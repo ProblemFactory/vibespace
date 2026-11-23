@@ -537,9 +537,11 @@ const cliUnmeasuredNotice = require('./cli-unmeasured-notice.js').create({ accou
 const cliSelfMeasure = require('./cli-self-measure.js').create({ accounts: () => { try { return getAccounts(); } catch { return null; } }, dataDir: path.join(rootDir, 'data'), app, enabled: () => { try { return serverSetting('accounts.cliSelfMeasure') !== false; } catch { return true; } }, onMembersBack: (ids) => { for (const id of ids) { try { onMemberReadingFresh(id, 'cli-measured', { placeable: true }); } catch {} } }, onCheckEnded: () => { const ar = getAutoResume(); if (ar && ar.armedIds && ar.refreshStatus) { let ids = []; try { ids = ar.armedIds() || []; } catch {} for (const id of ids) { try { ar.refreshStatus(id); } catch {} } } } });
 setInterval(() => { try { sweepUsageAnchors(); } catch {} try { cliUnmeasuredNotice.tick(); } catch {} try { cliSelfMeasure.tick().catch(() => {}); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
-// r3136 / r3200: an account's usage reading file that cannot be read — ONE For-you item with the person's «Set it aside» (its door)
-const usageReadingForYou = require('./usage-reading-for-you.js').create({ app, todos: () => getUserTodos(), cacheDir: USAGE_CACHE_DIR, nameOf: (k) => nameOf(k), backendOf: (k) => { try { return accounts.get(k)?.backend || null; } catch { return null; } }, readNow: (k) => readRawReading(k), log: (l) => console.warn(l) });
-{ const t = setTimeout(() => { try { usageReadingForYou.tick(); } catch {} }, 30000); if (t && t.unref) t.unref(); }   // an earlier run's open item, judged once For you answers (and at every mark / lift after)
+// r3136 / r3200 / r3285: an account's usage reading that cannot be told — ONE For-you item with the person's way out (its own tick)
+const usageReadingForYou = require('./usage-reading-for-you.js').create({ app, todos: () => getUserTodos(), cacheDir: USAGE_CACHE_DIR,
+  nameOf: (k) => usageReadingLabelOf(k),   // the engine's label (never a name holding an address; a machine's own); while the engine is being built it throws: the opaque word
+  isKnown: (k) => usageReadingKnownOf(k),   // r3349: production's ONE test (exported: the legs ask it, never a stand-in)
+  backendOf: (k) => { try { return accounts.get(k)?.backend || null; } catch { return null; } }, readNow: (k) => readRawReading(k), log: (l) => console.warn(l) });
 
 // ── Plan C (B-a612, 2.315.0): per-session pool placement ────────────────────
 // One pool, many links: each session bills the member its OWN symlink points
@@ -781,6 +783,7 @@ const spendGuard = require('./spend-guard.js').create({
   identityOf: (session) => fireIdentityFor(session),
   listHeld: () => accountsHeld(),   // r3088: a refusal while the accounts list is unread names that cause
   readCacheFor: (key) => readRawReading(key),   // r3136: the guard reads the UNREAD mark as «overage unknown by name»
+  readingItemOpen: (key, kind) => usageReadingForYou.noteHeld(key, kind),   // r3285 (1): the producer's item, truly OPEN (filed when not)
   // the ACCOUNT reader, not the slot one — an oat-only subscription serves
   // turns with no credential file at all (see accountCredentialState)
   credentialStateOf: (key) => accountCredentialState(key),
@@ -806,6 +809,38 @@ function reserveFloorPct() {
 /** The RAW usage cache for one key — no estimator overlay. The overage record
  *  is a fact a producer STATED; an estimate may not authorize an irreversible
  *  act (P7), and it may not bar one either. */
+/** r3285 (3) / r3349 — THE NAMES OF AN ACCOUNT's USAGE READING FILE the person's «Set it aside» may touch (and its item names):
+ *  a roster account; the hub's own machine logins (`__global__`, `__global_<harness>__`); the PER-MACHINE form this engine writes
+ *  itself (usageCacheKeyFor: `host-` + the machine's id — the id begins with `host-` and may hold more dashes), known when the
+ *  machines' list knows that machine; a paired machine's file of a roster account (`host-<…>-<account>`). Never the folder's
+ *  models file, never a made-up name. → true | false | 'unconfirmed' (the machines' list itself cannot be read now: a file named
+ *  for a machine is then neither confirmed nor refused — its item is said, its press refused BY THAT NAME) */
+function usageReadingKnownOf(key) {
+  const k = String(key || '');
+  if (!k || k === '__models__') return false;
+  try { if (accounts.get(k)) return true; } catch { }
+  if (/^__global(?:_[a-z0-9]+)?__$/.test(k)) return true;
+  if (k.startsWith('host-')) {
+    let held = false; try { held = typeof hosts.held === 'function' && hosts.held() === true; } catch { held = false; }
+    if (held) return 'unconfirmed';
+    try { if (hosts.get(k.slice(5))) return true; } catch { /* host_not_found: a machine the list READ gone */ }
+    const m = /^host-[\w.]+-(.+)$/.exec(k);
+    try { if (m && accounts.get(m[1])) return true; } catch { }
+  }
+  return false;
+}
+/** r3349: the item's name for that file — a machine's own label for its per-machine form (never a name holding an address),
+ *  else the engine's account label */
+function usageReadingLabelOf(key) {
+  const k = String(key || '');
+  let acct = false; try { acct = !!accounts.get(k); } catch { acct = false; }
+  if (k.startsWith('host-') && !acct) {
+    let held = false; try { held = typeof hosts.held === 'function' && hosts.held() === true; } catch { held = false; }
+    if (held) return 'a paired machine';   // its list cannot be read: never the raw file key
+    try { const h = hosts.get(k.slice(5)); const n = h && h.name; if (typeof n === 'string' && n && !n.includes('@')) return n; } catch { }
+  }
+  return labelOf(k);
+}
 function readRawUsageCache(id) {
   const r = readRawReading(id);
   return r === usageWrite.UNREAD_READING ? null : r;   // r3136: the stamp/window readers keep «nothing» for a failed read, as before
@@ -2399,13 +2434,15 @@ function sessionPoolOf(session) { try { const p = session && session._accountId;
  *  mark), or after torn bytes a lane this decision draws is not stated again (the plan windows; the family's cap while no
  *  enumerating reading has stated the caps) ⇒ NOT usable, nothing known: the pre-fire gate, the wall's arm and the wake hold,
  *  as for the accounts list's hold — and asked AFTER it (no list: no identity, no reading to ask). null = no hold. */
-function readingHoldOf(raw, fam) {
-  if (raw === usageWrite.UNREAD_READING || (raw && typeof raw === 'object' && raw.held === 'unread')) return { usable: false, known: false, blockedUntil: 0, readingUnread: true, reason: 'its usage reading could not be read — unknown until it reads again' };
+function readingHoldOf(raw, fam, key = null) {
+  const seen = (kind) => { if (key) { try { usageReadingForYou.seen(key, kind); } catch { } } };   // r3285 (1): a hold is never without its word
+  if (raw === usageWrite.UNREAD_READING || (raw && typeof raw === 'object' && raw.held === 'unread')) { seen('unread'); return { usable: false, known: false, blockedUntil: 0, readingUnread: true, reason: 'its usage reading could not be read — unknown until it reads again' }; }
   let unk = [];
   try { unk = usageWrite.restartUnknowns(raw); } catch { unk = []; }
   if (!unk.length) return null;
   const lanes = unk.filter((u) => u === 'plan:5h' || u === 'plan:7d');
   if (fam && unk.includes('model:*') && !(raw && Array.isArray(raw.scopedWeekly) && raw.scopedWeekly.some((b) => b && familyOfScopedBucket(b.name) === fam))) lanes.push('model:' + fam);
+  if (lanes.length) seen('restart');
   return lanes.length ? { usable: false, known: false, blockedUntil: 0, readingUnread: true, restarted: lanes, reason: `its usage reading started again after damaged bytes — not stated again yet: ${lanes.join(', ')}` } : null;
 }
 function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only = null } = {}) {
@@ -2490,10 +2527,10 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
     let heldListed = true;
     if (heldId) { try { heldListed = (accounts.poolMembers(scope) || []).some((m) => m.id === heldId); } catch { heldListed = false; } }
     const readLogin = poolReadLogin();
-    const verdictOf = (r0) => readingHoldOf(r0, fam) || quotaVerdict(proj(r0), nowSec);   // r3136: a member whose reading cannot be told is no way out
+    const verdictOf = (r0, id) => readingHoldOf(r0, fam, id) || quotaVerdict(proj(r0), nowSec);   // r3136: a member whose reading cannot be told is no way out
     const walled = session ? sessionWalledMembers(session._webuiId) : new Set();
     const verdicts = ordered.map((m) => {
-      const v = verdictOf(read(m.id));
+      const v = verdictOf(read(m.id), m.id);
       const li = readLogin(m.id);
       if (!loginUsable(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: `${loginBucketLabel(li)} — re-login needed` } };
       if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①
@@ -2535,7 +2572,7 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
   // a subscription bound DIRECTLY whose record says lapsed: the same refusal (verify r1 ①⑤)
   if (/^sub-/.test(String(scope || '')) && memberServeLapsed(scope)) return { ...quotaVerdict(proj(read(scope)), nowSec), usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' };
   const r0 = read(scope);
-  return readingHoldOf(r0, fam) || quotaVerdict(proj(r0), nowSec);   // r3136: an account bound directly whose reading cannot be told holds the fire
+  return readingHoldOf(r0, fam, scope) || quotaVerdict(proj(r0), nowSec);   // r3136: an account bound directly whose reading cannot be told holds the fire
 }
 
 /** PURE (B-73fe). THE CAUSE an arm carries so its card can say what the
@@ -6164,10 +6201,13 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
       // ONE limit per push (B-9213): this snapshot names its own limitId
       // and the write path merges it under that id, so a Spark push can no
       // longer erase the plan limit this account is actually spending.
+      // r3285 (2): a reply that answers a LIVE read (account/rateLimits/read — a person's ⟳ or the reset hold's ask) is the vendor's
+      // whole statement: after torn bytes it ends the unknown (what it does not state is «never stated», as for a new account)
+      let whole = false; try { const lr = session && liveReadSource(session.backend); whole = !!(lr && typeof lr.liveWaiting === 'function' && lr.liveWaiting(session)); } catch { whole = false; }
       usageWrite.writeCacheObject({
         cacheDir: USAGE_CACHE_DIR, key, obj: snap,
         set: quotaSourceFor(session ? session.backend : quotaBackendFor(key)).limitSetFromSnapshot?.(snap, { identity: key, source }) || null,
-        source, backend: 'codex',
+        source, backend: 'codex', wholeStatement: whole,
       });
     }
   } catch { }
@@ -8874,6 +8914,7 @@ function maybeStopOnFallback(session, id, from, to) {
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
     resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, _resetCreditTriesHeld: () => _resetCreditTriesHeld, _resetCreditTriesReading: () => _resetCreditTriesReading, _writeResetCreditViaHelper: writeResetCreditViaHelper, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
+    usageReadingKnownOf, usageReadingLabelOf, // r3349: the reading file's known names and the item's label (the legs ask production's own)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test
     repairIdentityAnchors, // B-855a c2: the STANDING identity repair (boot + POST /api/usage/repair-identity)

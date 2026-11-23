@@ -408,11 +408,16 @@ console.log('§6 r3136: no probe for an account whose usage file cannot be read;
   fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(fX)) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); return realRead.call(this, p0, ...a); };
   let refused = null;
   try { refused = await tickOnce('refused'); } finally { fs.readFileSync = realRead; }
+  fs.writeFileSync(fX, '{"fiveHour":{"utilization":0.2,"resets');   // r3285 (8): TORN BYTES — the ordinary first read (its write starts the file again)
+  await refreshFolder();
+  const torn = await tickOnce('torn');
   fs.rmSync(fX, { force: true });
   await refreshFolder();
   const never = await tickOnce('never');
   ok('§6 r3136: a stale reading is probed; the SAME account whose usage file\'s read fails is NOT probed (its answer could not be written); a file not there («never read») is probed as before',
     stale.includes(X) && !!refused && !refused.includes(X) && never.includes(X), JSON.stringify({ stale: stale.length, staleX: stale.includes(X), refusedX: refused && refused.includes(X), neverX: never.includes(X) }));
+  ok('§6 r3285: TORN BYTES are probed as a first read (the probe\'s write keeps them aside and starts the file again) — never left unread for good',
+    torn.includes(X), JSON.stringify({ tornX: torn.includes(X) }));
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);

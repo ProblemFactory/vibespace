@@ -3711,5 +3711,69 @@ console.log('㉔b r3200: the waiting readings keep a wall, replay at the read, t
   }
 }
 
+// r3285 (the round w19k650vo, ruled by 主开发): the follow's writer parts. Made-up accounts and readings; a failed read or rename is a
+// PLACED refusal of that one call, undone by the leg; a fresh account per block.
+console.log('㉔c r3285: a typed wall is kept ahead, the unknown ends at the first whole statement, a press that fails twice keeps the hold');
+{
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fiveOf = (f) => { try { return QM.lanesOfReading(JSON.parse(fs.readFileSync(f, 'utf8'))).find((l) => l.lane === 'plan:5h') || null; } catch { return null; } };
+  const quiet = (fn) => { const w0 = console.warn; console.warn = () => { }; try { return fn(); } finally { console.warn = w0; } };
+  const refusing = (file) => { const real = fs.readFileSync; fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(file)) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); return real.call(this, p0, ...a); }; return () => { fs.readFileSync = real; }; };
+  // (5) A TYPED WALL (the usage door's reading at its cap: a set, no object buckets) is kept ahead of eight plain readings
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3285w-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3285wall', f = W.cacheFileFor(dir, KEY), at = Date.now();
+    quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.4, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.5, resetsAt: nowSec + 3 * 86400 }, fetchedAt: at - 60e3, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' }));
+    const set = QM.makeLimitSet({ identity: KEY, fetchedAt: at, source: 'cli-usage', limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '5h', minutes: 300, usedPct: 100, resetsAt: nowSec + 3600, measuredAt: at })], source: 'cli-usage', fetchedAt: at })] });
+    const undo = refusing(f);
+    try {
+      quiet(() => W.writeReading({ cacheDir: dir, key: KEY, set, source: 'cli-usage', backend: 'claude' }));
+      for (let i = 1; i <= 8; i++) quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { sevenDay: { utilization: 0.5 + i / 100, resetsAt: nowSec + 3 * 86400 }, fetchedAt: at + i, source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }));
+    } finally { undo(); }
+    const owed = W.readingUnread && W.readingUnread(KEY) ? W.readingUnread(KEY).owed : null;
+    quiet(() => W.readReading(f, KEY));   // the first read that answers writes the waiting readings
+    const five = fiveOf(f);
+    ok(owed === 8 && !!five && five.usedPct >= 100,
+      `r3285 (5) A TYPED WALL past eight waiting readings: the usage door's set at its cap, then eight plain ones, all refused (${owed} kept) — the wall is kept ahead and reaches the file at the read (five-hour ${five && five.usedPct} %)`);
+  }
+  // (2) THE LAW: after torn bytes the unknown ENDS at the first ENUMERATING reading — what it does not state is «never stated»
+  for (const road of ['wholeStatement', 'panel']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3285l-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3285law' + road.length, f = W.cacheFileFor(dir, KEY), at = Date.now();
+    fs.writeFileSync(f, '{"limits":[{"limitId":"plan","win');
+    quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.2, resetsAt: nowSec + 3600 }, fetchedAt: at, source: 'statusline' }, measuredAt: at, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }));
+    const u1 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
+    // a reading that states NOTHING of overage, two times over: an ordinary one (still held), then an enumerating one (whole)
+    quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.21, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.3, resetsAt: nowSec + 3 * 86400 }, fetchedAt: at + 1, source: 'statusline' }, measuredAt: at + 1, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }));
+    const u2 = RUK(JSON.parse(fs.readFileSync(f, 'utf8')));
+    const whole = { fiveHour: { utilization: 0.22, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.3, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [], fetchedAt: at + 2, source: 'on-demand' };
+    if (road === 'panel') { if (QM.markScopedEnumeration) QM.markScopedEnumeration(whole, true, 0); }
+    quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: whole, measuredAt: at + 2, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', ...(road === 'wholeStatement' ? { wholeStatement: true } : { authoritativeScopes: QM.authoritativeScopesOf(whole), stated: whole }) }));
+    const o3 = JSON.parse(fs.readFileSync(f, 'utf8')), u3 = RUK(o3);
+    ok(Array.isArray(u1) && u1.includes('overage') && Array.isArray(u2) && u2.includes('overage') && Array.isArray(u3) && u3.length === 0 && !o3.startedAgain,
+      `r3285 (2) THE LAW (${road === 'panel' ? 'the panel\'s enumerating reading' : 'a producer\'s own whole statement'}): after torn bytes a reading that says nothing of overage leaves it UNKNOWN (held); the first ENUMERATING reading that says nothing of it ends the unknown — «never stated», as for a new account`, { u1, u2, u3 });
+  }
+  // (4) A PRESS WHOSE LAST RENAME AND PUT-BACK BOTH FAIL: the words say so, and the account stays HELD while no file is there
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsq-r3285d-')); tmpDirs.push(dir);
+    const KEY = 'sub-r3285dbl', f = W.cacheFileFor(dir, KEY);
+    quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.3, resetsAt: nowSec + 3600 }, fetchedAt: Date.now() - 60e3, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' }));
+    const ino = fs.statSync(f).ino, realRead = fs.readFileSync, realRename = fs.renameSync;
+    fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(f)) { let same = false; try { same = fs.statSync(p0).ino === ino; } catch { same = false; } if (same) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); } return realRead.call(this, p0, ...a); };
+    fs.renameSync = function (from, to, ...a) { if (path.resolve(String(to)) === path.resolve(f)) throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); return realRename.call(this, from, to, ...a); };
+    let r = null, door = null;
+    try { quiet(() => W.readReading(f, KEY)); r = quiet(() => W.setAsideReading({ cacheDir: dir, key: KEY, backend: 'claude' })); door = W.readReading(f, KEY); }
+    finally { fs.readFileSync = realRead; fs.renameSync = realRename; }
+    const gone = !fs.existsSync(f), aside = fs.readdirSync(dir).filter((n) => n.startsWith(KEY + '.json.unreadable-'));
+    const door2 = W.readReading(f, KEY), mark = W.readingUnread(KEY);
+    quiet(() => W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fiveHour: { utilization: 0.31, resetsAt: nowSec + 3600 }, fetchedAt: Date.now(), source: 'statusline' }, source: 'statusline', familyOf: familyOfScopedBucket, backend: 'claude' }));
+    let o = null; try { o = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { o = null; }
+    ok(!!r && r.ok === false && /could not be put back/.test(r.why || '') && !/was put back/.test(r.why || '') && gone && aside.length === 1 && door === W.UNREAD_READING && door2 === W.UNREAD_READING && !!mark,
+      'r3285 (4) BOTH RENAMES FAILED: the reply says the old file could NOT be put back (never «it was put back»); no file is there, and the account reads HELD (the door\'s mark, never «no reading» as for a new account)', { r, gone, aside, door: door === W.UNREAD_READING, mark });
+    ok(!!o && !!o.startedAgain && o.startedAgain.setAside === aside[0] && W.readingUnread(KEY) === null,
+      'r3285 (4) …the next reading starts the file again «started again» from the copy kept aside, and the hold lifts', o && o.startedAgain);
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

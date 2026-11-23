@@ -64,9 +64,10 @@ const WORDS = Object.freeze({
   resume_failed: 'the conversation did not start',
   human_only: 'only a person mints, grants, revokes or answers — an agent never writes a grant',
   cross_site: 'these doors answer this instance\'s own page only',
+  automation_unread: 'the automation keys could not be read',   // r3285 (9): the list's hold by its own code (the family's 503)
   unauthorized: 'missing or unknown session token', not_found: 'not found', not_ready: 'the server is still starting — try again in a moment', failed: 'it failed',
 });
-const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409, 'todos-unread': 503 });
+const STATUS = Object.freeze({ ...A.CODES, automation_unread: 503, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409, 'todos-unread': 503 });
 
 /**
  * @param {object} o
@@ -79,8 +80,13 @@ const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 4
  * @param {(req) => string|null} [o.who]  the sign-in handle (the `by` of a person's act)
  */
 function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), limitChoices = () => ({ accounts: [], permissionModes: [], models: [] }), permissionNow = null, conversationNames = () => ({}), who = () => null }) {
-  const answer = (res, r) => {
+  // r3285 (9): while the list is HELD every door's failure IS the hold's — answered by its code and the family's status (503), its
+  // words the engine's own; a road that THROWS the hold (its code) is answered the same, never 500 and the generic «failed»
+  const heldNow = () => { try { return typeof engine.held === 'function' ? engine.held() : null; } catch { return null; } };
+  const answer = (res, r0) => {
+    let r = r0;
     if (r && r.ok) return res.json(r);
+    if ((!r || !r.code || r.code === 'failed') && heldNow()) r = { ...(r || {}), code: 'automation_unread', why: heldNow().why };
     const code = (r && r.code) || 'failed';
     res.status(STATUS[code] || 400).json({ ...r, ok: false, code, error: r && r.why ? `${WORDS[code] || code}: ${r.why}` : WORDS[code] || code });
   };
@@ -89,7 +95,7 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
     res.set('Cache-Control', 'no-store');
     const v = personVerdict(req);
     if (!v.ok) return answer(res, v);
-    try { answer(res, await fn(req)); } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing changed' }); }
+    try { answer(res, await fn(req)); } catch (e) { if (e && e.code === 'automation_unread') return answer(res, { ok: false, code: 'automation_unread', why: e.message }); res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing changed' }); }
   };
   const body = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
 
@@ -137,7 +143,7 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
     const bearer = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
     if (A.isMaintainerToken(bearer)) {
       try { return answer(res, await engine.useMaintainer({ token: bearer, verb: String(req.params.verb), args: body(req) })); }
-      catch (e) { return res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing ran' }); }
+      catch (e) { if (e && e.code === 'automation_unread') return answer(res, { ok: false, code: 'automation_unread', why: e.message }); return res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing ran' }); }
     }
     const caller = callerFrom(req, res);
     if (!caller) return;
@@ -146,14 +152,14 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
     const gone = new AbortController();
     res.on('close', () => { if (!res.writableFinished) gone.abort(); });
     try { answer(res, await engine.use({ caller, verb: String(req.params.verb), args: body(req), want: req.query && req.query.key ? String(req.query.key) : null, signal: gone.signal })); }
-    catch (e) { res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing ran' }); }
+    catch (e) { if (e && e.code === 'automation_unread') return answer(res, { ok: false, code: 'automation_unread', why: e.message }); res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing ran' }); }
   });
   app.get('/api/agent/automation/keys', (req, res) => {
     res.set('Cache-Control', 'no-store');
     const caller = callerFrom(req, res);
     if (!caller) return;
     const keys = engine.keysFor(caller), h = typeof engine.held === 'function' ? engine.held() : null;   // r3104 (a): while held, the hold's words — never an empty key list
-    if (h) answer(res, { ok: false, code: 'failed', why: h.why });
+    if (h) answer(res, { ok: false, code: 'automation_unread', why: h.why });   // r3285 (9): by its code, 503
     else res.json({ ok: true, keys, verbs: A.SCOPES.map((s) => ({ verb: s.verb, billed: s.billed })) });
   });
   app.get('/api/agent/automation/audit', (req, res) => {

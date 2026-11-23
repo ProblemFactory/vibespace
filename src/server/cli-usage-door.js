@@ -107,7 +107,8 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
     if (j.verdict !== 'reading') return { ok: false, status: 502, code: j.verdict, error: j.why };
     const set = { ...j.reading, identity: id };
     // the file names its harness (`backend`): its projected buckets must never be lifted as claude's (usage-cache-write)
-    const w = usageWrite.writeReading({ cacheDir, key: id, set, extras: { backend: be }, source: od.source, backend: be });
+    // r3285 (2): the door's reading is the CLI's whole usage panel — the vendor's whole statement: after torn bytes it ends the unknown
+    const w = usageWrite.writeReading({ cacheDir, key: id, set, extras: { backend: be }, source: od.source, backend: be, wholeStatement: true });
     if (!w || !w.ok) return { ok: false, status: 500, code: 'write-refused', error: (w && (w.why || (w.errors || []).join('; '))) || 'the write path refused the reading' };
     return { ok: true, status: 200, key: id, shape: j.shape, fetchedAt: set.fetchedAt, limits: set.limits.length };
   }

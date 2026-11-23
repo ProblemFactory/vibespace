@@ -412,6 +412,15 @@ console.log('⑩ which account bills: the stated one is judged, and handed to th
   ok(R.reopens.length === 1 && R.reopens[0].accountId === 'acct-B', '…usable ⇒ the reopen is handed acct-B — the turn bills the account the gate judged, never another by this road', R.reopens);
 }
 
+console.log('⑪b r3136 / r3285: a usage READING that cannot be told waits by name');
+{
+  const X = cidOf(131);
+  const R = rig('reading', { kept: { [X]: RESTART }, limitOf: () => ({ usable: false, known: false, blockedUntil: 0, readingUnread: true, reason: 'its usage reading could not be read — unknown until it reads again' }) });
+  R.result(X, 'jb-r', 'r', 'r done');
+  await R.at(10);
+  ok(R.probes.length === 0 && R.reopens.length === 0 && R.wakes.some((w) => w.cid === X && w.code === 'limit_unread' && /usage reading cannot be told/.test(w.why)), 'the verdict says its READING cannot be told ⇒ no probe, no resume — it waits BY NAME (limit_unread, the reading\'s words), never as an ordinary limit', R.wakes);
+}
+
 console.log('⑪ an unreadable limit waits, said');
 {
   const X = cidOf(54);

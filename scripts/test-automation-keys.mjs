@@ -888,6 +888,34 @@ const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: 
   const GHX = await grantsHeldWorld(MXG);
   ok(GHX.placed === 1 && !GHX.same && GHX.m2.ok === true,
     'RED CONTROL (r3074 (1), the release\'s read in a copy): the grants file unread drops every grant from the record and the mint writes automation-keys.json WITHOUT the kept key\'s grant record — the leg above can fail', { m2ok: GHX.m2.ok, same: GHX.same });
+  // r3285 (9, from bl-phone-ui's round): THE ROUTES answer the list's hold BY ITS CODE — automation_unread with the family's 503,
+  // never 500 and the generic «failed» (the For-you row's words can then show): an owner door, a revoke, the agent's keys list
+  {
+    const express = require(path.join(ROOT, 'node_modules/express'));
+    const w1 = await mkWorld('held-routes-' + Math.random().toString(36).slice(2, 8));
+    const e1 = ENG.create({ dataDir: w1.dir, vault: w1.vault, userTodos: w1.userTodos, now: w1.now, verbs: { 'conversations.rename': () => ({ ok: true }) } });
+    const k1 = e1.mint({ name: 'kept', scopes: ['conversations.rename'] });
+    e1.grant(k1.key.id, ['session:conv-1']);
+    const pl = placeOnce(path.join(w1.dir, 'grants.json'));
+    let gsBad = null; try { gsBad = GS.create({ dataDir: w1.dir }); } finally { pl.undo(); }
+    const e2 = ENG.create({ dataDir: w1.dir, vault: w1.vault, userTodos: w1.userTodos, now: w1.now, verbs: { 'conversations.rename': () => ({ ok: true }) }, grants: gsBad });
+    const app = express(); app.use(express.json());
+    const tokens = { vsst_good: caller() };
+    require(path.join(ROOT, 'src/routes/automation.js')).registerAutomationRoutes(app, { engine: e2, callerOf: (t) => tokens[t] || null });
+    const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const page = { 'Content-Type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin' };
+    const go = async (method, p, { headers = {}, body } = {}) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+    let mint = null, revoke = null, agentKeys = null;
+    try {
+      mint = await go('POST', '/api/automation/keys', { headers: page, body: { name: 'second', scopes: ['conversations.rename'] } });
+      revoke = await go('POST', `/api/automation/keys/${k1.key.id}/revoke`, { headers: page });
+      agentKeys = await go('GET', '/api/agent/automation/keys', { headers: { Authorization: 'Bearer vsst_good' } });
+    } finally { srv.close(); }
+    const byCode = (x) => !!x && x.status === 503 && !!x.body && x.body.code === 'automation_unread' && /could not be read/.test(String(x.body.error || ''));
+    ok(byCode(mint) && byCode(revoke) && byCode(agentKeys),
+      'r3285 (9) THE ROUTES answer the list\'s hold BY ITS CODE: a mint, a revoke and the agent\'s keys list each answer automation_unread with 503 and the hold\'s words — never 500 and the generic «failed»', { mint, revoke, agentKeys });
+  }
   // r3074 (3) REACH INSIDE AN ACT reads its OWN snapshot: the key opened a worker; a rename of it waits inside its act while
   // another use's re-read FAILS — the reach to the worker the key opened is still judged on the stamp's good record
   const reachWorld = async (mod) => {

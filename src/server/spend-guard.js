@@ -112,7 +112,7 @@ function noticeExpiry(about, now = Date.now()) {
  *        inbox is created further down the boot (TDZ otherwise).
  * @param deps.log                console.log
  */
-function create({ dataDir, serverSetting = () => undefined, identityOf = null, listHeld = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null, lockSchedule = null, lockUnschedule = null } = {}) {
+function create({ dataDir, serverSetting = () => undefined, identityOf = null, listHeld = null, readCacheFor = null, readingItemOpen = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null, lockSchedule = null, lockUnschedule = null } = {}) {
   // B-ef83: the LOCK's own timers (its heartbeat and its retry), apart from the guard's — a suite that counts the guard's timers
   // never meets them
   const lsched = typeof lockSchedule === 'function' ? lockSchedule : (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; };
@@ -556,11 +556,13 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     }
     if (!readingHeld.size && offReadingLift) { const off = offReadingLift; offReadingLift = null; off(); }
   };
+  // r3285 (7): a write lifts only ITS account — the held accounts' files are read again at writes of a held account, never of any
+  const heldByFile = (file) => { const b = path.basename(String(file || '')); for (const k of readingHeld) if (UW.cacheFileName(k) === b) return k; return null; };
   const watchReadingLift = (k) => {
     if (!k) return;
     readingHeld.add(k);
     if (offReadingLift) return;
-    const a = UW.onUnreadLifted(() => checkReadingLift()), b = UW.onWritten(() => checkReadingLift());
+    const a = UW.onUnreadLifted((k0) => { if (readingHeld.has(String(k0))) checkReadingLift(); }), b = UW.onWritten((file) => { if (heldByFile(file)) checkReadingLift(); });
     offReadingLift = () => { try { a(); } catch { } try { b(); } catch { } };
   };
 
@@ -745,7 +747,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     if (v.why === 'reading-unread') watchReadingLift(key);   // r3136: ONE notice an account per hold, closed when its reading tells again
     // r3200: an account whose reading FILE cannot be read has its own For-you item with the person's way out (Set it aside —
     // src/server/usage-reading-for-you.js): IT speaks, one item an account; this notice is filed for the hold after torn bytes only
-    const fileItemSpeaks = v.why === 'reading-unread' && !!key && !!UW.readingUnread(key);
+    // r3285 (1): ONLY while that item is truly OPEN (asked of the producer, which files it when it is not) — else this notice is filed
+    const fileItemSpeaks = v.why === 'reading-unread' && !!key && typeof readingItemOpen === 'function' && readingItemOpen(key, UW.readingUnread(key) ? 'unread' : 'restart') === true;
     if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands && !fileItemSpeaks && !(v.why === 'settings-unread' && settingsSilent())) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure); the held settings' notice only past the silent rungs (cure 3)
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`

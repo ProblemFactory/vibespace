@@ -445,6 +445,7 @@ module.exports = {
   normalize: normalizeCodexRateLimit,
   predict: 'codex', // its prediction adapter, by name (src/harnesses/predict-adapters.js)
   readLive, settleLive, // the live read the engine calls for any harness that declares it (above)
+  liveWaiting: (session) => !!(session && Array.isArray(session._codexLimitsWaiters) && session._codexLimitsWaiters.length),   // r3285 (2): a reply that answers a live read (account/rateLimits/read: the vendor's whole statement)
   signalFromStream,
   probe: capsOf('codex').quotaProbe, // 'rpc-rate-limits': account/rateLimits/read on a LIVE app-server
   classifyAuthFailure,

@@ -64,8 +64,10 @@ const SR = require('./store-read.js');   // r3136: the store-read law's one answ
 /** THE cache filename rule, in ONE place. Every producer spelled this inline;
  *  a key that sanitises differently in two places is two different accounts. */
 function cacheFileFor(cacheDir, key) {
-  return path.join(cacheDir, String(key).replace(/[^\w.-]/g, '_') + '.json');
+  return path.join(cacheDir, cacheFileName(key));
 }
+/** an account's reading file's NAME (no folder): what a write's notice names, matched by a listener (r3285 (7)) */
+function cacheFileName(key) { return String(key).replace(/[^\w.-]/g, '_') + '.json'; }
 
 /** Is this directory entry a usage-cache SNAPSHOT? (Not `__models__.json`, not
  *  a `.window-`/`.slot-` sidecar — those deliberately carry no `.json`.) */
@@ -523,12 +525,18 @@ function markUnread(key, code) {
     const torn = String(code || '') === 'torn bytes';
     try { console.warn(torn ? `[usage-write] ${accountWord(k)}: its reading file did not parse — the account reads unknown until a reading starts the file again (the bytes are kept aside first)` : `[usage-write] ${accountWord(k)}: its reading file could not be read (${String(code || 'unreadable')}) — nothing is written over it; a reading for it waits in memory and is written once the file reads; until then the account reads unknown`); } catch { }
   }
-  if (fresh) for (const fn of _onUnreadMarked) { try { fn(k, { ..._unread.get(k) }); } catch { } }
+  for (const fn of _onUnreadMarked) { try { fn(k, { ..._unread.get(k), fresh }); } catch { } }   // r3285 (1): every mark — the producer files again for a marked account with no open item
 }
+/** r3285 (1): the accounts marked unknown now (the producer's tick files again for one with no open item) */
+function unreadKeys() { return [..._unread.keys()]; }
+const _missingHeld = new Map();   // r3285 (4): key → the aside name, after a press whose last rename AND put-back failed: no file, still held
+const _onStartedAgain = new Set();   // r3285 (2): (key, 'started' | 'whole') — a file that started again after torn bytes / made whole
+function onStartedAgain(fn) { if (typeof fn === 'function') _onStartedAgain.add(fn); return () => _onStartedAgain.delete(fn); }
 const _onUnreadLifted = new Set();   // r3136 commit 2: (key) — the account's reading file reads again (the guard closes its notice)
 function onUnreadLifted(fn) { if (typeof fn === 'function') _onUnreadLifted.add(fn); return () => _onUnreadLifted.delete(fn); }
 function clearUnread(key) {
   const k = String(key);
+  if (_missingHeld.has(k)) return;   // r3285 (4): the file is missing after a failed press — held until a write starts it again
   if (!_unread.delete(k)) return;
   if (_unreadSaid.delete(k)) { try { console.log(`[usage-write] ${accountWord(k)}: its reading file reads again`); } catch { } }
   for (const fn of _onUnreadLifted) { try { fn(k); } catch { } }
@@ -537,7 +545,9 @@ function clearUnread(key) {
 function statesWall(a) {
   if (!a || typeof a !== 'object') return false;
   if ((Array.isArray(a.refused) && a.refused.length) || (Array.isArray(a.refusalMarks) && a.refusalMarks.length)) return true;
-  try { return !!a.obj && typeof a.obj === 'object' && quotaModel.lanesOfReading(a.obj).some((l) => Number(l.usedPct) >= 100); } catch { return false; }
+  // the producer's object, or (r3285 (5)) a TYPED reading's own set — the usage door's, at its cap — read with that set's limits
+  const typed = a.set && Array.isArray(a.set.limits) ? { ...(a.obj && typeof a.obj === 'object' ? a.obj : {}), limits: a.set.limits } : null;
+  try { return [a.obj, typed].some((o) => !!o && typeof o === 'object' && quotaModel.lanesOfReading(o).some((l) => Number(l.usedPct) >= 100)); } catch { return false; }
 }
 /** a refused write: the account marked unknown, its reading owed (never a replace's — the repair migration runs again). Past the
  *  bound the OLDEST PLAIN reading goes first: a wall stated early in the episode outlives later plain ones (only walls ⇒ the oldest) */
@@ -559,6 +569,9 @@ function refuseUnread(key, code, args, replace) {
 function restartUnknowns(obj) {
   const sa = obj && typeof obj === 'object' ? obj.startedAgain : null;
   if (!sa || typeof sa !== 'object') return [];
+  // r3285 (2), THE LAW: after torn bytes the unknown ENDS at the first ENUMERATING reading of that account (the vendor's whole
+  // statement — a person's refresh makes one): what it does not state is «never stated», as for a new account (the release's rule)
+  if (sa.enumerated) return [];
   const at = Number(sa.at) || 0, out = [];
   let lanes = [];
   try { lanes = quotaModel.lanesOfReading(obj); } catch { lanes = []; }
@@ -580,7 +593,7 @@ function restartUnknowns(obj) {
 const UNREAD_READING = Object.freeze({ held: 'unread' });
 function readReading(file, key, { via = null } = {}) {
   const k = key != null ? String(key) : null;
-  const failed = (e) => { if (e && e.code === 'ENOENT') return null; if (k != null) markUnread(k, e instanceof SyntaxError ? 'torn bytes' : ((e && e.code) || 'unreadable')); return UNREAD_READING; };
+  const failed = (e) => { if (e && e.code === 'ENOENT') return k != null && _missingHeld.has(k) ? UNREAD_READING : null; if (k != null) markUnread(k, e instanceof SyntaxError ? 'torn bytes' : ((e && e.code) || 'unreadable')); return UNREAD_READING; };
   let v;
   try { v = readCacheJson(file, { via }); } catch (e) { return failed(e); }
   if (k != null && _owed.has(k)) {
@@ -620,7 +633,17 @@ function setAsideReading({ cacheDir, key, backend = null, now = Date.now() }) {
   // but the last rename's (a failure there puts the old one back)
   try { fs.writeFileSync(file + '.tmp', JSON.stringify(stub)); } catch (e) { return { ok: false, why: `the new file could not be made (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
   try { fs.renameSync(file, aside); } catch (e) { try { fs.unlinkSync(file + '.tmp'); } catch { } return { ok: false, why: `the file could not be set aside (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
-  try { fs.renameSync(file + '.tmp', file); } catch (e) { try { fs.renameSync(aside, file); } catch { } return { ok: false, why: `the new file could not be put in place (${(e && e.code) || (e && e.message) || e}) — the old one was put back` }; }
+  try { fs.renameSync(file + '.tmp', file); } catch (e) {
+    const code = (e && e.code) || (e && e.message) || e;
+    try { fs.renameSync(aside, file); } catch (e2) {
+      // r3285 (4): BOTH failed — no file is there now: the account stays HELD (never «no reading» as for a new account) until a
+      // reading starts the file again, marked «started again» from the copy kept aside
+      _missingHeld.set(k, path.basename(aside)); markUnread(k, 'missing after a failed set-aside');
+      return { ok: false, why: `the new file could not be put in place (${code}), and the old one could not be put back (${(e2 && e2.code) || (e2 && e2.message) || e2}): no file is there now — the account stays held until a reading starts the file again (the old bytes are kept beside it)` };
+    }
+    return { ok: false, why: `the new file could not be put in place (${code}) — the old one was put back` };
+  }
+  noteWritten(file, JSON.stringify(stub));   // r3285 (lens 1): the folder's kept reply learns the new file, as at any write
   try { console.warn(`[usage-write] ${accountWord(k)}: its reading file was set aside by the person's press (kept beside the file) — it starts again, every fact unknown until a reading states it`); } catch { }
   replayOwed(k);
   if (!_owed.has(k)) clearUnread(k);
@@ -629,7 +652,7 @@ function setAsideReading({ cacheDir, key, backend = null, now = Date.now() }) {
 /** r3136: { code, at } while the account's reading file did not answer (a reader asks it: unknown, never «no reading»), else null */
 function readingUnread(key) { const u = _unread.get(String(key)); return u ? { ...u, owed: (_owed.get(String(key)) || []).length } : null; }
 
-function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, overageStated = null, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
+function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, overageStated = null, wholeStatement = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
   if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
   const file = cacheFileFor(cacheDir, key);
   const at = Number(measuredAt) || Number(obj && obj.fetchedAt) || Date.now();
@@ -651,6 +674,8 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     if (kept.fresh) { try { console.warn(`[usage-write] ${accountWord(key)}: its reading file did not parse — its bytes are kept aside beside the file; this reading starts the file again`); } catch { } }
     stored = { state: 'missing' };
   }
+  // r3285 (4): no file after a press whose renames both failed — this reading starts the file again, «started again» from the copy
+  if (stored.state === 'missing' && _missingHeld.has(String(key))) tornKept = _missingHeld.get(String(key));
   // the file answers: a write refused in the episode before is replayed FIRST, in order (a wall it stated is not lost)
   if (!replace && _owed.has(String(key)) && !_replaying.has(String(key))) {
     replayOwed(key);
@@ -793,7 +818,7 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
       const sa = { ...was };
       // an ENUMERATING reading (the producer's own parse enumerated its caps — the panel, the approved automatic read): it states
       // every cap, an empty list meaning «no cap» FOR THIS MARK ONLY (it retires nothing: the retire rule above is unchanged)
-      if ((Array.isArray(authoritativeScopes) && authoritativeScopes.length) || quotaModel.scopedEnumeration(obj) || quotaModel.scopedEnumeration(stated)) sa.enumerated = true;   // `stated` = the enumerating producer's own parse (its flag is not spread)
+      if ((Array.isArray(authoritativeScopes) && authoritativeScopes.length) || quotaModel.scopedEnumeration(obj) || quotaModel.scopedEnumeration(stated) || wholeStatement === true) sa.enumerated = true;   // r3285 (2): + a producer's own whole statement (the codex live read's reply, the usage door's whole panel)   // `stated` = the enumerating producer's own parse (its flag is not spread)
       // r3200 (the round's shoulds): a producer whose object spreads another file (the stream capture: the identity's freshest
       // sibling) says whether ITS OWN event stated overage (`overageStated`) — never a sibling's older copy; spend control is
       // stated by true or false only (a codex reading sends null when the vendor said nothing); reset credits by their own record
@@ -829,6 +854,11 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   } catch (e) {
     return { ok: false, why: 'write failed: ' + e.message };
   }
+  if (_missingHeld.delete(String(key))) clearUnread(key);   // r3285 (4): the file is there again («started again»)
+  if (!replace) {   // r3285 (2): the producer's item stands for a file that started again, and goes when it is made whole
+    const was = !!(storedObj && storedObj.startedAgain), now = !!out.startedAgain;
+    if (was !== now) for (const fn of _onStartedAgain) { try { fn(String(key), now ? 'started' : 'whole'); } catch { } }
+  }
   // …or the change a DIRECT writer saw and left unsaid (the shipped statusline: `windowChangeUnsaid`) — said here
   // once when the merged set agrees with it, and the marker never outlives this write. A marker belongs to the key
   // that laid it: only the one ON the file being written, stamped with THIS key, is said — never one riding a
@@ -849,12 +879,12 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
 /** The typed entry: a producer that built a LimitSet hands it here and never
  *  spells the legacy shape at all. `extras` are the non-bucket fields it wants
  *  persisted (identity, planType, …). */
-function writeReading({ cacheDir, key, set, extras = null, source = null, familyOf = null, backend = null, onRefuse = null }) {
+function writeReading({ cacheDir, key, set, extras = null, source = null, familyOf = null, backend = null, onRefuse = null, wholeStatement = false }) {
   const base = { ...(extras && typeof extras === 'object' ? extras : {}) };
   if (set && set.fetchedAt) base.fetchedAt = set.fetchedAt;
   if (source || (set && set.source)) base.source = source || set.source;
   if (set && set.extra) for (const [k, v] of Object.entries(set.extra)) if (base[k] === undefined) base[k] = v;
-  return writeCacheObject({ cacheDir, key, obj: base, set, source: source || (set && set.source) || null, familyOf, backend, onRefuse });
+  return writeCacheObject({ cacheDir, key, obj: base, set, source: source || (set && set.source) || null, familyOf, backend, onRefuse, wholeStatement });
 }
 
 /** A SIDECAR beside the cache (`.window-<key>`, `.slot-<id>`, …). Deliberately
@@ -875,7 +905,7 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject, readCacheJson, listCacheDir,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
-  readingUnread, readReading, UNREAD_READING, restartUnknowns, onUnreadLifted, onUnreadMarked, setAsideReading, // r3136: unknown, never «no reading»; after torn bytes, each fact until stated
+  readingUnread, readReading, UNREAD_READING, restartUnknowns, onUnreadLifted, onUnreadMarked, setAsideReading, unreadKeys, onStartedAgain, cacheFileName, // r3136: unknown, never «no reading»; after torn bytes, each fact until stated
   carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,
   onWritten, noteWritten,
   DERIVED_KEYS,
