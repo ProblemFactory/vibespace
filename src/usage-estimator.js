@@ -1248,22 +1248,34 @@ class UsageEstimator {
     } catch { }
   }
   /** A SPLIT NAME's RATES RETIRED (B-87fd identity unit 4, 主开发 r3022 (1)(c)): its rates.json entry dropped and ON DISK before
-   *  the sweep archives the name's anchors file, and every rate, kept line and meta of it forgotten. Idempotent. A rates file it
-   *  could not read (anything but «not there») or a write not made durable THROWS: the retire has not happened */
+   *  the sweep archives the name's anchors file, and every rate, kept line and meta of it forgotten. Idempotent.
+   *  - A FOLD OF THAT NAME in flight or queued is ENDED FIRST (r3311 (3)): a fold that landed during the durable wait would write
+   *    the dropped entry back (_persistRates) — and an entry back after the wait is a retire not happened (THROWN: the next pass);
+   *  - a rates file that DOES NOT PARSE is read as empty, as its other writer reads it (_persistRates: each name learns again from
+   *    its anchors), said ONCE in the journal (r3311 (3): one behaviour);
+   *  - a rates file it could not read (anything but «not there») or a write not made durable THROWS: the retire has not happened */
   async retireRates(key) {
     const fp = path.join(this.dir, 'rates.json');
+    const endFolds = () => {
+      const f = this._folds && this._folds.get(key); if (f) this._foldEnd(f, false);
+      if (this._relearnQueue) for (let i = this._relearnQueue.length - 1; i >= 0; i--) if (this._relearnQueue[i] && this._relearnQueue[i].key === key) { this._foldEnd(this._relearnQueue[i], false); this._relearnQueue.splice(i, 1); }
+    };
+    endFolds();
     if (!this._ratesAll) {
       let text = null;
       try { text = await fs.promises.readFile(fp, 'utf-8'); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
-      const all = text ? JSON.parse(text) : {};
+      let all = {};
+      if (text) { try { all = JSON.parse(text); } catch { all = {}; if (!this._ratesUnparsedSaid) { this._ratesUnparsedSaid = true; console.warn('[usage-estimator] rates.json does not parse: read as empty, as its other writer reads it (each usage history learns its rates again from its readings)'); } } }
       if (!this._ratesAll) this._ratesAll = all && typeof all === 'object' ? all : {};   // a copy loaded meanwhile wins
     }
-    for (const m of [this._rateCache, this._lineCache, this._meta, this._folds, this._foldFail]) { try { if (m && typeof m.delete === 'function') m.delete(key); } catch { } }
+    endFolds();
+    for (const m of [this._rateCache, this._lineCache, this._meta, this._foldFail]) { try { if (m && typeof m.delete === 'function') m.delete(key); } catch { } }
     if (!Object.prototype.hasOwnProperty.call(this._ratesAll, key)) return true;
     delete this._ratesAll[key];
     const sw = require('./store-writer.js').storeWriter();
     sw.dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });
     if (!(await sw.whenDurable([fp]))) throw new Error('the rates file was not written');
+    if (Object.prototype.hasOwnProperty.call(this._ratesAll, key)) throw new Error('a fold wrote the entry back during the wait');   // not happened: the next pass
     return true;
   }
   /** the rates written NOW, on this thread — a one-shot repair (src/ledger-slot-backfill.js) records itself only after the

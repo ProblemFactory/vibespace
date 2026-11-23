@@ -658,7 +658,9 @@ class AccountManager {
     return (d.state === 'read' || d.state === 'unreadable') && d.from >= since ? d : { state: 'unread' };
   }
   /** THE DECISION ACCESSOR (sync): { state: 'read', auth, at, from, target } when confirmed within the bound (`opts.since`, an
-   *  instant, or `opts.withinMs`, default DECIDE_WITHIN_MS) — else { state: 'unknown', why: 'not-read-yet' | 'unreadable', reason } */
+   *  instant, or `opts.withinMs`, default DECIDE_WITHIN_MS) — else { state: 'unknown', why: 'not-read-yet' | 'unreadable', reason }.
+   *  `since: 0` = the KEPT facts at ANY age: 'not-read-yet' only for a folder this run has never landed (the engine's identity
+   *  groups ask it so — «landed» is landed once, 主开发 r3311 MUST 1); it asks no confirmation of its own */
   signinFacts(id, opts = {}) {
     const a = this.get(id), ty = a ? this._acctType(a) : null;
     if (ty !== 'subscription' && ty !== 'pooled') return { state: 'unknown', why: a ? 'no-sign-in' : 'no-account' };
@@ -889,10 +891,14 @@ class AccountManager {
    *  tie from THAT landing's own snapshot (`o`: the credentials the keeper has just parsed — no read of its own, no new writer, no
    *  vendor call, no timer), so the update never splits an account that spans two rows. Never over a tie, never on a row whose tie
    *  was dropped (the next press seeds it), nothing from credentials naming no login session. MARKED SEEDED — its folder trusted
-   *  as the release trusted it — and a later sign-in through the product replaces it by a proven one (_noteLoginTie) */
+   *  as the release trusted it — and a later sign-in through the product replaces it by a proven one (_noteLoginTie).
+   *  SEEDED ONCE, a restart included (主开发 r3311 (1)): the row keeps the MARK itself (`loginTieSeeded`, no value of the sign-in).
+   *  A seed whose credentials carry no deadline (refreshTokenExpiresAt) has its tie in memory only, so after a restart that row is
+   *  UNTIED — its record names no seat, «unproven» beside its twin, apart (the safe side) — until a sign-in through the product
+   *  ties it again; never seeded again from whatever its folder then holds (another account after a sign-in inside a conversation) */
   _seedTieAt(id, o) {
     const a = this.get(id);
-    if (!a || a.loginTieDropped || this._hasTie(id) || !o || typeof o !== 'object') return;
+    if (!a || a.loginTieDropped || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;
     const rt = typeof o.refreshToken === 'string' && o.refreshToken ? o.refreshToken : null;
     const rte = Number.isFinite(o.refreshTokenExpiresAt) ? o.refreshTokenExpiresAt : null;
     if (!rt && !rte) return;
@@ -900,7 +906,9 @@ class AccountManager {
     if (!this._tieSeeded) this._tieSeeded = new Set();
     if (rt) this._loginTies.set(id, tokenTieOf(rt));
     this._tieSeeded.add(id);
-    if (rte) { a.loginTie = { rte, seeded: true }; this._save(); }
+    a.loginTieSeeded = true;   // the mark on the row (r3311 (1)): never a second seed
+    if (rte) a.loginTie = { rte, seeded: true };
+    this._save();
   }
   /** the tie's kind for row `id`: 'proven' (a sign-in through the product), 'seeded' (its folder trusted: r3022 (2)(d)) or null */
   _tieKindOf(id) {

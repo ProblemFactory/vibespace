@@ -71,7 +71,9 @@
 // ONE IDENTITY, ONE MEMORY (quota r3): two account ids over one org-merged
 // identity (usageIdentityGroupsCached) share a reading, so they share the
 // bought buckets and the attempt floor — a purchase is written under every id
-// of the group, and each id reads the group's merged memory.
+// of the group, and each id reads the group's merged memory. Since B-87fd unit 4
+// the memory is the groups' PACING set (主开发 r3311 MUST 2): rows not proven
+// different pace as one, as the release grouped them (never more asks).
 const fs = require('fs');
 const path = require('path');
 const usageWrite = require('../usage-cache-write.js');   // lane lg-store-writes U6.4: a reading is read through the cache module
@@ -212,7 +214,15 @@ function createAutoCliLoop(d) {
         try { raw = usageWrite.readCacheJson(path.join(d.USAGE_CACHE_DIR, a.id + '.json')); } catch (e) { raw = null; readFailed = !!e && e.code !== 'ENOENT' && !(e instanceof SyntaxError); }
         if (readFailed) continue;
         try {
-          for (const [, g] of d.usageIdentityGroupsCached()) {
+          // THE PACING MEMORY (B-87fd identity unit 4, 主开发 r3311 MUST 2 — §ban-safety): the rows the one comparison does not prove
+          // DIFFERENT pace as ONE (the engine's `pacing`: the release's grouping less the proven splits) — the attempt floor, the
+          // bought buckets and the freshest reading's age — never more automatic asks for what may be one account than the release
+          // made; each row still files and decides on its own reading. A groups map with no `pacing` paces by its groups
+          const gs = d.usageIdentityGroupsCached(), pace = gs && gs.pacing ? gs.pacing.get(a.id) : null;
+          if (pace) {
+            mem = [a.id, ...pace.ids.filter((x) => x !== a.id)];
+            if (pace.cache && (pace.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) raw = withOwnAbsence(pace.cache, raw); // (no-5h-window r5)
+          } else for (const [, g] of gs) {
             if (!g.accountIds.includes(a.id)) continue;
             mem = [a.id, ...g.accountIds.filter((x) => x !== a.id)]; // one identity, one memory (quota r3)
             if (g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) raw = withOwnAbsence(g.cache, raw); // (no-5h-window r5)

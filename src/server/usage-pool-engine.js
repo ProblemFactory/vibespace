@@ -280,9 +280,14 @@ function usageIdentityGroups() {
   const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
   try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: usageFolder.via }).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
-  // the identity key's EMAIL DECIDES a grouping (B-360d, 主开发 r1221 — the timer row): the decision road's rows, confirmed within
-  // two of this memo's lives (60 s; a confirmation asked behind at 30 s) — an account not confirmed is its own identity (no merge)
+  // THE RELEASE's KEY (B-360d, 主开发 r1221 — the timer row): the decision road's rows confirmed within two of this memo's lives
+  // (60 s; a confirmation asked behind at 30 s) — an account not confirmed is its own identity (no merge). Since unit 4 it keys
+  // only the RELEASE's grouping the B-6a92 door still reads (`released` below) — and its read asks the confirmations behind
   const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];
+  // THE KEPT FACTS AT ANY AGE (主开发 r3311 MUST 1: «landed» = landed ONCE, never «confirmed in the last 60 s»): `since: 0` — a
+  // row the keeper has landed keeps its address, so its today's key and its record, while its confirmation ages (a seat does not
+  // change in a minute; a sign-in change lands the row again, the confirmation asked behind above). A row never landed has none
+  const kept = accounts.decisionList({ since: 0 }).accounts || [];
   // B-87fd identity unit 4 (主开发 r3011): each file is a MEMBER first — its today's key (groupKeyOf) and its row's RECORD on the
   // decision road (the keeper's kept facts: no read of its own) — then ONE GROUP = ONE ACCOUNT by the one comparison (identityGroupsOf)
   const members = [];
@@ -294,7 +299,7 @@ function usageIdentityGroups() {
       const accountId = (fn === '__global__.json' || gOwner) ? null : fn.slice(0, -5);
       const cache = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: usageFolder.via });
       if (!cache?.fetchedAt) continue;
-      const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
+      const acctRec = accountId ? kept.find((x) => x.id === accountId) : null, relRec = accountId ? roster.find((x) => x.id === accountId) : null;
       // A DELETED account's cache file is a zombie (nothing removes the file
       // with the record) and it kept poisoning org→account resolution: it
       // stays in the identity group, OTel's resolveOrg picked the dead id
@@ -314,14 +319,16 @@ function usageIdentityGroups() {
       const ownBe = gOwner || (acctRec?.backend && globalUsageKey(acctRec.backend) !== '__global__' ? acctRec.backend : null);
       const key = gOwner ? gOwner + ':__global__'
         : groupKeyOf({ accountId, cache, email: acctRec?.email, ownBe });   // B-6a92 r9: the ONE keying (module-level, the door's table runs it too)
-      // LANDED (r3022 (2)(c)): the keeper has read the row's folder within the bound, or found it unreadable — only then is it
-      // judged; a row not yet landed keeps its today's name's group as the release had it (its seed comes WITH that landing)
+      const relKey = gOwner ? key : groupKeyOf({ accountId, cache, email: relRec?.email, ownBe });   // the release's: confirmed within 60 s
+      // LANDED (r3022 (2)(c), 主开发 r3311 MUST 1): the keeper has EVER landed the row's folder — read, or found unreadable, at ANY
+      // age (`since: 0`: this run's kept facts) — only then is it judged, its record from the kept facts; a row never landed keeps its
+      // today's name's group as the release had it (its seed comes WITH that landing). A confirmation that aged is no new landing
       let rec = null, landed = true;
       if (accountId) {
-        try { const f = accounts.signinFacts(accountId, { withinMs: 60000 }); landed = f.state === 'read' || f.why !== 'not-read-yet'; } catch { landed = false; }
-        if (landed) { try { rec = accounts.identityRecordOf(accountId, { withinMs: 60000 }); } catch { rec = null; } }
+        try { const f = accounts.signinFacts(accountId, { since: 0 }); landed = f.state === 'read' || f.why !== 'not-read-yet'; } catch { landed = false; }
+        if (landed) { try { rec = accounts.identityRecordOf(accountId, { since: 0 }); } catch { rec = null; } }
       }
-      members.push({ id: gOwner ? fn.slice(0, -5) : (accountId || '__global__'), accountId, cache, today: key, backend: ownBe || 'claude', rec, landed, createdAt: accountId ? ((accounts.get(accountId) || {}).createdAt || 0) : 0 });
+      members.push({ id: gOwner ? fn.slice(0, -5) : (accountId || '__global__'), accountId, cache, today: key, released: relKey, backend: ownBe || 'claude', rec, landed, createdAt: accountId ? ((accounts.get(accountId) || {}).createdAt || 0) : 0 });
     } catch { }
   }
   const judged = identityGroupsOf(members);
@@ -339,9 +346,12 @@ function usageIdentityGroups() {
   }
   // the SPLITS travel with the groups (beside them, never one of them): the sweep's retire reads them here (r3022 (1))
   Object.defineProperty(groups, 'splits', { value: judged.splits || [], enumerable: false });
-  // …and the RELEASE's grouping (every member under its today's key): the B-6a92 door's facts read it, the door's own move onto
-  // the one comparison being its own unit (its r6 must: a row whose folder signs in as another account is NOT that account's group)
-  const released = new Map(); for (const m of members) { if (!released.has(m.today)) released.set(m.today, []); released.get(m.today).push(m.id); }
+  // …the PACING MEMORY of the automatic check (主开发 r3311 MUST 2, §ban-safety): the auto-cli loop's, for its pacing alone
+  Object.defineProperty(groups, 'pacing', { value: judged.pacing || null, enumerable: false });
+  // …and the RELEASE's grouping (every member under the release's key, confirmed within 60 s): the B-6a92 door's facts read it, the
+  // door's own move onto the one comparison being its own unit (its r6 must: a row whose folder signs in as another account is
+  // NOT that account's group)
+  const released = new Map(); for (const m of members) { if (!released.has(m.released)) released.set(m.released, []); released.get(m.released).push(m.id); }
   Object.defineProperty(groups, 'released', { value: released, enumerable: false });
   return groups;
 }
@@ -353,11 +363,19 @@ const _identGroupsMemo = { at: 0, groups: null };
 usageFolder.onReply(() => { _identGroupsMemo.groups = null; });   // B-360d part 3 U3: the memo never outlives the folder reply it was built on
 /** THE RETIRE OF A SPLIT NAME (B-87fd identity unit 4, 主开发 r3011 Q2 / r3022 (1)) — the sweep's ALONE, holding no state of its
  *  own: the bare name's anchors file STILL THERE is the test. Only on a PROVEN split (identityGroupsOf's `splits`). THE ORDER, so a
- *  crash anywhere is finished by the next pass: (1) its rates entry dropped and ON DISK (usageEstimator.retireRates), (2) the file
- *  ARCHIVED beside itself under a dated name that no anchors reader lists (`….ndjson.retired-<UTC stamp>`; never removed), (3)
- *  the kept lines read again (noteAnchorsRewritten), (4) said ONCE in the journal by its KIND and its rows' names and ids (r3013:
- *  never the organisation's id, never an address, never the name whole). A file it cannot stat, a rates file it cannot read or
- *  write, a rename refused: the retire has not happened, the pass ends without a word and the next one tries again */
+ *  crash before (2) is finished by the next pass: (1) its rates entry dropped and ON DISK (usageEstimator.retireRates: a fold of
+ *  that name in flight ended first), (2) the file ARCHIVED beside itself under a dated name that no anchors reader lists
+ *  (`….ndjson.retired-<UTC stamp to the ms>`; never removed), (3) the kept lines read again (noteAnchorsRewritten), (4) said ONCE
+ *  in the journal by its KIND and its rows' names and ids (r3013: never the organisation's id, never an address, never the name
+ *  whole). A file it cannot stat, a rates file it cannot write, a rename refused: the retire has not happened, the pass ends
+ *  without a word and the next one tries again. A CRASH BETWEEN (2) AND (4) loses the journal line for good — the history is
+ *  kept in the archive; the next pass finds no bare file and says nothing (r3311 (3)).
+ *  ONE ARCHIVE A SPLIT (r3311 MUST 1): a landed row stays judged when its confirmation ages, so nothing files under the bare name
+ *  again. The one window left is a START's before the rows' first landing (seconds: the start's own folder reads, the first sweep
+ *  20 s in), where the release's grouping stands as r3022 (2)(c) ruled — a reading filed in it re-makes the bare file, and the
+ *  next proven pass archives that one too and says it again.
+ *  THE RENAME NEVER OVERWRITES (r3311 (3)): one sweep runs at a time (a second ask joins it), no other process writes this folder
+ *  (src/usage-anchors.js) and the stamp is to the millisecond, so no dated name of this name can exist when it is made */
 async function retireSplitNames(groups) {
   const splits = (groups && groups.splits) || [];
   for (const s of splits) {
@@ -366,9 +384,9 @@ async function retireSplitNames(groups) {
     try { await fs.promises.stat(fp); } catch { continue; }   // not there: nothing to do (retired already); not readable: not happened
     try {
       await usageEstimator.retireRates(s.key);
-      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]|\.\d+/g, ''));
+      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]/g, ''));
       try { require('../usage-anchors.js').noteAnchorsRewritten(usageAnchors.dir); } catch { }
-      const k = /^(?:[a-z][a-z0-9-]*:)?(org|email|acct):/.exec(s.key), kind = k && k[1] === 'org' ? "an organisation's" : k && k[1] === 'email' ? "an address's" : "a row's";
+      const k = nameKindOf(s.key), kind = k === 'org' ? "an organisation's" : k === 'email' ? "an address's" : "a row's";
       console.log(`[usage] ${kind} shared usage history held two accounts — set apart: ${s.rows.map((id) => { const l = labelOf(id); return l === id ? id : `${l} (${id})`; }).join(', ')} each learn again from their own readings`);
     } catch { }
   }
@@ -9620,12 +9638,20 @@ function groupKeyOf({ accountId = null, cache = null, email = null, ownBe = null
  *    apart, a row with no record stands alone); a group is the union of its «same» pairs;
  *  - a MACHINE LOGIN (no row: its seat is never read from a home, r1477) joins a group only when exactly ONE group holds a member
  *    of its today's key, else it stands alone;
- *  - NOTHING IS JUDGED BEFORE IT LANDED (r3022 (2)(c)): a today's name with a row the keeper has not landed yet (`landed: false`)
- *    keeps ALL its rows together as the release grouped them, until each has landed or been found unreadable;
+ *  - NOTHING IS JUDGED BEFORE IT LANDED (r3022 (2)(c)): a today's name with a row the keeper has never landed (`landed: false`)
+ *    keeps ALL its rows together as the release grouped them, until each has landed or been found unreadable — ONCE: a landed
+ *    row whose confirmation aged is judged on its kept facts (主开发 r3311 MUST 1; the caller's `landed`);
  *  - THE NAMES (r3011 Q2 / Q3): a today's name whose members now stand in more than one group is SPLIT — nobody keeps it bare. A
  *    group keeps the best of its members' unsplit today's names (org, then address, then id; then the smaller string); a group
- *    with none takes its best today's name + '/' + its oldest row's id. A name carries no seat and no digest.
- *  → Map(name → members), each group in its members' order */
+ *    with none takes its best today's name + '/' + its oldest row's id — the id kept inside the anchors file's slug (r3311 (2):
+ *    a long name gives up the end of its base, never its id, so two pieces never share one file). A name carries no seat and no
+ *    digest. A MERGE reads only the precedence name: the absorbed name's history and rates entry stay on disk, unread and never
+ *    archived (nothing is summed, r3011 Q3);
+ *  - THE PACING MEMORY (主开发 r3311 MUST 2, §ban-safety — the automatic check's pacing ALONE): members that the comparison does
+ *    not prove DIFFERENT share one, as the release's grouping gave them (one today's key), and so does every group — never more
+ *    automatic asks for what may be one account than the release made; each row still files and decides on its own reading.
+ *  → Map(name → members), each group in its members' order; beside it (not enumerable) `splits` and `pacing` (id → { ids,
+ *    cache: the set's freshest reading })) */
 function identityGroupsOf(members, { same = (x, y) => require('../account-identity.js').sameAccount(x, y) } = {}) {
   const all = (members || []).map((m, idx) => ({ ...m, idx })), machines = all.filter((m) => !m.accountId);
   const pending = new Set(all.filter((m) => m.accountId && m.landed === false).map((m) => m.today));
@@ -9641,7 +9667,7 @@ function identityGroupsOf(members, { same = (x, y) => require('../account-identi
   for (const m of machines) { const h = list.filter((s) => s.some((x) => x.today === m.today)); if (h.length === 1) h[0].push(m); else list.push([m]); }
   const split = new Set(), first = new Map();
   list.forEach((s, gi) => { for (const m of s) { if (!first.has(m.today)) first.set(m.today, gi); else if (first.get(m.today) !== gi) split.add(m.today); } });
-  const rank = (k) => { const r = /^(?:[a-z][a-z0-9-]*:)?(org|email|acct):/.exec(k); return r ? ['org', 'email', 'acct'].indexOf(r[1]) : 3; };
+  const rank = (k) => { const r = nameKindOf(k); return r ? ['org', 'email', 'acct'].indexOf(r) : 3; };
   const best = (ks) => [...ks].sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))[0];
   const out = new Map();
   for (const s of list.map((g) => g.sort((a, b) => a.idx - b.idx)).sort((a, b) => a[0].idx - b[0].idx)) {
@@ -9649,7 +9675,8 @@ function identityGroupsOf(members, { same = (x, y) => require('../account-identi
     let name = whole.length ? best(whole) : null;
     if (!name) {
       const own = s.filter((m) => m.accountId), oldest = (own.length ? own : s).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || (a.id < b.id ? -1 : 1))[0];
-      name = best(keys) + '/' + oldest.id;
+      const base = best(keys), tail = '/' + oldest.id, room = require('../usage-anchors.js').anchorSlug(base + tail).length - tail.length;
+      name = base.slice(0, Math.max(0, room)) + tail;   // r3311 (2): the slug's cut takes the base's end, never the id
     }
     out.set(name, s);
   }
@@ -9657,19 +9684,37 @@ function identityGroupsOf(members, { same = (x, y) => require('../account-identi
   // tie (its record's seat named from a config tied to its credentials — seeded or proven) and «different» by the one comparison.
   // A missing tie, a row not landed (held above), a row found unreadable, «unproven»: never proven — nothing is retired for it
   const groupOfIdx = new Map(); for (const [, s] of out) for (const m of s) groupOfIdx.set(m.idx, s);
+  const provenApart = (x, y) => !!(x.accountId && y.accountId && x.rec && y.rec && x.rec.tie && y.rec.tie && same(x.rec, y.rec) === 'different');
   const splits = [...split].map((key) => {
     const of = all.filter((m) => m.accountId && m.today === key);
     let proven = false;
     for (let i = 0; i < of.length && !proven; i++) for (let j = i + 1; j < of.length && !proven; j++) {
       const x = of[i], y = of[j];
-      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx) && x.rec && y.rec && x.rec.tie && y.rec.tie && same(x.rec, y.rec) === 'different') proven = true;
+      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx) && provenApart(x, y)) proven = true;
     }
     const sp = { key, proven, rows: of.map((m) => m.id) };
     return sp;
   });
   Object.defineProperty(out, 'splits', { value: splits, enumerable: false });   // beside the groups, never one of them
+  // THE PACING MEMORY (r3311 MUST 2): one set per group, joined across one today's key unless the two are PROVEN apart (the
+  // splits' own proof) — a pair the comparison leaves unproven paces as the release paced it
+  const pu = all.map((_, i) => i), pr = (i) => (pu[i] === i ? i : (pu[i] = pr(pu[i])));
+  for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
+    const x = all[i], y = all[j];
+    if (pr(i) !== pr(j) && (groupOfIdx.get(x.idx) === groupOfIdx.get(y.idx) || (x.today === y.today && !provenApart(x, y)))) pu[pr(j)] = pr(i);
+  }
+  const sets = new Map(); all.forEach((m, i) => { const r = pr(i); if (!sets.has(r)) sets.set(r, []); sets.get(r).push(m); });
+  const pacing = new Map();
+  for (const set of sets.values()) {
+    let cache = null; for (const m of set) if (m.cache && (!cache || (m.cache.fetchedAt || 0) > (cache.fetchedAt || 0))) cache = m.cache;
+    const ids = set.map((m) => m.id); for (const m of set) pacing.set(m.id, { ids, cache });
+  }
+  Object.defineProperty(out, 'pacing', { value: pacing, enumerable: false });
   return out;
 }
+/** a group's name's KIND — 'org' | 'email' | 'acct' | null — past a harness's own prefix (the names' precedence and the retire's
+ *  journal words read the one spelling) */
+function nameKindOf(k) { const r = /^(?:[a-z][a-z0-9-]*:)?(org|email|acct):/.exec(String(k || '')); return r ? r[1] : null; }
 /** WHO ANSWERED a panel: its own printed / rewritten org (idv.panel), else the folder's login it ran through (idv.expected) —
  *  {org, email} in memory, or null when neither names anyone. */
 function answeringLogin(idv) {

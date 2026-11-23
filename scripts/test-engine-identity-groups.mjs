@@ -9,13 +9,24 @@
 //     keeps the precedence name; no name carries a seat;
 //  5. the spend slot (data/spend-budget.json's key, r3011 (3)) is the same under today's keying and the one comparison;
 //  6. THE UPDATE (r3022 (2)): rows signed in before the tie existed are SEEDED at their first landing — one account in two rows
-//     stays one group and nothing is renamed, a second start writes nothing; two accounts the release grouped by name split; a
-//     row whose snapshot cannot be read seeds nothing; the sweep that comes BEFORE the landing judges nothing;
+//     stays one group and nothing is renamed; a second start, its folder now signed in as ANOTHER account, writes nothing and
+//     keeps the seeded tie; a seed with no deadline is never seeded again after a restart (主开发 r3311 (1): the mark persisted);
+//     a dropped tie is not seeded by the next landing; two accounts the release grouped by name split; a row whose snapshot
+//     cannot be read seeds nothing; the sweep that comes BEFORE the landing judges nothing;
 //  7. THE RETIRE (r3022 (1)), the sweep's alone: only a PROVEN split archives the bare name's file beside itself (dated, never
 //     removed) after its rates entry is on disk, said once by kind and the rows' names and ids; one account, an unreadable row,
-//     an unproven split and a sweep before the landing retire nothing; a crash inside the retire is finished by the next pass.
-// RED CONTROLS: the release-keyed engine; a retire that archives before its rates entry is on disk; a retire on «unproven».
-// RED CONTROL: a copy of the engine keyed by today's key (the release's grouping) — legs 1, 2 and 4 fail on it.
+//     an unproven split, a sweep before the landing and the accounts list HELD retire nothing; a crash inside the retire is
+//     finished by the next pass; the kept lines are read again; the archive is read by the real listers; a rates file that does
+//     not parse is read as empty and said once;
+//  8. «LANDED» IS LANDED ONCE (主开发 r3311 MUST 1): two seats split, then their kept facts aged past the bound with no re-read —
+//     still apart, the names unchanged, seat A usable on its own reading, nothing filed under the bare name, no second archive;
+//  9. THE PACING MEMORY (r3311 MUST 2, §ban-safety): the REAL automatic check with a counted stand-in for the probe over four
+//     hours — two unproven rows of one address are asked as often as the release asked them; two seats proven different each
+//     keep their own cadence; 10. two pieces of a long split name never share one anchors file (r3311 (2)).
+// RED CONTROLS (each a copy with one named edit, built and run): the release-keyed engine (legs 1, 2 and 4 fail on it — legs 3
+// and 5 are PINS: their law did not move); a retire that archives before its rates entry is on disk; a retire on «unproven»; a
+// retire that reads no kept line again; «landed» as «confirmed in the last 60 s»; an engine with no pacing memory; a store whose
+// seed asks no tie / no mark / no drop; an estimator that refuses a rates file that does not parse.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,15 +53,30 @@ const engSrc = fs.readFileSync(engPath, 'utf8');
 let todayMod = null, todayErr = null;
 try { todayMod = require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, '  const judged = identityGroupsOf(members);\n', '  const judged = members.reduce((acc, x) => acc.set(x.today, [...(acc.get(x.today) || []), x]), new Map());\n', 'the release keying (RED)'))); } catch (e) { todayErr = e.message; }
 ok(!todayErr && todayMod && typeof todayMod.create === 'function', 'RED CONTROL built: a copy of the engine grouped by today\'s key', todayErr || '');
+const redCopy = (file, src, edits, label) => { try { let t = src; for (const [a, b] of edits) t = anchored(t, a, b, label); return require(MUT.write(file, t)); } catch (e) { return { err: e.message }; } };
+const LANDED = ["        try { const f = accounts.signinFacts(accountId, { since: 0 }); landed = f.state === 'read' || f.why !== 'not-read-yet'; } catch { landed = false; }\n        if (landed) { try { rec = accounts.identityRecordOf(accountId, { since: 0 }); } catch { rec = null; } }\n",
+  "        try { const f = accounts.signinFacts(accountId, { withinMs: 60000 }); landed = f.state === 'read' || f.why !== 'not-read-yet'; } catch { landed = false; }\n        if (landed) { try { rec = accounts.identityRecordOf(accountId, { withinMs: 60000 }); } catch { rec = null; } }\n"];
+const R60 = redCopy('src/server/usage-pool-engine.js', engSrc, [LANDED], '«landed» = confirmed in the last 60 s (RED)');
+const RNoPace = redCopy('src/server/usage-pool-engine.js', engSrc, [["  Object.defineProperty(groups, 'pacing', { value: judged.pacing || null, enumerable: false });\n", '']], 'no pacing memory (RED)');
+const RNoReread = redCopy('src/server/usage-pool-engine.js', engSrc, [["      try { require('../usage-anchors.js').noteAnchorsRewritten(usageAnchors.dir); } catch { }\n", '']], 'no kept line read again (RED)');
+const accPath = path.join(REPO, 'src/accounts.js'), accSrc = fs.readFileSync(accPath, 'utf8');
+const GUARD = "    if (!a || a.loginTieDropped || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;\n";
+const amOf = (m) => (m && !m.err ? (m.AccountManager || m) : m);
+const AMNoGuard = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || !o || typeof o !== 'object') return;\n"]], 'a seed over a tie (RED)'));
+const AMNoMark = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieDropped || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed with no mark (RED)'));
+const AMNoDrop = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed over a drop (RED)'));
+const estPath = path.join(REPO, 'src/usage-estimator.js');
+const EstOld = redCopy('src/usage-estimator.js', fs.readFileSync(estPath, 'utf8'), [["      if (text) { try { all = JSON.parse(text); } catch { all = {}; if (!this._ratesUnparsedSaid) { this._ratesUnparsedSaid = true; console.warn('[usage-estimator] rates.json does not parse: read as empty, as its other writer reads it (each usage history learns its rates again from its readings)'); } } }\n", '      if (text) all = JSON.parse(text);\n']], 'a rates file that does not parse refused (RED)');
+for (const [label, m] of [['«landed» as confirmed in the last 60 s', R60], ['no pacing memory', RNoPace], ['no kept line read again', RNoReread], ['a seed over a tie', AMNoGuard], ['a seed with no mark', AMNoMark], ['a seed over a drop', AMNoDrop], ['a rates file that does not parse refused', EstOld]]) ok(m && !m.err, `RED CONTROL built: ${label}`, (m && m.err) || '');
 
 // ── a made-up world: organisations and people are invented; no id or address of a real account ──
 let n = 0;
 const org = () => `${String(++n).padStart(8, '0')}-0000-4000-8000-0000000e1600`;
 const personOf = (address) => 'p-' + address.split('@')[0] + '-made-up';
 const credsAt = (dir) => path.join(dir, '.credentials.json'), cfgAt = (dir) => path.join(dir, '.claude.json');
-const writeLogin = (dir, { address, orgId }) => {   // what a real Claude sign-in leaves: the token file + the identity in .claude.json
+const writeLogin = (dir, { address, orgId, noRte = false }) => {   // what a real Claude sign-in leaves: the token file + the identity in .claude.json (`noRte`: an older CLI's, no deadline on its refresh)
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: 'at-' + address, refreshToken: 'rt-' + address, expiresAt: Date.now() + 3600e3, refreshTokenExpiresAt: Date.now() + 29 * 86400e3 + (++n), scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' } }));
+  fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: 'at-' + address, refreshToken: 'rt-' + address, expiresAt: Date.now() + 3600e3, ...(noRte ? {} : { refreshTokenExpiresAt: Date.now() + 29 * 86400e3 + (++n) }), scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' } }));
   fs.writeFileSync(cfgAt(dir), JSON.stringify({ oauthAccount: { emailAddress: address, accountUuid: personOf(address), organizationUuid: orgId, organizationName: 'Org' } }));
 };
 const writeToken = (dir) => {   // a long-lived token (ours): law 5 — it names no seat
@@ -70,10 +96,10 @@ const closeAm = async (am) => { try { await am.displaySettled(); } catch { } try
 /** `update: true` = THE UPDATE: the rows were signed in before the tie existed (their record holds none) and the hub starts again
  *  on the same data (`beforeLanding(am, ids)` runs on the new store before anything lands); `land: false` = the engine is built
  *  before the new store's first landing */
-const world = async (rows, { update = false, land = true, beforeLanding = null, copies = {} } = {}) => {
+const world = async (rows, { update = false, land = true, beforeLanding = null, copies = {}, AM = AccountManager, held = false } = {}) => {
   const root = tmpdir('vs-eig-'), dataDir = path.join(root, 'data'), cacheDir = path.join(dataDir, 'usage-cache');
   fs.mkdirSync(cacheDir, { recursive: true });
-  let am = new AccountManager({ dataDir, onChange: () => { } });
+  let am = new AM({ dataDir, onChange: () => { } });
   const ids = rows.map((r) => {
     if (r.machine) { writeCache(cacheDir, '__global__', r.cache); return '__global__'; }
     const id = am.createSubscription({}).id;
@@ -83,10 +109,14 @@ const world = async (rows, { update = false, land = true, beforeLanding = null, 
     return id;
   });
   if (update) {
-    for (const id of ids) { const a = am.get(id); if (a) { delete a.loginTie; delete a.loginTieDropped; } }
+    for (const id of ids) { const a = am.get(id); if (a) { delete a.loginTie; delete a.loginTieDropped; delete a.loginTieSeeded; } }
     am._save(); await closeAm(am);
-    am = new AccountManager({ dataDir, onChange: () => { } });
+    am = new AM({ dataDir, onChange: () => { } });
     if (beforeLanding) beforeLanding(am, ids);
+  }
+  if (held) {   // THE LIST HELD (bl-windows' accounts.held()): a hub start whose read of accounts.json is refused (mode 000)
+    am._save(); await closeAm(am); fs.chmodSync(path.join(dataDir, 'accounts.json'), 0o000);
+    am = new AM({ dataDir, onChange: () => { } });
   }
   if (land) await am.signinFactsSettled(null, { withinMs: 0 });
   const apps = [];
@@ -95,7 +125,7 @@ const world = async (rows, { update = false, land = true, beforeLanding = null, 
     getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
   const eng = mk(engMod), app = apps[0], today = todayMod ? mk(todayMod) : null;
   const copy = Object.fromEntries(Object.entries(copies).map(([k, mod]) => { const e = mk(mod); return [k, { eng: e, app: apps[apps.length - 1] }]; }));
-  return { am, ids, eng, app, today, copy, dataDir, close: () => closeAm(am) };
+  return { am, ids, eng, app, today, copy, dataDir, cacheDir, close: async () => { await closeAm(am); if (held) { try { fs.chmodSync(path.join(dataDir, 'accounts.json'), 0o600); } catch { } } } };
 };
 const groupOf = (e, id) => { for (const [, g] of e.usageIdentityGroups()) if (g.accountIds.includes(id)) return g.accountIds.slice().sort().join(','); return id; };   // the groups asked NOW (the engine's 30 s memo would answer an older ask)
 const usableOf = (e, id) => { try { const v = e.quotaVerdictFor(id); return v ? v.usable : 'no-verdict'; } catch (err) { return 'threw: ' + err.message; } };
@@ -148,11 +178,14 @@ const tieOf = (am, id) => { const a = am.get(id); return a && a.loginTie ? { see
   ok([X, Y].every((id) => tieOf(W.am, id) && tieOf(W.am, id).seeded && W.am.identityRecordOf(id).tie === 'seeded'), '6. the update: each row with no tie is SEEDED at its first landing, and its record says the tie was seeded (not proven at a press)', JSON.stringify([X, Y].map((id) => [tieOf(W.am, id), (W.am.identityRecordOf(id) || {}).tie])));
   ok(groupOf(W.eng, X) === [X, Y].sort().join(',') && JSON.stringify(namesOf(W.eng)) === JSON.stringify([`org:${O.toLowerCase()}`]), '6. …so one account in two rows stays ONE group under today\'s name: the update splits nothing and renames nothing', JSON.stringify({ group: groupOf(W.eng, X), names: namesOf(W.eng).length }));
   await W.close();
-  const before = fs.readFileSync(path.join(W.dataDir, 'accounts.json'), 'utf8');
+  const before = fs.readFileSync(path.join(W.dataDir, 'accounts.json'), 'utf8'), rteY = JSON.parse(before).accounts.find((a) => a.id === Y).loginTie.rte;
+  writeLogin(W.am.subDir(Y), { address: 'another@example.invalid', orgId: org() });   // a sign-in inside a conversation: Y's folder now holds ANOTHER account
+  const redDir = tmpdir('vs-eig-red-'); fs.cpSync(W.dataDir, redDir, { recursive: true });
   const again = new AccountManager({ dataDir: W.dataDir, onChange: () => { } }); await again.signinFactsSettled(null, { withinMs: 0 });
-  ok([X, Y].every((id) => tieOf(again, id) && tieOf(again, id).seeded), '6. a second start keeps the seeded ties (a tie is never written over by a seed)');
+  ok([X, Y].every((id) => tieOf(again, id) && tieOf(again, id).seeded) && again.get(Y).loginTie.rte === rteY, '6. a second start, Y\'s folder now signed in as ANOTHER account, keeps the seeded ties (a tie is never written over by a seed)', JSON.stringify({ Y: tieOf(again, Y), same: again.get(Y).loginTie && again.get(Y).loginTie.rte === rteY }));
   await closeAm(again);
   ok(fs.readFileSync(path.join(W.dataDir, 'accounts.json'), 'utf8') === before, '6. …and writes nothing: each row was seeded once');
+  if (!AMNoGuard.err) { const red = new AMNoGuard({ dataDir: redDir, onChange: () => { } }); await red.signinFactsSettled(null, { withinMs: 0 }); await closeAm(red); ok(fs.readFileSync(path.join(redDir, 'accounts.json'), 'utf8') !== before, 'RED: a store whose seed asks for no tie writes Y\'s tie over from the other account\'s sign-in'); }
   const later = new AccountManager({ dataDir: W.dataDir, onChange: () => { } }); await later.signinFactsSettled(null, { withinMs: 0 });
   writeLogin(later.subDir(X), acct); later.finalizeSubscription(X);
   ok(tieOf(later, X) && !tieOf(later, X).seeded && later.identityRecordOf(X).tie === 'proven', '6. a later sign-in through the product replaces the seeded tie by a PROVEN one', JSON.stringify(tieOf(later, X)));
@@ -176,6 +209,30 @@ if (typeof process.getuid === 'function' && process.getuid() !== 0) {   // a PLA
   ok(early.group === [X, Y].sort().join(',') && JSON.stringify(early.names) === JSON.stringify([`org:${O.toLowerCase()}`]), '6. THE SWEEP COMES FIRST: before the rows\' first landing nothing is judged — the name keeps its rows together as the release had them', JSON.stringify({ group: early.group === [X, Y].sort().join(','), names: early.names.length }));
   await W.am.signinFactsSettled(null, { withinMs: 0 });
   ok(groupOf(W.eng, X) === X && groupOf(W.eng, Y) === Y, '6. …and once both have landed (each seeded from its own snapshot) the two accounts are judged apart', JSON.stringify([groupOf(W.eng, X), groupOf(W.eng, Y)].map((g) => g.split(',').length)));
+  await W.close(); }
+
+// ── 6. SEEDED ONCE, a restart included (主开发 r3311 (1)): a seed whose credentials carry no deadline keeps its tie in memory only —
+// the MARK on the row keeps it from a second seed when, after a restart, its folder holds another account's sign-in ──
+{ const O = org(), acct = { address: 'old-cli@example.invalid', orgId: O, noRte: true }, W = await world([{ as: acct, cache: { ago: 60, u5: 0.3, orgId: O } }, { as: acct, cache: { ago: 30, u5: 0.3, orgId: O } }], { update: true });
+  const [X] = W.ids, a0 = W.am.get(X), rec0 = W.am.identityRecordOf(X);
+  ok(a0.loginTieSeeded === true && !a0.loginTie && rec0 && rec0.tie === 'seeded', '6. a seed with no deadline on its refresh: seeded at the landing (its tie in memory), the MARK kept on the row', JSON.stringify({ mark: a0.loginTieSeeded, tie: !!a0.loginTie, kind: rec0 && rec0.tie }));
+  await W.close();
+  writeLogin(W.am.subDir(X), { address: 'someone-else@example.invalid', orgId: org(), noRte: true });   // after the restart its folder holds ANOTHER account
+  const before = fs.readFileSync(path.join(W.dataDir, 'accounts.json'), 'utf8'), redDir = tmpdir('vs-eig-red-'); fs.cpSync(W.dataDir, redDir, { recursive: true });
+  const again = new AccountManager({ dataDir: W.dataDir, onChange: () => { } }); await again.signinFactsSettled(null, { withinMs: 0 });
+  const rec1 = again.identityRecordOf(X);
+  ok(rec1 && rec1.tie === null && rec1.seat == null && fs.readFileSync(path.join(W.dataDir, 'accounts.json'), 'utf8') === before, '6. …after a restart it is NEVER seeded again: untied, its record names no seat (unproven, apart), nothing written', JSON.stringify({ tie: rec1 && rec1.tie, seat: !!(rec1 && rec1.seat) }));
+  await closeAm(again);
+  if (!AMNoMark.err) { const red = new AMNoMark({ dataDir: redDir, onChange: () => { } }); await red.signinFactsSettled(null, { withinMs: 0 }); const r = red.identityRecordOf(X); ok(!!(r && r.tie === 'seeded' && r.seat), 'RED: a store whose seed keeps no mark seeds the row again — from the OTHER account\'s sign-in', JSON.stringify({ tie: r && r.tie, seat: !!(r && r.seat) })); await closeAm(red); } }
+// ── 6. A DROPPED TIE is not seeded by the next landing (r3022 (2)(a): the next press seeds it) ──
+const touch = (f) => { const t = new Date(Date.now() + 5000); fs.utimesSync(f, t, t); };   // the folder changed: its next read lands (a parse), not a confirmation
+for (const [AM, red] of [[AccountManager, false], ...(AMNoDrop.err ? [] : [[AMNoDrop, true]])]) {
+  const O = org(), W = await world([{ as: { address: 'dropped@example.invalid', orgId: O }, cache: { ago: 60, u5: 0.3, orgId: O } }], { AM });
+  const [X] = W.ids;
+  W.am._dropLoginTie(X); touch(credsAt(W.am.subDir(X))); await W.am.signinFactsSettled(null, { withinMs: 0 });
+  const t = tieOf(W.am, X), kind = (W.am.identityRecordOf(X) || {}).tie || null;
+  if (!red) ok(!t && kind === null && W.am.get(X).loginTieDropped === true, '6. a DROPPED tie stays dropped through the next landing (no seed: the next press seeds it)', JSON.stringify({ tie: t, kind }));
+  else ok(kind === 'seeded', 'RED: a store whose seed asks for no drop seeds the dropped row at its next landing', JSON.stringify({ kind }));
   await W.close(); }
 
 // ── 7. THE RETIRE (r3022 (1)) — the sweep's alone ──
@@ -203,7 +260,12 @@ const twoSeats = (tag) => { const O = org(); return { O, rows: [{ as: { address:
   await sweep(W.eng); const s1 = stateOf(W, key), line = said.slice();
   ok(!s1.bare && s1.archived === 1 && !s1.ratesHas && s1.otherKept, '7. a PROVEN split at the update: the bare name\'s file is ARCHIVED beside itself under a dated name and its rates entry dropped (another\'s kept)', JSON.stringify(s1));
   ok(line.length === 1 && line[0].includes("an organisation's shared usage history") && !line[0].includes(O) && !line[0].includes('@') && W.ids.every((id) => line[0].includes(id)), '7. …said ONCE in the journal by its kind and its rows\' ids — never the organisation\'s id, never an address', JSON.stringify({ n: line.length, hasOrg: line.some((l) => l.includes(O)), hasAt: line.some((l) => l.includes('@')) }));
-  ok(fs.readdirSync(anchorsDir(W)).every((f) => !/^anchors-.*\.ndjson$/.test(f) || !f.includes('.retired-')), '7. the archive is listed by no anchors reader (its name does not end in .ndjson)');
+  { // THE REAL LISTERS over a folder holding the archive alone (r3311 (6)): the repair's and the sweep's store read nothing of it
+    const arch = fs.readdirSync(anchorsDir(W)).find((f) => f.includes('.retired-')), root2 = tmpdir('vs-eig-arch-'), d2 = path.join(root2, 'data', 'usage-anchors');
+    fs.mkdirSync(d2, { recursive: true }); fs.copyFileSync(path.join(anchorsDir(W), arch), path.join(d2, arch));
+    const n2 = await require(path.join(REPO, 'src/reading-repair.js')).prefetchAnchorRows(d2);
+    const st = new UA.UsageAnchors({ dataDir: path.join(root2, 'data') }), primed = await st.prime(), last = st.lastAnchor(key);
+    ok(n2 === 0 && primed === true && last === null && st.syncReads === 0, '7. the archive is read by NONE of the real listers: the repair\'s prefetch reads 0 files, the sweep\'s store primes with nothing of it', JSON.stringify({ repair: n2, primed, last: !!last, syncReads: st.syncReads })); }
   await sweep(W.eng);
   ok(stateOf(W, key).archived === 1 && said.length === 1, '7. a second pass finds no bare file and does nothing (no state of its own; one archive a split)', JSON.stringify({ archived: stateOf(W, key).archived, said: said.length }));
   await W.close(); }
@@ -211,7 +273,7 @@ const twoSeats = (tag) => { const O = org(); return { O, rows: [{ as: { address:
   plant(W, key); said.length = 0; await sweep(W.eng); const s = stateOf(W, key);
   ok(s.bare && s.archived === 0 && s.ratesHas && said.length === 0, '7. ONE account in two rows at the update: nothing split, nothing retired, nothing said', JSON.stringify({ ...s, said: said.length }));
   await W.close(); }
-const REt = (() => { try { return require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, "      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx) && x.rec && y.rec && x.rec.tie && y.rec.tie && same(x.rec, y.rec) === 'different') proven = true;\n", "      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx)) proven = true;\n", 'a retire on «unproven» (RED)'))); } catch (e) { return { err: e.message }; } })();
+const REt = (() => { try { return require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, "      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx) && provenApart(x, y)) proven = true;\n", "      if (groupOfIdx.get(x.idx) !== groupOfIdx.get(y.idx)) proven = true;\n", 'a retire on «unproven» (RED)'))); } catch (e) { return { err: e.message }; } })();
 { const O = org(), W = await world([{ as: { address: 'token-twin@example.invalid', orgId: O }, cache: { ago: 60, u5: 0.3, orgId: O } }, { as: 'token', cache: { ago: 30, u5: 0.3, orgId: O } }], { copies: REt.err ? {} : { unproven: REt } }), key = `org:${O.toLowerCase()}`;
   plant(W, key); said.length = 0; await sweep(W.eng); const s = stateOf(W, key);
   ok(s.bare && s.archived === 0 && s.ratesHas && said.length === 0, '7. an UNPROVEN split (a long-lived-token row beside a signed-in one: no seat to compare) retires NOTHING — it stands apart, its history kept', JSON.stringify({ ...s, said: said.length }));
@@ -229,7 +291,7 @@ if (typeof process.getuid === 'function' && process.getuid() !== 0) {
   await W.am.signinFactsSettled(null, { withinMs: 0 }); await sweep(W.eng); const s1 = stateOf(W, key);
   ok(s0.bare && s0.archived === 0 && !s1.bare && s1.archived === 1 && said.length === 1, '7. THE SWEEP BEFORE THE LANDING retires nothing; once both rows landed (seeded, different) the next pass retires the name once', JSON.stringify({ before: s0, after: s1, said: said.length }));
   await W.close(); }
-const ROrder = (() => { try { return require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, "      await usageEstimator.retireRates(s.key);\n      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]|\\.\\d+/g, ''));\n", "      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]|\\.\\d+/g, ''));\n      await usageEstimator.retireRates(s.key);\n", 'the archive before the rates entry (RED)'))); } catch (e) { return { err: e.message }; } })();
+const ROrder = (() => { try { return require(MUT.write('src/server/usage-pool-engine.js', anchored(engSrc, "      await usageEstimator.retireRates(s.key);\n      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]/g, ''));\n", "      await fs.promises.rename(fp, fp + '.retired-' + new Date().toISOString().replace(/[-:]/g, ''));\n      await usageEstimator.retireRates(s.key);\n", 'the archive before the rates entry (RED)'))); } catch (e) { return { err: e.message }; } })();
 { const { O, rows } = twoSeats('crash'), W = await world(rows, { update: true }), key = `org:${O.toLowerCase()}`;
   // (i) the archive refused once, AFTER the rates entry was dropped: the next pass finishes it
   plant(W, key); said.length = 0;
@@ -256,6 +318,98 @@ const ROrder = (() => { try { return require(MUT.write('src/server/usage-pool-en
     ok(!o.bare && o.ratesHas, 'RED: a copy that archives BEFORE its rates entry is on disk leaves that entry for ever after the same refused write (no bare file left to tell)', JSON.stringify(o));
   } else ok(false, 'RED CONTROL built: the archive before the rates entry', ROrder.err);
   await W.close(); }
+
+// ── 7. the accounts list HELD (unread): no named row is grouped, so nothing is proven, retired or said ──
+if (typeof process.getuid === 'function' && process.getuid() !== 0) {
+  const { O, rows } = twoSeats('held'), W = await world(rows, { held: true }), key = `org:${O.toLowerCase()}`;
+  const h = typeof W.am.held === 'function' ? W.am.held() : null;
+  plant(W, key); said.length = 0; await sweep(W.eng); const s = stateOf(W, key);
+  ok(!!h && s.bare && s.archived === 0 && s.ratesHas && said.length === 0, '7. the accounts list HELD: nothing retired, nothing archived, nothing said', JSON.stringify({ held: !!h, ...s, said: said.length }));
+  await W.close(); }
+// ── 7. step (3): the KEPT LINES read again — the sweep's store never serves the archived file's last line for the bare name ──
+for (const [mod, red] of [[null, false], ...(RNoReread.err ? [] : [[RNoReread, true]])]) {
+  const { O, rows } = twoSeats(red ? 'reread-red' : 'reread'), W = await world(rows, { copies: mod ? { m: mod } : {} }), key = `org:${O.toLowerCase()}`;
+  const e = mod ? W.copy.m.eng : W.eng;
+  plant(W, key);
+  let was = null; for (let i = 0; i < 3 && !was; i++) { await e.usageAnchors.prime(); was = e.usageAnchors.lastAnchor(key); }   // the engine's own boot prime may be in flight (it listed the folder before the plant): the next one lists the planted file
+  said.length = 0; await sweep(e); const now = e.usageAnchors.lastAnchor(key), st = stateOf(W, key);
+  if (!red) ok(!!was && st.archived === 1 && now === null, '7. step (3): once the file is archived the kept lines are read again — the bare name has no last line', JSON.stringify({ was: !!was, archived: st.archived, now: !!now }));
+  else ok(!!now && st.archived === 1, 'RED: a retire that reads no kept line again still serves the archived file\'s last line for the bare name', JSON.stringify({ now: !!now }));
+  await W.close(); }
+// ── 7. a rates file that DOES NOT PARSE (r3311 (3)): read as empty, as its other writer reads it — the retire goes on, said once ──
+for (const red of [false, ...(EstOld.err ? [] : [true])]) {
+  const { O, rows } = twoSeats(red ? 'torn-red' : 'torn'), W = await world(rows), key = `org:${O.toLowerCase()}`;
+  plant(W, key); fs.writeFileSync(path.join(anchorsDir(W), 'rates.json'), '{"not json');
+  const est = W.app.locals.usageEstimator; est.reloadRates();
+  if (red) est.retireRates = EstOld.UsageEstimator.prototype.retireRates.bind(est);
+  const warned = [], ww = console.warn; console.warn = (...a) => { const t = a.join(' '); if (t.startsWith('[usage-estimator]')) warned.push(t); else ww(...a); };
+  said.length = 0;
+  try { await sweep(W.eng); await sweep(W.eng); } finally { console.warn = ww; }
+  const st = stateOf(W, key);
+  if (!red) ok(st.archived === 1 && !st.bare && warned.length === 1 && said.length === 1, '7. a rates file that does not parse: read as empty (as _persistRates reads it), the retire done and the file\'s state said ONCE', JSON.stringify({ archived: st.archived, warned: warned.length, said: said.length }));
+  else ok(st.bare && st.archived === 0, 'RED: a retire that refuses a rates file that does not parse fails at every pass without a word', JSON.stringify(st));
+  await W.close(); }
+
+// ── 8. «LANDED» IS LANDED ONCE (主开发 r3311 MUST 1): the kept facts age past the 60 s bound with no re-read ──
+{ const O = org(), W = await world([{ as: { address: 'aged-a@example.invalid', orgId: O }, cache: { ago: 120, u5: 0.05, orgId: O } }, { as: { address: 'aged-b@example.invalid', orgId: O }, cache: { ago: 10, u5: 1, orgId: O } }], { copies: R60.err ? {} : { r60: R60 } }), key = `org:${O.toLowerCase()}`;
+  const [A, B] = W.ids;
+  plant(W, key); said.length = 0; await sweep(W.eng);
+  const names0 = namesOf(W.eng).sort(), s0 = stateOf(W, key);
+  const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew;
+  try {
+    const age = async () => { await W.am.displaySettled(); skew += 61000; };   // every kept confirmation now older than the bound, no read in flight
+    await age();
+    const premise = W.am.signinFacts(A, { withinMs: 60000 }).why;
+    const g = { A: groupOf(W.eng, A) === A, B: groupOf(W.eng, B) === B, names: JSON.stringify(namesOf(W.eng).sort()) === JSON.stringify(names0), usableA: usableOf(W.eng, A) };
+    const r = W.copy.r60 ? { merged: groupOf(W.copy.r60.eng, A) === [A, B].sort().join(','), usableA: usableOf(W.copy.r60.eng, A) } : null;
+    ok(s0.archived === 1 && premise === 'not-read-yet' && g.A && g.B && g.names && g.usableA === true, '8. LANDED ONCE: the two seats\' kept facts aged past the bound (not re-read) — still apart, the names unchanged, seat A usable on its OWN reading', JSON.stringify({ archived: s0.archived, premise, ...g }));
+    if (r) ok(r.merged && r.usableA === false, 'RED: «landed» as «confirmed in the last 60 s» puts the two seats back in one group — seat A judged on seat B\'s spent reading', JSON.stringify(r));
+    await age(); writeCache(W.cacheDir, B, { ago: 0, u5: 1, orgId: O });   // a fresh reading while the facts are aged
+    await sweep(W.eng); const s1 = stateOf(W, key);
+    await W.am.signinFactsSettled(null, { withinMs: 0 }); await sweep(W.eng); const s2 = stateOf(W, key);
+    ok(!s1.bare && s1.archived === 1 && !s2.bare && s2.archived === 1 && said.length === 1, '8. …and the sweep over the aged facts files NOTHING under the bare name: no file made again, no second archive, said once', JSON.stringify({ aged: s1, after: s2, said: said.length }));
+    if (W.copy.r60) {
+      await age(); writeCache(W.cacheDir, B, { ago: 0, u5: 1, orgId: O }); await sweep(W.copy.r60.eng); const t1 = stateOf(W, key);
+      await W.am.signinFactsSettled(null, { withinMs: 0 }); await sweep(W.copy.r60.eng); const t2 = stateOf(W, key);
+      ok(t1.bare && t2.archived === 2 && said.length === 2, 'RED: …the copy files the merged group under the bare name again and RETIRES IT AGAIN (a second archive, said twice)', JSON.stringify({ aged: t1, after: t2, said: said.length }));
+    }
+  } finally { Date.now = realNow; }
+  await W.close(); }
+
+// ── 9. THE PACING MEMORY (主开发 r3311 MUST 2, §ban-safety): the REAL automatic check (src/server/auto-cli-loop.js), its probe a
+// counted stand-in, four hours in five-minute ticks over each engine's own groups ──
+const loopMod = require(path.join(REPO, 'src/server/auto-cli-loop.js'));
+const paceRun = async (rows, which) => {
+  const W = await world(rows, { copies: which === 'nopace' ? { nopace: RNoPace } : {} }), e = which === 'nopace' ? W.copy.nopace.eng : which === 'release' ? W.today : W.eng, asked = [];
+  const orgOf = new Map(W.ids.map((id, i) => [id, rows[i].cache.orgId || null]));
+  const realNow = Date.now; let T = realNow(); Date.now = () => T;
+  try {
+    const loop = loopMod.createAutoCliLoop({
+      now: () => T, rand: () => 0.5, dataDir: tmpdir('vs-eig-pace-'), USAGE_CACHE_DIR: W.cacheDir, metric() { },
+      serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined), accounts: W.am, autoCliReady: () => true,
+      usageIdentityGroupsCached: () => e.usageIdentityGroupsCached(), usageEstimator: { estimateFor: () => null }, projectionRereadFor: () => null, lastMemberReadAt: () => 0,
+      usage: { refreshViaCliPanel: async (k) => { asked.push(k); writeCache(W.cacheDir, k, { ago: 0, u5: 0.2, orgId: orgOf.get(k) }); return true; } },   // THE STAND-IN: counted; its reading lands as a probe's would
+      onMemberReadingFresh() { }, log() { }, warn() { },
+    });
+    for (let m = 0; m < 240; m += 5) { await e.usageFolder.fresh(); await loop.tick(); T += 5 * 60e3; }
+  } finally { Date.now = realNow; }
+  const ids = W.ids; await W.close();
+  return { n: asked.length, each: ids.map((id) => asked.filter((k) => k === id).length) };
+};
+{ const one = { address: 'pace@example.invalid', orgId: null }, rows = [{ as: one, cache: { ago: 60, u5: 0.2 } }, { as: one, cache: { ago: 30, u5: 0.2 } }];
+  const cure = await paceRun(rows, 'eng'), rel = await paceRun(rows, 'release'), nop = RNoPace.err ? null : await paceRun(rows, 'nopace');
+  ok(rel.n > 0 && cure.n === rel.n, '9. two UNPROVEN rows of one address (no organisation): the automatic check asks as often as the release asked (one pacing memory)', JSON.stringify({ cure: cure.n, release: rel.n }));
+  if (nop) ok(nop.n > rel.n, 'RED: an engine with no pacing memory asks about the two rows more often than the release (each on its own cadence)', JSON.stringify({ nopace: nop.n, release: rel.n })); }
+{ const { rows } = twoSeats('pace2');
+  const cure = await paceRun(rows, 'eng'), rel = await paceRun(rows, 'release'), nop = RNoPace.err ? null : await paceRun(rows, 'nopace');
+  ok(cure.each.every((x) => x > 0) && (!nop || cure.n === nop.n) && cure.n > rel.n, '9. two seats PROVEN different: each keeps its own cadence (asked as two accounts are)', JSON.stringify({ cure: cure.each, nopace: nop && nop.n, release: rel.n })); }
+
+// ── 10. two pieces of a LONG split name never share one anchors file (主开发 r3311 (2): the slug keeps the id, cutting the base) ──
+{ const long = 'email:' + 'a-very-long-made-up-address-'.repeat(3) + '@example.invalid', ids = ['sub-aaaaaaaa', 'sub-bbbbbbbb'];
+  const G = engMod.identityGroupsOf(ids.map((id) => ({ id, accountId: id, today: long, rec: {} })), { same: () => 'unproven' });
+  const slugs = [...G.keys()].map((k) => UA.anchorSlug(k)), naive = ids.map((id) => UA.anchorSlug(long + '/' + id));
+  ok(naive[0] === naive[1], 'PREMISE: the release spelling cuts a long split name\'s id off (both pieces one file)', JSON.stringify(naive.map((x) => x.length)));
+  ok(G.size === 2 && slugs[0] !== slugs[1] && ids.every((id, i) => slugs[i].endsWith('_' + id)), '10. each piece keeps its own id inside the anchors file\'s name (the base gives up its end)', JSON.stringify(slugs.map((x) => x.slice(-14)))); }
 
 // ── the PURE grouping alone: a row with no record stands alone; «unproven» is apart ──
 { const G = engMod.identityGroupsOf([{ id: 'a', accountId: 'a', today: 'email:x', rec: null }, { id: 'b', accountId: 'b', today: 'email:x', rec: null }], { same: () => 'same' });
