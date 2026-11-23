@@ -1105,6 +1105,29 @@ try {
         check('§17 B-02f6 remainder (1): the outer written through a LINK whose real folder never resolved is not held — a write by the link INTO the live inner pull goes through by the proof (the record\'s real folder, asked ONCE: the next writes keep its answer), one beside it is refused as before; a reader and a write under the live pull by its own spelling never ask; the files route and WebDAV ask the same door',
           !u.held.has('mm-hout') && !u.m._realMp.has('mm-hout') && syncIn?.id === 'mm-hout' && pIn === null && pIn2 === null && pBeside?.id === 'mm-hout' && MMx.pullShadowBody(pBeside).code === 'machine_folder_down' && pRead === null && pLiveOwn === null && doorIn === null && u.asked.length === 1);
         check('RED CONTROL §17 B-02f6 remainder (1): the release\'s door (the sync pullShadowOf) refuses that same write machine_folder_down', doorSync?.id === 'mm-hout' && MMx.pullShadowBody(doorSync).code === 'machine_folder_down', doorSync);
+        // r2684 (B-02f6, its first gap — 主开发's ruling): a LINK INSIDE a BARE outer folder (the record's real folder is itself: no link of
+        // its own) that points into a LIVE pull: a write through it is that machine's, nothing refused. One more look: the folder the write
+        // lands in, by its real path (THE STARTER's child; a stand-in here, counted), asked only below the record's folder, kept per folder;
+        // a write in a real subfolder or at the record's own folder is refused as before; a reader never asks. RED: the mapping as it was
+        // (no folder look, in a copy) refuses that write machine_folder_down. MEASURE (printed, never asserted): one real look by the starter
+        const mpBare = path.join(base, 'bare-out'), mpLiveIn = path.join(base, 'live-in'), lnkG1 = path.join(mpBare, 'lnk'), plainG1 = path.join(mpBare, 'plain');
+        fs.mkdirSync(plainG1, { recursive: true }); fs.mkdirSync(mpLiveIn, { recursive: true }); if (!fs.existsSync(lnkG1)) fs.symlinkSync(mpLiveIn, lnkG1);
+        const RECS_G1 = [{ id: 'mm-hin', dir: 'pull', hostId: 'h1', remotePath: '/Users/in', mountpoint: mpLiveIn, createdAt: 1 }, { id: 'mm-hout', dir: 'pull', hostId: 'h2', remotePath: '/out', mountpoint: mpBare, createdAt: 5 }];
+        const g1 = await sceneU(MMx.MachineMounts, 'pairs-02f6-gap1', RECS_G1);
+        const wLnk = path.join(lnkG1, 'f.txt'), wLnk2 = path.join(lnkG1, 'g.txt'), wPlain = path.join(plainG1, 'x.txt'), wTop = path.join(mpBare, 'top.txt');
+        const gSync = g1.m.shadowedBy(wLnk, { writer: true });
+        const gIn = await g1.m.shadowedByReal(wLnk, { writer: true }), gIn2 = await g1.m.shadowedByReal(wLnk2, { writer: true }), gPlain = await g1.m.shadowedByReal(wPlain, { writer: true });
+        const gTop = await g1.m.shadowedByReal(wTop, { writer: true }), gRead = await g1.m.shadowedByReal(wLnk), gAsked = g1.asked.slice();
+        const LOOK_G1 = "    const inner = await this._proofDir(rec, dir);\n    return inner && liveAt(inner + '/' + path.basename(rp)) ? null : s;\n";
+        let gRed = 'no copy: the look moved';
+        if (src3.split(LOOK_G1).length === 2) { const gr = await sceneU(copy3(src3.replace(LOOK_G1, '    return s;\n')), 'pairs-02f6-gap1-ctl', RECS_G1); gRed = await gr.m.shadowedByReal(wLnk, { writer: true }); }
+        const t0g = performance.now(), gReal = await MMx.starterRealpath(lnkG1), gMs = Math.round(performance.now() - t0g);
+        const nLnk = gAsked.filter((q) => q === lnkG1).length, nPlain = gAsked.filter((q) => q === plainG1).length;
+        console.log(`    [measure] B-02f6's first gap, the one more look: THE STARTER's realpath of the folder written in, ${gMs} ms here (one look for both writes in that folder; asked only for a write refused under a pull that is not live, in a folder below its record's) · ` + JSON.stringify({ learned: g1.m._realMp.get('mm-hout') || null, asked: gAsked, sync: gSync && gSync.id, gIn, gIn2, gPlain: gPlain && MMx.pullShadowBody(gPlain).code, gTop: gTop && gTop.id, gRead, viaStarter: gReal }));
+        check('§17 r2684 (B-02f6, its first gap): a LINK INSIDE a bare outer folder into a LIVE pull — the write through it goes through (the folder written in, by its real path: one more look, asked ONCE for both writes there); a write in a real subfolder or at the outer folder itself is refused as before (machine_folder_down); a reader never asks',
+          gSync?.id === 'mm-hout' && gIn === null && gIn2 === null && gPlain?.id === 'mm-hout' && MMx.pullShadowBody(gPlain).code === 'machine_folder_down' && gTop?.id === 'mm-hout' && gRead === null
+          && nLnk === 1 && nPlain === 1 && gAsked.every((q) => q === lnkG1 || q === plainG1 || q === mpBare) && gReal?.real === fs.realpathSync(mpLiveIn) && gReal.slow === false, { gAsked, gReal });
+        check('RED CONTROL §17 r2684 (B-02f6, its first gap): the mapping as it was (no folder look, in a copy) refuses that write machine_folder_down', !!gRed && typeof gRed === 'object' && gRed.id === 'mm-hout' && MMx.pullShadowBody(gRed).code === 'machine_folder_down', gRed);
         // (1)'s BOUNDS (r1178 (a)): a child that did not answer is kept as REFUSED for the stated time (no second child); the time past,
         // it is asked again; at most PROOF_KIDS_MAX children in flight (a third record's ask meanwhile is refused at once, nothing kept;
         // a second ask for a record in flight shares its child). (b): the proof's child is THE STARTER's (src/server/child-starter.js) —

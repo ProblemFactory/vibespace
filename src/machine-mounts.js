@@ -1137,9 +1137,16 @@ class MachineMounts {
     // r1274 (2): refused because its link could not be checked in time («never again») — the refusal says it heals by itself and what
     // a person can do (the not-mounted words would send them to Remount, which cannot help)
     if (!real && !s.offline && !s.hostsHeld && this._proofNever && this._proofNever.get(rec.id) === proofSig(rec)) return { ...s, unchecked: true };
-    if (!real || real === w) return s;
-    const asReal = real + rp.slice(w.length);
-    return this._state.mounts.some((o) => o.dir === 'pull' && this._live.has(o.id) && this._pullFolders(o).some((x) => x !== '/' && (asReal === x || asReal.startsWith(x + '/')))) ? null : s;
+    if (!real) return s;
+    const liveAt = (q) => this._state.mounts.some((o) => o.dir === 'pull' && this._live.has(o.id) && this._pullFolders(o).some((x) => x !== '/' && (q === x || q.startsWith(x + '/'))));
+    if (real !== w && liveAt(real + rp.slice(w.length))) return null;
+    // r2684 (B-02f6, its first gap): a LINK INSIDE the folder of the record may lead into a LIVE pull, and a write through it is that
+    // machine's. One more look, asked only when the folder the write lands in lies below the folder of the record and the mapping
+    // above refused: that folder by its own real path (THE STARTER's child, as the proof of the record; kept per folder, _proofDir)
+    const dir = path.dirname(rp);
+    if (dir === w || !dir.startsWith(w + '/')) return s;
+    const inner = await this._proofDir(rec, dir);
+    return inner && liveAt(inner + '/' + path.basename(rp)) ? null : s;
   }
   /** The record's real folder for the proof (主开发 r1214). A child that did NOT answer inside its bound (timed out, or the starter's
    *  «unknown») is NEVER asked again for that record as it stands — the writer is refused as the release refused (its words), and at
@@ -1165,6 +1172,32 @@ class MachineMounts {
       if (!cur || proofSig(cur) !== sig) return null;   // removed or edited while it was asked: its answer is no one's
       if (o.slow) { never.set(rec.id, sig); kept.delete(rec.id); return null; }
       kept.set(rec.id, { at: now(), real: o.real || null, sig });
+      if (kept.size > 256) kept.delete(kept.keys().next().value);
+      return o.real || null;
+    });
+    fly.set(sig, ask);
+    return ask;
+  }
+  /** r2684 (B-02f6, its first gap): the REAL path of the folder a write lands in, when that folder lies below the folder of its record
+   *  (a link inside the bare outer folder may lead into a live pull). The same proof as the record's: THE STARTER's child (`realpath -m`,
+   *  PROOF_MS), counted in the same PROOF_KIDS_MAX children in flight; its answer kept PROOF_KEEP_MS for that folder as asked (a writer
+   *  in a loop starts no child a write); a child that TIMED OUT keeps that folder refused while the record stands as it is («never
+   *  again» for it, at most 256 folders kept either way). Never asked once the record's own proof is «never again». → the real path, or null */
+  _proofDir(rec, dir) {
+    const kept = (this._proofDirKept = this._proofDirKept || new Map()), never = (this._proofDirNever = this._proofDirNever || new Map()), fly = (this._proofFly = this._proofFly || new Map());
+    const rsig = proofSig(rec), sig = rsig + '\u0000' + dir, now = () => performance.now();
+    if ((this._proofNever && this._proofNever.get(rec.id) === rsig) || never.has(sig)) return Promise.resolve(null);
+    const had = kept.get(sig);
+    if (had && now() - had.at < (this._proofKeepMs != null ? this._proofKeepMs : PROOF_KEEP_MS)) return Promise.resolve(had.real);
+    if (fly.has(sig)) return fly.get(sig);
+    if (fly.size >= PROOF_KIDS_MAX) return Promise.resolve(null);   // the bound: this ask keeps its refusal, nothing kept
+    const ask = Promise.resolve().then(() => (this._proofRealpath || starterRealpath)(dir)).catch(() => ({ real: null, slow: false })).then((v) => {
+      const o = v && typeof v === 'object' ? v : { real: v || null, slow: false };
+      fly.delete(sig);
+      const cur = this._state.mounts.find((x) => x.id === rec.id && x.dir === 'pull');
+      if (!cur || proofSig(cur) !== rsig) return null;   // removed or edited while it was asked: its answer is no one's
+      if (o.slow) { never.set(sig, true); kept.delete(sig); if (never.size > 256) never.delete(never.keys().next().value); return null; }
+      kept.set(sig, { at: now(), real: o.real || null });
       if (kept.size > 256) kept.delete(kept.keys().next().value);
       return o.real || null;
     });
