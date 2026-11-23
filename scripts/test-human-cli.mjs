@@ -416,20 +416,38 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     // SAYS is APPENDED to its buffer at once — the said journal, on disk before it is said — so the file's size no longer tells the
     // cadence. The whole rewrite is tmp + rename (chat-wrapper.js persistBuffer): a NEW INODE; an append keeps the inode
     const st = () => { try { const x = fs.statSync(buf); return { ino: x.ino, size: x.size }; } catch { return { ino: null, size: 0 }; } };
+    // THE REWRITE NAMED BY A NEW FILE, never by a number that can come back (主开发 r2958, the candidate's hosted red: 6012 / 6015 ms,
+    // the wait's own bound): a filesystem that hands a freed inode number to the next new file let a SECOND rewrite land on the number
+    // read before — the reply there, the number «unchanged», nothing more written. The leg holds a descriptor on the buffer's file
+    // while it waits: that inode cannot be freed, so no rewrite can come back on its number; closed after the wait
+    const hold0 = fs.openSync(buf, 'r');
     const b0 = st(), t0 = Date.now();
     w.stdin.write('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"torn HCPW\n');   // torn — and no person's CLI follows
     await until(() => st().size > b0.size, 6000, 20);
     const appended = st(), appendMs = Date.now() - t0;
-    await until(() => st().ino !== b0.ino, 6000, 20);
+    try { await until(() => st().ino !== b0.ino, 6000, 20); } finally { fs.closeSync(hold0); }
     const tornMs = Date.now() - t0;
     ok('…a torn line\'s notice is in the file AT ONCE, by the said journal: an APPEND on the same inode (the wrapper\'s hold), never a rewrite',
       appended.size > b0.size && appended.ino === b0.ino && appendMs < 1500, `${appendMs} ms, the inode ${b0.ino} → ${appended.ino}`);
     ok('THE 250 ms WINDOW OPENS ONLY ON A RECEIPT ASKED FOR (round 4): a torn line with no CLI following is REWRITTEN WHOLE at the wrapper\'s 2 s cadence — a new inode (round 3: 250 ms for 2 min — a sync whole-buffer rewrite 8× as often, for nobody)', tornMs >= 1500, `${tornMs} ms`);
+    const hold1 = fs.openSync(buf, 'r');   // the same: the file read before the frame keeps its inode while the leg waits
     const i1 = st().ino, t1 = Date.now();
     w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'followed HCPW' }] }, webui_msg_id: 'vs-cli-pw', webui_receipt: true }) + '\n');
-    await until(() => readOr(buf).includes('reply: followed HCPW') && st().ino !== i1, 6000, 20);   // its reply REWRITTEN WHOLE (a new inode), not only appended
-    const followedMs = Date.now() - t1;
-    ok('…a frame that ASKS for a receipt (a person\'s CLI follows) opens it: the buffer is REWRITTEN WHOLE with its reply (a new inode) well inside the 2 s cadence', followedMs < 1500, `${followedMs} ms`);
+    // BOTH HALVES, ON A PASS TOO (主开发 r2965): when the reply was first seen in the buffer and when the new file was first seen — the
+    // next strict run settles the residual (a late reply, or a rewrite the test could not see) either way
+    let replySeen = null, fileSeen = null;
+    try {
+      await until(() => {
+        const has = readOr(buf).includes('reply: followed HCPW'), moved = st().ino !== i1, at = Date.now() - t1;
+        if (has && replySeen === null) replySeen = at;
+        if (moved && fileSeen === null) fileSeen = at;
+        return has && moved;
+      }, 6000, 20);   // its reply REWRITTEN WHOLE (a new inode), not only appended
+    } finally { fs.closeSync(hold1); }
+    const followedMs = Date.now() - t1, iNow = st().ino;
+    const halves = `the reply seen at ${replySeen === null ? 'NEVER' : replySeen + ' ms'}, the new file seen at ${fileSeen === null ? 'NEVER' : fileSeen + ' ms'} (the inode ${i1} → ${iNow})`;
+    console.log(`    §7d the followed frame: ${halves}`);
+    ok('…a frame that ASKS for a receipt (a person\'s CLI follows) opens it: the buffer is REWRITTEN WHOLE with its reply (a new inode) well inside the 2 s cadence', followedMs < 1500, `${followedMs} ms — ${halves}`);
     w.kill('SIGTERM');
     await until(() => w.exitCode != null || w.signalCode != null, 5000);
   }

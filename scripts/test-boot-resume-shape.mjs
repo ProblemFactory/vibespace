@@ -297,7 +297,13 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
   } else if (judge === 'red') {
     // TIED TO ITS PLANT: a hold ≥ the law that the boot trace names by the planted code (its step, or the sites its samples stood in)
     const tied = trace && Array.isArray(trace.holds) ? trace.holds.filter((x) => (x.ms || 0) >= HOLD_LAW_MS && !!plant && plant.re.test([x.name || '', ...(x.sites || []).map((y) => y.what), ...(x.faint || []).map((y) => y.what)].join(' · '))) : [];
-    check(`${label}: RED as it must be — the law breaks in this window BY ITS PLANT: a loop hold ≥ ${HOLD_LAW_MS} ms named by ${plant ? plant.what : '?'} (${tied.length ? tied.map((x) => `${x.ms} ms: ${holdName(x)}`).join('; ') : 'none'}; the longest hold ${h.maxHeld} ms, N = ${N})`, h.ok && h.over > 0 && tied.length > 0, h.top);
+    const redWords = `${label}: RED as it must be — the law breaks in this window BY ITS PLANT: a loop hold ≥ ${HOLD_LAW_MS} ms named by ${plant ? plant.what : '?'} (${tied.length ? tied.map((x) => `${x.ms} ms: ${holdName(x)}`).join('; ') : 'none'}; the longest hold ${h.maxHeld} ms, N = ${N})`;
+    // 主开发 r2955 (the candidate's hosted red on Node 22: the release's one pass of 80 survivors held that runner 211–214 ms): a red
+    // control's CLOCK is judged where its law is — on the box. On the hosted runner it is the law's named skip, its reading printed,
+    // and the control is judged there by what it PLANTS: its structure checks below (the one batch; the release's backfill verbatim,
+    // the restore's own batches under the bound) — never by a number of milliseconds a faster machine does not reach
+    if (HOSTED) console.log(`  ⊘ SKIP: ${redWords} — NOT JUDGED on the hosted runner (GITHUB_ACTIONS=true): a red control's clock is judged on the box only, as its law (主开发 r2955); its plant is judged by its structure checks`);
+    else check(redWords, h.ok && h.over > 0 && tied.length > 0, h.top);;
   } else console.log(`  ${label}: reported, not judged in this unit (worst /login ${s.worst} ms, longest hold ${h.maxHeld} ms)`);
   return { s, h };
 }
