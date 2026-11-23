@@ -461,7 +461,8 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
     // MANUAL PRIORITY (2026-09-28): `priority` = the owner's order ([] = automatic),
     // validated by the store (members only, deduped, ≤ 40); `auto:false` is ignored —
     // the whole-pool manual switch is retired, so the device reflex stays armed
-    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot, priority: req.body?.priority, crossProvider: req.body?.crossProvider }, { chooseMember: decide });
+    // (B-d578) `fallbackProviders` = the third-party providers the pool uses only when every member is out — judged by the store, by name
+    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot, priority: req.body?.priority, crossProvider: req.body?.crossProvider, fallbackProviders: req.body?.fallbackProviders }, { chooseMember: decide });
     let membersAfter = [];
     try { membersAfter = accounts.poolMembership(id) || []; } catch { }
     const removedIds = membersBefore.filter((m) => !membersAfter.includes(m));

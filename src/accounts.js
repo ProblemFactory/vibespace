@@ -39,7 +39,7 @@ const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount p
 const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
 const PinRecord = require('./pool-pin-record.js'); // lane lg-group-parents B-526c unit 2: the person's pin records leave with the links' boot sweep
-const { presetOf: builtInProviderOf } = require('./model-providers.js'); // PURE: a built-in record's id (pv-anthropic-…) is never a third-party account (lane lg-providers U2)
+const { presetOf: builtInProviderOf, fitsHarness: providerFitsHarness } = require('./model-providers.js'); // PURE: a built-in record's id (pv-anthropic-…) is never a third-party account (lane lg-providers U2); a pool's fallback provider serves its harness (B-d578)
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
@@ -87,6 +87,7 @@ const { SlotTransitions } = require('./slot-transitions.js');
 // — accountProviderId + the rows filled from the harness's catalog); its presets then answer every account and this
 // fallback only covers a harness with no preset.
 const CROSS_PROVIDER_VALUES = Object.freeze(['never', 'allow']); // a pool's crossProvider (absent = 'never', the owner's default)
+const FALLBACK_PROVIDERS_MAX = 8; // a pool's fallbackProviders (B-d578, the fallback member): at most 8 third-party providers
 // The long-lived-token lifetime has ONE definition (2026-09-07 r2): the panel
 // and the readings repair must date an oat's death exactly the way the spawn
 // resolver does, and they read it from src/login-state.js (no AccountManager
@@ -547,7 +548,7 @@ class AccountManager {
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
+          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', fallbackProviders: this.poolFallbacksOf(a.id).map((pv) => ({ id: pv, label: (this.providerRecordOf(pv) || {}).label || pv })), currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -2327,7 +2328,56 @@ class AccountManager {
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
   setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; }
   /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
-  providersChanged() { this._notify(); }
+  providersChanged() { this.pruneFallbackProviders(); this._notify(); }
+  /** THE POOL'S FALLBACK PROVIDERS (row B-d578, the fallback member — ruling r1516 / the scene page r2733): third-party providers
+   *  a CLAUDE pool may use only when EVERY member is out — never in `members`, never ranked with them (account-pool-auto's
+   *  `fallbackOnly`, held apart and chosen last). The LIVE list: the ids the pool names whose record the provider store still
+   *  holds and that serve the pool's harness (a record that stopped fitting is no fallback until it fits again). → [pv-…] */
+  poolFallbacksOf(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'pooled' || !Array.isArray(a.fallbackProviders) || !a.fallbackProviders.length) return [];
+    const be = this._acctBackend(a) || 'claude';
+    return a.fallbackProviders.filter((pv) => { const p = this.providerRecordOf(pv); return !!p && p.known !== false && providerFitsHarness(p, be); });
+  }
+  /** The list a person's save hands in, judged BY NAME before anything is written (updatePool): [] / null ⇒ none (the field
+   *  goes: absent = none); each a third-party provider id the store holds that serves this pool's harness; Claude pools only (a
+   *  pool whose harness places each conversation on its own — caps `planC`);
+   *  deduped; at most FALLBACK_PROVIDERS_MAX. → the list to keep | null (none) — throws a sentence otherwise. */
+  _fallbackListOf(a, input) {
+    if (input === null || (Array.isArray(input) && !input.length)) return null;
+    if (!Array.isArray(input)) throw new Error('fallbackProviders must be a list of provider ids');
+    const be = this._acctBackend(a) || 'claude';
+    // a fallback needs each conversation placed on its OWN (the per-session links — the harness's caps row `planC`): a Claude pool today
+    if (!capsOf(be).planC) throw new Error(`a ${(harnessOf(be) || {}).label || be} pool takes no fallback provider — only a pool that places each conversation on its own takes one`);
+    const out = [];
+    for (const pv of input) {
+      if (typeof pv !== 'string' || !/^pv-[a-z0-9][a-z0-9-]{0,63}$/.test(pv) || builtInProviderOf(pv)) throw new Error('not a third-party provider: ' + String(pv).slice(0, 80));
+      const p = this.providerRecordOf(pv);
+      if (!p || p.known === false) throw new Error('no such provider on this hub: ' + pv);
+      if (!providerFitsHarness(p, be)) throw new Error(`${p.label || pv} does not serve Claude Code — it cannot be this pool's fallback`);
+      if (!out.includes(pv)) out.push(pv);
+    }
+    if (out.length > FALLBACK_PROVIDERS_MAX) throw new Error(`a pool lists at most ${FALLBACK_PROVIDERS_MAX} fallback providers`);
+    return out;
+  }
+  /** A PROVIDER REMOVED LEAVES EVERY POOL'S LIST IN THE SAME ACT (the scene page, scene 7): the provider routes' every write
+   *  calls providersChanged — a record the store no longer holds leaves each pool's fallbackProviders (the field goes when
+   *  none is left). Only with the store's lookup wired: without one every record reads as gone, and nothing is pruned.
+   *  → [{ poolId, gone: [pv-…] }] */
+  pruneFallbackProviders() {
+    if (!this._providerLookup) return [];
+    const out = [];
+    for (const a of this._state.accounts) {
+      if (this._acctType(a) !== 'pooled' || !Array.isArray(a.fallbackProviders) || !a.fallbackProviders.length) continue;
+      const gone = a.fallbackProviders.filter((pv) => !this.providerRecordOf(pv));
+      if (!gone.length) continue;
+      const keep = a.fallbackProviders.filter((pv) => !gone.includes(pv));
+      if (keep.length) a.fallbackProviders = keep; else delete a.fallbackProviders;
+      out.push({ poolId: a.id, gone });
+    }
+    if (out.length) { this._save(); for (const x of out) console.log(`[pool] ${x.poolId}: fallback provider${x.gone.length === 1 ? '' : 's'} ${x.gone.join(', ')} removed with the provider`); }
+    return out;
+  }
   /** (lane lg-providers U5) the third-party providers' roster rows (model-providers rosterRowsOf) — list().providerRows */
   setProviderRows(fn) { this._providerRows = typeof fn === 'function' ? fn : null; }
   /** (lane lg-providers U2) the third-party provider spawn road: `(id, backend, opts) → spawn account | throws by name` */
@@ -2852,6 +2902,7 @@ class AccountManager {
     // of the env string) — codex auth.json is a plain file, pools work anywhere
     // directory symlinks do.
     if (this._credsOf(be).keychainSensitive && !this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
+    if (Array.isArray(members) && members.some((m) => /^pv-/.test(String(m || '')))) throw new Error('a provider is never a pool member — list it as a fallback provider'); // (B-d578)
     const id = 'pool-' + crypto.randomBytes(6).toString('hex');
     // auto:true ALWAYS (2026-09-28): the whole-pool manual switch is retired — a pool is
     // placed automatically or by its manual `priority` list (empty = automatic)
@@ -2878,15 +2929,20 @@ class AccountManager {
   // membership narrows. `auto` is ALWAYS true now: a pool is placed automatically
   // or by its priority, never pinned by hand as a whole — `auto:false` is ignored
   // (said once in the journal; the record keeps `auto` for old clients).
-  updatePool(id, { members, auto, hot, priority, crossProvider } = {}, { chooseMember = null } = {}) {
+  updatePool(id, { members, auto, hot, priority, crossProvider, fallbackProviders } = {}, { chooseMember = null } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
+    // (B-d578) a third-party provider is never a MEMBER — it is a fallback (below); judged before anything is written
+    if (Array.isArray(members) && members.some((m) => /^pv-/.test(String(m || '')))) throw new Error('a provider is never a pool member — list it as a fallback provider');
+    const fallbackList = fallbackProviders !== undefined ? this._fallbackListOf(a, fallbackProviders) : undefined;
     // (q-053 P0b) the owner's per-pool rule for a move to ANOTHER provider: 'never' (the default — a card asks first) or
     // 'allow' (a cold switch + one line in the conversation); anything else is refused by name
     if (crossProvider !== undefined) {
       if (!CROSS_PROVIDER_VALUES.includes(crossProvider)) throw new Error("crossProvider must be 'never' or 'allow'");
       a.crossProvider = crossProvider;
     }
+    // (B-d578) the pool's FALLBACK PROVIDERS — used only when every member is out (poolFallbacksOf); absent = none
+    if (fallbackList !== undefined) { if (fallbackList) a.fallbackProviders = fallbackList; else delete a.fallbackProviders; }
     if (members !== undefined) a.members = Array.isArray(members) && members.length ? members.slice(0, 40) : null;
     if (auto === false && !AccountManager._autoOffSaid) { AccountManager._autoOffSaid = true; console.log('[pool] auto:false ignored — a pool is placed automatically or by its manual priority (the whole-pool manual switch is retired, 2026-09-28)'); }
     a.auto = true;
@@ -2971,6 +3027,17 @@ class AccountManager {
     if (!a) throw new Error('unknown account: ' + id);
     if (this._credsOf(this._acctBackend(a)).spawnForm !== 'securestorage') throw new Error('not a Claude account: ' + a.name);
     if (this._acctType(a) === 'pooled') {
+      // THE CONVERSATION'S MEMBER, asked ONCE (B-d578): the fallback road below and the per-session link further down read the same answer
+      let chosen; const chooseOnce = () => { if (chosen === undefined) { chosen = null; try { chosen = opts.chooseMember?.(id) ?? null; } catch { chosen = null; } } return chosen; };
+      // THE FALLBACK PROVIDER (row B-d578, the fallback member): the chooser placed this conversation on a third-party provider
+      // the pool lists as its fallback (poolFallbacksOf) — its own road (the provider's key from the vault, its own empty home;
+      // refused by name like any provider spawn), the pool's id kept: billed to the pool, attributed to the provider (ws-create
+      // stamps poolTarget as the held member). Asked BEFORE the self-heal below: a fallback is used when every member is out,
+      // signed out included — the heal would refuse that pool before the conversation's placement was read.
+      if (opts.sessionKey && this._providerSpawn && this.poolFallbacksOf(id).length) {
+        const fb = chooseOnce();
+        if (fb && this.poolFallbacksOf(id).includes(fb)) return { ...this._providerSpawn(String(fb), backend, opts), id: a.id, name: a.name, pooled: true, poolTarget: String(fb), kind: 'provider' };
+      }
       RR.forget(this._poolLinkDir(a)); // B-403e: the spawn's self-heal looks again before it re-points the pool default
       let cur = this.poolCurrent(id);
       if (cur) RR.forget(this.subDir(cur));
@@ -3053,8 +3120,7 @@ class AccountManager {
       // usage caches, which this store deliberately doesn't); default = the
       // pool's current target, i.e. exactly the legacy behaviour.
       if (opts.sessionKey) {
-        let member = null;
-        try { member = opts.chooseMember?.(id); } catch { } // the pool THIS spawn bills — the caller never re-derives it (verify r2)
+        let member = chooseOnce(); // the pool THIS spawn bills — the caller never re-derives it (verify r2); asked once (B-d578)
         // The chooser ranks by QUOTA (it reads the usage caches); credentials
         // are this store's authority. A member that is signed out is not a
         // candidate no matter how much quota it shows — same outage, second

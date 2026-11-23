@@ -746,7 +746,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // it so: a pool's members are the ACCOUNTS store's same-harness subscriptions (poolMembership / poolMembers / poolRoster /
   // setPoolTarget / a priority list); a provider record lives in the provider store, never in the accounts store, and no door
   // writes a provider onto an account (accountProviderId reads an account's `providerId`; nothing writes one). Even a member
-  // list that NAMES the provider (updatePool keeps the ids it is given) never routes to it. Should this ever go red, the
+  // list that NAMES the provider (written here by hand: updatePool refuses one by name since B-d578's fallback unit F1 — a pool LISTS
+  // providers apart, `fallbackProviders`, test-pool-fallback) never routes to it. Should this ever go red, the
   // remove confirm must name the pool-billed conversations too
   const poolOf = (AM, tag) => {
     const a = new AM({ dataDir: scratchDir('hspawn-pool-' + tag) });
