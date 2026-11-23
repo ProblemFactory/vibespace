@@ -2364,9 +2364,10 @@ class MessageManager extends MessageWindow {
       const afloat = !!(raw._fromWebui && raw.msgId && (raw.webui_copy || (emit && this._turnLive && !this._turnStartPending && this._queuePublished)));
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex, afloat, startsTurn: !afloat && !metaNote });
       if (!raw._fromWebui && !raw.origin && typeof raw.uuid === 'string' && raw.uuid) {   // line 500's follow: the CLI's records drawn, by their stamps (a batch: every frame it names)
+        // NEVER CAPPED (r2794): the unsettled copy it answers is carried for the life of the conversation object, so a cap would let
+        // the second bubble back after that many of the person's own records; this manager already holds every message it drew
         const drawn = this._cliUserUuids || (this._cliUserUuids = new Map());
         for (const u of [raw.uuid, ...(Array.isArray(raw.mergedSendUuids) ? raw.mergedSendUuids : [])]) if (typeof u === 'string' && u) drawn.set(u, msg.id);
-        while (drawn.size > 256) drawn.delete(drawn.keys().next().value);
       }
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
         msg.midTurn = true; // seam touch-chip-cause × claude-steer: a copy is made only of a MID-TURN frame — it entered a running turn

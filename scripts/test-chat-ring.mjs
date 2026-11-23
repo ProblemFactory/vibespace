@@ -214,6 +214,28 @@ WD.section('⑦');
   const u = bubblesOf(untrimmed, MessageManager), t = bubblesOf(trimmed, MessageManager), tRel = bubblesOf(trimmed, NOLATE), uRel = bubblesOf(untrimmed, NOLATE);
   ok(carriedFirst && u === 1 && t === 1 && uRel === 1 && tRel === 2,
     `a copy whose hand-over never settled, CARRIED past the CLI's own record of the frame by a trim: ONE bubble (untrimmed ${u}, trimmed ${t}) — RED: a normalizer whose claim runs only when the copy comes first draws ${tRel} after the trim (${uRel} untrimmed)`, { carriedFirst, u, t, uRel, tRel });
+  // r2794 (2): the copy is carried for the life of the conversation object — 300 of the person's own records between the CLI's record
+  // of the frame and the carried copy never let the second bubble back (the map of drawn stamps has no cap)
+  const SID2 = '22222222-0000-4000-8000-000000000072', CWD2 = '/tmp/chat-ring-suite-handed-many';
+  const dir2 = path.join(HOME, '.claude', 'projects', SS.cwdToProjectDir(CWD2)); fs.mkdirSync(dir2, { recursive: true });
+  const rec2 = (o) => JSON.stringify({ sessionId: SID2, cwd: CWD2, ...o });
+  const many = Array.from({ length: 300 }, (_, i) => rec2({ type: 'user', uuid: '44444444-0000-4000-8000-' + String(i).padStart(12, '0'), timestamp: '2026-11-21T10:01:00.000Z', message: { role: 'user', content: 'the person\'s next prompt ' + i } }));
+  fs.writeFileSync(path.join(dir2, SID2 + '.jsonl'), [
+    rec2({ type: 'user', uuid: '33333333-0000-4000-8000-000000000072', timestamp: '2026-11-21T09:59:00.000Z', message: { role: 'user', content: 'start the long task' } }),
+    rec2(JSON.parse(stream[0])),
+    rec2({ type: 'user', uuid: uuidOf(M2), timestamp: '2026-11-21T10:00:05.000Z', message: { role: 'user', content: [{ type: 'text', text: WORDS[M2] }] } }),
+    ...many,
+    ...stream.slice(1).map((l) => rec2(JSON.parse(l))),
+  ].join('\n') + '\n');
+  const bubblesOf2 = (buffer, MMClass) => {
+    const sm = new SS.SessionMessages({ cwd: CWD2, backend: 'claude', buffer, backendSessionId: SID2, claudeSessionId: SID2 }, 'chat-ring-suite');
+    const mm = new MMClass('chat-ring-suite'); mm.convertHistory(sm.raw());
+    return mm.messages.filter((m) => m.role === 'user' && JSON.stringify(m.content).includes(WORDS[M2])).length;
+  };
+  const CAPPED = require(M.write('src/message-manager.js', anchored(MM_SRC, "        for (const u of [raw.uuid, ...(Array.isArray(raw.mergedSendUuids) ? raw.mergedSendUuids : [])]) if (typeof u === 'string' && u) drawn.set(u, msg.id);\n",
+    "        for (const u of [raw.uuid, ...(Array.isArray(raw.mergedSendUuids) ? raw.mergedSendUuids : [])]) if (typeof u === 'string' && u) drawn.set(u, msg.id);\n        while (drawn.size > 256) drawn.delete(drawn.keys().next().value);   // MUTANT: the first form's cap\n", 'capped-256'), 'capped-256')).MessageManager;
+  const m2 = bubblesOf2(trimmed, MessageManager), m2Rel = bubblesOf2(trimmed, CAPPED);
+  ok(m2 === 1 && m2Rel === 2, `…and after 300 of the person's own records between the CLI's record and the carried copy: still ONE bubble (${m2}) — RED: the first form's 256-stamp cap lets the second bubble back (${m2Rel})`, { m2, m2Rel });
 }
 
 say('⑥ THE CENSUS — every write of a session\'s ring in the tree, each a row; a claude ring\'s goes through the one trim');
