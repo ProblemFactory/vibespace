@@ -88,8 +88,13 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   const CF_REQ = "require(path.join(__dirname, '..', '..', 'src', 'conversation-facts.js'))";
   ok(transportPure(read('src/conversation-facts.js')) && /^try \{ CF = require\(path\.join\(__dirname, '\.\.', '\.\.', 'src', 'conversation-facts\.js'\)\);/m.test(read('data/bin/chat-wrapper.js')),
     'chat-wrapper.js\'s facts module (src/conversation-facts.js) is PURE (no require / import) and is required once, at the wrapper\'s start (top level)');
+  // B-5a4d root, unit 2: the transcript path by the tree's ONE rule — src/fixture-guard.js encodeCwd (session-store cwdToProjectDir, restated
+  // there because PURE imports nothing). Admitted on the same terms: PURE, required ONCE at the wrapper's start (top level).
+  const FG_REQ = "require(path.join(__dirname, '..', '..', 'src', 'fixture-guard.js'))";
+  ok(transportPure(read('src/fixture-guard.js').replace(/\/\*[\s\S]*?\*\//g, '')) && /^let FG = null; try \{ FG = require\(path\.join\(__dirname, '\.\.', '\.\.', 'src', 'fixture-guard\.js'\)\);/m.test(read('data/bin/chat-wrapper.js')),
+    'chat-wrapper.js\'s path rule (src/fixture-guard.js, B-5a4d root) is PURE (no require / import) and is required once, at the wrapper\'s start (top level)');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '').replace(CF_REQ, '').replace(FC_REQ, '').replace(SJ_REQ, '')),
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '').replace(CF_REQ, '').replace(FC_REQ, '').replace(SJ_REQ, '').replace(FG_REQ, '')),
       `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above; claude-steer-inject 2.369.362: the kept copies, src/kept-copies.js, above; the manager stack: the conversation's facts, src/conversation-facts.js, PURE, above; the wrapper's hold: the said journal, src/said-journal.js, above)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),   // stale-pins: kept — an absence check on ITS own body (fs.writeFileSync left only in src/app-secrets-seal.js by B-694d)

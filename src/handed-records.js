@@ -92,7 +92,7 @@ function drawnFor(records, { liveSince = 0 } = {}) {
     if (!r || typeof r.copy !== 'string' || !r.copy.trimStart().startsWith('{')) continue;
     let mark = null;
     if (r.state === 'undelivered') mark = 'undelivered';
-    else if (r.state === 'handed' && !(liveSince && Number(r.at) >= liveSince)) mark = 'unconfirmed';
+    else if ((r.state === 'handed' || !Object.prototype.hasOwnProperty.call(RANK, r.state)) && !(liveSince && Number(r.at) >= liveSince)) mark = 'unconfirmed';   // an unknown state word reads as handed
     if (!mark) continue;
     let rec = null; try { rec = JSON.parse(r.copy); } catch { rec = null; }
     if (!rec || typeof rec !== 'object' || !rec.msgId) continue;

@@ -785,7 +785,7 @@ function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
   const was = _warmOfSession.get(k);
   if (was && (bulk || !was.bulk)) return was.p;
   // B-5a4d's root (unit 1): the conversation's handed records are read off the loop BESIDE its transcript (bounded, never its verdict)
-  const p = Promise.all([warmOnce(claudeSessionId, cwd, opts), HANDED.warm([claudeSessionId]).catch(() => null)]).then(([ok]) => ok).then((ok) => { if (ok) { _reWarmAt.delete(claudeSessionId); noteReadable(claudeSessionId); } return ok; })   // a warm that read: the parse may ask again at once after a later refusal; a page told «not loaded» is told it can read now
+  const p = Promise.all([warmOnce(claudeSessionId, cwd, opts), HANDED.warm([claudeSessionId], opts && opts.handedDir ? { dir: opts.handedDir } : {}).catch(() => null)]).then(([ok]) => ok).then((ok) => { if (ok) { _reWarmAt.delete(claudeSessionId); noteReadable(claudeSessionId); } return ok; })   // a warm that read: the parse may ask again at once after a later refusal; a page told «not loaded» is told it can read now
     .finally(() => { const cur = _warmOfSession.get(k); if (cur && cur.p === p) _warmOfSession.delete(k); });
   _warmOfSession.set(k, { p, bulk });
   return p;
@@ -1451,9 +1451,22 @@ class SessionMessages {
    *  is unknown — at its send time, in the stopped view and after a Resume alike. A live session's own frames in flight are not drawn. */
   _drawHanded(session, historySessionId) {
     if (!historySessionId) return;
-    const ids = [historySessionId, ...(Array.isArray(session.forkedFrom) ? session.forkedFrom : [])];
+    // the conversation's chain: the ids it moved through — never a REQUESTED fork's parent (a fork takes none of its parent's records)
+    const forkSource = session._forkSourceId || session.forkSourceId || null;
+    const ids = [historySessionId, ...(Array.isArray(session.forkedFrom) ? session.forkedFrom.filter((x) => x && x !== forkSource) : [])];
     let drawn = [];
     try { drawn = HANDED.drawnFor(HANDED.recordsFor(ids, this._buffersDir ? { dir: this._buffersDir } : {}), { liveSince: session.pty || session.socketPath ? Number(session.createdAt) || 0 : 0 }); } catch { drawn = []; }
+    if (!drawn.length) return;
+    // ASK THE TRANSCRIPT FIRST (unit 2): a stamp the CLI already recorded (its user record's uuid, a batch's mergedSendUuids, a
+    // queued_command's source_uuid) is that message — never drawn again beside it
+    const recorded = new Set();
+    for (const m of this._all) {
+      if (!m || typeof m !== 'object') continue;
+      if (m.type === 'user' && typeof m.uuid === 'string') recorded.add(m.uuid);
+      if (Array.isArray(m.mergedSendUuids)) for (const u of m.mergedSendUuids) if (typeof u === 'string') recorded.add(u);
+      if (m.attachment && typeof m.attachment.source_uuid === 'string') recorded.add(m.attachment.source_uuid);
+    }
+    drawn = drawn.filter((d) => !(d.rec && typeof d.rec.cliUuid === 'string' && recorded.has(d.rec.cliUuid)));
     if (!drawn.length) return;
     this._all = HANDED.insertDrawn(this._all, drawn);
     this._display = this._all.filter(isDisplayMessage);

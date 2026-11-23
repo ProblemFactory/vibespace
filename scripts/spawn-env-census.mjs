@@ -302,6 +302,7 @@ export const ROWS = Object.freeze([
   ['data/bin/acp-wrapper.js', 'cmd', 'upstream', 1, WRAPPER],
   ['src/claude-oat-trampoline.js', 'bin', 'upstream', 1, 'lane cli-self-measure (acceptance r3 item 1): the measurement\'s trampoline — its own env is the one the launcher built and checked against the allowlist (assertEnv) before strace started it; the binary inherits exactly that, and gets its OWN stderr (never the tracer\'s record)'],
   ['data/bin/chat-wrapper.js', 'cmd', 'upstream', 1, WRAPPER],
+  ['data/bin/chat-wrapper.js', 'process.execPath', 'probe', 1, PROBE + " (B-5a4d root: the wrapper's transcript tail read, in a child of its own killed at 2 s — a hung home never holds the wrapper's exit)"],
   ['data/bin/codex-chat-wrapper.js', 'cmd', 'upstream', 1, WRAPPER],
   ['data/bin/pty-wrapper.js', 'cmd', 'upstream', 1, WRAPPER + ' — a terminal session'],
   ['data/bin/agy-wrapper.js', 'cmd', 'upstream', 2, WRAPPER + " — Google's Antigravity CLI (agy, lane antigravity-harness): the wrapper is born with agentEnv + the named account's creds.spawnEnv; + its --version record probe (no network, measured)"],

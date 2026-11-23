@@ -385,7 +385,7 @@ ok(OWED_MAX <= OWED_BASELINE + RISES.reduce((a, r) => a + r[0], 0) && RISES.ever
 const REGION_ROWS = [
   ["data/bin", "data/bin/acp-wrapper.js", 2],
   ["data/bin", "data/bin/agy-wrapper.js", 5],
-  ["data/bin", "data/bin/chat-wrapper.js", 4],   // + B-5a4d root: the handed records file (<id>.handed), temp + rename
+  ["data/bin", "data/bin/chat-wrapper.js", 4],   // + B-5a4d root: the conversation's handed records (<buffers>/handed/<conversation id>.json), temp + rename
   ["data/bin", "data/bin/codex-chat-wrapper.js", 3],   // + B-cd4b's said journal (the wrapper's hold): one more temp + rename
   ["data/bin", "data/bin/job-wrapper.js", 5],
   ["data/bin", "data/bin/pty-wrapper.js", 1],

@@ -2062,10 +2062,10 @@ class MessageManager extends MessageWindow {
    *  (the person's Enter, or the ⚡ on a held row), and says what became of them: 'handed' (written — the agent reads it at
    *  its next tool call), 'landed' (it rode a tool result into the turn and the model answered — «Steered», where it sits),
    *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip), 'undelivered' (row
-   *  B-5a4d's root: the NEXT wrapper's start proved a frame a dead wrapper handed absent from the transcript, its old CLI gone —
-   *  it never reached the agent: «Not delivered», in its place, no turn of its own; a 'successor' word — landed, own-turn or
-   *  undelivered — also takes the copy out of the claim pool: no later record on this stream is ITS record —
-   *  data/bin/chat-wrapper.js settleDeadHandovers). What Stop
+   *  B-5a4d's root: a frame handed to a CLI that died, which the transcript proves it never took — «Not delivered», in its place,
+   *  no turn of its own). The settle words of a dead CLI's frames come from the wrapper at that CLI's exit (`via: 'exit'`) or from
+   *  the conversation's next wrapper judging what a killed one left (`via: 'successor'`) — data/bin/chat-wrapper.js settleOnExit /
+   *  settleLeftRecords; either is the frame's last word and takes its copy out of the claim pool. What Stop
    *  meant for each one is said by Stop's ONE `queue_dropped` (`keptIds` → 'kept', `landedIds` → 'steered' — message-
    *  window `_processQueueDropped`); a 'kept' state here is still read (a record of an earlier build). No bubble ⇒ nothing to mark:
    *  the frame reached the agent, which is never a silence worth a card. */
@@ -2387,8 +2387,8 @@ class MessageManager extends MessageWindow {
       // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
       // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
       if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
-      // B-5a4d's root: a copy the next wrapper marked NOT DELIVERED (its transcript proved the CLI never took it) is drawn with that
-      // chip at every rebuild — the wrapper keeps the marked copy in its buffer, so a hub restart draws it again
+      // B-5a4d's root: a copy the history read's drawer marked NOT DELIVERED (src/handed-records.js — from the conversation's handed
+      // record, never from a buffer: the buffer carries no marked copy) is drawn with that chip at every rebuild
       if (raw.webui_copy && raw.undelivered && raw.msgId) this._stampQueueChip(String(raw.msgId), 'undelivered', false);
       // …and one whose CLI died with no word on its fate (the history read's drawer, src/handed-records.js): «Not confirmed»
       else if (raw.webui_copy && raw.unconfirmed && raw.msgId) this._stampQueueChip(String(raw.msgId), 'unconfirmed', false);

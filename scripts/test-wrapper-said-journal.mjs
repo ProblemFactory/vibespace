@@ -335,6 +335,7 @@ setInterval(() => {}, 1e3);
       ["else { buffer += next + '\\n'; schedulePersist(); }", null, 1, 'a held copy\'s edit: never said'],
       ["buffer += line + '\\n';", 'durable();', 1, 'an answered permission (stdin): never said (B-5a4d: durable)'],
       ["type: '_remote_state'", null, 2, 'a transport record (filtered before the normalizer, never in the ring)'],
+      ['const TAIL_JS = ', null, 1, 'the transcript tail reader\'s OWN stdout (B-5a4d root, unit 2: a script the wrapper runs in a child of its own) — the child\'s pipe back to the wrapper, never the wrapper\'s stdout nor its ring'],
     ], [CX]: [
       ['JSON.stringify(nack)', null, 1, 'a torn stdin line\'s receipt (transport)'],
       ['JSON.stringify(ack)', null, 1, 'the stdin ack (transport)'],

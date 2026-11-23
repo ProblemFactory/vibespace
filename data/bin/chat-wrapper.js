@@ -236,35 +236,44 @@ const MAX_BUFFER = 500000; // 500KB — JSON lines are larger than raw PTY
 let writeTimer = null;
 let lineBufB = Buffer.alloc(0); // accumulator for partial lines (Buffer — byte-exact offsets)
 
-// A HANDED FRAME's RECORD, KEYED BY ITS CONVERSATION (row B-5a4d, its root — 主开发 r2852; the roads page and r3160's unit 1). A wrapper
-// that dies mid-turn wrote no settle for a frame it had HANDED to the CLI; every road to a next wrapper mints a new hub id and the exit
-// teardown removes this id's files, so nothing of the frame was left to draw: the stopped conversation showed nothing of the message.
-// Each handed frame now has ONE RECORD in `<buffers>/handed/<conversation id>.json` (0600 — it holds a person's words, as the buffer
-// does; never a wrapper file kind: no wrapper's end touches it), named by the id the CLI resumes by (`--resume`, then the CLI's own
-// `session_id` at its init — the record moves with it; before any id is known, the hub's own id names it until the announcement):
-// its copy, THE IDENTITY OF THE CLI IT WAS HANDED TO (pid, birth, boot), its state (handed · landed · own-turn · kept · undelivered),
-// when. record() writes every hand-over verdict into it (noteHandWord). EACH WRITE READS THE FILE, MERGES BY THE RECORD's OWN ID WITH
-// STATES THAT ONLY MOVE FORWARD, and renames a temp into place; this wrapper keeps its own records in memory and merges them in at every
-// write, so an update another writer lost comes back at the next write (no lock file). THE RESIDUAL: two writers inside one read–rename
-// window can drop each other's newest change in that window until the next write of the one that lost it — or for good if it dies first.
-// AT ITS CLI's EXIT (settleOnExit, before finalize) this wrapper settles what it handed to THAT child — its exit is the proof of «gone» —
-// by ONE bounded read of the transcript's tail (2 s, from before the stat; the exit is never held past it): found by the CLI's own
-// fields ⇒ landed / own-turn; proven absent ⇒ undelivered; else left, said. The hub's history read draws them (src/handed-records.js).
+// A HANDED FRAME's RECORD, KEYED BY ITS CONVERSATION (row B-5a4d, its root — 主开发 r2852; the roads page; r3160's unit 1 and r3200's
+// unit 2). A wrapper that dies mid-turn wrote no settle for a frame it had HANDED to the CLI; every road to a next wrapper mints a new hub
+// id and the exit teardown removes this id's files, so nothing of the frame was left to draw. Each handed frame has ONE RECORD in
+// `<buffers>/handed/<conversation id>.json` (0600 — a person's words, as the buffer; never a wrapper file kind), named by the id the CLI
+// resumes by (`--resume`, then the CLI's own `session_id` at its init — the record moves with it; before any id is known, the hub's own
+// id names it until the announcement). A FORK (`--fork-session`) is a new conversation: it starts under the hub's id and takes NO record
+// of its parent (no merge at its announcement). The record: its copy RESOLVED at the hand-over (long text and pictures inline — the
+// kept files go with this wrapper's folder at the exit; past RECORD_COPY_MAX the pictures stay out, said), THE IDENTITY OF THE CLI IT
+// WAS HANDED TO (pid, birth, boot), its state (handed · landed · own-turn · kept · undelivered; an unknown word reads as handed), when.
+// record() writes every hand-over verdict into it (noteHandWord). EACH WRITE READS THE FILE, MERGES BY THE RECORD's OWN ID WITH STATES
+// THAT ONLY MOVE FORWARD, bounds it by count AND by bytes (the file never passes its own read bound), renames a temp into place; this
+// wrapper's records in memory are trimmed to what was written (no lock file). THE RESIDUAL: two writers inside one read–rename window
+// can drop each other's newest change until the next write of the one that lost it — or for good if it dies first.
+//   AT ITS CLI's EXIT (settleOnExit) it settles what it handed to THAT child (pid AND birth) — that exit is the proof of «gone».
+//   AT ITS START (settleLeftRecords, unit 2) it judges what a killed wrapper left handed: each record by ITS OWN recorded CLI, BEFORE the
+//   transcript's stat — alive ⇒ left (it could still take it), no identity ⇒ unknown (left, said), known gone ⇒ judged by the transcript.
+// Both settles read the transcript's tail ONCE (4 MB; a 2 s bound from before the stat): found by the CLI's own fields ⇒ landed /
+// own-turn; proven absent ⇒ undelivered; else left, said. The hub's history read draws them (src/handed-records.js).
 const HANDED_DIR = bufferFile ? path.join(path.dirname(String(bufferFile)), 'handed') : null;
 const HUB_ID = bufferFile ? path.basename(String(bufferFile)).replace(/\.buf$/, '') : '';
 const HANDED_MAX = 50;                   // records a conversation keeps: the oldest FINISHED go first; an unfinished one only with a journal line
-const HANDED_FILE_MAX = 8 * 1024 * 1024; // its file (a copy keeps its pictures by reference); past it: not read, said, not written over
-const DEAD_TAIL_MAX = 4 * 1024 * 1024;   // the transcript's tail read at the CLI's exit
+const HANDED_FILE_MAX = 8 * 1024 * 1024; // its file's bound — the read refuses past it, so every WRITE keeps under it (by bytes, said)
+const RECORD_COPY_MAX = 2 * 1024 * 1024; // one record's resolved copy: past it its pictures stay out (the words kept), said
+const DEAD_TAIL_MAX = 4 * 1024 * 1024;   // the transcript's tail read
 const DEAD_READ_MS = 2000;               // that read's bound, from before its stat: past it nothing is settled, said once
 const RANK = { handed: 0, landed: 1, 'own-turn': 1, kept: 1, undelivered: 1 };
 const FINISHED = new Set(['landed', 'own-turn', 'kept']);
-let convId = argSettings(args, '--resume')[0] || null;   // the conversation's id (the CLI's): a resume names it at once; the CLI's init may move it
+const IS_FORK = args.includes('--fork-session');   // a requested fork: a new conversation — it takes none of its parent's records
+let convId = IS_FORK ? null : (argSettings(args, '--resume')[0] || null);   // the conversation's id (the CLI's); the CLI's init may move it
 let HR = new Map();                      // THIS wrapper's records: msgId → { msgId, cliUuid, copy, cli: {pid, start, boot} | null, state, at, settledAt, via }
 const hrSaid = new Set();
+let FG = null; try { FG = require(path.join(__dirname, '..', '..', 'src', 'fixture-guard.js')); } catch { FG = null; }
+const projectDirOf = (cwd) => (FG && FG.encodeCwd ? FG.encodeCwd(cwd) : String(cwd || '').replace(/[/._]/g, '-'));   // the tree's ONE rule (session-store cwdToProjectDir, restated in fixture-guard)
 const safeName = (id) => String(id || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 160);
 const recordsFileOf = (name) => (HANDED_DIR && name ? path.join(HANDED_DIR, safeName(name) + '.json') : null);
 const recordsName = () => convId || (HUB_ID ? 'hub-' + HUB_ID : '');
 const sayOnce = (key, words) => { if (hrSaid.has(key)) return; hrSaid.add(key); log(`handed records: ${words}`); };
+const knownState = (st) => Object.prototype.hasOwnProperty.call(RANK, st);
 /** The records' file → { kind: 'none' | 'ok' | 'refused' | 'torn', map } — the four replies of its read (a failed read is never «none»). */
 function readRecordsFile(file) {
   let size = 0;
@@ -275,13 +284,17 @@ function readRecordsFile(file) {
   let j = null; try { j = JSON.parse(text); } catch { j = null; }
   if (!j || typeof j !== 'object' || !Array.isArray(j.frames)) return { kind: 'torn', map: new Map() };
   const m = new Map();
-  for (const r of j.frames) if (r && typeof r.msgId === 'string' && r.msgId) m.set(r.msgId, r);
+  for (const r of j.frames) {
+    if (!r || typeof r.msgId !== 'string' || !r.msgId) continue;
+    if (!knownState(r.state)) sayOnce('state:' + r.state, `a record in ${path.basename(file)} says «${String(r.state).slice(0, 40)}», a word this build does not know — read as handed`);
+    m.set(r.msgId, r);
+  }
   return { kind: 'ok', map: m };
 }
-const rankOf = (r) => (r && Object.prototype.hasOwnProperty.call(RANK, r.state) ? RANK[r.state] : 0);
+const rankOf = (r) => (r && knownState(r.state) ? RANK[r.state] : 0);   // an unknown word: handed
 /** THE MERGE: by the record's own id; a state only moves forward (the higher rank wins; an equal one keeps what is there). */
 function mergeRecords(into, from) { for (const [id, r] of from) { const was = into.get(id); if (!was || rankOf(r) > rankOf(was)) into.set(id, r); } return into; }
-/** Write this wrapper's records into the conversation's file: read it, merge (forward only), bound by count, temp + rename (0600). */
+/** Write this wrapper's records into the conversation's file: read it, merge (forward only), bound by count and by bytes, temp + rename. */
 function writeRecords() {
   const file = recordsFileOf(recordsName());
   if (!file || !HR.size) return false;
@@ -294,29 +307,43 @@ function writeRecords() {
   }
   const all = mergeRecords(new Map(got.kind === 'ok' ? got.map : []), HR);
   const dropped = [];
-  while (all.size > HANDED_MAX) {
-    const list = [...all.values()].sort((x, y) => (x.settledAt || x.at || 0) - (y.settledAt || y.at || 0));
-    const victim = list.find((r) => FINISHED.has(r.state)) || list[0];
-    all.delete(victim.msgId);
-    if (!FINISHED.has(victim.state)) dropped.push(`${victim.msgId} (${victim.state})`);
-  }
-  if (dropped.length) log(`handed records: past ${HANDED_MAX} — ${dropped.length} record(s) not finished left ${path.basename(file)}: ${dropped.join(', ')}`);
+  const order = () => [...all.values()].sort((x, y) => (x.settledAt || x.at || 0) - (y.settledAt || y.at || 0));
+  const drop = () => { const list = order(); const victim = list.find((r) => FINISHED.has(r.state)) || list[0]; all.delete(victim.msgId); if (!FINISHED.has(victim.state)) dropped.push(`${victim.msgId} (${victim.state})`); };
+  while (all.size > HANDED_MAX) drop();
+  let text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] });
+  while (Buffer.byteLength(text) > HANDED_FILE_MAX && all.size > 1) { drop(); text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] }); }
+  if (dropped.length) log(`handed records: past ${HANDED_MAX} records or ${HANDED_FILE_MAX} bytes — ${dropped.length} record(s) not finished left ${path.basename(file)}: ${dropped.join(', ')}`);
+  if (Buffer.byteLength(text) > HANDED_FILE_MAX) { sayOnce('big:' + file, `one record alone passes ${HANDED_FILE_MAX} bytes — not written`); return false; }
   const tmp = `${file}.${process.pid}.tmp`;
-  try { fs.writeFileSync(tmp, JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] }), { mode: 0o600 }); fs.renameSync(tmp, file); return true; }
+  try { fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, file); }
   catch (e) { try { fs.unlinkSync(tmp); } catch { } sayOnce('write:' + file, `write of ${path.basename(file)} failed (${(e && e.code) || (e && e.message)})`); return false; }
+  for (const id of [...HR.keys()]) if (!all.has(id)) HR.delete(id);   // this wrapper's memory: what was written, never more
+  return true;
 }
-/** THE ID MOVES (r3160 (a)(1)): the CLI announced its conversation id (a fresh one, or a resume under a new id) — this wrapper's records
- *  go to that id's file, MERGED with what the earlier name's file holds (a dead wrapper's records under the earlier id travel with it). */
+/** THE ID MOVES (r3160 (a)(1)): the CLI announced its conversation id — this wrapper's records go to that id's file, MERGED with what the
+ *  earlier name's file holds (a dead wrapper's records under the earlier id travel with them); a FORK merges nothing of its parent. */
 function noteConvId(id) {
   const next = typeof id === 'string' && id ? id : null;
   if (!next || next === convId) return;
   const was = recordsName();
   convId = next;
   const old = recordsFileOf(was);
-  if (old && was !== recordsName()) { const got = readRecordsFile(old); if (got.kind === 'ok') mergeRecords(HR, got.map); }
+  if (!IS_FORK && old && was !== recordsName()) { const got = readRecordsFile(old); if (got.kind === 'ok') mergeRecords(HR, got.map); }
   if (writeRecords() && old && was === 'hub-' + HUB_ID) { try { fs.unlinkSync(old); } catch { } }   // this wrapper's own provisional file
 }
 const cliNow = () => (!OFFSET_MODE && meta.childPid ? { pid: Number(meta.childPid), start: String(meta.childStart || ''), boot: String(meta.childBoot || '') } : null);
+/** The copy as the record keeps it: its kept long text and pictures RESOLVED inline (they go with this wrapper's folder at the exit);
+ *  past RECORD_COPY_MAX the pictures stay references (the words kept), said. → { copy, note } */
+function keptCopyOf(line) {
+  let rec = null; try { rec = JSON.parse(line); } catch { return { copy: line, note: null }; }
+  const content = rec && rec.message && Array.isArray(rec.message.content) ? rec.message.content : null;
+  if (!content || !content.some((b) => KC.isKeptBlock(b))) return { copy: line, note: null };
+  const read = (only) => { const m = new Map(); for (const b of content) { const ref = KC.refOfBlock(b); if (!ref || !KC.refOk(ref) || (only && b.type !== only)) continue; try { m.set(KC.nameOf(ref), fs.readFileSync(path.join(KEPT_DIR, KC.nameOf(ref)))); } catch { } } return m; };
+  let copy = JSON.stringify(KC.resolveRecord(rec, read(null), log));
+  if (Buffer.byteLength(copy) <= RECORD_COPY_MAX) return { copy, note: null };
+  copy = JSON.stringify(KC.resolveRecord(rec, read('text'), log));
+  return { copy, note: 'its pictures pass the record\'s bound — the words are kept, the pictures not' };
+}
 /** THE ONE WRITER OF A VERDICT (record() calls it for every hand-over word this wrapper says). */
 function noteHandWord(type, f) {
   if (!HANDED_DIR) return;
@@ -327,8 +354,13 @@ function noteHandWord(type, f) {
       if (!id) continue;
       if (f.state === 'handed') {
         const c = copies.get(String(id));
-        if (c && c.line) { HR.set(String(id), { msgId: String(id), cliUuid: c.cliUuid || null, copy: c.line, cli: cliNow(), state: 'handed', at: Date.now(), settledAt: 0, via: f.via || '' }); changed = true; }
-      } else if (Object.prototype.hasOwnProperty.call(RANK, f.state)) ends.push([String(id), f.state]);
+        let copy = null, note = null;
+        if (c && c.line) ({ copy, note } = keptCopyOf(c.line));
+        else note = 'a hand-over with no copy line — recorded with no copy (nothing can be drawn of it)';
+        if (note) log(`handed records: ${String(id)}: ${note}`);
+        HR.set(String(id), { msgId: String(id), cliUuid: (c && c.cliUuid) || null, copy, cli: cliNow(), state: 'handed', at: Date.now(), settledAt: 0, via: f.via || '' });
+        changed = true;
+      } else if (knownState(f.state)) ends.push([String(id), f.state]);
     }
   } else if (type === 'queue_dropped') {
     for (const id of Array.isArray(f.keptIds) ? f.keptIds : []) ends.push([String(id), 'kept']);
@@ -337,40 +369,59 @@ function noteHandWord(type, f) {
   for (const [id, st] of ends) { const r = HR.get(id); if (r && RANK[st] > rankOf(r)) { r.state = st; r.settledAt = Date.now(); r.via = f.via || r.via; changed = true; } }
   if (changed) writeRecords();
 }
-/** AT THE CLI's EXIT: settle what this wrapper handed to THAT child (its exit is the proof of «gone»). Never holds the exit past the bound. */
-async function settleOnExit() {
-  const childPid = Number(meta.childPid) || 0;
-  const open = [...HR.values()].filter((r) => r.state === 'handed' && r.cli && Number(r.cli.pid) === childPid && childPid > 1);
+// THE TAIL IS READ IN A CHILD OF ITS OWN (unit 2's gate): a home that does not answer holds an fs call in this process's thread pool for
+// good, and a process exit waits for that pool — so a read here, however bounded, would hold the wrapper's exit. The child streams the
+// tail; at the bound it is killed and this process goes on (and exits) whatever the child is stuck in. A script of builtins only; it
+// OPENS first (where a home that does not answer holds it) and reads only a REGULAR file — a pipe or a device proves no absence.
+const TAIL_JS = "const fs = require('fs'); const [f, m] = process.argv.slice(1); const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n'); (function () { let fd = -1, st = null; try { fd = fs.openSync(f, 'r'); st = fs.fstatSync(fd); } catch (e) { say({ err: (e && e.code) || 'open' }); return; } if (!st.isFile()) { say({ err: 'not a regular file' }); return; } const from = Math.max(0, st.size - Number(m)); say({ from }); if (st.size > 0) fs.createReadStream(f, { fd, start: from, end: st.size - 1 }).pipe(process.stdout); })();";
+function tailViaChild(file) {
+  return new Promise((resolve, reject) => {
+    let c = null;
+    try { c = spawn(process.execPath, ['-e', TAIL_JS, file, String(DEAD_TAIL_MAX)], { stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { reject(e); return; }
+    const parts = []; let done = false;
+    const timer = setTimeout(() => { if (done) return; done = true; try { c.kill('SIGKILL'); } catch { } reject(Object.assign(new Error(`not read in ${DEAD_READ_MS / 1000} s`), { code: 'BOUND' })); }, DEAD_READ_MS);
+    c.stdout.on('data', (d) => parts.push(d));
+    c.on('error', (e) => { if (done) return; done = true; clearTimeout(timer); reject(e); });
+    c.on('close', () => {
+      if (done) return; done = true; clearTimeout(timer);
+      const all = Buffer.concat(parts), nl = all.indexOf(10);
+      let head = null; try { head = JSON.parse(all.slice(0, nl < 0 ? all.length : nl).toString('utf8')); } catch { head = null; }
+      if (!head) { reject(Object.assign(new Error('the reader said nothing'), { code: 'NO-READ' })); return; }
+      if (head.err) { reject(Object.assign(new Error(head.err), { code: head.err })); return; }
+      let t = nl < 0 ? '' : all.slice(nl + 1).toString('utf8');
+      if (head.from > 0) t = t.slice(t.indexOf('\n') + 1);
+      resolve({ tail: t, from: Number(head.from) || 0 });
+    });
+  });
+}
+/** ONE bounded read of the conversation's transcript tail (in its child) and the CLI's own fields → { where: Map msgId → 'steered' | 'own', from, first } */
+async function readTailFor(stamped) {
+  const file = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects', projectDirOf(process.cwd()), convId + '.jsonl');
+  const { tail, from } = await tailViaChild(file);
+  const where = new Map();
+  let first = from === 0 ? 0 : null;
+  for (const line of tail.split('\n')) {
+    if (first === null && line.includes('"timestamp"')) { try { const r = JSON.parse(line); if (r && typeof r.timestamp === 'string' && Date.parse(r.timestamp)) first = Date.parse(r.timestamp); } catch { } }
+    for (const d of stamped) {
+      if (where.has(d.msgId) || !line.includes(d.cliUuid)) continue;
+      let r = null; try { r = JSON.parse(line); } catch { continue; }
+      if (!r || typeof r !== 'object') continue;
+      if (r.attachment && r.attachment.source_uuid === d.cliUuid) where.set(d.msgId, 'steered');
+      else if (r.type === 'user' && (r.uuid === d.cliUuid || (Array.isArray(r.mergedSendUuids) && r.mergedSendUuids.includes(d.cliUuid)))) where.set(d.msgId, 'own');
+    }
+  }
+  return { where, from, first };
+}
+/** The verdicts of records whose CLI is KNOWN gone, by one transcript read; said once in the journal → then the words, via `via` */
+async function settleGone(open, via, label) {
   if (!open.length) return;
   const steered = [], own = [], lost = [], left = [], why = [];
   const stamped = open.filter((r) => r.cliUuid);
   if (stamped.length < open.length) { left.push(...open.filter((r) => !r.cliUuid).map((r) => r.msgId)); why.push(`${open.length - stamped.length} with no stamp`); }
   if (!convId) { left.push(...stamped.map((r) => r.msgId)); why.push('no conversation id was announced'); }
   else if (stamped.length) {
-    const file = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects', process.cwd().replace(/[/._]/g, '-'), convId + '.jsonl');
-    let s = null, timer = null;
     try {
-      const { tail, from } = await new Promise((resolve, reject) => {
-        timer = setTimeout(() => reject(Object.assign(new Error(`not read in ${DEAD_READ_MS / 1000} s`), { code: 'BOUND' })), DEAD_READ_MS);   // from before the stat
-        fs.promises.stat(file).then((st) => {
-          const size = st.size, from = Math.max(0, size - DEAD_TAIL_MAX), parts = [];
-          s = fs.createReadStream(file, size > 0 ? { start: from, end: size - 1 } : {});
-          s.on('data', (c) => parts.push(c)); s.on('error', reject);
-          s.on('end', () => { let t = Buffer.concat(parts).toString('utf8'); if (from > 0) t = t.slice(t.indexOf('\n') + 1); resolve({ tail: t, from }); });
-        }, reject);
-      });
-      const where = new Map();
-      let first = from === 0 ? 0 : null;
-      for (const line of tail.split('\n')) {
-        if (first === null && line.includes('"timestamp"')) { try { const r = JSON.parse(line); if (r && typeof r.timestamp === 'string' && Date.parse(r.timestamp)) first = Date.parse(r.timestamp); } catch { } }
-        for (const d of stamped) {
-          if (where.has(d.msgId) || !line.includes(d.cliUuid)) continue;
-          let r = null; try { r = JSON.parse(line); } catch { continue; }
-          if (!r || typeof r !== 'object') continue;
-          if (r.attachment && r.attachment.source_uuid === d.cliUuid) where.set(d.msgId, 'steered');
-          else if (r.type === 'user' && (r.uuid === d.cliUuid || (Array.isArray(r.mergedSendUuids) && r.mergedSendUuids.includes(d.cliUuid)))) where.set(d.msgId, 'own');
-        }
-      }
+      const { where, from, first } = await readTailFor(stamped);
       let unproven = 0;
       for (const d of stamped) {
         const w = where.get(d.msgId);
@@ -381,12 +432,36 @@ async function settleOnExit() {
       }
       if (unproven) why.push(`${unproven} the last ${DEAD_TAIL_MAX} bytes of the transcript cannot prove either way`);
     } catch (e) { left.push(...stamped.map((r) => r.msgId)); why.push(e && e.code === 'BOUND' ? `the transcript was ${e.message}` : `the transcript was not read (${(e && e.code) || (e && e.message)})`); }
-    finally { if (timer) clearTimeout(timer); if (s) { try { s.destroy(); } catch { } } }
   }
-  if (steered.length) record('input_handover', { state: 'landed', msg_ids: steered, via: 'exit' });
-  if (own.length) record('input_handover', { state: 'own-turn', msg_ids: own, via: 'exit' });
-  if (lost.length) record('input_handover', { state: 'undelivered', msg_ids: lost, via: 'exit' });
-  log(`handed at the CLI's exit: ${open.length} frame(s) — ${steered.length} steered, ${own.length} ran as a turn of their own, ${lost.length} not delivered, ${left.length} left as they were${why.length ? ` (${why.join('; ')})` : ''}`);
+  if (steered.length) record('input_handover', { state: 'landed', msg_ids: steered, via });
+  if (own.length) record('input_handover', { state: 'own-turn', msg_ids: own, via });
+  if (lost.length) record('input_handover', { state: 'undelivered', msg_ids: lost, via });
+  log(`${label}: ${open.length} frame(s) — ${steered.length} steered, ${own.length} ran as a turn of their own, ${lost.length} not delivered, ${left.length} left as they were${why.length ? ` (${why.join('; ')})` : ''}`);
+}
+/** AT THE CLI's EXIT: settle what this wrapper handed to THAT child (pid AND birth). Never holds the exit past the bound. */
+async function settleOnExit() {
+  const childPid = Number(meta.childPid) || 0, childStart = String(meta.childStart || '');
+  const open = [...HR.values()].filter((r) => (r.state === 'handed' || !knownState(r.state)) && r.cli && childPid > 1 && Number(r.cli.pid) === childPid && String(r.cli.start || '') === childStart);
+  await settleGone(open, 'exit', "handed at the CLI's exit");
+}
+/** AT THE START (unit 2): what a killed wrapper of this conversation left handed — each record judged by ITS OWN CLI, liveness FIRST. */
+async function settleLeftRecords() {
+  if (IS_FORK || !convId || REMOTE_SID || OFFSET_MODE) return;
+  const file = recordsFileOf(convId);
+  const got = file ? readRecordsFile(file) : { kind: 'none', map: new Map() };
+  if (got.kind === 'refused') { sayOnce('refused-left:' + file, `${path.basename(file)} could not be read (${got.why}) — the frames it holds are unknown; nothing is written over it`); return; }
+  if (got.kind !== 'ok') return;
+  const mine = Number(meta.childPid) || 0;
+  const open = [...got.map.values()].filter((r) => (r.state === 'handed' || !knownState(r.state)) && !(r.cli && Number(r.cli.pid) === mine && mine > 1));
+  if (!open.length) return;
+  const gone = [], alive = [], unknown = [];
+  for (const r of open) {   // THE CLI IT WAS HANDED TO, from ITS record — before any transcript stat
+    const v = !r.cli || !(Number(r.cli.pid) > 1) || !r.cli.start ? 'unknown-identity' : PI ? PI.tokenVerdict(Number(r.cli.pid), r.cli.start, r.cli.boot) : 'unknown';
+    if (v === 'gone' || v === 'pid-recycled' || v === 'zombie') gone.push(r); else if (v === 'same') alive.push(r); else unknown.push(r);
+  }
+  for (const r of open) if (!HR.has(r.msgId)) HR.set(r.msgId, { ...r });   // this wrapper now carries them: its verdicts are written into them
+  if (alive.length || unknown.length) log(`handed records at this start: ${alive.length} left — the CLI ${alive.length === 1 ? 'it was' : 'they were'} handed to still runs; ${unknown.length} left — ${unknown.length === 1 ? 'its record names' : 'their records name'} no CLI to judge (unknown, never «gone»)`);
+  await settleGone(gone.map((r) => HR.get(r.msgId)), 'successor', 'handed records at this start');
 }
 
 function persistBuffer() {
@@ -1759,5 +1834,6 @@ try {
 
 startChild();
 publishQueue();   // the BASELINE (an empty queue, said once at boot — the acp wrapper's rule)
+settleLeftRecords().catch((e) => log(`handed records at this start: not judged (${e && e.message})`));   // B-5a4d's root, unit 2: what a killed wrapper left handed, after the baseline
 
 process.on('uncaughtException', (err) => { log(`Uncaught: ${err.message}\n${err.stack}`); });
