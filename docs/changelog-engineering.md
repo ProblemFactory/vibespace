@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.417 — 2026-11-23
+
+### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
+- WHY (the legs at d458fc27d, run 10daecc69-20261123064000-box): with its read refused (EIO), the owner's next timed raise was TAKEN and the file then held ONLY the new hold — the two earlier raised ceilings lost their way back and stayed raised for good; a For-you notice said the holds could not be read, but nothing was refused.
+- THE CURE, on the tree's one mechanism (src/store-read-hold.js, lane bl-jobs f43b21128, picked first): the one read answered through SR.storeAnswer and handed to the hold. Held: a timed raise and «End now» are refused by name (`setting_holds_unread`, the card's words in en / zh / ja); the store's save writes nothing; the file is read again off the loop; the owner is told once which ceilings stand above their default now; `GET /api/setting-holds` carries `unread`. Lifted: the start's own pass (`adopt`). Torn bytes kept aside once, then empty, said. A restart while held reads the file again. No remover reads its silence.
+- Legs: scripts/test-setting-holds.mjs ⑨ — a placed EIO on the store's read: the raise and End now refused, the file's bytes untouched, the owner told which ceilings are raised; the read again lifts it and the next raise keeps all three; a restart while held; torn bytes kept aside once and said. RED: the press and the save not held (the release): the earlier holds written away.
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
