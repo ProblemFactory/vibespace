@@ -80,6 +80,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - Nothing filed (a pooled reading, the attribution journal, the usage history's walk / remote ingest / re-bake: they wait; server.js's resolver line answers «held», no line added), removed (reset claims, the expiry sweep, the models door's save) or migrated (the two account migrations and the four September reads throw). r3132: the token file sweep runs at the lift, an unexpected exit's one-shot resume is not spent while unread, the roster / status / mint carry accountsHeld; the permission oracle's and the models listing's words are bl-windows'. The usage reply's accountsHeld; refusals by name (accounts_unread); the badge «unknown». Telemetry truth lines left (diagnostic).
 - scripts/test-accounts-held-consumers.mjs (new, fast): the unreadable file a placed EIO on its read; each cure beside a control and with a red copy that never asks; the guard's leg fails at the base the verifier's way.
 
+### lg-providers B-f276 family follow (round w9jhivwdo, 主开发 r3106 — line 621's person-facing truths; on bbf2e7db4)
+- (1) the torn-copy refusal no longer advises «restore that copy» (it is the damaged bytes): the list was damaged, a provider added again is a NEW provider with a NEW key (never the old entry back), and the old key goes by a CONFIRMED Remove (`DELETE /api/providers/:id?kept=remove`).
+- (2) the empty lift is said: `store.damaged()` (the helper's `setAside`), `POST /list` → `damaged: {copy}`, the roster and the wizard say it (the name in a techFold); provider-spawn / modelFor answer `providers_damaged` for a provider the damaged list held.
+- (3) ws-create's last-resort pass carries `providers_*` by its code; cli-usage-door answers it (503), never login-needed. (4) the Vault window words a held refusal through heldWordsOf. (5) one held guard on every provider door but the list; the models routes answer the hold's words.
+- TESTS: test-provider-store-held ④ ⑤.
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
