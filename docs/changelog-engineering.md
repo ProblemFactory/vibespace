@@ -1846,6 +1846,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - 16 rows whose suite file is unchanged since 5b5fb7a9d (the train's log of each file) restated to that run: 190.4 → 134.3 s; eight overs STRUCK (test-agent-leak-census, test-auto-cli-tick-reads, test-channel-groups, test-ci-remote, test-csp-report, test-fable-cap-pool-storm, test-peer-text-census, test-vault-words), four KEPT with their true reading (test-agy-harness, test-browser-builds, test-channel-outbox, test-paced-wake-retry). The over count 39 → 31 and the cap follow by arithmetic at the pick (the integrator's); rows only.
 - Nine rows LEFT OUT: their suite file changed on the train since 5b5fb7a9d (a cut or a leg landed after the reading) — named in the line with the reading the run took.
 
+### lg-providers B-ee0a's two owed lines (r1061: «two lines for your next commit on that surface») — tests + kb only
+- test-vault-contents: the mount config door's text is lifted by `extractMountRoute`; a check says BY NAME when it finds nothing (a moved anchor compiled an app with no routes and the legs went red as 404s), and the compile is skipped then; CONTROL: the same extraction over the wiring with its anchor renamed finds nothing.
+- kb-api: the asymmetry the readers saw, named — with a vault set up a record that needs no reveal is still answered to a header-less caller; with no vault that caller is refused (`credential_page_only`); no secret rides either way.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
