@@ -2423,6 +2423,13 @@ The owner's Mac (2.369.358, 2026-10-26): «leg up» at the offer, 45 s black, `c
   - THE READER reads only a path the helper judged (`readAgentTranscript` refuses any other): no third door can hand it one.
   - All on the helper's road (fs.promises): nothing synchronous on the loop. Gated by test-subagent-transcript ⑧ (the verifier's table on both doors, the size oracle, a link out, a linked meta, a handed path; the honest asks as today; RED: a copy without the law).
 - **THE ONE WORKER, AND THE BOUNDS (r2594):** a viewer's whole read runs in the history lane's ONE worker, so a 20 MB agent can delay a person's history page. A read that never returns is bounded by the pool itself (60 s a call). The agent's .meta.json is bounded inside the chain (2 s, then refused by name), so no read holds the queue unbounded.
+- **THE FIND'S BOUND (主开发 r2881, lane bl-machines-a's verification):** the find before the chain is bounded too.
+  - Every file call of a find is a LOOK, counted by the folder it lands in (the projects root, or the project folder under it). ONE look out a folder: a look waits for the one out there before it starts, so a folder that hangs never holds a second file thread.
+  - The whole find answers within `FIND_BOUND_MS` (10 s). Past it, the ask is REFUSED BY NAME («the projects folder did not answer within 10 s»): the route's 503 `refused`, the attach's `loadRefused`.
+  - The look that did not answer keeps its folder MARKED until it returns: a later find starts no look there and is refused by name at once. The first ask after it returned is served.
+  - The live watcher's finder takes the same bound: an unanswered look gives no file, and its retry chain goes on.
+  - The release listed on the loop itself; the unit's first form had no bound on its async looks: on a folder that stopped answering, the route never answered and the viewer waited for ever.
+  - Gated by test-subagent-transcript ⑩ (the projects folder's listing STALLED by placement: by name at the bound, no second look, the next ask served; RED: today's finder).
 - **A REFUSAL BY NAME, never a read on the loop.** A refusal is: no pool on the process, its heap bound, its lane busy, or its workers down.
   - The attach says it as `loadRefused`. The viewer words it: «This agent's log could not be read here: {why}» (zh / ja).
   - The route answers 503 `{ error, refused }`.

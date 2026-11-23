@@ -20,6 +20,9 @@
 //   ⑨ THE CUT (主开发 r2874 (1)): a transcript cut and written again (placed between two looks), another file renamed over the
 //      name, and a cut grown past the old size before the next look — every record told ONCE, in order, all off the loop, the
 //      watch armed again on the replaced file; RED: the release's read (synchronous, from the old offset)
+//   ⑩ THE FIND'S BOUND (主开发 r2881): the projects folder's listing STALLED by placement — the route and the attach answer BY NAME
+//      at the bound, the next ask while it is out starts no second look (refused by name at once), the first ask after it returned
+//      is served; RED: today's finder (no bound, no count of its looks)
 //   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
 //   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
 //      conversation or out of the projects folder, and a conversation id with a parent step, are refused by name before any file
@@ -416,6 +419,50 @@ console.log('⑨ THE CUT (主开发 r2874 (1)) — a transcript cut and written 
   ok(rr.said.length < 90 && syncOf('statSync') + syncOf('openSync') > 0, `RED CONTROL: the release's read tells ${rr.said.length} of 90 (from the old offset after the cut) with ${syncOf('statSync') + syncOf('openSync')} synchronous calls on the loop — the legs above would be RED`);
 }
 
+console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that stops answering: answered by name at the bound, no second look, the next ask served');
+{
+  const hooked = fs.promises.readdir;
+  let gate = null, rootLooks = 0;
+  // THE STALL, PLACED: the projects folder's listing held until released (never made by load)
+  fs.promises.readdir = function (p, ...a) { if (p === PROJ) { rootLooks++; if (gate) return gate.p.then(() => hooked.call(fs.promises, p, ...a)); } return hooked.call(this, p, ...a); };
+  const stall = () => { let release; const p = new Promise((r) => { release = r; }); gate = { p, release }; };
+  const within = (p, ms) => Promise.race([p, sleep(ms).then(() => ({ late: true }))]);
+  try {
+    T._resetForTest(); T._setFindBoundForTest(200);
+    stall();
+    let t0 = Date.now();
+    const r1 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
+    const ms1 = Date.now() - t0;
+    t0 = Date.now();
+    const r2 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
+    const ms2 = Date.now() - t0;
+    const H = hub(require(WSH_PATH));
+    const at = await attachOf(H, BW);
+    const looks = rootLooks;
+    gate.release(); gate = null;
+    await sleep(60);   // the held listing returns: its folder's mark is cleared
+    const r3 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
+    ok(r1.code === 503 && /the projects folder did not answer within 0\.2 s/.test(r1.body.refused || ''), `a stalled listing of the projects folder: the route answers BY NAME at the bound (${r1.code}, «${r1.body.refused}», ${ms1} ms)`);
+    // «at once» by the census, never a clock: the mark's own refusal (not the bound's) and one listing of the folder in all
+    ok(r2.code === 503 && /did not answer \(a look there is still out\)/.test(r2.body.refused || '') && looks === 1, `…the next ask while that look is out starts NO second one (${looks} listing of the projects folder in all) and is refused by name at once, by the mark («${r2.body.refused}», ${ms2} ms)`);
+    ok(!!at.frame && /did not answer/.test(at.frame.loadRefused || ''), `…the attach too, by name: «${(at.frame || {}).loadRefused}»`);
+    ok(r3.code === 200 && (r3.body.messages || []).length > 0, `the first ask after the stalled look returned is served (${r3.code}, ${(r3.body.messages || []).length} cards)`);
+    // RED: today's finder — no bound, no count of its looks — planted in a copy
+    const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
+    const unbounded = MUT.load('src/server/subagent-transcript.js', anchored(anchored(HSRC,
+      '  const got = await Promise.race([work, late]);\n', '  const got = await work;\n', 'the find\'s bound'),
+      '  ctx.look = (p, fn) => {\n', '  ctx.look = (p, fn) => Promise.resolve().then(fn);\n  ctx.counted = (p, fn) => {\n', 'the counted looks'), 'find-unbounded');
+    rootLooks = 0; stall();
+    const u1 = unbounded.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
+    const u2 = unbounded.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
+    const [a1, a2] = await Promise.all([within(u1, 600), within(u2, 600)]);
+    const stacked = rootLooks;
+    gate.release(); gate = null;
+    await Promise.all([u1, u2]);
+    ok(a1.late && a2.late && stacked === 2, `RED CONTROL: today's finder never answers while the folder is stalled (neither ask in 0.6 s) and stacks a second look on it (${stacked}) — the legs above would be RED`);
+  } finally { if (gate) gate.release(); fs.promises.readdir = hooked; T._resetForTest(); }
+}
+
 console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 MiB + 32 MiB) comes back entire');
 {
   T._resetForTest();
@@ -474,7 +521,7 @@ console.log('⑧ THE READ CANNOT BE AIMED (主开发 r2865) — whatever a calle
   const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
   const lawless = MUT.load('src/server/subagent-transcript.js',
     anchored(anchored(anchored(HSRC,
-      '  const refused = idsRefusal(claudeSessionId, agentId);\n', '  const refused = null;   /* stale-pins: kept — the helper before r2865, planted as leg ⑧\'s RED control */\n', 'the shape test'),
+      '  const refused = idsRefusal(opts.claudeSessionId, opts.agentId);\n', '  const refused = null;   /* stale-pins: kept — the helper before r2865, planted as leg ⑧\'s RED control */\n', 'the shape test'),
       '  if (!inside) { _stats.outside++; return null; }\n', '', 'the real-path judge'),
       "fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath) : null))", "Promise.resolve().then(() => (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath))", 'the meta judge'), 'lawless');   // stale-pins: kept — the helper's meta read before r2865, planted as leg ⑧'s RED control
   const lB = await lawless.agentTranscript({ claudeSessionId: SID, agentId: toB, exactDir: DIR, root: PROJ });
