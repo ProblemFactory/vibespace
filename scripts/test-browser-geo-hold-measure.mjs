@@ -11,6 +11,10 @@
 //       grant win? — and with the site's grant rewritten to block. Printed (and whether Chrome kept what was written).
 //   (c) ON THAT STORED DENIAL, a live client: «prompt» for every origin plus the place (the site still ASKING), then a per-site grant plus
 //       the place; then the client's socket TERMINATED and the page reads again (back to the stored denial?). Printed.
+//   (h) 主开发 r2759 — THE ONE CLAIM NO RUN HAD SHOWN: the hold's every-origin «denied» over a PERSON's STORED allow for a site its list
+//     EXCLUDES (the override sits on every tab — src/server/browser-geo-hold.js — so the permission is the only fence): the stored allow
+//     read first (the control), then the real hold armed with a list that excludes the site, a running tab and a tab opened under it
+//     read; then the hold's socket gone, read again. Asserted: «denied» while the hold lives; the rest printed as facts.
 // It JUDGES only that each measure ran and that its control could see the other answer; each ✓ line carries its facts whole (a single-suite
 // run brings its log back green or red). Its first run (the integrator's queue, at f36b21f2e) is the line's: the kb essay of
 // src/server/browser-geo-hold.js quotes it. Without a Chrome it SKIPS BY NAME.
@@ -27,7 +31,7 @@ const ATL = require('../src/server/browser-attach-launch.js');
 const { ok, report } = checker();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = JSON.stringify;
-const PLACE = Object.freeze({ latitude: 35.6762, longitude: 139.6503, accuracy: 50 });   // a stand-in place (no person's)
+const PLACE = Object.freeze({ latitude: 12.5, longitude: 45.25, accuracy: 50 });   // a stand-in place: a round made-up pair (no person's, no city's — r2497 (6))
 const ROOT = scratch('geomeasure');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
 const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_')
@@ -164,6 +168,28 @@ for (const [name, setting, origin] of [['prompt, every origin', 'prompt', null],
   await stop(c);
 }
 ok(Object.keys(F).filter((x) => x.startsWith('c: ')).every((x) => F[x].whileHeld !== 'no read' && F[x].afterTheSocketDied !== 'no read'), `(c) RAN: ${Object.keys(F).filter((x) => x.startsWith('c: ')).map((x) => `${x.slice(3)} ⇒ held: ${F[x].whileHeld}; socket died: ${F[x].afterTheSocketDied}`).join(' · ')}`, Object.fromEntries(Object.entries(F).filter(([x]) => x.startsWith('c: '))));
+
+// ── (h) r2759: the hold's every-origin denial over a person's STORED allow for an unlisted site ──
+{
+  const GH = require('../src/server/browser-geo-hold.js');
+  const c = await chrome(prefsWith({ site: 1 }));   // the person allowed this site in Chrome's own settings (a stored row); no stored denial
+  const run = await openTab(c, 'h-run');
+  const r0 = await readOf('h-run', 0);   // the control: the stored allow in force (this machine's answer: a dead provider here)
+  const hold = GH.create({ log: { log() { }, warn() { }, error() { } } });
+  const armed = await hold.arm(`bp-${c.tag}`, { url: c.url, plan: { kind: 'place', ...PLACE, sites: ['https://listed.example'] } });   // its list EXCLUDES the site
+  await again(c, run, 1);
+  const r1 = await readOf('h-run', 1);   // a running tab: the override is on it, the permission is the hold's denial
+  await openTab(c, 'h-new');
+  const rN = await readOf('h-new', 0);   // a tab opened under the hold: placed, released, the same denial
+  hold.dispose(); await sleep(400);   // the hold's socket gone
+  await again(c, run, 2);
+  const r2 = await readOf('h-run', 2);
+  F.h = { storedAllowRead: said(r0), armed: !!(armed && armed.ok), runningTabWhileHeld: said(r1), newTabWhileHeld: said(rN), afterTheHoldDied: said(r2), stored: storedOf(c) };
+  await stop(c);
+  const deniedRead = (x) => !!x && x.err === 1 && x.perm === 'denied' && x.lat === undefined;
+  ok(!!r0 && r0.perm === 'granted' && F.h.armed && deniedRead(r1) && deniedRead(rN),
+    `(h) r2759: a person's STORED allow for a site the list excludes reads «denied» while the hold lives — a running tab and a new one (the hold's every-origin denial outranks the stored allow); the facts: ${J(F.h)}`, F.h);
+}
 console.log('\nFACTS ' + J(F));
 srv.close();
 report();
