@@ -6,14 +6,17 @@
 //       a real mount): the slot stays empty and the handle SAYS so by name (`gone`), never «busy»; nothing more is sent. A read out past
 //       an ask's budget is said too (`held`). THE TURN: the line's stat first; a bare stat whose asks all ended is not sent; facts go
 //   (b) THE HUB (src/hosts.js dirSlice) on a REAL agent (this tree's bundle) whose one read is out past the ask's budget: refused by
-//       name, the plain path LISTED by the release's road, nothing held — RED: today's late shape of that refusal; a machine whose agent
-//       says `gone` HELD on the release's road (no collect asked) until its agent says it has a live worker again
+//       name, the plain path LISTED by the release's road, nothing held — RED: the hub's own catch put back to the earlier late shape (a
+//       mutant of src/hosts.js) says «still looking» and lists nothing; a machine whose agent says `gone` HELD on the release's road (no
+//       collect asked) until a NEW HELLO or its agent says it has a live worker again; «gone» once on the REAL agent (its one worker
+//       ENDS — the suites' crash stand-in — until its pool respawns one)
 //   (c) a collect refused for NO CAPABILITY is served by the release's road too, and holds nothing
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { endDaemonsAndWait, DAEMON_ROOT_ENV, DAEMON_ARGV, DAEMON_COMM } from './scratch.mjs';
+import { endDaemonsAndWait, DAEMON_ROOT_ENV, DAEMON_ARGV, DAEMON_COMM, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -148,21 +151,25 @@ console.log('⑩ THE LAW (r2974): a machine\'s listing is never worse than the r
   dm.dirCollect = (...a) => { asks++; return raw(...a).catch((e) => { codes.push(e && e.code); whys.push(e && e.state && e.state.why); throw e; }); };
   const r1 = await hm.dirSlice('h-pair', plain), asks1 = asks;
   const r2 = await hm.dirSlice('h-pair', plain), asks2 = asks;
-  dm.dirCollect = raw;
+  dm.dirCollect = raw;   // (the counted asks are the two above)
+  // RED, the hub's OWN catch put back to the earlier late shape (ec1aa482c's): a mutant of src/hosts.js asks the same held agent
+  const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+  const NOW_CATCH = "      if (e && e.code === 'collector-stuck' && !(e.state && e.state.why === 'held')) this._collectStuckMark(id, dm, e);   // `held` (one read out past this ask's budget): this ask only\n      return null;\n";
+  const THEN_CATCH = "      const late = { late: true };\n      F = { home: info.home, at: Date.now(), me: { home: info.home, roots: [] }, answers: P.wire.cands.map((x) => ({ path: x.c, answer: 'late', at: x.a })), rows: P.wire.rows.map(() => late), probes: P.wire.probes.map(() => late), index: P.wire.roots.map(() => late), listed: [], listedTyped: 0, mounts: [] };\n";
+  const MH = mutantCopies('dir-collect-fallback', REPO).load('src/hosts.js', anchored(HSRC, NOW_CATCH, THEN_CATCH, 'the catch as at ec1aa482c'), 'late-catch');
+  const hmM = new MH.HostManager({ dataDir: path.join(dataDir, 'hub-hosts-mut') });
+  hmM._state.hosts.push({ id: 'h-pair', name: 'h-pair', transport: 'dial' });
+  hmM._devices = new Map([['h-pair', dm]]); hmM.device = async () => dm;
+  const today = await hmM.dirSlice('h-pair', plain);
   fs.writeFileSync(path.join(wedge, '.go'), '');
   ok(!!(healthy && listedOf(healthy) && isOut && asks1 === 1 && asks2 === 2 && codes.join() === 'collector-stuck,collector-stuck' && whys.join() === 'held,held' && listedOf(r1) && okWords(r1) && listedOf(r2) && okWords(r2) && !(hm._collectStuck && hm._collectStuck.has('h-pair'))),
     `on a REAL agent whose one read is out past this ask's budget: it SAYS so by name («${codes[0]}», ${whys[0]} — never «busy»), the plain path is LISTED by the release's road and the words promise nothing (no «still looking»); the next ask asks the collector again (${asks2 - asks1}) — refused at once while it holds, listed again — and nothing holds the machine`, { codes, whys, asks1, asks2, r1: { rowsLate: r1.rowsLate, factsLate: r1.factsLate, partial: r1.partial } });
-  // RED, today's shape: the same refusal shaped by the hub's own shaper from the all-late facts (ec1aa482c's catch) promises an
-  // answer that cannot come
-  const DSLm = require(REPO + '/src/server/dir-slice.js');
-  const Pp = DSLm.plan({ ...plain, budgetMs: 450 }, HOME), lt = { late: true };
-  const todayF = { home: HOME, at: Date.now(), me: { home: HOME, roots: [] }, answers: Pp.wire.cands.map((x) => ({ path: x.c, answer: 'late', at: x.a })), rows: Pp.wire.rows.map(() => lt), probes: Pp.wire.probes.map(() => lt), index: Pp.wire.roots.map(() => lt), listed: [], listedTyped: 0, mounts: [] };
-  const today = DSLm.shape(Pp, todayF, { machine: 'h-pair', localized: {}, took: 0 });
-  ok(!!(today.rowsLate === true && !listedOf(today)), `RED, today's shape: that refusal shaped as late (the all-late facts the last cure's catch built) says «still looking» for the plain path (rowsLate ${today.rowsLate}) and lists nothing — an answer that cannot come while the read holds`);
+  ok(!!(today.rowsLate === true && !listedOf(today)), `RED: the hub's own catch put back to the earlier late shape (a mutant of src/hosts.js, ec1aa482c's catch) answers the same held agent «still looking» for the plain path (rowsLate ${today.rowsLate}) and lists nothing — an answer that cannot come while the read holds`, { rowsLate: today.rowsLate, partial: today.partial });
   // (b2) a machine whose agent says its collector has NO usable worker (gone — the stand-in of (a) on a machine): held on the release's
   // road — no collect asked — until its agent, asked behind the answers, says it has a live worker again
-  let gone = true, pAsks = 0;
+  let gone = true, pAsks = 0, hello = { ...(dm.helloInfo() || {}) };
   const goneDm = new Proxy(dm, { get: (o, k) => {
+    if (k === 'helloInfo') return () => hello;   // (the link's own hello: a NEW object at a new link)
     if (k === 'dirCollect') return async (...a) => { pAsks++; if (gone) throw Object.assign(new Error('the folder field\'s collector on this machine cannot serve (gone)'), { code: 'collector-stuck', state: { live: false, why: 'gone' } }); return o.dirCollect(...a); };
     if (k === 'dirCollectState') return async () => (gone ? { live: false, why: 'gone' } : { live: true });
     const v = o[k]; return typeof v === 'function' ? v.bind(o) : v;
@@ -171,13 +178,35 @@ console.log('⑩ THE LAW (r2974): a machine\'s listing is never worse than the r
   const g1 = await hm.dirSlice('h-pair', plain), gp1 = pAsks;
   const g2 = await hm.dirSlice('h-pair', plain), gp2 = pAsks;
   const heldOn = !!(hm._collectStuck && hm._collectStuck.has('h-pair'));
+  // r3015 (3): A NEW HELLO ends the hold at once (the agent restarted, its link came back) — no state ask needed
+  hm._collectStuckAskMs = 1e9;
+  hello = { ...hello };
+  const gh0 = pAsks; await hm.dirSlice('h-pair', plain); const askedAtHello = pAsks - gh0;
   gone = false; hm._collectStuckAskMs = 0;
   const g3 = await hm.dirSlice('h-pair', plain);   // (its ask that asks the agent, behind its answer)
   const unheld = await until(() => !(hm._collectStuck && hm._collectStuck.has('h-pair')), 3000);
   const gp3 = pAsks;
   const g4 = await hm.dirSlice('h-pair', plain);
-  ok(!!(gp1 === 1 && listedOf(g1) && okWords(g1) && heldOn && gp2 === 1 && listedOf(g2) && listedOf(g3) && unheld && pAsks === gp3 + 1 && listedOf(g4)),
-    `a machine whose agent says «gone»: that ask LISTED by the release's road, the machine HELD there — the next ask asks no collect (${gp2 - gp1}) and is listed — until its agent, asked behind the answers, says it has a live worker again; then the collector road again (${pAsks - gp3} ask) and listed`, { gp1, gp2, gp3, pAsks, heldOn, unheld });
+  ok(!!(gp1 === 1 && listedOf(g1) && okWords(g1) && heldOn && gp2 === 1 && listedOf(g2) && askedAtHello === 1 && listedOf(g3) && unheld && pAsks === gp3 + 1 && listedOf(g4)),
+    `a machine whose agent says «gone»: that ask LISTED by the release's road, the machine HELD there — the next ask asks no collect (${gp2 - gp1}) and is listed — until a NEW HELLO (the collector asked at once: ${askedAtHello}) or its agent, asked behind the answers, says it has a live worker again; then the collector road again (${pAsks - gp3} ask) and listed`, { gp1, gp2, gp3, pAsks, heldOn, askedAtHello, unheld });
+  hm._devices = new Map([['h-pair', dm]]); hm.device = async () => dm;
+  // (b3) «gone» ONCE ON THE REAL AGENT: its one worker ENDS (the suites' crash stand-in, src/dir-ops.js) — the agent says gone until its
+  // pool respawns one; the hub serves the plain path by the release's road, holds the machine, and lets it go once the agent says live
+  mk('crashy/vs-crash-1'); setOld(path.join(HOME, 'crashy'));
+  const Pc = DS.plan({ text: '~/crashy/', bases: [], budgetMs: 300 }, HOME);
+  await dm.dirCollect(Pc.wire, { timeoutMs: 8000 }).catch(() => null);   // the kid's fact: answered, then that worker ends
+  const sawGone = await until(async () => { const s = await dm.dirCollectState().catch(() => null); return !!s && s.live === false && s.why === 'gone'; }, 3000);
+  const rawC = dm.dirCollect.bind(dm), gwhy = [];
+  dm.dirCollect = (...a) => rawC(...a).catch((e) => { gwhy.push(e && e.code === 'collector-stuck' && e.state ? e.state.why : String(e && e.code)); throw e; });
+  hm._collectStuckAskMs = null;   // (the product's own 10 s: no state ask yet)
+  const c1 = await hm.dirSlice('h-pair', plain);
+  const heldC = !!(hm._collectStuck && hm._collectStuck.has('h-pair'));
+  hm._collectStuckAskMs = 0;
+  let backC = false; for (let k = 0; k < 40 && !backC; k++) { await hm.dirSlice('h-pair', plain); await sleep(100); backC = !(hm._collectStuck && hm._collectStuck.has('h-pair')); }
+  const liveC = await dm.dirCollectState().catch(() => null);
+  dm.dirCollect = rawC;
+  ok(!!(sawGone && gwhy[0] === 'gone' && listedOf(c1) && okWords(c1) && heldC && backC && liveC && liveC.live === true),
+    `«gone» on the REAL agent (its one worker ended; the pool respawning): the agent SAYS so (${gwhy[0]}), the plain path is LISTED by the release's road, the machine held — and let go once the agent says live (${backC}: ${JSON.stringify(liveC)})`, { sawGone, gwhy, heldC, backC, liveC });
   hm._devices = new Map([['h-pair', dm]]); hm.device = async () => dm;
   // (c) the no-capability refusal (the client's own gate) falls to the release's road too — and holds nothing
   const nocap = new Proxy(dm, { get: (o, k) => (k === 'dirCollect' ? async () => { throw Object.assign(new Error('daemon lacks dir-collect (capabilities gate)'), { code: 'no-capability' }); } : (typeof o[k] === 'function' ? o[k].bind(o) : o[k])) });

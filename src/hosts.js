@@ -29,8 +29,8 @@ const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js')
 // B-99b9: the path field's two asks on another machine (hosts.dirSlice): the hub's own wait, the run's bound, the marks and holds
 const DIR_SLICE_WAIT_MS = 2000;      // the hub stops WAITING on its asks here and replies (its own race, never the run's timeout)
 const SLICE_TYPED_CAP = 4;          // typed folders one text asks at once (the bases' order): each is ONE shell there; past it, named unread
-const SLICE_RUN_MS = 6000;
-const COLLECT_STUCK_ASK_MS = 10000;   // r2974: a machine whose collector said it cannot serve is asked again whether it can, behind the answers, at most this often           // a run's own bound there (the device's runCmd / the ssh rung)
+const SLICE_RUN_MS = 6000;           // a run's own bound there (the device's runCmd / the ssh rung)
+const COLLECT_STUCK_ASK_MS = 10000;   // r2974: a machine whose collector said it cannot serve is asked again whether it can, behind the answers, at most this often
 const SLICE_DEADLINE_MS = 20000;     // a run that has not SETTLED by now never will (a shell stuck in the kernel): missed / hung — past the longest road
                                     // (the device's connect 4 s + the hub's own bound 7.5 s, then the ssh rung's 6 s), so a slow healthy landing is kept (r949)
 const SLICE_HUNG_MS = 30e3;          // a typed folder that never landed: marked this long (the hub rung's PROBE_LATE_MS)
@@ -1923,12 +1923,13 @@ class HostManager {
   }
 
   /** r2974: is this machine held on the release's road (its agent said its collector cannot serve)? While held, the agent is asked
-   *  whether it can again — behind the answers, at most every COLLECT_STUCK_ASK_MS; its «live» ends the hold. A new link to it (another
-   *  agent, a restart) ends the hold too */
+   *  whether it can again — behind the answers, at most every COLLECT_STUCK_ASK_MS; its «live» ends the hold. A NEW HELLO ends the hold
+   *  at once (r3015 (3): the agent restarted or its link came back — the device manager stays the same across reconnects, its hello is
+   *  the link's own: a fresh collector asked anew) */
   _collectHeld(id, { dm }) {
     const m = this._collectStuck && this._collectStuck.get(id);
     if (!m) return false;
-    if (m.dm !== dm) { this._collectStuck.delete(id); return false; }
+    if (m.dm !== dm || helloOf(dm) !== m.hello) { this._collectStuck.delete(id); return false; }
     const every = Number(this._collectStuckAskMs) >= 0 && this._collectStuckAskMs !== null ? Number(this._collectStuckAskMs) : COLLECT_STUCK_ASK_MS;   // (a suite's shorter one: its seam)
     if (!m.asking && Date.now() - m.askedAt >= every && typeof dm.dirCollectState === 'function') {
       m.asking = true; m.askedAt = Date.now();
@@ -1940,8 +1941,8 @@ class HostManager {
   }
   _collectStuckMark(id, dm, e) {
     const S = (this._collectStuck = this._collectStuck || new Map());
-    if (S.has(id) && S.get(id).dm === dm) return;
-    S.set(id, { dm, at: Date.now(), askedAt: Date.now(), asking: false });
+    if (S.has(id) && S.get(id).dm === dm && S.get(id).hello === helloOf(dm)) return;
+    S.set(id, { dm, hello: helloOf(dm), at: Date.now(), askedAt: Date.now(), asking: false });
     try { console.warn(`[hosts] the folder field on ${id} is served by the release's road: ${String((e && e.message) || e).slice(0, 160)} — until its agent says it has a live worker again`); } catch { }
   }
 

@@ -345,7 +345,7 @@ console.log('⑨ THE LAW (r2752): a listing never costs a person their files on 
       && /dirMounts\.p = dirHandleOf\(\)\.turn\(\(\) => pool\.run\('mountRows'/.test(ag); };
   const swapped = AG.replace('createDirHandle({ poolOf: dirPoolOf, ', 'createDirHandle({ poolOf: () => workerPool, ');
   ok(!!(handleOk(AG, DHs) && swapped !== AG && !handleOk(swapped, DHs)),
-    "the agent's handle for the collector: every read in its turn (dirOne: one out), idle-only, on the collector's OWN pool of one worker with no replacement while a stuck read is out — never the person's pool (its workers and its replacements are never the field's) — RED: the same handle on the person's pool is refused by this pin");
+    "the agent's handle for the collector: every read in its turn (the handle's: one out), idle-only, on the collector's OWN pool of one worker with no replacement while a stuck read is out — never the person's pool (its workers and its replacements are never the field's) — RED: the same handle on the person's pool is refused by this pin");
   // RED, today's shape, in process: the collector on the PERSON's pool (two workers; idle-only only takes an idle one) — the same dead
   // folders take both workers over the keystrokes and the person's act waits behind them
   const WP = require(REPO + '/src/agentd/worker-pool.js'), wf = path.join(dataDir, 'dir-worker.cjs');

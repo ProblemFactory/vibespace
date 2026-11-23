@@ -46,7 +46,16 @@ const pkgOf = (d) => {
 // inside, so the listed parent's time never moves; nothing is removed). A worker the pool's deadline terminates ends here. Nothing
 // else reads it.
 const deadStandIn = (p) => {
-  if (process.env.VIBESPACE_DIROPS_TEST !== '1' || !path.basename(String(p || '')).startsWith('vs-dead-')) return;
+  if (process.env.VIBESPACE_DIROPS_TEST !== '1') return;
+  // r3015 (2): a path named `vs-crash-…` is the suites' WORKER THAT ENDS — its first read answers, then this worker throws outside any
+  // op (an uncaught error ends a worker thread): the pool has no usable worker until its crash backoff respawns one (the collector's
+  // «gone», on a real agent). Once (a `.crashed` file inside the folder), so the respawned worker reads it as any folder
+  if (path.basename(String(p || '')).startsWith('vs-crash-')) {
+    const once = path.join(String(p), '.crashed');
+    if (!fs.existsSync(once)) { fs.writeFileSync(once, ''); setImmediate(() => { throw new Error('the suites\' crash stand-in: this worker ends'); }); }
+    return;
+  }
+  if (!path.basename(String(p || '')).startsWith('vs-dead-')) return;
   const held = path.join(String(p), '.held'), left = path.join(String(p), '.left'), go = path.join(String(p), '.go'), tick = new Int32Array(new SharedArrayBuffer(4));
   if (fs.existsSync(go)) return;
   fs.writeFileSync(held, '');
