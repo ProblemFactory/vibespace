@@ -86,6 +86,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - (3) ws-create's last-resort pass carries `providers_*` by its code; cli-usage-door answers it (503), never login-needed. (4) the Vault window words a held refusal through heldWordsOf. (5) one held guard on every provider door but the list; the models routes answer the hold's words.
 - TESTS: test-provider-store-held ④ ⑤.
 
+### bl-loop-b — the auto-resume follow (主开发 r3196, round wvdpig0q9 on line 656)
+- (1) THE FIRE DROPS A PROMISE THE CONVERSATION OUTLIVED: attemptFire asks `outlived` before any gate. A usage wall's arm answers the stop fact the wall wrote just before it (onWalledTurn: noteStoppedBy, then armIfEnabled); a turn that ran since clears it (in the meta too) or an overload replaces it; then the promise is disarmed, never fired. It cures a restart while held (goneHeld lives in memory only) and serves a plain restart; a stop fact never written is not judged; a removed member's hold keeps its own rule. (2) While held, the delayed «scheduled at T» card and a watch's hourly card are not said. (3) The lift's merge of one conversation's two breaker records goes forward (`mergeFire`). (4) The lift re-says every enabled conversation's status and tells the list once.
+- Legs, scripts/test-auto-resume.mjs 19j–19n, each with its RED in a copy: the outlived promise (restart while held, with a still-stopped control); the delayed card (its timer captured and run); the merge (the pending fire's identity quarantined); the re-say (an unarmed conversation, the list once); passed promises fired by the next tick through the gate, the same count as a plain restart; the toggle off; the newer arm; a forgotten conversation.
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
