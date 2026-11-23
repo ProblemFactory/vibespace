@@ -1433,7 +1433,7 @@ const [handed, locked, crash, boot, bootMut, approval, noMasker, noMaskerMut, wi
 // lane vault-job-approval: the card's legs and their mutants (each a copy of the door compiled at its real path)
 const dmut = (from, to) => { try { return swap(DOOR_SRC, from, to); } catch { return null; } };
 const MUT_REAUTH = dmut("    if (reauthed !== true) return named('reveal_needs_password');\n", '');
-const MUT_DEDUPE = (() => { try { return swap(swap(DOOR_SRC, 'const fresh = need.filter((r) => !(mineOpen && mineOpen.entries.includes(r.id)));', 'const fresh = need;'), '    const open = [...asks.values()].find((q) => q.jobId === jobId) || null;\n', '    const open = null;\n'); } catch { return null; } })();   // both open-card checks cut (the ask\'s and the landing\'s)
+const MUT_DEDUPE = (() => { try { return swap(swap(swap(DOOR_SRC, 'const fresh = need.filter((r) => !(mineOpen && mineOpen.entries.includes(r.id)));', 'const fresh = need;'), '    if (!need.length || sameSet) return { ok: true, filed: 0 };', '    if (!need.length) return { ok: true, filed: 0 };'), '    const open = [...asks.values()].find((q) => q.jobId === jobId) || null;\n', '    const open = null;\n'); } catch { return null; } })();   // every open-card check cut (the ask\'s two — r2666's same-set return with them — and the landing\'s)
 // F1's and F3's controls: the half-written press not taken back · the door that writes no wait line · a wait line every judge
 const MUT_HALF = dmut('          for (const d of done.reverse()) {', '          for (const d of [].reverse()) {');
 const MUT_NOWAIT = dmut("    if (why !== 'vault') return;\n    const entries", "    return;\n    const entries");
