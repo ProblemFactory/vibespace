@@ -199,7 +199,7 @@ for (const row of ROWS) {
 for (const t of TABLE) console.log(`    · ${t.row} · after ${t.after} · control ${t.control} · archive ${t.archive}`);
 {
   const r = runMerge({ AccountManager }, ROWS[0]);
-  ok(r.arch.length === 1 && /^\.credentials\.json\.dead-\d{13}-a[0-9a-f]{8}$/.test(r.arch[0].name) && r.arch[0].mode === 0o600 && (fs.statSync(credsOf(r.am, r.into)).mode & 0o777) === 0o600, 'the archive: `.credentials.json.dead-<ms>-m<6 hex>` beside the file, 0600 (account-material\'s writePrivateFile — the one archive writer of a merge); the new file 0600', r.arch.map((a) => [a.name, a.mode.toString(8)]));
+  ok(r.arch.length === 1 && /^\.credentials\.json\.dead-\d{13}-a[0-9a-f]{8}$/.test(r.arch[0].name) && r.arch[0].mode === 0o600 && (fs.statSync(credsOf(r.am, r.into)).mode & 0o777) === 0o600, 'the archive: `.credentials.json.dead-<ms>-a<8 hex>` beside the file, 0600 — the swap\'s own aside, settled as the verdict says (r2928: nothing is archived before the verdict); the new file 0600', r.arch.map((a) => [a.name, a.mode.toString(8)]));
   ok(r.rowGone && r.fromGone, 'the merged-away row and its dir are gone after the fold', { rowGone: r.rowGone, fromGone: r.fromGone });
 }
 {
@@ -212,7 +212,7 @@ console.log('§2b r2822 — THE SURVIVOR REFRESHED AT THE POINT: its fresh file 
   // the vendor's program writes the survivor's file AT a point of the merge's swap (a hook on the very call, never a race): right
   // before the guard moves the name aside (a refresh in place), or right before ours goes into the empty name (a sign-in landing)
   const hookOf = (k, test, act) => { const k0 = fs[k]; fs[k] = function (...a) { if (test(...a)) act(...a); return k0.apply(this, a); }; return () => { fs[k] = k0; }; };
-  const scene = (M, row, { at, linkless = false, linkErr = linkless ? 'EPERM' : null, widen = false, foldRenameErr = null }) => {
+  const scene = (M, row, { at, linkless = false, linkErr = linkless ? 'EPERM' : null, widen = false, foldRenameErr = null, foldRewrite = null, openErr = null }) => {
     const fresh = login(), freshB = J(fresh); let landed = false;
     const r = runMerge(M, { ...row, at: (am, into, from) => {
       const p = credsOf(am, into);
@@ -220,11 +220,13 @@ console.log('§2b r2822 — THE SURVIVOR REFRESHED AT THE POINT: its fresh file 
         ? hookOf('renameSync', (s0, d) => !landed && String(s0) === p && /\.dead-\d+-a/.test(String(d)), (s0) => { landed = true; fs.writeFileSync(s0, freshB); if (widen) fs.chmodSync(s0, 0o644); })
         // r2928 (5): the survivor's file GONE right at the move aside (the hub's own take-back, off the loop)
         : at === 'gone' ? hookOf('renameSync', (s0, d) => !landed && String(s0) === p && /\.dead-\d+-a/.test(String(d)), (s0) => { landed = true; fs.unlinkSync(s0); })
-        : at === 'link' ? hookOf('linkSync', (s0, d) => !landed && String(d) === p && /\.tmp$/.test(String(s0)), (s0, d) => { landed = true; fs.writeFileSync(d, freshB, { mode: 0o600 }); })
+        : at === 'link' ? hookOf('linkSync', (s0, d) => !landed && String(d) === p && /\.tmp$/.test(String(s0)), (s0, d) => { landed = true; fs.writeFileSync(d, freshB, { mode: 0o600 }); if (foldRewrite) fs.writeFileSync(path.join(am.subDir(from), '.credentials.json'), foldRewrite); })
         : () => { }];
       // …and the RELEASE's write point (its plain rename of the tmp onto the name), where a red control's copy writes: the same moment
       un.push(hookOf('renameSync', (s0, d) => !landed && String(d) === p && /\.tmp$/.test(String(s0)), (s0, d) => { landed = true; fs.writeFileSync(d, freshB, { mode: 0o600 }); }));
       if (linkErr) { const l0 = fs.linkSync; fs.linkSync = function () { throw Object.assign(new Error(linkErr + ': a stand-in'), { code: linkErr }); }; un.push(() => { fs.linkSync = l0; }); }
+      // r3042: an open for write refused (a file's tmp, chosen by its path) — the settle's cut, the settings file's write
+      if (openErr) { const o0 = fs.openSync; fs.openSync = function (q, ...a) { if (openErr.test(String(q)) && /\.tmp$/.test(String(q))) throw Object.assign(new Error('ENOSPC: a stand-in'), { code: 'ENOSPC' }); return o0.call(this, q, ...a); }; un.push(() => { fs.openSync = o0; }); }
       // r2928 (3): the rename of the FOLDED row's file aside fails (its own folder)
       if (foldRenameErr) { const fc = path.join(am.subDir(from), '.credentials.json'), r0 = fs.renameSync; fs.renameSync = function (s0, ...a) { if (String(s0) === fc) throw Object.assign(new Error(foldRenameErr + ': a stand-in'), { code: foldRenameErr }); return r0.call(this, s0, ...a); }; un.push(() => { fs.renameSync = r0; }); }
       return () => { for (const u of un.reverse()) u(); };
@@ -235,7 +237,7 @@ console.log('§2b r2822 — THE SURVIVOR REFRESHED AT THE POINT: its fresh file 
       said: r.out.filter((l) => l.includes('Into') && /changed or went since the merge read it/.test(l)).length, leaks: SECRETS.filter((x) => has(r.out.join('\n'), x)).length,
       oursInFile: filesUnder(r.dataDir).some((q) => fs.readFileSync(q, 'latin1').includes(OAT)), arch: r.arch.map((a) => ({ name: a.name, mcp: (() => { try { return mcpOf(JSON.parse(a.bytes)); } catch { return null; } })(), bytes: a.bytes })),
       fileB: r.file, before: r.before, intoB: r.intoB, fromB: r.fromB, facts: r.facts, fromLeft: fs.existsSync(path.join(r.fromDir, '.credentials.json')),
-      keptSaid: r.out.filter((l) => l.includes('Into') && /could not be moved beside it/.test(l)).length };
+      keptSaid: r.out.filter((l) => l.includes('Into') && /could not be moved beside it/.test(l)).length, out: r.out };
   };
   const GUARD = "guard = creds ? { expectBytes: intoBytes, asideAs: v.archive ? v.aside : null } : {}";
   const mNoGuard = mutant({ acc: [[GUARD, 'guard = {}']] });
@@ -306,6 +308,40 @@ console.log('§2b r2822 — THE SURVIVOR REFRESHED AT THE POINT: its fresh file 
   const mF = mutant({ acc: [['          if (facts) facts.stood =', '          if (false) facts.stood =']] });
   const S1F = mF ? scene(mF, ROWS[0], { at: 'aside' }) : null;
   ok(!!S1F && S1F.landed && !S1F.facts.stood, 'RED control (the fact not set) ⇒ the reply would say «merged» alone (red)', S1F && S1F.facts);
+  // ── r3042, the last smalls ──
+  const said = (x, re) => x.out.filter((l) => l.includes('Into') && re.test(l)).length;
+  // (1) the survivor held OUR token alone (no CLI keys): a failed link-in's aside is REMOVED — said as removed, never «rests archived»
+  const OURS_ALONE = { name: 'survivor-ours-alone', into: (id) => oursFor(id), from: () => login(), preferFrom: false };
+  const U1 = scene({ AccountManager }, OURS_ALONE, { at: 'none', linkErr: 'EIO' });
+  ok(U1.restsSaid === 1 && said(U1, /it held our token alone, which is not kept/) === 1 && said(U1, /it rests archived in its folder/) === 0 && !U1.oursInFile && U1.facts.stood && U1.facts.stood.why === 'archived', 'r3042 (1): the survivor held OUR token alone and the link-in failed — the aside is removed and the journal says THAT (never «rests archived»); our token in no file', { out: U1.out, ours: U1.oursInFile });
+  const mU1 = mutant({ acc: [["const rests = stood.asideSettled === 'removed' ?", 'const rests = false ?']] });
+  const U1X = mU1 ? scene(mU1, OURS_ALONE, { at: 'none', linkErr: 'EIO' }) : null;
+  ok(!!U1X && said(U1X, /it rests archived in its folder/) === 1, 'RED control (the words not picked by what became of it) ⇒ «rests archived» over a removed file (red)', U1X && U1X.out);
+  // (2) the aside's cut to its CLI keys FAILS (ENOSPC on its rewrite): our token stays in the archive — said by the member's name
+  const U2 = scene({ AccountManager }, OURS_ROW, { at: 'link', openErr: /\.dead-\d+-a[0-9a-f]{8}\./ });
+  ok(U2.landed && U2.stands && said(U2, /could not be cut to the CLI's keys or removed — it still holds our token/) === 1, 'r3042 (2): the aside\'s cut to its CLI keys fails — our token still rests in it, and the journal says so by the member\'s name (never silent)', { out: U2.out });
+  const mU2 = mutant({ acc: [["const oursLeft = () => { if (oursSaid) return; oursSaid = true; console.log(", "const oursLeft = () => { if (oursSaid) return; oursSaid = true; (() => { })("]] });
+  const U2X = mU2 ? scene(mU2, OURS_ROW, { at: 'link', openErr: /\.dead-\d+-a[0-9a-f]{8}\./ }) : null;
+  ok(!!U2X && U2X.landed && said(U2X, /still holds our token/) === 0, 'RED control (the cut\'s failure swallowed) ⇒ nothing says our token rests in an archive (red)', U2X && U2X.out);
+  // (3) the folded file asked «ours?» AGAIN as it is now: a vendor sign-in written over our token file since the first read is KEPT whole
+  const vendor = login(), vendorB = J(vendor);
+  const U3 = scene({ AccountManager }, FOLD_OURS, { at: 'link', foldRewrite: vendorB });
+  ok(U3.landed && U3.stands && U3.arch.some((x) => same(x.bytes, vendorB)) && !U3.err, 'r3042 (3): the folded row\'s file became a vendor sign-in after the merge\'s first read — asked again, it is archived WHOLE beside the survivor (never removed with the folder)', { arch: U3.arch.map((x) => x.name) });
+  const mU3 = mutant({ acc: [['let fromNow = fromObj; try { fromNow = parsed(fs.readFileSync(fc)); } catch { }', 'let fromNow = fromObj;']] });
+  const U3X = mU3 ? scene(mU3, FOLD_OURS, { at: 'link', foldRewrite: vendorB }) : null;
+  ok(!!U3X && U3X.landed && !U3X.arch.some((x) => same(x.bytes, vendorB)), 'RED control (the first read\'s «ours» kept) ⇒ the vendor sign-in is removed with the folded folder (red)', U3X && U3X.arch.map((x) => x.name));
+  // (4) the folded folder KEPT: the reply's facts say where the new sign-in is
+  const U4 = scene({ AccountManager }, ROWS[0], { at: 'aside', foldRenameErr: 'EACCES' });
+  ok(U4.keptSaid === 1 && typeof U4.facts.foldKept === 'string' && /^subs[\\/]/.test(U4.facts.foldKept) && !U4.fromGone, 'r3042 (4): the folded folder kept — the reply\'s facts name WHERE the new sign-in is (subs/<the folded row>), for the dialog to say it', U4.facts);
+  const mU4 = mutant({ acc: [['          if (foldedWhy && facts) facts.foldKept =', '          if (false) facts.foldKept =']] });
+  const U4X = mU4 ? scene(mU4, ROWS[0], { at: 'aside', foldRenameErr: 'EACCES' }) : null;
+  ok(!!U4X && !U4X.facts.foldKept, 'RED control (the place not in the facts) ⇒ the dialog would say «kept beside it» (red)', U4X && U4X.facts);
+  // (6) the survivor's SETTINGS file write fails (EIO on its tmp): said by name, the folded folder kept, its place in the facts
+  const U6 = scene({ AccountManager }, ROWS[0], { at: 'none', openErr: /\.claude\.json\./ });
+  ok(said(U6, /could not move the folded row's files \(ENOSPC\)/) === 1 && !U6.fromGone && typeof U6.facts.foldKept === 'string', 'r3042 (6): the survivor\'s settings file cannot be written — said by the member\'s name (no longer the best-effort catch\'s silence), the folded folder kept, its place in the facts', { out: U6.out, facts: U6.facts });
+  const mU6 = mutant({ acc: [["      console.log(`[accounts] ${who}: the merge could not move the folded row's files", "      (() => { })(`[accounts] ${who}: the merge could not move the folded row's files"]] });
+  const U6X = mU6 ? scene(mU6, ROWS[0], { at: 'none', openErr: /\.claude\.json\./ }) : null;
+  ok(!!U6X && said(U6X, /could not move the folded row's files/) === 0, 'RED control (the outer catch silent — the release) ⇒ nothing is said (red)', U6X && U6X.out);
 }
 
 console.log('§3 THE SPIES — no token byte on a merge\'s outbound paths, OUR token in no file');

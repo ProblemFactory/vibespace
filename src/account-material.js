@@ -78,7 +78,7 @@ function writePrivateFile(dest, bytes, { expectBytes, asideAs } = {}) {
     fs.fsyncSync(fd);
     fs.closeSync(fd); fd = undefined;
     if (expectBytes === undefined) fs.renameSync(tmp, dest);
-    else swapSync(tmp, dest, expectBytes, asideAs);
+    else return swapSync(tmp, dest, expectBytes, asideAs);   // the aside's fate (finally still unlinks the tmp)
   } finally {
     if (fd !== undefined) { try { fs.closeSync(fd); } catch { } }
     try { fs.unlinkSync(tmp); } catch { }
@@ -104,7 +104,7 @@ function swapSync(tmp, dest, was, asideAs) {
     }
   }
   // the put-back's three replies on the link-in road too (r2928 (2)): the read file goes back, rests settled, or is said kept
-  const back = (e) => { if (!aside) return e; const pb = putBackSync(aside, dest); if (pb !== 'back') settleAsideSync(aside, asideAs, was); if (pb === 'kept') e.restsArchived = true; if (pb === 'taken') e.taken = true; return e; };
+  const back = (e) => { if (!aside) return e; const pb = putBackSync(aside, dest); if (pb !== 'back') e.asideSettled = settleAsideSync(aside, asideAs, was); if (pb === 'kept') e.restsArchived = true; if (pb === 'taken') e.taken = true; return e; };
   let taken = false;
   try { fs.linkSync(tmp, dest); } catch (e) {
     if (e.code === 'EEXIST') taken = true;
@@ -112,16 +112,19 @@ function swapSync(tmp, dest, was, asideAs) {
     else { try { taken = !copyIntoSync(tmp, dest); } catch (e2) { throw back(e2); } }
   }
   if (taken) throw back(Object.assign(changed(), { taken: true }));   // a sign-in that took the empty name stays
-  if (aside) settleAsideSync(aside, asideAs, was);
+  return aside ? settleAsideSync(aside, asideAs, was) : null;   // the survivor's earlier file: what became of it (the merge says 'ours')
 }
 /** r2928 — THE LAW: an aside whose bytes are OUR OWN long-lived token is never kept as an archive. `as` is the caller's verdict on
  *  the file it read (which the aside is, proved by the compare, so its bytes are `was`): null = ours with nothing else — removed (the hub writes ours again
  *  at its next sync); bytes = what the archive keeps (a person's or the vendor's sign-in whole, or ours' CLI keys alone); undefined
  *  = kept as it is. The archive is 0600. */
 function settleAsideSync(aside, as, was) {
-  if (as === null) { try { fs.unlinkSync(aside); } catch { } return; }
-  if (as !== undefined && !Buffer.from(as).equals(Buffer.from(was))) { try { writePrivateFile(aside, as); } catch { } return; }
+  // → what became of it (r3042: the caller says exactly that): 'removed' | 'rest' (cut to the CLI's keys) | 'kept' (whole) | 'ours'
+  // (it could not be removed or cut: OUR token still rests in it — the caller says so by the member's name, never silent)
+  if (as === null) { try { fs.unlinkSync(aside); return 'removed'; } catch { return 'ours'; } }
+  if (as !== undefined && !Buffer.from(as).equals(Buffer.from(was))) { try { writePrivateFile(aside, as); return 'rest'; } catch { return 'ours'; } }
   try { fs.chmodSync(aside, 0o600); } catch { }
+  return 'kept';
 }
 /** putBack's sync form → 'back' | 'taken' | 'kept' (as putBack) */
 function putBackSync(aside, p) {
@@ -169,7 +172,7 @@ async function writePrivateFileAsync(dest, bytes, { expect, asideAs } = {}) {
         // r2928: the put-back's three replies — the aside is the file the verdict read (moveAside proved it): when it cannot go back
         // it becomes what `asideAs` says (OUR long-lived token never rests in an archive), and 'kept' is said true
         const pb = await putBack(aside, dest);
-        if (pb !== 'back') await settleAside(aside, asideAs);
+        if (pb !== 'back') e.asideSettled = await settleAside(aside, asideAs);
         if (pb === 'kept') e.restsArchived = true;
         throw e;
       }
@@ -183,10 +186,10 @@ async function writePrivateFileAsync(dest, bytes, { expect, asideAs } = {}) {
 
 /** settleAsideSync's twin off the loop (the strip and the re-mint roads): null = removed; bytes = what the archive keeps;
  *  undefined = kept as it is (a person's or the vendor's sign-in is always kept) */
-async function settleAside(aside, as) {
-  if (as === undefined) return;
-  if (as === null) { try { await fsp.unlink(aside); } catch { } return; }
-  try { await writePrivateFileAsync(aside, as); } catch { }
+async function settleAside(aside, as) {   // → as settleAsideSync's answer
+  if (as === undefined) return 'kept';
+  if (as === null) { try { await fsp.unlink(aside); return 'removed'; } catch { return 'ours'; } }
+  try { await writePrivateFileAsync(aside, as); return 'rest'; } catch { return 'ours'; }
 }
 
 // r2697 THE CONTENT A GUARD COMPARES: the sha256 of the bytes READ, kept in MEMORY ONLY beside the stat object it was read with (a

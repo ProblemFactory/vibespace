@@ -908,7 +908,9 @@ export function installManageAgents(App, ctx = {}) {
         if (r?.loggedIn) {
           clearInterval(iv);
           // r2928 (4): a merge whose guard STOOD says so in plain words — what is there stands, the new sign-in is kept beside it
-          if (r.merged && r.mergeStood) showToast(r.mergeStood.why === 'changed' ? t('Recognized as existing account “{name}” — its sign-in changed on this machine while merging, so it stays as it is; your new sign-in is kept beside it', { name: r.account?.name || '' }) : t('Recognized as existing account “{name}” — the merge could not place a sign-in for it (yours is kept beside its file); sign in again', { name: r.account?.name || '' }), { duration: 12000 });
+          // r3042 (4)(5): a kept folder says WHERE the sign-in is; only an EMPTY name asks for a new sign-in (a put-back that answered back stands)
+          if (r.merged && r.mergeFoldKept) showToast(t("Recognized as existing account “{name}” — your new sign-in could not be moved to it: it stays in VibeSpace's data folder under {folder}, which no account names; sign in again", { name: r.account?.name || '', folder: r.mergeFoldKept }), { duration: 15000 });
+          else if (r.merged && r.mergeStood) showToast(r.mergeStood.why === 'archived' ? t('Recognized as existing account “{name}” — the merge could not place a sign-in for it (yours is kept beside its file); sign in again', { name: r.account?.name || '' }) : t('Recognized as existing account “{name}” — its sign-in changed on this machine while merging, so it stays as it is; your new sign-in is kept beside it', { name: r.account?.name || '' }), { duration: 12000 });
           else if (r.merged) showToast(t('✓ Recognized as existing account “{name}” — merged (freshest login kept)', { name: r.account?.name || '' }), { duration: 7000 });
           else showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
           // B-360d: the same-account fold could not compare these rows (their sign-in could not be read in time) — SAID, never silent

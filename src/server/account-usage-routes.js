@@ -909,7 +909,7 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
         // credentials now live in; the throwaway above is about to stop
         // existing.
         wakeOnLoginSuccess(dup.id, merged, 'subscription login merge', merged?.id || dup.id);
-        return res.json({ success: true, ...fin, merged: true, account: merged, ...(mf.stood ? { mergeStood: mf.stood } : {}), ...adoptFirstSignin(cardRow, fin, (merged && merged.id) || dup.id) });
+        return res.json({ success: true, ...fin, merged: true, account: merged, ...(mf.stood ? { mergeStood: mf.stood } : {}), ...(mf.foldKept ? { mergeFoldKept: mf.foldKept } : {}), ...adoptFirstSignin(cardRow, fin, (merged && merged.id) || dup.id) });
       } catch (me) {
         // THE FOLD DID NOT HAPPEN, SO THIS RECORD IS STILL THE ONE HOLDING
         // THE LOGIN (r3) — it gets the edge the gate above deferred. Above

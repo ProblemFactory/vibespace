@@ -1173,7 +1173,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
   for (const k of ['remint:before-aside', 'remint:before-link', 'clear:before-aside', 'clear:before-unlink', 'strip:before-aside', 'strip:before-link']) T2[k] = await toc(undefined, k);
   ok(Object.values(T2).every((x) => x.landed && x.fresh !== 'LOST'), 'F2 toctou (the verifier\'s probe, ported to the new acts): a CLI login landing at every point of a re-mint swap, a clearOat and a strip — before the move aside, before the link into the empty name, before the aside\'s unlink — is never LOST', T2);
   ok(['remint:before-aside', 'clear:before-aside', 'strip:before-aside'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed') && ['remint:before-link', 'strip:before-link'].every((k) => T2[k].fresh === 'in place' && T2[k].fact.code === 'changed'), 'F2: a login that is what moved goes straight back (refused · changed); one that took the empty name stays where it landed (refused · changed)', T2);
-  const mF2r = mutantStore({ mat: [["    else if (expect !== undefined) {\n      const aside = await moveAside(dest, expect);\n      try { await linkInto(tmp, dest); } catch (e) {   // a login that took the empty name stays; ours goes back or rests archived\n        // r2928: the put-back's three replies — the aside is the file the verdict read (moveAside proved it): when it cannot go back\n        // it becomes what `asideAs` says (OUR long-lived token never rests in an archive), and 'kept' is said true\n        const pb = await putBack(aside, dest);\n        if (pb !== 'back') await settleAside(aside, asideAs);\n        if (pb === 'kept') e.restsArchived = true;\n        throw e;\n      }\n      try { await fsp.unlink(aside); } catch { }\n    } else await fsp.rename(tmp, dest);\n", "    else { if (expect !== undefined) await stillSame(dest, expect); await fsp.rename(tmp, dest); }\n"], ['  await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)\n', '  await stillSame(p, seen.stat);\n  await fsp.unlink(p);\n']] });
+  const mF2r = mutantStore({ mat: [["    else if (expect !== undefined) {\n      const aside = await moveAside(dest, expect);\n      try { await linkInto(tmp, dest); } catch (e) {   // a login that took the empty name stays; ours goes back or rests archived\n        // r2928: the put-back's three replies — the aside is the file the verdict read (moveAside proved it): when it cannot go back\n        // it becomes what `asideAs` says (OUR long-lived token never rests in an archive), and 'kept' is said true\n        const pb = await putBack(aside, dest);\n        if (pb !== 'back') e.asideSettled = await settleAside(aside, asideAs);\n        if (pb === 'kept') e.restsArchived = true;\n        throw e;\n      }\n      try { await fsp.unlink(aside); } catch { }\n    } else await fsp.rename(tmp, dest);\n", "    else { if (expect !== undefined) await stillSame(dest, expect); await fsp.rename(tmp, dest); }\n"], ['  await fsp.unlink(await moveAside(p, seen.stat)); // F2: rename aside → check → unlink (never the name itself)\n', '  await stillSame(p, seen.stat);\n  await fsp.unlink(p);\n']] });
   const T2m = {};
   if (mF2r) for (const k of ['remint:old-rename', 'clear:old-unlink', 'strip:old-rename']) T2m[k] = await toc(mF2r, k);
   ok(!!mF2r && Object.values(T2m).every((x) => x.landed && x.fresh === 'LOST'), 'RED control (F2): c9fea70ad\'s check-then-rename / check-then-unlink — a login landing after the stat guard is LOST in all three acts (the legs above catch it)', T2m);
@@ -1206,6 +1206,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
       const uns = [at === 'reread'
         ? hook(fsp8, 'open', function (o0, q, ...r) { if (String(q) === p && /removeCredentialFile/.test(String(new Error().stack))) land(); return o0.call(this, q, ...r); })
         // r2824 (4): the refresh placed right before the READ's stat (the handle's stat, after its bytes were read)
+        : at === 'none' ? () => { }
         : at === 'stat' ? hook(fsp8, 'open', function (o0, q, ...r) { return Promise.resolve(o0.call(this, q, ...r)).then((fh) => { if (String(q) === p && armed) { const s0 = fh.stat; fh.stat = function (...a) { land(); return s0.apply(this, a); }; } return fh; }); })
         : hook(fsp8, 'rename', function (r0, s, d, ...r) { if (String(s) === p && (at === 'archive' ? ARCH : /\.dead-\d+-a/).test(String(d))) land(); return r0.call(this, s, d, ...r); })];
       if (linkErr) uns.push(hook(fsp8, 'link', function () { return Promise.reject(errOf(linkErr)); }));
@@ -1222,7 +1223,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
       const texts = [logs.join('\n'), JSON.stringify(reply || null), JSON.stringify(reply2 || null), JSON.stringify(f || null), fs.readFileSync(path.join(am.dataDir, 'accounts.json'), 'utf8')].join('\n');
       return { landed, sameSize: fresh != null && fresh.length === before.length && fresh !== before, freshStands: fresh != null && now === fresh, fact: f && { verdict: f.verdict, code: f.code },
         said: logs.filter((l) => l.includes(name) && /changed or went since it was read/.test(l)).length, arch: allArch(am, m).length - arch0,
-        saidArch: logs.filter((l) => l.includes(name) && /could not go back to its name/.test(l)).length, mode: (() => { try { return fs.statSync(p).mode & 0o777; } catch { return null; } })(),
+        saidArch: logs.filter((l) => l.includes(name) && /could not go back to its name/.test(l)).length, heldAlone: logs.filter((l) => l.includes(name) && /it held our token alone, which is not kept/.test(l)).length, mode: (() => { try { return fs.statSync(p).mode & 0o777; } catch { return null; } })(),
         sumInText: [before, fresh].filter((t) => t != null).some((t) => texts.includes(sha(t).slice(0, 16))) };
     };
     const TK = {};
@@ -1309,6 +1310,13 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     const mLR = mutantStore({ acc: [['...(!v.archive && ours ? { asideAs } : {})', '...({})']] });
     const LRX = mLR ? await lawScene(mLR, 'remint') : null;
     ok(!!LRX && LRX.landed && LRX.oursArchived, 'RED control (the re-mint\'s verdict not handed to the writer) ⇒ our earlier token rests in an archive (red)', LRX);
+    // r3042 (1): ours could not be written (link EIO) and the file read could not go back — it held OUR token alone (no CLI keys), so
+    // its aside is REMOVED: the journal says that, never «the CLI's keys rest archived»
+    const TA1 = await tick(undefined, 'remint', 'in-place', { at: 'none', linkErr: 'EIO' });
+    ok(TA1.saidArch === 1 && TA1.heldAlone === 1 && TA1.arch === 0 && TA1.fact.code === 'EIO', 'r3042 (1): the link-in fails and so does the put-back, the file read held our token alone — it is removed (no archive), and the journal says so by the member\'s name', TA1);
+    const mTA1 = mutantStore({ acc: [["e.asideSettled === 'removed' ? 'it held our token alone, which is not kept' : ", '']] });
+    const TA1X = mTA1 ? await tick(mTA1, 'remint', 'in-place', { at: 'none', linkErr: 'EIO' }) : null;
+    ok(!!TA1X && TA1X.saidArch === 1 && TA1X.heldAlone === 0, 'RED control (the words not picked by what became of it) ⇒ «the CLI\'s keys rest archived» over a removed file (red)', TA1X);
     // r2824 (4): THE STAT AFTER THE BYTES — a same-size refresh placed right before the read's stat (after its bytes) is refused: the
     // pair is a newer stat with the bytes read; the old order (the stat first) takes the refresh as read and writes over it
     const TS = await tick(undefined, 'remint', 'in-place', { at: 'stat' });
