@@ -592,6 +592,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  engine's report rides the prompt hook of whatever turn starts next — lane stash-any-turn): with nothing stashed the claim
    *  is still taken, empty, so the hand-over posts the ONE frame that starts that turn (one turn, one charge — the report is
    *  never copied into the frame: it would arrive twice). */
+  /** how many group messages wait for this conversation's next turn (the strip's own preview: what the report would hand) — 0 when
+   *  none, null when it cannot be told now (no groups engine, a held family answers no `pending`) */
+  function groupsWaitingFor(cid) {
+    try { const ge = getGroups(); if (!ge || typeof ge.reportsForTurn !== 'function') return null; const pv = ge.reportsForTurn(cid, { preview: true }); return pv && Array.isArray(pv.pending) ? pv.pending.length : null; } catch { return null; }
+  }
   function claimForWake(cid, { bare = false } = {}) {
     if (!cid) return { ok: false, code: 'no_conversation', error: 'no conversation' };
     if (closed) return { ok: false, code: 'restarting', error: 'the server is restarting — the notices keep waiting' };
@@ -599,7 +604,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (cur) return { ok: false, code: 'in_flight', error: `a hand-over for this conversation is already in progress (${cur.id})`, id: cur.id };
     const id = mint();
     let prep = prepareHandOver(cid, id);
-    if (!prep.ok && prep.code === 'nothing_waiting' && bare) prep = { ok: true, d: getDeliver(), jm: jobsReady(), text: '', n: 0, held: 0, why: null, pm: { text: '', shown: [], rest: [] }, shownStashed: [], shownParked: [], jobs: [], jobsText: '', releases: [], bare: true };
+    // line 547's small (主开发 r2853): A WAKE NOBODY TYPED THAT HAS NOTHING NEW STARTS NO TURN — a BARE claim (a peer's wake: its words are in
+    // the group log, its report rides the turn) is taken only while that log holds something UNSEEN for this conversation; with nothing
+    // waiting it is refused by name (nothing_waiting), never an empty billed turn — on this road (a file held across a restart lost the
+    // record of a resume made while held) and every other. Unknown (no groups engine, a held family) ⇒ the claim as before.
+    if (!prep.ok && prep.code === 'nothing_waiting' && bare && groupsWaitingFor(cid) !== 0) prep = { ok: true, d: getDeliver(), jm: jobsReady(), text: '', n: 0, held: 0, why: null, pm: { text: '', shown: [], rest: [] }, shownStashed: [], shownParked: [], jobs: [], jobsText: '', releases: [], bare: true };
     if (!prep.ok) return prep;
     inflight.set(cid, { id, at: now(), p: null });
     changed();

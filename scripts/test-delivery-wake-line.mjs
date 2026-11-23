@@ -68,7 +68,7 @@ const AGENT = { stopReason: 'ended', stoppedAt: T0 - 60e3, endedBy: { kind: 'age
 let seq = 0;
 
 /** the rig: the REAL ladder + park + hand-over + line + start; ONE manual clock for the park; `live` = the conversations running */
-function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {}, cli = {}, tick = 0, clock = null, lineBound = null } = {}) {
+function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {}, cli = {}, tick = 0, clock = null, lineBound = null, shMod = SH } = {}) {
   const dataDir = dir || path.join(ROOT, name + '-' + (++seq));
   fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: T0, timers: [] };
@@ -89,7 +89,7 @@ function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = 
   });
   R.deliver.onRetry?.((ev, cid, e, extra) => { if (ev === 'wake') R.wakes.push({ cid, ...extra }); });
   R.jm = typeof jobs === 'function' ? jobs(R) : null;
-  R.view = SH.create({ activeSessions: sessions, getDeliver: () => R.deliver, getJobs: () => R.jm, broadcastSessions: () => { }, renderMsgStash: AR.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } }, now: () => c.now, dataDir });
+  R.view = shMod.create({ activeSessions: sessions, getDeliver: () => R.deliver, getJobs: () => R.jm, getGroups: () => R.ge || null, broadcastSessions: () => { }, renderMsgStash: AR.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } }, now: () => c.now, dataDir });
   R.line = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : { ok: false, why: 'no start' }), log: () => { }, ...(lineBound ? { startBoundMs: lineBound } : {}) });
   // the CLI registry's ids, ONE shared read a tick (`tick` null = the module's own tick; 0 = a read at every ask); `clock` = its time
   R.registryIds = (mod.sharedRegistryIds || DWO.sharedRegistryIds)({ read: () => { R.registryReads++; return new Set(live); }, ...(tick === null ? {} : { tickMs: tick }), clock: clock || (() => R.slept.reduce((a, b) => a + b, 0)) });
@@ -328,6 +328,76 @@ console.log('⑥b B-2566\'s remainder (r1277 (7)): a wake to a member whose MACH
   ok(!!g.held && g.held.parked === true && g.held.owed === true && g.held.refused === 'ended' && g.held.reason === D.senderWords('unreachable') && /cannot be reached/.test(g.held.reason) && g.owed === 1,
     'a wake to a member whose machine cannot be reached: OWED (the park keeps it), and its sender is told the MACHINE cannot be reached — «kept and goes out when it replies»', g);
   ok(!!r.held && r.held.reason === D.senderWords('owed') && /was ended/.test(r.held.reason), '⑥b RED CONTROL: the branch removed (a copy of the groups engine) ⇒ the sender is told the conversation «was ended» — the leg above would be red', r);
+}
+
+console.log('⑥c line 547\'s small (主开发 r2853): A WAKE NOBODY TYPED THAT HAS NOTHING NEW STARTS NO TURN');
+{
+  const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8');
+  const SH_EMPTY = mutantCopies('dwl-bare-empty', REPO).load('src/server/stash-handover.js', anchored(SHSRC, 'bare && groupsWaitingFor(cid) !== 0) prep = ', 'bare) prep = ', 'the empty claim as before'), 'bare-empty');
+  const Q = { info() { }, warn() { }, log() { } };
+  const groupsOf = (R, A, B) => {
+    const roster = [{ cid: A, name: 'alpha', groups: ['tg1'], reachability: null }, { cid: B, name: 'beta', groups: ['tg1'], reachability: null }];
+    const store = createChannelStore({ dir: path.join(R.dataDir, 'channels'), log: Q });
+    const eng = GE.create({ store, deliver: R.deliver, broadcast: () => { }, now: () => R.c.now, paceClock: () => R.c.now, roster: () => roster, groupSetting: () => 'none', log: Q });
+    R.ge = eng;
+    return { store, eng };
+  };
+  // (1) the wake owed to stopped B is parked; a TURN of B carries the report before the line runs it — nothing waits any more
+  const nothingRun = async (shMod, tag) => {
+    const A = cidOf(50), B = cidOf(51);
+    const R = rig('bare-nothing-' + tag, { kept: { [B]: RESTART }, shMod });
+    R.live.add(A);
+    const { store, eng } = groupsOf(R, A, B);
+    await eng.sendToAgent({ from: A, to: 'beta', text: 'please look at the review', wake: true });
+    const parked = R.deliver.endedEntries(B).length;
+    const rep = eng.reportsForTurn(B); await eng.commitReports(B, rep.marks);   // the report rode a turn: B has seen every word
+    await R.at(10);
+    try { store.close(); } catch { }
+    return { parked, reopens: R.reopens.filter((r) => r.cid === B).length, frames: R.framesTo(B).length, refused: R.wakes.some((w) => w.cid === B && w.code === 'nothing_waiting') };
+  };
+  const nw = await nothingRun(SH, 'head');
+  ok(nw.parked === 1 && nw.reopens === 0 && nw.frames === 0 && nw.refused, '⑥c a bare peer wake whose words a turn already carried: refused BY NAME (nothing_waiting) — no resume, no frame, no billed turn with nothing new', nw);
+  const nwx = await nothingRun(SH_EMPTY, 'cut');
+  ok(nwx.frames === 1 && nwx.reopens === 1, '⑥c RED CONTROL (the empty claim, as before): the conversation is resumed and a frame posted with nothing new in it — red', nwx);
+  // (2) THE ROAD THE ROUND NAMED: the last run parked a wake for B (on disk); this start cannot read msg-retry.json (held); a new wake
+  // RESUMES B while held and its turn carries every word; a RESTART while still held loses the record of that resume; the file then
+  // reads and its older wake for B goes to the line — which finds nothing waiting: ONE resume in all
+  const eio = (file) => { const real = fs.readFileSync; let n = 0; fs.readFileSync = function (p, ...a) { if (!n && path.resolve(String(p)) === file) { n++; throw Object.assign(new Error('EIO: stand-in'), { code: 'EIO' }); } return real.call(this, p, ...a); }; return () => { fs.readFileSync = real; }; };
+  const restartRun = async (shMod, tag) => {
+    const A = cidOf(52), B = cidOf(53);
+    const R1 = rig('bare-restart1-' + tag, { kept: { [B]: RESTART }, shMod });
+    R1.live.add(A);
+    const g1 = groupsOf(R1, A, B);
+    await g1.eng.sendToAgent({ from: A, to: 'beta', text: 'the first words', wake: true });   // parked, on disk — the hub stops before the line runs it
+    R1.deliver.closeRetries(); try { g1.store.close(); } catch { }
+    const file = path.resolve(path.join(R1.dataDir, 'msg-retry.json'));
+    const onDisk = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8'))[B] || []).length : 0;
+    let undo = eio(file);
+    let R2; try { R2 = rig('bare-restart2-' + tag, { dir: R1.dataDir, kept: { [B]: RESTART }, shMod }); } finally { undo(); }
+    R2.live.add(A);
+    const g2 = groupsOf(R2, A, B);
+    await g2.eng.sendToAgent({ from: A, to: 'beta', text: 'the second words', wake: true });
+    await R2.at(10);   // resumed while held (a bare frame)
+    const rep = g2.eng.reportsForTurn(B); await g2.eng.commitReports(B, rep.marks);   // its turn's report carried both
+    const life2 = { held: !!R2.deliver.retryHeldState(), frames: R2.framesTo(B).length };
+    R2.deliver.closeRetries(); try { g2.store.close(); } catch { }
+    undo = eio(file);
+    let R3; try { R3 = rig('bare-restart3-' + tag, { dir: R1.dataDir, kept: { [B]: RESTART }, shMod }); } finally { undo(); }
+    R3.live.add(A);
+    const g3 = groupsOf(R3, A, B);
+    const held3 = !!R3.deliver.retryHeldState();
+    R3.c.now = T0 + 31_000;
+    await R3.deliver.noteTurnEnd({ claudeSessionId: A, backendSessionId: A, name: 'alpha', mode: 'chat', backend: 'claude' });   // a park road reads the file again
+    for (let i = 0; i < 4; i++) { const p = R3.deliver._retryReading(); if (p) await p; await new Promise((z) => setImmediate(z)); }
+    await R3.at(200_000);
+    try { g3.store.close(); } catch { }
+    return { onDisk, life2, held3, lifted: !R3.deliver.retryHeldState(), life3Frames: R3.framesTo(B).length, resumes: life2.frames + R3.framesTo(B).length };
+  };
+  const rs = await restartRun(SH, 'head');
+  console.log(`    facts: ${JSON.stringify(rs)}`);
+  ok(rs.onDisk === 1 && rs.life2.held && rs.life2.frames === 1 && rs.held3 && rs.lifted && rs.life3Frames === 0 && rs.resumes === 1, '⑥d delivered while held, a restart while still held, then the lift: the file\'s older wake finds nothing waiting — ONE resume in all', rs);
+  const rsx = await restartRun(SH_EMPTY, 'cut');
+  ok(rsx.resumes === 2, '⑥d RED CONTROL (the empty claim, as before): the file\'s older wake resumes B a SECOND time with nothing new — red', rsx);
 }
 
 console.log('⑦ money: a delivery keeps piece 4\'s refusals — a goal runs many turns, a wake authorises one');
