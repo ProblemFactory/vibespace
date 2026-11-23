@@ -9553,6 +9553,8 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
+  "The folder of an attachment did not answer": "一个附件所在的文件夹没有响应",
+  "The folder of a link in an item did not answer": "条目里一个链接所在的文件夹没有响应",
   "Not found: {path}": "找不到：{path}",
   "{name} is no longer published": "{name} 已不再发布",
   "{name} is gone — nothing at {path} any more": "{name} 已不在了 —— {path} 处已没有它",

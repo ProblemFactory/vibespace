@@ -9552,6 +9552,8 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "添付がなくなりました",
   "A link in an item was not found": "項目内のリンクが見つかりません",
+  "The folder of an attachment did not answer": "添付のフォルダーが応答しませんでした",
+  "The folder of a link in an item did not answer": "項目内のリンクのフォルダーが応答しませんでした",
   "Not found: {path}": "見つかりません: {path}",
   "{name} is no longer published": "{name} は公開されていません",
   "{name} is gone — nothing at {path} any more": "{name} はもうありません — {path} に見つかりません",

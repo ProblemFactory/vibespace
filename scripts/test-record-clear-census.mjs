@@ -42,12 +42,14 @@
 //                         keeps a generic title), THE BELT (every text field of the five kinds a surface reads is worded through
 //                         the cleared-aware words, or declared), the long-lived client caches, each surface's repaint on its
 //                         store's broadcast — four patched copies as controls; the chrome half is test-record-clear-client
+//                         · §H8 (r2960) every toast of the For-you openers keeps a head + the item's ref, never its words
 //   §I THE INTERPOLATION CENSUS (verify r8, r9) — the HEAVY twin scripts/test-record-clear-census-interp.mjs since B-e601 r2
 //                         (2026-11-18: ~5 s of one pass over the whole tree; the fast tier keeps at most 12 rows over 10 s)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';   // §H8's reds: a copy's edit fails BY NAME when its line moves
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { trackedFiles } from './tracked-files.mjs'; // lane fence-hygiene B-abd8: a census lists data/bin via git, never a readdir (an untracked rclone/zip/bundle is NOT an agent CLI)
 const require = createRequire(import.meta.url);
@@ -1534,6 +1536,55 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
   const topAlt = (src) => { let d = 0, cls = false; for (let i = 0; i < src.length; i++) { const c = src[i]; if (c === '\\') { i++; continue; } if (cls) { if (c === ']') cls = false; continue; } if (c === '[') cls = true; else if (c === '(') d++; else if (c === ')') d--; else if (c === '|' && d === 0) return true; } return false; };
   ok(REPAINT.every(([, , re]) => (Array.isArray(re) ? re : [re]).every((r) => !topAlt(r.source))) && topAlt('a[\\s\\S]*|b') && !topAlt('(a|b)c'), 'H5 no row\'s pattern is a top-level alternation (one that passes on half of the row\'s claim)');
   for (const row of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 26, label: '§H6 ' })) ok(row.pass, row.name, row.detail);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// §H8 THE FOR-YOU OPENERS' TOASTS (主开发 r2960; B-23e5 (a)'s two storage toasts) — every toast that openArtifact and openLink
+// (src/lib/user-todos-actions.js) show keeps a head + the item's ref in the device's toast history (the Notifications tab
+// words it live), never the toast's words: those name an attachment (row.name) or a link taken from the item's words (`ref`,
+// a PARAMETER — §I's site rows read a record's fields, never a parameter, so the census alone cannot see that toast)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+console.log('\n§H8 the For-you openers\' toasts: each keeps a head + the item\'s ref, never its words');
+{
+  const OPENERS = ['openArtifact', 'openLink'];
+  // a call's argument text, read to its closing paren (quoted strings and template literals skipped whole)
+  const callArgs = (src, at) => {
+    let d = 0;
+    for (let i = at; i < src.length; i++) {
+      const c = src[i];
+      if (c === '\'' || c === '"' || c === '`') { for (i++; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i++; continue; }
+      if (c === '(') d++;
+      else if (c === ')' && --d === 0) return src.slice(at, i + 1);
+    }
+    return '';
+  };
+  const HISTORY_REF = /\bhistory: \{ m: t\('[^']+'\), ref: \{ kind: 'todo', id: item(?: && item)?\.id \} \}/;
+  const openerToasts = (src) => {
+    const out = [];
+    for (const name of OPENERS) {
+      const s = src.indexOf(`  const ${name} = async (`), e = s < 0 ? -1 : src.indexOf('\n  };\n', s);
+      if (s < 0 || e < 0) { out.push({ name, missing: true }); continue; }
+      const body = src.slice(s, e);
+      for (let k = body.indexOf('showToast('); k >= 0; k = body.indexOf('showToast(', k + 1)) {
+        out.push({ name, line: src.slice(0, s + k).split('\n').length, ref: HISTORY_REF.test(callArgs(body, k + 'showToast'.length)) });
+      }
+    }
+    return out;
+  };
+  const bareOf = (rows) => rows.filter((r) => !r.missing && !r.ref).map((r) => `${r.name}@${r.line}`);
+  const rel = 'src/lib/user-todos-actions.js', src = read(rel), rows = openerToasts(src);
+  ok(OPENERS.every((n) => rows.filter((r) => r.name === n && !r.missing).length >= 2), `${rows.length} toasts in openArtifact + openLink (each opener found, two or more toasts in each)`, rows);
+  ok(!bareOf(rows).length, 'every toast of openArtifact and openLink carries history { m: t(<a head>), ref: { kind: \'todo\', id } } — a cleared item\'s attachment name or link never stays in Notifications', bareOf(rows));
+  // the REDS: a copy with today's line (the candidate c51494dbc's storage toast, no history) — RED on exactly that toast
+  const TODAY = [
+    ['openArtifact', "{ name: row.name }), { type: 'error', history: { m: t('The folder of an attachment did not answer'), ref: { kind: 'todo', id: item.id } } });", "{ name: row.name }), { type: 'error' });"],   // stale-pins: kept
+    ['openLink', "{ name: String(ref) }), { type: 'error', history: { m: t('The folder of a link in an item did not answer'), ref: { kind: 'todo', id: item && item.id } } });", "{ name: String(ref) }), { type: 'error' });"],   // stale-pins: kept
+  ];
+  for (const [name, cured, today] of TODAY) {
+    const red = bareOf(openerToasts(anchored(src, cured, today, `opener-toast-today-${name}`)));
+    ok(red.length === 1 && red[0].startsWith(name + '@'), `CONTROL (r2960): a copy with today's storage toast in ${name} (no history ref) is RED on exactly that toast`, red);
+  }
 }
 
 
