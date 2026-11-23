@@ -63,7 +63,7 @@ let voicePlugin = { peek: () => ({}), update: () => {}, settings: () => ({}), wr
 // (src/server/feedback-forward.js: the outbox data/feedback-outbox.json, the pull of the maintainer's marks at boot + 6 h);
 // the hub's two doors are the routes' (the collector's token, as /api/telemetry/ingest)
 const feedbackForward = require('./feedback-forward.js').create({
-  dataDir: path.join(rootDir, 'data'), log: (...a) => console.warn(...a), applyMarks: (marks) => feedback.applyMarks(marks), backlog: () => feedback.list().reports,
+  dataDir: path.join(rootDir, 'data'), log: (...a) => console.warn(...a), applyMarks: (marks) => feedback.applyMarks(marks), backlog: () => (typeof feedback.isHeldUnread === 'function' && feedback.isHeldUnread() ? null : feedback.list().reports),   // r3193: null = the list is HELD (unread, never «no open reports»)
   target: () => { const t = getTelemetry && getTelemetry(); return t && typeof t.forwardTarget === 'function' ? t.forwardTarget() : {}; },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
   // lane feedback-forward-404: a target with no feedback door pauses the outbox; the owner's ONE low For-you notice only

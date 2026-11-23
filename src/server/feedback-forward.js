@@ -76,7 +76,19 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     file, valid: OUTBOX_SHAPE, code: 'outbox_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `VibeSpace cannot read its feedback outbox right now (${h.code}); it reads it again by itself every few minutes. Nothing is lost: nothing is written over it or sent until it reads`,
     log: (s) => log('[feedback] ' + s),
-    onLift: (v) => { if (v) state = fromRaw(v); for (const row of owed.splice(0)) push(row); if (owed.length || state.queue.length) { key(); save(); } schedule(); },
+    onLift: (v) => {
+      // r3193: the reports owed are derived again from the reports THEMSELVES (open, never forwarded, filed after the file's last write) — a
+      // restart before the lift lost the in-memory ones; the in-memory ones are a subset. No target ⇒ nothing queued (as enqueue).
+      let since = 0; try { since = fs.statSync(file).mtimeMs; } catch { since = 0; }
+      if (v) state = fromRaw(v);
+      let open1 = []; try { open1 = backlog() || []; } catch { open1 = []; }
+      const queued = new Set(state.queue.map((x) => x.id)), lost = new Set(state.lost);
+      const derived = open1.filter((r) => r && r.id && r.status !== 'handled' && !r.origin && Number(r.at) > since && !queued.has(r.id) && !lost.has(r.id));
+      const rows = [...new Map([...owed.splice(0), ...derived].map((r) => [r.id, r])).values()];
+      if (doors()) for (const row of rows) if (!state.queue.some((x) => x.id === row.id)) push(row);
+      if (state.queue.length) { key(); save(); }
+      schedule();
+    },
   });
   { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: OUTBOX_SHAPE });
@@ -170,6 +182,8 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   /** THE BACKFILL, once: the OPEN reports already on file, oldest first (the newest survive the bound) */
   const backfillOnce = () => {
     if (state.backfilled || !doors()) return 0;
+    let open0 = null; try { open0 = backlog(); } catch { open0 = []; }
+    if (open0 === null) return 0;   // r3193: the feedback list is HELD — «no open reports» is unread: the backfill waits (never marked done over nothing)
     let rows = [];
     try { rows = (backlog() || []).filter((r) => r && r.id && r.status !== 'handled' && !r.origin).sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)); } catch (e) { log('[feedback] the backfill could not list the reports:', e.message); return 0; }
     for (const r of rows) push(r);
@@ -182,7 +196,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   /** a NEW report filed here → queued (never blocks the filer). → { queued, why? } */
   api.enqueue = (row) => {
     if (!row || !row.id) return { queued: false, why: 'no_report' };
-    if (hold.held()) { if (!owed.some((x) => x.id === row.id)) owed.push(row); return { queued: false, why: 'outbox_unread', later: true }; }   // r3005: queued at the lift
+    if (hold.held()) { if (!owed.some((x) => x.id === row.id)) owed.push(row); if (owed.length > FF.LIMITS.outboxMax) owed.splice(0, owed.length - FF.LIMITS.outboxMax); return { queued: false, why: 'outbox_unread', later: true }; }   // r3005: queued at the lift (bounded as the outbox is)
     if (!doors()) return { queued: false, why: 'no_target' };
     backfillOnce();
     push(row);
@@ -239,6 +253,8 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     return pumping;
   };
   /** THE MARK-BACK: ask the hub for the marks on this origin's reports since the cursor; apply each to the own record */
+  let marksRetry = null;
+  const marksHeldRetry = () => { if (stopped || marksRetry) return; marksRetry = setT(() => { marksRetry = null; api.pullMarks().catch(() => { }); }, FF.LIMITS.marksBootMs * 5); if (marksRetry && typeof marksRetry.unref === 'function') marksRetry.unref(); };   // r3193: asked again while the feedback list is held
   api.pullMarks = () => {
     if (hold.held()) return Promise.resolve({ held: true });   // r3005: no pull under an unread key
     if (pulling) return pulling;
@@ -257,7 +273,11 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
           if (state.pause) { unpause('answered its feedback door'); save(); schedule(); }
           const a = await res.json();
           const marks = Array.isArray(a && a.marks) ? a.marks.slice(0, FF.LIMITS.marksPage) : [];
-          applied += (applyMarks(marks) || {}).applied || 0;
+          const am = applyMarks(marks) || {};
+          // r3193 MUST (1): the FEEDBACK store held — the marks were refused: the cursor stays BEFORE them and the pull asks again
+          // (a moved cursor lost them for good: a report marked handled stayed open, its filer never told)
+          if (am.ok === false && am.code === 'feedback_unread') { marksHeldRetry(); return { ok: false, why: 'feedback_unread', applied }; }
+          applied += am.applied || 0;
           const next = Number(a.next);
           if (Number.isFinite(next) && next > state.marksSince) state.marksSince = next;
           state.marksAt = now();
@@ -293,6 +313,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   /** a report's forward state, for its filer's `vibespace-feedback list`: 'paused' (queued; the target has no feedback
    *  door) | 'waiting' (queued) | 'dropped' (the outbox was full — it stays on this instance) | null (sent / never queued) */
   api.forwardOf = (id) => {
+    if (hold.held()) return owed.some((x) => x.id === id) ? 'waiting' : doors() ? 'unread' : null;   // r3193: the outbox is HELD — a report owed waits; any other's forward is not known (never silence as «sent»)
     if (state.queue.some((x) => x.id === id)) { const d = doors(); return state.pause && d && state.pause.door === d.forward ? 'paused' : 'waiting'; }
     return state.lost.includes(id) ? 'dropped' : null;
   };

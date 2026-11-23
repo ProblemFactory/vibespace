@@ -428,6 +428,7 @@ function create({
   /** A system by its name (case-insensitive: the row's title or its folder's name) or its folder; '' = the instance
    *  default. → {ok, row, viaDefault} | a refusal by name. */
   function resolveSystem(name) {
+    if (hold.held()) return heldFail();   // r3193 MUST (3): never «no design system is named …» from a held list
     const raw = String(name == null ? '' : name).replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 1024);
     const want = raw || defaultSystem();
     if (!want) return fail('no_default', 'no design system was named and this VibeSpace has no default one (⚙ All Settings → Chat → Default design system)');

@@ -74,7 +74,7 @@ async function call(method, route, body, bearer = TOKEN) {
 }
 const when = (at) => { try { return new Date(at).toISOString().slice(0, 16).replace('T', ' '); } catch { return '?'; } };
 // lane feedback-forward-404: a report this VibeSpace has not forwarded yet says why (the route's `forward`)
-const FORWARD = { paused: 'forward paused: the target has no door — it stays here, asked again daily', waiting: 'waiting to be forwarded', dropped: 'not forwarded: the outbox was full — it stays on this instance' };
+const FORWARD = { paused: 'forward paused: the target has no door — it stays here, asked again daily', waiting: 'waiting to be forwarded', dropped: 'not forwarded: the outbox was full — it stays on this instance', unread: 'forward not known right now: the outbox cannot be read; nothing is lost, it reads again by itself' };
 function printReports(list) {
   if (!list.length) { console.log('  (no reports from this conversation yet)'); return; }
   for (const r of list) {

@@ -9583,6 +9583,9 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
+  "VibeSpace cannot read its list of designs right now, so none is shown here. Nothing is lost: the design folders stay as they are, and the list comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到设计列表，所以这里一个也没显示。没有丢失：设计文件夹保持原样，列表会自己回来（每隔几分钟会再试一次）。",
+  "VibeSpace cannot read its list of designs right now, so it is not known whether this design was published. Nothing is lost: the design folders stay as they are; a publish pressed now is not taken — press it again once the list reads (it tries again every few minutes).": "VibeSpace 暂时读不到设计列表，所以不知道这个设计是否发布过。没有丢失：设计文件夹保持原样；现在按发布不会被接受 — 列表读到后请再按一次（每隔几分钟会再试一次）。",
+  "VibeSpace cannot read its feedback reports right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); marks wait until then.": "VibeSpace 暂时读不到反馈报告，所以这里一个也没显示。没有丢失：读到后它们会回来（每隔几分钟会再试一次）；标记要等到那时。",
   "VibeSpace cannot read its app proposals right now, so an agent’s install proposal may not be shown here. Nothing is lost: they come back when they read (it tries again every few minutes).": "VibeSpace 暂时读不到应用提案，所以智能体的安装提案可能没有显示在这里。没有丢失：读到后它们会回来（每隔几分钟会再试一次）。",
   "VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here. Nothing is lost: it comes back when they read (it tries again every few minutes).": "VibeSpace 暂时读不到 API 提案，所以等待你批准的调用可能没有显示在这里。没有丢失：读到后它会回来（每隔几分钟会再试一次）。",
   "VibeSpace cannot read its API proposals right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); decisions wait until then.": "VibeSpace 暂时读不到 API 提案，所以这里一个也没显示。没有丢失：读到后它们会回来（每隔几分钟会再试一次）；决定要等到那时。",

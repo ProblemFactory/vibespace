@@ -132,7 +132,9 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
     if (!collector(req, res)) return;
     const key = originOf(req, res);
     if (!key) return;
-    res.json(store.marks(key, Number(req.query && req.query.since) || 0));
+    const m = store.marks(key, Number(req.query && req.query.since) || 0);
+    if (m && m.ok === false) return answer(res, m);   // r3193: the list held — 503 feedback_unread (the origin's cursor stays, it asks again)
+    res.json(m);
   });
 }
 

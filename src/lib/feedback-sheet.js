@@ -7,7 +7,7 @@
 // applies the server's answer at once (never waits for the broadcast echo). Every string an agent wrote is textContent,
 // never HTML (the XSS law): the sheet builds nodes, it never assigns markup.
 import { registerMenuItem } from './contributions.js';
-import { createModalShell, getStateSync, showToast } from './utils.js';
+import { createModalShell, getStateSync, showToast, fetchJson } from './utils.js';
 import { SHEET_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -29,6 +29,9 @@ function adopt(id, row) {
 }
 /** load the store (a gear-menu open, the sheet): resolves true when this window holds the server's reports. A failed
  *  first load is asked again next time — the reconnect's resync may have brought the rows in since (the listener stays) */
+let feedbackHeld = false;   // r3193 MUST (5): the server's reply carries the hold (the synced rows never do) — «No reports yet» is unread then
+/** asked at EVERY open of the sheet (a lift since the last open clears it) */
+const readHeld = () => fetchJson('/api/feedback').then((r) => { feedbackHeld = !!r && r.code === 'feedback_unread'; }).catch(() => { });
 function ensureLoaded() {
   if (loading) return loading;
   const sync = getStateSync();
@@ -85,7 +88,9 @@ async function openFeedbackSheet() {
   const sheet = body.closest(SHEET_ROOTS); if (sheet) sheet.dataset.popover = '1'; // the global Esc protocol: the SHEET (the phone tier) is ours — Esc closes it first; a form window closes on an Escape inside it (lane dialog-yield)
   body.textContent = t('Loading…');
   let watch = () => { };
+  const heldNow = readHeld();
   if (!(await ensureLoaded())) { body.textContent = t('Could not load the feedback list'); return null; }
+  await heldNow;
   if (!body.isConnected) return null; // closed while it loaded
   body.textContent = '';
   body.append(el('p', 'agents-note fb-note', t('What agents reported with vibespace-feedback — a command, a flow, a screen or a manual that felt wrong. Newest first; a repeat within a day is counted on its row.')));
@@ -137,7 +142,7 @@ async function openFeedbackSheet() {
       prev = node;
     }
     for (const [k, b] of Object.entries(tabs)) { b.textContent = b._label(); b.setAttribute('aria-selected', String(k === filter)); b.classList.toggle('active', k === filter); }
-    empty.textContent = want.length ? '' : (view.size === 0 ? t('No reports yet — when a tool or a flow feels wrong to an agent, it sends one with vibespace-feedback.') : filter === 'open' ? t('Nothing open — every report is handled.') : t('No reports here.'));
+    empty.textContent = want.length ? '' : (view.size === 0 ? feedbackHeld ? t('VibeSpace cannot read its feedback reports right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); marks wait until then.') : t('No reports yet — when a tool or a flow feels wrong to an agent, it sends one with vibespace-feedback.') : filter === 'open' ? t('Nothing open — every report is handled.') : t('No reports here.'));
     empty.style.display = want.length ? 'none' : '';
   }
   // the global Esc removes a [data-popover] node without its onClose — a watcher whose list left the page drops itself

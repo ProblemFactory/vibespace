@@ -396,6 +396,7 @@ function handover({ from = {}, to = [], items = [], reach = null, at = Date.now(
     for (const { it, row } of rows) {
       const [sid, s] = live[0];
       if ((row.host || '') !== (s.host && s.host !== 'local' ? s.host : '')) { refused.push({ item: it, to: cid, why: 'other-machine', error: `${it} is on ${row.host || 'this server'}; ${cid} runs on ${s.host || 'this server'}` }); continue; }
+      if (row.kind === 'design') { const de0 = deps.designs && deps.designs(); const hw = de0 && typeof de0.heldWords === 'function' ? de0.heldWords() : null; if (hw) { refused.push({ item: it, to: cid, why: 'designs-unread', error: `${it}: ${hw}` }); continue; } }   // r3193: never marked handed over a refused register
       const op = AF.handoverOp(row, { from: fromRef, at });
       for (const [, rs] of live) noteOp(rs, op);
       if (row.kind === 'design') { // the Design window's registry: the receiver's now; its window opens for the user

@@ -264,6 +264,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
 
   /** "Draft from my recent decisions": the catalogue over the newest labeled examples → PROPOSED lines (never applied). */
   async function draft() {
+    if (hold.held()) return { ok: false, code: 'labels_unread', why: 'labels-unread', error: hold.words(), read: 0 };   // r3193 MUST (4): never «label a few rows first» from a held list
     const list = examples.slice(0, DRAFT_EXAMPLES);
     if (!list.some((x) => x.verdict === 'needs') || !list.some((x) => x.verdict === 'not')) return { ok: false, why: 'need-both-labels', read: list.length };
     if (!decision) return { ok: false, why: 'plugin-off', read: 0 };

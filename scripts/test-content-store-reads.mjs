@@ -688,4 +688,129 @@ console.log('FO [feedback-outbox.json] the origin key (the hub\'s marks come bac
   ok(!words.length, 'no held words of the chain name a file under the data folder (agents pass them on): «VibeSpace cannot read …», by the plain name', words);
 }
 
+// ══ r3193 cure 2 (the second half): every reader of a held list answers the hold — never «none», never a cursor past a refusal ══
+console.log('FB7–FB9 / DS7 / DX7 [the second half] the readers of a held list');
+{
+  const FFW = require(path.join(REPO, 'src/server/feedback-forward.js'));
+  const target = () => ({ url: 'https://hub.example.test', token: 'made-up-token' });
+  const stubT = { setTimeout: () => ({ unref() { } }), clearTimeout: () => { } };
+  const page = { marks: [{ id: 'fb-madeup1', status: 'handled', version: '0' }], next: 5, more: false };
+  const fetchMarks = async () => ({ status: 200, headers: { get: () => null }, json: async () => page });
+  // FB7 (MUST 1): the marks the HELD feedback store refused never move the cursor; the pull asks again
+  {
+    const d = world('fb7'), F = path.join(d, 'feedback-outbox.json');
+    const o = FFW.create({ dataDir: d, target, instance: () => ({ name: 'made-up', version: '0' }), applyMarks: () => ({ ok: false, applied: 0, code: 'feedback_unread' }), backlog: () => null, fetch: fetchMarks, ...stubT, log: () => { } });
+    const r = await quietly(() => o.pullMarks());
+    ok(!!r && r.why === 'feedback_unread' && o.facts().marksSince === 0 && (json(F) || { marksSince: 0 }).marksSince === 0, 'FB7 a mark page the HELD feedback store refused leaves the cursor BEFORE it (marksSince 0) — never past marks it never applied (the report stays open, the filer told at the read)', { r, since: o.facts().marksSince });
+    const o2 = FFW.create({ dataDir: world('fb7b'), target, instance: () => ({ name: 'made-up', version: '0' }), applyMarks: () => ({ ok: true, applied: 1 }), backlog: () => [], fetch: fetchMarks, ...stubT, log: () => { } });
+    await quietly(() => o2.pullMarks());
+    ok(o2.facts().marksSince === 5, 'FB7 CONTROL: the same page APPLIED moves the cursor to its next (5)', o2.facts().marksSince);
+  }
+  // FB8: the start-up backfill waits while the feedback list is held (never marked done over «no open reports»)
+  {
+    const d = world('fb8'), F = path.join(d, 'feedback-outbox.json');
+    let heldList = true;
+    const rep = { id: 'fb-madeup8', text: 'a made-up report', about: 'vibespace-task', kind: 'other', at: Date.now(), session: { id: 's8', name: 'Made-up 8' } };
+    const o = FFW.create({ dataDir: d, target, instance: () => ({ name: 'made-up', version: '0' }), backlog: () => (heldList ? null : [rep]), fetch: async () => { throw new Error('no network'); }, ...stubT, log: () => { } });
+    await quietly(() => o.enqueue({ ...rep, id: 'fb-madeup8b' }));
+    const a1 = json(F) || {};
+    heldList = false;
+    await quietly(() => o.enqueue({ ...rep, id: 'fb-madeup8c' }));
+    const a2 = json(F) || {};
+    ok(a1.backfilled !== true && a2.backfilled === true && (a2.queue || []).some((x) => x.id === 'fb-madeup8'), 'FB8 the backfill waits while the feedback list is held (not marked done), and at the next report after it reads the open report is backfilled', { first: a1.backfilled, then: a2.backfilled, queue: (a2.queue || []).map((x) => x.id) });
+  }
+  // FB9: a report filed while the outbox was held, then a RESTART before the lift: derived again at the lift from the reports themselves
+  {
+    const d = world('fb9'), F = path.join(d, 'feedback-outbox.json');
+    fs.writeFileSync(F, JSON.stringify({ v: 1, key: 'fk_' + 'A'.repeat(43), queue: [], backfilled: true, sent: 0, dropped: 0, refused: 0, fails: 0, holdUntil: 0, marksSince: 0, marksAt: 0, lost: [] }));
+    const past = Date.now() - 60e3; fs.utimesSync(F, past / 1000, past / 1000);
+    const rep = { id: 'fb-madeup9', text: 'filed while held, the hub restarted', about: 'vibespace-task', kind: 'other', at: Date.now(), session: { id: 's9', name: 'Made-up 9' } };
+    const pr = placeReads(F, 1);
+    let o = null;
+    try { await quietly(() => { o = FFW.create({ dataDir: d, target, instance: () => ({ name: 'made-up', version: '0' }), backlog: () => [rep], fetch: async () => { throw new Error('no network'); }, ...stubT, log: () => { } }); }); } finally { pr.restore(); }
+    await quietly(() => o._hold.again());
+    ok(((json(F) || {}).queue || []).some((x) => x.id === 'fb-madeup9'), 'FB9 at the lift the reports owed are derived again from the reports themselves (open, filed after the file\'s last write) — a report filed while held survives a restart before the lift', ((json(F) || {}).queue || []).map((x) => x.id));
+    o._hold.stop();
+  }
+  // FO7: the outbox held — `vibespace-feedback list` says a report owed WAITS, any other's forward is NOT KNOWN (never silence as «sent»)
+  {
+    const d = world('fo7'), F = path.join(d, 'feedback-outbox.json');
+    fs.writeFileSync(F, JSON.stringify({ v: 1, key: 'fk_' + 'B'.repeat(43), queue: [], backfilled: true, sent: 0, dropped: 0, refused: 0, fails: 0, holdUntil: 0, marksSince: 0, marksAt: 0, lost: [] }));
+    const pr = placeReads(F, 1);
+    let o = null;
+    try { await quietly(() => { o = FFW.create({ dataDir: d, target, instance: () => ({ name: 'made-up', version: '0' }), backlog: () => [], fetch: async () => { throw new Error('no network'); }, ...stubT, log: () => { } }); }); } finally { pr.restore(); }
+    o.enqueue({ id: 'fb-madeup7', text: 'filed while held', about: 'vibespace-task', kind: 'other', at: Date.now(), session: { id: 's7', name: 'Made-up 7' } });
+    ok(o.forwardOf('fb-madeup7') === 'waiting' && o.forwardOf('fb-madeup7x') === 'unread', 'FO7 the outbox held: a report owed reads «waiting», any other\'s forward «not known» — never nothing (read as sent) (RED: the outbox as it was answers null)', { owed: o.forwardOf('fb-madeup7'), other: o.forwardOf('fb-madeup7x') });
+    const CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-feedback'), 'utf8');
+    ok(CLI.includes("unread: 'forward not known right now: the outbox cannot be read; nothing is lost, it reads again by itself' };"), 'FO7 the agent\'s `vibespace-feedback list` words the unknown forward', null);
+    o._hold.stop();
+  }
+  // DS7 (MUSTs 2 and 3): the designs list held — the agent's list and systems refused by name; the Publish dialog's held branch executed
+  {
+    const DE = require(path.join(REPO, 'src/server/design-engine.js'));
+    const timers = { setInterval: () => ({ unref() { } }), clearInterval: () => { }, setTimeout: () => ({ unref() { } }) };
+    const d = world('ds7');
+    const e1 = DE.create({ dataDir: d, timers, log: () => { } }); e1.register({ dir: '/scratch-made-up/design-7', title: 'Seven', sessionId: 'sA', kind: 'system' }); await e1.flush();
+    const F = path.join(d, 'designs.json'), pr = placeReads(F, 1);
+    let de = null;
+    try { await quietly(() => { de = DE.create({ dataDir: d, timers, log: () => { } }); }); } finally { pr.restore(); }
+    const { registerDesignRoutes } = require(path.join(REPO, 'src/routes/design.js'));
+    const routes = {}, dapp = { get: (u, f) => { routes['GET ' + u] = f; }, post: (u, f) => { routes['POST ' + u] = f; }, put: () => { }, delete: () => { }, patch: () => { }, use: () => { } };
+    registerDesignRoutes(dapp, { design: de, activeSessions: new Map([['sA', { agentToken: 'vsst_A', backend: 'claude', claudeSessionId: 'conv-A', cwd: '/scratch-made-up', name: 'a' }]]) });
+    const call = async (k, req) => { const r = resStub(); await routes[k]({ query: {}, params: {}, headers: {}, ...req }, r); return r; };
+    const al = await call('GET /api/agent/designs', { headers: { authorization: 'Bearer vsst_A' } }), sy = await call('GET /api/agent/design/systems', { headers: { authorization: 'Bearer vsst_A' } });
+    const tok = await de.agentSystemTokens('Seven');
+    ok(al.code === 503 && al.body.code === 'designs_unread' && sy.code === 503 && sy.body.code === 'designs_unread' && tok.code === 'designs_unread', 'DS7 the agent\'s design list and its systems lookups while the designs list is held: refused by name (503 designs_unread) — never «no designs in this conversation yet» nor «no design system is named …»', { list: al.code, systems: sy.code, tokens: tok.code });
+    const home = await call('GET /api/designs', {});
+    ok(!!home.body && home.body.code === 'designs_unread', 'DS7 the Designs home\'s read carries designs_unread (the home draws the held words, never «No designs yet»)', home.body && home.body.code);
+    const DPW = await import(pathToFileURL(path.join(REPO, 'src/lib/design-publish-words.js')).href);
+    const tt = (x, prm) => String(x).replace(/\{(\w+)\}/g, (all, k) => (prm && k in prm ? String(prm[k]) : all));
+    const hs = DPW.publishStateWords({ designs: [], code: 'designs_unread' }, null, tt), ts = DPW.publishStateWords({ designs: [] }, null, tt);
+    ok(hs.known === false && /cannot read its list of designs/.test(hs.text) && /^Not published yet/.test(ts.text), 'DS7 the Publish dialog DRAWN on a held designs reply: «not known whether this design was published» — RED: the reply as it was draws «Not published yet»', { held: hs.text, today: ts.text });
+    de._hold.stop();
+  }
+  // DX7 (MUST 4): the draft asks the hold first
+  {
+    const AT = require(path.join(REPO, 'src/server/channels-attention.js'));
+    const d = world('dx7');
+    const a1 = AT.create({ dataDir: d, log: { log() { }, warn() { }, error() { } } }); a1.label('lark-1:oc_x1', 1000, 'needs', { title: 'x', lastText: 'y', lastAt: 1000 });
+    const F = path.join(d, 'decision-examples.json'), pr = placeReads(F, 1);
+    let a2 = null;
+    try { await quietly(() => { a2 = AT.create({ dataDir: d, log: { log() { }, warn() { }, error() { } } }); }); } finally { pr.restore(); }
+    const dr = await a2.draft();
+    ok(dr.why === 'labels-unread' && dr.code === 'labels_unread', 'DX7 «Draft from my recent decisions» while the labels are held: refused by name (labels-unread) — never «answer ✓ and ✗ on a few judged rows first»', dr);
+    a2._hold.stop();
+  }
+  // FB11 / FB12: the feedback list held — the agents' verb and the hub's marks door refuse by name (never «0 open», never «no marks»)
+  {
+    const FS = require(path.join(REPO, 'src/server/feedback-store.js'));
+    const d = world('fb11');
+    const s1 = FS.create({ dataDir: d }); s1.report({ text: 'a made-up report 11', about: 'vibespace-task' }, { session: { id: 'sess-madeup-11', name: 'Made-up 11' } });
+    const F = path.join(d, 'feedback.json'), pr = placeReads(F, 1);
+    let s2 = null;
+    try { await quietly(() => { s2 = FS.create({ dataDir: d }); }); } finally { pr.restore(); }
+    const vl = FS.automationVerbs({ store: s2 })['feedback.list']();
+    ok(!!vl && vl.ok === false && vl.code === 'feedback_unread' && /cannot read /.test(vl.why || ''), 'FB11 the agents\' feedback.list verb while the list is held: refused by name with the words — never «0 open» (RED: the verb as it was answers ok with no reports)', vl);
+    const { registerFeedbackRoutes } = require(path.join(REPO, 'src/routes/feedback.js'));
+    const routes = {}, last = (f) => f[f.length - 1], fapp = { get: (u, ...f) => { routes['GET ' + u] = last(f); }, post: (u, ...f) => { routes['POST ' + u] = last(f); }, patch: () => { }, put: () => { }, delete: () => { }, use: () => { } };
+    registerFeedbackRoutes(fapp, { store: s2, activeSessions: new Map(), collectorToken: () => 'c1' });
+    const r = resStub(); r.set = (k, v) => { r.headers[k] = v; return r; };
+    await routes['GET /api/feedback/forward/marks']({ query: { since: '0' }, params: {}, headers: { authorization: 'Bearer c1', 'x-vibespace-feedback-origin': 'fk_' + 'A'.repeat(43) } }, r);
+    ok(r.code === 503 && !!r.body && r.body.code === 'feedback_unread', 'FB12 AT THE WIRE: the hub\'s marks door while its feedback list is held answers 503 feedback_unread — never 200 «no marks» (RED: the door as it was)', { code: r.code, body: r.body });
+    s2._hold.stop();
+  }
+  // the page's own roads by their lines (each with a red copy)
+  {
+    const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+    const DH = src('src/lib/design-home.js'), FS2 = src('src/lib/feedback-sheet.js'), SU = src('src/lib/settings-ui.js'), AR = src('src/server/artifact-registry.js');
+    const home = (x) => x.includes("designsHeld = r.code === 'designs_unread';") && x.includes("status.textContent = designsHeld ? t('VibeSpace cannot read its list of designs right now, so none is shown here.");
+    ok(home(DH) && !home(anchored(DH, "designsHeld = r.code === 'designs_unread';", 'designsHeld = false;', 'ds7-home-today')), 'DS7 the Designs home draws the held words where «No designs yet» stood (RED: the home as it was, the code unread)', null);
+    const sheet = (x) => x.includes("feedbackHeld = !!r && r.code === 'feedback_unread';") && x.includes("(view.size === 0 ? feedbackHeld ? t('VibeSpace cannot read its feedback reports right now") && x.includes('  const heldNow = readHeld();\n  if (!(await ensureLoaded()))');
+    ok(sheet(FS2) && !sheet(anchored(FS2, "feedbackHeld = !!r && r.code === 'feedback_unread';", 'feedbackHeld = false;', 'fb10-sheet-today')), 'FB10 (MUST 5) the owner\'s Agent feedback sheet reads the reply that carries the hold and draws its words where «No reports yet» stood (RED: the sheet as it was, the synced rows only)', null);
+    ok(SU.includes("r && r.why === 'labels-unread' ? t('the labels you taught could not be read"), 'DX7 the draft\'s toast words labels-unread (its card sentence, zh / ja)', null);
+    const ho = (x) => x.includes("why: 'designs-unread'") && x.indexOf("why: 'designs-unread'") < x.indexOf('const op = AF.handoverOp(row, { from: fromRef, at });');
+    ok(ho(AR) && !ho(anchored(AR, "why: 'designs-unread'", "why: 'designs-unread-today'", 'ho-today')), 'DS7 a design hand-over while the designs list is held is REFUSED, said — never noted, registered nowhere and marked handed (RED: the hand-over as it was)', null);
+  }
+}
+
 report();

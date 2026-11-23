@@ -1342,7 +1342,7 @@ class SettingsUI {
           const r = await fetchJson('/api/channels/decision/draft', { method: 'POST' });
           d.disabled = false;
           if (!r || r.error || r.ok === false || !r.text) {
-            const why = r && r.why === 'need-both-labels' ? t('answer ✓ and ✗ on a few judged rows first') : (r && (r.why || r.error)) || t('server unreachable');
+            const why = r && r.why === 'labels-unread' ? t('the labels you taught could not be read — nothing was lost; try again in a few minutes (it reads them again by itself)') : r && r.why === 'need-both-labels' ? t('answer ✓ and ✗ on a few judged rows first') : (r && (r.why || r.error)) || t('server unreachable');   // r3193 MUST (4)
             showToast(t('No lines proposed ({n} of your decisions read) — {why}', { n: (r && r.read) || 0, why }), { type: 'error' });
             return;
           }

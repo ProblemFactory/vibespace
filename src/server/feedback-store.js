@@ -143,7 +143,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     return { ok: true, duplicate: false, report: M.publicRow(rec) };
   };
   /** THE HUB: the marks ONE origin may read — its own forwarded reports, marked after `since` */
-  api.marks = (key, since) => FF.marksAnswer(state.records, key, since);
+  api.marks = (key, since) => (hold.held() ? heldRefusal() : FF.marksAnswer(state.records, key, since));   // r3193: held — never «no marks» to an origin (it asks again)
   /** THE ORIGIN: the maintainer's marks (src/server/feedback-forward.js's pull), each applied to the OWN report it names */
   api.applyMarks = (marks) => {
     if (hold.held()) return { ok: false, applied: 0, code: 'feedback_unread' };   // held: the marks wait (the pull asks again)
@@ -213,7 +213,9 @@ function automationVerbs({ store }) {
       return r.ok ? { ok: true, id: r.report.id, status: r.report.status, version: r.report.handledVersion, by: r.report.handledBy, ...(r.report.origin ? { markBack: piece(r.report.origin.instance, 2 * M.LIMITS.name) } : {}) } : { ok: false, code: r.code, why: r.error };
     },
     'feedback.list': () => {
-      const open = store.list().reports.filter((r) => r.status !== 'handled');
+      const l = store.list();
+      if (l.code === 'feedback_unread') return { ok: false, code: 'feedback_unread', why: l.unread };   // r3193: held — never «0 open» from an unread list
+      const open = l.reports.filter((r) => r.status !== 'handled');
       return { ok: true, open: open.length, reports: open.map(agentRow) };
     },
   };

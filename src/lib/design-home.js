@@ -81,7 +81,7 @@ export function openDesignHome(app, { syncId } = {}) {
   list.appendChild(status);
   winInfo.content.appendChild(root);
 
-  let rows = [];
+  let rows = [], designsHeld = false;   // r3193: the designs list is HELD — «No designs yet» is unread
   const els = new Map();   // rowKey → the row element (keyed: a re-read updates in place, focus and scroll stay)
   const heads = { system: mk('div', 'design-home-head', t('Design systems')), design: mk('div', 'design-home-head', t('Designs')) };
 
@@ -152,7 +152,7 @@ export function openDesignHome(app, { syncId } = {}) {
     }
     const live = new Set(rows.map(rowKey));
     for (const k of [...els.keys()]) if (!live.has(k)) els.delete(k);
-    if (!want.length) { status.textContent = rows.length ? t('No design matches') : t('No designs yet — ask for one with the design chip in a chat'); want.push(status); }
+    if (!want.length) { status.textContent = designsHeld ? t('VibeSpace cannot read its list of designs right now, so none is shown here. Nothing is lost: the design folders stay as they are, and the list comes back by itself (it tries again every few minutes).') : rows.length ? t('No design matches') : t('No designs yet — ask for one with the design chip in a chat'); want.push(status); }
     // in place: only nodes that moved are touched (a row being renamed keeps its input and its focus)
     let at = list.firstChild;
     for (const n of want) { if (n === at) { at = at.nextSibling; continue; } list.insertBefore(n, at); }
@@ -165,6 +165,7 @@ export function openDesignHome(app, { syncId } = {}) {
     if (signal.aborted) return;
     if (!r || !Array.isArray(r.designs)) { status.textContent = t('Could not read the designs — the server did not answer'); if (!rows.length) render(); return; }
     rows = readDesignRows(r.designs);
+    designsHeld = r.code === 'designs_unread';
     held.textContent = r.pagesUnread ? t('VibeSpace cannot read its list of published pages right now, so no design shows as published. Nothing is lost: every link given out stays, though it answers «cannot be shown right now» until the list reads (it tries again every few minutes).') : ''; held.hidden = !r.pagesUnread;
     render();
   }
