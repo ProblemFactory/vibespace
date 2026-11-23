@@ -372,7 +372,8 @@ await guard('§8', async () => {
   // durable write (data/bin/chat-wrapper.js endBatch: persistNow, the journal, then stdout — B-5a4d / B-cd4b). So the log runs one
   // write AHEAD of the record by design; the run waits for the RECORD by order, never a clock. STALL: a preload placed in that very
   // window — the wrapper's SAY is held: from the line that carries the chosen text (its STOP_LATE_STALL_AT-th copy) every line it
-  // says waits STOP_LATE_STALL_MS, then all go out in their order — the hosted symptom made at will. A held SAY, never a blocked
+  // says waits until THE RUN RELEASES IT (a file the run writes, STOP_LATE_STALL_RELEASE — never a duration, 主开发 r2870), then all go
+  // out in their order — the hosted symptom made at will. A held SAY, never a blocked
   // write: a blocked durable write made the red control hang on how the CLI's lines met the wrapper (its result and its idle word
   // in ONE chunk: the settle is logged before the record is said; in TWO: the record is said before the settle is logged, and the
   // release's read is right). The held say opens the same window either way.
@@ -380,14 +381,14 @@ await guard('§8', async () => {
   fs.writeFileSync(STALL, [
     "'use strict';",
     "const fs = require('fs'), out = process.stdout, write = out.write.bind(out), E = process.env;",
-    "const TEXT = E.STOP_LATE_STALL_TEXT || '', AT = Number(E.STOP_LATE_STALL_AT) || 1, MS = Number(E.STOP_LATE_STALL_MS) || 1500, MARK = E.STOP_LATE_STALL_MARK || '';",
+    "const TEXT = E.STOP_LATE_STALL_TEXT || '', AT = Number(E.STOP_LATE_STALL_AT) || 1, MARK = E.STOP_LATE_STALL_MARK || '', RELEASE = E.STOP_LATE_STALL_RELEASE || '';",
     "let seen = 0, state = 0, q = [];   // 0 not yet · 1 holding · 2 let go",
     "out.write = function (chunk, ...a) {",
     "  if (state === 1) { q.push([chunk, a]); return true; }",
     "  if (state === 0 && TEXT) {",
     "    const s = String(chunk); for (let i = s.indexOf(TEXT); i >= 0; i = s.indexOf(TEXT, i + 1)) seen++;",
     "    if (seen >= AT) { state = 1; q.push([chunk, a]); if (MARK) fs.writeFileSync(MARK, 'held');",
-    "      setTimeout(() => { state = 2; for (const [c, x] of q) write(c, ...x); q = []; }, MS); return true; }",
+    "      const poll = setInterval(() => { if (RELEASE && fs.existsSync(RELEASE)) { clearInterval(poll); state = 2; for (const [c, x] of q) write(c, ...x); q = []; } }, 10); return true; }",
     "  }",
     "  return write(chunk, ...a);",
     "};",
@@ -396,7 +397,7 @@ await guard('§8', async () => {
   const run = async (wrapperPath, label, env, { secondStop = false, stall = null, oldWait = false } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-late-' + label + '-'));
     const dlv = path.join(dir, 'delivered.jsonl');
-    const w = spawn(process.execPath, [...(stall ? ['-r', STALL] : []), wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env, ...(stall ? { STOP_LATE_STALL_TEXT: stall.text, STOP_LATE_STALL_AT: String(stall.at), STOP_LATE_STALL_MS: '1500', STOP_LATE_STALL_MARK: path.join(dir, 'held') } : {}) } });
+    const w = spawn(process.execPath, [...(stall ? ['-r', STALL] : []), wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env, ...(stall ? { STOP_LATE_STALL_TEXT: stall.text, STOP_LATE_STALL_AT: String(stall.at), STOP_LATE_STALL_RELEASE: path.join(dir, 'release'), STOP_LATE_STALL_MARK: path.join(dir, 'held') } : {}) } });
     const recs = []; let lb = '';
     w.stdout.setEncoding('utf8');
     w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
@@ -416,8 +417,12 @@ await guard('§8', async () => {
       // line the window SETTLED at (the CLI's idle word, said after the follow-up's result; a result where the CLI says no state
       // word). The deadline only names a failure (byOrder 'DEADLINE'). `oldWait` is the release's 20 ms — the RED controls
       let byOrder = 'off';
-      if (oldWait) await sleep(20);
+      // THE HOLD IS PLACED AND RELEASED BY THIS RUN (主开发 r2870), never a timer: a RED control reads the release's way (20 ms after
+      // the log's settle) and NEVER releases, so the held record cannot come — it misses it by the placed cause on every run; it then
+      // waits, by order, for the hold's mark (the hold was reached). A run read by order releases the hold once it stands.
+      if (oldWait) { await sleep(20); if (stall) await until(() => fs.existsSync(path.join(dir, 'held')), 15000); }
       else {
+        if (stall && await until(() => fs.existsSync(path.join(dir, 'held')), 15000)) fs.writeFileSync(path.join(dir, 'release'), 'go');
         const lg0 = log();
         const said = /stop late: /.test(lg0) ? (r) => r.type === 'result' && r.webui_stop_late
           : /stop settled \(result\)/.test(lg0) ? (r) => r.type === 'result'
