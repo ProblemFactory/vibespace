@@ -5734,6 +5734,7 @@ function create(deps = {}) {
     if (held && held.data) {
       const hatt = owner.attachments.find((a) => String(a.id) === String(attId)) || {};
       const put = await store.attachmentPut(adapterId, convId, attId, { msg: scope, data: held.data, name: peerName(hatt.name, 256) || null, mime: held.mime || hatt.mime || null }, { budgetBytes: attachmentBudgetBytes() });
+      if (!put) return answer({ ok: false, code: 'account-changed', error: 'the account changed while the attachment was fetched — nothing was kept' });   // 主开发 r2878 (a): the store refused a purged account's write
       return answer({ ok: true, file: put.file, meta: put.meta, cached: false, held: true, source: owner.shown ? 'vendor' : 'archive' });
     }
     v = Att.fetchVerdict({
@@ -5800,6 +5801,7 @@ function create(deps = {}) {
         return { ok: false, code: 'too-large', error: `the attachment is ${Math.round(data.length / 1048576)} MB — larger than ${ATTACHMENT_MAX_BYTES / 1048576} MB` };
       }
       const put = await store.attachmentPut(adapterId, convId, attId, { msg: scope, data, name: peerName(att.name, 256) || peerName(r && r.name, 256) || null, mime: (r && r.mime) || att.mime || null }, { budgetBytes: attachmentBudgetBytes() });
+      if (!put) return { ok: false, code: 'account-changed', error: 'the account changed while the attachment was fetched — nothing was kept' };   // r2878 (a)
       if (put.evicted.length) log.log(`[channels] ${adapterId}: attachment cache over ${Math.round(attachmentBudgetBytes() / 1048576)} MB — evicted ${put.evicted.length} least-recently-used file(s)`);
       return { ok: true, file: put.file, meta: put.meta, cached: false, evicted: put.evicted.length, source: owner.shown ? 'vendor' : 'archive' };
     })();
@@ -7390,6 +7392,7 @@ function create(deps = {}) {
         return { ok: false, code: 'too-large', error: 'a custom emoji is larger than 1 MB' };
       }
       const put = await store.attachmentPut(adapterId, '~emoji', k, { data, name: `${k}.png`, mime: (r && r.mime) || 'image/png' }, { budgetBytes: attachmentBudgetBytes() });
+      if (!put) return { ok: false, code: 'account-changed', error: 'the account changed while the emoji was fetched — nothing was kept' };   // r2878 (a)
       return { ok: true, file: put.file, meta: put.meta, cached: false };
     })();
     emojiFlights.set(fk, run);
@@ -7492,6 +7495,7 @@ function create(deps = {}) {
         return { ok: false, code, error: mime ? 'a profile picture is larger than 256 KiB' : 'the profile picture is not a raster image' };
       }
       const put = await store.avatarPut(adapterId, a, { data, mime });
+      if (!put) return { ok: false, code: 'account-changed', error: 'the account changed while the picture was fetched — nothing was kept' };   // r2878 (a)
       return { ok: true, file: put.file, meta: put.meta, cached: false };
     })();
     avatarFlights.set(fk, run);

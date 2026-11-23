@@ -13,6 +13,10 @@
 //   ④ THE PEOPLE MEMO OWED at the purge (handed to the writer, not written yet): never written. RED: the purge that forgets
 //      neither the memo's cache nor its owed write.
 //   ⑤ NOTHING SYNCHRONOUS: the purge makes no synchronous fs call on the main thread. RED: the release's purge (rmSync).
+//   ⑥ A REMOVAL THAT FAILS (主开发 r2878), placed for each folder in turn: the purge NOT said done, the folder named with its code,
+//      kept in purge-pending.json; the NEXT START finishes it. RED: the purge that swallows the failure (the release's).
+//   ⑦ THE PERSON IS TOLD: the panel names what is left and that it is tried again (zh, ja); the remove road answers purgeLeft and
+//      writes the purge's mark before the record leaves. RED: the dialog without its branch.
 // Run: node scripts/test-channel-store-forget.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,7 +66,7 @@ async function lawLeg(mod, tag) {
 {
   const r = await lawLeg(CS, 'law');
   ok(r.before.length === 3 && r.after.length === 0 && r.other.length === 3 && r.r.logs && r.r.files && r.r.own, `① after the purge nothing of the account is left (before: ${r.before.join(' ')}; after: ${r.after.join(' ') || 'nothing'}); the second account keeps its three folders (${r.other.join(' ')})`, r);
-  const KEEP = M.load('src/channel-store.js', anchored(anchored(SRC, 'own: await gone(own) };', 'own: false };', 'the purge that leaves the own folder'), '    if (await there(own)) { try { await fs.promises.rm(own, { recursive: true, force: true }); } catch { } }\n', '', 'and its settle\'s second removal'), 'keep-own');
+  const KEEP = M.load('src/channel-store.js', anchored(anchored(SRC, '    for (const [k, q] of Object.entries(folders)) r[k] = await removeOne(q);', "    for (const [k, q] of Object.entries(folders)) r[k] = k === 'own' ? { state: 'absent' } : await removeOne(q);", 'the purge that leaves the own folder'), '    for (const [k, q] of Object.entries(folders)) if (await there(q)) {', "    for (const [k, q] of Object.entries(folders)) if (k !== 'own' && await there(q)) {", 'and its last look'), 'keep-own');
   const red = await lawLeg(KEEP, 'law-red');
   ok(red.after.includes(A), `① RED CONTROL: the purge that leaves the account's own folder (the release's) — left: ${red.after.join(' ')} — the leg above would go red`, red);
 }
@@ -155,9 +159,56 @@ async function syncLeg(mod, tag) {
 {
   const r = await syncLeg(CS, 'sync');
   ok(r.seen.length === 0, `⑤ the purge: ${r.seen.length} synchronous fs calls on the main thread${r.seen.length ? ' (' + r.seen.join(' ') + ')' : ''}`, r);
-  const RS = M.load('src/channel-store.js', anchored(SRC, "    const there = async (p) => { try { await fs.promises.access(p); return true; } catch { return false; } };", "    const there = async (p) => fs.existsSync(p);", 'the release\'s synchronous look'), 'purge-sync');
+  const RS = M.load('src/channel-store.js', anchored(SRC, "    const there = async (q) => { try { await fs.promises.access(q); return true; } catch { return false; } };", "    const there = async (q) => fs.existsSync(q);", 'the release\'s synchronous look'), 'purge-sync');
   const red = await syncLeg(RS, 'sync-red');
   ok(red.seen.includes('existsSync'), `⑤ RED CONTROL: a purge that looks with existsSync (the release's) — ${red.seen.length} synchronous calls — the leg above would go red`, red);
+}
+
+// ═══ ⑥ A REMOVAL THAT FAILS (主开发 r2878, round w8ar0zqri's must) ═══
+console.log('⑥ a folder that could not be removed: not said done, named, kept in the mark; the next start finishes it');
+async function failLeg(mod, tag, which) {
+  const dir = tmp(tag), o = open(mod, dir);
+  await fill(o.st, o.w, dir, A);
+  const target = { logs: path.join(dir, 'msgs', A), files: path.join(dir, 'attachments', A), own: path.join(dir, A) }[which];
+  const r0 = fs.promises.rm; let failed = 0;
+  fs.promises.rm = async function (q, ...x) { if (path.resolve(String(q)) === target) { failed++; const e = new Error('EBUSY: resource busy or locked'); e.code = 'EBUSY'; throw e; } return r0.call(this, q, ...x); };
+  let r; try { r = await o.st.purgeAccount(A); } finally { fs.promises.rm = r0; }
+  const markF = path.join(dir, 'purge-pending.json');
+  await o.w.durable(markF);
+  let mark = null; try { mark = JSON.parse(fs.readFileSync(markF, 'utf8')); } catch { }
+  const afterFail = left(dir, A);
+  shut(o);
+  const o2 = open(mod, dir);   // THE NEXT START: an id with no adapter record is purged again, off the loop
+  for (let k = 0; k < 100 && fs.existsSync(target); k++) await new Promise((z) => setTimeout(z, 30));
+  await new Promise((z) => setTimeout(z, 100)); await o2.w.durable(markF);
+  let mark2 = null; try { mark2 = JSON.parse(fs.readFileSync(markF, 'utf8')); } catch { }
+  const afterStart = left(dir, A);
+  shut(o2);
+  return { failed, done: r.done, left: (r.left || []).map((x) => x.what), code: (r.left || [])[0] ? r.left[0].code : null, marked: !!(mark && mark.ids && mark.ids[A]), afterFail, afterStart, cleared: !!(mark2 && mark2.ids && !mark2.ids[A]) };
+}
+for (const which of ['logs', 'files', 'own']) {
+  const r = await failLeg(CS, `fail-${which}`, which);
+  ok(r.failed >= 1 && r.done === false && r.left.includes(which) && r.code === 'EBUSY' && r.marked && r.afterFail.length === 1 && r.afterStart.length === 0 && r.cleared, `⑥ the ${which} folder could not be removed (EBUSY placed): the purge NOT said done, ${which} named (${r.code}), kept in the mark (${r.marked}); the next start finished it (left after it: ${r.afterStart.join(' ') || 'nothing'}; the mark cleared: ${r.cleared})`, r);
+}
+{
+  const SWL = M.load('src/channel-store.js', anchored(SRC, "      try { await fs.promises.rm(q, { recursive: true, force: true }); } catch (e) { return { state: 'left', code: (e && e.code) || 'error' }; }\n      return (await there(q)) ? { state: 'left', code: 'still-there' } : { state: 'removed' };", "      try { await fs.promises.rm(q, { recursive: true, force: true }); } catch { /* reported below */ }\n      return { state: 'removed' };", 'the purge that swallows a failed removal (the release\'s)'), 'swallow');
+  const red = await failLeg(SWL, 'fail-red', 'own');
+  ok(red.done === true && red.afterFail.length === 1, `⑥ RED CONTROL: the purge that swallows the failed removal says DONE with the folder still there (${red.afterFail.join(' ')}) — the leg above would go red`, red);
+}
+
+// ═══ ⑦ THE PERSON IS TOLD (主开发 r2878): what could not be removed, by kind, and that it is tried again ═══
+console.log('⑦ the panel names what could not be removed and that it is tried again; the remove road answers it and marks first');
+{
+  const DLG = fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf8');
+  const KEY = 'Removed "{name}" — {left} could not be removed from disk now; VibeSpace tries again when it starts';
+  const keys = [KEY, 'its messages', 'its fetched files', 'its pictures and memos'];   // stale-pins: kept (the panel's words, read in the dialog and its tables)
+  const tables = ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8'));
+  const BR = '  if (r && Array.isArray(r.purgeLeft) && r.purgeLeft.length) {';
+  const pin = (src) => src.split(BR).length === 2 && src.indexOf(BR) < src.indexOf("  showToast(tr('Removed \"{name}\"', { name }));") && src.includes(`tr('${KEY}'`) && tables.every((t) => keys.every((k) => t.includes(JSON.stringify(k) + ':')));
+  ok(pin(DLG), '⑦ the dialog answers purgeLeft with its own warning (what is left, by kind, and that VibeSpace tries again when it starts) before the plain «Removed»; its words are in the zh and ja tables');
+  ok(!pin(anchored(DLG, BR, '  if (false) {', 'the dialog without its leftover warning')), '⑦ RED CONTROL: the dialog without its purgeLeft branch — the pin above would go red');
+  const AUTH = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+  ok(/if \(purged && Array\.isArray\(purged\.left\) && purged\.left\.length\) return \{ ok: true, removed: true, id: rec\.id, purgeLeft:/.test(AUTH) && /await store\.purgeBegin\(rec\.id\)[\s\S]{0,600}await store\.adapters\.update\(\(a\) => \{ const i = a\.adapters\.indexOf\(rec\)/.test(AUTH), '⑦ the remove road answers purgeLeft to the person, and writes the purge\'s mark BEFORE the record leaves');
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

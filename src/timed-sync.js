@@ -60,6 +60,7 @@ const STORES = Object.freeze({
   'channels-wake-pace.write': row('write', 'channels/wake-pace', 'src/channel-store.js', ['paceSet']),   // lane lg-store-writes (B-0248 U3): the groups' wake-pace ledger — paced
   'channels-dispatch.write': row('write', 'channels/dispatch-ledger', 'src/channel-store.js', ['dispatchSet']),   // lane lg-store-writes (B-0248 U3): the dispatch ledger — an act
   'channels-people.write': row('write', 'channels/<account>/people', 'src/channel-store.js', ['peopleWrite']),
+  'channels-purge-pending.write': row('write', 'channels/purge-pending', 'src/channel-store.js', ['pendingWrite']),   // 主开发 r2878: the purges begun and not finished, through the store writer (an act)
   'channels-search-memo.write': row('write', 'channels/<account>/search-memo', 'src/channel-store.js', ['searchMemoWrite']),   // B-360d r1360: the vendor-search memo, through the store writer (its thread makes the account's directory)
   'channels-feed-miss.write': row('write', 'channels/<account>/feed-misses', 'src/channel-store.js', ['feedMissWrite']),   // B-360d r1360: the change feed's miss memo, the same road
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),

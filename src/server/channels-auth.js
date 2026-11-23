@@ -1201,6 +1201,8 @@ function create(engineCtx) {
     // B-360d unit 1, 主开发 r1542 (1): «forget its data» whose journal could not be rewritten now says so to the PERSON — removed,
     // with bytes of it still in the index's journal on disk until the storage takes the retry (never only a log line and an audit row)
     // `note`: a LOG-GRADE field, English only (主开发 r2455) — the panel words journalOwed from its own tr() key, in every language
+    // 主开发 r2878: part of its local copy COULD NOT be removed now — the person is told what is left (its kinds) and that it is tried again
+    if (purged && Array.isArray(purged.left) && purged.left.length) return { ok: true, removed: true, id: rec.id, purgeLeft: purged.left.slice(), ...(purged.journalClean === false ? { journalOwed: true } : {}), note: 'removed — part of its local copy could not be removed now; it is tried again when VibeSpace starts' };
     if (purged && purged.purged && purged.journalClean === false) return { ok: true, removed: true, id: rec.id, journalOwed: true, note: 'removed — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write' };
     return { ok: true, removed: true, id: rec.id };
   }
@@ -1225,6 +1227,8 @@ function create(engineCtx) {
       if (ix.accountAssignments) delete ix.accountAssignments[rec.id];
       if (ix.patternAssignments) for (const [id, pa] of Object.entries(ix.patternAssignments)) if (pa && pa.adapterId === rec.id) delete ix.patternAssignments[id];
     }, { durable: true });
+    // 主开发 r2878: a purge's MARK on disk BEFORE the record leaves — a crash from here on is finished by the next start
+    if (purgesOnRemove(rec) && typeof store.purgeBegin === 'function') { const marked = await store.purgeBegin(rec.id).catch(() => false); if (marked === false) log.warn(`[channels] ${rec.id}: the purge's mark could not be written — a crash in the middle of this removal would leave its local copy for a person to remove`); }
     await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
     return purgeIfDeclared(rec);   // r1542 (1): its answer reaches the person (remove())
   }
@@ -1247,10 +1251,9 @@ function create(engineCtx) {
    *  the account — the message logs (msgs/<id>/), the fetched files (attachments/<id>/), and every ENDED proposal of the
    *  account with its staged files (a live one refuses the removal by name first — referencesOf). Slack's Developer
    *  Policy: the data goes when the app does. Every other adapter keeps its logs (archive-never-destroy). */
+  const purgesOnRemove = (rec) => { let c = null; try { c = registry.capsOf(rec.kind); } catch { c = null; } return !!(c && c.retention === 'purge-on-remove'); };
   async function purgeIfDeclared(rec) {
-    let c = null;
-    try { c = registry.capsOf(rec.kind); } catch { c = null; }
-    if (!c || c.retention !== 'purge-on-remove') return { purged: false };
+    if (!purgesOnRemove(rec)) return { purged: false };
     const ended = [];
     await store.outbox.update((ob) => { for (const [id, q] of Object.entries(ob.proposals)) if (q && q.adapterId === rec.id && P.isTerminal(q.state)) { ended.push(id); delete ob.proposals[id]; } });
     for (const id of ended) { try { OF.remove(store.dir, id); } catch { /* the sweep takes it */ } }
@@ -1260,9 +1263,13 @@ function create(engineCtx) {
     let journalClean = true;
     try { if (store.index.journalDurable) journalClean = (await store.index.journalDurable()) !== false; } catch { journalClean = false; }
     if (!journalClean) log.warn(`[channels] ${rec.id}: removed — its rows left index.json, but the index's journal could not be rewritten now (the storage did not take it): its older lines leave at the next compaction`);
-    log.log(`[channels] ${rec.id}: removed with its local copy (${r.logs ? 'message logs' : 'no logs'}, ${r.files ? 'fetched files' : 'no files'}, ${r.own ? 'its pictures and memos' : 'no pictures or memos'}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
-    try { store.audit({ kind: 'account', op: journalClean ? 'purge' : 'purge-owed', id: rec.id, proposals: ended.length, at: now() }); } catch {}
-    return { purged: true, proposals: ended.length, journalClean };   // r1542 (1): the person's answer says a failed compaction
+    // 主开发 r2878: ONE OF THREE a folder — removed, was not there, COULD NOT BE REMOVED; «purged» only when nothing is left
+    const said = (k, what) => (r.states && r.states[k] ? (r.states[k].state === 'removed' ? what : r.states[k].state === 'absent' ? `no ${what}` : `${what} NOT removed (${r.states[k].code})`) : what);
+    const left = Array.isArray(r.left) ? r.left : [];
+    if (left.length) log.warn(`[channels] ${rec.id}: removed, but part of its local copy could NOT be removed now (${left.map((x) => `${x.folder}: ${x.code}`).join('; ')}) — kept in purge-pending.json, finished at the next start or the next removal`);
+    else log.log(`[channels] ${rec.id}: removed with its local copy (${said('logs', 'message logs')}, ${said('files', 'fetched files')}, ${said('own', 'pictures and memos')}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
+    try { store.audit({ kind: 'account', op: left.length ? 'purge-left' : journalClean ? 'purge' : 'purge-owed', id: rec.id, proposals: ended.length, ...(left.length ? { left: left.map((x) => x.folder) } : {}), at: now() }); } catch {}
+    return { purged: !left.length, left: left.map((x) => x.what), proposals: ended.length, journalClean };   // r1542 (1): the person's answer says a failed compaction
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
    *  carrying EXACTLY `DUPLICATE_FIELDS` (the custom secret re-sealed), named

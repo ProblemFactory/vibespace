@@ -1795,6 +1795,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  answers the replacement (or null = unchanged) for each record whose vendorId is named; the log is rewritten whole
    *  (tmp + rename, like `trim`). `{changed: [ids], unknown: [ids]}`. */
   function rewriteRecords(adapterId, convId, vendorIds, fn) {
+    if (goneAccounts.has(adapterId)) return { changed: 0, unknown: [], gone: true };   // 主开发 r2878: a purged account's log is never renamed back
     const want = new Set((Array.isArray(vendorIds) ? vendorIds : []).map(String));
     const fp = logPath(adapterId, convId);
     let lines;
@@ -1867,6 +1868,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * Returns `{ removed, kept }`; a log that does not exist is `{0,0}`.
    */
   function trim(adapterId, convId, { days = RETENTION_DAYS, maxRecords = RETENTION_MAX_RECORDS, floorDays = RETENTION_FLOOR_DAYS } = {}) {
+    if (goneAccounts.has(adapterId)) return { removed: 0, kept: 0, side: null, gone: true };   // r2878
     const fp = logPath(adapterId, convId);
     let lines;
     try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) {
@@ -2165,6 +2167,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * never outgrows the read window and the next compaction is SIDE_KEEP_BYTES of appends away. Temp + rename.
    */
   function trimSide(adapterId, convId, { liveIds, folded = null } = {}) {
+    if (goneAccounts.has(adapterId)) return { removed: 0, kept: 0, forgotten: 0, gone: true };   // r2878
     const { lines, cut } = sideWindow(adapterId, convId);
     if (!lines.length && !cut) return { removed: 0, kept: 0, forgotten: 0 };
     const byMsg = new Map();
@@ -2314,6 +2317,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // 主开发 r2819: the accounts purged in THIS process — every late write of theirs refuses (an ask, a fetch or a pass that began
   // before the purge and lands after it makes nothing again); cleared when an adapter record with that id is written again
   const goneAccounts = new Set();
+  const purging = new Map();   // 主开发 r2878: id → its purge's promise (a re-add clears the gone mark only after it settles)
   const purgeSeq = new Map();   // adapterId -> how many times its local copy was purged (主开发 r2557 (2): an async read across a purge answers nothing)
   function lruOf(adapterId) {
     let l = lruCache.get(adapterId);
@@ -2524,7 +2528,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // 主开发 r2819 (line 510's small): A PURGED ACCOUNT's write refuses — at its start and after each wait (a purge that lands
     // inside it): what it made is taken away again, and it answers null (ingest's held-bodies road reads «nothing» as «not
     // kept yet» and asks this write next: it writes nothing back)
-    const gone = async () => { if (!goneAccounts.has(adapterId)) return false; try { await fs.promises.rm(path.join(attRoot, safeSeg(adapterId)), { recursive: true, force: true }); } catch { } return true; };
+    const gone = async () => { if (!goneAccounts.has(adapterId)) return false; lruCache.delete(adapterId); lruDirty.delete(adapterId); try { await fs.promises.rm(path.join(attRoot, safeSeg(adapterId)), { recursive: true, force: true }); } catch { } return true; };   // r2878 (c): its ledger leaves memory too
     if (goneAccounts.has(adapterId)) return null;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
     const d = attDir(adapterId, convId);
@@ -2666,7 +2670,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (adLoad.blocked) return Promise.reject(blockedError(adLoad.blocked));
     // 0600 (2.369.165): the records carry sealed tokens AND an account's own
     // client secret (`credential.appSecretEnc`) — owner-only like the key file.
-    const run = adChain.then(() => fn(ad)).then((r) => { for (const a of (ad && ad.adapters) || []) if (a && goneAccounts.has(a.id)) goneAccounts.delete(a.id); owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); return r; });
+    // r2878: an account added again clears its gone mark — a re-add DURING its purge only after that purge settles
+    const run = adChain.then(() => fn(ad)).then((r) => { for (const a of (ad && ad.adapters) || []) if (a && goneAccounts.has(a.id)) { const pp = purging.get(a.id); if (pp) pp.finally(() => goneAccounts.delete(a.id)); else goneAccounts.delete(a.id); } owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); return r; });
     adChain = run.then(() => {}, () => {});
     return paced ? run : run.then((r) => landed(adaptersFile).then(() => r));
   }
@@ -2964,9 +2969,42 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   /** design 012 (Slack S1, `caps.retention: 'purge-on-remove'`): ONE account's LOCAL COPY goes — its message logs and
    *  side logs (msgs/<id>/), its fetched files (attachments/<id>/) and every cache this store keeps for it. Called by
    *  the engine AFTER the account's index rows and record left (nothing reads the account any more). → {logs, files}. */
+  // 主开发 r2878: THE PURGES BEGUN AND NOT FINISHED — data/channels/purge-pending.json ({ v, ids: { <id>: { at, left } } }), through
+  // the writer as an act. Written BEFORE the record leaves (purgeBegin: a crash in the middle is finished at the next start), it keeps
+  // what COULD NOT BE REMOVED; the next start (an id with no record) or the next removal finishes it. Read and written off the loop
+  const pendingFile = path.join(dir, 'purge-pending.json');
+  let pending = null;
+  async function loadPending() {
+    if (pending) return pending;
+    let v = null; try { v = JSON.parse(await fs.promises.readFile(pendingFile, 'utf8')); } catch { v = null; }
+    if (!pending) pending = { v: 1, ids: v && v.ids && typeof v.ids === 'object' && !Array.isArray(v.ids) ? v.ids : {} };
+    return pending;
+  }
+  function pendingWrite() { owe(pendingFile, { name: 'channels-purge-pending.write', produce: () => (pending ? JSON.stringify(pending, null, 1) : null), mode: 0o600, act: true }); return landed(pendingFile); }
+  async function purgeBegin(adapterId) { if (!safeSeg(adapterId)) return false; await loadPending(); pending.ids[adapterId] = { at: now(), left: null }; return pendingWrite(); }
   async function purgeAccount(adapterId) {
+    const p = purgeOne(adapterId);   // its marks are set synchronously, before any wait
+    purging.set(adapterId, p);
+    try { const r = await p; await finishPending({ except: adapterId }); return r; }
+    finally { if (purging.get(adapterId) === p) purging.delete(adapterId); }
+  }
+  /** the start's and every removal's pass over the purges not finished: an id with no adapter record is purged again (at the
+   *  START only, an id whose record still stands — a removal cut before its record left — leaves the mark) */
+  async function finishPending({ except = null, atStart = false } = {}) {
+    await loadPending();
+    let changed = false;
+    for (const id of Object.keys(pending.ids)) {
+      if (closed) return;
+      if (id === except || purging.has(id)) continue;
+      if (((ad && ad.adapters) || []).some((a) => a && a.id === id)) { if (atStart) { delete pending.ids[id]; changed = true; } continue; }
+      const q = purgeOne(id); purging.set(id, q);
+      try { await q; } finally { if (purging.get(id) === q) purging.delete(id); }
+    }
+    if (changed) await pendingWrite();
+  }
+  async function purgeOne(adapterId) {
     const seg = safeSeg(adapterId);
-    if (!seg) return { logs: false, files: false, own: false };
+    if (!seg) return { logs: false, files: false, own: false, states: {}, left: [], done: true };
     const pre = `${adapterId}/`;
     for (const m of [dedup, sideDedup, placeCache, basePlaces, sideCompactFailedAt]) for (const k of [...m.keys()]) if (String(k).startsWith(pre)) m.delete(k);
     for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; }
@@ -2979,17 +3017,31 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     peopleCache.delete(adapterId);
     memoForget(searchMemoFile(adapterId)); memoForget(feedMissFile(adapterId));
     try { W().forget(peopleFile(adapterId)); } catch { }
-    // off the loop (B-92fc: nothing synchronous): each folder removed on the thread pool, said by whether it was there and is not
-    const there = async (p) => { try { await fs.promises.access(p); return true; } catch { return false; } };
-    const gone = async (p) => { const had = await there(p); try { await fs.promises.rm(p, { recursive: true, force: true }); } catch { /* reported below */ } return had && !(await there(p)); };
+    // off the loop (B-92fc: nothing synchronous). 主开发 r2878: each folder says ONE OF THREE — removed, was not there, or COULD NOT
+    // BE REMOVED (its error's code) — never a swallowed error
+    const there = async (q) => { try { await fs.promises.access(q); return true; } catch { return false; } };
+    const removeOne = async (q) => {
+      if (!(await there(q))) return { state: 'absent' };
+      try { await fs.promises.rm(q, { recursive: true, force: true }); } catch (e) { return { state: 'left', code: (e && e.code) || 'error' }; }
+      return (await there(q)) ? { state: 'left', code: 'still-there' } : { state: 'removed' };
+    };
     const own = path.join(dir, seg);
-    const r = { logs: await gone(path.join(msgsDir, seg)), files: await gone(path.join(attRoot, seg)), own: await gone(own) };
-    // THE SETTLE: a write of this folder already IN FLIGHT on the writer's thread may land its rename after that removal (its makeDir
-    // makes the folder again; its forgotten file is unlinked after it lands) — once no write of the folder flies, the folder goes again
+    const folders = { logs: path.join(msgsDir, seg), files: path.join(attRoot, seg), own };
+    const r = {};
+    for (const [k, q] of Object.entries(folders)) r[k] = await removeOne(q);
+    // THE SETTLE: a write of the own folder already IN FLIGHT on the writer's thread may land its rename after that removal (its makeDir
+    // makes the folder again; its forgotten file is unlinked after it lands) — once no write of the folder flies, it goes again
     const flying = () => { try { return W().stats().some((x) => x.inflight && String(x.file || '').startsWith(own + path.sep)); } catch { return false; } };
     for (let k = 0; k < 600 && flying(); k++) await new Promise((z) => setTimeout(z, 50));
-    if (await there(own)) { try { await fs.promises.rm(own, { recursive: true, force: true }); } catch { } }
-    return r;
+    // the truth at the end: a folder still there is LEFT (one more removal tried for a folder that came back)
+    for (const [k, q] of Object.entries(folders)) if (await there(q)) { const again = await removeOne(q); if (again.state === 'left') r[k] = r[k].state === 'left' ? r[k] : again; else if (r[k].state === 'left') r[k] = { state: 'removed' }; }
+    const NAMES = { logs: `msgs/${seg}`, files: `attachments/${seg}`, own: seg };
+    const left = Object.keys(folders).filter((k) => r[k].state === 'left').map((k) => ({ what: k, folder: NAMES[k], code: r[k].code }));
+    await loadPending();
+    if (left.length) pending.ids[adapterId] = { at: (pending.ids[adapterId] && pending.ids[adapterId].at) || now(), left: left.map((x) => x.folder) };
+    else delete pending.ids[adapterId];
+    await pendingWrite();
+    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length };
   }
 
   acctWarmStart();   // B-dfa4 cut 3: a big index's per-account keys, in slices from the load (keysOf finishes them if it asks first)
@@ -2997,9 +3049,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // no write; until it lands a touched row counts as changed (journaled)
   try { persistedTop = topCmp(); } catch { persistedTop = null; }   // B-360d unit 1 (M4): the top as loaded (base + journal)
   if (!ixLoad.blocked && plainRows(ix.conversations)) { try { if (Object.keys(ix.conversations).length > LAYOUT_SYNC_ROWS) warmLayout({ atOpen: true }); else buildLayout(ix.conversations); } catch (e) { warn('[channels] the index layout at open failed:', (e && e.message) || e); } }
+  // 主开发 r2878: THE START FINISHES a purge begun and not finished (a crash in its middle, a folder that could not be removed) —
+  // off the loop, after the open
+  { const t = setTimeout(() => { if (!closed) finishPending({ atStart: true }).catch((e) => warn(`[channels] the purges not finished could not be finished now: ${(e && e.message) || e}`)); }, 0); if (t.unref) t.unref(); }
   return {
     rootClosed,   // the root closed to other accounts: resolves true once it is (or already was), false when the filesystem refused (said once)
-    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
+    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount, purgeBegin, finishPending,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
       // B-526c × B-360d unit 1 (主开发 r1765): a row has LANDED exactly when its own change is on disk by the road that carries it —
