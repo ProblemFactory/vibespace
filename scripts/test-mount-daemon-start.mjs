@@ -257,14 +257,18 @@ try {
     CS.setChildStarter(W);
     try {
       const conn = mm.mount(R.id);
-      await until(() => started.length >= 1, 5000);   // the daemon runs; its starter's answer not yet heard
+      // B-3dbd (主开发 r3297): each wait of this scene ends ON ITS FACT, bounded at 30 s (the release gave the start 5 s and the end 2 s,
+      // and read what had come: with no /proc the end reads the daemon's identity through a ps child, slower than 2 s on the loaded pod)
+      await until(() => started.length >= 1, 30000);   // the daemon runs; its starter's answer not yet heard
       if (mounted) mountedNow = true;                 // …and it mounted meanwhile
       await mm.unmount(R.id);                         // the person's Disconnect, meanwhile
       const conn2 = again ? mm.mount(R.id) : null;    // …then the person's Connect again: it joins the connect in flight
       if (twice) await mm.unmount(R.id);              // …and a Disconnect again: the last word
       released = true; release(); const r = await conn; const r2 = conn2 ? await conn2 : null;
       const d0 = started[0] && started[0].pid;
-      if (M === MOUNTS && !stranger) await until(() => !(d0 && alive(d0)), 2000);   // its end waited on; a red's daemon lives (nothing ends it): read at once
+      // its end waited on, as the fact it is — OR the product's other road, the next start held for it (a lost answer with no /proc:
+      // the daemon is left to the next start, its mark set) — whichever the product chose; a red's daemon lives (nothing ends it): read at once
+      if (M === MOUNTS && !stranger) await until(() => !(d0 && alive(d0)) || !!(mm._lostStart && mm._lostStart.has(mp)), 30000);
       const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
       return { r, r2, desired: rec.desired, alive: !!(d0 && alive(d0)), starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
         lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: strangerKid ? (M === MOUNTS ? alive(strangerKid.pid) : !(await until(() => !alive(strangerKid.pid), 1000))) : null };   // a red's kill waited on (its read: never read in the signal's own instant)
