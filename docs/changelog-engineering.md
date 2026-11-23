@@ -1833,6 +1833,10 @@ This file is the engineers' record of every release: the lanes, the verification
   - leg ③'s sharing is forced by a held first read, not timed.
   - New legs, each with its red copy where it has one: the stop in the look, the meta bound, a kept place whose file is gone, the listing read again after its age.
 
+### lg-providers B-d578 pool unit (d) — a pooled create placed on a provider member takes that provider's checks (ruling r1516: (d), the last before a provider id reaches a decision)
+- WHY: ws-create's two provider checks — the model re-resolved against the provider's own rows (or refused by name) and the managed Claude settings refusal — read `data.accountId`; a pooled create names the POOL, so a spawn the store places on a provider member would have met neither (an Anthropic model id sent to the provider; the organisation's helper or credential toward the provider's address).
+- ws-create: the model rule is one local function (`pvModelOf(id)`) the provider account's check calls as before; after resolveForSpawn, a pooled spawn whose descriptor is a provider (`pooled` + `kind: 'provider'` + its `poolTarget`) runs both checks against that member and refuses by name before anything spawns; the spawn then COMMANDS the member's row (`commandModel`, fixed before the member was known, is computed again). LEGS (test-harness-spawn, a stand-in store placing the pool on DeepSeek): the start takes DeepSeek's own row for «sonnet»; under a managed key helper it is refused by name (provider-managed-helper, DeepSeek), nothing spawned; RED: the create without the block spawns it.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
