@@ -321,7 +321,7 @@ try {
     //   (2) M3: a key on the popup's OWN handle arrives in THAT popup, the main window hears none;
     //   r2220: an ENGINE click gives the keyboard to the window it lands in (the box's row 236: on xpra nothing else does);
     //   (3) after an aim INTO the main (a click on its page — the third click opens nothing), the keys stand there: the select's list
-    //       opened by Tab + alt+Down (one more window drawn in the image, read), Down then Return PICK «two» (nothing forced, the
+    //       opened by Tab + alt+Down (the page's own keys say it is open: Down and Return reach the list, not the page), Down then Return PICK «two» (nothing forced, the
     //       list's grab kept); `key <app> x` lands in the main page (and closes both popups: the clean-up)
     if (popNamed) {
       const heardSince = (k0) => hits.slice(k0).filter((h) => /^\/key\?/.test(h.url)).map((h) => h.url);
@@ -363,7 +363,13 @@ try {
       const kr = await cli('vibespace-window', ['key', H2, 'Return']);
       const picked = await until(async () => (hits.slice(s0).some((h) => h.url === '/pick?v=two') ? true : null), 15000, 300);
       console.log(`    MEASURE B-dbb4 r1691 (not a proof): the windows composed in the main handle's image ${before} → ${after} after alt+Down (the select's list); what the page heard — ${JSON.stringify(hits.slice(s0).filter((h) => /^\/(key|pick)/.test(h.url)).map((h) => h.url))}`);
-      check(`B-dbb4 r1691 on the real chromium: after an aim into the main page, a select's list OPEN (one more window drawn: ${before} → ${after}), Down then Return on the APP's own handle PICK the option «two» (nothing forced)`, ckA.code === 0 && kt.code === 0 && ko.code === 0 && kd.code === 0 && kr.code === 0 && after > before && !!picked, { ckA: ckA.code, kt: kt.code, ko: ko.code, kd: kd.code, kr: kr.code, before, after, picked: !!picked });
+      // box row 417 (int361, at the trial 30e68023c): the list's popup is no window the composition counts (3 → 3 with the list open) —
+      // «one more window drawn» was a count the product never promised. THE PAGE's OWN EVENTS say the list was open: after alt+Down
+      // (its own keydown, heard once) Down and Return reached the OPEN LIST, not the page (it heard neither), and «two» was picked; a
+      // list that never opened would let the page hear a second ArrowDown and the Enter
+      const heardSel = hits.slice(s0).filter((h) => /^\/(key|pick)/.test(h.url)).map((h) => h.url);
+      const listHeld = heardSel.filter((u) => u === '/key?w=main&k=ArrowDown').length === 1 && !heardSel.includes('/key?w=main&k=Enter');
+      check(`B-dbb4 r1691 on the real chromium: after an aim into the main page, a select's list OPEN (the page's own keys: after alt+Down, Down and Return reached the open list, not the page — ${listHeld ? 'it heard neither' : 'it heard them'}; the windows composed ${before} → ${after}, measured only), Down then Return on the APP's own handle PICK the option «two» (nothing forced)`, ckA.code === 0 && kt.code === 0 && ko.code === 0 && kd.code === 0 && kr.code === 0 && listHeld && !!picked, { ckA: ckA.code, kt: kt.code, ko: ko.code, kd: kd.code, kr: kr.code, before, after, picked: !!picked, heardSel });
       const k1 = hits.length;
       const km = await cli('vibespace-window', ['key', H2, 'x']);
       const mainGot = await until(async () => (hits.slice(k1).some((h) => h.url === '/key?w=main&k=x') ? true : null), 15000, 300);
