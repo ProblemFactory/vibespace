@@ -135,6 +135,7 @@
   "test-browser-backend.mjs": 1,
   "test-browser-build-download.mjs": 1,
   "test-browser-builds.mjs": 1,
+  "test-browser-builds-keeper.mjs": 1,
   "test-browser-cli-kept.mjs": 1,
   "test-browser-cli-pin.mjs": 1,
   "test-browser-continuity.mjs": 1,

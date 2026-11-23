@@ -130,7 +130,7 @@ export const EXEMPT = Object.freeze({
 
 /** THE NAMED ROWS — files whose text holds a Chrome marker and that launch no Chrome of their own, each READ (主开发 03:13Z) */
 export const ROWS = Object.freeze({
-  'scripts/test-browser-builds.mjs': 'a PRODUCT argv it asserts: the engine plugin\'s launch rows (splitLaunchArgs, the forbidden-switch census) — it launches no Chrome',
+  'scripts/test-browser-builds-keeper.mjs': 'a PRODUCT argv it asserts: the engine plugin\'s launch rows (splitLaunchArgs, the forbidden-switch census) — it launches no Chrome (B-7e49: the legs moved verbatim from test-browser-builds, its heavy twin)',
   'scripts/test-browser-display-chrome.mjs': 'its markers are COMMENTS; its Chrome is launched by the REAL agent-browser CLI it drives (the vendor\'s own launch, with the owner\'s config args) — not a launch of this suite',
   'scripts/test-browser-orphans.mjs': 'process-table FIXTURES: rows whose argv names a Chrome (pid, ppid, starttime) for the orphan judge — its children are /bin/sleep and node, never Chrome',
   'scripts/test-browser-profiles.mjs': 'a config FIXTURE: an agent-browser.json / config.json whose `args` STRING names the debugging port, written to disk for the reader under test',

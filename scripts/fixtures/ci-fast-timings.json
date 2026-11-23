@@ -90,7 +90,6 @@
   "test-bridge-liveness": 2095,
   "test-browser-backend": 5300,
   "test-browser-build-download": 5695,
-  "test-browser-builds": 48085,
   "test-browser-cli-kept": 5718,
   "test-browser-cli-pin-pins": 81,
   "test-browser-disk": 616,

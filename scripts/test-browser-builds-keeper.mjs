@@ -147,19 +147,19 @@ let kk;
   const r3 = await k.setBrowserChoice({ profileId: pin.id, choice: { kind: 'build', version: '152.0.1.2' }, by: 'user' }).catch((e) => e);
   ok(r3 && r3.code === 'build_noop', 'the same build again ⇒ build_noop');
   // verify r1 (F1): the user DRIVES this browser (a takeover from a live view) ⇒ Change build… is refused BY NAME, nobody
-  // told, nothing stopped (the switch's `driving` rule — never a restart under his hands); handed back ⇒ it works
+  // told, nothing stopped (the switch's `driving` rule — never a restart under their hands); handed back ⇒ it works
   const B153 = mkBuild('153.0.1.1');
   const tk = k.takeover({ browserKey: KEY_A, profileId: pin.id, viewerId: 'viewer-1', sessionId: 'sess-a' });
   const bvD = await k.buildsView(pin.id);
   const nRel = relaunches.length, c4 = fake.calls().length;
   const rD = await k.setBrowserChoice({ profileId: pin.id, choice: { kind: 'build', version: '153.0.1.1' }, by: 'user' }).catch((e) => e);
   ok(tk && tk.ok && bvD.driven === KEY_A && rD && rD.code === 'browser_driven' && /hand the browser back/.test(rD.message) && rD.driver === KEY_A && relaunches.length === nRel && callsOf(ns, c4).every((c) => c.verb !== 'close --all') && k.list().browsers[pin.id].runningBuild === '152.0.1.2',
-    'a browser the user is DRIVING (a takeover) is never restarted under his hands: Change build… refused by name (browser_driven, the driver named), the dialog says who drives it, nobody told, no stop', { tk, driven: bvD.driven, code: rD && rD.code, msg: rD && rD.message });
+    'a browser the user is DRIVING (a takeover) is never restarted under their hands: Change build… refused by name (browser_driven, the driver named), the dialog says who drives it, nobody told, no stop', { tk, driven: bvD.driven, code: rD && rD.code, msg: rD && rD.message });
   k.handback({ browserKey: KEY_A, profileId: pin.id, cause: 'explicit' });
   const rH = await k.setBrowserChoice({ profileId: pin.id, choice: { kind: 'build', version: '153.0.1.1' }, by: 'user' }).catch((e) => e);
   ok(rH && rH.ok && rH.restarted && (await k.buildsView(pin.id)).driven === null && fake.launches().at(-1).exe === B153, '…handed back ⇒ the change restarts it as before (the driver gone from the dialog\'s facts)', rH && (rH.code || rH.restarted));
   // verify r2 (H2): a takeover that lands INSIDE the restart (after the stop, before the new launch) — refused by name; the
-  // restart never goes on under the user's hands (his take was accepted before: the tab reopened and the card told while he drove)
+  // restart never goes on under the user's hands (their take was accepted before: the tab reopened and the card told while they drove)
   mkBuild('154.0.1.1'); mkBuild('155.0.1.1'); // newer than what runs (no downgrade refusal first)
   const h2 = await raceLeg(k, pin.id, '154.0.1.1');
   ok(h2.sawStop && h2.take && h2.take.ok === false && h2.take.code === 'browser_restarting' && /take over again in a few seconds/.test(h2.take.error) && h2.change.ok && h2.inputAfter === 'agent',
@@ -182,11 +182,11 @@ let kk;
   { const lw = read('src/lib/browser-live-window.js'); const KEYW = 'The browser is restarting — take over again in a few seconds, when it is back'; const zhD = (await import('../src/lib/i18n-zh.js')).default, jaD = (await import('../src/lib/i18n-ja.js')).default;
     ok(lw.includes(`else if (m.code === 'browser_restarting') showToast(t('${KEYW}'), { type: 'warn' });`) && zhD[KEYW] && jaD[KEYW], 'the live view says the refusal in the device\'s language (its own toast, zh / ja), never the raw server sentence'); }
   k.handback({ browserKey: KEY_A, profileId: pin.id, cause: 'explicit' });
-  // …and Browse yourself IN FLIGHT (his own tab being opened) holds a Change build… off like his browsing does
+  // …and Browse yourself IN FLIGHT (their own tab being opened) holds a Change build… off like their browsing does
   const bw = k.browse(pin.id).catch((e) => ({ code: e.code }));
   const rB = await k.setBrowserChoice({ profileId: pin.id, choice: { kind: 'build', version: '155.0.1.1' }, by: 'user' }).catch((e) => e);
   const bwr = await bw;
-  ok(rB && rB.code === 'browsing_yourself' && bwr && bwr.ok, 'a Change build… while his Browse yourself is still opening his tab ⇒ browsing_yourself (never a restart that closes the tab he is opening)', { rB: rB && (rB.code || rB.restarted), bwr });
+  ok(rB && rB.code === 'browsing_yourself' && bwr && bwr.ok, 'a Change build… while their Browse yourself is still opening their tab ⇒ browsing_yourself (never a restart that closes the tab they are opening)', { rB: rB && (rB.code || rB.restarted), bwr });
   try { await k.endHuman(pin.id, 'closed', { closeTab: true }); } catch { /* none */ }
   // verify r1 (F9): the NEW build does not start ⇒ the old one runs again, and the holder is told THAT (never "restarted on the
   // new build"); neither starts ⇒ told it is not running (the next command starts it on the old build) — never a dead lease
@@ -309,7 +309,7 @@ console.log('— ③b the agent\'s side: `providers` lists the builds and the CL
   ok(Object.values(answers).every((a) => a.status === 200) && leaks.length === 0 && /"kind":"path"/.test(answers.profiles.text) && /"kind":"path"/.test(answers.switcher.text),
     'a chrome file the user named is a FACT by kind only for an agent: status / profiles / use / the switcher view carry neither its path nor the launch view (no launchEnv, no AGENT_BROWSER_EXECUTABLE_PATH)', { statuses: Object.fromEntries(Object.entries(answers).map(([n, a]) => [n, a.status])), leaks: leaks.map(([n, a]) => n + ': ' + (a.text.match(/.{0,50}(?:named chrome|launchEnv|EXECUTABLE).{0,60}/) || [''])[0]) });
   const hv = await kA.buildsView(pp.id);
-  ok(hv.choice && hv.choice.path === pathExe && kA.switcherView(pp.id).build.choice.path === pathExe, '…while the user\'s own dialog and switch view still name the file he typed');
+  ok(hv.choice && hv.choice.path === pathExe && kA.switcherView(pp.id).build.choice.path === pathExe, '…while the user\'s own dialog and switch view still name the file they typed');
   try { await kA.stop(pp.id, { why: 'user' }); } catch { /* none */ }
   await new Promise((res) => srv.close(res));
   const cli = read('data/bin/vibespace-browser');
@@ -360,7 +360,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(rd && rd.ok && rd.restarted === true, 'control (d): …it RESTARTED the browser the user was driving — exactly what ②\'s browser_driven leg catches', rd && (rd.code || rd.restarted));
   try { await kd.stop(pd.id, { why: 'user' }); } catch { /* none */ }
   // verify r2 (H2): a keeper whose takeover does not ask whether the browser is restarting ⇒ the user takes over inside the
-  // restart and it goes on under his hands; one blind to a Browse yourself in flight ⇒ Change build… restarts his opening tab
+  // restart and it goes on under their hands; one blind to a Browse yourself in flight ⇒ Change build… restarts their opening tab
   const noRestartGate = editAnchor(ks, "    if (profileId && switching.has(String(profileId))) { const p = profile(profileId);", "    if (false) { const p = profile(profileId);", "src/server/browser-keeper.js");
   ok(noRestartGate !== ks, 'control (h): the patch (a takeover blind to a restart in progress) applies');
   const Kh = MUT.load('src/server/browser-keeper.js', noRestartGate, 'no-restart-gate');
@@ -382,7 +382,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   const bwi = ki.browse(pi.id).catch((e) => ({ code: e.code }));
   const ri = await ki.setBrowserChoice({ profileId: pi.id, choice: { kind: 'build', version: '153.0.1.1' }, by: 'user' }).catch((e) => e);
   try { await bwi; } catch { /* its own end */ }
-  ok(ri && ri.ok && ri.restarted === true, 'control (i): …Change build… RESTARTED the browser while his own tab was being opened — exactly what ②\'s Browse-in-flight leg catches', ri && (ri.code || ri.restarted));
+  ok(ri && ri.ok && ri.restarted === true, 'control (i): …Change build… RESTARTED the browser while their own tab was being opened — exactly what ②\'s Browse-in-flight leg catches', ri && (ri.code || ri.restarted));
   try { await ki.endHuman(pi.id, 'closed', { closeTab: true }); await ki.stop(pi.id, { why: 'user' }); } catch { /* none */ }
   // verify r2 (B5): a keeper with no settle window (the pre-fix heal) ⇒ the dead build is healed in its daemon, no second word
   const noSettle = editAnchor(ks, "    if (rec.buildChange && now() - Number(rec.buildChange.at || 0) <= CHANGE_SETTLE_MS) return fallBackFromChange(rec, p, seenBy);\n", '', "src/server/browser-keeper.js");
@@ -427,9 +427,9 @@ const EID = 'vibespace.custom-browser';
 const shWords = (line) => { const out = []; const re = /'((?:[^']|'\\'')*)'/g; let m; while ((m = re.exec(line))) out.push(m[1].replace(/'\\''/g, "'")); return out; };
 const wrapperOf = (exe) => { let t = ''; try { t = fs.readFileSync(exe, 'utf8'); } catch { return null; } const line = t.split('\n').find((l) => l.startsWith('exec ')); if (!line || !line.includes(' "$@"')) return null; const [head, tail] = [line.slice(0, line.indexOf(' "$@"')), line.slice(line.indexOf(' "$@"') + 5)]; return { program: shWords(head)[0], args: shWords(tail), text: t }; };
 const kernelOf = (exe) => { const w = exe ? wrapperOf(exe) : null; return w ? w.program : exe; };
-// THE OWNER'S SWITCHES (a fixture — measured on his hub 2026-11-02, 2.369.370, the custom kernel v0.1.5; none is a secret): the
-// keeper's line as his base config held it (the mark's value his conversation's browser key), and the custom kernel's own
-// arguments as his engine config named them — the four holding a comma read by 主开发 (fixups-r2), the rest from the brief
+// THE OWNER'S SWITCHES (a fixture — measured on their hub 2026-11-02, 2.369.370, the custom kernel v0.1.5; none is a secret): the
+// keeper's line as their base config held it (the mark's value their conversation's browser key), and the custom kernel's own
+// arguments as their engine config named them — the four holding a comma read by 主开发 (fixups-r2), the rest from the brief
 const OWNER_KEEPER_LINE = '--no-sandbox,--disable-blink-features=AutomationControlled,--vibespace-keeper=bk-209f474e,--ozone-platform=x11,--use-angle=swiftshader,--enable-unsafe-swiftshader,--disable-gpu-compositing';
 const OWNER_ENGINE = ['--no-sandbox', '--ozone-platform=x11', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--accept-lang=en-US,en', '--window-size=1920,1080', '--window-position=24,36', '--disable-features=OptimizationHints,MediaRouter,Translate,CalculateNativeWinOcclusion,HttpsUpgrades'];
 const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platform')); // lane engine-spi-egress r2: the keeper owns the display platform
@@ -594,8 +594,8 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
       'a switch the one line cannot carry back as itself (a comma, a blank at an end, nothing, a line break) is REFUSED by name — never dropped, never split', cut);
     ok(safe(() => VB.driverArgsText('--a,--b\n--c').args === '--a,--b\n--c' && VB.driverArgsText(undefined).ok && VB.driverArgsText(undefined).args === undefined && !VB.driverArgsText({ a: 1 }).ok) === true,
       'a string is the driver\'s shape already — kept byte for byte (a running browser launched with that spelling); nothing ⇒ nothing; another type refused');
-    // THE SPLIT (r2): the owner's switches — the keeper's line from his base config, the custom kernel's own (the four holding a
-    // comma read from his engine config by 主开发, 2026-11-02) — one switch per name, the keeper's part rides the driver's line,
+    // THE SPLIT (r2): the owner's switches — the keeper's line from their base config, the custom kernel's own (the four holding a
+    // comma read from their engine config by 主开发, 2026-11-02) — one switch per name, the keeper's part rides the driver's line,
     // the engine's the wrapper
     const so = safe(() => VB.splitLaunchArgs(OWNER_KEEPER_LINE, OWNER_ENGINE));
     const names = (l) => l.map((x) => (x.startsWith('-') && x.includes('=') ? x.slice(0, x.indexOf('=')) : x));
@@ -642,7 +642,7 @@ const OWNER_ENGINE_K = OWNER_ENGINE.filter((x) => !x.startsWith('--ozone-platfor
   ok(/"K" cannot start: the Custom Browser Kernel engine's kernel is not installed/.test(mn.text) && /never switches it to Chrome by itself/.test(mn.detail) && !/\/k\//.test(mn.text + mn.detail), 'the vanished kernel\'s ONE For-you notice says what is missing and the way out — never a path', mn);
 }
 // ── lane engine-args-string r2: THE WRAPPER ROAD over the REAL browser-display-config (the keeper's writer) and a real `sh` — the
-// owner's switches (his base config's line + the custom kernel's own) reach an argv-recording program verbatim, once, in order ──
+// owner's switches (their base config's line + the custom kernel's own) reach an argv-recording program verbatim, once, in order ──
 {
   const DCm = require('../src/server/browser-display-config.js');
   const VB = require('../src/browser-verbs.js');
