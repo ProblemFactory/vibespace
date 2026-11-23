@@ -2096,7 +2096,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         claudeCreds: fs.existsSync(CLAUDE_CREDS),
         codexCreds: fs.existsSync(CODEX_CREDS),
         hosts: (getHosts?.()?.list?.() || []).length, hostsUnread: (getHosts?.()?.held?.() && getHosts().unreadWords()) || null,   // the B-f276 remainder (H15): a held list is no «no hosts»
-        mounts: (getMounts?.()?.list?.() || []).length,
+        mounts: (getMounts?.()?.list?.() || []).length, mountsUnread: (getMounts?.()?.unreadWords?.()) || null,   // B-f276 family unit 1: a held storage list is no «no mounts»
         accounts: (getAccounts?.()?.list?.()?.accounts || []).length,
         secondPassword: (() => { const g = req.app && req.app.locals ? req.app.locals.vaultGate : null; return !!g && g.state() !== 'not_set_up'; })(), // lane vault-contents-window r2: the dialog asks for it
       },
@@ -2111,6 +2111,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // the B-f276 remainder (its read r1, N3): a backup asked to carry the machines while hosts.json is HELD would leave them out in silence
     const hostsHeld = includeSensitive.includes('hosts') && getHosts?.()?.unreadWords?.();
     if (hostsHeld) return res.status(503).json({ error: `the export asks for the machines: ${hostsHeld}`, code: 'hosts-unread' });
+    // B-f276 family unit 1: …and the storage while mounts.json is HELD (a backup carrying none would read as a person with no storage)
+    const storageHeld = includeSensitive.includes('mounts') && getMounts?.()?.unreadWords?.();
+    if (storageHeld) return res.status(503).json({ error: `the export asks for the storage: ${storageHeld}`, code: 'storage_unread' });
     // B-225b R8: every named section's hold asked FIRST — a held store refuses the export WHOLE by name (a backup that leaves it out,
     // or carries its defaults, would read as an empty one and be imported over the person's)
     { const hs = heldSections(Array.isArray(sections) ? sections : []); if (hs.length) return res.status(503).json({ error: `the export was refused: ${hs.map((h) => h.file).join(', ')} could not be read — nothing was exported`, code: 'store_unread', held: hs }); }
@@ -2260,8 +2263,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         if (r && r.code === 'hosts-unread') held.push(r.code); else applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');
       }
       if (includeSensitive.includes('mounts') && sens.mounts) {
-        getMounts?.()?.importBundle?.(sens.mounts);
-        applied.push('mounts');
+        let r = null; try { getMounts?.()?.importBundle?.(sens.mounts); } catch (e) { if (e && e.code === 'storage_unread') r = e; else throw e; }   // B-f276 family unit 1: held — not imported, said
+        if (r) held.push(r.code); else applied.push('mounts');
       }
       if (includeSensitive.includes('accounts') && sens.accounts) {
         const r = getAccounts?.()?.importBundle?.(sens.accounts);

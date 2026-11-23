@@ -3,7 +3,7 @@
 // Manage-Agents visual language; the login flow mirrors guided Drive OAuth
 // (server captures the auth URL, user opens it, we poll status until Running).
 import { railRow } from './rail-row.js'; // lane ui-phone-and-fit M2: THE RAIL ROW
-import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
+import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText, heldWordsOf, pluginsHeldWords } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -195,6 +195,8 @@ export function installPluginsUI(App) {
         return;
       }
       body.innerHTML = '';
+      // B-f276 family unit 1: plugins.json HELD (it could not be read) — every row below reads as off because its record is unread
+      if (r.unread) body.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline plugins-held-hint', textContent: t('VibeSpace cannot read its plugins’ settings right now, so every plugin shows as off. Nothing is lost: VibeSpace starts none of them and changes wait until the settings read (it tries again every few minutes).') }));
       const list = document.createElement('div'); list.className = 'plugin-list';
       body.appendChild(list);
       for (const p of r.plugins) {
@@ -203,7 +205,7 @@ export function installPluginsUI(App) {
         const isRelay = provides(p, 'relay');
         const isServe = provides(p, 'serve'), isTunnel = provides(p, 'tunnel'), isDictation = provides(p, 'dictation'), isDecision = provides(p, 'decision');
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
-          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.error); return x; });
+          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(heldWordsOf(x) || x.error); return x; });   // a held plugins.json: worded by its code
         const act = async (fn) => { try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); } render(); };
         let chip, tone = '', chipTitle = '', onChip = null, swOn = !!p.enabled, swDisabled = false, onSwitch, install = null, fact = null;
         if (isDecision) {
@@ -653,6 +655,9 @@ export function installPluginsUI(App) {
     const st = await this._harnessServiceState(backend);
     if (!st) return false;
     if (st.running) return true;
+    // B-f276 family unit 1: plugins.json HELD — whether we already asked is unread: the offer is never made again (a «Not now» is
+    // never re-asked); an action that needs the service hears why
+    if (st.unread) { if (needsService) showToast(pluginsHeldWords(), { type: 'error' }); return false; }
     // Nothing to offer: the harness CLI itself is missing, or ops forced the
     // service off with VIBESPACE_OPENCODE_SERVE=0 — both are honest dead ends,
     // and a failed user action must still hear WHY (no silent failure).

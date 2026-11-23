@@ -45,6 +45,9 @@ const PLUGIN_ROOT = path.join(os.homedir(), '.vibespace', 'plugins');
 const BUILTIN = require('./plugins/index.js');
 const PS = require('./plugin-settings.js'); // PURE: one settings table per built-in plugin (docs/design-plugin-settings.zh.md)
 const SB = require('./secret-box.js');       // the data dir's vault (a plugin's secret is its entry)
+const SR = require('./store-read.js');
+const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: plugins.json under the store-read law
+const PLUGINS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.plugins === undefined || (!!v.plugins && typeof v.plugins === 'object' && !Array.isArray(v.plugins)));
 
 // the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider; lane engine-plugin:
 // a BROWSER ENGINE answers the engine registry's two verbs — src/server/browser-engines.js, the contract src/browser-engines.js)
@@ -83,7 +86,21 @@ class PluginManager {
     this._file = path.join(dataDir, 'plugins.json');
     this.broadcast = broadcast || (() => {});
     this._watchers = new Set(); // lane tailnet-names r4: watch() — what follows a plugin's state AND its rows (the tailnet door)
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = { plugins: {} }; }
+    // B-f276 family unit 1 (lane bl-jobs, 主开发 r2930): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure as
+    // «no plugin set up» and the next save (a first-use answer, an on-switch) wrote over the file — every plugin's on-switch and
+    // record gone. HELD: no plugin is started (the boot replay waits for the read), every change is refused by name, nothing is
+    // written over it (a migration's write throws — the runner tries it again at the next start), and it is read again off the
+    // loop; torn bytes are kept aside once per content, then it starts empty. A restart while held reads the same file again
+    this._hold = HOLD.create({
+      file: this._file, valid: PLUGINS_SHAPE, code: 'plugins_unread', aside: (mark) => this._file + '.corrupt-' + mark,
+      words: (h) => `plugins.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No plugin setting is lost: nothing is written over it, no plugin is started by VibeSpace, and changes to plugins wait until it reads.`,
+      log: (s) => console.warn('[plugins] ' + s),
+      onLift: (v) => this._lifted(v),
+    });
+    let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: PLUGINS_SHAPE });
+    this._state = this._hold.start(a0) === 'data' ? a0.value : { plugins: {} };
+    if (!this._state.plugins) this._state.plugins = {};
     this._defs = new Map(); this._verbs = new Map();
     this._fresh = new Map(); this._freshTok = new Map(); // id → the refresh in flight (with its AbortController) and its token — an act supersedes it (round 3) // id → the status refresh in flight (ONE at a time — rank 13)
     this._statusFailed = new Map(); // id → {at, why}: the last refresh did not answer — the kept answer stands, said as stale
@@ -109,6 +126,7 @@ class PluginManager {
   }
 
   _save({ loud = false } = {}) {
+    if (!this._hold.writable('a plugin change')) { if (loud) throw this._hold.refusal('this one-time move'); return; }   // held: nothing written over it
     try {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
@@ -120,6 +138,7 @@ class PluginManager {
   /** THE VAULT'S OPEN HOOK (lane vault-e2e-password-fix-r2): every plugin holding a secret seals what its record still
    *  holds in the clear (`sealSecrets` — frp's relay token). → the ids that sealed one. */
   sealSecrets() {
+    if (this._hold.held()) { this._sealAsked = true; return []; }   // held: the records are unread — sealed at the lift
     const out = [];
     for (const [id, v] of this._verbs) { if (typeof v.sealSecrets !== 'function') continue; try { if (v.sealSecrets()) out.push(id); } catch (e) { console.warn(`[plugins] ${id}: its secret was not sealed:`, e.message); } }
     this._notify();   // every card re-reads its state (a relay / voice row the lock kept closed is open now)
@@ -141,6 +160,7 @@ class PluginManager {
   /** THE ONE-TIME MOVE (migration 2026-10-plugin-config-to-settings, src/server/migrations.js): the table rows'
    *  old values leave data/plugins.json for settings.json — through this live manager (it holds plugins.json). */
   migrateConfigToSettings() {
+    this._hold.refuse('moving the plugins\' settings');   // held: never «nothing to move» — a throw is run again at the next start
     const { patch, strip } = PS.migrationPlan(this._state, this._readSettings());
     if (Object.keys(patch).length) this._settings.patch(patch);
     for (const [id, fields] of Object.entries(strip)) {
@@ -160,6 +180,7 @@ class PluginManager {
    *  config → settings move again (an instance that ran 2026-10-plugin-config-to-settings while the table had the new
    *  id). Idempotent: a second run finds nothing under the old id. → {settings: {moved, dropped, seeded}, record, config}. */
   renamePlugin(fromId, toId, { seed = {} } = {}) {
+    this._hold.refuse('renaming a plugin');   // held: never «nothing under the old id» — a throw is run again at the next start
     if (!this._defs.has(toId)) throw new Error(`renamePlugin: ${toId} is not a built-in plugin`);
     const tbl = PS.PLUGIN_SETTINGS[toId];
     const cur = this._readSettings();
@@ -206,6 +227,17 @@ class PluginManager {
   watch(fn) { if (typeof fn !== 'function') return () => { }; this._watchers.add(fn); return () => { this._watchers.delete(fn); }; }
   _tell(ev) { for (const fn of [...this._watchers]) { try { fn(ev); } catch (e) { console.warn('[plugins] a watcher failed:', e && e.message); } } }
 
+  /** the words a person reads while plugins.json is held (the plugins list, a refused change) — null when it reads */
+  unreadWords() { return this._hold.words(); }
+  /** the hold LIFTED (src/store-read-hold.js): the records read (null: empty); what the start skipped runs now — the boot replay
+   *  and the vault's seal when they were asked — and every card is told */
+  _lifted(v) {
+    this._state = v || { plugins: {} };
+    if (!this._state.plugins) this._state.plugins = {};
+    this._notify();
+    if (this._replayAsked) { this._replayAsked = false; this.bootReplay(); }
+    if (this._sealAsked) { this._sealAsked = false; this.sealSecrets(); }
+  }
   _rec(id) { return (this._state.plugins[id] = this._state.plugins[id] || {}); }
   // restored 2.343.1 — a dead-code sweep (dc37220) deleted this while 8 call
   // sites remained; every plugin-state broadcast (and publish) threw since.
@@ -262,6 +294,7 @@ class PluginManager {
       installed: !!st.installed, running: !!st.running, starting: !!st.starting,
       parked: !!st.parked, envForced: st.envForced === undefined ? null : st.envForced,
       reason: st.reason || st.lastError || st.error || null,
+      ...(this._hold.held() ? { unread: true } : {}),   // B-f276 family unit 1: plugins.json held — never «not asked yet», never «off» by a record
     };
   }
 
@@ -311,11 +344,12 @@ class PluginManager {
   refreshAll() { for (const [id, v] of this._verbs) if (typeof v.statusAsync === 'function') this.refreshStatus(id).catch(() => { }); }
   _statusOr(id) { try { return this.status(id); } catch (e) { return { error: e.message }; } }
 
-  setMode(id, mode) { return this._verb(id, 'mode')(mode); }
-  setConfig(id, patch = {}) { return this._verb(id, 'config')(patch); }
+  setMode(id, mode) { this._hold.refuse('changing a plugin'); return this._verb(id, 'mode')(mode); }
+  setConfig(id, patch = {}) { this._hold.refuse('changing a plugin'); return this._verb(id, 'config')(patch); }
 
   setEnabled(id, enabled) {
     if (!this._verbs.has(id)) throw new Error('unknown plugin: ' + id);
+    this._hold.refuse('turning a plugin on or off');
     // a plugin whose on-switch IS its start/stop (enable declared) owns it; the default is the boot flag
     const own = this._verbs.get(id).enable;
     if (own) return own(enabled);
@@ -329,6 +363,7 @@ class PluginManager {
    *  persistent state change so a second tab never re-asks. */
   setPrompted(id, prompted = true) {
     if (!this._verbs.has(id)) throw new Error('unknown plugin: ' + id);
+    this._hold.refuse('remembering the first-use answer');
     const rec = this._rec(id);
     if (prompted) rec.promptedAt = Date.now(); else delete rec.promptedAt;
     this._save();
@@ -340,6 +375,7 @@ class PluginManager {
   // owns its rule (frp: default-on from the cluster env, no prior desiredUp; opencode-serve: the env override);
   // the default is enabled + desiredUp ⇒ start, unless the daemon is already running or managed by the system.
   bootReplay() {
+    if (this._hold.held()) { this._replayAsked = true; return; }   // B-f276 family unit 1: held — no plugin is started over unread records; replayed at the lift
     this.refreshAll(); // every kept status read once at boot — async, bounded (rank 13)
     for (const [id, verbs] of this._verbs) {
       if (verbs.bootReplay) { verbs.bootReplay(); continue; }
@@ -361,6 +397,7 @@ class PluginManager {
   // the act keeps its VERB's contract: a sync verb throws / returns in place (a caller catches a refusal where it calls — frp's
   // revoked identity), an async one returns its promise; either way the fresh read follows it
   _act(id, verb) {
+    this._hold.refuse('this plugin action');   // held: an install / start / stop / sign-in records its state — refused by name
     const fn = this._verb(id, verb); this._supersede(id);
     const after = () => { this.refreshStatus(id).catch(() => { }); };
     let r; try { r = fn(); } catch (e) { after(); throw e; }

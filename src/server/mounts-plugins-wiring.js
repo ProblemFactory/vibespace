@@ -817,29 +817,31 @@ app.get('/vibespace-node/:version/:file', async (req, res) => {
 
 // lane hub-sync-holds (rank 13): the panel's rows are the KEPT statuses (no synchronous child on this turn); opening it is a person's press,
 // so every kept status is asked again (async, bounded) and a change reaches the panel by its broadcast
+/** a plugin door's refusal: a HELD plugins.json (B-f276 family unit 1) answers 503 with its code — the page words it by code */
+const pluginRefusal = (res, e) => res.status(e && e.code === 'plugins_unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'plugins_unread' ? { code: e.code } : {}) });
 app.get('/api/plugins', (req, res) => {
-  try { res.json({ plugins: plugins.list() }); plugins.refreshAll(); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ plugins: plugins.list(), ...(plugins.unreadWords() ? { unread: plugins.unreadWords() } : {}) }); plugins.refreshAll(); } catch (e) { res.status(500).json({ error: e.message }); }   // B-f276 family unit 1: why every plugin reads as off
 });
 app.get('/api/plugins/:id/status', async (req, res) => {
-  try { res.json(await plugins.refreshStatus(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { const st = await plugins.refreshStatus(req.params.id); res.json(plugins.unreadWords() && st && typeof st === 'object' ? { ...st, unread: plugins.unreadWords() } : st); } catch (e) { pluginRefusal(res, e); }   // B-f276 family unit 1: a held plugins.json is said (the first-use offer asks nothing then)
 });
 app.post('/api/plugins/:id/install', async (req, res) => {
-  try { res.json(await plugins.install(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await plugins.install(req.params.id)); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/start', async (req, res) => {
-  try { res.json(await plugins.start(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await plugins.start(req.params.id)); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/stop', async (req, res) => {
-  try { res.json(await plugins.stop(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await plugins.stop(req.params.id)); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/login', async (req, res) => {
-  try { res.json(await plugins.loginStart(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await plugins.loginStart(req.params.id)); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/enabled', (req, res) => {
-  try { plugins.setEnabled(req.params.id, !!req.body?.enabled); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { plugins.setEnabled(req.params.id, !!req.body?.enabled); res.json({ ok: true }); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/mode', (req, res) => {
-  try { res.json(plugins.setMode(req.params.id, String(req.body?.mode || 'auto'))); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(plugins.setMode(req.params.id, String(req.body?.mode || 'auto'))); } catch (e) { pluginRefusal(res, e); }
 });
 app.post('/api/plugins/:id/config', (req, res) => {
   // lane setting-doors f4 (主开发 2026-11-15): the judge's daily dollar cap is a SPENDING row — this old door writes it through the
@@ -856,7 +858,7 @@ app.post('/api/plugins/:id/config', (req, res) => {
 // instance (owner: "Not now" is remembered), so the flag is INSTANCE state
 // (data/plugins.json) that broadcasts, never per-browser localStorage.
 app.post('/api/plugins/:id/prompted', (req, res) => {
-  try { res.json(plugins.setPrompted(req.params.id, req.body?.prompted !== false)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(plugins.setPrompted(req.params.id, req.body?.prompted !== false)); } catch (e) { pluginRefusal(res, e); }
 });
 
 // PLUGIN LOADER (Ph2, 2.369.24; Ph4 2.369.30): manifest plugins under
@@ -914,7 +916,7 @@ try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync 
 // throwing "Cannot access 'mounts' before initialization" out of add() before
 // it returned the id — which is why an env-provisioned My storage (S3 or
 // CephFS) came up `desired: unmounted` on its very first boot.
-mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
+mounts.pathGuard = (p) => { mountTokens.refuseIfHeld('renaming this storage'); return mountTokens.list().some((t) => String(t.root || '').startsWith(p)); };   // B-f276 family unit 1: tokens held ⇒ whether a link points here is unknown — refused by name
 { const fy = require('./mount-for-you.js').create({ getUserTodos: () => userTodos, mountCount: () => mounts._state.mounts.length, log: (l) => console.warn(l), onReopen: () => { mounts.clientSwapCheck().catch(() => { }); } }); Object.assign(mounts, { onPark: (m, info) => fy.park(m, info), onUnpark: (m) => fy.unpark(m), onKilled: (m, info) => fy.killed(m, info), onAnswered: (m) => fy.answered(m), onStranded: (m, info) => fy.stranded(m, info), onRemoved: (m) => fy.removed(m), onClientSwaps: (g, memos) => fy.clientSwaps(g, memos) }); try { require('./cluster-presets.js').sharedPresets().onChange(() => { mounts.clientSwapCheck().catch(() => { }); }); } catch (e) { console.warn(`[mounts] the client-swap notice follows no presets reload: ${e.message}`); } mounts.clientSwapCheck().catch(() => { }); } // B-e40d: a replaced preset client is said (the boot + every reload). B-5ce7: the mounts' For-you items (a parked mount + its Reconnect door; B-f230: a stopped process, stranded files)
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
@@ -939,6 +941,7 @@ app.get('/api/mounts', async (req, res) => {
   const cfg = mounts.getMyStorageConfig(); // redacted (no secret)
   res.json({
     mounts: mounts.list(),
+    ...(mounts.unreadWords() ? { unread: mounts.unreadWords() } : {}),   // B-f276 family unit 1: mounts.json held — why the list is empty
     providers: mounts.providers(),   // the storage providers' client cells (lane dc-mount-client)
     shares: mounts.listShares(),
     env: cfg ? { endpoint: cfg.endpoint, bucket: cfg.bucket, prefix: cfg.prefix, accessKey: cfg.accessKey, configured: cfg.configured, importedFromEnv: cfg.importedFromEnv } : null,
@@ -996,18 +999,18 @@ app.post('/api/mounts/:id/ceph-share', async (req, res) => {
 });
 
 // Mount tokens (WebDAV bridge): mint returns the link ONCE; stored hashed
-app.get('/api/mount-tokens', (req, res) => res.json({ tokens: mountTokens.list() }));
+app.get('/api/mount-tokens', (req, res) => res.json({ tokens: mountTokens.list(), ...(mountTokens.unreadWords() ? { unread: mountTokens.unreadWords() } : {}) }));   // B-f276 family unit 1: why the list is empty
 app.post('/api/mount-tokens', (req, res) => {
   try {
     const { name, root, mode } = req.body || {};
     const { raw, rec } = mountTokens.mint({ name, root, mode });
     const url = require('../write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }); // the request's own origin (forwarded proto / host first — behind an https ingress the link is https): THE one rule
     res.json({ success: true, token: raw, davUrl: `${url}/dav`, link: mountTokens.buildLink({ url, raw, rec }), id: rec.id, rec: { id: rec.id, name: rec.name, root: rec.root, mode: rec.mode } });
-  } catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
+  } catch (e) { res.status(e.code === 'tokens_unread' ? 503 : 400).json(require('../mount-error-words.js').errorBody(e)); }   // B-f276 family unit 1: held, by name
 });
 app.delete('/api/mount-tokens/:id', (req, res) => {
   try { mountTokens.revoke(req.params.id); res.json({ success: true }); }
-  catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
+  catch (e) { res.status(e.code === 'tokens_unread' ? 503 : 400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 
 // Import an rclone.conf: parse to a preview list, then import selected remotes

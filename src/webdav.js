@@ -26,19 +26,39 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
+const SR = require('./store-read.js');
+const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: mount-tokens.json under the store-read law
 
 const TOKEN_PREFIX = 'vsmt_';
+const TOKENS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.tokens === undefined || Array.isArray(v.tokens));
 const LINK_PREFIX = 'vibespace-mount:v1:';
 
 class MountTokens {
-  constructor({ dataDir }) {
+  constructor({ dataDir, log }) {
     this._file = path.join(dataDir, 'mount-tokens.json');
     this._state = { tokens: [] };
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { /* fresh */ }
+    // B-f276 family unit 1 (lane bl-jobs, 主开发 r2930): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure as
+    // «no tokens» and the next mint wrote over the file — every folder link and every push mount's token gone. HELD: no token
+    // resolves (a folder link is refused until the file reads), nothing is minted or revoked by name, nothing is written over it,
+    // and it is read again off the loop; torn bytes are kept aside once per content, then the list starts empty
+    this._hold = HOLD.create({
+      file: this._file, valid: TOKENS_SHAPE, code: 'tokens_unread', aside: (mark) => this._file + '.corrupt-' + mark,
+      words: (h) => `mount-tokens.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No token is lost: nothing is written over it, folder links to this computer are refused and new ones wait until it reads.`,
+      log: log || ((s) => console.warn('[mount-tokens] ' + s)),
+      onLift: (v) => { this._state = v || { tokens: [] }; if (!Array.isArray(this._state.tokens)) this._state.tokens = []; },
+    });
+    let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: TOKENS_SHAPE });
+    if (this._hold.start(a) === 'data') this._state = a.value;
     if (!Array.isArray(this._state.tokens)) this._state.tokens = [];
   }
+  /** the words a person reads while mount-tokens.json is held (the tokens list, a refused change) — null when it reads */
+  unreadWords() { return this._hold.words(); }
+  /** a caller's guard over the tokens (the hub's rename guard): throws the refusal by name while held */
+  refuseIfHeld(what) { this._hold.refuse(what); }
 
   _save() {
+    if (!this._hold.writable('a token change')) return;   // held: nothing is written over the file
     const tmp = this._file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, this._file);
@@ -52,6 +72,7 @@ class MountTokens {
    *  it belongs to — so orphan GC + UI classification key off STRUCTURED
    *  fields, never a name-prefix hack (user directive). */
   mint({ name, root, mode, kind, owner }) {
+    this._hold.refuse('making a folder link');
     if (!root || !path.isAbsolute(root)) throw new Error('root must be an absolute path');
     let real;
     try { real = fs.realpathSync(root); } catch { throw new Error('root does not exist'); }
@@ -74,6 +95,7 @@ class MountTokens {
   }
 
   revoke(id) {
+    this._hold.refuse('revoking a folder link');
     const before = this._state.tokens.length;
     this._state.tokens = this._state.tokens.filter(t => t.id !== id);
     if (this._state.tokens.length === before) throw new Error('token not found');
@@ -105,6 +127,7 @@ class MountTokens {
    *  onto yourself is a fuse→HTTP→self loop that deadlocks the threadpool. */
   has(raw) {
     if (!raw || !String(raw).startsWith(TOKEN_PREFIX)) return false;
+    this._hold.refuse('connecting a VibeSpace folder link');   // held: whether it is OURS is unknown — never a self-mount by default
     const h = MountTokens._hash(String(raw));
     return this._state.tokens.some(x => x.tokenHash === h);
   }
@@ -113,6 +136,7 @@ class MountTokens {
   resolve(raw) {
     if (!raw || !raw.startsWith(TOKEN_PREFIX)) return null;
     const h = MountTokens._hash(raw);
+    if (this._hold.held()) return null;   // held: no token is known — refused, never resolved against an empty list
     const t = this._state.tokens.find(x => x.tokenHash === h);
     if (t) { t.lastUsedAt = Date.now(); this._saveSoon(); }
     return t || null;

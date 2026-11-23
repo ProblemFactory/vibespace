@@ -740,7 +740,7 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const PRS = fs.readFileSync(path.join(ROOT, 'src/routes/persistence.js'), 'utf8'), APS = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
   ok(PRS.includes("        if (r && r.code === 'hosts-unread') held.push(r.code); else applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');")
     && PRS.includes("    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}), ")   // (B-225b's move: the answer names its `setAside` after `held`)
-    && APS.includes("const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null;")
+    && APS.includes("const heldSaid = [Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null,")   // B-f276 family unit 1: the storage's held sentence joins it (one line, one wait)
     && APS.includes("if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }")
     && APS.includes("showToast([t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }), heldSaid].filter(Boolean).join(' '), heldSaid ? { type: 'warn', duration: 8000 } : undefined);")
     && APS.includes('setTimeout(() => location.reload(), heldSaid ? 8000 : 900);'),

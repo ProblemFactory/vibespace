@@ -1117,6 +1117,7 @@ class App {
     // the B-f276 remainder (H15) meets lane ui-needs-a-button: a HELD machines list is SAID on its own line (no row: what is unread
     // does not exist to export) — never «no hosts», never silence
     if (!sens.hosts && sens.hostsUnread) sensWrap.append(needLine({ words: t('the paired machines cannot be read right now — an export now carries none'), tone: 'info', cls: 'cfg-sens-hosts-held' }));
+    if (!sens.mounts && sens.mountsUnread) sensWrap.append(needLine({ words: t('the storage list cannot be read right now — an export now carries none'), tone: 'info', cls: 'cfg-sens-mounts-held' }));   // B-f276 family unit 1
     if (!sens.vsPassword && typeof this._showPasswordDialog === 'function') sensWrap.append(needLine({ words: t('No VibeSpace password is set.'), tone: 'info', cls: 'cfg-sens-pass', doors: [{ label: t('Set a password…'), kind: 'secondary', door: 'set-password', run: () => this._showPasswordDialog() }] }));
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
@@ -1261,7 +1262,8 @@ class App {
           // the machines a HELD hosts.json refused (`held`): the page's own sentence (its own: «nothing was changed» beside «Imported» would
           // read as the whole import), in the reader's language — long enough to read before
           // the reload; nothing else imported ⇒ said on the form's line, nothing reloads
-          const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null;
+          const heldSaid = [Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null,
+            Array.isArray(d.held) && d.held.includes('storage_unread') ? t('Your storage was not imported — VibeSpace cannot read its storage list right now. Import it again in a few minutes.') : null].filter(Boolean).join(' ') || null;   // B-f276 family unit 1
           if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }
           close();
           showToast([t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }), heldSaid].filter(Boolean).join(' '), heldSaid ? { type: 'warn', duration: 8000 } : undefined);

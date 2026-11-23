@@ -399,6 +399,7 @@ export function installSidebarMounts(Sidebar) {
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
       overlayLastRuns(hd && hd.hosts, this._lastRunSeen); // B-a31a: a run pushed while this list was on its way stays shown
       d.mountTokens = mt?.tokens || [];
+      d.mountTokensUnread = !!(mt && mt.unread);   // B-f276 family unit 1: mount-tokens.json held — why no link is listed
       this._machineMountsData = mm?.mounts || []; // push AND pull mounts, keyed by hostId (B-f3e8)
       this._mountsData = d;
       // B-54b7 (the B-f276 remainder's cure, 主开发 23:20Z): a list that arrives with the HOLD's mark (`unread`: hosts.json /
@@ -514,7 +515,8 @@ export function installSidebarMounts(Sidebar) {
       // is a connected place — S3, Drive, WebDAV, SFTP, a shared folder, etc.
       const list = document.createElement('div');
       list.className = 'mounts-list';
-      if (!d.mounts.length) {
+      if (d.unread) list.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint', textContent: tr('VibeSpace cannot read its storage list right now, so none is listed. Nothing is lost: it comes back here when it reads (it tries again every few minutes); changes to storage wait until then.') }));   // B-f276 family unit 1: mounts.json held
+      else if (!d.mounts.length) {
         list.innerHTML = `<div class="mounts-empty">${escHtml(tr('Nothing connected yet. Click “Connect storage” below to add a cloud folder (S3, Google Drive, Nextcloud, SFTP…), or “Import share link” to open a folder someone shared with you.'))}</div>`;
       }
       // Credentials render as parent rows with their mount points nested under
@@ -583,10 +585,11 @@ export function installSidebarMounts(Sidebar) {
       );
       root.appendChild(foot);
       // Bridge tokens I minted (revocable)
-      if ((d.mountTokens || []).length) {
+      if ((d.mountTokens || []).length || d.mountTokensUnread) {
         const bt = document.createElement('div');
         bt.className = 'mounts-shares';
         bt.innerHTML = `<div class="mounts-sec-head">${escHtml(tr('Bridge tokens'))}</div>`;
+        if (d.mountTokensUnread) bt.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint', textContent: tr('VibeSpace cannot read its folder links right now, so none is listed and links into this computer are refused. Nothing is lost: they come back here when they read (it tries again every few minutes); new links wait until then.') }));   // B-f276 family unit 1: mount-tokens.json held
         for (const t of d.mountTokens) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';

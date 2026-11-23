@@ -1395,7 +1395,7 @@ class Sidebar {
   _renderServiceHintRows(sessions) {
     for (const meta of Object.values(BACKEND_META)) {
       const svc = meta.servicePlugin ? meta.service : null;
-      if (!svc || !svc.installed || svc.enabled || svc.running) continue;
+      if (!svc || svc.unread || !svc.installed || svc.enabled || svc.running) continue;   // B-f276 family unit 1: a held plugins.json is no «off»
       const met = svc.prompted || (sessions || []).some((x) => (x.backend || 'claude') === meta.id);
       if (!met) continue;                      // never nag someone who has not used this harness here
       const row = document.createElement('div');

@@ -62,7 +62,10 @@ const { obscure: rcloneObscure } = require('./rclone-obscure.js'); // lane mount
  *  daemon that lives for days (detached, it survives server restarts). */
 const rcloneEnv = (cfg = {}) => serviceEnv(process.env, { keep: RCLONE_ENV_KEEP, egress: true, add: cfg });
 const PROBE_OUT_MAX = 1024 * 1024;   // B-323e: a probe's output bound — the old road's (execFile's default maxBuffer; past it the child was ended and the answer read no proof)
-const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
+const LIVENESS = require('./mount-liveness.js');
+const SR = require('./store-read.js');
+const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: mounts.json under the store-read law
+const MOUNTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // lane mount-liveness: THE sweep's verdict table (PURE)
 const MW = require('./mount-error-words.js');   // B-af94: a row's words BY CODE — the page words them in its language
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
 // The vfsMeta walk, run in a CHILD node (never the loop, never the threadpool: 164 788 files over NFS): each file judged
@@ -169,7 +172,7 @@ class MountManager {
     this._state = { mounts: [], shares: [] };
     this._errors = new Map(); // id -> last mount error line
     this._load();
-    this._maybeImportEnvStorage();
+    if (!this._hold.held()) this._maybeImportEnvStorage();   // held: the env import (it saves) waits for the read — _lifted runs it
   }
 
   // One-time migration: VIBESPACE_S3_* env → persisted config. Runs only when
@@ -276,6 +279,7 @@ class MountManager {
   }
 
   setMyStorageConfig({ endpoint, bucket, prefix, accessKey, secretKey }) {
+    this._hold.refuse('changing the storage settings');
     if (!endpoint || !bucket || !accessKey) throw new Error('endpoint, bucket and accessKey required');
     const prev = this._state.myStorage;
     // secretKey omitted on edit = keep the existing one
@@ -516,14 +520,43 @@ class MountManager {
   _enc(text) { return this._box.enc(text); }
   _dec(blob) { return this._box.dec(blob); }
 
+  // B-f276 family unit 1 (lane bl-jobs, 主开发 r2930): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure as
+  // «nothing connected» and the next save — a person's Connect storage, a migration — wrote over the file: every storage record and
+  // its sealed credentials gone. HELD: no storage is listed (the list says why), every change is refused by name (_get and the doors
+  // that make a record), nothing is written over it, the boot's restore and the env import wait, and it is read again off the
+  // loop; torn bytes are kept aside once per content, then the list starts empty. A restart while held reads the same file again
   _load() {
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { /* fresh */ }
+    this._hold = HOLD.create({
+      file: this._file, valid: MOUNTS_SHAPE, code: 'storage_unread', aside: (mark) => this._file + '.corrupt-' + mark,
+      words: (h) => `mounts.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No storage is lost: nothing is written over it, and changes to storage wait until it reads.`,
+      log: (s) => console.warn('[mounts] ' + s),
+      onLift: (v) => this._lifted(v),
+    });
+    let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: MOUNTS_SHAPE });
+    if (this._hold.start(a) === 'data') this._state = a.value;
+    this._shapeState();
+    if (!this._hold.held()) this._maybeMigrateDrive();
+  }
+  _shapeState() {
     if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
     if (!Array.isArray(this._state.shares)) this._state.shares = [];
-    this._maybeMigrateDrive();
   }
+  /** the hold LIFTED (src/store-read-hold.js): the records read (null: empty) — what the start skipped runs now (the one-time
+   *  migration, the env import, the boot's restore when it was asked), and every page is told */
+  _lifted(v) {
+    this._state = v || { mounts: [], shares: [] };
+    this._shapeState();
+    this._maybeMigrateDrive();
+    this._maybeImportEnvStorage();
+    this._notify();
+    if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => { }); }
+  }
+  /** the words a person reads while mounts.json is held (the storage list, a refused change) — null when it reads */
+  unreadWords() { return this._hold.words(); }
 
   _save() {
+    if (!this._hold.writable('a storage change')) return;   // held: nothing is written over the file
     const tmp = this._file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, this._file);
@@ -632,6 +665,7 @@ class MountManager {
 
   importBundle(bundle) {
     if (!bundle) return;
+    this._hold.refuse('importing storage');
     if (bundle.myStorage && !this._state.myStorage) {
       try { this.setMyStorageConfig(bundle.myStorage); } catch {}
     }
@@ -946,6 +980,7 @@ class MountManager {
   // ── CRUD ──
 
   add(cfg) {
+    this._hold.refuse('connecting storage');
     // a raw rclone cfg of a backend another row ADOPTS (ONE Google Drive, OneDrive, the cloud list) is added as that row
     const adopter = rowFor(this, cfg).rawRclone && this._adopterOf(cfg.rcloneType);
     if (adopter) cfg = adopter.fromRclone(cfg);
@@ -1184,6 +1219,7 @@ class MountManager {
   }
 
   _get(id) {
+    this._hold.refuse('this storage change');   // held: no record is known — refused by name, never «mount not found»
     const m = this._state.mounts.find(x => x.id === id);
     if (!m) throw new Error('mount not found');
     return m;
@@ -2754,6 +2790,7 @@ class MountManager {
   /** Boot: adopt live mounts, re-mount anything desired-but-dead. */
   async restore() {
     this.maybeUpgradePinnedRclone(); // async, best-effort — see the pin note (first, as the release: test-mount-oauth-probe wires it)
+    if (this._hold.held()) { this._restoreAsked = true; this._notify(); return; }   // B-f276 family unit 1: held — the list is unread, not empty; the restore runs at the lift
     // B-5ce7 cure round 2: every parked mount's path is BLOCKED and its words set at once, before any connect is awaited —
     // the doors meet the parked words from the first request after a boot, not when the loop's turn comes
     for (const m of this._state.mounts) if (m.parked) { try { this.blockPath(m.parked.mp || this.pathOf(m), MountManager.PARK_BLOCK_MS); this._errors.set(m.id, this._parkedWords(m)); } catch { } }
@@ -3420,6 +3457,7 @@ class MountManager {
    * the OWNER credential (my-storage env or an existing mount's key).
    */
   async mintShare({ name, endpoint, bucket, prefix, mode, ownerAccessKey, ownerSecretKey, expiryDays }) {
+    this._hold.refuse('making a share');
     prefix = String(prefix || '').replace(/^\/+|\/+$/g, '');
     const policy = this._sharePolicy(bucket, prefix, mode);
     let cred, method;
@@ -3551,6 +3589,7 @@ class MountManager {
   }
 
   async revokeShare(id) {
+    this._hold.refuse('revoking a share');
     const share = this._state.shares.find(s => s.id === id);
     if (!share) throw new Error('share not found');
     if (share.kind === 'cephmount' && share.client && this.cephMintAvailable()) {

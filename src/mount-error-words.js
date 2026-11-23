@@ -17,6 +17,9 @@ const i18nKey = (s) => s;   // a declared visible template (scripts/i18n-extract
 
 const WORDS = Object.freeze({
   // ── pull mounts and machine-mount refusals (src/machine-mounts.js) ──
+  // ── a HELD store (B-f276 family unit 1, lane bl-jobs): its file could not be read — every change refused by this code ──
+  storage_unread: i18nKey('VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'),
+  tokens_unread: i18nKey('VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'),
   mount_removed: i18nKey('this pull mount was removed while it was being mounted — nothing of it stays mounted'),
   device_unreachable: i18nKey('device unreachable — its daemon is not dialed in'),
   mount_door_unavailable: i18nKey('push mount not started: this hub could not open the mount’s own door — restart the hub, then try again'),   // B-7f0b r1317 (5)

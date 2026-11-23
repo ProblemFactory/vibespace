@@ -209,7 +209,8 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
       export const createModalShell = () => { throw new Error('no modal in this leg'); }; export const freshKey = (k) => k;
       export const fetchJson = (u, o) => W.fetchJson(u, o); export const showToast = (m, o) => { W.toasts.push([m, (o && o.type) || 'info']); };
       export const showConfirmDialog = async (o) => { W.confirms.push(o && o.title); return false; }; export const showContextMenu = (x, y, items) => { W.menus.push(items); };
-      export const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); export const copyText = async () => {};`,
+      export const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); export const copyText = async () => {};
+      export const heldWordsOf = (d) => (d && d.code === 'plugins_unread' ? 'plugins held' : null); export const pluginsHeldWords = () => 'plugins held';`,   // B-f276 family unit 1: the held store's words by code
     './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));',
     './agent-meta.js': 'export const BACKEND_META = {};',
     './voice-plugin-card.js': 'export const renderVoiceSheet = () => {};',

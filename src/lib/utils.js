@@ -1969,7 +1969,9 @@ export function hostsHeldWords() { return t('VibeSpace cannot read its paired ma
 export function mountsHeldWords() { return t('VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
 /** A refusal answered BY A HOLD (its code: `hosts-unread` / `mounts-unread`) → the page's sentence; any other answer → null (its own words
  *  stand). For the pages that fetch by hand (the exit runs and device activity dialogs, Settings' config export and import). */
-export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : null; }
+/** …and plugins.json (503 `plugins_unread`, B-f276 family unit 1): a plugin's on-switch, an install, a start or a stop refused */
+export function pluginsHeldWords() { return t('VibeSpace cannot read its plugins’ settings right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
+export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d && d.code === 'plugins_unread' ? pluginsHeldWords() : null; }
 /** B-225b (lane lg-store-writes, the persistence holds): a persistence store the hub's START could not read is HELD — 503 `store_unread`
  *  with `held` {file, kind, code, since, rung}. ONE sentence by its file and its kind, in the page's words (the hub's are English). */
 export function storeWhatOf(file) {
