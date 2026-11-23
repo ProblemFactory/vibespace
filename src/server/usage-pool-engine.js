@@ -7662,6 +7662,8 @@ function memberWord(poolId, id, force = false) {
 const _crossLinesOwed = new Map(); // backend session id → {text, i18n, at}: the line owed to the resumed conversation
 const _crossPlacementOwed = new Map(); // backend session id → {poolId, to, at, fromSid}: the member its RESUME starts on (the chooser reads it)
 const CROSS_CARRY_MS = 30 * 60e3; // the carry's life = the owed line's: a restart that never came carries nothing
+/** (r3148 (6)) the backend a conversation's cold restart names — the fallback's pre-kill check asks with the SAME expression */
+function convBackend(s) { return (s && s.backend) || 'claude'; }
 function applyCrossMove(poolId, sid, s2, fromId, d, now = Date.now(), { why = 'cross-provider', record = null, quiet = false } = {}) {
   const x = d && d.cross;
   if (!x || !d.to || !s2) return { moved: false, why: 'no-move' };
@@ -7690,7 +7692,7 @@ function applyCrossMove(poolId, sid, s2, fromId, d, now = Date.now(), { why = 'c
   if (bsid) _crossPlacementOwed.set(String(bsid), { poolId, to: d.to, at: now, fromSid: sid, ...(record ? { record } : {}) }); // the RESUME starts on d.to (poolChooserForModel)
   if (!quiet) serverNotice(`pool-cross-${poolId}-${sid}-${now}`, fill(NOTE) + ' Restarting the conversation to apply it.', { level: 1, i18n: { key: NOTE, params, then: { key: PIN_RESTART_KEY } } });
   console.log(`[pool] cross-provider switch ${poolId}/${sid}: ${fromId || '?'} (${x.fromId}) → ${d.to} (${x.toId}), model ${x.model || '?'} → ${x.toModel} (${why})`);
-  sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: bsid, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null, model: x.toModel }], now);
+  sendColdRestart(poolId, [{ serverId: sid, backend: convBackend(s2), backendSessionId: bsid, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null, model: x.toModel }], now);
   closeCrossAsksFor(poolId, sid, 'moved');
   // (lane pool-provider-latents, q-055 M1) the device's sealed orders follow NOW, not at the next tick: the moved link leaves
   // the old provider's `linkPaths` — the only field an older daemon reads — before a server-down window can open
@@ -7787,6 +7789,7 @@ function queueFallbackMove(poolId, sid, to, by = 'pool', now = Date.now()) {
 /** Start every queued move the pace and the turns allow; ONE toast a (pool, provider) for what this batch moved. → the batch's promise */
 function pumpFallbackMoves(now = Date.now()) {
   while (_fbMovedAt.length && now - _fbMovedAt[0] >= 60e3) _fbMovedAt.shift();
+  for (const sid of [..._fbBackoff.keys()]) if (!activeSessions.get(sid)) _fbBackoff.delete(sid);   // (r3148 (2)) a conversation that is gone keeps no backoff
   const ready = [];
   for (const e of [..._fbQueue.values()]) {
     const s = activeSessions.get(e.sid);
@@ -7842,13 +7845,19 @@ async function executeFallbackMove(e, now = Date.now()) {
   const j = fallbackJudge(e.poolId, e.sid, e.to, now, e.by);
   if (!j.d) { console.log(`[pool] fallback ${e.poolId}/${e.sid}: the move to ${e.to} is not made — ${j.why}`); return { moved: false, why: j.why }; }
   const x = j.d.cross;
+  // (r3148 (5)) NO BACKEND ID ⇒ nothing to resume on the fallback (the carry keys on it): refused BEFORE anything — no check, no record, no slot past this turn
+  if (!(j.s2.claudeSessionId || j.s2.backendSessionId)) { sayOnce(j.s2, e.sid, 'no-resume-id', fillWith(FALLBACK_NO_RESUME_ID, { provider: nameOf(e.to) })); console.log(`[pool] fallback ${e.poolId}/${e.sid}: not moved to ${e.to} — the conversation has no backend id to resume`); return { moved: false, why: 'no-resume-id' }; }
   // (r2939 (4)) THE PROVIDER's REFUSALS BEFORE THE KILL — the ones the create would meet after it (the provider's model rule; the
   // machine's managed Claude settings): refused ⇒ not moved, said in the conversation's own line
-  const refused = await fallbackRefusal(e.to, x.toModel, (j.s2 && j.s2.backend) || (accounts.get(e.poolId) || {}).backend || 'claude');   // (r3041 (b)) the conversation's OWN backend and the model its create gets
+  const refused = await fallbackRefusal(e.to, x.toModel, convBackend(j.s2));   // (r3041 (b), r3148 (6)) the conversation's OWN backend — the SAME expression the restart sends — and the model its create gets
   if (refused) {
     const b = _fbBackoff.get(e.sid), n = b && b.to === e.to ? b.n + 1 : 1, wait = Math.min(FALLBACK_REFUSED_BACKOFF_MAX_MS, FALLBACK_REFUSED_BACKOFF_MS * 2 ** (n - 1));
     _fbBackoff.set(e.sid, { to: e.to, n, until: Date.now() + wait });   // (r3041 (c)) not queued by the pool again before then (a pool slot is not spent on it each pass)
-    sayOnce(j.s2, e.sid, 'refused:' + e.to, fillWith(refused.key, { provider: nameOf(e.to), ...refused.params }));
+    while (_fbBackoff.size > 4096) _fbBackoff.delete(_fbBackoff.keys().next().value);   // (r3148 (2)) capped as the said-once map is
+    const key = e.by === 'person' && refused.key === FALLBACK_REFUSED_UNCHECKED ? FALLBACK_REFUSED_UNCHECKED_PRESS : refused.key;   // (r3148 (4)) under a press nothing asks again
+    const line = fillWith(key, { provider: nameOf(e.to), ...refused.params });
+    if (e.by === 'person') { try { feedPeerCard(j.s2, { fromName: 'VibeSpace', kind: 'notification', text: line }); } catch { } }   // (r3148 (3)) a PRESS refused is said each time (its toast promised the line)
+    else sayOnce(j.s2, e.sid, 'refused:' + e.to, line);
     console.log(`[pool] fallback ${e.poolId}/${e.sid}: ${e.to} refuses it before the move — ${refused.why} (the pool asks again in ${Math.round(wait / 60e3)} min)`);
     return { moved: false, why: 'refused' };
   }
@@ -7870,9 +7879,12 @@ async function executeFallbackMove(e, now = Date.now()) {
   else { endFallbackEpisode(e.sid); if (e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid); }   // (r3041 MUST) a press's slot waits for the LANDING
   return r;
 }
-const FALLBACK_REFUSED_MODEL = i18nKey('{provider} cannot take this conversation: it does not serve the model {model} — nothing moved');
-const FALLBACK_REFUSED_MANAGED = i18nKey('{provider} cannot take this conversation: this machine\'s managed Claude settings keep a provider\'s key out — nothing moved');
-const FALLBACK_REFUSED_UNCHECKED = i18nKey('{provider} cannot take this conversation now: its refusals could not be checked — nothing moved; the pool asks again later');
+// (r3148 (1)) a conversation's line is a STORED string — never translated (it stays English): plain strings, no dictionary rows
+const FALLBACK_REFUSED_MODEL = '{provider} cannot take this conversation: it does not serve the model {model} — nothing moved';
+const FALLBACK_REFUSED_MANAGED = '{provider} cannot take this conversation: this machine\'s managed Claude settings keep a provider\'s key out — nothing moved';
+const FALLBACK_REFUSED_UNCHECKED = '{provider} cannot take this conversation now: its refusals could not be checked — nothing moved; the pool asks again later';
+const FALLBACK_REFUSED_UNCHECKED_PRESS = '{provider} cannot take this conversation now: its refusals could not be checked — nothing moved';   // (r3148 (4)) a press: nothing asks again by itself
+const FALLBACK_NO_RESUME_ID = '{provider} cannot take this conversation yet: it has no conversation of its own the provider could resume — nothing moved';   // (r3148 (5))
 /** The provider's own refusals a create would meet AFTER the kill (r2939 (4)) — the model rule and the managed settings — asked before
  *  the move with the conversation's OWN backend and the model its create gets (r3041 (b)); a check that THROWS refuses (fails closed:
  *  never killed for a create that refuses) → null | {key, params, why} — the line a whole sentence in the page's language (r3041 (f)),
@@ -8001,7 +8013,8 @@ function drawFallbackAsk(q, a) {
     q.n = n;
   } catch (e) { console.warn('[pool] fallback: the For-you item could not be filed:', e.message); }
 }
-/** THE PERSON's answer to a fallback item (answerCrossProviderAsk hands it here): once / always / deny → {ok, state, moved, moving, why} */
+/** THE PERSON's answer to a fallback item (answerCrossProviderAsk hands it here): once / always / deny → {ok, state, moved: false, queued, why} —
+ *  `queued` the conversations put at the head of the queue (each move is said when it is made); `why` 'gone' when none waits */
 function answerFallbackAsk(q, answer, now = Date.now()) {
   const settle = (by) => { _fbAsks.delete(q.key); _fbAskById.delete(q.askId); if (q.todoId) { try { const t = getUserTodos(); if (t && typeof t.setStatus === 'function') t.setStatus(q.todoId, 'done', by); } catch { } } };
   if (answer === 'deny') { _fbAskQuiet.set(q.key, now + CROSS_ASK_QUIET_MS); settle('denied'); console.log(`[pool] fallback ${q.poolId}: denied — nothing moves to ${q.pv} (not asked again for 6 h)`); return { ok: true, state: 'denied', moved: false, moving: 0 }; }
@@ -9272,7 +9285,7 @@ function maybeStopOnFallback(session, id, from, to) {
     requestSlotFor, // law 1's ONE answer to «which account» (lane readings-attribution-2): {key, slotOk, reqAt, movedAt?} or null = unknown
     providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, dropCrossCarry, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     queueFallbackMove, pumpFallbackMoves, fallbackJudge, fallbackRows, syncFallbackAsks, answerFallbackAsk, _fbQueue, _fbMovedAt, _fbAsks, FALLBACK_MOVES_PER_MIN,
-    purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, _fbLanding, _fbBackoff, noteFallbackLanded, endFallbackEpisode, // F2 cure (r2939) + cure 2 (r3041) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
+    purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, _fbLanding, _fbBackoff, convBackend, noteFallbackLanded, endFallbackEpisode, // F2 cure (r2939) + cure 2 (r3041) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)

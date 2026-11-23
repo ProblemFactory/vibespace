@@ -563,6 +563,39 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await wK.pass(); await wK.settle();
   ok(kAfter.c1 === 1 && kAfter.c3 === 1 && !kAfter.queued && kAfter.off && wK.cards.filter((c) => c.sid === 'k1' && /keep a provider's key out/.test(c.text)).length === 1 && !wK.eng._fbBackoff.has('k1'),
     '(c) refused once ⇒ backed off: two more passes queue nothing and ask the check NO more (one check, one line); B serving again ends the episode (the backoff cleared)', kAfter);
+  // (r3148 (2)) the backoff of a conversation that is gone is dropped at the next pump (and the map is capped as the said-once one is)
+  wK.eng._fbBackoff.set('gone-sid', { to: ds.id, n: 1, until: Date.now() + 36e5 });
+  wK.eng.pumpFallbackMoves();
+  ok(!wK.eng._fbBackoff.has('gone-sid') && /while \(_fbBackoff\.size > 4096\)/.test(read('src/server/usage-pool-engine.js')), '(r3148 (2)) a gone conversation keeps no backoff (dropped at the next pump); the map is capped at 4096 like the said-once map');
+  // (r3148 (3) (4)) A PRESS REFUSED AGAIN says it again (the toast promised the line); a press's failed check promises no «asks again»
+  const wPr = world({ managedDir: mdir });
+  wPr.client(); wPr.mk('pr1');
+  await wPr.pass();
+  wPr.mute(() => wPr.eng.answerCrossProviderAsk(fbItems(wPr)[0].action.askId, { answer: 'once' })); await wPr.settle(); await wPr.settle();
+  await wPr.pass();
+  const again = fbItems(wPr).filter((x) => x.status === 'open');
+  if (again.length) { wPr.mute(() => wPr.eng.answerCrossProviderAsk(again[0].action.askId, { answer: 'once' })); await wPr.settle(); await wPr.settle(); }
+  const prLines = wPr.cards.filter((c) => c.sid === 'pr1' && /keep a provider's key out/.test(c.text)).length;
+  ok(again.length === 1 && prLines === 2 && wPr.restarts().length === 0, '(r3148 (3)) a press refused AGAIN in the same episode says its line again (two presses, two lines, nothing restarted)', { again: again.length, prLines });
+  const wPu = world();
+  wPu.client(); wPu.mk('pu1');
+  await wPu.pass();
+  MAN.managedHelperFact = async () => { throw new Error('a placed throw'); };
+  try { wPu.mute(() => wPu.eng.answerCrossProviderAsk(fbItems(wPu)[0].action.askId, { answer: 'once' })); await wPu.settle(); await wPu.settle(); } finally { MAN.managedHelperFact = realMH; }
+  ok(wPu.cards.some((c) => c.sid === 'pu1' && c.text === 'DeepSeek cannot take this conversation now: its refusals could not be checked — nothing moved') && !wPu.cards.some((c) => /asks again/.test(c.text || '')),
+    '(r3148 (4)) a PRESS whose check could not be made says so with no «the pool asks again» (under «never» nothing asks again)', wPu.cards.map((c) => c.text));
+  // (r3148 (5)) A MOVE WITH NO BACKEND ID is refused before anything: no check, no record, nothing restarted, no slot held
+  const wNb = world({ cross: 'allow' });
+  wNb.client(); wNb.mk('nb1', wNb.P, { claudeSessionId: null });
+  let checksNb = 0; MAN.managedHelperFact = async (o) => { checksNb++; return realMH(o); };
+  try { await wNb.pass(); await wNb.settle(); } finally { MAN.managedHelperFact = realMH; }
+  ok(wNb.restarts().length === 0 && checksNb === 0 && !(wNb.metas.get('cw-nb1') || {}).poolFallback && wNb.eng._fbInFlight.size === 0 && wNb.eng._fbLanding.size === 0 && wNb.cards.some((c) => c.sid === 'nb1' && /has no conversation of its own the provider could resume/.test(c.text)),
+    '(r3148 (5)) a conversation with no backend id is refused BEFORE anything — no check asked, no record, nothing restarted, no slot held — and its line says why', { checksNb, inFlight: wNb.eng._fbInFlight.size, cards: wNb.cards.map((c) => c.text) });
+  // (r3148 (1) (6)) the conversation lines are stored strings (no dictionary rows); the check and the restart name the backend ONE way
+  const ENGs = read('src/server/usage-pool-engine.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+  ok(!/i18nKey\('\{provider\} cannot take this conversation/.test(ENGs) && !ZH.includes('"{provider} cannot take this conversation') && !JA.includes('"{provider} cannot take this conversation')
+    && ENGs.includes('fallbackRefusal(e.to, x.toModel, convBackend(j.s2))') && ENGs.includes("sendColdRestart(poolId, [{ serverId: sid, backend: convBackend(s2), backendSessionId: bsid,"),
+    '(r3148 (1) (6)) the refusal lines are stored strings — no dictionary rows (a conversation\'s line stays English); the pre-kill check and the cold restart name the backend by ONE expression');
   // (6) THE BUTTON's WORDS: «Always» on the fallback item says it reaches ANY fallback this pool lists; its detail too
   ok(read('src/lib/user-todos-row.js').includes("act && act.fallback ? t('Always — to any fallback this pool lists') : t('Always for this pool')") && /to ANY fallback this pool lists/.test(fbItems(wB)[0].detail || ''),
     '(6) the fallback item\'s «Always» says it plainly — always, to ANY fallback this pool lists (the pool\'s one setting) — in its button and its detail');

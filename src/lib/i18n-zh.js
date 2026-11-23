@@ -11443,9 +11443,6 @@ export default {
   "1 conversation is queued to move to the fallback — it restarts there when its turn is over; a refusal is said in its own line": "已排队把 1 个对话移到备用提供方——它在当前回合结束后在那里重启；若被拒绝，会在它自己的对话里说明", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
   "{n} conversations are queued to move to the fallback — each restarts there when its turn is over; a refusal is said in its own line": "已排队把 {n} 个对话移到备用提供方——每个对话在当前回合结束后在那里重启；若被拒绝，会在它自己的对话里说明", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
   "This pool now moves a conversation to its fallback by itself — none waits right now": "这个号池现在会自己把对话移到备用提供方——目前没有在等的对话", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
-  "{provider} cannot take this conversation: it does not serve the model {model} — nothing moved": "{provider} 无法接手此对话：它不提供模型 {model}——什么都没有移动", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
-  "{provider} cannot take this conversation: this machine's managed Claude settings keep a provider's key out — nothing moved": "{provider} 无法接手此对话：这台机器的托管 Claude 设置不允许使用提供方的密钥——什么都没有移动", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
-  "{provider} cannot take this conversation now: its refusals could not be checked — nothing moved; the pool asks again later": "{provider} 现在无法接手此对话：无法检查它的拒绝条件——什么都没有移动；号池稍后会再试", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
   "{provider} could take this conversation while every member is out, but the vault is locked — For you names what waits on it; Unlock… there and the pool can move it": "所有成员都不可用时 {provider} 可以接手此对话，但保管库已锁定——「待你处理」里列出了等它的事项；在那里解锁后号池就能移动它", // lane lg-providers B-d578 fallback F2 cure (r2939 (7))
   "Always — to any fallback this pool lists": "一直——移到这个号池列出的任一备用提供方", // lane lg-providers B-d578 fallback F2 cure
   "Nothing moved — no conversation waits any more": "没有移动——已经没有等待的对话", // lane lg-providers B-d578 fallback F2 cure
