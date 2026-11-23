@@ -39,6 +39,8 @@ import { reconcileKeyed } from './user-todos-row.js';
 import { track } from './telemetry-client.js';
 import * as R from '../integration-registry.js';
 import { switcherModel, switchOutcomeWords, dismissOutcomeWords, viewErrorWords, chipWords, choicesOf, backendFactOf } from './browser-switcher-model.js';
+import { PROXY_REFUSALS } from './browser-proxy-model.js'; // B-7aef (主开发 r2927): a switch whose restart meets a proxy refusal …
+import { sayProxyRefusal } from './browser-proxy-dialog.js'; // … says the switch's words, then the proxy's, with ITS press (the profile's own move)
 import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: the build row's Change build…
 import { cardBuildLine } from './browser-build-model.js';
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: the browser runs headless (no desktop session) — said under the now line
@@ -258,7 +260,9 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
     const r = await fetchJson('/api/browser/switch', json('POST', { profile: profileId, provider: e.id, sessionId: sessionId || undefined, confirmDowngrade: !!confirmDowngrade }));
     st.pending = null;
     if (r && r.error) console.warn('[browser-switcher] switch answered', r.code, r.error);
-    toast(switchOutcomeWords(r, { t, from, to: e.id, label })); // the toast reaches the user even when the window was closed
+    const said = switchOutcomeWords(r, { t, from, to: e.id, label });
+    if (r && PROXY_REFUSALS.includes(r.code)) sayProxyRefusal(r, '', { said: said.text });   // B-7aef r2927: the same helper, the same press
+    else toast(said); // the toast reaches the user even when the window was closed
     if (!st.closed) { render(); refresh(); }
   }
   /** "Hand it back to your agent" (the driven card): the act itself, here — the dialog stays open and the broadcast the

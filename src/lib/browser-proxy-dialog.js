@@ -6,7 +6,8 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { mountProxyField } from './browser-proxy-field.js';
 import { proxyWords, proxyDoor } from './browser-proxy-model.js';
-import { showUnlock, showSetup } from './vault-unlock.js';
+import { showUnlock, showSetup, unlockThen, vaultFacts } from './vault-unlock.js';
+import { joinSentences } from './browser-exit-words.js';   // B-7aef r2927: a road's own sentence, then the proxy's
 
 // B-acb9 (r226): the forms ONE of their own saves ended, keyed by the form's overlay. A second open of the same profile RAISES the
 // live form and hands its caller that same overlay, so the word every caller hears is the FORM's — never one call's local.
@@ -72,23 +73,35 @@ export function openProxyDialog(app, r, { onDone = null, onClose = null } = {}) 
   return shell;
 }
 
-/** B-7aef (主开发 r2863): A PROXY's REFUSAL ON ANY PERSON's ROAD — said in the page's words (`act`: the act it refused, 'start' · 'move')
- *  with ITS press as the toast's action: «Move the password to the vault» aimed at the profile the hub's answer names (`profileId`,
- *  carried from the launch's own verdict), or the vault's Unlock… / Set up the vault…; never a path through a menu. The roads: the
- *  Agent browser panel's Restart and a kept browser's Resume (browser-trace-view.js), Browse yourself and the live view's Resume /
- *  Restart (browser-live-window.js), the For-you item's Restart (user-todos-actions.js). */
-export function sayProxyRefusal(r, what, { act = 'start' } = {}) {
+/** B-7aef (主开发 r2863 / r2927): A PROXY's REFUSAL ON ANY PERSON's ROAD — said in the page's words (`act`: the act it refused, 'start' ·
+ *  'move') with ITS press as the toast's action: «Move the password to the vault» aimed at the profile the hub's answer names
+ *  (`profileId`, carried from the launch's own verdict), or the vault's Unlock… / Set up the vault…; never a path through a menu.
+ *  `said`: a road's own whole sentence said first (the switch's outcome), the proxy's after it. A MOVE a locked vault refused: its
+ *  Unlock… goes on into the move the person already pressed, once THIS page's unlock lands (one press — never a second move).
+ *  The roads: the Agent browser panel's Restart and a kept browser's Resume (browser-trace-view.js), Browse yourself and the live
+ *  view's Resume / Restart (browser-live-window.js), the For-you item's Restart (user-todos-actions.js), a switch to another backend
+ *  (browser-switcher.js — its restart meets the refusal). Not a road: the chat card's Resume of the conversation's own throwaway
+ *  browser (chat-renderers.js) — an ephemeral profile holds no saved proxy and cannot be moved, so its words stand alone. */
+export function sayProxyRefusal(r, what, { act = 'start', said = '' } = {}) {
   const door = act === 'move' && r && r.code === 'not_written' ? 'move' : proxyDoor(r && r.code, r && r.word);   // a write that did not land: the vault holds the login, the profile is as it was — press again
-  const moveId = door === 'move' && r && typeof r.profileId === 'string' && r.profileId ? r.profileId : '';   // the refusal names its profile (an id)
-  const reason = proxyWords(r && r.code, t, '', { act, word: r && r.word });
-  showToast(t('{what} — {reason}', { what, reason }), { type: 'error', duration: 9000, ...(door === 'move' ? (moveId ? { action: { label: t('Move the password to the vault'), run: () => moveProxyPassword(moveId) } } : {}) : door ? { action: { label: door === 'setup' ? t('Set up the vault…') : t('Unlock…'), run: () => { try { (door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } } } } : {}) });
+  const id = r && typeof r.profileId === 'string' && r.profileId ? r.profileId : '';   // the refusal names its profile (an id)
+  const moveId = door === 'move' ? id : '';
+  const goesOn = act === 'move' && door === 'unlock' && !!id;
+  const reason = proxyWords(r && r.code, t, '', { act, word: r && r.word, goesOn });
+  showToast(said ? joinSentences(said, reason) : t('{what} — {reason}', { what, reason }), { type: 'error', duration: 9000, ...(door === 'move' ? (moveId ? { action: { label: t('Move the password to the vault'), run: () => moveProxyPassword(moveId) } } : {}) : goesOn ? { action: { label: t('Unlock…'), run: () => unlockThen(() => { if ((vaultFacts() || {}).state === 'unlocked') moveProxyPassword(id); }, { here: true }) } } : door ? { action: { label: door === 'setup' ? t('Set up the vault…') : t('Unlock…'), run: () => { try { (door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } } } } : {}) });
 }
+const MOVING = new Set();   // B-7aef r2927: one move at a time per profile on the toast roads — a second press while the first is out asks nothing
 /** The press itself (主开发 r2686): the HUB moves the word — this page posts the profile's id ONLY (the word crosses no page, address
- *  or log); a refused move is said with its own press (a locked vault: Unlock…, then press again). The panels redraw on the hub's
+ *  or log); a refused move is said with its own press (a locked vault: Unlock…, and the move goes on). The panels redraw on the hub's
  *  `browser-profiles-updated` (the keeper's move notifies). */
 export async function moveProxyPassword(profileId) {
-  const res = await fetchJson('/api/vault/proxy-logins/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId }) });
-  if (!res || res.error || res.ok === false) { sayProxyRefusal(res && { ...res, profileId }, t('Could not move the password'), { act: 'move' }); return false; }
-  showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
-  return true;
+  const id = String(profileId || '');
+  if (MOVING.has(id)) return false;
+  MOVING.add(id);
+  try {
+    const res = await fetchJson('/api/vault/proxy-logins/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: id }) });
+    if (!res || res.error || res.ok === false) { sayProxyRefusal(res && { ...res, profileId: id }, t('Could not move the password'), { act: 'move' }); return false; }
+    showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
+    return true;
+  } finally { MOVING.delete(id); }
 }

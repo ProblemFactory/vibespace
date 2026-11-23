@@ -45,9 +45,9 @@ export function proxyDoor(code, word = '') {
 /** The words a refusal is said in, by its CODE and the act it refused (`act`: 'save' — this dialog's Save · 'move' — «Move the
  *  password to the vault» · 'start' — a start of the browser) and the vault's own word. B-8b87 cure: a code with no words here is
  *  named by its code in the page's language — never the server's English sentence. */
-export function proxyWords(code, t, error = '', { act = 'save', word = '' } = {}) {
+export function proxyWords(code, t, error = '', { act = 'save', word = '', goesOn = false } = {}) {   // goesOn (B-7aef r2927): the toast's Unlock… goes on into the move already pressed
   const door = proxyDoor(code, word);
-  if (door === 'unlock') return act === 'move' ? t('The vault is locked — press Unlock…, then move the password again.') : act === 'start' ? t('The vault is locked — press Unlock…, then start the browser again.') : t('The vault is locked — press Unlock…, then save.');
+  if (door === 'unlock') return act === 'move' ? (goesOn ? t('The vault is locked — press Unlock…, and the password moves once the vault is open.') : t('The vault is locked — press Unlock…, then move the password again.')) : act === 'start' ? t('The vault is locked — press Unlock…, then start the browser again.') : t('The vault is locked — press Unlock…, then save.');
   if (door === 'setup') return t('The vault is not set up yet — press Set up the vault…, then try again.');
   switch (code) {
     case 'bad_proxy': return t('The proxy must be http://host:port, https://host:port or socks5://host:port.');

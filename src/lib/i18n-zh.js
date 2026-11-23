@@ -14722,6 +14722,7 @@ export default {
   "{user} — the vault's list could not be read": "{user}——无法读取保险库的列表", // B-8b87 cure: a proxy's refusals in the page's words
   "{user} — no longer in the vault": "{user}——已不在保险库中", // B-8b87 cure: a proxy's refusals in the page's words
   "The vault is locked — press Unlock…, then move the password again.": "保险库已锁定——请按「解锁…」，然后再移一次密码。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, and the password moves once the vault is open.": "保险库已锁定——请按「解锁…」，保险库打开后密码就会移入。",
   "The vault is locked — press Unlock…, then start the browser again.": "保险库已锁定——请按「解锁…」，然后再启动浏览器。", // B-8b87 cure: a proxy's refusals in the page's words
   "The vault is locked — press Unlock…, then save.": "保险库已锁定——请按「解锁…」，然后保存。", // B-8b87 cure: a proxy's refusals in the page's words
   "The vault is not set up yet — press Set up the vault…, then try again.": "保险库还没有设置——请按「设置保险库…」，然后再试一次。", // B-8b87 cure: a proxy's refusals in the page's words

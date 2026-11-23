@@ -45,7 +45,6 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { anchored } from './scratch.mjs';   // B-1e9a cure 3: the Connect block's RED controls
 import { dictEntries } from './i18n-extract.mjs';   // B-8703: the zh / ja VALUES the value net reads
-import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';   // B-7aef r2863: the real keeper's capability check finds a client (nothing launches)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -913,7 +912,6 @@ class Nd {
   insertBefore(n, ref) { if (n.parentNode) n.parentNode._drop(n); const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); n.parentNode = this; return n; }
   replaceChildren(...ns) { for (const c of this.children) c.parentNode = null; this.children = []; this._text = ''; this.append(...ns); }
   remove() { if (this.parentNode) this.parentNode._drop(this); }
-  before(...ns) { const p = this.parentNode; if (p) for (const n of ns) p.insertBefore(typeof n === 'string' ? textNode(n) : n, this); }   // B-7aef r2863: the vault's own unlock dialog puts its wait line before its error line
   get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }
   set textContent(v) { for (const c of this.children) c.parentNode = null; this.children = []; this._text = String(v ?? ''); }
   get innerHTML() { return this._html || ''; }
@@ -1794,157 +1792,8 @@ if (CL) {
     try { textOnly = (await bundleOf("export * as CAD from './channel-account-dialogs.js';", [[/channel-words\.js$/, anchored(CWSRC, "  if (!r || r.code !== 'disabled' || typeof r.account !== 'string' || !r.account) return null;\n", '  return null;\n', 'B-7aef: the channel words as released — text only')]], 'b7aef-cw')).CAD; } catch (e) { ok(false, 'RED control setup: the channel dialogs bundle alone', String(e && e.message).slice(0, 300)); }
     const RT = await enable(textOnly, REFUSED);
     ok(!RT.door && !RT.calls.length, 'RED control: the release\'s text-only words (no door as data) leave a disabled account\'s refusal with no press — the person sent to a menu', RT);
-    // (2) THE PROXY's PASSWORD IN ITS ADDRESS: «Move the password to the vault» = the profile's own move (主开发 r2686: the hub moves the
-    // word, it never crosses the page). 主开发 r2863: EVERY ANSWER HERE IS THE HUB's OWN — a real keeper whose profiles were saved with the
-    // password in the address before the law, behind the real browser routes (express on 127.0.0.1, port 0); the move is the keeper's
-    // own (what the vault route's proxyMove calls); the vault a stand-in this leg locks and unlocks. RED: the id dropped where it is
-    // dropped today (the keeper's launch refusal, the route's answer — each today's line, in memory); today's exit dialog (no vault door)
-    const Module = require('node:module');
-    const memOf = (rel, from, to, what) => { const file = path.join(REPO, rel); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(anchored(fs.readFileSync(file, 'utf8'), from, to, what), file); return m.exports; };
-    const RKROOT = path.join(TMP, 'b7aef-keeper'), RKHOME = path.join(RKROOT, 'home'), RKDATA = path.join(RKROOT, 'data'), RKSTORE = path.join(RKDATA, 'browser-profiles.json');
-    const PUSER = 'standin-user', PPASS = ['standin', 'pw', String(process.pid)].join('-');   // built at run time — never a literal secret
-    const PADDR = 'http://proxy.example.test:3128';
-    const rkVault = { locked: false, entries: new Map() };
-    Object.assign(rkVault, {
-      state: () => (rkVault.locked ? 'locked' : 'unlocked'),
-      secretPut: (name, value) => { if (rkVault.locked) return { ok: false, code: 'key-unreadable:vault_locked' }; rkVault.entries.set(name, Buffer.from(value)); return { ok: true }; },
-      secretGet: (name) => (rkVault.locked ? { ok: false, code: 'key-unreadable:vault_locked' } : { ok: true, value: rkVault.entries.has(name) ? Buffer.from(rkVault.entries.get(name)) : null }),
-      secretDrop: (name) => { rkVault.entries.delete(name); return { ok: true }; },
-      secretNames: () => [...rkVault.entries.keys()].map((name) => ({ name, at: 1 })),
-      noteUse: () => ({ receipt: null }),
-    });
-    const storeNow = () => { const w = require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync(); if (w && (w.deferred || (w.left && w.left.length))) throw new Error('the store writer left owed writes'); return fs.readFileSync(RKSTORE, 'utf8'); };
-    const rowOf = (id) => { try { return JSON.parse(storeNow()).profiles.find((x) => x.id === id) || null; } catch { return null; } };
-    const movedWord = (id) => { const row = rowOf(id); const v = row && typeof row.proxyCredential === 'string' ? rkVault.entries.get(row.proxyCredential) : null; return !!row && row.proxy === PADDR && !JSON.stringify(row).includes(PPASS) && !!v && v.toString() === PPASS; };
-    const stillHeld = (id) => { const row = rowOf(id); return !!row && String(row.proxy || '').includes(PPASS); };
-    let BR = null, kNow = null, kToday = null, ids = [], rkErr = null;
-    const servers = [];
-    try {
-      fs.mkdirSync(RKHOME, { recursive: true }); fs.mkdirSync(RKDATA, { recursive: true });
-      writeFakeAgentBrowser(path.join(RKROOT, 'bin'), path.join(RKROOT, 'ab-state'));   // the capability check finds a client (nothing launches: the refusal comes first)
-      const logins = require(path.join(REPO, 'src/server/browser-proxy-logins.js')).create({ vault: rkVault, log: { log() { }, warn() { } } });
-      const make = (mod) => mod.create({ dataDir: RKDATA, homeDir: RKHOME, env: () => ({ PATH: `${path.join(RKROOT, 'bin')}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: RKHOME, FAKE_AB_STATE: path.join(RKROOT, 'ab-state') }),
-        serverSetting: (k) => (k === 'browser.exitCheckUrl' ? 'https://exit-check.example.com/ip' : undefined), liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, userTodos: { add: () => ({ id: 'u1' }) }, proxyLogins: logins });
-      const RK = require(path.join(REPO, 'src/server/browser-keeper.js'));
-      const k0 = make(RK);
-      ids = ['Legacy browse', 'Legacy exit', 'Legacy exit today'].map((label) => k0.createProfile({ label, proxy: PADDR }).id);
-      const doc = JSON.parse(storeNow());
-      for (const id of ids) doc.profiles.find((x) => x.id === id).proxy = 'http://' + [PUSER, PPASS].join(':') + '@proxy.example.test:3128';   // saved WITH its password, before the law
-      fs.writeFileSync(RKSTORE, JSON.stringify(doc));
-      kNow = make(RK);
-      kToday = make(memOf('src/server/browser-keeper.js', "    if (!v.ok) throw namedError(v.code, v.error, v.code === 'proxy_password_in_profile' && v.profileId ? { profileId: v.profileId } : {});", '    if (!v.ok) throw namedError(v.code, v.error);', 'today: the launch refusal drops the verdict\'s id'));
-      BR = require(path.join(REPO, 'src/routes/browser.js'));
-      const RTToday = memOf('src/routes/browser.js', "    ...(!agentRoad && e?.code === 'proxy_password_in_profile' && typeof e?.profileId === 'string' && ID_RE.test(e.profileId) ? { profileId: e.profileId } : {}),\n", '', 'today: the route\'s answer drops the id');
-      const express = require('express');
-      // one routes module serves two keepers (now / today) — its context is set per request (the asks here are one at a time)
-      const serve = async (R, keeper) => { const app = express(); app.use(express.json()); app.use((q, s, next) => { R.setup({ keeper, activeSessions: new Map(), browserEnv: () => null, forwards: () => [], propose: () => ({ id: 'ut-b7aef' }) }); next(); }); app.use(R.router); const srv = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); }); servers.push(srv); return `http://127.0.0.1:${srv.address().port}`; };
-      servers.now = await serve(BR, kNow); servers.keeperToday = await serve(BR, kToday); servers.routeToday = await serve(RTToday, kNow);
-    } catch (e) { rkErr = String((e && e.stack) || e).slice(0, 900); }
-    ok(!rkErr && ids.length === 3 && !!kNow && !!kToday && ids.every(stillHeld), 'B-7aef setup: a real keeper over three profiles saved with the password in the address, its today copy, the real browser routes and their today copy', rkErr);
-    const hubAnswer = async (base, sub, id) => { if (!base) return null; const res = await realFetch(`${base}/api/browser/profiles/${encodeURIComponent(id)}/${sub}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); return { status: res.status, body: await res.json() }; };
-    const keeperMove = async (o) => { const b = o && o.body ? JSON.parse(o.body) : {}; return { b, answer: await kNow.moveProxyPassword(String(b.profileId || '')) }; };
-    // MUST 1 — Browse yourself (the panel row's, the switch dialog's «Open it yourself»): the hub's own answer names the profile; the page's
-    // refusal (sayProxyRefusal — every person's road says it there) draws the press over THAT answer; PRESSED, the word moves
-    const A = await hubAnswer(servers.now, 'browse', ids[0]), AK = await hubAnswer(servers.keeperToday, 'browse', ids[0]), AR = await hubAnswer(servers.routeToday, 'browse', ids[0]);
-    let AG = null;
-    try { const e0 = kNow ? await kNow.start(ids[0], { why: 'user' }).then(() => null, (e) => e) : null; if (BR && e0) BR.fail({ req: { path: '/api/agent/browser/open' }, locals: {}, status() { return this; }, json(b) { AG = b; } }, e0); } catch (e) { AG = { threw: String(e && e.message) }; }
-    ok(!!A && A.status === 409 && A.body.code === 'proxy_password_in_profile' && A.body.profileId === ids[0] && !JSON.stringify(A.body).includes(PPASS),
-      'B-7aef r2863: Browse yourself on a profile whose proxy address carries its password — THE HUB\'s answer (the real keeper behind the real route) names that profile by its id; the word is in no part of it', A);
-    ok(!!AG && AG.code === 'proxy_password_in_profile' && !('profileId' in AG) && !JSON.stringify(AG).includes(PPASS), 'B-7aef r2863: the same refusal answered on an agent\'s route carries no id — the press is the owner\'s page only (r2686 law 1)', AG);
-    let BPD = null;
-    try { BPD = (await bundleOf("export * as BPD from './browser-proxy-dialog.js';", [], 'b7aef-bpd')).BPD; } catch (e) { ok(false, 'B-7aef: the proxy dialog bundles alone', String(e && e.message).slice(0, 400)); }
-    const pressDrive = async (answer) => {
-      const moves = [];
-      const before0 = FETCH;
-      FETCH = async (url, o) => { if (String(url) !== '/api/vault/proxy-logins/move') return before0(url, o); const m = await keeperMove(o); moves.push(m.b); return answerOf(m.answer); };
-      const seen = new Set(DOC.body.querySelectorAll('.global-toast-body'));
-      if (BPD && typeof BPD.sayProxyRefusal === 'function' && answer) BPD.sayProxyRefusal(answer, 'Could not open the browser');
-      const body0 = newToasts(seen)[0] || null;
-      const press = body0 && body0.parentNode ? body0.parentNode.querySelector('.global-toast-action') : null;
-      const drawn = { words: body0 ? body0.textContent : '', press: press ? press.textContent : null };
-      if (press) { press.click(); for (let i = 0; i < 40 && !moves.length; i++) await tick(10); await tick(20); }
-      const said = newToasts(seen).map((x) => x.textContent);
-      dropToasts(seen);
-      FETCH = noFetch;
-      return { drawn, moves, said };
-    };
-    const PK = AK ? await pressDrive(AK.body) : null, PR = AR ? await pressDrive(AR.body) : null;   // the REDs first: a press they drew would move the word
-    const P = A ? await pressDrive(A.body) : null;
-    ok(!!P && P.drawn.press === 'Move the password to the vault' && P.drawn.words.includes('move it to the vault first'),
-      'B-7aef r2863 MUST 1: over the hub\'s own answer the page\'s refusal draws «Move the password to the vault» beside its words', P && P.drawn);
-    ok(!!P && P.moves.length === 1 && JSON.stringify(P.moves[0]) === JSON.stringify({ profileId: ids[0] }) && movedWord(ids[0]) && P.said.some((s) => s.includes('The proxy password is in the vault now')),   // stale-pins: kept — the drawn toast's words, read at run time (drawn by browser-proxy-dialog.js / browser-exit-dialog.js)
-      'B-7aef r2863 MUST 1: PRESSED, it posts that profile\'s id ONLY and THE WORD MOVES — the profile keeps the address and a vault reference alone, the vault holds the password, the page says so', { moves: P && P.moves, said: P && P.said, row: rowOf(ids[0]) && Object.keys(rowOf(ids[0])) });
-    ok(!!AK && AK.body.code === 'proxy_password_in_profile' && !AK.body.profileId && !!PK && !PK.drawn.press && !PK.moves.length,
-      'RED control: the keeper as today (its launch refusal drops the verdict\'s id) — the hub\'s answer names no profile, the page draws no press', { answer: AK && AK.body.code, drawn: PK && PK.drawn });
-    ok(!!AR && AR.body.code === 'proxy_password_in_profile' && !AR.body.profileId && !!PR && !PR.drawn.press && !PR.moves.length,
-      'RED control: the route as today (its answer drops the id) — the hub\'s answer names no profile, the page draws no press', { answer: AR && AR.body.code, drawn: PR && PR.drawn });
-    // the roads that say a start's proxy refusal through sayProxyRefusal (named in the line): the panel's act() (Restart, a kept Resume),
-    // Browse yourself and the live view's Resume / Restart, the For-you Restart — each hands the hub's answer as it came
-    const ROADS = [['src/lib/browser-trace-view.js', 'sayProxyRefusal(r, what)'], ['src/lib/browser-live-window.js', "sayProxyRefusal(r, t('Could not open the browser'))"], ['src/lib/browser-live-window.js', "sayProxyRefusal(r, t('Could not resume the browser'))"],
-      ['src/lib/browser-live-window.js', "sayProxyRefusal(r, t('Could not restart the browser'))"], ['src/lib/user-todos-actions.js', "sayProxyRefusal(r, t('Could not restart the browser'))"]];
-    const roadMiss = ROADS.filter(([f, call]) => !(sources.get(f) || fs.readFileSync(path.join(REPO, f), 'utf8')).includes(call));
-    ok(roadMiss.length === 0, 'B-7aef r2863: every person\'s road that meets a start\'s proxy refusal hands the hub\'s answer, as it came, to sayProxyRefusal (the panel\'s Restart / kept Resume, Browse yourself, the live view\'s Resume / Restart, the For-you Restart)', roadMiss);
-    // MUST 2 — the exit dialog: the hub's own check answer draws Move; a move a LOCKED vault refused takes the same door as the proxy
-    // dialog — Unlock… / Set up the vault… — with Move AFTER it; the leg presses Unlock (the vault's own dialog), then completes the move
-    const EWSRC = fs.readFileSync(path.join(REPO, 'src/lib/browser-exit-words.js'), 'utf8'), EDSRC = fs.readFileSync(path.join(REPO, 'src/lib/browser-exit-dialog.js'), 'utf8');
-    const ENTRY_BX = "export * as BED from './browser-exit-dialog.js'; export * as BPM from './browser-proxy-model.js'; export * as BEW from './browser-exit-words.js';";
-    let BX = null, BXW = null, BXD = null;
-    try {
-      BX = await bundleOf(ENTRY_BX, [], 'b7aef-bx');
-      BXW = await bundleOf(ENTRY_BX, [[/browser-exit-words\.js$/, anchored(EWSRC, "    case 'proxy_password_in_profile': return row(t('Its proxy address carries its password, which is never used — move it to the vault first.'), '', 'move');", "    case 'proxy_password_in_profile': return row(t('Its proxy address carries its password, which is never used — move it to the vault first.'));", 'B-7aef: the exit words as released — no door as data')]], 'b7aef-bxw');
-      BXD = await bundleOf(ENTRY_BX, [[/browser-exit-dialog\.js$/, anchored(EDSRC, "    vaultDoor.style.display = text && vault ? '' : 'none';", "    vaultDoor.style.display = 'none';", 'B-7aef r2863: today\'s exit dialog — no vault door (Move alone after a locked vault)')]], 'b7aef-bxd');
-    } catch (e) { ok(false, 'RED control setup: the exit dialog bundles alone (now, the words as released, today\'s dialog)', String(e && e.message).slice(0, 600)); }
-    const exitDrive = async (B, id, label) => {
-      const calls = [];
-      const before0 = FETCH;
-      FETCH = async (url, o) => {
-        const u = String(url);
-        if (u === `/api/browser/profiles/${encodeURIComponent(id)}/exit-check`) { calls.push(['check']); return realFetch(servers.now + u, o); }   // the hub answers
-        if (u === '/api/vault/proxy-logins/move') { const m = await keeperMove(o); calls.push(['move', m.b, m.answer && m.answer.code]); return answerOf(m.answer); }
-        if (u === '/api/vault/unlock') { calls.push(['unlock']); rkVault.locked = false; return answerOf({ ok: true, state: 'unlocked' }); }   // the second password taken: the stand-in vault opens
-        return before0(url, o);
-      };
-      const before = new Set(DOC.body.children), seen = new Set(DOC.body.querySelectorAll('.global-toast-body'));
-      const app = { settings: { get: (k) => (k === 'browser.exitCheckUrl' ? 'https://exit-check.example.com/ip' : undefined) } };
-      rkVault.locked = true;
-      if (B && B.BED && typeof B.BED.openExitDialog === 'function' && servers.now) B.BED.openExitDialog(app, { id, label });
-      const q = (sel) => DOC.body.querySelector(sel);
-      const shown = (sel) => { const d = q(sel); return !!d && d.style.display !== 'none'; };
-      const look = () => { const r = q('.bnew-refusal'), v = q('.bexit-vault'), n = q('.bwho-notes'), kids = n ? n.children : []; return { words: r ? r.textContent : '', said: !!r && r.style.display !== 'none', move: shown('.bexit-door'), vault: shown('.bexit-vault') ? v.textContent : null, greyed: !!((q('.bexit-door') || {}).disabled || (v || {}).disabled), vaultFirst: kids.findIndex((c) => c.classList.contains('bexit-vault')) < kids.findIndex((c) => c.classList.contains('bexit-door')) }; };
-      const moves = () => calls.filter((c) => c[0] === 'move').length;
-      const settle = async (cond) => { for (let i = 0; i < 40 && !cond(); i++) await tick(10); await tick(10); };
-      const check = q('.bexit-check'); if (check) check.click();
-      await settle(() => calls.length > 0);
-      const refused = look(), steps = [];
-      if (refused.move) { q('.bexit-door').click(); q('.bexit-door').click(); await settle(() => moves() >= 1); await tick(20); steps.push({ ...look(), moves: moves() }); }   // two presses while the first is out: ONE move
-      let unlocked = false;
-      if (steps[0] && steps[0].vault) {
-        q('.bexit-vault').click(); await tick(10);
-        const pw = DOC.getElementById('vault-unlock-pw'), go = q('.vault-unlock-go');
-        if (pw && go) { pw.value = ['second', String(process.pid)].join('-'); go.click(); await settle(() => calls.some((c) => c[0] === 'unlock') && !DOC.getElementById('vault-unlock-pw')); unlocked = calls.some((c) => c[0] === 'unlock'); }
-        if (unlocked && shown('.bexit-door')) { q('.bexit-door').click(); await settle(() => moves() >= 2); await tick(20); steps.push({ ...look(), moves: moves() }); }
-      }
-      const said = newToasts(seen).map((x) => x.textContent);
-      dropToasts(seen);
-      for (const n of DOC.body.children.filter((c) => !before.has(c))) Nd.prototype.remove.call(n);
-      FETCH = noFetch;
-      rkVault.locked = false;
-      return { calls, refused, steps, unlocked, said };
-    };
-    const XW = await exitDrive(BXW, ids[2], 'Legacy exit today'), XD = await exitDrive(BXD, ids[2], 'Legacy exit today');   // the REDs first (nothing they do may move ids[2]'s word)
-    const X = await exitDrive(BX, ids[1], 'Legacy exit');
-    ok(X.refused.said && X.refused.words.includes('move it to the vault first') && X.refused.move && !X.refused.vault && !X.refused.greyed && X.calls[0] && X.calls[0][0] === 'check',
-      'B-7aef: the hub\'s own exit-check refusal (a password in the proxy address) draws «Move the password to the vault» beside its words, live', X.refused);
-    ok(!!X.steps[0] && X.steps[0].moves === 1 && X.steps[0].words.includes('The vault is locked') && X.steps[0].words.includes('move the password again') && X.steps[0].vault === 'Unlock…' && X.steps[0].move && X.steps[0].vaultFirst && !X.steps[0].greyed,
-      'B-7aef r2863 MUST 2: a move the locked vault refused says so by name and what to do — Unlock… drawn, Move AFTER it, neither greyed; two presses while the first is out make ONE move', X.steps[0]);
-    const xm = X.calls.filter((c) => c[0] === 'move');
-    ok(X.unlocked && xm.length === 2 && xm.every((m) => JSON.stringify(m[1]) === JSON.stringify({ profileId: ids[1] })) && xm[0][2] === 'vault_locked' && !!X.steps[1] && !X.steps[1].said && !X.steps[1].move && !X.steps[1].vault && movedWord(ids[1]) && X.said.some((s) => s.includes('The proxy password is in the vault now')),   // stale-pins: kept — the drawn toast's words, read at run time (drawn by browser-proxy-dialog.js / browser-exit-dialog.js)
-      'B-7aef r2863 MUST 2: PRESSED Unlock (the vault\'s own dialog, the second password), then Move — the move completes: the word in the vault, the profile holding a reference alone, the refusal and both presses gone', { calls: X.calls.map((c) => [c[0], c[2]]), step: X.steps[1], said: X.said });
-    ok(XD.refused.move && !!XD.steps[0] && XD.steps[0].moves === 1 && !XD.steps[0].vault && !XD.unlocked && !XD.calls.some((c) => c[0] === 'unlock') && stillHeld(ids[2]),
-      'RED control: today\'s exit dialog — after the locked vault\'s refusal no Unlock is drawn: the person cannot unlock from here and the word stays in the profile', { step: XD.steps[0], calls: XD.calls.map((c) => c[0]) });
-    ok(XW.refused.said && !XW.refused.move && !XW.calls.some((c) => c[0] === 'move') && stillHeld(ids[2]), 'RED control: the release\'s exit words (no door as data) leave the hub\'s refusal with no press — «in ⋯» was the way', XW.refused);
-    ok(BX && BX.BPM && BX.BPM.proxyDoor('proxy_password_in_profile') === 'move' && BX.BPM.proxyDoor('bad_proxy') === null, 'B-7aef: proxyDoor answers «move» for a password in the address (the proxy dialog and the live view draw it with the profile they hold)');
-    for (const s of servers) { try { s.close(); } catch { /* gone */ } }
+    // (2) THE PROXY's PASSWORD IN ITS ADDRESS — its legs run over the hub's own answers in scripts/test-needs-doors-proxy.mjs (主开发 r2927: their
+    // own fast row; this census keeps its statement)
   }
   ok(STRAYS.length === 0, `A LEG LEAVES NOTHING IN FLIGHT: no stand-in of this section was asked an address that is not its leg's (a stray call is refused by name where it lands)${STRAYS.length ? ' — ' + STRAYS.slice(0, 8).join(' · ') : ''}`, STRAYS);
 }

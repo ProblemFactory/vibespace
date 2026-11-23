@@ -14721,6 +14721,7 @@ export default {
   "{user} — the vault's list could not be read": "{user}——保管庫の一覧を読み取れませんでした", // B-8b87 cure: a proxy's refusals in the page's words
   "{user} — no longer in the vault": "{user}——もう保管庫にありません", // B-8b87 cure: a proxy's refusals in the page's words
   "The vault is locked — press Unlock…, then move the password again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度パスワードを移してください。", // B-8b87 cure: a proxy's refusals in the page's words
+  "The vault is locked — press Unlock…, and the password moves once the vault is open.": "保管庫はロックされています——「ロック解除…」を押すと、保管庫が開いたところでパスワードが移ります。",
   "The vault is locked — press Unlock…, then start the browser again.": "保管庫はロックされています——「ロック解除…」を押してから、もう一度ブラウザを起動してください。", // B-8b87 cure: a proxy's refusals in the page's words
   "The vault is locked — press Unlock…, then save.": "保管庫はロックされています——「ロック解除…」を押してから保存してください。", // B-8b87 cure: a proxy's refusals in the page's words
   "The vault is not set up yet — press Set up the vault…, then try again.": "保管庫はまだ設定されていません——「保管庫を設定…」を押してから、もう一度お試しください。", // B-8b87 cure: a proxy's refusals in the page's words
