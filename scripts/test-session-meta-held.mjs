@@ -155,6 +155,7 @@ console.log('⑦ r3199 — a writer that builds a FRESH object, and a whole writ
 {
   const s = born(7), f = path.join(META_DIR, s + '.json');
   REFUSE.add(f); SS.readSessionMeta(s);
+  { const ff = SMV && SMV.factsOf(s); if (ff) ff.copy = 'as-if-a-copy-were-there'; }   // (r3245: a copy fact on a FAILED read — the whole write still waits: it is the TORN fact that lets a whole write restate)
   SS.writeSessionMeta(s, { name: 'a fresh object with no spread' });
   SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the live conversation', cwd: '/made/up/live' }, { durable: true, whole: true });
   land(s);
@@ -196,5 +197,87 @@ console.log('⑨ r3199 — a torn record the person removes is «not there» aga
     `the notice's rows name the conversation (from its torn bytes: «${named && named.name}»; from its live session: «${liveRow && liveRow.name}»), never a path; a torn record the person REMOVED after its copy is «not there» again (an empty record, not unread)`);
 }
 
+
+console.log('⑩ r3245 — the copy FIRST: a whole write before the torn bytes are copied waits; after the copy it restates');
+{
+  const s = 'vs-smheld-sock-torn-3', f = path.join(META_DIR, s + '.json');
+  const TORN3 = '{"name":"the third torn conversation","cwd":"/made/up';
+  fs.writeFileSync(f, TORN3);
+  SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the live conversation, too early', cwd: '/made/up/early' }, { durable: true, whole: true });   // the same turn as the read: no copy yet
+  land(s);
+  const early = realReadSync.call(fs, f, 'utf8');
+  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')); i++) await sleep(25);
+  const copies = fs.readdirSync(META_DIR).filter((n) => n.startsWith(s + '.json.corrupt-'));
+  ok(!!(early === TORN3 && copies.length === 1 && realReadSync.call(fs, path.join(META_DIR, copies[0]), 'utf8') === TORN3),
+    `a whole write in the very turn of a torn read (before its copy) restates NOTHING — the torn bytes stay where they are until their copy is made (${copies.length} copy, byte for byte) — RED: the restatement wrote over the only copy`);
+}
+
+console.log('⑪ r3245 — the whole restatement carries the LIVE conversation\'s account, machine, group and pool');
+{
+  const s = 'vs-smheld-sock-torn-4', f = path.join(META_DIR, s + '.json');
+  fs.writeFileSync(f, '{"name":"the fourth torn conversation","cwd":"/made/up');
+  ACTIVE.set('sess-made-up-live-4', { sockName: s, name: 'the fourth live conversation', _accountId: 'acct-made-up-live', host: 'a-made-up-machine', _initialGroupId: 'g-made-up-live', _poolPin: { pool: 'pool-made-up', member: 'm-made-up' } });
+  SS.readSessionMeta(s);
+  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')); i++) await sleep(25);
+  await sleep(20);
+  SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the fourth live conversation', cwd: '/made/up/live-4', webuiSessionId: 'sess-made-up-live-4' }, { durable: true, whole: true });
+  land(s); await sleep(50); land(s);
+  const d = onDisk(s);
+  ACTIVE.delete('sess-made-up-live-4');
+  ok(!!(d && d.accountId === 'acct-made-up-live' && d.host === 'a-made-up-machine' && d.taskId === 'g-made-up-live' && d.poolPin && d.poolPin.pool === 'pool-made-up'),
+    `a torn record restated whole by its live conversation carries what that conversation holds and the whole writer does not list: its account (${d && d.accountId}), its machine, its group, its pool — so it resumes on its own account — RED: the restatement held only the listed keys`, d);
+}
+
+console.log('⑫ r3245 (1) — a live conversation whose record is unread at a start is LISTED: by its socket\'s name, never attached, stopped by its Stop');
+{
+  const S = 'vs-smheld-sock-unread-live', f = path.join(META_DIR, S + '.json');
+  fs.writeFileSync(f, JSON.stringify({ name: 'the unread live conversation', webuiSessionId: 'sess-made-up-unread', claudeSessionId: 'c-made-up-unread' }));
+  REFUSE.add(f);
+  const meta = SS.readSessionMeta(S);   // the real reader: an UNREAD record, marked
+  const SRC = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const BR = SRC('src/server/boot-restore.js'), WS = SRC('src/ws-handler.js'), SV = SRC('server.js'), CARD = SRC('src/lib/session-card.js');
+  const braces = (text, head) => { const a = text.indexOf(head); if (a < 0) return ''; let d = 0; for (let i = text.indexOf('{', a + head.length - 1); i < text.length; i++) { if (text[i] === '{') d++; else if (text[i] === '}' && --d === 0) return text.slice(a, i + 1); } return ''; };
+  const lineOf = (text, head) => { const a = text.indexOf(head); return a < 0 ? '' : text.slice(a, text.indexOf('\n', a)); };
+  const sfm = braces(BR, 'function sessionFromMeta(meta, transportFacts) {');
+  const BLOCK = braces(BR, "if (require('./session-meta-verdict.js').isUnread(meta)) {");
+  const restore = (block) => {   // the restore's step for ONE live socket, its unread branch as shipped; a socket past it is ADOPTED
+    const live = new Map();
+    const req = (m) => (m === './session-meta-verdict.js' ? SMV : require(m));
+    new Function('require', 'activeSessions', 'os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'console', 'meta', 'SOCK',
+      `${sfm}\nfunction* each() { for (const sockFile of [SOCK]) { const socketPath = '/made/up/sockets/' + sockFile;\n${block}\nactiveSessions.set('sess-minted-' + sockFile, { adopted: true }); yield; } }\nfor (const _ of each()) { }`)(
+      req, live, os, () => null, () => ({}), 'v-made-up', { log: () => { }, warn: () => { } }, meta, S);
+    return live;
+  };
+  const live = restore(BLOCK), L = live.get(S);
+  const today = restore(BLOCK.replace('activeSessions.set(sockFile, listed);', ''));
+  ok(!!(unread(meta) && L && L._metaUnread && L._metaUnread.sock === S && L._metaUnread.socketPath === '/made/up/sockets/' + S && L.name === S && L.mode === 'terminal' && L.pty === null && !('sockName' in L) && !L.socketPath && live.size === 1 && ![...live.keys()].some((k) => k.startsWith('sess-'))),
+    `the restore LISTS a live socket whose record could not be read under its SOCKET's name (${[...live.keys()].join(', ')}), never under a minted id and never adopted; it carries no record name, so no writer reaches the record through it (a rename's whole write would restate the torn record from a stub) — RED (the skip it replaces): nothing listed (${today.size} entries), the conversation runs on unseen`,
+    { keys: [...live.keys()], today: [...today.keys()] });
+  ok(today.size === 0, 'RED control: without the listing the restore leaves the live conversation out of the list (it runs on, unseen)');
+  // the list's row: the card's state words
+  const rs = (SV.match(/remoteState: ([^\n]*?),\s+\/\/ r2/) || [])[1] || '';
+  const stateOf = (expr, s) => { try { return new Function('s', `return ${expr};`)(s); } catch (e) { return 'threw: ' + e.message; } };
+  const Ltoday = { ...L, _remoteState: null };   // the listing without its state (RED below)
+  ok(!!(rs && stateOf(rs, L) === 'record-unread' && stateOf(rs, {}) === null && stateOf(rs, Ltoday) === null && /s\.remoteState === 'record-unread'/.test(CARD) && CARD.includes("tr('Status unknown — it could not be read')")),
+    `its row in the conversation list (the payload's own state expression) says its record could not be read (state ${stateOf(rs, L)}; the card's chip words and tip) and an ordinary conversation's row is unchanged — RED: without its state the row names nothing (${stateOf(rs, Ltoday)})`);
+  const zh = SRC('src/lib/i18n-zh.js'), ja = SRC('src/lib/i18n-ja.js');
+  ok(['Status unknown — it could not be read'].every((k) => zh.includes(`"${k}": "`) && ja.includes(`"${k}": "`)), 'the chip\'s words are a row the Chinese and Japanese tables already hold');
+  // the attach: refused BY NAME, before the socket joins the conversation
+  const refusal = lineOf(WS, 'if (session && session._metaUnread) {');
+  const attachOf = (line) => { const sent = []; const r = new Function('session', 'ws', 'data', `do {\n${line}\nreturn 'attached'; } while (false); return 'refused';`)(L, { send: (m) => sent.push(JSON.parse(m)) }, { sessionId: S }); return { r, sent }; };
+  const at = attachOf(refusal), atToday = attachOf('');
+  const join = WS.indexOf('const session = activeSessions.get(data.sessionId);   // read AFTER the warm'), ri = WS.indexOf(refusal), next = WS.indexOf('if (session) {', join);
+  ok(!!(refusal && at.r === 'refused' && at.sent.length === 1 && at.sent[0].type === 'error' && at.sent[0].code === 'session-meta-unread' && at.sent[0].sessionId === S && at.sent[0].message.includes(S) && join > 0 && ri > join && ri < next && attachOf(refusal).r === 'refused' && new Function('session', 'ws', 'data', `do {\n${refusal}\nreturn 'attached'; } while (false); return 'refused';`)({}, { send: () => { } }, {}) === 'attached'),
+    `an attach of it is refused BY NAME (code ${at.sent[0] && at.sent[0].code}) before the socket joins the conversation (the line sits between the read of the live set and its attach); any other conversation attaches as before — RED: today it would attach (${atToday.r})`);
+  // its Stop: the kill body (the release's, pinned by test-discovery-spawn) reaches its socket and its record
+  const stop = lineOf(WS, 'if (session._metaUnread) { session.socketPath');
+  const body = WS.indexOf('const endSessionBody = async'), si = WS.indexOf(stop), kill = WS.indexOf('// Kill the dtach session process (which kills claude as its child)');
+  const Lc = { ...L }; new Function('session', stop)(Lc);
+  const back = SS.deleteSessionMeta(Lc.sockName);
+  const row = (SMV && typeof SMV.rows === 'function' ? SMV.rows() : []).find((r) => r.name === S || r.file === S + '.json' || String(r.file || '').endsWith(S + '.json'));
+  ok(!!(stop && body > 0 && si > body && si < kill && WS.indexOf('session._exitAsked = { by: \'terminate\'', body) < si && Lc.socketPath === '/made/up/sockets/' + S && Lc.sockName === S && back === false && (onDisk(S) || {}).webuiSessionId === 'sess-made-up-unread' && row && row.removalOwed === true),
+    `its Stop reaches its socket (the kill body's ${'`'}if (session.socketPath)${'`'} ends the process holding ${Lc.socketPath}) and its record: the removal is REMEMBERED for its read (${back}, removal owed ${row && row.removalOwed}), the record itself still there — RED: without the line the kill body has no socket to end and no record to name (${!!L.socketPath} / ${!!L.sockName})`,
+    { row });
+}
 clearInterval(KEEP);
 report();

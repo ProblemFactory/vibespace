@@ -512,6 +512,7 @@ function registerWsHandler(wss, ctx) {
       // Cancel any pending delayed-SIGINT from a recent interrupt — after
       // kill, the childPid may be reused by an unrelated process
       if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
+      if (session._metaUnread) { session.socketPath = session._metaUnread.socketPath; session.sockName = session._metaUnread.sock; }   // r3245 (1): a conversation LISTED with an unread record — its Stop alone names its socket (its process ended) and its record (the removal remembered for its read)
       // Kill the dtach session process (which kills claude as its child)
       // The dtach process is the parent of our attach PTY's target
       if (session.socketPath) {
@@ -1699,6 +1700,7 @@ function registerWsHandler(wss, ctx) {
             }
           }
           const session = activeSessions.get(data.sessionId);   // read AFTER the warm: one that ended meanwhile is gone
+          if (session && session._metaUnread) { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, code: 'session-meta-unread', message: `${session._metaUnread.sock}: its record could not be read when the hub started — it keeps running and is not opened here; it opens after the next start once its record reads (Stop ends it)` })); break; }   // r3245 (1): refused BY NAME, never attached
           if (session) {
             // `caps` (perf lane chunk D): what this client can answer — `op-seq` =
             // it reads `seq`, resumes by `sinceSeq` and re-attaches on `lagged`.

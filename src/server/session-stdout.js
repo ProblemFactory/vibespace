@@ -564,7 +564,7 @@ function readSessionMeta(sockName) {
   if (a.state === 'data') return SMV.isMarked(sockName) ? liftMeta(sockName, a.value) : a.value;
   if (a.state === 'missing' && !SMV.isMarked(sockName)) return {};
   // r3199: a torn record whose copy is kept and whose file is now gone (the person removed it) is «not there» again
-  if (a.state === 'missing' && (SMV.factsOf(sockName) || {}).torn && (SMV.factsOf(sockName) || {}).copy) return liftMeta(sockName, {});
+  if (a.state === 'missing' && (SMV.factsOf(sockName) || {}).torn && (SMV.factsOf(sockName) || {}).copy) return liftMeta(sockName, liveExtrasOf(sockName));   // r3245 (2): what the live conversation knows, as a whole restatement does
   if (a.state !== 'missing') holdMeta(sockName, fp, a, read);   // (a «missing» right after a failed read: the helper reads it once more)
   return SMV.unreadMeta(SMV.factsOf(sockName) || { code: a.code || 'unreadable' });
 }
@@ -598,7 +598,7 @@ function liftMeta(sockName, value) {
   if (metaDeleteOwed.delete(sockName)) { deleteSessionMetaNow(sockName); return {}; }
   if (value && value.webuiSessionId) SMV.liftedId(sockName, value.webuiSessionId);   // (a conversation left un-adopted at its start: its id kept by the sweeps this run)
   const merged = { ...(value || {}), ...(w || {}) };
-  if (w && Object.keys(w).length) writeSessionMeta(sockName, { ...merged }, { durable: true });   // (the record as read, the changes that waited on it)
+  if (w && Object.keys(w).length) writeSessionMeta(sockName, { ...merged }, { durable: true, prev: value || {} });   // (the record as read, the changes that waited on it; its owner check reads nothing again)
   return merged;   // r3199 (the must): every road of the lift hands on the MERGED record
 }
 const metaDeleteOwed = new Set();   // r3199: sockNames whose removal waits for their record's read
@@ -667,7 +667,7 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
     SMV.clear(sockName); waitingMeta.delete(fpw);
     const h = metaHolds.get(sockName); if (h) { metaHolds.delete(sockName); try { h.stop(); } catch { } }
     console.warn(`[session] ${sockName}: its torn record (kept aside${f && f.copy ? ' as ' + f.copy : ''}) is restated whole from the live conversation — keys it does not list are only in that copy`);
-    return writeSessionMeta(sockName, { ...(w || {}), ...liveExtrasOf(sockName), ...Object.fromEntries(Object.entries(meta || {})) }, { durable, sync, flagOnly });
+    return writeSessionMeta(sockName, { ...(w || {}), ...liveExtrasOf(sockName), ...Object.fromEntries(Object.entries(meta || {})) }, { durable, sync, flagOnly, prev: {} });   // r3245 (3): `prev` given — the owner check reads the still-torn file NO second time (no second mark)
   }
   // r3137 (1): NO WRITER SAVES OVER A RECORD IT COULD NOT READ — the change WAITS for the record (its fields, the newest per field;
   // the unread mark is a symbol and is not one of them) and is saved merged over it the moment it reads
@@ -736,7 +736,9 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
 function deleteSessionMeta(sockName) {
   // r3137 (2): NO REMOVER REMOVES BY AN UNREAD RECORD — the one delete road (a dead socket's retire, a teardown) keeps it
   // r3199: a person's delete or a teardown asked meanwhile is REMEMBERED (no write lands meanwhile: the tombstone) and done at the read
-  if (SMV.isMarked(sockName)) { metaDeleteOwed.add(sockName); _metaTombstones.set(sockName, Date.now()); console.warn(`[session] ${sockName}: its record could not be read — kept now; its removal is done when it reads`); return false; }
+  // r3245 (4): what is TRUE at the delete — remembered in memory only: done when the record reads in this run; a restart before then
+  // finds the record again (no debt kept in a new store) — the notice's row says «its removal waits for its read»
+  if (SMV.isMarked(sockName)) { metaDeleteOwed.add(sockName); _metaTombstones.set(sockName, Date.now()); const f = SMV.factsOf(sockName); if (f) f.removalOwed = true; console.warn(`[session] ${sockName}: its record could not be read — kept now; its removal is done when it reads in this run (a restart before then finds it again)`); return false; }
   return deleteSessionMetaNow(sockName);
 }
 function deleteSessionMetaNow(sockName) {

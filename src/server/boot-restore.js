@@ -847,8 +847,17 @@ function restoreSessions() {
 
     const meta = readSessionMeta(sockFile);
     // r3137 (2): a live socket whose record is UNREAD is NOT re-adopted under a new id (its pool link, its attach config and its
-    // browser would be swept as another's): it is left running, nothing of it removed, and adopted at the next start once it reads
-    if (require('./session-meta-verdict.js').isUnread(meta)) { console.log(`  ⏸ ${sockFile}: its record could not be read — left running, not adopted under a new id (nothing of it removed)`); yield; continue; }
+    // browser would be swept as another's): nothing of it is removed, and it is adopted at the next start once it reads.
+    // r3245 (1): a person sees and stops what runs — it is LISTED under its SOCKET's name (never a minted id) with the words that its
+    // record could not be read; it is never attached (an attach is refused by name: ws-handler), and it carries NO `sockName`, so no
+    // writer reaches the record through it (a rename's whole write would restate the torn record from a stub); only its Stop names
+    // its socket and its record (ws-handler endSessionBody: the socket's process ended, the record's removal remembered for its read)
+    if (require('./session-meta-verdict.js').isUnread(meta)) {
+      const listed = sessionFromMeta({ name: sockFile }, { mode: 'terminal', pty: null, name: sockFile, buffer: '', _remoteState: { state: 'record-unread', at: Date.now() } });   // the list row's state: the card's chip says it
+      listed._metaUnread = { sock: sockFile, socketPath }; listed._webuiId = sockFile;
+      activeSessions.set(sockFile, listed);
+      console.log(`  ⏸ ${sockFile}: its record could not be read — LISTED under its socket's name (Stop ends it; never attached, no new id, nothing of it removed; adopted at the next start once it reads)`); yield; continue;
+    }
     const id = meta.webuiSessionId || ('sess-' + (++sessionCounterRef.value) + '-' + Date.now());
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5: before any writer persists the boot instant as its createdAt
 

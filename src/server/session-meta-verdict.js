@@ -36,7 +36,7 @@ function rows() {
   for (const [sock, f] of unread) {
     let name = f.name || null;
     if (!name && f.torn && typeof f.text === 'string') { const m = /"name"\s*:\s*"([^"\\]{1,120})"/.exec(f.text); if (m) name = m[1]; }
-    out.push(Object.freeze({ file: sock + '.json', name, code: f.code || null, since: f.since, torn: !!f.torn, copy: f.copy || null }));
+    out.push(Object.freeze({ file: sock + '.json', name, code: f.code || null, since: f.since, torn: !!f.torn, copy: f.copy || null, removalOwed: !!f.removalOwed }));   // removalOwed (r3245): a removal asked meanwhile waits for its read, in this run only
   }
   return Object.freeze(out);
 }
