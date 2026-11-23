@@ -273,8 +273,12 @@ function setup(ctx) {
   // «nowhere»); the hub's reads OUT never pass WF_LOOK_LANES across looks — a read that never comes back keeps its lane, a later
   // look uses only the lanes that came back, and with none back it starts nothing and says so once in the journal.
   const WF_LOOK_EVERY_MS = 60 * 1000, WF_LOOK_LANES = 8, WF_LOOK_DEADLINE_MS = 30 * 1000, WF_WANT_TTL_MS = 5 * 60 * 1000, WF_WANT_MAX = 256;
-  const _wfWant = new Map();    // runId → { askedAt, dirs: Map(asker → since), snaps: Map(asker → since) } — who could not place it, since when (the least recent ask leaves first past WF_WANT_MAX)
-  const _wfFound = new Map();   // runId → { dirs: [{ sid, path }], snaps: [{ sid, path }], at, kinds: { dirs, snaps }, whole } — the last look's answer
+  const _wfWant = new Map();    // runId → { askedAt, dirs: Map(asker → seq), snaps: Map(asker → seq) } — who could not place it, and its ask's place in law 3's order (the least recent ask leaves first past WF_WANT_MAX)
+  const _wfFound = new Map();   // runId → { dirs: [{ sid, path }], snaps: [{ sid, path }], at, seq, kinds: { dirs, snaps }, whole } — the last look's answer
+  // LAW 3's ORDER (round w6p1kgvv3, 主开发 r2735): an ask and a look's start are ordered by ONE number that only grows, stamped at
+  // each ask and at each look's start — never the wall clock (a clock stepped back inside the minute would let a look that began
+  // before the latest ask say «nowhere»); the minute's spacing and the asks' life keep the clock
+  let _wfSeq = 0;
   const _wfOut = { root: 0, project: 0, conversation: 0 };   // the look's reads OUT for the hub, by the folder's class
   let _wfLook = null, _wfLookStart = 0, _wfLookTimer = null, _wfStrandSaid = false;
   const wfNow = () => (_wfLookTest.now ? _wfLookTest.now() : Date.now());
@@ -291,7 +295,7 @@ function setup(ctx) {
       if (_wfLookTest.onLook) _wfLookTest.onLook({ started: false });
       return;
     }
-    const startedAt = now, found = new Map();
+    const startedAt = now, startedSeq = ++_wfSeq, found = new Map();
     const want = new Map([..._wfWant].map(([id, w]) => [id, { dirs: w.dirs.size > 0, snaps: w.snaps.size > 0 }]));
     let ended = false, whole = false, timer = null;
     const read = async (p, cls) => {   // ONE read of the look, counted out until it returns; none starts once the look has ended
@@ -319,9 +323,9 @@ function setup(ctx) {
         };
         await Promise.all(Array.from({ length: lanes }, lane));
       })();
-      whole = await Promise.race([work.then(() => true, () => true), new Promise((r) => { timer = wfTimer(() => r(false), _wfLookTest.deadlineMs || WF_LOOK_DEADLINE_MS); })]);
+      whole = await Promise.race([work.then(() => true, () => false), new Promise((r) => { timer = wfTimer(() => r(false), _wfLookTest.deadlineMs || WF_LOOK_DEADLINE_MS); })]);
       ended = true; (_wfLookTest.clearTimer || clearTimeout)(timer);
-      for (const [id, kinds] of want) if (_wfWant.has(id)) _wfFound.set(id, { ...(found.get(id) || { dirs: [], snaps: [] }), at: startedAt, kinds, whole });
+      for (const [id, kinds] of want) if (_wfWant.has(id)) _wfFound.set(id, { ...(found.get(id) || { dirs: [], snaps: [] }), at: startedAt, seq: startedSeq, kinds, whole });
     })().catch(() => { }).finally(() => {
       _wfLook = null;
       if (_wfLookTest.onLook) _wfLookTest.onLook({ started: true, whole });
@@ -333,13 +337,13 @@ function setup(ctx) {
     const wait = Math.max(50, _wfLookStart ? _wfLookStart + WF_LOOK_EVERY_MS - wfNow() : 50);   // the runs wanted together ride ONE look
     _wfLookTimer = wfTimer(() => { _wfLookTimer = null; runWorkflowLook(); }, wait);
   }
-  // an ASK: a poll of this asker that could not place the run; its time is this asker's first such poll since its last answer
+  // an ASK: a poll of this asker that could not place the run; its place in law 3's order is this asker's first such poll since its last answer
   function wantWorkflow(runId, kind, asker) {
     const now = wfNow();
     let w = _wfWant.get(runId);
     if (w) _wfWant.delete(runId); else w = { askedAt: now, dirs: new Map(), snaps: new Map() };
     _wfWant.set(runId, w); w.askedAt = now;   // re-set: the least recent ask leaves first
-    if (!w[kind].has(asker)) w[kind].set(asker, now);
+    if (!w[kind].has(asker)) w[kind].set(asker, ++_wfSeq);
     while (_wfWant.size > WF_WANT_MAX) { const old = _wfWant.keys().next().value; _wfWant.delete(old); _wfFound.delete(old); }
     scheduleWorkflowLook();
   }
@@ -358,8 +362,8 @@ function setup(ctx) {
     if (!f || !f.kinds[kind]) return { answered: false, path: null };
     const list = f[kind] || [], own = list.find((x) => x.sid === asker) || list[0] || null;
     if (own) return { answered: true, path: own.path };
-    let latest = 0; if (w) for (const m of [w.dirs, w.snaps]) for (const at of m.values()) if (at > latest) latest = at;
-    return { answered: !!(f.whole && f.at > latest), path: null };
+    let latest = 0; if (w) for (const m of [w.dirs, w.snaps]) for (const seq of m.values()) if (seq > latest) latest = seq;
+    return { answered: !!(f.whole && f.seq > latest), path: null };   // law 3 by its order (_wfSeq), never by the clock
   }
   function findWorkflowSnapshot(runId, claudeSessionId, cwd, runDir = null) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');

@@ -22,7 +22,8 @@
 //   §9 B-360d part 2: a found run is not walked for (control = the release's walk), a fork's view of its parent's run is found
 //      and its place kept, the journal is folded as it grows (appends, a rewrite in place, a line longer than a slice, cuts inside
 //      a multi-byte character, pollers sharing one read); the hub's look's bounds — a second root listing only after the minute,
-//      a read that never returns (its deadline, at most eight reads out across looks), each by the look's seam (round w7o3p5msx)
+//      a read that never returns (its deadline, at most eight reads out across looks), each by the look's seam (round w7o3p5msx);
+//      law 3 by its order (a clock stepped back), law 4 (a placed fork's ask cleared) (round w6p1kgvv3)
 // Run: node scripts/test-workflow-disk.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -610,7 +611,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
     setup({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => {}, createSessionMessages: () => null, BUFFERS_DIR: '/tmp', PERMISSION_MODES: [], execFileSync: () => '', hosts: { get: (id) => ({ id }), fetchWorkflowState: async () => ({}) }, serverSetting: () => null });
     const app = express(); app.use(router);
     const srv = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
-    const get = async (rid) => { const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/workflow?runId=${rid}&claudeSessionId=${SID}&cwd=${encodeURIComponent(CWD)}`); return { status: r.status, body: await r.json() }; };
+    const get = async (rid, sid = SID) => { const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/workflow?runId=${rid}&claudeSessionId=${sid}&cwd=${encodeURIComponent(CWD)}`); return { status: r.status, body: await r.json() }; };
     return { get, close: () => new Promise((res) => srv.close(res)) };
   };
   const pathsOf = async (m, rid) => {
@@ -755,7 +756,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   const minuteCut = M9.write('src/routes/sessions.js', cut9(route, 'const WF_LOOK_EVERY_MS = 60 * 1000,', 'const WF_LOOK_EVERY_MS = 0,'), 'look-minute-cut');
   const noDeadline = M9.write('src/routes/sessions.js', cut9(route, 'new Promise((r) => { timer = wfTimer(() => r(false), _wfLookTest.deadlineMs || WF_LOOK_DEADLINE_MS); })', 'new Promise(() => { })'), 'look-no-deadline');
   const lanesAll = M9.write('src/routes/sessions.js', cut9(route, 'const lanes = WF_LOOK_LANES - wfOut();', 'const lanes = WF_LOOK_LANES;'), 'look-lanes-not-shared');
-  const ranOutNowhere = M9.write('src/routes/sessions.js', cut9(route, 'answered: !!(f.whole && f.at > latest)', 'answered: !!(f.at > latest)'), 'look-ran-out-nowhere');
+  const ranOutNowhere = M9.write('src/routes/sessions.js', cut9(route, 'answered: !!(f.whole && f.seq > latest)', 'answered: !!(f.seq > latest)'), 'look-ran-out-nowhere');
   const ticks = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
   const waitFor = async (cond, ms, what) => { const t = Date.now() + ms; while (!cond() && Date.now() < t) await new Promise((r) => setTimeout(r, 5)); return cond() ? true : markTimedOut(false, ms, what); };
   const seamed = async (file) => {
@@ -828,6 +829,46 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   ok(`(f) LAW 2: the hub's reads out never pass eight across looks (at most ${fCure.max}); with none back the next two looks start nothing and the journal says so ONCE, with no path (${(fCure.said || []).length}: «${((fCure.said || [])[0] || '').slice(0, 120)}…»); three reads back ⇒ a later look uses those three lanes only (${fCure.back} held, then ${fCure.held4})`, judgeF2(fCure), { max: fCure.max, said: (fCure.said || []).length, end2: fCure.end2, end3: fCure.end3, back: fCure.back, held4: fCure.held4 });
   ok(`(f) CONTROLS, the legs' red copies: with no deadline the look never ends (${JSON.stringify(fNoDeadline.end1 || null)}); a look that ran out answering «nowhere» gives the 404 (${fNowhere.after && fNowhere.after.status}); lanes not shared across looks put ${fLanes.max} reads out — the judges read all three as red`,
     !judgeF1(fNoDeadline) && !fNoDeadline.end1 && !judgeF1(fNowhere) && !!(fNowhere.after && fNowhere.after.status === 404) && !judgeF2(fLanes) && fLanes.max > 8, { noDeadline: fNoDeadline.end1 || null, nowhere: fNowhere.after && fNowhere.after.status, lanes: fLanes.max });
+  // THE ROUND's SMALL (round w6p1kgvv3, 主开发 r2735). (g) LAW 3 BY ITS ORDER, NEVER THE CLOCK: a whole look finds nothing, the
+  // wall clock steps back, then a NEW asker's first poll (the first asker's ask still live) — its ask comes after the look in the
+  // order, so it is «locating», never that look's 404. RED: the copy that stamps the ask and the look with the clock
+  const byClock = M9.write('src/routes/sessions.js', cut9(cut9(route, 'w[kind].set(asker, ++_wfSeq)', 'w[kind].set(asker, now)'), 'answered: !!(f.whole && f.seq > latest)', 'answered: !!(f.whole && f.at > latest)'), 'law3-by-clock');
+  const SID_B = fixtureSid('fa39'), RQ = 'wf_b360dstep';
+  const stepRun = async (file) => {
+    const m = await seamed(file);
+    try {
+      const first = await m.get(RQ); m.to(m.T0 + 50);
+      const ended = await waitFor(() => m.ends.length >= 1, 4000, 'the look to end');
+      m.to(m.T0 - 5000);   // the wall clock steps back (an NTP step, a resumed machine)
+      const b = await m.get(RQ, SID_B);
+      return { first: first.status, firstLocating: !!(first.body && first.body.locating), whole: !!(ended === true && m.ends[0] && m.ends[0].whole), b: b.status, bLocating: !!(b.body && b.body.locating) };
+    } finally { await m.close(); }
+  };
+  const gCure = await stepRun(fresh()), gClock = await stepRun(byClock);
+  const judgeG = (x) => x.first === 200 && x.firstLocating && x.whole && x.b === 200 && x.bLocating;
+  ok(`(g) LAW 3 BY ITS ORDER: after a whole look that found nothing, the clock steps back 5 s and a NEW asker's first poll is «locating» (${gCure.b}) — never that look's 404`, judgeG(gCure), gCure);
+  ok(`(g) RED — the copy that orders law 3 by the clock answers the new asker ${gClock.b}: the judge reads it red`, !judgeG(gClock) && gClock.b === 404, gClock);
+  // (h) LAW 4: once placed, the ask is cleared — a fork placed by the look takes its 'dirs' ask away, so the next look lists no
+  // conversation's `subagents/workflows` (its snapshot is still wanted: `workflows` is listed). RED: the copy whose finder keeps it
+  const keepAsk = M9.write('src/routes/sessions.js', cut9(route, "const placedDir = (p) => { answeredWorkflow(runId, 'dirs', claudeSessionId || ''); return p; };", 'const placedDir = (p) => p;'), 'law4-keeps-ask');
+  const clearRun = async (file) => {
+    const m = await seamed(file), o = fs.promises.readdir; let sub = 0, snap = 0, counting = false;
+    fs.promises.readdir = function (p, ...a) { const q = String(p); if (counting) { if (q.endsWith(path.join('subagents', 'workflows'))) sub++; else if (path.basename(q) === 'workflows') snap++; } return o.call(this, p, ...a); };
+    try {
+      await m.get(RF); m.to(m.T0 + 50);
+      await waitFor(() => m.ends.length >= 1, 4000, 'the first look to end');
+      m.to(m.T0 + 100); const put = await m.get(RF);
+      m.to(m.T0 + 30000); await m.get(RF);
+      counting = true; m.to(m.T0 + 60100);
+      await waitFor(() => m.ends.length >= 2, 4000, 'the second look to end');
+      counting = false;
+      return { placed: put.status === 200 && !(put.body && put.body.locating), sub, snap };
+    } finally { fs.promises.readdir = o; await m.close(); }
+  };
+  const hCure = await clearRun(fresh()), hKeep = await clearRun(keepAsk);
+  const judgeH = (x) => x.placed && x.sub === 0 && x.snap > 0;
+  ok(`(h) LAW 4: a fork placed by the look clears its ask — the next look lists ${hCure.sub} conversation run folders and ${hCure.snap} snapshot folders (its snapshot is still wanted)`, judgeH(hCure), hCure);
+  ok(`(h) RED — the copy whose finder keeps the ask: the next look lists ${hKeep.sub} run folders again — the judge reads it red`, !judgeH(hKeep) && hKeep.sub > 0, hKeep);
   for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 5, label: '§9 ' })) ok(r.name, r.pass, r.detail);
 }
 
