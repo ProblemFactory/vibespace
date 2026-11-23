@@ -1564,6 +1564,7 @@ function createSessionMessages(session, sessionId) {
       });
       browserKeeper.setStuckSource((bk, pid) => browserDialogs.stuckForKey(bk, pid ? { profileId: pid } : undefined)); // lane browsers-stop: the stop asks about ONE browser
       browserKeeper.setPasskeyDrop?.((pid) => browserDialogs.dropPasskeys(pid)); // lane passkey-store-core: a removed profile's keys go with it
+      if (typeof vault.onLock === 'function') vault.onLock(() => { try { browserDialogs.endScrubWorkers('a lock'); } catch { /* the watch's own */ } });   // 主开发 r2445 law 4 (lane lg-vault-file): the frame scrub's workers end at a lock, their copy of the values with them
       browserKeeper.setPaintWatch?.(browserDialogs); // lane browser-swiftshader-cpu: idle paint stops on the watch's own socket
       // verify r1 (site-reset): a holder's tabs the KEEPER can attribute (its pinned tab, its mediated lease's tabs, the user's
       // own + adopted ones) — the watch's `tabsOf` from here on; the stream bridge below UNIONS its live view's active target

@@ -1927,6 +1927,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const blSrc = fs.readFileSync(path.join(REPO, 'src/browser-login.js'), 'utf8');
   const lfSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
   const bdSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const csSrc = fs.readFileSync(path.join(REPO, 'src/cdp-frame-scrub.js'), 'utf8');   // the credential scan (moved from browser-dialogs.js: the twin's worker, 主开发 r2445 — a browser-dialogs copy delegates to the REAL module)
   const veSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
 
   // Mutant 1: remove origin gate in fillVaultElement -> types secret on evil origin!
@@ -2034,10 +2035,10 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   // Mutant 4 (L1): remove `multipart/` branch & fail-closed default -> cross-origin FormData body leaks secret unblocked!
-  const m4BdSrc = editAnchor(editAnchor(bdSrc,
-    "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/server/browser-dialogs.js"),
-    "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/server/browser-dialogs.js");
-  const BD_M4 = m4BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m4BdSrc, 'multipart-branch-removed') : null;
+  const m4BdSrc = editAnchor(editAnchor(csSrc,
+    "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/cdp-frame-scrub.js"),
+    "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/cdp-frame-scrub.js");
+  const BD_M4 = m4BdSrc !== csSrc ? MUT.load('src/cdp-frame-scrub.js', m4BdSrc, 'multipart-branch-removed') : null;
   {
     const m4Secret = 'Mut4Secret!' + crypto.randomBytes(4).toString('hex');
     const m4Sigs = Dm.credSigOf ? [Dm.credSigOf(m4Secret)] : [];
@@ -2268,11 +2269,11 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   const BD_M12 = m12BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m12BdSrc, 'n2-snapshot-full-ax-on-watch') : null;
 
   // Mutant 13 (N4): `json_too_many_nodes` limit returns `{ carries: false, undecodable: false }` -> cross-origin >4096-node JSON fails open!
-  const m13BdSrc = editAnchor(bdSrc,
+  const m13BdSrc = editAnchor(csSrc,
     "return { carries: false, undecodable: true, reason: 'json_too_many_nodes' };",
     "return { carries: false, undecodable: false, format: 'json' };"
-  , "src/server/browser-dialogs.js");
-  const BD_M13 = m13BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m13BdSrc, 'n4-json-cap-fails-open') : null;
+  , "src/cdp-frame-scrub.js");
+  const BD_M13 = m13BdSrc !== csSrc ? MUT.load('src/cdp-frame-scrub.js', m13BdSrc, 'n4-json-cap-fails-open') : null;
 
   // Mutant 14 (m2): omit `Network.disable` when `wantCred` drops -> `Network.*` stays enabled after fence lifts!
   const m14BdSrc = editAnchor(bdSrc,

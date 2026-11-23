@@ -1095,7 +1095,36 @@ function folderLostNotice({ label = '', tries = WINDOW_PUTBACK_TRIES } = {}) {
     i18n: { text: { key: FOLDER_LOST_WORDS.text, params }, detail: [{ key: FOLDER_LOST_WORDS.detail, params }] } };
 }
 
+/** 主开发 r2445 laws 2 + 6 (lane lg-vault-file, the frame scrub's worker) — ONE ORDERED SENDER for one client socket (the mediator
+ *  makes one a connection). post(r, bytes, reply): `r` = a frame (a string), null (nothing to send — its place kept), or a promise of
+ *  { out } | { withheld } (a frame scrubbed off the loop). Frames leave in the order posted; a pending one holds the frames behind it
+ *  until it is answered; with nothing waiting a frame leaves at once (synchronously). What waits is bounded in BYTES (`maxBytes`):
+ *  past it a frame is withheld. `withheld(why, reply)` gives what leaves in a withheld frame's place — a refusal by name for a reply
+ *  (`reply` = its {id, sessionId}), null for an event. */
+function orderedSender({ send, maxBytes, withheld }) {
+  const q = [];
+  let waiting = 0;
+  const flush = () => { while (q.length && q[0].done) { const it = q.shift(); waiting -= it.bytes; if (it.out != null) { try { send(it.out); } catch { /* gone */ } } } };
+  function post(r, bytes, reply = null) {
+    if (typeof r === 'string' && !q.length) { send(r); return; }
+    let n = Number(bytes) || 0;
+    if (q.length && waiting + n > maxBytes) {
+      if (r && typeof r.then === 'function') r.then(() => { }, () => { });
+      r = withheld('the frames waiting for this connection are past their bound', reply);
+      n = r ? r.length : 0;
+    }
+    const it = { done: typeof r === 'string' || r == null, out: typeof r === 'string' ? r : null, bytes: n };
+    q.push(it);
+    waiting += n;
+    if (it.done) { flush(); return; }
+    Promise.resolve(r).then((a) => { it.out = a && typeof a.out === 'string' ? a.out : withheld((a && a.withheld) || 'no answer', reply); }, () => { it.out = withheld('the scrub failed', reply); })
+      .then(() => { it.done = true; flush(); });
+  }
+  return { post, waiting: () => q.length, bytes: () => waiting };
+}
+
 module.exports = {
+  orderedSender,   // 主开发 r2445 laws 2 + 6: one client socket's ordered, byte-bounded sender
   FOLDER_LOST_WORDS, folderLostNotice, // B-0645 cure: the folder not confirmed put back, told to the person
   WINDOW_PUTBACK_TRIES,
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,

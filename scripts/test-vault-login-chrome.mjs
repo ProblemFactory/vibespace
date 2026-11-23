@@ -1132,6 +1132,7 @@ try {
       const lfSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
       const blSrc = fs.readFileSync(path.join(REPO, 'src/browser-login.js'), 'utf8');
       const bdSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+      const csSrc = fs.readFileSync(path.join(REPO, 'src/cdp-frame-scrub.js'), 'utf8');   // the credential scan (moved from browser-dialogs.js: the twin's worker, 主开发 r2445 — a browser-dialogs copy delegates to the REAL module)
       const veSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
       const LF_M1 = MUT.load('src/server/browser-login-fill.js', editAnchor(lfSrc, '  if (iso.origin !== wantOrigin) {', '  if (false && iso.origin !== wantOrigin) {', "src/server/browser-login-fill.js"), 'origin-gate-removed');
       const BL_M2 = MUT.load('src/browser-login.js', editAnchor(blSrc,
@@ -1142,9 +1143,9 @@ try {
         "const wantSecretPw = Boolean(secret && slot !== 'otp');", 'const wantSecretPw = false;', "src/server/browser-login-fill.js", 'all'),
         'async function wipeTabTypedInputs(', 'async function wipeTabTypedInputs() { return { ok: true, wiped: 0 }; }\nasync function _deadWipeTabTypedInputs(', "src/server/browser-login-fill.js"),
       'mask-wipe-removed');
-      const BD_M4 = MUT.load('src/server/browser-dialogs.js', editAnchor(editAnchor(bdSrc,
-        "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/server/browser-dialogs.js"),
-        "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/server/browser-dialogs.js"),
+      const BD_M4 = MUT.load('src/cdp-frame-scrub.js', editAnchor(editAnchor(csSrc,
+        "if (media.startsWith('multipart/') || (!media && /^--[^\\r\\n]{1,128}\\r?\\ncontent-disposition:/i.test(bodyText))) {", 'if (false) {', "src/cdp-frame-scrub.js"),
+        "return { carries: false, undecodable: true, reason: `unsupported_content_type:${media || 'unknown'}` };", "return { carries: false, undecodable: false, reason: 'none' };", "src/cdp-frame-scrub.js"),
       'multipart-branch-removed');
       const VE_M5 = MUT.load('src/server/vault-engine.js', editAnchor(veSrc, ', ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {})', '', "src/server/vault-engine.js"), 'secretNames-without-rev');
       const LF_M8 = MUT.load('src/server/browser-login-fill.js', editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(lfSrc,
@@ -1168,10 +1169,10 @@ try {
         '      writeSnapshotRefs(w, e, specs, { seq, at });', // B-21cc (r2849): a NAMED note writes the tab's references here
         '      await call(w, \'Accessibility.getFullAXTree\', {}, e.sid);\n      writeSnapshotRefs(w, e, specs, { seq, at });'
       , "src/server/browser-dialogs.js"), 'n2-snapshot-full-ax');
-      const BD_M_N4_CAP = MUT.load('src/server/browser-dialogs.js', editAnchor(bdSrc,
+      const BD_M_N4_CAP = MUT.load('src/cdp-frame-scrub.js', editAnchor(csSrc,
         "return { carries: false, undecodable: true, reason: 'json_too_many_nodes' };",
         "return { carries: false, undecodable: false, format: 'json' };"
-      , "src/server/browser-dialogs.js"), 'n4-json-cap-open');
+      , "src/cdp-frame-scrub.js"), 'n4-json-cap-open');
 
       const ep = await w.kk.cdpEndpointFor(w.prof.id);
       const ws = new WSBase(ep.url);

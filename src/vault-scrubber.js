@@ -264,12 +264,7 @@ function compileForms(secrets) {
   // it, from whichever end the engine likes, and no count can see inside one exec. The run's scan asks a regex of HEADS — each
   // form's first SCRUB_HEAD characters — and a head that begins a longer form is VERIFIED by a counted compare: at a position the
   // longest form there is still the find (every key that matches there is a prefix of the longest key that does)
-  const HEAD = SCRUB_HEAD, longOf = new Map(), shortIn = new Map();
-  for (const t of texts) if (t.length > HEAD) { const k = t.slice(0, HEAD); let l = longOf.get(k); if (!l) longOf.set(k, l = []); l.push(t); }
-  const keys = [...new Set(texts.map((t) => (t.length > HEAD ? t.slice(0, HEAD) : t)))].sort((a, b) => b.length - a.length);
-  const shorts = texts.filter((t) => t.length <= HEAD);
-  for (const k of keys) { const s = shorts.find((t) => k.startsWith(t)); if (s) shortIn.set(k, s); }
-  const hre = keys.length ? new RegExp(keys.map(reEscape).join('|'), 'g') : null;
+  const { keys, hre, longOf, shortIn } = headsOf(texts);   // ONE implementation (主开发 r1915 (a)): the browser dialogs' text scrubber builds its heads with the same function
   // THE CUT'S PREFIX SEARCH (主开发 r1216, the follow's item 1): the heads sorted by code unit (a suffix of a head's length or less is
   // a head's prefix where a binary search lands), and the LONG forms' heads by their rolling hash (a longer suffix starts with one;
   // the follow's read: a regex of every long head was work per alternative at every position, which no count saw)
@@ -277,6 +272,21 @@ function compileForms(secrets) {
   for (const k of longOf.keys()) { const h = headHash(k, 0); let l = lhash.get(h); if (!l) lhash.set(h, l = []); l.push(k); }
   return Object.freeze({ [COMPILED]: true, table, texts, re, W, size: texts.length, keys, hre, longOf, shortIn, sorted, lhash });
 }
+/** THE HEADS (the budget's second read, G1; ONE implementation since 主开发 r1915 (a) — the run's scan and the browser dialogs'
+ *  text scrubber both call it): each spelled form's first SCRUB_HEAD characters, longest first. → { keys, hre (the regex of the
+ *  heads), longOf (a 64-character head → the long forms it begins), shortIn (a head → the shorter form it is or begins with) } */
+function headsOf(texts) {
+  const HEAD = SCRUB_HEAD, longOf = new Map(), shortIn = new Map();
+  for (const t of texts) if (t.length > HEAD) { const k = t.slice(0, HEAD); let l = longOf.get(k); if (!l) longOf.set(k, l = []); l.push(t); }
+  const keys = [...new Set(texts.map((t) => (t.length > HEAD ? t.slice(0, HEAD) : t)))].sort((a, b) => b.length - a.length);
+  const shorts = texts.filter((t) => t.length <= HEAD);
+  for (const k of keys) { const s = shorts.find((t) => k.startsWith(t)); if (s) shortIn.set(k, s); }
+  const hre = keys.length ? new RegExp(keys.map(reEscape).join('|'), 'g') : null;
+  return { keys, hre, longOf, shortIn };
+}
+/** THE COUNTED VERIFY (ONE implementation, r1915 (a)): the head a regex of heads matched in `sk` at `m.index` → the longest spelled
+ *  form there (a long one VERIFIED by a compare `spend` counts), or null (no form is there: ask at the next position) */
+const resolveHead = (sk, m, longOf, shortIn, spend) => { const k = m[0], longs = longOf.get(k); if (longs) for (const t of longs) { spend(t.length); if (sk.startsWith(t, m.index)) return t; } return shortIn.has(k) ? shortIn.get(k) : null; };
 /** Is `x` a compiled set (compileForms), not a secrets list? */
 const isCompiledForms = (x) => !!(x && x[COMPILED] === true);
 /** THE SCAN'S BUDGET (主开发 r1068 — the law: THE SCAN'S WORK A PUSH IS BOUNDED BY CONSTRUCTION, WHATEVER THE INPUT): every loop
@@ -284,6 +294,7 @@ const isCompiledForms = (x) => !!(x && x[COMPILED] === true);
  *  past SCRUB_STEPS_PUSH in one turn or SCRUB_STEPS_RUN in the run, the run FAILS CLOSED: a sticky mark, every stream's held text
  *  masked whole under the cut's placeholder, these words said once by name, and nothing handed on after. */
 const SCRUB_STEPS_PUSH = 1 << 24, SCRUB_STEPS_RUN = 1 << 28, SCRUB_STEPS_A_CHAR = 256, SCRUB_HEAD = 64;   // THE FIGURES BY A MEASURED RULE (主开发 r1216): a turn's — the smallest power of two at least four times the longest turn of an ORDINARY run at the door's largest set (256 values, the runnable list's cap, each a realistic length; a 2 MiB log), never over 2^24: that turn read 8.59 M steps, so the rule gives 2^26 and the ceiling binds (the margin 1.95×, said). The run's: 16 × the turn's (the proportion), and SCRUB_STEPS_A_CHAR a character it read — 256, the TIGHTER of the follow's two (主开发 r1505: while the scan runs on the hub's loop the run's figure must not widen what the loop may be held for): 2^28 + 256 × the 2.03 M characters a 2 MiB run read = 0.79 G, 1.37× the costliest ordinary run at the largest set (575 M steps in 4 KiB reads; the rule's own four times would be 1 024); a job's log has no bound, so its masker's figure grows with what it read (the second read, G4). SCRUB_HEAD: the longest literal the regex holds
+const TEXT_STEPS_BASE = 1 << 20, TEXT_STEPS_A_CHAR = 64;   // the text budget's figures (主开发 r1216 / r1915): a call of the browser dialogs' text scrubber is ONE counted turn, its figure LINEAR in the text (a screenshot's megabytes of base64 are ordinary): 2^20 + 64 a character — what fails closed is work that grows faster than the text
 const SCRUB_OVER_WORDS = '\n[vault: this stretch of the output is withheld — scrubbing it passed its work bound (scrub_work_bound)]\n';   // 主开发 r1216: true for each road — the run door hands on nothing after these words (its run's output ends here; the child runs on, what it prints is counted as withheld), a job's log resumes at its next quiet (the wrapper starts a fresh masker there, kb-design-lessons)
 /** THE CUTS SETTLED IN ONE SWEEP (主开发 r1068, the readers' cure: two fixpoints walked a chain of overlapping groups back one group
  *  a pass — groups² a turn). `lists` = each group's ranges [[stream, a, b], …]; `cut` (stream → offset) falls to the greatest cuts
@@ -351,7 +362,7 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
   const limit = { push: (opts.steps && opts.steps.push) || SCRUB_STEPS_PUSH, run: (opts.steps && opts.steps.run) || SCRUB_STEPS_RUN, aChar: (opts.steps && opts.steps.aChar) || SCRUB_STEPS_A_CHAR };   // THE SCAN'S BUDGET: the figures (a suite may plant smaller ones)
   if (!HEADS.has(C)) HEADS.set(C, repeatingHeads(C.keys || texts));   // THE SCAN'S BUDGET: the heads the regex holds (≤ SCRUB_HEAD characters each)
   const hre = C.hre || re, longOf = C.longOf || new Map(), shortIn = C.shortIn || new Map(), sorted = C.sorted, lhash = C.lhash;   // THE SCAN'S BUDGET
-  const resolve = (sk, m) => { const k = m[0], longs = longOf.get(k); if (longs) for (const t of longs) { spend(t.length); if (sk.startsWith(t, m.index)) return t; } return shortIn.has(k) ? shortIn.get(k) : null; };   // THE SCAN'S BUDGET: a head → the longest form at that place, a long one VERIFIED by a counted compare (null: none is there)
+  const resolve = (sk, m) => resolveHead(sk, m, longOf, shortIn, spend);   // THE SCAN'S BUDGET (one implementation, r1915 (a): resolveHead): a head → the longest form at that place, a long one VERIFIED by a counted compare (null: none is there)
   const heads = HEADS.get(C), charge = 1 + heads.flat + heads.byD.reduce((n, [, hs]) => n + hs.reduce((m, x) => m + x.h, 0), 0);   // THE SCAN'S BUDGET: the repeating heads (the read's F1); `charge` = the most a character can cost, for the suites' figures
   const OVER = Symbol('vault-run.scrub-over');   // THE SCAN'S BUDGET
   const spend = (n) => { st.steps += n; st.runSteps += n; if (st.steps > limit.push || st.runSteps > limit.run + limit.aChar * st.read) throw OVER; };   // THE SCAN'S BUDGET: every loop of a turn counts here — past a figure the turn stops where it is
@@ -669,41 +680,52 @@ function compileTextScrubber(secrets) {
   const texts = [...table.keys()].sort((a, b) => b.length - a.length);
   const maxFormLen = texts.length ? texts[0].length : 0;
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
+  const H = headsOf(texts), textHeads = repeatingHeads(H.keys), CUT = placeholderOf({ label: '\u2026' });   // THE TEXT BUDGET (主开发 r1216 / r1915): the textHeads (the run scan's own builder), their repeating textHeads, the cut's placeholder
+  let overs = 0, spend = () => { };   // THE TEXT BUDGET: the call's one spend (a no-op between calls), and how many calls failed closed
+  const OVER = Symbol('vault-run.text-over');   // THE TEXT BUDGET
+  const counted = (raw, fn) => { const limit = TEXT_STEPS_BASE + TEXT_STEPS_A_CHAR * raw.length; let steps = 0; spend = (n) => { steps += n; if (steps > limit) throw OVER; }; try { return fn(); } catch (e) { if (e !== OVER) throw e; overs++; return CUT; } finally { spend = () => { }; } };   // THE TEXT BUDGET: ONE call is ONE counted turn, its figure LINEAR in the text — past it the whole string is the cut's placeholder, never raw
   const isNumChar = (c) => (c >= 48 && c <= 57) || c === 45 || c === 43 || c === 46 || c === 101 || c === 69;
   const isWsChar = (c) => c === 32 || c === 9 || c === 10 || c === 13;
   const isBareJsonNumber = (raw, L, s, b) => {
     let ns = s, ne = b;
     while (ns > 0 && isNumChar(raw.charCodeAt(ns - 1))) ns--;
     while (ne < L && isNumChar(raw.charCodeAt(ne))) ne++;
+    spend(2 * (ne - ns) + 2);   // THE TEXT BUDGET: the number's walk and its test
     if (!/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(raw.slice(ns, ne))) return false;
     let li = ns - 1;
     while (li >= 0 && isWsChar(raw.charCodeAt(li))) li--;
+    spend(ns - li);   // THE TEXT BUDGET
     if (li >= 0) {
       const lc = raw.charCodeAt(li);
       if (lc !== 58 && lc !== 44 && lc !== 91 && lc !== 123) return false; // : , [ {
     }
     let ri = ne;
     while (ri < L && isWsChar(raw.charCodeAt(ri))) ri++;
+    spend(ri - ne + 1);   // THE TEXT BUDGET
     if (ri < L) {
       const rc = raw.charCodeAt(ri);
       if (rc !== 44 && rc !== 93 && rc !== 125) return false; // , ] }
     }
     return true;
   };
-  const scrub = (raw) => {
+  const scrubOnce = (raw) => {
+    const re = H.hre;   // THE TEXT BUDGET: the regex of HEADS (no literal over SCRUB_HEAD characters)
     if (!re || typeof raw !== 'string' || !raw) return raw;
     re.lastIndex = 0;
+    spend(2 * raw.length + deepCost(raw, textHeads));   // THE TEXT BUDGET: the plain test and the view triggers read the text
     const plainHit = re.test(raw);
     const hasView = VIEW_TRIGGER_RE.test(raw);
     if (!plainHit && !hasView) return raw;
     const L = raw.length, finds = [];
     const look = (sk, r) => {
       re.lastIndex = 0;
+      spend(deepCost(sk, textHeads));   // THE TEXT BUDGET: the regex reads the text once, as deep as a run repeats a repeating head
       let m;
       const vEnd = new Map();   // the dialog scrubber's overlap (r858): each value's last find's end
       while ((m = re.exec(sk)) !== null) {
         const s = r ? r.at[m.index] : m.index;
         if (s >= L) break;
+        spend(1); { const full = resolveHead(sk, m, H.longOf, H.shortIn, spend); if (full === null) { re.lastIndex = m.index + 1; continue; } m[0] = full; }   // THE TEXT BUDGET: the head → its longest form there, a long one verified by the counted compare (the run scan's own)
         const t = table.get(m[0]);
         if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // the dialog scrubber's overlap: the same value inside its own last find is no new find
         finds.push({ a: s, b: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph });
@@ -713,11 +735,13 @@ function compileTextScrubber(secrets) {
     if (plainHit) look(raw, null);
     if (hasView) {
       for (const vw of VIEWS) {
+        spend(2 * L);   // THE TEXT BUDGET: a view reads the text
         const r = readView(vw, raw, L, true);
         if (r) look(r.sk, r);
       }
     }
     if (!finds.length) return raw;
+    spend(finds.length * (2 + Math.ceil(Math.log2(finds.length + 2))) + L);   // THE TEXT BUDGET: the finds sorted, the text written out
     finds.sort((p, q) => p.a - q.a || p.b - q.b);
     let out = '', i = 0, lastEnd = -1;
     for (const m of finds) {
@@ -727,10 +751,13 @@ function compileTextScrubber(secrets) {
     }
     return out + raw.slice(i);
   };
-  scrub.spelled = (raw) => {
+  const scrub = (raw) => (typeof raw !== 'string' || !raw || !H.hre ? raw : counted(raw, () => scrubOnce(raw)));   // THE TEXT BUDGET
+  const spelledOnce = (raw) => {
+    const re = H.hre;   // THE TEXT BUDGET
     if (!re || typeof raw !== 'string' || !raw) return raw;
     let plainHit = false;
     re.lastIndex = 0;
+    spend(2 * raw.length + deepCost(raw, textHeads));   // THE TEXT BUDGET
     plainHit = re.test(raw);
     const hasView = VIEW_TRIGGER_RE.test(raw);
     if (!plainHit && !hasView) return raw;
@@ -739,8 +766,10 @@ function compileTextScrubber(secrets) {
       re.lastIndex = 0;
       let m;
       const vEnd = new Map();   // its spelled pass (r858): each value's last candidate's end
+      spend(deepCost(raw, textHeads));   // THE TEXT BUDGET
       while ((m = re.exec(raw)) !== null) {
         if (m.index >= L) break;
+        spend(1); { const full = resolveHead(raw, m, H.longOf, H.shortIn, spend); if (full === null) { re.lastIndex = m.index + 1; continue; } m[0] = full; }   // THE TEXT BUDGET
         const t = table.get(m[0]);
         if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // its spelled pass: the same value inside its own last candidate is none
         cands.push({ a: m.index, b: m.index + m[0].length, ph: t.ph, digits: /^\d+$/.test(m[0]) });
@@ -750,9 +779,11 @@ function compileTextScrubber(secrets) {
     if (hasView && maxFormLen > 0) {
       for (const vw of VIEWS) {
         vw.re.lastIndex = 0;
+        spend(L);   // THE TEXT BUDGET: the view's tokens found over the text
         let tm, curS = -1, curE = -1;
         const wins = [];
         while ((tm = vw.re.exec(raw)) !== null) {
+          spend(1);   // THE TEXT BUDGET
           const ws = Math.max(0, tm.index - maxFormLen);
           const we = Math.min(L, tm.index + tm[0].length + maxFormLen);
           if (curS < 0) { curS = ws; curE = we; }
@@ -761,15 +792,18 @@ function compileTextScrubber(secrets) {
         }
         if (curS >= 0) wins.push([curS, curE]);
         for (const [ws, we] of wins) {
+          spend(3 * (we - ws));   // THE TEXT BUDGET: the window cut, read through the view
           const slice = raw.slice(ws, we);
           const r = readView(vw, slice, slice.length, true);
           if (!r) continue;
           re.lastIndex = 0;
+          spend(deepCost(r.sk, textHeads));   // THE TEXT BUDGET
           let m;
           const vEnd = new Map();   // its spelled pass through a view (r858): each value's last candidate's end
           while ((m = re.exec(r.sk)) !== null) {
             const s = ws + r.at[m.index];
             if (s >= L) break;
+            spend(1); { const full = resolveHead(r.sk, m, H.longOf, H.shortIn, spend); if (full === null) { re.lastIndex = m.index + 1; continue; } m[0] = full; }   // THE TEXT BUDGET
             const b = ws + r.to[m.index + m[0].length - 1];
             const t = table.get(m[0]);
             if ((vEnd.get(t.v) || -1) > m.index) { re.lastIndex = m.index + 1; continue; }   // its spelled pass through a view: the same value inside its own last candidate is none
@@ -780,6 +814,7 @@ function compileTextScrubber(secrets) {
       }
     }
     if (!cands.length) return raw;
+    spend(cands.length * (2 + Math.ceil(Math.log2(cands.length + 2))) + 2 * L);   // THE TEXT BUDGET: the candidates sorted, the JSON-string walk (once over the text), the text written out
     cands.sort((p, q) => p.a - q.a || p.b - q.b);
     let qIdx = 0, inQuote = false, esc = false;
     const inJsonStrAt = (pos) => {
@@ -814,6 +849,8 @@ function compileTextScrubber(secrets) {
     }
     return out + raw.slice(i);
   };
+  scrub.spelled = (raw) => (typeof raw !== 'string' || !raw || !H.hre ? raw : counted(raw, () => spelledOnce(raw)));   // THE TEXT BUDGET
+  Object.defineProperty(scrub, 'overs', { get: () => overs });   // THE TEXT BUDGET: how many calls failed closed (the dialogs log it once a profile)
   return scrub;
 }
 
@@ -821,4 +858,5 @@ module.exports = {
   MIN_MASK_BYTES, placeholderOf, bytesOf, WORDS,
   FORMS, FORM_ROWS, VIEWS, formsOf, compileForms, isCompiledForms, createMasker, createRunMasker, maskText, compileTextScrubber,
   settleCuts, SCRUB_STEPS_PUSH, SCRUB_STEPS_RUN,   // 主开发 r1068: the cuts settled in one sweep (the suite's equivalence leg reads it against the fixpoint), the scan's two figures
+  TEXT_STEPS_BASE, TEXT_STEPS_A_CHAR, headsOf, resolveHead,   // 主开发 r1915: the text budget's figures; the heads and the counted verify — ONE implementation for the run's scan and the dialogs' text scrubber
 };

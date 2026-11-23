@@ -174,6 +174,9 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
     back('function maskText(text, secrets) { const m = createMasker(secrets), t = String(text == null ? \'\' : text); let out = \'\'; for (let i = 0; i < t.length; i += 65536) out += m.push(t.slice(i, i + 65536)); return out + m.end(); }   // in 64 KiB pieces (the budget\'s read, F9: a whole text of megabytes in ONE turn met the turn\'s figure — the output belt\'s text became the withheld words)\n', 'function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }\n', 'maskText');   // stale-pins: kept (the release\'s own maskText, one push)
     back('  function scan(buf, final, at) {\n', '  function scan(buf, final) {\n', "scan's head");   // stale-pins: kept (the release's own head)
     back('      const sc = scan(all, final, idxAt);\n', '      const sc = scan(all, final);\n', 'arrival scan');   // stale-pins: kept (the release's own call)
+    t = anchored(t, /\n[^\n]*\/\/ THE TEXT BUDGET[^\n]*/, '', "the release's text scrubber (its budget's own lines, 主开发 r1915)", { count: 26 });   // the heads, the spend, each loop's count, the counted wrapper, the overs getter
+    back('  const scrubOnce = (raw) => {\n', '  const scrub = (raw) => {\n', 'text scrubber head');   // stale-pins: kept (the release's own head, put back)
+    back('  const spelledOnce = (raw) => {\n', '  scrub.spelled = (raw) => {\n', 'spelled pass head');   // stale-pins: kept (the release's own head, put back)
     t = anchored(t, /\n[^\n]*\/\/ the dialog scrubber's overlap[^\n]*/, '', "⑦g the release's dialog scrubber", { count: 3 });
     t = anchored(t, /\n[^\n]*\/\/ its spelled pass(?: \(r858\)|:)[^\n]*/, '', "⑦g the release's spelled pass", { count: 3 });
     t = anchored(t, /\n[^\n]*\/\/ its spelled pass through a view(?: \(r858\)|:)[^\n]*/, '', "⑦g the release's spelled view pass", { count: 3 });

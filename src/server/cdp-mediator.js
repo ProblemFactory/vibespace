@@ -65,6 +65,11 @@ const { WebSocketServer, WebSocket } = require('ws');
 const M = require('../browser-mediation.js');
 
 const MAX_PAYLOAD = 256 * 1024 * 1024; // a Page.captureScreenshot / printToPDF answer can be tens of MB
+// 主开发 r2445 (lane lg-vault-file, the frame scrub's worker): what may WAIT for one client behind a frame scrubbed off the loop —
+// in bytes (law 6); a lone frame always leaves (up to MAX_PAYLOAD), a frame past the bound behind others is withheld by name
+const CLIENT_QUEUE_MAX_BYTES = 64 * 1024 * 1024;
+const FRAME_WITHHELD_CODE = 'frame_withheld';
+const frameWithheldWords = (why) => `VibeSpace withheld this answer whole: a frame this large is scrubbed of the vault's values off the hub's loop, and that scrub could not answer (${String(why || 'no answer').slice(0, 120)}). Nothing of it is shown unscrubbed; ask for a smaller part (a narrower query, a clip)`;
 /** The ids the proxy uses for ITS OWN calls upstream (the takeover's Runtime.terminateExecution): counted DOWN from
  *  here (CDP ids are int32; a daemon counts up from 1), never one a client has pending on that connection. */
 const INTERNAL_ID_BASE = 2000000000;
@@ -93,7 +98,7 @@ const VERSION_RETRY_MS = 5000;
  *  the close reason the grant's live connections get (verify r3 M3). */
 const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting: 'Browser Restarting', browser_stopped: 'Browser Stopped', server_shutdown: 'Server Shutting Down' });
 
-function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS, windowBoundMs = M.WINDOW_BOUND_MS, windowAnswerMs = FETCH_MS, loginFence: initLoginFence = null } = {}) {   // (lane chrome-157: a suite's world shortens THE WINDOW's bound)
+function create({ clientQueueMaxBytes = CLIENT_QUEUE_MAX_BYTES /* r2445 law 6: a suite's seam */, log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS, windowBoundMs = M.WINDOW_BOUND_MS, windowAnswerMs = FETCH_MS, loginFence: initLoginFence = null } = {}) {   // (lane chrome-157: a suite's world shortens THE WINDOW's bound)
   /** lane chrome-157: the methods an unclassified refusal was said for in the journal, this RUN of this mediator (the hub makes
    *  ONE a run) — once a method, never per call; r2: at most UNCLASSIFIED_SAY of them, the rest counted (`unsaid`) */
   const unclassifiedSaid = new Set();
@@ -253,6 +258,16 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     askVersion(g, conn);   // (lane chrome-157 r2: the browser of THIS connection — a restart / relaunch closes it, the reconnect reads the new one)
     g.conns.add(conn);
     g.lastUsedAt = now();
+    // 主开发 r2445 laws 2 + 6 (lane lg-vault-file) — ONE ORDERED SENDER for this client. Every frame it is sent leaves in the order it
+    // came: the browser's frames through the fence's scrub (sendClient) and the mediator's own (sendOwn: its refusals, the replies it
+    // makes). A frame the fence scrubs OFF THE LOOP (past the on-loop figure: the profile's worker) holds the frames behind it until
+    // it is answered; with nothing waiting, a frame leaves at once. What waits is bounded in BYTES: past the bound a frame is withheld by
+    // name. A withheld REPLY is answered with a refusal by name (frame_withheld: the driver never waits on it); a withheld event is
+    // dropped and counted (g.scrubWithheld).
+    const withheldOut = (why, reply) => { g.scrubWithheld = (g.scrubWithheld || 0) + 1; return reply && reply.id != null ? JSON.stringify(M.refusal(reply.id, FRAME_WITHHELD_CODE, frameWithheldWords(why), reply.sessionId)) : null; };
+    const postOut = M.orderedSender({ send: (t) => ws.send(t), maxBytes: clientQueueMaxBytes, withheld: withheldOut }).post;   // the client's ONE way out (src/browser-mediation.js)
+    const sendOwn = (str) => { const t = String(str); postOut(t, t.length, null); };
+    conn.sendOwn = sendOwn;
     const closeBoth = (code, reason) => {
       const had = g.conns.delete(conn);
       if (had && grants.get(g.token) === g) { const w = windows.get(g.profileId); if (w && w.conn === conn && w.st && w.st.owner === g.key) stepWindow(g.profileId, { kind: 'connGone', key: g.key }); }   // (lane chrome-157: W5 / the closure list S1 — the window lives with the connection that SET it: its events go there alone)
@@ -278,7 +293,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     function onClient(data) {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
-      if (!msg) { try { ws.send(JSON.stringify(M.refusal(null, 'bad_message', 'not JSON'))); } catch { /* gone */ } return; }
+      if (!msg) { try { sendOwn(JSON.stringify(M.refusal(null, 'bad_message', 'not JSON'))); } catch { /* gone */ } return; }
       g.lastUsedAt = now();
       let paused = false;
       try { paused = !!(typeof g.paused === 'function' && g.paused()); } catch (e) { paused = false; log.warn?.(`[cdp-mediator] paused() threw for ${g.profileId}/${g.browserKey}: ${e && e.message}`); }
@@ -300,7 +315,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         // only a shaped name is ever kept or written. Never a token, never the raw url.
         if (v.why === 'unclassified') noteUnclassified(g, conn, msg.method);
         else if (v.why === 'malformed') noteMalformed(g);
-        if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return;
+        if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { sendOwn(JSON.stringify(v.reply)); } catch { /* gone */ } return;
       }
       if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }
       const sid = msg.sessionId == null || msg.sessionId === '' ? null : String(msg.sessionId);
@@ -313,7 +328,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             const reqId = msg.params && msg.params.requestId ? String(msg.params.requestId) : '';
             if (reqId && typeof loginFence.isCredRequestId === 'function' && loginFence.isCredRequestId(g.profileId, reqId)) {
               g.refusals = (g.refusals || 0) + 1;
-              try { ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, `${msg.method} is refused because that request carried a vault login credential`, sid))); } catch { /* gone */ }
+              try { sendOwn(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, `${msg.method} is refused because that request carried a vault login credential`, sid))); } catch { /* gone */ }
               return;
             }
           }
@@ -321,7 +336,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             const handle = msg.params && msg.params.handle ? String(msg.params.handle) : '';
             if (handle && conn.taintedStreams && conn.taintedStreams.has(handle)) {
               g.refusals = (g.refusals || 0) + 1;
-              try { ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, 'IO.read is refused because that trace overlapped a vault login fill — start a fresh trace after signing in', sid))); } catch { /* gone */ }
+              try { sendOwn(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, 'IO.read is refused because that trace overlapped a vault login fill — start a fresh trace after signing in', sid))); } catch { /* gone */ }
               return;
             }
           } else if (msg.method === 'IO.close') {
@@ -338,7 +353,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           const profileFenced = !lf && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId);
           if (ct.wrapped && (lf || (profileFenced && ct.unknownSession))) {
             g.refusals = (g.refusals || 0) + 1;
-            try { ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, 'Target.sendMessageToTarget is refused while a vault login fill is in progress or unsubmitted in this tab', sid))); } catch { /* gone */ }
+            try { sendOwn(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, 'Target.sendMessageToTarget is refused while a vault login fill is in progress or unsubmitted in this tab', sid))); } catch { /* gone */ }
             return;
           }
           if (lf || (!ct.wrapped && ct.unknownSession && profileFenced)) {
@@ -346,7 +361,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: msg.params || null, holdReason: (lf && lf.holdReason) || '' });
             if (lfv.refuse) {
               g.refusals = (g.refusals || 0) + 1;
-              try { ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, sid))); } catch { /* gone */ }
+              try { sendOwn(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, sid))); } catch { /* gone */ }
               return;
             }
           }
@@ -382,7 +397,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
               g.refusals = (g.refusals || 0) + 1;
               const words = r.refuse.code === M.INTERRUPTED_CODE ? M.pausedWords(msg.method, M.pausedVerdict(msg.method)) : `${msg.method} ${r.refuse.words}`;
               if (credit) settleCredit(credit, { ok: false, code: r.refuse.code, error: words });
-              try { ws.send(JSON.stringify(M.refusal(msg.id, r.refuse.code, words, v.pending.sessionId))); } catch { /* gone */ }
+              try { sendOwn(JSON.stringify(M.refusal(msg.id, r.refuse.code, words, v.pending.sessionId))); } catch { /* gone */ }
               return;
             }
             if (prm.behavior !== 'default') v.rewrite = { ...prm, eventsEnabled: true };   // (the mediator must SEE its download begin and end on the channel it set; the lease is told only what it asked for, and only its own)
@@ -391,7 +406,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         conn.pending.set(msg.id, v.pending);
         if (conn.pending.size > 10000) { const first = conn.pending.keys().next().value; conn.pending.delete(first); }
         if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
-        try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
+        try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { sendOwn(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
       };
       const checkMethod = ct.wrapped ? (ct.innerMethod || msg.method) : msg.method;
       const checkParams = ct.wrapped ? ct.innerParams : (msg.params || null);
@@ -409,7 +424,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             if (ws.readyState !== WebSocket.OPEN) return;
             if (rc && rc.checkFailed) {
               g.refusals = (g.refusals || 0) + 1;
-              try { ws.send(JSON.stringify(M.refusal(msg.id, rc.code || 'login_check_failed', rc.error || 'VibeSpace could not check this tab — try again', sid))); } catch { /* gone */ }
+              try { sendOwn(JSON.stringify(M.refusal(msg.id, rc.code || 'login_check_failed', rc.error || 'VibeSpace could not check this tab — try again', sid))); } catch { /* gone */ }
               return;
             }
             forwardAfterFence();
@@ -425,7 +440,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             if (ws.readyState !== WebSocket.OPEN) return;
             if (rc && rc.checkFailed) {
               g.refusals = (g.refusals || 0) + 1;
-              try { ws.send(JSON.stringify(M.refusal(msg.id, rc.code || 'login_check_failed', rc.error || 'VibeSpace could not check this tab — try again', sid))); } catch { /* gone */ }
+              try { sendOwn(JSON.stringify(M.refusal(msg.id, rc.code || 'login_check_failed', rc.error || 'VibeSpace could not check this tab — try again', sid))); } catch { /* gone */ }
               return;
             }
             forwardAfterFence();
@@ -434,11 +449,13 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       }
       forwardAfterFence();
     }
-    const sendClient = (str) => {
-      const out = loginFence && typeof loginFence.scrubCdpFrame === 'function'
-        ? loginFence.scrubCdpFrame(g.profileId, str)
-        : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
-      ws.send(out);
+    const sendClient = (str, reply = null) => {   // `reply` = the answer's {id, sessionId}: a reply withheld is refused by name
+      const out = loginFence && typeof loginFence.scrubCdpFrameAsync === 'function'
+        ? loginFence.scrubCdpFrameAsync(g.profileId, str)
+        : loginFence && typeof loginFence.scrubCdpFrame === 'function'
+          ? loginFence.scrubCdpFrame(g.profileId, str)
+          : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
+      postOut(out, str.length, reply);
     };
     // B-70af (主开发's readers, 00:15Z): ONE after-filter for every event this connection is shown — the upstream's (below) and an
     // out-of-band admission's replay (admitInto → conn.deliver): the live-fill fence, its masking and the trace taint judge both,
@@ -541,7 +558,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           const unknownWhileFenced = Boolean(pend.unknownSession && !lfNow && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
           if (pend.wrapped && (lfNow || epochMoved || unknownWhileFenced)) {
             g.refusals = (g.refusals || 0) + 1;
-            try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', pend.sessionId))); } catch { /* gone */ }
+            try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendOwn(JSON.stringify(M.refusal(msg.id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', pend.sessionId))); } catch { /* gone */ }
             return;
           }
           if (lfNow || epochMoved || unknownWhileFenced) {
@@ -549,7 +566,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             const lfv = M.liveFillCdpVerdict(pend.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: pend.params || null, holdReason: (lfNow && lfNow.holdReason) || '' });
             if (lfv.refuse) {
               g.refusals = (g.refusals || 0) + 1;
-              try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, pend.sessionId))); } catch { /* gone */ }
+              try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendOwn(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, pend.sessionId))); } catch { /* gone */ }
               return;
             }
           }
@@ -565,12 +582,12 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
               || (postBody && typeof loginFence.bodyCarriesCred === 'function' && loginFence.bodyCarriesCred(g.profileId, postBody, reqId));
             if (credHit) {
               g.refusals = (g.refusals || 0) + 1;
-              try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, `${pend.method} is refused because that request carried a vault login credential`, pend.sessionId))); } catch { /* gone */ }
+              try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendOwn(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, `${pend.method} is refused because that request carried a vault login credential`, pend.sessionId))); } catch { /* gone */ }
               return;
             }
           }
         }
-        try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendClient(JSON.stringify(out.reply)); } catch { /* gone */ }
+        try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendClient(JSON.stringify(out.reply), out.reply); } catch { /* gone */ }
         return;
       }
       if (msg.id != null) return; // a reply to nothing we forwarded
@@ -644,7 +661,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         p.aborted = true; p.interruptAt = out.at;
         g.refusals = (g.refusals || 0) + 1;
         if (conn.credits && conn.credits.has(a.id)) { const c = conn.credits.get(a.id); conn.credits.delete(a.id); settleCredit(c, { ok: false, code: M.INTERRUPTED_CODE, error: 'interrupted by the takeover' }); }
-        try { conn.ws.send(JSON.stringify(M.refusal(a.id, M.INTERRUPTED_CODE, M.pausedWords(a.method, M.pausedVerdict(a.method)), a.sessionId))); } catch { /* gone */ }
+        try { conn.sendOwn(JSON.stringify(M.refusal(a.id, M.INTERRUPTED_CODE, M.pausedWords(a.method, M.pausedVerdict(a.method)), a.sessionId))); } catch { /* gone */ }
         out.aborted.push({ method: a.method, sessionId: a.sessionId });
       }
       for (const sid of plan.terminate) {
@@ -685,7 +702,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             p.aborted = true;
             p.fillAborted = true;
             g.refusals = (g.refusals || 0) + 1;
-            try { conn.ws.send(JSON.stringify(M.refusal(id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', p.sessionId))); } catch { /* gone */ }
+            try { conn.sendOwn(JSON.stringify(M.refusal(id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', p.sessionId))); } catch { /* gone */ }
             out.aborted.push({ method: p.method, sessionId: p.sessionId || null, browserKey: g.browserKey });
             continue;
           }
@@ -694,7 +711,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           p.aborted = true;
           p.fillAborted = true;
           g.refusals = (g.refusals || 0) + 1;
-          try { conn.ws.send(JSON.stringify(M.refusal(id, lfv.code, lfv.error, p.sessionId))); } catch { /* gone */ }
+          try { conn.sendOwn(JSON.stringify(M.refusal(id, lfv.code, lfv.error, p.sessionId))); } catch { /* gone */ }
           out.aborted.push({ method: p.method, sessionId: p.sessionId || null, browserKey: g.browserKey });
         }
       }
@@ -959,4 +976,4 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
   return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, putBackDownloads, adopt, onTold: (fn) => { if (typeof fn !== 'function') return () => { }; toldListeners.add(fn); return () => toldListeners.delete(fn); }, onFolder: (fn) => { if (typeof fn !== 'function') return () => { }; folderListeners.add(fn); return () => folderListeners.delete(fn); }, windowToldOf: (profileId, browserKey) => { const g = grantOf(profileId, browserKey); return g && g.windowTold ? { ...g.windowTold } : null; }, downloadWindowOf: (profileId) => { const w = windows.get(String(profileId)); return w && w.st ? { phase: w.st.phase, browserKey: w.browserKey, began: w.st.began ? w.st.began.length : 0, pending: !!w.st.pending, ordered: !!w.st.ordered, then: w.st.then || null, deadline: w.st.deadline || null } : null; }, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptForFill, interruptionOf, setLoginFence, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
-module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE, UNCLASSIFIED_KEEP, UNCLASSIFIED_SAY, VERSION_RETRY_MS, FETCH_MS, ADOPT_TRIES, ADOPT_GAP_MS, ADOPT_WAIT_MS };
+module.exports = { create, MAX_PAYLOAD, CLIENT_QUEUE_MAX_BYTES, FRAME_WITHHELD_CODE, frameWithheldWords /* r2445 */, REFUSE_TEXT, INTERNAL_ID_BASE, UNCLASSIFIED_KEEP, UNCLASSIFIED_SAY, VERSION_RETRY_MS, FETCH_MS, ADOPT_TRIES, ADOPT_GAP_MS, ADOPT_WAIT_MS };
