@@ -66,6 +66,7 @@ import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js'
 import { showUnlock, showSetup } from './vault-unlock.js';
 import { openExitDialog } from './browser-exit-dialog.js'; // the exit check (the owner 2026-11-17)
 import { registerBrowserProfileCommands } from './browser-profile-commands.js'; // B-acb9: a plugin's window opens this card's «Proxy…» / «Check the exit…»
+import { techFold } from './plain-words.js';   // r3104: where a damaged list's bytes are kept — in the fold, never on the face
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -1250,7 +1251,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
       for (const o of ol) orph.appendChild(orphanRow(o));
     }
     const fg = section(t('Deleted profiles (kept aside)'), t('never deleted by themselves — only «Delete permanently» deletes one'));
-    if (!(v.forgotten || []).length) fg.appendChild(el('div', 'bprof-empty chat-status-dim', t('Nothing set aside.')));
+    if (v.forgottenUnread) fg.appendChild(el('div', 'bprof-empty chat-status-dim', t('The list of browsers set aside could not be read — VibeSpace reads it again every few minutes. Nothing set aside is lost; setting a browser aside or deleting one waits until it reads.')));   // r3008: HELD, never «Nothing set aside»
+    else if (v.forgottenDamaged) { fg.appendChild(el('div', 'bprof-empty chat-status-dim', t("The list of browsers set aside was damaged, so it starts again empty. The browsers it listed are still in their folders: mend the list by hand and restart VibeSpace to see them here again, or delete those folders by hand."))); const fd = techFold([t("Its damaged bytes are kept beside it as: {name}", { name: String(v.forgottenDamaged.copy || '') }), t("The folders it listed: {path}", { path: '~/.agent-browser/…' + '.forgotten-…' })], { mono: true }); if (fd) fg.appendChild(fd); }   // r3104: a torn list lifted empty — said in place, never «restore that copy»
+    if (!v.forgottenUnread && !(v.forgotten || []).length && !v.forgottenDamaged) fg.appendChild(el('div', 'bprof-empty chat-status-dim', t('Nothing set aside.')));
     for (const f of v.forgotten || []) fg.appendChild(forgottenRow(f));
     // design 015 (c): MAINTENANCE — the Browser CLI row, the last sweep + Sweep now, the retention text in full
     const mt = section(t('Maintenance'), '');

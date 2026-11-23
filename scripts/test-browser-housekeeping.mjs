@@ -427,6 +427,70 @@ const hk = R.create({ dataDir: DATA, homeDir: HOME, keeper: stubKeeper, bridge, 
   ok(err && err.code === 'not-found', 'an unknown ledger id is not-found');
 }
 
+// ═══ ③b THE FORGOTTEN LEDGER THROUGH A FAILED READ (主开发 r3008) ═════════
+// lane bl-machines-b's census of the stores (batch 3): browser-forgotten.json is read once, and ANY failed read was taken as an EMPTY
+// ledger — the next Forget then wrote that over the file, and the rows naming the moved-aside `.forgotten-` folders (with their
+// sign-ins) were gone: nothing could find or delete those folders again. THE LAW (the store-read law, src/store-read-hold.js): a read
+// that fails for any reason but «no file» is never an empty ledger — a Forget meanwhile is refused BY NAME before anything moves (or,
+// on a tree without the law, keeps its own row), the file is never written over; an UNREADABLE file, once it reads again (the hold's
+// read again — asked here, never a clock), answers the SAME rows; TORN bytes are kept aside byte for byte beside the store before it
+// starts empty (no remover reads this store's silence: an empty start is safe here); afterwards a Forget works as before. Placed
+// refusals only, in the leg's own folders (never a mount): a ledger that does not parse, and one this process may not read (a run
+// that reads through mode 0000 says so and does not judge that placement).
+console.log('— ③b the forgotten ledger through a failed read: never emptied, never written over');
+{
+  const placements = [
+    { name: 'a ledger that does not parse', torn: true, place: (f, good) => fs.writeFileSync(f, good.slice(0, Math.floor(good.length / 2))), holds: () => true },
+    { name: 'a ledger this process may not read', torn: false, place: (f) => fs.chmodSync(f, 0o000), holds: (f) => { try { fs.readFileSync(f); return false; } catch (e) { return e.code === 'EACCES'; } } },
+  ];
+  let n = 0;
+  for (const pl of placements) {
+    n += 1;
+    const LH = path.join(ROOT, `fg-held-${n}`), LD = path.join(LH, 'data'), LAB = path.join(LH, 'home', '.agent-browser');
+    fs.mkdirSync(LD, { recursive: true }); fs.mkdirSync(LAB, { recursive: true });
+    const moved = path.join(LAB, 'old' + T.FORGOTTEN_SUFFIX + (clock - 86400000));
+    fs.mkdirSync(moved); fs.writeFileSync(path.join(moved, 'Cookies'), 'the sign-ins of a forgotten browser');
+    const seededId = `fg-0a0a0a0${n}`;
+    const good = JSON.stringify({ version: 1, forgotten: [{ id: seededId, profileId: null, label: 'Old', from: path.join(LAB, 'old'), dir: moved, bytes: null, at: clock - 86400000, why: 'forgotten by the user', deletedAt: null }] });
+    const h = R.create({ dataDir: LD, homeDir: path.join(LH, 'home'), keeper: stubKeeper, bridge, serverSetting: (k) => settings[k], broadcast: () => { }, log: quiet, now, execFileImpl: fakeDu, sweepEveryMs: 0 });
+    fs.mkdirSync(path.dirname(h.forgottenFile), { recursive: true }); fs.writeFileSync(h.forgottenFile, good);
+    pl.place(h.forgottenFile, good);
+    if (!pl.holds(h.forgottenFile)) { fs.chmodSync(h.forgottenFile, 0o600); console.log(`  (${pl.name}: this run reads a mode-0000 file, so the placed refusal does not hold here — SAID, not judged)`); h.shutdown(); continue; }
+    const st0 = fs.statSync(h.forgottenFile);
+    const bytes0 = pl.torn ? fs.readFileSync(h.forgottenFile) : null;
+    const later = path.join(LAB, 'later'); fs.mkdirSync(later); fs.writeFileSync(path.join(later, 'Local State'), '{}');
+    let fr = null, ferr = null; try { fr = h.forgetOrphan(later); } catch (e) { ferr = e; }
+    const st1 = fs.statSync(h.forgottenFile);
+    const notOver = st1.ino === st0.ino && (st1.mode & 0o777) === (st0.mode & 0o777) && (bytes0 === null || fs.readFileSync(h.forgottenFile).equals(bytes0));
+    ok(notOver, `${pl.name}: a Forget during the failed read never writes the ledger over (the same file, its bytes and mode as placed)`, JSON.stringify({ ino: [st0.ino, st1.ino], mode: [(st0.mode & 0o777).toString(8), (st1.mode & 0o777).toString(8)], forget: fr ? { ok: fr.ok, to: fr.to } : { code: ferr && ferr.code } }));
+    ok(ferr ? (ferr.code === 'forgotten_unread' && fs.existsSync(later) && /could not be read/.test(ferr.message)) : (!!fr && fr.ok && JSON.parse(fs.readFileSync(h.forgottenFile, 'utf8').replace(/^﻿/, '') || '{}').forgotten?.some?.((r) => r.id === fr.ledger.id)),
+      `${pl.name}: the Forget during the failed read is refused BY NAME (forgotten_unread, the folder untouched) — never a folder moved aside with no row`, JSON.stringify(ferr ? { code: ferr.code, folderStill: fs.existsSync(later), message: String(ferr.message).slice(0, 160) } : { to: fr && fr.to }));
+    const hv = await h.housekeeping();
+    ok(!pl.torn ? (!!hv.forgottenUnread && hv.forgottenUnread.file === 'browser-forgotten.json') : true, `${pl.name}: while held the panel's answer says so (forgottenUnread) — never «Nothing set aside»`, JSON.stringify(hv.forgottenUnread || null));
+    const hold = h._forgottenHold || null;
+    if (!pl.torn) {
+      fs.chmodSync(h.forgottenFile, 0o600);   // the file reads again (the disk answered)
+      if (hold) await hold.again();            // the hold's read again (its ladder's try, asked now — never a clock)
+      await until(() => !hold || !hold.held(), 4000);
+      const rows = (await h.housekeeping()).forgotten || [];
+      ok(rows.some((r) => r.id === seededId && r.dir === moved), `${pl.name}: once the file reads again the SAME ledger answers the row it held (the moved-aside folder with its sign-ins can still be found and deleted)`, JSON.stringify(rows.map((r) => r.id)));
+    } else {
+      await until(() => !hold || !hold.held(), 4000);   // torn: the helper keeps the bytes aside off the loop, then starts empty
+      const copies = fs.readdirSync(path.dirname(h.forgottenFile)).filter((x) => x.startsWith(path.basename(h.forgottenFile) + '.corrupt-'));
+      const same = copies.some((x) => fs.readFileSync(path.join(path.dirname(h.forgottenFile), x)).equals(bytes0));
+      ok(same && fs.readFileSync(h.forgottenFile).equals(bytes0), `${pl.name}: its torn bytes are kept aside BYTE FOR BYTE beside the store before it starts empty (no remover reads this store's silence), the live file untouched until a write`, JSON.stringify({ copies }));
+      const hvD = await h.housekeeping();
+      ok(!!hvD.forgottenDamaged && copies.includes(hvD.forgottenDamaged.copy) && !hvD.forgottenUnread, `${pl.name}: the panel's answer says the list was DAMAGED and names where its bytes are kept (the copy's base name) — the person is told in place, never «Nothing set aside»`, JSON.stringify(hvD.forgottenDamaged || null));
+    }
+    // afterwards the ledger behaves as before: a Forget works, its row kept beside what the ledger answers
+    const after = path.join(LAB, 'after'); fs.mkdirSync(after); fs.writeFileSync(path.join(after, 'Local State'), '{}');
+    let fa = null; try { fa = h.forgetOrphan(after); } catch (e) { fa = { error: e && e.code }; }
+    const rowsA = (await h.housekeeping()).forgotten || [];
+    ok(!!fa && fa.ok === true && rowsA.some((r) => r.id === fa.ledger.id) && (pl.torn || rowsA.some((r) => r.id === seededId)), `${pl.name}: afterwards a Forget works as before — its row filed${pl.torn ? '' : ' beside the row the ledger held'}`, JSON.stringify({ fa: fa && (fa.error || fa.to), rows: rowsA.map((r) => r.id) }));
+    h.shutdown();
+  }
+}
+
 // ═══ ④ THE ROUTES in-process ════════════════════════════════════════════════
 console.log('— ④ the routes: the session-or-key match, the frame, PATCH, housekeeping, host refused');
 {

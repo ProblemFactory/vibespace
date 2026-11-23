@@ -70,6 +70,8 @@ const RR = require('../browser-recording-retention.js'); // the video recordings
 const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): what was IN FLIGHT at a takeover is read off this recorder's ring
 const B = require('../browser-profiles.js');
 const S = require('../browser-stream.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3008 (主开发): the forgotten ledger under the store-read law — the tree's ONE hold
 const HM = require('../browser-human.js'); // BROWSE YOURSELF (B-6ae8): the user's own browsing — his session markers, his recorded acts
 
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
@@ -112,6 +114,25 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   const recordingRefusals = new Map(); // profileId → { code, error, at }
   const sizeCache = new Map();   // dir → { bytes, at }
   let forgotten = null;
+  // r3008 (主开发; lane bl-machines-b's census of the stores, batch 3): THE FORGOTTEN LEDGER UNDER THE STORE-READ LAW. The release read
+  // ANY failure of browser-forgotten.json as «no row» and the next Forget wrote that over the file: the rows naming the moved-aside
+  // `.forgotten-` folders (with their sign-ins) were gone, so nothing could find or delete those folders again. Now its ONE read at the
+  // start answers through the store-read law (src/store-read-hold.js): HELD, the panel says so (never «Nothing set aside»), a Forget and
+  // a Delete are refused BY NAME before anything moves, nothing is written over the file, and it is read again off the loop; torn bytes
+  // are kept aside once per content, then it starts empty. NO REMOVER reads this store's silence (by reading the tree: a `.forgotten-`
+  // folder is removed only by deleteForgotten — a person's click on a row the ledger NAMES; the orphan list skips `.forgotten-` names;
+  // no sweep, size bound or migration removes by it), so the helper's empty lift after the copy is safe here.
+  const FORGOTTEN_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.forgotten === undefined || Array.isArray(v.forgotten));
+  const fgHold = HOLD.create({
+    file: forgottenFile, valid: FORGOTTEN_SHAPE, code: 'forgotten_unread', aside: (mark) => forgottenFile + '.corrupt-' + mark,
+    words: (h) => `the list of the browsers set aside (browser-forgotten.json in VibeSpace's data folder) could not be read (${h.code}); VibeSpace reads it again every few minutes. Nothing set aside is lost: nothing is written over it, and setting a browser aside or deleting one waits until it reads`,
+    log: (s) => log.warn?.('[browser-trace] ' + s), now,
+    onLift: (v, f) => { forgotten = v && Array.isArray(v.forgotten) ? v.forgotten : []; fgDamaged = !v && f && f.setAside ? { copy: String(f.setAside), at: now() } : null; bc({ type: 'browser-housekeeping-updated' }); },
+  });
+  let fgStarted = false;
+  // r3104: TORN bytes lifted as empty — the person is told IN PLACE that the list was damaged and WHERE its bytes are kept (the copy's
+  // base name; never «restore that copy»: they are the damaged bytes), with what they can do (the panel's words)
+  let fgDamaged = null;
   let lastSweep = null;
   let timer = null;
   let unsubLease = null;
@@ -794,8 +815,20 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   const dirMtime = (d) => { try { return fs.statSync(d).mtimeMs; } catch { return 0; } };
 
   // ── the forgotten ledger ──
-  function loadForgotten() { if (forgotten) return forgotten; try { const j = JSON.parse(fs.readFileSync(forgottenFile, 'utf8')); forgotten = Array.isArray(j.forgotten) ? j.forgotten : []; } catch { forgotten = []; } return forgotten; }
-  function saveForgotten() { try { fs.mkdirSync(path.dirname(forgottenFile), { recursive: true }); writeJsonAtomic(forgottenFile, { version: 1, forgotten: loadForgotten() }); } catch (e) { log.warn?.(`[browser-trace] forgotten ledger not saved: ${e && e.message}`); } }
+  /** the ledger's rows. Its ONE read at the start (the first ask) answers through the store-read law; HELD ⇒ no rows are known — an
+   *  empty list each time, never cached as the ledger (the panel says the hold, every change is refused before this is asked) */
+  function loadForgotten() {
+    if (forgotten) return forgotten;
+    if (!fgStarted) {
+      fgStarted = true;
+      let read; try { read = { text: fs.readFileSync(forgottenFile, 'utf8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: FORGOTTEN_SHAPE });
+      if (fgHold.start(a) === 'data') { forgotten = Array.isArray(a.value.forgotten) ? a.value.forgotten : []; return forgotten; }
+    }
+    if (fgHold.held()) return [];
+    forgotten = []; return forgotten;
+  }
+  function saveForgotten() { if (!fgHold.writable('a row of the browsers set aside')) return; try { fs.mkdirSync(path.dirname(forgottenFile), { recursive: true }); writeJsonAtomic(forgottenFile, { version: 1, forgotten: loadForgotten() }); } catch (e) { log.warn?.(`[browser-trace] forgotten ledger not saved: ${e && e.message}`); } }
   function fileForgotten({ profileId = null, label = '', dir, to, bytes = null, why = 'forgotten' }) {
     const row = { id: 'fg-' + crypto.randomBytes(4).toString('hex'), profileId, label, from: dir, dir: to, bytes, at: now(), why, deletedAt: null };
     loadForgotten().push(row);
@@ -813,6 +846,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   /** `forget` a registry profile: verdict → the lineage WRITTEN under the new name → RENAME the directory beside itself → ledger row → the record goes. */
   async function forgetProfile(id, { unpin = false } = {}) {
     if (!keeper) throw namedError('unavailable', 'no keeper');
+    loadForgotten(); fgHold.refuse('setting this browser aside');   // r3008: the ledger HELD — refused by name before anything moves
     const p = keeper.profile(id);
     const reg = keeper._reg();
     const v = T.forgetVerdict({ profile: p, leases: reg.leases, browsers: reg.browsers });
@@ -871,6 +905,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   /** `forget` an orphan directory (no record): verdict on the path → rename → ledger. */
   function forgetOrphan(dir) {
     refuseIfKeeperHeld();
+    loadForgotten(); fgHold.refuse('setting this folder aside');   // r3008: the ledger HELD — refused by name before anything moves
     const v = T.orphanPathVerdict({ dir, base: abBase });
     if (!v.ok) throw namedError(v.code, v.error);
     let real = null; try { real = fs.realpathSync(dir); } catch { throw namedError('not-found', `${dir} does not exist`); }
@@ -887,6 +922,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   }
   /** The ONE permanent deletion — a human's explicit click on a forgotten row. */
   async function deleteForgotten(fid) {
+    loadForgotten(); fgHold.refuse('deleting a browser set aside');   // r3008: the ledger HELD — never «no such row»
     const row = loadForgotten().find((r) => r.id === fid);
     if (!row) throw namedError('not-found', `no forgotten row ${fid}`);
     if (row.deletedAt) return { ok: true, already: true, row };
@@ -964,7 +1000,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const ks = keeper && typeof keeper.keptStore === 'function' ? keeper.keptStore() : null;
     let kept = [], keptLimits = null, keptSweep = null;
     if (ks) { try { kept = ks.list(); keptLimits = ks.limits(); keptSweep = ks.lastSweep(); } catch (e) { log.warn?.(`[browser-trace] the kept browsers could not be listed: ${e && e.message}`); } }
-    return { profiles: rows, ephemeral: eph, ephemeralBrowsers, kept, keptSweep, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), sweep: lastSweep,
+    return { profiles: rows, ephemeral: eph, ephemeralBrowsers, kept, keptSweep, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), ...(fgHold.held() ? { forgottenUnread: { file: 'browser-forgotten.json', code: fgHold.held().code, since: fgHold.held().since } } : {}), ...(fgDamaged ? { forgottenDamaged: { ...fgDamaged } } : {}), sweep: lastSweep,
       limits: { bytesPerProfile: bytesLimit(), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR, ...(keptLimits ? { keptOn: keptLimits.on, keptPerConversation: keptLimits.perConversation, keptTotal: keptLimits.total } : {}) },
       traceOn: enabled(), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
   }
@@ -1025,12 +1061,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest);
     if (keeper && typeof keeper.setInFlightReader === 'function') keeper.setInFlightReader(inFlightFor); // the owner's ruling (2026-09-27)
   }
-  function shutdown() { if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
+  function shutdown() { fgHold.stop(); if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
 
   return {
     enabled, watch, unwatch, watchHuman, unwatchHuman, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
     maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
-    traceRoot, recRoot, forgottenFile, abBase, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
+    traceRoot, recRoot, forgottenFile, abBase, _forgottenHold: fgHold /* r3008: a suite asks its read again (the ladder's try, never a clock) */, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
   };
 }
 

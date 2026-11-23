@@ -101,7 +101,7 @@ const STATUS = {
   // the trace
   trace_off: 409, 'not-live': 409, ended: 409, refused: 409,
   // housekeeping (§7.1 / §8 / D8): the sweep's scope, the archive-before-remove rule
-  not_ours: 400, leased: 409, running: 409, forget_failed: 500,
+  not_ours: 400, leased: 409, running: 409, forget_failed: 500, forgotten_unread: 503,   // r3008: the ledger of the browsers set aside could not be read — HELD
   // BROWSE YOURSELF verify r1 (H4): Delete… while the user browses it himself — refused by name (Close / Quit first)
   browsing_yourself: 409, delete_failed: 500, adopt_failed: 409, label_required: 400, label_taken: 409,
   // P6 (§6.2): `sharing` edits through PATCH — refused by the verdict (no proxy / paired machine / unknown value)
