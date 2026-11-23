@@ -798,7 +798,9 @@ try {
   }
   // (d) CONTROL 2: the hook never armed
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-  const needle = "const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding }, sid);";
+  // the product line as it stands (2.369.271, f57d1cbe9, added executionContextName: the hook's binding lives in its own world); the needle
+  // was the line before it — this control never ran on the declared driver until the box read it (row 438, r2876's gate), so nobody saw it
+  const needle = "const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding, executionContextName: w.pkWorld }, sid);";
   ok(dsrc.includes(needle), 'CONTROL 2: the addBinding step is where this suite removes it');
   const Dmut = MUT.load('src/server/browser-dialogs.js', dsrc.replace(needle, 'const r1 = null;'), 'no-arm');
   let wc = null;
