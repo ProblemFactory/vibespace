@@ -346,27 +346,39 @@ const isDriverShim = (p) => { try { const fd = fs.openSync(p, 'r'); try { const 
  *  a row's scratch — has none. The driver documents NO variable for that folder (agent-browser.dev/configuration: only
  *  AGENT_BROWSER_EXECUTABLE_PATH, «Custom browser executable path», ONE executable — the suites list builds), so THE SAME LAW AS THE
  *  DOOR: the folder VS_AGENT_BROWSER_BROWSERS names (as handed; the driver's layout, chrome-<version>/chrome) is linked as
- *  <home>/.agent-browser/browsers; named and not a folder is none, said by name; with no name, none — never found, never fetched.
+ *  <home>/.agent-browser/browsers (placeBrowsers: quiet when it is already that folder, caught, the link left with the home); named and not a folder is none, said by name; with no name, none — never found, never fetched.
  *  PURE over its probe (`isDir`). */
 export function browsersDoor({ named = '', isDir = () => false } = {}) {
   if (!named) return { path: null, named: false };
   return named.startsWith('/') && isDir(named) ? { path: named, named: true } : { path: null, named: true, why: `${DRIVER.browsersEnv} names ${named}: no folder of installed browsers there` };
 }
 const isDirAt = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
-/** places the named folder as <home>/.agent-browser/browsers — never over one that is there (said, left as it is); `own`: the home
- *  is not this run's to keep (a left-alone suite's), so what this placed is taken back at exit → null (no name) | { at, target } | { at: null, why } */
-function placeBrowsers(home, me, { own = false } = {}) {
+/** places the named folder as <home>/.agent-browser/browsers → null (no name) | { at, target } | { at: null, why[, same] }. QUIET when
+ *  what stands there already IS the named folder (a child of a named run, a sibling that placed it first — between this one's look and
+ *  its link too: EEXIST is «there already»); one that is another folder is never covered, said; a home that cannot take the link is
+ *  none, said by the variable's name — never a stack trace (r2825). THE LINK STAYS (r2825 (3), the choice said): a re-homed home is
+ *  removed whole at exit (the link, never its target — rmSync follows no link), and a left-alone home is the RUNNER's (a box row's
+ *  own scratch, removed with its row, r2203): nothing takes it back, so a suite sharing that home never loses it mid-run. */
+function placeBrowsers(home, me) {
   const b = browsersDoor({ named: HANDED[DRIVER.browsersEnv], isDir: isDirAt });
   if (!b.named) return null;
-  if (!b.path) { process.stderr.write(`[scratch] ${me}: ${b.why} — its installed-browser legs cannot run\n`); return Object.freeze({ at: null, why: b.why }); }
-  const parent = path.join(home, '.agent-browser'), at = path.join(parent, 'browsers');
-  let there = false; try { fs.lstatSync(at); there = true; } catch { }
-  if (there) { process.stderr.write(`[scratch] ${me}: ${at} is there already — ${DRIVER.browsersEnv} left unplaced\n`); return Object.freeze({ at: null, why: `${at} is there already` }); }
+  const none = (why) => { process.stderr.write(`[scratch] ${me}: ${why} — its installed-browser legs cannot run\n`); return Object.freeze({ at: null, why }); };
+  if (!b.path) return none(b.why);
   let real = b.path; try { real = fs.realpathSync(b.path); } catch { }
-  const madeParent = !fs.existsSync(parent);
-  fs.mkdirSync(parent, { recursive: true });
-  fs.symlinkSync(real, at);
-  if (own) process.on('exit', () => { try { fs.unlinkSync(at); } catch { } if (madeParent) { try { fs.rmdirSync(parent); } catch { } } });   // the link only, never its target
+  const parent = path.join(home, '.agent-browser'), at = path.join(parent, 'browsers');
+  const stands = () => { try { fs.lstatSync(at); return true; } catch { return false; } };
+  const thereAlready = () => {
+    let same = false; try { same = fs.realpathSync(at) === real; } catch { }
+    if (same) return Object.freeze({ at: null, why: 'the named folder is there already', same: true });
+    process.stderr.write(`[scratch] ${me}: ${at} is there already — ${DRIVER.browsersEnv} left unplaced\n`);
+    return Object.freeze({ at: null, why: `${at} is there already` });
+  };
+  if (stands()) return thereAlready();
+  try { fs.mkdirSync(parent, { recursive: true }); fs.symlinkSync(real, at); }
+  catch (e) {
+    if (e && e.code === 'EEXIST' && stands()) return thereAlready();   // placed by another between the look and the link
+    return none(`${DRIVER.browsersEnv} names ${b.path}: ${at} cannot take it (${(e && (e.code || e.message)) || 'refused'})`);
+  }
   return Object.freeze({ at, target: real });
 }
 export const makeResolver = HL.makeResolver;
@@ -505,15 +517,16 @@ export const REHOMED = (() => {
   return Object.freeze({ home, why: v.why, dropped: Object.freeze(dropped), notCarried: Object.freeze(notCarried), linked: Object.freeze(linked), node: node ? Object.freeze({ file: node.file }) : null, initPaths, seam: SEAM, carried: Object.freeze(carried), notCarriedNames: Object.freeze(notCarriedNames), compared: HANDED.HOME, own: Object.freeze(own), ownPath: Object.freeze(ownPath), browsers });
 })();
 /** THE DRIVER'S DOOR, LEFT ALONE (主开发 r2775, the box's real-driver rows read NO READING): a process the re-home LEAVES ALONE (its
- *  handed home is already under a temp root — every box row's own scratch home, r2203; a suite or debug script only, never the tier
- *  runner) keeps the PATH it was handed, and a runner
+ *  handed home is already under a temp root — every box row's own scratch home, r2203; a file the re-home judges only: a test-* /
+ *  dbg-* file, or a main file of this checkout's scripts folder that is no NOT_REHOMED row — never the tier runner) keeps the PATH it was handed, and a runner
  *  names the driver in the variable only (r2095). The door applies WHEREVER A RUNNER NAMES A USABLE DRIVER, re-homed or not: here
  *  the one program VS_AGENT_BROWSER_BIN names is linked as agent-browser into a folder of this run's own (under the scratch temp
  *  root, stamped, removed at exit) put FIRST on PATH, so the suite's fence (src/browser-facts.js binaryResolver over its own PATH)
  *  finds THAT program; named and unusable (gone, not executable, the shim) is none, said by name; with no name, none: nothing
  *  changes. null when re-homed (the re-home's own door above) or with no name; else { dir, linked, target } or { dir: null, why }. */
 export const DRIVER_LEFT_ALONE = (() => {
-  if (!REHOMES || REHOMED) return null;   // only a SUITE (or debug script) the re-home left alone — never the tier runner, never a person's home
+  if (!HANDED[DRIVER.env] && !HANDED[DRIVER.browsersEnv]) return null;   // NEITHER NAME: nothing at all, not one file call (r2825 (1))
+  if (!REHOMES || REHOMED) return null;   // only a file the re-home judges (REHOMES) and left alone — never the tier runner, never a person's home
   const v = HV.suiteRehome({ home: HANDED.HOME, tmpRoots: TMP_ROOTS, varRoots: [os.tmpdir()], notTemp: SEAM ? [SEAM] : [], resolve: makeResolver() });
   if (v.rehome || v.why !== 'temp-home') return null;   // its home is a throwaway (a box row's own scratch, a lane's): the door's case
   const me = path.basename(process.argv[1] || '');
@@ -522,13 +535,18 @@ export const DRIVER_LEFT_ALONE = (() => {
   if (drv.named && !drv.path) { process.stderr.write(`[scratch] ${me}: ${drv.why} — its real-driver legs cannot run\n`); driver = { dir: null, why: drv.why }; }
   else if (drv.path) {
     let real = drv.path; try { real = fs.realpathSync(drv.path); } catch { }
-    const dir = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}driver-`)));
-    stampScratchRun(dir);   // this run's own, as the scratch homes are
-    const linked = linkTools(dir, [{ name: DRIVER.name, target: real }]);
-    process.env.PATH = dir + (process.env.PATH ? path.delimiter + process.env.PATH : '');
-    driver = { dir, linked: Object.freeze(linked), target: real };
+    try {
+      const dir = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}driver-`)));
+      stampScratchRun(dir);   // this run's own, as the scratch homes are
+      const linked = linkTools(dir, [{ name: DRIVER.name, target: real }]);
+      process.env.PATH = dir + (process.env.PATH ? path.delimiter + process.env.PATH : '');
+      driver = { dir, linked: Object.freeze(linked), target: real };
+    } catch (e) {   // a temp root that cannot take its folder: none, said by the variable's name — never a stack trace (r2825 (2))
+      const why = `${DRIVER.env} names ${drv.path}: no folder of this run's own could hold it (${(e && (e.code || e.message)) || 'refused'})`;
+      process.stderr.write(`[scratch] ${me}: ${why} — its real-driver legs cannot run\n`); driver = { dir: null, why };
+    }
   }
-  const browsers = placeBrowsers(HANDED.HOME, me, { own: true });   // the home is the runner's: taken back at exit
+  const browsers = placeBrowsers(HANDED.HOME, me);   // the home is the runner's: the link stays with it (placeBrowsers)
   return driver || browsers ? Object.freeze({ ...(driver || { dir: null }), browsers }) : null;
 })();
 /** Is the process whose main file RESOLVES to `me` a row of `rows` — the row's FILE in this checkout's scripts folder,
