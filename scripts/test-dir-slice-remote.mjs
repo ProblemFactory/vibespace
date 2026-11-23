@@ -55,7 +55,7 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
   // one can end it); its pid to a file, so the leg counts what stayed and ends exactly those. ~/net is planted as a MOUNT POINT of that
   // machine (its table read, as the script reads it); everything under it, ~/dead and ~/lost stall; a fake grep stalls on the mount's
   // package.json — reached ONLY by a test of the mount child, which the script must not make
-  const STALL = `{ [ -e "${NOSTALL}" ] || sh -c 'trap "" TERM; echo $$ >> "$VS_PL"; exec sleep 300'; }`;
+  const STALL = `{ [ -e "${NOSTALL}" ] || sh -c 'trap "" TERM; echo $$ >> "$VS_PL"; [ -z "$VS_PL_RUN" ] || echo $$ >> "$VS_PL_RUN"; exec sleep 300'; }`;   // r2909: a run's own mark too (VS_PL_RUN), when its harness asks it
   const FB = path.join(TMP, 'fakebin99'); fs.mkdirSync(FB);
   const realGrep = ['/usr/bin/grep', '/bin/grep'].find((p) => fs.existsSync(p));
   fs.writeFileSync(path.join(FB, 'grep'), `#!/bin/sh\nfor a; do case "$a" in */net/package.json|*/pkgl/package.json) ${STALL};; esac; done\nexec ${realGrep} "$@"\n`, { mode: 0o755 });
@@ -67,20 +67,28 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     INM, INM + (mount ? '\nMP="$MP$NL$H/net$NL' + REALMH + '/real/stallm"' : '') + '\n' + OVR, 'B-99b9 the plant after the mount table');
   const unwrap = (cmd) => { const m = /^exec sh -c '([\s\S]*)'$/.exec(cmd); return m ? m[1].split(`'\\''`).join("'") : cmd; };   // the ssh rung's plain-sh wrapper
   const WAITT = 200, runs = [];
-  // the run's own bound there: 250 ms where a hung run must END at it (its stalls never end: ⑥'s hung typed folder, ⑦'s hung rests — their
-  // misses are those legs' facts); a NET of 20 s that judges nothing where a leg judges a healthy or slow run by its LANDING (r2574 / r2691 /
+  // the run's own bound there: 250 ms where a run must end at a bound; ⑥'s hung typed folder and ⑦'s hung rests END AT THEIR STALL (r2909:
+  // shOf's atPlant — their counts and misses are those legs' facts, taken at that state); a NET of 20 s that judges nothing where a leg judges a healthy or slow run by its LANDING (r2574 / r2691 /
   // r2789: ④'s slow folder — 0.3 s, past the hub's 200 ms wait — and ⑦'s landing step, run while the no-stall mark is set)
   // h-99o (主开发 r2574): ① judges the ORDER — the healthy typed folder LANDS while the hung run is still OUT — so its runs carry a NET
   // of 20 s that judges nothing (a real sh and ls under twelve lanes read past the hub's own 200 ms wait once); the leg ends its own stall
   const NET20 = new Set(['h-99o', 'h-99a', 'h-99e', 'h-99g', 'h-99b']);   // r2691 / r2789: every host whose leg judges a healthy or slow typed run by its LANDING (①, ②, ③, the base-relative ask, the link-reached file ask, ④)
   const runtOf = (id) => (NET20.has(id) || (id === 'h-99d' && fs.existsSync(NOSTALL)) ? 20e3 : 250);   // their net twice the legs' 10 s landing wait: a hung run of theirs is surely still out then
-  const shOf = (script, timeout) => new Promise((resolve, reject) => execFile('sh', ['-c', script], { env: { HOME: MH, PATH: `${FB}:/usr/bin:/bin`, VS_PL: PL }, timeout, maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
+  let runSeq = 0;
+  // r2909 (主开发): a run of ⑥'s and ⑦'s hosts is ended at A STATE when it stalls — the moment its own stall is planted, seen by its
+  // own mark (VS_PL_RUN) — never by a bound a loaded machine can outrun before it plants (then a count read one less); `atPlant` keeps the
+  // 20 s net as its backstop. The end is a kill of its own child: the run's own facts say «killed», as at a bound
+  const shOf = (script, timeout, { atPlant = false } = {}) => new Promise((resolve, reject) => {
+    const mark = atPlant ? path.join(TMP, `run-${++runSeq}.pid`) : null;
+    const c = execFile('sh', ['-c', script], { env: { HOME: MH, PATH: `${FB}:/usr/bin:/bin`, VS_PL: PL, ...(mark ? { VS_PL_RUN: mark } : {}) }, timeout, maxBuffer: 8 << 20 }, (e, out) => { if (iv) clearInterval(iv); return e ? reject(e) : resolve(out); });
+    const iv = mark ? setInterval(() => { let t = ''; try { t = fs.readFileSync(mark, 'utf8'); } catch { } if (t.trim()) { clearInterval(iv); try { if (c.stdout) c.stdout.destroy(); if (c.stderr) c.stderr.destroy(); c.kill('SIGTERM'); } catch { } } }, 10) : null;   // its stall planted: the run ends there — its read: the pipes let go FIRST (the stall's sleep holds them, and execFile answers at their close), as execFile's own timeout and hosts.js's resolveAlias timer do
+  });
   const mkHm = (id) => {
     const hm = new HostManager({ dataDir: path.join(TMP, 'hub-data-' + id) });
     hm._state.hosts.push({ id, name: 'nas-' + id, host: id + '.example.test', user: 'me', port: 22, transport: 'ssh' });
     hm.refuseUnreachable = async () => {};
     hm._clock = 1_800_000_000_000; hm._now = () => hm._clock;
-    hm._ssh = (h, cmd) => { const sc = unwrap(cmd), r = { id: h.id, sc, plain: cmd.startsWith("exec sh -c '"), settled: false }; runs.push(r); let p; try { p = shOf(plant(sc), runtOf(h.id)); } catch (e) { r.settled = true; throw e; } p.then(() => { r.settled = true; }, () => { r.settled = true; }); return p; };   // the run's own bound there; `settled` — the run ended (r2574: ①'s order)
+    hm._ssh = (h, cmd) => { const sc = unwrap(cmd), r = { id: h.id, sc, plain: cmd.startsWith("exec sh -c '"), settled: false }; runs.push(r); let p; try { const atPlant = h.id === 'h-99c' || (h.id === 'h-99d' && !fs.existsSync(NOSTALL)); p = shOf(plant(sc), atPlant ? 20e3 : runtOf(h.id), { atPlant }); } catch (e) { r.settled = true; throw e; } p.then(() => { r.settled = true; }, () => { r.settled = true; }); return p; };   // the run's own bound there; `settled` — the run ended (r2574: ①'s order)
     return hm;
   };
   const alive = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^\d+ \(.*\) [ZX]/.test(st) && fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('sleep'); } catch { return false; } };
@@ -199,16 +207,17 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     const deadRuns = () => runs.filter((r) => r.id === 'h-99c' && r.sc.includes("ls1 \"$H\"'/dead'")).length;
     const s0 = await stuck();
     await field('h-99c', '~/dead/');
-    await until(() => [...(hmOf('h-99c')._sliceCache.get('h-99c').hung.keys())].includes('~/dead'), 3000);
+    await until(() => [...(hmOf('h-99c')._sliceCache.get('h-99c').hung.keys())].includes('~/dead'), 20e3);   // its read: the mark comes when its run reached its stall — inside the net, never a short clock
     const a6 = await field('h-99c', '~/dead/'), a6b = await field('h-99c', '~/dead/sub/');
     const s1 = await stuck();
-    hmOf('h-99c')._clock += 31e3; await field('h-99c', '~/dead/'); await until(() => deadRuns() >= 2, 2000); await sleep(runtOf('h-99c') + 100);
+    hmOf('h-99c')._clock += 31e3; await field('h-99c', '~/dead/'); await until(() => deadRuns() >= 2, 2000);
+    const ended6 = await until(() => runs.filter((r) => r.id === 'h-99c' && r.sc.includes("ls1 \"$H\"'/dead'")).every((r) => r.settled), 20e3);   // r2909: the second dead run ended AT ITS STALL — a state, never its bound's clock (inside the net)
     const s2 = await stuck();
     ok(`B-99b9 a HUNG typed folder: marked once its run never landed (the run's own bound); the reply says «asked again in ${a6.verdict && Math.round(a6.verdict.retryIn / 1000)} s» for it AND for text under it, with NO new run in the 30 s (runs ${deadRuns()}); after the mark one more — ONE stuck process a 30 s window (${s1 - s0}, then ${s2 - s0})`,
-      a6.partial === true && !!a6.verdict && a6.verdict.kind === 'skipped' && a6.verdict.retryIn > 25e3 && !!a6b.verdict && a6b.verdict.kind === 'skipped' && s1 - s0 === 1 && s2 - s0 === 2 && deadRuns() === 2, { a6: a6.verdict, a6b: a6b.verdict, runs: deadRuns(), s: [s0, s1, s2] });
+      a6.partial === true && !!a6.verdict && a6.verdict.kind === 'skipped' && a6.verdict.retryIn > 25e3 && !!a6b.verdict && a6b.verdict.kind === 'skipped' && s1 - s0 === 1 && s2 - s0 === 2 && deadRuns() === 2 && ended6, { a6: a6.verdict, a6b: a6b.verdict, runs: deadRuns(), ended6, s: [s0, s1, s2] });
     // 7. THE REST'S HOLD, DOUBLING: a rest that does not land holds that machine's rest 30 s, then 60 s, 120 s; a landing resets it — ONE stuck process a hold window
     const H7 = hmOf('h-99d'), r2Of = () => H7._sliceCache.get('h-99d').r2;
-    const holdNext = async () => { await field('h-99d', '', ['~/net/a']); await until(() => !r2Of().p, 3000); const a = await field('h-99d', '', ['~/net/a']); return a; };
+    const holdNext = async () => { await field('h-99d', '', ['~/net/a']); await until(() => !r2Of().p, 20e3); const a = await field('h-99d', '', ['~/net/a']); return a; };
     const t0s = await stuck();
     const h1 = await holdNext(); H7._clock += 31e3; const h2 = await holdNext(); H7._clock += 61e3; const h3 = await holdNext();
     const t1s = await stuck();
