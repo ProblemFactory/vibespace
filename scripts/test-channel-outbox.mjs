@@ -1127,6 +1127,7 @@ function mkReal(opts = {}) {
     delay: 0,
     async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (ladder.delay) await sleep(ladder.delay); if (o.noWake === true) return { ok: false, reason: 'no free lane', refused: 'no-wake' }; return { ok: true, lane: 'message' }; },
     stashFor: real.stashFor, drainStash: real.drainStash, stashPeek: real.stashPeek, onStash: real.onStash, stashCount: real.stashCount, flush: real.flush,
+    ...(opts.noTornAt ? {} : { stashTornAt: real.stashTornAt }),   // r3003 (a): the stash's torn instant, as server.js wires the real ladder (noTornAt: the RED — a reconcile that cannot see it)
   };
   const reg = CH.createChannelRegistry();
   const send = { hold: null, throwOnce: false, reconciles: 0 };
@@ -1259,6 +1260,27 @@ async function takenLeg(ladderMod, name) {
   const back = W2.real.stashPeek('agent-1').find((e) => e.ref === p.proposal.id);
   W2.eng.stop();
   ok(onDisk && onDisk.ho === 'ho-crash' && released && released.ids.includes('ho-crash') && back && !back.ho && f === 'waiting', `merge-d a claim the dead process left on disk is released at the ladder's create (${released && released.ids.join()}), and the engine's boot reconcile then reads the receipt as waiting (${f})`, JSON.stringify({ onDisk, released, back, f }));
+}
+{
+  // r3003 (a) + r3019 THE REMOVER LAW: the boot reconcile reads the stash's SILENCE as «handed». The stash's bytes TORN at the next
+  // boot (kept aside, the stash starts from memory, `__tornAt` remembers the instant): a receipt stashed BEFORE that instant is
+  // UNKNOWN to it — never read as handed (its card keeps «waiting»). RED: a reconcile that cannot see the torn instant reads the
+  // silence as handed
+  const tornLeg = async (name, noTornAt) => {
+    const W = mkReal({ name }); const { eng } = W; await prime(eng);
+    const p = await eng.propose(AGENT, A, C, { text: 'a receipt in the stash' }); await eng.approve(p.proposal.id, {});
+    eng.stop();
+    fs.writeFileSync(path.join(W.dataDir, 'msg-stash.json'), '{"agent-1": [{"source": "channel-rec');   // torn bytes (written whole, never a mount)
+    const W2 = mkReal({ name, dataDir: W.dataDir, noTornAt });
+    for (let i = 0; i < 200 && W2.real.stashHeld(); i++) await sleep(10);   // the copy is made off the loop, then the stash lifts
+    await W2.eng.reconcileReceiptFates();
+    const q = W2.eng.store.outbox.snapshot().proposals[p.proposal.id];
+    W2.eng.stop();
+    return { tornAt: W2.real.stashTornAt(), drained: q.receiptDrainedHow || null, fate: fateOf(W2, p.proposal.id).kind };
+  };
+  const tl = await tornLeg('torn-remover', false), tr = await tornLeg('torn-remover-red', true);
+  ok(Number.isFinite(tl.tornAt) && tl.drained === null && tl.fate === 'waiting', `THE REMOVER LAW: a receipt stashed before the stash's torn bytes is UNKNOWN to the boot reconcile — never read as handed (${tl.fate})`, tl);
+  ok(tr.drained === 'reconciled', `RED: a reconcile that cannot see the torn instant reads the stash's silence as handed (${tr.drained})`, tr);
 }
 {
   // merge-e a ref'd entry whose write FAILS is taken back EXACTLY: the queue as it was (a claimed entry at its head, the cap's

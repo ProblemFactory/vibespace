@@ -96,7 +96,7 @@ const DELIVERED_MAX = 50;
 const DELIVERED_FILE = 'stash-handover.json';
 /** The frame's own name for its hand-over (the text the wrapper echoes back carries it). */
 const HANDOVER_TAG_RE = /\(hand-over (ho-[a-z0-9]+-[a-z0-9]+)\)/;
-const STATUS = Object.freeze({ agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503, not_mid_turn: 409, not_steerable: 409, stopping: 409, unconfirmed: 409, too_long: 409, awaiting_word: 409 });
+const STATUS = Object.freeze({ msg_stash_unread: 503, agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503, not_mid_turn: 409, not_steerable: 409, stopping: 409, unconfirmed: 409, too_long: 409, awaiting_word: 409 });
 /** B-02a3: the group hand-over's budget (the frame the running turn takes — the next-turn report's own composition, bounded
  *  like the stash's hand-over), how long a press waits for the wrapper's word «handed», and how long a late word still
  *  settles it (the marks are committed only on that word). */
@@ -192,7 +192,14 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       // others the strip names them; alone they are the strip (no press — nothing can be handed over until they can be judged)
       const kept = d && typeof d.stashKeptCount === 'function' ? d.stashKeptCount(cid) : 0;
       if (!sum && kept > 0) return { count: 0, kept, items: [], billed: false, inFlight: false, held: 0, reachable: false };
-      return sum ? { ...sum, ...(kept > 0 ? { kept } : {}), ...(s.host ? { groupHandover: false } : {}), billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
+      // r3003 (a): the stash HELD (its file could not be read) is said ON THE STRIP — never «nothing waiting»: its entries wait unread;
+      // a torn lift names where the damaged bytes are kept (their base name) — never «restore that copy»
+      const unread = d && typeof d.stashUnreadWords === 'function' ? d.stashUnreadWords() : null;
+      const torn = !unread && d && typeof d.stashTorn === 'function' ? d.stashTorn() : null;
+      const stashFacts = unread ? { stashUnread: { code: 'msg_stash_unread' } } : torn ? { stashTorn: { copy: torn.copy } } : {};
+      if (!sum && (unread || torn)) return { count: 0, items: [], billed: false, inFlight: false, held: 0, reachable: false, ...stashFacts };
+      if (sum && unread) return { ...sum, ...stashFacts, billed: billedFor(s), inFlight: !!inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: false };   // nothing is handed over while held
+      return sum ? { ...sum, ...stashFacts, ...(kept > 0 ? { kept } : {}), ...(s.host ? { groupHandover: false } : {}), billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
     } catch (e) { log.warn?.(`[stash] summary failed: ${(e && e.message) || e}`); return null; }
   }
 
@@ -471,6 +478,8 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const d = getDeliver();
     if (!d || typeof d.deliverToConversation !== 'function') return { ok: false, code: 'unavailable', error: 'the delivery ladder is not wired on this instance' };
     const jm = jobsReady();
+    // r3003 (a): the stash HELD — refused BY NAME (never «nothing is waiting»: its entries wait unread, handed over once it reads)
+    if (d && typeof d.stashHeld === 'function' && d.stashHeld()) return { ok: false, code: 'msg_stash_unread', status: 503, error: d.stashUnreadWords() };
     const { msg: stashed, jobs, retry } = entriesOf(cid);
     const msg = [...retry, ...stashed];   // a parked notification rides the same frame — the oldest wait first
     if (!msg.length && !jobs.length) return { ok: false, code: 'nothing_waiting', error: 'nothing is waiting for this conversation', kept: d && typeof d.stashKeptCount === 'function' ? d.stashKeptCount(cid) : 0 };   // B-f276 1a: entries KEPT (their reach cannot be judged now) are not nothing — the wake's line waits for them

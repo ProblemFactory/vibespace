@@ -1503,9 +1503,14 @@ function create(engineCtx) {
     if (!deliver || typeof deliver.stashPeek !== 'function' || engineCtx.stopped) return [];
     const ob = store.outbox.snapshot();
     const gone = [];
+    // r3003 (a) + r3019 (the remover law): the stash's silence is «handed» ONLY for what it could have held. Torn bytes of msg-stash.json
+    // were kept aside at `tornAt` (the stash remembers the instant across restarts): a receipt stashed before it is UNKNOWN — never
+    // read as handed; it stays as it is until a person decides (the card keeps «waiting»)
+    let tornAt = null; try { tornAt = typeof deliver.stashTornAt === 'function' ? deliver.stashTornAt() : null; } catch { tornAt = null; }
     for (const q of Object.values(ob.proposals || {})) {
       const d = q.receiptDelivery;
       if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
+      if (tornAt != null && !(Number(d.at) > tornAt)) continue;   // stashed before the torn bytes (or with no instant): unknown — decides nothing
       let held = null;
       try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
       const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));

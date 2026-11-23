@@ -179,6 +179,12 @@ function partWords(item, t) {
 function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false, groupPress = false, kept = 0 } = {}) {
   // B-f276 1b: KEPT entries (their reach cannot be judged now) — alone they are the strip, in their own words, with no press
   const k = Number(kept) > 0 ? Number(kept) : 0;
+  // r3003 (a): the stash's file HELD (could not be read) or TORN (its bytes kept aside) — said IN PLACE, never «nothing waiting»; a torn
+  // lift names where the damaged bytes are kept and what the person can do (never «restore that copy»: those ARE the damaged bytes)
+  const unreadLine = summary && summary.stashUnread ? t('The messages waiting for this agent could not be read just now — VibeSpace reads them again by itself; nothing that waits was lost or changed.') : null;
+  const tornLine = summary && summary.stashTorn && summary.stashTorn.copy ? t('The list of messages waiting for agents was damaged, so what it held cannot be read; the damaged bytes are kept as {copy} in the data folder. Send again anything that should still reach them.', { copy: summary.stashTorn.copy }) : null;
+  const stashLine = unreadLine || tornLine;
+  if (summary && !summary.count && !k && stashLine) return { head: stashLine, parts: [], line: stashLine, button: t('Hand over now'), cost: null, held: null, noButton: unreadLine ? t('they are handed over once it reads') : null, title: stashLine };
   if (summary && !summary.count && k) return { head: k === 1 ? t('1 notice waits whose reach cannot be judged now') : t('{n} notices wait whose reach cannot be judged now', { n: k }), parts: [], line: k === 1 ? t('1 notice waits whose reach cannot be judged now') : t('{n} notices wait whose reach cannot be judged now', { n: k }), button: t('Hand over now'), cost: null, held: t('a channels file could not be read — they are handed over once it reads again'), noButton: t('they wait until VibeSpace can judge them'), title: t('VibeSpace cannot tell now whether these still reach this agent (a channels file could not be read) — nothing is handed over until it can') };
   if (!summary || !summary.count) return null;
   const n = summary.count;
@@ -209,7 +215,7 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
     line: `${head}: ${parts.join(', ')}`,
     button: inFlight ? t('Handing over…') : t('Hand over now'),
     cost: reachable ? costWords : null,
-    held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, keptWords, ridesWords].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
+    held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, keptWords, ridesWords, stashLine].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
     // no hand-over for this harness: the sentence stands where the button would
     noButton: reachable ? null : midTurn ? t('this agent is mid-turn — they ride the next turn, after this one ends') : t('they ride the next turn'),
     title: allRetrying ? t('The agent did not accept this at once; VibeSpace posts it again when its turn ends and on a schedule — Hand over now delivers it this instant')
@@ -278,6 +284,8 @@ function clockAt(at, { now = Date.now(), locale = undefined, timeZone = undefine
  *  signed-out account and the other codes still do. */
 function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
   const code = r && r.code;
+  // r3003 (a): the stash's file could not be read — nothing is handed over until it reads (its entries wait unread, none lost)
+  if (code === 'msg_stash_unread') return { text: t('Not handed over — the messages waiting for this agent could not be read just now. VibeSpace reads them again by itself; nothing that waits was lost.') };
   if (code === 'spend_refused') {
     // r2: ONE row per `why`, the same table as the For-you notice (spend-authorizer REFUSAL_WORDS): a cap set to 0 is
     // «switched off», a signed-out account's door is the Usage window, a body with no identity never says «the limit

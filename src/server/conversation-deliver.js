@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const SR = require('../store-read.js');   // B-f276's remainder (lane bl-windows): the park's file under THE STORE READ
+const HOLD = require('../store-read-hold.js');   // …and its hold: msg-stash.json under the law
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { wrapperCaps } = require('./wrapper-files.js');
 const { vibespaceNoticeText, withoutNoticeHead } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
@@ -110,27 +111,55 @@ const RETRY_CAP = STASH_CAP;   // the hand-over's sender (src/notification-sende
 // applies to it, and the name says what we do not know.
 function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, waitingOverCap = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
   const stashFile = path.join(dataDir, 'msg-stash.json');
+  // B-f276 family (主开发 r3003 (a), lane hub-loop-stalls): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of
+  // this file — a failed read, torn bytes — as an EMPTY stash, and the next write (the hub's own stop, any stash or drain) wrote it
+  // over: every message, job result and receipt waiting for a conversation's next turn gone, said nowhere. HELD: nothing is written
+  // over the file (an entry stashed meanwhile lives in memory — a ref'd one is refused BY NAME to its producer, as a failed write
+  // is), a road that DECIDES from the stash (stashPeek: a receipt's fate, a dedupe) is told «unknown» (the hold's refusal: it
+  // decides nothing), the hand-over is refused by name and the conversation's strip says so (stash-handover), and the file is read
+  // again off the loop. LIFTED: the entries read — each judged again by the stores that own their words (a clear made while held
+  // reaches them), a hand-over stamp of an earlier process released — then what memory took meanwhile after them, written once.
+  // TORN BYTES: kept aside once (msg-stash.json.corrupt-<mark>), then the stash starts from what memory holds; `__tornAt` (a
+  // reserved key, like `__slots`) remembers the instant: a receipt stashed before it is «unknown» to the reconcile that reads the
+  // stash's silence as «handed» (src/server/channels-outbound.js) — r3019's remover law, across restarts.
+  const STASH_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   let stash = {};
-  try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
+  const stashHold = HOLD.create({ file: stashFile, valid: STASH_SHAPE, code: 'msg_stash_unread', aside: (mark) => stashFile + '.corrupt-' + mark,
+    words: (h) => `the messages waiting for the conversations' next turns could not be read (${h && h.code}) — VibeSpace reads them again by itself every few minutes. Nothing that waits was lost or changed: nothing is written over the file, and they go to their conversations once it reads`,
+    log: (l) => log('[deliver] ' + l), onLift: (v, facts) => liftStash(v, facts) });
+  { let read0; try { read0 = { text: fs.readFileSync(stashFile, 'utf-8') }; } catch (error) { read0 = { error }; }
+    const a0 = SR.storeAnswer(read0, { valid: STASH_SHAPE });
+    if (stashHold.start(a0) === 'data') stash = a0.value; }
   // lane queued-is-not-woke laws 2 + 3 (shape C): THE KEYED SLOTS' MEMORY — per (conversation, slot), the set its entry carried
   // when it was last HANDED — rides the stash file beside the queues under one reserved key (a release that reads this
   // file drops it: it keeps queues only)
-  let slots = stash && stash.__slots && typeof stash.__slots === 'object' && !Array.isArray(stash.__slots) ? stash.__slots : {};
-  if (stash) delete stash.__slots;
-  const stashBody = () => JSON.stringify(Object.keys(slots).length ? { ...stash, __slots: slots } : stash);
+  const takeReserved = (o) => {
+    const sl = o && o.__slots && typeof o.__slots === 'object' && !Array.isArray(o.__slots) ? o.__slots : {};
+    const ta = o && Number.isFinite(o.__tornAt) ? o.__tornAt : null;
+    if (o) { delete o.__slots; delete o.__tornAt; }
+    return { sl, ta };
+  };
+  let slots = {}, tornAt = null;
+  { const r = takeReserved(stash); slots = r.sl; tornAt = r.ta; }
+  const stashBody = () => JSON.stringify(Object.keys(slots).length || tornAt != null ? { ...stash, ...(Object.keys(slots).length ? { __slots: slots } : {}), ...(tornAt != null ? { __tornAt: tornAt } : {}) } : stash);
   // A CLAIM THE PREVIOUS PROCESS DID NOT SETTLE (channel-jump verify r2, 2026-09-27): an entry stamped `ho:<id>` was
   // being handed over when the server stopped. The shutdown path WAITS for a hand-over in flight (server.js
   // `stashView.settle`), so a stamp here means the process died mid-post (SIGKILL / OOM) inside the socket
   // round-trip — whether the CLI took the frame is unknown. RELEASED (they wait again), by name in the log: a lost
   // notice is silent, a repeated one is visible and traceable by its hand-over id.
   const releasedAtBoot = [];
-  for (const [cid, q] of Object.entries(stash)) {
-    if (!Array.isArray(q)) { delete stash[cid]; continue; }
-    const ids = new Set();
-    for (const e of q) if (e && e.ho) { ids.add(e.ho); delete e.ho; }
-    if (ids.size) releasedAtBoot.push({ cid, ids: [...ids], n: q.length });
-  }
-  if (releasedAtBoot.length) { try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
+  const releaseClaims = (obj) => {
+    const out = [];
+    for (const [cid, q] of Object.entries(obj)) {
+      if (!Array.isArray(q)) { delete obj[cid]; continue; }
+      const ids = new Set();
+      for (const e of q) if (e && e.ho) { ids.add(e.ho); delete e.ho; }
+      if (ids.size) out.push({ cid, ids: [...ids], n: q.length });
+    }
+    return out;
+  };
+  releasedAtBoot.push(...releaseClaims(stash));
+  if (releasedAtBoot.length && stashHold.writable('the release of an earlier hand-over')) { try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
   // lane report-mark-on-ack: a `carry` claim is an UNCONFIRMED ANSWER's (src/turn-carry.js) — it posts no frame, so its line
   // names no hand-over to look for; a hand-over's keeps its words; both on one conversation are named apart
   const claimedWords = (ids) => {
@@ -148,6 +177,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   let lastWriteError = null, retryTimer = null;
   const STASH_RETRY_MS = 30 * 1000;
   const writeStashNow = () => {
+    if (!stashHold.writable('a write of the messages waiting for conversations')) return false;   // HELD: never over a file that could not be read (the lift writes)
     try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; return true; }
     catch (e) {
       lastWriteError = { at: Date.now(), message: String(e && e.message || e) };
@@ -269,6 +299,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       q.splice(0, q.length, ...before);   // the take-back: the entry out, whatever the cap dropped back in its place
       if (!q.length) delete stash[cid];
       stashChanged(cid);
+      if (stashHold.held()) throw stashHold.refusal('this entry was not stored');   // HELD (r3003 (a)): refused by name — never written over the unread file
       throw new Error(`the stash could not be written to disk (${path.basename(stashFile)}) — the entry was not stored`);
     }
     // the journal names an evicted entry by its KIND, a peer by its sender's name — never by a label VibeSpace composed
@@ -553,7 +584,27 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** A READ of one conversation's held entries (2026-09-27 verify: the
    *  channels engine's boot reconcile asks whether a receipt is still
    *  waiting). Copies; never drains, never re-orders. */
-  function stashPeek(cid) { gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }
+  function stashPeek(cid) { stashHold.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }   // HELD: a road that DECIDES from the stash is told «unknown» (r3104 (a))
+  /** the hold LIFTED (r3003 (a), src/store-read-hold.js): the entries read (null: torn bytes kept aside — none), each judged again by the
+   *  stores that own their words (a clear made while held reaches them), an earlier process's hand-over stamps released, then what
+   *  memory took meanwhile after them — written once, every conversation told */
+  function liftStash(v, facts) {
+    const read = STASH_SHAPE(v) ? v : {};
+    const r = takeReserved(read);
+    const released = releaseClaims(read);
+    for (const x of released) { releasedAtBoot.push(x); log(`[deliver] ${x.cid}: ${claimedWords(x.ids)}`); }
+    for (const q of Object.values(read)) for (const e of q) { try { judgeEntry(e); } catch { } }
+    let kept = 0;
+    for (const q of Object.values(read)) kept += q.length;
+    let took = 0;
+    for (const [cid, q] of Object.entries(stash)) { if (!Array.isArray(q) || !q.length) continue; read[cid] = [...(read[cid] || []), ...q]; took += q.length; }
+    stash = read;
+    slots = { ...r.sl, ...slots };
+    tornAt = facts && facts.setAside ? Date.now() : (r.ta != null ? r.ta : tornAt);
+    const ok = writeStashNow();
+    for (const cid of Object.keys(stash)) stashChanged(cid);
+    log(`[deliver] the stash read again: ${facts && facts.setAside ? `torn bytes, kept aside as ${facts.setAside} — none of its entries could be read` : `${kept} entr${kept === 1 ? 'y' : 'ies'} back`}${took ? `, ${took} stashed meanwhile after them` : ''}${ok ? '' : ' (its write failed — retried)'}`);
+  }
   /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). Every
    *  read passes the stash gate first (verify r3): what a revoked reach no longer covers is never handed out. */
   function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }   // B-f276: a kept entry is not handed out
@@ -2535,7 +2586,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   return {
     retryHeldState: () => (retryHeld ? { ...retryHeld } : null), _retryReading: () => retryReading,   // B-f276's remainder: the park held unread (a copy), its read again in flight
     deliverToConversation, peerReachable, liveForWake, unreachableOf, machineAwayOf, machineNameOf: (hid) => { const h = pairingOf(hid).host; return String((h && (h.name || h.id)) || hid || '').slice(0, 80); }, pairingOf: (hid) => pairingOf(hid).reply, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
-    stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
+    stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,
+    // r3003 (a): the stash's hold — its facts (null: read), the person's words, a torn lift's copy and its instant, one read again
+    stashHeld: () => stashHold.held(), stashUnreadWords: () => stashHold.words(), stashTorn: () => stashHold.torn(), stashTornAt: () => tornAt, stashReadAgain: () => stashHold.again(), stashRefusal: (what) => stashHold.refusal(what), capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     // lane queued-is-not-woke (law 1): the wrapper's queue and turn edges, and a queued frame handed back — read off its records

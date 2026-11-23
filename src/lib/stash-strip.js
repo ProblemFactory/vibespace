@@ -144,7 +144,8 @@ export function createStashStrip({ sessionId }) {
     // B-02a3: the group messages waiting, and whether the group press is drawn (mid-turn, the Enter door steers)
     const rides = summary && Array.isArray(summary.items) ? summary.items.filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0) : 0;
     const groupPress = midTurn && steers === true && rides > 0 && !(summary && summary.groupHandover === false);   // a remote conversation: no press (its wrapper's door is not read on this machine)
-    const key = summary && (summary.count || kept) ? summaryDigest(summary) + '|' + kept + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + groupPress + '|' + rides + '|' + previewDigest(summary) : '';
+    const stashMark = summary && summary.stashUnread ? 'unread' : summary && summary.stashTorn ? 'torn:' + summary.stashTorn.copy : '';   // r3003 (a): the stash's file held / torn — the strip says it
+    const key = summary && (summary.count || kept || stashMark) ? summaryDigest(summary) + '|' + stashMark + '|' + kept + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + groupPress + '|' + rides + '|' + previewDigest(summary) : '';
     if (key === st.key) return;
     st.key = key;
     st.summary = key ? summary : null;

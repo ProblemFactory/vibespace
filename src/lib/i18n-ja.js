@@ -6651,6 +6651,10 @@ export default {
   "{n} more wait whose reach cannot be judged now": "ほかに、届くかどうか今は判断できないものが {n} 件待っています",   // B-f276 1b: kept stash entries
   "a channels file could not be read — they are handed over once it reads again": "チャンネルのファイルを読めませんでした — 読めるようになり次第、引き渡します",   // B-f276 1b: kept stash entries
   "they wait until VibeSpace can judge them": "VibeSpace が判断できるまで待ちます",   // B-f276 1b: kept stash entries
+  "The messages waiting for this agent could not be read just now — VibeSpace reads them again by itself; nothing that waits was lost or changed.": "このエージェントを待っているメッセージは今は読み込めませんでした。VibeSpace が自動でもう一度読み込みます。待っている内容は失われても変わってもいません。",
+  "The list of messages waiting for agents was damaged, so what it held cannot be read; the damaged bytes are kept as {copy} in the data folder. Send again anything that should still reach them.": "エージェントを待っているメッセージの一覧が壊れていたため、中身を読めません。壊れたバイトはデータフォルダに {copy} として保存されています。まだ届けるべきものはもう一度送ってください。",
+  "they are handed over once it reads": "読み込めたら渡されます",
+  "Not handed over — the messages waiting for this agent could not be read just now. VibeSpace reads them again by itself; nothing that waits was lost.": "渡せませんでした——このエージェントを待っているメッセージを今は読み込めません。VibeSpace が自動でもう一度読み込みます。待っている内容は失われていません。",
   "VibeSpace cannot tell now whether these still reach this agent (a channels file could not be read) — nothing is handed over until it can": "これらがまだこのエージェントに届くかどうか、VibeSpace には今は判断できません（チャンネルのファイルを読めませんでした）— 判断できるまで何も引き渡しません",   // B-f276 1b: kept stash entries
   "they ride the next turn": "次のターンと一緒に届きます",
   "1 group message rides the next turn, after this one ends": "グループメッセージ 1 件は、このターンが終わった後の次のターンと一緒に届きます",

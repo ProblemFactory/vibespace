@@ -4363,9 +4363,9 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   // CONTROLS: the ladder copy that never asks the gate, and the engine copy whose producers file no `about`
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const G1 = '  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }';   // B-f276: a kept entry is not handed out
-  const G2 = '  function stashPeek(cid) { gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }';
+  const G2 = "  function stashPeek(cid) { stashHold.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }";   // r3003 (a): the hold's refusal first (a held stash is «unknown»)
   ok(dsrc.split(G1).length === 2 && dsrc.split(G2).length === 2, 'CONTROL setup: both reads ask the gate, once each');
-  const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dsrc, G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }', "src/server/conversation-deliver.js"), G2, '  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }', "src/server/conversation-deliver.js"), 'no-stash-gate'), 'nogate');
+  const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dsrc, G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }', "src/server/conversation-deliver.js"), G2, "  function stashPeek(cid) { stashHold.refuse('reading the messages waiting for this conversation'); return (stash[cid] || []).map((e) => ({ ...e })); }", "src/server/conversation-deliver.js"), 'no-stash-gate'), 'nogate');
   ok(noGate.read === 'not-found' && noGate.leaks(noGate.injected) && /launch code is 0417/.test(noGate.injected), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
   const esrc = engineSource(REPO);
   const aboutSites = esrc.match(/, about: stashAbout\(/g) || [];
