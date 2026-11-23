@@ -66,10 +66,10 @@ function world(AM, { text = HEALTHY, failBoot = null, dir: dir0 = null, todos = 
   const onDisk = () => (fs.existsSync(file) ? realRead(file, 'utf8') : null);
   const asides = () => fs.readdirSync(dir).filter((f) => f.startsWith('accounts.json.corrupt-'));
   // the helper's torn-bytes copy runs off the loop at the start: wait for its answer (bounded)
-  const settle = async () => { for (let i = 0; i < 300 && (asides().length === 0 || (am.held() && !am._tornAside)); i++) await new Promise((z) => setTimeout(z, 10)); await tick(); };   // torn: until the copy is made AND the list re-held (or lifted, in a red)
+  const settle = async () => { for (let i = 0; i < 300 && (asides().length === 0 || (am.held() && !am._torn)); i++) await new Promise((z) => setTimeout(z, 10)); await tick(); };   // torn: until the copy is made AND the list re-held (or lifted, in a red)
   return { am, dir, file, onDisk, asides, settle, changes };
 }
-const inbox = () => { const items = [], done = []; return { items, done, add: (k, it) => { items.push({ k, ...it }); return { id: `ut-${items.length}` }; }, get: (id) => ({ id, status: done.includes(id) ? 'done' : 'open' }), setStatus: (id, st) => { if (st === 'done') done.push(id); } }; };
+const inbox = () => { const items = [], done = []; return { items, done, add: (k, it) => { items.push({ k, ...it, id: `ut-${items.length + 1}` }); return { id: `ut-${items.length}` }; }, get: (id) => ({ id, status: done.includes(id) ? 'done' : 'open' }), forSession: (k) => items.filter((i) => i.k === k && !done.includes(i.id)), setStatus: (id, st) => { if (st === 'done') done.push(id); } }; };
 const tryCall = (fn) => { try { return { r: quiet(fn) }; } catch (e) { return { code: (e && e.code) || null, status: (e && e.status) || null, msg: String((e && e.message) || '') }; } };
 
 console.log('① a failed read at the start HOLDS the list — nothing is written over the file');
@@ -103,7 +103,7 @@ const refuseRun = (AM) => {
 };
 const r2 = refuseRun(AM0);
 ok(Object.values(r2.out).every((v) => v === 'accounts_unread/503') && r2.same && r2.rows === 0, 'add, a subscription, a codex login, another harness\'s login, the default, a pool, an import: each refused BY NAME (accounts_unread, 503) — nothing in memory, nothing on disk', r2);
-const r2x = refuseRun(cut('  _refuseWhileHeld(what = \'changing the accounts\') { if (this._hold) this._hold.refuse(what); }\n', '  _refuseWhileHeld() { }\n', 'no refusal', 'acct-refuse'));
+const r2x = refuseRun(cut('  _refuseWhileHeld(what = \'changing the accounts\') { if (this.held()) throw this._heldRefusal(what); }\n', '  _refuseWhileHeld() { }\n', 'no refusal', 'acct-refuse'));
 ok(r2x.out.add === 'went' && r2x.rows > 0 && r2x.same, 'RED CONTROL (no refusal): the add answers «done» while nothing reached disk — the person is told a change that never landed — red', r2x);
 
 console.log('③ the list carries `held` — never an empty list as a fact');
@@ -122,7 +122,7 @@ const noticeRun = async (AM) => {
 };
 const n3 = await noticeRun(AM0);
 ok(n3.filed === 1 && n3.origin === 'login' && /none is shown as gone/.test(n3.key || '') && !n3.path && n3.closed === 1, 'ONE notice (r3046: never one per page open): a For-you item while the list is unread, filed once though asked again, no file path in its words, closed when the file reads', n3);
-const n3x = await noticeRun(cut('    if (!todos || typeof todos.add !== \'function\' || !h || this._heldTodoId) return;\n', "    if (!todos || typeof todos.add !== 'function' || !h) return;\n", 'a notice at every ask', 'acct-once'));
+const n3x = await noticeRun(cut('    if (same) { this._heldTodoId = same.id; return; }', '', 'a notice at every ask', 'acct-once'));
 ok(n3x.filed > 1, 'RED CONTROL (a notice at every ask): the tray fills with copies of one fact — red', n3x);
 
 console.log('④ the read again (the helper\'s) ADOPTS the file');
@@ -149,8 +149,8 @@ const tornRun = async (AM) => {
 };
 const t5 = await tornRun(AM0);
 ok(t5.held === 'torn bytes' && t5.asides === 1 && t5.keptBytes && t5.add === 'accounts_unread' && t5.torn && t5.held2 === 'torn bytes' && t5.after === 1, 'torn bytes at the start: copied aside ONCE (its bytes kept), the list stays HELD (never «none»), an add refused, the file as it is; a restart over the same bytes: held again, no second copy', t5);
-ok(!!t5.aside && t5.words.includes(t5.aside) && /Mend the file by hand/.test(t5.words) && /add them again/.test(t5.words) && !/restore/i.test(t5.words), 'r3104: the torn hold\'s words say WHERE the damaged bytes are kept (by base name) and what the person can do — mend the file by hand and restart, or remove it and add the accounts again; never «restore» (they are the damaged bytes)', { aside: t5.aside, words: t5.words });
-const t5x = await tornRun(cut('      this._hold.start({ state: \'unreadable\', code: \'torn bytes\', why: `did not parse — kept beside it as ${facts.setAside}` });\n      this._fileHeldNotice();   // the same notice (one a hold)\n      return;\n', '', 'lifted as empty once copied', 'acct-rehold'));
+ok(!!t5.aside && t5.words.includes(t5.aside) && /mend the file by hand and restart/.test(t5.words) && /remove it and restart/.test(t5.words) && /each account is signed in again/.test(t5.words) && !/restore/i.test(t5.words), 'r3104 / r3129 (5): the torn hold\'s words say WHERE the damaged bytes are kept (by base name) and what the person can do — mend the file by hand and restart, or remove it and restart (the old sign-ins stay unused, each account is signed in again); never «restore» (they are the damaged bytes)', { aside: t5.aside, words: t5.words });
+const t5x = await tornRun(cut('      this._torn = { since, aside: facts.setAside };\n      this._fileHeldNotice();   // the torn notice — now that its copy exists (it names it)\n      this._notify();           // every page learns the hold\'s true words\n      return;\n', '', 'lifted as empty once copied', 'acct-rehold'));
 ok(!t5x.held && t5x.add === 'went', 'RED CONTROL (lifted as empty once copied, the helper\'s default): the list reads «none» as a fact and the next add goes — red', t5x);
 
 console.log('⑥ a restart while held keeps the hold');
@@ -175,11 +175,9 @@ const spawnRun = (AM) => {
 };
 const m7 = spawnRun(AM0);
 ok(m7.def.code === 'accounts_unread' && m7.named.code === 'accounts_unread' && m7.codex.code === 'accounts_unread' && !m7.machine.code && m7.machine.r === null, 'the spawn door while held: a start with no pick, with a pick, a codex start — REFUSED by name (never null = the machine\'s own login); a person\'s «this machine\'s login» stays theirs', m7);
-const m7x = spawnRun(cut('    if (this._hold && this._hold.held() && requested !== \'subscription\') throw this._hold.refusal(\'starting a conversation on an account\');\n', '', 'no refusal at the spawn door', 'acct-spawn'));
+const m7x = spawnRun(cut('    if (requested !== \'subscription\' && this.held()) throw this._heldRefusal(\'starting a conversation on an account\');\n', '', 'no refusal at the spawn door', 'acct-spawn'));
 ok(m7x.def.r === null && /unknown account/.test(m7x.named.msg || ''), 'RED CONTROL (no refusal at the spawn door): the start with no pick resolves to the MACHINE\'S OWN LOGIN, and a resume of a named account throws «unknown account» (ws-create\'s «deleted account» degrade) — red', m7x);
-const WSC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-const iRef = WSC.indexOf("if (e && e.code === 'accounts_unread') {"), iDeg = WSC.indexOf("if (data.resumeId && /unknown account/.test(String(e.message))) {");
-ok(iRef > 0 && iDeg > iRef && !/unknown account/.test(m7.named.msg || ''), 'ws-create\'s resume: the refusal by name comes BEFORE the «deleted account» degrade, and the held refusal never says «unknown account» — the degrade cannot fire on it', { iRef, iDeg, msg: (m7.named.msg || '').slice(0, 90) });
+ok(!/unknown account/.test(m7.named.msg || ''), 'the held refusal never says «unknown account» (the words ws-create\'s «deleted account» degrade matches)', (m7.named.msg || '').slice(0, 90));
 
 console.log('⑧ r3104 (a): every road that looks an account up answers the hold\'s words while held — never «unknown account» from the empty list');
 const AURSRC = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
@@ -197,6 +195,75 @@ ok(gH.mw && [gH.rename, gH.pool, gH.tails].every((x) => x.code === 503 && x.body
 const AURx = MUT.load('src/server/account-usage-routes.js', anchored(AURSRC, "  if (typeof app.use === 'function') app.use('/api/accounts', (req, res, next) => {", "  if (false) app.use('/api/accounts', (req, res, next) => {", 'no guard'), 'acct-routes-guard');
 const gX = guardRun(AURx, world(AM0, { failBoot: 'EIO' }).am);
 ok(!gX.mw, 'RED CONTROL (no guard): no road answers the hold — a rename over the empty list meets «unknown account» — red', gX);
+
+console.log('⑨ r3129 (7): a RESUME through the REAL create handler while held — its record keeps its account, no «deleted» notice');
+const WS = require(path.join(REPO, 'src/ws-create.js'));
+const { createAdapterRegistry } = require(path.join(REPO, 'src/adapters/index.js'));
+const Wp = (f) => '/w/' + f;
+const resumeRun = async (am) => {
+  const registry = createAdapterRegistry({ claudeCmd: '/opt/bin/claude', codexCmd: '/opt/bin/codex', chatWrapper: Wp('chat-wrapper.js'), codexChatWrapper: Wp('codex-chat-wrapper.js'), acpWrapper: Wp('acp-wrapper.js'), acpCommands: { opencode: '/opt/bin/opencode', antigravity: '/opt/bin/agy' }, ptyWrapper: Wp('pty-wrapper.js'), buffersDir: '/b' });
+  const sent = [], spawned = [], notices = [], metas = [];
+  const active = new Map(), noop = () => undefined;
+  const base = path.join(ROOT, 'create-' + (++wn)), SOCK = path.join(base, 'sock'), BUF = path.join(base, 'buf'), CWD = path.join(base, 'cwd');
+  for (const d of [SOCK, BUF, CWD]) fs.mkdirSync(d, { recursive: true });
+  const ctx = new Proxy({
+    activeSessions: active, WS_OPEN: 1, sessionCounterRef: { value: 0 }, adapterRegistry: registry, hosts: null, accounts: am, fs, path,
+    execFileSync: require('child_process').execFileSync, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+    SOCKETS_DIR: SOCK, BUFFERS_DIR: BUF, PTY_WRAPPER: Wp('pty-wrapper.js'), CHAT_WRAPPER: Wp('chat-wrapper.js'),
+    NODE_CMD: '/n/node', DTACH_CMD: '/stub/dtach', ENV_CMD: '/usr/bin/env', CLAUDE_CMD: '/opt/bin/claude', EDITOR_CMD: '/stub/editor/code', AGENT_BIN_DIR: '/stub/bin', PORT: 1, X_ENV: {},
+    cliCmds: { forSpawn: async (b, c) => c }, USAGE_STATUSLINE_CMD: '/stub/vibespace-usage', userStatuslineCmd: () => '',
+    serverSetting: () => undefined, harnessSetting: noop, harnessDeclares: () => false, harnessSpawnSettings: () => ({}),
+    integrationEnabled: () => true, readSessionMeta: () => null, readLayouts: () => ({}), getSyncStore: () => null,
+    writeSessionMeta: (...a) => { metas.push(a); },
+    serverNotice: (key, text) => { notices.push({ key: String(key), text: String(text) }); return 1; },
+    pty: { spawn: (cmd, args, opts) => { spawned.push({ cmd, args, env: opts.env }); return { pid: 4242, onData() { }, onExit() { }, write() { }, resize() { }, kill() { } }; } },
+    setupSessionPty: (s, id, p) => { s.pty = p; },
+  }, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' && /^[a-z]/.test(k) ? noop : undefined)) });
+  const handler = WS.createWsCreateHandler({ ctx, agentEnv: () => ({ PATH: '/usr/bin:/bin', HOME: process.env.HOME }), crashLoopRef: { map: new Map() }, noConvoRef: { map: new Map() }, execFileAsync: async () => ({ stdout: '', stderr: '' }), pickCodexThreadCandidate: () => null, getSessionKey: (s) => `${s.backend}:${s.backendSessionId}`, normalizeComparablePath: (p) => p });
+  try { await quietA(() => handler({ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }, { type: 'create', mode: 'chat', backend: 'claude', cwd: CWD, reqId: 'r1', resumeId: '0a0a0a0a-0000-4000-8000-00000000abcd', accountId: ID1 }, new Set())); } catch (e) { return { threw: String(e && e.message).slice(0, 120) }; }
+  const err = sent.find((f) => f && f.type === 'error') || null;
+  return { code: err && err.code, spawned: spawned.length, gone: notices.some((n) => /resume-acct-gone/.test(n.key)), dropped: metas.some((m) => JSON.stringify(m).includes('"accountId":null')), live: active.size };
+};
+const c9 = await resumeRun(world(AM0, { failBoot: 'EIO' }).am);
+ok(c9.code === 'accounts_unread' && c9.spawned === 0 && !c9.gone && !c9.dropped && c9.live === 0, 'held: a resume of a conversation that names an account is REFUSED by name (the error frame, accounts_unread) — nothing spawns on the machine login, no «deleted» notice, no record written with its account dropped', c9);
+const c9x = await resumeRun(world(cut('    if (requested !== \'subscription\' && this.held()) throw this._heldRefusal(\'starting a conversation on an account\');\n', '', 'no refusal at the spawn door', 'acct-spawn-create'), { failBoot: 'EIO' }).am);
+ok(!!c9x.gone && c9x.spawned > 0, 'RED CONTROL (no refusal at the spawn door — the release\'s «unknown account»): the resume DEGRADES — «was deleted» said, and it spawns on the global login — red', c9x);
+
+console.log('⑩ r3129 (1)/(4)/(5): the notice across two starts with the same tray; torn bytes off the ladder; the words by cause');
+const twoStarts = async (AM) => {
+  const todos = inbox();
+  const w1 = world(AM, { failBoot: 'EIO', todos });
+  const open1 = todos.forSession('accounts').length;
+  const w2 = world(AM, { dir: w1.dir, todos });   // the restart: the file reads
+  return { open1, open2: todos.forSession('accounts').length, filed: todos.items.length, held2: !!w2.am.held() };
+};
+const s10 = await twoStarts(AM0);
+ok(s10.open1 === 1 && s10.open2 === 0 && s10.filed === 1 && !s10.held2, 'a held start files ONE notice; the next start READS the file and CLOSES it (its id lived in memory only — never a notice left saying no conversation starts while every account works)', s10);
+const s10x = await twoStarts(cut('  setUserTodos(todos) { this._todos = todos || null; if (this.held()) this._fileHeldNotice(); else this._closeHeldNotice(); }\n', '  setUserTodos(todos) { this._todos = todos || null; if (this.held()) this._fileHeldNotice(); }\n', 'no close at a start that reads', 'acct-closeatstart'));
+ok(s10x.open2 === 1, 'RED CONTROL (no close at a start that reads): the notice stays open after a restart in which the file reads — red', s10x);
+const tornNotice = async (AM) => {
+  const todos = inbox();
+  const w = world(AM, { text: TORN, todos });
+  await w.settle();
+  const h = w.am.held(), items = todos.forSession('accounts');
+  const at1 = h && h.at;
+  await new Promise((z) => setTimeout(z, 30));
+  const named = items.length === 1 && w.asides().length === 1 && String(items[0].detail || '').includes(w.asides()[0]);
+  return { code: h && h.code, ladder: !!w.am._hold.held(), sameSince: !!(w.am.held() && w.am.held().at === at1), items: items.length, torn: items.length === 1 && /damaged/.test(items[0].text || ''), named, signins: /old sign-ins stay on disk unused/.test((h && h.why) || ''), mends: /does not mend by itself/.test((h && h.why) || '') };
+};
+const t10 = await tornNotice(AM0);
+ok(t10.code === 'torn bytes' && !t10.ladder && t10.sameSince && t10.items === 1 && t10.torn && t10.named && t10.signins && t10.mends, 'torn bytes: held for the life OFF the helper\'s ladder (no read and no journal every 30 s; the first «since» kept); ONE notice in the torn words, filed once the copy exists (its detail names it); the words say it does not mend by itself and the old sign-ins stay on disk unused', t10);
+
+console.log('⑪ r3129 (7): the pins of the one-line doors a suite cannot drive here');
+const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+const wired = (src) => src.split('accounts.setUserTodos(userTodos)').length === 2 && src.indexOf('accounts.setUserTodos(userTodos)') > src.indexOf('const userTodos = new UserTodoManager(');
+ok(wired(SV), 'server.js wires the tray ONCE, after it is made (accounts.setUserTodos(userTodos)) — without it no notice is ever filed in production');
+ok(!wired(SV.replace('accounts.setUserTodos(userTodos)', 'void 0')), 'RED CONTROL: the line taken out — the pin reds (no other suite sees it)');
+const APP = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), PER = fs.readFileSync(path.join(REPO, 'src/routes/persistence.js'), 'utf8'), SES = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), PRM = fs.readFileSync(path.join(REPO, 'src/server/permission-rules.js'), 'utf8');
+ok(/msg\.type === 'accounts-updated'[\s\S]{0,400}held: msg\.held \|\| null/.test(APP), 'r3129 (2): the page\'s accounts push keeps `held` — the lift ends the banner on every open page');
+ok(/catch \(e\) \{ if \(e && e\.code === 'accounts_unread'\) rh = e; else throw e; \}[\s\S]{0,200}if \(rh\) held\.push\(rh\.code\)/.test(PER), 'r3129 (3): the config import\'s accounts section is refused by name and said with the other held sections (never a bare 503 after the rest was written)');
+ok(/if \(h\) return \{ refuse: h\.why, code: 'accounts_unread'/.test(SES), 'r3129 (6): the account-bound resume says the hold\'s words, never «deleted» over the held list');
+ok(/accounts\.held\(\) : null; if \(h\) return Promise\.resolve\(\{ ok: false, reason: 'account', detail: h\.why \}\)/.test(PRM), 'r3129 (6): the permission oracle says the hold\'s words, never «unknown account»');
 
 for (const am of ALL) { try { am.close(); } catch { } }
 report();

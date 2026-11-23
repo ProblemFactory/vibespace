@@ -405,7 +405,7 @@ class App {
       }
       if (msg.type === 'setting-holds' && Array.isArray(msg.holds)) this._setSettingHolds(msg.holds);   // lane setting-doors pick 2: a press, an «End now», a return
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg) };
+        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg), held: msg.held || null };   // r3129 (2): the push's `held` — the lift ends the banner on every open page, and a page that never fetched during the hold learns it
         // B-ba7d: the push carries no key tail — the person's last read is laid on, and asked again (coalesced: one ask in flight) — a
         // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one. ONE ask a tails
         // generation: the push carries its word; the roster's refresh below takes this read (B-ee0a smalls)

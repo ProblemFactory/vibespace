@@ -1116,6 +1116,8 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
   const held = await heldAccountOfNow(backend, id, opts);
   if (!(held && held.accountId && held.accountId !== accountId)) return null;
   // r2: the account that holds it was DELETED — the deleted-account sentence, never «resume it on» an account that is gone
+  // the B-f276 family (r3129 (6)): the accounts could not be read — the hold's words, never «deleted» over the empty list
+  { let h = null; try { h = opts.accounts && typeof opts.accounts.held === 'function' ? opts.accounts.held() : null; } catch { h = null; } if (h) return { refuse: h.why, code: 'accounts_unread', accountId: held.accountId, message: h.why }; }
   if (held.accountId !== 'subscription' && opts.accounts && typeof opts.accounts.get === 'function') {
     let a = null, threw = false; try { a = opts.accounts.get(held.accountId); } catch { threw = true; }   // r3: a get that throws says nothing (never «deleted»)
     if (!threw && !a) return { refuse: ACCT_GONE_BOUND, code: 'resume-account-gone', accountId: held.accountId, message: ACCT_GONE_BOUND };

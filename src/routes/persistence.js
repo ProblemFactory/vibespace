@@ -2267,8 +2267,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         if (r) held.push(r.code); else applied.push('mounts');
       }
       if (includeSensitive.includes('accounts') && sens.accounts) {
-        const r = getAccounts?.()?.importBundle?.(sens.accounts);
-        applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
+        let r = null, rh = null; try { r = getAccounts?.()?.importBundle?.(sens.accounts); } catch (e) { if (e && e.code === 'accounts_unread') rh = e; else throw e; }   // the B-f276 family (r3129 (3)): held — not imported, said by name
+        if (rh) held.push(rh.code); else applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
       }
       if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.signinInInterface) {
         // the piped form (the separation's B3b follow): the sign-in table is the interface's — refused BY NAME, before it could throw

@@ -18,6 +18,7 @@ const fs = require('fs');
 const SR = require('./store-read.js');           // the B-f276 family (lane bl-windows, 主开发 r2947 / r3043): accounts.json under THE STORE READ
 const HOLD = require('./store-read-hold.js');    // …on the family's helper (bl-jobs, r3019): the hold, its read again, the torn bytes' copy
 const i18nKey = (k) => k;   // the extraction marker (scripts/i18n-extract.mjs): the client words a For-you item with t(key)
+const ACCOUNTS_TORN_TEXT = 'The accounts file is damaged — its bytes are kept beside it. Nothing is changed and no conversation starts on another login until it is mended or removed and VibeSpace restarted.';   // r3129 (5): torn bytes never mend by themselves — their own words
 const ACCOUNTS_HELD_TEXT = 'The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.';   // r3046: ONE notice while the list is unread
 const accountIdentity = require('./account-identity.js'); // PURE (row B-87fd unit 2): the ONE identity record + the ONE «same account?» comparison
 const DISPLAY = require('./account-display-facts.js'); // B-360d (lane chrome-157): the list's sign-in facts, read OFF the loop and kept a folder
@@ -350,64 +351,87 @@ class AccountManager {
   _load() {
     this._hold = HOLD.create({
       file: this._file, valid: (v) => this._accountsValid(v), code: 'accounts_unread', aside: (mark) => `${this._file}.corrupt-${mark}`,
-      words: (h) => (h && h.code === 'torn bytes'
-        ? `the accounts file is damaged — its damaged bytes are kept beside it as ${this._tornAside || 'a copy'}; nothing is changed and nothing starts on another login meanwhile. Mend the file by hand and restart VibeSpace, or remove it to start with no accounts and add them again`
+      words: (h) => (h && h.code === 'torn bytes' ? this._tornWords(null)
         : `the accounts could not be read (${h ? h.code : 'unreadable'}) — nothing was changed and nothing starts on another login until they read; VibeSpace reads them again by itself`),
-      log: (line) => { if (!(this._tornAside && /kept aside as .* — it starts empty/.test(line))) console.warn('[accounts] ' + line); },
+      // the helper's journal says «then it starts empty» for torn bytes: here they stay HELD (r3043) — its lines said true
+      log: (line) => { if (/kept aside as .* — it starts empty/.test(line)) return; console.warn('[accounts] ' + String(line).replace(' — held while its bytes are copied aside; then it starts empty', ' — held while its bytes are copied aside; the accounts stay held (never «none») until the file is mended or removed')); },
       onLift: (v, facts) => this._lifted(v, facts),
     });
     let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }   // the manager's own start
     const a = SR.storeAnswer(read, { valid: (v) => this._accountsValid(v) });
     if (this._hold.start(a) === 'data') this._state = a.value;
-    this._fileHeldNotice();   // (the tray is wired later by server.js — setUserTodos files it then)
   }
-  /** the hub's For-you tray (server.js, once it exists): the held list is TOLD ONCE (主开发 r3046: one notice, never one per page open) */
-  setUserTodos(todos) { this._todos = todos || null; this._fileHeldNotice(); }
+  /** the torn hold's words (r3104 / r3129 (5)): WHERE the damaged bytes are kept (by base name, once the copy exists), and what the
+   *  person can do — never «restore that copy» (it is the damaged bytes); they do not mend by themselves */
+  _tornWords(aside) {
+    return `the accounts file is damaged — ${aside ? `its damaged bytes are kept beside it as ${aside}` : 'its damaged bytes are being copied beside it'}; nothing is changed and nothing starts on another login meanwhile. It does not mend by itself: mend the file by hand and restart VibeSpace, or remove it and restart to start with no accounts (the old sign-ins stay on disk unused, and each account is signed in again)`;
+  }
+  /** the hub's For-you tray (server.js, once it exists): the held list is TOLD ONCE (r3046) — and a start that READS closes any item of
+   *  that kind a held life left open (r3129 (1): its id lived in memory only; «mend and restart» must end the notice) */
+  setUserTodos(todos) { this._todos = todos || null; if (this.held()) this._fileHeldNotice(); else this._closeHeldNotice(); }
+  /** the open For-you items of the held kinds (this life's, or one an earlier life left) — never another filer's under the same key */
+  _openHeldItems() {
+    const todos = this._todos;
+    try { return todos && typeof todos.forSession === 'function' ? todos.forSession('accounts').filter((i) => i && i.origin === 'login' && (i.text === ACCOUNTS_HELD_TEXT || i.text === ACCOUNTS_TORN_TEXT)) : []; } catch { return []; }
+  }
   _fileHeldNotice() {
     const todos = this._todos, h = this.held();
-    if (!todos || typeof todos.add !== 'function' || !h || this._heldTodoId) return;
+    if (!todos || typeof todos.add !== 'function' || !h) return;
+    if (h.code === 'torn bytes' && !this._torn) return;   // r3129 (5): the torn notice is filed once its copy exists (it names it)
+    const text = this._torn ? ACCOUNTS_TORN_TEXT : ACCOUNTS_HELD_TEXT;
+    const open = this._openHeldItems();
+    for (const i of open) if (i.text !== text) { try { todos.setStatus(i.id, 'done', 'system'); } catch (e) { console.warn('[accounts] the other cause\'s notice could not be closed (it stays until the next start reads):', e && e.message); } }   // the other cause's item: its fact ended
+    const same = open.find((i) => i.text === text);
+    if (same) { this._heldTodoId = same.id; return; }   // r3129 (1): an item a restart while still held left open IS this hold's — adopted, never a second
     try {
       const item = todos.add('accounts', {
-        origin: 'login', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Manage Agents', text: ACCOUNTS_HELD_TEXT,
+        origin: 'login', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Manage Agents', text,
         detail: `${h.why}. No account is added, changed or removed and nothing is written over the list meanwhile; this notice closes when the accounts read.`,
-        i18n: { text: { key: i18nKey('The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.'), params: {} }, source: { key: i18nKey('Manage agents') } },
+        i18n: { text: { key: this._torn ? i18nKey('The accounts file is damaged — its bytes are kept beside it. Nothing is changed and no conversation starts on another login until it is mended or removed and VibeSpace restarted.') : i18nKey('The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.'), params: {} }, source: { key: i18nKey('Manage agents') } },
       });
       this._heldTodoId = (item && item.id) || null;
     } catch (e) { console.warn('[accounts] could not file the For-you notice about the accounts:', e && e.message); }
   }
   _closeHeldNotice() {
-    const id = this._heldTodoId, todos = this._todos;
     this._heldTodoId = null;
-    if (!id) return;
-    try { const it = todos && typeof todos.get === 'function' ? todos.get(id) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(id, 'done', 'system'); }
-    catch (e) { console.warn('[accounts] the accounts\' notice could not be closed:', e && e.message); }
+    const todos = this._todos;
+    if (!todos || typeof todos.setStatus !== 'function') return;
+    for (const i of this._openHeldItems()) { try { todos.setStatus(i.id, 'done', 'system'); } catch (e) { console.warn('[accounts] the accounts\' notice could not be closed:', e && e.message); } }
   }
   /** the hold LIFTED (src/store-read-hold.js): the file read (its value, or null: «not there» twice in a row — a fresh list) */
   _lifted(v, facts = {}) {
     if (facts && facts.setAside) {
       // r3019 / r3043 — «EMPTY» IS NOT SAFE WHERE A REMOVER READS THE STORE: the sign-in expiry sweep and the account migrations read
-      // this list's silence. Torn bytes, once the helper made their copy, stay HELD — never lifted as empty by themselves: the helper
-      // reads the file again on its ladder (the same bytes: no second copy); a good copy put back reads, a file removed (by a person)
-      // answers «not there» twice: a fresh list
-      if (this._tornAside !== facts.setAside) console.warn(`[accounts] accounts.json did not parse — its bytes are kept beside it as ${facts.setAside}; the accounts stay HELD (never «none») until the file reads or is removed`);
-      this._tornAside = facts.setAside;
-      this._hold.start({ state: 'unreadable', code: 'torn bytes', why: `did not parse — kept beside it as ${facts.setAside}` });
-      this._fileHeldNotice();   // the same notice (one a hold)
+      // this list's silence. Torn bytes, once the helper made their copy, stay HELD for this life — never lifted as empty, and (r3129 (4))
+      // NOT put back on the helper's ladder: bytes that do not parse do not mend by themselves — no read and no journal line every
+      // 30 s, the first «since» kept, said once. The hold ends at a start that reads the file (mended) or finds it «not there» (removed)
+      const since = (this._torn && this._torn.since) || (facts.was && facts.was.since) || Date.now();
+      if (!this._torn) console.warn(`[accounts] accounts.json did not parse — its damaged bytes are kept beside it as ${facts.setAside}; the accounts stay HELD (never «none») until the file is mended or removed and VibeSpace restarted`);
+      this._torn = { since, aside: facts.setAside };
+      this._fileHeldNotice();   // the torn notice — now that its copy exists (it names it)
+      this._notify();           // every page learns the hold's true words
       return;
     }
-    this._tornAside = null;
+    this._torn = null;
     this._state = v && this._accountsValid(v) ? v : { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };   // a lift ADOPTS the file
     try { this._displayAll(); } catch { }   // the start's folder reads, now over the list (off the loop)
     this._closeHeldNotice();
     this._notify();
   }
-  /** THE ONE READ-ONLY FACT «the list is unread» (主开发 r3043) — {code, at, why} while held, else null. Every consumer that must not act
-   *  on an EMPTY list asks it (never «unknown account», never «no limit», never «gone») */
-  held() { const h = this._hold && this._hold.held(); return h ? { code: h.code, at: h.since, why: this._hold.words() } : null; }
+  /** THE ONE READ-ONLY FACT «the list is unread» (主开发 r3043) — {code, at, why} while held (a failed read, or torn bytes kept aside),
+   *  else null. Every consumer that must not act on an EMPTY list asks it (never «unknown account», never «no limit», never «gone») */
+  held() {
+    if (this._torn) return { code: 'torn bytes', at: this._torn.since, why: this._tornWords(this._torn.aside) };
+    const h = this._hold && this._hold.held();
+    return h ? { code: h.code, at: h.since, why: this._hold.words() } : null;
+  }
+  /** THE REFUSAL BY NAME while held (accounts_unread, 503): what was refused, then the hold's words */
+  _heldRefusal(what) { const h = this.held(); return Object.assign(new Error(`${what}: ${h ? h.why : 'the accounts could not be read'}`), { code: 'accounts_unread', status: 503 }); }
   /** a person's adding or changing act while held: refused BY NAME (accounts_unread, 503) before anything moves */
-  _refuseWhileHeld(what = 'changing the accounts') { if (this._hold) this._hold.refuse(what); }
+  _refuseWhileHeld(what = 'changing the accounts') { if (this.held()) throw this._heldRefusal(what); }
 
   _save() {
+    if (this._torn) { if (!this._tornSaveSaid) { this._tornSaveSaid = true; console.warn('[accounts] an accounts change was refused: the file is damaged, and nothing is written over it until it is mended or removed'); } return; }   // THE GUARD for torn bytes held (r3043)
     if (this._hold && !this._hold.writable('an accounts change')) return;   // THE GUARD (r2947 (1)): every one of the 35 sites — nothing written over a file that could not be read
     const tmp = this._file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
@@ -2713,7 +2737,7 @@ class AccountManager {
     }
     // THE MONEY (主开发 r2947 / r3043): while the accounts are held NOTHING starts or resumes on another login by a guess — the default and
     // every named account are unknown: refused by name (never null = the machine's own login); a person's own «this machine's login» stays theirs
-    if (this._hold && this._hold.held() && requested !== 'subscription') throw this._hold.refusal('starting a conversation on an account');
+    if (requested !== 'subscription' && this.held()) throw this._heldRefusal('starting a conversation on an account');
     if (this._credsOf(backend)?.spawnForm === 'isolated-home') return this._resolveHomeSpawn(backend, requested, opts); // the descriptor's creds row picks the form (rv-harnesses H3)
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
@@ -2895,7 +2919,6 @@ class AccountManager {
   // login (default) or its shared home when none; an account id → that account's own dir as spawnEnvVar.
   _resolveHomeSpawn(backend, requested, opts = {}) {
     if (requested === 'subscription') return null; // codex's own global login
-    if (this._hold && this._hold.held()) throw this._hold.refusal('starting a conversation on an account');   // r3043: never the machine login for a list that could not be read
     const id = requested || this._state[this._credsOf(backend).defaultIdField];
     if (!id) return null;
     const a = this.get(id);
