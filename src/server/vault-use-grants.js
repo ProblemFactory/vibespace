@@ -59,7 +59,7 @@ function writeJsonAtomic(file, obj) {
 
 const STATUS = Object.freeze({ vault_use_marks_unread: 503, marks_undecided: 409, row_changed: 409, except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
-  marks_undecided: 'this row\'s marks were lost (vault-use-marks.json was damaged or missing) — its members are kept, unverified; open «Who may use it» and save the row again (验证是你) to keep them; nothing was written',   // r3002 (a)
+  marks_undecided: 'this row\'s marks were lost (vault-use-marks.json was damaged) — its members are kept, unverified; open «Who may use it» and save the row as you want it (验证是你): that decides it — a single ✕ or press cannot vouch for the members it leaves; nothing was written',   // r3002 (a); r3130 (c) (e)
   row_changed: 'someone changed who may use it since this page read it — nothing was written; the row as it is now is answered (use): save again over it',   // B-f212's remainder
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
@@ -145,17 +145,22 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     onLift: (v, f) => { if (f && f.setAside) tornLift = { setAside: f.setAside }; marksStarted = false; if (unlocked()) loadGen(); said(); },
   }) : null;
   const marksHeld = () => !!(marksHold && marksHold.held());
-  const genBody = (seq, res, und = []) => JSON.stringify({ v: 1, gen: Number(seq) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])), ...(und.length ? { undecided: [...und].sort() } : {}) });
+  // r3130 MUST 1 (THE WAY BACK): `mark` stays over THE RELEASE's OWN BODY, byte for byte ({v, gen, res}) — a release reading this sidecar
+  // verifies every row decided here; the undecided list rides BESIDE it under a SECOND mark of its own (UND_LABEL over {gen, undecided}),
+  // read only when both verify (a missing or failing second mark = no undecided row: the release's own answer for those rows)
+  const genBody = (seq, res) => JSON.stringify({ v: 1, gen: Number(seq) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])) });
+  const UND_LABEL = 'vault-use-undecided-v1';
+  const undecidedBody = (seq, und) => JSON.stringify({ gen: Number(seq) || 0, undecided: [...und].sort() });
   /** a read sidecar → its generations (and its undecided rows) when its mark verifies; else nothing changes (fail closed) */
   const applyMarks = (raw) => {
     if (!raw || typeof raw !== 'object') return false;
     const res = raw.res && typeof raw.res === 'object' && !Array.isArray(raw.res) ? Object.fromEntries(Object.keys(raw.res).filter((k) => GM.resourceShapeOk(U.DOOR, k)).map((k) => [k, Number(raw.res[k]) || 0])) : {};
     const und = Array.isArray(raw.undecided) ? raw.undecided.filter((k) => typeof k === 'string' && GM.resourceShapeOk(U.DOOR, k)) : [];
     const g = Number(raw.gen) || 0;
-    let want = null; try { want = vault.macOf(GEN_LABEL, genBody(g, res, und)); } catch { want = null; }
-    const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;
-    if (!(want && got && g >= markGen && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) return false;
-    genSeq = Math.max(genSeq, g); markGen = g; genByRes = Object.assign(Object.create(null), res); undecided = new Set(und);
+    const macOk = (label, body, got) => { let want = null; try { want = vault.macOf(label, body); } catch { want = null; } const h = typeof got === 'string' && /^[0-9a-f]{64}$/.test(got) ? got : null; return !!(want && h && crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(want, 'hex'))); };
+    if (!(g >= markGen && macOk(GEN_LABEL, genBody(g, res), raw.mark))) return false;
+    genSeq = Math.max(genSeq, g); markGen = g; genByRes = Object.assign(Object.create(null), res);
+    undecided = und.length && macOk(UND_LABEL, undecidedBody(g, und), raw.undecidedMark) ? new Set(und) : new Set();   // r3130 MUST 1: only under its OWN mark
     return true;
   };
   /** torn marks say nothing of the rows that exist: each whose members do not all verify at generation 0 is UNDECIDED, written under the mark */
@@ -186,7 +191,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     let raw = null; try { raw = JSON.parse(read.text); } catch { return; }
     applyMarks(raw);
   };
-  const saveGen = () => { if (!MARK_FILE || !marksHold.writable('a vault-use generation')) return; try { const body = genBody(genSeq, genByRes, [...undecided]); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; writeJsonAtomic(MARK_FILE, { ...JSON.parse(body), mark }); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
+  const saveGen = () => { if (!MARK_FILE || !marksHold.writable('a vault-use generation')) return; try { const body = genBody(genSeq, genByRes); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; const doc = { ...JSON.parse(body), mark }; if (undecided.size) { const umark = vault.macOf(UND_LABEL, undecidedBody(genSeq, undecided)); if (!umark) return; doc.undecided = [...undecided].sort(); doc.undecidedMark = umark; } writeJsonAtomic(MARK_FILE, doc); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
   // lane vault-use-grants round 5 (MINOR, item 6): the generation moves in TWO steps — `nextGen` computes the generation a
   // write WILL take (it does NOT persist), and `commitGen` records it only AFTER the grants write landed. r4 bumped+persisted
   // BEFORE the write, so a refused 257th member (too_many) or a failed grants.json write invalidated every existing member of
@@ -326,7 +331,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
       const sc = U.scopesOf(e).map((s) => { const p = o.get(`${s.kind}\n${s.key}`); return p && p.until === s.until && (p.tool || null) === (s.tool || null) ? { ...s, source: p.source, at: p.at } : { ...s, source: 'owner', at: now() }; });
       return U.scopedMember(e, sc);
     });
-    if (widens(was, { to: rowTo, except: v.row.except }) && !reauthed) return named('reveal_needs_password');
+    if ((undecided.has(String(id)) || widens(was, { to: rowTo, except: v.row.except })) && !reauthed) return named('reveal_needs_password');   // r3130 (d): a Save that DECIDES an undecided row vouches anew for members whose mark is lost — the second word, as the window says
     // r9 (主开发's acceptance of r8, MINOR D): a Save that leaves out a member holding a LIVE window takes the window back — named
     // here (`windowsGone`), so the door tells the press's record as both ✕ roads do
     const keptW = new Set(rowTo.filter((e) => U.scopesOf(e).some((s) => s.kind === 'window' && s.until > t0)).map((e) => GM.principalKey(e)));
@@ -463,12 +468,14 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
    *  writer, by 'migration'. → { carried, expired, hostless, failed }. */
   function carry(always, { resourceOf = (x) => x, toolOfWild = null } = {}) {
     const plan = U.alwaysCarry(always, { now: now(), resourceOf, toolOfWild });
-    let carried = 0, failed = 0, legacy = 0;
+    loadGen(); if (marksHeld()) return { held: true, carried: 0, expired: plan.expired, hostless: plan.hostless, failed: 0, legacy: 0, waits: plan.members.length };   // r3130 (a): nothing carried while held — the rows stay for the next read
+    let carried = 0, failed = 0, legacy = 0, waits = 0;
     for (const m of plan.members) {
-      const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null, legacy: !!m.legacy }, { by: 'migration' });   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
+      const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null, legacy: !!m.legacy }, { by: 'migration' });
+      if (!r.ok && (r.code === 'marks_undecided' || r.code === 'vault_use_marks_unread')) { waits++; continue; }   // r3130 (a): it waits for the row's decision — never «failed»   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
       if (r.ok) { carried++; if (m.legacy) legacy++; } else { failed++; log(`[vault-use] an «always» row could not be carried (${m.resource}: ${r.code})`); }
     }
-    return { carried, expired: plan.expired, hostless: plan.hostless, failed, legacy };
+    return { carried, expired: plan.expired, hostless: plan.hostless, failed, legacy, waits };
   }
   /** r3 (MAJOR 1): THE WILDCARD CARRY — every stored member's wildcard host with NO tool (the 2.369.363/.364 carry wrote them)
    *  gets the CLI the tool table names for it (`toolOfWild`), through the ONE writer, by 'migration'; one the table cannot name

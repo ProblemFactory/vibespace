@@ -116,7 +116,8 @@ const sigOf = (scopes) => scopes.filter((s) => s && s.kind !== 'window').map(sco
  *  1-hour window that has ENDED (the hub had not swept it — a restart or a lock drops the hour-end timer) IS a change: the Save
  *  posts and the hub prunes it — what the preview says («the 1-hour approval ended — Save removes it»). A live one is the
  *  card's: never sent, never compared. */
-export function rowChanged(stored = {}, next = {}, { now = Date.now() } = {}) {
+export function rowChanged(stored = {}, next = {}, { now = Date.now(), undecided = false } = {}) {
+  if (undecided) return true;   // r3130 MUST 2: an UNDECIDED row's Save is a change — it decides the row (posted whole)
   const endedW = (s) => !!s && s.kind === 'window' && (!!s.expired || (Number(s.until) > 0 && Number(s.until) <= now));
   if ((stored.to || []).filter(Boolean).some((m) => scopesOfM(m).some(endedW))) return true;
   // the chain's cure (C): a member's «仅本组» is part of what the row says — a flag-only change is a change (switched off = only:false)
@@ -260,6 +261,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // the row as a Save LANDED it (`landRow`: the hub's answer names it — null for an older hub's answer: every next Save then
   // posts the row whole); `held` = its 除了 as picker keys (r10)
   let snap = { to: members, except: u.except || [] }, held = stored.except;
+  let undecidedNow = !!(u && u.unverifiedWhy === 'marks_undecided');   // r3130 MUST 2: the row's marks were lost — its Save decides it (the landing and a re-read move this)
   // B-f212's remainder (主开发 r1163): THE ROW'S STAMP — of the row this dialog last knew (the open, then every landing); every
   // Save sends it, the hub refuses one over a row this dialog never saw (`row_changed`). An older hub's row has none: none sent
   const revOfUse = (x) => (x && Number.isSafeInteger(x.rev) ? x.rev : null);
@@ -392,7 +394,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       fresh.push(plan.fresh); kept.push(plan.kept); gone.push(!!plan.pruned);
     }
     const removed = exceptRemovedOf(snap ? snap.except : u.except || [], pick.except);   // r10: every exception this Save takes away — said, and named to the hub
-    return { to, fresh, kept, gone, pick, removed, changed: !snap || rowChanged(snap, { to, except: pick.except }) };
+    return { to, fresh, kept, gone, pick, removed, changed: !snap || rowChanged(snap, { to, except: pick.except }, { undecided: undecidedNow }) };
   };
   // r13 (the readers of B-f212): the owner's own inputs — a change the hub made (a row answered without `use`, a 1-hour window
   // that ended meanwhile) is no reason to count the ends anew
@@ -466,6 +468,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const landRow = (r, base) => {
     const lu = r && r.use && Array.isArray(r.use.to) ? r.use : null;
     snap = lu ? { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] } : null;
+    if (lu) undecidedNow = lu.unverifiedWhy === 'marks_undecided';   // r3130 MUST 2: a landed row is decided (the hub's answer says if not)
     if (lu) { stale.textContent = ''; stale.hidden = true; rev = revOfUse(lu); }   // the hub just answered the row: it was read (and its stamp)
     land(base, lu ? { ...rowFields(lu, base), end: base.end } : asPressed(base));
   };
@@ -497,6 +500,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const at = saveAt, base = fieldsNow();
     if (plan.error) { err.textContent = plan.error; return false; }
     const { to, pick, removed, changed } = plan;
+    const deciding = undecidedNow;   // r3130 MUST 2: this press decides an undecided row (said at its landing)
     const polWas = polLanded, polNow = base.policy;
     // r10 (主开发's acceptance of r9, MAJOR (2)): the ROW is posted only when it changed — a Save that sets only the policy never
     // rewrites the row behind the 验证是你 the owner gives for the policy
@@ -535,7 +539,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
         land(base, { policy: polNow });   // B-f212: the policy landed — words typed over it since the press stay unsaved
       }
       if (r && r.ok) {
-        if (changed) showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); else if (polNow !== polWas) showToast(t('Saved'));
+        if (changed) showToast(deciding && to.length ? t('Saved — these members are in use again') : to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); else if (polNow !== polWas) showToast(t('Saved'));   // r3130 MUST 2
         // B-f212 (b): a landing closes a CLEAN dialog only. An edit made while the Save was in flight is still unsaved: the dialog
         // asks, as the person's own close does (Save / Discard / Keep editing); the ask's own Save hears why it is not done
         if (keptPress) { refresh?.(); return t('what you changed while it was saving'); }   // a press kept during this flight posts next: it closes or asks
@@ -570,8 +574,9 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       // Save then meets the hub's refusal by name, as before
       const listed = !!r && r.ok !== false && Array.isArray(r.rows);
       const x = listed ? r.rows.find((y) => y && y.id === row.id) : null, lu = x && x.run ? x.run.use : null;
-      const locked = (r && (r.code === 'vault_locked' || r.state === 'locked')) || !!(lu && lu.unverified);
-      const word = locked ? t('The vault is locked — who may use it could not be read just now; this shows it as last read')
+      const locked = (r && (r.code === 'vault_locked' || r.state === 'locked')) || !!(lu && lu.unverified && !lu.unverifiedWhy);   // r3130 MUST 2: a held or undecided row is not «locked»
+      const word = lu && lu.unverifiedWhy === 'marks_unread' ? t('The vault-use marks could not be read — this shows who may use it as last read; nothing is lost')
+        : locked ? t('The vault is locked — who may use it could not be read just now; this shows it as last read')
         : !listed ? t('Who may use it could not be read just now — this shows it as last read')
           : !x ? t('«{name}» was removed from the vault', { name: row.label })
             : !lu || lu.unknown || !Array.isArray(lu.to) ? t('Who may use it could not be read just now — this shows it as last read') : '';
@@ -581,7 +586,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       // entry that is GONE says its own status (unlocking re-reads by itself; a removed entry cannot be opened again). Words a press
       // already showed («being read») follow the read that failed after it (the tracer's read)
       if (word && unread) { readFailed = true; failWord = locked || (listed && !x) ? word : t('Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)'); if (err.textContent) err.textContent = failWord; }
-      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; if (unread) { unread = false; err.textContent = ''; } rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
+      if (!word) { undecidedNow = lu.unverifiedWhy === 'marks_undecided'; snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; if (unread) { unread = false; err.textContent = ''; } rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
     }
     if (owed && !flying) readRow();
   }

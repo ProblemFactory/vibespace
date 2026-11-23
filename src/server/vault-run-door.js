@@ -783,9 +783,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** lane vault-use-grants: THE CARRY — the verified store's «always» rows (command shapes) become vault-use members (each
    *  entry × the conversation × the shape's hosts × its end), then the store keeps none; ONE audit line says how many. */
   function carryAlways() {
-    let c = null;
-    try { c = useGrants.carry(db.always, { toolOfWild: VR.wildcardToolOf }); } catch (e) { log(`the «always» rows could not be carried (${e.message}) — they stay in data/${STORE_FILE}`); return; }
-    const r = save({ runnable: db.runnable, always: [] });
+    // r3130 (a): ONE row at a time — a row the vault-use marks' hold (or an undecided row) refused STAYS in the old list for the next
+    // read; never «carried» into an empty list
+    const c = { carried: 0, expired: 0, hostless: 0, failed: 0, legacy: 0, waits: 0 }, keep = [];
+    for (const a of db.always) {
+      let one = null;
+      try { one = useGrants.carry([a], { toolOfWild: VR.wildcardToolOf }); } catch (e) { log(`the «always» rows could not be carried (${e.message}) — they stay in data/${STORE_FILE}`); return; }
+      for (const k of Object.keys(c)) c[k] += Number(one && one[k]) || 0;
+      if (one && (one.held || one.waits)) keep.push(a);
+    }
+    const r = save({ runnable: db.runnable, always: keep });
     audit('vault-run-always-carried', { ...c, rows: c.carried + c.expired + c.hostless + c.failed, saved: !!r.ok });
     log(`data/${STORE_FILE}: ${c.carried} «always» member(s) carried into the vault-use grants (${c.expired} expired, ${c.hostless} with no host)${r.ok ? '' : ' — the store could not be rewritten; carried again at the next read'}`);
   }

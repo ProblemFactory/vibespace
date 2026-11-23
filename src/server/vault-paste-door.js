@@ -76,6 +76,7 @@ const MORE_WORDS = Object.freeze({
   vault_not_set_up: 'the vault is not set up yet — set the second password first (⚙ System ▸ Vault…), then save it',
   invalid_value: 'that value is not accepted by the field',
   store_failed: 'the value could not be saved — nothing changed',
+  vault_use_marks_unread: 'the vault-use marks could not be read — nothing was deleted; VibeSpace reads them again by itself, then delete again',   // r3130 (b)
   entry_unknown_id: 'that stored value is not there any more',
   entry_unknown: 'no entry this conversation may use has that reference — `vibespace-vault list` names them',   // lane vault-entry-description
   words_pending: 'a change of that entry\'s words already waits on the user — wait for their answer',
@@ -87,7 +88,7 @@ const MORE_WORDS = Object.freeze({
 });
 const STATUS = Object.freeze({
   unauthorized: 401, job_no_use: 403, 'todos-unread': 503, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
-  bad_answer: 400, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
+  bad_answer: 400, vault_use_marks_unread: 503, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
   totp_no_door: 409, totp_bad_name: 400, totp_words: 400, totp_host: 400, exists: 409, bad_uri: 400, hotp_unsupported: 400, bad_seed: 400, seed_too_short: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400, name_required: 400, bad_way: 400,   // lane totp-request-card (the two-step add door's own codes)
   login_no_door: 409, login_channel_unmediated: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_bad_origin: 400, login_words: 400, login_password_lines: 400, login_bad_user: 400, bad_totp: 400, not_written: 500, unreadable: 500,   // lane login-request-card (+ the add door's own codes + r29 channel law)
@@ -433,7 +434,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     // lane vault-use-grants round 5 (MINOR item 6): the entry and WHO MAY USE IT go together — remove the vault-use grant row
     // FIRST (it refuses while locked, needing the generation sidecar). If it cannot (a locked vault), REFUSE the whole delete by
     // name, so an entry is never gone while its grant row dangles (r4 deleted the secret and silently ignored the row's refusal).
-    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${entry}#${P.ENTRY_FIELD}`, { by }); } catch (e) { log(`${entry}: its vault-use grant row could not be removed — ${e.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
+    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${entry}#${P.ENTRY_FIELD}`, { by }); } catch (e) { log(`${entry}: its vault-use grant row could not be removed — ${e.message}`); return named('store_failed'); } if (dr && !dr.ok) return dr.code === 'vault_use_marks_unread' ? named('vault_use_marks_unread', { words: dr.error || MORE_WORDS.vault_use_marks_unread }) : named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }   // r3130 (b): held — its own code and words
     // lane vault-job-approval (decision ④): …and the Background jobs approved to use it — their vault-job row goes FIRST (the
     // same rule: a delete never leaves an approval dangling; a row that cannot be removed refuses the delete by name)
     const rowId = `secrets:${entry}#${P.ENTRY_FIELD}`;
@@ -461,7 +462,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const e = String(entry || '');
     if (!V.AGENT_NS_RE.test(e)) return named('entry_unknown_id');
     // an agent row's field is 'secret' too (src/vault-inventory.js secretRowOf) — the grant row's id is the row's id
-    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${e}#${P.ENTRY_FIELD}`, { by }); } catch (x) { log(`${e}: its vault-use grant row could not be removed — ${x.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
+    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${e}#${P.ENTRY_FIELD}`, { by }); } catch (x) { log(`${e}: its vault-use grant row could not be removed — ${x.message}`); return named('store_failed'); } if (dr && !dr.ok) return dr.code === 'vault_use_marks_unread' ? named('vault_use_marks_unread', { words: dr.error || MORE_WORDS.vault_use_marks_unread }) : named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }   // r3130 (b): held — its own code and words
     // lane vault-job-approval (decision ④, the agent's entry as the free one): the Background jobs approved to use it (a value
     // the hub minted asks the owner) — their vault-job row goes FIRST or the delete is refused by name; after the drop every job
     // that names it stops, its own put ones too (its value is gone: a waiting one is refused, a running one stopped and told once)

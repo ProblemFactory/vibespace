@@ -1793,6 +1793,9 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     readrev: ['rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true }));', "if (globalThis.__f212red !== 'readrev') rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true }));"],   // round lens 3: the re-read keeps the old stamp
     landrev: ['stale.hidden = true; rev = revOfUse(lu); }   // the hub just answered the row', "stale.hidden = true; if (globalThis.__f212red !== 'landrev') rev = revOfUse(lu); }   // the hub just answered the row"],   // round lens 3: a landed Save keeps the old stamp
     kept: ['keptPress = null; if (refused) return false; return doSave();', "keptPress = null; if (refused && globalThis.__f212red !== 'kept') return false; return doSave();"],   // ㉘ (the read): a press kept over a refusal posts at once
+    undecided: ['{ undecided: undecidedNow })', "{ undecided: globalThis.__f212red !== 'undecided' && undecidedNow })"],   // r3130 MUST 2: today's plan — an undecided row's Save with no edit posts nothing
+    undecidedlive: ["if (lu) undecidedNow = lu.unverifiedWhy === 'marks_undecided';", "if (lu && globalThis.__f212red !== 'undecidedlive') undecidedNow = lu.unverifiedWhy === 'marks_undecided';"],   // r3130 MUST 2: the open's «undecided» kept after the row landed
+    lockedword: ['|| !!(lu && lu.unverified && !lu.unverifiedWhy);', "|| !!(lu && lu.unverified && (globalThis.__f212red === 'lockedword' || !lu.unverifiedWhy));"],   // r3130 MUST 2: today's reader — every unverified row read as «the vault is locked»
     off: ['offContents = () => { try { app.ws.offGlobal(onContents); } catch { } };', "offContents = () => { if (globalThis.__f212red === 'off') return; try { app.ws.offGlobal(onContents); } catch { } };"],   // the listener outlives the dialog
   };
   const mutantVU = await bundleVU((src) => Object.entries(REDS).reduce((acc, [name, [from, to]]) => anchored(acc, from, to, `㉗ RED ${name}`), src));
@@ -2249,6 +2252,53 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(J(tsR.sent) === J([7, 7]) && tsR.closed === 0, `RED control: the landed Save keeps the old stamp ⇒ the dialog's next Save is refused over its own write — ${J(tsR)}`, tsR);
   ok(sfN.sent === 'none' && J(sfN.stored) === J(['cid-ada']) && !sfR.picked.includes(K_CEE) && sfR.second.sent === 7 && sfR.second.closed === 0,
     `RED control: no stamp sent ⇒ the hub writes the dialog's row over the card's member (Cee lost — the release's last writer wins); the refusal not landed ⇒ Cee never shown and the next Save refused again — ${J({ stampless: { sent: sfN.sent, stored: sfN.stored }, refusal: { picked: sfR.picked, err: sfR.err, second: sfR.second } })}`, { sfN, sfR });
+  // ═══ r3130 MUST 2 (lane lg-vault-env, round wzlpe5oa8): THE WAY OUT of a row whose vault-use marks were lost (UNDECIDED) ═══
+  // the owner's Save decides it: the press with NO edit posts the row whole and says the members are in use again; the decided
+  // row's repeated Save posts nothing; a re-read of an undecided or a held row never says «the vault is locked». REDs (the one
+  // mutant bundle's switches): today's plan (the press posts nothing — the row stays undecided), the open's state kept after the
+  // landing, today's reader
+  console.log('  r3130 MUST 2: vault «Who may use» — an undecided row\'s Save with no edit posts it (it decides); its reader never says «locked»');
+  {
+    const undRow = (extra = {}) => ({ id: ENTRY, label: 'API key', run: { use: { to: [{ ...ada }], except: [], entryHosts: [], unverified: true, unverifiedWhy: 'marks_undecided', ...extra } } });
+    const undRoutes = (calls, { policy = true } = {}) => async (url, method, body) => {
+      if (url === '/api/vault/use-grants' && method === 'POST') { calls.push(body); return { ok: true, use: { to: (body.to || []).map((m) => ({ ...m, principal: `conversation:${m.key}`, name: 'Ada', hosts: (m.scopes || []).filter((sc) => sc.host).map((sc) => sc.host) })), except: body.except || [] } }; }
+      if (url === '/api/vault/use-policy') return policy ? { ok: true } : { ok: false, code: 'not_written' };
+      return method !== 'GET' ? { ok: true } : undefined;
+    };
+    const press = async (show) => {   // ONE press, no edit
+      const calls = [];
+      const P = newPage({ routes: undRoutes(calls) });
+      show(undRow(), { app: VU_APP, refresh: () => { } });
+      await saved(P, P.shell.opts.unsaved.save());
+      return { posts: calls.length, toasts: P.toasts.slice(), closed: P.closed };
+    };
+    const twice = async (show) => {   // the row decided, the policy half refused (the dialog stays open): the repeated Save
+      const calls = [];
+      const P = newPage({ routes: undRoutes(calls, { policy: false }) });
+      show(undRow(), { app: VU_APP, refresh: () => { } });
+      byCls(P.shell.body, 'vw-use-policy-in').value = 'Only for the staging deploy';
+      await saved(P, P.shell.opts.unsaved.save());
+      await saved(P, P.shell.opts.unsaved.save());
+      return { posts: calls.length, closed: P.closed };
+    };
+    const reread = async (show, why) => {   // another client's save heard: the row read again answers it unverified by `why`
+      const H = wsApp();
+      const P = newPage({ routes: async (url, method) => (url === '/api/vault/contents' && method === 'GET' ? { ok: true, rows: [undRow({ unverifiedWhy: why })] } : method !== 'GET' ? { ok: true } : undefined) });
+      show(undRow({ unverifiedWhy: why }), { app: H.app, refresh: () => { } });
+      H.notify();
+      await saved(P, Promise.resolve());
+      return textOf(byCls(P.shell.body, 'vw-use-stale'));
+    };
+    const p1 = await press(real), p1R = await asRed('undecided', press);
+    ok(p1.posts === 1 && p1.toasts.includes('Saved — these members are in use again') && p1.closed === 1, `r3130 MUST 2 (a): an UNDECIDED row's Save with no edit POSTS the row whole (it decides) and says «these members are in use again» — ${J(p1)}`, p1);
+    ok(p1R.posts === 0, `RED control (today's plan): the same press posts nothing — the row stays undecided — ${J(p1R)}`, p1R);
+    const t2 = await twice(real), t2R = await asRed('undecidedlive', twice);
+    ok(t2.posts === 1 && t2.closed === 0, `r3130 MUST 2 (b): …once that Save landed the row is decided — the repeated Save posts no row again (only the policy is tried again) — ${J(t2)}`, t2);
+    ok(t2R.posts === 2, `RED control: the open's «undecided» kept after the landing ⇒ the repeated Save posts the row again — ${J(t2R)}`, t2R);
+    const wu = await reread(real, 'marks_undecided'), wh = await reread(real, 'marks_unread'), wuR = await asRed('lockedword', (s) => reread(s, 'marks_undecided'));
+    ok(!/locked/i.test(wu) && /marks could not be read/.test(wh) && !/locked/i.test(wh), `r3130 MUST 2 (c): the row's reader never reads an undecided or a held row as «the vault is locked» (undecided: «${wu}»; held: «${wh}»)`, { wu, wh });
+    ok(/The vault is locked/.test(wuR), `RED control (today's reader): an undecided row re-read says «The vault is locked» — «${wuR}»`, wuR);
+  }
   globalThis.__hx.real = realWas;
 }
 

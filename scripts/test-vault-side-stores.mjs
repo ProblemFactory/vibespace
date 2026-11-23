@@ -131,6 +131,119 @@ async function main() {
     const r = await silenceScene(noUndecided, 'torn');
     ok(!!r.add && r.add.ok && !r.kept, '(a) CONTROL (a copy whose torn marks lift as «no generations»): the card\'s «Always» rewrites the row WITHOUT its old member — red', { add: r.add && (r.add.ok ? 'written' : r.add.code), kept: r.kept });
   }
+  // ── r3130: the round's two musts and its required points ──
+  const releaseVerifies = (vault, file) => {   // THE RELEASE's OWN READER SHAPE (b06f36e90 loadGen), its bytes pinned: a mark over {v, gen, res}
+    const f = jsonOr(file); if (!f || typeof f.mark !== 'string') return false;
+    const res = f.res && typeof f.res === 'object' ? f.res : {};
+    const body = JSON.stringify({ v: 1, gen: Number(f.gen) || 0, res: Object.fromEntries(Object.keys(res).sort().map((k) => [k, Number(res[k]) || 0])) });
+    let want = null; try { want = vault.macOf('vault-use-gen-v1', body); } catch { want = null; }
+    return !!want && want === f.mark;
+  };
+  async function wayBackScene(ugMod) {
+    const w = await marksWorld(ugMod);
+    fs.writeFileSync(w.MARKS, '{"v":1,"gen":2,"res":{"secrets:secr');   // torn
+    const ug = w.mk(); ug.publicFor(w.e1);
+    const textOf = () => { try { return fs.readFileSync(w.MARKS, 'utf8'); } catch { return ''; } };
+    await until(() => textOf() !== '' && !textOf().startsWith('{"v":1,"gen":2,"res":{"secrets:secr'), 3000); await sleep(30); ug.publicFor(w.e1);
+    const save = ug.setRow(w.e1, { to: [w.m1] }, { reauthed: true });   // the owner decides e1; e2 stays undecided
+    const f = jsonOr(w.MARKS) || {};
+    return { save, hasUndecided: Array.isArray(f.undecided) && f.undecided.includes(w.e2), release: releaseVerifies(w.vault, w.MARKS), e2still: w.mk().publicFor(w.e2).unverifiedWhy };
+  }
+  {
+    const r = await wayBackScene(UG);
+    ok(!!r.save && r.save.ok && r.hasUndecided && r.release && r.e2still === 'marks_undecided', '(a) MUST 1 THE WAY BACK: with a row still undecided, the release\'s own reader verifies the sidecar (its mark over {v, gen, res}, byte for byte) — the rows decided here keep their members under the release; the list rides under its own mark', r);
+    const M = mutantCopies('vault-side-stores-wayback', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8');
+    const folded = anchored(SRC, 'const body = genBody(genSeq, genByRes); const mark = vault.macOf(GEN_LABEL, body);', 'const body = JSON.stringify({ ...JSON.parse(genBody(genSeq, genByRes)), ...(undecided.size ? { undecided: [...undecided].sort() } : {}) }); const mark = vault.macOf(GEN_LABEL, body);', 'folded-list');
+    const r2 = await wayBackScene(M.load('src/server/vault-use-grants.js', folded, 'folded-list'));
+    ok(!r2.release, '(a) CONTROL (the list folded back into the first body): the release cannot verify the sidecar — red', { release: r2.release });
+  }
+  {
+    // MUST 2 THE WAY OUT: the page's own plan function — a Save with no edit of an UNDECIDED row posts it (it decides)
+    const VUR = await import(new URL('../src/lib/vault-use-row.js', import.meta.url).href).catch(() => null);
+    const m = { kind: 'conversation', key: 'cid-made-up-1', scopes: [{ kind: 'host', key: '192.168.1.1', host: '192.168.1.1' }] };
+    const posts = VUR && VUR.rowChanged({ to: [m], except: [] }, { to: [m], except: [] }, { undecided: true });
+    const today = VUR && VUR.rowChanged({ to: [m], except: [] }, { to: [m], except: [] });
+    ok(posts === true, '(a) MUST 2 THE WAY OUT: an undecided row\'s Save with no edit POSTS the row whole (the page\'s own plan: it decides)', { posts });
+    ok(today === false, '(a) CONTROL (today\'s plan, the row not undecided): the same press posts nothing — red', { today });
+  }
+  {
+    // (d) deciding asks the second word; (a)(f) the carry, the wildcard carry, a drop and a ✕ while HELD; a lift while LOCKED; a file gone after a failed read
+    const w = await marksWorld();
+    const ug = w.mk();
+    const pr = placeRefusal(w.MARKS);
+    let carryR = null, wild = null, drop = null, rev = null, rows0 = null, rows1 = null;
+    try {
+      rows0 = JSON.stringify(w.grants.rowsOfDoor('vault-use'));
+      const always = [{ conv: 'cid-made-up-9', key: 'shape:' + JSON.stringify(['/usr/bin/curl', 0, 0, 0, ['192.168.1.1']]), entries: [w.e2], until: null }];
+      carryR = ug.carry(always); wild = ug.carryWildcards(() => null); drop = ug.drop(w.e2); rev = ug.revoke(w.e2, 'conversation:cid-made-up-2');
+      rows1 = JSON.stringify(w.grants.rowsOfDoor('vault-use'));
+    } finally { pr.lift(); }
+    ok(!!carryR && carryR.held === true && carryR.carried === 0 && !!wild && wild.code === 'vault_use_marks_unread' && rows1 === rows0, '(a) the carry of an old «always» row and the wildcard carry while HELD carry nothing and say they wait (the row stays for the next read)', { carry: carryR, wild: wild && wild.code });
+    ok(!!drop && drop.code === 'vault_use_marks_unread' && !!rev && rev.code === 'vault_use_marks_unread' && rows1 === rows0, '(a) …a drop and a ✕ while HELD are refused by the hold\'s own code, nothing written', { drop: drop && drop.code, revoke: rev && rev.code });
+    // a lift while the vault is LOCKED: the read again lifts; the next unlocked read loads the generations
+    w.vault.lock('door');
+    const lifted = await ug._marksHold.again();
+    await w.vault.unlock(PW);
+    ok(lifted === true && w.verified(ug, w.e2) === 1 && w.stale.length === 0, '(a) a lift while the vault is LOCKED: the generations load at the next unlocked read, every member verifies, nothing said forged', { lifted, verified: w.verified(ug, w.e2) });
+  }
+  {
+    const w = await marksWorld();
+    const ug = w.mk();
+    const pr = placeRefusal(w.MARKS);
+    try { ug.publicFor(w.e2); } finally { pr.lift(); }
+    fs.rmSync(w.MARKS, { force: true });   // the file is GONE after the failed read
+    const a1 = await ug._marksHold.again(), a2 = await ug._marksHold.again();
+    const pub = ug.publicFor(w.e2);
+    ok(a1 === false && a2 === true && !!pub && !pub.unverifiedWhy, '(a) a file MISSING after a failed read is read once more, then is the release\'s generation 0 (no row undecided — a missing sidecar never makes one)', { first: a1, second: a2, why: pub && pub.unverifiedWhy });
+  }
+  {
+    const w = await marksWorld(), ug = w.mk();
+    fs.writeFileSync(w.MARKS, '{"v":1,"gen":2,"res":{"secrets:secr'); ug.publicFor(w.e2);
+    await until(() => { try { return !fs.readFileSync(w.MARKS, 'utf8').startsWith('{"v":1,"gen":2,"res":{"secrets:secr'); } catch { return false; } }, 3000); await sleep(30); ug.publicFor(w.e2);
+    const noWord = ug.setRow(w.e2, { to: [w.m2] }, { reauthed: false });
+    const withWord = ug.setRow(w.e2, { to: [w.m2] }, { reauthed: true });
+    ok(!!noWord && noWord.code === 'reveal_needs_password' && !!withWord && withWord.ok, '(a) (d) a Save that DECIDES an undecided row asks the second word (验证是你), as the window says — it vouches anew for members whose mark is lost', { without: noWord && noWord.code, with: withWord && (withWord.ok ? 'ok' : withWord.code) });
+  }
+  {
+    // r3130 (a) AT THE RUN DOOR: an old «always» row read while the marks are HELD STAYS in data/vault-run.json for the next read (the
+    // door carries one row at a time and keeps each the hold refused); the next life, the marks read, carries it. RED: a door whose
+    // carry keeps nothing (the list emptied while nothing was carried — the row lost)
+    const RUNA = require(path.join(REPO, 'src/server/vault-run-door.js'));
+    const VRA = require(path.join(REPO, 'src/vault-run.js'));
+    async function alwaysScene(runMod) {
+      const w = await marksWorld();
+      const name = w.e2.slice('secrets:'.length, -'#secret'.length), ref = `vault://secrets/${name}/secret`;
+      const key = VRA.shapeKeyOf({ tool: '/usr/bin/curl', sub: [], flags: ['-s'], args: ['url'], hosts: ['api.router.lan'], entries: [ref], injection: ['env:T'], env: [], templates: [], on: null, script: null, keyed: [] });
+      const body = JSON.stringify({ v: 1, gen: 7, runnable: [w.e2], always: [{ conv: 'cid-made-up-9', key, until: null, entries: [w.e2], at: Date.now(), by: 'user' }] });
+      const STORE = path.join(w.dataDir, RUNA.STORE_FILE);
+      fs.writeFileSync(STORE, JSON.stringify({ ...JSON.parse(body), mark: w.vault.macOf(RUNA.MARK_LABEL, body) }));
+      const door = (ug) => runMod.create({ dataDir: w.dataDir, vault: w.vault, userTodos: null, sources: {}, log: () => { }, useGrants: ug });
+      const row = { id: w.e2, store: 'secrets', entry: name, field: 'secret' };
+      const pr = placeRefusal(w.MARKS);
+      let heldAnswer = null;
+      try { const ug = w.mk(); door(ug).rowFacts(row); heldAnswer = ug.carry([], {}); } finally { pr.lift(); }
+      const keptWhileHeld = ((jsonOr(STORE) || {}).always || []).length;
+      door(w.mk()).rowFacts(row);   // the next life: the marks read
+      return { held: !!(heldAnswer && heldAnswer.held), kept: keptWhileHeld, carried: JSON.stringify(w.onDisk(w.e2)).includes('cid-made-up-9'), left: ((jsonOr(STORE) || {}).always || []).length };
+    }
+    const r = await alwaysScene(RUNA);
+    ok(r.held && r.kept === 1 && r.carried && r.left === 0, '(a) THE RUN DOOR\'s carry of an old «always» row while the marks are HELD: the row STAYS in data/vault-run.json for the next read — and the next life, the marks read, carries it (the list then empty)', r);
+    const M = mutantCopies('vault-side-stores-carry', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const r2 = await alwaysScene(M.load('src/server/vault-run-door.js', anchored(SRC, '      if (one && (one.held || one.waits)) keep.push(a);\n', '', 'carry-keeps-nothing'), 'carry-keeps-nothing'));
+    ok(r2.kept === 0 && !r2.carried, '(a) CONTROL (a door whose carry keeps nothing): the held read empties the list and the row is never carried — red', r2);
+  }
+  {
+    // the HELD scene's own red: a copy whose write doors do not ask the hold
+    const M = mutantCopies('vault-side-stores-held', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8');
+    const noHold = anchored(SRC, "    if (marksHeld()) return { ok: false, code: 'vault_use_marks_unread', error: marksHold.words() };\n    if (!decides && undecided.has(String(id))) return named('marks_undecided');", "    if (!decides && undecided.has(String(id))) return named('marks_undecided');", 'no-hold-guard');
+    const w = await marksWorld(M.load('src/server/vault-use-grants.js', noHold, 'no-hold-guard'));
+    const ug = w.mk(); const pr = placeRefusal(w.MARKS);
+    let save = null; try { save = ug.setRow(w.e1, { to: [w.m1] }, { reauthed: true }); } finally { pr.lift(); }
+    ok(!!save && save.ok === true, '(a) CONTROL (a copy whose write doors do not ask the hold): the owner\'s Save goes through on a mark that could not be read — red', save && (save.ok ? 'written' : save.code));
+  }
 }
 
 main().then(() => report(), (e) => { console.error(`  ✗ the suite itself threw — ${(e && e.stack) || e}`); process.exit(1); });
