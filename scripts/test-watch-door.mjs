@@ -518,15 +518,20 @@ async function parserRoad(consumer, { control = false } = {}) {
     attach(s, id, h, helpers);
     // the helper starts BEFORE its transcript exists: the parser's RETRY TIMER arms the watch (the road that ended the hub)
     h.data(JSON.stringify({ type: 'system', subtype: 'task_started', task_type: 'local_agent', task_id: 'ag1', tool_use_id: 'tu-wd-1' }) + '\n');
+    // the transcript is written only once the parser found NONE and armed its RETRY TIMER (the road that ended the hub) — on that
+    // FACT, never on the order of two writes: at the hotfix's trial of 11-23 (14:06Z, the bare trial tip) the finder saw a file
+    // written right after task_started, the watch started on the found road (its throw caught there), and the control's road was
+    // never taken (r3208)
+    await until(() => { const e = s.subagentWatchers && s.subagentWatchers.get('tu-wd-1'); return !!(e && e.retry); }, 400, 50);
     fs.mkdirSync(sub, { recursive: true }); fs.writeFileSync(file, rec(1));
-    const armed = await until(() => { const e = s.subagentWatchers && s.subagentWatchers.get('tu-wd-1'); return !!(e && e.watcher) || uncaught.length > 0; }, 80, 50);   // the timer fires after ~1 s
+    const armed = await until(() => { const e = s.subagentWatchers && s.subagentWatchers.get('tu-wd-1'); return !!(e && e.watcher) || uncaught.length > 0; }, 400, 50);   // the timer fires after ~1 s; the wait ENDS ON THE FACT (the watch armed, or the throw), bounded at 20 s — r3208: a loaded test machine beat the old 4 s bound in 7 of 299 runs on 11-23 (the helper's find, then its timer)
     r.armed = armed; r.uncaught = uncaught.map((e) => e && e.code);
     const helperMsgs = () => bcast.filter((m) => m && m.type === 'subagent-message' && m.parentToolUseId === 'tu-wd-1').map((m) => m.message && m.message.uuid);
     if (!control) {
       let baseTaken = false; Promise.resolve(((s.subagentWatchers.get('tu-wd-1') || {}).watcher || {}).ready).then(() => { baseTaken = true; });
       await until(() => baseTaken, 80, 25);   // (its reader's S4) the poll's baseline taken — a fact, never a fixed wait; bounded, so a poll that never takes it is a named red, never a hang
       fs.appendFileSync(file, rec(2));
-      await until(() => helperMsgs().length >= 2, 80, 50);
+      await until(() => helperMsgs().length >= 2, 400, 50);   // r3208: the same fact-ended wait, bounded at 20 s
     }
     r.helper = helperMsgs();
     r.polled = !!(s.subagentWatchers.get('tu-wd-1') || {}).watcher?.polled;
