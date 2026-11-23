@@ -2693,8 +2693,8 @@ function create(engineCtx) {
    * release before this block carries these fields: every watch and rule row arrives without them) or a return to it (its row model
    * keeps six fields: the entry's WHO, never its settings, never the row's `rule` / `blocks`) — takes what this release's own SAVE
    * would carry for it from the channel index's copy, BY THE SAVE's OWN RULES (addCarriedBodies: inline bodies only; CG.carriedOf:
-   * every bound), WHO as the row has it, ONE ROW A WRITE (a row the store refuses, or one that cannot carry, stays as it is and is
-   * said once; the others land). A healed row carries: the next start finds it whole. A row and a copy that DISAGREE are never
+   * every bound), WHO as the row has it, ALL IN ONE WRITE (r3020: every row's change built first, then ONE setMany — a row the store
+   * refuses is set aside and said once and the rest handed again at once; one that cannot carry stays as it is, said once). A healed row carries: the next start finds it whole. A row and a copy that DISAGREE are never
    * guessed — THE LATER STAMP OF THE ACT WINS: an entry later than its index watcher is kept as written (its act's settings are not
    * in the index); a carrying row later than the index is the completion's (run first). A watcher the row names that has no
    * settings in the index (one another door added; one whose save a stop cut short before a return) stays bare — nothing invented.
@@ -2704,10 +2704,11 @@ function create(engineCtx) {
    * said again) — that ledger is never pruned, bounded by the rows. The engine's start waits while its index is held, so the heal
    * never reads an unread index. → {healed: [words], none: [words], later: [words], cannot: [words]}.
    */
+  const FILTER_ID_MAX = 512;   // r3020: the bound of a filter id a watch entry carries (src/grant-model.js TEXT_MAX)
   async function healGrainRows() {
     let rows = [];
     try { rows = CG.rowsShort(); } catch { rows = []; }
-    const out = { healed: [], none: [], later: [], cannot: [] };
+    const out = { healed: [], none: [], later: [], cannot: [], writes: 0 };
     if (!rows.length) return out;
     const accounts = new Set(adapterRecords().adapters.map((r) => r.id));
     const said = store.index.table('grainSkipsSaid') || {}, newSaid = {};
@@ -2721,6 +2722,7 @@ function create(engineCtx) {
         return l && l.rec && Array.isArray(l.rec.watchers) ? l.rec.watchers : (Array.isArray(holder.watchers) ? holder.watchers : []);
       } catch { return Array.isArray(holder.watchers) ? holder.watchers : []; }
     };
+    const queue = [], batch = new Map();   // r3020: every row's change, then ONE write
     for (const row of rows) {
       const m = /^(account|rule|conversation):(.+)$/.exec(row.resource);
       if (!m) continue;
@@ -2740,9 +2742,7 @@ function create(engineCtx) {
         if (!ruleRec) continue;
         const c = CG.carriedOf(row.resource, { rule: ruleRec });
         if (!c.rule) { tell(out.cannot, `rule ${id} (its pattern is past what a row carries — the row stays as the save itself writes it)`); continue; }
-        const r = CG.healRow({ door: DOORS_REACH, resource: row.resource, to: row.to, except: row.except, rule: c.rule });
-        if (r && r.ok) out.healed.push(`rule ${id} (its record, on its reach row)`);
-        else tell(out.cannot, `rule ${id} (the grants store refused its reach row: ${(r && (r.code || r.error)) || 'refused'})`);
+        queue.push({ change: { door: DOORS_REACH, resource: row.resource, to: row.to, except: row.except, rule: c.rule }, healed: `rule ${id} (its record, on its reach row)`, refused: (why) => tell(out.cannot, `rule ${id} (the grants store refused its reach row: ${why})`) });
         continue;
       }
       const ws = watchersOf(holder, kind), take = new Map();
@@ -2755,7 +2755,7 @@ function create(engineCtx) {
       }
       if (!take.size) continue;
       const blocks = [...scopeBlocksOf(scope)].map(([key, v]) => ({ key, ...(v && Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v && typeof v.by === 'string' && v.by ? { by: v.by } : {}) }));
-      const c = CG.carriedOf(row.resource, { rule: ruleRec, blocks, bodies: addCarriedBodies(new Map(), [...take.values()]) });
+      const c = CG.carriedOf(row.resource, { rule: ruleRec, blocks, bodies: addCarriedBodies(new Map(), [...take.values()]), batch });
       const short = [...c.short];
       let n = 0;
       const to = row.to.map((e) => {
@@ -2766,10 +2766,29 @@ function create(engineCtx) {
         n++;
         return ne;
       });
-      if (!n) { tell(out.cannot, `${row.resource} (what its watchers carry is past what a row carries — the row stays as the save itself writes it)`); continue; }
-      const r = CG.healRow({ door: DOORS_WATCH, resource: row.resource, to, except: row.except, ...(c.blocks ? { blocks: c.blocks } : {}), ...(c.rule ? { rule: c.rule } : {}) });
-      if (r && r.ok) out.healed.push(`${row.resource} (${n} watcher${n === 1 ? '' : 's'}' settings${c.blocks && c.blocks.length ? `, ${c.blocks.length} block${c.blocks.length === 1 ? '' : 's'}` : ''}${c.rule ? ', its rule' : ''}${short.length ? ` — not carried, as the save would not: ${short.join(', ')}` : ''})`);
-      else tell(out.cannot, `${row.resource} (the grants store refused the row: ${(r && (r.code || r.error)) || 'refused'})`);
+      if (!n) {   // r3020 (small): a filter id past its bound is named as that
+        const idPast = [...take.values()].every((w) => w && w.mode === 'filtered' && w.filterId && !(typeof w.filterId === 'string' && w.filterId.length <= FILTER_ID_MAX && !/[\u0000-\u001f\u007f]/.test(w.filterId)));
+        tell(out.cannot, `${row.resource} (${idPast ? `its watchers' filter id is past its bound (${FILTER_ID_MAX} characters)` : 'what its watchers carry is past what a row carries'} — the row stays as the save itself writes it)`);
+        continue;
+      }
+      batch.set(row.resource, to.reduce((t, e) => t + (e && e.filter ? Buffer.byteLength(JSON.stringify(e.filter), 'utf8') : 0), 0));   // r3020: the bodies this one write carries (the index does not see them yet)
+      const notCarried = short.map((k) => (k === 'bodies' ? 'the inline filter bodies (past their total bound)' : k === 'blocks' ? "the agents' blocks" : k === 'rule' ? "the rule's record" : `${k}'s settings`));
+      queue.push({ change: { door: DOORS_WATCH, resource: row.resource, to, except: row.except, ...(c.blocks ? { blocks: c.blocks } : {}), ...(c.rule ? { rule: c.rule } : {}) },
+        healed: `${row.resource} (${n} watcher${n === 1 ? '' : 's'}' settings${c.blocks && c.blocks.length ? `, ${c.blocks.length} block${c.blocks.length === 1 ? '' : 's'}` : ''}${c.rule ? ', its rule' : ''}${notCarried.length ? ` — not carried, as the save would not carry them either: ${notCarried.join(', ')}` : ''})`,
+        refused: (why) => tell(out.cannot, `${row.resource} (the grants store refused the row: ${why})`) });
+    }
+    // r3020 — THE HEAL COSTS ONE WRITE WHEN NOTHING IS REFUSED: every row's change is built first (above) and handed to ONE setMany;
+    // a refusal names its row, which is set aside and said once, and the rest are handed again at once (no yield between: a save
+    // never lands between two of these writes) — a refusal at the store's check writes nothing, so a refused row costs no write
+    if (queue.length) {
+      const w = CG.healRows(queue.map((q) => q.change));
+      const key = (d, r) => `${d}\u0000${r}`, landed = new Set((w.changed || []).map((x) => key(x.door, x.resource))), refused = new Map((w.refused || []).map((x) => [key(x.door, x.resource), x]));
+      for (const q of queue) {
+        const k = key(q.change.door, q.change.resource);
+        if (refused.has(k)) { const x = refused.get(k); q.refused((x && (x.code || x.error)) || 'refused'); }
+        else if (w.ok) out.healed.push(q.healed);   // landed, or already whole by the store's own check
+      }
+      out.writes = w.writes;
     }
     const list = (xs) => `${xs.slice(0, 8).join(' · ')}${xs.length > 8 ? ` · and ${xs.length - 8} more` : ''}`;
     if (out.healed.length) log.log(`[channels] boot: ${out.healed.length} grants row${out.healed.length === 1 ? '' : 's'} written by an earlier release now carr${out.healed.length === 1 ? 'ies' : 'y'} what the channel index holds for ${out.healed.length === 1 ? 'it' : 'them'} (an upgrade, or a return to that release): ${list(out.healed)}`);

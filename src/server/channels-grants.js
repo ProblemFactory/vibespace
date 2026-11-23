@@ -373,7 +373,11 @@ function create({ grants = null, dataDir = null } = {}) {
     let bodies = lists && lists.bodies instanceof Map ? lists.bodies : null;
     if (bodies && bodies.size) {
       let total = 0;
-      for (const [r2, row] of doorIndex(DOORS.watch).rows) if (r2 !== String(res)) for (const e of row.to) if (e && e.filter) total += Buffer.byteLength(JSON.stringify(e.filter), 'utf8');
+      // r3020: `batch` = the bodies the rows ahead of this one in the SAME write carry (the heal's one setMany — the index does not see
+      // them yet): those rows are counted by what they will carry, never by what the index still holds for them
+      const batch = lists && lists.batch instanceof Map ? lists.batch : null;
+      for (const [r2, row] of doorIndex(DOORS.watch).rows) if (r2 !== String(res) && !(batch && batch.has(r2))) for (const e of row.to) if (e && e.filter) total += Buffer.byteLength(JSON.stringify(e.filter), 'utf8');
+      if (batch) for (const [r2, n] of batch) if (r2 !== String(res)) total += Number(n) || 0;
       for (const b of bodies.values()) total += Buffer.byteLength(JSON.stringify(b), 'utf8');
       if (total > CARRY_BODIES_MAX) { bodies = null; short.push('bodies'); }
     }
@@ -419,13 +423,27 @@ function create({ grants = null, dataDir = null } = {}) {
     }
     return out;
   }
-  /** THE HEAL's WRITE: ONE whole row (`{door, resource, to, except, rule?, blocks?}`), WHO as stored, through the ONE writer — a
-   *  row at a time (r2933 (2)): a row the store refuses is that row's alone, the others land. The row's own `at` / `by` become the
-   *  heal's (the store stamps the writer of every row: «boot»); its entries keep theirs. */
-  function healRow(change, by = 'boot') {
+  /** THE HEAL's WRITE (r3020 — THE HEAL COSTS ONE WRITE WHEN NOTHING IS REFUSED): every whole row (`{door, resource, to, except,
+   *  rule?, blocks?}`, WHO as stored) in ONE setMany through the ONE writer. A refusal names its row (the store's check, before
+   *  anything is written): that row is set aside and the rest are handed again AT ONCE — no yield between, so no save lands between
+   *  two of these writes (r2933 (2): a refused row is that row's alone, the others land). A refusal that names no row (the store
+   *  unreadable, its write refused) refuses every row left. The rows' own `at` / `by` become the heal's («boot»); their entries
+   *  keep theirs. → {ok, changed: [{door, resource}], refused: [{door, resource, code, error}], writes} */
+  function healRows(changes, by = 'boot') {
     const s = S();
-    if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
-    return s.setMany([{ removeExcept: [], ...change }], by);
+    let left = (Array.isArray(changes) ? changes : []).map((c) => ({ removeExcept: [], ...c }));
+    const refused = [];
+    const refuseAll = (r) => { for (const c of left) refused.push({ door: c.door, resource: c.resource, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' }); return { ok: false, changed: [], refused, writes: 0 }; };
+    if (!s) return refuseAll({ code: 'store_unreadable', error: 'the grants store is not available — nothing was written' });
+    while (left.length) {
+      const r = s.setMany(left, by);
+      if (r && r.ok) return { ok: true, changed: r.changed || [], refused, writes: (r.changed || []).length ? 1 : 0 };
+      const i = r && r.door !== undefined ? left.findIndex((c) => c.door === r.door && String(c.resource) === String(r.resource)) : -1;
+      if (i < 0) return refuseAll(r);
+      refused.push({ door: left[i].door, resource: left[i].resource, code: r.code || 'refused', error: r.error || 'refused' });
+      left = left.filter((_, j) => j !== i);
+    }
+    return { ok: true, changed: [], refused, writes: 0 };
   }
   /** One principal's row in a conversation's `#user` / `#request` row (null level ⇒ removed). */
   function setLevel(res, principal, level, { at = null, by = 'user' } = {}) {
@@ -474,7 +492,7 @@ function create({ grants = null, dataDir = null } = {}) {
     DOORS, RES, grainResource, rowOf, resourcesOf, refusalOf, watchAdmitsFor, exceptBare, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
     entryOfWatch, watcherOfEntry, rowsCarrying, CARRY_BODIES_MAX,   // lane lg-group-parents B-526c
-    rowsShort, healRow, carriedOf,   // r2541 (a) / r2933: the heal at a start, by the save's own bounds
+    rowsShort, healRows, carriedOf,   // r2541 (a) / r2933 / r3020: the heal at a start, by the save's own bounds, in one write
   };
 }
 

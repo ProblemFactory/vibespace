@@ -34,7 +34,10 @@
 //      then the release: what the index never got said by name, once, nothing invented; (3) the later stamp wins (and an entry the
 //      release wrote, with no stamp, takes the index's copy); (4) a watcher naming the conversation's OWN filter: no body carried —
 //      the route edit after the heal stands; (5) a removal made on the release brings nothing back; (6) a refused row stays as it
-//      is, said once, the others land. REDS: no heal, a never-got watcher not said, the stamp rule inverted, every body carried
+//      is, said once, the others land; (7) r3020 ONE write of the grants file for six short rows, and for one refused among them;
+//      (8) a rule's PRE-SPLIT index record (the six-row world's third rule): its watcher healed, never said none; the next start
+//      writes no grants and its completion writes the record split, its watcher as readers saw it (fourteen round trips, five at once). REDS: no heal,
+//      a never-got watcher not said, the stamp rule inverted, every body carried, tonight's one-write-a-row loop
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -87,6 +90,9 @@ if (process.argv[2] === '--child') {
   const lines = [], delivered = [];
   const log = { log: (x) => lines.push(String(x)), warn: (x) => lines.push(String(x)), error: (x) => lines.push(String(x)) };
   const deliver = { deliverToConversation: async (cid, text) => { delivered.push({ cid, text }); return { ok: true }; }, stashFor: () => ({ stored: true }) };
+  // r3020: THE GRANTS FILE's WRITES of this process — every rename onto data/grants.json (the store's one write: tmp + rename)
+  let grantsWrites = 0;
+  { const ren = fs.renameSync, gf = path.resolve(dataDir, 'grants.json'); fs.renameSync = function (a, b, ...x) { if (path.resolve(String(b)) === gf) grantsWrites++; return ren.call(this, a, b, ...x); }; }
   const eng = ENG.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
   const bound = (p, ms) => Promise.race([p.then((v) => ({ answered: true, v })), new Promise((r) => { setTimeout(() => r({ answered: false }), ms); })]);   // the bound keeps the process up (an answer that never comes is the RED's fact, never an exit)
   const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
@@ -200,6 +206,22 @@ if (process.argv[2] === '--child') {
     say({ role, ok: !!(r1 && r1.ok), pid });
     process.exit(0);
   }
+  if (role === 'write-clean-many') {   // r3020: the upgrade shape with MANY short rows — three rules, each with its watcher (six rows), every write landed, a clean stop
+    await seed();
+    const pids = [];
+    for (const v of ['Ops', 'Deploys', 'Builds']) {
+      const r = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: v }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 45, dailyWakeCap: 7, mode: 'all' }] }, { by: 'user' });
+      pids.push(r && r.grain ? r.grain.id : null);
+    }
+    // r3020 (small): the THIRD rule's index record in the PRE-SPLIT shape (a top-level principal): a rule never carried at all
+    const lp = pids[2];
+    await eng.store.index.update((ix) => { const pa = ix.patternAssignments && ix.patternAssignments[lp]; if (!pa) return; const w = (pa.watchers || []).find((x) => x && x.principal && x.principal.id === 'agent-1') || {}; const { access, watchers, ...rest } = pa; ix.patternAssignments[lp] = { ...rest, principal: w.principal, mode: 'all', notify: w.notify, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, authority: 'draft' }; });
+    await eng.store.index.update(() => {}); eng.store.index.flush(); try { real.flushSync(); } catch { }
+    const lpa = (eng.store.index.table('patternAssignments') || {})[lp] || null;
+    eng.stop();
+    say({ role, ok: pids.every(Boolean), pids, legacy: !!(lpa && lpa.principal && !Array.isArray(lpa.watchers)) });
+    process.exit(0);
+  }
   if (role === 'write-clean-two') {   // r2933 (3): two watchers on the rule, every write landed, a clean stop (a removal is then made on the release)
     await seed();
     const r1 = await eng.setGrain(A, { kind: 'pattern' }, { pattern: RULE, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 45, dailyWakeCap: 7 }, { principal: OTHER, delivery: 'wake', notify: 'wake' }] }, { by: 'user' });
@@ -230,6 +252,8 @@ if (process.argv[2] === '--child') {
   if (role === 'boot') {
     eng.start();
     await eng.store.index.update(() => {}); await eng.store.index.update(() => {});   // behind the boot's own queued completion
+    if (eng.settleWakes) await eng.settleWakes();   // r3020: the start's tracked work (the completion, the heal) settled
+    const startWrites = grantsWrites;   // r3020: the grants file's writes OF THE START (this role's own acts below write it too)
     const pas = eng.store.index.table('patternAssignments') || {};
     const pid = Object.keys(pas).find((k) => pas[k] && pas[k].adapterId === A) || null;
     const pa = pid ? pas[pid] : null;
@@ -252,7 +276,10 @@ if (process.argv[2] === '--child') {
     const room = ((eng.store.index.live()[KEY] || {}).watchers || []).find((x) => x && x.principal && x.principal.id === 'agent-1') || null;
     const rewatch = await eng.agentWatch(AG, KEY, { delivery: 'next-turn' });
     eng.stop();
-    say({ role, count, recCount, convFilter, newRow: newRow ? { watchers: (newRow.watchers || []).map((x) => x && x.principal && x.principal.id) } : null, roomW: room ? { notify: room.notify, delivery: room.delivery || null, digestMinutes: room.digestMinutes, dailyWakeCap: room.dailyWakeCap } : null,
+    // r3020 (8): what a READER sees of each rule's record (a pre-split one lifted by the readers' own pure read), beside its shape
+    const CFL = require(path.join(REPO, 'src/channel-filter.js'));
+    const seenOf = (v) => { const r = v && v.principal ? CFL.liftGrainRecord(v).rec : v; const pk = (x) => x && x.principal ? `${x.principal.kind}:${x.principal.id}` : null; return { access: (r && r.access || []).map((x) => [pk(x), x.authority || null]), watchers: (r && r.watchers || []).map((x) => [pk(x), x.notify || null, x.mode || null, x.digestMinutes == null ? null : x.digestMinutes, x.dailyWakeCap == null ? null : x.dailyWakeCap]) }; };
+    say({ role, grantsWrites: startWrites, paShapes: Object.fromEntries(Object.entries(pas).map(([k, v]) => [k, Object.keys(v || {}).sort()])), paSeen: Object.fromEntries(Object.entries(pas).map(([k, v]) => [k, seenOf(v)])), count, recCount, convFilter, newRow: newRow ? { watchers: (newRow.watchers || []).map((x) => x && x.principal && x.principal.id) } : null, roomW: room ? { notify: room.notify, delivery: room.delivery || null, digestMinutes: room.digestMinutes, dailyWakeCap: room.dailyWakeCap } : null,
       journal: lines.filter((l) => /grain|completed|carried|without access|healed|LOST|not healed|carr(?:y|ies) what the channel index|keeps? no settings|kept as written|not given what/.test(l)), ruleWatchers: pa && Array.isArray(pa.watchers) ? pa.watchers.map((x) => x && x.principal && x.principal.id).sort() : null, roomWatchers, rule: pa ? { pattern: pa.pattern } : null,
       watcher: w ? { notify: w.notify, mode: w.mode, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, delivery: w.delivery || null, filter: w.filterId && filters[w.filterId] ? filters[w.filterId].rules : null } : null,
       block: Object.keys(blocks).filter((k) => k.endsWith('|agent:agent-1')), held, flushed: fl ? !!fl.ok : null, delivered: delivered.filter((d) => d.cid === 'agent-1').map((d) => /deploy at noon/.test(d.text) && !/lunch at noon/.test(d.text)), rewatch: { ok: !!rewatch.ok, code: rewatch.code || null } });
@@ -550,7 +577,11 @@ console.log('⑥ r2541 (a) / r2933 — THE HEAL AT A START: the train writes, th
   const NO_SAY = MUT.write('src/server/channels-access.js', anchored(asrc, "        if (row.door === DOORS_WATCH) for (const e of row.to) tell(out.none, `${pkOf(GM_toChannel(e))} on ${row.resource} (the channel index holds no copy of this grain)`);\n", '', 'a watcher the index never got not said'), 'no-say');
   const INVERTED = MUT.write('src/server/channels-access.js', anchored(asrc, '        if ((Number(e.at) || 0) > (Number(w.updatedAt || w.createdAt) || 0))', '        if ((Number(e.at) || 0) < (Number(w.updatedAt || w.createdAt) || 0))', 'the stamp rule inverted'), 'inverted');
   const ANY_BODY = MUT.write('src/server/channels-access.js', anchored(asrc, "    for (const w of watchers || []) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId) && inlineFilterId(w.filterId)) {", "    for (const w of watchers || []) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId)) {", 'every filter body carried (the inline check removed)'), 'any-body');
-  const REFUSED = MUT.write('src/server/channels-grants.js', anchored(csrc, "  function healRow(change, by = 'boot') {\n", "  function healRow(change, by = 'boot') {\n    if (change && change.door === 'channel-watch') return { ok: false, code: 'planted-refusal' };\n", 'the store refuses every healed watch row'), 'refused');
+  const SET_MANY = '      const r = s.setMany(left, by);\n';
+  const REFUSED = MUT.write('src/server/channels-grants.js', anchored(csrc, SET_MANY, "      const pw = left.find((c) => c.door === 'channel-watch'); const r = pw ? { ok: false, code: 'planted-refusal', door: pw.door, resource: pw.resource } : s.setMany(left, by);\n", 'the store refuses every healed watch row'), 'refused');
+  const ONE_REFUSED = MUT.write('src/server/channels-grants.js', anchored(csrc, SET_MANY, "      const pw = !globalThis.__plantedOnce && left.find((c) => c.door === 'channel-watch'); if (pw) globalThis.__plantedOnce = true; const r = pw ? { ok: false, code: 'planted-refusal', door: pw.door, resource: pw.resource } : s.setMany(left, by);\n", 'the store refuses ONE healed row'), 'one-refused');
+  // RED (r3020): TONIGHT's loop (43d45f484) — one whole-file write a row
+  const PER_ROW = MUT.write('src/server/channels-grants.js', anchored(csrc, "  function healRows(changes, by = 'boot') {\n", "  function healRows(changes, by = 'boot') {\n    const s = S(), changed = [], refused = [];\n    for (const c of Array.isArray(changes) ? changes : []) { const r = s.setMany([{ removeExcept: [], ...c }], by); if (r && r.ok) changed.push(...(r.changed || [])); else refused.push({ door: c.door, resource: c.resource, code: (r && r.code) || 'refused' }); }\n    return { ok: true, changed, refused, writes: changed.length };\n  }\n  function healRowsOneWrite(changes, by = 'boot') {\n", 'tonight\'s one-write-a-row loop'), 'per-row');
   const roundTrip = async (dir, { writer = 'write-clean', rw = {}, mutant = '', boots = 1, between = null } = {}) => {
     const d = path.join(ROOT, dir);
     const w = await child(writer, d);
@@ -561,7 +592,7 @@ console.log('⑥ r2541 (a) / r2933 — THE HEAL AT A START: the train writes, th
     return { w, before, rewritten, b, after, b2 };
   };
   const t1 = Date.now();
-  const [H1, H1R, H2, H2R, H3, H3R, HA, HF, HFR, HD, HX] = await pool([
+  const [H1, H1R, H2, H2R, H3, H3R, HA, HF, HFR, HD, HX, HM, HMX, HMR] = await pool([
     () => roundTrip('h1', { boots: 2 }), () => roundTrip('h1r', { mutant: ACC(NO_HEAL) }),
     () => roundTrip('h2', { writer: 'write', boots: 2 }), () => roundTrip('h2r', { writer: 'write', mutant: ACC(NO_SAY) }),
     () => roundTrip('h3', { rw: { bump: 3600e3 }, boots: 2 }), () => roundTrip('h3r', { rw: { bump: 3600e3 }, mutant: ACC(INVERTED) }),
@@ -569,8 +600,9 @@ console.log('⑥ r2541 (a) / r2933 — THE HEAL AT A START: the train writes, th
     () => roundTrip('hf', { writer: 'write-convfilter', between: 'boot-edit', boots: 2 }), () => roundTrip('hfr', { writer: 'write-convfilter', between: 'boot-edit', boots: 2, mutant: ACC(ANY_BODY) }),
     () => roundTrip('hd', { writer: 'write-clean-two', rw: { drop: 'agent-2' }, boots: 2 }),
     () => roundTrip('hx', { mutant: CGF(REFUSED), boots: 2 }),
-  ], 4);
-  console.log(`    (the eleven round trips, at most four at once, in ${Date.now() - t1} ms)`);
+    () => roundTrip('hm', { writer: 'write-clean-many', rw: { dropAt: true }, boots: 2 }), () => roundTrip('hmx', { writer: 'write-clean-many', rw: { dropAt: true }, mutant: CGF(ONE_REFUSED) }), () => roundTrip('hmr', { writer: 'write-clean-many', rw: { dropAt: true }, mutant: CGF(PER_ROW) }),
+  ], 5);
+  console.log(`    (the fourteen round trips, at most five at once, in ${Date.now() - t1} ms)`);
   const sorted = (o) => J(Object.keys(o || {}).sort().map((k) => [k, o[k]]));
   // (1) AN ORDINARY UPGRADE — or a clean return: rows that never carried / were rewritten take what the save would carry; true words, once
   {
@@ -634,6 +666,35 @@ console.log('⑥ r2541 (a) / r2933 — THE HEAL AT A START: the train writes, th
     console.log('    (6) a refused row: ' + J({ first: said(j1, ANY), second: said(j2, ANY), reach: !!(af.reach && af.reach.rule) }));
     ok(!!(HX.b.facts && said(j1, CANNOT).length === 1 && said(j1, CANNOT)[0].includes(`rule:${pid} (the grants store refused the row: planted-refusal)`) && af.watch && !('notify' in af.watch.to[0]) && af.reach && af.reach.rule && said(j2, CANNOT).length === 0),
       '(6) ONE ROW THE STORE REFUSES stays as it is and is said ONCE; the others land (the rule\'s reach row took its record); the start goes on', { j1: said(j1, ANY), j2: said(j2, ANY) });
+  }
+  // (7) r3020 — THE HEAL COSTS ONE WRITE WHEN NOTHING IS REFUSED: the upgrade shape with MANY short rows (three rules, each with its
+  //     watcher: six rows) — ONE write of the grants file at that start; one row refused among them — still ONE (a refusal at the
+  //     store's check writes nothing: within one per refusal plus one), that row said once, the five others healed. RED: tonight's
+  //     one-write-a-row loop — six writes
+  {
+    const rowsOf = (t) => (t.after || []).filter((r) => /^rule:/.test(r.resource));
+    const carried = (t) => rowsOf(t).filter((r) => r.door === 'channel-watch' ? r.to.some((e) => e.notify === 'digest') : !!r.rule).length;
+    const short6 = (t) => (t.rewritten || []).filter((r) => /^rule:/.test(r.resource) && (r.door === 'channel-watch' ? !r.to.some((e) => typeof e.notify === 'string') : !r.rule)).length;
+    console.log('    (7) one write: ' + J({ short: short6(HM), writes: HM.b.facts && HM.b.facts.grantsWrites, second: HM.b2 && HM.b2.facts && HM.b2.facts.grantsWrites, oneRefused: HMX.b.facts && HMX.b.facts.grantsWrites, red: HMR.b.facts && HMR.b.facts.grantsWrites, healed: [carried(HM), carried(HMX), carried(HMR)] }));
+    ok(!!(HM.w.facts && HM.w.facts.ok && short6(HM) === 6 && HM.b.facts && HM.b.facts.grantsWrites === 1 && carried(HM) === 6 && HM.b2 && HM.b2.facts && HM.b2.facts.grantsWrites === 0),
+      '(7) THE UPGRADE SHAPE, SIX SHORT ROWS: the start writes the grants file ONCE and every row carries what the save would; the next start writes it never', { writes: HM.b.facts && HM.b.facts.grantsWrites, carried: carried(HM) });
+    const jx = HMX.b.facts ? HMX.b.facts.journal : null;
+    ok(!!(HMX.b.facts && HMX.b.facts.grantsWrites === 1 && said(jx, CANNOT).length === 1 && /planted-refusal/.test(said(jx, CANNOT)[0]) && carried(HMX) === 5),
+      '(7) ONE ROW REFUSED AMONG THEM: still ONE write (the refusal is the store\'s check, before anything is written — within one per refusal plus one), that row said once, the five others healed', { writes: HMX.b.facts && HMX.b.facts.grantsWrites, cannot: said(jx, CANNOT), carried: carried(HMX) });
+    ok(!!(HMR.b.facts && HMR.b.facts.grantsWrites === 6 && carried(HMR) === 6), 'RED tonight\'s one-write-a-row loop (43d45f484): the start writes the whole grants file SIX times, one a row', HMR.b.facts && HMR.b.facts.grantsWrites);
+  }
+  // (8) r3020 (small) — A RULE NEVER CARRIED AT ALL (the six-row world's third rule: its index record in the PRE-SPLIT shape, lifted by
+  //     a pure read): its watcher is healed onto the row — never said «none». The next start writes no grants; its completion writes
+  //     the index's record in the SPLIT shape — exactly what every reader already lifted it to (nothing a reader did not already see)
+  {
+    const lp = HM.w.facts && HM.w.facts.pids ? HM.w.facts.pids[2] : null, af = ruleRows(HM.after, lp), j1 = HM.b.facts ? HM.b.facts.journal : null, e = af.watch && af.watch.to.find((x) => x.key === 'agent-1');
+    const shapes = [HM.b.facts && HM.b.facts.paShapes ? HM.b.facts.paShapes[lp] : null, HM.b2 && HM.b2.facts && HM.b2.facts.paShapes ? HM.b2.facts.paShapes[lp] : null];
+    const seen = [HM.b.facts && HM.b.facts.paSeen ? HM.b.facts.paSeen[lp] : null, HM.b2 && HM.b2.facts && HM.b2.facts.paSeen ? HM.b2.facts.paSeen[lp] : null];
+    console.log('    (8) a legacy record: ' + J({ legacy: HM.w.facts && HM.w.facts.legacy, entry: e, none: said(j1, NONE), shapes, seen }));
+    ok(!!(HM.w.facts && HM.w.facts.legacy && e && e.notify === 'digest' && e.digestMinutes === 45 && !said(j1, NONE).some((l) => l.includes(`agent:agent-1 on rule:${lp}`))),
+      '(8) A LEGACY WATCHER IS NEVER SAID NONE: the rule\'s pre-split record is lifted by a pure read and its watcher\'s settings are healed onto the row', { e, none: said(j1, NONE) });
+    ok(!!(HM.b2 && HM.b2.facts && HM.b2.facts.grantsWrites === 0 && shapes[0] && shapes[0].includes('principal') && shapes[1] && shapes[1].includes('watchers') && !shapes[1].includes('principal') && seen[0] && seen[1] && seen[0].watchers.length === 1 && J(seen[0].watchers) === J(seen[1].watchers)),
+      '(8) …the next start writes NO grants; its completion writes the index\'s record in the split shape — its watcher as a reader sees it is the SAME before and after (its settings, as every reader lifted the pre-split record; the rule\'s access is read from the grants rows, never this list)', { shapes, seen });
   }
 }
 report();
