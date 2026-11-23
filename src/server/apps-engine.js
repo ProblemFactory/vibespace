@@ -145,9 +145,11 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     file, valid: APPS_SHAPE, code: 'apps_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `VibeSpace cannot read its app proposals right now (${h.code}); it reads them again by itself every few minutes. No app proposal is lost: nothing is written over them, and app proposals, their decisions and helpers wait until it reads`,
     log: (s) => log.warn?.('[apps] ' + s),
-    onLift: (v) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; bump('local'); },
+    onLift: (v) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; bump('local');
+      for (const h of [...owedListen]) { owedListen.delete(h); afterListen({ host: h }).catch((e) => log.warn?.(`[apps] the replay owed since the start failed at the lift: ${e && e.message}`)); } },   // r3193: the start's replay, now on the list as read
   }) : null;
   const isHeld = () => !!(hold && hold.held());
+  const owedListen = new Set();   // r3193: the start's replay asked while held — it runs at the lift (never an unstage from an unread list)
   if (file) {
     let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: APPS_SHAPE });
@@ -260,7 +262,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const r = await access.call(host, 'app-status', {});
     lastStatus.set(host || 'local', { at: now(), status: r.status });
     const h = host || 'local';
-    return { host: h, ...r.status, replaying: replaying.get(h) || null, proposals: store.proposals.filter((p) => p.host === h && !TERMINAL.has(p.state)).map(view), helpers: store.helpers.filter((x) => x.host === h) };
+    return { host: h, ...r.status, replaying: replaying.get(h) || null, proposals: store.proposals.filter((p) => p.host === h && !TERMINAL.has(p.state)).map(view), helpers: store.helpers.filter((x) => x.host === h), ...(isHeld() ? { proposalsUnread: hold.words(), code: 'apps_unread' } : {}) };   // r3193: a held list is no «none pending»
   }
   /** design 009 §4 — THE PROPOSAL VIEW both install lanes share (additive): the card's structure; the client words it. */
   const view = (p) => {
@@ -620,6 +622,9 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
 
   // ── after listen: the rebuilt machine's replay ──
   async function afterListen({ host = 'local' } = {}) {
+    // r3193 (THE MUST): while the list is HELD its silence is no «nothing kept»: the keep list below would be empty and the machine would
+    // unstage the installer of every pending proposal. The whole replay waits — nothing is unstaged, nothing is settled — and runs at the lift.
+    if (isHeld()) { owedListen.add(host || 'local'); log.warn?.(`[apps] boot: ${STORE_FILE} could not be read — the replay and the staged files' sweep wait for the read (nothing is unstaged by an unread list)`); return { ran: false, why: 'apps_unread' }; }
     // apps-joint r1 (F3, V6): a proposal still `installing` at boot was being run by the hub that went down — that run is
     // gone. It settles as failed (its card offers Try again: the same stored plan), so the sweep below keeps no file of it.
     for (const p of store.proposals.slice()) if (p.state === 'installing') setState(p, 'failed', { result: { code: 'install_interrupted', error: 'VibeSpace restarted while this was installing — press Try again to finish it', step: 'install' } }, { tell: true });

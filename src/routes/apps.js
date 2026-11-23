@@ -203,6 +203,7 @@ router.post('/api/apps/helpers', (req, res) => {
 });
 router.delete('/api/apps/helpers/:sessionId', (req, res) => {
   const engine = userGate(req, res); if (!engine) return;
+  if (typeof engine.isHeldUnread === 'function' && engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: engine.heldWords() });   // r3193: held — nothing dropped, said (never ok)
   engine.dropHelper(String(req.params.sessionId)); res.json({ ok: true });
 });
 

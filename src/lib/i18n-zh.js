@@ -9583,6 +9583,9 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
+  "VibeSpace cannot read its app proposals right now, so an agent’s install proposal may not be shown here. Nothing is lost: they come back when they read (it tries again every few minutes).": "VibeSpace 暂时读不到应用提案，所以智能体的安装提案可能没有显示在这里。没有丢失：读到后它们会回来（每隔几分钟会再试一次）。",
+  "VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here. Nothing is lost: it comes back when they read (it tries again every few minutes).": "VibeSpace 暂时读不到 API 提案，所以等待你批准的调用可能没有显示在这里。没有丢失：读到后它会回来（每隔几分钟会再试一次）。",
+  "VibeSpace cannot read its API proposals right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); decisions wait until then.": "VibeSpace 暂时读不到 API 提案，所以这里一个也没显示。没有丢失：读到后它们会回来（每隔几分钟会再试一次）；决定要等到那时。",
   "VibeSpace cannot read its list of published pages right now, so it is not known whether this design was published. Nothing is lost: every link given out stays, though it answers «cannot be shown right now» until the list reads; a publish pressed now is not taken — press it again then (it tries again every few minutes).": "VibeSpace 暂时读不到已发布页面的列表，所以不知道这个设计是否发布过。没有丢失：发出去的每个链接都还在，但在列表读到之前它会显示「暂时无法显示」；现在按发布不会被接受 — 到时请再按一次（每隔几分钟会再试一次）。",
   "the labels you taught could not be read — nothing was lost; try again in a few minutes (it reads them again by itself)": "你教过的标签暂时读不到 — 没有丢失；几分钟后再试（它会自己再读一次）",
   "VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, though it answers «cannot be shown right now» until the list reads, and the list comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到已发布页面的列表，所以这里一个也没显示。没有丢失：发出去的每个链接都还在，但在列表读到之前它会显示「暂时无法显示」，列表会自己回来（每隔几分钟会再试一次）。",

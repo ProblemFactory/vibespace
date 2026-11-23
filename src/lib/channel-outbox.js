@@ -98,7 +98,7 @@ import * as chanCaps from '../channel-caps.js';
 import * as P from '../channel-policy.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
 import { routeErrorText } from './channel-words.js';
-import { apiOutboxSection, outboxSecHead, paintSecHead } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
+import { apiOutboxSection, outboxSecHead, paintSecHead, apiCardsUnread } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
 import { fateOf as apiFate } from '../channel-api-card.js';
 import { outboxCensus, outboxView } from '../outbox-census.js';   // lane outbox-window-scroll-filter: ONE count, ONE filter
 import { draftBehindSearch } from '../channel-touch.js';   // B-0f26: a row whose press shows the search results says where its draft waits   // lane outbox-window-scroll-filter: ONE count, ONE filter
@@ -1183,7 +1183,9 @@ export function outboxNodes(app, list, ob, { view = null, open = new Set(), onTo
     nodes.push(keyedRow(app, p, rows.get(p.id) || null, { badge: badges.get(p.adapterId) || null, open: isOpen, onToggle, onReview }));
     if (isOpen) nodes.push(keyedCard(app, p, cards.get(p.id) || null));
   };
-  if (!census.total) nodes.push(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
+  const apiUnread = apiCardsUnread();   // r3193: the API proposals are HELD — an empty Outbox section is unread, never «nothing waits»
+  if (apiUnread && (!census.total || (vw.view === 'awaiting' && !census.waiting))) nodes.push(el('div', 'empty-hint', t('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here. Nothing is lost: it comes back when they read (it tries again every few minutes).')));
+  else if (!census.total) nodes.push(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
   else if (vw.view === 'awaiting' && !census.waiting) nodes.push(el('div', 'empty-hint', t('Nothing is waiting for your approval.')));
   for (const sec of census.total ? vw.sections : []) {
     if (sec.key === 'messages') {
@@ -1531,7 +1533,7 @@ export function openChannelOutbox(app, opts = {}) {
     for (const id of [...open]) if (!r.proposals.some((p) => p.id === id)) open.delete(id);
     segAwait.classList.toggle('chan-seg-on', r.view === 'awaiting');
     segAll.classList.toggle('chan-seg-on', r.view === 'all');
-    summary.textContent = r.census.total ? t('{a} awaiting your approval · {n} proposals', { a: r.census.waiting, n: r.census.total }) : t('No proposals yet');
+    summary.textContent = r.census.total ? t('{a} awaiting your approval · {n} proposals', { a: r.census.waiting, n: r.census.total }) : apiCardsUnread() ? t('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here. Nothing is lost: it comes back when they read (it tries again every few minutes).') : t('No proposals yet');   // r3193
     if (filter) {
       ftext.textContent = t('drafted by {who}', { who: filter.name || t('this conversation') });
       if (!r.census.total && r.nodes[0]) r.nodes[0].textContent = t('This conversation has no proposal in the Outbox list.');

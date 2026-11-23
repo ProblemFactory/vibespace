@@ -168,7 +168,8 @@ export async function showApiAccessDialog(app, cred) {
     body.appendChild(sens);
     // ALWAYS ALLOWED (per conversation, revocable)
     body.appendChild(el('div', 'dialog-label', t('Always allowed')));
-    if (!(cur.shapes || []).length) body.appendChild(el('div', 'chat-status-dim', t('No call shapes are always allowed')));
+    const apiHeld = !!view && view.code === 'api_unread';   // r3193: the proposals (and the shapes) are UNREAD — never «none» on a held list
+    if (!(cur.shapes || []).length) body.appendChild(el('div', 'chat-status-dim', apiHeld ? t('VibeSpace cannot read its API proposals right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); decisions wait until then.') : t('No call shapes are always allowed')));
     for (const s of cur.shapes || []) {
       const r = el('div', 'chan-api-shape'); r.dataset.key = s.id;
       r.append(el('code', '', s.shape), el('span', 'chat-status-dim', ` · ${s.principalName || s.principal}`), button(t('Revoke'), async () => { await fetchJson(`/api/channels/api/shapes/${encodeURIComponent(s.id)}`, { method: 'DELETE' }); await refresh(); }));
@@ -177,7 +178,7 @@ export async function showApiAccessDialog(app, cred) {
     // WAITING FOR YOU — the proposal cards of this credential
     body.appendChild(el('div', 'dialog-label', t('Waiting for you')));
     const mine = (view.cards || []).filter((p) => p.cred === cur.id && p.status === 'pending');
-    if (!mine.length) body.appendChild(el('div', 'chat-status-dim', t('Nothing waits for you')));
+    if (!mine.length) body.appendChild(el('div', 'chat-status-dim', apiHeld ? t('VibeSpace cannot read its API proposals right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); decisions wait until then.') : t('Nothing waits for you')));
     for (const p of mine) body.appendChild(renderApiCard(p));
     // THE API LOG — the dialog's one box (above), re-read on every draw
     body.append(el('div', 'dialog-label', t('API log')), logEl);

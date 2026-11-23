@@ -332,6 +332,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
     }
     // open proposals from agents (each = one For-you item too)
     props.replaceChildren();
+    if (st.proposalsUnread) props.appendChild(el('div', 'app-sec-row empty-hint app-sec-proposals-held', t('VibeSpace cannot read its app proposals right now, so an agent’s install proposal may not be shown here. Nothing is lost: they come back when they read (it tries again every few minutes).')));   // r3193: a held list is no «no proposal»
     for (const p of st.proposals || []) {
       const row = el('div', 'app-sec-row app-sec-proposal');
       const words = p.kind === 'remove' ? t('{name} wants to remove {app}', { name: (p.by && p.by.name) || t('An agent'), app: p.label }) : p.kind === 'source' ? t('{name} wants to add the package source {app}', { name: (p.by && p.by.name) || t('An agent'), app: p.label }) : t('{name} wants to install {app}', { name: (p.by && p.by.name) || t('An agent'), app: p.label });

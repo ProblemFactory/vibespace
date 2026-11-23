@@ -390,6 +390,7 @@ try { if (integrations && typeof integrations.registerTest === 'function') integ
 // history of a conversation and its newest vibespace-task progress note (the stores' own readers; nothing is kept here)
 const inboxBoard = () => {
   const st = getSessionStatus ? getSessionStatus() : null, tasks = getTasks ? getTasks() : null;
+  if (st && typeof st.isHeldUnread === 'function' && st.isHeldUnread()) return null;   // r3193: the statuses are UNREAD — the pass runs with no board (unknown), never null / [] as facts
   const progressAt = new Map();
   for (const g of tasks && typeof tasks.list === 'function' ? tasks.list() : []) for (const p of g.progress || []) if (p && p.session && !(progressAt.get(p.session) >= p.at)) progressAt.set(p.session, p.at);
   return (key) => ({ status: st ? st.get(key) : null, history: st ? st.history(key) : [], progressAt: progressAt.get(key) || 0 });

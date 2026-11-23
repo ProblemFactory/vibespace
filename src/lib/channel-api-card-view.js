@@ -147,6 +147,9 @@ export function placeApiCards(box, recs, opts = {}) {
 
 // ── THE SHARED RECORDS (one fetch, every mounted surface patched) ──
 let records = [], inflight = null, wired = false, again = false;
+let apiUnread = false;   // r3193: GET /api/channels/api said the API proposals are HELD (api_unread) — an empty list is unread
+/** r3193: are the API proposals held (unread) at the last read? — an Outbox never draws «nothing waits» then */
+export function apiCardsUnread() { return apiUnread; }
 // B-d3d3: THE LAST GOOD READ (an answer with a `cards` array) — the chat's API rows judge a proposal's fate by it, and a
 // failed read keeps it (the adversarial read r1: a failed read after a good one emptied the records, and every waiting
 // row read like a call that ran unasked); `started` counts the reads begun, `goodSeq` = the one the good read was
@@ -161,7 +164,7 @@ const listeners = new Set();
 export function refreshApiCards({ changed = false } = {}) {
   if (inflight) { if (changed) again = true; return inflight; }
   const seq = ++started;
-  inflight = fetchJson('/api/channels/api').then((r) => { records = (r && r.cards) || []; if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; } for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
+  inflight = fetchJson('/api/channels/api').then((r) => { apiUnread = !!r && r.code === 'api_unread'; records = (r && r.cards) || []; if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; } for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
   return inflight;
 }
 /** B-d3d3: the good read's records by id → `{fate, status}` (the Outbox row's short status — C.fateOf / C.statusOf); the

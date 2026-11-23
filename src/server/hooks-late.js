@@ -40,7 +40,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
     }
     let n = 0;
     for (const [id, s] of targets) {
-      try { st.pushNotice(sessionStatusKey(s, id), HL.hooksLateNotice({ webuiId: id, rel, at }), { replaceKind: true }); told.add(id); n++; }
+      try { const k = st.pushNotice(sessionStatusKey(s, id), HL.hooksLateNotice({ webuiId: id, rel, at }), { replaceKind: true }); if (k) { told.add(id); n++; } else warn(`[hooks] ${id}: the late-hooks note was not queued — the conversations' statuses could not be read; not counted as told`); }   // r3193: pushNotice answers 0 while held
       catch (e) { warn(`[hooks] ${id}: the late-hooks note was not queued — ${e && e.message}`); }
     }
     if (n) {

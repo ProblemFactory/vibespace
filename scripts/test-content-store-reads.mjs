@@ -385,9 +385,10 @@ console.log('SS [session-status.json] every task\'s state, urgency and reason, t
     let m2 = null, told = [];
     try { await quietly(() => { m2 = new SessionStatusManager({ dataDir: d, onChange: (st) => { told.push(Object.keys(st || {}).length); } }); }); } finally { pr.restore(); }
     const lifted = await quietly(() => m2._hold.again());
+    const atLift = told.length;   // r3193: the lift's OWN broadcast, before any write tells the boards itself
     m2.setByAgent('claude:aaaa0003', { state: 'working' }); m2.flush();
     const keys = Object.keys((json(F) || {}).statuses || {});
-    ok(lifted === true && !m2.isHeldUnread() && !!m2.get('claude:aaaa0001') && told.length >= 1, 'SS4 the file reads again ⇒ the hold lifts, the statuses are back and every board is told (one broadcast)', { lifted, told });
+    ok(lifted === true && !m2.isHeldUnread() && !!m2.get('claude:aaaa0001') && atLift === 1, 'SS4 the file reads again ⇒ the hold lifts, the statuses are back and every board is told (one broadcast)', { lifted, told });
     ok(keys.length === 3 && keys.includes('claude:aaaa0001') && keys.includes('claude:aaaa0002'), 'SS4 after the lift the next status goes through and keeps both earlier ones on disk', keys);
   }
   // ⑤ TORN BYTES, kept aside once; no remover
@@ -481,6 +482,49 @@ console.log('XP [app-proposals.json] the pending app installs');
       ok(/const STATUS = \{ apps_unread: 503,/.test(ROUTES), 'XP2 the Apps routes answer it 503 by its code (the window\'s toast says the words)', null);
     },
   });
+}
+
+// ══ XP7 r3193 THE MUST: no removal by a held list — the start's replay (its staged-file sweep) waits and runs at the lift ══
+console.log('XP7 [app-proposals.json] the start\'s replay while held: nothing unstaged; at the lift it runs on the list as read');
+{
+  const AE = require(path.join(REPO, 'src/server/apps-engine.js'));
+  const d = world('xp7'), F = path.join(d, AE.STORE_FILE), t0 = Date.now(), STAGED = '0123456789abcdef.deb';
+  fs.writeFileSync(F, JSON.stringify({ proposals: [{ id: 'ap-staged1', host: 'local', state: 'proposed', createdAt: t0, request: { kind: 'deb', staged: STAGED, sha256: 'a'.repeat(64), name: 'made-up' }, by: { kind: 'agent', conversation: 'conv-A' } }], helpers: [] }, null, 2));
+  const calls = [];
+  const access = { call: async (host, verb, args) => { calls.push({ verb, args }); if (verb === 'app-status') return { status: { entries: [], replay: { decision: { run: false, why: 'made-up: nothing to put back' } } } }; return {}; } };
+  const before = disk(F), pr = placeReads(F, 1);
+  let e = null;
+  try { await quietly(() => { e = AE.create({ access, dataDir: d, log: { log() { }, warn() { } } }); }); } finally { pr.restore(); }
+  const r = await quietly(() => e.afterListen());
+  const unstagedWhileHeld = calls.filter((c) => c.verb === 'app-unstage');
+  ok(pr.seen.n === 1 && r && r.why === 'apps_unread' && unstagedWhileHeld.length === 0 && disk(F) === before, 'XP7 the start\'s replay while held asks the machine NOTHING (no app-unstage with an empty keep list — the staged installer of a pending proposal stays) and writes nothing', { r, calls: calls.map((c) => c.verb) });
+  const st = await quietly(() => e.status('local'));
+  ok(st.code === 'apps_unread' && /cannot read its app proposals/.test(st.proposalsUnread || '') && st.proposals.length === 0, 'XP7 the Apps status read while held carries proposalsUnread + apps_unread (no «none pending»)', { code: st.code });
+  await quietly(() => e._hold.again());
+  for (let i = 0; i < 100 && !calls.some((c) => c.verb === 'app-unstage'); i++) await new Promise((res) => setTimeout(res, 10));
+  const un = calls.find((c) => c.verb === 'app-unstage');
+  ok(!!un && Array.isArray(un.args.keep) && un.args.keep.includes(STAGED), 'XP7 at the lift the owed replay runs on the list as read: its sweep KEEPS the pending proposal\'s staged installer', un && un.args);
+  e._hold.stop();
+}
+// ══ XP8 r3193 the smaller roads of the first half, by their source lines (each with a red copy) ══
+{
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const RA = src('src/routes/apps.js'), HLs = src('src/server/hooks-late.js'), MPW = src('src/server/mounts-plugins-wiring.js'), DLG = src('src/lib/channel-api-dialog.js');
+  const L1 = "  if (typeof engine.isHeldUnread === 'function' && engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: engine.heldWords() });   // r3193: held — nothing dropped, said (never ok)\n";
+  const del = (r) => r.includes(L1) && r.indexOf(L1) > r.indexOf("router.delete('/api/apps/helpers/:sessionId'");
+  ok(del(RA) && !del(anchored(RA, L1, '', 'xp8-del-today')), 'XP8 a helper\'s end while held answers the hold (503 apps_unread), never { ok: true } over nothing dropped (RED: the route as it was)', null);
+  const L2 = 'if (k) { told.add(id); n++; } else warn(';
+  ok(HLs.includes(L2) && !HLs.includes('{ replaceKind: true }); told.add(id); n++; }'), 'XP8 the late-hooks note is counted as told only when the statuses queued it (pushNotice answers 0 while held)', null);   // stale-pins: kept
+  const L3 = "  if (st && typeof st.isHeldUnread === 'function' && st.isHeldUnread()) return null;";
+  ok(MPW.includes(L3) && MPW.indexOf(L3) > MPW.indexOf('const inboxBoard = () => {') && MPW.indexOf(L3) < MPW.indexOf('const progressAt = new Map();'), 'XP8 the For-you judge\'s board while the statuses are held: no board (unknown), never null status and [] history as facts', null);
+  const L4 = "const apiHeld = !!view && view.code === 'api_unread';";
+  const dlg = (x) => x.includes(L4) && (x.match(/apiHeld \? t\('VibeSpace cannot read its API proposals right now, so none is shown here\./g) || []).length === 2;
+  ok(dlg(DLG) && !dlg(anchored(DLG, L4, "const apiHeld = false;", 'xp8-dialog-today')), 'XP8 the owner\'s API access dialog while held says why both lists are empty (the always-allowed shapes, the cards waiting), never «none» (RED: the dialog as it was, the mark unread)', null);
+  const CV2 = src('src/lib/channel-api-card-view.js'), OB = src('src/lib/channel-outbox.js'), AID = src('src/lib/app-install-dialog.js');
+  const outbox = (cv, ob) => cv.includes("apiUnread = !!r && r.code === 'api_unread';") && ob.includes("const apiUnread = apiCardsUnread();") && (ob.match(/t\('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here\./g) || []).length === 2;
+  ok(outbox(CV2, OB) && !outbox(anchored(CV2, "apiUnread = !!r && r.code === 'api_unread';", 'apiUnread = false;', 'xp8-outbox-today'), OB), 'XP8 the Outbox while the API proposals are held: its card view keeps the mark, its empty section and its summary say why — never «Nothing is waiting for your approval» / «No proposals yet» (RED: the card view as it was, the mark dropped)', null);
+  const apps = (x) => x.includes("if (st.proposalsUnread) props.appendChild(el('div', 'app-sec-row empty-hint app-sec-proposals-held',");
+  ok(apps(AID) && !apps(anchored(AID, "if (st.proposalsUnread) props", 'if (false) props', 'xp8-apps-today')), 'XP8 the Apps window while app-proposals is held draws the held line above the agents\' proposals (RED: the window as it was)', null);
 }
 
 // ══ XP6 r3104 (a) the Apps routes that look a proposal up while held ══
