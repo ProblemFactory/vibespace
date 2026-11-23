@@ -70,6 +70,14 @@ try { again = fs.readFileSync(fd, 'utf8'); } catch (e) { again = 'ERR:' + e.code
 let fd3 = ''; try { fd3 = fs.readlinkSync('/proc/self/fd/3'); } catch { fd3 = ''; } // node keeps its own fds (eventpoll …) — a SOCKET at 3 is the hub's channel
 const gotF = path.join(out, 'got-' + process.pid + '.json');   // int374 (B-b1f5): written whole, then renamed in — the suite polls this dir
 fs.writeFileSync(gotF + '.tmp', JSON.stringify({ v, again, fd3, pid: process.pid })); fs.renameSync(gotF + '.tmp', gotF);
+if (process.env.PIPES) {   // 主开发 r2773 (1): a value across the two pipes — split between them (a, b), or whole on one with the other's bytes between its pieces (c, d)
+  const h = Math.floor(v.length / 2), nl = String.fromCharCode(10), still = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms), k = process.env.PIPES;
+  const steps = { a: [[1, 'a1 ' + v.slice(0, h)], [2, v.slice(h) + ' a2' + nl]], b: [[2, 'b1 ' + v.slice(0, h)], [1, v.slice(h) + ' b2' + nl]],
+    c: [[1, 'c1 ' + v.slice(0, h)], [2, '[the other pipe]' + nl], [1, v.slice(h) + ' c2' + nl]], d: [[2, 'd1 ' + v.slice(0, h)], [1, '[the other pipe]' + nl], [2, v.slice(h) + ' d2' + nl]] }[k];
+  for (const [p, s] of steps) { fs.writeSync(p, s); still(150); }
+  still(700);
+  process.exit(0);
+}
 if (process.env.QUIETSPLIT) {   // round wtlm3ig4w: a marker written in TWO pieces of one line with a quiet between them (the until scan's carry)
   process.stdout.write(process.env.QUIETSPLIT);
   for (let i = 0; i < 600 && !fs.existsSync(path.join(out, 'more')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
@@ -266,12 +274,12 @@ async function legQuietLine(wrap = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world(wrap ? 'qlinem' : 'qline', wrap ? { wrap } : {}), S = SENT('qline');
   W.put(S);
-  const svc = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'listens', env: { QUIETLINE: 'listening on 127.0.0.1:8080' } }).job.id);
+  const svc = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name: 'listens', env: { QUIETLINE: 'listening on the service socket' } }).job.id);
   const task = W.jm.jobs.get(W.create({ name: 'marks', untilOutput: 'UNTIL-READY-MARK', env: { QUIETLINE: 'UNTIL-READY-MARK' } }).job.id);
   await W.until(() => W.got().length === 2);
   const logOf = (j) => { try { return fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { return ''; } };
   const t0 = Date.now();
-  const line = await W.untilMs(() => logOf(svc).includes('listening on 127.0.0.1:8080'), 1600);
+  const line = await W.untilMs(() => logOf(svc).includes('listening on the service socket'), 1600);
   const hit = await W.untilMs(() => task._untilHit === true, 2600 - (Date.now() - t0));
   rows.line = line.ok; rows.hit = hit.ok;
   if (wrap) { W.release(); W.end(); return rows; }
@@ -290,14 +298,14 @@ async function legSettleLines({ srcMut = null, jobs = null } = {}) {
   const W = await world(srcMut || jobs ? 'slinem' : 'sline', { srcMut, jobs }), S = SENT('sline');
   W.put(S);
   const mk = (name, env, extra = {}) => W.jm.jobs.get(W.create({ kind: 'service', restart: 'never', name, env, ...extra }).job.id);
-  const colour = mk('coloured', { QUIETLINE: '\u001b[32mlistening on 127.0.0.1:9090\u001b[0m', QUIETNL: '0' });
+  const colour = mk('coloured', { QUIETLINE: '\u001b[32mlistening on the colour socket\u001b[0m', QUIETNL: '0' });
   const amp = mk('ampersand', { QUIETLINE: 'serving: run a && b', QUIETNL: '0' });
   const head = W.jm.jobs.get(W.create({ name: 'head-mark', untilOutput: 'MARK-ENDS-' + S[0], env: { QUIETLINE: 'MARK-ENDS-', QUIETHEAD: '1' } }).job.id);
   const split = W.jm.jobs.get(W.create({ name: 'split-mark', untilOutput: 'SPLIT-MARK-READY', env: { QUIETSPLIT: 'SPLIT-MARK-', QUIETREST: 'READY' } }).job.id);
   await W.until(() => W.got().length === 4);
   const logOf = (j) => { try { return fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { return ''; } };
   const t0 = Date.now();
-  const a = await W.untilMs(() => logOf(colour).includes('listening on 127.0.0.1:9090\u001b[0m'), 1600);
+  const a = await W.untilMs(() => logOf(colour).includes('listening on the colour socket\u001b[0m'), 1600);
   const b = await W.untilMs(() => logOf(amp).includes('serving: run a && b'), Math.max(0, 1600 - (Date.now() - t0)));
   const c = await W.untilMs(() => head._untilHit === true, Math.max(0, 2600 - (Date.now() - t0)));
   const half = await W.untilMs(() => logOf(split).includes('SPLIT-MARK-'), 1600);   // its first piece released at the quiet — and read by the until scan
@@ -329,6 +337,29 @@ async function legPiecesEncoded(wrap = null) {
   if (wrap) { W.release(); W.end(); return rows; }
   row(rows.masked, 'round wtlm3ig4w — the value\'s BASE64 spelling written in two pieces with a quiet between them is masked whole (the settle keeps the encoded piece back too)', logOf().slice(Math.max(0, logOf().indexOf(' rest') - 40), logOf().indexOf(' rest') + 6));
   W.release(); W.end();
+  return rows;
+}
+// 主开发 r2773 (1): THE MASKER MAY HIDE A VALUE; IT NEVER LOSES A BYTE OF THE JOB'S OWN WORDS — every scene of the settle through
+// the REAL wrapper: what the job wrote, with only the value replaced, comes out — every byte counted (the log's job text, its
+// placeholders taken out, against the job's own words), every word in its pipe's order. RED: a settle that drops the run it keeps
+async function legBytes({ srcMut = null } = {}) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(srcMut ? 'bytesm' : 'bytes', { srcMut }), S = SENT('bytes'), h = Math.floor(S.length / 2);
+  W.put(S);
+  const own = { a: ['a1 ', ' a2\n'], b: ['b1 ', ' b2\n'], c: ['c1 ', '[the other pipe]\n', ' c2\n'], d: ['d1 ', '[the other pipe]\n', ' d2\n'] };
+  const jobs = Object.fromEntries(Object.keys(own).map((k) => [k, W.jm.jobs.get(W.create({ name: 'pipes-' + k, env: { PIPES: k } }).job.id)]));
+  const ended = await W.untilMs(() => Object.values(jobs).every((j) => ['done', 'failed', 'interrupted'].includes(j.state)), 15000);
+  const textOf = (j) => { let t = ''; try { t = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return t.split('\n').filter((l) => !l.startsWith('[job-wrapper]')).join('\n'); };
+  const out = {};
+  for (const [k, j] of Object.entries(jobs)) {
+    const t = textOf(j), bare = t.replace(/\[vault:[^\]]*\]/g, '');
+    const want = own[k].join('');
+    out[k] = { words: own[k].every((w) => t.includes(w.trimEnd())), bytes: Buffer.byteLength(bare.replace(/\n+$/, '')) === Buffer.byteLength(want.replace(/\n+$/, '')), noValue: !t.includes(S.slice(0, h)) || !t.includes(S.slice(h)), log: t.replace(S.slice(0, h), '<H1>').replace(S.slice(h), '<H2>').slice(0, 200) };
+  }
+  rows.scenes = out;
+  if (srcMut) { W.end(); return rows; }
+  row(ended.ok && Object.values(out).every((x) => x.words && x.bytes && x.noValue), 'r2773 (1) — NO BYTE OF THE JOB\'S OWN WORDS IS LOST: a value split between the pipes (a, b) and whole on one with the other\'s bytes between its pieces (c, d) — every word in the log, every byte counted, only the value replaced', out);
+  W.end();
   return rows;
 }
 async function legLocked() {
@@ -1052,14 +1083,15 @@ const STALL_MS = 1500, BOUND_MS = 400, HOLD_MS = 350;
 // a PLACED stall: every async read answers after STALL_MS (a slow / newly hung mount); a synchronous read is HELD HOLD_MS on the
 // loop's own thread (Atomics.wait — no CPU spent) and counted — the real door makes none
 const stallFs = () => {
-  let sync = 0, answered = 0;
+  let sync = 0, answered = 0, begin = null;
+  const began = new Promise((r) => { begin = r; });   // the FIRST stalled read has begun (its deadline is met — it reads)
   const fake = { uid: 0, mode: 0o40755, isFile: () => true };
-  const later = (v) => new Promise((r) => setTimeout(() => { answered++; r(v); }, STALL_MS));   // `answered`: how many stalled reads have answered (an event, never a clock)
+  const later = (v) => { begin(); return new Promise((r) => setTimeout(() => { answered++; r(v); }, STALL_MS)); };   // `answered`: how many stalled reads have answered (an event, never a clock)
   const hold = () => { sync++; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, HOLD_MS); };
-  return { fsp: { stat: () => later(fake), realpath: (p) => later(p), statSync: () => { hold(); return fake; }, realpathSync: (p) => { hold(); return p; } }, syncCalls: () => sync, answered: () => answered };
+  return { fsp: { stat: () => later(fake), realpath: (p) => later(p), statSync: () => { hold(); return fake; }, realpathSync: (p) => { hold(); return p; } }, syncCalls: () => sync, answered: () => answered, began };
 };
-async function legFactsOffLoop(doorSrc = null) {
-  const D = doorOf(doorSrc), st = stallFs();
+async function legFactsOffLoop(doorSrc = null, st = stallFs()) {
+  const D = doorOf(doorSrc);
   let last = performance.now(), gap = 0;
   const iv = setInterval(() => { const t = performance.now(); gap = Math.max(gap, t - last); last = t; }, 5);   // the loop's turns, while the read runs
   const t0 = performance.now();
@@ -1576,6 +1608,8 @@ const VR_SRC = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8'), VS_
 const scrubMut = (from, to) => ({ 'vault-scrubber.js': swap(VS_SRC, from, to), 'vault-run.js': VR_SRC });
 const SETTLE_OLD = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", '    const lastLine = (x) => cutTailStart(x);'); } catch { return null; } })();
 const UNTIL_NOCARRY = (() => { try { return swap(JOBS_SRC, "      const lines = ((job._untilCarry || '') + buf.toString('utf-8')).split('\\n');", "      const lines = buf.toString('utf-8').split('\\n');"); } catch { return null; } })();
+// r2773 (1)'s control: a settle that DROPS the run it keeps (its kept tails forgotten) — a copy of src/vault-run.js
+const SETTLE_DROPS = (() => { try { return scrubMut('    held = kept;   // the uncertain tails stay held — the masker lives on', '    held = [];   // (the control: the kept run dropped)'); } catch { return null; } })();
 const QUIET_NONE = (() => { try { return swap(WRAP_SRC, '  try { o = vmask.settle(); } catch { o = null; }', '  o = null;'); } catch { return null; } })();
 const MUTANTS = [
   ['the value in spec.env', { jobs: swap(JOBS_SRC, ENV_AT, `...(vj ? { ...VJ.envOf(vj.plan), TOK_COPY: ${leak} } : {})`) }, (f) => f.procs.includes(f.S)],
@@ -1643,12 +1677,20 @@ const MUT_ONSTATUS = dmut("  if (userTodos && typeof userTodos.onStatus === 'fun
 const MUT_NOSLOT = dmut('    if (lateHere || !(await take())) throw LATE;', '    if (lateHere) throw LATE;');
 const MUT_VALUEPROG = dmut('function pastWrapper(argv, i) {\n', "function pastWrapper(argv, i) {\n  if (argv[i + 1] === '-s') return i + 2;\n");
 const [oneSlot, oneSlotMut, heldSaid, wrapMut] = await Promise.all([legOneSlot(), MUT_NOSLOT ? legOneSlot(MUT_NOSLOT) : null, legHeldSaid(), MUT_VALUEPROG ? legWrapperSkip(MUT_VALUEPROG) : null]);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut] = await Promise.all([legFactsOffLoop(), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND) : null, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+// ⑫'s two timed reads start ALONE, each until its first stalled read has begun: the legs after them set up synchronously (a world's
+// src copies) and held the loop past BOUND_MS before the no-bound copy read anything — its deadline gone first (red at 8d05e0a7c)
+const stOff = stallFs(), stNoBound = stallFs();
+const offRuns = [legFactsOffLoop(null, stOff), MUT_NOBOUND ? legFactsOffLoop(MUT_NOBOUND, stNoBound) : null];
+let tBegan = null;
+await Promise.race([Promise.all([stOff.began, MUT_NOBOUND ? stNoBound.began : null]), new Promise((r) => { tBegan = setTimeout(r, 3000); })]);
+clearTimeout(tBegan);
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
   legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
   legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {},
   legQuietLine(), QUIET_NONE ? legQuietLine(QUIET_NONE) : {},
-  legSettleLines(), SETTLE_OLD ? legSettleLines({ srcMut: SETTLE_OLD }) : {}, UNTIL_NOCARRY ? legSettleLines({ jobs: UNTIL_NOCARRY }) : {}, legPiecesEncoded(), QUIET_FLUSH ? legPiecesEncoded(QUIET_FLUSH) : {}]);
+  legSettleLines(), SETTLE_OLD ? legSettleLines({ srcMut: SETTLE_OLD }) : {}, UNTIL_NOCARRY ? legSettleLines({ jobs: UNTIL_NOCARRY }) : {}, legPiecesEncoded(), QUIET_FLUSH ? legPiecesEncoded(QUIET_FLUSH) : {},
+  legBytes(), SETTLE_DROPS ? legBytes({ srcMut: SETTLE_DROPS }) : {}, SETTLE_OLD ? legBytes({ srcMut: SETTLE_OLD }) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1666,6 +1708,9 @@ print('①e A COMPLETED LINE IS CERTAIN, A VIEW PIECE UNCERTAIN ONLY UNFINISHED 
 ok(!!SETTLE_OLD && settleOldMut.a === false && settleOldMut.b === false && settleOldMut.c === false, 'CONTROL — 7e1674a83\'s settle (the whole held text read, every view\'s first trigger an end): the coloured line, the ampersand line and the line ending in the value\'s first character are NOT whole in the log in time — RED on the copy', SETTLE_OLD ? { a: settleOldMut.a, b: settleOldMut.b, c: settleOldMut.c } : 'the copy could not be built (its anchor is missing)');
 ok(!!UNTIL_NOCARRY && noCarryMut.half === true && noCarryMut.d === false, 'CONTROL — the until scan without its carry: a marker in two pieces of one line never fires — RED on the copy', UNTIL_NOCARRY ? { half: noCarryMut.half, d: noCarryMut.d } : 'the copy could not be built (its anchor is missing)');
 ok(!!QUIET_FLUSH && pieces64Mut.masked === false, 'CONTROL — the release\'s quiet flush: the base64 spelling split by the quiet lands whole — RED on the copy', QUIET_FLUSH ? { masked: pieces64Mut.masked } : 'the copy could not be built');
+print('①f NO BYTE OF THE JOB\'S OWN WORDS IS LOST (主开发 r2773 (1))', bytesRows);
+ok(!!SETTLE_DROPS && !!bytesMut.scenes && Object.values(bytesMut.scenes).some((x) => !x.words || !x.bytes), 'CONTROL — a settle that DROPS the run it keeps: a job\'s own words go missing from its log — RED on the copy', SETTLE_DROPS ? bytesMut.scenes : 'the copy could not be built (its anchor is missing)');
+console.log(`      7e1674a83's settle (a copy) over the same scenes: ${JSON.stringify(SETTLE_OLD ? Object.fromEntries(Object.entries(bytesOldMut.scenes || {}).map(([k, x]) => [k, { words: x.words, bytes: x.bytes, log: x.log }])) : 'no copy')}`);
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');
