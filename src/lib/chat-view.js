@@ -1,6 +1,6 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
 import { quietOpenVerdict, teachVerdict, TAUGHT_KEY } from './artifact-auto-open.js'; // lane artifacts-auto-open-quiet: the doc's automatic open is quiet
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress, hostsHeldWords } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress, hostsHeldWords, pagesListHeldWords } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { turnWaitStep, turnSeq } from '../desktop-switch.js'; // lane phone-take-photo r2/r3 (主开发 ①): the finished turn's mark, the same on every client, ended by the turn sequence (PURE)
 import { metric, track } from './telemetry-client.js';
@@ -5523,7 +5523,7 @@ class ChatView {
     const ids = this._getSessionIds();
     const cid = ids?.claudeId || ids?.backendSessionId || '';
     fetchJson('/api/pages?sessionId=' + encodeURIComponent(this.sessionId) + (cid ? '&conversationId=' + encodeURIComponent(cid) : '')).then((r) => {
-      if (r && Array.isArray(r.pages) && this._statusBar) this._statusBar.setPages(r.pages);
+      if (r && Array.isArray(r.pages) && this._statusBar) this._statusBar.setPages(r.pages, { unread: r.code === 'pages_unread' ? pagesListHeldWords() : null });   // r3107: held — the chip says why it is empty
     });
   }
 

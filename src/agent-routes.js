@@ -2802,7 +2802,7 @@ app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25m
   // hostname — both resolve nowhere else; 2.366.0 shipped exactly that link
   // to the owner). publicUrl or the relative path, and the CLI says so.
   const r = publishedPages.publishContent({ html: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), name: String(q.title || q.name || ''), srcKey, makePublic, sessionId: a.sessionId, conversationId: a.conversationId });
-  if (r.error) return res.status(400).json(r);
+  if (r.error) return res.status(r.status === 503 ? 503 : 400).json(r);   // r3107: a held list is «try again», never a bad request
   res.json({ ...r, page: pageAnswer(r.page) }); // no origin: an agent has no browser, and the server must not guess one (2.366.1); the name through the belt (verify r6 F3)
 });
 // B-f694 (2026-10-01, 生活方式助手: a public page could only be overwritten by a placeholder — taking one down lived in
@@ -2815,6 +2815,9 @@ const ownPage = (a, ref) => {
   if (!publishedPages) return { code: 503, error: 'published pages not available on this server' };
   const r = String(ref ?? '').trim();
   if (!r) return { code: 400, error: 'name the page: its id (pg…), its /p/ link, or the published file\'s path' };
+  // r3107: the list is HELD (published-pages.json could not be read) — never «not among yours» (it reads EMPTY while held): the hold's words, 503
+  const heldW = typeof publishedPages.heldWords === 'function' ? publishedPages.heldWords() : null;
+  if (heldW) return { code: 503, error: heldW, held: 'pages_unread' };
   const mine = (a.sessionId || a.conversationId) ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }) : [];
   const m = /(?:^|\/p\/)(pg[a-z0-9]{10})(?=$|[/?#])/.exec(r);
   const key = `${a.hostId || 'local'}:${r}`;
@@ -2825,9 +2828,9 @@ const ownPage = (a, ref) => {
 app.post('/api/agent/pages/unpublish', (req, res) => {
   const a = pageAuth(req, res); if (!a) return;
   const o = ownPage(a, req.body?.ref);
-  if (o.error) return res.status(o.code).json({ error: o.error });
+  if (o.error) return res.status(o.code).json({ error: o.error, ...(o.held ? { code: o.held } : {}) });
   const r = o.publishedPages.remove(o.page.id);
-  if (r.error) return res.status(404).json(r);
+  if (r.error) return res.status(r.status === 503 ? 503 : 404).json(r);
   res.json({ ok: true, page: pageAnswer({ ...o.page, removed: true }) });
 });
 app.post('/api/agent/pages/visibility', (req, res) => {
@@ -2835,15 +2838,17 @@ app.post('/api/agent/pages/visibility', (req, res) => {
   const v = req.body?.visibility;
   if (v !== 'public' && v !== 'private') return res.status(400).json({ error: 'visibility is public or private' });
   const o = ownPage(a, req.body?.ref);
-  if (o.error) return res.status(o.code).json({ error: o.error });
+  if (o.error) return res.status(o.code).json({ error: o.error, ...(o.held ? { code: o.held } : {}) });
   const r = o.publishedPages.setFlags(o.page.id, { makePublic: v === 'public' });
-  if (r.error) return res.status(404).json(r);
+  if (r.error) return res.status(r.status === 503 ? 503 : 404).json(r);
   res.json({ ...r, page: pageAnswer(r.page) });
 });
 app.get('/api/agent/pages', (req, res) => {
   const a = pageAuth(req, res); if (!a) return;
   const publishedPages = getPublishedPages();
   if (!a.sessionId && !a.conversationId) return res.json({ pages: [] }); // a caller with no scope sees nothing (no all-pages oracle — review-caught)
+  { const held = publishedPages && typeof publishedPages.heldWords === 'function' ? publishedPages.heldWords() : null;   // r3107: held — an EMPTY list is unread, never «no pages published yet»
+    if (held) return res.status(503).json({ error: held, code: 'pages_unread', unread: held, pages: [] }); }
   res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }).map(pageAnswer) : [] });   // verify r6 F3: every name through the belt
 });
 // B-70f9 cure 2: the create door answers EVERY throw by name (src/server/job-where.js answersEveryThrow — async since the folder check).

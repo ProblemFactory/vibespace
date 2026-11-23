@@ -883,6 +883,7 @@ function create({
   async function publish({ host = null, dir, title = '', makePublic, sessionId = null, conversationId = null, req = null, pageId = null } = {}) {
     const pages = getPublishedPages();
     if (!pages || typeof pages.publishContent !== 'function') return fail('no_pages', 'published pages are not available on this server');
+    if (typeof pages.heldWords === 'function' && pages.heldWords()) return fail('pages_unread', pages.heldWords(), { status: 503 });   // r3107: held — never «no published page» for a page named
     const b = await bundle(host, dir);
     if (!b.ok) return b;
     const r = b.read;
@@ -944,6 +945,7 @@ function create({
     tweaks, setTweaks, requestTweaks,
     systems, defaultSystem, systemTokens, rename, unlist, agentSystems, agentSystemTokens,   // lane design-systems-home
     flush: () => saving, _watches: watches, STATUS,
+    pagesHeldWords: () => { const p = getPublishedPages(); return p && typeof p.heldWords === 'function' ? p.heldWords() : null; },   // r3107: a design's page fact is unread while the pages list is held
   };
 }
 

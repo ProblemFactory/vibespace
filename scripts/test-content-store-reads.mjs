@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
@@ -97,8 +97,13 @@ console.log('PP [published-pages.json] the share links a person gave out');
     const pubR = resStub(); routes['POST /api/pages/publish']({ body: { path: html('pp2-new') }, headers: {} }, pubR);
     ok(!!lr.body && lr.body.code === 'pages_unread' && /could not be read/.test(lr.body.unread || '') && !!br.body && br.body.code === 'pages_unread' && br.body.page === null, 'PP2 the lists say it (the chips\' list and the Publish dialog\'s by-path read carry unread + pages_unread — the dialog words it, zh / ja)', { list: lr.body, byPath: br.body });
     ok(pubR.code === 503 && !!pubR.body && pubR.body.code === 'pages_unread', 'PP2 the Publish dialog\'s POST answers 503 pages_unread (the toast words it by its code)', { code: pubR.code, body: pubR.body });
+    const flR = resStub(); routes['POST /api/pages/:id']({ params: { id: ids[0] }, body: { public: false }, headers: {} }, flR);
+    const unR = resStub(); routes['DELETE /api/pages/:id']({ params: { id: ids[1] }, headers: {} }, unR);
+    ok(flR.code === 503 && flR.body.code === 'pages_unread' && unR.code === 503 && unR.body.code === 'pages_unread', 'PP2 the chip\'s visibility flip and unpublish routes answer 503 pages_unread (never 404 «no such page»)', { flip: flR.code, unpublish: unR.code });
+    const known = visit(p2, ids[0]), never = visit(p2, 'pgmadeup0000');
+    ok(known.code === never.code && known.body === never.body && known.headers['Cache-Control'] === 'no-store' && never.headers['Cache-Control'] === 'no-store', 'PP2 no existence oracle: an id that never existed reads exactly like a real one while held (503, the same words, no-store)', { known: known.code, never: never.code });
     ok(disk(F) === before, 'PP2 nothing was written over the file while held', null);
-    p2._hold.stop();
+    p2._hold.stop(); healthy._hold.stop();
   }
   // ③ a RESTART while held
   {
@@ -121,6 +126,60 @@ console.log('PP [published-pages.json] the share links a person gave out');
     const onDisk = ((json(F) || {}).pages || []).map((p) => p.id);
     ok(lifted === true && !p2._hold.held() && ids.every((id) => listed.includes(id)), 'PP4 the file reads again (the helper\'s read off the loop) ⇒ the hold lifts and both pages are listed again', { lifted, listed });
     ok(!!idOf(third) && onDisk.length === 3 && ids.every((id) => onDisk.includes(id)) && visit(p2, ids[0]).code === 200, 'PP4 after the lift a publish goes through and keeps both earlier pages; a share link serves again', { onDisk });
+  }
+
+  // ⑥ r3107 THE ROADS THAT LOOK A PAGE UP THROUGH THE LIST — each asks the hold FIRST (never «no page among yours» / «no published page»)
+  {
+    const express = require('express');
+    const { setupAgentRoutes } = require(path.join(REPO, 'src/agent-routes.js'));
+    const d = world('pp6');
+    let cur = mk(d);
+    const sessA = { agentToken: 'vsst_A', backend: 'claude', claudeSessionId: 'conv-A', cwd: '/scratch-made-up', name: 'a' };
+    const app = express(); app.use(express.json());
+    setupAgentRoutes({
+      app, activeSessions: new Map([['sA', sessA]]), tasks: { get: () => null, groupsOfSession: () => [] },
+      sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => { }, clear: () => null, setByUser: () => { } },
+      SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
+      userTodos: { rekey: () => { }, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
+      sessionStatusKey: (s, sid) => `claude:${sid}`, serverSetting: () => undefined, scheduleCtxSync: () => { }, remoteCtxBaseFor: () => null,
+      getPublishedPages: () => cur,
+    });
+    const srv = app.listen(0); await new Promise((r) => srv.on('listening', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const post = (p, body) => fetch(base + p, { method: 'POST', headers: { Authorization: 'Bearer vsst_A', 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, j: await r.json().catch(() => ({})) }));
+    const pub = () => fetch(`${base}/api/agent/pages/publish?path=${encodeURIComponent('/scratch-made-up/a.html')}&title=A&public=1`, { method: 'POST', headers: { Authorization: 'Bearer vsst_A', 'Content-Type': 'text/html' }, body: '<p>a made-up page</p>' }).then(async (r) => ({ status: r.status, j: await r.json().catch(() => ({})) }));
+    const first = await pub(), id = first.j.page && first.j.page.id;
+    ok(first.status === 200 && !!id && first.j.page.public === true, 'PP6 setup: the agent published a public page of its own (the list reads)', first.j);
+    const F = path.join(d, 'published-pages.json'), before = disk(F), pr = placeReads(F, 1);
+    try { await quietly(() => { cur = mk(d); }); } finally { pr.restore(); }
+    const held = (r) => r.status === 503 && r.j.code === 'pages_unread' && /could not be read/.test(r.j.error || '') && !/among the pages this conversation published|no such page/.test(r.j.error || '');
+    const un = await post('/api/agent/pages/unpublish', { ref: id }), vis = await post('/api/agent/pages/visibility', { ref: id, visibility: 'private' });
+    ok(held(un) && held(vis), 'PP6 the agent\'s `vibespace-page unpublish` and `visibility` on its own page while held: 503 with the hold\'s words (pages_unread) — never «no page … among the pages this conversation published» (the person asked to take it down: the agent hears why it cannot yet)', { unpublish: un, visibility: vis });
+    const ls = await fetch(base + '/api/agent/pages', { headers: { Authorization: 'Bearer vsst_A' } }).then(async (r) => ({ status: r.status, j: await r.json().catch(() => ({})) }));
+    ok(held(ls) && ls.j.unread === ls.j.error, 'PP6 the agent\'s `vibespace-page list` while held: 503 with the words and the unread mark (the CLI prints a refusal\'s words) — never an empty list, never «no pages published yet»', ls);
+    const again = await pub();
+    ok(held(again), 'PP6 the agent\'s publish while held answers 503 (the hold\'s refusal), never 400 «bad request»', again);
+    ok(disk(F) === before, 'PP6 nothing was written over the file by any agent road while held', null);
+    // the design road: a page NAMED (`vibespace-design publish --page <id>`), and the Designs home's page fact
+    const DE = require(path.join(REPO, 'src/server/design-engine.js'));
+    const de = DE.create({ dataDir: world('pp6-design'), getPublishedPages: () => cur, timers: { setInterval: () => ({ unref() { } }), clearInterval: () => { }, setTimeout: () => ({ unref() { } }) }, log: () => { } });
+    de.register({ dir: '/scratch-made-up/design-pp6', title: 'Made-up design' });
+    const dp = await quietly(() => de.publish({ dir: '/scratch-made-up/design-pp6', pageId: id, sessionId: 'sA' }));
+    ok(!!dp && dp.code === 'pages_unread' && dp.status === 503 && /could not be read/.test(dp.error || ''), 'PP6 the design road with a page named while held: 503 pages_unread with the words — never «no published page <id>»', dp);
+    ok(/could not be read/.test(de.pagesHeldWords() || ''), 'PP6 the design engine says the pages list is held (GET /api/designs carries pagesUnread; the Designs home words it, zh / ja)', null);
+    cur._hold.stop(); srv.close();
+  }
+  // ⑦ r3107 THE PAGE: the chip and the Designs home say why a list is empty; the toasts word a refusal by its code
+  {
+    const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+    const CV = src('src/lib/chat-view.js'), SB = src('src/lib/chat-status-bar.js'), DH = src('src/lib/design-home.js'), RD = src('src/routes/design.js');
+    const chip = (cv, sb) => cv.includes("setPages(r.pages, { unread: r.code === 'pages_unread' ? pagesListHeldWords() : null })") && sb.includes("this._pagesUnread = unread || null;") && sb.includes("h.className = 'empty-hint empty-hint-inline chat-pages-held'; h.textContent = this._pagesUnread;") && (sb.match(/err: heldWordsOf\(r\) \|\| \(r && r\.error\) \|\| 'network'/g) || []).length === 2;
+    const home = (dh, rd) => dh.includes('held.hidden = !r.pagesUnread;') && rd.includes("pagesUnread: 'pages_unread'");
+    ok(chip(CV, SB), 'PP7 the chat status bar\'s pages chip: the list read\'s unread reaches setPages, the open list draws the words (and the tooltip), its two buttons\' toasts word a refusal by its code', null);
+    ok(home(DH, RD), 'PP7 the Designs home: GET /api/designs says the pages list is unread, the home draws the words above the list', null);
+    // their REDS: a copy with the release's line (the unread dropped) — each reads red on exactly its road
+    ok(!chip(anchored(CV, "setPages(r.pages, { unread: r.code === 'pages_unread' ? pagesListHeldWords() : null })", 'setPages(r.pages)', 'pp7-chip-today'), SB), 'PP7 RED: the chip read with today\'s line (setPages(r.pages), the unread dropped) fails the leg', null);   // stale-pins: kept
+    ok(!home(DH, anchored(RD, ", ...(design.pagesHeldWords && design.pagesHeldWords() ? { pagesUnread: 'pages_unread' } : {})", '', 'pp7-home-today')), 'PP7 RED: the designs route with today\'s answer (no pagesUnread) fails the leg', null);
   }
   // ⑤ TORN BYTES, kept aside once; the remover question
   {

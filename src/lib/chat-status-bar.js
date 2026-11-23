@@ -1,5 +1,5 @@
 import { billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill's forms (its «对话设置» row says the full one)
-import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent } from './utils.js';
+import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent, heldWordsOf } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
 import { apiFateLookup, onApiCards } from './channel-api-card-view.js'; // B-d3d3: a raw API row's words say its proposal's fate (and follow the records while the menu is open)
@@ -684,7 +684,7 @@ export class ChatStatusBar {
   }
 
   /** Pages published from this session (status-bar design chip + popover). */
-  setPages(pages) { this._pages = Array.isArray(pages) ? pages.slice() : []; this.render(); this._refillDesignList(); }
+  setPages(pages, { unread = null } = {}) { this._pages = Array.isArray(pages) ? pages.slice() : []; this._pagesUnread = unread || null; this.render(); this._refillDesignList(); }   // r3107: `unread` — the list is held, said in the chip
   /** This session's designs (lane design-window: GET /api/designs?sessionId, re-read on `designs-updated`) — the
    *  chip's count and the popover's list above the pages, both followed live. */
   setDesigns(designs) { this._designs = Array.isArray(designs) ? designs.filter((d) => d && typeof d.dir === 'string' && d.dir).slice(0, 200) : []; this.render(); this._refillDesignList(); }
@@ -709,6 +709,7 @@ export class ChatStatusBar {
       // lane pages-chip-groups: two groups, each under its head line (own, then shown here); KEYED — a row whose words did
       // not change keeps its element, a changed one is replaced in place, never a whole repaint while the popover is open
       const want = [];
+      if (this._pagesUnread) want.push({ key: 'pages-unread', sig: this._pagesUnread, make: () => { const h = document.createElement('div'); h.className = 'empty-hint empty-hint-inline chat-pages-held'; h.textContent = this._pagesUnread; return h; } });   // r3107
       for (const g of this._pagesChip().groups) {
         if (!g.rows.length) continue;
         want.push({ key: 'head:' + g.key, sig: g.label, make: () => { const h = document.createElement('div'); h.className = 'chat-design-group-head'; h.textContent = g.label; return h; } });
@@ -1098,7 +1099,7 @@ export class ChatStatusBar {
     // by this VibeSpace; the count = pages published from this session
     if (this._onDesignRequest) {
       const pc = this._pagesChip(); // F2: a published design is ONE; lane pages-chip-groups: + the pages shown here
-      const n = pc.chipCount, dTitle = pc.tip;
+      const n = pc.chipCount, dTitle = this._pagesUnread ? `${pc.tip}\n${this._pagesUnread}` : pc.tip;   // r3107: held — the tooltip says why
       inDoor('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);   // lane mask-value-shape: inside 产出
     }
 
@@ -1552,7 +1553,7 @@ export class ChatStatusBar {
     paint();
     vis.onclick = async () => {
       const r = await fetchJson('/api/pages/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ public: !p.public }) });
-      if (!r || r.error) { showToast(t('Update failed: {err}', { err: (r && r.error) || 'network' }), { type: 'error' }); return; }
+      if (!r || r.error) { showToast(t('Update failed: {err}', { err: heldWordsOf(r) || (r && r.error) || 'network' }), { type: 'error' }); return; }
       if (r.page) { p.public = !!r.page.public; paint(); this.notePagePublished(r.page); }
     };
     // B-f694: the take-down the agent's `vibespace-page unpublish` does (the explorer's Publish page… dialog had it;
@@ -1564,7 +1565,7 @@ export class ChatStatusBar {
       const page = { ...p }, label = p.name || p.id;
       if (!await showConfirmDialog({ title: t('Unpublish'), message: t('Unpublish "{name}"? Anyone who opens its link is told the page was taken down.', { name: label }), confirmText: t('Unpublish'), danger: true })) return;
       const r = await fetchJson('/api/pages/' + encodeURIComponent(page.id), { method: 'DELETE' });
-      if (!r || r.error) { showToast(t('Unpublish failed: {err}', { err: (r && r.error) || 'network' }), { type: 'error' }); return; }
+      if (!r || r.error) { showToast(t('Unpublish failed: {err}', { err: heldWordsOf(r) || (r && r.error) || 'network' }), { type: 'error' }); return; }
       showToast(t('Page unpublished'));
       this.notePagePublished({ ...page, removed: true });
     };

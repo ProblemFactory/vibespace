@@ -75,7 +75,9 @@ export function openDesignHome(app, { syncId } = {}) {
   const list = mk('div', 'design-home-list');
   list.setAttribute('role', 'list');
   const status = mk('div', 'design-home-empty empty-hint', t('Loading designs…'));
-  root.append(bar, list);
+  const held = mk('div', 'design-home-empty empty-hint design-home-held', '');   // r3107: a list read as «not published» that is UNREAD, said
+  held.hidden = true;
+  root.append(bar, held, list);
   list.appendChild(status);
   winInfo.content.appendChild(root);
 
@@ -163,6 +165,7 @@ export function openDesignHome(app, { syncId } = {}) {
     if (signal.aborted) return;
     if (!r || !Array.isArray(r.designs)) { status.textContent = t('Could not read the designs — the server did not answer'); if (!rows.length) render(); return; }
     rows = readDesignRows(r.designs);
+    held.textContent = r.pagesUnread ? t('VibeSpace cannot read its list of published pages right now, so no design shows as published. Nothing is lost: every link given out stays (it tries again every few minutes).') : ''; held.hidden = !r.pagesUnread;
     render();
   }
 

@@ -123,7 +123,7 @@ async function drive(Bar) {
   ok(v.s4.join() === 'H:Published by this conversation,own:pgown0000001,own:pgown0000003', '③ nothing shown any more ⇒ the shown group and its head leave', v.s4);
   const src = fs.readFileSync(path.join(repo, 'src/lib/chat-status-bar.js'), 'utf8');
   const refill = src.slice(src.indexOf('\n  _refillDesignList() {'), src.indexOf('\n    const dl = this._designsEl;'));
-  ok(refill.length > 0 && !/replaceChildren\(|innerHTML/.test(refill) && /pagesChipGroups\(/.test(src) && /const pc = this\._pagesChip\(\);[^\n]*\n\s*const n = pc\.chipCount, dTitle = pc\.tip;/.test(src), '③ pins: the pages list is patched by key (no replaceChildren / innerHTML), the chip\'s number + tooltip are the model\'s');
+  ok(refill.length > 0 && !/replaceChildren\(|innerHTML/.test(refill) && /pagesChipGroups\(/.test(src) && /const pc = this\._pagesChip\(\);[^\n]*\n\s*const n = pc\.chipCount, dTitle = (?:this\._pagesUnread \? `\$\{pc\.tip\}\\n\$\{this\._pagesUnread\}` : )?pc\.tip;/.test(src), '③ pins: the pages list is patched by key (no replaceChildren / innerHTML), the chip\'s number + tooltip are the model\'s');
 }
 
 console.log('— ④ CONTROL: a model copy that mixes the groups');
