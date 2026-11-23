@@ -32,6 +32,8 @@ const QUEUE_CHIPS = Object.freeze({
   handed: Object.freeze({ inTurn: true, place: 'tail' }),        // claude (lane claude-steer-inject): written to the running turn, read at its next tool call
   kept: Object.freeze({ inTurn: true, place: 'next-turn' }),     // claude: Stop came before the agent read it — it rides the NEXT message (its turn opens at that delivery)
   stopped: Object.freeze({ inTurn: false, place: 'here' }),      // codex (lane codex-interrupted-putback): it had STARTED its own turn when Stop cut it off
+  unconfirmed: Object.freeze({ inTurn: true, place: 'here' }),   // claude (B-5a4d root, unit 1): its CLI died with no word on its fate (a remote or paired machine, a wrapper killed) — it may not have reached the agent
+  undelivered: Object.freeze({ inTurn: true, place: 'here' }),   // claude (B-5a4d's root): a dead wrapper had handed it and the CLI never took it — it never reached the agent; it starts no turn and claims nothing of the input box
 });
 /** Every chip state, in the table's order. */
 const QUEUE_STATES = Object.freeze(Object.keys(QUEUE_CHIPS));

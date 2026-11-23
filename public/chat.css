@@ -1188,6 +1188,10 @@
 /* lane claude-steer-inject: handed = on its way into the running turn (the accent, dashed: not read yet); kept = Stop came first */
 .chat-queue-chip-handed { color: var(--accent); border-color: var(--accent); border-style: dashed; }
 .chat-queue-chip-removed { text-decoration: line-through; }
+/* B-5a4d's root: undelivered = a dead wrapper had handed it and the CLI never took it — send it again */
+.chat-queue-chip-undelivered { color: var(--red); border-color: var(--red); }
+/* B-5a4d root, unit 1: unconfirmed = its CLI died with no word on its fate */
+.chat-queue-chip-unconfirmed { border-style: dashed; }
 /* ── SEND MODES WHILE A TURN RUNS (the Alt+Enter chord, 2026-09-07) ───────
    TWO faces of ONE capability, split by VIEWPORT so they can never both show:
    the hint line is the keyboard face (desktop), the bolt button beside Send is

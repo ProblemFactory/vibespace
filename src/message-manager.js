@@ -2046,7 +2046,7 @@ class MessageManager extends MessageWindow {
     // that happened while the agent has not read it, in its place once it has (src/queue-chips.js `place`)
     this._placeByChip(msg, state);
     // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
-    if (state === 'removed' || state === 'stopped') this._webuiCopies.delete(String(msgId));
+    if (state === 'removed' || state === 'stopped' || state === 'undelivered' || state === 'unconfirmed') this._webuiCopies.delete(String(msgId));
     // the hub's `now` is re-said at every emit (r6): it pairs with `until` for the client's own deadline
     const settling = state === 'queued' && this._settling ? (this._settling.until ? { ...this._settling, now: Date.now() } : this._settling) : null;
     const settleMoved = JSON.stringify(msg.settling || null) !== JSON.stringify(settling) && !(msg.settling && settling && msg.settling.until === settling.until && !!msg.settling.running === !!settling.running);
@@ -2061,20 +2061,23 @@ class MessageManager extends MessageWindow {
   /** `input_handover` (2.369.361, lane claude-steer-inject) — the wrapper wrote these frames to the CLI while a turn ran
    *  (the person's Enter, or the ⚡ on a held row), and says what became of them: 'handed' (written — the agent reads it at
    *  its next tool call), 'landed' (it rode a tool result into the turn and the model answered — «Steered», where it sits),
-   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip), 'stopped' (row
-   *  B-5a4d's root: the NEXT wrapper's start found the frame a dead wrapper handed nowhere in the transcript — it never reached
-   *  the agent; its 'landed' says the CLI recorded it — data/bin/chat-wrapper.js settleDeadHandovers). What Stop
+   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip), 'undelivered' (row
+   *  B-5a4d's root: the NEXT wrapper's start proved a frame a dead wrapper handed absent from the transcript, its old CLI gone —
+   *  it never reached the agent: «Not delivered», in its place, no turn of its own; a 'successor' word — landed, own-turn or
+   *  undelivered — also takes the copy out of the claim pool: no later record on this stream is ITS record —
+   *  data/bin/chat-wrapper.js settleDeadHandovers). What Stop
    *  meant for each one is said by Stop's ONE `queue_dropped` (`keptIds` → 'kept', `landedIds` → 'steered' — message-
    *  window `_processQueueDropped`); a 'kept' state here is still read (a record of an earlier build). No bubble ⇒ nothing to mark:
    *  the frame reached the agent, which is never a silence worth a card. */
   _processInputHandover(raw, emit) {
-    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept', stopped: 'stopped' }[raw.state];
+    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept', undelivered: 'undelivered' }[raw.state];
     if (state === undefined) return;
     for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) {
       // every state here means the frame was WRITTEN to the CLI — a batch's last witness, in the order said (r9)
       const c = this._webuiCopies.get(String(msgId));
       if (c && !c.ran) c.ran = ++this._handOrder;
       this._stampQueueChip(msgId, state, emit);
+      if (raw.via === 'successor' || raw.via === 'exit') this._webuiCopies.delete(String(msgId));   // B-5a4d's root: a settle at the CLI's exit (or a next wrapper's) is the frame's last word
     }
   }
 
@@ -2384,6 +2387,11 @@ class MessageManager extends MessageWindow {
       // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
       // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
       if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
+      // B-5a4d's root: a copy the next wrapper marked NOT DELIVERED (its transcript proved the CLI never took it) is drawn with that
+      // chip at every rebuild — the wrapper keeps the marked copy in its buffer, so a hub restart draws it again
+      if (raw.webui_copy && raw.undelivered && raw.msgId) this._stampQueueChip(String(raw.msgId), 'undelivered', false);
+      // …and one whose CLI died with no word on its fate (the history read's drawer, src/handed-records.js): «Not confirmed»
+      else if (raw.webui_copy && raw.unconfirmed && raw.msgId) this._stampQueueChip(String(raw.msgId), 'unconfirmed', false);
       // lane touch-chip-cause r3: a message the person sends while a turn RUNS entered that turn (held, handed or steered) —
       // never a turn's start where it was typed; a held one's turn opens at its delivery (the next turn's first record)
       if (raw._fromWebui && emit && this._turnLive && !msg.turnStart) msg.midTurn = true;

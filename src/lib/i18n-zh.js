@@ -4014,6 +4014,10 @@ export default {
   "Injected into the running turn": "已插入正在进行的这一轮",
   "Removed from the queue — it will not run": "已从队列移除 —— 不会运行",
   "Started, then stopped": "已开始，被停止",
+  "Not delivered": "未送达",
+  "Not confirmed": "未确认",
+  "The conversation ended while this message was being handed to the agent — it may not have reached it": "智能体接收这条消息时对话已结束 —— 它可能没有送达",
+  "The conversation ended before the agent read this message — send it again": "智能体读到这条消息之前对话已结束 —— 请重新发送",
   "It had already started when Stop cut it off — its words are back in the input box": "按下停止时它已开始运行 —— 已被停止，内容放回了输入框",
   "That message is no longer queued — it already ran.": "这条消息已不在队列中 —— 它已经运行了。",
   // the Alt+Enter chord (2026-09-07): the OTHER send mode by keyboard, plus

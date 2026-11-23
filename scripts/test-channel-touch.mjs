@@ -1010,8 +1010,8 @@ await section('⑨', async () => {
   }
   const unknown = [...drawn, ...stamped].filter((s) => !QC.QUEUE_STATES.includes(s));
   console.log(`    THE CHIP TABLE: ${QC.QUEUE_STATES.map((s) => `${s}${QC.QUEUE_CHIPS[s].inTurn ? ' (in the turn)' : ' (its own turn)'}`).join(', ')} — drawn by the renderer: ${drawn.join(', ')}; stamped by a normalizer: ${[...stamped].join(', ')}`);
-  ok(eq(T.MID_TURN_QUEUE, QC.IN_TURN_STATES) && chipRows.every(([s, o]) => o === !QC.QUEUE_CHIPS[s].inTurn) && ['queued', 'steered', 'removed', 'handed', 'kept'].every((s) => QC.IN_TURN_STATES.includes(s)) && drawn.length >= 4 && unknown.length === 0,
-    'EVERY CHIP VALUE (MAJOR 2 (c)): the mid-turn set is DERIVED from the chip table (src/queue-chips.js) — queued / steered / removed / handed / kept are inside the running turn (never a boundary), stopped started its own; every state the renderer draws and every state a normalizer stamps has a row', { chipRows, unknown });
+  ok(eq(T.MID_TURN_QUEUE, QC.IN_TURN_STATES) && chipRows.every(([s, o]) => o === !QC.QUEUE_CHIPS[s].inTurn) && ['queued', 'steered', 'removed', 'handed', 'kept', 'undelivered', 'unconfirmed'].every((s) => QC.IN_TURN_STATES.includes(s)) && drawn.length >= 4 && unknown.length === 0,
+    'EVERY CHIP VALUE (MAJOR 2 (c)): the mid-turn set is DERIVED from the chip table (src/queue-chips.js) — queued / steered / removed / handed / kept / undelivered / unconfirmed are inside the running turn (never a boundary), stopped started its own; every state the renderer draws and every state a normalizer stamps has a row', { chipRows, unknown });
   // ── 10. CODEX'S TURN — its own task_started facts, never its midTurn (which means «does not close the streams»)
   const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
   const CB = Date.parse('2026-10-28T10:00:00.000Z'), ciso = (d) => new Date(CB + d).toISOString();

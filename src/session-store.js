@@ -15,6 +15,7 @@ const { readJsonlTail } = require('./adapters/codex');
 // A test suite's synthetic transcript is never a conversation (see the essay
 // in src/fixture-guard.js — one declaration, shared with the usage walk).
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
+const HANDED = require('./handed-records.js');   // B-5a4d's root (unit 1): the records of frames handed to a CLI that died — drawn by the history read
 const { costResume, costShown } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — this restore and message-manager's live road
 const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: SHARED — the witness's storage roots (none in a process nobody set)
 
@@ -783,7 +784,8 @@ function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
   const k = claudeSessionId + '\u0000' + (cwd || ''), bulk = !!(opts && opts.bulk === true);
   const was = _warmOfSession.get(k);
   if (was && (bulk || !was.bulk)) return was.p;
-  const p = warmOnce(claudeSessionId, cwd, opts).then((ok) => { if (ok) { _reWarmAt.delete(claudeSessionId); noteReadable(claudeSessionId); } return ok; })   // a warm that read: the parse may ask again at once after a later refusal; a page told «not loaded» is told it can read now
+  // B-5a4d's root (unit 1): the conversation's handed records are read off the loop BESIDE its transcript (bounded, never its verdict)
+  const p = Promise.all([warmOnce(claudeSessionId, cwd, opts), HANDED.warm([claudeSessionId]).catch(() => null)]).then(([ok]) => ok).then((ok) => { if (ok) { _reWarmAt.delete(claudeSessionId); noteReadable(claudeSessionId); } return ok; })   // a warm that read: the parse may ask again at once after a later refusal; a page told «not loaded» is told it can read now
     .finally(() => { const cur = _warmOfSession.get(k); if (cur && cur.p === p) _warmOfSession.delete(k); });
   _warmOfSession.set(k, { p, bulk });
   return p;
@@ -1378,6 +1380,7 @@ class SessionMessages {
       this._helperResults = memo.helperResults || [];
       this._all = memo.all;
       this._display = this._all.filter(isDisplayMessage);
+      this._drawHanded(session, historySessionId);
       return;
     }
     // (B-299b A5: the two Sets of every record's uuid and message.id built here were read by nothing — gone. The dedup is the
@@ -1439,6 +1442,20 @@ class SessionMessages {
       this._all = all;
     }
     _mergeMemo.set(jsonl, { buffer, kept, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });
+    this._display = this._all.filter(isDisplayMessage);
+    this._drawHanded(session, historySessionId);
+  }
+
+  /** B-5a4d's root (unit 1): THE ONE DRAWER of a frame the person handed to a CLI that died — its record, named by the conversation
+   *  (src/handed-records.js, from the cache the harness's warm filled off the loop): «Not delivered», or «Not confirmed» while its fate
+   *  is unknown — at its send time, in the stopped view and after a Resume alike. A live session's own frames in flight are not drawn. */
+  _drawHanded(session, historySessionId) {
+    if (!historySessionId) return;
+    const ids = [historySessionId, ...(Array.isArray(session.forkedFrom) ? session.forkedFrom : [])];
+    let drawn = [];
+    try { drawn = HANDED.drawnFor(HANDED.recordsFor(ids, this._buffersDir ? { dir: this._buffersDir } : {}), { liveSince: session.pty || session.socketPath ? Number(session.createdAt) || 0 : 0 }); } catch { drawn = []; }
+    if (!drawn.length) return;
+    this._all = HANDED.insertDrawn(this._all, drawn);
     this._display = this._all.filter(isDisplayMessage);
   }
 

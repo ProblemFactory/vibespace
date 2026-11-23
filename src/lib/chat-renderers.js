@@ -1017,7 +1017,7 @@ class ChatRenderers {
     const prev = el.querySelector(':scope > .chat-queue-chip');
     if (prev) prev.remove();
     const state = msg?.queueState;
-    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped' && state !== 'handed' && state !== 'kept') return null;
+    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped' && state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed') return null;
     const chip = document.createElement('button');
     chip.className = `chat-queue-chip chat-queue-chip-${state}`;
     chip.type = 'button';
@@ -1026,7 +1026,7 @@ class ChatRenderers {
     // HELD WHILE THE TURN SETTLES (lane claude-steer-inject r5, the deadline-card law): a window in which the CLI owes a turn
     // holds it — the chip says so and counts down to the backstop (ChatView's one-second ticker rewrites the seconds)
     const settling = state === 'queued' && msg?.settling ? msg.settling : null;
-    const label = settling ? (settling.running ? t('Held — the previous turn’s follow-up is running') : t('Held — the turn is settling')) : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
+    const label = settling ? (settling.running ? t('Held — the previous turn’s follow-up is running') : t('Held — the turn is settling')) : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped') : state === 'undelivered' ? t('Not delivered') : state === 'unconfirmed' ? t('Not confirmed')
       : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Unread when stopped — goes with your next message') : t('Removed');
     // a countdown only while a timer exists, on THIS browser's clock (r6, the hub-clock law: ChatView turned the hub's `until`
     // into `localUntil` with the hub's `now` when the edit arrived; a restored page has no such pair and shows no seconds)
@@ -1040,6 +1040,8 @@ class ChatRenderers {
       ? t('Waiting behind the running turn — steering it injects it now, at the agent’s next reply')
       : state === 'steered' ? t('Injected into the running turn')
         : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
+        : state === 'undelivered' ? t('The conversation ended before the agent read this message — send it again')
+        : state === 'unconfirmed' ? t('The conversation ended while this message was being handed to the agent — it may not have reached it')
           : state === 'handed' ? t('Handed to the running turn — the agent reads it at its next tool call')
             : state === 'kept' ? t('Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again')
               : t('Removed from the queue — it will not run');

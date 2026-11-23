@@ -1,163 +1,244 @@
 #!/usr/bin/env node
-// THE NEXT WRAPPER SETTLES WHAT A DEAD ONE HANDED (row B-5a4d, its root — 主开发 r2852). A wrapper that died mid-turn wrote no settle
-// for a frame it had handed to the CLI, and its successor's first write replaced its file: the copy and its 'handed' record stayed
-// owed in the hub's ring for the life of the conversation object, the message afloat with «read at its next tool call» for good.
-// data/bin/chat-wrapper.js now reads the last wrapper's file ONCE before its first write and settles each frame handed with no settle:
-// 'landed' when the transcript's tail holds the frame's stamp, 'stopped' when the read proves it is not there. FAST, the REAL wrapper
-// over the stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs), a scratch config folder holding the conversation's transcript.
-//   ① THE SETTLE: a dead file with five frames — one the CLI recorded (landed), one it never did (stopped), one settled before it died,
-//      one Stop kept, one copy with no stamp (an older build: left) — ONE record each for the two, on stdout and in the new file, after
-//      the boot's queue baseline; nothing for the other three; the log says the count
-//   ② THE WINDOW: a transcript past the bound (4 MB read from its end) — a stamp inside the window lands; a frame sent after the
-//      window's first record and absent is stopped; one sent before it cannot be proven either way and is left (said)
-//   ③ NO DEAD ONE: a fresh start, and a last file with no hand-over — no settle record
-//   ④ THE PAGE: the normalizer draws a 'stopped' frame IN ITS PLACE with the 'stopped' chip, a 'landed' one with «Steered»;
-//      RED: a normalizer that does not know 'stopped' keeps it afloat with «read at its next tool call»
-//   ⑤ RED: a wrapper copy that never settles says nothing of the dead one's frames
-import { stopWrapper, anchored } from './scratch.mjs';
+// A HANDED FRAME's RECORD BY ITS CONVERSATION, DRAWN BY THE HISTORY READ (row B-5a4d, its root — 主开发 r3160's unit 1; the roads page
+// /var/tmp/vibespace-lanes/bl-keys-misc/b5a4d/roads-page.md). A frame the person handed to a running turn whose CLI then died was lost in
+// silence: every road to a next wrapper mints a new hub id, the exit teardown removes that id's files, and the stopped conversation's
+// view reads the transcript alone. Now data/bin/chat-wrapper.js keeps each handed frame's record in <buffers>/handed/<conversation id>.json
+// (0600; the id the CLI resumes by, moved at its init), settles it at its CLI's exit (that child's exit is the proof of «gone»), and the
+// hub's history read (src/session-store.js through src/handed-records.js) draws «Not delivered» — or «Not confirmed» when no word came.
+// FAST: the REAL wrapper over the stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs), the tree's REAL teardown function
+// (src/server/wrapper-files.js removeWrapperFiles — what src/server/session-stdout.js's exit teardown calls) and the REAL reader
+// (src/session-store.js SessionMessages + src/message-manager.js), under a scratch home. Every scene is RED on the tip before this unit.
+//   ① THE DYING WRAPPER: a frame handed while a tool runs; the CLI is killed — the wrapper settles it 'undelivered' at the exit (the word on
+//      stdout, the record in handed/<C>.json, 0600); a frame the transcript shows taken in settles 'landed'
+//   ② THE EXIT TEARDOWN removes the wrapper's files — the conversation's record stays (it is no wrapper file kind)
+//   ③ THE STOPPED VIEW (buffer '', by the conversation's id) draws «Not delivered» with the words; RED: a wrapper copy that names its
+//      record by the hub's id (the tip before this unit) — the view draws nothing
+//   ④ A RESUME UNDER A NEW HUB ID: the new live session's history draws it too; the new wrapper's start writes nothing over it
+//   ⑤ THE ID MOVES: a resume whose CLI announces another id — the records go to that id's file, a dead wrapper's records under the earlier
+//      id travel with them; the view finds them by the current id
+//   ⑥ A WRAPPER KILLED BEFORE IT COULD SETTLE: its record stays handed — the stopped view says «Not confirmed», never nothing
+//   ⑦ TWO WRITERS: another writer's records in the file are kept (the merge by the record's own id; states only move forward)
+//   ⑧ THE DRAWER's READ: four replies — none, ok, refused (a folder), torn — a refused or torn file draws nothing, said once
+//   ⑨ A LIVE wrapper's frame in flight is never drawn «Not confirmed»; the page's words and chips (en / zh / ja), the chip table
+import { stopWrapper } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let passed = 0, failed = 0;
 const say = console.log.bind(console);
-function ok(c, name, detail) { if (typeof c !== 'boolean') throw new TypeError(`ok(): the condition must be a boolean (${typeof c}) — «${name}»`); if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + JSON.stringify(detail).slice(0, 600)}`); } }
-const WD = armWatchdog({ capMs: 30e3 });
+function ok(c, name, detail) { if (typeof c !== 'boolean') throw new TypeError(`ok(): the condition must be a boolean (${typeof c}) — «${name}»`); if (c) { passed++; say(`  ✓ ${name}`); } else { failed++; say(`  ✗ ${name}${detail === undefined ? '' : ' — ' + JSON.stringify(detail).slice(0, 700)}`); } }
+const WD = armWatchdog({ capMs: 45e3 });
+const J = JSON.stringify;
+const BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dead-handover-'));
+const HOME = path.join(BASE, 'home'); fs.mkdirSync(path.join(HOME, '.claude', 'projects'), { recursive: true });
+process.env.HOME = HOME;   // the reader's transcripts live here — never the machine's own home
+const CFG = path.join(HOME, '.claude');
+process.on('exit', () => { try { fs.rmSync(BASE, { recursive: true, force: true }); } catch { } });
 const WRAPPER = path.join(ROOT, 'data/bin/chat-wrapper.js');
 const STAND_IN = path.join(ROOT, 'scripts/fixtures/claude-stand-in-cli.cjs');
-const BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dead-handover-'));
-process.on('exit', () => { try { fs.rmSync(BASE, { recursive: true, force: true }); } catch { } });
-const CFG = path.join(BASE, 'config');   // the conversation's CLAUDE_CONFIG_DIR — never the machine's own
-const M = mutantCopies('dead-handover', ROOT);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (fn, ms = 6000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(10); } return fn(); };
-
-// ── the lines, as the wrapper writes them ──
-const uuidOf = (id) => '00000000-0000-4000-8000-' + Buffer.from(id).toString('hex').padEnd(12, '0').slice(0, 12);
-const T = (hhmm) => `2026-11-23T${hhmm}:00.000Z`;
-const copy = (id, { stamp = true, at = T('10:00') } = {}) => JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'words of ' + id }] }, msgId: id, cliUuid: stamp ? uuidOf(id) : null, handNo: 1, _fromWebui: true, webui_copy: true, timestamp: at });
-const hand = (ids, state) => JSON.stringify({ type: 'input_handover', state, msg_ids: ids, via: 'enter' });
-const dropped = (o) => JSON.stringify({ type: 'queue_dropped', id: '1-1', items: [], keptIds: [], landedIds: [], ...o });
-const queueEmpty = JSON.stringify({ type: 'queue_changed', items: [] });
-let k = 0;
-const rec = (sid, cwd, o) => JSON.stringify({ sessionId: sid, cwd, ...o });
-const said = (sid, cwd, at, text = 'the turn says more ') => rec(sid, cwd, { type: 'assistant', uuid: '11111111-0000-4000-8000-' + String(k++).padStart(12, '0'), timestamp: at, message: { id: 'msg_' + k, role: 'assistant', content: [{ type: 'text', text }] } });
-/** a world: a working folder, its transcript under CFG, a buffer folder holding the last wrapper's file (null = none) */
-function world(tag, { dead = null, transcript = [] } = {}) {
-  const cwd = fs.mkdtempSync(path.join(BASE, 'cwd-' + tag + '-'));
-  const real = fs.realpathSync(cwd);
-  const sid = '55555555-0000-4000-8000-' + Buffer.from(tag).toString('hex').padEnd(12, '0').slice(0, 12);
-  const proj = path.join(CFG, 'projects', real.replace(/[/._]/g, '-'));
-  fs.mkdirSync(proj, { recursive: true });
-  fs.writeFileSync(path.join(proj, sid + '.jsonl'), transcript.map((f) => f(sid, real)).join('\n') + (transcript.length ? '\n' : ''));
-  const dir = fs.mkdtempSync(path.join(BASE, 'buf-' + tag + '-'));
-  if (dead !== null) fs.writeFileSync(path.join(dir, 's.buf'), dead);
-  return { cwd: real, sid, dir, buf: path.join(dir, 's.buf') };
-}
-/** the REAL wrapper (or a copy) started as the hub starts a resumed claude conversation; → its records, its file, its log */
-async function start(w, { wrapper = WRAPPER, waitFor = 'log', graceMs = 6000 } = {}) {
-  const child = spawn(process.execPath, [wrapper, w.buf, path.join(w.dir, 's.json'), process.execPath, STAND_IN, '--resume', w.sid], { cwd: w.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, CLAUDE_CONFIG_DIR: CFG, VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
-  const recs = []; let lb = '';
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
-  const log = () => { try { return fs.readFileSync(path.join(w.dir, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } };
-  try {
-    const baseline = await until(() => recs.some((r) => r.type === 'queue_changed'), graceMs);
-    if (waitFor === 'log') await until(() => /dead hand-overs: /.test(log()), graceMs);
-    else await sleep(waitFor);   // a RED copy says nothing: its silence is read after a bound (its baseline came first)
-    const file = (() => { try { return fs.readFileSync(w.buf, 'utf8'); } catch { return ''; } })();
-    const settles = recs.filter((r) => r.type === 'input_handover' && r.via === 'successor');
-    return { baseline, recs, settles, file, log: log(), by: (st) => settles.filter((r) => r.state === st).flatMap((r) => r.msg_ids) };
-  } finally { await stopWrapper(child, { dir: w.dir }); }
-}
-const J = JSON.stringify;
-
-const ML = 'msg-landed', MS = 'msg-stopped', MD = 'msg-settled', MK = 'msg-kept', MN = 'msg-nostamp';
-const DEAD1 = [queueEmpty,
-  copy(ML), hand([ML], 'handed'),
-  copy(MS), hand([MS], 'handed'),
-  copy(MD), hand([MD], 'handed'), hand([MD], 'landed'),
-  copy(MK), hand([MK], 'handed'), dropped({ keptIds: [MK] }),
-  copy(MN, { stamp: false }), hand([MN], 'handed'),
-].join('\n') + '\n';
-const w1 = world('one', { dead: DEAD1, transcript: [
-  (sid, cwd) => rec(sid, cwd, { type: 'user', uuid: '33333333-0000-4000-8000-000000000001', timestamp: T('09:59'), message: { role: 'user', content: 'start the long task' } }),
-  (sid, cwd) => said(sid, cwd, T('09:59')),
-  (sid, cwd) => rec(sid, cwd, { type: 'user', uuid: uuidOf(ML), timestamp: T('10:00'), message: { role: 'user', content: [{ type: 'text', text: 'words of ' + ML }] } }),   // the CLI's record of the landed frame
-  (sid, cwd) => said(sid, cwd, T('10:01')),
-] });
-const MW = 'msg-in-window', MP = 'msg-provable', MU = 'msg-unprovable';
-const DEAD2 = [copy(MU, { at: T('09:00') }), hand([MU], 'handed'), copy(MP, { at: T('10:00') }), hand([MP], 'handed'), copy(MW, { at: T('09:31') }), hand([MW], 'handed')].join('\n') + '\n';
-const PAD = 'the turn says more '.repeat(14);
-const old = Array.from({ length: 3000 }, () => (sid, cwd) => said(sid, cwd, T('08:00'), PAD));       // ~1 MB the read never reaches
-const recent = Array.from({ length: 15000 }, () => (sid, cwd) => said(sid, cwd, T('09:30'), PAD));   // ~4.5 MB: the window starts inside these
-const w2 = world('two', { dead: DEAD2, transcript: [...old, ...recent,
-  (sid, cwd) => rec(sid, cwd, { type: 'user', uuid: uuidOf(MW), timestamp: T('09:31'), message: { role: 'user', content: [{ type: 'text', text: 'words of ' + MW }] } }),
-  (sid, cwd) => said(sid, cwd, T('09:32')),
-] });
-const tsize = fs.statSync(path.join(CFG, 'projects', w2.cwd.replace(/[/._]/g, '-'), w2.sid + '.jsonl')).size;
-// every scene's wrapper runs AT ONCE (each its own folder, transcript and stand-in); each section reads its own
-const CW_SRC = fs.readFileSync(WRAPPER, 'utf8');
-const CALL = "settleDeadHandovers(DEAD).catch((e) => log(`dead hand-overs: not settled (${e && e.message})`));   // B-5a4d's root: after the baseline, off the input path\n";
-const ctl = fs.mkdtempSync(path.join(BASE, 'ctl-'));
-fs.mkdirSync(path.join(ctl, 'data', 'bin'), { recursive: true });
-fs.symlinkSync(path.join(ROOT, 'src'), path.join(ctl, 'src'));
-fs.writeFileSync(path.join(ctl, 'data', 'bin', 'chat-wrapper.js'), CW_SRC.split(CALL).join(''));
-const RUNS = Promise.all([
-  start(w1),
-  start(w2),
-  start(world('fresh'), { waitFor: 300 }),
-  start(world('quiet', { dead: [queueEmpty, copy('msg-held-only'), JSON.stringify({ type: 'queued_input', msg_id: 'msg-held-only', turn_id: null })].join('\n') + '\n' }), { waitFor: 300 }),
-  start(world('red', { dead: DEAD1, transcript: [(sid, cwd) => rec(sid, cwd, { type: 'user', uuid: uuidOf(ML), timestamp: T('10:00'), message: { role: 'user', content: 'x' } })] }), { wrapper: path.join(ctl, 'data', 'bin', 'chat-wrapper.js'), waitFor: 1000 }),
-]);
-say('① THE SETTLE — the dead one\'s five frames: landed, stopped, settled before, kept by Stop, no stamp');
-WD.section('①');
-const [r1, r2, r3a, r3b, r5] = await RUNS;
-ok(r1.baseline && J(r1.by('landed')) === J([ML]) && J(r1.by('stopped')) === J([MS]) && r1.settles.length === 2,
-  `the frame the CLI recorded is settled 'landed', the one it never recorded 'stopped' — ONE record each, on stdout (landed ${J(r1.by('landed'))}, stopped ${J(r1.by('stopped'))})`, { settles: r1.settles, log: r1.log.slice(-400) });
-ok(![MD, MK, MN].some((id) => r1.settles.some((r) => r.msg_ids.includes(id))) && /dead hand-overs: 3 frame\(s\) the last wrapper handed with no settle — 1 landed, 1 stopped, 1 left as they were \(1 with no stamp/.test(r1.log),
-  'a frame settled before the death, one Stop kept and a copy with no stamp get NO record; the log says 3 owed — 1 landed, 1 stopped, 1 left (no stamp)', { log: r1.log.split('\n').filter((l) => l.includes('dead hand-overs')) });
-const at = (s) => r1.file.indexOf(s);
-ok(at('"type":"queue_changed"') >= 0 && at('"state":"landed"') > at('"type":"queue_changed"') && at('"state":"stopped"') > at('"type":"queue_changed"') && !r1.file.includes('"webui_copy":true'),
-  'the settles are IN THE NEW FILE after the boot\'s queue baseline (written through, as every hand-over word); the dead copies are not carried into it', { file: r1.file.slice(0, 400) });
-
-say('② THE WINDOW — a transcript past the 4 MB read: a stamp inside lands; absence is proven only back to the window\'s first record');
-WD.section('②');
-ok(tsize > 4 * 1024 * 1024 + 500000 && J(r2.by('landed')) === J([MW]) && J(r2.by('stopped')) === J([MP]) && !r2.settles.some((r) => r.msg_ids.includes(MU)) && /1 the last 4194304 bytes of the transcript cannot prove either way/.test(r2.log),
-  `a ${(tsize / 1048576).toFixed(1)} MB transcript: the stamp inside the window lands; a frame sent after the window's first record is stopped; one sent before it is LEFT and said (landed ${J(r2.by('landed'))}, stopped ${J(r2.by('stopped'))})`, { settles: r2.settles, log: r2.log.split('\n').filter((l) => l.includes('dead hand-overs')) });
-
-say('③ NO DEAD ONE — a fresh start, a last file with no hand-over: no settle');
-WD.section('③');
-ok(r3a.baseline && r3b.baseline && r3a.settles.length === 0 && r3b.settles.length === 0 && !/dead hand-overs/.test(r3a.log + r3b.log),
-  'a start with no last file, and one whose last file holds no hand-over: no settle record, no log line (nothing was read past a stat)', { a: r3a.settles, b: r3b.settles });
-
-say('④ THE PAGE — a stopped frame IN ITS PLACE with its chip; a landed one «Steered»');
-WD.section('④');
+const SS = require(path.join(ROOT, 'src/session-store.js'));
+const HANDED = require(path.join(ROOT, 'src/handed-records.js'));
+const WF = require(path.join(ROOT, 'src/server/wrapper-files.js'));
 const { MessageManager } = require(path.join(ROOT, 'src/message-manager.js'));
-const MM_SRC = fs.readFileSync(path.join(ROOT, 'src/message-manager.js'), 'utf8');
-const UNKNOWN = require(M.write('src/message-manager.js', anchored(MM_SRC, "kept: 'kept', stopped: 'stopped' }[raw.state];", "kept: 'kept' }[raw.state];   // MUTANT: 'stopped' unknown", 'no-stopped'), 'no-stopped')).MessageManager;
-const draw = (MMClass, id, settle) => {
-  const mm = new MMClass('dead-handover-suite');
-  mm.convertHistory([JSON.parse(copy(id)), JSON.parse(hand([id], 'handed')), JSON.parse(JSON.stringify({ type: 'input_handover', state: settle, msg_ids: [id], via: 'successor' }))]);
-  const b = mm.messages.find((m) => m.role === 'user' && m.webuiMsgId === id);
-  return { chip: b ? b.queueState || null : 'no bubble', afloat: !!(b && (mm._afloat || []).includes(b)) };
-};
-const pS = draw(MessageManager, MS, 'stopped'), pL = draw(MessageManager, ML, 'landed'), pR = draw(UNKNOWN, MS, 'stopped');
-ok(pS.chip === 'stopped' && !pS.afloat && pL.chip === 'steered' && !pL.afloat && pR.chip === 'handed' && pR.afloat,
-  `the settled frames take their place: 'stopped' → chip «${pS.chip}», afloat ${pS.afloat}; 'landed' → «${pL.chip}», afloat ${pL.afloat} — RED: a normalizer that does not know 'stopped' leaves «${pR.chip}» afloat ${pR.afloat}`, { pS, pL, pR });
+const { ClaudeCodeAdapter } = require(path.join(ROOT, 'src/adapters/claude-code.js'));
+const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(10); } return fn(); };
 
-say('⑤ RED — a wrapper copy that never settles');
+// ── a conversation: its working folder, its transcript, its buffers folder (the hub's BUFFERS_DIR) ──
+let k = 0;
+const uuid = (n) => '33333333-0000-4000-8000-' + String(n).padStart(12, '0');
+function conversation(tag, { conv = uuid(++k), transcript = null } = {}) {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(BASE, 'cwd-' + tag + '-')));
+  const proj = path.join(CFG, 'projects', SS.cwdToProjectDir(cwd)); fs.mkdirSync(proj, { recursive: true });
+  const buffers = fs.mkdtempSync(path.join(BASE, 'buffers-' + tag + '-'));
+  const c = { cwd, conv, proj, buffers, tfile: (id = conv) => path.join(proj, id + '.jsonl') };
+  writeTranscript(c, conv, transcript || [{ type: 'user', uuid: uuid(900 + k), timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'start the long task' } }]);
+  return c;
+}
+function writeTranscript(c, id, recs) { fs.writeFileSync(c.tfile(id), recs.map((r) => J({ sessionId: id, cwd: c.cwd, ...r })).join('\n') + '\n'); }
+const recordsOf = (c, id = c.conv) => { try { return new Map(JSON.parse(fs.readFileSync(HANDED.fileOf(c.buffers, id), 'utf8')).frames.map((r) => [r.msgId, r])); } catch { return new Map(); } };
+/** the REAL wrapper as the hub starts a resumed claude conversation (a NEW hub id each time): `--resume <conv>` (+ extra argv) */
+function startWrapper(c, hubId, { wrapper = WRAPPER, extra = [] } = {}) {
+  const buf = path.join(c.buffers, hubId + '.buf'), meta = path.join(c.buffers, hubId + '.json');
+  const child = spawn(process.execPath, [wrapper, buf, meta, process.execPath, STAND_IN, '--resume', c.conv, ...extra], { cwd: c.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, HOME, CLAUDE_CONFIG_DIR: CFG, VIBESPACE_SKIP_AGENT_HOOKS: '1', STAND_IN_LONG_MS: '60000' } });
+  const out = []; let lb = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { out.push(JSON.parse(l)); } catch { } } });
+  const exited = new Promise((r) => child.once('exit', r));
+  const log = () => { try { return fs.readFileSync(path.join(c.buffers, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } };
+  const sidecar = () => { try { return JSON.parse(fs.readFileSync(meta, 'utf8')); } catch { return {}; } };
+  return { child, out, exited, log, sidecar, buf, hubId };
+}
+/** hand a frame to a running turn (a tool that runs on), as the person's Enter does → the frame's msgId */
+async function handOne(w, msgId, words) {
+  w.child.stdin.write(ad.formatChatInput('TOOL-A run a slow command', 'm-tool-' + msgId).stdinPayload + '\n');
+  await until(() => w.out.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
+  w.child.stdin.write(ad.formatChatInput(words, msgId, { steer: true }).stdinPayload + '\n');
+  return until(() => w.out.some((r) => r.type === 'input_handover' && r.state === 'handed' && (r.msg_ids || []).includes(msgId)), 4000);
+}
+const killCli = (w) => { const pid = Number(w.sidecar().childPid); if (pid > 1) { try { process.kill(pid, 'SIGKILL'); } catch { } } return pid; };
+const words = (id) => 'the words of ' + id;
+/** THE STOPPED VIEW: the reader the view-only attach builds (buffer '', the conversation's ids), after the warm the transcript's warm makes */
+async function stoppedView(c, ids = [c.conv], extra = {}) {
+  await HANDED.warm(ids, { dir: c.buffers });
+  const sm = new SS.SessionMessages({ backendSessionId: ids[0], claudeSessionId: ids[0], cwd: c.cwd, buffer: '', ...(ids.length > 1 ? { forkedFrom: ids.slice(1) } : {}), ...extra }, 'view', { buffersDir: c.buffers });
+  const mm = new MessageManager('dead-handover-suite'); mm.convertHistory(sm.raw());
+  return mm;
+}
+const bubbleOf = (mm, id) => { const b = mm.messages.find((m) => m.role === 'user' && m.webuiMsgId === id); return b ? { chip: b.queueState || null, words: JSON.stringify(b.content).includes(words(id)), index: mm.messages.indexOf(b), of: mm.messages.length } : null; };
+
+// RED: the tip before this unit names the record by the HUB's id (a file no later reader looks for)
+const CW_SRC = fs.readFileSync(WRAPPER, 'utf8');
+const NAME = "const recordsName = () => convId || (HUB_ID ? 'hub-' + HUB_ID : '');";
+const ctl = fs.mkdtempSync(path.join(BASE, 'ctl-'));
+fs.mkdirSync(path.join(ctl, 'data', 'bin'), { recursive: true }); fs.symlinkSync(path.join(ROOT, 'src'), path.join(ctl, 'src'));
+fs.writeFileSync(path.join(ctl, 'data', 'bin', 'chat-wrapper.js'), CW_SRC.split(NAME).join("const recordsName = () => (HUB_ID ? 'hub-' + HUB_ID : '');   // MUTANT: named by the hub's id"));
+const R_HUBID = path.join(ctl, 'data', 'bin', 'chat-wrapper.js');
+
+/** ONE SCENE: a conversation, a frame handed under hub id A, its CLI killed, the wrapper's own exit, the REAL teardown of A */
+async function dies(tag, { wrapper = WRAPPER, takenIn = false } = {}) {
+  const c = conversation(tag);
+  const w = startWrapper(c, 'sess-1-' + tag, { wrapper });
+  const MS = 'msg-' + tag;
+  const handed = await handOne(w, MS, words(MS));
+  const stampOf = () => { try { return JSON.parse(fs.readFileSync(w.buf, 'utf8').split('\n').filter((l) => l.includes('"webui_copy":true') && l.includes(MS)).pop() || '{}').cliUuid || null; } catch { return null; } };
+  await until(() => !!stampOf(), 3000);
+  if (takenIn) writeTranscript(c, c.conv, [{ type: 'user', uuid: uuid(800), timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'start the long task' } },
+    { type: 'attachment', uuid: uuid(801), timestamp: new Date().toISOString(), attachment: { type: 'queued_command', prompt: words(MS), source_uuid: stampOf() } }]);
+  const cli = killCli(w);
+  await Promise.race([w.exited, sleep(8000)]);
+  const before = { buf: fs.existsSync(w.buf), meta: fs.existsSync(path.join(c.buffers, w.hubId + '.json')) };
+  WF.removeWrapperFiles(c.buffers, w.hubId);   // THE HUB's EXIT TEARDOWN (src/server/session-stdout.js:428 calls exactly this)
+  await sleep(100);   // its other kinds go off the loop
+  return { c, w, MS, handed, cli, before, after: { buf: fs.existsSync(w.buf), handedDir: fs.existsSync(path.join(c.buffers, 'handed')) }, exited: w.child.exitCode !== null || w.child.signalCode !== null };
+}
+
+const [S1, S1t, S1r] = await Promise.all([dies('lost'), dies('taken', { takenIn: true }), dies('red', { wrapper: R_HUBID })]);
+
+say('① THE DYING WRAPPER settles what it handed to the CLI that died');
+WD.section('①');
+const said1 = S1.w.out.filter((r) => r.type === 'input_handover' && r.via === 'exit');
+const rec1 = recordsOf(S1.c).get(S1.MS);
+const mode1 = (() => { try { return (fs.statSync(HANDED.fileOf(S1.c.buffers, S1.c.conv)).mode & 0o777).toString(8); } catch { return null; } })();
+ok(S1.handed && S1.exited && J(said1.map((r) => [r.state, r.msg_ids])) === J([['undelivered', [S1.MS]]]) && rec1?.state === 'undelivered' && rec1?.cli?.pid === S1.cli && mode1 === '600',
+  `a frame handed while a tool ran, its CLI killed: the wrapper settled it at the exit — «undelivered» said on stdout, its record in handed/<conversation>.json (mode ${mode1}) names the CLI it was handed to`, { said: said1, rec: rec1 && { state: rec1.state, cli: rec1.cli }, log: S1.w.log().split('\n').filter((l) => /handed at the CLI/.test(l)) });
+const said1t = S1t.w.out.filter((r) => r.type === 'input_handover' && r.via === 'exit');
+ok(J(said1t.map((r) => [r.state, r.msg_ids])) === J([['landed', [S1t.MS]]]) && recordsOf(S1t.c).get(S1t.MS)?.state === 'landed',
+  'a frame the transcript shows taken in (a queued_command naming its stamp) is settled «landed» — by the CLI\'s own field', { said: said1t });
+
+say('② THE EXIT TEARDOWN removes the wrapper\'s files — the conversation\'s record stays');
+WD.section('②');
+const STDOUT_SRC = fs.readFileSync(path.join(ROOT, 'src/server/session-stdout.js'), 'utf8');
+ok(S1.before.buf && !S1.after.buf && S1.after.handedDir && !!rec1 && !WF.WRAPPER_FILE_KINDS.includes('handed') && STDOUT_SRC.includes("require('./wrapper-files.js').removeWrapperFiles(BUFFERS_DIR, id);"),
+  'the teardown (the tree\'s own removeWrapperFiles, what session-stdout\'s exit calls) took the buffer — the record under handed/ is no wrapper file kind and survived', { before: S1.before, after: S1.after });
+
+say('③ THE STOPPED VIEW — the first place the person looks');
+WD.section('③');
+const v1 = bubbleOf(await stoppedView(S1.c), S1.MS);
+const v1r = bubbleOf(await stoppedView(S1r.c), S1r.MS);
+ok(!!v1 && v1.chip === 'undelivered' && v1.words && v1.index === v1.of - 1 && !v1r && fs.existsSync(path.join(S1r.c.buffers, 'handed', 'hub-sess-1-red.json')),
+  `the read-only view (buffer '', by the conversation's id) draws the message with «Not delivered» and its words, at its send time — RED: a wrapper that names its record by the hub's id draws ${v1r ? 'a bubble' : 'NOTHING'} (its file sits under the hub id no reader looks for)`, { v1, v1r });
+
+say('④ A RESUME UNDER A NEW HUB ID');
+WD.section('④');
+const w2 = startWrapper(S1.c, 'sess-2-lost');
+await until(() => w2.out.some((r) => r.type === 'queue_changed'));
+const live = await (async () => {
+  await HANDED.warm([S1.c.conv], { dir: S1.c.buffers });
+  const ring = (() => { try { return fs.readFileSync(w2.buf, 'utf8'); } catch { return ''; } })();
+  const sm = new SS.SessionMessages({ backendSessionId: S1.c.conv, claudeSessionId: S1.c.conv, cwd: S1.c.cwd, buffer: ring, pty: {}, createdAt: Date.now() - 50 }, 'sess-2-lost', { buffersDir: S1.c.buffers });
+  const mm = new MessageManager('dead-handover-suite'); mm.convertHistory(sm.raw()); return bubbleOf(mm, S1.MS);
+})();
+await stopWrapper(w2.child);
+ok(!!live && live.chip === 'undelivered' && live.words && recordsOf(S1.c).get(S1.MS)?.state === 'undelivered',
+  'a Resume under a NEW hub id: the new live session\'s history draws «Not delivered» too — and the new wrapper\'s start wrote nothing over the record', { live });
+
+say('⑤ THE ID MOVES — a resume whose CLI announces another id');
 WD.section('⑤');
-ok(CW_SRC.split(CALL).length === 2 && r5.baseline && r5.settles.length === 0,
-  `RED: a copy of the wrapper without the settle call (its anchor spelled once: ${CW_SRC.split(CALL).length - 1}) starts, says its baseline and NOTHING of the dead one's frames`, { settles: r5.settles });
+{
+  const c = conversation('moves');
+  const C1 = uuid(700);
+  const dead = { msgId: 'msg-dead-earlier', cliUuid: uuid(701), copy: J({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: words('msg-dead-earlier') }] }, msgId: 'msg-dead-earlier', cliUuid: uuid(701), _fromWebui: true, webui_copy: true, timestamp: new Date(Date.now() - 30000).toISOString() }), cli: { pid: 1, start: 'l1', boot: '' }, state: 'undelivered', at: Date.now() - 30000, settledAt: Date.now() - 29000, via: 'exit' };
+  fs.mkdirSync(path.join(c.buffers, 'handed'), { recursive: true }); fs.writeFileSync(HANDED.fileOf(c.buffers, c.conv), J({ v: 1, frames: [dead] }));
+  writeTranscript(c, C1, [{ type: 'user', uuid: uuid(702), timestamp: new Date(Date.now() - 20000).toISOString(), message: { role: 'user', content: 'resumed' } }]);
+  const w = startWrapper(c, 'sess-5-moves', { extra: ['--session-id', C1] });   // the stand-in announces C1, the resume named c.conv
+  await handOne(w, 'msg-after-move', words('msg-after-move'));
+  await until(() => recordsOf(c, C1).has('msg-after-move'), 3000);
+  await stopWrapper(w.child);
+  const moved = recordsOf(c, C1);
+  const view = await stoppedView(c, [C1]);
+  ok(moved.has('msg-after-move') && moved.get('msg-dead-earlier')?.state === 'undelivered' && bubbleOf(view, 'msg-dead-earlier')?.chip === 'undelivered',
+    'the records go to the announced id\'s file; a dead wrapper\'s record under the earlier id travels with them, and the view by the CURRENT id draws it', { ids: [...moved.keys()] });
+}
 
-for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 1, label: 'B-5a4d root ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+say('⑥ A WRAPPER KILLED BEFORE IT COULD SETTLE');
+WD.section('⑥');
+{
+  const c = conversation('killed');
+  const w = startWrapper(c, 'sess-6-killed');
+  await handOne(w, 'msg-killed', words('msg-killed'));
+  const cli = Number(w.sidecar().childPid);
+  try { w.child.kill('SIGKILL'); } catch { }
+  await Promise.race([w.exited, sleep(4000)]);
+  if (cli > 1) { try { process.kill(cli, 'SIGKILL'); } catch { } }   // its orphaned CLI (this suite's own process tree)
+  WF.removeWrapperFiles(c.buffers, w.hubId);
+  const v = bubbleOf(await stoppedView(c), 'msg-killed');
+  ok(recordsOf(c).get('msg-killed')?.state === 'handed' && !!v && v.chip === 'unconfirmed' && v.words,
+    `the wrapper was killed with no word: its record stays handed and the stopped view says «Not confirmed» with the words — never nothing`, { v });
+}
+
+say('⑦ TWO WRITERS — another writer\'s records are kept');
+WD.section('⑦');
+{
+  const c = conversation('two');
+  const other = { msgId: 'msg-other-writer', cliUuid: uuid(601), copy: J({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: words('msg-other-writer') }] }, msgId: 'msg-other-writer', cliUuid: uuid(601), _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() }), cli: null, state: 'undelivered', at: Date.now() - 5000, settledAt: Date.now() - 4000, via: 'exit' };
+  fs.mkdirSync(path.join(c.buffers, 'handed'), { recursive: true }); fs.writeFileSync(HANDED.fileOf(c.buffers, c.conv), J({ v: 1, frames: [other] }));
+  const w = startWrapper(c, 'sess-7-two');
+  await handOne(w, 'msg-mine', words('msg-mine'));
+  await until(() => recordsOf(c).has('msg-mine'), 3000);
+  await stopWrapper(w.child);
+  const r = recordsOf(c);
+  ok(r.get('msg-other-writer')?.state === 'undelivered' && r.has('msg-mine'), 'each write reads the file and merges by the record\'s own id: the other writer\'s record kept beside mine', { ids: [...r.keys()] });
+}
+
+say('⑧ THE DRAWER\'s READ — four replies');
+WD.section('⑧');
+{
+  const dir = fs.mkdtempSync(path.join(BASE, 'replies-'));
+  fs.mkdirSync(path.join(dir, 'handed', 'conv-folder.json'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'handed', 'conv-torn.json'), '{"v":1,"frames":[{"msgId":"x","co');
+  const warned = []; const was = console.warn; console.warn = (...a) => warned.push(a.join(' '));
+  const got = await HANDED.warm(['conv-none', 'conv-folder', 'conv-torn'], { dir });
+  await HANDED.warm(['conv-folder', 'conv-torn'], { dir });
+  console.warn = was;
+  const kinds = Object.fromEntries(got.map((g) => [g.id, g.kind]));
+  ok(kinds['conv-none'] === 'none' && kinds['conv-folder'] === 'refused' && kinds['conv-torn'] === 'torn' && HANDED.recordsFor(['conv-folder', 'conv-torn'], { dir }).size === 0 && warned.filter((w) => w.includes('conv-folder')).length === 1 && warned.filter((w) => w.includes('conv-torn')).length === 1,
+    `none · refused (a folder) · torn — a refused or torn file draws nothing and is said ONCE (${J(kinds)})`, { warned });
+}
+
+say('⑨ A LIVE wrapper\'s frame in flight; the page');
+WD.section('⑨');
+{
+  const rec = (state, at) => new Map([['m', { msgId: 'm', copy: J({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'x' }] }, msgId: 'm', _fromWebui: true, webui_copy: true, timestamp: new Date(at).toISOString() }), state, at }]]);
+  const now = Date.now();
+  ok(HANDED.drawnFor(rec('handed', now), { liveSince: now - 1000 }).length === 0 && HANDED.drawnFor(rec('handed', now - 5000), { liveSince: now - 1000 })[0]?.rec.unconfirmed === true && HANDED.drawnFor(rec('landed', now - 5000)).length === 0,
+    'a frame the LIVE wrapper handed (at or after its start) is never drawn «Not confirmed»; one a dead wrapper left is; a finished one is not drawn');
+  const QC = require(path.join(ROOT, 'src/queue-chips.js'));
+  const CT = require(path.join(ROOT, 'src/channel-touch.js'));
+  const CR = fs.readFileSync(path.join(ROOT, 'src/lib/chat-renderers.js'), 'utf8'), ZH = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+  const TIPS = { undelivered: 'The conversation ended before the agent read this message — send it again', unconfirmed: 'The conversation ended while this message was being handed to the agent — it may not have reached it' };
+  ok(['undelivered', 'unconfirmed'].every((s) => QC.QUEUE_CHIPS[s] && QC.QUEUE_CHIPS[s].inTurn === true && QC.QUEUE_CHIPS[s].place === 'here' && CT.opensTurn({ role: 'user', content: [{ type: 'text', text: 'x' }], turnIndex: 1, queueState: s }, { turnIndex: 0 }) === false)
+    && CR.includes("state === 'undelivered' ? t('Not delivered')") && CR.includes("state === 'unconfirmed' ? t('Not confirmed')") && Object.values(TIPS).every((t) => CR.includes(`t('${t}')`) && ZH.includes(`"${t}": "`) && JA.includes(`"${t}": "`)) && ZH.includes('"Not delivered": "未送达"') && ZH.includes('"Not confirmed": "未确认"') && JA.includes('"Not delivered": "未配信"') && JA.includes('"Not confirmed": "未確認"'),
+    'THE PAGE: «Not delivered» and «Not confirmed» are chips in the turn (no turn of their own), drawn in place, with their words in en / zh / ja — nothing of Stop or the input box');
+}
+
 say(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

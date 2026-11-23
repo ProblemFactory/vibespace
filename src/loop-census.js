@@ -121,6 +121,7 @@ const OWNERS = Object.freeze([
       name('billing-pick'),   // unit «billing pick alive»: a subscription pick sets the machine's key helper aside (PURE; the create)
       name('settings-merge|settings-merge-device'),   // B-e7c0 (paired machine): the create's ONE bounded ask of a paired machine's agent to merge the person's settings file there
       name('said-journal'),   // B-cd4b (the wrapper's hold): every said line on disk before it is said — the wrappers' journal, the restore's fence (SHARED)
+      name('handed-records'),   // B-5a4d's root (unit 1): a handed frame's record by its conversation — read off the loop beside the transcript, drawn by the history read
       name('utf8-stream'),   // B-b968: ONE UTF-8 decoder per terminal / conversation output stream (PURE; pty-duck, the re-attach shim, the agent's chat tail)
       name('helper-fact'),   // B-bc9f: a Claude settings file's key-helper fact — ONE rule for the create and a paired machine's probe (PURE)
       name('ckpt-switch'),   // row B-437e U0: the checkpoint switch's PURE verdict (the probe, the release road, their suites)

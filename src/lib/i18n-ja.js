@@ -4014,6 +4014,10 @@ export default {
   "Injected into the running turn": "実行中のターンに投入済み",
   "Removed from the queue — it will not run": "キューから削除 —— 実行されません",
   "Started, then stopped": "開始後に停止",
+  "Not delivered": "未配信",
+  "Not confirmed": "未確認",
+  "The conversation ended while this message was being handed to the agent — it may not have reached it": "このメッセージをエージェントに渡している間に会話が終了しました — 届いていない可能性があります",
+  "The conversation ended before the agent read this message — send it again": "エージェントがこのメッセージを読む前に会話が終了しました — もう一度送信してください",
   "It had already started when Stop cut it off — its words are back in the input box": "停止したときにはすでに実行が始まっていました —— 停止し、内容を入力欄に戻しました",
   "That message is no longer queued — it already ran.": "そのメッセージはもうキューにありません —— すでに実行されました。",
   // the Alt+Enter chord (2026-09-07)
