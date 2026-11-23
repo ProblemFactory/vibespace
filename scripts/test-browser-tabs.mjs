@@ -899,6 +899,19 @@ console.log('— ③b B-21cc (r2849): the routes tell the dialog watch every tab
       routeAct: await movesOf(() => tabCmd(sA, ['tab', String(aTab || 'T1')])),
       routeRefused: await movesOf(() => tabCmd(sA, ['tab', String(bTab || 'T2')])),
     };
+    // r2992 (7): THE TWO ROADS AGREE on what a tab command is — the CLI hands the command as typed (`tabArgv`) and /audit judges it by
+    // the SAME verdict /resolve uses, as the server's tab road does: every form, the same answer on each road
+    const FORMS = [['tab'], ['tab', '--json'], ['tab', 'list'], ['tab', 'list', '--json'], ['tab', '--json', String(bTab || 'T2')], ['tab', 'close'], ['tab', 'new', 'https://a.example/3'], ['tab', String(aTab || 'T1')]];
+    const agree = [];
+    for (const form of FORMS) {
+      const atResolve = (await movesOf(() => j('POST', '/api/agent/browser/resolve', { argv: form, wrapper: true }, as(sA)))).length > 0;
+      const atAudit = (await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'tab', tabArgv: form, ok: true }, as(sA)))).length > 0;
+      agree.push({ form: form.join(' '), atResolve, atAudit });
+    }
+    const listForms = agree.filter((x) => /^tab( --json)?$|^tab list( --json)?$/.test(x.form));
+    const routeJson = await movesOf(() => tabCmd(sA, ['tab', '--json']));
+    ok(agree.every((x) => x.atResolve === x.atAudit) && listForms.length === 4 && listForms.every((x) => !x.atResolve) && agree.filter((x) => !listForms.includes(x)).every((x) => x.atResolve) && J(routeJson) === '[]',
+      'B-21cc (r2992 (7)): the roads AGREE on whether a tab command moves the tab — /resolve, /audit (the command as typed) and the server\'s tab road judge each form by ONE verdict: a listing (with or without --json) moves nothing, every other form moves it', agree);
     const V = `tab-verb:${KA}`, RT = `tab-route:${KA}`;
     ok(J(got.resolveTab) === J([V]) && J(got.resolveBatch) === J([V]) && J(got.auditClose) === J([V]) && J(got.auditNoWord) === J([V]) && J(got.auditBatch) === J([V]),
       'B-21cc (r2849 (2)): the conversation\'s own tab verb is a MOVER at its start (/resolve: `tab <id>`, a batch holding a tab verb) and at its end (/audit: a failed `tab close`, a batch, a CLI that names no sub-verb) — the conversation\'s epoch, under ITS key', got);

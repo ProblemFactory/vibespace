@@ -1510,7 +1510,8 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
     let cur = null;
     const kcalls = [], inputFns = [], leaseFns = [];
     // the keeper stand-in: EVERY member it is asked for is counted — any call during a note is a read
-    const mkKeeperD = ({ road = 'mediated' } = {}) => new Proxy({
+    const mkKeeperD = ({ road = 'mediated', clock = null } = {}) => new Proxy({
+      ...(clock ? { clock } : {}),
       cdpEndpointFor: async () => ({ ok: true, url: fkD.wsUrl }),
       onLease: (fn) => { leaseFns.push(fn); return () => {}; },
       onInput: (fn) => { inputFns.push(fn); return () => {}; },
@@ -1695,7 +1696,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       'B-21cc (r2849 (4)): ONE slot per conversation — a newer note replaces it, another conversation keeps its own; once adopted it keeps only the tab and its number (the counts dropped)', { sl2, sl2b, sl3, r4: r4 && r4.code });
     ok(!!(afterHelper && afterEnd === null && otherStays && afterStop === null), 'B-21cc (r2849 (4)): GONE WITH THE CONVERSATION — its lease\'s end takes its slot (a helper\'s end keeps it; another conversation\'s stays); the browser\'s stop takes every slot', { afterHelper: !!afterHelper, afterEnd, otherStays: !!otherStays, afterStop });
     {
-      const keepSrc = anchored(bdD, 'if (ev.browserKey && parentKey(ev.browserKey) === String(ev.browserKey)) dropSnapSlots(pid, ev.browserKey); ', '', 'B-21cc control: the slot outlives its conversation');
+      const keepSrc = anchored(bdD, 'if (ev.browserKey) dropSnapSlots(pid, ev.browserKey); ', '', 'B-21cc control: the slot outlives its conversation');
       const w = await worldD(MD.load('src/server/browser-dialogs.js', keepSrc, 'slot-outlives'));
       await noteNow(w, '@e7');
       fire(leaseFns, { kind: 'detach', browserKey: T.browserKey, profileId: T.profileId });
@@ -1737,6 +1738,134 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       ok(!!(r7 && r7.ok && landed7), 'RED CONTROL (r2849): the older snapshot used — the newer note\'s @e2 (another field) is filled by the OLDER snapshot\'s @e2: the same-document leg can go red', { r7: r7 && r7.code });
     }
 
+    // ── r2992 (round ww38os4bk): THE REFERENCES KEPT HONEST — the wrong field on the right site (the site judgement keeps the value safe) ──
+    // (1) A BLACKOUT: a snapshot the watch could not see makes the slot UNKNOWN — never the older snapshot a stash restores on its tab
+    const blackout = async (Dmod) => {
+      const w = await worldD(Dmod);
+      cur = { ok: true, targetId: tidS }; resetD();
+      await noteNow(w, '@e2');
+      const rA = await fillRef(w, '@e2'); const landedA = valOf(tidS) === PW_D; resetD(); // A adopted on S
+      const m0 = fkD.mark();
+      fkD.dropSockets(); await sleepD(120);
+      const nB = await w.noteSnapshot(T, { parsedRefs: REF('@e2', 'Email'), since: Date.now() }); // B, renumbered, while the watch is down
+      await w.arm(T.profileId);
+      await waitD(() => fkD.calls().filter((c) => c.seq > m0 && c.method === 'Page.enable').length >= 2); await sleepD(120);
+      const rB = await fillRef(w, '@e2');
+      const res = { rA: !!(rA && rA.ok), landedA, nB, rB: rB && { ok: rB.ok, code: rB.code, error: rB.error }, landedB: valOf(tidS) === PW_D, nothingB: valOf(tidS) === '' && valOf(tidO) === '' };
+      resetD(); w.shutdown();
+      return res;
+    };
+    const bo = await blackout(Dm);
+    ok(bo.rA && bo.landedA && bo.nB && bo.nB.code === 'not_watched' && refusedMoved(bo.rB) && bo.nothingB, 'B-21cc (r2992 (1)): A BLACKOUT — a snapshot taken while the watch is not open makes the slot UNKNOWN, so the fill by reference after the watch returns refuses by name; the OLDER snapshot the stash restored on the tab is never used', bo);
+    {
+      const boSrc = anchored(bdD, "    if (!w || w.state !== 'open') { if (pid) snapSlots.set(slotKeyOf(pid, target && target.browserKey), { seq: ++snapSeq, at: now(), tid: null, epoch: null, navSeqs: null, specs: null, unknown: true }); return { ok: false, count: 0, code: 'not_watched' }; }", "    if (!w || w.state !== 'open') return { ok: false, count: 0 };", 'B-21cc control: a note in a blackout leaves the slot as it was');
+      const boR = await blackout(MD.load('src/server/browser-dialogs.js', boSrc, 'blackout-keeps-slot'));
+      ok(boR.landedB, 'RED CONTROL (r2992 (1)): a note in a blackout that leaves the slot as it was — the stash restores the OLDER snapshot and the newer @e2 fills the older one\'s field: the leg above can go red', { rB: boR.rB });
+    }
+    // (2) ONE SLOT PER DRIVER: a helper (its own driver on its own tab) keeps its snapshot under ITS key — the parent never adopts it
+    const helperScene = async (Dmod) => {
+      const w = await worldD(Dmod);
+      cur = { ok: true, targetId: tidS }; resetD();
+      const TH = { profileId: T.profileId, browserKey: T.browserKey + '.1' };
+      await sleepD(3);
+      const nH = await w.noteSnapshot(TH, { parsedRefs: REF('@e5'), since: Date.now() });
+      const rP = await fillRef(w, '@e5'); // the PARENT fills by a reference its own driver's snapshot never showed
+      const res = { nH, rP: rP && { ok: rP.ok, code: rP.code, error: rP.error }, landed: valOf(tidS) === PW_D, nothing: valOf(tidS) === '' && valOf(tidO) === '', own: w.snapshotSlotOf(TH), parent: w.snapshotSlotOf(T) };
+      resetD(); w.shutdown();
+      return res;
+    };
+    const hs = await helperScene(Dm);
+    ok(!!(hs.nH && hs.nH.ok && hs.rP && !hs.rP.ok && hs.rP.code === 'target_not_found' && hs.nothing && hs.own && hs.own.specs && hs.own.specs[0].ref === '@e5' && hs.parent && hs.parent.tid === tidS),
+      'B-21cc (r2992 (2)): ONE SLOT PER DRIVER — a helper\'s snapshot is kept under the helper\'s own key; the parent\'s fill by that reference never adopts it (refused by name, nothing filled)', { rP: hs.rP, own: hs.own && hs.own.seq, parent: hs.parent && hs.parent.tid });
+    {
+      const keySrc = anchored(bdD, "const slotKeyOf = (profileId, browserKey) => `${String(profileId || '')}\\0${String(browserKey || '') || '*'}`;", "const slotKeyOf = (profileId, browserKey) => `${String(profileId || '')}\\0${parentKey(browserKey) || '*'}`;", 'B-21cc control: one slot per parent conversation'); // stale-pins: kept — the older line, planted back as this RED control
+      const hsR = await helperScene(MD.load('src/server/browser-dialogs.js', keySrc, 'slot-per-parent'));
+      ok(hsR.landed, 'RED CONTROL (r2992 (2)): a slot per PARENT — the parent\'s fill adopts the helper\'s snapshot and fills its field: the leg above can go red', { rP: hsR.rP });
+    }
+    // (3) THE COUNT THE SNAPSHOT RAN UNDER: a page that navigated between the snapshot's /resolve and its note is unknown, never «as after»
+    const navScene = async (Dmod) => {
+      const w = await worldD(Dmod);
+      cur = { ok: true, targetId: tidS };
+      const since0 = Date.now(); await sleepD(5);
+      fkD.navigate(tidS, SHOP + '?step=2');
+      fkD.setDom(tidS, { url: SHOP + '?step=2', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      await sleepD(150);
+      const nN = await w.noteSnapshot(T, { parsedRefs: REF('@e5'), since: since0 }); // the snapshot ran BEFORE the navigation, its note came after
+      const rN = await fillRef(w, '@e5');
+      const res = { nN, rN: rN && { ok: rN.ok, code: rN.code, error: rN.error }, landed: valOf(tidS) === PW_D, nothing: valOf(tidS) === '' && valOf(tidO) === '' };
+      fkD.navigate(tidS, SHOP); await sleepD(80); resetD(); w.shutdown();
+      return res;
+    };
+    const ns3 = await navScene(Dm);
+    ok(!!(ns3.nN && ns3.nN.ok && ns3.rN && !ns3.rN.ok && ns3.rN.code === 'target_not_found' && /navigated/.test(ns3.rN.error || '') && ns3.nothing),
+      'B-21cc (r2992 (3)): THE COUNT THE SNAPSHOT RAN UNDER — a page that navigated at or after the snapshot verb\'s /resolve instant is recorded unknown at the note; the fill there refuses by name (navigated), nothing filled', ns3);
+    {
+      const navSrc = anchored(bdD, '    for (const x of w.targets.values()) if (inScope(scope, x.targetId) && x.sid) navSeqs.set(x.targetId, hasSince && (Number(x.navAt) || 0) >= since ? -1 : (x.navSeq || 0));', '    for (const x of w.targets.values()) if (inScope(scope, x.targetId) && x.sid) navSeqs.set(x.targetId, x.navSeq || 0);', 'B-21cc control: the count taken at the note'); // stale-pins: kept — the older line, planted back as this RED control
+      const nsR = await navScene(MD.load('src/server/browser-dialogs.js', navSrc, 'count-at-note'));
+      ok(nsR.landed, 'RED CONTROL (r2992 (3)): the count taken at the NOTE — the old document\'s reference passes on the new document and is filled: the leg above can go red', { rN: nsR.rN });
+    }
+    // (4) THE MOVES' TWO MAPS PRUNED where the slots are dropped
+    const pruneScene = async (Dmod) => {
+      const w = await worldD(Dmod);
+      w.moveTab('tab-verb', { browserKey: T.browserKey }); w.moveTab('page-born', { profileId: T.profileId });
+      const before = w.tabMovesOf();
+      fire(leaseFns, { kind: 'detach', browserKey: T.browserKey + '.1', profileId: T.profileId });
+      const afterHelper = w.tabMovesOf();
+      fire(leaseFns, { kind: 'detach', browserKey: T.browserKey, profileId: T.profileId });
+      const afterEnd = w.tabMovesOf();
+      fire(leaseFns, { kind: 'browser-stopped', profileId: T.profileId });
+      const afterStop = w.tabMovesOf();
+      w.shutdown();
+      return { before, afterHelper, afterEnd, afterStop };
+    };
+    const pr = await pruneScene(Dm);
+    ok(pr.before.conversations.includes(T.browserKey) && pr.before.browsers.includes(T.profileId) && pr.afterHelper.conversations.includes(T.browserKey) && !pr.afterEnd.conversations.includes(T.browserKey) && pr.afterEnd.browsers.includes(T.profileId) && !pr.afterStop.browsers.includes(T.profileId),
+      'B-21cc (r2992 (4)): THE MOVES\' MAPS ARE PRUNED where the slots go — the conversation\'s entry at its own lease\'s end (a helper\'s end keeps it), the browser\'s at its stop (after the watch\'s own last mover)', pr);
+    {
+      const keepMoves = anchored(bdD, '      if (parentKey(browserKey) === String(browserKey)) tabMoves.byConv.delete(String(browserKey));\n', '', 'B-21cc control: the moves never pruned');
+      const prR = await pruneScene(MD.load('src/server/browser-dialogs.js', keepMoves, 'moves-unpruned'));
+      ok(prR.afterEnd.conversations.includes(T.browserKey), 'RED CONTROL (r2992 (4)): the conversation\'s entry never pruned — it outlives its lease: the leg above can go red', prR);
+    }
+    // (5) ONE CLOCK: a mover is stamped on the keeper's clock, the one the route stamps the verb's /resolve instant with — a hub whose
+    // dialogs clock lags the keeper's still knows a mover after /resolve; and the remembered tab is judged by NUMBER (no same-ms tie)
+    const clockScene = async (Dmod) => {
+      const AHEAD = 60000;
+      const w = await worldD(Dmod, { clock: () => Date.now() + AHEAD });
+      cur = { ok: true, targetId: tidS }; resetD();
+      const since = Date.now() + AHEAD; // the verb's /resolve instant, on the keeper's clock
+      await sleepD(3); w.moveTab('tab-verb', { browserKey: T.browserKey }); // a mover AFTER it
+      const n = await w.noteSnapshot(T, { parsedRefs: REF('@e5'), since });
+      const r = await fillRef(w, '@e5');
+      const res = { n, r: r && { ok: r.ok, code: r.code, error: r.error }, landed: valOf(tidS) === PW_D, nothing: valOf(tidS) === '' && valOf(tidO) === '' };
+      resetD(); w.shutdown();
+      return res;
+    };
+    const cs = await clockScene(Dm);
+    ok(!!(cs.n && cs.n.code === 'tab_moved' && refusedMoved(cs.r) && cs.nothing), 'B-21cc (r2992 (5)): ONE CLOCK — a mover after the verb\'s /resolve instant is known as such though the dialogs\' own clock lags the keeper\'s by a minute: the slot is unknown, the fill refuses by name', cs);
+    {
+      const twoClocks = anchored(bdD, '    const rec = { seq: ++tabMoveSeq, at: clockNow(), why };', '    const rec = { seq: ++tabMoveSeq, at: now(), why };', 'B-21cc control: the mover on the dialogs\' own clock'); // stale-pins: kept — the older line, planted back as this RED control
+      const csR = await clockScene(MD.load('src/server/browser-dialogs.js', twoClocks, 'two-clocks'));
+      ok(csR.landed, 'RED CONTROL (r2992 (5)): two clocks — the mover stamped on a clock a minute behind the /resolve instant reads as BEFORE it, and the old snapshot is adopted: the leg above can go red', csR);
+    }
+    {
+      // the same-millisecond tie: an ack, then a mover in the SAME millisecond (tried until both land in one) — by number the mover outranks
+      const tie = async (Dmod) => {
+        const w = await worldD(Dmod);
+        let got = null;
+        for (let i = 0; i < 40 && got === null; i++) {
+          await sleepD(2);
+          const t0 = Date.now(); w.noteActiveTab(T, tidO); w.moveTab('person-tab-act', { profileId: T.profileId }); const t1 = Date.now();
+          if (t0 === t1) got = w.rememberedTabOf(T);
+        }
+        w.shutdown();
+        return got;
+      };
+      const tieNow = await tie(Dm);
+      const tieAt = anchored(bdD, '    return m && m.tid && Number.isInteger(m.moveSeq) && tabEpochOf(pid, target && target.browserKey).seq <= m.moveSeq && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;', '    return m && m.tid && m.at >= tabEpochOf(pid, target && target.browserKey).at && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;', 'B-21cc control: the remembered tab by instants'); // stale-pins: kept — the older line, planted back as this RED control
+      const tieOld = await tie(MD.load('src/server/browser-dialogs.js', tieAt, 'remembered-by-instant'));
+      ok(tieNow === null && tieOld === tidO, 'B-21cc (r2992 (5)): the remembered tab is judged by NUMBER — an ack and a mover in the SAME millisecond: the mover outranks the ack (none named); RED: judged by instants, the tie trusts the ack', { tieNow, tieOld });
+    }
+
     // (5) THE FRAME NOTE's TAB, WITHOUT A READ: the only tab, or the last ack no mover followed — else none (silent rather than wrong)
     const w5d = await worldD(Dm);
     await sleepD(3); w5d.moveTab('person-tab-act', { profileId: T.profileId }); // the world's own named notes left an ack: a mover after it
@@ -1745,7 +1874,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
     await sleepD(3); w5d.moveTab('person-tab-act', { profileId: T.profileId }); const f2 = w5d.rememberedTabOf(T);
     await sleepD(3); w5d.noteActiveTab(T, tidS); const f3 = w5d.rememberedTabOf(T);
     {
-      const staleSrc = anchored(bdD, '    return m && m.tid && m.at >= tabEpochOf(pid, target && target.browserKey).at && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;\n', '    return m && m.tid && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;\n', 'B-21cc control: the frame note\'s tab after a mover');
+      const staleSrc = anchored(bdD, '    return m && m.tid && Number.isInteger(m.moveSeq) && tabEpochOf(pid, target && target.browserKey).seq <= m.moveSeq && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;', '    return m && m.tid && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;', 'B-21cc control: the frame note\'s tab after a mover');
       const w = await worldD(MD.load('src/server/browser-dialogs.js', staleSrc, 'frame-stale'));
       await sleepD(3); w.noteActiveTab(T, tidO); await sleepD(3); w.moveTab('person-tab-act', { profileId: T.profileId });
       const stale = w.rememberedTabOf(T);

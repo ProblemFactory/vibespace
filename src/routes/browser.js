@@ -1884,9 +1884,8 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
     // B-21cc (r2849 (2)): a tab verb of the conversation (any but a list; a batch holding one) moves the tab its driver is on — a
     // mover at its START, before the binary runs (the audit is its end)
     if (ctx.dialogs && typeof ctx.dialogs.moveTab === 'function') {
-      const tw = verb === 'tab' ? require('../browser-tabs.js').parseTabArgv(req.body.argv.map(String)) : null;
       const inBatch = verb === 'batch' && Array.isArray(req.body?.batchVerbs) && req.body.batchVerbs.some((x) => String(x) === 'tab');
-      if ((tw && !(tw.ok && tw.act === 'list')) || inBatch) { try { ctx.dialogs.moveTab('tab-verb', { browserKey: f.browserKey }); } catch { /* optional */ } }
+      if ((verb === 'tab' && tabArgvMoves(req.body.argv)) || inBatch) { try { ctx.dialogs.moveTab('tab-verb', { browserKey: f.browserKey }); } catch { /* optional */ } }
     }
     let v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session), verb });
     // owner ruling A: a pin is this conversation's DEFAULT ATTACHMENT, opened through the keeper — never a directory
@@ -2021,8 +2020,7 @@ router.post('/api/agent/browser/tab', async (req, res) => {
     if (typeof k.agentTabAct !== 'function') return res.json({ ok: true, passthrough: true, why: 'this server has no tab fence' });
     // B-21cc (r2849 (2)): a tab act on the server's road (any but a list — a refused or a failed one too) moves the tab the
     // conversation's driver is on: a mover at its start and at its end
-    const twR = require('../browser-tabs.js').parseTabArgv(Array.isArray(req.body?.argv) ? req.body.argv.map(String).slice(0, 12) : []);
-    const movesR = !(twR.ok && twR.act === 'list') && ctx.dialogs && typeof ctx.dialogs.moveTab === 'function';
+    const movesR = tabArgvMoves(Array.isArray(req.body?.argv) ? req.body.argv : []) && ctx.dialogs && typeof ctx.dialogs.moveTab === 'function'; // r2992 (7): the one verdict
     if (movesR) { try { ctx.dialogs.moveTab('tab-route', { browserKey: f.browserKey }); } catch { /* optional */ } }
     let r;
     try { r = await k.agentTabAct({ browserKey: f.browserKey, handle: String(req.body?.handle || ''), argv: Array.isArray(req.body?.argv) ? req.body.argv.map(String).slice(0, 12) : [] }); }
@@ -2088,10 +2086,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     const tabObj = req.body?.tab && typeof req.body.tab === 'object' ? req.body.tab : null;
     const tabTid = tabObj && typeof tabObj.targetId === 'string' ? tabObj.targetId.slice(0, 64) : null;
     const tabAck = tabObj && tabObj.new && tabTid ? tabTid : null;
-    // B-21cc (r2849 (2)): the END of the conversation's own tab verb (any but a list — a failed or a closing one too; a CLI that
-    // names no sub-verb counts) — before the ack below is remembered, so the ack stands after it
-    { const tv = String(req.body?.verb || '') === 'tab' ? (typeof req.body?.tabVerb === 'string' ? req.body.tabVerb : 'unknown') : (String(req.body?.verb || '') === 'batch' && req.body?.tabVerb === 'batch' ? 'batch' : null);
-      if (tv !== null && tv !== '' && tv !== 'list' && ctx.dialogs && typeof ctx.dialogs.moveTab === 'function') { try { ctx.dialogs.moveTab('tab-verb', { browserKey: f.browserKey }); } catch { /* optional */ } } }
+    // B-21cc (r2849 (2)): the END of the conversation's own tab verb (any but a list — a failed or a closing one too) — before the ack
+    // below is remembered, so the ack stands after it. r2992 (7): the CLI hands the command as typed (`tabArgv`), judged by the SAME
+    // verdict /resolve uses; a CLI that hands only a sub-verb (`tabVerb`) is judged on it, and one that hands neither counts
+    { const v0 = String(req.body?.verb || '');
+      const moves = v0 === 'tab' ? (Array.isArray(req.body?.tabArgv) ? tabArgvMoves(req.body.tabArgv) : typeof req.body?.tabVerb === 'string' ? tabArgvMoves(['tab', ...(req.body.tabVerb ? [req.body.tabVerb] : [])]) : true) : (v0 === 'batch' && req.body?.tabVerb === 'batch');
+      if (moves && ctx.dialogs && typeof ctx.dialogs.moveTab === 'function') { try { ctx.dialogs.moveTab('tab-verb', { browserKey: f.browserKey }); } catch { /* optional */ } } }
     if (profileId && tabObj && (tabObj.switched || tabObj.new) && tabTid && ctx.dialogs && typeof ctx.dialogs.noteActiveTab === 'function') {
       try { const t0 = dialogTargetFor(k, f, profileId); if (t0.ok) ctx.dialogs.noteActiveTab(t0, tabTid); } catch { /* optional */ }
     }
@@ -2160,6 +2160,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
 // `dialog_open` at the event, never after the 30 s timeout), and the agent's `dialog accept|dismiss` answers through it.
 /** The browser a dialog question names — ONE of this conversation's own: its (or a helper's) managed ephemeral record,
  *  or a named profile it holds a lease on. Never another conversation's (a page dialog is that page's content). */
+/** B-21cc (r2992 (7)): ONE verdict for every road (/resolve, /audit, the server's tab road) — whether a tab command moves the tab its
+ *  driver is on: a LIST moves nothing (`tab`, `tab list`, with or without --json); a command that does not parse counts (fail closed). */
+function tabArgvMoves(argv) {
+  const tw = require('../browser-tabs.js').parseTabArgv((Array.isArray(argv) ? argv : []).map(String).slice(0, 12));
+  return !(tw && tw.ok && tw.act === 'list');
+}
 function dialogTargetFor(k, f, profileId) {
   const B = require('../browser-profiles.js');
   let p = null; try { p = profileId ? k.profile(String(profileId)) : null; } catch { p = null; }
