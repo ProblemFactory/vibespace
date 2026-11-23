@@ -880,7 +880,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
   // ── lane passkey-ui (design-passkey-store §2.5): a profile's Passkeys table (src/lib/browser-passkeys-view.js) — desk: a
   // fold-out under its row that survives a rebuild; phone: a bottom sheet ──
   const pkOpen = new Map(); // profileId → the open section
-  const pkCountOf = (id) => Math.max(0, Number((app._browserProfiles && app._browserProfiles.passkeyCounts && app._browserProfiles.passkeyCounts[id]) || 0));
+  const pkCountOf = (id) => (app._browserProfiles && app._browserProfiles.passkeysHeld ? null : Math.max(0, Number((app._browserProfiles && app._browserProfiles.passkeyCounts && app._browserProfiles.passkeyCounts[id]) || 0)));   // r3261: HELD ⇒ unknown (null), never 0
   function pkClose(pid) { const o = pkOpen.get(pid); if (!o) return; pkOpen.delete(pid); o.close(); }
   function pkToggle(r) {
     if (pkOpen.has(r.id)) { pkClose(r.id); return; }
@@ -1331,7 +1331,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
   }
   const scheduleLoad = () => { if (st.timer) clearTimeout(st.timer); st.timer = setTimeout(() => { st.timer = null; load(); }, PANEL_REFRESH_DEBOUNCE_MS); };
   // (+ tasks-updated: a Task Group's title / membership on a "Who can use it" chip follows the store)
-  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-passkeys-updated' && pkOpen.has(String(m.profileId || ''))) pkOpen.get(String(m.profileId)).load(); if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || (m.type === 'tasks-updated' && metaChanged(m)) || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane task-group-fanout: a title / membership move only // lane browser-resume: + the kept browsers
+  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-passkeys-updated' && m.profileId == null) { for (const o of pkOpen.values()) o.load(); } /* r3261: the store's hold lifted — every open list reads again */ else if (m.type === 'browser-passkeys-updated' && pkOpen.has(String(m.profileId || ''))) pkOpen.get(String(m.profileId)).load(); if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || (m.type === 'tasks-updated' && metaChanged(m)) || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane task-group-fanout: a title / membership move only // lane browser-resume: + the kept browsers
   app.ws?.onGlobal?.(onGlobal);
   sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();

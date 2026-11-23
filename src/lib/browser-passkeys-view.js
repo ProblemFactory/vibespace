@@ -15,7 +15,7 @@ import { passkeyTable, passkeyDeleteWords } from './browser-panel-model.js';
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 async function act(url, init, what) {
   const r = await fetchJson(url, init);
-  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null; }
+  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: r && r.code === 'passkeys_unread' ? t("The passkeys could not be read right now \u2014 VibeSpace reads them again by itself. Nothing was changed: adding, removing or changing a passkey waits until they read.") : (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null; }   // r3261: the hold in the page's own words
   return r;
 }
 const pkUrl = (pid, id) => `/api/browser/passkeys/${encodeURIComponent(pid)}${id ? '/' + encodeURIComponent(id) : ''}`;
@@ -54,6 +54,7 @@ export function createPasskeysSection({ profileId, label = '', words = null, pho
 async function pkLoad(pid, o, isClosed) {
   const res = await fetchJson(`/api/browser/passkeys?profile=${encodeURIComponent(pid)}`);
   if (isClosed()) return;
+  if (res && res.code === 'passkeys_unread') { o.err.textContent = t("The passkeys could not be read right now \u2014 VibeSpace reads them again by itself. Nothing was changed: adding, removing or changing a passkey waits until they read."); o.err.hidden = false; return; }   // r3261: HELD — said in place, never an empty list
   if (!res || res.error || !res.ok) { o.err.textContent = t('Passkeys unavailable: {why}', { why: String((res && res.error) || t('server unreachable')) }); o.err.hidden = false; return; }
   o.err.hidden = true; pkPaint(pid, o, res);
 }

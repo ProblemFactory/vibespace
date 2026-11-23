@@ -95,6 +95,8 @@ const ST = require('../browser-stuck.js');
 const PK = require('../browser-passkey.js');
 const FENCE_LAND_MS = 10000;   // lane lg-store-writes, the moved2 cure 2: a login fill waits this long for its tab's fence record to land, else types nothing
 const PS = require('../browser-passkey-store.js'); // lane passkey-store-core: the sealed per-profile table + THE GATE (this file is its one writer)
+let SRm = null;   // r3261: lazily, as the lines below (two passkey suites copy this file beside three modules only)
+const SR = () => SRm || (SRm = require('../store-read.js'));   // r3261: the passkey store under the store-read law
 const crypto = require('crypto');
 let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 // lane browser-surfaces: the kernel's surfaces (PURE) and the agent belt are asked only on a kernel that HAS surfaces — required
@@ -246,6 +248,36 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // the binding + the key are minted per ARM), the open cards (`pk-…`), the approved registration grants
   const pks = passkeys && typeof passkeys.read === 'function' && typeof passkeys.write === 'function' && passkeys.cipher ? passkeys : null;
   let pkCache = null;
+  // r3261 (主开发; lane bl-machines-b's census of the stores, «37 more», item 1): THE PASSKEY STORE UNDER THE STORE-READ LAW. The release
+  // read ANY failure of browser-passkeys.json as an EMPTY store, cached it for the process's life, and the next write (a switch, a
+  // removal, a sign-in's count, a registration) wrote the file over: every passkey a person registered in an agent browser lost.
+  // Now the store's ONE read at its first ask answers through src/store-read.js and the tree's ONE hold (src/store-read-hold.js):
+  // HELD, no passkey is known (an empty view each ask, never cached), nothing is written over the file, every writer is refused BY
+  // NAME before any side effect, a registration and a sign-in are refused at the gate BEFORE the ceremony answers the site (the site
+  // is never left holding a passkey we did not store; an agent is told the hold, never «no passkey»), and the file is read again off
+  // the loop; LIFTED with no restart. Torn bytes are kept aside once (`browser-passkeys.json.corrupt-<mark>`, 0600 from its create:
+  // they hold sealed keys), then it starts empty with the DAMAGED mark in the new file (`damaged {copy, at}`, read back at a start,
+  // gone when a store without it is read). A stand-in store without the file's road (a suite's own {read, write, cipher}) reads as before.
+  const PK_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.profiles === undefined || (!!v.profiles && typeof v.profiles === 'object' && !Array.isArray(v.profiles)));
+  const pkHoldable = !!(pks && typeof pks.readText === 'function' && typeof pks.file === 'string' && pks.file);
+  const pkDamagedOf = (v) => (v && v.damaged && typeof v.damaged === 'object' && typeof v.damaged.copy === 'string' && v.damaged.copy ? { copy: v.damaged.copy, at: Number(v.damaged.at) || null } : null);
+  let pkDamaged = null, pkStarted = false;
+  const pkStoreHold = pkHoldable ? require('../store-read-hold.js').create({   // r3261: the tree's ONE hold, required INLINE — only a holdable store loads it (the copying suites' stand-ins never do), a create test-held-lists counts
+    file: pks.file, valid: PK_SHAPE, code: 'passkeys_unread', aside: (mark) => pks.file + '.corrupt-' + mark, now,
+    words: (h) => `the passkeys could not be read (browser-passkeys.json in VibeSpace's data folder: ${h.code}); VibeSpace reads them again every few minutes. No passkey is lost: nothing is written over them, no passkey is offered to a site or registered, and changes wait until they read`,
+    log: (l) => { try { log.warn?.('[browser-dialogs] ' + l); } catch { /* a log is never the store's */ } },
+    onLift: (v, f) => {
+      pkCache = PS.normalizeStore(v);
+      pkDamaged = !v && f && f.setAside ? { copy: String(f.setAside), at: now() } : pkDamagedOf(v);
+      if (!v && pkDamaged) pkWrite(pkCache);   // the new empty store carries the damaged mark at once (a restart still says it)
+      for (const pid of Object.keys(pkCache.profiles || {})) emit({ kind: 'passkeys', profileId: pid });
+      emit({ kind: 'passkeys', profileId: null, lifted: true });
+    },
+  }) : null;
+  const pkHeld = () => !!(pkStoreHold && pkStoreHold.held());
+  /** the hold's refusal BY NAME (503 passkeys_unread) — the answer every writer gives while the store is unread */
+  const pkHeldRefusal = (what) => ({ ok: false, code: 'passkeys_unread', status: 503, error: `${what}: ${pkStoreHold.words()}` });
+  const pkHeldFacts = () => { const h = pkStoreHold && pkStoreHold.held(); return h ? { file: 'browser-passkeys.json', code: h.code, since: h.since, words: pkStoreHold.words() } : null; };
   const pkIds = new Map(), pkAsks = new Map(), pkGrants = new Map();
   const pkGrantAsk = new WeakMap(); // r10 (acceptance r9 MINOR 1): a grant → the card whose «Allow once» made it — told when a later answer takes it back unused (pkGrantWithdrawn)
   const pkSpend = (g) => { if (g) g.used = true; }; // r11 (acceptance r10 MAJOR): a registration grant SPENT is marked `used` on EVERY road — the hook road at its release, the kernel road at its verdict (it makes the key at once, nothing waits) — so a later answer takes nothing back and its card is never told «withdrawn… nothing was registered»
@@ -1829,8 +1861,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── lane passkey-store-core: THE PASSKEY STORE'S CEREMONIES (docs/design-passkey-store.zh.md; P0's corrections) ──
   // The tab's virtual authenticator is EMPTY between ceremonies; a held ceremony is judged by PURE PS.gateVerdict and only
   // the rows it may use are loaded for it; `end` unloads everything. THIS file is the store's ONE writer.
-  const pkRead = () => { if (!pkCache) { let raw = null; try { raw = pks.read(); } catch (e) { say('pk-read:' + (e && e.message), `the passkey store could not be read — ${e && e.message}`); } pkCache = PS.normalizeStore(raw); } return pkCache; };
-  const pkWrite = (next) => { pkCache = PS.normalizeStore(next); try { pks.write(pkCache); return true; } catch (e) { say('pk-write:' + (e && e.message), `the passkey store was not written — ${e && e.message}`); return false; } }; // lane passkey-sink: → on disk?
+  const pkRead = () => {
+    if (pkCache) return pkCache;
+    if (pkHoldable) {
+      if (!pkStarted) {   // r3261: the store's ONE read, at its first ask, through the store-read law
+        pkStarted = true;
+        let read; try { read = { text: pks.readText() }; } catch (error) { read = { error }; }
+        const a = SR().storeAnswer(read, { valid: PK_SHAPE });
+        if (pkStoreHold.start(a) === 'data') { pkCache = PS.normalizeStore(a.value); pkDamaged = pkDamagedOf(a.value); return pkCache; }
+      }
+      if (pkHeld()) return PS.normalizeStore(null);   // HELD: no passkey is known — an empty view each ask, NEVER cached as the store
+      pkCache = PS.normalizeStore(null); return pkCache;   // no file yet: empty, as before
+    }
+    let raw = null; try { raw = pks.read(); } catch (e) { say('pk-read:' + (e && e.message), `the passkey store could not be read — ${e && e.message}`); } pkCache = PS.normalizeStore(raw); return pkCache;
+  };
+  const pkWrite = (next) => { if (pkStoreHold && !pkStoreHold.writable('a passkey change')) return false; /* r3261: HELD — nothing is written over the file */ pkCache = PS.normalizeStore(next); try { pks.write(pkDamaged ? { ...pkCache, damaged: { ...pkDamaged } } : pkCache); return true; } catch (e) { say('pk-write:' + (e && e.message), `the passkey store was not written — ${e && e.message}`); return false; } }; // lane passkey-sink: → on disk?
   const b64 = (u) => { const s = String(u || '').replace(/-/g, '+').replace(/_/g, '/'); return s + '='.repeat((4 - (s.length % 4)) % 4); };
   const b64u = (s) => String(s || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   /** P0 (b): `enable` and the authenticator are ONE step — an enabled domain with no authenticator hangs every get. */
@@ -1976,6 +2021,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const drained = async () => { if (!h.stop) h.stop = pkHold(w, e, rec); await pkDrained(w, e); return rec.outcome === 'pending'; }; // r7 (acceptance r6): the wait has NO cap — the page's hold is kept meanwhile (BREAK 6); over while it waited (its page's own hold ran out) ⇒ nothing passed, paired, loaded or released
     if (person && e.pk.once && e.pk.auth && !(e.pk.onceFor && e.pk.onceFor.outcome === 'pending')) { const stale = e.pk.onceFor; pkDrain(w, e, () => pkOnceGone(w, e, stale)).catch(() => {}); } // r5 belt: a once-authenticator whose ceremony is over never meets the next one (Chrome's own window for it) — r6: its remove is a drain like every other
     if (person && e.pk.draining && !(await drained())) return; // r6: his autofill too meets no clean-up in flight (a disable after its pass drops the environment Chrome holds it in)
+    if (pks) pkRead();   // r3261: the store's first read happens HERE, before any verdict over its rows
+    if (pkHeld()) { if (person) return pkCtl(w, e, rec, 'release'); /* the PERSON's own ceremony: Chrome's own window — the vault offers nothing it cannot read */ rec.refused = true; rec.why = 'passkeys_unread'; pkTrace(w, e, rec, 'refused', { why: rec.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return { verdict: 'refuse', why: rec.why }; }   // r3261 (a)/(b): HELD — refused BEFORE the ceremony answers the site: nothing paired, nothing loaded, no key made; the agent told the hold
     if (person && rec.conditional) { rec.passed = true; return pkCtl(w, e, rec, 'pass'); } // acceptance r2: his AUTOFILL get (the page's, at load — a pick by nature, open as long as the page) goes to Chrome as is: no vault key, and it holds no queue — acceptance r3: Chrome takes ONE WebAuthn request per page (a modal one beside it is refused with OperationError — measured), so the hook ends it when his «Sign in with a passkey» starts (installHook's `supersede`)
     if (!e.pk.auth && !person) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
     if (e.pk.draining && !(await drained())) return; // ONE ceremony per tab at a time: the last one's unload first (r7: no cap — a slow browser is waited for)
@@ -2284,6 +2331,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const pid = String(profileId || ''), rp = PS.hostWord(rpId);
     if (!pks) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no passkeys on this server' };
     if (!rp || (!rp.includes('.') && rp !== 'localhost')) return { ok: false, code: 'bad-request', error: `"${rpId}" is not a site name (e.g. github.com)` };
+    pkRead(); if (pkHeld()) return { ok: false, code: 'passkeys_unread', status: 503, error: PK.refusedText('passkeys_unread', rp) };   // r3261: HELD — no registration is proposed over a store that could not be read
     if (PS.profileOf(pkRead(), pid).agentsOff) return { ok: false, code: 'passkeys_off', error: PK.refusedText('profile-switch', rp) };
     const bk = String(browserKey || '').replace(/\.\d+$/, '');
     const live = [...pkAsks.values()].find((x) => x.state === 'open' && x.card.kind === 'register' && x.profileId === pid && x.card.rpId === rp && x.browserKey === bk);
@@ -2293,12 +2341,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return { ok: true, proposal: a.card, state: a.state === 'answered' ? (a.card.answer === 'once' ? 'approved' : 'rejected') : a.state };
   }
   /** The table as it may leave the server (publicRow only) + the profile's switch. */
-  function passkeyList(profileId) { const p = PS.profileOf(pkRead(), String(profileId || '')); return { agentsOff: p.agentsOff, keys: p.rows.map(PS.publicRow), displaced: (pkDisplacedAt.get(String(profileId || '')) || []).filter((at) => now() - at < 3600e3).length, asks: [...pkAsks.values()].filter((a) => a.state === 'open' && a.profileId === String(profileId || '')).map((a) => a.card) }; }
+  function passkeyList(profileId) { if (pks) pkRead(); if (pkHeld()) return { held: pkHeldFacts(), keys: null, agentsOff: null, displaced: 0, asks: [] }; /* r3261: HELD — said in place, never an empty list */ const p = PS.profileOf(pkRead(), String(profileId || '')); return { ...(pkDamaged ? { damaged: { ...pkDamaged } } : {}), agentsOff: p.agentsOff, keys: p.rows.map(PS.publicRow), displaced: (pkDisplacedAt.get(String(profileId || '')) || []).filter((at) => now() - at < 3600e3).length, asks: [...pkAsks.values()].filter((a) => a.state === 'open' && a.profileId === String(profileId || '')).map((a) => a.card) }; }
   /** lane vault-contents-window: THE VAULT WINDOW's rows of the passkey store — one per stored private key (its site and
    *  user; the sealed key rides only to the length class); `passkeyVaultReveal` opens ONE (entry = `<profile>/<credential
    *  id's first 40 characters>`). */
   function passkeyVaultRows() {
     if (!pks) return [];
+    pkRead(); if (pkHeld()) throw Object.assign(new Error(pkStoreHold.words()), { code: 'passkeys_unread' });   // r3261: HELD — the Vault window says the store's error, never «no passkey»
     const out = [];
     for (const [pid, p] of Object.entries(pkRead().profiles || {})) for (const r of p.rows || []) out.push({ entry: `${pid}/${String(r.credentialId).slice(0, 40)}`, field: 'privateKey', kind: 'private-key', label: r.userName ? `${r.rpId} · ${r.userName}` : r.rpId, detail: pid, createdAt: r.createdAt || null, cipher: r.keySealed });
     return out;
@@ -2306,6 +2355,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function passkeyVaultReveal(entry, field) {
     const i = String(entry || '').indexOf('/');
     if (!pks || field !== 'privateKey' || i < 1) return null;
+    pkRead(); if (pkHeld()) throw Object.assign(new Error(pkStoreHold.words()), { code: 'passkeys_unread' });   // r3261: HELD — never «no such key»
     const pid = String(entry).slice(0, i), cid = String(entry).slice(i + 1);
     const rows = (PS.profileOf(pkRead(), pid).rows || []).filter((r) => String(r.credentialId).slice(0, 40) === cid);
     if (rows.length !== 1) return null;
@@ -2315,7 +2365,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** `forget`: an agent removes only keys an AGENT registered; the owner removes any. */
   function passkeyForget(profileId, ref, { by = 'agent' } = {}) {
-    const pid = String(profileId || ''); const rows = PS.findRows(PS.profileOf(pkRead(), pid).rows, ref);
+    const pid = String(profileId || ''); pkRead(); if (pkHeld()) return pkHeldRefusal('removing a passkey');   // r3261: HELD — never «not-found»
+    const rows = PS.findRows(PS.profileOf(pkRead(), pid).rows, ref);
     if (!rows.length) return { ok: false, code: 'not-found', error: `this profile holds no passkey "${String(ref || '').slice(0, 80)}" — \`vibespace-browser passkey list\`` };
     if (by !== 'user' && rows.some((r) => r.createdBy === 'human')) return { ok: false, code: 'owner_key', error: 'a passkey the owner registered is removed only by the owner (the Agent browser panel)' };
     const ids = new Set(rows.map((r) => r.credentialId));
@@ -2323,6 +2374,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return { ok: true, removed: d.rows.map(PS.publicRow) };
   }
   function passkeyPolicy(profileId, id, policy) {
+    pkRead(); if (pkHeld()) return pkHeldRefusal('changing a passkey\'s policy');   // r3261: HELD — never «no passkey»
     const pid = String(profileId || ''); const rows = PS.findRows(PS.profileOf(pkRead(), pid).rows, id);
     if (rows.length !== 1 || !PS.POLICIES.includes(policy)) return { ok: false, code: rows.length ? 'bad-request' : 'not-found', error: rows.length ? `policy is ${PS.POLICIES.join(' | ')}` : `no passkey ${id}` };
     pkWrite(PS.setPolicy(pkRead(), pid, rows[0].credentialId, policy)); emit({ kind: 'passkeys', profileId: pid });
@@ -2332,15 +2384,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** int258: the chat cards of ONE conversation's browser key, open and decided (a rebuild draws each with its latest state,
    *  like the keeper's proposal cards) — in memory, as the asks are: a server stop ends them. */
   function passkeyCards(browserKey) { const k = String(browserKey || ''); return k ? [...pkAsks.values()].filter((a) => String(a.browserKey || '').replace(/\.\d+$/, '') === k).sort((x, y) => x.at - y.at).map((a) => PS.cardBlock(a.card, a.at)) : []; }
-  function passkeyCounts() { if (!pks) return {}; const s = pkRead(); const out = {}; for (const pid of Object.keys(s.profiles || {})) out[pid] = PS.profileOf(s, pid).rows.length; return out; }
-  function passkeySwitch(profileId, on) { const pid = String(profileId || ''); pkWrite(PS.setAgentsOff(pkRead(), pid, !!on)); emit({ kind: 'passkeys', profileId: pid }); return { ok: true, agentsOff: !!on }; }
+  function passkeyCounts() { if (!pks) return {}; pkRead(); if (pkHeld()) return null; /* r3261: HELD — the count is UNKNOWN, never 0 */ const s = pkRead(); const out = {}; for (const pid of Object.keys(s.profiles || {})) out[pid] = PS.profileOf(s, pid).rows.length; return out; }
+  function passkeySwitch(profileId, on) { if (pks) { pkRead(); if (pkHeld()) return pkHeldRefusal('turning passkeys on or off for agents'); } /* r3261: HELD — refused by name, nothing written */ const pid = String(profileId || ''); pkWrite(PS.setAgentsOff(pkRead(), pid, !!on)); emit({ kind: 'passkeys', profileId: pid }); return { ok: true, agentsOff: !!on }; }
   /** `removeProfile`: the profile's keys go with it (said in the removal answer). */
-  function dropPasskeys(profileId) { const pid = String(profileId || ''); if (pid) clearProfileLoginFencesOnStop(pid, watches.get(pid)); if (!pks) return 0; const d = PS.dropProfile(pkRead(), pid); if (d.removed || pkRead().profiles[pid]) pkWrite(d.store); return d.removed; }
+  function dropPasskeys(profileId) { const pid = String(profileId || ''); if (pid) clearProfileLoginFencesOnStop(pid, watches.get(pid)); if (!pks) return 0; pkRead(); if (pkHeld()) throw Object.assign(new Error(pkStoreHold.words()), { code: 'passkeys_unread' }); /* r3261: HELD — a removed profile's keys are never «dropped» over an unread store (the keeper asks passkeysHeld first) */ const d = PS.dropProfile(pkRead(), pid); if (d.removed || pkRead().profiles[pid]) pkWrite(d.store); return d.removed; }
   function setTabsOf(fn) { tabsFn = typeof fn === 'function' ? fn : null; }
   /** r4 #2: the orphan tabs of a browser and what they hold (a diagnostic read — the suites, `stats`). */
   function orphansOf(profileId, scope = new Set(['-'])) { const w = watches.get(String(profileId || '')); const ob = orphanBusy(w, scope); return { orphans: ob.orphans ? [...ob.orphans] : [], loop: ob.loop ? ob.loop.targetId : null, busy: ob.busy, loading: w && ob.orphans ? (loadingIn(w.profileId, ob.orphans) || null) : null, open: w && ob.orphans ? !!openIn(w.profileId, ob.orphans) : false }; }
   function stats() { return [...watches.values()].map((w) => ({ profileId: w.profileId, state: w.state, tabs: w.targets.size, enabled: [...w.targets.values()].filter((e) => e.enabled).length, held: [...w.targets.values()].filter((e) => e.heldAt).length, open: [...w.open.values()].map((d) => ({ id: d.id, type: d.type })), answered: w.answered.length, loops: [...w.targets.values()].filter((e) => e.loop).length, kernel: w.kernel ? { protocol: w.kernel.protocol, features: w.kernel.features } : w.kernel, surfaces: [...w.surf.values()].map((x) => ({ id: x.id, kind: x.kind, cls: x.cls })), nativeIgnored: w.nativeIgnored })); } // lane browser-surfaces
-  function shutdown() { for (const w of [...watches.values()]) { try { w.ws && w.ws.close(1001); } catch { /* */ } down(w, 'the server is restarting', { keepNotices: true }); } stashedTabFencesByProfile.clear(); stashedSnapshotsByProfile.clear(); snapSlots.clear(); try { LF().clearAllFilledSecrets?.(); } catch { /* */ } for (const x of waiters) x.resolve(null); waiters.clear(); }
+  function shutdown() { if (pkStoreHold) pkStoreHold.stop(); for (const w of [...watches.values()]) { try { w.ws && w.ws.close(1001); } catch { /* */ } down(w, 'the server is restarting', { keepNotices: true }); } stashedTabFencesByProfile.clear(); stashedSnapshotsByProfile.clear(); snapSlots.clear(); try { LF().clearAllFilledSecrets?.(); } catch { /* */ } for (const x of waiters) x.resolve(null); waiters.clear(); }
 
   // ── lane browser-ui-prompts (B-ebfc): THE BROWSER'S OWN PROMPTS — hooked on every enabled tab of this socket ──
   // MEASURED (0.38.1 + Chrome 154, headless and the hidden window): intercepted, a chooser reports `Page.fileChooserOpened` in
@@ -2539,6 +2591,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const pre = WA().requestVerdict({ crypto, req: q, rpMatches: PS.rpMatches });
     if (pre) return pkKernelRefuse(w, e, rec, pre);
     if (!pks) return pkKernelRefuse(w, e, rec, 'none'); // no store wired: nothing in VibeSpace holds a passkey
+    pkRead(); if (pkHeld()) return pkKernelRefuse(w, e, rec, 'passkeys_unread');   // r3261 (a)/(b): HELD — no key is made and none signs: the page told not allowed, the agent told the hold
     const part = PS.profileOf(pkRead(), pid), owner = pkOwner(w, e);
     const gk = pid + ' ' + PS.grantKey(rec.rpId, owner || '');
     const v = PS.gateVerdict({ kind: rec.conditional ? 'conditional' : rec.kind, rpId: rec.rpId, origin: q.origin, rows: part.rows, grant: pkGrants.get(gk) || null, input: { allow: rec.allow || [] }, answer: rec.answer || null, profileSwitch: part.agentsOff, takeover: rec.by === 'human', now: now() });
@@ -5601,6 +5654,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
     passkeyVaultRows, passkeyVaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
     answerPasskey, passkeyRegister, passkeyList, passkeyForget, passkeyPolicy, passkeySwitch, dropPasskeys, passkeyCounts, passkeyCards, // lane passkey-ui: + the counts // int258: + the chat cards a rebuild draws // lane passkey-store-core: the store, its cards, its grants
+    passkeysHeld: () => { if (pks) pkRead(); return pkHeldFacts(); }, _passkeyHold: pkStoreHold, // r3261: the store's hold, asked by the keeper (a profile's removal) and the digest; the suite's read again
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     personWindows, personPromptStateOf, // B-b56d (the owner's ruling B, 2026-11-18): the person's own windows hook a sign-in; what they say beside it

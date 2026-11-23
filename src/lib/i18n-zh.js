@@ -4666,6 +4666,7 @@ export default {
   "the port remote conversations reach their tools by": "远程对话取用工具的端口",
   "which plugins are on and trusted": "哪些插件已开启、已信任",
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace 暂时读不到哪些插件已开启、已信任 — 没有更改任何东西，也没有丢失任何插件。几分钟后再试（它会自己再读一次）。",
+  "the browsers’ passkeys": "浏览器的通行密钥",   // r3261
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到 API 提案 — 没有做出任何决定，也没有执行任何请求。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到应用提案 — 没有安装或更改任何东西。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到设计列表 — 没有更改任何东西，设计文件夹保持原样。几分钟后再按一次（它会自己再读一次）。",
@@ -4674,6 +4675,7 @@ export default {
   "VibeSpace cannot read your accounts list right now — nothing was changed and no conversation starts on another login meanwhile. If it does not come back by itself, see the notice in For you.": "VibeSpace 暂时无法读取你的账户列表——没有做任何更改，在此期间也不会有对话在其他登录上开始。如果它没有自行恢复，请查看「待你处理」中的通知。",
   "The record of raised spending ceilings could not be read, so nothing was changed. VibeSpace reads it again by itself every few minutes; press again then. You can still lower a ceiling on its row.": "无法读取被调高支出上限的记录，因此没有做任何更改。VibeSpace 每隔几分钟会自动重新读取，届时请再按一次。你仍可以在上限所在的那一行把它调低。",
   "The list of browsers you set aside can't be read right now, so nothing was set aside or deleted. VibeSpace reads it again by itself every few minutes — try again then.": "暂时无法读取已搁置浏览器的列表，因此没有搁置或删除任何内容。VibeSpace 会每隔几分钟自动重新读取，届时请再试一次。",
+  "The passkeys saved in your agent browsers can't be read right now, so nothing was changed and no passkey was offered to a site or registered. VibeSpace reads them again by itself every few minutes — try again then.": "暂时无法读取代理浏览器中保存的通行密钥，所以没有做任何更改，也没有向网站提供或注册通行密钥。VibeSpace 每隔几分钟会自动再读一次 — 到时再试。",   // r3488: passkeys_unread's own row
   "VibeSpace cannot read who may use your stored values right now — nothing was changed and no permission is lost. It reads the list again by itself; try again in a few minutes.": "VibeSpace 暂时读不出谁可以使用你存储的值——没有做任何改动，也没有丢失任何授权。它会自动再读这份列表，请过几分钟再试。",
   "in a moment": "马上",
   "Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.": "另一个 VibeSpace 或工具正占用端口 {port} — 在那边完成或取消它, 或者把重定向 URL 粘贴回这里。",
@@ -7584,6 +7586,8 @@ export default {
   "Allowed — the agent may register the passkey now": "已允许——代理现在可以注册这把通行密钥", // lane passkey-ui
   "Allowed — the page signs in": "已允许——网页正在登录", // lane passkey-ui
   "Passkeys ({n})…": "通行密钥（{n}）…", // lane passkey-ui
+  "The passkeys could not be read right now — VibeSpace reads them again by itself. Nothing was changed: adding, removing or changing a passkey waits until they read.": "暂时无法读取通行密钥 — VibeSpace 会自动重新读取。没有做任何更改：添加、删除或更改通行密钥要等能读取后才能进行。",   // r3261
+  "Passkeys…": "通行密钥…",   // r3261
   "The passkeys this profile keeps — site, user, who registered it, last use, policy": "这个 profile 存着的通行密钥——站点、用户、谁注册的、最近使用、策略", // lane passkey-ui
   "Ask each time": "每次问", // lane passkey-ui
   "Agents never sign in with passkeys": "代理永不用通行密钥登录", // lane passkey-ui

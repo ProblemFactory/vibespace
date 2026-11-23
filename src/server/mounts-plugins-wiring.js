@@ -1536,25 +1536,7 @@ function createSessionMessages(session, sessionId) {
         },
         // lane passkey-store-core: THE PASSKEY STORE — data/browser-passkeys.json (0600, written only by the watch) + the
         // per-instance key file data/browser-passkeys.key (0600, made once; B-4a59(b)'s keyring replaces this pair)
-        passkeys: (() => {
-          const PS = require('../browser-passkey-store.js'), crypto = require('crypto');
-          const file = path.join(rootDir, 'data', 'browser-passkeys.json'), keyFile = path.join(rootDir, 'data', 'browser-passkeys.key');
-          let cipher = null;
-          const withCipher = (op) => {
-            const SB = require('../secret-box.js');
-            if (cipher) return op(cipher);
-            const k = SB.lawfulKey(keyFile, { raw: true, hasCiphertext: () => SB.holdsCiphertext({ files: [file], re: /v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\./ }) }); // THE KEY-FILE LAW
-            if (!k.ok) return { ok: false, code: k.code, file: path.basename(keyFile), words: require('../key-file.js').refusalWords(k.code, path.basename(keyFile)) }; // sealed passkeys stay sealed: never a new key over them — a VALUE (key-file-law-fix: a throw here left the ws listener ⇒ the hub's exit)
-            const c = PS.cipherOf(crypto, k.key);
-            if (!SB.vaultHeld(keyFile)) { cipher = c; return op(c); }   // a key file (no vault in this process): cached as before
-            try { return op(c); } finally { k.key.fill(0); }   // THE VAULT LAW: a vault-held key lives for this one call — a lock reaches it
-          };
-          return {
-            read: () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } },
-            write: (o) => require('../channel-store.js').writeJsonAtomic(file, o, { mode: 0o600 }),
-            cipher: { seal: (t) => withCipher((c) => c.seal(t)), open: (t) => withCipher((c) => c.open(t)) }, // a refusal = the answer of both doors
-          };
-        })(),
+        passkeys: require('./browser-passkey-file.js').passkeyFileStore({ dataDir: path.join(rootDir, 'data') }),   // r3261: the store's file and key, ONE object production and its legs build
         leaseCountOf: (profileId) => new Set(holdersOf(profileId).map((h) => h.browserKey)).size,
         labelOf: (profileId) => { try { const p = browserKeeper.profile(profileId); return p ? p.label : null; } catch { return null; } },
         // rule 6: a dialog that opened while the conversation ran no browser verb ⇒ ONE free next-turn line (never a wake)
@@ -1566,6 +1548,7 @@ function createSessionMessages(session, sessionId) {
       browserKeeper.setStuckSource((bk, pid) => browserDialogs.stuckForKey(bk, pid ? { profileId: pid } : undefined)); // lane browsers-stop: the stop asks about ONE browser
       browserKeeper.setPasskeyDrop?.((pid) => browserDialogs.dropPasskeys(pid)); // lane passkey-store-core: a removed profile's keys go with it
       if (typeof vault.onLock === 'function') vault.onLock(() => { try { browserDialogs.endScrubWorkers('a lock'); } catch { /* the watch's own */ } });   // 主开发 r2445 law 4 (lane lg-vault-file): the frame scrub's workers end at a lock, their copy of the values with them
+      browserKeeper.setPasskeyHeld?.(() => (typeof browserDialogs.passkeysHeld === 'function' ? browserDialogs.passkeysHeld() : null)); // r3261: a profile's removal asks whether the passkey store is held
       browserKeeper.setPaintWatch?.(browserDialogs); // lane browser-swiftshader-cpu: idle paint stops on the watch's own socket
       // verify r1 (site-reset): a holder's tabs the KEEPER can attribute (its pinned tab, its mediated lease's tabs, the user's
       // own + adopted ones) — the watch's `tabsOf` from here on; the stream bridge below UNIONS its live view's active target
@@ -1576,7 +1559,7 @@ function createSessionMessages(session, sessionId) {
       // NAMED profiles only: the digest also reaches agents, and another conversation's ephemeral record is never named to them
       browserKeeper.addDigest(() => ({ pageStuck: Object.fromEntries(Object.entries(browserDialogs.pageStuckMap()).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
       // lane passkey-ui: each NAMED profile's passkey COUNT (the panel's "Passkeys (n)…"; counts only — never a row)
-      browserKeeper.addDigest(() => ({ passkeyCounts: Object.fromEntries(Object.entries(typeof browserDialogs.passkeyCounts === 'function' ? browserDialogs.passkeyCounts() : {}).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
+      browserKeeper.addDigest(() => { const c = typeof browserDialogs.passkeyCounts === 'function' ? browserDialogs.passkeyCounts() : {}; return c === null ? { passkeyCounts: null, passkeysHeld: true } : { passkeyCounts: Object.fromEntries(Object.entries(c).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }; });   // r3261: the passkey store HELD ⇒ the count is unknown (the panel says «Passkeys…», never «(0)»)
       let digestTimer = null;
       browserDialogs.onChange((ev) => {
         // lane passkey-store-core: every ceremony = one trace row on its conversation's live view (the stream mirror's shape)

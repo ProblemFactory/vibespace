@@ -4665,6 +4665,7 @@ export default {
   "the port remote conversations reach their tools by": "リモート会話がツールに届くポート",
   "which plugins are on and trusted": "どのプラグインがオンで信頼済みか",
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace はいま、どのプラグインがオンで信頼済みかを読み込めません — 何も変更されておらず、プラグインも失われていません。数分後にもう一度お試しください（自動でもう一度読み込みます）。",
+  "the browsers’ passkeys": "ブラウザのパスキー",   // r3261
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace は API の提案をいま読めません — 何も決定・実行していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace はアプリの提案をいま読めません — 何もインストール・変更していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace はデザインの一覧をいま読めません — 何も変更しておらず、デザインのフォルダーもそのままです。数分後にもう一度押してください（自動でもう一度読みます）。",
@@ -4673,6 +4674,7 @@ export default {
   "VibeSpace cannot read your accounts list right now — nothing was changed and no conversation starts on another login meanwhile. If it does not come back by itself, see the notice in For you.": "VibeSpace は今アカウントの一覧を読み取れません——何も変更しておらず、その間に別のログインで会話が始まることもありません。自然に戻らない場合は「あなた宛て」の通知をご覧ください。",
   "The record of raised spending ceilings could not be read, so nothing was changed. VibeSpace reads it again by itself every few minutes; press again then. You can still lower a ceiling on its row.": "引き上げた支出上限の記録を読み込めないため、何も変更していません。VibeSpace は数分ごとに自動で読み直します。その後もう一度押してください。上限はその行でいつでも下げられます。",
   "The list of browsers you set aside can't be read right now, so nothing was set aside or deleted. VibeSpace reads it again by itself every few minutes — try again then.": "取り置いたブラウザの一覧を今は読み取れないため、取り置きも削除も行っていません。VibeSpace は数分ごとに自動で読み直します。そのあとでもう一度お試しください。",
+  "The passkeys saved in your agent browsers can't be read right now, so nothing was changed and no passkey was offered to a site or registered. VibeSpace reads them again by itself every few minutes — try again then.": "エージェントブラウザに保存したパスキーを今は読み取れないため、何も変更せず、サイトへのパスキーの提示や登録もしていません。VibeSpace が数分ごとに自動で読み直します — そのときにもう一度お試しください。",   // r3488: passkeys_unread's own row
   "VibeSpace cannot read who may use your stored values right now — nothing was changed and no permission is lost. It reads the list again by itself; try again in a few minutes.": "VibeSpace は今、保存した値を誰が使えるかを読み取れません——何も変更しておらず、許可は失われていません。一覧は自動で読み直されます。数分後にもう一度お試しください。",
   "in a moment": "まもなく",
   "Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.": "別の VibeSpace またはツールがポート {port} を保持しています — そちらで完了またはキャンセルするか、リダイレクト URL をここに貼り付けてください。",
@@ -7583,6 +7585,8 @@ export default {
   "Allowed — the agent may register the passkey now": "許可しました — エージェントは今パスキーを登録できます", // lane passkey-ui
   "Allowed — the page signs in": "許可しました — ページがログインします", // lane passkey-ui
   "Passkeys ({n})…": "パスキー（{n}）…", // lane passkey-ui
+  "The passkeys could not be read right now — VibeSpace reads them again by itself. Nothing was changed: adding, removing or changing a passkey waits until they read.": "パスキーを今は読み取れません — VibeSpace が自動で読み直します。何も変更していません。パスキーの追加・削除・変更は読み取れるようになるまで待ちます。",   // r3261
+  "Passkeys…": "パスキー…",   // r3261
   "The passkeys this profile keeps — site, user, who registered it, last use, policy": "このプロファイルが保存しているパスキー — サイト、ユーザー、登録者、最終使用、ポリシー", // lane passkey-ui
   "Ask each time": "毎回確認", // lane passkey-ui
   "Agents never sign in with passkeys": "エージェントはパスキーでログインしない", // lane passkey-ui

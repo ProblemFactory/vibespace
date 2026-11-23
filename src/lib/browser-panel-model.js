@@ -134,7 +134,7 @@ export function rowMenu(r, x = {}) {
   if (hung(r, x)) { /* Restart is the row's primary (never twice) */ } else if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });
   else if (x.autoDialogs) out.push({ id: 'restart-hold', label: t('Restart to hold dialogs'), title: t('Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay') });
   // lane passkey-ui (design-passkey-store §2.5): Passkeys (n)… — n = 0 too (the agents-never switch lives inside)
-  if (!notOurs(r)) out.push({ id: 'passkeys', label: t('Passkeys ({n})…', { n: Math.max(0, Number(x.passkeys) || 0) }), title: t('The passkeys this profile keeps — site, user, who registered it, last use, policy') });
+  if (!notOurs(r)) out.push({ id: 'passkeys', label: x.passkeys === null ? t('Passkeys…') : t('Passkeys ({n})…', { n: Math.max(0, Number(x.passkeys) || 0) }),   /* r3261: the store held ⇒ no count (unknown), never «(0)» */ title: t('The passkeys this profile keeps — site, user, who registered it, last use, policy') });
   if (!notOurs(r)) { out.push({ sep: true }); out.push({ id: 'delete', label: t('Delete…'), warn: true, title: t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below') }); }
   return out;
 }

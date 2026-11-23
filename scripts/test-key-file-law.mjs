@@ -104,7 +104,7 @@ const STORES = [
   { name: '.integrations-key', file: 'src/server/integration-store.js', via: 'secretBox', ciphertext: 'integrations.json + the state in memory', rows: 'the integration card: storeError {code, reason}' },
   { name: '.channels-key', file: 'src/server/channels-engine.js', via: 'secretBox', ciphertext: 'channels/adapters.json + every channels/<id>/callers.json', rows: 'the account card: token-undecryptable — restore' },
   { name: '.app-secrets-key', file: 'src/app-secrets.js', via: 'lawfulKey', ciphertext: 'desktop-apps/<id>/portal/secrets.json with n > 0', rows: 'the app window ⋯: Stored logins: …' },
-  { name: 'browser-passkeys.key', file: 'src/server/mounts-plugins-wiring.js', via: 'lawfulKey', ciphertext: 'browser-passkeys.json v1 sealed rows', rows: 'the passkey ceremony line (a named refusal)' },
+  { name: 'browser-passkeys.key', file: 'src/server/browser-passkey-file.js' /* r3261: the store's file moved out of the wiring */, via: 'lawfulKey', ciphertext: 'browser-passkeys.json v1 sealed rows', rows: 'the passkey ceremony line (a named refusal)' },
 ];
 // THE VAULT (lane vault-e2e-password): the ONE file besides a store that names every store key — its STORE_KEYS rows are what it seals
 const VAULT_HOLDER = 'src/server/vault-engine.js';
@@ -338,9 +338,9 @@ const ACCT_KEY = SRC.get('src/accounts.js').match(/  _key\(\) \{[^]*?\n  \}\n/)?
 const OLD_ACCT_KEY = "  _key() {\n    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }\n    catch {\n      const k = crypto.randomBytes(32);\n      fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 });\n      return k;\n    }\n  }\n";
 plant('src/accounts.js', ACCT_KEY, OLD_ACCT_KEY, 'accounts\' old _key() (mint on ANY read error)');
 // lane vault-e2e-password: the wiring reads its key per CALL under a vault (withCipher) — the anchor is that block
-const PK_NEW = SRC.get('src/server/mounts-plugins-wiring.js').match(/            const k = SB\.lawfulKey[^\n]*\n[^\n]*\n            const c = PS\.cipherOf\(crypto, k\.key\);\n[^\n]*\n            try \{ return op\(c\); \} finally \{ k\.key\.fill\(0\); \}[^\n]*/)?.[0] || 'MISSING';
-const PK_OLD = "            let key = null; try { key = fs.readFileSync(keyFile); } catch (e) { if (e.code !== 'ENOENT') throw e; }\n            if (!key) { key = crypto.randomBytes(32); try { fs.writeFileSync(keyFile, key, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; key = fs.readFileSync(keyFile); } }\n            cipher = PS.cipherOf(crypto, key); return op(cipher);";
-plant('src/server/mounts-plugins-wiring.js', PK_NEW, PK_OLD, 'the passkey store\'s old inline mint (ENOENT, no ciphertext question)');
+const PK_NEW = SRC.get('src/server/browser-passkey-file.js').match(/    const k = SB\.lawfulKey[^\n]*\n[^\n]*\n    const c = PS\.cipherOf\(crypto, k\.key\);\n[^\n]*\n    try \{ return op\(c\); \} finally \{ k\.key\.fill\(0\); \}[^\n]*/)?.[0] || 'MISSING';
+const PK_OLD = "    let key = null; try { key = fs.readFileSync(keyFile); } catch (e) { if (e.code !== 'ENOENT') throw e; }\n    if (!key) { key = crypto.randomBytes(32); try { fs.writeFileSync(keyFile, key, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; key = fs.readFileSync(keyFile); } }\n    cipher = PS.cipherOf(crypto, key); return op(cipher);";
+plant('src/server/browser-passkey-file.js', PK_NEW, PK_OLD, 'the passkey store\'s old inline mint (ENOENT, no ciphertext question)');
 plant('src/server/foo-store.js', null, "'use strict';\nconst path = require('path');\nconst { secretBox } = require('../secret-box.js');\nconst KEY_FILE = '.foo-key';\nmodule.exports = (d) => secretBox(path.join(d, KEY_FILE), { hasCiphertext: () => false });\n", 'a NEW store with its own key file and no STORES row');
 plant('src/server/integration-store.js', "const KEY_FILE = '.integrations-key';", "const KEY_FILE = '.integrations-key';\nconst { writeFileSync: put } = require('fs');\nconst mintAside = (d) => put(require('path').join(d, 'x'), require('crypto').randomBytes(32));", 'an ALIASED mint (writeFileSync: put + randomBytes(32))');
 plant('src/app-secrets.js', "SB.lawfulKey(keyFile, { hasCiphertext:", "SB.lawfulKey(keyFile, { noQuestion:", 'app-secrets\' lawfulKey without hasCiphertext');
@@ -619,11 +619,13 @@ await storeLegs({
   open: ({ d, m }) => { const r = m.appSecretsMaster({ dataDir: d }); if (!r.master) throw new Error(r.refused.code); return SB.decWith(r.master, JSON.parse(realRead(path.join(d, 'desktop-apps', 'app-kfl', 'portal', 'secrets.json'), 'utf-8')).sealed); },
   rowCode: ({ d, m }) => { const r = m.appSecretsMaster({ dataDir: d }); return r.master ? null : r.refused.code; },
 });
-// passkeys: the wiring's own IIFE, extracted verbatim and run over a scratch rootDir
+// passkeys: the store's maker (r3261: src/server/browser-passkey-file.js passkeyFileStore, which the wiring CALLS), extracted verbatim
+// and run over a scratch rootDir — the same shape as the wiring's old IIFE, so every mutant below cuts the production text
 const WIRING = realRead(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
-const pkStart = WIRING.indexOf('passkeys: (() => {'), pkEnd = WIRING.indexOf('})(),', pkStart);
-const PK_IIFE = pkStart > 0 && pkEnd > pkStart ? WIRING.slice(pkStart + 'passkeys: '.length, pkEnd + 4) : null;
-ok(!!PK_IIFE && PK_IIFE.includes('lawfulKey(keyFile, { raw: true, hasCiphertext'), 'passkeys: the wiring\'s store IIFE extracted verbatim (it reads its key through lawfulKey, raw, with the store\'s question)');
+const PKF = realRead(path.join(REPO, 'src/server/browser-passkey-file.js'), 'utf-8');
+const pkStart = PKF.indexOf('function passkeyFileStore({ dataDir }) {'), pkEnd = PKF.indexOf('\n}\n', pkStart);
+const PK_IIFE = pkStart > 0 && pkEnd > pkStart ? `(() => { ${PKF.slice(pkStart, pkEnd + 2)}\nreturn passkeyFileStore({ dataDir: path.join(rootDir, 'data') }); })()` : null;
+ok(!!PK_IIFE && PK_IIFE.includes('lawfulKey(keyFile, { raw: true, hasCiphertext') && WIRING.includes("passkeys: require('./browser-passkey-file.js').passkeyFileStore({ dataDir: path.join(rootDir, 'data') }),"), 'passkeys: the store\'s maker extracted verbatim (it reads its key through lawfulKey, raw, with the store\'s question) — and the wiring builds the store through it');
 const pkModule = (iife) => ({ make: (rootDir) => new Function('rootDir', 'path', 'fs', 'require', `return ${iife};`)(rootDir, path, fs, createRequire(path.join(REPO, 'src/server/mounts-plugins-wiring.js'))) });
 await storeLegs({
   tag: 'passkeys', keyFile: (d) => path.join(d, 'data', 'browser-passkeys.key'), shape: (b) => b.length === 32, ctFiles: (d) => [path.join(d, 'data', 'browser-passkeys.json')],

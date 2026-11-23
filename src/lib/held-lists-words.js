@@ -39,6 +39,7 @@ const NAMES = Object.freeze({
   'opencode-serve.json': i18nKey('the record of the OpenCode background service'),   // bl-chat-b's own plain name (r3334 unit 1)
   'plugin-registry.json': i18nKey('which plugins are on and trusted'),
   'vault.json': i18nKey('your vault'),   // lg-vault-env's vault record (unit (b), the train 2.369.418)
+  'browser-passkeys.json': i18nKey('the browsers’ passkeys'),   // r3261 (bl-browser-b): the passkey store joined the helper
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

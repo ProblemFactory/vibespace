@@ -201,6 +201,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // B-8b87 cure: a profile proxy's refusals by name (a person's page words them by code — never a 500 for a refusal)
   store_unread: 503,   // the B-f276 remainder: the profile registry is held (unread)
   plugin_registry_unread: 503,   // B-f276 (r3305): the plugin registry is held — an engine profile's start, create or Change build refused by its name
+  passkeys_unread: 503,   // r3261: the passkey store is held (unread) — a profile's removal waits for it
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
@@ -1424,10 +1425,10 @@ function passkeyOwnerTarget(req, res) {
   if (!p) { res.status(404).json({ error: `no profile ${req.params.profile || req.query.profile || ''}`, code: 'not-found' }); return null; }
   return { D, p };
 }
-router.get('/api/browser/passkeys', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; res.json({ ok: true, profileId: t.p.id, ...t.D.passkeyList(t.p.id) }); });
-router.patch('/api/browser/passkeys/:profile/:id', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const r = t.D.passkeyPolicy(t.p.id, req.params.id, String(req.body?.policy || '')); if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code }); res.json(r); });
-router.delete('/api/browser/passkeys/:profile/:id', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const r = t.D.passkeyForget(t.p.id, req.params.id, { by: 'user' }); if (!r.ok) return res.status(404).json({ error: r.error, code: r.code }); res.json(r); });
-router.put('/api/browser/passkeys/:profile/switch', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; if (typeof req.body?.agentsOff !== 'boolean') return res.status(400).json({ error: 'agentsOff: true | false', code: 'bad-request' }); res.json(t.D.passkeySwitch(t.p.id, req.body.agentsOff)); });
+router.get('/api/browser/passkeys', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const L = t.D.passkeyList(t.p.id); if (L && L.held) return res.status(503).json({ error: L.held.words, code: 'passkeys_unread', held: L.held }); /* r3261: HELD — said, never an empty list */ res.json({ ok: true, profileId: t.p.id, ...L }); });
+router.patch('/api/browser/passkeys/:profile/:id', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const r = t.D.passkeyPolicy(t.p.id, req.params.id, String(req.body?.policy || '')); if (!r.ok) return res.status(r.code === 'passkeys_unread' ? 503 : r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code }); res.json(r); });
+router.delete('/api/browser/passkeys/:profile/:id', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const r = t.D.passkeyForget(t.p.id, req.params.id, { by: 'user' }); if (!r.ok) return res.status(r.code === 'passkeys_unread' ? 503 : 404).json({ error: r.error, code: r.code }); res.json(r); });
+router.put('/api/browser/passkeys/:profile/switch', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; if (typeof req.body?.agentsOff !== 'boolean') return res.status(400).json({ error: 'agentsOff: true | false', code: 'bad-request' }); const r = t.D.passkeySwitch(t.p.id, req.body.agentsOff); if (r && r.ok === false) return res.status(r.code === 'passkeys_unread' ? 503 : 409).json({ error: r.error, code: r.code }); res.json(r); });
 router.delete('/api/browser/blocked/:id', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
@@ -2348,6 +2349,7 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
     const v = D.passkeyIn(t.profileId, D.scopeFor(t));
     // lane passkey-store-core: the store's answer (publicRow only — never a key) beside the page's state
     const L = typeof D.passkeyList === 'function' ? D.passkeyList(t.profileId) : null;
+    if (L && L.held && action !== 'status') return res.status(503).json({ error: PK.refusedText('passkeys_unread', String(req.body?.rpId || req.body?.ref || '').trim().slice(0, 300) || null), code: 'passkeys_unread' });   // r3261: HELD — the agent told the hold, never «no passkey»
     const storeLine = !L ? '' : L.agentsOff ? 'The owner turned passkeys off for agents on this profile.' : L.keys.length ? `This profile holds ${L.keys.length} passkey${L.keys.length === 1 ? '' : 's'}: ${L.keys.slice(0, 8).map((x) => `${x.rpId} (${x.userName || x.id}, policy ${x.policy})`).join(', ')}.` : 'This profile holds no passkeys — `vibespace-browser passkey register <site>` asks the owner first.';
     if (action === 'list') return res.json({ ok: true, keys: L ? L.keys : [], agentsOff: !!(L && L.agentsOff), text: storeLine });
     if (action === 'register' || action === 'forget') {
@@ -2357,10 +2359,10 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
       if (action === 'forget') { const r = D.passkeyForget(t.profileId, ref, { by: 'agent' }); if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 409).json({ error: r.error, code: r.code }); return res.json({ ok: true, removed: r.removed, text: `Removed ${r.removed.length} passkey${r.removed.length === 1 ? '' : 's'} (${r.removed.map((x) => `${x.rpId} ${x.userName || x.id}`).join(', ')}).` }); }
       const waitMs = Math.max(0, Math.min(Number(req.body?.waitSec) || 0, 300)) * 1000;
       const r = await D.passkeyRegister({ profileId: t.profileId, browserKey: f.browserKey, sessionId: f.sessionId || null, rpId: ref, user: String(req.body?.user || '').slice(0, 64) }, { waitMs });
-      if (!r.ok) return res.status(r.code === 'bad-request' ? 400 : 409).json({ error: r.error, code: r.code });
+      if (!r.ok) return res.status(r.code === 'passkeys_unread' ? 503 : r.code === 'bad-request' ? 400 : 409).json({ error: r.error, code: r.code });
       return res.json({ ok: true, state: r.state, proposal: { id: r.proposal.id, rpId: r.proposal.rpId, expiresAt: r.proposal.expiresAt }, text: PK.registerText(r.state, r.proposal.rpId) });
     }
-    if (action === 'status') return res.json({ ok: true, passkey: PK.passkeyBlock(v), store: L ? { keys: L.keys.length, agentsOff: L.agentsOff } : null, text: (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE || v.state === 'refused' ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT) + (storeLine ? ' ' + storeLine : '') });
+    if (action === 'status') return res.json({ ok: true, passkey: PK.passkeyBlock(v), store: L && L.held ? { held: true } : L ? { keys: L.keys.length, agentsOff: L.agentsOff } : null, text: (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE || v.state === 'refused' ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT) + (storeLine ? ' ' + storeLine : '') });
     let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
     if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('passkey cancel'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
     const r = await D.cancelPasskey(t, { by: 'agent' });

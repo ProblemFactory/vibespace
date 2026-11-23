@@ -2009,6 +2009,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // (the pin is judged LAST: a leased / running profile is refused first, so an unpin never runs for a removal that cannot happen)
     const rv = removeVerdict(id);
     if (!rv.ok) throw namedError(rv.code, rv.error);
+    // r3261: THE PASSKEY STORE HELD (unread): a removed profile's keys could not go with it — the removal is refused BY NAME before
+    // anything moves (the remover asks the fact; never «dropped» over a store that could not be read). A sweep's retire waits too.
+    { let ph = null; try { ph = passkeyHeld ? passkeyHeld() : null; } catch { ph = null; } if (ph) throw namedError('passkeys_unread', `this browser profile is not removed while ${ph.words || 'the passkeys could not be read'}`); }
     const pv = BF.deletePinnedVerdict({ label: p.label, pinnedBy: pinnedBy(id), unpin });
     if (!pv.ok) throw namedError(pv.code, pv.error, { pinnedCount: pv.count, pinnedNames: pv.names });
     // verify r4 (S26b): the DIRECTORY remembers the lineage its record carried — a retired ephemeral's kept directory outlives it
@@ -7265,6 +7268,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function setStuckSource(fn) { stuckSource = typeof fn === 'function' ? fn : null; }
   let passkeyDrop = null; // lane passkey-store-core: the dialog watch (the passkey store's one writer) drops a removed profile's keys
   function setPasskeyDrop(fn) { passkeyDrop = typeof fn === 'function' ? fn : null; }
+  let passkeyHeld = null; // r3261: the dialog watch answers whether the passkey store is HELD (unread) — asked before a profile's removal
+  function setPasskeyHeld(fn) { passkeyHeld = typeof fn === 'function' ? fn : null; }
   /** lane S2: THE browser fact of one live session (`sessionFacts` = browser-fact.sessionFactsOf(session)). */
   function factFor(sessionFacts) {
     if (!sessionFacts || !sessionFacts.browserKey) return null;
@@ -9345,7 +9350,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
     geoRegrant: (profileId) => (geoHoldOwn ? geoHoldOwn.regrant(String(profileId || '')).catch(() => false) : Promise.resolve(false)),   // r2311 (i): the dialog watch's reset or leaving ⇒ the hold grants again
     placeKindFor,   // r2767 (a): the profile's location kind the gates judge by (the running browser's, else the saved)
-    cdpEndpointFor, geoHeldFor: (profileId) => { const r = runningPlaceKind(profileId); if (r !== undefined) return r === 'place' ? ((geoHoldOwn && geoHoldOwn.heldOf(String(profileId || ''))) || { kind: 'place' }) : r === 'blocked' ? { kind: 'blocked' } : null; let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* r2767 (a): the running browser's plan until its restart */ /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    cdpEndpointFor, geoHeldFor: (profileId) => { const r = runningPlaceKind(profileId); if (r !== undefined) return r === 'place' ? ((geoHoldOwn && geoHoldOwn.heldOf(String(profileId || ''))) || { kind: 'place' }) : r === 'blocked' ? { kind: 'blocked' } : null; let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* r2767 (a): the running browser's plan until its restart */ /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, setPasskeyHeld /* r3261 */, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports

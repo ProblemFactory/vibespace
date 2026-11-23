@@ -153,6 +153,8 @@ function refusedText(why, rpId) {
     case 'declined': return `The owner said no to this passkey sign-in on ${rp} — the page was told it was not allowed; ask the owner before you try again.`;
     case 'expired': return `The owner's permission for the passkey on ${rp} was not there in time (no answer within 5 minutes, or a registration permission older than 10 minutes) — the page was told it was not allowed; ask again (\`vibespace-browser passkey register ${rp}\` to register; press the page's button again to sign in).`;
     case 'profile-switch': return `The owner turned passkeys off for agents on this browser profile — ${rp}'s request was refused; use the page's other way in.`;
+    // r3261: the passkey store HELD (its file could not be read) — never «no passkey»: an agent told «none» would register a new one or give up the account
+    case 'passkeys_unread': return `The passkeys of this browser could not be read right now, so no passkey was offered to ${rp} and none was registered — nothing was lost: VibeSpace reads them again by itself every few minutes. Do not register a new passkey or give up this account: try again in a few minutes (\`vibespace-browser passkey status\` says when they read).`;
     case 'rp-mismatch': return `The page asked for a passkey of ${rp}, which its own address may not use — refused.`;
     case 'withdrawn': return `The user took over the browser — your passkey request on ${rp} was withdrawn.`;
     case 'expired-waiting': return `The owner's permission to register a passkey on ${rp} ran out (its 10 minutes) while this registration waited its turn — nothing was registered and the page was told it was not allowed; ask again (\`vibespace-browser passkey register ${rp}\`), then press the page's button again.`; // r11
