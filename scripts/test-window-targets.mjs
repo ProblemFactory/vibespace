@@ -19,7 +19,8 @@
 //      truncating, ctrl+s and a canvas point click landing (the fixture's own
 //      witness labels) and BOTH refused with the probe when xdotool is taken
 //      away, a PNG of the frame. SKIPs with evidence without python3-gi /
-//      Atspi / Gtk, Xvfb or a session bus.
+//      Atspi / Gtk or Xvfb; the session and accessibility buses are the
+//      suite's OWN (r3097), a missing dbus-daemon / at-spi program named.
 //   §4 THE ENGINE over a fake keeper + the routes: one holder per window,
 //      not_attached / window_leased / resumed, refs per snapshot, the engine
 //      refusing a node without Action BEFORE any helper call — and still with
@@ -423,10 +424,47 @@ console.log('§2b the cancellable injection (lane E verify r2, L5): killed by IT
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('§3 REAL: this box\'s Xvfb + the GTK fixture through the real helper');
-const base = { ...process.env };
+// r3097 (lane bl-machines-a; 主开发 r2305: a suite never uses the machine's session bus, it brings its own): these legs read the
+// tree on the MACHINE's session bus, and wherever a run has none (the box, the first machine's desktop runs) they skipped «the
+// accessibility bus did not answer». THE SUITE'S OWN BUSES, in its own 0700 runtime folder: a private session bus (dbus-daemon over
+// a config of the product's own shape: src/desktop-apps.js portalPlan, one socket in the folder, EXTERNAL auth, ONE servicedir)
+// whose ONE service is the a11y row of the product's PORTAL_SERVICES (org.a11y.Bus → at-spi-bus-launcher, found as the product
+// finds it: D.portalBins over its A11Y_BINS), started by the product's own D.startPortalBus (its dirs 0700, its files 0600, resolved
+// once the socket listens). The first ask activates the launcher, which starts the accessibility bus (its socket under the same
+// folder) and registryd. The machine's bus, runtime folder and display names are never carried. A program missing: a SKIP that
+// NAMES it.
+const DAPPS = require('../src/desktop-apps.js');
+const MACHINE_SESSION = Object.freeze(['DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY']);
+const base = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !MACHINE_SESSION.includes(k))), WAYLAND_DISPLAY: D.NO_WAYLAND_DISPLAY };   // never delete WAYLAND_DISPLAY: unset means wayland-0, the machine's own screen
+const busRT = path.join(dir, 'xrt');
+fs.mkdirSync(busRT, { recursive: true, mode: 0o700 }); fs.chmodSync(busRT, 0o700);
+base.XDG_RUNTIME_DIR = busRT;
+/** the skip's words for what is missing: each program BY NAME */
+const busMissingWhy = (missing) => `${missing.join(', ')} not found on this machine (${missing.map((n) => (n === 'dbus-daemon' ? 'dbus' : 'at-spi2-core')).filter((v, i, a) => a.indexOf(v) === i).join(', ')}) — the suite's own ${missing.includes('dbus-daemon') ? 'session bus' : 'accessibility bus'} cannot start`;
+const busBins = { 'dbus-daemon': D.binOnPath('dbus-daemon', { env: process.env }), ...D.portalBins({ env: process.env, names: DAPPS.A11Y_BINS }) };
+const busMissing = Object.entries(busBins).filter(([, p]) => !p).map(([n]) => n);
+const ownBus = await (async () => {
+  if (busMissing.length) return { ok: false, why: busMissingWhy(busMissing) };
+  const root = path.join(busRT, 'bus.d'), sock = path.join(busRT, 'bus'), address = `unix:path=${sock}`;
+  if (sock.length > 107) return { ok: false, why: `the suite's bus socket path is ${sock.length} bytes (over 107)` };
+  const row = DAPPS.PORTAL_SERVICES.find(([name]) => name === 'org.a11y.Bus');
+  if (!row) return { ok: false, why: 'the product names no org.a11y.Bus service (src/desktop-apps.js PORTAL_SERVICES)' };
+  const xml = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const conf = ['<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">',
+    '<busconfig>', '  <type>session</type>', '  <keep_umask/>', `  <listen>${xml(address)}</listen>`, '  <auth>EXTERNAL</auth>', `  <servicedir>${xml(root)}/services</servicedir>`,
+    '  <policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>', '</busconfig>', ''].join('\n');
+  const plan = { ok: true, address, busArgv: [busBins['dbus-daemon'], '--nofork', `--config-file=${root}/bus.conf`], dirs: [root, `${root}/services`],
+    files: [{ file: `${root}/bus.conf`, text: conf }, { file: `${root}/services/${row[0]}.service`, text: `[D-BUS Service]\nName=${row[0]}\nExec=${busBins[row[1]]}\n` }],
+    env: { DBUS_SESSION_BUS_ADDRESS: address, XDG_RUNTIME_DIR: busRT } };
+  try { const child = await D.startPortalBus({ plan, env: base }); children.add(child); return { ok: true, address, pid: child.pid }; }
+  catch (e) { return { ok: false, why: `the suite's own session bus did not start: ${(e && e.message) || e}` }; }
+})();
+if (ownBus.ok) base.DBUS_SESSION_BUS_ADDRESS = ownBus.address;
+ok(busMissingWhy(['at-spi-bus-launcher']).startsWith('at-spi-bus-launcher not found on this machine (at-spi2-core)') && busMissingWhy(['dbus-daemon']).includes('session bus'), 'r3097: a machine without an accessibility program skips NAMING it (never a silent count)');
+console.log(`  the suite's own buses: ${ownBus.ok ? `session bus ${ownBus.address} (pid ${ownBus.pid})` : ownBus.why}; runtime folder ${busRT} (${(fs.statSync(busRT).mode & 0o777).toString(8)})`);
 const py = await run('python3', ['-c', "import gi; gi.require_version('Atspi','2.0'); gi.require_version('Gtk','3.0'); from gi.repository import Atspi, Gtk; print('ok')"], base, 20000);
 const xvfbBin = D.binOnPath('Xvfb', { env: base });
-const a11y = py.err ? null : await WT.probeA11y({ env: base, wallMs: 10000 });
+const a11y = py.err || !ownBus.ok ? null : await WT.probeA11y({ env: base, wallMs: 10000 });
 let real = null; // { pid, xenv, display, snapshot, refs, bins }
 // mirror red on 2.369.181: WHAT is missing when §3 cannot build its fixture is carried to every later SKIP that needs it
 // (§4's tree legs, §5's pixel road) — a skip names the missing capability, never just "needs §3"
@@ -434,10 +472,13 @@ let realMissing = 'the fixture never came up (see §3 above)';
 const skip3 = (why) => { realMissing = why; skip(why); };
 if (py.err) skip3(`python3 gi Atspi/Gtk not importable: ${(py.stderr || py.err.message).trim().split('\n').pop()}`);
 else if (!xvfbBin) skip3('Xvfb not on PATH');
-else if (!base.DBUS_SESSION_BUS_ADDRESS && !base.XDG_RUNTIME_DIR) skip3('no session bus in this environment (DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR unset) — the a11y bus is unreachable');
-else if (!a11y || !a11y.ok) skip3(`the accessibility bus did not answer: ${a11y && a11y.why}`);
+else if (!ownBus.ok) skip3(ownBus.why);
+else if (!a11y || !a11y.ok) skip3(`the suite's own accessibility bus did not answer (its session bus ${ownBus.address}): ${a11y && a11y.why}`);
 else {
   console.log(`  a11y probe: ${a11y.apps} apps on the bus in ${a11y.ms} ms`);
+  const a11yAt = await D.a11yBusAddress({ env: base, timeout: 3000 });
+  ok(base.DBUS_SESSION_BUS_ADDRESS === ownBus.address && !MACHINE_SESSION.some((k) => k !== 'WAYLAND_DISPLAY' && process.env[k] && base[k] === process.env[k]) && (fs.statSync(busRT).mode & 0o777) === 0o700,
+    `r3097: the tree legs run on the suite's OWN buses in its 0700 folder — the session bus ${ownBus.address}, the accessibility bus ${a11yAt || '(dbus-send absent: not asked)'} — never the machine's`);
   // an X server of our own, on a number -displayfd hands us
   const authFile = path.join(dir, 'Xauthority');
   const cookie = D.newCookie();
@@ -458,7 +499,7 @@ else {
       // wait for the app on the a11y bus
       let onBus = false;
       for (let i = 0; i < 40 && !onBus; i++) { const r = await WT.runHelper({ op: 'apps' }, { env: base, wallMs: 8000 }); onBus = !!(r.ok && (r.apps || []).some((a) => a.pid === pid)); if (!onBus) await sleep(250); }
-      ok(onBus, `the fixture (pid ${pid}) registered on the session\'s accessibility bus from OUR display ${display} — the bus is per user, not per display`);
+      ok(onBus, `the fixture (pid ${pid}) registered on the suite\'s OWN accessibility bus from OUR display ${display}`);
       const snapRes = await WT.snapshotTarget({ pids: [pid], env: base });
       ok(snapRes.ok, 'snapshotTarget answers', snapRes);
       if (snapRes.ok) {
