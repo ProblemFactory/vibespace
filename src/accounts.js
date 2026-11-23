@@ -374,6 +374,11 @@ class AccountManager {
     const todos = this._todos;
     try { return todos && typeof todos.forSession === 'function' ? todos.forSession('accounts').filter((i) => i && i.origin === 'login' && (i.text === ACCOUNTS_HELD_TEXT || i.text === ACCOUNTS_TORN_TEXT)) : []; } catch { return []; }
   }
+  /** r3173 (2): the held items the PERSON hid (✕) — never filed again while that hold lasts (a restart while still held included) */
+  _hiddenHeldItems() {
+    const todos = this._todos;
+    try { return todos && typeof todos.hiddenFor === 'function' ? todos.hiddenFor('accounts').filter((i) => i && i.origin === 'login' && (i.text === ACCOUNTS_HELD_TEXT || i.text === ACCOUNTS_TORN_TEXT)) : []; } catch { return []; }
+  }
   _fileHeldNotice() {
     const todos = this._todos, h = this.held();
     if (!todos || typeof todos.add !== 'function' || !h) return;
@@ -381,12 +386,13 @@ class AccountManager {
     const text = this._torn ? ACCOUNTS_TORN_TEXT : ACCOUNTS_HELD_TEXT;
     const open = this._openHeldItems();
     for (const i of open) if (i.text !== text) { try { todos.setStatus(i.id, 'done', 'system'); } catch (e) { console.warn('[accounts] the other cause\'s notice could not be closed (it stays until the next start reads):', e && e.message); } }   // the other cause's item: its fact ended
+    if (this._hiddenHeldItems().some((i) => i.text === text)) return;   // r3173 (2): the person hid this notice — it is not filed again for this hold
     const same = open.find((i) => i.text === text);
     if (same) { this._heldTodoId = same.id; return; }   // r3129 (1): an item a restart while still held left open IS this hold's — adopted, never a second
     try {
       const item = todos.add('accounts', {
         origin: 'login', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Manage Agents', text,
-        detail: `${h.why}. No account is added, changed or removed and nothing is written over the list meanwhile; this notice closes when the accounts read.`,
+        detail: `${h.why}. No account is added, changed or removed and nothing is written over the list meanwhile; this notice closes ${this._torn ? 'at the next start of VibeSpace that reads the file (once it is mended or removed)' : 'when the accounts read'}.`,   // r3173 (5)
         i18n: { text: { key: this._torn ? i18nKey('The accounts file is damaged — its bytes are kept beside it. Nothing is changed and no conversation starts on another login until it is mended or removed and VibeSpace restarted.') : i18nKey('The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.'), params: {} }, source: { key: i18nKey('Manage agents') } },
       });
       this._heldTodoId = (item && item.id) || null;
@@ -396,7 +402,7 @@ class AccountManager {
     this._heldTodoId = null;
     const todos = this._todos;
     if (!todos || typeof todos.setStatus !== 'function') return;
-    for (const i of this._openHeldItems()) { try { todos.setStatus(i.id, 'done', 'system'); } catch (e) { console.warn('[accounts] the accounts\' notice could not be closed:', e && e.message); } }
+    for (const i of [...this._openHeldItems(), ...this._hiddenHeldItems()]) { try { todos.setStatus(i.id, 'done', 'system'); } catch (e) { console.warn('[accounts] the accounts\' notice could not be closed:', e && e.message); } }   // r3173 (2): a hidden one too — the next hold says it afresh
   }
   /** the hold LIFTED (src/store-read-hold.js): the file read (its value, or null: «not there» twice in a row — a fresh list) */
   _lifted(v, facts = {}) {

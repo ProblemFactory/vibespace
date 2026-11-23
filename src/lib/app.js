@@ -1263,7 +1263,8 @@ class App {
           // read as the whole import), in the reader's language — long enough to read before
           // the reload; nothing else imported ⇒ said on the form's line, nothing reloads
           const heldSaid = [Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null,
-            Array.isArray(d.held) && d.held.includes('storage_unread') ? t('Your storage was not imported — VibeSpace cannot read its storage list right now. Import it again in a few minutes.') : null].filter(Boolean).join(' ') || null;   // B-f276 family unit 1
+            Array.isArray(d.held) && d.held.includes('storage_unread') ? t('Your storage was not imported — VibeSpace cannot read its storage list right now. Import it again in a few minutes.') : null,   // B-f276 family unit 1
+            Array.isArray(d.held) && d.held.includes('accounts_unread') ? t('Your accounts were not imported — VibeSpace cannot read its accounts list right now. Import them again once it reads; For you says why.') : null].filter(Boolean).join(' ') || null;   // the B-f276 family (bl-windows, r3173): the accounts section held — said, never «Imported»
           if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }
           close();
           showToast([t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }), heldSaid].filter(Boolean).join(' '), heldSaid ? { type: 'warn', duration: 8000 } : undefined);

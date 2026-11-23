@@ -5,6 +5,8 @@
 export default {
   "the agent's next browser command starts it again, and this view reconnects then": "Agent 的下一条浏览器命令会再次启动它，这个视图随后会重新连接",
   "The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.": "无法读取账户——不会显示为已不存在。在能读取之前不会更改任何内容，也不会有对话在其他登录上启动；VibeSpace 会自行再次读取。",   // the B-f276 family (bl-windows, r2947 (3)): the accounts held — the panel and the notice
+  "Your accounts were not imported — VibeSpace cannot read its accounts list right now. Import them again once it reads; For you says why.": "你的账户没有导入——VibeSpace 暂时无法读取账户列表。等它能读取后再导入一次；「待你处理」中说明了原因。",   // the B-f276 family (bl-windows, r3173): the config import's held accounts section
+  "Nothing was changed. The accounts file is damaged and does not mend by itself — mend it or remove it, then restart VibeSpace.": "没有做任何更改。账户文件已损坏，不会自行恢复——请修好或移除它，然后重启 VibeSpace。",   // the B-f276 family (bl-windows, r3173 (1)): the Add dialog over torn bytes
   "The accounts file is damaged — its bytes are kept beside it. Nothing is changed and no conversation starts on another login until it is mended or removed and VibeSpace restarted.": "账户文件已损坏——其内容保留在它旁边。在修好或移除该文件并重启 VibeSpace 之前，不会更改任何内容，也不会有对话在其他登录上开始。",   // the B-f276 family (bl-windows, r3129 (5)): torn accounts bytes — the panel and the notice
   "The accounts could not be read": "无法读取账户",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
   "Nothing was changed. VibeSpace reads them again by itself; Try again shows whether they read now.": "没有做任何更改。VibeSpace 会自行再次读取；点“重试”看看现在能否读取。",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog

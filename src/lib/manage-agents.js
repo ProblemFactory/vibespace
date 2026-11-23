@@ -1475,7 +1475,8 @@ export function installManageAgents(App, ctx = {}) {
   /** the B-f276 family (主开发 r2947 (2)): a change while the accounts are HELD — the dialog says so by name, nothing was changed, and Try
    *  again asks the list now (the server reads the file again by itself, off its loop) */
   async _accountsHeldDialog(refresh) {
-    const again = await showConfirmDialog({ title: t('The accounts could not be read'), message: t('Nothing was changed. VibeSpace reads them again by itself; Try again shows whether they read now.'), confirmText: t('Try again') });
+    const torn = this._accounts?.held?.code === 'torn bytes';   // r3173 (1): torn bytes never lift by Try again — the words by the cause
+    const again = await showConfirmDialog({ title: t('The accounts could not be read'), message: torn ? t('Nothing was changed. The accounts file is damaged and does not mend by itself — mend it or remove it, then restart VibeSpace.') : t('Nothing was changed. VibeSpace reads them again by itself; Try again shows whether they read now.'), confirmText: t('Try again') });
     if (!again) return;
     try { await this.refreshAccounts?.(); } catch { }
     refresh?.();

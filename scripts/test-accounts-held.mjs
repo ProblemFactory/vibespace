@@ -66,10 +66,10 @@ function world(AM, { text = HEALTHY, failBoot = null, dir: dir0 = null, todos = 
   const onDisk = () => (fs.existsSync(file) ? realRead(file, 'utf8') : null);
   const asides = () => fs.readdirSync(dir).filter((f) => f.startsWith('accounts.json.corrupt-'));
   // the helper's torn-bytes copy runs off the loop at the start: wait for its answer (bounded)
-  const settle = async () => { for (let i = 0; i < 300 && (asides().length === 0 || (am.held() && !am._torn)); i++) await new Promise((z) => setTimeout(z, 10)); await tick(); };   // torn: until the copy is made AND the list re-held (or lifted, in a red)
+  const settle = async () => { for (let i = 0; i < 100 && (asides().length === 0 || (am.held() && !am._torn)); i++) await new Promise((z) => setTimeout(z, 10)); await tick(); };   // torn: until the copy is made AND the list re-held (or lifted, in a red)
   return { am, dir, file, onDisk, asides, settle, changes };
 }
-const inbox = () => { const items = [], done = []; return { items, done, add: (k, it) => { items.push({ k, ...it, id: `ut-${items.length + 1}` }); return { id: `ut-${items.length}` }; }, get: (id) => ({ id, status: done.includes(id) ? 'done' : 'open' }), forSession: (k) => items.filter((i) => i.k === k && !done.includes(i.id)), setStatus: (id, st) => { if (st === 'done') done.push(id); } }; };
+const inbox = () => { const items = [], done = [], hidden = []; return { items, done, add: (k, it) => { items.push({ k, ...it, id: `ut-${items.length + 1}` }); return { id: `ut-${items.length}` }; }, get: (id) => ({ id, status: done.includes(id) ? 'done' : 'open' }), forSession: (k) => items.filter((i) => i.k === k && !done.includes(i.id) && !hidden.includes(i.id)), hiddenFor: (k) => items.filter((i) => i.k === k && hidden.includes(i.id) && !done.includes(i.id)), hide: (id) => { hidden.push(id); }, setStatus: (id, st) => { if (st === 'done') done.push(id); } }; };
 const tryCall = (fn) => { try { return { r: quiet(fn) }; } catch (e) { return { code: (e && e.code) || null, status: (e && e.status) || null, msg: String((e && e.message) || '') }; } };
 
 console.log('① a failed read at the start HOLDS the list — nothing is written over the file');
@@ -249,10 +249,12 @@ const tornNotice = async (AM) => {
   const at1 = h && h.at;
   await new Promise((z) => setTimeout(z, 30));
   const named = items.length === 1 && w.asides().length === 1 && String(items[0].detail || '').includes(w.asides()[0]);
-  return { code: h && h.code, ladder: !!w.am._hold.held(), sameSince: !!(w.am.held() && w.am.held().at === at1), items: items.length, torn: items.length === 1 && /damaged/.test(items[0].text || ''), named, signins: /old sign-ins stay on disk unused/.test((h && h.why) || ''), mends: /does not mend by itself/.test((h && h.why) || '') };
+  return { code: h && h.code, ladder: !!w.am._hold.held(), sameSince: !!(w.am.held() && w.am.held().at === at1), items: items.length, torn: items.length === 1 && /damaged/.test(items[0].text || ''), named, restart: items.length === 1 && /at the next start of VibeSpace that reads the file/.test(String(items[0].detail || '')), signins: /old sign-ins stay on disk unused/.test((h && h.why) || ''), mends: /does not mend by itself/.test((h && h.why) || '') };
 };
 const t10 = await tornNotice(AM0);
-ok(t10.code === 'torn bytes' && !t10.ladder && t10.sameSince && t10.items === 1 && t10.torn && t10.named && t10.signins && t10.mends, 'torn bytes: held for the life OFF the helper\'s ladder (no read and no journal every 30 s; the first «since» kept); ONE notice in the torn words, filed once the copy exists (its detail names it); the words say it does not mend by itself and the old sign-ins stay on disk unused', t10);
+ok(t10.code === 'torn bytes' && !t10.ladder && t10.sameSince && t10.items === 1 && t10.torn && t10.named && t10.restart && t10.signins && t10.mends, 'torn bytes: held for the life OFF the helper\'s ladder (no read and no journal every 30 s; the first «since» kept); ONE notice in the torn words, filed once the copy exists (its detail names it); the words say it does not mend by itself and the old sign-ins stay on disk unused', t10);
+const t10x = await tornNotice(cut('      this._torn = { since, aside: facts.setAside };\n      this._fileHeldNotice();   // the torn notice — now that its copy exists (it names it)\n      this._notify();           // every page learns the hold\'s true words\n      return;\n', "      this._hold.start({ state: 'unreadable', code: 'torn bytes', why: `did not parse — kept beside it as ${facts.setAside}` });\n      this._fileHeldNotice();\n      return;\n", 'the old re-hold on the helper\'s ladder', 'acct-torn-ladder'));
+ok(t10x.ladder, 'RED CONTROL (r3173 (4): the old re-hold put back): torn bytes go back on the helper\'s ladder — a read and a journal line every 30 s — red', t10x);
 
 console.log('⑪ r3129 (7): the pins of the one-line doors a suite cannot drive here');
 const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
@@ -264,6 +266,45 @@ ok(/msg\.type === 'accounts-updated'[\s\S]{0,400}held: msg\.held \|\| null/.test
 ok(/catch \(e\) \{ if \(e && e\.code === 'accounts_unread'\) rh = e; else throw e; \}[\s\S]{0,200}if \(rh\) held\.push\(rh\.code\)/.test(PER), 'r3129 (3): the config import\'s accounts section is refused by name and said with the other held sections (never a bare 503 after the rest was written)');
 ok(/if \(h\) return \{ refuse: h\.why, code: 'accounts_unread'/.test(SES), 'r3129 (6): the account-bound resume says the hold\'s words, never «deleted» over the held list');
 ok(/accounts\.held\(\) : null; if \(h\) return Promise\.resolve\(\{ ok: false, reason: 'account', detail: h\.why \}\)/.test(PRM), 'r3129 (6): the permission oracle says the hold\'s words, never «unknown account»');
+
+console.log('⑫ r3173: the config import with the accounts held — the route says the section held; the page words it');
+const PRSRC = fs.readFileSync(path.join(REPO, 'src/routes/persistence.js'), 'utf8');
+const routeImportAcc = async (Pmod) => {
+  const D = path.join(ROOT, 'imp-' + (++wn)); fs.mkdirSync(D, { recursive: true });
+  let mode = 'export';
+  const accStub = { exportBundle: () => ({ accounts: [{ id: 'acct-x', name: 'Work key' }] }), held: () => (mode === 'held' ? { code: 'EIO', at: 1, why: 'the accounts could not be read (EIO)' } : null),
+    importBundle: () => { if (mode === 'held') throw Object.assign(new Error('importing the accounts: the accounts could not be read (EIO)'), { code: 'accounts_unread', status: 503 }); return { imported: 1, skipped: 0 }; } };
+  Pmod.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => [], getTasks: () => null, getAccounts: () => accStub, getUsageHistory: () => null, onSettingsWrite: () => { } });
+  const door = (p) => Pmod.router.stack.find((l) => l.route && l.route.path === p && l.route.methods.post).route.stack[0].handle;
+  const call = (p, body) => new Promise((resolve) => { const out = { status: 200 }; const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, get() { return undefined; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); } }; Promise.resolve().then(() => door(p)({ body, headers: { 'sec-fetch-site': 'same-origin' }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out))).catch((e) => { out.status = 'threw'; out.body = { error: String(e && e.message) }; resolve(out); }); });
+  const ex = await quietA(() => call('/api/config/export', { sections: [], includeSensitive: ['accounts'], passphrase: 'walk-pass-0001' }));
+  mode = 'held';
+  const im = ex.body && ex.body.sensitive ? await quietA(() => call('/api/config/import', { file: ex.body, sections: [], includeSensitive: ['accounts'], passphrase: 'walk-pass-0001' })) : null;
+  return { exported: ex.status, status: im && im.status, applied: (im && im.body && im.body.applied) || null, held: (im && im.body && im.body.held) || null };
+};
+const ri = await routeImportAcc(require(path.join(REPO, 'src/routes/persistence.js')));
+ok(ri.exported === 200 && ri.status === 200 && Array.isArray(ri.applied) && !ri.applied.some((a) => /^accounts/.test(a)) && JSON.stringify(ri.held) === '["accounts_unread"]', 'the import route, driven: a bundle with the accounts imported while the list is held answers `held: [accounts_unread]` — no accounts entry in `applied`, never a bare 503 after the rest was written', ri);
+const rix = await routeImportAcc(MUT.load('src/routes/persistence.js', anchored(PRSRC, "        let r = null, rh = null; try { r = getAccounts?.()?.importBundle?.(sens.accounts); } catch (e) { if (e && e.code === 'accounts_unread') rh = e; else throw e; }", "        let r = null, rh = null; r = getAccounts?.()?.importBundle?.(sens.accounts);", 'the refusal not caught'), 'acct-import'));
+ok(rix.status !== 200 || !rix.held, 'RED CONTROL (the refusal not caught, line 625\'s shape): the import fails after the other sections were written, its words the hub\'s — red', rix);
+const APPSRC = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), MASRC = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+ok(/d\.held\.includes\('accounts_unread'\) \? t\('Your accounts were not imported — VibeSpace cannot read its accounts list right now\. Import them again once it reads; For you says why\.'\)/.test(APPSRC) && APPSRC.includes("if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }"), 'the PAGE words the held accounts section beside «Imported: …» — with only the accounts ticked, the form stays and says it (never «Imported: — reloading»)');
+ok(/const torn = this\._accounts\?\.held\?\.code === 'torn bytes';/.test(MASRC) && /torn \? t\('Nothing was changed\. The accounts file is damaged and does not mend by itself/.test(MASRC), 'r3173 (1): the Add dialog says the torn cause (it does not mend by itself — mend or remove, restart), never «reads them again by itself»');
+
+console.log('⑬ r3173 (2): a notice the person HID is not filed again at a held restart; a start that reads closes it');
+const hideRun = async (AM) => {
+  const todos = inbox();
+  const w1 = world(AM, { failBoot: 'EIO', todos });
+  const first = todos.items.length;
+  todos.hide(todos.items[0].id);   // the person's ✕
+  world(AM, { dir: w1.dir, failBoot: 'EIO', todos });   // a restart while still held
+  const afterHeldRestart = todos.items.length;
+  world(AM, { dir: w1.dir, todos });   // the restart in which the file reads
+  return { first, afterHeldRestart, closed: todos.done.includes(todos.items[0].id) };
+};
+const h13 = await hideRun(AM0);
+ok(h13.first === 1 && h13.afterHeldRestart === 1 && h13.closed, 'the person hid the notice: a restart while still held files NO new one; the start that reads closes the hidden one (the next hold says it afresh)', h13);
+const h13x = await hideRun(cut('    if (this._hiddenHeldItems().some((i) => i.text === text)) return;   // r3173 (2): the person hid this notice — it is not filed again for this hold\n', '', 'no ask of the hidden items', 'acct-hidden'));
+ok(h13x.afterHeldRestart > 1, 'RED CONTROL (no ask of the hidden items): the hidden notice comes back at every held restart — red', h13x);
 
 for (const am of ALL) { try { am.close(); } catch { } }
 report();
