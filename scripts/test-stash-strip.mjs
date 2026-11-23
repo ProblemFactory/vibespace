@@ -948,7 +948,7 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   fs.writeFileSync(memFile, JSON.stringify(obj).slice(0, 40));
   const b2 = logs.length;
   const v3 = SH.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: L });
-  ok(v3._delivered.size === 0 && logs.slice(b2).length === 1 && /^W \[stash\] the hand-over memory .*stash-handover\.json was unreadable \(.*\) — starting empty/.test(logs[b2]), 'a torn file: empty memory, SAID by name (was: a silent catch)', logs.slice(b2));
+  ok(v3._delivered.size === 0 && logs.slice(b2).length === 1 && /^W \[stash\] stash-handover\.json did not parse \(.*\) — held while its bytes are copied aside; then it starts empty/.test(logs[b2]), 'a torn file: empty memory, SAID by name (was: a silent catch) — since r3003 (c) the family\'s hold says it: its bytes copied aside first', logs.slice(b2));
   const b3 = logs.length;
   ok(v3.restoreHandedOver('c', 'frame (hand-over ho-gone-1)') === 0 && logs.slice(b3).length === 1 && /a frame names hand-over ho-gone-1, which this hub no longer remembers/.test(logs[b3]), 'an echo naming a hand-over the memory lacks answers 0 (the frame is kept as one notice) and SAYS so by id (was: silent)', logs.slice(b3));
   ok(!fs.existsSync(path.join(dir, 'nowhere')) && SH.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: path.join(dir, 'nowhere'), log: L }) && logs.length === b3 + 1, 'an ABSENT file is a first boot: nothing said');
@@ -973,9 +973,9 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   fs.writeFileSync(path.join(dir, SH.DELIVERED_FILE), JSON.stringify(obj));
   const f = Fifo.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: { log() {}, warn() {} } });
   ok([...f._delivered.keys()].filter((k) => k.startsWith('ho-spent')).length === 5 && [...f._delivered.keys()].filter((k) => k.startsWith('ho-live')).length === 44, 'CONTROL spent-first removed: six LIVE records are forgotten while five spent ones stay (②f can go red)');
-  const a3 = " && Number(rec.at) > 0) delivered.set(id, { ...rec, at: Number(rec.at),";
+  const a3 = " && Number(rec.at) > 0) { delivered.set(id, { ...rec, at: Number(rec.at),";
   if (!sh.includes(a3)) throw new Error('mutation anchor missing: at-gate');
-  const Junk = MUT5.load('src/server/stash-handover.js', editAnchor(sh, a3, ') delivered.set(id, { ...rec,', "src/server/stash-handover.js"), 'junk-at');
+  const Junk = MUT5.load('src/server/stash-handover.js', editAnchor(sh, a3, ') { delivered.set(id, { ...rec,', "src/server/stash-handover.js"), 'junk-at');
   fs.writeFileSync(path.join(dir, SH.DELIVERED_FILE), JSON.stringify({ 'ho-junk': { cid: 'c', text: 't', msg: [], jobs: [], at: 'yesterday' } }));
   const j = Junk.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: { log() {}, warn() {} } });
   ok(j._delivered.has('ho-junk'), 'CONTROL the numeric-instant gate removed: the junk record is loaded (②f can go red)');
@@ -1492,7 +1492,7 @@ function producerCensus(src) {
   // ── 6. THE BOOT: the stores load synchronously at create, before the server listens and before any session is restored ──
   const sj = read('server.js');
   const iDeliver = sj.indexOf("const deliver = require('./src/server/conversation-deliver.js').create("), iView = sj.indexOf("const stashView = require('./src/server/stash-handover.js').create("), iListen = sj.indexOf('hub.listen(PORT, HOST'), iRestore = sj.indexOf('restoreSessions();', iListen);
-  ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen && /const file = dataDir \? path\.join\(dataDir, DELIVERED_FILE\) : null;\n  if \(file\) \{\n    let raw = null;\n    try \{ raw = fs\.readFileSync\(file, 'utf-8'\); \}/.test(read('src/server/stash-handover.js')),
+  ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen && /  if \(file\) \{\n    let read = null;\n    try \{ read = \{ text: fs\.readFileSync\(file, 'utf-8'\) \}; \} catch \(error\) \{ read = \{ error \}; \}/.test(read('src/server/stash-handover.js')),
     'THE BOOT ORDER: the ladder\'s stash and the hand-over memory are read synchronously at create, both before hub.listen (the one-port front, lane https-tailscale), and restoreSessions runs inside the listen callback — a first prompt at boot+1 s finds either a restored session (drained once, persisted synchronously) or no session (401, nothing touched)');
   // a restored session: the stash on disk from a previous process, the first prompt drains it ONCE, the second carries nothing
   const H = rigR7({ groups: 1, n: 5 });

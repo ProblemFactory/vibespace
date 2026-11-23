@@ -4602,6 +4602,8 @@ export default {
   "the storage list": "存储列表",
   "the folder links": "文件夹链接",
   "the messages waiting for agents": "等待代理的消息",
+  "the record of messages already handed to agents": "已交给代理的消息记录",
+  "The record of messages already handed to agents could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A message an agent hands back waits until it reads.": "已交给代理的消息记录刚才没能读取——VibeSpace 会自己再读一次；没有丢失，也没有改动。代理退回的消息要等读出来之后再处理。",
   "the plugins’ settings": "插件的设置",
   "this VibeSpace’s own id": "这个 VibeSpace 自己的标识",
   "the Task Groups": "任务组",

@@ -68,6 +68,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const SR = require('../store-read.js');   // r3003 (c), lane hub-loop-stalls: stash-handover.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold (lane bl-jobs's helper): a failed read held, never read as «nothing remembered»
 const { CLEARED_TEXT } = require('../record-clear.js');   // "Clear content…": the sentence a cleared record's copy reads
 const S = require('../stash-summary.js');
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
@@ -342,17 +344,38 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   // with a restart, and the wrapper's echo after the boot found nothing to restore (the frame then rode the next
   // injection as one 400-char line: 5 channel messages and a job result, gone). tmp+rename; unreadable = empty.
   const file = dataDir ? path.join(dataDir, DELIVERED_FILE) : null;
-  if (file) {
-    let raw = null;
-    try { raw = fs.readFileSync(file, 'utf-8'); } catch { raw = null; }   // absent = a first boot, nothing to say
-    if (raw !== null) {
-      try {
-        const obj = JSON.parse(raw);
-        // a record is a hand-over's only with its conversation, its exact frame text and a NUMERIC instant — a junk `at`
-        // (verify r5: a string is never older than the TTL's cut, NaN < cut is false, so it lived until the count bound)
-        for (const [id, rec] of Object.entries(obj || {})) if (rec && typeof rec === 'object' && rec.cid && (typeof rec.text === 'string' || typeof rec.textSha === 'string') && Number(rec.at) > 0) delivered.set(id, { ...rec, at: Number(rec.at), msg: Array.isArray(rec.msg) ? rec.msg : [], jobs: Array.isArray(rec.jobs) ? rec.jobs : [] });
-      } catch (e) { log.warn?.(`[stash] the hand-over memory ${file} was unreadable (${(e && e.message) || e}) — starting empty; a frame handed back for a hand-over delivered before this boot is kept as one notice`); }   // verify r5: never silent
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  /** the file's records into `delivered` (a record is a hand-over's only with its conversation, its exact frame text and a NUMERIC
+   *  instant — a junk `at` (verify r5: a string is never older than the TTL's cut, NaN < cut is false, so it lived until the count
+   *  bound)); `keep` = ids already in memory (memory's record wins) → the ids loaded */
+  function loadRecords(obj, keep = null) {
+    const ids = [];
+    for (const [id, rec] of Object.entries(obj || {})) {
+      if (keep && keep.has(id)) continue;
+      if (rec && typeof rec === 'object' && rec.cid && (typeof rec.text === 'string' || typeof rec.textSha === 'string') && Number(rec.at) > 0) { delivered.set(id, { ...rec, at: Number(rec.at), msg: Array.isArray(rec.msg) ? rec.msg : [], jobs: Array.isArray(rec.jobs) ? rec.jobs : [] }); ids.push(id); }
     }
+    return ids;
+  }
+  // r3003 (c), lane hub-loop-stalls — THE STORE-READ LAW (the release: ANY failed read or torn bytes = empty, and the next hand-over's
+  // write replaced the file with its one record: every earlier hand-over's originals gone — their frames, handed back, came back as
+  // one clipped notice — and a put-back's only copy of job notifications with them). Through store-read's answer to the hold
+  // (src/store-read-hold.js, code `handover_memory_unread`). HELD: nothing is written over the file (persistDelivered); a new hand-over's
+  // record lives in memory (said once a hold); a frame handed back for a hand-over memory does not name is KEPT in the stash as itself,
+  // marked `about.handover`, and a stash gate keeps it (not handed out, the wake waits) until the memory reads; a clear reaches memory's
+  // records now and the file's at the lift. LIFTED: the file's records, memory's after them (memory's wins on an id), written once; the
+  // file's put-backs of job notifications put back; every kept frame judged again (its originals restored, or handed out as itself).
+  // TORN: kept aside once by the helper, then empty (the records' loss said by the copy's name).
+  const memHold = file ? HOLD.create({ file, valid: isObj, code: 'handover_memory_unread', aside: (m) => file + '.corrupt-' + m,
+    words: (h) => `the memory of delivered hand-overs could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and a message handed back for an earlier hand-over waits until it reads`,
+    log: (l) => log.warn?.(`[stash] ${l}`), onLift: (v, facts) => liftMemory(v, facts) }) : null;
+  const memHeld = () => !!(memHold && memHold.held());
+  const clearsHeld = [];   // (match, scope) of a clear made while held: it reaches the file's records at the lift
+  let heldNewSaid = false;   // the ONE journal line a hold for the records memory keeps
+  if (file) {
+    let read = null;
+    try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }   // ENOENT = a first boot, nothing to say
+    const a = SR.storeAnswer(read, { valid: isObj });
+    if (memHold.start(a) === 'data') loadRecords(a.value);
   }
   // "CLEAR CONTENT…" (the lane-redact merge onto 2.369.196): this memory is a COPY of held words — a delivered hand-over's
   // originals (the ladder's entries: a group wake's report, a codex hand-back; the jobs store's notifications) and the
@@ -377,6 +400,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  carried the second kept the job's name and words on disk after the clear. */
   const namesJob = (text, id) => new RegExp('(^|[^\\w-])' + String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-])').test(text);
   function redactDelivered(match, scope = {}) {
+    if (memHeld()) clearsHeld.push({ match, scope });   // r3003 (c): HELD — the file's records are judged by this clear at the lift
     const ids = new Set(Array.isArray(scope && scope.jobIds) ? scope.jobIds.map(String) : []);
     const ask = (e) => { let r = null; try { r = typeof match === 'function' ? match(e) : null; } catch { r = null; } return r && typeof r === 'object' ? r : null; };
     let n = 0;
@@ -407,6 +431,10 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   function persistDelivered() {
     if (!file) return;
+    if (memHold && !memHold.writable('a write of the hand-over memory')) {   // HELD: never over a file that could not be read
+      if (!heldNewSaid && delivered.size) { heldNewSaid = true; log.warn?.(`[stash] the memory of delivered hand-overs could not be read — ${delivered.size} record${delivered.size === 1 ? ' is' : 's are'} kept in memory only until it reads (a restart before then loses them: a frame handed back for one is then kept as one notice)`); }
+      return;
+    }
     try { fs.writeFileSync(file + '.tmp', JSON.stringify(Object.fromEntries(delivered))); fs.renameSync(file + '.tmp', file); }
     catch (e) { log.warn?.(`[stash] the hand-over memory was not persisted: ${(e && e.message) || e}`); }
   }
@@ -446,17 +474,59 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   /** A START PUTS BACK EVERY COPY STILL HELD (the moved2 cure 2): a record whose put-back had not landed when the last process
    *  stopped — its job notifications go back into the jobs store (by job and instant, no duplicate) and ride that landing again.
    *  The jobs store comes up after this module: asked again each second, a minute at most, said when it never came. */
-  function putBackHeld(tries = 0) {
-    const held = [...delivered.values()].filter((r) => r && r.jobsOwed && r.jobs.length);
+  function putBackHeld(tries = 0, only = null) {
+    const held = [...delivered.values()].filter((r) => r && r.jobsOwed && r.jobs.length && (!only || only.has(r)));
     if (!held.length) return;
     const jm = jobsReady();
-    if (!jm || typeof jm.restoreNotifs !== 'function') { if (tries < 60) schedule(() => putBackHeld(tries + 1), 1000); else log.warn?.(`[stash] ${held.length} hand-over cop${held.length === 1 ? 'y' : 'ies'} of job notifications still held — the jobs store never came up; kept for the next start`); return; }
+    if (!jm || typeof jm.restoreNotifs !== 'function') { if (tries < 60) schedule(() => putBackHeld(tries + 1, only), 1000); else log.warn?.(`[stash] ${held.length} hand-over cop${held.length === 1 ? 'y' : 'ies'} of job notifications still held — the jobs store never came up; kept for the next start`); return; }
     let n = 0;
     for (const rec of held) { n += jm.restoreNotifs(rec.cid, rec.jobs); keepUntilLanded(rec, jm); }
     log.log?.(`[stash] the last process stopped before ${held.length} hand-over put-back(s) landed — ${n} job notification(s) put back (none twice)`);
     changed();
   }
   if (delivered.size) schedule(() => putBackHeld(0), 0);
+  /** r3003 (c): THE KEPT FRAMES (a frame handed back while this memory was held, `about.handover`): the stash gate keeps them while
+   *  held — neither handed out nor changed (B-f276's keep: the wake's claim waits) — and lets them through once it reads */
+  const echoGate = (cid, e) => (e && e.about && typeof e.about.handover === 'string' && memHeld() ? { keep: true } : null);
+  { const d0 = getDeliver(); if (d0 && typeof d0.registerStashGate === 'function') d0.registerStashGate(echoGate); else schedule(() => { const d = getDeliver(); if (d && typeof d.registerStashGate === 'function') d.registerStashGate(echoGate); }, 0); }
+  /** every kept frame judged again (the memory reads): its hand-over remembered, the frame its own and not restored yet ⇒ the
+   *  ORIGINALS restored (each as itself) and the kept frame taken out; else it goes as itself (its mark dropped) — said */
+  function settleEchoes() {
+    const d = getDeliver();
+    if (!d || typeof d.stashCids !== 'function' || typeof d.stashEntries !== 'function') return 0;
+    let n = 0;
+    for (const cid of d.stashCids()) {
+      for (const e of d.stashEntries(cid).filter((x) => x && x.about && typeof x.about.handover === 'string' && !x.ho)) {
+        const id = e.about.handover, rec = delivered.get(id);
+        if (rec && rec.cid === cid && !rec.restored && sameFrame(rec, String(e.text || ''))) {
+          if (typeof d.drainStash === 'function') d.drainStash(cid, new Set([e]));
+          const k = restoreHandedOver(cid, String(e.text || ''), { kind: e.kind || null });
+          log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} while the memory was held — ${k > 0 ? `${k} original${k === 1 ? '' : 's'} restored, each as itself` : 'none to restore: it goes as one notice'}`);
+          if (!(k > 0)) d.stashFor(cid, { source: 'agent', kind: e.kind || null, fromName: FROM_NAME, text: String(e.text || '') });
+        } else { delete e.about; log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} — ${rec ? 'not its frame or already restored' : 'not remembered after the read either'}: it goes as itself`); }
+        n++;
+      }
+    }
+    if (n) changed();
+    return n;
+  }
+  if (file && !memHeld()) schedule(() => settleEchoes(), 0);   // an earlier life's kept frames whose lift never came: judged at a readable start
+  /** the hold LIFTED: the file's records (null: torn bytes kept aside — none), memory's after them (memory's record wins on an id),
+   *  the clears made while held, the bounds, ONE write; the file's put-backs of job notifications put back; the kept frames judged */
+  function liftMemory(v, facts) {
+    const mine = new Set(delivered.keys());
+    const ids = v ? loadRecords(v, mine) : [];
+    if (ids.length) { const all = [...delivered]; delivered.clear(); for (const [id, r] of all) if (!mine.has(id)) delivered.set(id, r); for (const [id, r] of all) if (mine.has(id)) delivered.set(id, r); }   // the file's first, memory's after them
+    for (const c of clearsHeld.splice(0)) { try { redactDelivered(c.match, c.scope); } catch (e) { log.warn?.(`[stash] a clear made while the hand-over memory was held could not reach its records: ${(e && e.message) || e}`); } }
+    forget();
+    persistDelivered();
+    heldNewSaid = false;
+    const owed = new Set(ids.map((id) => delivered.get(id)).filter((r) => r && r.jobsOwed && r.jobs.length));
+    if (owed.size) schedule(() => putBackHeld(0, owed), 0);
+    log.log?.(`[stash] the memory of delivered hand-overs read again: ${facts && facts.setAside ? `torn bytes, kept aside as ${facts.setAside} — no earlier record could be read` : `${ids.length} record${ids.length === 1 ? '' : 's'} back`}${mine.size ? `, ${mine.size} made meanwhile after them` : ''}`);
+    settleEchoes();
+    changed();
+  }
   /** Hand the whole stash over now — ONE message through the ladder, reason `stash-handover`. */
   async function handOver(webuiId, { auto = false, pressed = null } = {}) {
     const s = activeSessions && activeSessions.get(String(webuiId));
@@ -676,6 +746,18 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (!m) return 0;
     if (meta && meta.kind === 'peer') { log.log?.(`[stash] ${cid}: a PEER frame names hand-over ${m[1]} — stashed as itself`); return 0; }
     const rec = delivered.get(m[1]);
+    // r3003 (c): HELD — a hand-over this memory does not name MAY be in the file that could not be read (unknown is held): the frame
+    // is kept in the stash as ITSELF (on disk there), marked, and the gate below keeps it — not handed out, the wake waits — until the
+    // memory reads; then its originals are restored (each as itself) or it goes as itself. Answered 1: the caller stashes nothing
+    if (!rec && memHeld()) {
+      const d = getDeliver();
+      if (d && typeof d.stashFor === 'function') {
+        try { d.stashFor(cid, { source: 'agent', kind: (meta && meta.kind) || null, fromName: FROM_NAME, text: echoed, about: { handover: m[1] } }); }
+        catch (e) { log.warn?.(`[stash] ${cid}: a frame naming hand-over ${m[1]} could not be kept while the hand-over memory is held (${(e && e.message) || e}) — stashed as itself`); return 0; }
+        log.log?.(`[stash] ${cid}: a frame names hand-over ${m[1]} while the memory of delivered hand-overs cannot be read — kept as itself, not handed out, until it reads`);
+        return 1;
+      }
+    }
     if (!rec) { log.log?.(`[stash] ${cid}: a frame names hand-over ${m[1]}, which this hub no longer remembers (forgotten, or delivered before a boot that lost the memory) — kept as one notice`); return 0; }   // verify r5: never silent
     if (rec.cid !== cid) return 0;
     // THE FRAME IS OURS ONLY WHEN IT IS THE FRAME (verify r3): the tag is a string any peer can write into a message
@@ -907,7 +989,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   armOwedWakes(1);   // B-6721: AT BOOT — what a stopped hub left owed a wake is looked at from the 30 s step (restored sessions attach first)
   /** B-f276 1a: the park's ONE door, asked by the resume line's start (a producer held while the wake waited in the line) */
   function heldWhyOfWake(entry) { const d = getDeliver(); return d && typeof d.heldWhyOf === 'function' ? d.heldWhyOf(entry) : null; }
-  return { waitingAll, summaryFor, billedFor, reachableFor, changed, handOver, heldWhyOfWake, claimForWake, handOverWake, releaseWake, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
+  return { waitingAll, summaryFor, billedFor, reachableFor, changed, handOver, heldWhyOfWake, claimForWake, handOverWake, releaseWake, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, settleEchoes, memoryHeld: () => (memHold ? memHold.held() : null), memoryUnreadWords: () => (memHold ? memHold.words() : null), memoryTorn: () => (memHold ? memHold.torn() : null), memoryReadAgain: () => (memHold ? memHold.again() : Promise.resolve(false)), close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 
 module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE, GROUP_HANDOVER_BYTES, GROUP_HANDED_WAIT_MS, GROUP_LATE_MS };
