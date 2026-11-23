@@ -129,7 +129,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   async function deviceOf(hostId) {
     if (!hosts || typeof hosts.deviceBounded !== 'function') throw named('host_unavailable', 'remote machines are not configured on this instance');
     notHeld();
-    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named('host_unavailable', 'this machine is named by a kept copy of the damaged machines list — pair it again to use it') : named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
+    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named('host_unavailable', 'this machine is no longer listed (the machines list was damaged and a kept copy still names it) — its records are kept, nothing is removed') : named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     let dm;
     try { dm = await hosts.deviceBounded(hostId, connectMs); }
     catch (e) { throw named(e && e.code === 'host_needs_daemon' ? 'host_needs_daemon' : 'host_unavailable', `${hostId}: ${e && e.message}`); }
@@ -912,7 +912,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const st = credentialsOf();
     if (!st || typeof st.machineView !== 'function') throw named('host_unavailable', 'the integration store is not wired on this instance');
     if (!isLocal(hostId)) notHeld();
-    if (isLocal(hostId) || !hostKnown(hostId)) throw !isLocal(hostId) && namedByCopy(hostId) ? named('host_unavailable', 'this machine is named by a kept copy of the damaged machines list — pair it again to use it') : named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
+    if (isLocal(hostId) || !hostKnown(hostId)) throw !isLocal(hostId) && namedByCopy(hostId) ? named('host_unavailable', 'this machine is no longer listed (the machines list was damaged and a kept copy still names it) — its records are kept, nothing is removed') : named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
     const view = st.machineView(RA.CREDENTIAL_ROW, hostId);
     let last = null;
     try { const ds = typeof local === 'function' ? local() : local; last = ds && typeof ds.listApps === 'function' ? ds.listApps().find((r) => r.remoteapp && r.remoteapp.hostId === hostId && r.rdp) || null : null; } catch { last = null; }

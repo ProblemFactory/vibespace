@@ -393,7 +393,15 @@ class HostManager {
   /** 主开发 r3115 (2): A REMOVER NEVER REMOVES WHAT A KEPT COPY OF TORN BYTES STILL NAMES: does a kept copy of hosts.json's torn bytes still name machine `id`? (from memory; unknown ⇒ yes) — the
    *  removers by the list's silence ask it first: the transcript caches (sweepJsonlCache), the exit lists (exit-proxy pruneLists),
    *  the desktop-app records (desktop-access: such a machine is «unavailable», never «not a paired machine») */
-  namedByCopy(id) { return this._copies().names(String(id)); }
+  namedByCopy(id) {
+    // round wxzvih2as's MUST (1): A PERSON's REMOVAL BEATS THE COPIES — a machine the person REMOVED (its id written into hosts.json at the removal, kept across restarts) is never kept by a
+    // copy: its exit lists, its cache and its desktop records go as at any removal; pairing it again takes the id off that list
+    if (Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id))) return false;
+    return this._copies().names(String(id));
+  }
+  /** a PERSON's removal of machine `id` (remove()) — the newest 200 kept in the store itself; a machine added again leaves the list */
+  _noteRemoved(id) { const was = Array.isArray(this._state.removedIds) ? this._state.removedIds : []; this._state.removedIds = [...was.filter((x) => x !== id), String(id)].slice(-200); }
+  _noteAdded(id) { if (Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id))) this._state.removedIds = this._state.removedIds.filter((x) => x !== String(id)); }
   _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, '') })); }
   _load() {
     let read;
@@ -474,7 +482,7 @@ class HostManager {
     if (a.state === 'missing' && !this._unreadMissingAt) { this._unreadMissingAt = Date.now(); return; }
     if (a.state === 'corrupt') {   // its read r1 (N1): torn bytes now are copied aside OFF the loop first — no place for them, the hold stands
       const aside = this._asideName();
-      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; } catch { }
+      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; this._copies().invalidate(); } catch { }
       if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
       a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
       if (a.state === 'unreadable') { this._unread.code = a.code; return; }
@@ -1102,7 +1110,7 @@ class HostManager {
       if (this._state.hosts.some(h => h.id === id)) return id; // idempotent
       const rec = { id, name: String(name || deviceId).slice(0, 60), transport: 'dial', deviceId: String(deviceId), createdAt: Date.now() };
       if (dialTokenHash) rec.dialTokenHash = String(dialTokenHash);
-      this._state.hosts.push(rec);
+      this._state.hosts.push(rec); this._noteAdded(id);
       this._save();
       return id;
     }
@@ -1159,7 +1167,7 @@ class HostManager {
     } else if (keyPath) {
       rec.keyPath = String(keyPath);
     }
-    this._state.hosts.push(rec);
+    this._state.hosts.push(rec); this._noteAdded(rec.id);
     this._save();
     return rec.id;
   }
@@ -1171,6 +1179,7 @@ class HostManager {
     // uploaded per-host key files are ours to clean up
     const uploadedKey = h.keyPath && h.keyPath.startsWith(this._sshDir) && h.keyPath.endsWith(`${id}.key`) ? h.keyPath : null;   // (not a key STORE's file: test-key-file-law names those by `keyFile`)
     this._state.hosts = this._state.hosts.filter(x => x.id !== id);
+    this._noteRemoved(id);   // (B-f276 family unit 2: the removal is written with the list — no kept copy keeps anything of it)
     this._discoveryCache.delete(id);
     try { const DMx = require('./agentd/client.js').DeviceManager; if (h.deviceId) DMx.dropHelloFolds('dev:' + h.deviceId); DMx.dropHelloFolds('host:' + id); } catch {}   // B-0194: what its hello folds owe said, then they go (both names) — memory only: at once (the restack's meeting; the files wait for the landing below)
     this._save();

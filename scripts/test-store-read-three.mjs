@@ -494,7 +494,7 @@ try {
     const daCall = async (DA, id) => { const A = DA.create({ hosts: { get: () => null, isLocal: () => false, namedByCopy: (x) => x === 'h-made0001', deviceBounded: async () => { throw new Error('never asked'); }, unreadWords: () => null }, install: false }); try { await A.call(id, 'status', {}); return 'ok'; } catch (e) { return e && e.code; } };
     const DAm = require('../src/server/desktop-access.js');
     const d1 = await daCall(DAm, 'h-made0001'), d2 = await daCall(DAm, 'h-made0002');
-    const dx = await daCall(mutant('src/server/desktop-access.js', [["    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named('host_unavailable', 'this machine is named by a kept copy of the damaged machines list — pair it again to use it') : named('unsupported-host',", "    if (!hostKnown(hostId)) throw named('unsupported-host',"]]), 'h-made0001');
+    const dx = await daCall(mutant('src/server/desktop-access.js', [["    if (!hostKnown(hostId)) throw namedByCopy(hostId) ? named('host_unavailable', 'this machine is no longer listed (the machines list was damaged and a kept copy still names it) — its records are kept, nothing is removed') : named('unsupported-host',", "    if (!hostKnown(hostId)) throw named('unsupported-host',"]]), 'h-made0001');
     ok(d1 === 'host_unavailable' && d2 === 'unsupported-host', 'the desktop-app records (H3): a machine a kept copy names is UNAVAILABLE (the keeper keeps its records); another unknown machine is «not a paired machine» as today', { d1, d2 });
     ok(dx === 'unsupported-host', 'RED CONTROL — the copies not asked (in a copy): «not a paired machine» — the keeper would drop its records', dx);
     // jobs: the keeper's release (J1) — a job no longer listed that a kept copy names is unknown
@@ -504,6 +504,48 @@ try {
     ok(J.jobRunningIn(jm, 'jb-made0001') === 'unknown' && J.jobRunningIn(jm, 'jb-made0002') === false && JX.jobRunningIn(jm, 'jb-made0001') === false, 'jobs (J1): a job no longer listed that a kept copy names is UNKNOWN (its handle kept); another is not running as today; RED CONTROL (in a copy): read as not running');
     const VJD = fs.readFileSync(path.join(REPO, 'src/server/vault-job-door.js'), 'utf8');
     ok(VJD.includes("keep: (x) => !!(jm && (jm.jobs.has(x) || (typeof jm.namedByCopy === 'function' && jm.namedByCopy(String(x)))))"), 'jobs (J3, pin): the vault-job row\'s prune keeps a job a kept copy names');
+  }
+  {
+    console.log('⑧ round wxzvih2as: A PERSON\'s REMOVAL BEATS THE COPIES; the copies\' answer is never older than the newest copy made');
+    const HMb = require('../src/hosts.js'), EPb = require('../src/exit-proxy.js');
+    // (1) an old tear's copy names a dial machine; the person pairs it again (the same id, by design), then REMOVES it: its exit lists
+    // are pruned, a restart keeps the removal, and paired again it starts at nobody — RED CONTROL: the removal not asked
+    const removeRun = async (MOD, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));
+      fs.writeFileSync(f + '.corrupt-1700000000000', '{"hosts": [{"id": "host-dial-made01", "transport": "dial", "name": "made-up"');
+      const Hm = new MOD.HostManager({ dataDir: d });
+      const id = Hm.add({ name: 'made-up', transport: 'dial', deviceId: 'made01' });
+      await Hm._copies().refresh();
+      const before = Hm.namedByCopy(id);
+      await Hm.remove(id);
+      const set = [], me = Object.create(EPb.ExitProxyManager.prototype);
+      Object.assign(me, { _grants: () => ({ rowsOfDoor: () => [{ resource: id + ':use', except: [] }, { resource: id + ':run', except: [] }], setMany: (rows) => { set.push(...rows.map((r) => r.resource)); return { ok: true }; } }), hosts: Hm, _hosts: () => Hm.list(), log() { } });
+      me.pruneLists();
+      const H2 = new MOD.HostManager({ dataDir: d }); await H2._copies().refresh();
+      const afterRestart = H2.namedByCopy(id);
+      H2.add({ name: 'made-up', transport: 'dial', deviceId: 'made01' });
+      return { id, before, pruned: set.sort().join(), afterRestart, readded: Array.isArray(H2._state.removedIds) && H2._state.removedIds.includes(id) };
+    };
+    const rm1 = await removeRun(HMb, 'remove-beats');
+    const rmx = await removeRun(mutant('src/hosts.js', [["    if (Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id))) return false;", ""]]), 'remove-beats-ctl');
+    ok(rm1.before === true && rm1.pruned === `${rm1.id}:run,${rm1.id}:use` && rm1.afterRestart === false && rm1.readded === false, 'A PERSON\'s REMOVAL BEATS THE COPIES: a machine a kept copy names, paired again and then REMOVED, loses both exit lists; a restart keeps the removal; paired again it leaves the removed list (it starts at nobody)', rm1);
+    ok(rmx.pruned === '' && rmx.afterRestart === true, 'RED CONTROL — the removal not asked (in a copy): the copy keeps the removed machine\'s exit lists, across a restart too', rmx);
+    // (2) hosts.json held at the start (no copy then); the bytes tear meanwhile; the read again copies them aside ITSELF and lifts empty:
+    // the first remover to ask is told NAMED (the answer invalidated by that copy) — RED CONTROL: the invalidation cut, a stale «not named»
+    const staleRun = async (MOD, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [{ id: 'host-made02', name: 'made-up', host: 'made.example.invalid', user: 'u' }] }));
+      const un = refuse(f); let Hm = null; try { Hm = new MOD.HostManager({ dataDir: d }); } finally { un(); }
+      await Hm._copies().refresh();
+      fs.writeFileSync(f, '{"hosts": [{"id": "host-made02", "name": "made-up"');
+      await Hm._unreadRetry(); await until(() => !Hm.unreadWords());
+      const lifted = !Hm.unreadWords() && Hm.list().length === 0, named = Hm.namedByCopy('host-made02');
+      await Hm._copies().refresh();
+      return { lifted, named, namedRead: Hm.namedByCopy('host-made02') };
+    };
+    const st1 = await staleRun(HMb, 'stale-copies');
+    const stx = await staleRun(mutant('src/hosts.js', [["ok = true; this._copies().invalidate(); } catch {", "ok = true; } catch {"]]), 'stale-copies-ctl');
+    ok(st1.lifted && st1.named === true && st1.namedRead === true, 'THE COPIES\' ANSWER IS NEVER OLDER THAN THE NEWEST COPY MADE: a tear found by a read again in a running process — the first remover is told NAMED, and the copies read again name it', st1);
+    ok(stx.lifted && stx.named === false, 'RED CONTROL — the store\'s own copy not followed by the invalidation (in a copy): the first remover reads the stale «not named» and would remove it', stx);
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));

@@ -281,7 +281,7 @@ class MachineMounts {
     if (a.state === 'missing' && !this._unreadMissingAt) { this._unreadMissingAt = Date.now(); return; }
     if (a.state === 'corrupt') {   // its read r1 (N1): torn bytes now are copied aside OFF the loop first — no place for them, the hold stands
       const aside = this._asideName();
-      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; } catch { }
+      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; this._copies().invalidate(); } catch { }
       if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
       a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
       if (a.state === 'unreadable') { this._unread.code = a.code; return; }
@@ -1268,7 +1268,7 @@ class MachineMounts {
   /** the kept copies of this store's torn bytes (src/store-read-hold.js copiesOf) — their prefix is this store's own set-aside name */
   _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, '') })); }
   async restore() {
-    try { await this._copies().refresh(); } catch { }   // B-f276 family unit 2 commit 3: the sweep below answers from memory — read first (off the loop)
+    try { await Promise.race([this._copies().refresh(), new Promise((r) => { const t = setTimeout(r, 20000); t.unref?.(); })]); } catch { }   // B-f276 family unit 2 commit 3: the sweep below answers from memory — read first (off the loop); BOUNDED (a folder that hangs: the sweep keeps every id it cannot judge)
     this.gcOrphanTokens();
     if (this._pairsOnce) await this._pairsOnce;   // r4: a dial-in's heal ran one already — waited for, then
     this._pairsOnce = this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the real paths and the held records FIRST — a held record's folder is another's (r5: restore's own check, fresh)

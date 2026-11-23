@@ -341,7 +341,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   let heldAsk = false;   // ONE waiter while For you is held (every re-judge of every waiting job asks here)
   function ask(job, v = {}) {
     // B-f276 family unit 2 (r3115 (2)): the jobs' kept copies are read when a card is filed — the press's prune (memberWith) is judged by them
-    try { if (jm && typeof jm.readCopies === 'function') jm.readCopies().catch(() => { }); } catch { /* the prune keeps every id the copies are not read for */ }
+    try { if (jm && typeof jm.readCopies === 'function') jm.readCopies(); } catch { /* the prune keeps every id the copies are not read for */ }
     if (!userTodos || typeof userTodos.add !== 'function') { log(`[vault-job] no For-you store is wired — the approval card of ${VJ.askJobIdOf(job)} is not filed (the job waits)`); return { ok: true, filed: 0 }; }   // a door built without the tray (a scripted engine): the L1a wait, said in the journal
     // B-44f3 (For you HELD UNREAD — its file could not be read): no card can be filed and the open ones are unread — the job WAITS
     // (never refused for it: a refusal would fail it and end a schedule's next fire); at the read every waiting job is judged

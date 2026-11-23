@@ -297,7 +297,7 @@ class JobManager {
    *  copies are read at the FIRST ask (not at the start: the engine's start reads nothing more — until they are read, every id is named) */
   namedByCopy(id) { return this._copies().names(String(id)); }
   /** read the kept copies now (off the loop) — the vault-job door asks it when it files a card, so the person's press is judged by them */
-  readCopies() { return this._copies().refresh(); }
+  readCopies() { this._copies().warm(); }   // (round wxzvih2as: read once if never read — the door asks it at each card, the press is judged by it)
   _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this.file, prefix: path.basename(asideOf(this.file)).replace(/\d+$/, '') })); }
   init() {
     try {
@@ -503,6 +503,7 @@ class JobManager {
       if (!this.readOnly) {
         const bad = asideOf(file);
         try { await fs.promises.rename(file, bad); pre.bad = bad; } catch { try { await fs.promises.copyFile(file, bad, fs.constants.COPYFILE_EXCL); pre.bad = bad; } catch { pre.bad = null; } }
+        if (pre.bad && file === this.file) { try { this._copies().invalidate(); } catch { } }   // round wxzvih2as (2): the copies' answer never older than the copy just made
         if (pre.bad) this.d.log(`[jobs] ${path.basename(file)}: torn bytes when read again — set aside as ${path.basename(pre.bad)}, before its load`);   // cure 2: said where it is done
       }
       if (which === 'store') { try { pre.logIds = await fs.promises.readdir(this.logsDir); } catch { pre.logIds = []; } }   // cure 2: a read-only engine lists off the loop too
@@ -5109,6 +5110,7 @@ class JobManager {
     const last = job.runs && job.runs[job.runs.length - 1];
     if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
     this.jobs.delete(job.id); this._dirty = true; this._save();
+    try { this.d.onRunEnded?.(job, null); } catch { }   // round wxzvih2as's MUST (1): A PERSON's REMOVAL BEATS THE COPIES: the person's removal releases the job's browser handle BY ID (a kept copy never keeps it)
     // B-0248 step 3: a stale archived copy of this live record (a crash between an archive's landing and jobs.json's) goes with it
     if (!this._archiveHandedIds.has(job.id) && !this._unread.archive && (this._archiveNext() || []).some((r) => r && r.id === job.id)) this._writeArchive(this._archiveNext().filter((r) => r.id !== job.id));
     (this._removalOwed || (this._removalOwed = new Map())).set(job.id, job);   // its logs stay in the sweep's keep set until the landing

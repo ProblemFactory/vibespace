@@ -550,6 +550,10 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
   await until(() => sj.state === 'up' && sj.proc && sj.proc.pid); jm.stop(sj); await until(() => ['interrupted', 'failed'].includes(sj.state));
   const once = (id) => ended.filter((x) => x === id).length === 1;
   ok(once(inWd.j.id) && once(crash.j.id) && crash.j.state === 'failed' && once(sj.id) && sj.state === 'interrupted', 'F11: every run end — exit, crash (exit 3), stop (interrupted) — calls the release seam exactly once', { ended, crash: crash.j.state, stopped: sj.state });
+  // round wxzvih2as's MUST (1), a PERSON's REMOVAL BEATS THE COPIES: removing a job releases its browser handle BY ID (the same release a
+  // run's end makes) — the keeper never keeps it because a kept copy of torn jobs.json still names the job
+  { const n0 = ended.filter((x) => x === inWd.j.id).length; const rr = jm.rm(jm.jobs.get(inWd.j.id) || inWd.j);
+    ok(!!rr && !rr.error && ended.filter((x) => x === inWd.j.id).length === n0 + 1 && !jm.jobs.has(inWd.j.id), 'a PERSON\'s removal of a job releases its browser handle by id (the run-end release, once more) — no kept copy keeps it', { rr, n: ended.filter((x) => x === inWd.j.id).length - n0 }); }
   try { jm.shutdown(); } catch { }
 }
 

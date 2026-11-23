@@ -99,7 +99,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     for (let k = 0; k < 5; k++) {
       const to = aside(String(now()) + (k ? '-' + k : ''));
       const w = await writeWhole(to, buf, log);   // r3144: whole under a part name, synced, put in place only when whole
-      if (w.ok) { const c = COPIES.get(file + '\n' + prefix); if (c) c.refresh().catch(() => { }); return path.basename(to); }   // (a copy added: its store's copies' answer read again)
+      if (w.ok) { const c = COPIES.get(file + '\n' + prefix); if (c) c.invalidate(); return path.basename(to); }   // (a copy added: its store's copies' answer read again)
       if (!w.error || w.error.code !== 'EEXIST') return null;
     }
     return null;
@@ -180,37 +180,53 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
  *  to lose: a person ends it by pairing the thing again (its id then in the live list) or by clearing the copy. */
 const COPIES = new Map();
 const RELIST_MS = 60e3;
+const COPY_MAX = 8 * 1024 * 1024;   // a copy bigger than this is not read whole — its store's every id is NAMED (unknown keeps)
+/** the ids a copy holds — every JSON string in its bytes, read ONCE at the copy's read (round wxzvih2as: an ask is then a Set lookup,
+ *  never a search of every copy's text on the loop) */
+function idsOfText(text) {
+  const out = new Set(), re = /"((?:[^"\\\n]|\\.){1,240})"/g;
+  let m; while ((m = re.exec(text))) { try { out.add(JSON.parse('"' + m[1] + '"')); } catch { out.add(m[1]); } }
+  return out;
+}
 function copiesOf({ file, prefix } = {}) {
   if (!file || !prefix) throw new Error('store-read-hold: copiesOf needs the file and its copies\' prefix');
   const keyOf = file + '\n' + prefix;
   if (COPIES.has(keyOf)) return COPIES.get(keyOf);
   const dir = path.dirname(file);
-  let texts = null, failed = false, listedAt = 0, names = null, inflight = null;
+  let ids = null, failed = false, listedAt = 0, listed = null, inflight = null, againAfter = false;
   async function refresh() {
-    if (inflight) return inflight;
+    if (inflight) { againAfter = true; return inflight; }   // a read asked while one is in flight (a copy made meanwhile): one more after it
     inflight = (async () => {
       try {
         const all = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(prefix)).sort().slice(-COPY_LOOK);
         listedAt = Date.now();
-        if (texts && !failed && names && names.join('\n') === all.join('\n')) return;   // the same copies: the answer stands
-        const read = [];
-        for (const n of all) read.push(await fs.promises.readFile(path.join(dir, n), 'utf8'));
-        texts = read; names = all; failed = false;
+        if (ids && !failed && listed && listed.join('\n') === all.join('\n')) return;   // the same copies: the answer stands
+        const set = new Set();
+        for (const n of all) {
+          const p = path.join(dir, n);
+          if ((await fs.promises.stat(p)).size > COPY_MAX) throw new Error(`${n} is over the copies' bound`);   // unknown keeps
+          for (const x of idsOfText(await fs.promises.readFile(p, 'utf8'))) set.add(x);
+        }
+        ids = set; listed = all; failed = false;
       } catch { failed = true; listedAt = Date.now(); }
-    })().finally(() => { inflight = null; });
+    })().finally(() => { inflight = null; if (againAfter) { againAfter = false; refresh().catch(() => { }); } });
     return inflight;
   }
   const C = {
     /** true: a kept copy names `id` — or it cannot be judged (unknown keeps); false: no kept copy names it */
     names(id) {
       if (!inflight && Date.now() - listedAt >= RELIST_MS) refresh().catch(() => { });
-      if (!texts || failed) return true;
-      const look = JSON.stringify(String(id));
-      return texts.some((t) => t.includes(look));
+      if (!ids || failed) return true;
+      return ids.has(String(id));
     },
     /** the copies were read (false: every id is named) */
-    ready: () => !!texts && !failed,
+    ready: () => !!ids && !failed,
     refresh,
+    /** round wxzvih2as's MUST: THE ANSWER IS NEVER OLDER THAN THE NEWEST COPY THIS PROCESS MADE — a store that makes its own copy of
+     *  torn bytes calls this right after: every id is NAMED until the copies are read again (off the loop) */
+    invalidate() { ids = null; listed = null; listedAt = 0; refresh().catch(() => { }); },
+    /** read the copies if they were never read (one listing at most — a caller that asks often never re-lists by itself) */
+    warm() { if (!ids && !inflight) refresh().catch(() => { }); },
   };
   COPIES.set(keyOf, C);
   return C;
