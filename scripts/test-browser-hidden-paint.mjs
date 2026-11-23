@@ -214,7 +214,11 @@ try {
   // ── b ──
   console.log('— b: the next verb (a screenshot) thaws before it runs');
   const rMark = resolves.length, bornB = spy.born.length;
-  const shot = path.join(ROOT, 'a.png');
+  // THE PICTURE GOES UNDER THE SESSION's OWN PROJECT FOLDER (主开发 r2886, box row 431): the CLI's write fence allows that folder, the
+  // temp folder the CLI process itself sees, and ~/Downloads — a box row's temp folder is the row's own, so a picture under this
+  // run's scratch root was refused (write_path_refused) before the verb ran. CWD is the folder handed as the session's
+  // (VIBESPACE_SESSION_CWD): it is allowed in every environment, and it stays inside the scratch root
+  const shot = path.join(CWD, 'a.png');
   r = await A(['screenshot', shot]);
   const rv = resolves[rMark] || {};
   let png = null; try { png = pngCensus(fs.readFileSync(shot)); } catch { png = null; }
