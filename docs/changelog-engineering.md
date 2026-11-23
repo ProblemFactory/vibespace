@@ -1872,6 +1872,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - (2) The job card's take-back takes back EVERY vault-job row that names the job (`rowsOfDoor`), not only the entries it declares now. Leg with a RED (declared only).
 - (3) The card's line says «New on this card since it was last drawn» (en, zh, ja) — true at a third draw.
 - Taken from the read's options: a card a train tip filed before one card a job (action.entry, no revision) is read as a card of its one entry, its press carrying no revision.
+- **New (B-dc3f (1), 主开发 r2780: where the sign-in witness cannot know yet).** VibeSpace can still start with no sign-in in two cases it cannot yet tell apart from a new install — its data folder is missing at a start on a machine whose home is on a network drive and whose temporary folder is emptied at every restart, or a different data folder whose own sign-in is turned off has been put in its place — and setting VIBESPACE_SIGNIN=required keeps it shut in both.
 
 ## 2.369.415 — 2026-11-21
 
