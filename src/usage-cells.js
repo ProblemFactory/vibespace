@@ -19,6 +19,7 @@ class UsageCells {
   constructor({ thresholds = [200000, 272000], capacity = 1024 } = {}) {
     this.th = [...new Set((thresholds || []).map(Number).filter((x) => Number.isFinite(x) && x > 0))].sort((a, b) => a - b);
     this.n = 0;
+    this.fixed = false;   // (B-360d cells small) FIXED: the hub's thread never grows them — a new cell past `cap` throws CELLS_FULL (the owner stands the cells down)
     this.names = [null];   // id 0 = null / absent
     this._nameIx = new Map();
     this._alloc(Math.max(16, capacity | 0));
@@ -65,12 +66,15 @@ class UsageCells {
     }
     const ts = Number(ev.ts) || 0;
     if (c === -1) {
-      if (this.n >= this.cap) { this._alloc(this.cap * 2); return this.add(ev); }
+      if (this.n >= this.cap) {
+        if (this.fixed) throw Object.assign(new Error(`the usage cells are full (${this.n} cells)`), { code: 'CELLS_FULL' });   // nothing written: the row is still the ledger's
+        this._alloc(this.cap * 2); return this.add(ev);
+      }
       c = this.n++;
       this.k.set(key, c * NK);
       const v = c * NV; this.v[v + 6] = ts; this.v[v + 7] = ts; this.v[v + 8] = prompt; this.v[v + 9] = prompt;
       this.tab[p] = c;
-      if (this.n * 2 > this.mask) this._rehash((this.mask + 1) * 2);
+      if (!this.fixed && this.n * 2 > this.mask) this._rehash((this.mask + 1) * 2);   // fixed: the table was sized for `cap` (≥ 2 × cap slots) — never rehashed on the hub's thread
     }
     const v = c * NV;
     this.v[v] += 1; this.v[v + 1] += Number(ev.i) || 0; this.v[v + 2] += Number(ev.o) || 0; this.v[v + 3] += Number(ev.cw5) || 0; this.v[v + 4] += Number(ev.cw1) || 0; this.v[v + 5] += Number(ev.cr) || 0;
@@ -87,6 +91,19 @@ class UsageCells {
   }
   /** does cell c straddle a long-prompt threshold X (its rows sit on both sides — it cannot be priced from the cell) */
   straddles(c, X) { const v = c * NV; return this.v[v + 8] <= X && this.v[v + 9] > X; }
+  /** THE WORKER's sizing at the hand-over (B-360d cells small): the arrays cut to the cells in use plus `headroom`, the table
+   *  rehashed for them (≥ 2 × cap slots) — a copy on the WORKER's thread, never the hub's → this */
+  sizedTo(headroom) {
+    const cap = Math.max(16, this.n + Math.max(0, headroom | 0));
+    if (cap === this.cap) return this;
+    const k = new Int32Array(cap * NK), v = new Float64Array(cap * NV);
+    k.set(this.k.subarray(0, this.n * NK)); v.set(this.v.subarray(0, this.n * NV));
+    this.k = k; this.v = v; this.cap = cap;
+    this._rehash(cap * 2);
+    return this;
+  }
+  /** the headroom a hand-over leaves: a quarter of the cells in use, at least 65 536 (a stand-down once the history grows by it) */
+  static headroomOf(n) { return Math.max(65536, Math.ceil((n | 0) / 4)); }
   bytes() { return this.k.byteLength + this.v.byteLength + this.tab.byteLength + this.names.reduce((s, x) => s + (x ? x.length * 2 + 40 : 0), 0); }
   /** the parts that travel between the worker and the hub's thread (the buffers move, no copy) */
   parts() { return { n: this.n, th: this.th, names: this.names, k: this.k.buffer, v: this.v.buffer, tab: this.tab.buffer, mask: this.mask }; }
@@ -97,6 +114,7 @@ class UsageCells {
     const k = new Int32Array(p.k), v = new Float64Array(p.v);
     u.k = k; u.v = v; u.cap = Math.floor(k.length / NK); u.n = p.n;
     if (p.tab) { u.tab = new Int32Array(p.tab); u.mask = p.mask; } else u._rehash(u.cap * 2);   // the table travels: no rehash on the hub's thread
+    u.fixed = true;   // (B-360d cells small) adopted from the worker: never grown on the hub's thread
     return u;
   }
 }

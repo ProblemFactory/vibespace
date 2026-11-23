@@ -1374,6 +1374,7 @@ class UsageHistory {
       console.warn(`[usage] the ledger's cold columns passed their ${Math.round(this._coldMaxBytes() / CB.MB)} MB ceiling (${Math.round(c.cold.bytes() / CB.MB)} MB, ${c.cold.n} rows) — kept: the money readers' numbers never drop a row`);
     }
     c.whole = true; // a pass ran to its end: from now on a rebuild keeps serving this cache (B-748f)
+    if (c.cells) c.cells.fixed = true; // (B-360d cells small) from now on the cells never grow on this thread: full ⇒ they stand down (_cellsStandDown)
   }
   /** One slice [from, to) of a shard's new bytes: its complete lines taken, the shard's place + append-proof moved past
    *  them (the proof = the last PROBE_BYTES before the place, never reaching back before this pass's start — what one
@@ -1508,7 +1509,8 @@ class UsageHistory {
     // rows arrived since it was last asked, whatever their ts (usage-anchors costBetweenMulti).
     if (c.whole && !(ev.host && ev.atype === 'host')) _logArrival(c, ev);
     if (c.hours && typeof c.hours.add === 'function') { try { c.hours.add(ev); } catch { c.hours = null; } } // B3: the hour sums keep up (usage-anchors installs them)
-    if (c.cells) { try { c.cells.add(ev); } catch { c.cells = null; } } // B-360d unit 1: the cells keep up — every row that counts, where it is counted (a failed add stands the cells down: the window folds rows, as before)
+    if (c.cells) { try { c.cells.add(ev); } catch (e) { c.cells = null; if (e && e.code === 'CELLS_FULL') this._cellsStandDown(c, e); } } // B-360d unit 1: the cells keep up — every row that counts, where it is counted (a failed add stands the cells down: the window folds rows, as before)
+    else if (c.cellsFull) this._cellsStandUp(c); // (B-360d cells small) stood down for room: the worker's rebuild is asked again (after a failed one's wait)
     // THE (HOST, ACCOUNT) INDEX (hotfix usage-ledger-walk B2): a remote host's RESOLVED rows (an account, not the host's own
     // bucket) by their ts — the dark-taint question («which accounts did a dark host spend in the last 7 days») answered by
     // binary search (hostAccountsIn), never a 7-day walk. Rows only arrive within a generation; a rewrite is a new cache.
@@ -1891,6 +1893,21 @@ class UsageHistory {
       throw this._rbFail.err;
     }
   }
+  /** THE CELLS STAND DOWN FOR ROOM (B-360d cells small, 主开发 r2935 / r2941): the hub's thread never copies or rehashes the cells —
+   *  full, they stand down: every ask folds rows (the row road, as when there are no cells; every row is in the ledger, none is
+   *  dropped) and the fold worker REBUILDS the cache off the loop, its cells sized to the cells in use plus a headroom
+   *  (UsageCells.headroomOf), handed over as transferred buffers; the swap stands them up (the rows appended meanwhile are read
+   *  once from the worker's own marks). The cache is NOT marked stale: its rows still serve every ask meanwhile. */
+  _cellsStandDown(c, e) {
+    c.cellsFull = { at: Date.now(), n: (e && e.message) || '' };
+    console.log(`[usage] ${(e && e.message) || 'the usage cells are full'} — they stand down: the Usage window folds rows until the fold worker sizes new ones (a rebuild off the loop)`);
+    this._cellsStandUp(c);
+  }
+  _cellsStandUp(c) {
+    if (c !== this._evCache || this._rb) return;
+    if (this._rbFail && Date.now() < this._rbFail.retryAt) return;   // a failed rebuild's wait: asked again by the next row after it
+    this._requestRebuild('the usage cells are full').catch(() => { });
+  }
   /** The worker's half (usage-cold-worker.js runs it on its own instance): the ONE load pass to its end + warm()'s settle
    *  + the hot rows' ts order (= _sortHot's stable sort), packed — the cold columns' ArrayBuffers moved whole, the hot rows
    *  and their ids v8-serialized in chunks of HOT_CHUNK_ROWS inside ONE transferred buffer. */
@@ -1907,7 +1924,7 @@ class UsageHistory {
     const buf = new Uint8Array(parts.reduce((t, [, b]) => t + b.length, 0)), chunks = [];
     let at = 0;
     for (const [k, b] of parts) { buf.set(b, at); chunks.push({ k, at, len: b.length }); at += b.length; }
-    const sizes = Float64Array.from(c.sizes), locs = Float64Array.from(c.locs), hrh = Float64Array.from(c.hrh), cold = c.cold.parts(), cells = c.cells ? c.cells.parts() : null;
+    const sizes = Float64Array.from(c.sizes), locs = Float64Array.from(c.locs), hrh = Float64Array.from(c.hrh), cold = c.cold.parts(), cells = c.cells ? c.cells.sizedTo(UsageCells.headroomOf(c.cells.n)).parts() : null; // (B-360d cells small) sized HERE, on the worker's thread: the cells in use plus a headroom
     const marks = [...c.marks].map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: new Uint8Array(m.probe) }]);
     return {
       built: { buf, chunks, sizes, locs, hrh, perm, hotBytes: c.hotBytes, cold: cold.parts, cells, consumed: [...c.consumed], marks, srcWm: [...c.srcWm], hostAcct: [...(c.hostAcct || new Map())].map(([h, m]) => [h, [...m].map(([a, l]) => [a, l.ts.slice()])]), hostAcctFloor: c.hostAcctFloor ?? null, hostAcctNewest: c.hostAcctNewest ?? null, cutoff: c.cutoff, shards: c.shards, overWarned: !!c.overWarned },

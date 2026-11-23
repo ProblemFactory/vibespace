@@ -52,6 +52,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const CB = require('../src/cache-bounds.js');
 const { UsageHistory } = require('../src/usage-history.js');
+const { UsageCells } = require('../src/usage-cells.js');   // (B-360d cells small) §2b's hub-built cells take the worker's headroom
 armWatchdog();
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (typeof m !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof m} — the arguments are swapped?`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
@@ -173,6 +174,9 @@ try {
     const base = path.join(tmp, 'pass', 'usage-history'); fs.mkdirSync(base, { recursive: true });
     writeRowsTo(base, Array.from({ length: 2000 }, () => mkRow(T - DAY - Math.floor(rnd() * 9 * DAY))));
     const u = new UsageHistory({ dataDir: path.dirname(base), homeDir: tmp }); u.ledgerWindowMs = 40 * DAY; u.warm();
+    // (B-360d cells small) a cache built on this thread is FIXED once whole; give it the headroom the worker's hand-over gives, so the
+    // appends below never stand its cells down (that asks a rebuild in the worker, whose swap would replace the cache §4's walk holds)
+    if (u._evCache.cells) u._evCache.cells.sizedTo(UsageCells.headroomOf(u._evCache.cells.n));
     const c = u._evCache, max = Math.floor(c.hotBytes * 1.05); u.ledgerHotMaxBytes = max; u.firstLoadInWorker = true; // the hub's ledger, its first load landed
     writeRowsTo(base, Array.from({ length: 400 }, () => mkRow(T - Math.floor(rnd() * DAY)))); c.checkedAt = 0;
     const lt0 = c.lastTrim; u._loadEvents();
