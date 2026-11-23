@@ -16,8 +16,10 @@
 // whose cells hold a bare <absent>) and fixture 31's second table are TABLES; the bisection legs (a)–(g) + the minimal
 // failing / passing pair; what the schema cannot carry (excess cells, an attributed tag) stays raw; a 5th control: the
 // literal rule stubbed ⇒ the trigger leg + fixture 32 go red.
-// THE SIX CONTROLS (B-1747, the coordinator's r3254): each is JUDGED AND SAID — a throw inside one is its failure by name, never the
-// suite's end — and each prints what its mutant changed; each copy reads ITS OWN parser (its own `marked` and @tiptap/markdown:
+// THE SEVEN CONTROLS AND A BASELINE (B-1747, the coordinator's r3254 / r3293): each is JUDGED AND SAID — a throw inside one, or in
+// its copy's making or load, is its failure by name, never the suite's end — and each prints what its mutant changed; the BASELINE
+// (an unpatched copy by the same loader) reads exactly as the real modules; the literal rule has two: its shared predicate
+// (doc-window-model literalTag) and doc-markdown's own call of it; each copy reads ITS OWN parser (its own `marked` and @tiptap/markdown:
 // one shared instance kept the real modules' tokenizers, so a tokenizer's mutant changed nothing the measure read).
 // THE MEASURE's LIMIT (B-1747, the coordinator's r3238): it compares WORDS, never markup — a construct whose words survive and
 // whose markup is lost is not seen by it (a stated limit, no row); so the control on the html rule judges what its mutant
@@ -226,36 +228,43 @@ const ui = fs.readFileSync(path.join(ROOT, 'src/lib/doc-window-ui.js'), 'utf8');
 for (const code of Object.keys(M.RAW_WHY)) ok(ui.includes(`${code}: t('${M.RAW_WHY[code]}')`), `the chip says the WHY of ${code} in the model's words (a literal t() for the dictionaries)`);
 
 // ── 3 patched-copy controls: each mutant turns the suite's own verdicts red ──
-const mutant = async (label, file, from, to, want) => {
+const mutant = async (label, file, from, to, want, { baseline = false } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-mut-'));
-  fs.mkdirSync(path.join(dir, 'src/lib'), { recursive: true });
   // B-1747 (r3254): THE COPY READS ITS OWN PARSER. One link to node_modules made every copy load the SAME `marked` — the default
   // instance @tiptap/markdown's MarkdownManager uses — whose tokenizers the REAL modules registered first, so a mutant inside a
   // tokenizer (the literal rule, the close in a code span) changed nothing the measure read (a counted probe: the real modules
   // ran a copy's planted counter). Each copy links every package but these two, which it copies: its own marked, its own tokenizers.
-  const NM = path.join(ROOT, 'node_modules'), nm = path.join(dir, 'node_modules'), OWN = new Set(['marked', '@tiptap/markdown']);
-  fs.mkdirSync(nm);
-  for (const e of fs.readdirSync(NM)) {
-    if (!e.startsWith('@')) { if (OWN.has(e)) fs.cpSync(path.join(NM, e), path.join(nm, e), { recursive: true, dereference: true }); else fs.symlinkSync(path.join(NM, e), path.join(nm, e)); continue; }
-    fs.mkdirSync(path.join(nm, e));
-    for (const x of fs.readdirSync(path.join(NM, e))) { const k = e + '/' + x; if (OWN.has(k)) fs.cpSync(path.join(NM, k), path.join(nm, k), { recursive: true, dereference: true }); else fs.symlinkSync(path.join(NM, k), path.join(nm, k)); }
-  }
-  for (const f of ['src/doc-model.js', 'src/lib/doc-markdown.js', 'src/lib/doc-window-model.js']) { let t = fs.readFileSync(path.join(ROOT, f), 'utf8'); if (f === file) { ok(t.includes(from), `control "${label}": the needle is in ${f}`); t = t.replace(from, to); } fs.writeFileSync(path.join(dir, f), t); }
+  // B-1747 (r3293 (5)): the copy, its loader and its load stand INSIDE the try that makes a throw the control's own failure, by name
+  let v;
   try {
+    fs.mkdirSync(path.join(dir, 'src/lib'), { recursive: true });
+    const NM = path.join(ROOT, 'node_modules'), nm = path.join(dir, 'node_modules'), OWN = new Set(['marked', '@tiptap/markdown']);
+    fs.mkdirSync(nm);
+    for (const e of fs.readdirSync(NM)) {
+      if (!e.startsWith('@')) { if (OWN.has(e)) fs.cpSync(path.join(NM, e), path.join(nm, e), { recursive: true, dereference: true }); else fs.symlinkSync(path.join(NM, e), path.join(nm, e)); continue; }
+      fs.mkdirSync(path.join(nm, e));
+      for (const x of fs.readdirSync(path.join(NM, e))) { const k = e + '/' + x; if (OWN.has(k)) fs.cpSync(path.join(NM, k), path.join(nm, k), { recursive: true, dereference: true }); else fs.symlinkSync(path.join(NM, k), path.join(nm, k)); }
+    }
+    for (const f of ['src/doc-model.js', 'src/lib/doc-markdown.js', 'src/lib/doc-window-model.js']) { let t = fs.readFileSync(path.join(ROOT, f), 'utf8'); if (f === file) { ok(t.includes(from), `control "${label}": the needle is in ${f}`); t = t.replace(from, to); } fs.writeFileSync(path.join(dir, f), t); }
     const d = await import(pathToFileURL(path.join(dir, 'src/lib/doc-markdown.js')).href + '?m=' + label.length);
     const m = (await import(pathToFileURL(path.join(dir, 'src/doc-model.js')).href)).default;
     // B-1747 (r3254): EVERY CONTROL IS JUDGED AND SAID — a throw inside one is that control's failure by name, never the suite's end;
     // a control stays only if it SEES its mutant: true, with what changed, printed
-    let v; try { v = await want(d, m); } catch (e) { v = [false, 'THREW ' + String((e && e.message) || e).slice(0, 160)]; }
-    const [seen, saw] = Array.isArray(v) ? v : [v === true, String(v)];
-    console.log(`[doc-wheel] control «${label}»: ${seen === true ? 'sees its mutant' : 'DOES NOT see its mutant'} — ${saw}`);
-    ok(seen === true, `control "${label}" goes red`, saw);   // B-1747 (r3179): each `want` is async — un-awaited, its promise was always truthy
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    try { v = await want(d, m); } catch (e) { v = [false, 'THREW ' + String((e && e.message) || e).slice(0, 160)]; }
+  } catch (e) { v = [false, 'THE COPY or ITS LOAD THREW ' + String((e && e.message) || e).slice(0, 160)]; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const [seen, saw] = Array.isArray(v) ? v : [v === true, String(v)];
+  const word = baseline ? (seen === true ? 'reads as the real modules' : 'DIFFERS from the real modules') : (seen === true ? 'sees its mutant' : 'DOES NOT see its mutant');
+  console.log(`[doc-wheel] control «${label}»: ${word} — ${saw}`);
+  ok(seen === true, baseline ? `control "${label}" holds` : `control "${label}" goes red`, saw);   // B-1747 (r3179): each `want` is async — un-awaited, its promise was always truthy
 };
+// B-1747 (r3293 (5)): THE BASELINE — an UNPATCHED copy built by the same loader reads EXACTLY as the real modules, so no control is
+// «true» because a fresh copy lacks something: the measure, the mark / literal tables and the bisection the same
+await mutant('an unpatched copy reads as the real modules', 'src/doc-model.js', "  crlf: 'it uses Windows", "  crlf: 'it uses Windows", async (d, m) => { const r = await measure(d, m), key = (x) => JSON.stringify([x.n, x.refused, x.same, x.untouched, x.oneLine, x.dropped, x.raw, x.reformat]); const tables = [markTable(d).length, literalTable(d).length, bisect(d).length]; return [key(r) === key(R) && tables.every((x) => x === 0) && m.RAW_WHY.crlf === M.RAW_WHY.crlf, `the copy's measure ${key(r) === key(R) ? 'the same as' : 'NOT the same as'} the real modules' (untouched ${r.untouched}/${r.n - r.refused}, raw ${r.raw.join(' ')}) · mark / literal / bisect tables red: ${tables.join(' / ')}`]; }, { baseline: true });
 await mutant('whole-document rewrite', 'src/lib/doc-markdown.js', '  return M.patchBlocks(s, loaded.maps, plan);', '  return { ok: true, text: serializeMd(doc) + "\\n" };', async (d, m) => { const r = await measure(d, m); return [!verdicts(r)[0], `untouched lines byte-identical ${r.untouched}/${r.n - r.refused} under the mutant (${R.untouched} at the real modules)`]; });
 await mutant('an html block no longer refused as raw', 'src/lib/doc-markdown.js', "if (tok.type !== 'front_matter' && tok.type !== 'html' && !hasHtml(tok)) {", "if (tok.type !== 'front_matter') { if (0) hasHtml(tok);", async (d, m) => { const of17 = (raw) => raw.filter((x) => x.startsWith('17:')), r = await measure(d, m); return [of17(R.raw).length === 3 && of17(r.raw).length === 0, `fixture 17's raw blocks: ${of17(R.raw).length} at the real modules, ${of17(r.raw).length} under the mutant`]; });   // B-1747 (r3238): it judged a «dropped» the measure cannot see (words, never markup)
 await mutant('a mark serialized as backticks', 'src/lib/doc-markdown.js', 'return `<${tag}>${h.renderChildren(node)}</${tag}>`;', "return '`' + h.renderChildren(node) + '`';", async (d) => { const b = markTable(d); return [b.length > 0, `the mark table: ${b.slice(0, 2).join(' | ') || 'nothing red'}`]; });
 await mutant('the literal rule stubbed', 'src/lib/doc-window-model.js', "  return m && !HTML_TAGS.has(m[1].toLowerCase()) ? m[0] : unpairedOpenTag(s);", '  return null;', async (d) => { const b = bisect(d), m32 = marksOf(d.loadDoc(F32).doc); return [b.some((x) => x.startsWith('(g)')) && m32.includes('RAW'), `the bisection's red: ${b.slice(0, 2).join(' | ') || 'none'} · fixture 32 reads ${m32.includes('RAW') ? 'a raw block' : 'no raw block'}`]; });   // B-1747 (r3254): the predicate both roads call (src/lib/doc-window-model.js literalTag)
+await mutant('the literal line of the document module stubbed', 'src/lib/doc-markdown.js', '  const lit = literalTag(src);', '  const lit = null;', async (d) => { const b = bisect(d), m32 = marksOf(d.loadDoc(F32).doc); return [b.some((x) => x.startsWith('(g)')) && m32.includes('RAW'), `the bisection's red: ${b.slice(0, 2).join(' | ') || 'none'} · fixture 32 reads ${m32.includes('RAW') ? 'a raw block' : 'no raw block'}`]; });   // B-1747 (r3293 (5)): the narrower mutation — doc-markdown's own call of the shared predicate
 await mutant('a close inside a code span counted', 'src/lib/doc-window-model.js', ".test(s.slice(m[0].length).replace(CODE_SPANS, ''))", '.test(s.slice(m[0].length))', async (d) => { const t = literalTable(d); return [t.some((x) => x.startsWith('a close inside a code span')), `the literal table: ${t.slice(0, 2).join(' | ') || 'nothing red'}`]; });
 await mutant('a reason without a why', 'src/doc-model.js', "  crlf: 'it uses Windows", "  crlf_: 'it uses Windows", async (d, m) => [!(typeof m.RAW_WHY.crlf === 'string' && m.RAW_WHY.crlf.length > 20), `RAW_WHY.crlf under the mutant: ${JSON.stringify(m.RAW_WHY.crlf)}`]);
 

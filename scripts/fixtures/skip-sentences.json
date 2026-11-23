@@ -19,6 +19,7 @@
   "scripts/test-context-diff.mjs": 1,
   "scripts/test-desktop-app-window.mjs": 1,
   "scripts/test-duo-layout.mjs": 1,
+  "scripts/test-guard-inline-helpers.mjs": 2,
   "scripts/test-image-cards.mjs": 1,
   "scripts/test-migrations.mjs": 1,
   "scripts/test-model-providers.mjs": 1,

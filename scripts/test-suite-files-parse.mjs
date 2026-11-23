@@ -350,19 +350,28 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
     ['a throw naming the anchor under an unrelated test', 1, "const cut = (from, to) => { if (!fs.existsSync(f)) throw new Error('no file for ' + from); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
     ['a check judging a value merely HANDED the edit', 1, "const cut = (from, to) => { const p = MUT.write('src/x.js', src.replace(from, to), 't'); ok(fs.existsSync(p), 'written'); return require(p); };"],
     // B-1747 (r3179): the guard tool's wraps judge the value they hold — a check of the anchor under one still fails by name
-    ['a check that judges the anchor through the guard tool\'s verdictOf', 0, "const cut = (from, to) => { const m = src.replace(from, to); ok(verdictOf(m !== src), 'CONTROL: the patch applies'); return MUT.load('src/x.js', m, 't'); };"],
-    ['a check that judges the anchor through its gate (gateOf)', 0, "const cut = (from, to) => { ok(gateOf(src.includes(from)) && 1 === 1, 'the anchor is there'); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
-    ['a check that judges the anchor through the alias (verdictOfGuard)', 0, "const cut = (from, to) => { ok(verdictOfGuard(src.split(from).length === 2), 'the anchor stands once'); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a check that judges the anchor through the guard tool\'s verdictOf', 0, "import { verdictOf } from './lib/check.mjs'; const cut = (from, to) => { const m = src.replace(from, to); ok(verdictOf(m !== src), 'CONTROL: the patch applies'); return MUT.load('src/x.js', m, 't'); };"],
+    ['a check that judges the anchor through its gate (gateOf)', 0, "import { gateOf } from './lib/check.mjs'; const cut = (from, to) => { ok(gateOf(src.includes(from)) && 1 === 1, 'the anchor is there'); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    ['a check that judges the anchor through the alias (verdictOfGuard)', 0, "import { verdictOf as verdictOfGuard } from './lib/check.mjs'; const cut = (from, to) => { ok(verdictOfGuard(src.split(from).length === 2), 'the anchor stands once'); return MUT.load('src/x.js', src.replace(from, to), 't'); };"],
+    // r3293 (2): a function of the FILE's OWN named like the checker's is no wrap — the walk does not read through it
+    ['a check through a function of the file\'s own named verdictOf (no import)', 1, "const verdictOf = (x) => true; const cut = (from, to) => { const m = src.replace(from, to); ok(verdictOf(m !== src), 'CONTROL: the patch applies'); return MUT.load('src/x.js', m, 't'); };"],
+    // the reader's find: an imported verdictOf that a block binds AGAIN is that block's function there — not read through
+    ['a check through an imported verdictOf that a block binds again', 1, "import { verdictOf } from './lib/check.mjs'; const cut = (from, to) => { const verdictOf = (x) => true; const m = src.replace(from, to); ok(verdictOf(m !== src), 'CONTROL: the patch applies'); return MUT.load('src/x.js', m, 't'); };"],
   ];
   const got287 = PLANTS287.map(([n, want, body]) => [n, want, H(body)]);
   ok(got287.every(([, want, got]) => got === want), `CONTROL (B-287c): each plant is judged by what it is about — ${got287.map(([n, want, got]) => `${n} ${got}${got === want ? '' : ` (want ${want})`}`).join(' · ')}`);
   // RED (B-1747, r3179): the walk WITHOUT its look-through reads the three wrapped checks as helpers that do not fail by name
   const MUTX = mutantCopies('suite-files-parse-wrap', REPO), MCSRC = fs.readFileSync(path.join(REPO, 'scripts', 'mutant-copy.mjs'), 'utf-8');
-  const LOOK = "      if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && /^(?:verdictOf|gateOf)(?:Guard)?$/.test(n.callee.name) && n.arguments.length === 1) return ofAnchor(n.arguments[0]);\n";
+  const LOOK = "      if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && CHECKER.has(n.callee.name) && n.arguments.length === 1) return ofAnchor(n.arguments[0]);\n";
   const NOLOOK = await import(pathToFileURL(MUTX.write('scripts/mutant-copy.mjs', anchored(MCSRC, LOOK, '', 'the walk without the look-through'), 'mc-no-look')).href);
   const wrapped = PLANTS287.filter(([n]) => /guard tool's verdictOf|its gate \(gateOf\)|the alias \(verdictOfGuard\)/.test(n));
   const red = wrapped.map(([n, , body]) => [n, NOLOOK.anchorHelpers(P(body)).length]);
   ok(wrapped.length === 3 && red.every(([, got]) => got === 1), `RED (the walk without its look-through through the guard tool's wraps): each wrapped check reads as a helper that does not fail by name — ${red.map(([n, got]) => `${n} ${got}`).join(' · ')}`);
+  // RED (the reader's find): the walk WITHOUT its alone rule reads through the block's own verdictOf — the plant reads 0
+  const ALONE = "    for (const nm of [...CHECKER]) if (seen.get(nm) !== 1) CHECKER.delete(nm);\n";
+  const NOALONE = await import(pathToFileURL(MUTX.write('scripts/mutant-copy.mjs', anchored(MCSRC, ALONE, '', 'the walk without the alone rule'), 'mc-no-alone')).href);
+  const shadow = PLANTS287.filter(([n]) => /a block binds again/.test(n)), redA = shadow.map(([n, , body]) => [n, NOALONE.anchorHelpers(P(body)).length]);
+  ok(shadow.length === 1 && redA.every(([, got]) => got === 0), `RED (the walk without its alone rule): the check through a block's own verdictOf reads as looked through — ${redA.map(([n, got]) => `${n} ${got}`).join(' · ')}`);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);

@@ -21,7 +21,8 @@
 //                          stderr names the suite and the kind); any other value coerces as !!value.
 //   gateOf(value)        → THE && GATE (r3179): the tool wraps an && operand that is not the last in it — true / false by
 //                          truthiness, never a red (a present function there is an existence check); a promise is counted
-//                          and noted at exit («NOTE … promise(s) handed as an && gate»), never a ✗.
+//                          and noted once per call site, at the moment, on stderr («NOTE … a promise handed as an && gate at
+//                          <file:line>»), never a ✗ — never after the suite's closing line.
 // test-ci-gate-tiers §7b runs both over every script: no swapped call anywhere, and the inline helpers without the guard
 // only ever fall (a new suite imports this file). PURE: no I/O beyond the console in checker(), verdictOf() and gateOf().
 
@@ -71,14 +72,21 @@ export function takeVacuousFinds() { const n = vacuousFinds; vacuousFinds = 0; r
 // the last of an && chain, every operand of an ||, each branch of a ?: — and an && operand that is NOT the last in gateOf. A gate's
 // truthiness only decides whether the chain goes on (`f && f(1) === 1`: a present function is an existence check, never the
 // verdict; a falsy gate makes the verdict false), so gateOf answers true / false by truthiness and is never a red. A PROMISE handed
-// as a gate may be a missing await that judges nothing (it is truthy whatever it holds): each one is COUNTED, and the process
-// prints the count at exit as a NOTE line, never a ✗ — the apply's rehearsal reads that list.
-let promiseGates = 0, gateSaid = false;
+// as a gate may be a missing await that judges nothing (it is truthy whatever it holds): it is COUNTED, and a NOTE is said ONCE per
+// call site, at the moment, on STDERR (r3293 (1): the runner reads a suite's LAST stdout line — its closing count, or a whole-suite
+// «SKIP: …» — so a note may never stand after it) — a NOTE, never a ✗; the apply's rehearsal reads those lines.
+let promiseGates = 0;
+const gateSites = new Set();
+const callerOf = (stack) => { const l = String(stack || '').split('\n')[2] || ''; const m = /([^\s(/\\]+):(\d+):\d+\)?\s*$/.exec(l); return m ? `${m[1]}:${m[2]}` : 'an unknown place'; };
 export function gateOf(value) {
   if (value !== null && typeof value === 'object') {
     let thenable = false;
     try { thenable = typeof value.then === 'function'; } catch { /* an unreadable then: no promise */ }
-    if (thenable && !promiseGates++ && !gateSaid) { gateSaid = true; process.once('exit', () => { if (promiseGates) console.log(`  NOTE ${suiteName()}: ${promiseGates} promise(s) handed as an && gate — truthy whatever they hold; a missing await there judges nothing (B-1747, never a red)`); }); }
+    if (thenable) {
+      promiseGates++;
+      const at = callerOf(new Error().stack);
+      if (!gateSites.has(at)) { gateSites.add(at); console.error(`  NOTE ${suiteName()}: a promise handed as an && gate at ${at} — truthy whatever it holds; a missing await there judges nothing (B-1747, never a red)`); }
+    }
   }
   return !!value;
 }

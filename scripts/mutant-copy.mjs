@@ -254,8 +254,26 @@ export function anchorHelpers(src, { ast: given = null, plan = false } = {}) {
   if (!ast) for (const sourceType of ['module', 'script']) { try { ast = req('acorn').parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { } }
   if (!ast) return plan ? null : [];
   const text = (n) => src.slice(n.start, n.end);
+  // r3293 (2): the guard tool's wraps are read through only under the names THIS file binds by its import of them from the shared
+  // checker (scripts/lib/check.mjs verdictOf / gateOf, aliased or not) — a function of the file's own of that name is not one
+  const CHECKER = new Set();
+  for (const d of ast.body || []) if (d.type === 'ImportDeclaration' && /(?:^|\/)check\.mjs$/.test(String(d.source.value))) for (const x of d.specifiers) if (x.type === 'ImportSpecifier' && /^(?:verdictOf|gateOf)$/.test(x.imported.name)) CHECKER.add(x.local.name);
   const walk = walkAst;
   const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+  // … and only a name the import binds ALONE (the reader's find): a block's own `const gateOf = …` is another function, so a
+  // name bound anywhere else in the file is read as any call
+  if (CHECKER.size) {
+    const ids = (p, out = []) => { if (!p) return out; if (p.type === 'Identifier') out.push(p.name); else if (p.type === 'ObjectPattern') for (const pr of p.properties) ids(pr.type === 'RestElement' ? pr.argument : pr.value, out); else if (p.type === 'ArrayPattern') for (const e of p.elements) ids(e, out); else if (p.type === 'RestElement') ids(p.argument, out); else if (p.type === 'AssignmentPattern') ids(p.left, out); return out; };
+    const seen = new Map(), add = (name) => { if (CHECKER.has(name)) seen.set(name, (seen.get(name) || 0) + 1); };
+    walk(ast, (n) => {
+      if (n.type === 'VariableDeclarator') ids(n.id).forEach(add);
+      else if (FN.has(n.type)) { if (n.id) add(n.id.name); for (const p of n.params) ids(p).forEach(add); }
+      else if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id) add(n.id.name);
+      else if (n.type === 'CatchClause' && n.param) ids(n.param).forEach(add);
+      else if (n.type === 'ImportSpecifier' || n.type === 'ImportDefaultSpecifier' || n.type === 'ImportNamespaceSpecifier') add(n.local.name);
+    });
+    for (const nm of [...CHECKER]) if (seen.get(nm) !== 1) CHECKER.delete(nm);
+  }
   const LOADER = /(?:^|\.)(?:load|write|_compile|runInThisContext|runInNewContext|runInContext|compileFunction|writeFileSync)$|^require$/;
   const params = (fn) => { const out = new Set(); for (let q of fn.params) { if (q.type === 'AssignmentPattern') q = q.left; if (q.type === 'Identifier') out.add(q.name); } return out; };
   const found = new Map(), anchorsOf = new Map();
@@ -286,10 +304,10 @@ export function anchorHelpers(src, { ast: given = null, plan = false } = {}) {
       if (n.type === 'BinaryExpression' || n.type === 'LogicalExpression') return ofAnchor(n.left) || ofAnchor(n.right);
       if (n.type === 'UnaryExpression') return ofAnchor(n.argument);
       if (n.type === 'MemberExpression') return ofAnchor(n.object);
-      // B-1747 (the coordinator's r3179): the guard tool's wraps — verdictOf / verdictOfGuard / gateOf / gateOfGuard of ONE value —
-      // judge that value: read through them as through `!` (the apply at the cut of 2.369.416 put eleven helpers' checks of their
+      // B-1747 (the coordinator's r3179 / r3293): the guard tool's wraps — verdictOf / gateOf of ONE value, under the names the file's
+      // import from the shared checker binds (CHECKER) — judge that value: read through them as through `!` (the apply at the cut of 2.369.416 put eleven helpers' checks of their
       // anchor under such a call, and this walk read them as helpers that do not fail by name)
-      if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && /^(?:verdictOf|gateOf)(?:Guard)?$/.test(n.callee.name) && n.arguments.length === 1) return ofAnchor(n.arguments[0]);
+      if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && CHECKER.has(n.callee.name) && n.arguments.length === 1) return ofAnchor(n.arguments[0]);
       if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return false;
       if (isEditCall(n) && ev.has(n.arguments[0].name)) return true;
       if (TESTS.test(n.callee.property.name || '') && (n.arguments.some((g) => g.type === 'Identifier' && ev.has(g.name)) || (n.callee.object.type === 'Identifier' && ev.has(n.callee.object.name)))) return true;

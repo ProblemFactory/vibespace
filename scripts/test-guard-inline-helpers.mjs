@@ -115,9 +115,16 @@ const FIX = {
   comma: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok((extra.push(1), extra.length), 'a comma expression');"),
   aliased: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x * 2;', "ok(verdictOf(1), 'its own verdictOf is no coercion');", "ok(2, 'a value');"),
   opensWithTest: lines(HEAD, K + ' ok = (c, n) => {c ? pass++ : fail++;};', "ok(extra.length, 'a value');", "ok(pass === 0, 'a comparison');"),
-  gate: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const f = (x) => x + 1, none = null, p = Promise.resolve(1);', "ok(f && f(1) === 2, 'an existence gate on a function');", "ok(none && none.x === 1, 'a falsy gate (fails)');", "ok(p && 1 === 1, 'a promise as a gate');"),
+  gate: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const f = (x) => x + 1, none = null, p = Promise.resolve(1), zero = 0, two = 2;', "ok(f && f(1) === 2, 'an existence gate on a function');", "ok(none && none.x === 1, 'a falsy gate (fails)');", "ok(p && 1 === 1, 'a promise as a gate');", "ok(zero || two, 'an or of two values');"),
+  ownGate: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const gateOf = (x) => x * 3;', "ok(extra && gateOf(1) === 3, 'an ordinary gate beside its own gateOf');", "ok(gateOf(1) && extra, 'its own gateOf is no coercion'); import { verdictOf } from './lib/check.mjs';"),
+  // r3293 (3), the reader's find: an earlier import of the shared checker's gateOf under the name verdictOf — that name is the GATE's
+  crossImport: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const two = 2;', "ok(extra && two, 'a gate and a value'); import { gateOf as verdictOf } from './lib/check.mjs';"),
 };
 const LEFT = {
+  // r3293 (3), the reader's find: the name an earlier run imported is bound AGAIN (a block's const, a parameter) — a wrap there would
+  // call that function: the helper is left by name, nothing written
+  shadowGate: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "{ const gateOf = () => ({}); ok(extra && extra.length === 0, 'a gate in a block that binds its own gateOf'); }", "ok(extra, 'a value'); import { verdictOf, gateOf } from './lib/check.mjs';"), /^the file binds gateOf again beside its import of the shared checker's gateOf/],
+  shadowVerdict: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'function pick(verdictOf) { return verdictOf; }', "ok(pick(extra), 'a value'); import { verdictOf } from './lib/check.mjs';"), /^the file binds verdictOf again beside its import of the shared checker's verdictOf/],
   handed: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "[true, 'x'].forEach(ok);", "ok(pass, 'a call');"), /^handed on as a value/],
   exported: [lines('export ' + K + ' ok = (c, n) => { if (c) pass++; };', "ok(1, 'a call');"), /^exported/],
   spread: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(...[true, 'by spread']);"), /^a call with no condition argument, or by spread/],
@@ -135,14 +142,14 @@ const LEFT = {
   inPage: [lines(HEAD, 'const page = { evaluate: (f) => f() };', "page.evaluate(() => { " + K + " check = (c, n) => { if (!c) throw new Error(n); }; check(1, 'in the page'); });"), /^its body is inside a function serialised into a page/],
   nestedInName: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(1, 'outer ' + ok(2, 'inner'));"), /^a call of it stands inside another call's NAME argument/],
 };
-const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock', 'comma', 'aliased', 'gate'];
+const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock', 'comma', 'aliased', 'gate', 'ownGate'];
 const NAME_SLOT = { ok: 1, check: 0, ck: 1, leg: 0 };
 const LATER = (applied) => applied + '\n' + lines(K + ' check = (c, n) => { if (!c) fail++; else pass++; };', "check(pass, 'a new helper at a later tip');");
 // a fixture run: its tally (or why it threw) — the fixtures are this file's own texts
 const IMPORT_RE = /[ ;]import \{ (?:verdictOf(?: as verdictOfGuard)?(?:, gateOf(?: as gateOfGuard)?)?|gateOf(?: as gateOfGuard)?) \} from '\.\/(?:lib\/)?check\.mjs';/;
 const run = (text) => {
   // the coercion in scope under each name the fixture does not bind itself (its import taken off: new Function holds none)
-  const t = text.replace(IMPORT_RE, ''), names = ['verdictOf', 'verdictOfGuard', 'gateOf', 'gateOfGuard'].filter((n) => !new RegExp(`\\b(?:const|let|var|function) ${n}\\b`).test(t));
+  const t = text.replace(new RegExp(IMPORT_RE.source, 'g'), ''), names = ['verdictOf', 'verdictOfGuard', 'gateOf', 'gateOfGuard'].filter((n) => !new RegExp(`\\b(?:const|let|var|function) ${n}\\b`).test(t));
   try { return JSON.stringify(new Function(...names, t + '\nreturn { pass, fail, extra };')(...names.map((n) => (/^gateOf/.test(n) ? C.gateOf : C.verdictOf)))); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); }
 };
 const nl = (s) => s.split('\n').length;
@@ -172,7 +179,8 @@ function verdicts(G, only = null) {
     ];
     // the coercion's import: once, on the LAST line of every fixture with a wrap (no line moves); none where nothing is wrapped
     const imp = Object.keys(R).filter((k) => R[k].p.edits.some((e) => e.kind === 'wrap-open')), noWrap = Object.keys(R).filter((k) => !imp.includes(k));
-    const lastOk = imp.every((k) => { const ls = R[k].o.split('\n'); return (R[k].o.match(new RegExp(IMPORT_RE.source, 'g')) || []).length === 1 && IMPORT_RE.test(ls[ls.length - 1]); }) && noWrap.every((k) => !IMPORT_RE.test(R[k].o));
+    const nImp = (t) => (t.match(new RegExp(IMPORT_RE.source, 'g')) || []).length;   // (a fixture may hold an earlier run's import: one more, or none added)
+    const lastOk = imp.every((k) => { const ls = R[k].o.split('\n'); return nImp(R[k].o) === nImp(FIX[k]) + 1 && IMPORT_RE.test(ls[ls.length - 1]); }) && noWrap.every((k) => nImp(R[k].o) === nImp(FIX[k]));
     want.push([String(lastOk), 'true']);
     want.push([R.functionNameFirst.o.split('\n')[6].slice(-50), "x, verdictOf(x)); import { verdictOf } from './lib/check.mjs';".slice(-50)]);
     const bad = want.filter(([got, w]) => got !== w);
@@ -235,12 +243,20 @@ function verdicts(G, only = null) {
     return off.length === 0 && /"pass":/.test(before) && /^THREW ok: its condition is a string, not a boolean/.test(after);
   });
   judge('gate', () => {
-    const o = R.gate.o.split('\n'), want = [[at('gate', 4), "ok(gateOf(f) && f(1) === 2, 'an existence gate on a function');"], [at('gate', 5), "ok(gateOf(none) && none.x === 1, 'a falsy gate (fails)');"], [at('gate', 6), "ok(gateOf(p) && 1 === 1, 'a promise as a gate');"]];
-    const imp = / import \{ gateOf \} from '\.\/lib\/check\.mjs';$/.test(o[o.length - 1]), before = run(FIX.gate);
+    const o = R.gate.o.split('\n'), want = [[at('gate', 4), "ok(gateOf(f) && f(1) === 2, 'an existence gate on a function');"], [at('gate', 5), "ok(gateOf(none) && none.x === 1, 'a falsy gate (fails)');"], [at('gate', 6), "ok(gateOf(p) && 1 === 1, 'a promise as a gate');"], [at('gate', 7), "ok(verdictOf(zero) || verdictOf(two), 'an or of two values');"]];
+    // r3293 (3): an earlier run's import of verdictOf and the file's OWN gateOf — the gate takes the free twin, gateOfGuard, and the
+    // file's own gateOf(1) is no coercion (it is gated like any value)
+    const og = R.ownGate.o.split('\n'), ogLine = og[og.length - 1].replace(new RegExp(IMPORT_RE.source, 'g'), ''), ogImp = (og[og.length - 1].match(new RegExp(IMPORT_RE.source, 'g')) || []).map((x) => x.trim().replace(/^;/, ''));
+    want.push([ogLine, "ok(gateOfGuard(gateOf(1)) && verdictOf(extra), 'its own gateOf is no coercion');"], [og[og.length - 2], "ok(gateOfGuard(extra) && gateOf(1) === 3, 'an ordinary gate beside its own gateOf');"], [JSON.stringify(ogImp), JSON.stringify(["import { verdictOf } from './lib/check.mjs';", "import { gateOf as gateOfGuard } from './lib/check.mjs';"])]);
+    // r3293 (3), the reader's find: a name the file imports as the OTHER function is not free — gateOf imported as verdictOf: the
+    // gate takes that import, the verdict verdictOfGuard, and the file still parses (no name bound twice)
+    const cx = R.crossImport.o.split('\n'), parses = (t) => { try { acorn.parse(t, G0.PARSE_OPTS); return true; } catch { return false; } };
+    want.push([cx[cx.length - 1], "ok(verdictOf(extra) && verdictOfGuard(two), 'a gate and a value'); import { gateOf as verdictOf } from './lib/check.mjs'; import { verdictOf as verdictOfGuard } from './lib/check.mjs';"], ['parses ' + parses(R.crossImport.o), 'parses true']);
+    const imp = / import \{ verdictOf, gateOf \} from '\.\/lib\/check\.mjs';$/.test(o[o.length - 1]), before = run(FIX.gate);
     C.takePromiseGates(); const after = run(R.gate.o), noted = C.takePromiseGates();
     const bad = want.filter(([got, w]) => got !== w);
-    say.gate = `an && gate goes through gateOf and the verdict through verdictOf (${want.map(([g]) => g.slice(0, 44)).join(' · ')}); the import names gateOf alone (${imp}); the tally ${before} → ${after}; the promise gate counted ${noted}${bad.length ? ' — OFF: ' + bad.map(([g, w]) => `«${String(g).slice(0, 70)}» ≠ «${w.slice(0, 70)}»`).join(' | ') : ''}`;
-    return !bad.length && imp && before === after && /^\{"pass":2,"fail":1/.test(after) && noted === 1;
+    say.gate = `an && gate goes through gateOf and the verdict through verdictOf, an || operand through verdictOf, the file's own gateOf no coercion (${want.map(([g]) => g.slice(0, 44)).join(' · ')}); the import names both (${imp}); the tally ${before} → ${after}; the promise gate counted ${noted}${bad.length ? ' — OFF: ' + bad.map(([g, w]) => `«${String(g).slice(0, 70)}» ≠ «${w.slice(0, 70)}»`).join(' | ') : ''}`;
+    return !bad.length && imp && before === after && /^\{"pass":3,"fail":1/.test(after) && noted === 1 && run(FIX.ownGate) === run(R.ownGate.o);
   });
   judge('left', () => {
     const r = Object.entries(LEFT).map(([k, [t, why]]) => { const p = plan(t); return [k, p.edits.length === 0 && p.left.length >= 1 && p.left.every((x) => why.test(x.why)), p.left.length ? p.left.map((x) => x.why).join(' / ') : 'NOT LEFT']; });
@@ -324,7 +340,7 @@ const LEG_NAMES = {
   behaviour: '⑦ it passes exactly when it passed before; a swap now throws', left: '⑧ left by rule, by name', scope: '⑧ scope by scope: a parameter or an inner binding is another function',
   clock: '⑦ a comparison stays outside every wrap: the wall-clock census reads a bound the same (with the product\'s span fields)',
   vacuous: '⑦ THE ROW\'S CLASS STAYS VISIBLE: a promise or a function handed as a verdict now fails, red by name; a match and a length pass as before',
-  gate: '⑦ AN && GATE IS NOT A VERDICT (r3179): a present function on the left of an && stays an existence check (gateOf, by truthiness), the verdict operand goes through verdictOf; a promise gate is counted as a note',
+  gate: '⑦ AN && GATE IS NOT A VERDICT (r3179): a present function on the left of an && stays an existence check (gateOf, by truthiness), the verdict operand goes through verdictOf, an || operand too; a promise gate is counted as a note; a name the file binds of its own is never taken for the checker\'s (r3293)',
 };
 for (const [k, label] of Object.entries(LEG_NAMES)) ok(real.V[k] === true, label, real.say[k] || '');
 for (const k of ['applied', 'behaviour', 'later', 'plants', 'vacuous', 'gate']) console.log(`    ${k}: ${String(real.say[k]).slice(0, 400)}`);
@@ -332,14 +348,14 @@ for (const k of ['applied', 'behaviour', 'later', 'plants', 'vacuous', 'gate']) 
 console.log('\n②–⑧ RED CONTROLS: each guarantee\'s leg goes red on a tool that breaks it');
 const REDS = [
   ['lines', 'a guard on its own line', "text: ` ${guard}`, kind: 'guard'", "text: `\\n${guard}`, kind: 'guard'"],
-  ['names', 'the wrap on the name slot', 'const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond, coerce);', 'const a = c.node.arguments, cond = a[nameSlot], ws = wrapsOf(cond, coerce);'],
+  ['names', 'the wrap on the name slot', 'const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond, NM);', 'const a = c.node.arguments, cond = a[nameSlot], ws = wrapsOf(cond, NM);'],
   ['literal', 'the string-shaped refusal out', 'if (swap) { leave(', 'if (false) { leave('],
   ['plants', 'the tokenizer filter out', 'for (const d of judged) if (code.inside(d.at)) res.plants.push(', 'for (const d of judged) if (false) res.plants.push('],
   ['inside', "the self-check's span test out", 'if (code.ok) for (const e of es) if (code.inside(e.at))', 'if (false) for (const e of es) if (code.inside(e.at))'],
   ['twice', 'a guard the census cannot read (the value-use rule out too: it would leave such a helper, not guard it again)', "${condP} !== 'boolean') throw new TypeError(", "${condP} !== 'boolean') console.error(", VALUE_RULE_OUT],
   ['later', 'targets that ignore «guarded» (the value-use rule out too: the guard\'s own typeof would leave the old helper)', "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown' && !d.guarded);", "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown');", VALUE_RULE_OUT],
-  ['behaviour', '`!(` for the coercion', "text: `${role === 'gate' ? gateName(coerce) : coerce}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
-  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${role === 'gate' ? gateName(coerce) : coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
+  ['behaviour', '`!(` for the coercion', "text: `${role === 'gate' ? gate : coerce}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
+  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${role === 'gate' ? gate : coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
   ['selfCheck', 'a comma expression wrapped inside its parentheses (two arguments)', "n.expression.type === 'SequenceExpression' ? [[n.start, n.end, role]] : wrapsOf(n.expression, name, role)", 'wrapsOf(n.expression, name, role)'],
   ['left', 'the arguments rule out', "else if (n.name === 'arguments' && ownArgs) seen(n, 'value');", ''],
   ['behaviour', 'an expression block without its return', 'text: `{ ${guard} return (`', 'text: `{ ${guard} (`'],
@@ -347,9 +363,13 @@ const REDS = [
   ['scope', 'calls read by name, not by binding', 'const mine = B.calls.filter((c) => c.bind === b.id);', 'const mine = B.calls.filter((c) => c.node.callee.name === d.name);'],
   ['left', 'the value-use rule out', 'if (u.value) { out.set(t,', 'if (false) { out.set(t,'],
   ['left', 'the hands-back rule out', 'if (u.hands) { const read =', 'if (false) { const read ='],
-  ['twice', 'the guarded set left out of the body rules', "callPos(c.node, parents(), wrapped, coerce) === 'value'", "callPos(c.node, parents(), null, coerce) === 'value'"],
-  ['clock', 'the whole && chain wrapped in a plain !! (verdictOf( … ) around a whole chain reads the same to the census: a call is no `!`)', "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, 'gate'), ...wrapsOf(n.right, name, role)];\n  if (n.type === 'LogicalExpression' && n.operator === '||') return [...wrapsOf(n.left, name, role), ...wrapsOf(n.right, name, role)];", 'if (false) return [];', ["text: `${role === 'gate' ? gateName(coerce) : coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"]],
+  ['twice', 'the guarded set left out of the body rules', "callPos(c.node, parents(), wrapped, NM) === 'value'", "callPos(c.node, parents(), null, NM) === 'value'"],
+  ['clock', 'the whole && chain wrapped in a plain !! (verdictOf( … ) around a whole chain reads the same to the census: a call is no `!`)', "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, 'gate'), ...wrapsOf(n.right, name, role)];\n  if (n.type === 'LogicalExpression' && n.operator === '||') return [...wrapsOf(n.left, name, role), ...wrapsOf(n.right, name, role)];", 'if (false) return [];', ["text: `${role === 'gate' ? gate : coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"]],
+  ['gate', 'an OR\'s left operand made a gate (r3293 (4))', "if (n.type === 'LogicalExpression' && n.operator === '||') return [...wrapsOf(n.left, name, role), ...wrapsOf(n.right, name, role)];", "if (n.type === 'LogicalExpression' && n.operator === '||') return [...wrapsOf(n.left, name, 'gate'), ...wrapsOf(n.right, name, role)];"],
+  ['gate', 'the gate\'s name derived from the verdict\'s and taken by its spelling (r3293 (2)(3): an import over the file\'s own gateOf)', 'const gate = pick(ours && ours.gate, GATE, GATE_ALIAS);', 'const gate = gateName(coerce);'],
   ['gate', 'today\'s rule: every && operand a verdict (a present function on the left made false)', "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, 'gate'), ...wrapsOf(n.right, name, role)];", "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, role), ...wrapsOf(n.right, name, role)];"],
+  ['gate', 'a name the file imports as the OTHER function counted free (r3293 (3), the reader\'s find: gateOf imported as verdictOf)', 'const free = (n, own) => (counts.get(n) || 0) === (n === own ? 1 : 0);', 'const free = (n, own) => (counts.get(n) || 0) === (n === own || n === (ours && ours.local) || n === (ours && ours.gate) ? 1 : 0);'],
+  ['left', 'a name bound again in another scope counted free (the bindings read as a set: the first form)', 'const free = (n, own) => (counts.get(n) || 0) === (n === own ? 1 : 0);', 'const free = (n, own) => Math.min(counts.get(n) || 0, 1) === (n === own ? 1 : 0);'],
 ];
 const mutants = {};
 for (const [key, what, anchor, to, more] of REDS) {
@@ -401,5 +421,27 @@ console.log('    ' + (trRed.logs[1].find((l) => /APPLY|APPLIED/.test(l)) || '').
 console.log('\n⑩ the CLI');
 const cli = [[['--apply'], true], [['--apply', '--coordinator-word'], false], [[], false], [['--list', '/some/repo'], false], [['--aply'], true]].map(([a, refused]) => [a.join(' ') || '(none)', !!G0.cliRefusal(a) === refused]);
 ok(cli.every(([, y]) => y), '⑩ --apply refuses without --coordinator-word, and an unknown flag refuses; a dry run, --list and the word pass', cli.map(([a, y]) => `${a} ${y ? '✓' : '✗'}`).join(' · '));
+
+
+console.log('\n⑦ THE GATE\'S NOTE NEVER STANDS AFTER A SUITE\'S CLOSING LINE (r3293 (1)): the runner reads a suite\'s LAST stdout line');
+{
+  const { spawnSync } = await import('node:child_process');
+  const dirN = scratch('guard-inline-note'); fs.mkdirSync(dirN, { recursive: true });
+  let k = 0;
+  // a suite whose leg hands a promise as an && gate, then closes with a whole-suite skip (its last line, as the runner reads it)
+  const runNote = (checkPath) => {
+    const f = path.join(dirN, `note-${++k}.mjs`);
+    fs.writeFileSync(f, `import { gateOf } from ${JSON.stringify(pathToFileURL(checkPath).href)};\nconst p = Promise.resolve(1);\nconst r = gateOf(p) && 1 === 1;\nconsole.log(r ? 'the leg judged' : 'the leg did not');\nconsole.log('SKIP: a whole-suite skip, its closing line');\n`);
+    const r = spawnSync(process.execPath, [f], { encoding: 'utf8', timeout: 20000 });
+    const out = String(r.stdout || '').trim().split('\n');
+    return { last: out[out.length - 1], notedOnStderr: /NOTE note-\d+\.mjs: a promise handed as an && gate at note-\d+\.mjs:3 /.test(String(r.stderr || '')) };
+  };
+  const real = runNote(path.join(REPO, 'scripts', 'lib', 'check.mjs'));
+  ok(real.last === 'SKIP: a whole-suite skip, its closing line' && real.notedOnStderr, '⑦ the gate\'s NOTE is said at the moment, on stderr, naming its call site — the suite\'s last stdout line stays its closing line (here a whole-suite «SKIP: …»)', real);
+  const CHK = fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'check.mjs'), 'utf8');
+  const atExit = anchored(anchored(CHK, 'console.error(`  NOTE ${suiteName()}: a promise handed as an && gate at ${at}', "process.once('exit', () => console.log(`  NOTE ${suiteName()}: a promise handed as an && gate at ${at}", 'the note at exit, on stdout'), 'a missing await there judges nothing (B-1747, never a red)`); }', 'a missing await there judges nothing (B-1747, never a red)`)); }', 'its close');
+  const old = runNote(MC.write('scripts/lib/check.mjs', atExit, 'note-at-exit'));
+  ok(old.last !== 'SKIP: a whole-suite skip, its closing line' && /NOTE/.test(old.last), 'RED (the note at exit, on stdout — the first form): the suite\'s last line is the note, so the runner reads no count and no skip', old);
+}
 
 report();
