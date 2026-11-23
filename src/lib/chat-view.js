@@ -3374,6 +3374,9 @@ class ChatView {
     this._wheelCarry = this._wheelCarryDir === dir ? Math.min((this._wheelCarry || 0) + px, cap) : Math.min(px, cap);
     this._wheelCarryDir = dir;
   }
+  /** The list's zoom over the viewport (the chat font size over 14 × the desktop UI scale): viewport px ÷ it = the list's layout
+   *  px, the unit of scrollTop (B-3e8b — a wheel notch is read in it). */
+  _listZoom() { return (this._chatScale || 1) * uiScale(); }
   /** Apply the carried px at a LANDING — both extends AND both gap slabs read
    *  it (the seek path used to eat a carried notch silently): bounded by the
    *  room the landing produced, never in the up direction while pinned (a
@@ -3388,10 +3391,8 @@ class ChatView {
    *  loop landed at the very bottom and the landing's own scroll re-pinned the
    *  view the wheel had just unpinned (`wheelTop{carry:120} extendTop:done
    *  {st:0,sh:565} … extendTop:grown repin`, no wheelCarry anywhere). */
-  /** The list's zoom over the viewport (the chat font size over 14 × the desktop UI scale): viewport px ÷ it = the list's layout
-   *  px, the unit of scrollTop (B-3e8b — a wheel notch is read in it). */
-  _listZoom() { return (this._chatScale || 1) * uiScale(); }
   _applyWheelCarry(dir, by, { keepRest = false, less = 0 } = {}) {
+    this._gapSettle?.flush();   // B-3e8b: a relative write measures nothing itself — what was pending is the watch's, first
     const list = this._messageList;
     const room = dir === 'up' ? list.scrollTop : Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
     const held = (this._wheelCarryDir === dir && !(dir === 'up' && this._pinned)) ? (this._wheelCarry || 0) : 0;

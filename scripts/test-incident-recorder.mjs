@@ -403,7 +403,7 @@ console.log('⑦ THE WHEEL AND THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9
   ok('…and the arm reads NO live layout: the geometry the scroll handler last saw (_geomSeen, set in its rAF read), marked «at: press»',
     noLayoutPin(armFn)
     && /const \{ scrollTop, scrollHeight, clientHeight \} = this\._messageList;\n\s*this\._geomSeen = \{ st: Math\.round\(scrollTop\), sh: scrollHeight, ch: clientHeight, t: Date\.now\(\) \};/.test(cv));
-  ok('…every stamped write counts (_traceExpect bumps _stWriteSeq) — the fine trace\'s writer test', /_traceExpect\(by\) \{ this\._lastStWriteAt = Date\.now\(\); this\._lastStWriteBy = by \|\| ''; this\._stWriteSeq = \(this\._stWriteSeq \|\| 0\) \+ 1;( this\._gapSettle\?\.wrote\(by\);)? \}/.test(cv));   // (B-3e8b: the settle watch hears a stamp)
+  ok('…every stamped write counts (_traceExpect bumps _stWriteSeq) — the fine trace\'s writer test', /_traceExpect\(by\) \{ this\._lastStWriteAt = Date\.now\(\); this\._lastStWriteBy = by \|\| ''; this\._stWriteSeq = \(this\._stWriteSeq \|\| 0\) \+ 1; this\._gapSettle\?\.wrote\(by\); \}/.test(cv));   // (B-3e8b: the settle watch hears every stamp)
   // MUTANTS: the arm back AFTER the toggles (r1's place) ⇒ the pin reds; a live read in the arm ⇒ its pin reds
   const mutant = setRunOpen.replace("\n    if (!this._runsMutating) this._armScrollFine(open ? 'runOpen' : 'runClose');", '').replace('    if (outsidePass) {\n', "    if (outsidePass) {\n      this._armScrollFine(run.open ? 'runOpen' : 'runClose');\n");
   ok('MUTANT: the arm moved back after the toggles (r1) reds the arm pin', mutant !== setRunOpen && armPin(setRunOpen) && !armPin(mutant));

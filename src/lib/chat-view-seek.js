@@ -219,7 +219,9 @@ export function installChatSeek(ChatView) {
      *    re-seeds after it; a navigation the reader chose (_noteUserNav) forgets the line it remembered;
      *  · a card replaced by a newer version of itself (_swapMessageEl) — `swap` carries the old card's height to the new one.
      *  Heights are read in ONE unit, layout px (offsetHeight, like offsetTop and scrollTop), at every chat font size and UI
-     *  scale: a rect is in zoomed px. A row added meanwhile is seeded by its first report; a removed one leaves the observer.
+     *  scale: a rect is in zoomed px. Whole numbers: under a zoom each changed row's answer is off by under one px (the two
+     *  roundings together), and a row that grows by under half a px goes unseen — the worst case about one px a changed row,
+     *  typically far less (contiguous rows' rounding telescopes). A row added meanwhile is seeded by its first report; a removed one leaves the observer.
      *  Bounded: the slab leaves (_dropGapSlab), a jump's reset, a teleport, the view's dispose, a newer slab, or the first
      *  scroll or settle after GAP_SETTLE_CEIL_MS from the insert (read in a frame and in the callback: no timer). */
     _watchGapSettle() {
@@ -271,12 +273,15 @@ export function installChatSeek(ChatView) {
       if (late) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
     });
     // what the movers ask (census above): pending answered BEFORE a mover measures; re-seeded AFTER a stamped write
-    let rebaseQueued = false;
+    let rebaseQueued = false, stW = 0;
     const rebase = () => {
       rebaseQueued = false;
       if (this._gapSettleRO !== ro) return;
       for (const el of list.children) if (!el._isSeekSentinel) { if (!last.has(el)) ro.observe(el); last.set(el, el.offsetHeight); }
-      fr.at = list.scrollTop;   // (the line stays: a writer that kept the reader's place moved nothing the line names)
+      // the remembered line moves with the mover's OWN write (as the watch's answer moves it): a put-back of +X leaves the
+      // content the line names X lower; a person's scroll in the same frame stays for the frame's own reading (fr.at moves alike)
+      const moved = list.scrollTop - stW;
+      fr.before += moved; fr.at += moved;
     };
     this._gapSettle = {
       flush: () => {
@@ -284,7 +289,7 @@ export function installChatSeek(ChatView) {
         for (const el of list.children) { const was = last.get(el); if (was === undefined) continue; const h = el.offsetHeight; if (h !== was) { last.set(el, h); changed.push({ el, was, h }); } }
         answer(changed);
       },
-      wrote: (by) => { if (by === 'gapUp:settle' || rebaseQueued) return; rebaseQueued = true; queueMicrotask(rebase); },
+      wrote: (by) => { if (by === 'gapUp:settle' || rebaseQueued) return; rebaseQueued = true; stW = list.scrollTop; queueMicrotask(rebase); },   // (stamped BEFORE its write)
       swap: (oldEl, newEl) => { const w = last.get(oldEl); if (w !== undefined) last.set(newEl, w); ro.observe(newEl); },
       nav: () => { fr.before = fr.at = list.scrollTop; fr.moved = -Infinity; },
     };

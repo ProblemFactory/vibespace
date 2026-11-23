@@ -728,17 +728,18 @@ const NOTCH_READ = `(async () => {
   window.__notchTop = top;
   return { prevOff, off: top ? top.getBoundingClientRect().top - lt : null, st: Math.round(list.scrollTop), sh: list.scrollHeight, landed: (v._traceRing || []).some((e) => e.tag === 'gapUp:done') ? 1 : 0 };
 })()`;
-const notchLaw = (reads, notchPx) => {
+const notchLaw = (reads, notchPx, zoomed = false) => {
   const iv = [];
   for (let k = 1; k < reads.length; k++) { const a = reads[k - 1], b = reads[k]; iv.push({ moved: a.off == null || b.prevOff == null ? null : b.prevOff - a.off, landed: b.landed }); }
   const L = iv.findIndex((x) => x.landed);
   if (L < 0) return { ok: false, why: 'no slab landed during the hold', iv };
   const lost = iv.filter((x) => x.moved == null).length;
   // THE NOTCH's OWN DISTANCE ON SCREEN: at a chat font size or a UI scale other than 1 a notch moves the view by its px over
-  // the zoom, so the law reads the median of the notches after the landing (every notch moves alike) — the unit's own
+  // the zoom, so there the law reads the median of the notches after the landing (every notch moves alike — a per-notch bias
+  // under a zoom is then not seen by `worst`; the wheel's unit is pinned by the landing's `carried`) — at zoom 1, the notch's px
   const after = iv.slice(L + 1).map((x) => x.moved).filter((x) => x != null).sort((a, b) => a - b);
   const med = after.length >= 5 ? after[after.length >> 1] : notchPx;
-  const np = Math.abs(med - notchPx) <= notchPx / 2 ? med : notchPx;
+  const np = zoomed && Math.abs(med - notchPx) <= notchPx / 2 ? med : notchPx;   // the median ONLY under a zoom: at 1 the notch is its own px (a uniform per-notch error stays red there)
   const carried = iv.slice(0, L + 1).reduce((m, x) => m + (x.moved || 0), 0) - np * (L + 1);
   const extras = iv.slice(L + 1).map((x) => (x.moved == null ? null : x.moved - np));
   const worst = extras.reduce((m, x) => (x != null && Math.abs(x) > Math.abs(m) ? x : m), 0);
@@ -764,11 +765,12 @@ const firstHoldOn = async (label, blind, after) => {
   const row = (r.rows || []).find((x) => x.name === 'gap-up-hold-1');
   const ring = row ? row.ring : [];
   const n = (tag, by) => ring.filter((e) => e.tag === tag && (by === undefined || e.by === by)).length;
-  const law = row ? notchLaw(reads, CADENCE.hold.deltaY) : { ok: false, why: 'no row' };
+  const zoomNow = r.opened?.ok ? await evaljs('(() => [Number(window.__list.style.zoom || 1), Number(document.body.style.zoom || 1)])()') : null;
+  const law = row ? notchLaw(reads, CADENCE.hold.deltaY, !!zoomNow && zoomNow[0] * zoomNow[1] !== 1) : { ok: false, why: 'no row' };
   const out = { label, row, law, dev: row && row.after.topDev != null ? Math.round(row.after.topDev + row.wheelPx) : null, slabs: n('gapUp:done'), carries: n('wheelCarry', 'gapUp:carry'),
     reader: ring.filter((e) => e.tag === 'gapUp:reader').map((e) => [e.px, e.rest]), settle: ring.filter((e) => e.tag === 'gapUp:settle').map((e) => e.px), less: ring.filter((e) => e.tag === 'wheelCarry' && e.less).map((e) => [e.px, e.less]) };
   console.log(`  [first hold ${label}] per notch: ${law.why || `carried + landing ${law.carried} px (${law.L + 1} notch(es)), then the worst notch ${law.worst} px, ${law.lost} read(s) lost`}; extras ${JSON.stringify(law.extras || [])}`);
-  out.after = afterOut; out.zoom = r.opened?.ok ? await evaljs('(() => [Number(window.__list.style.zoom || 1), Number(document.body.style.zoom || 1)])()') : null;
+  out.after = afterOut; out.zoom = zoomNow;
   if (afterOut) console.log(`  [first hold ${label}] after the hold: ${JSON.stringify(afterOut)}`);
   console.log(`  [first hold ${label}] the original card ${out.dev} px past the wheel at the end (rows growing below the reading line count there); slabs ${out.slabs}, carried landings ${out.carries} ${JSON.stringify(out.less)}; (1') ${JSON.stringify(out.reader)}; (2) answered ${JSON.stringify(out.settle)}`);
   return out;
@@ -791,6 +793,22 @@ const SWAP_ABOVE = `(async () => { ${READ_TOP}
   v._swapMessageEl(above, neu, above.dataset.msgId);
   await paint(); await new Promise((r) => setTimeout(r, 400)); await paint();
   return { ok: true, alive, grew: Math.round(neu.offsetHeight - h0), moved: Math.round((top.getBoundingClientRect().top - lt()) - off0) };
+})()`;
+// (c) A RELATIVE WRITE IN THE TASK OF A PENDING CHANGE (round wjyz36f09's should, r3265 item 1): a row wholly above the reading
+// line grows 150 px and, in the same task, a carried notch lands (the carry measures nothing itself) — the card at the reading
+// line moves exactly the carry, the growth answered by the watch first. Its control blinds the watch's flush for that one carry.
+const CARRY_SAME_TASK = (blind) => `(async () => { ${READ_TOP}
+  const v = window.__v; await paint();
+  const st = list.scrollTop, top = topCard(); let above = null;
+  for (const c of list.children) { if (c === top) break; if (c.classList && c.classList.contains('chat-msg') && c.offsetHeight > 20 && c.offsetTop + c.offsetHeight < st - 40) above = c; }
+  if (!top || !above || !v._gapSettle) return { ok: false, why: 'no watch or no card above', alive: !!v._gapSettle };
+  const off0 = top.getBoundingClientRect().top - lt(), keep = v._gapSettle.flush;
+  if (${blind ? 1 : 0}) v._gapSettle.flush = () => { };
+  const pad = document.createElement('div'); pad.style.height = '150px'; above.appendChild(pad);
+  v._addWheelCarry('up', 60); v._applyWheelCarry('up', 'leg:carry');
+  if (${blind ? 1 : 0} && v._gapSettle) v._gapSettle.flush = keep;
+  await paint(); await new Promise((r) => setTimeout(r, 300)); await paint();
+  return { ok: true, alive: true, moved: Math.round((top.getBoundingClientRect().top - lt()) - off0), carry: Math.round(60 * (v._listZoom?.() || 1)) };
 })()`;
 const SEARCH_OPEN = (stopFirst) => `(async () => { ${READ_TOP}
   const v = window.__v; await paint();
@@ -853,6 +871,9 @@ const searchScene = async (tail, stopFirst = false) => {
   const held = scenes.map((x, i) => [x, alone[i]]).filter(([x, y]) => x.ok && x.alive && x.gap > 0 && x.headersAbove > 0 && y && y.ok && y.gap > 0 && y.st0 === x.st0 && y.card === x.card);
   const once = ([x, y]) => x.open != null && y.open != null && Math.abs(x.open - y.open) <= NOTCH_TOL_PX && x.closed != null && y.closed != null && Math.abs(x.closed - y.closed) <= NOTCH_TOL_PX;
   check(`§4h ONE AUTHORITY, SEARCH OPENS: at ${held.length} of ${scenes.length} depths the scene held (the watch alive, the slab in the page, run headers folded above the reading line) beside a twin page in the browser's own world, and the card at the reading line moved exactly as there (open / closed — the watch: ${held.map(([x]) => x.open + ' / ' + x.closed).join(', ') || '-'}; the browser alone: ${held.map(([, y]) => y.open + ' / ' + y.closed).join(', ') || '-'} px; ± ${NOTCH_TOL_PX})`, held.length >= 1 && held.every(once), JSON.stringify({ scenes, alone }));
+  // (c): a carry in the task of a pending change, and its control (the watch's flush blinded for that carry)
+  const ct = await firstHold('a carry with a pending change', null, { after: CARRY_SAME_TASK(false) }), cc = await firstHold('a carry with a pending change, control', null, { after: CARRY_SAME_TASK(true) });
+  check(`§4h ONE AUTHORITY, A CARRY IN THE TASK OF A PENDING CHANGE: a row above the reading line grew 150 px and a ${ct.after?.carry} px carry landed in the same task — the card at the reading line moved exactly the carry (${ct.after?.moved} px; ± ${NOTCH_TOL_PX}); CONTROL, the watch's flush blinded for that carry: it moved ${cc.after?.moved} px (the growth answered by no one)`, !!ct.after?.ok && Math.abs(ct.after.moved - ct.after.carry) <= NOTCH_TOL_PX && !!cc.after?.ok && Math.abs(cc.after.moved - cc.after.carry) > NOTCH_TOL_PX, JSON.stringify({ leg: ct.after, control: cc.after }));
   // MUST 2 (b): a card above the reading line replaced by a newer, taller version of itself while the watch lives
   const sw = await firstHold('a card above replaced', null, { after: SWAP_ABOVE });
   check(`§4h ONE AUTHORITY, A CARD REPLACED ABOVE THE READING LINE: the scene held (the watch alive ${sw.after?.alive}, the card ${sw.after?.grew} px taller) and the card at the reading line stayed (${sw.after?.moved} px; ± ${NOTCH_TOL_PX})`, !!sw.after?.ok && sw.after.alive && sw.after.grew >= 150 && Math.abs(sw.after.moved) <= NOTCH_TOL_PX, JSON.stringify(sw.after));
