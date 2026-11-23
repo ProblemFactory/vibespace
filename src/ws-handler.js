@@ -1619,24 +1619,27 @@ function registerWsHandler(wss, ctx) {
               // split and parsed the whole file HERE, on the hub's loop (11–119 ms an open at the stand-in's sizes). A pool that
               // refuses is SAID in the window (`loadRefused`) — never a read on the loop.
               const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-              let rawMsgs = [], meta = {}, subFetchErr = null, refused = null;
+              let rawMsgs = [], meta = {}, subFetchErr = null, refused = null, refusedSaid = null;
               const pulled = [];   // a remote parent's agent transcript, pulled into the local cache: asked first
               // REMOTE parent (2.191.0, remote workflow viewer's View Log):
               // pull the agent transcript into the local cache first — the
               // helper then reads it like any other place.
               const subHost = data.hostId || parentSession?.host || null;
               // r2865: ids not of the CLI's shape are refused by name (the helper says it) BEFORE any file call — the pull too
-              const aimed = require('./server/subagent-transcript').idsRefusal(claudeId, agentId);
+              const aimedOf = require('./server/subagent-transcript').idsRefusalOf(claudeId, agentId), aimed = aimedOf ? aimedOf.text : null;
               // r2991 (b): the words fit the cause — a parent of ANOTHER harness keeps no Claude Code sub-agent log; no conversation named
               // (the parent's harness by its DECLARED row: store.pictures.subagents — its sub-agents keep records under
               // <conversation>/subagents/, src/harnesses/*.js — never a branch on a harness id)
               const subBackend = String(parentSession?.backend || data.backend || 'claude');
               const subHarness = (() => { try { return harnessOf(subBackend); } catch { return null; } })();
               const keepsAgentFiles = !!subHarness?.store?.pictures?.subagents;
+              const harnessLabel = subHarness?.label || subBackend;
               const aimedWords = !aimed ? null
-                : !keepsAgentFiles ? `its parent is a ${subHarness?.label || subBackend} conversation, and no Claude Code sub-agent log is kept for it here`
+                : !keepsAgentFiles ? `its parent is a ${harnessLabel} conversation, and no Claude Code sub-agent log is kept for it here`
                 : !claudeId ? 'no conversation was named for this agent'
                 : aimed;
+              // …and its code for the page's own words (r3103 (4): src/lib/chat-view.js SUBAGENT_REFUSED, zh / ja)
+              const aimedSaid = !aimed ? null : !keepsAgentFiles ? { code: 'other-harness', vars: { harness: harnessLabel } } : !claudeId ? { code: 'no-conversation' } : aimedOf.said;
               if (!aimed && subHost && hosts && /^[\w-]+$/.test(agentId)) {
                 try {
                   const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });
@@ -1649,8 +1652,8 @@ function registerWsHandler(wss, ctx) {
                   subFetchErr = e.message;
                 }
               }
-              const got = aimed ? { fp: null, refused: aimedWords } : await require('./server/subagent-transcript').agentTranscript({ claudeSessionId: claudeId, agentId, exactDir: path.join(projectsDir, cwdToProjectDir(cwd)), first: pulled, root: projectsDir });
-              if (got.refused) refused = got.refused;
+              const got = aimed ? { fp: null, refused: aimedWords, said: aimedSaid } : await require('./server/subagent-transcript').agentTranscript({ claudeSessionId: claudeId, agentId, exactDir: path.join(projectsDir, cwdToProjectDir(cwd)), first: pulled, root: projectsDir });
+              if (got.refused) { refused = got.refused; refusedSaid = got.said || null; }
               else if (got.fp) { rawMsgs = got.records.filter((m) => m && (m.type === 'user' || m.type === 'assistant' || m.type === 'result')); meta = got.meta || {}; }
               const subMM = new MessageManager(subId);
               await subMM.convertHistoryAsync(rawMsgs);
@@ -1659,7 +1662,7 @@ function registerWsHandler(wss, ctx) {
               // with a retry instead of a blank read-only window.
               ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total, meta,
                 ...(rawMsgs.length === 0 && subFetchErr ? { loadError: `Couldn’t load this agent’s log from the machine: ${subFetchErr}` } : {}),
-                ...(refused ? { loadRefused: refused } : {}) }));
+                ...(refused ? { loadRefused: refused, ...(refusedSaid ? { loadRefusedCode: refusedSaid } : {}) } : {}) }));
             } else if (!found) ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: [], totalCount: 0 }));
             break;
           }

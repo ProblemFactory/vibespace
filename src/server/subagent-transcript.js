@@ -38,12 +38,16 @@ const os = require('os');
 
 const SID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AGENT_SHAPE = /^[\w-]{1,128}$/;
-/** why these ids are refused (not the shape the CLI gives them), or null — pure, no file call */
-function idsRefusal(claudeSessionId, agentId) {
-  if (typeof claudeSessionId !== 'string' || !SID_SHAPE.test(claudeSessionId)) return 'its conversation id is not one the CLI gives (a UUID)';
-  if (typeof agentId !== 'string' || !AGENT_SHAPE.test(agentId)) return 'its agent id is not one the CLI gives (letters, digits, _ and -)';
+// EVERY REFUSAL IS SAID TWICE (主开发 r3103 (4)): its English words (`refused`, the journal's and the API's) and its CODE with its
+// values (`said`: { code, vars }) — the page words it through its own translation (src/lib/chat-view.js SUBAGENT_REFUSED, zh / ja)
+/** the shape refusal of these ids — { text, said } — or null; pure, no file call */
+function idsRefusalOf(claudeSessionId, agentId) {
+  if (typeof claudeSessionId !== 'string' || !SID_SHAPE.test(claudeSessionId)) return { text: 'its conversation id is not one the CLI gives (a UUID)', said: { code: 'sid-shape' } };
+  if (typeof agentId !== 'string' || !AGENT_SHAPE.test(agentId)) return { text: 'its agent id is not one the CLI gives (letters, digits, _ and -)', said: { code: 'agent-shape' } };
   return null;
 }
+/** why these ids are refused (not the shape the CLI gives them), or null — pure, no file call */
+const idsRefusal = (claudeSessionId, agentId) => { const r = idsRefusalOf(claudeSessionId, agentId); return r ? r.text : null; };
 
 const PLACE_MAX = 256;
 const _places = new Map();   // `${conversation}\0${agent}` → the transcript's path, kept (the newest last, the oldest dropped)
@@ -85,9 +89,16 @@ let findBoundMs = FIND_BOUND_MS;   // a suite may set it (_setFindBoundForTest)
 const _unanswered = new Map();   // folder → the look out there that did not answer within a find's bound (until it returns)
 const _tail = new Map();         // folder → its last look (the next one there waits for it)
 const STOP = Symbol('stop');
-const stopOf = (why) => Object.assign(new Error(why), { [STOP]: true });
+const stopOf = (why, said = null) => Object.assign(new Error(why), { [STOP]: true, said });
 const isStop = (e) => !!(e && e[STOP]);
-const folderName = (key, root) => (key === root ? 'the projects folder' : `the folder ${path.basename(key)}`);
+// a folder's words, said with their code: `s` = the bound (it did not answer within it), or null (a look there is still out)
+function folderWords(key, root, s = null) {
+  const name = path.basename(key);
+  if (key === root) return s == null ? { text: 'the projects folder did not answer (a look there is still out)', said: { code: 'root-out' } }
+    : { text: `the projects folder did not answer within ${s} s`, said: { code: 'root-late', vars: { s } } };
+  return s == null ? { text: `the folder ${name} did not answer (a look there is still out)`, said: { code: 'folder-out', vars: { name } } }
+    : { text: `the folder ${name} did not answer within ${s} s`, said: { code: 'folder-late', vars: { name, s } } };
+}
 function looker(root) {
   const ctx = { ended: false, out: null, waiting: null, skipped: null, judgeRoot: path.resolve(projectsRoot()), realProj: new Map() };
   const keyOf = (p) => { const rel = path.relative(root, p); if (!rel) return root; if (rel.split(path.sep)[0] === '..' || path.isAbsolute(rel)) return path.dirname(p); return path.join(root, rel.split(path.sep)[0]); };
@@ -95,7 +106,7 @@ function looker(root) {
     if (ctx.ended) return Promise.reject(stopOf('the find has ended'));
     const key = keyOf(p);
     if (_unanswered.has(key)) {
-      if (key === root) { _stats.unanswered++; return Promise.reject(stopOf(`${folderName(key, root)} did not answer (a look there is still out)`)); }
+      if (key === root) { _stats.unanswered++; const w = folderWords(key, root); return Promise.reject(stopOf(w.text, w.said)); }
       _stats.skipped++; if (!ctx.skipped) ctx.skipped = key;   // a marked project folder: skipped, as one with no such file
       return Promise.reject(new Error('skipped'));
     }
@@ -174,17 +185,16 @@ async function inWorkflows(subDir, want, place, L) {
 const markUnanswered = (out) => { _unanswered.set(out.key, out.lp); const clear = () => { if (_unanswered.get(out.key) === out.lp) _unanswered.delete(out.key); }; out.lp.then(clear, clear); };
 async function findAgentTranscript(opts = {}) {
   _stats.finds++;
-  const refused = idsRefusal(opts.claudeSessionId, opts.agentId);
-  if (refused) { _stats.aimed++; return { fp: null, refused, aimed: true }; }
+  const shape = idsRefusalOf(opts.claudeSessionId, opts.agentId);
+  if (shape) { _stats.aimed++; return { fp: null, refused: shape.text, said: shape.said, aimed: true }; }
   const root = opts.root || projectsRoot();
   const ask = [opts.claudeSessionId, opts.agentId, opts.exactDir || '', root, opts.workflows !== false, !!opts.shared, ...(opts.first || [])].join('\0');
-  const missedAt = _missedPast.get(ask);
-  if (missedAt !== undefined) { if (Date.now() - missedAt < MISS_KEPT_MS) return { fp: null }; _missedPast.delete(ask); }   // the kept answer of a walk past a bound
   let walk = _walks.get(ask);
   if (!walk) {
     const ctx = looker(root);
+    ctx.ask = ask;
     walk = { ctx, past: false };
-    walk.p = findWithin(opts, root, ctx).catch((e) => (isStop(e) ? { fp: null, refused: e.message, unanswered: true } : { fp: null }));
+    walk.p = findWithin(opts, root, ctx).catch((e) => (isStop(e) ? { fp: null, refused: e.message, said: e.said || null, unanswered: true } : { fp: null }));
     _walks.set(ask, walk);
     const w = walk;
     w.p.then((r) => {
@@ -204,11 +214,13 @@ async function findAgentTranscript(opts = {}) {
     if (_walks.get(ask) === walk) _walks.delete(ask);   // an ended walk is joined by no later ask: that one meets the mark at once
     markUnanswered(out);
     _stats.unanswered++;
-    return { fp: null, refused: `${folderName(out.key, root)} did not answer within ${findBoundMs / 1000} s`, unanswered: true };
+    const w = folderWords(out.key, root, findBoundMs / 1000);
+    return { fp: null, refused: w.text, said: w.said, unanswered: true };
   }
   walk.past = true;   // still going: not cut — it goes on, its answer kept for the next ask
   _stats.unfinished++;
-  return { fp: null, refused: `the walk of the projects folder did not finish within ${findBoundMs / 1000} s (it goes on: ask again)`, unanswered: true };
+  const s = findBoundMs / 1000;
+  return { fp: null, refused: `the walk of the projects folder did not finish within ${s} s (it goes on: ask again)`, said: { code: 'walk-unfinished', vars: { s } }, unanswered: true };
 }
 async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, first = [], workflows = true, shared = false }, root, ctx) {
   const want = `agent-${agentId}.jsonl`, key = `${sid}\0${agentId}`, L = ctx.look;
@@ -225,6 +237,9 @@ async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, firs
     const wf = workflows ? await inWorkflows(exactSub, want, place, L) : null;
     if (wf) { _stats.exact++; keep(key, wf.cand); return { fp: wf.fp, how: 'exact' }; }
   }
+  // r3103 (1): the kept MISS is asked only AFTER the kept and exact places — a file written there since is found at once
+  const missedAt = _missedPast.get(ctx.ask);
+  if (missedAt !== undefined) { if (Date.now() - missedAt < MISS_KEPT_MS) return { fp: null }; _missedPast.delete(ctx.ask); }
   let dirs = [];
   // shared: the live watchers' road — the hub's one listing, at most once a second
   try { dirs = await L(root, () => (shared ? sharedListing(root) : fsp.readdir(root))); } catch (e) { if (isStop(e)) throw e; }
@@ -238,7 +253,7 @@ async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, firs
   }
   _stats.missed++;
   // a folder skipped as marked may hold it: the ask is refused by THAT folder's name, never answered as missing
-  if (ctx.skipped) return { fp: null, refused: `${folderName(ctx.skipped, root)} did not answer (a look there is still out)`, unanswered: true };
+  if (ctx.skipped) { const w = folderWords(ctx.skipped, root); return { fp: null, refused: w.text, said: w.said, unanswered: true }; }
   return { fp: null };
 }
 
@@ -278,7 +293,7 @@ function readAgentTranscript(fp, { reader = null, metaRead = null, metaBoundMs =
         new Promise((res) => { timer = setTimeout(() => res(LATE), metaBoundMs); }),
       ]);
       clearTimeout(timer);
-      if (text === LATE) { _stats.refused++; return { refused: `its meta file (${path.basename(metaPath)}) did not answer within ${metaBoundMs / 1000} s` }; }
+      if (text === LATE) { _stats.refused++; const file = path.basename(metaPath), s = metaBoundMs / 1000; return { refused: `its meta file (${file}) did not answer within ${s} s`, said: { code: 'meta-late', vars: { file, s } } }; }
       if (typeof text === 'string') try { meta = JSON.parse(text); } catch { }
       return { records, meta };
     } finally { _stats.inFlight--; }
@@ -294,9 +309,9 @@ function readAgentTranscript(fp, { reader = null, metaRead = null, metaBoundMs =
 /** find + read, the one road both callers take → { fp, records, meta } | { fp: null } | { fp, refused } */
 async function agentTranscript(opts = {}) {
   const found = await findAgentTranscript(opts);
-  if (!found.fp) return found.aimed || found.unanswered ? { fp: null, refused: found.refused, aimed: !!found.aimed, unanswered: !!found.unanswered } : { fp: null };
+  if (!found.fp) return found.aimed || found.unanswered ? { fp: null, refused: found.refused, said: found.said || null, aimed: !!found.aimed, unanswered: !!found.unanswered } : { fp: null };
   const got = await readAgentTranscript(found.fp, opts);
-  return got.refused ? { fp: found.fp, refused: got.refused } : { fp: found.fp, how: found.how, records: got.records, meta: got.meta };
+  return got.refused ? { fp: found.fp, refused: got.refused, said: got.said || null } : { fp: found.fp, how: found.how, records: got.records, meta: got.meta };
 }
 
 /** the place kept for this conversation and agent (the one asked, judged again at each ask), or null */
@@ -306,4 +321,4 @@ function _resetForTest() { _places.clear(); _judged.clear(); _unanswered.clear()
 const _setListingMaxAgeForTest = (ms) => { listingMaxAgeMs = ms; };
 const _setFindBoundForTest = (ms) => { findBoundMs = ms; };
 
-module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, FIND_BOUND_MS, MISS_KEPT_MS, _resetForTest, _setListingMaxAgeForTest, _setFindBoundForTest };
+module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, idsRefusalOf, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, FIND_BOUND_MS, MISS_KEPT_MS, _resetForTest, _setListingMaxAgeForTest, _setFindBoundForTest };

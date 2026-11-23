@@ -31,6 +31,10 @@
 //      through the linked folder's parent, answer as missing; RED: the judge against the real projects root (05d3d860d), and a copy
 //      with no judge. Also (r2991 (b)) the attach's words fit a parent of another harness and a conversation not named, and (lens 3)
 //      an aimed conversation id with a remote parent asks no remote pull (RED: the pull unguarded)
+//   ⑫ THE REFUSALS' WORDS (r3103 (4)): every code the hub sends has its row in the page's table (src/lib/chat-view.js
+//      SUBAGENT_REFUSED), every row's words have zh and ja; the attach and the route send the code beside the words; CONTROL: a
+//      code planted in the hub with no row is caught by name. And (r3103 (1), in ⑩b) a kept miss never hides a file written at the
+//      exact place since; RED: the kept miss asked first
 //   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
 //   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
 //      conversation or out of the projects folder, and a conversation id with a parent step, are refused by name before any file
@@ -136,7 +140,7 @@ const releaseCards = async (fp, { attach = true, id = 'ref' } = {}) => {
 };
 const MUT = mutantCopies('subagent-transcript', REPO);
 const WSH_SRC = fs.readFileSync(WSH_PATH, 'utf-8');
-const HELPER_CALL = (() => { const a = WSH_SRC.indexOf("              const got = aimed ? { fp: null, refused: aimedWords } : await require('./server/subagent-transcript').agentTranscript("); if (a < 0) return 'THE HELPER CALL'; const b = WSH_SRC.indexOf('\n', WSH_SRC.indexOf('              else if (got.fp) {', a)); return WSH_SRC.slice(a, b + 1); })();
+const HELPER_CALL = (() => { const a = WSH_SRC.indexOf("              const got = aimed ? { fp: null, refused: aimedWords, said: aimedSaid } : await require('./server/subagent-transcript').agentTranscript("); if (a < 0) return 'THE HELPER CALL'; const b = WSH_SRC.indexOf('\n', WSH_SRC.indexOf('              else if (got.fp) {', a)); return WSH_SRC.slice(a, b + 1); })();
 
 console.log('① THE ATTACH — a 5 MB agent, 300 project folders: the release\'s cards, nothing listed or read whole on the loop');
 {
@@ -494,6 +498,10 @@ console.log('⑩b THE BOUND\'S WORDS (主开发 r2991 (a)) — a large healthy p
     await settle(T);
     const r4 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
     ok(/did not finish/.test(r3.body.refused || '') && r4.code === 200 && (r4.body.messages || []).length === 0 && !r4.body.refused, `…an agent that is nowhere: the walk past the bound ends finding nothing, and the next ask is answered «none», as the release answered in the end (${r4.code}${r4.body.refused ? ', «' + r4.body.refused + '»' : ''})`);
+    // r3103 (1): the kept miss is asked only AFTER the kept and exact places — the agent's file written at the exact place since is found at once
+    agent(SUB, NONE, 0.02);
+    const r5 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
+    ok(r5.code === 200 && (r5.body.messages || []).length > 0, `…and once its file is written at the conversation's own folder, the next ask finds it at once — the kept miss never hides it (${r5.code}, ${(r5.body.messages || []).length} cards)`);
     // RED: the bound as it was (05d3d860d) — any look out at the bound ends the walk and names its folder; the next ask walks again
     const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
     const cut = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, '  const stalled = !!out && Date.now() - out.at >= findBoundMs / 2;\n', '  const stalled = !!out;\n', 'the bound\'s words'), 'bound-cuts');
@@ -502,7 +510,46 @@ console.log('⑩b THE BOUND\'S WORDS (主开发 r2991 (a)) — a large healthy p
     for (let i = 0; i < 300 && cut.stats().marked > 0; i++) await sleep(10);
     const c2 = await cut.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
     ok(/did not answer/.test(c1.refused || '') && !!c2.refused && !c2.records, `RED CONTROL: the bound that ends every walk names a folder that answered («${c1.refused}») and refuses the next ask again («${c2.refused}») — the legs above would be RED`);
+    // RED (r3103 (1)): the kept miss asked FIRST (before the kept and exact places), planted in a copy — the file written since stays hidden
+    const missFirst = MUT.load('src/server/subagent-transcript.js', anchored(anchored(HSRC,
+      '  const missedAt = _missedPast.get(ctx.ask);\n  if (missedAt !== undefined) { if (Date.now() - missedAt < MISS_KEPT_MS) return { fp: null }; _missedPast.delete(ctx.ask); }\n', '', 'the kept miss after the exact place'),
+      '  let walk = _walks.get(ask);\n', '  const missedAt = _missedPast.get(ask);\n  if (missedAt !== undefined && Date.now() - missedAt < MISS_KEPT_MS) return { fp: null };\n  let walk = _walks.get(ask);\n', 'the kept miss asked first'), 'miss-first');
+    missFirst._setFindBoundForTest(200);
+    const NONE2 = 'e0000000000000ed', mopts = { claudeSessionId: SID, agentId: NONE2, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ };
+    await missFirst.agentTranscript(mopts); await settle(missFirst);
+    agent(SUB, NONE2, 0.02);
+    const mf = await missFirst.agentTranscript(mopts);
+    ok(!mf.fp, `RED CONTROL: a copy that asks the kept miss first answers «none» for a file written at the exact place since (found ${mf.fp}) — the leg above would be RED`);
   } finally { fs.promises.realpath = realRp; fs.promises.readdir = realRd; T._resetForTest(); }
+}
+
+console.log('⑫ THE REFUSALS\' WORDS (主开发 r3103 (4)) — every code the hub sends is worded by the page, with zh and ja');
+{
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
+  const HELPER = read('src/server/subagent-transcript.js'), WSH = read('src/ws-handler.js'), CV = read('src/lib/chat-view.js');
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+  const codesOf = (src) => [...new Set([...src.matchAll(/\bcode: '([a-z-]+)'/g)].map((m) => m[1]))];
+  const tableOf = (src) => { const a = src.indexOf('const SUBAGENT_REFUSED = {'), b = src.indexOf('\n};', a); return a < 0 || b < 0 ? {} : Object.fromEntries([...src.slice(a, b).matchAll(/^  '([a-z-]+)': \([^)]*\) => t\('((?:[^'\\]|\\.)*)'/gm)].map((m) => [m[1], m[2]])); };
+  const census = (hubSrcs, cv) => {
+    const sent = [...new Set(hubSrcs.flatMap(codesOf))], table = tableOf(cv);
+    const noRow = sent.filter((c) => !(c in table));
+    const noWords = Object.entries(table).filter(([, key]) => !ZH.includes(JSON.stringify(key) + ':') || !JA.includes(JSON.stringify(key) + ':')).map(([c]) => c);
+    return { sent, rows: Object.keys(table).length, noRow, noWords };
+  };
+  // the attach's own block only (the rest of ws-handler sends codes of its own frames)
+  const WSH_SUB = (() => { const a = WSH.indexOf("const aimedOf = require('./server/subagent-transcript')"), b = WSH.indexOf('loadRefusedCode', a); return a >= 0 && b > a ? WSH.slice(a, b) : 'THE SUB-AGENT BLOCK'; })();
+  const c = census([HELPER, WSH_SUB], CV);
+  ok(c.sent.length >= 10 && !c.noRow.length && !c.noWords.length, `every refusal code the hub sends (${c.sent.length}: ${c.sent.join(', ')}) has its row in the page's table (${c.rows}) and its words in zh and ja${c.noRow.length ? ' — NO ROW: ' + c.noRow.join(', ') : ''}${c.noWords.length ? ' — NO zh/ja: ' + c.noWords.join(', ') : ''}`);
+  const planted = census([HELPER + "\nconst zz = { code: 'zz-planted' };", WSH_SUB], CV);
+  ok(planted.noRow.length === 1 && planted.noRow[0] === 'zz-planted', `CONTROL: a code planted in the hub with no row in the page's table is caught by name (${planted.noRow.join(', ')})`);
+  // the doors send the code beside the words
+  T._resetForTest();
+  const H = hub(require(WSH_PATH));
+  const aimedA = await attachOf(H, '/../../x', {}), otherA = await attachOf(H, 'abc125', { sid: 'thread-of-a-codex-parent', more: { backend: 'codex' } }), noneA = await attachOf(H, 'abc126', { sid: '' });
+  const codeOf = (r) => ((r && r.frame && r.frame.loadRefusedCode) || {});
+  const aimedR = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: '/../../x' });
+  ok(codeOf(aimedA).code === 'agent-shape' && codeOf(otherA).code === 'other-harness' && (codeOf(otherA).vars || {}).harness === 'Codex' && codeOf(noneA).code === 'no-conversation' && (aimedR.body.refusedCode || {}).code === 'agent-shape',
+    `the attach sends the code beside the words (${codeOf(aimedA).code}, ${codeOf(otherA).code} ${J(codeOf(otherA).vars)}, ${codeOf(noneA).code}); the route too (${J(aimedR.body.refusedCode)})`);
 }
 
 console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 MiB + 32 MiB) comes back entire');
@@ -563,7 +610,7 @@ console.log('⑧ THE READ CANNOT BE AIMED (主开发 r2865) — whatever a calle
   const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
   const lawless = MUT.load('src/server/subagent-transcript.js',
     anchored(anchored(anchored(HSRC,
-      '  const refused = idsRefusal(opts.claudeSessionId, opts.agentId);\n', '  const refused = null;   /* stale-pins: kept — the helper before r2865, planted as leg ⑧\'s RED control */\n', 'the shape test'),
+      '  const shape = idsRefusalOf(opts.claudeSessionId, opts.agentId);\n', '  const shape = null;   /* stale-pins: kept — the helper before r2865, planted as leg ⑧\'s RED control */\n', 'the shape test'),
       '  if (!inside) { _stats.outside++; return null; }\n', '', 'the real-path judge'),
       "fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || readJudged)(metaPath) : null))", "Promise.resolve().then(() => (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath))", 'the meta judge'), 'lawless');   // stale-pins: kept — the helper's meta read before r2865, planted as leg ⑧'s RED control
   const lB = await lawless.agentTranscript({ claudeSessionId: SID, agentId: toB, exactDir: DIR, root: PROJ });

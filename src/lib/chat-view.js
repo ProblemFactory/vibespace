@@ -63,6 +63,21 @@ import { endLineWords } from './left-behind-line.js'; // B-69a7: a press's outco
 import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
 import { lateFocus, openClock, PAGE_START } from './late-focus.js'; // B-c87d: the rewind answer's focus goes through THE door (the keyboard stays where the person last put it)
 
+// lane lg-recovery (主开发 r3103 (4)): the hub's sub-agent refusals BY THEIR CODE (src/server/subagent-transcript.js `said`,
+// src/ws-handler.js) — worded here, through the page's translation; every code the hub sends has its row (test-subagent-transcript ⑫)
+const SUBAGENT_REFUSED = {
+  'sid-shape': () => t('its conversation id is not one the CLI gives (a UUID)'),
+  'agent-shape': () => t('its agent id is not one the CLI gives (letters, digits, _ and -)'),
+  'no-conversation': () => t('no conversation was named for this agent'),
+  'other-harness': (v) => t('its parent is a {harness} conversation, and no Claude Code sub-agent log is kept for it here', { harness: String(v.harness || '') }),
+  'root-late': (v) => t('the projects folder did not answer within {s} s', { s: String(v.s ?? '') }),
+  'folder-late': (v) => t('the folder {name} did not answer within {s} s', { name: String(v.name || ''), s: String(v.s ?? '') }),
+  'root-out': () => t('the projects folder did not answer (a look there is still out)'),
+  'folder-out': (v) => t('the folder {name} did not answer (a look there is still out)', { name: String(v.name || '') }),
+  'walk-unfinished': (v) => t('the walk of the projects folder did not finish within {s} s (it goes on: ask again)', { s: String(v.s ?? '') }),
+  'meta-late': (v) => t('its meta file ({file}) did not answer within {s} s', { file: String(v.file || ''), s: String(v.s ?? '') }),
+};
+
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
 // (agent-meta.js owns both halves — see isAgentMemoryPath). The PATH
@@ -6640,7 +6655,10 @@ class ChatView {
           // server now distinguishes the two: msg.loadError carries the real
           // machine-side failure (2.272.1) instead of implying an empty log.
           // lane lg-recovery (r2374): `loadRefused` = the hub's transcript pool refused the read (never done on the hub's loop instead)
-          view._renderers.appendSystem(msg.loadRefused ? t('This agent’s log could not be read here: {why}', { why: String(msg.loadRefused) }) : (msg.loadError || t('No transcript found for this agent.')));
+          // r3103 (4): a refusal the hub CODED is worded by the page (its own translation, zh / ja); only an uncoded one shows the hub's words
+          const coded = msg.loadRefusedCode && SUBAGENT_REFUSED[msg.loadRefusedCode.code];
+          const why = msg.loadRefused ? (coded ? coded(msg.loadRefusedCode.vars || {}) : String(msg.loadRefused)) : '';
+          view._renderers.appendSystem(msg.loadRefused ? t('This agent’s log could not be read here: {why}', { why }) : (msg.loadError || t('No transcript found for this agent.')));
         }
       }
     };
