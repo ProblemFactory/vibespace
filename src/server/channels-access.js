@@ -2704,11 +2704,10 @@ function create(engineCtx) {
    * said again) — that ledger is never pruned, bounded by the rows. The engine's start waits while its index is held, so the heal
    * never reads an unread index. → {healed: [words], none: [words], later: [words], cannot: [words]}.
    */
-  const FILTER_ID_MAX = 512;   // r3020: the bound of a filter id a watch entry carries (src/grant-model.js TEXT_MAX)
   async function healGrainRows() {
     let rows = [];
     try { rows = CG.rowsShort(); } catch { rows = []; }
-    const out = { healed: [], none: [], later: [], cannot: [], writes: 0 };
+    const out = { healed: [], none: [], later: [], cannot: [] };
     if (!rows.length) return out;
     const accounts = new Set(adapterRecords().adapters.map((r) => r.id));
     const said = store.index.table('grainSkipsSaid') || {}, newSaid = {};
@@ -2767,8 +2766,10 @@ function create(engineCtx) {
         return ne;
       });
       if (!n) {   // r3020 (small): a filter id past its bound is named as that
-        const idPast = [...take.values()].every((w) => w && w.mode === 'filtered' && w.filterId && !(typeof w.filterId === 'string' && w.filterId.length <= FILTER_ID_MAX && !/[\u0000-\u001f\u007f]/.test(w.filterId)));
-        tell(out.cannot, `${row.resource} (${idPast ? `its watchers' filter id is past its bound (${FILTER_ID_MAX} characters)` : 'what its watchers carry is past what a row carries'} — the row stays as the save itself writes it)`);
+        // r3194 (2): the filter id judged by the model's ONE rule — the save's own builder, asked once more without the id: carried
+        // whole then ⇒ the id is what the row cannot carry
+        const idPast = [...take.values()].every((w) => { if (!(w && w.mode === 'filtered' && w.filterId)) return false; const bare = CG.entryOfWatch({ ...w, filterId: null }, null, []); return !!(bare && typeof bare.notify === 'string'); });
+        tell(out.cannot, `${row.resource} (${idPast ? "its watchers' filter id is past what a row carries" : 'what its watchers carry is past what a row carries'} — the row stays as the save itself writes it)`);
         continue;
       }
       batch.set(row.resource, to.reduce((t, e) => t + (e && e.filter ? Buffer.byteLength(JSON.stringify(e.filter), 'utf8') : 0), 0));   // r3020: the bodies this one write carries (the index does not see them yet)
@@ -2786,9 +2787,8 @@ function create(engineCtx) {
       for (const q of queue) {
         const k = key(q.change.door, q.change.resource);
         if (refused.has(k)) { const x = refused.get(k); q.refused((x && (x.code || x.error)) || 'refused'); }
-        else if (w.ok) out.healed.push(q.healed);   // landed, or already whole by the store's own check
+        else if (landed.has(k)) out.healed.push(q.healed);   // r3194 (1): «now carries» said only of a row the store CHANGED
       }
-      out.writes = w.writes;
     }
     const list = (xs) => `${xs.slice(0, 8).join(' · ')}${xs.length > 8 ? ` · and ${xs.length - 8} more` : ''}`;
     if (out.healed.length) log.log(`[channels] boot: ${out.healed.length} grants row${out.healed.length === 1 ? '' : 's'} written by an earlier release now carr${out.healed.length === 1 ? 'ies' : 'y'} what the channel index holds for ${out.healed.length === 1 ? 'it' : 'them'} (an upgrade, or a return to that release): ${list(out.healed)}`);

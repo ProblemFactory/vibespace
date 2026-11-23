@@ -428,22 +428,22 @@ function create({ grants = null, dataDir = null } = {}) {
    *  anything is written): that row is set aside and the rest are handed again AT ONCE — no yield between, so no save lands between
    *  two of these writes (r2933 (2): a refused row is that row's alone, the others land). A refusal that names no row (the store
    *  unreadable, its write refused) refuses every row left. The rows' own `at` / `by` become the heal's («boot»); their entries
-   *  keep theirs. → {ok, changed: [{door, resource}], refused: [{door, resource, code, error}], writes} */
+   *  keep theirs. → {ok, changed: [{door, resource}], refused: [{door, resource, code, error}]} */
   function healRows(changes, by = 'boot') {
     const s = S();
     let left = (Array.isArray(changes) ? changes : []).map((c) => ({ removeExcept: [], ...c }));
     const refused = [];
-    const refuseAll = (r) => { for (const c of left) refused.push({ door: c.door, resource: c.resource, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' }); return { ok: false, changed: [], refused, writes: 0 }; };
+    const refuseAll = (r) => { for (const c of left) refused.push({ door: c.door, resource: c.resource, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' }); return { ok: false, changed: [], refused }; };
     if (!s) return refuseAll({ code: 'store_unreadable', error: 'the grants store is not available — nothing was written' });
     while (left.length) {
       const r = s.setMany(left, by);
-      if (r && r.ok) return { ok: true, changed: r.changed || [], refused, writes: (r.changed || []).length ? 1 : 0 };
+      if (r && r.ok) return { ok: true, changed: r.changed || [], refused };
       const i = r && r.door !== undefined ? left.findIndex((c) => c.door === r.door && String(c.resource) === String(r.resource)) : -1;
       if (i < 0) return refuseAll(r);
       refused.push({ door: left[i].door, resource: left[i].resource, code: r.code || 'refused', error: r.error || 'refused' });
       left = left.filter((_, j) => j !== i);
     }
-    return { ok: true, changed: [], refused, writes: 0 };
+    return { ok: true, changed: [], refused };
   }
   /** One principal's row in a conversation's `#user` / `#request` row (null level ⇒ removed). */
   function setLevel(res, principal, level, { at = null, by = 'user' } = {}) {
