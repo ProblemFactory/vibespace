@@ -647,5 +647,41 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   ok(/const keysPointOf = \(px, lease\) => \{ const r = dialogWindow\(px, lease\) \|\| \(px && px\.plan && px\.plan\.main\) \|\| null; return r \? visiblePoint\(r\) : null; \};/.test(esrc), 'only a point the PLAN gives is judged (a dialog\'s window, else the main window\'s) — with no main, mainFocus\'s tree-bounds fallback (the toolkit\'s coordinates, never the X root\'s) makes no claim');
 }
 
+// ── r3085 (lane bl-machines-a, the family's second law r3019): desktop-apps.json HELD (desktop-serve's own hold) keeps an EMPTY memory;
+// the window reconcile drops a lease whose window has «no live record» and prunes a share whose window has none — read while held that
+// is UNKNOWN: ZERO leases dropped, ZERO shares ended. The keeper a stand-in in desktop-serve's shape answering as a held desktop-serve
+// does (held() true, its records gone from memory); RED: the reconcile as it was (the held fact cut, in a copy) ends them ──
+{
+  const ENG85 = require(path.join(REPO, 'src/server/window-targets-engine.js'));
+  const dir85 = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wreach-held-'));
+  process.on('exit', () => { try { fs.rmSync(dir85, { recursive: true, force: true }); } catch { } });
+  const mkRec85 = (id) => ({ id, label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242 }, starts: {}, backend: 'vnc-display', startedAt: 1 });
+  const P85 = 'aaaaaaaa-1111-4000-8000-000000000085';
+  const scene85 = (M, sub) => {
+    const recs = new Map([['da-h1', mkRec85('da-h1')], ['da-h2', mkRec85('da-h2')]]); let held = false;
+    const sessions = new Map([['w-P', { agentToken: 'vsst_P85', claudeSessionId: P85, backendSessionId: P85, backend: 'claude', name: 'parent', mode: 'chat' }]]);
+    const e = M.create({ keeper: { listApps: () => [...recs.values()], get: (id) => recs.get(id) || null, sessionPids: (rec) => Object.values(rec.pids).filter(Boolean), x11EnvFor: () => null, held: () => held, registry: () => [] }, dataDir: path.join(dir85, sub), env: () => ({}), activeSessions: sessions, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null });
+    const f = e.factsForToken('vsst_P85');
+    e.grantReach('da-h1', { kind: 'session', id: 'w-P', name: 'parent' }); e.grantReach('da-h2', { kind: 'session', id: 'w-P', name: 'parent' });   // both windows shared with the session
+    let leaseErr = null; try { e.attach('da-h1', f); } catch (x) { leaseErr = (x && (x.code || x.message)) || String(x); }
+    const before = { lease: !!e.leaseOf('da-h1'), share: !!e.reachOf('da-h2') };
+    held = true; const kept = new Map(recs); recs.clear();   // desktop-apps.json held: desktop-serve's memory reads EMPTY
+    const r = e.reconcile({ graceMs: 0 });
+    held = false; for (const [k, v] of kept) recs.set(k, v);   // the hold LIFTS: the records read again — what survived the held reconcile shows now
+    return { leaseErr, before, after: { lease: !!e.leaseOf('da-h1'), share: !!e.reachOf('da-h2') }, dropped: r.dropped.length, pruned: r.pruned };
+  };
+  const now85 = scene85(ENG85, 'held-now');
+  const src85 = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
+  const CUT85 = "    const storeHeld = (() => { try { return typeof keeper.held === 'function' && !!keeper.held(); } catch { return false; } })();\n";
+  const { anchored: anch85 } = await import('./scratch.mjs');
+  const red85 = src85.split(CUT85).length === 2 ? scene85(MUT.load('src/server/window-targets-engine.js', anch85(src85, CUT85, '    const storeHeld = false;\n', 'held-ignored'), 'held-ignored'), 'held-red') : null;
+  console.log('  r3085, the facts judged: ' + JSON.stringify({ now: now85, red: red85 }));
+  ok(now85.before.lease && now85.before.share && now85.after.lease && now85.after.share && now85.dropped === 0 && now85.pruned === 0,
+    `r3085: desktop-apps.json HELD (its memory empty) — the real reconcile drops ZERO leases and ends ZERO shares (lease ${now85.before.lease} → ${now85.after.lease}, share ${now85.before.share} → ${now85.after.share}; dropped ${now85.dropped}, pruned ${now85.pruned})`, now85);
+  // (the copy's share is judged by its OWN prune count: reachOf after the lift reads the grants rows through another module's view)
+  ok(!!red85 && red85.before.lease && red85.before.share && !red85.after.lease && red85.dropped >= 1 && red85.pruned >= 1,
+    `RED CONTROL r3085: the reconcile as it was (the held fact cut, in a copy) drops the lease and prunes the shares (dropped ${red85 && red85.dropped}, pruned ${red85 && red85.pruned})`, red85);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1106,11 +1106,19 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    * (0 = at once — the boot path, after restoreSessions). Returns what
    * happened; commits when anything did.
    */
+  let reconcileHeldSaid = false;   // r3085: the held reconcile said once a hold
   function reconcile({ graceMs = LEASE_DROP_GRACE_MS } = {}) {
     load();
+    // r3085 (lane bl-machines-a, the family's second law r3019): desktop-apps.json HELD (desktop-serve's own hold — its read failed)
+    // keeps an EMPTY memory, so «no live record» is UNKNOWN there, never «gone»: while the hold stands no lease is dropped and no share
+    // is pruned by it (the holder-gone and agent-browser ends read the sessions, not the store, and keep their road)
+    const storeHeld = (() => { try { return typeof keeper.held === 'function' && !!keeper.held(); } catch { return false; } })();
+    if (storeHeld && !reconcileHeldSaid) { reconcileHeldSaid = true; log.warn?.('[window] desktop-apps.json is held: no window lease is dropped and no share pruned for a window it cannot name, until it reads'); }
+    if (!storeHeld) reconcileHeldSaid = false;
     const t = now();
     const dropped = [], stamped = [];
     for (const [h, l] of [...leases]) {
+      if (!liveAny(h) && storeHeld) continue;   // r3085: unknown while desktop-apps.json is held — the lease kept
       if (!liveAny(h)) {
         // lane e2a r3 (verify r1 #2/#6): a Scale ▸ relaunch's successor carries the agent's rung (desktop-serve relaunch) —
         // its lease follows `replacedBy` the way the reach does. r4 (verify r2 #6): reachable only for an ORPHANED lease — the
@@ -1134,6 +1142,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     let pruned = 0;
     for (const h of shareHandles()) {
       if (liveRecord(h)) continue;
+      if (storeHeld) continue;   // r3085: unknown while desktop-apps.json is held — the share kept
       const next = successorOf(h);
       if (next && liveRecord(next) && !hasShare(next)) { moveShare(h, next); audit({ handle: next, verb: 'reach-carried', by: 'keeper', ok: true, from: h }); }
       else dropShare(h);
