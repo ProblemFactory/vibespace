@@ -159,12 +159,23 @@ function create({ dataDir, log = console } = {}) {
   // re-written dozens of times per turn and says the same thing each time.
   const announced = new Set();
 
-  function readAll() {
-    try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (raw && typeof raw === 'object' && raw.byConversation && typeof raw.byConversation === 'object') return raw;
-    } catch { }
-    return { v: 1, byConversation: {} };
+  // r3054 (主开发 — the kept browsers' second door): UNKNOWN IS NOT EMPTY. The file's read in three states: 'ok' (its rows),
+  // 'absent' (no file: a fresh instance — truly empty) and 'unknown' (a read that FAILED, or bytes that do not parse or are not the
+  // store's shape). `readAll` keeps answering what a READER may show (unknown ⇒ no rows: a name, a resume's rung 1, the fresh-key
+  // rule); every road that ENDS by «no binding names it» asks `boundKeys` (unknown ⇒ a throw), and nothing is WRITTEN over it.
+  function readState() {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? { state: 'absent', all: { v: 1, byConversation: {} } } : { state: 'unknown', kind: String((e && e.code) || 'read-failed') }; }
+    try { const raw = JSON.parse(text); if (raw && typeof raw === 'object' && raw.byConversation && typeof raw.byConversation === 'object') return { state: 'ok', all: raw }; } catch { }
+    return { state: 'unknown', kind: 'unparsable' };
+  }
+  function readAll() { const r = readState(); return r.all || { v: 1, byConversation: {} }; }
+  // said ONCE per kind of failure (the error's code, or «unparsable»), the file's base name only
+  const unknownSaid = new Set();
+  function sayUnknown(kind) {
+    if (unknownSaid.has(kind)) return;
+    unknownSaid.add(kind);
+    try { log.warn?.(`[browser] ${FILE_NAME} could not be read (${kind}) — no browser binding is written while it is unknown; each is offered again at its conversation's next record, and nothing ends by «no binding names it»`); } catch { }
   }
   function writeAll(obj) {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
@@ -240,7 +251,11 @@ function create({ dataDir, log = console } = {}) {
     if (!sid || !KEY_RE.test(String(key || ''))) return false;
     if (known.get(sid) === key) return false;
     try {
-      const all = readAll();
+      // r3054 (2): NOTHING IS WRITTEN OVER AN UNREAD FILE — the record (and the prune it carries) writes nothing when its own read
+      // is unknown; `known` stays unset, so the conversation's next record offers the binding again
+      const rs = readState();
+      if (rs.state === 'unknown') { sayUnknown(rs.kind); return false; }
+      const all = rs.all;
       const cur = all.byConversation[sid];
       if (cur && cur.key === key) { known.set(sid, key); return false; }
       if (cur && KEY_RE.test(String(cur.key || '')) && cur.key !== key) return refuseMove(sid, cur, key);
@@ -281,8 +296,22 @@ function create({ dataDir, log = console } = {}) {
     return '';
   }
 
+  /** r3054 (1): every bound key for a road that ENDS by «no binding names it» (the kept store's sweep) — a THROW when the file is
+   *  UNKNOWN (a failed read, torn bytes), so the caller's guard ends NOTHING that pass; an absent file is truly empty. */
+  function boundKeys() {
+    const rs = readState();
+    if (rs.state === 'unknown') { sayUnknown(rs.kind); throw Object.assign(new Error(`${FILE_NAME} could not be read (${rs.kind})`), { code: 'bindings_unknown' }); }
+    const out = new Set();
+    for (const v of Object.values(rs.all.byConversation)) if (v && KEY_RE.test(String(v.key || ''))) out.add(String(v.key));
+    return out;
+  }
+  /** 'ok' | 'absent' | 'unknown' — the file's read now (r3054: a one-shot step that would MOVE by «no binding names it» waits). */
+  function state() { return readState().state; }
+
   /** Every bound key (for a sweeper that wants to know which keys a stopped
-   *  conversation could still come back for). */
+   *  conversation could still come back for). r3054: an UNKNOWN file names none here — kept for the fresh-key rule, whose other
+   *  rungs (the env directory, the scratch profile, the meta, the kept store) name every key with a browser on disk; a road that
+   *  ENDS asks `boundKeys`. */
   function keys() {
     const out = new Set();
     for (const v of Object.values(readAll().byConversation)) if (v && KEY_RE.test(String(v.key || ''))) out.add(String(v.key));
@@ -296,7 +325,7 @@ function create({ dataDir, log = console } = {}) {
   /** How many (session, conversation) implicit-fork announcements were journalled (r7). */
   function implicitForks() { return announced.size; }
 
-  return { record, lookup, conversationOf, conversationsByKey, keys, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS };
+  return { record, lookup, conversationOf, conversationsByKey, keys, boundKeys, state, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS };
 }
 
 module.exports = { create, conversationIdOf, bindableIdOf, keyDecidedFor, FILE_NAME, DIR_REL, MAX_BINDINGS, REFUSAL_METRIC, SHARE_METRIC, IMPLICIT_FORK_METRIC };

@@ -5,7 +5,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ## INDEX (one line per file; the essay is below)
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
-scripts/test-browser-kept-sweep.mjs (fast, NEW — r3006, the sweep's fail-closed law) — a kept store whose read was refused at a start: the real boot sweep removes no kept browser's profile folder, nothing is written over the file; red = the release's rename
+scripts/test-browser-kept-sweep.mjs (fast, NEW — r3006, the sweep's fail-closed law; r3054 ④: the bindings file, the second door) — a kept store whose read was refused at a start: the real boot sweep removes no kept browser's profile folder, nothing is written over the file; red = the release's rename
 scripts/test-channel-store-heap.mjs (NEW, fast — B-360d r2542) — the channel store keeps no start-read text: a stand-in index of 8 000 rows (a title outside Latin-1), the store in a child (--expose-gc), its settled heap a row under twice the file's bytes a row; RED: the takeText line removed
 scripts/fixtures/channel-store-heap-child.cjs (NEW — B-360d r2542) — test-channel-store-heap's child: one store over a stand-in, its settled heap after the open's layout warm-up landed
 src/server/subagent-transcript.js (NEW — 主开发 r2374) — a finished agent's transcript found (kept place, cwd's folder first, async walk) and read by the transcript pool's pages, whole, one read at a time; the sub-agent attach + GET /api/subagent-messages; a pool refusal said ⇒ kb-file-structure
@@ -4927,6 +4927,15 @@ Constructed in `src/ws-create.js`'s factory (not server.js: that file is AT its
 * Gates: test-browser-share-model ③ (real engine + routes + keeper + browser-env over the fake 0.38.1; CONTROLS: a copy that mints twice, a copy without the fork rule; ③f r2: the default-after-start scenes beside their spawn-keyed twins, the 8-row spawn ↔ late parity table (the list, never the clock), the pre-r2 engine as a control that ignores the witness, a live-cap control; ③f .196: a `chosen` witness and a landing on a profile kept to another conversation leave every owner byte-identical and are refused by the list, CONTROL a restorePin that adds the conversation), test-browser-fact ⑦, test-browser-share ⑦ (heavy, real binary + Chrome), test-browser-continuity ⑤ (heavy, a real server: the real wiring + the real writeSessionMeta choke point; the late key survives Terminate → Resume; r2: a keyless spawn's record carries its witness).
 
 ### src/server/browser-bindings.js
+
+**r3054 (主开发 — the kept browsers' SECOND door; found by bl-machines-b's store census): UNKNOWN IS NOT EMPTY.** The file's read has three states: `readState()` → 'ok' (its rows), 'absent' (no file: a fresh instance, truly empty) and 'unknown' (a read that FAILED, or bytes that do not parse or are not the store's shape). The release's bare catch answered EMPTY to every failure, so the kept store's hourly sweep read «no binding names it» for every stopped kept browser past the grace and REMOVED its profile folder (its sign-ins); and `record` read empty and wrote the file over, losing every other binding. Now:
+- `boundKeys()` THROWS on unknown, and the kept sweep's existing guard ends nothing that pass.
+- `record` (and the prune it carries) writes NOTHING over an unread file. Said once per kind of failure, with the base name only; the binding is offered again at the conversation's next record.
+- `state()` lets the one-shot grants-unify step WAIT (a failed step runs again at the next start), so no grant moves from its conversation to a bare key.
+- `keys()` and `readAll` keep answering readers: unknown ⇒ no rows, for names and the fresh-key rule, whose other rungs name every key with a browser on disk.
+- A conversation that comes back while the file is unknown resumes on its own key if a session meta names it (rung 2), else on a FRESH key for that run. Its kept browser is never ended or moved; once the file reads, the old binding stands (a move is refused).
+
+Gate: test-browser-kept-sweep ④ (a refused read, torn bytes; RED the bare catch).
 
 **ORCH (r5) — the conversation → browser-key binding, in a store whose lifetime
 is the CONVERSATION's, not the webui session's.** `create({dataDir, log})` →

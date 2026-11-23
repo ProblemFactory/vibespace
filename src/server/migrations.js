@@ -1089,6 +1089,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     try { channelIndex = eng && eng.store && eng.store.index && typeof eng.store.index.snapshot === 'function' ? eng.store.index.snapshot() : null; } catch { channelIndex = null; }
     let bindings = null;
     try { bindings = require('./browser-bindings.js').create({ dataDir }); } catch { bindings = null; }
+    // r3054: a key no binding names stands for ITSELF in the grants it is moved to — so while the bindings file cannot be read this
+    // one-shot step WAITS (a failed step runs again at the next start), never moving a grant from its conversation to a bare key
+    if (bindings && typeof bindings.state === 'function' && bindings.state() === 'unknown') throw new Error('the browser bindings file could not be read — this step runs again at the next start');
     const rep = require('./grants-migration.js').migrate({ dataDir, store: grantsStoreOf(), hosts, channelIndex, ensure, resolveBrowserKey: (bk) => { try { return bindings ? bindings.conversationOf(bk) || null : null; } catch { return null; } } });
     console.log('[migrate] grants-unify:', JSON.stringify(rep));
     return rep;

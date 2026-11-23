@@ -473,7 +473,8 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       const t0 = now();
       const s = load();
       let carried = new Set(); try { const v = liveKeys(); carried = v instanceof Set ? v : new Set(v || []); } catch (e) { log.warn?.(`[browser-kept] the live sessions could not be listed (${e && e.message}) — nothing ends this pass`); carried = null; }
-      let bound = null; try { bound = bindingsOf().keys(); } catch (e) { log.warn?.(`[browser-kept] the bindings could not be read (${e && e.message}) — nothing ends this pass`); bound = null; }
+      // r3054: the read that SAYS unknown (`boundKeys` throws on a failed read or torn bytes) — the guard below then ends nothing
+      let bound = null; try { const bb = bindingsOf(); bound = typeof bb.boundKeys === 'function' ? bb.boundKeys() : bb.keys(); } catch (e) { log.warn?.(`[browser-kept] the bindings could not be read (${e && e.message}) — nothing ends this pass`); bound = null; }
       const ended = [];
       if (carried && bound) {
         for (const e of Object.values(s.entries)) {

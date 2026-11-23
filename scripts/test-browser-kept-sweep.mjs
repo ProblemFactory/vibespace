@@ -94,4 +94,44 @@ for (const how of ['torn', 'refused']) {
   ok(mx.walks === 64 && mx.exhausted, `RED CONTROL (${how}, the line before r3023: an unknown store names every candidate): 64 tries, the meta walked 64 times on the loop, «EXHAUSTED» — red`, mx);
 }
 
+console.log('④ r3054 THE SECOND DOOR — the bindings file: a refused read, or torn bytes, at the kept store\'s sweep (past the grace) ENDS nothing and REMOVES no folder; a record over an unread file writes nothing');
+const BBS = fs.readFileSync(path.join(REPO, 'src/server/browser-bindings.js'), 'utf8');
+const BB0 = require(path.join(REPO, 'src/server/browser-bindings.js'));
+const CONVS = ['c-aaaa1111-0000-4000-8000-000000000001', 'c-bbbb2222-0000-4000-8000-000000000002'];
+async function bindScene(BBm, how) {
+  const dir = path.join(ROOT, `b${++wn}`);
+  fs.mkdirSync(dir, { recursive: true });
+  let clock = 1_000_000;
+  const bindings = BBm.create({ dataDir: dir, log: quiet });
+  for (let i = 0; i < KEYS.length; i++) bindings.record(CONVS[i], KEYS[i], { at: clock });   // each kept browser's conversation CAN come back
+  const bfile = path.resolve(bindings.file);
+  const S = KS0.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
+  for (const k of KEYS) { S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); }
+  clock += 3600e3;   // an hour later: both stopped far past the grace — only their bindings keep them
+  if (how === 'torn') fs.writeFileSync(bfile, fs.readFileSync(bfile, 'utf8').slice(0, 40));   // torn bytes (a write cut short)
+  const bytes = fs.readFileSync(bfile, 'utf8');
+  // PLACED on the very read: the bindings file's reads refused (EIO — a share that does not answer), never a mount, never a mode change
+  const realRead = fs.readFileSync;
+  let refusedN = 0;
+  fs.readFileSync = function (p, ...a) { if (how === 'refused' && path.resolve(String(p)) === bfile) { refusedN++; throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); } return realRead.call(this, p, ...a); };
+  let sw = null, rec = null;
+  try {
+    sw = await S.sweep();   // THE REAL KEPT SWEEP (the hourly pass) over the REAL bindings
+    rec = bindings.record('c-cccc3333-0000-4000-8000-000000000003', 'bk-0000c013', { at: clock });   // a record while the file cannot be read
+  } finally { fs.readFileSync = realRead; }
+  const left = KEYS.filter((k) => fs.existsSync(path.join(S.dirOf(k), 'Cookies'))).length;
+  const res = { how, refusedN, ended: sw ? sw.ended : null, removed: KEYS.length - left, kept: KEYS.filter((k) => S.has(k)).length, recorded: rec, same: realRead(bfile, 'utf8') === bytes };
+  try { S.shutdown(); } catch { /* its own */ }
+  return res;
+}
+for (const how of ['refused', 'torn']) {
+  const b = await bindScene(BB0, how);
+  console.log(`    facts: ${JSON.stringify(b)}`);
+  ok((how === 'torn' || b.refusedN >= 1) && b.ended === 0 && b.removed === 0 && b.kept === KEYS.length && b.recorded === false && b.same,
+    `${how === 'torn' ? 'torn bytes in the bindings file' : 'the bindings file\'s read refused (EIO)'} at the hourly kept sweep, both kept browsers stopped an hour past the grace: UNKNOWN IS NOT EMPTY — ZERO ended, ZERO folders removed (their sign-ins stay); a record then writes NOTHING over the file (byte for byte)`, b);
+  const bx = await bindScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, '  function readState() {\n', "  function readState() { // the release: a bare catch — any failure, or bytes that do not parse, answer EMPTY\n    try { const raw = JSON.parse(fs.readFileSync(file, 'utf8')); if (raw && typeof raw === 'object' && raw.byConversation && typeof raw.byConversation === 'object') return { state: 'ok', all: raw }; } catch { }\n    return { state: 'absent', all: { v: 1, byConversation: {} } };\n  }\n  function readStateNow() {\n", 'r3054 control: the release\'s bare catch'), `bindings-bare-catch-${how}`), how);
+  console.log(`    facts (red): ${JSON.stringify(bx)}`);
+  ok(bx.removed === KEYS.length && bx.ended === KEYS.length && !bx.same, `RED CONTROL (${how}, the release's bare catch): the unread bindings answer EMPTY — the sweep ends BOTH kept browsers («its conversation can never come back») and REMOVES both folders, and the record writes over the file — red`, bx);
+}
+
 report();
