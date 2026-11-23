@@ -27,6 +27,32 @@ const path = require('path');
 const MAX_LINES = 20000;      // ≈2.4MB at ~120B/line; a busy pool writes a few hundred a day
 const DEDUP_MS = 60000;       // an identical consecutive (session → to) inside a minute is one fact
 
+// THE LEDGER FILE's ONE IN-PROCESS STATE (B-360d remainder, 主开发 r1231 / r2850). The hub writes the ledger through one instance
+// (src/accounts.js) and reads it through another (src/server/usage-pool-engine.js), and the reader asked the file a synchronous
+// stat at EVERY call to learn of the writer's appends — one stat a stream record on a pooled conversation: on a slow share a
+// 200-record turn held the loop twelve seconds. Now every instance of ONE FILE (keyed by its resolved path: two spellings of one
+// path are one file; another ledger, a suite's, has its own) shares ONE state: the rows read, kept exactly as a read of the file
+// would give them. A write of the hub lands in them in the writer's own step, so the reader's NEXT read holds it with nothing
+// between, and a read answers from memory — no stat, no read. The file is read only when no rows are kept: the first read, after
+// a trim, after a write that failed, or after the backstop found the file changed.
+// THE BACKSTOP is for a writer OUTSIDE the hub — none exists today (every writer in src/ is the hub's; a migration writes before
+// any read). It never holds the loop and adds no timer: a read that finds its last look older than LOOK_EVERY_MS serves its rows
+// NOW and starts ONE look OFF the loop (fs.promises.stat; at most one out a file — a look that never answers starts no second
+// one); a look that finds the file's size not the one the kept rows were read at — or its mtime moved since the previous look —
+// drops the rows for the next read. So an outside edit is seen within the bound plus one look (a same-size rewrite right after a
+// write of the hub, before the next look has named the file's time, is the one shape it cannot tell), and a share that stops
+// answering holds nothing.
+const LOOK_EVERY_MS = 10 * 1000;
+const _files = new Map();     // resolved file path → { rows, bytes, clean, seen, lookAt, lookOut, gen }
+const _test = {};             // the suite's seam (test-slot-ledger-reads): a clock, the look's stat
+const lookNow = () => (_test.now ? _test.now() : Date.now());
+function fileState(file) {
+  const k = path.resolve(file);
+  let st = _files.get(k);
+  if (!st) { st = { rows: null, bytes: -1, clean: true, seen: null, lookAt: 0, lookOut: false, gen: 0 }; _files.set(k, st); }
+  return st;
+}
+
 class SlotTransitions {
   constructor({ dataDir, max = MAX_LINES } = {}) {
     this.dataDir = dataDir;
@@ -34,8 +60,12 @@ class SlotTransitions {
     this.archiveDir = path.join(dataDir, 'archive');
     this.max = max;
     this._last = new Map();     // key → {to, at} (dedup, memory only)
-    this._cache = null;         // {mtimeMs, size, rows}
+    this._st = fileState(this.file);   // THE FILE's one in-process state, shared by every instance of this file
   }
+  /** the rows kept for this file (null = the next read reads the file); assigning null drops them — a suite that edits the file
+   *  behind the ledger's back says so this way */
+  get _cache() { return this._st.rows ? { rows: this._st.rows } : null; }
+  set _cache(v) { if (v == null) { this._st.rows = null; this._st.gen++; } }
 
   /** The dedup key is the LINK, not the session (2026-09-07 r3, reproduced).
    *  A session key (`sess-<seq>-<ms>`) is globally unique and a conversation
@@ -65,24 +95,38 @@ class SlotTransitions {
     // that gap (the held-member rule reads the disagreement as unknown).
     if (prev && prev.to === to && at - prev.at < DEDUP_MS && (!from || from === prev.to)) return null;
     const row = { sessionId: sessionId || null, poolId: poolId || null, from: from || null, to, at, ...(why ? { why: String(why).slice(0, 40) } : {}) };
+    const st = this._st, line = JSON.stringify(row) + '\n';
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
-      fs.appendFileSync(this.file, JSON.stringify(row) + '\n');
-      this._last.set(k, { to, at });
-      this._cache = null;
-      this._maybeTrim();
-      return row;
-    } catch { return null; }
+      fs.appendFileSync(this.file, line);
+    } catch { st.rows = null; st.gen++; return null; }   // a write that FAILED (a part of it may have landed): the next read reads the file
+    this._last.set(k, { to, at });
+    // THE WRITE LANDS IN THE KEPT ROWS in this step, exactly as a read would give them (the line parsed back; a row whose `at` is
+    // not finite is one a read drops; the order is the read's stable sort by `at`). Only on a file whose last line was whole: a
+    // line glued onto a partial one is read as the file holds it, so then the next read reads the file
+    st.gen++; st.seen = null;
+    if (st.rows && st.clean) {
+      const back = JSON.parse(line);
+      if (back && back.to && Number.isFinite(back.at)) {
+        st.rows.push(back);
+        if (st.rows.length > 1 && st.rows[st.rows.length - 2].at > back.at) st.rows.sort((a, b) => a.at - b.at);
+      }
+      st.bytes = Math.max(0, st.bytes) + Buffer.byteLength(line);
+    } else st.rows = null;
+    this._maybeTrim();
+    return row;
   }
 
   /** Every recorded transition, oldest first — the LIVE file plus every
    *  archived shard (the migration must not go blind at a rotation). */
   all() {
-    const st = (() => { try { return fs.statSync(this.file); } catch { return null; } })();
-    if (this._cache && st && this._cache.mtimeMs === st.mtimeMs && this._cache.size === st.size) return this._cache.rows;
+    const st = this._st;
+    if (st.rows) { this._lookMaybe(); return st.rows; }   // from memory: no stat, no read (the backstop's look is off the loop)
     const rows = [];
-    const eat = (fp) => {
+    let bytes = -1, clean = true;
+    const eat = (fp, live = false) => {
       let txt; try { txt = fs.readFileSync(fp, 'utf-8'); } catch { return; }
+      if (live) { bytes = Buffer.byteLength(txt); clean = !txt || txt.endsWith('\n'); }
       for (const line of txt.split('\n')) {
         if (!line) continue;
         try { const r = JSON.parse(line); if (r && r.to && Number.isFinite(r.at)) rows.push(r); } catch { }
@@ -93,10 +137,26 @@ class SlotTransitions {
         if (/^slot-transitions-\d+\.jsonl$/.test(f)) eat(path.join(this.archiveDir, f));
       }
     } catch { }
-    eat(this.file);
+    eat(this.file, true);
     rows.sort((a, b) => a.at - b.at);
-    if (st) this._cache = { mtimeMs: st.mtimeMs, size: st.size, rows };
+    st.rows = rows; st.bytes = bytes; st.clean = clean; st.seen = null; st.lookAt = lookNow(); st.gen++;
     return rows;
+  }
+
+  /** THE BACKSTOP's look (above): off the loop, at most one out a file, started by a read whose last look is older than the bound */
+  _lookMaybe() {
+    const st = this._st, t = lookNow();
+    if (st.lookOut || t - st.lookAt < LOOK_EVERY_MS) return;
+    st.lookOut = true; st.lookAt = t;
+    const gen = st.gen;
+    const said = (size, mtimeMs) => {
+      if (st.gen !== gen || !st.rows) return;   // the hub wrote (or the rows were dropped) while the look was out: its answer is old
+      if (size !== st.bytes || (st.seen != null && mtimeMs !== st.seen)) { st.rows = null; st.gen++; return; }   // changed outside the hub
+      st.seen = mtimeMs;
+    };
+    Promise.resolve().then(() => (_test.stat ? _test.stat(this.file) : fs.promises.stat(this.file)))   // the census counts this reader site
+      .then((s) => said(s.size, s.mtimeMs), (e) => { if (e && e.code === 'ENOENT') said(-1, null); })
+      .finally(() => { st.lookOut = false; });
   }
 
   /** The member a conversation's link pointed at at time `at`: its own latest
@@ -158,9 +218,9 @@ class SlotTransitions {
       fs.appendFileSync(out, lines.slice(0, cut).join('\n') + '\n');
       fs.writeFileSync(this.file + '.tmp', lines.slice(cut).join('\n') + '\n');
       fs.renameSync(this.file + '.tmp', this.file);
-      this._cache = null;
     } catch { }
+    this._st.rows = null; this._st.gen++;   // a trim (whole or failed half-way) moved rows between files: the next read reads them
   }
 }
 
-module.exports = { SlotTransitions, MAX_LINES, DEDUP_MS };
+module.exports = { SlotTransitions, MAX_LINES, DEDUP_MS, LOOK_EVERY_MS, _ledgerTestSeam: (o) => { for (const k of Object.keys(_test)) delete _test[k]; Object.assign(_test, o || {}); } };
