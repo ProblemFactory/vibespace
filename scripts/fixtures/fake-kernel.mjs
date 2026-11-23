@@ -100,7 +100,9 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const info = (t) => ({ targetId: t.targetId, type: 'page', title: t.title, url: t.url, attached: t.sessions.size > 0, canAccessOpener: false, browserContextId: 'ctx-1' });
   const send = (ws, o) => { try { ws.send(JSON.stringify(o)); } catch { /* gone */ } };
   const all = (o) => { for (const ws of sockets) send(ws, o); };
-  const newTarget = (url) => { const t = { targetId: 'T' + (++seq).toString(16).padStart(8, '0').toUpperCase(), url: String(url || 'about:blank'), title: String(url || 'about:blank'), sessions: new Set(), held: null, domOrigin: undefined, frames: new Map(), domNodes: new Map() }; targets.set(t.targetId, t); return t; };
+  // B-21cc (r2849): `mode.hexIds` = Chrome's own id shape (32 hex) — a suite whose REAL keeper reads a driver's tab list (which keeps
+  // only Chrome-shaped ids) names the same page the watch tracks
+  const newTarget = (url) => { const t = { targetId: mode.hexIds ? (++seq).toString(16).toUpperCase().padStart(32, '0') : 'T' + (++seq).toString(16).padStart(8, '0').toUpperCase(), url: String(url || 'about:blank'), title: String(url || 'about:blank'), sessions: new Set(), held: null, domOrigin: undefined, frames: new Map(), domNodes: new Map() }; targets.set(t.targetId, t); return t; };
   const attach = (ws, t) => { const sid = 'S' + crypto.randomUUID().replace(/-/g, '').slice(0, 24).toUpperCase(); sessions.set(sid, { targetId: t.targetId, ws, page: false, vs: false, fetch: false, net: false }); t.sessions.add(sid); send(ws, { method: 'Target.attachedToTarget', params: { sessionId: sid, targetInfo: info(t), waitingForDebugger: false } }); return sid; };
   let autoAttach = false, ctxSeq = 10, objSeq = 100, reqSeq = 0;
   const isoContexts = new Map(); // contextId → { targetId, frameId, sandbox }
@@ -1022,6 +1024,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   return { port: bound, wsUrl: `ws://127.0.0.1:${bound}${wsPath}`, calls: () => calls.slice(), mark: () => heard, close, // lane vault-login-chrome r2c: + mark()
     // lane browser-surfaces: the suites' hands on the surface protocol
     mode, targets: () => [...targets.values()].map(info), addTarget: (url) => { const x = newTarget(url); all({ method: 'Target.targetCreated', params: { targetInfo: info(x) } }); return x.targetId; },
+    closeTarget: (tid) => { const x = targets.get(tid); if (!x) return false; targets.delete(x.targetId); for (const s of [...surfaces.values()]) if (s.targetId === x.targetId) surfaces.delete(s.surfaceId); all({ method: 'Target.targetDestroyed', params: { targetId: x.targetId } }); return true; }, // B-21cc (r2849): a page gone, as Target.closeTarget does it
     openSurface, updateSurface, closeSurface, surfaces: () => [...surfaces.values()], answers: () => answered.slice(), failNext: (code) => failQueue.push(String(code)),
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
     refuseNextAnswer: (code = 'no_such_request') => { waRefuseNext = String(code); }, // B-d981 cure: the next webauthnAnswer finds the page's request gone (the page aborts first) and is refused by `code`

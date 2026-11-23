@@ -1881,6 +1881,13 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   try {
     // the owner's ruling (2026-09-27): a verb refused while the user drives goes on the handback's re-run list (its NAME only)
     const verb = require('../browser-profiles.js').auditVerbOf(Array.isArray(req.body?.argv) ? req.body.argv.map(String) : []);
+    // B-21cc (r2849 (2)): a tab verb of the conversation (any but a list; a batch holding one) moves the tab its driver is on — a
+    // mover at its START, before the binary runs (the audit is its end)
+    if (ctx.dialogs && typeof ctx.dialogs.moveTab === 'function') {
+      const tw = verb === 'tab' ? require('../browser-tabs.js').parseTabArgv(req.body.argv.map(String)) : null;
+      const inBatch = verb === 'batch' && Array.isArray(req.body?.batchVerbs) && req.body.batchVerbs.some((x) => String(x) === 'tab');
+      if ((tw && !(tw.ok && tw.act === 'list')) || inBatch) { try { ctx.dialogs.moveTab('tab-verb', { browserKey: f.browserKey }); } catch { /* optional */ } }
+    }
     let v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session), verb });
     // owner ruling A: a pin is this conversation's DEFAULT ATTACHMENT, opened through the keeper — never a directory
     if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);
@@ -2012,7 +2019,14 @@ router.post('/api/agent/browser/tab', async (req, res) => {
   const f = agentFacts(req, res); if (!f) return;
   try {
     if (typeof k.agentTabAct !== 'function') return res.json({ ok: true, passthrough: true, why: 'this server has no tab fence' });
-    const r = await k.agentTabAct({ browserKey: f.browserKey, handle: String(req.body?.handle || ''), argv: Array.isArray(req.body?.argv) ? req.body.argv.map(String).slice(0, 12) : [] });
+    // B-21cc (r2849 (2)): a tab act on the server's road (any but a list — a refused or a failed one too) moves the tab the
+    // conversation's driver is on: a mover at its start and at its end
+    const twR = require('../browser-tabs.js').parseTabArgv(Array.isArray(req.body?.argv) ? req.body.argv.map(String).slice(0, 12) : []);
+    const movesR = !(twR.ok && twR.act === 'list') && ctx.dialogs && typeof ctx.dialogs.moveTab === 'function';
+    if (movesR) { try { ctx.dialogs.moveTab('tab-route', { browserKey: f.browserKey }); } catch { /* optional */ } }
+    let r;
+    try { r = await k.agentTabAct({ browserKey: f.browserKey, handle: String(req.body?.handle || ''), argv: Array.isArray(req.body?.argv) ? req.body.argv.map(String).slice(0, 12) : [] }); }
+    finally { if (movesR) { try { ctx.dialogs.moveTab('tab-route', { browserKey: f.browserKey }); } catch { /* optional */ } } }
     if (!r.ok) return failVerdict(res, r);
     if (!r.passthrough) stampActive(f, r.profileId || '');
     // 2.369.199 integration (lane site-reset verify r4 #1 × lane browser-resume C): a fenced `tab new` NAMES its tab (the
@@ -2074,6 +2088,10 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     const tabObj = req.body?.tab && typeof req.body.tab === 'object' ? req.body.tab : null;
     const tabTid = tabObj && typeof tabObj.targetId === 'string' ? tabObj.targetId.slice(0, 64) : null;
     const tabAck = tabObj && tabObj.new && tabTid ? tabTid : null;
+    // B-21cc (r2849 (2)): the END of the conversation's own tab verb (any but a list — a failed or a closing one too; a CLI that
+    // names no sub-verb counts) — before the ack below is remembered, so the ack stands after it
+    { const tv = String(req.body?.verb || '') === 'tab' ? (typeof req.body?.tabVerb === 'string' ? req.body.tabVerb : 'unknown') : (String(req.body?.verb || '') === 'batch' && req.body?.tabVerb === 'batch' ? 'batch' : null);
+      if (tv !== null && tv !== '' && tv !== 'list' && ctx.dialogs && typeof ctx.dialogs.moveTab === 'function') { try { ctx.dialogs.moveTab('tab-verb', { browserKey: f.browserKey }); } catch { /* optional */ } } }
     if (profileId && tabObj && (tabObj.switched || tabObj.new) && tabTid && ctx.dialogs && typeof ctx.dialogs.noteActiveTab === 'function') {
       try { const t0 = dialogTargetFor(k, f, profileId); if (t0.ok) ctx.dialogs.noteActiveTab(t0, tabTid); } catch { /* optional */ }
     }
@@ -2081,7 +2099,7 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     const saw = req.body?.daemonSaw && typeof req.body.daemonSaw === 'object' && typeof req.body.daemonSaw.type === 'string' ? { type: req.body.daemonSaw.type.slice(0, 24) } : null;
     const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.loop ? 'loop' : req.body?.timedOut ? 'timeout' : 'ok', ended: true, bind: tabAck, saw }) : (endVerb(f), {}); // lane site-reset: a verb cut at a navigation loop is not a timeout (the loop explains it)
     if (profileId && Array.isArray(req.body?.snapshotRefs) && ctx.dialogs && typeof ctx.dialogs.noteSnapshot === 'function') {
-      try { const tSnap = dialogTargetFor(k, f, profileId); if (tSnap.ok) await ctx.dialogs.noteSnapshot(tSnap, { parsedRefs: req.body.snapshotRefs.slice(0, 16384) }); } catch { /* optional */ }
+      try { const tSnap = dialogTargetFor(k, f, profileId); if (tSnap.ok) await ctx.dialogs.noteSnapshot(tSnap, { parsedRefs: req.body.snapshotRefs.slice(0, 16384), since }); } catch { /* optional */ } // B-21cc (r2849): no read — the verb's own /resolve instant decides whether a mover came between
     }
     // lane site-reset: a verb the loop CUT keeps its session's daemon waiting until 0.38.1's own timeout — remembered, said
     if (req.body?.loop === 'cut' && since > 0) { try { ctx.dialogs?.noteCut?.(f.browserKey, since); } catch { /* optional */ } }
@@ -2124,7 +2142,8 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     // (the watch's kept targets: no CDP call); the CLI prints it after a snapshot and after the driver's own «not found»
     let otherSiteFrame = null;
     if (profileId && ctx.dialogs && typeof ctx.dialogs.otherSiteFramesFor === 'function' && (req.body?.verb === 'snapshot' || req.body?.ok === false)) {
-      try { const tF = dialogTargetFor(k, f, profileId); if (tF.ok) otherSiteFrame = ctx.dialogs.otherSiteFramesFor(tF); } catch { otherSiteFrame = null; }
+      // B-21cc (r2849 (5)): asked of the tab the watch knows WITHOUT a read (its only tab, or the last ack no mover followed) — silent rather than wrong
+      try { const tF = dialogTargetFor(k, f, profileId); if (tF.ok) { const tidF = typeof ctx.dialogs.rememberedTabOf === 'function' ? ctx.dialogs.rememberedTabOf(tF) : null; otherSiteFrame = tidF ? ctx.dialogs.otherSiteFramesFor(tF, { targetId: tidF }) : null; } } catch { otherSiteFrame = null; }
     }
     let scrubbed = null;
     if (profileId && req.body?.output && typeof req.body.output === 'object' && ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function') {

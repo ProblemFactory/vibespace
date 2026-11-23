@@ -1165,8 +1165,8 @@ try {
         'const wantCred = Boolean((e.liveFill && !e.liveFill.holdReason) || e.credPreArming);',
       ), 'n1-hold-relaxes-fetch');
       const BD_M_N2_AX = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
-        '    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };',
-        '    await call(w, \'Accessibility.getFullAXTree\', {}, e.sid);\n    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };',
+        '      writeSnapshotRefs(w, e, specs, { seq, at });', // B-21cc (r2849): a NAMED note writes the tab's references here
+        '      await call(w, \'Accessibility.getFullAXTree\', {}, e.sid);\n      writeSnapshotRefs(w, e, specs, { seq, at });',
       ), 'n2-snapshot-full-ax');
       const BD_M_N4_CAP = MUT.load('src/server/browser-dialogs.js', bdSrc.replace(
         "return { carries: false, undecodable: true, reason: 'json_too_many_nodes' };",

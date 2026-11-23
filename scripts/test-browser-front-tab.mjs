@@ -430,6 +430,10 @@ async function keeperCreateLeg(X, KTid, tbId) {
   const blob = JSON.stringify(spawned);
   ok(!!(cR.ok && spawned.length === 1 && JSON.stringify(spawned[0].argv) === JSON.stringify(['tab', 'list', '--json']) && spawned[0].env.AGENT_BROWSER_CDP && !/web-login:|vault|password|#alice/i.test(blob)),
     'B-21cc (r2711\'s ruling): on a REAL keeper the fill\'s one spawn is the current tab\'s read — exactly `tab list --json` under the lease\'s own url; its argv and env hold no entry name and no value', { spawned });
+  // r2760's small: TWO rows marked current (the stand-in's list carries A's current tab twice) ⇒ refused by name, never the first of them
+  C.edit(C.NS, (s) => { const t0 = s.tabs.find((t) => t.targetId === s.sessions['vs-' + KA]) || s.tabs[0]; s.sessions['vs-' + KA] = t0.targetId; s.tabs.push({ ...t0, tabId: 'tdup' }); });
+  const twoRows = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
+  ok(!twoRows.ok && twoRows.code === 'current_tab_unreadable' && /more than one tab is marked current/.test(twoRows.error), 'B-21cc (the r2760 small): a list with TWO rows marked current is refused by name, never the first of them', twoRows);
   // no row marked current (the session bound to a tab gone from the list) ⇒ refused by name
   C.edit(C.NS, (s) => { s.sessions['vs-' + KA] = 'E'.repeat(32); });
   const noRow = await C.k.currentTabOf({ profileId: C.p.id, browserKey: KA });
@@ -442,6 +446,77 @@ async function keeperCreateLeg(X, KTid, tbId) {
     'B-21cc: a current tab that cannot be read is REFUSED BY NAME (current_tab_unreadable) — no lease, an ephemeral browser (never on the vault fill\'s road: the login-channel law refuses it first), a tab list that does not answer — never a guess', { none, eph, dead });
   C.k.shutdown();
 }
+// B-21cc line 520's follow (主开发 r2760 → r2849 (1) + the r2760 small): ON A REAL KEEPER COPY a snapshot's note adds ZERO lines to
+// the stand-in driver's log and asks the browser nothing; a REAL fill by reference then makes the ONE read (`tab list --json`) while
+// an entry's name and its value stand in the hub (the logins, the vault, the fill's own spec) — its argv and env carry neither.
+// RED: 473fa577c's note (the read on every snapshot) adds a line per snapshot. The watch's CDP is a fake kernel's (the stand-in names
+// a dead port), its pages Chrome-shaped so the keeper's read names the page the watch tracks.
+{
+  const { startFakeKernel } = await import('./fixtures/fake-kernel.mjs');
+  const VE = require('../src/server/vault-engine.js'), GS = require('../src/server/grants-store.js'), Lm = require('../src/server/browser-logins.js'), Dm = require('../src/server/browser-dialogs.js'), BM = require('../src/browser-mediation.js');
+  const C = await world(K, 'b21cc-note');
+  const fk = await startFakeKernel({ firstUrl: 'https://shop.example.test/login', mode: { standard: true, hexIds: true } });
+  const ROOTV = path.join(ROOT, 'b21cc-vault'); fs.mkdirSync(ROOTV, { recursive: true, mode: 0o700 });
+  const eng = VE.create({ dataDir: ROOTV, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+  await eng.setup('B21ccNote#Master9');
+  const ws = [];
+  try {
+    const g = GS.create({ memory: true });
+    const lg = Lm.create({ vault: eng, grants: () => g, log: () => { }, forYou: { add: () => 'fy-1', resolve() { } } });
+    const PW = 'B21ccNote!' + require('crypto').randomBytes(4).toString('hex');
+    lg.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW }, { who: 'owner' });
+    lg.grant('web-login:https://shop.example.test#alice', 'any-account', 'session:conv-b21cc-note');
+    const tid = fk.targets()[0].targetId;
+    fk.setDom(tid, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+    // A's session is bound to that page (the same id), so the REAL keeper's read names it
+    C.edit(C.NS, (s) => { s.tabs.push({ tabId: 'tk1', targetId: tid, url: 'https://shop.example.test/login', title: 'Page shop', label: null, opener: null }); s.sessions['vs-' + KA] = tid; });
+    const chan = ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(BM.leaseRoadVerdict({ mediated: false, proxy: true, ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }), { proxy: true, external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: true, usableProfiles: ['Work'], profileLabel: 'Work', action });
+    // the REAL keeper — its browser's CDP the fake kernel's, its login channel the fill's road; every other member its own
+    const kw = new Proxy(C.k, { get: (o, p) => (p === 'cdpEndpointFor' ? async () => ({ ok: true, url: fk.wsUrl }) : p === 'loginChannelFor' ? chan : (typeof o[p] === 'function' ? o[p].bind(o) : o[p])) });
+    const Tn = { profileId: C.p.id, browserKey: KA };
+    const logLines = () => fs.readFileSync(path.join(C.DATA, '..', 'ab', 'cmds.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const mk = async (Dmod) => {
+      // the suite's own WebSocket: a patched copy lives outside the checkout, where `ws` does not resolve (its watch would never open)
+      const w = Dmod.create({ keeper: kw, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: KA, sessionId: 'sess-a' }], leaseCountOf: () => 1, logins: lg, WebSocketImpl: require('ws') });
+      ws.push(w);
+      await w.arm(C.p.id);
+      await until(async () => { const a = await w.noteSnapshot(Tn, { parsedRefs: [{ ref: '@e0', role: 'textbox', name: 'Password', nth: 0 }], targetId: tid }); return !!(a && a.ok); });
+      return w;
+    };
+    const note = (w) => w.noteSnapshot(Tn, { parsedRefs: [{ ref: '@e5', role: 'textbox', name: 'Password', nth: 0 }], since: Date.now() });
+    const w = await mk(Dm);
+    await sleep(5);
+    const n0 = logLines().length, m0 = fk.mark();
+    const notes = [];
+    for (let i = 0; i < 3; i++) { await sleep(2); notes.push(await note(w)); }
+    const noteSpawns = logLines().slice(n0), noteCalls = fk.mark() - m0;
+    const n1 = logLines().length;
+    const r = await w.fillVaultField(Tn, { target: '@e5', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc-note'] } });
+    const fillSpawns = logLines().slice(n1);
+    const blob = JSON.stringify(fillSpawns);
+    const landed = ((fk.readDomValues(tid) || {}).pw || '') === PW;
+    ok(notes.every((x) => x && x.ok && x.pending) && noteSpawns.length === 0 && noteCalls === 0,
+      'B-21cc (r2849 (1)): on a REAL keeper copy three snapshot notes add ZERO lines to the stand-in driver\'s log and ask the browser nothing', { notes, noteSpawns, noteCalls });
+    ok(!!(r && r.ok && landed && fillSpawns.length === 1 && JSON.stringify(fillSpawns[0].argv) === JSON.stringify(['tab', 'list', '--json']) && fillSpawns[0].env.AGENT_BROWSER_CDP && !blob.includes(PW) && !/web-login:|vault|password|alice/i.test(blob)),
+      'B-21cc (the r2760 small: the assert made to bite): a REAL fill by reference — the entry\'s name and value in the hub, its spec naming the entry — makes exactly ONE driver call, `tab list --json` under the lease\'s own url, whose argv and env carry neither; the value lands', { r: r && { ok: r.ok, code: r.code, error: r.error }, fillSpawns, landed });
+    // RED: 473fa577c's note — the read on every snapshot (a patched copy of the dialogs over the same real keeper)
+    let ds = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    ds = anchored(ds, '    const slotKey = slotKeyOf(pid, target && target.browserKey);\n', '    const slotKey = slotKeyOf(pid, target && target.browserKey);\n    { const ct = await currentTabFor(w, target, targetId); if (!ct.ok) return { ok: false, count: 0, code: ct.code }; } // 473fa577c: the read on every snapshot\n', 'B-21cc control: the read on the snapshot');
+    const df = path.join(ROOT, 'dialogs-b21cc-note-reads.js'); fs.writeFileSync(df, absReq(ds, path.join(REPO, 'src/server')));
+    w.shutdown(); // one watch of the profile at a time
+    const wR = await mk(require(df));
+    await sleep(5);
+    const n2 = logLines().length;
+    const nR = await note(wR);
+    const redSpawns = logLines().slice(n2);
+    ok(!!(nR && nR.ok) && redSpawns.length === 1 && JSON.stringify(redSpawns[0].argv) === JSON.stringify(['tab', 'list', '--json']), 'RED CONTROL (B-21cc r2849 (1)): 473fa577c\'s note on the same real keeper — a snapshot spawns the driver\'s `tab list`: the zero-line leg above can go red', { redSpawns, nR });
+  } finally {
+    for (const x of ws) { try { x.shutdown(); } catch { /* its own */ } }
+    try { eng.close(); } catch { /* its own */ }
+    await fk.close();
+    C.k.shutdown();
+  }
+}
 // RED CONTROL (B-21cc): a keeper copy that takes the list's FIRST row instead of the one marked active names a tab the session is not on
 {
   let ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
@@ -453,6 +528,17 @@ async function keeperCreateLeg(X, KTid, tbId) {
   const r9 = await R9.k.currentTabOf({ profileId: R9.p.id, browserKey: KA });
   ok(!!(r9 && r9.ok && r9.targetId !== bound9), 'RED CONTROL (B-21cc): the list\'s FIRST row taken for the current tab names a tab A\'s session is NOT on — the read leg above can go red', { r9, bound9 });
   R9.k.shutdown();
+}
+// RED CONTROL (B-21cc, r2760's small): a keeper copy that takes the FIRST of two rows marked current names one of them as if known
+{
+  let ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  ks = anchored(ks, "    if (act.length !== 1) return no(act.length ? 'more than one tab is marked current' : 'no tab is marked current');\n", "    if (act.length < 1) return no('no tab is marked current');\n", 'B-21cc control: the first of two rows marked current');
+  const kfT = path.join(ROOT, 'keeper-b21cc-two-rows.js'); fs.writeFileSync(kfT, absReq(ks, path.join(REPO, 'src/server')));
+  const RT = await world(require(kfT), 'b21cc-two-red');
+  RT.edit(RT.NS, (s) => { const t0 = s.tabs.find((t) => t.targetId === s.sessions['vs-' + KA]) || s.tabs[0]; s.sessions['vs-' + KA] = t0.targetId; s.tabs.push({ ...t0, tabId: 'tdup' }); });
+  const rT = await RT.k.currentTabOf({ profileId: RT.p.id, browserKey: KA });
+  ok(!!(rT && rT.ok), 'RED CONTROL (B-21cc, r2760\'s small): the first of two rows marked current taken as known — the two-rows leg above can go red', { rT });
+  RT.k.shutdown();
 }
 // RED CONTROL OF THE MUST: the unit's first order (the person's stamped roots FIRST, before every lease) — B's rooted tab reads «yours»
 {

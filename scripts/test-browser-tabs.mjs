@@ -861,6 +861,69 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   }
 }
 
+// ═══ ③b B-21cc (主开发 r2849 (2)): THE ROUTES' TAB MOVERS ═══════════════════════
+// A snapshot's note makes no read (src/server/browser-dialogs.js): the fill decides by the tab epoch, which every mover of ONE list
+// bumps. The routes' rows of that list, on the real keeper and the real routes: the conversation's own tab verb (any but a list; a
+// failed or a closing one; a batch holding one; a CLI that names no sub-verb) at its START (/resolve) and its END (/audit); the
+// server's tab road at its start and its end (a refused act too). The snapshot's note carries the verb's /resolve instant and no
+// tab; its frame note is asked of the tab the watch knows WITHOUT a read, and nothing is asked when it knows none.
+console.log('— ③b B-21cc (r2849): the routes tell the dialog watch every tab verb of the conversation, at its start and its end; a list moves nothing');
+{
+  const realD = require('../src/server/browser-dialogs.js').create({ keeper: k, log: quiet, leaseCountOf: () => 1 });
+  const rec = [];
+  let remembered = null;
+  const WATCHED = new Set(['moveTab', 'noteSnapshot', 'otherSiteFramesFor']);
+  const spyD = new Proxy(realD, { get(o, p) {
+    if (p === 'rememberedTabOf') return () => { rec.push(['rememberedTabOf']); return remembered; };
+    const v = o[p];
+    if (typeof v !== 'function') return v;
+    if (!WATCHED.has(p)) return v.bind(o);
+    return (...a) => { rec.push([String(p), ...(p === 'moveTab' ? a : a.slice(1))]); return p === 'otherSiteFramesFor' ? null : v.apply(o, a); };
+  } });
+  R.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [], dialogs: spyD });
+  try {
+    await j('POST', '/api/agent/browser/use', { profile: 'Work' }, as(sA)); // A holds the browser (an earlier block may have let it go)
+    const movesOf = async (fn) => { rec.length = 0; await fn(); return rec.filter((x) => x[0] === 'moveTab').map((x) => `${x[1]}:${(x[2] && x[2].browserKey) || ''}`); };
+    const got = {
+      resolveTab: await movesOf(() => j('POST', '/api/agent/browser/resolve', { argv: ['tab', String(aTab || 'T1')], wrapper: true }, as(sA))),
+      resolveList: await movesOf(() => j('POST', '/api/agent/browser/resolve', { argv: ['tab', 'list'], wrapper: true }, as(sA))),
+      resolveBatch: await movesOf(() => j('POST', '/api/agent/browser/resolve', { argv: ['batch'], batchVerbs: ['open', 'tab'], wrapper: true }, as(sA))),
+      resolveOpen: await movesOf(() => j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://a.example/2'], wrapper: true }, as(sA))),
+      auditClose: await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'tab', tabVerb: 'close', ok: false }, as(sA))),
+      auditList: await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'tab', tabVerb: 'list', ok: true }, as(sA))),
+      auditBareTab: await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'tab', tabVerb: '', ok: true }, as(sA))),
+      auditNoWord: await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'tab', ok: true }, as(sA))),
+      auditBatch: await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'batch', tabVerb: 'batch', ok: true }, as(sA))),
+      auditOpen: await movesOf(() => j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'open', ok: true }, as(sA))),
+      routeList: await movesOf(() => tabCmd(sA, ['tab', 'list'])),
+      routeAct: await movesOf(() => tabCmd(sA, ['tab', String(aTab || 'T1')])),
+      routeRefused: await movesOf(() => tabCmd(sA, ['tab', String(bTab || 'T2')])),
+    };
+    const V = `tab-verb:${KA}`, RT = `tab-route:${KA}`;
+    ok(J(got.resolveTab) === J([V]) && J(got.resolveBatch) === J([V]) && J(got.auditClose) === J([V]) && J(got.auditNoWord) === J([V]) && J(got.auditBatch) === J([V]),
+      'B-21cc (r2849 (2)): the conversation\'s own tab verb is a MOVER at its start (/resolve: `tab <id>`, a batch holding a tab verb) and at its end (/audit: a failed `tab close`, a batch, a CLI that names no sub-verb) — the conversation\'s epoch, under ITS key', got);
+    ok(J(got.resolveList) === '[]' && J(got.resolveOpen) === '[]' && J(got.auditList) === '[]' && J(got.auditBareTab) === '[]' && J(got.auditOpen) === '[]',
+      'B-21cc (r2849 (2)): CONTROL — a tab LIST (`tab list`, a bare `tab`) and a verb that is no tab verb (`open`) move nothing', got);
+    ok(J(got.routeAct) === J([RT, RT]) && J(got.routeRefused) === J([RT, RT]) && J(got.routeList) === '[]',
+      'B-21cc (r2849 (2)): the server\'s tab road is a mover at its START and at its END — an act on A\'s own tab, and an act refused (B\'s tab) too; its list moves nothing', got);
+    // the snapshot's note: the verb's own /resolve instant, no tab; the frame note asked of the tab known without a read — none ⇒ nothing asked
+    rec.length = 0; remembered = null;
+    await j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'snapshot', ok: true, since: 1234567, snapshotRefs: [{ ref: '@e1', role: 'textbox', name: 'Email', nth: 0 }] }, as(sA));
+    const recNone = rec.map((x) => x[0]);
+    const noted = rec.find((x) => x[0] === 'noteSnapshot');
+    rec.length = 0; remembered = String(aTab || 'T1');
+    await j('POST', '/api/agent/browser/audit', { profile: work.id, verb: 'snapshot', ok: true, since: 1234568, snapshotRefs: [{ ref: '@e1', role: 'textbox', name: 'Email', nth: 0 }] }, as(sA));
+    const asked = rec.find((x) => x[0] === 'otherSiteFramesFor');
+    ok(!!(noted && noted[1] && noted[1].since === 1234567 && !('targetId' in noted[1]) && Array.isArray(noted[1].parsedRefs) && noted[1].parsedRefs.length === 1),
+      'B-21cc (r2849): the route\'s own snapshot note passes the verb\'s /resolve instant and NO tab (the driver\'s answer names none; the note reads nothing)', { noted });
+    ok(recNone.includes('rememberedTabOf') && !recNone.includes('otherSiteFramesFor') && !!(asked && asked[1] && asked[1].targetId === String(aTab || 'T1')),
+      'B-21cc (r2849 (5)): the snapshot\'s frame note is asked of the tab the watch knows WITHOUT a read; when it knows none, nothing is asked — silent rather than wrong', { recNone, asked });
+  } finally {
+    R.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
+    try { realD.shutdown(); } catch { /* its own */ }
+  }
+}
+
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════
 console.log('— ④ the words: every new key in zh + ja');
 {

@@ -239,7 +239,7 @@ console.log('— ④ the doors: the audit, the CLI, the vault fill, the stale ad
 {
   const route = read('src/routes/browser.js'), cli = read('data/bin/vibespace-browser');
   const audit = (route.match(/router\.post\('\/api\/agent\/browser\/audit'[\s\S]*?\n\}\);\n/) || [''])[0];
-  ok(/\(req\.body\?\.verb === 'snapshot' \|\| req\.body\?\.ok === false\)/.test(audit) && /otherSiteFrame = ctx\.dialogs\.otherSiteFramesFor\(tF\)/.test(audit) && /\.\.\.\(otherSiteFrame \? \{ otherSiteFrame \} : \{\}\)/.test(audit),
+  ok(/\(req\.body\?\.verb === 'snapshot' \|\| req\.body\?\.ok === false\)/.test(audit) && /otherSiteFrame = tidF \? ctx\.dialogs\.otherSiteFramesFor\(tF, \{ targetId: tidF \}\) : null/.test(audit) && /\.\.\.\(otherSiteFrame \? \{ otherSiteFrame \} : \{\}\)/.test(audit),
     'the audit answers otherSiteFrame after a snapshot or a failed verb, from the watch (the conversation\'s own tab)');
   ok(cli.includes("const kind = snapNote ? (DS && typeof DS.frameFieldsListed === 'function' && DS.frameFieldsListed(outText) ? 'listed' : 'unlisted') : 'selector';")
     && cli.includes("const said = DS && typeof DS.otherSiteFrameText === 'function' ? DS.otherSiteFrameText(au.otherSiteFrame.origins, null, { kind }) : (kind === 'selector' ? au.otherSiteFrame.text : '');")

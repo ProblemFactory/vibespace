@@ -1276,7 +1276,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const ack = (o) => send(viewer.ws, { type: 'tab-ack', rid: v.rid, act: v.act, targetId: v.targetId, ...o });
     if (!keeper || typeof keeper.userTabAct !== 'function') { ack({ ok: false, code: 'unavailable', error: 'tab acts are not available on this server' }); return; }
     const id8 = String(v.targetId || '').slice(0, 8);
-    Promise.resolve().then(() => keeper.userTabAct({ target: relay.target, viewerId: viewer.id, act: v.act, targetId: v.targetId }))
+    const movedBy = () => { try { if (dialogs && typeof dialogs.moveTab === 'function') dialogs.moveTab('person-tab-act', { profileId: relayProfileId(relay) || (relay.target && relay.target.profileId) || null }); } catch { /* optional */ } }; // B-21cc (r2849 (2)): the person's tab act moves the driver's tab — at its start and its end
+    movedBy();
+    Promise.resolve().then(() => keeper.userTabAct({ target: relay.target, viewerId: viewer.id, act: v.act, targetId: v.targetId })).finally(movedBy)
       .then((r) => {
         if (r && r.switchedTo && relay.anchor && relays.get(relay.key) === relay) relay.anchor = S.takeoverAnchor(r.switchedTo, now());
         // lane browser-windows (U0b, userW's inc-muqdohf0-hkjc — his chip clicks left no line anywhere): every act is RECORDED

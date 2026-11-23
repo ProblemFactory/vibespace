@@ -1421,22 +1421,25 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       'B-21cc: a current tab that cannot be read — its read refused, its read threw, no reader at all — the fill is REFUSED BY NAME (current_tab_unreadable), nothing filled: no guess', { r3: r3 && r3.code, r3t: r3t && r3t.code, r4: r4 && r4.code });
     const MC = mutantCopies('b21cc-current-tab', REPO);
     const bdSrcC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-    // round w41hvnm5h's must: THE SNAPSHOT's REFERENCES go to the CURRENT tab, through the same read — the route's own note names no
-    // tab (the driver's snapshot answer carries none), the watch's entry stands on the OTHER tab; then a fill BY REFERENCE lands
+    // round w41hvnm5h's must, as r2849 builds it: THE SNAPSHOT's REFERENCES go to the CURRENT tab — the note keeps them with NO read,
+    // the fill adopts them on the tab IT reads. The route's own note names no tab (the driver's snapshot answer carries none), the
+    // watch's entry stands on the OTHER tab; then a fill BY REFERENCE lands
     const w5 = await worldOn(Dm);
     curAnswer = { ok: true, targetId: tidS };
     const ns5 = await w5.noteSnapshot(T, { parsedRefs: [{ ref: '@e7', role: 'textbox', name: 'Password', nth: 0 }] }); // as the route passes it: no tab
     const r5 = await w5.fillVaultField(T, { target: '@e7', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] } });
     ok(!!(ns5 && ns5.ok && r5 && r5.ok) && valOf(tidS) === PW_C && valOf(tidO) === '',
-      'B-21cc (round w41hvnm5h): the route\'s snapshot note (no tab) writes the references to the CURRENT tab through the same read, though the watch\'s entry stands on the other — a fill BY REFERENCE then lands there', { ns5, r5: r5 && { ok: r5.ok, code: r5.code, error: r5.error } });
+      'B-21cc (round w41hvnm5h → r2849): the route\'s snapshot note (no tab) keeps the references with no read; the fill BY REFERENCE reads the CURRENT tab and adopts them THERE, though the watch\'s entry stands on the other — the value lands there', { ns5, r5: r5 && { ok: r5.ok, code: r5.code, error: r5.error } });
     fkC.setDom(tidS, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
     // the read fails ⇒ nothing is written (the fill then refuses by name); the current tab NOT in scope ⇒ refused before any judgment
     curAnswer = { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (its tab list did not answer) — nothing was filled; try again' };
+    const asked6 = asked;
     const ns6 = await w5.noteSnapshot(T, { parsedRefs: [{ ref: '@e9', role: 'textbox', name: 'Password', nth: 0 }] });
+    const askedNote6 = asked - asked6;
     curAnswer = { ok: true, targetId: 'F'.repeat(32) };
     const r6 = await fillC(w5);
-    ok(!!(ns6 && !ns6.ok && ns6.count === 0 && ns6.code === 'current_tab_unreadable' && r6 && r6.code === 'target_not_found' && /not one of its own pages here/.test(r6.error || '')) && valOf(tidS) === '' && valOf(tidO) === '',
-      'B-21cc (round w41hvnm5h): an unreadable current tab writes NO references; a current tab that is not one of this conversation\'s is refused target_not_found before any judgment — nothing filled', { ns6, r6: r6 && { code: r6.code, error: r6.error } });
+    ok(!!(ns6 && ns6.ok && ns6.pending && askedNote6 === 0 && r6 && r6.code === 'target_not_found' && /not one of its own pages here/.test(r6.error || '')) && valOf(tidS) === '' && valOf(tidO) === '',
+      'B-21cc (r2849): the note asks nothing even where the read would fail (the snapshot is kept for the fill to judge); a current tab that is not one of this conversation\'s is refused target_not_found before any judgment — nothing filled', { ns6, askedNote6, r6: r6 && { code: r6.code, error: r6.error } });
     // the required small: the fill hands the tab it JUDGED (the refusal's frame sentence is asked of it); no tab judged ⇒ none
     curAnswer = { ok: true, targetId: tidS };
     const j7 = {}; const r7 = await w5.fillVaultField(T, { target: '#nope', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc'] }, judged: j7 });
@@ -1446,7 +1449,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       'B-21cc (round w41hvnm5h): a refusal after the judgment hands the tab it JUDGED (the frame sentence\'s only tab); an unreadable current tab judged none — no frame sentence', { r7: r7 && r7.code, j7, r8: r8 && r8.code, j8 });
     w5.shutdown();
     // RED: the release's snapshot note (the old pick) — the references land on the watch's entry, the OTHER tab; the fill by reference on the current one then fails
-    const snapRel = anchored(bdSrcC, '    const ct = await currentTabFor(w, target, targetId);\n    if (!ct.ok) return { ok: false, count: 0, code: ct.code };\n    const e = pickScopedTabFor(w, target, { targetId: ct.targetId });\n', '    const e = pickScopedTabFor(w, target, { targetId });\n', 'B-21cc control: the release\'s snapshot pick');
+    const snapRel = anchored(bdSrcC, '    snapSlots.set(slotKey, { seq, at, tid: null, epoch: ep.seq, navSeqs, specs, unknown: false });\n    return { ok: true, targetId: null, count: specs.size, pending: true };\n', '    { const e = pickScopedTabFor(w, target, { targetId }); if (!e || !e.sid) return { ok: false, count: 0 }; writeSnapshotRefs(w, e, specs, { seq, at }); snapSlots.set(slotKey, { seq, at, tid: e.targetId, epoch: null, navSeqs: null, specs: null, unknown: false }); return { ok: true, targetId: e.targetId, count: specs.size }; }\n', 'B-21cc control: the release\'s snapshot pick');
     const DmSnap = MC.load('src/server/browser-dialogs.js', snapRel, 'release-snapshot-pick');
     const wS = await worldOn(DmSnap);
     curAnswer = { ok: true, targetId: tidS };
@@ -1458,9 +1461,10 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
     // the order: a conversation with no tab of its own in scope is refused BEFORE its session is asked (a never-used session's `tab list` binds a tab)
     const fnC = bdSrcC.slice(bdSrcC.indexOf('  async function fillVaultField('), bdSrcC.indexOf('  async function fillVaultField(') + 9000);
     const ctC = bdSrcC.slice(bdSrcC.indexOf('  async function currentTabFor('), bdSrcC.indexOf('  async function currentTabFor(') + 1600);
-    const nsC = bdSrcC.slice(bdSrcC.indexOf('  async function noteSnapshot('), bdSrcC.indexOf('  async function noteSnapshot(') + 1600);
-    ok(ctC.indexOf('if (!hasScopedTab(w, target))') > 0 && ctC.indexOf('if (!hasScopedTab(w, target))') < ctC.indexOf('keeper.currentTabOf(') && fnC.includes('const ct = await currentTabFor(w, target, targetId);') && nsC.includes('const ct = await currentTabFor(w, target, targetId);') && !nsC.includes('pickScopedTabFor(w, target, { targetId })') && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); return /judged\.targetId && typeof D\.otherSiteFramesFor === 'function'\) \{ try \{ framed = D\.otherSiteFramesFor\(t, \{ targetId: judged\.targetId, kind: 'vault' \}\)/.test(rs); })() && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); const a = rs.indexOf('const r = await D.fillVaultField(t, {'); const b = rs.indexOf('});', a); return a > 0 && b > a && !/targetId/.test(rs.slice(a, b)); })(),
-      'B-21cc: ONE read feeds the fill AND its snapshot\'s references (currentTabFor, asked only once the conversation has a tab of its own in scope); the route hands the fill no tab of the caller\'s, and asks the refusal\'s frame sentence of the tab the fill JUDGED only');
+    const nsC = bdSrcC.slice(bdSrcC.indexOf('  async function noteSnapshot('), bdSrcC.indexOf("  /** B-21cc (r2849): the conversation's NEWEST snapshot"));
+    const nsUnnamed = nsC.slice(nsC.indexOf('    const ep = tabEpochOf('));
+    ok(ctC.indexOf('if (!hasScopedTab(w, target))') > 0 && ctC.indexOf('if (!hasScopedTab(w, target))') < ctC.indexOf('keeper.currentTabOf(') && fnC.includes('const ct = await currentTabFor(w, target, targetId);') && bdSrcC.includes('const sv = snapshotForFill(w, target, e, { ep0, ep1 });') && nsC.length > 400 && !nsC.includes('currentTabFor(') && !nsC.includes('keeper.') && nsUnnamed.length > 100 && !nsUnnamed.includes('pickScopedTabFor(') && !nsUnnamed.includes('writeSnapshotRefs(') && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); return rs.includes('await ctx.dialogs.noteSnapshot(tSnap, { parsedRefs: req.body.snapshotRefs.slice(0, 16384), since });') && rs.includes("const tidF = typeof ctx.dialogs.rememberedTabOf === 'function' ? ctx.dialogs.rememberedTabOf(tF) : null; otherSiteFrame = tidF ? ctx.dialogs.otherSiteFramesFor(tF, { targetId: tidF }) : null;"); })() && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); return /judged\.targetId && typeof D\.otherSiteFramesFor === 'function'\) \{ try \{ framed = D\.otherSiteFramesFor\(t, \{ targetId: judged\.targetId, kind: 'vault' \}\)/.test(rs); })() && (() => { const rs = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'); const a = rs.indexOf('const r = await D.fillVaultField(t, {'); const b = rs.indexOf('});', a); return a > 0 && b > a && !/targetId/.test(rs.slice(a, b)); })(),
+      'B-21cc (r2849): the FILL\'s one read (currentTabFor, asked only once the conversation has a tab of its own in scope) decides the snapshot it uses; the note makes NO read and, naming no tab, writes no tab\'s entry; the route\'s own note passes the verb\'s /resolve instant and no tab, its frame note is asked of the tab the watch knows without a read; the route hands the fill no tab of the caller\'s, and asks the refusal\'s frame sentence of the tab the fill JUDGED only');
     // RED: the release's pick (the watch's own entry, else «most recently seen») — the sign-in tab current, the OTHER judged
     const relSrc = anchored(bdSrcC, fnC.slice(fnC.indexOf('    const ct = await currentTabFor(w, target, targetId);\n'), fnC.indexOf("    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ?")), '    const e = pickScopedTabFor(w, target, { targetId });\n', 'B-21cc control: the release\'s pick');
     const DmRel = MC.load('src/server/browser-dialogs.js', relSrc, 'release-pick');
@@ -1477,6 +1481,288 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
     engC.close();
     await fkC.close();
     fs.rmSync(ROOT4C, { recursive: true, force: true });
+  }
+}
+
+// ═══ ④d B-21cc line 520's follow (主开发 r2760 → the lane's proposal → r2849): A SNAPSHOT MAKES NO READ — the fill decides by the tab epoch ═══
+// A snapshot is the most asked verb of an agent browser and it gets no slower for a fill that may never come: the note keeps the
+// conversation's NEWEST snapshot in ONE slot (references and counts only) with NO spawn and NO browser call; the fill, which reads the
+// current tab anyway, adopts it only when no mover of the ONE list came between (the epoch the same before and after its read and the
+// slot's own) and the tab has not navigated — else it refuses BY NAME and asks for a fresh snapshot. The SITE is judged on the tab the
+// fill reads, whatever the slot says. Each condition of r2849 with its leg and its red; two made-up sites (shop / other .example.test).
+console.log('④d B-21cc (r2849): the snapshot\'s note makes no read; the fill adopts the newest snapshot only when no mover came between');
+if (typeof LF?.resolveSnapshotRef === 'function') {
+  const ROOT4D = scratch('vl-b21cc-epoch');
+  fs.rmSync(ROOT4D, { recursive: true, force: true });
+  fs.mkdirSync(ROOT4D, { recursive: true });
+  const fkD = await startFakeKernel({ firstUrl: 'https://shop.example.test/login', mode: { standard: true } });
+  const engD = VE.create({ dataDir: ROOT4D, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+  await engD.setup('B21ccEpoch#Master9');
+  const wsD = [];
+  const sleepD = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitD = async (pred, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleepD(15); } return false; };
+  try {
+    const gD = GS.create({ memory: true });
+    const lgD = Lm.create({ vault: engD, grants: () => gD, log: () => {}, forYou: { add: () => 'fy-1', resolve() {} } });
+    const PW_D = 'B21ccEpoch!' + crypto.randomBytes(4).toString('hex');
+    lgD.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW_D }, { who: 'owner' });
+    lgD.grant('web-login:https://shop.example.test#alice', 'any-account', 'session:conv-b21cc-d');
+    let cur = null;
+    const kcalls = [], inputFns = [], leaseFns = [];
+    // the keeper stand-in: EVERY member it is asked for is counted — any call during a note is a read
+    const mkKeeperD = ({ road = 'mediated' } = {}) => new Proxy({
+      cdpEndpointFor: async () => ({ ok: true, url: fkD.wsUrl }),
+      onLease: (fn) => { leaseFns.push(fn); return () => {}; },
+      onInput: (fn) => { inputFns.push(fn); return () => {}; },
+      saveLoginFenceState() {},
+      loginFenceStateOf: () => null,
+      loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ proxy: road === 'mediated', ephemeral, remoteSession, hasCdp: Boolean(fkD.wsUrl), action }),
+      currentTabOf: async () => (typeof cur === 'function' ? cur() : cur),
+    }, { get(o, p) { const v = o[p]; return typeof v === 'function' ? (...a) => { kcalls.push(String(p)); return v.apply(o, a); } : v; } });
+    const T = { profileId: 'bp-b21cc-d', browserKey: 'bk-b21ccd' };
+    const SHOP = 'https://shop.example.test/login', OTHER = 'https://other.example.test/account';
+    const tidS = fkD.targets()[0].targetId;
+    const tidO = fkD.addTarget(OTHER);
+    const resetD = () => { fkD.setDom(tidS, { url: SHOP, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] }); fkD.setDom(tidO, { url: OTHER, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] }); };
+    resetD();
+    const REF = (ref = '@e5', name = 'Password') => [{ ref, role: 'textbox', name, nth: 0 }];
+    const worldD = async (Dmod, o = {}) => {
+      const w = Dmod.create({ keeper: mkKeeperD(o), log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: T.browserKey, sessionId: 's-b21cc-d' }], leaseCountOf: () => 1, logins: lgD });
+      wsD.push(w);
+      await w.arm(T.profileId);
+      // both tabs watched (their sessions attached) before a scene: a NAMED note on each; the scenes' own notes replace the slot
+      for (const tid of [tidO, tidS]) for (let i = 0; i < 60; i++) { const a = await w.noteSnapshot(T, { parsedRefs: REF('@e0'), targetId: tid }); if (a && a.ok) break; await sleepD(10); }
+      return w;
+    };
+    const valOf = (tid) => (fkD.readDomValues(tid) || {}).pw || '';
+    const fillRef = (w, ref = '@e5') => w.fillVaultField(T, { target: ref, spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-b21cc-d'] } });
+    const noteNow = async (w, ref = '@e5', name = 'Password') => { await sleepD(3); return w.noteSnapshot(T, { parsedRefs: REF(ref, name), since: Date.now() }); }; // as the route passes it: no tab, the verb's /resolve instant
+    const refusedMoved = (r) => !!(r && !r.ok && r.code === 'target_not_found' && /the tab changed since the last snapshot/.test(r.error || '') && /snapshot -i/.test(r.error || ''));
+    const MD = mutantCopies('b21cc-epoch', REPO);
+    const bdD = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+
+    // (1) NO READ ON ANY SNAPSHOT — on the mediated road and on the plain one: zero keeper calls, zero browser calls
+    const zero = {};
+    for (const road of ['mediated', 'plain']) {
+      const w = await worldD(Dm, { road });
+      await waitD(async () => { const m = fkD.mark(); await sleepD(60); return fkD.mark() === m; }); // the watch quiet first
+      await sleepD(3);
+      kcalls.length = 0;
+      const m0 = fkD.mark();
+      const n = await w.noteSnapshot(T, { parsedRefs: REF('@e5'), since: Date.now() });
+      zero[road] = { n, keeperCalls: kcalls.slice(), browserCalls: fkD.mark() - m0 };
+      if (road === 'mediated') {
+        cur = { ok: true, targetId: tidS }; kcalls.length = 0;
+        const r = await fillRef(w);
+        zero.fill = { ok: !!(r && r.ok), code: r && r.code, error: r && r.error, reads: kcalls.filter((x) => x === 'currentTabOf').length, landed: valOf(tidS) === PW_D && valOf(tidO) === '' };
+        resetD();
+      }
+      w.shutdown();
+    }
+    ok(!!(zero.mediated.n && zero.mediated.n.ok && zero.mediated.n.pending && zero.mediated.keeperCalls.length === 0 && zero.mediated.browserCalls === 0 && zero.plain.n && zero.plain.n.ok && zero.plain.keeperCalls.length === 0 && zero.plain.browserCalls === 0),
+      'B-21cc (r2849 (1)): NO READ ON ANY SNAPSHOT — the note asks the keeper NOTHING (no driver spawn) and the browser NOTHING, on the mediated road and on the plain one; it keeps the snapshot for the fill', zero);
+    ok(!!(zero.fill && zero.fill.ok && zero.fill.reads === 1 && zero.fill.landed), 'B-21cc (r2849): the FILL reads the current tab once (its own read, as before) and adopts the kept snapshot there — the value lands in the current tab, none in the other', zero.fill);
+    {
+      const readSrc = anchored(bdD, '    const slotKey = slotKeyOf(pid, target && target.browserKey);\n', '    const slotKey = slotKeyOf(pid, target && target.browserKey);\n    { const ct = await currentTabFor(w, target, targetId); if (!ct.ok) return { ok: false, count: 0, code: ct.code }; } // 473fa577c: the read on every snapshot\n', 'B-21cc control: the read on the snapshot');
+      const w = await worldD(MD.load('src/server/browser-dialogs.js', readSrc, 'note-reads'));
+      cur = { ok: true, targetId: tidS }; kcalls.length = 0;
+      const n = await noteNow(w);
+      const reads = kcalls.filter((x) => x === 'currentTabOf').length;
+      w.shutdown();
+      ok(reads === 1, 'RED CONTROL (B-21cc r2849 (1)): 473fa577c\'s note — every snapshot asks the keeper for the current tab (one spawn of the driver\'s `tab list`): the zero-read leg above can go red', { reads, n });
+    }
+
+    // (2) THE MOVERS, ONE LIST: after each class a fill by reference refuses by name; with none (or the person's OWN window) it lands
+    const w2 = await worldD(Dm);
+    cur = { ok: true, targetId: tidS };
+    const scene = async (label, move) => {
+      resetD();
+      const n = await noteNow(w2);
+      const moved = await move();
+      const r = await fillRef(w2);
+      const res = { label, noted: !!(n && n.ok), moved, code: r && r.code, error: r && r.error, refused: refusedMoved(r), landed: valOf(tidS) === PW_D, nothing: valOf(tidS) === '' && valOf(tidO) === '' };
+      resetD();
+      return res;
+    };
+    const fire = (fns, ev) => { for (const fn of fns) fn(ev); return fns.length > 0; };
+    const ctl = await scene('no mover (control)', async () => true);
+    const ctlHuman = await scene('the person\'s OWN browsing window letting go (nobody\'s conversation: no mover)', async () => fire(inputFns, { kind: 'handback', human: true, browserKey: T.browserKey, profileId: T.profileId, state: {} }));
+    let popup = null;
+    const movers = [
+      ['the conversation\'s own tab verb on the CLI road (the route\'s /resolve start and /audit end; a failed or closing one too — test-browser-tabs walks the route)', async () => w2.moveTab('tab-verb', { browserKey: T.browserKey }).ok],
+      ['the conversation\'s own tab verb on the server\'s tab road (its start and its end — test-browser-tabs)', async () => w2.moveTab('tab-route', { browserKey: T.browserKey }).ok],
+      ['a HELPER of the conversation (its child handle) moving a tab — the parent\'s epoch', async () => w2.moveTab('tab-verb', { browserKey: T.browserKey + '.1' }).ok],
+      ['a page BORN in the browser (a popup the driver may follow)', async () => { popup = fkD.addTarget('https://shop.example.test/popup'); return waitD(() => fkD.calls().some((c) => c.method === 'Target.attachToTarget' && c.params && c.params.targetId === popup)); }],
+      ['a page GONE (the driver\'s tab closed moves it to another)', async () => { const okc = fkD.closeTarget(popup); await sleepD(80); return okc; }],
+      ['the person\'s tab act (the live view, browser-stream: its start and its end)', async () => w2.moveTab('person-tab-act', { profileId: T.profileId }).ok],
+      ['a TAKEOVER (the keeper\'s input event)', async () => fire(inputFns, { kind: 'takeover', browserKey: T.browserKey, profileId: T.profileId, state: {} })],
+      ['a HANDBACK (the keeper\'s input event)', async () => fire(inputFns, { kind: 'handback', browserKey: T.browserKey, profileId: T.profileId, state: {} })],
+      ['the watch BLIND (its socket dropped, then watched again)', async () => { const m0 = fkD.mark(); fkD.dropSockets(); await sleepD(60); await w2.arm(T.profileId); const back = await waitD(() => fkD.calls().filter((c) => c.seq > m0 && c.method === 'Page.enable').length >= 2); await sleepD(80); return back; }],
+    ];
+    const mv = [];
+    for (const [label, move] of movers) mv.push(await scene(label, move));
+    w2.shutdown();
+    ok(ctl.noted && ctl.landed && ctlHuman.noted && ctlHuman.landed, 'B-21cc (r2849 (2)): with NO mover the kept snapshot is adopted and the value lands — the person\'s OWN browsing window (nobody\'s conversation) moves nothing', { ctl, ctlHuman });
+    ok(mv.length === 9 && mv.every((x) => x.noted && x.moved === true && x.refused && x.nothing),
+      'B-21cc (r2849 (2)): THE MOVERS — after each class (the conversation\'s own tab verbs on both roads, a helper\'s, a page born, a page gone, the person\'s tab act, a takeover, a handback, the watch blind) a fill BY REFERENCE refuses by name and asks for a fresh snapshot; nothing filled anywhere',
+      mv.map((x) => ({ label: x.label, noted: x.noted, moved: x.moved, code: x.code, error: x.error, nothing: x.nothing })));
+    {
+      const noEpoch = anchored(bdD, '    if (s.epoch !== ep0 || ep0 !== ep1 || !s.navSeqs || !s.navSeqs.has(e.targetId)) return { ok: false, why: moved };\n', '    if (!s.navSeqs || !s.navSeqs.has(e.targetId)) return { ok: false, why: moved };\n', 'B-21cc control: the epoch not asked');
+      const w = await worldD(MD.load('src/server/browser-dialogs.js', noEpoch, 'no-epoch'));
+      cur = { ok: true, targetId: tidS }; resetD();
+      await noteNow(w);
+      fire(inputFns, { kind: 'handback', browserKey: T.browserKey, profileId: T.profileId, state: {} });
+      const r = await fillRef(w);
+      const landed = valOf(tidS) === PW_D;
+      resetD(); w.shutdown();
+      ok(!!(r && r.ok && landed), 'RED CONTROL (B-21cc r2849 (2)): the epoch not asked — after a handback the OLD snapshot is adopted on the read tab (an @ref the agent saw before the move): the movers leg can go red', { r: r && { ok: r.ok, code: r.code } });
+    }
+    // THE ONE PLACE: every write of the epoch is inside moveTab; every caller of moveTab across src/ is a row of this closed list
+    const srcFiles = {};
+    for (const rel of fs.readdirSync(path.join(REPO, 'src'), { recursive: true })) { if (String(rel).endsWith('.js')) srcFiles['src/' + rel] = fs.readFileSync(path.join(REPO, 'src', String(rel)), 'utf8'); }
+    const moverCensus = (files) => {
+      const d = files['src/server/browser-dialogs.js'] || '';
+      const a = d.indexOf('  function moveTab('), b = d.indexOf("  /** The epoch a conversation's tab stands at");
+      const out = { body: a > 0 && b > a, writesOutside: [], calls: [] };
+      for (const [rel, s] of Object.entries(files)) {
+        for (const pat of ['tabMoves.byConv.set(', 'tabMoves.byProfile.set(', '++tabMoveSeq', 'tabMoveSeq++', 'tabMoveSeq +=']) { let i = -1; while ((i = s.indexOf(pat, i + 1)) >= 0) if (!(rel === 'src/server/browser-dialogs.js' && i > a && i < b)) out.writesOutside.push(`${rel}: ${pat}`); }
+        const re = /moveTab\((?:'([a-z-]+)'|(ev\.kind))/g; let m;
+        while ((m = re.exec(s))) out.calls.push(`${rel}: ${m[1] || m[2]}`);
+      }
+      out.calls.sort();
+      return out;
+    };
+    const MOVER_ROWS = ['src/routes/browser.js: tab-route', 'src/routes/browser.js: tab-route', 'src/routes/browser.js: tab-verb', 'src/routes/browser.js: tab-verb', 'src/server/browser-dialogs.js: ev.kind', 'src/server/browser-dialogs.js: page-born', 'src/server/browser-dialogs.js: page-gone', 'src/server/browser-dialogs.js: watch-down', 'src/server/browser-stream.js: person-tab-act'];
+    const mc = moverCensus(srcFiles);
+    const dSrc = srcFiles['src/server/browser-dialogs.js'];
+    ok(mc.body && mc.writesOutside.length === 0 && JSON.stringify(mc.calls) === JSON.stringify(MOVER_ROWS) && dSrc.includes("const TAB_MOVERS = Object.freeze(['tab-verb', 'tab-route', 'page-born', 'page-gone', 'watch-down', 'person-tab-act', 'takeover', 'handback']);") && dSrc.includes("(ev.kind !== 'takeover' && ev.kind !== 'handback')) return; moveTab(ev.kind,"),
+      'B-21cc (r2849 (2)): THE MOVERS ARE A LIST IN ONE PLACE — the epoch is written only inside moveTab, and its callers across src/ are exactly the list (the routes\' tab verbs at start and end on both roads, the watch\'s page born / gone / blind, the keeper\'s takeover and handback, the live view\'s person\'s tab act)', { writesOutside: mc.writesOutside, calls: mc.calls });
+    {
+      const planted = { ...srcFiles, 'src/server/browser-dialogs.js': anchored(dSrc, '    w.targets.set(tid, e);\n', '    w.targets.set(tid, e); tabMoves.byProfile.set(w.profileId, { seq: ++tabMoveSeq, at: now() });\n', 'B-21cc census control: a bump outside moveTab') };
+      const extra = { ...srcFiles, 'src/server/browser-tabs-x.js': "dialogs.moveTab('page-born', { profileId: 'x' });" };
+      const p1 = moverCensus(planted), p2 = moverCensus(extra);
+      ok(p1.writesOutside.length === 2 && JSON.stringify(p2.calls) !== JSON.stringify(MOVER_ROWS), 'RED CONTROL (r2849 (2)): a bump written outside moveTab, and a caller not on the list, each fail the census above', { p1: p1.writesOutside, p2: p2.calls.length });
+    }
+
+    // (3) THE SITE IS JUDGED ON THE TAB THE FILL READS, whatever the slot says
+    const w3 = await worldD(Dm);
+    resetD(); await noteNow(w3);
+    cur = { ok: true, targetId: tidO }; // a mover the hub could not see: the tab read is the other site
+    const r3a = await fillRef(w3);
+    const a3 = { code: r3a && r3a.code, error: r3a && r3a.error, s: valOf(tidS), o: valOf(tidO) };
+    resetD(); await noteNow(w3);
+    cur = { ok: true, targetId: tidS }; w3.noteActiveTab(T, tidO); // the watch's own entry names the other
+    const r3b = await fillRef(w3);
+    const b3 = { ok: !!(r3b && r3b.ok), code: r3b && r3b.code, s: valOf(tidS) === PW_D, o: valOf(tidO) };
+    resetD(); w3.shutdown();
+    ok(a3.code === 'login_phishing' && /other\.example\.test/.test(a3.error || '') && a3.s === '' && a3.o === '', 'B-21cc (r2849 (3)): THE SITE IS JUDGED ON THE TAB THE FILL READS — the snapshot kept with no tab, the tab read on another site: THAT site\'s grant decides (refused, naming it); nothing of the value reaches either page', a3);
+    ok(b3.ok && b3.s && b3.o === '', 'B-21cc (r2849 (3)): …and the tab read on the granted site: the value lands THERE only, though the watch\'s own entry names the other', b3);
+    {
+      const pickSrc = anchored(bdD, "    const e = pickScopedTabFor(w, target, { targetId: ct.targetId });\n    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ?", "    const e = pickScopedTabFor(w, target, { targetId });\n    if (!e || !e.sid) return { ok: false, code: 'target_not_found', error: targetId ?", 'B-21cc control: the fill on the watch\'s entry, not the tab it read');
+      const w = await worldD(MD.load('src/server/browser-dialogs.js', pickSrc, 'fill-on-entry'));
+      resetD(); await noteNow(w);
+      cur = { ok: true, targetId: tidO }; w.noteActiveTab(T, tidS);
+      const r = await fillRef(w);
+      const reachedS = valOf(tidS) === PW_D;
+      resetD(); w.shutdown();
+      ok(reachedS, 'RED CONTROL (r2849 (3)): a fill on the watch\'s entry (the release\'s pick) puts the value in a page the conversation is NOT on — the leg above can go red', { r: r && { ok: r.ok, code: r.code } });
+    }
+
+    // (4) THE SLOT: references and counts only; one per conversation, replaced by a newer note, gone with the conversation
+    const w4 = await worldD(Dm);
+    resetD();
+    const n4 = await noteNow(w4, '@e7');
+    const sl1 = w4.snapshotSlotOf(T);
+    const T2 = { profileId: T.profileId, browserKey: 'bk-b21ccd2' };
+    await w4.noteSnapshot(T2, { parsedRefs: REF('@e8'), since: Date.now() });
+    await noteNow(w4, '@e9');
+    const sl2 = w4.snapshotSlotOf(T), sl2b = w4.snapshotSlotOf(T2);
+    cur = { ok: true, targetId: tidS };
+    const r4 = await fillRef(w4, '@e9');
+    const sl3 = w4.snapshotSlotOf(T);
+    resetD();
+    fire(leaseFns, { kind: 'detach', browserKey: T.browserKey + '.1', profileId: T.profileId }); // a helper's lease ends
+    const afterHelper = w4.snapshotSlotOf(T);
+    fire(leaseFns, { kind: 'detach', browserKey: T.browserKey, profileId: T.profileId }); // the conversation's own lease ends
+    const afterEnd = w4.snapshotSlotOf(T), otherStays = w4.snapshotSlotOf(T2);
+    fire(leaseFns, { kind: 'browser-stopped', profileId: T.profileId });
+    const afterStop = w4.snapshotSlotOf(T2);
+    w4.shutdown();
+    const specKeysOk = (sl) => !!(sl && Array.isArray(sl.specs) && sl.specs.length && sl.specs.every((x) => Object.keys(x).sort().join(',') === 'name,nth,ref,role'));
+    ok(!!(n4 && n4.ok && sl1 && sl1.keys.join(',') === 'at,epoch,navSeqs,seq,specs,tid,unknown' && specKeysOk(sl1) && sl1.tid === null && Array.isArray(sl1.navSeqs) && sl1.navSeqs.length === 2 && !JSON.stringify(sl1).includes(PW_D) && !/alice|web-login/.test(JSON.stringify(sl1))),
+      'B-21cc (r2849 (4)): the slot holds references (ref, role, name, nth — what the note held before) and counts (the epoch, each tab\'s navigations) only: no value, no entry name, no page text beyond the references', sl1);
+    ok(!!(sl2 && sl2b && sl2.seq > sl1.seq && sl2.specs[0].ref === '@e9' && sl2b.specs[0].ref === '@e8' && r4 && r4.ok && sl3 && sl3.tid === tidS && sl3.specs === null && sl3.navSeqs === null),
+      'B-21cc (r2849 (4)): ONE slot per conversation — a newer note replaces it, another conversation keeps its own; once adopted it keeps only the tab and its number (the counts dropped)', { sl2, sl2b, sl3, r4: r4 && r4.code });
+    ok(!!(afterHelper && afterEnd === null && otherStays && afterStop === null), 'B-21cc (r2849 (4)): GONE WITH THE CONVERSATION — its lease\'s end takes its slot (a helper\'s end keeps it; another conversation\'s stays); the browser\'s stop takes every slot', { afterHelper: !!afterHelper, afterEnd, otherStays: !!otherStays, afterStop });
+    {
+      const keepSrc = anchored(bdD, 'if (ev.browserKey && parentKey(ev.browserKey) === String(ev.browserKey)) dropSnapSlots(pid, ev.browserKey); ', '', 'B-21cc control: the slot outlives its conversation');
+      const w = await worldD(MD.load('src/server/browser-dialogs.js', keepSrc, 'slot-outlives'));
+      await noteNow(w, '@e7');
+      fire(leaseFns, { kind: 'detach', browserKey: T.browserKey, profileId: T.profileId });
+      const left = w.snapshotSlotOf(T);
+      w.shutdown();
+      ok(!!left, 'RED CONTROL (r2849 (4)): a slot not dropped at the lease\'s end outlives its conversation — the leg above can go red', { left: !!left });
+    }
+
+    // the MOMENT and the SAME DOCUMENT: a mover after the verb's own /resolve instant, or an unknown instant, keeps the tab unknown;
+    // an older snapshot is never used once a newer one came (the second reader's same-document case: agent-browser renumbers @eN)
+    const w6 = await worldD(Dm);
+    cur = { ok: true, targetId: tidS }; resetD();
+    await sleepD(3); w6.moveTab('tab-verb', { browserKey: T.browserKey });
+    const nLate = await w6.noteSnapshot(T, { parsedRefs: REF('@e5'), since: Date.now() - 1000 }); // the mover came after the verb's /resolve
+    const rLate = await fillRef(w6);
+    const nZero = await w6.noteSnapshot(T, { parsedRefs: REF('@e5'), since: 0 });
+    const rZero = await fillRef(w6);
+    resetD();
+    await noteNow(w6, '@e2'); const rA = await fillRef(w6, '@e2'); const landedA = valOf(tidS) === PW_D; resetD();
+    await w6.noteSnapshot(T, { parsedRefs: REF('@e2', 'Email'), since: 0 }); const rB = await fillRef(w6, '@e2');
+    const nothingB = valOf(tidS) === '' && valOf(tidO) === '';
+    resetD(); w6.shutdown();
+    ok(!!(nLate && nLate.code === 'tab_moved' && refusedMoved(rLate) && nZero && nZero.code === 'tab_moved' && refusedMoved(rZero)), 'B-21cc (r2849): a mover AFTER the snapshot verb\'s own /resolve instant, or no instant at all, keeps the snapshot\'s tab UNKNOWN — a fill by reference refuses by name', { nLate, rLate: rLate && rLate.error, nZero, rZero: rZero && rZero.error });
+    ok(!!(rA && rA.ok && landedA && refusedMoved(rB) && nothingB), 'B-21cc (r2849): the SAME DOCUMENT — an older snapshot adopted on the tab is NEVER used once a newer note came whose tab is unknown (agent-browser renumbers @eN): refused by name, nothing filled', { rA: rA && rA.code, rB: rB && rB.error });
+    {
+      const noMoment = anchored(bdD, '    if (hasSince && (!since || ep.at >= since)) {\n', '    if (hasSince && !since) {\n', 'B-21cc control: the moment not asked');
+      const w = await worldD(MD.load('src/server/browser-dialogs.js', noMoment, 'no-moment'));
+      cur = { ok: true, targetId: tidS }; resetD();
+      await sleepD(3); w.moveTab('tab-verb', { browserKey: T.browserKey });
+      await w.noteSnapshot(T, { parsedRefs: REF('@e5'), since: Date.now() - 1000 });
+      const r = await fillRef(w); const landed = valOf(tidS) === PW_D;
+      resetD(); w.shutdown();
+      ok(!!(r && r.ok && landed), 'RED CONTROL (r2849): the moment not asked — a snapshot taken BEFORE a mover is adopted on the tab after it: the moment leg can go red', { r: r && r.code });
+      const older = anchored(bdD, '    if (s.unknown) return { ok: false, why: moved };\n', '    if (s.unknown) return { ok: true, refs: e.snapshotRefs };\n', 'B-21cc control: the older snapshot used');
+      const w7 = await worldD(MD.load('src/server/browser-dialogs.js', older, 'older-snapshot'));
+      resetD(); await noteNow(w7, '@e2'); await fillRef(w7, '@e2'); resetD();
+      await w7.noteSnapshot(T, { parsedRefs: REF('@e2', 'Email'), since: 0 }); const r7 = await fillRef(w7, '@e2'); const landed7 = valOf(tidS) === PW_D;
+      resetD(); w7.shutdown();
+      ok(!!(r7 && r7.ok && landed7), 'RED CONTROL (r2849): the older snapshot used — the newer note\'s @e2 (another field) is filled by the OLDER snapshot\'s @e2: the same-document leg can go red', { r7: r7 && r7.code });
+    }
+
+    // (5) THE FRAME NOTE's TAB, WITHOUT A READ: the only tab, or the last ack no mover followed — else none (silent rather than wrong)
+    const w5d = await worldD(Dm);
+    await sleepD(3); w5d.moveTab('person-tab-act', { profileId: T.profileId }); // the world's own named notes left an ack: a mover after it
+    const f0 = w5d.rememberedTabOf(T);
+    await sleepD(3); w5d.noteActiveTab(T, tidO); const f1 = w5d.rememberedTabOf(T);
+    await sleepD(3); w5d.moveTab('person-tab-act', { profileId: T.profileId }); const f2 = w5d.rememberedTabOf(T);
+    await sleepD(3); w5d.noteActiveTab(T, tidS); const f3 = w5d.rememberedTabOf(T);
+    {
+      const staleSrc = anchored(bdD, '    return m && m.tid && m.at >= tabEpochOf(pid, target && target.browserKey).at && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;\n', '    return m && m.tid && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;\n', 'B-21cc control: the frame note\'s tab after a mover');
+      const w = await worldD(MD.load('src/server/browser-dialogs.js', staleSrc, 'frame-stale'));
+      await sleepD(3); w.noteActiveTab(T, tidO); await sleepD(3); w.moveTab('person-tab-act', { profileId: T.profileId });
+      const stale = w.rememberedTabOf(T);
+      w.shutdown();
+      ok(stale === tidO, 'RED CONTROL (r2849 (5)): the ack trusted after a mover names a tab the driver may have left — the frame note\'s leg below can go red', { stale });
+    }
+    fkD.closeTarget(tidO); await sleepD(80);
+    const f4 = w5d.rememberedTabOf(T);
+    w5d.shutdown();
+    ok(f0 === null && f1 === tidO && f2 === null && f3 === tidS && f4 === tidS, 'B-21cc (r2849 (5)): the snapshot\'s frame note is asked of a tab the watch knows WITHOUT a read — the last tab ack while no mover followed it, or the conversation\'s only tab; two tabs and no such ack, or a mover after it ⇒ none: silent rather than wrong', { f0, f1, f2, f3, f4 });
+    for (const r of copiesCensus(MD.files, MD.dir, REPO, { label: 'B-21cc r2849 controls: ' })) ok(r.pass, r.name, r.detail);
+  } finally {
+    for (const w of wsD) { try { w.shutdown(); } catch { } }
+    LF?.clearAllFilledSecrets?.();
+    engD.close();
+    await fkD.close();
+    fs.rmSync(ROOT4D, { recursive: true, force: true });
   }
 }
 
@@ -1704,16 +1990,18 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
       const w7 = BD_M7 ? withCurrentTab(BD_M7).create({ keeper: sk, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-m', sessionId: 's-m' }], leaseCountOf: () => 1, logins: logM }) : null;
       if (w7) {
         await w7.arm('bp-m7');
+        // B-21cc (r2849): a note that names no tab only KEEPS the snapshot for the fill to adopt, so the two tabs' references are
+        // written by NAMED notes — B's first, A's last: the conversation's newest snapshot is A's, so only a fill that LEAVES the
+        // tab it acts on (B) for the tab holding the reference (A) types there (the product refuses B's fill by name: a moved tab)
+        const parseM7 = require(path.join(REPO, 'src/browser-verbs.js')).parseSnapshotRefs;
         for (let i = 0; i < 20; i++) {
-          w7.noteActiveTab({ profileId: 'bp-m7', browserKey: 'bk-m' }, tidA);
-          const nsA = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, '- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]');
-          if (nsA && nsA.ok && nsA.count === 2) break;
+          const nsB = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, { parsedRefs: parseM7('- textbox "Search" [ref=e1]'), targetId: tidB2 });
+          if (nsB && nsB.ok && nsB.count === 1) break;
           await new Promise((r) => setTimeout(r, 10));
         }
         for (let i = 0; i < 20; i++) {
-          w7.noteActiveTab({ profileId: 'bp-m7', browserKey: 'bk-m' }, tidB2);
-          const nsB = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, '- textbox "Search" [ref=e1]');
-          if (nsB && nsB.ok && nsB.count === 1) break;
+          const nsA = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, { parsedRefs: parseM7('- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]'), targetId: tidA });
+          if (nsA && nsA.ok && nsA.count === 2) break;
           await new Promise((r) => setTimeout(r, 10));
         }
         const r7 = await w7.fillVaultField({ profileId: 'bp-m7', browserKey: 'bk-m' }, { targetId: tidB2, target: '@e2', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-m7'] } });
@@ -1820,8 +2108,8 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
 
   // Mutant 12 (N2): `noteSnapshot` calls `Accessibility.getFullAXTree` over the watch socket (r23's bug) -> 3,000-row page drops watch with 1009!
   const m12BdSrc = editAnchor(bdSrc,
-    '    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };',
-    '    await call(w, \'Accessibility.getFullAXTree\', { frameId: e.targetId }, e.sid);\n    e.snapshotRefs = { specs, resolved: new Map(), map: null, at: now(), navSeq: e.navSeq || 0 };'
+    '      writeSnapshotRefs(w, e, specs, { seq, at });', // B-21cc (r2849): a NAMED note writes the tab's references here
+    '      await call(w, \'Accessibility.getFullAXTree\', { frameId: e.targetId }, e.sid);\n      writeSnapshotRefs(w, e, specs, { seq, at });'
   , "src/server/browser-dialogs.js");
   const BD_M12 = m12BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m12BdSrc, 'n2-snapshot-full-ax-on-watch') : null;
 
