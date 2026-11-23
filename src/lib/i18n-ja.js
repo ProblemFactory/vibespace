@@ -10703,6 +10703,7 @@ export default {
   "Session token": "セッショントークン", // lane vault-contents-window
   "Set a second password first — stored values are shown only behind it": "先に第二パスワードを設定してください — 保存された値はその後ろでだけ表示されます", // lane vault-contents-window
   "That stored value could not be opened": "その保存値は開けませんでした", // lane vault-contents-window
+  "The vault's run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute": "保管庫の実行設定をいま読めなかったため、何も変更していません。VibeSpace が自動でもう一度読みます。1 分ほどしてからもう一度お試しください", // lane lg-vault-file (主开发 r2920)
   "That stored value is not there any more": "その保存値はもうありません", // lane vault-contents-window
   "The vault is locked — Unlock… shows what it holds (For you names what is waiting on it).": "保管庫はロック中です — 「ロック解除…」で中身を表示できます（待っているものは「あなた宛て」に載っています）。", // lane vault-contents-window
   "Token": "トークン", // lane vault-contents-window

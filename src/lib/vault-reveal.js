@@ -44,6 +44,7 @@ export function revealWords(r) {
   if (c === 'paced' && r.retryInMs && !r.failedTries) return t('Too many values shown — try again in {n} s', { n: Math.max(1, Math.ceil(r.retryInMs / 1000)) });
   if (c === 'not_found') return t('That stored value is not there any more');
   if (c === 'unreadable') return t('That stored value could not be opened');
+  if (c === 'store_held') return t('The vault\'s run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute');   // 主开发 r2920: the run door's store HELD (its read failed) — the switch refused by name
   if (c === 'not_revealable') return t('That stored value is never shown — VibeSpace uses it itself');
   if (c === 'vault_use_marks_unread') return t('The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself');   // r3104 (a): the page's own words for the held code (until the family's table)
   if (c === 'marks_undecided') return t('This row\'s marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed')   // r3130 (e);

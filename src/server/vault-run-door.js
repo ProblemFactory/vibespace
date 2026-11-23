@@ -218,7 +218,7 @@ const STATUS = Object.freeze({
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403, run_not_admitted: 403,   // B-a14b: + grant_expired · B-bc3b: + run_not_admitted
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
-  spawn_failed: 500, run_unanswered: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
+  spawn_failed: 500, run_unanswered: 500, store_held: 503, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
   too_many_askers: 429,   // B-4934
   scope_required: 400, command_unreadable: 400, command_has_hosts: 400, standing_bad_host: 400, command_not_pinnable: 400, standing_bad_tool: 400, tool_required: 400,   // lane vault-standing-request (+ r2)
@@ -232,6 +232,7 @@ const LOCKED_AFTER_RAN = Object.freeze({   // 主开发 r2229: the words name ho
   gone: VB.agentWords('the command RAN until its caller left, before the lock — do not run it again blindly; its output after the lock is withheld, and a new run waits until a person unlocks it on this instance\'s page'),
 });
 const MORE_WORDS = Object.freeze({
+  store_held: 'the vault\'s run store (data/vault-run.json) could not be read, so it is HELD: nothing was changed and nothing is written over it; it is read again by itself — try again in a minute',   // 主开发 r2920
   run_unanswered: 'the command RAN, but its answer could not be written: its output is lost — do not run it again blindly; its receipt and its use are recorded',   // r1919 (2)
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
   card_too_long: `the card that shows this run to the user would be cut (over ${DETAIL_MAX} characters) — a shorter command or template`,
@@ -427,6 +428,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   spawnPriority = () => null,   // B-7f18: () → src/server/spawn-priority.js priorityFor's answer (its `priority.by` = the step below the hub); none = the hub's own
   lowerImpl = lowerRun,   // B-7f18: the run's child set `by` below the hub (a suite's seam)
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
+  storeRetry = { firstMs: 30000, maxMs: 300000, missingMs: 1000 },   // 主开发 r2920: the held store's read again (src/store-read.js retryDelay) and the once-more read of a «missing» after it
   useGrants = null, useFacts = () => null, groupNameOf = null,   // the chain's cure (B): a group id → its belted name (tasks.lineageNameOf)
   writer = null,   // B-a14b: the grant ends' store writer (THE store writer when none is handed in)
   entryMax = 256,   // B-be21: the run list's bound (a suite seam — the product keeps 256)
@@ -651,6 +653,61 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const approvedOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && x && typeof x === 'object') out[k] = { n: Number(x.n) || 0, lastAt: Number(x.lastAt) || 0, shapes: (Array.isArray(x.shapes) ? x.shapes : []).filter((s) => s && typeof s.conv === 'string' && typeof s.key === 'string').slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(typeof s.shape === 'string' ? { shape: s.shape } : {}) })), items: (Array.isArray(x.items) ? x.items : []).filter((i) => typeof i === 'string').slice(-AP_MAX) }; return out; };   // the SAME field order AND caps as bodyOf emits so the mark verifies on read
   const okAlways = (a) => a && typeof a.conv === 'string' && typeof a.key === 'string' && a.key.startsWith(VR.SHAPE_V + ':') && (a.until === null || Number.isFinite(a.until)) && Array.isArray(a.entries);
   let lastGen = 0;   // the newest generation this hub read or wrote — an older copy is a replay (the review: a saved copy restored)
+  // 主开发 r2920 — THE STORE HELD: { why, code, tries } while data/vault-run.json gives no answer; null when it reads
+  const STORE_VALID = (d) => !!d && typeof d === 'object' && !Array.isArray(d);
+  let storeHeld = null, heldTimer = null;
+  let heldBefore = false, missingSeen = 0;   // a read failed since the last DATA read · how many «missing» answers came after it
+  const tornKept = new Set();   // the torn bytes kept aside this hub life (by their digest) — kept ONCE, never one copy a load
+  let tornAside = null;   // the torn bytes' copy in flight — every owner write waits for it (refused by name): until it lands, the file is their only copy
+  const TORN_UNKEPT = 'its bytes did not parse and could not be kept aside, so the file is their only copy';   // the law (src/store-read.js afterSetAside): never written over
+  /** ONE law for every read of the store (the load's and the read again's) → 'held', or the answer to apply. Only the LOAD's own read
+   *  (`applied`) of data clears the hold's memory: a read again that answered lifts the hold, and the load that follows is judged too */
+  function lawOf(a, { applied = true } = {}) {
+    if (a.state === 'unreadable') { missingSeen = 0; hold(a.code); return 'held'; }
+    if (a.state === 'missing' && heldBefore) {
+      if (++missingSeen < 2) { hold('missing right after unreadable', storeRetry.missingMs); return 'held'; }   // read once more before it counts as a new store
+      heldBefore = false; missingSeen = 0; return a;
+    }
+    if (a.state === 'data' || a.state === 'corrupt') { missingSeen = 0; if (applied) heldBefore = false; }   // bytes were there: a later «missing» is read once more again
+    return a;
+  }
+  function hold(code, soonMs = null, said = `the read failed (${code})`) {
+    const first = !storeHeld;
+    heldBefore = true;
+    storeHeld = { why: `held — ${said}; it is read again by itself`, code, tries: storeHeld ? storeHeld.tries : 0 };
+    if (first) { log(`data/${STORE_FILE}: ${said} — HELD: the door stays closed for runs, every switch is refused by name, nothing is written over it; read again off the loop`); audit('vault-run-store-held', { why: `data/${STORE_FILE}: ${said} — held, read again by itself` }); }
+    readAgainLater(soonMs);
+  }
+  function readAgainLater(ms = null) {
+    if (heldTimer) return;
+    const wait = ms == null ? SR.retryDelay(storeHeld.tries + 1, storeRetry) : ms;
+    heldTimer = timers.set(() => { heldTimer = null; readAgain().catch((e) => { log(`data/${STORE_FILE}: a read again failed (${(e && e.message) || e})`); if (storeHeld) readAgainLater(); }); }, wait);   // one read in flight
+    heldTimer?.unref?.();
+  }
+  async function readAgain() {   // OFF THE LOOP: the read's own fd, its own size bound
+    if (!storeHeld) return;
+    storeHeld.tries++;
+    let read;
+    try { const fh = await fs.promises.open(FILE, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0)); try { const st = await fh.stat(); if (!st.isFile()) throw Object.assign(new Error('not a regular file'), { code: 'ENOTREG' }); if (st.size > STORE_MAX) throw Object.assign(new Error('too large'), { code: 'EFBIG' });   // the load's own read, off the loop (no link followed, a regular file, bounded)
+      const b = Buffer.alloc(st.size); await fh.read(b, 0, st.size, 0); read = { text: b.toString('utf8') }; } finally { await fh.close(); } } catch (e) { read = { error: e }; }
+    if (!storeHeld) return;
+    const tries = storeHeld.tries;
+    const a = SR.storeAnswer(read, { valid: STORE_VALID });
+    if (lawOf(a, { applied: false }) === 'held') return;   // held again: the same record (its tries), the next read scheduled
+    if (a.state === 'corrupt' && (await keepTornAside(read.text)) === false) { if (storeHeld) hold('not set aside', null, TORN_UNKEPT); return; }   // torn bytes with no copy yet: held, read again later
+    storeHeld = null; db = null; dbEpoch = -1;   // LIFTED: the next load reads the file as at a start (through the same law) — no restart, every switch the owner made stands
+    log(`data/${STORE_FILE} reads again (after ${tries} read(s)) — the hold is lifted`);
+    audit('vault-run-store-read-again', { tries });
+  }
+  /** the torn bytes → a copy beside the store, named by their digest; → null when they are kept already, else a promise of true (kept)
+   *  or false (not kept: the file is their only copy — the caller holds the store, never writes over it) */
+  function keepTornAside(text) {
+    const h = crypto.createHash('sha256').update(String(text)).digest('hex').slice(0, 16);
+    if (tornKept.has(h)) return null;
+    const to = `${STORE_FILE}.corrupt-${h}`;   // named by the bytes' own digest: the same torn bytes are kept ONCE, across restarts too
+    return fs.promises.writeFile(path.join(dataDir, to), String(text), { flag: 'wx', mode: 0o600 }).then(() => { tornKept.add(h); log(`data/${STORE_FILE} did not parse — its bytes kept aside as data/${to}; the door fails closed`); return true; },
+      (e) => { if (e && e.code === 'EEXIST') { tornKept.add(h); return true; } log(`data/${STORE_FILE}'s torn bytes could not be kept aside (${(e && e.code) || e}) — HELD: never written over`); return false; });
+  }
   let refusedNoted = null;   // the last `why` filed in For-you — so a refused store is reported once, not every read
   // round 3 (MAJOR item 6) + round 4 (MAJOR item 5): THIS use's OWN per-hour judge bound (the door's counter, per conversation),
   // the SECOND fence beside the engine's atomic `perHour: 30` (per caller, restored in the wiring). The counter is BOOKED
@@ -753,9 +810,22 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function load() {
     if (vaultState() !== 'unlocked') return null;
     if (db && dbEpoch === vault.epoch()) return db;
-    let raw = null, why = null;
-    try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }
     let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {}, policyHours: {}, opened: {}, touched: {} };
+    // THE STORE READ (主开发 r2920, the store-read law's own for this store): a READ that failed is no state — the store is HELD (the
+    // door stays closed for runs, every owner switch refused by name, nothing written over the file) and read again OFF THE LOOP until it
+    // answers; «missing» right after «unreadable» is read once more before it counts as a new store; torn bytes are kept aside once.
+    if (storeHeld) { next.refused = storeHeld.why; next.held = true; db = next; dbEpoch = vault.epoch(); return db; }   // held: no read on the loop — the read again answers
+    let read;
+    try { read = { text: readBounded(FILE, STORE_MAX).toString('utf8') }; } catch (e) { read = { error: e }; }
+    const a = lawOf(SR.storeAnswer(read, { valid: STORE_VALID }));
+    if (a === 'held') { next.refused = storeHeld.why; next.held = true; db = next; dbEpoch = vault.epoch(); return db; }
+    let raw = null, why = null;
+    if (a.state === 'data') raw = a.value;
+    else if (a.state === 'corrupt') {   // bytes that were READ and are no store: kept aside once, the door fails closed (below); a copy that fails HOLDS the store
+      why = `unreadable (${a.code})`;
+      const k = keepTornAside(read.text);
+      if (k) { tornAside = k; k.then((kept) => { if (tornAside === k) tornAside = null; if (!kept) hold('not set aside', null, TORN_UNKEPT); }); }
+    }
     if (raw && !why) {
       try {
         const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.templateHash === 'string' ? { templateHash: a.templateHash, templateBytes: Number(a.templateBytes) || 0 } : {}), ...(typeof a.todoId === 'string' && /^ut-[\w-]{1,40}$/.test(a.todoId) ? { todoId: a.todoId } : {}) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved), policyHours: hoursOf(raw.policyHours), opened: openedOf(raw.opened), touched: touchedOf(raw.touched) };
@@ -826,6 +896,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     } catch (e) { log(`the legacy wildcard notice could not be filed (${e.message})`); }
   }
   function save(next0) {
+    if (storeHeld) return named('store_held', { why: storeHeld.why });   // 主开发 r2920: the store is HELD — the owner's switch is refused BY NAME, nothing written over the unread file
+    if (tornAside) return named('store_held', { why: 'its bytes did not parse and are being kept aside first' });   // the torn bytes' copy in flight: nothing written over their only copy
     const next = { suspended: (db && db.suspended) || new Set(), policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], policyApproved: (db && db.policyApproved) || {}, policyHours: (db && db.policyHours) || {}, opened: (db && db.opened) || {}, touched: (db && db.touched) || {}, ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy / per-hour counter keeps them; (round 2) a save that names no `suspended` keeps it; (round 7) a save that names no `opened` keeps it; (round 12) a save that names no `touched` clock keeps it
     // round 7 (MAJOR item 2, bound invariant): if a stored RESUMED set would be truncated, NAME it — the dropped marks fail
     // CLOSED (those members become paused on the next read), never an un-pause, so a cap is safe but never silent.
@@ -2879,7 +2951,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, useRowDropped, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { _storeHeld: () => (storeHeld ? { ...storeHeld } : null), scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, useRowDropped, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }

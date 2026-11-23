@@ -10704,6 +10704,7 @@ export default {
   "Session token": "会话令牌", // lane vault-contents-window
   "Set a second password first — stored values are shown only behind it": "请先设置第二密码——存储的值只在它之后显示", // lane vault-contents-window
   "That stored value could not be opened": "该存储值无法打开", // lane vault-contents-window
+  "The vault's run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute": "保险库的运行设置暂时读不出来，所以没有做任何改动。VibeSpace 会自己再读一次：过一分钟再试", // lane lg-vault-file (主开发 r2920)
   "That stored value is not there any more": "该存储值已不存在", // lane vault-contents-window
   "The vault is locked — Unlock… shows what it holds (For you names what is waiting on it).": "保险库已锁定——点「解锁…」后才能查看其中内容（「待你处理」里写明了在等它的事）。", // lane vault-contents-window
   "Token": "令牌", // lane vault-contents-window
