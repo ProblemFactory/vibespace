@@ -4,7 +4,7 @@
 //   Ⓐ BASE (VIBESPACE_AB_BASE = a 0.38.1 native binary; SKIP without one): Chrome logging to stderr + a page logging every
 //     5 ms ⇒ the main thread blocks in pipe_write, /json/version answers 0 bytes (time-to-hang) ⇒ the keeper's verdict over
 //     the real /proc = stderr-pipe-full
-//   Ⓑ THE PIN (the driver on PATH, ≥ 0.38.2): the SAME spam ⇒ answers for ≥ 3× the time-to-hang; fd 2 still a pipe — drained
+//   Ⓑ THE PIN (the driver the run NAMES in VS_AGENT_BROWSER_BIN, ≥ 0.38.2; never one on a person's PATH): the SAME spam ⇒ answers for ≥ 3× the time-to-hang; fd 2 still a pipe — drained
 //     (the verdict null)
 //   Ⓒ the quiet switches (--disable-logging --log-level=3), Chrome's stderr captured by a test-local wrapper: fewer bytes
 //   Ⓓ B-1789 (a sub-agent's child browser stopped answering ~20–25 s after each start, fb-a0d05b52b6): a HELPER's browser on
@@ -17,7 +17,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, DRIVER, DRIVER_LEFT_ALONE, REHOMED } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const BE = require('../src/browser-stderr.js');
 let pass = 0, fail = 0;
@@ -25,14 +25,21 @@ const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const done = (code) => { console.log(`\n${fail ? '✗' : '✓'} test-browser-stderr-pipe-real: ${pass} passed, ${fail} failed`); process.exit(code); };
 
-// the REAL driver binary (past the VibeSpace shim on PATH): the package's native linux build beside its bin/agent-browser.js
+// THE DRIVER BY THE RUNNER'S VARIABLE ONLY (主开发 r3062, the law of r2095): the one program VS_AGENT_BROWSER_BIN names, as
+// scratch.mjs's door linked it into this run's own folder — re-homed (its own bin folder, on the PATH the re-home built) or
+// left alone (a folder of its own, first on PATH). With no name there is none: a driver on a person's PATH is never picked up.
+const namedDriver = () => {
+  if (DRIVER_LEFT_ALONE && DRIVER_LEFT_ALONE.dir) return path.join(DRIVER_LEFT_ALONE.dir, DRIVER.name);
+  if (REHOMED && Array.isArray(REHOMED.linked) && REHOMED.linked.includes(DRIVER.name)) { try { return require('../src/browser-facts.js').binaryResolver(DRIVER.name, process.env)(); } catch { return null; } }
+  return null;
+};
+// the REAL driver binary: the package's native linux build — the named program itself, or the one beside its bin/agent-browser(.js)
+const NAMED = namedDriver();
 let AB = null;
-for (const d of String(process.env.PATH || '').split(':')) {
-  const p = path.join(d, 'agent-browser');
-  try { const real = fs.realpathSync(p); const nat = path.join(path.dirname(real), 'agent-browser-linux-x64'); if (/node_modules\/agent-browser\/bin\//.test(real) && fs.existsSync(nat)) { AB = nat; break; } } catch { }
-}
+if (NAMED) { try { const real = fs.realpathSync(NAMED); const nat = /agent-browser-linux-x64$/.test(real) ? real : path.join(path.dirname(real), 'agent-browser-linux-x64'); if (fs.existsSync(nat)) AB = nat; } catch { } }
+if (!AB) { console.log(`  SKIP: ${DRIVER.skip} ${NAMED ? `the named driver (${NAMED}) has no native linux build beside it` : 'the run named none'} — Ⓐ–Ⓓ did NOT run (no «Ⓓ RAN» line)`); done(0); }
 const xvfb = String(process.env.PATH || '').split(':').some((d) => fs.existsSync(path.join(d, 'Xvfb')));
-if (!AB || !xvfb || process.platform !== 'linux') { console.log(`  SKIP: needs the real agent-browser (found ${AB}) + Xvfb (${xvfb}) on linux — Ⓐ–Ⓓ did NOT run (no «Ⓓ RAN» line)`); done(0); }
+if (!xvfb || process.platform !== 'linux') { console.log(`  SKIP: needs Xvfb (${xvfb}) on linux beside the named driver (${AB}) — Ⓐ–Ⓓ did NOT run (no «Ⓓ RAN» line)`); done(0); }
 const verOf = (bin) => { try { return (/(\d+\.\d+\.\d+)/.exec(execFileSync(bin, ['--version'], { encoding: 'utf8' })) || [])[1] || null; } catch { return null; } };
 const cmpV = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const ver = verOf(AB);

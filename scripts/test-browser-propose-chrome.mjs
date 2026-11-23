@@ -25,7 +25,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker, CHROME_STORE, CHROME_QUIET, DRIVER, DRIVER_LEFT_ALONE, REHOMED } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
@@ -41,7 +41,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── what this machine has ──
 const isShim = (p) => { try { return /vibespace-browser/.test(fs.readFileSync(p, 'utf8').slice(0, 4096)); } catch { return false; } };
-const realAb = V.resolveRealBinary({ PATH: process.env.PATH || '', exists: (p) => fs.existsSync(p), isShim });
+// THE DRIVER BY THE RUNNER'S VARIABLE ONLY (主开发 r3062, the law of r2095): the one program VS_AGENT_BROWSER_BIN names, as
+// scratch.mjs's door linked it into this run's own folder — re-homed (its own bin folder, on the PATH the re-home built) or
+// left alone (a folder of its own, first on PATH). With no name there is none: a driver on a person's PATH is never picked up.
+const namedDriver = () => {
+  if (DRIVER_LEFT_ALONE && DRIVER_LEFT_ALONE.dir) return path.join(DRIVER_LEFT_ALONE.dir, DRIVER.name);
+  if (REHOMED && Array.isArray(REHOMED.linked) && REHOMED.linked.includes(DRIVER.name)) { try { return require('../src/browser-facts.js').binaryResolver(DRIVER.name, process.env)(); } catch { return null; } }
+  return null;
+};
+// the product's OWN resolver is exercised over a PATH of this suite's own: a scratch folder holding ONE link, to the named driver
+// (made here, removed at exit), and that folder first on the hub's PATH, so the browser the leg judges is the named driver's
+const NAMED = namedDriver();
+const OWN_DRV = NAMED ? scratch('bprop-chrome-drv') : null;
+if (OWN_DRV) { fs.rmSync(OWN_DRV, { recursive: true, force: true }); fs.mkdirSync(OWN_DRV, { recursive: true }); let real = NAMED; try { real = fs.realpathSync(NAMED); } catch { } fs.symlinkSync(real, path.join(OWN_DRV, DRIVER.name)); process.on('exit', () => { try { fs.rmSync(OWN_DRV, { recursive: true, force: true }); } catch { } }); }
+const realAb = OWN_DRV ? V.resolveRealBinary({ PATH: OWN_DRV, exists: (p) => fs.existsSync(p), isShim }) : { ok: false, error: `${DRIVER.skip} the run named none (the product's resolver is never handed a person's PATH)` };
+const HUB_PATH = OWN_DRV ? OWN_DRV + path.delimiter + (process.env.PATH || '') : (process.env.PATH || '');   // the named driver first on the hub's PATH; with no name, the PATH as before
 console.log(`machine: agent-browser ${realAb.ok ? realAb.path : 'absent'}`);
 
 // ── scratch roots ──
@@ -138,7 +152,7 @@ process.stdin.on('end', () => process.exit(0));
 
 let srv = null;
 const LOG = path.join(stubDir, 'server.log');
-const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: HUB_PATH, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
 startServer();
 const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
