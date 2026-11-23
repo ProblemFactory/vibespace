@@ -1549,6 +1549,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * the seal closes it, and only what really is missing is written.
    */
   function appendRecords(adapterId, convId, records) {
+    if (goneAccounts.has(adapterId)) return { appended: 0, duplicates: 0, lastAt: null, lastText: null, healed: false, freshAt: [], fresh: [], widened: [], gone: true };   // 主开发 r2819 (B-92fc): a purged account's late write makes nothing
     const list = Array.isArray(records) ? records : [];
     const set = dedupSet(adapterId, convId);
     const fresh = [];
@@ -1924,6 +1925,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * a few MB at most. Returns `{appended, duplicates}`.
    */
   function prependRecords(adapterId, convId, records) {
+    if (goneAccounts.has(adapterId)) return { appended: 0, duplicates: 0, widened: [], gone: true };   // B-92fc
     const list = Array.isArray(records) ? records : [];
     const set = dedupSet(adapterId, convId);
     const inBatch = new Set();
@@ -1990,6 +1992,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * (invariant 2's r2) and is DROPPED when the write throws (r4). → `{appended, duplicates, msgs}`.
    */
   function appendSide(adapterId, convId, sides) {
+    if (goneAccounts.has(adapterId)) return { appended: 0, duplicates: 0, msgs: [], gone: true };   // B-92fc
     const list = Array.isArray(sides) ? sides : [];
     const set = sideDedupSet(adapterId, convId);
     const inBatch = new Set();
@@ -2358,18 +2361,26 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return { file, meta };
   }
   async function avatarPut(adapterId, author, { data, mime }) {
+    // B-92fc (主开发 r2819): a picture fetch that began before a purge and lands after it makes nothing — refused at its start
+    // and after each wait, what it made taken away again
+    const gone = async () => { if (!goneAccounts.has(adapterId)) return false; try { await fs.promises.rm(path.join(dir, safeSeg(adapterId)), { recursive: true, force: true }); } catch { } return true; };
+    if (goneAccounts.has(adapterId)) return null;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
     const d = avDir(adapterId);
     await fs.promises.mkdir(d, { recursive: true, mode: 0o700 });
+    if (await gone()) return null;
     const file = path.join(d, attHash(author));
     const tmp = `${file}.tmp-${process.pid}-${++attSeq}`;
     await fs.promises.writeFile(tmp, buf, { mode: 0o600 });
+    if (await gone()) return null;
     await fs.promises.rename(tmp, file);
+    if (await gone()) return null;
     const meta = { at: now(), mime: String(mime || '').slice(0, 64), bytes: buf.length };
     writeJsonAtomic(file + '.json', meta, { mode: 0o600 });
     return { file, meta };
   }
   function avatarRefuse(adapterId, author, { code, error = '', until }) {
+    if (goneAccounts.has(adapterId)) return null;   // B-92fc
     const d = avDir(adapterId);
     fs.mkdirSync(d, { recursive: true, mode: 0o700 });
     const meta = { code: String(code).slice(0, 64), error: String(error || '').slice(0, 300), until: Number(until) || 0, at: now() };
@@ -2394,6 +2405,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // store whose directory is gone fails its write ENOENT, said, as before
   const peopleFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'people.json');
   function peopleWrite(adapterId, memo) {
+    if (goneAccounts.has(adapterId)) return { self: null, people: {} };   // B-92fc: nothing owed for a purged account
     const out = { self: memo && typeof memo.self === 'string' ? memo.self : null, people: memo && memo.people && typeof memo.people === 'object' ? memo.people : {} };
     peopleCache.set(adapterId, out);
     const file = peopleFile(adapterId);
@@ -2425,6 +2437,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function searchMemoWrite(adapterId, obj) {
     if (!safeSeg(adapterId)) return false;
+    if (goneAccounts.has(adapterId)) return false;   // B-92fc
     const file = searchMemoFile(adapterId);
     memoHeld.set(file, obj);
     owe(file, { name: 'channels-search-memo.write', produce: memoBytes(file), mode: 0o600, makeDir: true });
@@ -2445,6 +2458,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function feedMissWrite(adapterId, obj) {   // B-360d r1360, ALSO CURED: the search memo's twin (the same mkdir + atomic write)
     if (!safeSeg(adapterId)) return false;
+    if (goneAccounts.has(adapterId)) return false;   // B-92fc
     const file = feedMissFile(adapterId);
     memoHeld.set(file, obj);
     owe(file, { name: 'channels-feed-miss.write', produce: memoBytes(file), mode: 0o600, makeDir: true });
@@ -2950,9 +2964,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   /** design 012 (Slack S1, `caps.retention: 'purge-on-remove'`): ONE account's LOCAL COPY goes — its message logs and
    *  side logs (msgs/<id>/), its fetched files (attachments/<id>/) and every cache this store keeps for it. Called by
    *  the engine AFTER the account's index rows and record left (nothing reads the account any more). → {logs, files}. */
-  function purgeAccount(adapterId) {
+  async function purgeAccount(adapterId) {
     const seg = safeSeg(adapterId);
-    if (!seg) return { logs: false, files: false };
+    if (!seg) return { logs: false, files: false, own: false };
     const pre = `${adapterId}/`;
     for (const m of [dedup, sideDedup, placeCache, basePlaces, sideCompactFailedAt]) for (const k of [...m.keys()]) if (String(k).startsWith(pre)) m.delete(k);
     for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; }
@@ -2960,8 +2974,22 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     lruDirty.delete(adapterId);
     purgeSeq.set(adapterId, (purgeSeq.get(adapterId) || 0) + 1);
     goneAccounts.add(adapterId);
-    const gone = (p) => { const had = fs.existsSync(p); try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* reported below */ } return had && !fs.existsSync(p); };
-    return { logs: gone(path.join(msgsDir, seg)), files: gone(path.join(attRoot, seg)) };
+    // B-92fc (主开发 r2819): THE ACCOUNT'S OWN FOLDER goes too (data/channels/<account>/: its pictures, the people memo, the memos) —
+    // its owed writes forgotten first (synchronously, before any wait: a late write of this account refuses from here on)
+    peopleCache.delete(adapterId);
+    memoForget(searchMemoFile(adapterId)); memoForget(feedMissFile(adapterId));
+    try { W().forget(peopleFile(adapterId)); } catch { }
+    // off the loop (B-92fc: nothing synchronous): each folder removed on the thread pool, said by whether it was there and is not
+    const there = async (p) => { try { await fs.promises.access(p); return true; } catch { return false; } };
+    const gone = async (p) => { const had = await there(p); try { await fs.promises.rm(p, { recursive: true, force: true }); } catch { /* reported below */ } return had && !(await there(p)); };
+    const own = path.join(dir, seg);
+    const r = { logs: await gone(path.join(msgsDir, seg)), files: await gone(path.join(attRoot, seg)), own: await gone(own) };
+    // THE SETTLE: a write of this folder already IN FLIGHT on the writer's thread may land its rename after that removal (its makeDir
+    // makes the folder again; its forgotten file is unlinked after it lands) — once no write of the folder flies, the folder goes again
+    const flying = () => { try { return W().stats().some((x) => x.inflight && String(x.file || '').startsWith(own + path.sep)); } catch { return false; } };
+    for (let k = 0; k < 600 && flying(); k++) await new Promise((z) => setTimeout(z, 50));
+    if (await there(own)) { try { await fs.promises.rm(own, { recursive: true, force: true }); } catch { } }
+    return r;
   }
 
   acctWarmStart();   // B-dfa4 cut 3: a big index's per-account keys, in slices from the load (keysOf finishes them if it asks first)

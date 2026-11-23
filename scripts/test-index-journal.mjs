@@ -233,7 +233,7 @@ async function lawEleven(waitJournal, tag) {
   const hr = await heldLeft(HM, 'eleven-held-red');
   ok(hr[1] > 0, `⑥ RED CONTROL: the compaction owed at open never asked (the journal's wait asks nothing; a landing asks only for the lines it took) — the journal still holds ${hr[1]} of its rows — the leg above would go red`, hr);
   const auth = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
-  ok(/const r = store\.purgeAccount\(rec\.id\);[\s\S]{0,400}await store\.index\.journalDurable\(\)/.test(auth), '⑥ LAW 11: the purge road (purgeIfDeclared) awaits the journal\'s compaction before the removal says done');
+  ok(/const r = await store\.purgeAccount\(rec\.id\);[^\n]*\n[\s\S]{0,400}await store\.index\.journalDurable\(\)/.test(auth), '⑥ LAW 11: the purge road (purgeIfDeclared) awaits the journal\'s compaction before the removal says done');
 }
 
 // ═══ ⑦ LAW 8 ═══

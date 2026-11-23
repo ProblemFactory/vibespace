@@ -179,9 +179,10 @@ async function attLeg(mod, tag) {
     { const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
       await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('body'), mime: 'text/plain' }); try { st.close(); } catch { } try { w.stop(); } catch { } }
     const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
-    const r0 = fs.promises.readFile; let purged = false;
-    fs.promises.readFile = async function (f, ...x) { const out = await r0.call(this, f, ...x); if (!purged && path.basename(String(f)) === 'lru.json') { purged = true; st.purgeAccount('gmail'); } return out; };
+    const r0 = fs.promises.readFile; let purged = false, purgeP = null;
+    fs.promises.readFile = async function (f, ...x) { const out = await r0.call(this, f, ...x); if (!purged && path.basename(String(f)) === 'lru.json') { purged = true; purgeP = st.purgeAccount('gmail'); } return out; };
     let ans; try { ans = await st.attachmentGetAsync('gmail', 'thr_1', 'part:1', 'm1'); } finally { fs.promises.readFile = r0; }
+    await purgeP;   // B-92fc: the purge is off the loop now — its removals awaited before the folder is judged
     try { st.close(); } catch { } try { w.stop(); } catch { }
     return { purged, ans, remade: fs.existsSync(path.join(dir, 'attachments', 'gmail')) };
   };
@@ -199,17 +200,18 @@ async function attLeg(mod, tag) {
     { const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
       await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('body'), mime: 'text/plain' }); try { st.close(); } catch { } try { w.stop(); } catch { } }
     const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
-    const r0 = fs.promises.readFile; let purged = false;
-    fs.promises.readFile = async function (f, ...x) { const out = await r0.call(this, f, ...x); if (!purged && path.basename(String(f)) === 'lru.json') { purged = true; st.purgeAccount('gmail'); } return out; };
+    const r0 = fs.promises.readFile; let purged = false, purgeP = null;
+    fs.promises.readFile = async function (f, ...x) { const out = await r0.call(this, f, ...x); if (!purged && path.basename(String(f)) === 'lru.json') { purged = true; purgeP = st.purgeAccount('gmail'); } return out; };
     let asked = 'unasked', put = 'unasked';
     try { asked = await st.attachmentGetAsync('gmail', 'thr_1', 'part:1', 'm1'); } finally { fs.promises.readFile = r0; }
+    await purgeP;   // B-92fc: the purge (off the loop now) ends first — the engine's write then lands AFTER it, as a late writer's does
     if (!asked) put = await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('body'), mime: 'text/plain' });   // the engine's next step (persistHeldBodies)
     try { st.close(); } catch { } try { w.stop(); } catch { }
     return { purged, asked, put: put && put.file ? 'written' : put, back: fs.existsSync(path.join(dir, 'attachments', 'gmail')) };
   };
   const rd = await roadLeg(CS, 'road');
   ok(rd.purged && rd.asked === null && rd.put === null && !rd.back, `⑥ the held-bodies road across a purge: the question answered ${JSON.stringify(rd.asked)}, the write that follows refused (${JSON.stringify(rd.put)}); the purged account's attachments folder back: ${rd.back}`, rd);
-  const RB = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (goneAccounts.has(adapterId)) return null;\n    const buf = Buffer.isBuffer(data)", "    const buf = Buffer.isBuffer(data)", 'the write blind to a gone account at its start'), "const gone = async () => { if (!goneAccounts.has(adapterId)) return false;", "const gone = async () => { if (true) return false;", 'the write blind to a gone account after its waits'), 'put-blind');
+  const RB = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (goneAccounts.has(adapterId)) return null;\n    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');\n    const d = attDir(adapterId, convId);", "    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');\n    const d = attDir(adapterId, convId);", 'the write blind to a gone account at its start'), "const gone = async () => { if (!goneAccounts.has(adapterId)) return false; try { await fs.promises.rm(path.join(attRoot,", "const gone = async () => { if (true) return false; try { await fs.promises.rm(path.join(attRoot,", 'the write blind to a gone account after its waits'), 'put-blind');
   const rdr = await roadLeg(RB, 'road-red');
   ok(rdr.purged && rdr.back, `⑥ RED CONTROL: a write blind to a gone account — the purged account's folder and the body back (${rdr.put}) — the leg above would go red`, rdr);
   const i = ENGSRC.indexOf('  async function persistHeldBodies('), body = i < 0 ? '' : ENGSRC.slice(i, ENGSRC.indexOf('\n  }\n', i));
