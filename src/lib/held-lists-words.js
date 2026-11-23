@@ -14,6 +14,8 @@ export function heldChipTitle(t) { return t(i18nKey('Some of VibeSpace’s lists
 export function heldSectionTitle(t) { return t(i18nKey('Lists that could not be read')); }
 export function heldSectionNote(t) { return t(i18nKey('Nothing is written over these lists, and changes to them wait until they read. VibeSpace reads them again by itself.')); }
 export function heldPressLabel(t) { return t(i18nKey('Read again now')); }
+/** a next try whose time has passed (r3212): worded, never a time in the past */
+export function heldSoonWord(t) { return t(i18nKey('in a moment')); }
 /** one row: its plain name, since when, the next try (each worded by the caller; '' = not known) */
 export function heldRowWords(row, t, { since = '', next = '' } = {}) {
   const name = heldListName(row && row.what, t);

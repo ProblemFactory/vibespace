@@ -471,11 +471,12 @@ const heldLists = require('./held-lists.js').create({
   broadcast: (m) => bcastAll(m), log: (m) => console.log(m),
   older: [
     { key: 'user-todos', facts: () => { const u = userTodos && typeof userTodos.unreadState === 'function' ? userTodos.unreadState() : null; return u ? { since: u.at || null } : null; },
-      readAgain: () => userTodos.readAgain(), onLift: (fn) => { if (userTodos && typeof userTodos.whenRead === 'function') userTodos.whenRead(fn, 'the held lists notice'); } },
+      readAgain: () => userTodos.readAgain(), onLift: (fn) => { if (!userTodos || typeof userTodos.whenRead !== 'function') return false; userTodos.whenRead(fn, 'the held lists notice'); return true; } },
     { key: 'task-groups', facts: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; const u = tg && typeof tg.unreadState === 'function' ? tg.unreadState() : null; return u ? { since: u.at || null } : null; },
-      readAgain: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; return tg && typeof tg.readAgain === 'function' ? tg.readAgain() : Promise.resolve(false); } },
+      readAgain: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; return tg && typeof tg.readAgain === 'function' ? tg.readAgain() : Promise.resolve(false); },
+      onLift: (fn) => { const tg = typeof getTasks === 'function' ? getTasks() : null; if (!tg || typeof tg.onLift !== 'function') return false; tg.onLift(fn); return true; } },   // r3212: the manager's own lift signal (armed once it exists)
     { key: 'hosts', facts: () => (hosts && typeof hosts.held === 'function' && hosts.held() ? { since: null } : null),
-      onLift: (fn) => { if (hosts && typeof hosts.whenRead === 'function') hosts.whenRead(fn, 'the held lists notice'); } },
+      onLift: (fn) => { if (!hosts || typeof hosts.whenRead !== 'function') return false; hosts.whenRead(fn, 'the held lists notice', 'held-lists'); return true; } },   // keyed: one wait, never let go among the bound
   ],
 });
 app.delete('/api/hosts/:id/hub-pin', async (req, res) => {
@@ -1017,7 +1018,7 @@ app.post('/api/mounts/:id/ceph-share', async (req, res) => {
 // B-f276 family unit B: THE ONE NOTICE's two routes (its hub half is made above the first route: `heldLists`)
 app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list() }));
 app.post('/api/held-lists/read-again', async (req, res) => {
-  if (isAgentBearer(req)) return res.status(403).json({ error: 'reading the held lists again is the owner\'s press — an agent token cannot press it', code: 'agent-forbidden' });
+  if (require('../write-origin.js').pressBearer(req.headers)) return res.status(403).json({ error: 'reading the held lists again is the owner\'s press — no token presses it (an agent\'s, a job\'s, an automation\'s)', code: 'agent-forbidden' });   // r3212: the tree's ONE verdict for every bearer
   try { res.json(await heldLists.readAgain()); } catch (e) { res.status(500).json({ error: (e && e.message) || 'failed' }); }
 });
 

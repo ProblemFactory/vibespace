@@ -66,7 +66,35 @@ ok(S.first.ok === true && S.olderPressed === 1 && S.first.lists.length === 1 && 
 ok(S.tooSoon.ok === false && S.tooSoon.code === 'held_read_too_soon' && S.tooSoon.retryAfterMs > 0 && S.running.ok === false && S.running.code === 'held_read_running', 'a second press inside the gap, and a press while one runs, are refused BY NAME (nothing greyed: the page says each)', { tooSoon: S.tooSoon, running: S.running });
 const last = S.casts[S.casts.length - 1];
 ok(S.lift.ok === true && S.lift.read === true && S.after.length === 0 && !!last && Array.isArray(last.lists) && last.lists.length === 0, 'the storage answering again: the press lifts the hold — broadcast with an EMPTY list (the chip goes by itself), the list empty', { lift: S.lift, last });
-ok(S.liftOlder === 'function', 'an older hold\'s lift is heard (its onLift was asked for the broadcast)');
+ok(S.liftOlder === 'function', 'an older hold\'s lift signal was armed (its onLift handed the broadcast)');
+// r3212 MUST 2: A BRIDGED STORE THAT LIFTS BY ITSELF IS BROADCAST — its own lift signal, not a press, not another hold's change
+{
+  let held = true, fire = null, ready = false, reenter = 0;
+  const casts = [];
+  const selfLift = { key: 'task-groups', facts: () => (held ? { since: 5 } : null), readAgain: async () => false, onLift: (fn) => { if (!ready) return false; fire = fn; return true; } };   // its object comes later (the Task Groups' manager)
+  const atOnce = { key: 'hosts', facts: () => null, onLift: (fn) => { reenter++; fn(); return true; } };   // a signal that answers at once (not held): say → list → arm re-enters
+  const hl = HL.create({ broadcast: (m) => casts.push(m), older: [selfLift, atOnce], now: () => 1 });
+  const before = fire;
+  ready = true; hl.list();   // the next list arms it (lazily)
+  hl.say();
+  const n0 = casts.length;
+  held = false; if (fire) fire();   // the store read again by itself and lifted
+  const last = casts[casts.length - 1];
+  ok(before === null && typeof fire === 'function' && reenter === 1 && casts.length === n0 + 1 && !!last && !last.lists.some((r) => r.key === 'task-groups'),
+    'r3212: a bridged store that lifts BY ITSELF is broadcast through its own lift signal (armed lazily once its object exists; a signal that answers at once re-enters once, never loops)', { armedLate: typeof fire, reenter, casts: casts.length - n0 });
+  hl.stop();
+}
+// r3212 small: the press answers within its bound — a read that never answers (a hung mount) holds neither it nor a later press
+{
+  let clock = 10;
+  const hung = { key: 'user-todos', facts: () => ({ since: 1 }), readAgain: () => new Promise(() => { }), onLift: () => true };
+  const hl = HL.create({ broadcast: () => { }, older: [hung], now: () => clock, boundMs: 40 });
+  const a = await hl.readAgain();   // it answers at its bound (the leg would hang without it — no wall clock read here)
+  clock += HL.PRESS_GAP_MS + 1; const b = await hl.readAgain();
+  ok(a.ok === true && a.timedOut === true && a.lists.length === 1 && b.code !== 'held_read_running' && b.timedOut === true,
+    'r3212: a press whose read never answers returns at its bound with the true state (still held), and the next press is no «running» for good', { a: { ok: a.ok, timedOut: a.timedOut }, b: b.code || b.ok });
+  hl.stop();
+}
 // RED: the helper without the start's change — no broadcast at a hold
 const HOLD_R = memOf('src/store-read-hold.js', "    changed();   // B-f276 unit B: the family's notice hears the set change\n", '', 'held-lists: the start\'s change cut');
 const HL_H = memOf('src/server/held-lists.js', "const HOLD = require('../store-read-hold.js');", "const HOLD = null;", 'held-lists: a copy taking the helper it is handed');
@@ -101,11 +129,25 @@ console.log('③ THE PAGE\'s WIRING (source)');
 const PAGE = read('src/lib/held-lists.js'), APP = read('src/lib/app.js'), RAIL = read('src/lib/sidebar-rail.js'), WIRE = read('src/server/mounts-plugins-wiring.js'), VAULT = read('src/lib/vault-unlock.js');
 ok(PAGE.includes("const CHIP_SLOTS = [['taskbar-tray', 'taskbar-user-todos', 'taskbar-held'], ['mobile-nav', 'mobile-nav-todos', 'mobile-nav-held']];") && VAULT.includes("const CHIP_SLOTS = [['taskbar-tray', 'taskbar-user-todos', 'taskbar-vault'], ['mobile-nav', 'mobile-nav-todos', 'mobile-nav-vault']];"),
   'the chip stands in the vault chip\'s own two slots — beside For you in the taskbar\'s tray and in the phone\'s nav');
-ok(PAGE.includes("chip.onclick = () => openHeldSection();") && PAGE.includes("openRailPanel(app, 'system');") && PAGE.includes("document.querySelector('.sys-held')"), 'the chip\'s press opens the system panel and brings its section into view — the act lives there, never behind the chip alone');
+ok(PAGE.includes("chip.onclick = () => openHeldSection();") && PAGE.includes("openRailPanel(app, 'system');") && PAGE.includes('scrollWanted = true;'), 'the chip\'s press opens the system panel and brings its section into view — the act lives there, never behind the chip alone');
 ok(RAIL.includes('<div class="sys-held" hidden></div>') && RAIL.includes("paintHeldLists(c.querySelector('.sys-held'));"), 'the system panel carries the section «Lists that could not be read» (drawn only while one is held)');
 ok(APP.includes("initHeldLists(this);") && APP.includes("if (msg.type === 'held-lists') applyHeldLists(msg.lists);") && APP.includes("placeHeldChip();"), 'app.js: the first read at boot, the hub\'s broadcast, the chip re-seated after every arrangement (as the vault\'s)');
-ok(/app\.post\('\/api\/held-lists\/read-again', async \(req, res\) => \{\n {2}if \(isAgentBearer\(req\)\) return res\.status\(403\)/.test(WIRE) && WIRE.includes("app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list() }));"), 'the press\'s route refuses an agent\'s token before anything is read again (a person\'s press); the list is the page\'s first read');
+ok(WIRE.includes("app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list() }));") && !/held-lists\/read-again[\s\S]{0,200}isAgentBearer\(req\)/.test(WIRE), 'the list is the page\'s first read; the press\'s route asks no file-local token rule (the one verdict below)');
 ok(!/\.disabled\s*=\s*true/.test(PAGE), 'nothing of the notice is greyed: a press while one runs is said, never disabled');
+ok(APP.includes("      refreshStoreHolds();   // B-225b R7: a hold said — or lifted — while this page was away (its word never arrives)\n      refreshHeldLists().catch(() => { });"), 'r3212 MUST 1: the held lists are read again at EVERY reconnect, beside the store strip\'s own re-read (a lift broadcast while the page was away is never missed)');
+ok(PAGE.includes("const before = vault && vault.parentNode === slot.parent ? vault : slot.before;") && PAGE.includes("chip.nextSibling !== before) slot.parent.insertBefore(chip, before);"), 'r3212: one fixed order beside For you — this chip before the vault\'s, so the two never trade places at a redraw');
+ok(PAGE.includes('scrollWanted = true;') && PAGE.includes('if (scrollWanted) { scrollWanted = false;') && !PAGE.includes('setTimeout(() => { try { document.querySelector'), 'r3212: the section scrolls into view at its FIRST draw after the chip opened the panel (never a fixed wait that can come before it exists)');   // stale-pins: kept — a deliberate absence check (the fixed wait the cure removed)
+ok(PAGE.includes('r.next > at ? stampAt(r.next) : heldSoonWord(t)'), 'r3212: a next try that has passed is worded at paint («in a moment»), never a time in the past');
+ok(/app\.post\('\/api\/held-lists\/read-again', async \(req, res\) => \{\n {2}if \(require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(WIRE), 'r3212: the press refuses EVERY bearer by the tree\'s ONE verdict (write-origin.js pressBearer: an agent\'s, a job\'s, an automation\'s) — a person\'s press');
+// r3212 MUST 2 + small: EVERY bridged row hands a lift signal, and every name it asks is a method its production object carries
+const OLDER = (() => { const i = WIRE.indexOf('  older: ['), j = WIRE.indexOf('\n  ],\n});', i); return i < 0 || j < 0 ? [] : WIRE.slice(i, j).split(/\n    \{ key: '/).slice(1).map((b) => ({ key: b.slice(0, b.indexOf("'")), body: b })); })();
+const liftless = (rows) => rows.filter((r) => !/\bonLift: \(fn\) =>/.test(r.body)).map((r) => r.key);
+ok(OLDER.length === 3 && liftless(OLDER).length === 0, `every bridged row (${OLDER.map((r) => r.key).join(', ')}) hands a lift signal`, liftless(OLDER));
+ok(liftless([...OLDER, { key: 'frobs', body: "frobs', facts: () => null, readAgain: () => frobs.readAgain() }" }]).includes('frobs'), 'CONTROL: a bridged row without a lift signal is RED by name');
+const METHODS = { 'user-todos': ['src/user-todos.js', ['unreadState', 'readAgain', 'whenRead']], 'task-groups': ['src/task-groups.js', ['unreadState', 'readAgain', 'onLift']], hosts: ['src/hosts.js', ['held', 'whenRead']] };
+const missingNames = Object.entries(METHODS).flatMap(([key, [file, names]]) => { const src = read(file), row = OLDER.find((r) => r.key === key); return names.filter((n) => !new RegExp(`\\n {2}(?:async )?${n}\\(`).test(src) || !row || !row.body.includes(`.${n}(`) && !row.body.includes(`.${n} !== 'function'`)).map((n) => `${key}.${n} (${file})`); });
+ok(missingNames.length === 0, 'every name a bridged row asks is a method its production object carries (user-todos, the Task Groups, the paired machines) — a rename cannot drop a list from the notice with every leg green', missingNames);
+ok(read('src/task-groups.js').includes("      for (const fn of [...(this._liftHooks || [])]) { try { fn(); } catch { /* a listener's own */ } }   // B-f276 unit B"), 'the Task Groups\' manager fires its lift signal in its own lift (after its listeners are told)');
 
 console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain name');
 function heldStoreFiles(files) {
@@ -119,7 +161,7 @@ function heldStoreFiles(files) {
 }
 const srcFiles = () => { const out = new Map(); const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.posix.join(d, e.name); if (e.isDirectory()) { if (r !== 'src/lib') walk(r); } else if (/\.(?:c?js)$/.test(e.name)) out.set(r, read(r)); } }; walk('src'); return out; };
 const STORES = heldStoreFiles(srcFiles());
-const unnamed = (stores) => [...stores].flatMap(([f, names]) => (names.length ? names.filter((n) => !W.HELD_NAMED.includes(n)).map((n) => `${n} (${f})`) : [`${f}: its store file is not found by the census`]));
+const unnamed = (stores) => [...stores].flatMap(([f, names]) => (names.length ? names.filter((n) => !W.HELD_NAMED.includes(n)).map((n) => `${n} (${f})`) : [`${f}: its store file is not found by the census`]).map((x) => x + ' — add its plain name to src/lib/held-lists-words.js NAMES'));
 ok(STORES.size >= 3 && unnamed(STORES).length === 0, `every store the helper holds has a plain name (${[...STORES.values()].flat().join(', ')})`, unnamed(STORES));
 const planted = new Map(STORES); planted.set('src/frobs.js', ['frobs.json']);
 ok(unnamed(planted).some((x) => x.startsWith('frobs.json')), 'CONTROL: a new store held by the helper with no plain name is RED by name', unnamed(planted));

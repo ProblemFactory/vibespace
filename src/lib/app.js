@@ -103,7 +103,7 @@ import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-
 import { enterSubmits } from './chat-enter-keys.js';
 import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
 import { initVault, listenVaultDoor, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
-import { initHeldLists, applyHeldLists, placeHeldChip } from './held-lists.js'; // B-f276 family unit B: THE ONE NOTICE of the held lists (the chip; the system panel's section)
+import { initHeldLists, applyHeldLists, placeHeldChip, refreshHeldLists } from './held-lists.js'; // B-f276 family unit B: THE ONE NOTICE of the held lists (the chip; the system panel's section)
 import { insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself); B-df5f: the page's cwds of a row
 import { oatDeadFor, oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: the New Session list reads the ONE verdict + the server's last day
 
@@ -709,6 +709,7 @@ class App {
       try { this.settings?.refetch?.(); } catch {}
       try { this._loadSettingHolds?.(); } catch {} // lane setting-doors pick 2: the holds are a broadcast-only mirror too
       refreshStoreHolds();   // B-225b R7: a hold said — or lifted — while this page was away (its word never arrives)
+      refreshHeldLists().catch(() => { });   // B-f276 unit B (r3212 must 1): the held lists re-read at every reconnect — a lift's one broadcast may have gone out while this page was away
       // user-state too (2.223.4 — the userW names/stars/archives blackout):
       // a boot-time fetch that failed during a restart window left the tab
       // permanently stateless; reconnect re-applies the authoritative copy.

@@ -4544,6 +4544,7 @@ export default {
   "Could not read them again — try again in a moment.": "没能再读它们 — 稍后再试。",
   "{n} still could not be read — VibeSpace keeps reading them again by itself.": "{n} 个仍然读不到 — VibeSpace 会继续自己再读。",
   "Every list reads again.": "所有列表都读到了。",
+  "in a moment": "马上",
   "Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.": "另一个 VibeSpace 或工具正占用端口 {port} — 在那边完成或取消它, 或者把重定向 URL 粘贴回这里。",
   "refused": "已拒绝",
   "Finish": "完成",

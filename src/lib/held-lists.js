@@ -9,7 +9,7 @@ import { fetchJson, showToast } from './utils.js';
 import { stampAt } from './page-time.js';
 import { slotBeside } from './customize-mode.js';
 import { openRailPanel } from './sidebar-rail.js';
-import { heldChipWords, heldChipTitle, heldSectionTitle, heldSectionNote, heldPressLabel, heldRowWords, heldPressWords } from './held-lists-words.js';
+import { heldChipWords, heldChipTitle, heldSectionTitle, heldSectionNote, heldPressLabel, heldRowWords, heldPressWords, heldSoonWord } from './held-lists-words.js';
 
 let lists = [];
 let appRef = null;
@@ -24,6 +24,10 @@ function drawChip() {
     if (!n) { chip?.remove(); continue; }
     const slot = slotBeside(besideId, document.getElementById(hostId));
     if (!slot) continue;
+    // r3212: ONE fixed order beside For you — this chip, then the vault's (it inserts before the vault's chip when that stands there), so
+    // the two never trade places at a redraw
+    const vault = document.getElementById(id === 'taskbar-held' ? 'taskbar-vault' : 'mobile-nav-vault');
+    const before = vault && vault.parentNode === slot.parent ? vault : slot.before;
     if (!chip) {
       chip = document.createElement('button');
       chip.className = 'vault-chip held-chip';
@@ -32,7 +36,7 @@ function drawChip() {
     }
     chip.textContent = heldChipWords(n, t);
     chip.title = heldChipTitle(t);
-    if (chip.parentNode !== slot.parent || chip.nextSibling !== slot.before) slot.parent.insertBefore(chip, slot.before);
+    if (chip.parentNode !== slot.parent || chip.nextSibling !== before) slot.parent.insertBefore(chip, before);
   }
 }
 /** the hub's list (the first read, a broadcast, a press's answer) → the chip and every open section */
@@ -46,10 +50,11 @@ export async function refreshHeldLists() { const r = await fetchJson('/api/held-
 export const placeHeldChip = () => drawChip();
 export function initHeldLists(app) { appRef = app; refreshHeldLists().catch(() => { }); }
 /** the chip's press: the system panel, its section in view */
+let scrollWanted = false;   // r3212: the chip opened the panel — the section scrolls into view at its FIRST draw (the panel may build it later)
 export function openHeldSection(app = appRef) {
   if (!app) return;
+  scrollWanted = true;
   openRailPanel(app, 'system');
-  setTimeout(() => { try { document.querySelector('.sys-held')?.scrollIntoView?.({ block: 'nearest' }); } catch { /* none */ } }, 300);
 }
 let pressing = false;
 /** «Read again now» — ONE press reads every held list again (the hub paces it; a press while one runs is said, never greyed) */
@@ -73,11 +78,13 @@ export function paintHeldLists(el) {
     if (!lists.length) { el.hidden = true; el.replaceChildren(); return; }
     el.hidden = false;
     const title = document.createElement('div'); title.className = 'usage-section-title'; title.textContent = heldSectionTitle(t);
-    const rows = lists.map((r) => { const d = document.createElement('div'); d.className = 'sys-held-row'; d.textContent = heldRowWords(r, t, { since: r.since ? stampAt(r.since) : '', next: r.next ? stampAt(r.next) : '' }); return d; });
+    const at = Date.now();   // r3212: a next try that has passed is worded at paint («soon»), never a time in the past
+    const rows = lists.map((r) => { const d = document.createElement('div'); d.className = 'sys-held-row'; d.textContent = heldRowWords(r, t, { since: r.since ? stampAt(r.since) : '', next: r.next ? (r.next > at ? stampAt(r.next) : heldSoonWord(t)) : '' }); return d; });
     const note = document.createElement('div'); note.className = 'empty-hint empty-hint-inline sys-held-note'; note.textContent = heldSectionNote(t);
     const press = document.createElement('button'); press.type = 'button'; press.className = 'mounts-btn sys-held-again'; press.textContent = heldPressLabel(t);
     press.onclick = () => { readHeldAgain().catch(() => { }); };
     el.replaceChildren(title, ...rows, note, press);
+    if (scrollWanted) { scrollWanted = false; try { el.scrollIntoView?.({ block: 'nearest' }); } catch { /* none */ } }
   };
   off = onHeldLists(draw);
   draw();

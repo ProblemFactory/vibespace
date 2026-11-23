@@ -612,6 +612,7 @@ class TaskGroupManager {
       console.log(`[tasks] ${was.file} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${Object.keys(this._state.tasks || {}).length} Task Group(s) — the hold is lifted`);
       if (said && this._unreadNotice && typeof this._unreadNotice.lift === 'function') { try { this._unreadNotice.lift(said.handle); } catch { } }
       this._notify(); // the late load: every listener told (the re-judge of reach, the board, the roster)
+      for (const fn of [...(this._liftHooks || [])]) { try { fn(); } catch { /* a listener's own */ } }   // B-f276 unit B: the family's one notice hears the lift
       return true;
     })();
     const free = () => { if (this._unreadP === job) this._unreadP = null; };
@@ -2604,6 +2605,8 @@ class TaskGroupManager {
 
   // lane task-group-fanout: a write names the groups it touched (`ids`; null = every group) — the hub's ONE broadcaster
   // (src/server/task-fanout.js) sends those groups' DELTA, never the store (1.57 MB to every client per Activity line before)
+  /** B-f276 unit B (主开发 r3212): a listener told at EVERY lift of a held store (the family's one notice) → its off */
+  onLift(fn) { if (typeof fn !== 'function') return () => { }; (this._liftHooks ||= new Set()).add(fn); return () => this._liftHooks.delete(fn); }
   _notify(ids = null) { this._rev = (this._rev || 0) + 1; this._primeMemberRows(); try { this._onChange({ ids: ids == null ? null : [].concat(ids) }); } catch { } }
   /** B-55dc PRIMING: a store edit (a Context row added or changed) STARTS the off-loop reads membership will need, so a
    *  synchronous asker after it finds them read; no file call here (the reads are promises), nothing when nothing is new */

@@ -4543,6 +4543,7 @@ export default {
   "Could not read them again — try again in a moment.": "読み直せませんでした — 少し待ってからもう一度お試しください。",
   "{n} still could not be read — VibeSpace keeps reading them again by itself.": "{n} 件はまだ読み込めません — VibeSpace は自動で読み直し続けます。",
   "Every list reads again.": "すべての一覧を読み込めました。",
+  "in a moment": "まもなく",
   "Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.": "別の VibeSpace またはツールがポート {port} を保持しています — そちらで完了またはキャンセルするか、リダイレクト URL をここに貼り付けてください。",
   "refused": "拒否されました",
   "Finish": "完了",

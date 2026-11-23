@@ -8,12 +8,15 @@
 const HOLD = require('../store-read-hold.js');
 
 const PRESS_GAP_MS = 10000;
+const PRESS_BOUND_MS = 15000;   // r3212: a press answers within this — a read that never answers (a hung mount) never holds the press, nor every later one
 
-/** older: [{ key, facts() → { since, next } | null, readAgain?() → Promise<boolean>, onLift?(fn) }] — the holds made before the helper */
-function create({ hold = HOLD, broadcast = () => { }, older = [], now = Date.now, log = () => { } } = {}) {   // hold: the helper (a leg's copy)
+/** older: [{ key, facts() → { since, next } | null, readAgain?() → Promise<boolean>, onLift(fn) → true once armed }] — the holds made before the helper;
+ *  EVERY bridged row hands a lift signal (r3212: a row without one would keep the chip after its store lifts by itself) */
+function create({ hold = HOLD, broadcast = () => { }, older = [], now = Date.now, log = () => { }, boundMs = PRESS_BOUND_MS } = {}) {   // hold: the helper (a leg's copy)
   let pressAt = 0, pressing = null, said = null;
   const factsOf = (o) => { try { return o.facts() || null; } catch { return null; } };
   function list() {
+    arm();
     const out = [];
     for (const h of hold.holds()) if (h && h.held) out.push({ key: 'store:' + h.file, what: h.file, since: h.since || null, next: h.next || null, readAgain: true });
     for (const o of older) { const f = factsOf(o); if (f) out.push({ key: String(o.key), what: String(o.key), since: f.since || null, next: f.next || null, readAgain: typeof o.readAgain === 'function' }); }
@@ -27,23 +30,30 @@ function create({ hold = HOLD, broadcast = () => { }, older = [], now = Date.now
     try { broadcast({ type: 'held-lists', lists }); } catch (e) { log(`[held-lists] the broadcast failed: ${(e && e.message) || e}`); }
   }
   const off = hold.onHoldsChange(say);
-  for (const o of older) if (typeof o.onLift === 'function') { try { o.onLift(say); } catch (e) { log(`[held-lists] ${o.key}: its lift is not heard (${(e && e.message) || e})`); } }
+  // r3212: a bridged store's lift signal is armed LAZILY — its object may not exist yet when this is made (the Task Groups' manager comes
+  // later at the hub's start): asked again at every list until it answers that it is armed
+  const armed = new Set();
+  const arm = () => { for (const o of older) if (!armed.has(o) && typeof o.onLift === 'function') { armed.add(o); let ok = false; try { ok = !!o.onLift(say); } catch (e) { log(`[held-lists] ${o.key}: its lift is not heard yet (${(e && e.message) || e})`); } if (!ok) armed.delete(o); } };   // marked first: a signal that answers at once (not held) re-enters say → list → arm
+  arm();
   /** «Read again now» — every held list read again once (a person's press) → { ok, lists } | a refusal by name */
   async function readAgain() {
     if (pressing) return { ok: false, code: 'held_read_running', error: 'the lists are being read again right now', lists: list() };
     const at = now();
     if (pressAt && at - pressAt < PRESS_GAP_MS) return { ok: false, code: 'held_read_too_soon', retryAfterMs: PRESS_GAP_MS - (at - pressAt), error: 'the lists were read again a moment ago', lists: list() };
     pressAt = at;
-    pressing = (async () => {
+    const pass = (async () => {
       for (const h of hold.holds()) if (h && h.held) { try { await hold.readAgainOf(h.file); } catch (e) { log(`[held-lists] ${h.file}: a read again failed (${(e && e.message) || e})`); } }
       for (const o of older) if (typeof o.readAgain === 'function' && factsOf(o)) { try { await o.readAgain(); } catch (e) { log(`[held-lists] ${o.key}: a read again failed (${(e && e.message) || e})`); } }
     })();
-    try { await pressing; } finally { pressing = null; }
+    pressing = pass;
+    let timedOut = false, timer = null;
+    const bound = new Promise((r) => { timer = setTimeout(() => { timedOut = true; r(); }, boundMs); });   // held while a press is out (cleared at its answer)
+    try { await Promise.race([pass.catch(() => { }), bound]); } finally { clearTimeout(timer); pressing = null; }   // a read still out stays the helper's (one in flight a store)
     say();
     const lists = list();
-    return { ok: true, lists, read: lists.length === 0 };
+    return { ok: true, lists, read: lists.length === 0, ...(timedOut ? { timedOut: true } : {}) };
   }
   return { list, say, readAgain, stop: () => off(), PRESS_GAP_MS };
 }
 
-module.exports = { create, PRESS_GAP_MS };
+module.exports = { create, PRESS_GAP_MS, PRESS_BOUND_MS };
