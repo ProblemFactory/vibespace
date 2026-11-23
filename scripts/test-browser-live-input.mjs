@@ -32,7 +32,8 @@
 //   ⑤ CONTROLS — the same legs on a server built from a patched copy of the tree (the pre-fix chunk in the bridge; the
 //      client without the ⌘ table, forwarding every keyup, moving without the held button; the bridge without the
 //      copy-out door — the hostile page's copy IS written after one click; bundle rebuilt): each goes red.
-// SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.37 + an installed chromium, or a viewer chrome.
+// SKIPs (with the reason) without dtach, the real agent-browser at the tree's declared floor or newer (src/browser-verbs.js
+// AGENT_BROWSER_CLI.floor, r2876) + an installed chromium, or a viewer chrome.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,6 +50,7 @@ const S = require('../src/browser-stream.js');
 const VP = require('../src/server/browser-viewport.js');
 const F = require('../src/browser-facts.js');
 const DV = require('../src/desktop-viewers.js');
+const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtLeast: abAtLeast } = require('../src/browser-attach.js');   // the tree's ONE driver version row, never a version typed here (r2876)
 /** lane live-input-under-load (a): how long a desktop-app pane may take to be seated / elected — the product's own patience
  *  for Resume here (RESUME_WAIT_MS: it holds the pane active that long before the answer), × 2 for the 2-cpu runner. */
 const SEAT_MS = 2 * DV.RESUME_WAIT_MS;
@@ -201,7 +203,7 @@ const M = mutantCopies('bli', REPO);
 }
 if (!CHROME) { skip('② – ⑤: no viewer chrome (google-chrome / chromium)'); await done(); }
 if (!dtachOk) { skip('② – ⑤: dtach is not installed — a local session cannot be created'); await done(); }
-if (!REAL_AB || !abVer || !/\b0\.(3[7-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`${DRIVER.skip} ② – ⑤: the real agent-browser ≥ 0.37 is not resolvable (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
+if (!REAL_AB || !abVer || !abAtLeast(abVer, AB_ROW.floor)) { skip(`${DRIVER.skip} ② – ⑤: the real agent-browser is not resolvable at the tree's floor ${AB_ROW.floor} or newer (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
 if (!LAN_IP) console.log('  (no non-loopback IPv4 on this machine — the viewer uses 127.0.0.1, a SECURE context; the plain-http leg is then the API path)');
 
 // ═══ THE WORLD ═══════════════════════════════════════════════════════════════

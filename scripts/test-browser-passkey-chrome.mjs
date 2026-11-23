@@ -3,7 +3,8 @@
 // LEG (heavy, run ALONE): the REAL keeper launches ONE profile browser on the HIDDEN-WINDOW rung (no desktop in the env,
 // Xvfb on the PATH ⇒ a normal Chrome window on its own Xvfb — where Chrome's native WebAuthn window really opens) in a
 // scratch HOME + a private XDG_RUNTIME_DIR; the REAL routes + the REAL dialog watch (the passkey hook) + the shipped
-// `vibespace-browser` CLI drive the installed agent-browser 0.38.1 against loopback pages served as http://localhost
+// `vibespace-browser` CLI drive the installed agent-browser — MEASURED on 0.38.1, run since r2876 on the tree's DECLARED driver (src/browser-verbs.js
+// AGENT_BROWSER_CLI: the install it declares, 0.38.2; any driver at its floor or newer) — against loopback pages served as http://localhost
 // (rpId localhost — a secure context):
 //   (a) a click starts navigator.credentials.get ⇒ the watch hears `start` (the binding still works after the hook's
 //       `delete`); a verb issued before 3 s is woken at 3 s and the next `click` answers THE SENTENCE [passkey_open];
@@ -20,7 +21,7 @@
 //   (K) lane passkey-sink: THE KERNEL LEG — the fake kernel as the browser (no Chrome, no agent-browser: it runs before their
 //       SKIPs): register / sign-in over the real store file + key file, the signature verified against the sealed key, cancel
 //       ⇒ NotAllowedError; three mutant controls (UV always true · the count not advanced · the request not re-checked) RED
-// SKIPs by name without the real agent-browser 0.38.1 or an Xvfb. Zero vendor calls, no real site; the scratch root, its
+// SKIPs by name without a real agent-browser at the tree's declared floor or newer, or without an Xvfb. Zero vendor calls, no real site; the scratch root, its
 // daemons, Xvfbs and Chromes are ended by this run's own root.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,6 +38,7 @@ const express = require('express');
 const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js');
 const D = require('../src/server/browser-dialogs.js');
 const PK = require('../src/browser-passkey.js');
+const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtLeast: abAtLeast } = require('../src/browser-attach.js');   // the tree's ONE driver version row, never a version typed here (r2876)
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
@@ -555,7 +557,13 @@ async function kernelLegs(Dm, tag) {
 
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-if (!ver || !/\b0\.38\.1\b/.test(ver)) { skip(`${DRIVER.skip} test-browser-passkey-chrome: no real agent-browser 0.38.1 resolves past the shim (${REAL_AB || 'none'}: ${ver || 'no version'})`); done(); }
+// THE GATE (主开发 r2876): the driver is judged against THE TREE's declared row (src/browser-verbs.js AGENT_BROWSER_CLI — package.json's
+// install line and floor and the image's install are pinned to it by test-browser-cli-pin), never a version typed here: a driver older
+// than the floor is the named skip. Until r2876 this line asked for EXACTLY 0.38.1, so with the declared 0.38.2 every leg below skipped on
+// every machine. What those legs say was MEASURED on 0.38.1 (the passkey dialog drawn inside the browser window; the display the daemon
+// starts) — the words stay as measured; they now run on the declared driver, and the box row's reading is their first on it
+if (!ver || !abAtLeast(ver, AB_ROW.floor)) { skip(`${DRIVER.skip} test-browser-passkey-chrome: no real agent-browser at the tree's declared floor ${AB_ROW.floor} or newer resolves past the shim (the tree declares ${AB_ROW.table}; ${REAL_AB || 'none'}: ${ver || 'no version'})`); done(); }
+console.log(`— the real driver: ${ver} (the tree declares ${AB_ROW.table}, floor ${AB_ROW.floor}; the legs below were MEASURED on 0.38.1)`);
 const XVFB = String(BASE_ENV.PATH || '').split(':').map((d) => path.join(d, 'Xvfb')).find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
 if (!XVFB) { skip('test-browser-passkey-chrome: no Xvfb on the PATH — the hidden-window rung (where Chrome\'s own passkey window opens) needs one'); done(); }
 console.log(`agent-browser: ${REAL_AB} (${ver}); Xvfb: ${XVFB}`);

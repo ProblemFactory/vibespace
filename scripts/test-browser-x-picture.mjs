@@ -26,7 +26,8 @@
 //      opens Chrome's popup (an override-redirect window: no name, no class, no transient-for) and his click there picks an option;
 //      r5: an agent's window mapped over his resting pointer (on top in X, drawn under his) — his press, no move, is raised in X
 //      first and lands in HIS page (the X stack read before and after, by xwininfo: the raise read off X, never assumed).
-// SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.38.2, Google Chrome, xpra / xauth, or when the server
+// SKIPs (with the reason) without dtach, the real agent-browser at the attach road's own minimum (src/browser-attach.js
+// ATTACH_MIN_DRIVER, r2876), Google Chrome, xpra / xauth, or when the server
 // took the driver road. Scratch only (/tmp/vs-xpicture-<pid>): never ~/.agent-browser, never the owner's display or bus,
 // never `close --all`, never the production data/. PNGs: VIBESPACE_XPIC_PNG_DIR (optional) receives the viewer's picture.
 // Run: npm run build && node scripts/test-browser-x-picture.mjs
@@ -45,6 +46,7 @@ const require = createRequire(import.meta.url);
 if (process.env.VIBESPACE_XPIC_LOG) { const f = process.env.VIBESPACE_XPIC_LOG; const tee = (orig) => (...a) => { try { fs.appendFileSync(f, a.map(String).join(' ') + '\n'); } catch { } return orig(...a); }; console.log = tee(console.log.bind(console)); console.error = tee(console.error.bind(console)); }
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const F = require('../src/browser-facts.js');
+const { driverAtLeast: abAtLeast, ATTACH_MIN_DRIVER } = require('../src/browser-attach.js');   // the attach road's own minimum, never a version typed here (r2876)
 const PIC = require('../src/browser-picture.js');
 const DD = require('../src/desktop-display.js');
 const { WebSocket } = require('ws');
@@ -90,11 +92,10 @@ let abVer = null; if (REAL_AB) { try { abVer = execFileSync(REAL_AB, ['--version
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'].find((p) => fs.existsSync(p)) || null;
 const binOf = (n) => DD.binOnPath(n, { env: envNoAb });
 const dtachOk = (() => { try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); return true; } catch (e) { return e && e.status !== undefined && e.code !== 'ENOENT'; } })();
-const verAtLeast = (v, min) => { const a = String(v || '').match(/(\d+)\.(\d+)\.(\d+)/); if (!a) return false; const b = min.split('.').map(Number); for (let i = 0; i < 3; i++) { if (Number(a[i + 1]) !== b[i]) return Number(a[i + 1]) > b[i]; } return true; };
 if (!CHROME) { skip('no Google Chrome — the attach road and the viewer both need it'); await done(); }
 if (!dtachOk) { skip('dtach is not installed — a local session cannot be created'); await done(); }
 if (!binOf('xpra') || !binOf('xauth')) { skip('xpra / xauth not on PATH — no display session, no X picture (the screencast stays, as before)'); await done(); }
-if (!REAL_AB || !verAtLeast(abVer, '0.38.2')) { skip(`${DRIVER.skip} the real agent-browser ≥ 0.38.2 is not resolvable (${REAL_AB || 'none'} ${abVer || ''}) — the attach road needs it`); await done(); }
+if (!REAL_AB || !abAtLeast(abVer, ATTACH_MIN_DRIVER)) { skip(`${DRIVER.skip} the real agent-browser is not resolvable at ${ATTACH_MIN_DRIVER} or newer (the attach road's own minimum) (${REAL_AB || 'none'} ${abVer || ''}) — the attach road needs it`); await done(); }
 console.log(`box: ${abVer}, ${execFileSync(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--version'], { encoding: 'utf8' }).trim()}, ${execFileSync(binOf('xpra'), ['--version'], { encoding: 'utf8' }).trim()}`);
 
 /** A throwaway headless Chrome (the VIEWER) with its own profile under ROOT; → { port, close }. */

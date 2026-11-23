@@ -112,6 +112,7 @@ const require = createRequire(import.meta.url);
 const S = require('../src/browser-stream.js');
 const BS = require('../src/server/browser-stream.js');
 const F = require('../src/browser-facts.js');
+const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtLeast: abAtLeast } = require('../src/browser-attach.js');   // the tree's ONE driver version row, never a version typed here (r2876)
 const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
@@ -1631,7 +1632,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
   // REAL binary, the REAL keeper, no record: `no-browser` (not-started) and `session info` under its pairs still says
   // active:false, no process under its socket dir. CONTROL: the as-shipped `stream status` under the same pairs SPAWNS a
   // background daemon (measured on 0.38.1) — reaped by its own scratch socket dir in its environ.
-  if (ver && /\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(ver)) await (async () => {
+  if (ver && abAtLeast(ver, AB_ROW.floor)) await (async () => {   // the tree's floor (r2876), never a version typed here
     const K = require('../src/server/browser-keeper.js');
     const D = path.join(ROOT, 'real-norecord'); fs.mkdirSync(path.join(D, 'sock'), { recursive: true, mode: 0o700 }); fs.mkdirSync(path.join(D, 'data'), { recursive: true });
     const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) env[k] = v;
@@ -1668,7 +1669,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
   // `stream status` began after `open` ended. CONTROL: the pre-fix launch (patched copy: the setting) ⇒ the view's
   // `stream status` restarts the daemon the keeper just launched and recorded. Every process is reaped by its
   // scratch socket dir in its environ / cmdline.
-  if (ver && /\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(ver)) await (async () => {
+  if (ver && abAtLeast(ver, AB_ROW.floor)) await (async () => {   // the tree's floor (r2876), never a version typed here
     const K0 = require('../src/server/browser-keeper.js');
     const B = require('../src/browser-profiles.js');
     const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) envBase[k] = v;

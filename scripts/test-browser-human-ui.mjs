@@ -39,7 +39,8 @@
 //       law 8 (主开发 15:42Z): the page-load numbers with the hook armed and with none, a stall placed in the hub's loop
 //       (SIGSTOP of this suite's own scratch hub) while a request is paused, and the hub ENDED mid-pause (Chrome releases the
 //       request by itself) — the LAST step of the suite: the hub is gone after it.
-// SKIPs (with the reason) without dtach, the real agent-browser ≥ 0.37 + an installed Chrome, or a viewer chrome.
+// SKIPs (with the reason) without dtach, the real agent-browser at the tree's declared floor or newer (src/browser-verbs.js
+// AGENT_BROWSER_CLI.floor, r2876) + an installed Chrome, or a viewer chrome.
 // Scratch only (/tmp/vs-browseself-<pid>): never ~/.agent-browser (the machine's own Chrome serves both the agent's
 // browser and the viewer), never `close --all`, never the production data/.
 import fs from 'node:fs';
@@ -54,6 +55,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const F = require('../src/browser-facts.js');
 const HM = require('../src/browser-human.js');
+const AB_ROW = require('../src/browser-verbs.js').AGENT_BROWSER_CLI, { driverAtLeast: abAtLeast } = require('../src/browser-attach.js');   // the tree's ONE driver version row, never a version typed here (r2876)
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
@@ -96,7 +98,7 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 const dtachOk = (() => { try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); return true; } catch (e) { return e && e.status !== undefined && e.code !== 'ENOENT'; } })();
 if (!CHROME) { skip('no viewer chrome (google-chrome / chromium) — the suite never downloads one'); await done(); }
 if (!dtachOk) { skip('dtach is not installed — a local session cannot be created'); await done(); }
-if (!REAL_AB || !abVer || !/\b0\.(3[7-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) { skip(`${DRIVER.skip} the real agent-browser ≥ 0.37 is not resolvable (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
+if (!REAL_AB || !abVer || !abAtLeast(abVer, AB_ROW.floor)) { skip(`${DRIVER.skip} the real agent-browser is not resolvable at the tree's floor ${AB_ROW.floor} or newer (${REAL_AB || 'none'} ${abVer || ''})`); await done(); }
 
 /** A throwaway headless Chrome (the VIEWER) with its own profile under ROOT; → { port, close }. */
 async function launchChrome(bin, { name, args = [], url = 'about:blank' } = {}) {
