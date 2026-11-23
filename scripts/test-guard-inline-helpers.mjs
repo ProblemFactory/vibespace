@@ -17,6 +17,9 @@
 //                                                                     REDS: `!(` for `!!(`; an expression block without its return
 //   ⑧ LEFT BY RULE, said: handed on as a value, exported, a call by spread, a string where the condition goes (whole or
 //     joined), a defaulted condition parameter                        REDS: the handed-on rule out; calls read by name, not binding
+//   ⑦ AN && GATE IS NOT A VERDICT (the coordinator's r3179): a present function on the left of an && is an existence check —
+//     wrapped in the checker's gateOf (by truthiness), the operand that becomes the verdict in verdictOf; a promise there is
+//     counted as a note                                               RED: today's rule (every && operand a verdict)
 //   ⑨ THE RUN OVER A TREE (a scratch repo): the dry run writes nothing; the apply writes the files and LOWERS the one-way list
 //     (never adds, never raises); a second run says NOTHING TO DO      RED: the census-unreadable guard (the apply is refused)
 //   ⑩ the CLI's refusal: --apply without --coordinator-word, an unknown flag
@@ -112,6 +115,7 @@ const FIX = {
   comma: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok((extra.push(1), extra.length), 'a comma expression');"),
   aliased: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x * 2;', "ok(verdictOf(1), 'its own verdictOf is no coercion');", "ok(2, 'a value');"),
   opensWithTest: lines(HEAD, K + ' ok = (c, n) => {c ? pass++ : fail++;};', "ok(extra.length, 'a value');", "ok(pass === 0, 'a comparison');"),
+  gate: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const f = (x) => x + 1, none = null, p = Promise.resolve(1);', "ok(f && f(1) === 2, 'an existence gate on a function');", "ok(none && none.x === 1, 'a falsy gate (fails)');", "ok(p && 1 === 1, 'a promise as a gate');"),
 };
 const LEFT = {
   handed: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "[true, 'x'].forEach(ok);", "ok(pass, 'a call');"), /^handed on as a value/],
@@ -131,15 +135,15 @@ const LEFT = {
   inPage: [lines(HEAD, 'const page = { evaluate: (f) => f() };', "page.evaluate(() => { " + K + " check = (c, n) => { if (!c) throw new Error(n); }; check(1, 'in the page'); });"), /^its body is inside a function serialised into a page/],
   nestedInName: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(1, 'outer ' + ok(2, 'inner'));"), /^a call of it stands inside another call's NAME argument/],
 };
-const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock', 'comma', 'aliased'];
+const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock', 'comma', 'aliased', 'gate'];
 const NAME_SLOT = { ok: 1, check: 0, ck: 1, leg: 0 };
 const LATER = (applied) => applied + '\n' + lines(K + ' check = (c, n) => { if (!c) fail++; else pass++; };', "check(pass, 'a new helper at a later tip');");
 // a fixture run: its tally (or why it threw) — the fixtures are this file's own texts
-const IMPORT_RE = /[ ;]import \{ verdictOf(?: as verdictOfGuard)? \} from '\.\/(?:lib\/)?check\.mjs';/;
+const IMPORT_RE = /[ ;]import \{ (?:verdictOf(?: as verdictOfGuard)?(?:, gateOf(?: as gateOfGuard)?)?|gateOf(?: as gateOfGuard)?) \} from '\.\/(?:lib\/)?check\.mjs';/;
 const run = (text) => {
   // the coercion in scope under each name the fixture does not bind itself (its import taken off: new Function holds none)
-  const t = text.replace(IMPORT_RE, ''), names = ['verdictOf', 'verdictOfGuard'].filter((n) => !new RegExp(`\\b(?:const|let|var|function) ${n}\\b`).test(t));
-  try { return JSON.stringify(new Function(...names, t + '\nreturn { pass, fail, extra };')(...names.map(() => C.verdictOf))); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); }
+  const t = text.replace(IMPORT_RE, ''), names = ['verdictOf', 'verdictOfGuard', 'gateOf', 'gateOfGuard'].filter((n) => !new RegExp(`\\b(?:const|let|var|function) ${n}\\b`).test(t));
+  try { return JSON.stringify(new Function(...names, t + '\nreturn { pass, fail, extra };')(...names.map((n) => (/^gateOf/.test(n) ? C.gateOf : C.verdictOf)))); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); }
 };
 const nl = (s) => s.split('\n').length;
 const callsOf = (text) => { const out = [], ast = acorn.parse(text, G0.PARSE_OPTS); const v = (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name in NAME_SLOT) out.push(n); for (const k in n) { const x = n[k]; if (x && typeof x === 'object' && k !== 'loc') (Array.isArray(x) ? x : [x]).forEach((y) => y && typeof y.type === 'string' && v(y)); } }; v(ast); return out.sort((a, b) => a.start - b.start); };
@@ -155,12 +159,12 @@ function verdicts(G, only = null) {
       [at('arrowBlock', 2), K + " ok = (c, n) => { " + G0.guardText('ok', 'c') + ' if (c) pass++; else fail++; };'],
       [at('arrowBlock', 4), "ok(v.a === 1, 'a comparison');"], [at('arrowBlock', 5), "ok(!v.none, 'a negation');"],
       [at('arrowBlock', 8), "ok(true, `a template name ${v.a}`);"], [at('arrowBlock', 10), "ok(verdictOf(v.a), 'a property');"],
-      [at('arrowBlock', 13), "ok(verdictOf(v.s) && verdictOf(v.a), 'an and of values');"], [at('arrowBlock', 14), "ok(verdictOf(v.none ?? v.z), 'a nullish (fails)');"], [at('arrowBlock', 15), "ok(v.a ? verdictOf(v.s) : verdictOf(0), 'a ternary of values');"], [at('arrowBlock', 16), 'ok(verdictOf(v.list'], [at('arrowBlock', 18), "  .find((x) => x > 3)), 'a call over three lines');"],
+      [at('arrowBlock', 13), "ok(gateOf(v.s) && verdictOf(v.a), 'an and of values');"], [at('arrowBlock', 14), "ok(verdictOf(v.none ?? v.z), 'a nullish (fails)');"], [at('arrowBlock', 15), "ok(v.a ? verdictOf(v.s) : verdictOf(0), 'a ternary of values');"], [at('arrowBlock', 16), 'ok(verdictOf(v.list'], [at('arrowBlock', 18), "  .find((x) => x > 3)), 'a call over three lines');"],
       [at('functionNameFirst', 3), F + ' check(n, c) { ' + G0.guardText('check', 'c') + ' if (!c) { fail++; return; } pass++; }'],
       [at('functionNameFirst', 5), "check('a regex test', verdictOf(/a/.test('a')));"], [at('functionNameFirst', 7), "for (const x of [1, 0]) check('a loop value ' + x, verdictOf(x));"],
       [at('arrowExpression', 2), K + ' ck = (c, n) => { ' + G0.guardText('ck', 'c') + ' return (c ? pass++ : fail++); };'],
       [at('arrowExpression', 3), K + ' leg = (n, c) => { ' + G0.guardText('leg', 'c') + ' return ((c ? (pass++, true) : (fail++, false))); };'],
-      [at('twoHelpers', 4), "ok(verdictOf(check('in', verdictOf(1))) && verdictOf(2), 'out');"], [at('clock', 4), "ok(verdictOf(r.done) && performance.now() - t0 >= 0, 'a lower bound in a chain');"],
+      [at('twoHelpers', 4), "ok(gateOf(check('in', verdictOf(1))) && verdictOf(2), 'out');"], [at('clock', 4), "ok(gateOf(r.done) && performance.now() - t0 >= 0, 'a lower bound in a chain');"],
       [at('handsBack', 4), "if (!ok(verdictOf(pass), 'a test')) extra.push('failed');"],
       [at('comma', 3), "ok(verdictOf((extra.push(1), extra.length)), 'a comma expression');"],
       [at('aliased', 4), "ok(verdictOfGuard(verdictOf(1)), 'its own verdictOf is no coercion');"], [R.aliased.o.split('\n')[4], "ok(verdictOfGuard(2), 'a value'); import { verdictOf as verdictOfGuard } from './lib/check.mjs';"],
@@ -188,7 +192,7 @@ function verdicts(G, only = null) {
     return off.length === 0;
   });
   judge('literal', () => {
-    const wrappedArgs = (t) => { const out = [], v = (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && /^verdictOf(?:Guard)?$/.test(n.callee.name) && n.arguments.length === 1) out.push(n.arguments[0]); for (const k in n) { const x = n[k]; if (x && typeof x === 'object' && k !== 'loc') (Array.isArray(x) ? x : [x]).forEach((y) => y && typeof y.type === 'string' && v(y)); } }; v(acorn.parse(t, G0.PARSE_OPTS)); return out; };
+    const wrappedArgs = (t) => { const out = [], v = (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && /^(?:verdictOf|gateOf)(?:Guard)?$/.test(n.callee.name) && n.arguments.length === 1) out.push(n.arguments[0]); for (const k in n) { const x = n[k]; if (x && typeof x === 'object' && k !== 'loc') (Array.isArray(x) ? x : [x]).forEach((y) => y && typeof y.type === 'string' && v(y)); } }; v(acorn.parse(t, G0.PARSE_OPTS)); return out; };
     const lit = Object.keys(R).filter((k) => wrappedArgs(R[k].o).some((a) => G0.stringByNode(a)));   // (the new text's own parse: 'ab'.length is no string)
     const swaps = ['swapWhole', 'swapJoined'].map((k) => { const p = plan(LEFT[k][0]); return p.edits.length === 0 && p.left.length === 1 && LEFT[k][1].test(p.left[0].why); });
     say.literal = `no condition shaped as a string is wrapped; a whole and a joined string where the condition goes leave their helper by name (${swaps.join(', ')})${lit.length ? ' — WRAPPED in ' + lit.join(', ') : ''}`;
@@ -229,6 +233,14 @@ function verdicts(G, only = null) {
     const swapped = '\nok(\'a swapped name\', v.a);', before = run(FIX.arrowBlock + swapped), after = run(R.arrowBlock.o + swapped);
     say.behaviour = `each fixture's tally is the same before and after (${run(R.arrowBlock.o)} · ${run(R.arrowExpression.o)} · ${run(R.scope.o)}); a swapped call passed before (${before.slice(0, 40)}) and THROWS after (${after.slice(0, 90)})${off.length ? ' — DIFFERS: ' + off.map((k) => `${k} ${run(FIX[k])} → ${run(R[k].o)}`).join(' | ') : ''}`;
     return off.length === 0 && /"pass":/.test(before) && /^THREW ok: its condition is a string, not a boolean/.test(after);
+  });
+  judge('gate', () => {
+    const o = R.gate.o.split('\n'), want = [[at('gate', 4), "ok(gateOf(f) && f(1) === 2, 'an existence gate on a function');"], [at('gate', 5), "ok(gateOf(none) && none.x === 1, 'a falsy gate (fails)');"], [at('gate', 6), "ok(gateOf(p) && 1 === 1, 'a promise as a gate');"]];
+    const imp = / import \{ gateOf \} from '\.\/lib\/check\.mjs';$/.test(o[o.length - 1]), before = run(FIX.gate);
+    C.takePromiseGates(); const after = run(R.gate.o), noted = C.takePromiseGates();
+    const bad = want.filter(([got, w]) => got !== w);
+    say.gate = `an && gate goes through gateOf and the verdict through verdictOf (${want.map(([g]) => g.slice(0, 44)).join(' · ')}); the import names gateOf alone (${imp}); the tally ${before} → ${after}; the promise gate counted ${noted}${bad.length ? ' — OFF: ' + bad.map(([g, w]) => `«${String(g).slice(0, 70)}» ≠ «${w.slice(0, 70)}»`).join(' | ') : ''}`;
+    return !bad.length && imp && before === after && /^\{"pass":2,"fail":1/.test(after) && noted === 1;
   });
   judge('left', () => {
     const r = Object.entries(LEFT).map(([k, [t, why]]) => { const p = plan(t); return [k, p.edits.length === 0 && p.left.length >= 1 && p.left.every((x) => why.test(x.why)), p.left.length ? p.left.map((x) => x.why).join(' / ') : 'NOT LEFT']; });
@@ -312,9 +324,10 @@ const LEG_NAMES = {
   behaviour: '⑦ it passes exactly when it passed before; a swap now throws', left: '⑧ left by rule, by name', scope: '⑧ scope by scope: a parameter or an inner binding is another function',
   clock: '⑦ a comparison stays outside every wrap: the wall-clock census reads a bound the same (with the product\'s span fields)',
   vacuous: '⑦ THE ROW\'S CLASS STAYS VISIBLE: a promise or a function handed as a verdict now fails, red by name; a match and a length pass as before',
+  gate: '⑦ AN && GATE IS NOT A VERDICT (r3179): a present function on the left of an && stays an existence check (gateOf, by truthiness), the verdict operand goes through verdictOf; a promise gate is counted as a note',
 };
 for (const [k, label] of Object.entries(LEG_NAMES)) ok(real.V[k] === true, label, real.say[k] || '');
-for (const k of ['applied', 'behaviour', 'later', 'plants', 'vacuous']) console.log(`    ${k}: ${String(real.say[k]).slice(0, 400)}`);
+for (const k of ['applied', 'behaviour', 'later', 'plants', 'vacuous', 'gate']) console.log(`    ${k}: ${String(real.say[k]).slice(0, 400)}`);
 
 console.log('\n②–⑧ RED CONTROLS: each guarantee\'s leg goes red on a tool that breaks it');
 const REDS = [
@@ -325,9 +338,9 @@ const REDS = [
   ['inside', "the self-check's span test out", 'if (code.ok) for (const e of es) if (code.inside(e.at))', 'if (false) for (const e of es) if (code.inside(e.at))'],
   ['twice', 'a guard the census cannot read (the value-use rule out too: it would leave such a helper, not guard it again)', "${condP} !== 'boolean') throw new TypeError(", "${condP} !== 'boolean') console.error(", VALUE_RULE_OUT],
   ['later', 'targets that ignore «guarded» (the value-use rule out too: the guard\'s own typeof would leave the old helper)', "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown' && !d.guarded);", "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown');", VALUE_RULE_OUT],
-  ['behaviour', '`!(` for the coercion', "text: `${coerce}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
-  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
-  ['selfCheck', 'a comma expression wrapped inside its parentheses (two arguments)', "n.expression.type === 'SequenceExpression' ? [[n.start, n.end]] : wrapsOf(n.expression, name)", 'wrapsOf(n.expression, name)'],
+  ['behaviour', '`!(` for the coercion', "text: `${role === 'gate' ? gateName(coerce) : coerce}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
+  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${role === 'gate' ? gateName(coerce) : coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
+  ['selfCheck', 'a comma expression wrapped inside its parentheses (two arguments)', "n.expression.type === 'SequenceExpression' ? [[n.start, n.end, role]] : wrapsOf(n.expression, name, role)", 'wrapsOf(n.expression, name, role)'],
   ['left', 'the arguments rule out', "else if (n.name === 'arguments' && ownArgs) seen(n, 'value');", ''],
   ['behaviour', 'an expression block without its return', 'text: `{ ${guard} return (`', 'text: `{ ${guard} (`'],
   ['left', 'the handed-on rule out', 'if (handed) { leave(', 'if (false) { leave('],
@@ -335,7 +348,8 @@ const REDS = [
   ['left', 'the value-use rule out', 'if (u.value) { out.set(t,', 'if (false) { out.set(t,'],
   ['left', 'the hands-back rule out', 'if (u.hands) { const read =', 'if (false) { const read ='],
   ['twice', 'the guarded set left out of the body rules', "callPos(c.node, parents(), wrapped, coerce) === 'value'", "callPos(c.node, parents(), null, coerce) === 'value'"],
-  ['clock', 'the whole && chain wrapped in a plain !! (verdictOf( … ) around a whole chain reads the same to the census: a call is no `!`)', "if (n.type === 'LogicalExpression' && n.operator !== '??') return [...wrapsOf(n.left, name), ...wrapsOf(n.right, name)];", 'if (false) return [];', ["text: `${coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"]],
+  ['clock', 'the whole && chain wrapped in a plain !! (verdictOf( … ) around a whole chain reads the same to the census: a call is no `!`)', "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, 'gate'), ...wrapsOf(n.right, name, role)];\n  if (n.type === 'LogicalExpression' && n.operator === '||') return [...wrapsOf(n.left, name, role), ...wrapsOf(n.right, name, role)];", 'if (false) return [];', ["text: `${role === 'gate' ? gateName(coerce) : coerce}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"]],
+  ['gate', 'today\'s rule: every && operand a verdict (a present function on the left made false)', "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, 'gate'), ...wrapsOf(n.right, name, role)];", "if (n.type === 'LogicalExpression' && n.operator === '&&') return [...wrapsOf(n.left, name, role), ...wrapsOf(n.right, name, role)];"],
 ];
 const mutants = {};
 for (const [key, what, anchor, to, more] of REDS) {

@@ -19,8 +19,11 @@
 //   verdictOf(value)     → the GUARDED COERCION the guard tool (scripts/guard-inline-helpers.mjs) wraps an existing call's
 //                          condition in: a thenable or a function is no verdict — the leg fails, red by name (a line on
 //                          stderr names the suite and the kind); any other value coerces as !!value.
+//   gateOf(value)        → THE && GATE (r3179): the tool wraps an && operand that is not the last in it — true / false by
+//                          truthiness, never a red (a present function there is an existence check); a promise is counted
+//                          and noted at exit («NOTE … promise(s) handed as an && gate»), never a ✗.
 // test-ci-gate-tiers §7b runs both over every script: no swapped call anywhere, and the inline helpers without the guard
-// only ever fall (a new suite imports this file). PURE: no I/O beyond the console in checker() and verdictOf().
+// only ever fall (a new suite imports this file). PURE: no I/O beyond the console in checker(), verdictOf() and gateOf().
 
 export function checker({ log = (l) => console.log(l), err = (l) => console.error(l), exit = (c) => process.exit(c) } = {}) {
   const counts = { pass: 0, fail: 0, failed: [] };
@@ -64,6 +67,23 @@ export function verdictOf(value) {
 const suiteName = () => String(process.argv[1] || '').split('/').pop();
 /** The finds counted so far, and the count cleared — for a suite that plants vacuous verdicts on purpose and reads them. */
 export function takeVacuousFinds() { const n = vacuousFinds; vacuousFinds = 0; return n; }
+// AN && GATE (B-1747 part 2's apply, the coordinator's r3179): the tool wraps an operand that can BECOME the verdict in verdictOf —
+// the last of an && chain, every operand of an ||, each branch of a ?: — and an && operand that is NOT the last in gateOf. A gate's
+// truthiness only decides whether the chain goes on (`f && f(1) === 1`: a present function is an existence check, never the
+// verdict; a falsy gate makes the verdict false), so gateOf answers true / false by truthiness and is never a red. A PROMISE handed
+// as a gate may be a missing await that judges nothing (it is truthy whatever it holds): each one is COUNTED, and the process
+// prints the count at exit as a NOTE line, never a ✗ — the apply's rehearsal reads that list.
+let promiseGates = 0, gateSaid = false;
+export function gateOf(value) {
+  if (value !== null && typeof value === 'object') {
+    let thenable = false;
+    try { thenable = typeof value.then === 'function'; } catch { /* an unreadable then: no promise */ }
+    if (thenable && !promiseGates++ && !gateSaid) { gateSaid = true; process.once('exit', () => { if (promiseGates) console.log(`  NOTE ${suiteName()}: ${promiseGates} promise(s) handed as an && gate — truthy whatever they hold; a missing await there judges nothing (B-1747, never a red)`); }); }
+  }
+  return !!value;
+}
+/** The promise gates counted so far, and the count cleared — for a suite that plants them on purpose and reads them. */
+export function takePromiseGates() { const n = promiseGates; promiseGates = 0; return n; }
 
 // ── the census (PURE over a file's text) ──────────────────────────────────────────────────────────────────────────────
 // A helper definition = a const / let / var binding of the name to an arrow function of two or more parameters, or a
