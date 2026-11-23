@@ -123,14 +123,14 @@ async function rescueRun(mod, fail) {
 console.log('② a CLI\'s own settings file (src/harness-config.js commitWrite / commitCreate — the shipped helper\'s writer)');
 const HC_REL = 'src/harness-config.js', HCT = fs.readFileSync(path.join(REPO, HC_REL), 'utf8');
 const PLAN = { v: 1, files: [{ harness: 'claude', id: 'settings', rel: ['.claude', 'settings.json'], format: 'json', createIfMissing: 'dir-exists', set: [{ key: 'transcriptRetentionDays', path: ['cleanupPeriodDays'], value: 36500 }] }] };
-async function cliRun(mod, { exists = true, fail } = {}) {
+async function cliRun(mod, { exists = true, fail, mode = null } = {}) {
   const home = path.join(ROOT, `home-${++seq}`), dir = path.join(home, '.claude'), file = path.join(dir, 'settings.json');
   fs.mkdirSync(dir, { recursive: true });
   const was = exists ? JSON.stringify({ model: 'opus', cleanupPeriodDays: 30 }, null, 2) + '\n' : null;
-  if (was !== null) fs.writeFileSync(file, was);
+  if (was !== null) { fs.writeFileSync(file, was); if (mode != null) fs.chmodSync(file, mode); }
   const out = await recorded(() => require(mod).applyConfigPlan(PLAN, { home }), fail);
   const receipt = out.r && out.r.receipts && out.r.receipts[0];
-  return { ...out, receipt, was, now: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, tmpLeft: fs.readdirSync(dir).some((f) => f.endsWith('.tmp')) };
+  return { ...out, receipt, was, now: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, mode: fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : null, tmpLeft: fs.readdirSync(dir).some((f) => f.endsWith('.tmp')) };
 }
 {
   for (const [road, exists, last] of [['an existing file (commitWrite)', true, 'rename settings.json.tmp'], ['a created file (commitCreate)', false, 'link settings.json.tmp']]) {
@@ -145,12 +145,26 @@ async function cliRun(mod, { exists = true, fail } = {}) {
   // the shipped helper embeds THIS text: every machine's helper writes the same way (test-claude-retention pins the embed too)
   ok(fs.readFileSync(path.join(REPO, 'data/bin/vibespace-hook-register.mjs'), 'utf8').includes(HCT), 'the shipped helper (data/bin/vibespace-hook-register.mjs) carries this writer byte for byte');
   // RED: today's writer — both syncs taken out (anchored: a moved line fails by name)
-  const SYNC_LINE = "  try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }\n";
+  const SYNC_LINE = "    try { fs.fsyncSync(fd); } catch (e) { throw syncRefused(tmp, file, e); }\n";
   const todayHc = anchored(anchored(HCT, '  ' + SYNC_LINE, '', 'today: commitCreate links with nothing synced'), SYNC_LINE, '', 'today: commitWrite renames with nothing synced');   // commitCreate's (deeper) line first: the shallower anchor is a substring of it
   for (const [road, exists, last] of [['commitWrite', true, 'rename settings.json.tmp'], ['commitCreate', false, 'link settings.json.tmp']]) {
     const t = await cliRun(MC.write(HC_REL, todayHc, `today-${road}`), { exists, fail: (k, p) => k === 'fsyncSync' && /settings\.json\.tmp$/.test(String(p)) });
     ok(t.receipt && t.receipt.state === 'applied' && !t.log.some((x) => x.startsWith('fsyncSync')) && t.log.includes(last),
       `RED (today's ${road}): the name points at a temp nothing synced, and a failing disk is never asked — the legs above read it`, t.log.join(' → '));
+  }
+  // r2814: A READ-ONLY SETTINGS FILE (no owner write bit: 0444, 0400) IS STILL REPLACED, as in the release (a rename needs the folder's
+  // permission only): ONE descriptor writes the bytes, sets the mode and syncs them — never a second open the mode refuses
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;   // a mode does not stop root's open: the RED reads only unprivileged
+  const SECOND_OPEN = anchored(HCT, /  const fd = fs\.openSync\(tmp, 'w', mode == null \? 0o666 : mode\);\n  try \{\n    fs\.writeFileSync\(fd, out\);\n    if \(mode != null\) fs\.fchmodSync\(fd, mode\);[^\n]*\n    try \{ fs\.fsyncSync\(fd\); \} catch \(e\) \{ throw syncRefused\(tmp, file, e\); \}\n  \} finally \{ fs\.closeSync\(fd\); \}\n/,
+    "  fs.writeFileSync(tmp, out, mode == null ? undefined : { mode });\n  if (mode != null) fs.chmodSync(tmp, mode);\n  try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }\n", 'line 534: a second open of the temp to sync it');
+  for (const ro of [0o444, 0o400]) {
+    const r = await cliRun(path.join(REPO, HC_REL), { exists: true, mode: ro });
+    ok(!!(!r.err && r.receipt && r.receipt.state === 'applied' && JSON.parse(r.now).cleanupPeriodDays === 36500 && r.mode === ro && before(r.log, 'fsyncSync settings.json.tmp', 'rename settings.json.tmp') && !r.tmpLeft),
+      `a read-only settings file (0${ro.toString(8)}) is still replaced: the key applied, its mode kept (0${ro.toString(8)}), the sync recorded before the rename, no temp left`, { log: r.log.join(' → '), mode: r.mode && r.mode.toString(8), receipt: r.receipt });
+    const rm = await cliRun(MC.write(HC_REL, SECOND_OPEN, `second-open-${ro.toString(8)}`), { exists: true, mode: ro });
+    ok(isRoot || !!(rm.receipt && rm.receipt.state === 'error' && /could not be put on disk \(EACCES\)/.test(rm.receipt.reason || '') && rm.now === rm.was),
+      isRoot ? `RED (line 534's second open, 0${ro.toString(8)}): not read as root — a mode does not stop root's open; it is read where the suite runs unprivileged (the test machine, the hosted runner)`
+        : `RED (line 534's second open, 0${ro.toString(8)}): the write that worked in the release is REFUSED («could not be put on disk (EACCES)»), the file left as it was`, rm.receipt);
   }
 }
 

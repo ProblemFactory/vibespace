@@ -133,13 +133,18 @@ function syncRefused(tmp, file, e) {
   try { fs.unlinkSync(tmp); } catch { }
   return new Error(`${file}: the new settings could not be put on disk (${(e && e.code) || (e && e.message) || e}) — not written, the file is as it was`);
 }
-/** tmp beside the target → the file's own mode → its bytes synced → atomic rename onto the target. */
+/** tmp beside the target → the file's own mode → its bytes synced → atomic rename onto the target. ONE descriptor writes the bytes,
+ *  sets the mode and syncs them (r2814): a settings file with no owner write bit (0444, 0400 — a person or a tool made it read-only)
+ *  is still replaced, as in the release (the rename needs the folder's permission only), never refused by a second open. */
 function commitWrite(file, out) {
   const { target, mode } = writeTarget(file);
   const tmp = target + '.tmp';
-  fs.writeFileSync(tmp, out, mode == null ? undefined : { mode });
-  if (mode != null) fs.chmodSync(tmp, mode); // the umask clears bits at create time; the file's own mode wins
-  try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }
+  const fd = fs.openSync(tmp, 'w', mode == null ? 0o666 : mode);
+  try {
+    fs.writeFileSync(fd, out);
+    if (mode != null) fs.fchmodSync(fd, mode); // the umask clears bits at create time; the file's own mode wins
+    try { fs.fsyncSync(fd); } catch (e) { throw syncRefused(tmp, file, e); }
+  } finally { fs.closeSync(fd); }
   fs.renameSync(tmp, target);
 }
 /** CREATE a missing file (the 'dir-exists' rule): mode 0600, its directory's
@@ -149,15 +154,18 @@ function commitWrite(file, out) {
 const LINKLESS = Object.freeze(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS']);
 function commitCreate(file, out) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, out, { mode: 0o600 });
+  const fd = fs.openSync(tmp, 'w', 0o600);
   try {
-    fs.chmodSync(tmp, 0o600);
-    if (typeof process.getuid === 'function' && process.getuid() === 0) {
-      const d = fs.statSync(path.dirname(file));
-      if (d.uid !== 0) fs.chownSync(tmp, d.uid, d.gid);
-    }
-    // its bytes, mode and owner on disk before the link (or the rename) names it
-    try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }
+    // ONE descriptor (r2814): its bytes, mode and owner written and synced through it, before the link (or the rename) names it
+    try {
+      fs.writeFileSync(fd, out);
+      fs.fchmodSync(fd, 0o600);
+      if (typeof process.getuid === 'function' && process.getuid() === 0) {
+        const d = fs.statSync(path.dirname(file));
+        if (d.uid !== 0) fs.fchownSync(fd, d.uid, d.gid);
+      }
+      try { fs.fsyncSync(fd); } catch (e) { throw syncRefused(tmp, file, e); }
+    } finally { fs.closeSync(fd); }
     try { fs.linkSync(tmp, file); } catch (e) {
       if (e && e.code === 'EEXIST') return false;
       // a filesystem without hard links (some FUSE / network mounts): the rename the old create used, only while the
