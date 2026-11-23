@@ -27,6 +27,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - LEGS: scripts/test-accounts-held.mjs (new, fast), each with its red.
 - ITS FOLLOW (主开发 r3129, round wp657mf3v: taken, eight smalls): the notice closes at a start that reads (found by its text, adopted at a held restart); the page's push keeps `held`; the config import's accounts section is refused by name with the other held sections; torn bytes are held for the life off the helper's ladder, said once; the words by cause (torn bytes do not mend by themselves; the old sign-ins stay unused); the account-bound resume and the permission oracle say the hold; a resume through the real create handler is a leg; server.js's tray line is pinned; the unreachable home-spawn guard is gone.
 
+### lg-providers B-f276 family — providers.json under the store-read law (主开发 r3000 / r3019; on d458fc27d with bl-jobs' f43b21128 picked first)
+- WHY: the store census (bl-machines-b, item 1): a failed read or torn bytes started the list EMPTY and the person's next add wrote only the new record over the file — every other provider's record gone, their keys left in the vault named by nothing.
+- THE CURE (src/server/provider-store.js on src/store-read-hold.js): the start's one read answered by store-read and handed to the hold; held ⇒ the list answers unread, every door refused by name (`providers_unread`, 503), the save writes nothing, read again off the loop; torn bytes kept aside once, then empty. src/server/provider-spawn.js + provider-test.js: a conversation or a Test that names a provider is refused by name while held. src/routes/providers.js: the list answers `unread`; refusals carry the store's words. The page: the account dialog's providers section and the wizard say it (zh / ja; `providersHeldWords` in heldWordsOf).
+- THE REMOVER BY ITS SILENCE (r3019): the Vault row's Remove of an orphaned key refuses a key a kept torn copy names (`providers_torn_named`).
+- TESTS: scripts/test-provider-store-held.mjs (NEW, fast; red copies: no hold, no copy check).
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
