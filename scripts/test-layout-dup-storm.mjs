@@ -718,7 +718,13 @@ async function b1d87Legs({ DM = RealDM, LM = RealLM, install = null, legs = null
   // fixed 30 ms, B's second write was built before it, and (c2)'s red control read «0 red»): after the 30 ms, wait until the hub has
   // sent the page its refusal, then for its delivery (the fake hub hands a frame over 1 ms after it records it) — at most 400 × 5 ms
   const refusedOn = (P) => P.sock().frames.some((f) => f.type === 'layout-sync-refused' && f.reason === 'stale');
-  const untilRefused = async (P) => { let waited = false; for (let i = 0; i < 400 && !refusedOn(P); i++) { waited = true; await tick(5); } if (waited) await tick(5); return refusedOn(P); };
+  // B-3dbd (主开发 r3297): the premise is the page HAVING TAKEN the refusal, not the frame recorded: the fake hub records a frame and
+  // hands it over a tick later, so a frame seen at the first look could still be unhandled when B's second write was built — the
+  // refusal road never ran, and (c2)'s RED CONTROL (the stand taken out) read «0 red» on the loaded pod. The desktop manager's
+  // onSyncRefused records the refusal (its breaker's `_refusals` row) inside one synchronous handler, so that row standing means the
+  // whole road ran. Waited for as that fact, bounded at 30 s (6000 × 5 ms), never a count of ticks
+  const tookRefusal = (P) => refusedOn(P) && !!(P.dm._refusals && P.dm._refusals.get('desk-x'));
+  const untilRefused = async (P) => { for (let i = 0; i < 6000 && !tookRefusal(P); i++) await tick(5); return tookRefusal(P); };
   const scenes = [];
   if (want('a')) scenes.push((async () => {
     const { H, A, B } = pair();
