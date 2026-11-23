@@ -2136,14 +2136,9 @@ function registerWsHandler(wss, ctx) {
             for (const [name, sinceVersion] of Object.entries(data.versions)) {
               const store = getSyncStore(name);
               if (!store) continue;
-              const result = store.getOpsSince(sinceVersion);
-              if (result.full) {
-                ws.send(JSON.stringify({ type: 'state-snapshot', store: name, data: result.full, version: result.version }));
-              } else if (result.ops.length > 0) {
-                for (const op of result.ops) {
-                  ws.send(JSON.stringify({ type: 'state-sync', store: name, ...op }));
-                }
-              }
+              // lane lg-recovery (主开发 r3262 / r3271, law (a)): the store's own answer — a HELD store says `state-held` (the page
+              // keeps what it holds), never a snapshot of its unread state; else the missed ops or the full snapshot, as before
+              for (const m of store.resyncAnswer(sinceVersion)) ws.send(JSON.stringify(m));
             }
           }
           break;

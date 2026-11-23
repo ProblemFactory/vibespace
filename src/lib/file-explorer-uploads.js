@@ -57,6 +57,12 @@ export function installExplorerUploads(FileExplorer) {
     // History section
     const sync = getStateSync();
     const historyData = sync ? this._getUploadHistory(sync) : [];
+    // lane lg-recovery (r3262 / r3271): the list unread — said, never an empty list
+    if (sync && sync.unreadOf && sync.unreadOf('uploads')) {
+      const divider = document.createElement('div'); divider.className = 'upload-menu-divider';
+      const note = document.createElement('div'); note.className = 'upload-menu-label'; note.textContent = t('The list of recent uploads can’t be read right now — it is read again by itself');
+      pop.append(divider, note);
+    }
     if (historyData.length > 0) {
       const divider = document.createElement('div'); divider.className = 'upload-menu-divider';
       pop.appendChild(divider);
@@ -102,6 +108,7 @@ export function installExplorerUploads(FileExplorer) {
     _clearUploadHistory() {
     const sync = getStateSync();
     if (!sync) return;
+    if (sync.unreadOf && sync.unreadOf('uploads')) { showToast(t('The list of recent uploads can’t be read right now — nothing was cleared')); return; }   // lane lg-recovery (r3262): never «cleared» over a list unread
     const data = sync.getAll('uploads');
     for (const key of Object.keys(data)) {
       if (key.startsWith('upload:')) sync.set('uploads', key, '');

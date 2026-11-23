@@ -269,6 +269,16 @@ export class ChatInput {
     };
     const sync = getStateSync();
     if (sync) sync.on('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);
+    // lane lg-recovery (r3262 / r3271, law (b)): the drafts store unread — ONE notice in place (the box's own placeholder), never an
+    // error at a keystroke: what is typed is kept, and joins the saved drafts when they read again
+    this._unreadSaid = false;
+    const sayUnread = () => {
+      const u = sync && sync.unreadOf ? sync.unreadOf('drafts') : null;
+      if (u && !this._unreadSaid) { this._unreadSaid = true; this._placeholderBefore = this._textarea.placeholder; this._textarea.placeholder = t('Your saved drafts can’t be read right now — what you type is kept and joins them when they read again'); }
+      else if (!u && this._unreadSaid) { this._unreadSaid = false; this._textarea.placeholder = this._placeholderBefore || t('Type a message...'); }
+    };
+    this._offUnread = sync && sync.onUnread ? sync.onUnread((store) => { if (store === 'drafts') sayUnread(); }) : null;
+    sayUnread();
 
     // Slash command dropdown
     this._slashDropdown = document.createElement('div');
@@ -1373,6 +1383,7 @@ export class ChatInput {
     if (this._draftSyncHandler) {
       const sync = getStateSync();
       if (sync) sync.off('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);
+      if (this._offUnread) { this._offUnread(); this._offUnread = null; }
     }
   }
 

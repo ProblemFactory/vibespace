@@ -2026,6 +2026,11 @@ const HELD_WORDS = Object.freeze({
   channel_people_unread: () => t('This account\'s list of people cannot be read right now — nothing was changed. It is read again by itself; names and your own messages are shown again once it reads.'),   // bl-mail (line 698: a channels account's people memo, channels/<account>/people.json, one hold an account) — the lane's words (主开发 r3608; no route answers the code today: the memo's writes wait or are kept)
   plugin_registry_unread: () => t('VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).'),   // bl-browser-a (plugin-registry.json, 主开发 r3305 / r3470: the row in the unit for the train) — a plugin's switch, consent, install, uninstall, update, an engine profile's start
   record_unreadable: () => t('VibeSpace cannot read your vault right now — nothing is lost and nothing was changed. It reads it again by itself; wait a few minutes, then unlock again.'),   // lg-vault-env (unit (b): data/vault.json, the vault record) — the vault itself, not a list: its own sentence (r3168: a store boarding after the hotfix adds its own row)
+  // lg-recovery (the synced stores' one read, 主开发 r3262 / r3271; rows in the unit, r3489): GET /api/sync/:store 503 and a reconnect's state-held (src/sync-store.js) — LIST holds: read again by itself, nothing written over, what is typed meanwhile kept. The page words the drafts and the uploads in place with these same sentences (src/lib/chat-input.js, src/lib/file-explorer-uploads.js)
+  drafts_unread: () => t('Your saved drafts can’t be read right now — what you type is kept and joins them when they read again'),   // drafts.json
+  stage_unread: () => t('The Stage layout can’t be read right now — nothing was changed; it is read again by itself'),   // stage-sync.json
+  uploads_unread: () => t('The list of recent uploads can’t be read right now — it is read again by itself'),   // uploads-sync.json
+  settings_unread: () => t('The synced settings can’t be read right now — nothing was changed; they are read again by themselves'),   // settings-sync.json
 });
 const HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;   // THE STATED PATTERN the census finds held-looking codes by — never what the step words by (r3123)
 // 主开发 r3123 (a must of this unit, found by its own read): the pattern also matches codes that are NO list hold (a vault's unreadable key,
@@ -2317,7 +2322,8 @@ class StateSync {
     this._globalHandler = (msg) => {
       if (msg.type === 'state-sync') this._applyOp(msg.store, msg);
       else if (msg.type === 'state-ack') this._applyAck(msg.store, msg);
-      else if (msg.type === 'state-snapshot') this._applySnapshot(msg.store, msg.data, msg.version);
+      else if (msg.type === 'state-snapshot') this._applySnapshot(msg.store, msg.data, msg.version, msg);
+      else if (msg.type === 'state-held') this._applyUnread(msg.store, msg);   // lane lg-recovery (r3262 / r3271): the hub cannot read the store
     };
     wsManager.onGlobal(this._globalHandler);
     // On reconnect, request missed ops for all stores
@@ -2343,6 +2349,9 @@ class StateSync {
       try {
         const res = await fetch(`/api/sync/${storeName}`);
         const snap = await res.json();
+        // lane lg-recovery (主开发 r3262 / r3271, law (a)): the hub could not read this store — HELD by name: the page starts empty AND
+        // held (init answers false: no surface takes it for «nothing stored»), and keeps what it holds
+        if (snap && snap.held === true) { this._applyUnread(storeName, snap); return false; }
         s.data = snap.data || {};
         s.version = snap.version || 0;
         return !!res.ok;
@@ -2358,6 +2367,9 @@ class StateSync {
     const s = this.stores[storeName];
     if (!s) return;
     s.pending.set(key, (s.pending.get(key) || 0) + 1);
+    // r3271, THE PAGE's LAW: what the person types or changes while the store is unread is THIS page's newer value for that unit —
+    // kept here until a snapshot (the lift's, or one after a hub restart) has taken it, then sent again (null = a deletion)
+    if (s.unread) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(key, value == null || value === '' ? null : value);
     if (value == null || value === '') {
       delete s.data[key];
       this.ws.send({ type: 'state-set', store: storeName, key, value: '', basedOn: s.version });
@@ -2415,9 +2427,29 @@ class StateSync {
     for (const op of q) this._applyOp(storeName, op);
   }
 
-  _applySnapshot(storeName, data, version) {
+  /** the hub cannot read this store (`state-held`, or the first load's 503): the page keeps what it holds — no snapshot, no rollback
+   *  push, no listener told '' — and its surfaces say it once (onUnread) */
+  _applyUnread(storeName, msg) {
     const s = this.stores[storeName];
     if (!s) return;
+    const first = !s.unread;
+    s.unread = { code: String((msg && msg.code) || storeName + '_unread') };
+    if (first) this._tellUnread(storeName, s.unread, null);
+  }
+  /** the store's unread facts ({ code }) — null when it reads */
+  unreadOf(storeName) { return this.stores[storeName]?.unread || null; }
+  /** a surface's ONE notice: handler(store, unread | null, { setAside } | null) at each change; → the unsubscribe */
+  onUnread(handler) { (this._unreadHandlers || (this._unreadHandlers = [])).push(handler); return () => { const a = this._unreadHandlers, i = a.indexOf(handler); if (i >= 0) a.splice(i, 1); }; }
+  _tellUnread(storeName, unread, facts) { for (const h of [...(this._unreadHandlers || [])]) { try { h(storeName, unread, facts); } catch { } } }
+
+  _applySnapshot(storeName, data, version, msg) {
+    const s = this.stores[storeName];
+    if (!s) return;
+    // r3271, THE PAGE's LAW: a unit typed or changed here while the store was unread is never cleared or replaced by this snapshot
+    // (the lift's, or one after a hub restart): the page's newer value wins for that unit, and is sent again below
+    const typed = s.typedWhileUnread && s.typedWhileUnread.size ? new Map(s.typedWhileUnread) : null;
+    const wasUnread = !!s.unread;
+    s.unread = null; s.typedWhileUnread = null;
     const oldData = s.data;
     const oldKeys = new Set(Object.keys(oldData));
     // Server ROLLBACK defense: a snapshot whose version is BELOW what this
@@ -2436,7 +2468,9 @@ class StateSync {
       if (key in oldData) s.data[key] = oldData[key]; else delete s.data[key];
       this._applyOp(storeName, op);
     }
-    if (rolledBack) {
+    if (typed) for (const [key, value] of typed) { if (value === null) delete s.data[key]; else s.data[key] = value; }
+    if (typed) for (const [key, value] of typed) this.set(storeName, key, value === null ? '' : value);   // sent again: the store then holds it
+    if (rolledBack && !typed) {
       for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
         const localVal = oldData[key] ?? '';
         const serverVal = s.data[key] ?? '';
@@ -2450,6 +2484,7 @@ class StateSync {
       const newVal = s.data[key] || '';
       this._notify(s, key, newVal);
     }
+    if (wasUnread || (msg && msg.setAside)) this._tellUnread(storeName, null, msg && msg.setAside ? { setAside: String(msg.setAside) } : null);
   }
 
   // handlers get (value, key, op): `op` = the remote op that changed the key (undefined from a snapshot) — every listener
@@ -2527,6 +2562,13 @@ export function getStateSync() { return _stateSync; }
 
 export async function initStateSync(wsManager) {
   _stateSync = new StateSync(wsManager);
+  // lane lg-recovery (r3262 / r3271): a store lifted from TORN bytes says so ONCE, where its damaged bytes are kept and what the
+  // person can do — never «restore that copy» (they are the damaged bytes)
+  _stateSync.onUnread((store, unread, facts) => {
+    if (unread || !facts || !facts.setAside) return;
+    const list = store === 'drafts' ? t('Your saved drafts') : store === 'stage' ? t('The Stage layout') : store === 'uploads' ? t('The list of recent uploads') : t('A saved list');
+    showToast(t('{list} could not be read: the file was damaged. Its damaged bytes are kept aside as {name} in VibeSpace’s data folder. What you changed since is kept; add again what is missing, or mend the file by hand and restart.', { list, name: facts.setAside }), { type: 'error', duration: 15000 });
+  });
   await _stateSync.init('drafts');
   await _stateSync.init('uploads');
   return _stateSync;

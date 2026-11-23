@@ -41,6 +41,8 @@ const NAMES = Object.freeze({
   'vault.json': i18nKey('your vault'),   // lg-vault-env's vault record (unit (b), the train 2.369.418)
   'browser-passkeys.json': i18nKey('the browsers’ passkeys'),   // r3261 (bl-browser-b): the passkey store joined the helper
   'pricing.json': i18nKey('your edited prices'),   // bl-ci's own plain name (r3145 unit 2: usage-history/pricing.json; r3488)
+  // lg-recovery: the synced stores (src/sync-store.js, one create site, a store per file — r3489: the rows in the unit)
+  'drafts.json': i18nKey('your saved drafts'), 'stage-sync.json': i18nKey('the Stage layout'), 'uploads-sync.json': i18nKey('the list of recent uploads'), 'settings-sync.json': i18nKey('the synced settings'),
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

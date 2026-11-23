@@ -1344,7 +1344,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.get('/api/sync/:store', (req, res) => {
     const store = getSyncStore(req.params.store);
     if (!store) return res.status(404).json({ error: 'Unknown store' });
-    res.json(store.getSnapshot());
+    // lane lg-recovery (主开发 r3262 / r3271, law (a)): the store's own answer — HELD by name (503, no data) while its file is
+    // unread, never «nothing at version 0» (the page starts empty AND held, and keeps what it holds)
+    const ans = store.snapshotAnswer();
+    res.status(ans.status).json(ans.body);
   });
 
   // ── User State ──

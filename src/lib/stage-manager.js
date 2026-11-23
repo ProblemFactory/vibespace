@@ -1047,6 +1047,9 @@ export class StageManager {
 
   _touchLru(key) {
     const sync = this._sync();
+    // lane lg-recovery (r3262 / r3271): the Stage store unread — the list read now is empty, and writing it would stand over the saved
+    // one at the lift (a unit written while held wins): the recent-use order waits until the store reads
+    if (sync && sync.unreadOf && sync.unreadOf('stage')) return;
     let lru = [];
     try { lru = JSON.parse(sync?.get('stage', 'lru') || '[]'); } catch {}
     lru = [key, ...lru.filter((k) => k !== key)].slice(0, 20);

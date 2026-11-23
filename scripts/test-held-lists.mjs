@@ -184,7 +184,8 @@ const CALLERS = { 'src/hosts.js': ['hosts.json'], 'src/machine-mounts.js': ['mac
   // A STORE MADE PER THING from ONE create site (r3314): { sites, stores } — `sites` the file's create sites, `stores` the names the hub lists them
   // by (a shape's example where each thing has its own file), checked against the notice's names, not against the file's literals
   'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] },
-  'src/channel-store.js': { sites: 1, stores: ['people.json'] } };   // bl-mail (line 698, 主开发 r3608): ONE create site (the people memo's hold), a store per channels account
+  'src/channel-store.js': { sites: 1, stores: ['people.json'] },   // bl-mail (line 698, 主开发 r3608): ONE create site (the people memo's hold), a store per channels account
+  'src/sync-store.js': { sites: 1, stores: ['drafts.json', 'settings-sync.json', 'uploads-sync.json', 'stage-sync.json'] } };   // lg-recovery (r3489): ONE create site (SyncStore._load), a store per file
 // r3354: A FILE THAT ONLY ASKS the helper (its kept copies: copiesOf — no create site, inline or bound, and no destructured create) holds
 // no store through it: it needs no row and no plain name (hosts.js, jobs.js, machine-mounts.js ask it for their OLDER holds' copies, which
 // the notice bridges by their own doors). A file in the map is never let off this way (its rows would go dead unseen), and an asker that
