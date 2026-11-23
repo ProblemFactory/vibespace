@@ -548,7 +548,7 @@ class AccountManager {
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', fallbackProviders: this.poolFallbacksOf(a.id).map((pv) => ({ id: pv, label: (this.providerRecordOf(pv) || {}).label || pv })), currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
+          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', fallbackProviders: this.poolFallbacksOf(a.id).map((pv) => ({ id: pv, label: (this.providerRecordOf(pv) || {}).label || pv })), fallbackStatus: (() => { try { const r = this._fallbackStatusOf ? this._fallbackStatusOf(a.id) : null; return Array.isArray(r) && r.length ? r : null; } catch { return null; } })(), currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -2423,6 +2423,10 @@ class AccountManager {
   }
   /** (lane lg-providers U5) the third-party providers' roster rows (model-providers rosterRowsOf) — list().providerRows */
   setProviderRows(fn) { this._providerRows = typeof fn === 'function' ? fn : null; }
+  /** (B-d578 F3b, r3316 (2)) the pool engine's fallback counts for a pool's row — `(poolId) → [{provider, label, running, canReturn, waiting}]` */
+  setFallbackStatusLookup(fn) { this._fallbackStatusOf = typeof fn === 'function' ? fn : null; }
+  /** (F3b) the counts changed: every client is told the list again (no store change — the tails generation does not move) */
+  noteFallbackStatus() { try { this._onChange(this.list()); } catch { } }
   /** (lane lg-providers U2) the third-party provider spawn road: `(id, backend, opts) → spawn account | throws by name` */
   setProviderSpawn(fn, modelFor = null) { this._providerSpawn = typeof fn === 'function' ? fn : null; this._providerModel = typeof modelFor === 'function' ? modelFor : null; }
   /** (lane lg-providers U2 r1) a provider record by its id (the badge's name and tail) — null for anything else */

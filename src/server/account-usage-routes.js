@@ -51,7 +51,8 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   const providers = require('./provider-store.js').create({ dataDir: path.join(rootDir, 'data'), catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; }, onLift: () => { try { broadcastAll({ type: 'providers-changed', what: 'read', id: null }); } catch { } try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } } });   // (B-f276 family) a held providers.json read again: every list re-reads
   if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct), { clean: typeof providers.readClean === 'function' ? () => providers.readClean() && !(typeof providers.damaged === 'function' && providers.damaged()) : true }); /* (the move onto 2.369.418) the store-read hold's LIVE answer, read at each prune: held, or lifted EMPTY over torn bytes kept aside (as the Vault's remover refuses a key a kept copy names), is the cure's «unreadable» — nothing pruned; a value read once at the start refused every prune after a held start lifted */ // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
   // lane lg-providers U2: a `pv-<id>` account spawns through the provider's own road (its key from the vault, its own empty home)
-  if (typeof accounts.setProviderRows === 'function') accounts.setProviderRows(() => require('../model-providers.js').rosterRowsOf(providers.thirdParty(), { usable: ((open) => (p) => open && providers.hasKey(p.id))((() => { try { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return !!v && v.state() === 'unlocked'; } catch { return false; } })()) }));   // lane lg-providers U5: the rows every page lists (U1 cure: usable = the vault open AND the record's entry in it, read off its names)
+  if (typeof accounts.setFallbackStatusLookup === 'function' && typeof engine.fallbackStatus === 'function') accounts.setFallbackStatusLookup((id) => engine.fallbackStatus(id));   // (B-d578 F3b) the pool row's fallback counts
+  if (typeof accounts.setProviderRows === 'function') accounts.setProviderRows(() => { const open = (() => { try { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return !!v && v.state() === 'unlocked'; } catch { return false; } })(); return require('../model-providers.js').rosterRowsOf(providers.thirdParty(), { usable: (p) => open && providers.hasKey(p.id), whyNot: (p) => (!open ? 'vault-locked' : !providers.hasKey(p.id) ? 'no-key' : null) }); });   // lane lg-providers U5: the rows every page lists (U1 cure: usable = the vault open AND the record's entry in it, read off its names)
   if (typeof accounts.setProviderSpawn === 'function') accounts.setProviderSpawn(require('./provider-spawn.js').create({ providers, dataDir: path.join(rootDir, 'data') }), (id, be, model) => require('./provider-spawn.js').modelFor(providers, id, model, be));
   require('../routes/account-models.js').registerAccountModelRoutes(app, { accounts, providers });
   // THE THIRD-PARTY PROVIDERS (lane lg-providers, B-d578 U1): the wizard's doors — add from a shipped preset (the key sealed
@@ -604,6 +605,22 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
 // (q-053 P0b, decision ①) THE OWNER'S ANSWER to a pool's cross-provider card — once (this conversation, now) / always
 // (the pool's crossProvider = 'allow') / deny. A person's act only: an agent's bearer is refused; the engine re-judges
 // before anything moves and answers what it found ({ok, state, moved, why}) or a named refusal (ask_unknown, bad_args).
+// (B-d578 F3b, r3316 (3)) THE POOL ROW's ONE PRESS «Move them back»: every conversation of the pool on a fallback that a member can take
+// again is queued at the head (a person's press: never counted, each still re-judged; its slot held to the landing). A PERSON's act:
+// the tree's ONE verdict for a sign-in that is not the person's own page (personVerdict); the same-origin verdict is the auth layer's.
+// → {ok, queued: n} — QUEUED, as F2's press says it (each move is said when it is made)
+app.post('/api/accounts/:poolId/fallback/move-back', (req, res) => {
+  try {
+    const who = require('../routes/vault.js').personVerdict(req);
+    if (!who.ok) return res.status(who.status || 403).json({ ok: false, code: who.code || 'human_only', error: who.error || 'a person\'s press only' });
+    if (typeof engine.fallbackMoveBack !== 'function') return res.status(503).json({ ok: false, code: 'no_engine', error: 'pool engine unavailable' });
+    const poolId = String(req.params.poolId || '');
+    const pa = accounts.get(poolId);
+    if (!pa || pa.type !== 'pooled') return res.status(400).json({ ok: false, code: 'not_pooled', error: 'not a pooled account' });
+    const r = engine.fallbackMoveBack(poolId);
+    res.json({ ok: true, queued: (r && r.queued) || 0, noModel: (r && r.noModel) || 0, lapsed: (r && r.lapsed) || 0, familyUnknown: (r && r.familyUnknown) || 0, otherRecord: (r && r.otherRecord) || 0 });   // (r3319 (5), r3338 (2) (4)) each reason a conversation could not move, counted   // (r3319 (5)) those whose first model is unknown: not queued, said why
+  } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
+});
 app.post('/api/accounts/pool-cross/asks/:askId', (req, res) => {
   try {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });

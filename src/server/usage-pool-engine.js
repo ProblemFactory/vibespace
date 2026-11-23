@@ -8197,6 +8197,15 @@ async function executeFallbackBack(e, now = Date.now()) {
   if (r.moved && e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid);   // a press's slot waits for the LANDING (its resumed conversation is seen)
   return r;
 }
+/** (B-d578 F3b, r3316 (2)) THE POOL ROW's COUNTS ride the accounts list every client holds: a CHANGE of them tells the clients (the
+ *  tree's rule for a cache a client also holds) — compared with what they were last told, so an unchanged pass pushes nothing */
+const _fbStatusSig = new Map();   // pool id → the counts the clients were last told (JSON)
+function tellFallbackStatus(poolId) {
+  let sig = ''; try { sig = JSON.stringify(fallbackStatus(poolId)); } catch { return; }
+  if (_fbStatusSig.get(poolId) === sig) return;
+  _fbStatusSig.set(poolId, sig);
+  try { if (typeof accounts.noteFallbackStatus === 'function') accounts.noteFallbackStatus(); } catch { }
+}
 /** THE PERSON's press (the page, unit F3b): move these conversations of the pool — or every one on a fallback — back NOW (at the head of
  *  the queue, never counted; each still re-judged). → {queued} */
 function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
@@ -8214,6 +8223,7 @@ function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
     queueFallbackMove(poolId, sid, to, 'person', now); n++;
   }
   if (n) pumpFallbackMoves(now);
+  tellFallbackStatus(poolId);
   return { queued: n, noModel, lapsed, familyUnknown, otherRecord };
 }
 /** The pool row's count (the page, unit F3b): per provider, how many conversations run on it and how many could come back now. */
@@ -9383,7 +9393,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         }
       } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
     }
-    if (poolCaps.planC) { try { syncFallbackAsks(poolId, a, fbOffered, only, now); judgeFallbackReturns(poolId, a, only, now); pumpFallbackMoves(now); } catch (e) { console.warn('[pool] fallback pass:', e.message); } } // (B-d578 F2) scene 1's count; (F3a) coming back; the queue
+    if (poolCaps.planC) { try { syncFallbackAsks(poolId, a, fbOffered, only, now); judgeFallbackReturns(poolId, a, only, now); pumpFallbackMoves(now); tellFallbackStatus(poolId); } catch (e) { console.warn('[pool] fallback pass:', e.message); } } // (B-d578 F2) scene 1's count; (F3a) coming back; the queue
     // THE WARM CACHE, pool-default form: the default moves EVERY conversation
     // without its own link at once (the `affected` set below), so its proactive
     // move waits while ANY of them is warm — the warmest one (largest ttl − ago
@@ -9600,7 +9610,7 @@ function maybeStopOnFallback(session, id, from, to) {
     providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, dropCrossCarry, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     queueFallbackMove, pumpFallbackMoves, fallbackJudge, fallbackRows, syncFallbackAsks, answerFallbackAsk, _fbQueue, _fbMovedAt, _fbAsks, FALLBACK_MOVES_PER_MIN,
     purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, _fbLanding, _fbBackoff, convBackend, noteFallbackLanded, endFallbackEpisode, // F2 cure (r2939) + cure 2 (r3041) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
-    judgeFallbackReturns, fallbackBackTarget, fallbackBackVerdict, fallbackMoveBack, fallbackStatus, FALLBACK_DWELL_MS, _fbDwell, sweepFallbackDwell, stampFallbackDwell, // B-d578 F3a: coming back
+    judgeFallbackReturns, fallbackBackTarget, fallbackBackVerdict, fallbackMoveBack, fallbackStatus, FALLBACK_DWELL_MS, _fbDwell, sweepFallbackDwell, stampFallbackDwell, tellFallbackStatus, _fbStatusSig, // B-d578 F3a: coming back; F3b: the row's counts
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)

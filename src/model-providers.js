@@ -568,7 +568,7 @@ function draftOf(presetId, { region = null, baseUrl = null, label = null, model 
 // it fits — { id: the record's own (pv-…), name, type: 'provider', backend, tail, model, … } — carried BESIDE the accounts
 // (list().providerRows), never inside them: the hub's account readers keep seeing only accounts.json's records; the page
 // merges both into its own cache (agent-meta accountRowsOf). ONE record, one row per harness it fits. ──
-function rosterRowsOf(records, { usable = true } = {}) {   // usable = the key can be read now (the vault open + its entry there): a flag, or a test of the record
+function rosterRowsOf(records, { usable = true, whyNot = null } = {}) {   // whyNot(p) → 'vault-locked' | 'no-key' | null: the word a row that cannot start wears (B-d578 F3b)   // usable = the key can be read now (the vault open + its entry there): a flag, or a test of the record
   const out = [];
   const can = typeof usable === 'function' ? usable : () => usable;
   for (const p of Array.isArray(records) ? records : []) {
@@ -577,7 +577,7 @@ function rosterRowsOf(records, { usable = true } = {}) {   // usable = the key c
     const ready = !!can(p);
     for (const h of FIT_HARNESSES) {
       if (!f[h] || !f[h].ok) continue;
-      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: ready, localOnly: true,   // NO key tail (B-ba7d: the accounts list and its push reach every agent-readable mirror — the person's roster reads it through POST /api/providers/list)
+      out.push({ id: p.id, name: p.label, type: 'provider', backend: h, provenance: 'third-party', loggedIn: ready, ...(!ready && typeof whyNot === 'function' ? { notReady: whyNot(p) || null } : {}), localOnly: true,   // NO key tail (B-ba7d: the accounts list and its push reach every agent-readable mirror — the person's roster reads it through POST /api/providers/list)
         model: resolveModel(p, '') || '', preset: p.preset || null, kind: p.kind, providerId: p.id, tested: (p.tested && p.tested[h]) || null, lastTestAt: p.lastTestAt || null, createdAt: p.createdAt || null });
     }
   }

@@ -881,6 +881,46 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   // (3) the member's own judgement runs under the FIRST model's family, explicit (the session adds only the walls)
   ok(read('src/server/usage-pool-engine.js').includes('return memberCanServe(poolId, to, s2, sid, now, fam) ? { to, why: null } : { to: null, why: \'no-member\' };'),
     '(r3338 (3)) the way back\'s member check is handed the FIRST model\'s family explicitly — the session adds only its walls, never its own model\'s family');
+  // (F3b, r3316 (2)) THE ROW's COUNTS TELL THE CLIENTS ON A CHANGE ONLY: the same counts twice push once; a new conversation on the
+  // fallback pushes again (the accounts list's own push — no new read the page polls)
+  const wTl = world();
+  wTl.client(); onFb(wTl, 'tl1');
+  let toldTl = 0; const realNote = wTl.am.noteFallbackStatus.bind(wTl.am); wTl.am.noteFallbackStatus = () => { toldTl++; return realNote(); };
+  wTl.eng._fbStatusSig.delete(wTl.P);
+  wTl.eng.tellFallbackStatus(wTl.P); wTl.eng.tellFallbackStatus(wTl.P);
+  const toldOnce = toldTl;
+  onFb(wTl, 'tl2');
+  wTl.eng.tellFallbackStatus(wTl.P);
+  ok(toldOnce === 1 && toldTl === 2 && JSON.stringify(wTl.eng.fallbackStatus(wTl.P).map((r) => r.running)) === '[2]',
+    '(F3b) the pool row\'s fallback counts tell the clients only when they CHANGE: the same counts twice push once, a second conversation on the fallback pushes again', { toldOnce, toldTl });
+  // (r3338, with F3b) THE DWELL ACROSS A HUB RESTART: a conversation restored with the stamp its meta carries (boot-restore maps
+  // meta.poolFallbackDwell → _poolFallbackDwell) is not put on the fallback again inside the dwell, every member out, the pool allowing
+  const BRs = read('src/server/boot-restore.js');
+  const wRs = world({ cross: 'allow' });
+  wRs.client(); wall(wRs);
+  const rs1 = wRs.mk('rs1', wRs.P, { claudeSessionId: 'cid-rs1', _lastPtyDataAt: Date.now(), _poolFallbackDwell: Date.now() - 60e3 });
+  await wRs.pass(); await wRs.pass();
+  ok((BRs.match(/_poolFallbackDwell: Number\(meta\.poolFallbackDwell\) \|\| null/g) || []).length === 2 && !wRs.eng._fbQueue.has('rs1') && !wRs.restarts().some((t) => t.serverId === 'rs1') && rs1._poolFallbackDwell > 0,
+    '(r3338) the DWELL across a hub restart: a conversation restored from a meta carrying the stamp (both restore roads map it) is not moved onto the fallback inside its dwell — every member out, the pool allowing', { queued: wRs.eng._fbQueue.has('rs1') });
+  // (r3338, with F3b) A PRESS's MOVE BACK holds its slot until it LANDS: six that can come back, a press ⇒ four out at once; each landing
+  // (its resumed conversation seen) lets one more go; all six in the end
+  const wPl = world();
+  wPl.client(); heal(wPl); for (let i = 0; i < 6; i++) onFbRec(wPl, 'pl' + i, { fromModel: 'sonnet' });
+  await wPl.pass();
+  const prPl = wPl.eng.fallbackMoveBack(wPl.P);
+  await until(wPl, () => wPl.restarts().length >= 4);
+  await wPl.settle();
+  const firstPl = wPl.restarts().length;
+  let maxPl = firstPl, landedPl = 0;
+  for (let k = 0; k < 12 && landedPl < wPl.restarts().length; k++) {
+    const t = wPl.restarts()[landedPl];
+    wPl.mk(t.serverId + 'r', wPl.P, { claudeSessionId: t.backendSessionId, _lastPtyDataAt: Date.now() });   // the resumed conversation is seen
+    landedPl++;
+    await wPl.pass(); await until(wPl, () => wPl.restarts().length >= Math.min(6, landedPl + 4), 8);
+    maxPl = Math.max(maxPl, wPl.restarts().length - landedPl);
+  }
+  ok(prPl.queued === 6 && firstPl === 4 && maxPl <= 4 && wPl.restarts().length === 6,
+    '(r3338, F3b) a press\'s move BACK holds its slot until it LANDS: six queued, four out at once, the next only as one lands (its resumed conversation seen); all six in the end', { queued: prPl.queued, firstPl, maxPl, restarts: wPl.restarts().length });
   // RED CONTROLS of §5
   const DWELL = "    if (!removed && now - (Number(rec.at) || 0) < FALLBACK_DWELL_MS) continue;   // the DWELL: the pool moves nobody back inside it";
   const wDw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, DWELL, '', 'no dwell'), 'eng-no-dwell') });
