@@ -554,8 +554,9 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
 {
   // 主开发 r2803 / r2884 / r2982 / r3017: the table NOT_CREDENTIAL_HEADS, found in the line files (int359/sched-1117/lines, the
   // corpus page b4f7f/corpus-measure-2.md), read at holderVerdict's last line; every other last word still FAILS CLOSED. THE LAW: no
-  // word is on it under which a real credential can plausibly pass with no other rule taking its value. THE REACH: holderName is the
-  // ONE name grammar of the belt (messages, exit heads, device acts, job names, grants diffs, channel text, the judge, migrations)
+  // word is on it under which a real credential can plausibly pass with no other rule taking its value. THE REACH, by its definition
+  // (r3083): every caller of redactSecrets / redactByValue — the module's comment names them (a process's command line, a job's
+  // output, the vault doors' cards and the rest beside messages)
   const SS = r('src/secret-shapes.js'), J = JSON.stringify;
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const M = mutantCopies('b4f7f', REPO);
@@ -596,13 +597,13 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
       L('json', 'GOOGLE_CREDENTIALS_JSON', '=', vs[10]), L('json', 'GCP_SA_KEY_JSON', '=', vs[20]), L('json', 'GCP_SA_KEY_JSON', '=', B), ['json', 'GOOGLE_CREDENTIALS_JSON=' + escJson(vs[11]), vs[11]],
       L('json', 'data:\n  key.json', ': ', B), L('json', 'data:\n  credentials.json', ': ', B),
       L('only', 'DB_PASSWORD_READ_ONLY', '=', vs[12]), L('check', 'password_check', '=', vs[13]), ['check', '{"user":"ann","passwordCheck":"' + vs[14] + '"}', vs[14]],
-      L('build', 'NPM_TOKEN_BUILD', '=', vs[15]), L('dns', 'CF_API_TOKEN_DNS', '=', vs[16]), L('ui', 'ADMIN_PASSWORD_UI', '=', vs[17]), L('real', 'PASSWORD_REAL', '=', vs[18]), L('re', 'password_re', '=', vs[19])]; };
+      L('build', 'NPM_TOKEN_BUILD', '=', vs[15]), L('build', 'NPM_TOKEN_BUILD', '=', B), L('dns', 'CF_API_TOKEN_DNS', '=', vs[16]), L('ui', 'ADMIN_PASSWORD_UI', '=', vs[17]), L('real', 'PASSWORD_REAL', '=', vs[18]), L('re', 'password_re', '=', vs[19])]; };
   const shows = (o, secret) => o.includes(secret);
   const MSG = (S, t) => S.redactSecrets(t, { message: true }).text, LINE = (S, t) => S.redactSecrets(t).text;
   const tableOf = (S) => S.NOT_CREDENTIAL_HEADS instanceof Set ? S.NOT_CREDENTIAL_HEADS : new Set();
   const lastOf = (n) => n.split(/[_\-.\s]+|(?<=[a-z0-9])(?=[A-Z])/).filter(Boolean).pop().toLowerCase();
   const publicBad = (S) => [...new Set([...Object.values(KINDS), ...PAGE_PUBLIC])].filter((h) => S.holderName(h) !== false || MSG(S, h + SIGHT) !== h + SIGHT);
-  const priceOf = (S) => Object.entries(PRICE).map(([w, n]) => { const v = val(); return [w, n, v, LINE(S, n + '=' + v).includes(v)]; });
+  const priceOf = (S) => Object.entries(PRICE).map(([w, n]) => { const v = val(); return [w, n, v, LINE(S, n + '=' + v).includes(v) && MSG(S, n + '=' + v).includes(v)]; });   // r3083 (3): in both modes
   const stillBad = (S) => [...STILL, ...TWINS].filter((n) => S.holderName(n) !== true);
   const offBad = (S) => OFF_LINES().filter(([, line, secret]) => [MSG(S, line), LINE(S, line)].some((o) => shows(o, secret))).map(([w, line]) => w + ' ' + line.split(/[:=]/)[0].trim());
   const flagBad = (S) => { const v = val(), a = MSG(S, 'flags: --password-store=basic'), b = MSG(S, 'flags: --password-store=' + v); return a !== 'flags: --password-store=basic' || b.includes(v); };
@@ -610,7 +611,7 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
   const kindsBad = (S) => { const t = tableOf(S), k = Object.keys(KINDS); return [...[...t].filter((w) => !k.includes(w) || !PRICE[w]), ...k.filter((w) => !t.has(w)), ...k.filter((w) => lastOf(KINDS[w]) !== w)]; };
   ok(tableOf(SS).size > 0 && publicBad(SS).length === 0, `B-4f7f (1) THE FOUND HEADS FREE: ${tableOf(SS).size} last words on the table; a head of its kind for each and the corpus page's «cured public» heads read public, and the sighting's words after them are kept whole${publicBad(SS).length ? ' — still holding: ' + J(publicBad(SS)) : ''}`);
   { const pr = priceOf(SS), hid = pr.filter((x) => !x[3]);
-    ok(hid.length === 0, `B-4f7f (a) THE PRICE OF EACH WORD (r3017), what the loosening lets through, a credential word then the table word then a made-up value — every one SHOWS: ${pr.map(([w, n]) => n).join(' ')}${hid.length ? ' — hidden after all: ' + J(hid.map((x) => x[1])) : ''}`); }
+    ok(hid.length === 0, `B-4f7f (a) THE PRICE OF EACH WORD (r3017), what the loosening lets through, a credential word then the table word then a made-up value — every one SHOWS in both modes: ${pr.map(([w, n]) => n).join(' ')}${hid.length ? ' — hidden after all: ' + J(hid.map((x) => x[1])) : ''}`); }
   ok(stillBad(SS).length === 0, `B-4f7f (c) EVERY REAL SHAPE STILL TAKEN: ${STILL.length} names (r2982's list, the corpus heads r3017's cure turns back) and ${TWINS.length} twins (a table word FOLLOWED by a credential's name) hold${stillBad(SS).length ? ' — public now: ' + J(stillBad(SS)) : ''}`);
   ok(offBad(SS).length === 0, `B-4f7f (b) EVERY WORD LEFT OFF HOLDS: ${OFF_LINES().length} made-up lines, a value after each head (r3017's json / only / check with GOOGLE_CREDENTIALS_JSON (short, escaped JSON), GCP_SA_KEY_JSON (short, base64), key.json and credentials.json file entries (base64), DB_PASSWORD_READ_ONLY, password_check, passwordCheck; build dns ui real re; r2982's six; the page's six): every value hidden in both modes${offBad(SS).length ? ' — shown under: ' + J(offBad(SS)) : ''}`);
   ok(!flagBad(SS), 'B-4f7f (c) --password-store still holds ON PURPOSE: a known value (basic) is kept, any other value is hidden (KNOWN_FLAG_VALUES; «store» stays off the table)');
@@ -631,8 +632,8 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
   ok(stillBad(ANY).filter((n) => TWINS.includes(n) || n === 'scan_secret').length >= 20, `RED CONTROL (the table read on ANY word, not the last): ${stillBad(ANY).length} names go public (scan_secret, the twins) — leg (c) goes red`);
   const TBL = 'const NOT_CREDENTIAL_HEADS = new Set([';
   const OFFON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + OFF.map((w) => J(w)).join(', ') + ', ', 'src/secret-shapes.js'), 'b4f7f-off-on');
-  { const shown = new Set(offBad(OFFON).map((x) => x.split(' ')[0]));
-    ok(OFF.every((w) => shown.has(w)) && overlapBad(OFFON).length === OFF.length && kindsBad(OFFON).length === OFF.length, `RED CONTROL (the ${OFF.length} words left off put ON the table): a value shows under every one of them (${J([...shown])}), and the table legs (3) and (4) name them — red`); }
+  { const lines = OFF_LINES(), shownL = lines.filter(([, line, secret]) => [MSG(OFFON, line), LINE(OFFON, line)].every((o) => shows(o, secret))), hiddenL = lines.filter((x) => !shownL.includes(x));   // r3083 (2): keyed by LINE, both modes
+    ok(shownL.length === lines.length && OFF.every((w) => shownL.some(([x]) => x === w)) && overlapBad(OFFON).length === OFF.length && kindsBad(OFFON).length === OFF.length, `RED CONTROL (the ${OFF.length} words left off put ON the table): EVERY ONE of the ${lines.length} lines shows its value in both modes — the base64 entries too, so each is hidden by its head and by nothing else — and the table legs (3) and (4) name the words${hiddenL.length ? ' — still hidden by another rule: ' + J(hiddenL.map(([w, l]) => w + ' ' + l.split(/[:=]/)[0].trim())) : ''}`); }
   const CREDON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + "'token', ", 'src/secret-shapes.js'), 'b4f7f-cred');
   ok(overlapBad(CREDON).includes('token') && kindsBad(CREDON).includes('token'), 'RED CONTROL (a credential word on the table): leg (3) names «token», leg (4) finds it without a leg of its kind — red');
 }

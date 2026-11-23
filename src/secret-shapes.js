@@ -527,9 +527,13 @@ const DESCRIPTOR_HEADS = new Set(['usage', 'type', 'ttl', 'sock', 'policy', 'sca
 // row B-4f7f (主开发 r2803 / r2982 / r3017; lane mask-value-shape): a head whose LAST piece is an act or a thing that is not a
 // credential holds nothing — the table FOUND in the line files (int359/sched-1117/lines, 1894 files: every head the belt took only by
 // failing closed, by its last piece), never guessed. THE LAW (r2982 / r3017): no word is on it under which a real credential can
-// plausibly pass with no other rule taking its value. THE REACH: holderName is the ONE name grammar of the belt — messages between
-// conversations, exit heads, the device acts' summaries, job names, grants diffs, the channel road's text, the judge's input, a
-// migration's failure line: a word here loosens ALL of them at once. NOT on it, each failing closed because a person can truly write
+// plausibly pass with no other rule taking its value. THE REACH, by its definition (r3083): every caller of the belt's two entry
+// functions, redactSecrets and redactByValue — among them the output belt's sinks (messages between conversations, task progress,
+// For-you items, status notices, a job's log), exit heads, a machine card's process command lines, the device acts' summaries, job
+// names AND every chunk of a job's output, grants diffs, the channel road's text, the judge's input, the auto usage check's stored
+// reason, the provider test's output, the auto-allow log's head, the vault doors' cards and records (job, run, paste), a door's
+// stored reason, the names job-secrets and migrations show, a migration's failure line: a word here loosens ALL of them at once. NOT
+// on it, each failing closed because a person can truly write
 // a secret after such a head: pin / pins (a PIN), helper (its command), args / options (whatever was typed), reset (a reset code or
 // link), local / pre / only / build / dns / ui / real (a credential's variant: DB_PASSWORD_LOCAL, DB_PASSWORD_READ_ONLY,
 // NPM_TOKEN_BUILD, CF_API_TOKEN_DNS), info / set / box (a thing that may carry one), store (--password-store holds on purpose:
