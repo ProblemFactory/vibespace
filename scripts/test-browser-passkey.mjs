@@ -1597,7 +1597,11 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const known = { humanTargetFor: () => target, humanAttach: () => ({ ok: true, take: true }), streamPortFor: async () => ({ ok: true, port: 9 }) };
     const keeper = new Proxy(known, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
     // B-346d r1505: ONE world, run on the tree's bridge and on a control copy — the press, and what the pressing viewer is told after it
-    const pressWorld = async (SBm) => {
+    // B-3dbd (主开发 r3297): every wait of this world ends ON ITS FACT, bounded at 30 s (the release waited 1–2 s and judged what had come):
+    // the arm, the viewer's held fact, the press's arm and — for the bridge that answers — its ack. `quietMs` (the CONTROL's world
+    // only) is the window in which a bridge that never answers is judged silent: READ FROM THIS RUN, ten times the answering bridge's
+    // own press → ack in the same run, never a clock literal
+    const pressWorld = async (SBm, { quietMs = null } = {}) => {
       const arms = [];
       const dialogs = { arm: async (pid, o) => { arms.push(o || null); return { ok: false, watched: false }; }, passkeyFactOf: () => ({ state: 'passkey', passkey: PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), profileId: PID }), onChange: () => () => {}, cancelPasskey: async () => ({ ok: true, n: 0 }), openOn: () => null, surfacesIn: () => [] };
       class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
@@ -1607,22 +1611,24 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`); const got = [];
       ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } });
       await new Promise((r) => { ws.on('open', r); ws.on('error', r); });
-      await until2(() => arms.length >= 1); const a0 = arms.length;
+      await until2(() => arms.length >= 1, 30000); const a0 = arms.length;
       // r2447 (lane bl-tests-e): the press's mark is taken once the viewer HOLDS what the first arm said. The bridge records the arm,
       // then (its answer's turn) broadcasts the fact it reads (still «gave up») over the socket: a mark taken at the arm alone counted
       // that fact, still in flight, as the press's reply when the box was slow — the release control red with status, passkey, status
       // (two runs of 11-22, box zone). `ready` is the world's own precondition: each leg on this world is red without it.
-      const ready = await until2(() => got.some((m) => m.type === 'passkey' && m.fact && m.fact.passkey && m.fact.passkey.why === 'gave-up'));
-      const p0 = got.length;
+      const ready = await until2(() => got.some((m) => m.type === 'passkey' && m.fact && m.fact.passkey && m.fact.passkey.why === 'gave-up'), 30000);
+      const p0 = got.length, t0 = Date.now();
       ws.send(JSON.stringify({ type: 'passkey-retry' }));
-      await until2(() => arms.length > a0, 1000); await sleep2(30);
-      await until2(() => got.slice(p0).some((m) => m.type === 'passkey-retry-ack'), 1000);
+      const armed = await until2(() => arms.length > a0, 30000);   // the press's arm: a fact both bridges make
+      if (quietMs == null) await until2(() => got.slice(p0).some((m) => m.type === 'passkey-retry-ack'), 30000);   // the answering bridge: its ack, waited for
+      else await sleep2(quietMs);   // the silent bridge: nothing can come; the window is ten times the answering bridge's own (this run)
+      const pressToAckMs = Date.now() - t0;
       const refused = got.some((m) => m.type === 'refused');
       try { ws.close(); } catch { /* */ }
       bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
-      return { arms, a0, refused, ready, after: got.slice(p0) };
+      return { arms, a0, refused, ready, armed, pressToAckMs, after: got.slice(p0) };
     };
-    const { arms, a0, refused, ready, after } = await pressWorld(SB);
+    const { arms, a0, refused, ready, after, pressToAckMs } = await pressWorld(SB);
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const unk = (live.split('    } else if (pkUnknown) {')[1] || '').split('\n    }\n')[0];
     ok(words.retry === 'Connect again now' && plain.retry === '' && /«Connect again now» in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'person' && arms[0].by === 'person' && !refused && /textBtn\(pkUnknown\.retry, \(\) => \{ st\.pkRetryAt = Date\.now\(\); send\(\{ type: 'passkey-retry' \}\); \}/.test(unk),
@@ -1637,7 +1643,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const MUT1505 = mutantCopies('browser-passkey-b346d-reply', REPO);
     const sbsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
     const silentSB = MUT1505.load('src/server/browser-stream.js', anchored(sbsrc, "    if (msg && msg.type === 'passkey-retry') { retryPasskey(relay, viewer); return; }", "    if (msg && msg.type === 'passkey-retry') { armDialogs(relay); return; }", 'r1505 control: the release\'s press'), 'press-only-rearms'); // stale-pins: kept (r1505: the release's line, the control's rebuilt text)
-    const silent = await pressWorld(silentSB);
+    const silent = await pressWorld(silentSB, { quietMs: Math.max(1, 10 * pressToAckMs) });   // the window READ FROM THIS RUN
     ok(silent.ready && silent.arms.length === silent.a0 + 1 && !silent.after.some((m) => m.type === 'passkey-retry-ack' || m.type === 'passkey'), 'CONTROL (r1505): the release\'s bridge re-arms on the press and tells the viewer NOTHING when the fact stays — RED', { ready: silent.ready, after: silent.after.map((m) => m.type) });
     // the words: '' when the fact moved; else the cause in the person's language («its connection was lost» after the tries stopped,
     // «no watch could open» when the arm failed, on a refusal, or when nothing is known — never the arm's own English error text,
