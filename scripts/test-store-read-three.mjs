@@ -384,6 +384,36 @@ try {
     ok(!!AUTH && words[1].length > 0 && !words.some((w) => w && AUTH.test(w)), 'THE preMount SHOULD (a reading made a leg): a held refusal\'s words match none of the remount\'s auth words — the sweep reconnects that mount after the lift, never left waiting for a press', words);
     stopOf(tw);
   }
+  {
+    console.log('⑥ B-f276 family unit 2 (the census, 主开发 r3115): mounts.json HELD — its silence removes nothing');
+    // MS2: the client-swap check closes For-you items no memo names — while held its facts read EMPTY: it waits; the lift runs it
+    const swapRun = async (X) => {
+      const d = dirOf('swap'), f = path.join(d, 'mounts.json'); fs.writeFileSync(f, JSON.stringify(STORES[1].plant(d), null, 2));
+      const un = refuse(f); let s = null; try { s = STORES[1].make(d, X); } finally { un(); }
+      const calls = []; s.onClientSwaps = (facts, memos) => { calls.push(facts); return memos; };
+      await s.clientSwapCheck(); const held = calls.length;
+      await s._hold.again(); await until(() => calls.length > held);
+      stopOf(s); return { held, after: calls.length };
+    };
+    const sw = await swapRun(undefined), swx = await swapRun(mutant('src/mounts.js', [["    if (this._hold.held()) return;   // B-f276 family unit 2 (the census's MS2): held, its facts read EMPTY — nothing filed, redrawn or closed; the lift runs the check\n", '']]));
+    ok(sw.held === 0 && sw.after >= 1, 'MS2: the client-swap check WAITS while mounts.json is held (its facts read empty — no For-you item closed on them); the lift runs it', sw);
+    ok(swx.held >= 1, 'RED CONTROL — the hold not asked (the release\'s road, in a copy): the check runs over the empty facts while held', swx);
+    // MS1: the raw-API proposals' sweep ends a proposal whose credential is gone — a mount's lent client is UNKNOWN while held
+    const cardsRun = (CARDS, held) => {
+      const d = dirOf('cards'), rejected = [];
+      const prop = { id: 'ap-made-0001', cred: 'mount:mnt-made0001', status: 'pending', at: Date.now(), principal: { kind: 'conversation', id: 'conv-made', name: 'made-up' }, method: 'GET', host: 'api.example.invalid', path: '/v1/made' };
+      const c = CARDS.create({ dataDir: d, api: { ownerView: () => ({ ok: true, ...(held ? { mountsHeld: true } : {}), creds: [], proposals: [prop] }), reject: (id, o) => { rejected.push([id, o && o.reason]); } }, timer: false, log: { warn() { }, log() { } } });
+      return c.sync().then(() => { c.stop(); return rejected; });
+    };
+    const CARDS = require('../src/server/channel-api-cards.js');
+    const r1 = await cardsRun(CARDS, true), r2 = await cardsRun(CARDS, false);
+    const CX = mutant('src/server/channel-api-cards.js', [["      if (!credIds.has(p.cred)) return mountsHeld && String(p.cred || '').startsWith('mount:') ? null : 'the account was removed';", "      if (!credIds.has(p.cred)) return 'the account was removed';"]]);
+    const r3 = await cardsRun(CX, true);
+    ok(r1.length === 0 && r2.some(([id, why]) => id === 'ap-made-0001' && /the account was removed/.test(String(why))), 'MS1: a raw-API proposal on a mount\'s lent client is NOT ended while mounts.json is held (unknown); a store that READ and lends no such client ends it as before', { held: r1, read: r2 });
+    ok(r3.length === 1, 'RED CONTROL — the hold not asked (the release\'s road, in a copy): the held store\'s silence ends the proposal as «the account was removed»', r3);
+    const CA = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf8');
+    ok(/const mountsHeld = \(\(\) => \{ try \{ const m = getMounts\(\); return !!\(m && typeof m\.unreadWords === 'function' && m\.unreadWords\(\)\); \}/.test(CA) && CA.includes("ok: true, ...(mountsHeld ? { mountsHeld: true } : {}), creds:"), 'the owner view says mounts.json is held (pin: the view the sweep reads)');
+  }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));
 } finally {

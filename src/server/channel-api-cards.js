@@ -61,9 +61,10 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
     });
   }
   /** null while the proposal's principal still holds API access to a live credential; else the reason it ended. */
-  function liveness(a, credIds) {
+  function liveness(a, credIds, mountsHeld = false) {
     return (p) => {
-      if (!credIds.has(p.cred)) return 'the account was removed';
+      // B-f276 family unit 2 (the census's MS1): a mount's lent client is UNKNOWN while mounts.json is held — never «removed»
+      if (!credIds.has(p.cred)) return mountsHeld && String(p.cred || '').startsWith('mount:') ? null : 'the account was removed';
       let mine = null;
       if (require('./groups-hold.js').held() || (p.principal && p.principal.groupsUnreadable === true)) return null;   // Task Groups held unread, or the card filed while they were: its tier is unknown — a card never ENDS on it («withdrawn» would be false)
       try { mine = a.creds(ctxOf(p)); } catch { return null; }   // an unreadable tier decides nothing
@@ -126,8 +127,8 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
     if (stopped || !a || typeof a.ownerView !== 'function') return;
     if (typeof a.isHeldUnread === 'function' && a.isHeldUnread()) return;   // r3005: the proposals are UNREAD — the cards file, close and drop nothing until they read
     let recs = records();
-    const credIds = new Set(((a.ownerView().creds) || []).map((c) => c.id));
-    const ends = C.sweepVerdicts(recs, { now: now(), live: liveness(a, credIds) });
+    const view = a.ownerView() || {}, credIds = new Set((view.creds || []).map((c) => c.id));
+    const ends = C.sweepVerdicts(recs, { now: now(), live: liveness(a, credIds, !!view.mountsHeld) });
     for (const v of ends) { try { a.reject(v.id, { by: v.by, reason: v.reason }); } catch (e) { log.warn(`[channel-api-cards] ${v.id} was not ${v.by}: ${(e && e.message) || e}`); } }
     if (ends.length) recs = records();
     let dirty = ends.length > 0;

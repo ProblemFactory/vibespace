@@ -566,6 +566,28 @@ async function legCard(doorSrc = null) {
   W.end();
   return rows;
 }
+// B-f276 family unit 2 (the census's J2, 主开发 r3115): jobs.json HELD — the engine's memory is EMPTY because it is unread: a press on
+// a job's approval card is REFUSED BY NAME (records-unread) and the card stays open; read again, the same press answers as ever
+async function legHeldPress(doorSrc = null) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('heldpress', { doorSrc });
+  W.vault.agentMint('agent:conv-a/tok', { length: 32 }); W.release();
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+  await W.door.factsLanded();   // the card is filed when its file facts land (off the loop)
+  const a = (cards(W)[0] || {}).action || {};
+  const keep = new Map(W.jm.jobs), was = W.jm._unread.store;
+  W.jm.jobs.clear(); W.jm._unread.store = { code: 'EIO', why: 'the read failed (placed)', at: Date.now() };
+  const h = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+  await W.door.factsLanded();
+  rows.held = h; rows.open = cards(W).length;
+  row(!!h && h.ok === false && h.code === 'records-unread' && cards(W).length === 1, 'jobs.json HELD (its memory empty because unread): a press on a job\'s approval card is REFUSED BY NAME (records-unread) — the card stays open, never closed as over', { h, open: cards(W).length });
+  W.jm.jobs.clear(); for (const [k, v] of keep) W.jm.jobs.set(k, v); W.jm._unread.store = was;
+  const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+  await W.door.factsLanded();
+  row(!!d && d.ok && d.outcome === 'denied' && job.state === 'failed', 'read again, the same press answers as ever (denied — the job refused by name)', d);
+  W.end();
+  return rows;
+}
 async function legDeny(doorSrc = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world('deny', { doorSrc });
@@ -1836,6 +1858,10 @@ ok(!!MUT_CAPCARDS && capJobsMut.state === 'failed', 'CONTROL — the cap countin
 ok(!!MUT_REAUTH && !!cardMutReauth.unauthed && cardMutReauth.unauthed.ok === true, 'CONTROL — 允许 without 验证是你 (the door\'s reauth check removed): the row is WRITTEN — RED on the copy', MUT_REAUTH ? cardMutReauth.unauthed : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_DEDUPE && cardMutDedupe.rejudge > 1, 'CONTROL — a card per re-judge (the open-card check removed): a second card — RED on the copy', MUT_DEDUPE ? cardMutDedupe.rejudge : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_DENY && denyMut.state === 'waiting', 'CONTROL — a Deny that leaves its job (the refusal removed): the job still waits — RED on the copy', MUT_DENY ? denyMut.state : 'the copy could not be built (its anchor is missing)');
+const MUT_HELDPRESS = dmut("    if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords() : 'the Background Work records cannot be read right now' };\n", '');
+const [heldPress, heldPressMut] = await Promise.all([legHeldPress(), MUT_HELDPRESS ? legHeldPress(MUT_HELDPRESS) : {}]);
+print('⑨g THE JOBS STORE HELD (B-f276 family unit 2, the census\'s J2 — 主开发 r3115)', heldPress);
+ok(!!MUT_HELDPRESS && heldPressMut.open === 0, 'CONTROL — the hold not asked (the release\'s road): the press closes the card as over — RED on the copy', MUT_HELDPRESS ? { held: heldPressMut.held, open: heldPressMut.open } : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_CAP && capsMut.n === 5, 'CONTROL — no per-conversation bound: a fifth card — RED on the copy', MUT_CAP ? capsMut.n : 'the copy could not be built (its anchor is missing)');
 print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval — decisions ④ ③)', [...revoke, ...gone, ...jgone, ...lockRuns, ...pdel, ...adel]);
 print('⑩e A LOCK WITHDRAWS THE CARDS (B-a08e, 主开发 r1665) — the job waits, the unlock asks again', lockWithdraw);

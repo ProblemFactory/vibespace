@@ -166,6 +166,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // lane jobs-browser (B-dbc1): is this Background Work job's run alive (state starting | up)? A running job CARRIES its
   // browser handle (src/browser-job-principal.js), so its lease outlives its owner conversation until the job ends
   jobRunning = () => false,
+  // B-f276 family unit 2 (主开发 r3115): the settings store HELD? (the hub's persistence router) — the CLI pin is never computed from
+  // a setting it could not read
+  settingsHeld = () => null,
   jobName = () => null, // accept-fixes-strip F8: a Background Work job's name (the live view names a job's tab by it)
   facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true, answerAskMs = null, /* lane browser-unresponsive: the gate's bound of one ask */
   probeLadder = null, // B-0b8c (lane browser-probe-transient): the gate's `{retryMs, timeoutMs, timers}` for the version probe's ladder (production: F.PROBE_RETRY_MS / F.PROBE_TIMEOUT_MS)
@@ -7760,6 +7763,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** THE PIN: `{mode: path|pinned|version, version, path|null, installed, why, invalid}` — recomputed when the setting moves or
    *  an install ends (never per command), mirrored to cli-pin.json on a change. */
   function cliPin() {
+    // B-f276 family unit 2 (主开发 r3115 — the census's one unverified item, VERIFIED): while the SETTINGS are held `browser.cli` is
+    // UNREAD (the held view carries no such row): the pin computed from it is the default's («path»), and the mirror below was REMOVED —
+    // the person's pinned build gone from the agent's CLI on a guess. Held: the last pin stands, nothing is written; the lift recomputes
+    let settingsUnread = false; try { settingsUnread = !!settingsHeld(); } catch { settingsUnread = false; }
+    if (settingsUnread) return cliMemo ? cliMemo.pin : { mode: 'path', version: null, path: null, installed: false, why: 'the settings cannot be read right now — the pin file is left as it is', invalid: null, held: true };
     let raw = ''; try { const v0 = serverSetting('browser.cli'); raw = v0 == null ? '' : String(v0); } catch { raw = ''; }
     if (cliMemo && cliMemo.raw === raw && cliMemo.gen === cliGen) {
       // verify r1 (F4): a pinned install that VANISHED (data/browser-tools wiped, the folder moved) is said at once — the

@@ -355,7 +355,10 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   function ownerView() {
     const e = eng();
     const rows = e && typeof e.apiGrants === 'function' ? e.apiGrants() : [];
-    return { ...(hold.held() ? { held: hold.words(), code: 'api_unread' } : {}), ok: true, creds: allCreds().map((c) => ({ ...c, grants: rows.filter((g) => g.scope && g.scope.id === c.id).map((g) => ({ principal: g.principal, tier: g.api, perDay: g.perDay || null })), except: e && typeof e.apiExceptOf === 'function' ? e.apiExceptOf(c.id) : [], shapes: state.shapes.filter((s) => s.cred === c.id), sensitive: (F.vendorRowOf(credentialOf(c.id)) || { sensitive: [] }).sensitive.map((re) => re.source) })), proposals: Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(0, 50).map((p) => proposalView(p)) };
+    // B-f276 family unit 2 (the census's MS1): mounts.json HELD lends no client because it is UNREAD — the view says so (a remover
+    // never reads a held store's silence as «the account was removed»)
+    const mountsHeld = (() => { try { const m = getMounts(); return !!(m && typeof m.unreadWords === 'function' && m.unreadWords()); } catch { return false; } })();
+    return { ...(hold.held() ? { held: hold.words(), code: 'api_unread' } : {}), ok: true, ...(mountsHeld ? { mountsHeld: true } : {}), creds: allCreds().map((c) => ({ ...c, grants: rows.filter((g) => g.scope && g.scope.id === c.id).map((g) => ({ principal: g.principal, tier: g.api, perDay: g.perDay || null })), except: e && typeof e.apiExceptOf === 'function' ? e.apiExceptOf(c.id) : [], shapes: state.shapes.filter((s) => s.cred === c.id), sensitive: (F.vendorRowOf(credentialOf(c.id)) || { sensitive: [] }).sensitive.map((re) => re.source) })), proposals: Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(0, 50).map((p) => proposalView(p)) };
   }
   async function setTiers(cred, list, { by = 'user', except = undefined, removeExcept = [] } = {}) {
     const e = eng();

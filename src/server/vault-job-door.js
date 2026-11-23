@@ -481,6 +481,9 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const job = jm ? jm.jobs.get(q.jobId) : null;
     const lines = (op, extra = {}) => { for (const e of q.entries) audit({ op, job: q.jobId, entry: refOf(q.jobId, e).ref, ...extra, askId: id }); };   // ONE line an entry, the card's one askId
     const over = (code) => { const keys = keysOf(q); settle(q, 'ask-over'); lines('over'); return named(code, keys ? { key: keys } : {}); };
+    // B-f276 family unit 2 (the census's J2): jobs.json HELD — its memory is EMPTY because it is unread, never «the job is over»: the
+    // press is refused by name and the card stays open (it is judged once the records read)
+    if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords() : 'the Background Work records cannot be read right now' };
     if (!job) return over('ask_over');
     const fact = person ? { decidedBy: 'person', decidedAt: now() } : null;
     const who = String(by || 'user').slice(0, 40);

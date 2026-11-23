@@ -345,6 +345,27 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     for (const row of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
     jobs.clear(); for (const [a, b] of keep) jobs.set(a, b); delete jm._unread;
   }
+  // 主开发 r3115 (1), the census's J1: a job the engine CANNOT VERIFY (`unverified` — a skeleton recovered from torn bytes, a job whose
+  // wrapper a restart could not own again) is UNKNOWN: the real reconcile keeps its handle, its lease and its tabs (none closed on a guess)
+  { const jA = jobs.get('jb-0000aaaa'), st0 = jA.state; jA.state = 'unverified';
+    const winU = lw(H), tabsU = windowTabs(winU), jl1 = jl.length;
+    k.reconcile({ graceMs: 0 }); await new Promise((r) => setTimeout(r, 50));
+    ok(!!k._reg().children[H] && leasesOf(H).includes(pBank.id) && tabsU.length > 0 && tabsU.every((t) => model.targets.get(t).state !== 'closed') && !jl.slice(jl1).some((x) => /job handle released/.test(x)), 'AN UNVERIFIED JOB (r3115 (1)): the real reconcile keeps its handle, lease and tabs — unknown is never «not running»', { children: Object.keys(k._reg().children) });
+    const MU = mutantCopies('jobs-browser-unverified', REPO), JSRC1 = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
+    const JU = MU.load('src/browser-job-principal.js', anchored(JSRC1, "  if (j && j.state === 'unverified') return 'unknown';\n", '', 'B-f276 r3115 (1): unverified read as not running'));
+    ok(JU.jobChildrenToRelease(k._reg().children, (id) => JU.jobRunningIn(jm, id)).some((x) => x.handle === H), 'RED CONTROL — unverified read as not running (the release\'s road, in a copy): the rule releases that handle');
+    for (const row of copiesCensus(MU.files, MU.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    jA.state = st0;
+  }
+  // 主开发 r3115 (the census's one unverified item, verified): the SETTINGS HELD — `browser.cli` unread: the CLI pin file the agent's
+  // CLI reads is never REMOVED over a setting the keeper could not read (it was: the default «path» pin removed the mirror)
+  { const pinAt = (dd) => { const pf = path.join(dd, 'browser-tools', 'cli-pin.json'); fs.mkdirSync(path.dirname(pf), { recursive: true }); fs.writeFileSync(pf, JSON.stringify({ version: '9.9.9', path: '/made/up/agent-browser' })); return pf; };
+    const pfH = pinAt(path.join(O, 'data-pin-held')), pfR = pinAt(path.join(O, 'data-pin-release'));
+    const kH = mk(K, { dataDir: path.join(O, 'data-pin-held'), settingsHeld: () => ({ code: 'EIO' }) }), kR = mk(K, { dataDir: path.join(O, 'data-pin-release') });
+    const pinH = kH.cliPin(); kR.cliPin();
+    ok(fs.existsSync(pfH) && pinH && pinH.held === true, 'THE SETTINGS HELD: the CLI pin is not computed from an unread setting — its file is LEFT AS IT IS (the last pin stands)', pinH);
+    ok(!fs.existsSync(pfR), 'RED CONTROL — the same keeper with no hold to ask (the release): the default «path» pin REMOVES the file');
+  }
   // THE .229 MIRROR (F11 red on the Actions runner: window 104 left open, its tab never closed): a tab read in flight while the
   // job's window gained a tab — the CDP read taken BEFORE the tab, the holders read AFTER its root was stamped — pruned that
   // root as gone, so the finalize found nothing of the job's to close. A root stamped after the read began survives the read.

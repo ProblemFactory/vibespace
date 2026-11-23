@@ -551,6 +551,7 @@ class MountManager {
     this._maybeImportEnvStorage();
     this._notify();
     if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => { }); }
+    try { const r = this.clientSwapCheck(); if (r && typeof r.catch === 'function') r.catch(() => { }); } catch { }   // the census's MS2: the check the hold made wait
   }
   /** the words a person reads while mounts.json is held (the storage list, a refused change) — null when it reads */
   unreadWords() { return this._hold.words(); }
@@ -3085,6 +3086,7 @@ class MountManager {
   }
   _clientSwapCheckNow() {
     if (typeof this.onClientSwaps !== 'function') return;
+    if (this._hold.held()) return;   // B-f276 family unit 2 (the census's MS2): held, its facts read EMPTY — nothing filed, redrawn or closed; the lift runs the check
     const was = this._state.clientSwaps && typeof this._state.clientSwaps === 'object' && !Array.isArray(this._state.clientSwaps) ? this._state.clientSwaps : {};
     const next = this.onClientSwaps(this.clientSwapFacts(), was);
     if (next && typeof next === 'object' && JSON.stringify(next) !== JSON.stringify(was)) { this._state.clientSwaps = next; this._save(); }

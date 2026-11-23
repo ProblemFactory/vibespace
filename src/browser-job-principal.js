@@ -43,6 +43,11 @@ function isRunningJob(job) { return !!job && typeof job === 'object' && RUNNING_
 function jobRunningIn(jm, jobId) {
   if (jm && jm._unread && jm._unread.store) return 'unknown';
   const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null;
+  // 主开发 r3115 (1), the census's J1: a job the engine CANNOT VERIFY — `unverified` (a skeleton recovered from torn bytes, a job whose
+  // wrapper a restart could not own again) — is UNKNOWN to the keeper: its handle is kept, never released on a guess. Bounded: they
+  // are the jobs that existed (one handle each at most); none is closed by a timer — the person ends it in the jobs panel (its state
+  // then final), or its own record says it ended
+  if (j && j.state === 'unverified') return 'unknown';
   return isRunningJob(j);
 }
 function ownerConversationOf(job) {
