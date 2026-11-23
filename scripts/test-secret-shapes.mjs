@@ -550,64 +550,89 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   ok(s0.some((g) => g.t === 'link' && g.ref.includes(REDACTED)) && s0.some((g) => g.t === 'link' && g.kind === 'path') && !s0.some((g) => g.t === 'masked'), 'RED CONTROL (the base\'s card): a masked URL and a masked path are whole-looking LINKS — the LAW 2 legs go red');
 }
 
-console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A THING HOLDS NOTHING (the found table) — every real shape still taken');
+console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A THING HOLDS NOTHING (the found table) — its price, every real shape still taken');
 {
-  // 主开发 r2803 / r2884 / r2982: the table NOT_CREDENTIAL_HEADS, found in the line files (int359/sched-1117/lines, the corpus page
-  // b4f7f/corpus-measure-2.md), read at holderVerdict's last line; every other last word still FAILS CLOSED
+  // 主开发 r2803 / r2884 / r2982 / r3017: the table NOT_CREDENTIAL_HEADS, found in the line files (int359/sched-1117/lines, the
+  // corpus page b4f7f/corpus-measure-2.md), read at holderVerdict's last line; every other last word still FAILS CLOSED. THE LAW: no
+  // word is on it under which a real credential can plausibly pass with no other rule taking its value. THE REACH: holderName is the
+  // ONE name grammar of the belt (messages, exit heads, device acts, job names, grants diffs, channel text, the judge, migrations)
   const SS = r('src/secret-shapes.js'), J = JSON.stringify;
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const M = mutantCopies('b4f7f', REPO);
   const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
-  // a made-up value NO shape rule takes by itself (a word and digits; a PIN's digits): only its HEAD can hide it — so a red copy shows it
+  // made-up values only, built at runtime by joining pieces: a word and digits, a PIN's digits — no shape rule takes them by
+  // themselves, so only their HEAD can hide them; a base64 service-account blob; an escaped-JSON service-account value
   const val = () => ['maple', 'river', 'copper', 'lantern', 'harbor'][crypto.randomInt(5)] + crypto.randomInt(100, 999), pin = () => String(100000 + crypto.randomInt(899999));
+  const b64 = () => Buffer.from(JSON.stringify({ type: ['service', 'account'].join('_'), project_id: 'demo-' + crypto.randomInt(1000, 9999), private_key_id: crypto.randomBytes(8).toString('hex') }, null, 2)).toString('base64');
+  const escJson = (v) => JSON.stringify(JSON.stringify({ type: ['service', 'account'].join('_'), client_secret: v }));
   // A LEG OF ITS KIND FOR EVERY WORD ON THE TABLE: a head the line files held only by failing closed (or one of its kind, never a
-  // tree file's name), and its twin — the same word FOLLOWED by a credential's name, which still holds
-  const KINDS = { scan: 'secret-scan', watch: 'session-events-watch', build: 'VS_SIG_STALL_BUILD', checking: 'StrictHostKeyChecking', check: 'auth-check',
-    js: 'token-door.js', mjs: 'key-census.mjs', json: 'auth.json', law: 'key-file-law', line: 'session-spawn-line', dialog: 'new-session-dialog',
-    schema: 'token-schema', form: 'token-form', ui: 'session-title-ui', real: 'host-key-pin-real', pty: 'setupSessionPty', alias: 'HostKeyAlias',
-    startup: 'session.restore_on_startup', brain: 'key-brain', dns: 'VerifyHostKeyDNS', re: 'MERGE_SID_RE', source: 'apiKeySource',
-    locked: 'hostTokenLocked', for: 'usageCacheKeyFor', asked: 'session._exitAsked', nice: 'session._cpuNice', unread: 'keyHelperUnread',
-    use: 'session.mayUse', off: 'keyHelperOff', pinned: 'hosts.onHostKeyPinned', of: 'lineageKeyOf', only: 'key-only', why: 'keyWhy' };
+  // tree file's name) — and THE PRICE: a credential word, then the table word, then a made-up value (r3017 (a))
+  const KINDS = { scan: 'secret-scan', watch: 'session-events-watch', checking: 'StrictHostKeyChecking',
+    js: 'token-door.js', mjs: 'key-census.mjs', law: 'key-file-law', line: 'session-spawn-line', dialog: 'new-session-dialog',
+    schema: 'token-schema', form: 'token-form', pty: 'setupSessionPty', alias: 'HostKeyAlias', startup: 'session.restore_on_startup',
+    brain: 'key-brain', source: 'apiKeySource', locked: 'hostTokenLocked', for: 'usageCacheKeyFor', asked: 'session._exitAsked',
+    nice: 'session._cpuNice', unread: 'keyHelperUnread', use: 'session.mayUse', off: 'keyHelperOff', pinned: 'hosts.onHostKeyPinned',
+    of: 'lineageKeyOf', why: 'keyWhy' };
   const CRED = ['token', 'key', 'secret', 'password'];
+  const PRICE = Object.fromEntries(Object.keys(KINDS).map((w, i) => [w, (CRED[i % CRED.length] + '_' + w).toUpperCase()]));
   const TWINS = Object.keys(KINDS).map((w, i) => w + '_' + CRED[i % CRED.length]);
-  // the corpus page's «cured public» heads (password-reset is NOT among them: r2982 keeps «reset» off the table)
-  const PAGE_PUBLIC = ['secret-scan', 'test-secret-scan', 'auth.json', 'session-lifecycle.js', 'StrictHostKeyChecking', 'HostKeyAlias', 'test-key-file-law', 'keyHelperOff', 'usageCacheKeyFor', 'auth-check'];
+  // the corpus page's «cured public» heads that stay public (auth.json and auth-check hold again: json and check are off, r3017)
+  const PAGE_PUBLIC = ['secret-scan', 'test-secret-scan', 'session-lifecycle.js', 'StrictHostKeyChecking', 'HostKeyAlias', 'test-key-file-law', 'keyHelperOff', 'usageCacheKeyFor'];
   // the sighting's own shape (bl-proposals msg 2231): ordinary words, a sha range, counts, capitals — after a freed head it is kept WHOLE
   const SIGHT = ': clean over 942cb0908..the tip, 9 FAILED (30 passed), BOTH zones GREEN';
-  // EVERY REAL SHAPE STILL TAKEN: the page's names, the twins, the words left off (mine and r2982's) — each still a holder
-  const OFF = ['pin', 'pins', 'helper', 'args', 'options', 'reset', 'local', 'pre', 'info', 'set', 'box', 'store'];
+  // THE WORDS LEFT OFF (each still failing closed): r2982's six, the page's six, r3017's three and the four of its watch list, and re
+  const OFF = ['pin', 'pins', 'helper', 'args', 'options', 'reset', 'local', 'pre', 'info', 'set', 'box', 'store', 'json', 'only', 'check', 'build', 'dns', 'ui', 'real', 're'];
+  // EVERY REAL SHAPE STILL TAKEN: r2982's names; the corpus heads that turn back to a mark with r3017's cure; the twins (each table word
+  // FOLLOWED by a credential's name — they guard the table being read on ANY word, nothing more)
   const STILL = ['scan_secret', 'check_token', 'reset_token', 'store_password', 'json_key', 'pin_secret', 'build_token', 'helper_auth', 'source_key',
-    'DB_PASSWORD_LOCAL', 'API_KEY_PRE', 'AUTH_INFO', 'keptKeySet', 'secret-box', '--password-store', 'session-store', 'password-reset'];
-  // r2982's six, each a made-up line with a made-up value after its head: the value is hidden
-  const SIX = () => { const v = { pin: pin(), pins: pin() + ',' + pin(), helper: val(), args: val(), options: val(), reset: val() };
-    return [['pin', 'auth_pin: ' + v.pin, [v.pin]], ['pins', 'SIM_AUTH_PINS=' + v.pins, v.pins.split(',')], ['helper', 'apiKeyHelper: echo ' + v.helper, [v.helper]],
-      ['args', 'auth_args: ' + v.args + ' --verbose', [v.args]], ['options', 'session-options: ' + v.options + ' --fast', [v.options]], ['reset', 'password-reset: ' + v.reset, [v.reset]]]; };
-  const MSG = (S, t) => S.redactSecrets(t, { message: true }).text;
+    'auth.json', 'auth-check', 'key-only', 'VS_SIG_STALL_BUILD', 'VerifyHostKeyDNS', 'test-session-title-ui', 'test-host-key-pin-real', 'MERGE_SID_RE'];
+  // ONE MADE-UP LINE FOR EACH WORD LEFT OFF, a made-up value after its head (r2982's six, r3017 (b): the three removed with the heads
+  // that removed each, the two Kubernetes file entries with a base64 blob; the watch list's four and re; the page's six): each HIDDEN
+  const OFF_LINES = () => { const B = b64(), piece = B.slice(8, 40), L = (w, head, sep, v, tail = '') => [w, head + sep + v + tail, v.length > 40 ? piece : v];
+    const p1 = pin(), vs = Array.from({ length: 24 }, val);
+    return [L('pin', 'auth_pin', ': ', pin()), ['pins', 'SIM_AUTH_PINS=' + p1 + ',' + pin(), p1], L('helper', 'apiKeyHelper', ': echo ', vs[0]), L('args', 'auth_args', ': ', vs[1], ' --verbose'),
+      L('options', 'session-options', ': ', vs[2], ' --fast'), L('reset', 'password-reset', ': ', vs[3]), L('local', 'DB_PASSWORD_LOCAL', '=', vs[4]), L('pre', 'API_KEY_PRE', '=', vs[5]),
+      L('info', 'AUTH_INFO', '=', vs[6]), L('set', 'keptKeySet', ': ', vs[7]), L('box', 'secret-box', ': ', vs[8]), L('store', 'session-store', ': ', vs[9]),
+      L('json', 'GOOGLE_CREDENTIALS_JSON', '=', vs[10]), L('json', 'GCP_SA_KEY_JSON', '=', vs[20]), L('json', 'GCP_SA_KEY_JSON', '=', B), ['json', 'GOOGLE_CREDENTIALS_JSON=' + escJson(vs[11]), vs[11]],
+      L('json', 'data:\n  key.json', ': ', B), L('json', 'data:\n  credentials.json', ': ', B),
+      L('only', 'DB_PASSWORD_READ_ONLY', '=', vs[12]), L('check', 'password_check', '=', vs[13]), ['check', '{"user":"ann","passwordCheck":"' + vs[14] + '"}', vs[14]],
+      L('build', 'NPM_TOKEN_BUILD', '=', vs[15]), L('dns', 'CF_API_TOKEN_DNS', '=', vs[16]), L('ui', 'ADMIN_PASSWORD_UI', '=', vs[17]), L('real', 'PASSWORD_REAL', '=', vs[18]), L('re', 'password_re', '=', vs[19])]; };
+  const shows = (o, secret) => o.includes(secret);
+  const MSG = (S, t) => S.redactSecrets(t, { message: true }).text, LINE = (S, t) => S.redactSecrets(t).text;
   const tableOf = (S) => S.NOT_CREDENTIAL_HEADS instanceof Set ? S.NOT_CREDENTIAL_HEADS : new Set();
   const lastOf = (n) => n.split(/[_\-.\s]+|(?<=[a-z0-9])(?=[A-Z])/).filter(Boolean).pop().toLowerCase();
   const publicBad = (S) => [...new Set([...Object.values(KINDS), ...PAGE_PUBLIC])].filter((h) => S.holderName(h) !== false || MSG(S, h + SIGHT) !== h + SIGHT);
+  const priceOf = (S) => Object.entries(PRICE).map(([w, n]) => { const v = val(); return [w, n, v, LINE(S, n + '=' + v).includes(v)]; });
   const stillBad = (S) => [...STILL, ...TWINS].filter((n) => S.holderName(n) !== true);
-  const sixBad = (S) => SIX().filter(([, line, vs]) => { const o = MSG(S, line); return vs.some((x) => o.includes(x)) || !o.includes(REDACTED); }).map(([w]) => w);
+  const offBad = (S) => OFF_LINES().filter(([, line, secret]) => [MSG(S, line), LINE(S, line)].some((o) => shows(o, secret))).map(([w, line]) => w + ' ' + line.split(/[:=]/)[0].trim());
   const flagBad = (S) => { const v = val(), a = MSG(S, 'flags: --password-store=basic'), b = MSG(S, 'flags: --password-store=' + v); return a !== 'flags: --password-store=basic' || b.includes(v); };
   const overlapBad = (S) => [...tableOf(S)].filter((w) => S.SECRET_WORDS.has(w) || S.CONTAINER_HEADS.has(w) || S.DESCRIPTOR_HEADS.has(w) || OFF.includes(w));
-  const kindsBad = (S) => { const t = tableOf(S), k = Object.keys(KINDS); return [...[...t].filter((w) => !k.includes(w)), ...k.filter((w) => !t.has(w)), ...k.filter((w) => lastOf(KINDS[w]) !== w)]; };
-  ok(tableOf(SS).size === 33 && publicBad(SS).length === 0, `B-4f7f (1) THE FOUND HEADS FREE: ${tableOf(SS).size} last words on the table; every head of its kind and the corpus page's «cured public» list reads public, and the sighting's words after it are kept whole${publicBad(SS).length ? ' — still holding: ' + J(publicBad(SS)) : ''}`);
-  ok(stillBad(SS).length === 0, `B-4f7f (2) EVERY REAL SHAPE STILL TAKEN: ${STILL.length} names (r2982's list, the words left off, password-reset) and ${TWINS.length} twins (each table word FOLLOWED by a credential's name) still hold${stillBad(SS).length ? ' — public now: ' + J(stillBad(SS)) : ''}`);
-  ok(sixBad(SS).length === 0, `B-4f7f (2) r2982's SIX, each a made-up line with a made-up value after its head (an auth pin, PINs, a helper's command, auth args, session options, a password reset): every value hidden${sixBad(SS).length ? ' — shown under: ' + J(sixBad(SS)) : ''}`);
-  ok(!flagBad(SS), 'B-4f7f (2) --password-store still holds ON PURPOSE: a known value (basic) is kept, any other value is hidden (KNOWN_FLAG_VALUES; «store» stays off the table)');
-  ok(tableOf(SS).size > 0 && overlapBad(SS).length === 0, `B-4f7f (3) THE TABLE meets no credential, container or descriptor word and none of the twelve left off${overlapBad(SS).length ? ' — met: ' + J(overlapBad(SS)) : ''}`);
-  ok(tableOf(SS).size > 0 && kindsBad(SS).length === 0, `B-4f7f (4) EVERY WORD ON THE TABLE HAS A LEG OF ITS KIND (a head ending in it; a word added without one is red)${kindsBad(SS).length ? ' — without: ' + J(kindsBad(SS)) : ''}`);
+  const kindsBad = (S) => { const t = tableOf(S), k = Object.keys(KINDS); return [...[...t].filter((w) => !k.includes(w) || !PRICE[w]), ...k.filter((w) => !t.has(w)), ...k.filter((w) => lastOf(KINDS[w]) !== w)]; };
+  ok(tableOf(SS).size > 0 && publicBad(SS).length === 0, `B-4f7f (1) THE FOUND HEADS FREE: ${tableOf(SS).size} last words on the table; a head of its kind for each and the corpus page's «cured public» heads read public, and the sighting's words after them are kept whole${publicBad(SS).length ? ' — still holding: ' + J(publicBad(SS)) : ''}`);
+  { const pr = priceOf(SS), hid = pr.filter((x) => !x[3]);
+    ok(hid.length === 0, `B-4f7f (a) THE PRICE OF EACH WORD (r3017), what the loosening lets through, a credential word then the table word then a made-up value — every one SHOWS: ${pr.map(([w, n]) => n).join(' ')}${hid.length ? ' — hidden after all: ' + J(hid.map((x) => x[1])) : ''}`); }
+  ok(stillBad(SS).length === 0, `B-4f7f (c) EVERY REAL SHAPE STILL TAKEN: ${STILL.length} names (r2982's list, the corpus heads r3017's cure turns back) and ${TWINS.length} twins (a table word FOLLOWED by a credential's name) hold${stillBad(SS).length ? ' — public now: ' + J(stillBad(SS)) : ''}`);
+  ok(offBad(SS).length === 0, `B-4f7f (b) EVERY WORD LEFT OFF HOLDS: ${OFF_LINES().length} made-up lines, a value after each head (r3017's json / only / check with GOOGLE_CREDENTIALS_JSON (short, escaped JSON), GCP_SA_KEY_JSON (short, base64), key.json and credentials.json file entries (base64), DB_PASSWORD_READ_ONLY, password_check, passwordCheck; build dns ui real re; r2982's six; the page's six): every value hidden in both modes${offBad(SS).length ? ' — shown under: ' + J(offBad(SS)) : ''}`);
+  ok(!flagBad(SS), 'B-4f7f (c) --password-store still holds ON PURPOSE: a known value (basic) is kept, any other value is hidden (KNOWN_FLAG_VALUES; «store» stays off the table)');
+  { const v = val(), K = b64(), T = SS.redactSecrets('secret-scan: ' + PAT + '\ntoken-door.js:\n-----BEGIN PRIVATE KEY-----\n' + K + '\n-----END PRIVATE KEY-----\nend').text;
+    const q = SS.redactSecrets('https://ci.example.com/cb?secret_scan=clean&scan_secret=' + v).text;
+    ok(!T.includes(PAT) && !T.includes(K.slice(8, 40)) && T.startsWith('secret-scan: ') && T.includes('token-door.js:'), `B-4f7f (c) A REAL SHAPE AFTER A FREED HEAD is still taken by its own rule: a known-prefix token after secret-scan, a PEM block after token-door.js — the heads stay, the secrets go (${J(T.slice(0, 80))}…)`);
+    ok(q.includes('secret_scan=clean') && !q.includes(v), `B-4f7f THE QUERY ROAD reads the same grammar: ?secret_scan=clean stays, ?scan_secret=<value> is hidden (${J(q)})`); }
+  ok(tableOf(SS).size > 0 && overlapBad(SS).length === 0, `B-4f7f (3) THE TABLE meets no credential, container or descriptor word and none of the ${OFF.length} left off${overlapBad(SS).length ? ' — met: ' + J(overlapBad(SS)) : ''}`);
+  ok(tableOf(SS).size > 0 && kindsBad(SS).length === 0, `B-4f7f (4) EVERY WORD ON THE TABLE HAS A LEG OF ITS KIND AND ITS PRICE LINE (a head ending in it; a word added without both is red)${kindsBad(SS).length ? ' — without: ' + J(kindsBad(SS)) : ''}`);
   // RED CONTROLS (patched copies of the module, each through the SAME legs)
   const LAST = '  return !DESCRIPTOR_HEADS.has(head) && !NOT_CREDENTIAL_HEADS.has(head);';
   const TODAY = M.load('src/secret-shapes.js', editAnchor(SRC, LAST, '  return !DESCRIPTOR_HEADS.has(head);', 'src/secret-shapes.js'), 'b4f7f-today');   // stale-pins: kept (the base's verdict line is this red copy's REPLACEMENT, never an anchor)
-  ok(publicBad(TODAY).length >= 10, `RED CONTROL (the verdict that does not read the table, d458fc27d's): ${publicBad(TODAY).length} heads still hold — leg (1) goes red`);
+  ok(publicBad(TODAY).length >= 10 && priceOf(TODAY).every((x) => !x[3]), `RED CONTROL (the verdict that does not read the table, d458fc27d's): ${publicBad(TODAY).length} heads still hold and every price line is hidden — legs (1) and (a) go red`);
   const OPEN = M.load('src/secret-shapes.js', editAnchor(SRC, LAST, '  return false;', 'src/secret-shapes.js'), 'b4f7f-open');
-  ok(stillBad(OPEN).length >= 5 && sixBad(OPEN).length === 6 && flagBad(OPEN), `RED CONTROL (FAIL OPEN: every last word that is no credential's name is public): ${stillBad(OPEN).length} names go public and all six values show — legs (2) go red`);
+  const openExpect = STILL.filter((n) => !SS.SECRET_WORDS.has(lastOf(n)) && !SS.CONTAINER_HEADS.has(lastOf(n))).length;   // the STILL names whose last word is no credential's or container's
+  ok(openExpect > 0 && stillBad(OPEN).length >= openExpect && offBad(OPEN).length === OFF_LINES().length && flagBad(OPEN), `RED CONTROL (FAIL OPEN: every last word that is no credential's name is public): ${stillBad(OPEN).length} names go public and all ${offBad(OPEN).length} made-up values show — legs (b) and (c) go red`);
   const ANY = M.load('src/secret-shapes.js', editAnchor(SRC, '  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;', '  if (words.some((w) => NOT_CREDENTIAL_HEADS.has(w))) return false;\n  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;', 'src/secret-shapes.js'), 'b4f7f-any');
-  ok(stillBad(ANY).filter((n) => TWINS.includes(n) || n === 'scan_secret').length >= 20, `RED CONTROL (the table read on ANY word, not the last): ${stillBad(ANY).length} names go public (scan_secret, the twins) — leg (2) goes red`);
+  ok(stillBad(ANY).filter((n) => TWINS.includes(n) || n === 'scan_secret').length >= 20, `RED CONTROL (the table read on ANY word, not the last): ${stillBad(ANY).length} names go public (scan_secret, the twins) — leg (c) goes red`);
   const TBL = 'const NOT_CREDENTIAL_HEADS = new Set([';
-  const SIXON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + "'pin', 'pins', 'helper', 'args', 'options', 'reset', ", 'src/secret-shapes.js'), 'b4f7f-six');
-  ok(sixBad(SIXON).length === 6 && overlapBad(SIXON).length === 6 && kindsBad(SIXON).length === 6, `RED CONTROL (r2982's six put ON the table): each of the six values shows (${J(sixBad(SIXON))}), and the table legs (3) and (4) name them — red`);
+  const OFFON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + OFF.map((w) => J(w)).join(', ') + ', ', 'src/secret-shapes.js'), 'b4f7f-off-on');
+  { const shown = new Set(offBad(OFFON).map((x) => x.split(' ')[0]));
+    ok(OFF.every((w) => shown.has(w)) && overlapBad(OFFON).length === OFF.length && kindsBad(OFFON).length === OFF.length, `RED CONTROL (the ${OFF.length} words left off put ON the table): a value shows under every one of them (${J([...shown])}), and the table legs (3) and (4) name them — red`); }
   const CREDON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + "'token', ", 'src/secret-shapes.js'), 'b4f7f-cred');
   ok(overlapBad(CREDON).includes('token') && kindsBad(CREDON).includes('token'), 'RED CONTROL (a credential word on the table): leg (3) names «token», leg (4) finds it without a leg of its kind — red');
 }
@@ -631,8 +656,9 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
     'a value in parentheses (the closer is the prose\'s)': [`the value (token=${V}) ${TAIL}`, V, 'token='],
   });
   const S1 = SIGHT(v());
-  // B-4f7f (主开发 r2982): the 6th sighting's head ends in «schema», a THING on the found table — it holds nothing now, so that
-  // sighting arrives WHOLE in both modes (its own leg below); the six that still hold keep these legs, meaning kept
+  // B-4f7f (主开发 r2982 / r3017 (d)): the 6th sighting's head is a SUITE's name (test-session-schema) — no credential's: its value
+  // stays because of what the head names, so that sighting arrives WHOLE in both modes (its own leg below); the six that still hold
+  // keep these legs, meaning kept
   const FREED = '6th: a suite name ending in schema, a colon, a quoted leg';
   const run = (SSx, opt) => Object.entries(S1).filter(([n]) => n !== FREED).map(([n, [t, V, name]]) => { const said = []; const o = SSx.redactSecrets(t, { ...opt, said }); return { n, t, V, name, o, said }; });
   const msg = run(SS, { message: true });
@@ -640,7 +666,7 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   ok(bad.length === 0, `MESSAGE MODE: all ${msg.length} sightings keep the REST of the message, hide the value, keep the name${bad.length ? ' — off: ' + bad.map((x) => x.n + ' → ' + J(x.o.text)).join(' · ') : ''}`);
   ok(msg.every((x) => x.said.includes(x.name)), `MESSAGE MODE: \`said\` names each trigger as written (${msg.map((x) => x.said.join('+')).join(' · ')})`);
   { const [t6] = S1[FREED], s6 = [], whole = (S) => S.redactSecrets(t6, { message: true, said: s6 }).text === t6 && S.redactSecrets(t6, {}).text === t6;
-    ok(whole(SS) && s6.length === 0, 'B-4f7f: the 6th sighting (a suite name ending in schema) arrives WHOLE in both modes and names no trigger — its head holds nothing (NOT_CREDENTIAL_HEADS)');
+    ok(whole(SS) && s6.length === 0, 'B-4f7f: the 6th sighting arrives WHOLE in both modes and names no trigger — its value stays because its head is a SUITE\'s name (test-session-schema), no credential\'s; the found table reads that suite name as public');
     const T6 = M.load('src/secret-shapes.js', editAnchor(SRC, '  return !DESCRIPTOR_HEADS.has(head) && !NOT_CREDENTIAL_HEADS.has(head);', '  return !DESCRIPTOR_HEADS.has(head);', 'src/secret-shapes.js'), 'b4f7f-6th');   // stale-pins: kept (the base's verdict line is this red copy's REPLACEMENT)
     ok(!whole(T6), 'RED CONTROL (the verdict that does not read the table): the 6th sighting loses its value again — its WHOLE leg goes red'); }
   ok(msg.every((x) => SS.redactSecrets(x.o.text, { message: true }).text === x.o.text), 'MESSAGE MODE is idempotent: a masked message masks to itself (the group log\'s second belt pass finds nothing)');
