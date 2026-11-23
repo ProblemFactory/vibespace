@@ -10,11 +10,15 @@ import { metric } from './telemetry-client.js';
 // SLAB's ROWS SETTLE ABOVE THE READER after the insert (+418, +258 px), and the browser's own scroll anchoring answered SOME
 // of them: ONE AUTHORITY for the slab's settle — the list opts out of the browser's anchoring (`overflow-anchor: none`, as the
 // channel list does for good, B-59ff) and a ResizeObserver over every row answers each size change of a row wholly above the
-// viewport's top by the same delta on scrollTop: a size answer only, so a person's own scroll or jump is never fought. Bounded:
-// the slab leaves the DOM, a jump or a teleport, a newer slab, the view's dispose, or this ceiling from the insert, read inside
-// the observer's own callback (no timer) — the batch that finds it past is still answered, then the browser's anchoring is back.
+// READING LINE (the line read before the latest scroll burst, for GAP_SETTLE_RECENT_MS) by the same delta on scrollTop, in layout px
+// at every zoom: a size answer only, so a person's own scroll or jump is never fought. Every other mover answers its own
+// change and hands the rest to the watch (r2922's census: _watchGapSettle). Bounded: the slab leaves the DOM, a jump or a
+// teleport, a newer slab, the view's dispose, or the first scroll or settle after this ceiling from the insert (read in a
+// frame and in the observer's callback: no timer) — the batch that finds it past is still answered, then the browser's
+// anchoring is back.
 const GAP_SETTLE_CEIL_MS = 8000;
-const GAP_SETTLE_RECENT_MS = 150;   // the lowest line the view showed this long ago is still the line that was read
+const GAP_SETTLE_RECENT_MS = 150;   // the line read before the latest scroll burst still holds this long after it
+const GAP_SETTLE_BURST_MS = 50;   // scroll moves this close together are one burst (a notch and a write it caused)
 
 /**
  * ChatView gap-seek mixin — the huge-JSONL continuous-scroll machinery
@@ -204,63 +208,97 @@ export function installChatSeek(ChatView) {
     }
     return null;
   },
-    /** (2) THE SLAB's ROWS SETTLE ABOVE THE READER (主开发 r2251 / r2395 — ONE AUTHORITY): for the slab's life the list
-     *  opts out of the browser's scroll anchoring and a ResizeObserver over EVERY row (a row added meanwhile is observed from
-     *  its first size: its arrival is its adder's to anchor) answers each size change of a row lying WHOLLY ABOVE the reading
-     *  line (the lowest line the view showed in the last GAP_SETTLE_RECENT_MS) by the same delta on scrollTop — a size
-     *  answer only. A batch is read in document order, each row's old top rebuilt
-     *  from the deltas before it. Bounded: the slab leaves (_dropGapSlab), a jump's reset, a teleport, the view's dispose, a
-     *  newer slab (its watch replaces this one), or GAP_SETTLE_CEIL_MS from the insert (read in the callback: no timer). */
+    /** (2) THE SLAB's ROWS SETTLE ABOVE THE READER (主开发 r2251 / r2395 / r2922 — ONE AUTHORITY): for the slab's life the
+     *  list opts out of the browser's scroll anchoring, so EVERY height change above the reading line is answered EXACTLY
+     *  ONCE — by this watch, or by the mover that made it, never both, never neither (the census, kb-bugfix-invariants):
+     *  · a row that settles with no writer of its own (a picture, a highlighted block, a card's state, a slab row) — a
+     *    ResizeObserver over every row answers it by the same delta on scrollTop (a size answer only);
+     *  · a mover that puts the reader back itself (the runs pass, every _withViewportAnchor mutation) — `flush` answers what
+     *    was pending before it measures, and its stamped write re-seeds the watch after it (`wrote`, from _traceExpect);
+     *  · every other stamped writer (a jump and its hold, a search reveal, the needs cards, the pinned follow) — the watch
+     *    re-seeds after it; a navigation the reader chose (_noteUserNav) forgets the line it remembered;
+     *  · a card replaced by a newer version of itself (_swapMessageEl) — `swap` carries the old card's height to the new one.
+     *  Heights are read in ONE unit, layout px (offsetHeight, like offsetTop and scrollTop), at every chat font size and UI
+     *  scale: a rect is in zoomed px. A row added meanwhile is seeded by its first report; a removed one leaves the observer.
+     *  Bounded: the slab leaves (_dropGapSlab), a jump's reset, a teleport, the view's dispose, a newer slab, or the first
+     *  scroll or settle after GAP_SETTLE_CEIL_MS from the insert (read in a frame and in the callback: no timer). */
     _watchGapSettle() {
     if (typeof ResizeObserver !== 'function') return;
     this._stopGapSettle('newSlab');
     const list = this._messageList, t0 = performance.now(), last = new WeakMap();
-    const hOf = (e) => (e.borderBoxSize && e.borderBoxSize[0] ? e.borderBoxSize[0].blockSize : e.target.getBoundingClientRect().height);
     // THE LINE THE PERSON WAS READING: a row a notch scrolls INTO view takes its real height within a frame or two (probe 5:
     // 33 ms after the notch, +209 and +258 px) — it lay above the line read before the notch, so its change is answered too.
-    // The line is the lowest content line (the largest scrollTop) the view showed during the last GAP_SETTLE_RECENT_MS —
-    // not «the one before the latest scroll event»: any other write in between (the runs pass putting its anchor back,
-    // −27 px, measured) would lose it. An upward notch keeps the card read before it exactly where the notch put it; a
-    // downward one, the card now at the top. Each answer moves the remembered lines with the content it moved.
-    const seen = [], fr = { at: list.scrollTop };   // seen: { st, until } — a scrollTop the view showed, and when it stopped
-    const onScroll = () => { const now = performance.now(); seen.push({ st: fr.at, until: now }); while (seen.length && now - seen[0].until > GAP_SETTLE_RECENT_MS) seen.shift(); fr.at = list.scrollTop; };
+    // The line is the one the view showed just BEFORE the latest scroll burst (moves ≤ GAP_SETTLE_BURST_MS apart are one
+    // burst: another write inside it — the runs pass putting its anchor back, −27 px, measured — does not move the line),
+    // held for GAP_SETTLE_RECENT_MS after the burst's last move; never older (a hold's notches come ~130 ms apart: the line
+    // before the notch before would answer rows the person had already passed, −258 px, measured). An upward notch keeps the
+    // card read before it exactly where the notch put it; a downward one, the card now at the top. Each answer moves the
+    // remembered line with the content it moved; a navigation the reader chose forgets it (`nav`). Taken once a frame.
+    const fr = { at: list.scrollTop, before: list.scrollTop, moved: -Infinity, raf: 0 };
+    const frame = () => {
+      fr.raf = 0;
+      const now = performance.now(), st = list.scrollTop;
+      if (Math.abs(st - fr.at) >= 0.5) { if (now - fr.moved > GAP_SETTLE_BURST_MS) fr.before = fr.at; fr.moved = now; fr.at = st; }
+      if (this._disposed || now - t0 > GAP_SETTLE_CEIL_MS) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
+    };
+    const onScroll = () => { if (!fr.raf) fr.raf = requestAnimationFrame(frame); };
     list.addEventListener('scroll', onScroll, { passive: true });
-    this._gapSettleOff = () => list.removeEventListener('scroll', onScroll);
+    const lineNow = () => { const st = list.scrollTop; return performance.now() - fr.moved <= GAP_SETTLE_RECENT_MS ? Math.max(st, fr.before) : st; };
+    // answer a batch of changed rows (document order, each row's old top rebuilt from the deltas before it)
+    const answer = (changed) => {
+      if (!changed.length || this._disposed) return;
+      changed.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+      const st = list.scrollTop, line = lineNow();
+      let before = 0, d = 0;
+      for (const c of changed) {
+        const oldTop = c.el.offsetTop - before;
+        if (oldTop + c.was <= line) d += c.h - c.was;   // wholly above the reading line: it moved everything read below it
+        before += c.h - c.was;
+      }
+      if (d) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; fr.before += d; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st) }); }
+    };
     const ro = new ResizeObserver((entries) => {
-      const late = this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS;
-      const now = performance.now(), st = list.scrollTop, changed = [];
-      let line = st;
-      for (const x of seen) if (now - x.until <= GAP_SETTLE_RECENT_MS && x.st > line) line = x.st;
+      const late = this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS, changed = [];
       for (const e of entries) {
         const el = e.target;
         if (!el.isConnected) { ro.unobserve(el); continue; }
-        const was = last.get(el), h = hOf(e);
+        const was = last.get(el), h = el.offsetHeight;
         last.set(el, h);
-        if (was === undefined || Math.abs(h - was) < 0.01) continue;
+        if (was === undefined || h === was) continue;
         changed.push({ el, was, h });
       }
-      if (changed.length && !this._disposed) {
-        changed.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-        let before = 0, d = 0;
-        for (const c of changed) {
-          const oldTop = c.el.offsetTop - before;
-          if (oldTop + c.was <= line + 0.5) d += c.h - c.was;   // wholly above the reading line: it moved everything read below it
-          before += c.h - c.was;
-        }
-        if (Math.abs(d) >= 0.5) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; for (const x of seen) x.st += d; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st) }); }
-      }
+      answer(changed);
       if (late) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
     });
-    const mo = typeof MutationObserver === 'function' ? new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1) ro.observe(n); }) : null;
+    // what the movers ask (census above): pending answered BEFORE a mover measures; re-seeded AFTER a stamped write
+    let rebaseQueued = false;
+    const rebase = () => {
+      rebaseQueued = false;
+      if (this._gapSettleRO !== ro) return;
+      for (const el of list.children) if (!el._isSeekSentinel) { if (!last.has(el)) ro.observe(el); last.set(el, el.offsetHeight); }
+      fr.at = list.scrollTop;   // (the line stays: a writer that kept the reader's place moved nothing the line names)
+    };
+    this._gapSettle = {
+      flush: () => {
+        const changed = [];
+        for (const el of list.children) { const was = last.get(el); if (was === undefined) continue; const h = el.offsetHeight; if (h !== was) { last.set(el, h); changed.push({ el, was, h }); } }
+        answer(changed);
+      },
+      wrote: (by) => { if (by === 'gapUp:settle' || rebaseQueued) return; rebaseQueued = true; queueMicrotask(rebase); },
+      swap: (oldEl, newEl) => { const w = last.get(oldEl); if (w !== undefined) last.set(newEl, w); ro.observe(newEl); },
+      nav: () => { fr.before = fr.at = list.scrollTop; fr.moved = -Infinity; },
+    };
+    const mo = typeof MutationObserver === 'function' ? new MutationObserver((recs) => { for (const r of recs) { for (const n of r.addedNodes) if (n.nodeType === 1) ro.observe(n); for (const n of r.removedNodes) if (n.nodeType === 1 && !n.isConnected) ro.unobserve(n); } }) : null;
     this._gapSettleRO = ro; this._gapSettleMO = mo;
+    this._gapSettleOff = () => { list.removeEventListener('scroll', onScroll); if (fr.raf) cancelAnimationFrame(fr.raf); };
     list.style.overflowAnchor = 'none';   // ONE authority while the slab settles (B-59ff's property, for the slab's life only)
-    for (const el of list.children) { if (el._isSeekSentinel) continue; last.set(el, el.getBoundingClientRect().height); ro.observe(el); }
+    for (const el of list.children) { if (el._isSeekSentinel) continue; last.set(el, el.offsetHeight); ro.observe(el); }
     mo?.observe(list, { childList: true });
   },
     _stopGapSettle(why) {
     const ro = this._gapSettleRO;
     if (!ro) return;
-    this._gapSettleRO = null;
+    this._gapSettleRO = null; this._gapSettle = null;
     try { ro.disconnect(); this._gapSettleMO?.disconnect(); this._gapSettleOff?.(); } catch { }
     this._gapSettleMO = null; this._gapSettleOff = null;
     if (this._messageList) this._messageList.style.overflowAnchor = '';   // the browser's own anchoring is back

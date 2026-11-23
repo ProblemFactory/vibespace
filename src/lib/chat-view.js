@@ -1,6 +1,6 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
 import { quietOpenVerdict, teachVerdict, TAUGHT_KEY } from './artifact-auto-open.js'; // lane artifacts-auto-open-quiet: the doc's automatic open is quiet
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress, hostsHeldWords, pagesListHeldWords } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress, hostsHeldWords, pagesListHeldWords, uiScale } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { turnWaitStep, turnSeq } from '../desktop-switch.js'; // lane phone-take-photo r2/r3 (主开发 ①): the finished turn's mark, the same on every client, ended by the turn sequence (PURE)
 import { metric, track } from './telemetry-client.js';
@@ -791,8 +791,10 @@ class ChatView {
     this._messageList.addEventListener('wheel', (e) => {
       if (!this._canPaginate) return;
       const list = this._messageList;
-      // the notch in px (deltaMode 1 = lines, 2 = pages)
-      const px = Math.abs(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * list.clientHeight : e.deltaY);
+      // the notch in px (deltaMode 1 = lines, 2 = pages) — in the LIST's layout px, the unit of scrollTop and of the carry it
+      // lands (B-3e8b, measured: at a chat font of 16 or a UI scale of 125 % a notch moves the view its viewport px over the
+      // zoom, and a carry kept in viewport px landed 43 / 74 px past it); a page is the list's own height already
+      const px = Math.abs(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * list.clientHeight : e.deltaY) / (e.deltaMode === 2 ? 1 : (this._listZoom?.() || 1));
       // what the notch can scroll into NATIVELY in its direction — the browser
       // clamps the rest away inside this same event, so it is ours to carry
       const roomUp = list.scrollTop;
@@ -3108,6 +3110,7 @@ class ChatView {
     this._cancelForcedScroll(via);   // …and so does an off-list navigation (B-9702)
     this._clearWheelCarry?.(via);    // a carried notch is stale now (r1)
     this._endResumeSettle();
+    this._gapSettle?.nav();          // B-3e8b: the line the settle watch remembered is stale too (the reader chose a place)
   }
 
   /** Did the READER position this view after `since`? — did a person ACT: a
@@ -3385,6 +3388,9 @@ class ChatView {
    *  loop landed at the very bottom and the landing's own scroll re-pinned the
    *  view the wheel had just unpinned (`wheelTop{carry:120} extendTop:done
    *  {st:0,sh:565} … extendTop:grown repin`, no wheelCarry anywhere). */
+  /** The list's zoom over the viewport (the chat font size over 14 × the desktop UI scale): viewport px ÷ it = the list's layout
+   *  px, the unit of scrollTop (B-3e8b — a wheel notch is read in it). */
+  _listZoom() { return (this._chatScale || 1) * uiScale(); }
   _applyWheelCarry(dir, by, { keepRest = false, less = 0 } = {}) {
     const list = this._messageList;
     const room = dir === 'up' ? list.scrollTop : Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
@@ -5840,6 +5846,7 @@ class ChatView {
     oldEl.replaceWith(newEl);
     if (needsFocus && needsFocus.isConnected) { try { needsFocus.focus({ preventScroll: true }); } catch { } }
     if (wasRendered) this._reserveFreshHeights([newEl], { live: true });
+    this._gapSettle?.swap(oldEl, newEl);   // B-3e8b: the newer card's height change is the settle watch's (from the old card's)
     // Only re-point the map when it really pointed HERE: a gap-loaded element
     // is not in `_elements` at all, and clobbering a different live element's
     // entry would strand THAT one instead.
@@ -7861,6 +7868,7 @@ class ChatView {
   // Anchor the topmost visible element instead: its offsetTop delta IS the
   // ground truth in the same units the browser scrolls by.
   _withViewportAnchor(fn) {
+    this._gapSettle?.flush();   // B-3e8b: a slab's settle pending before this mover measures is the watch's (its own write is its own)
     const list = this._messageList;
     const st = list.scrollTop;
     let el = null, delta = 0;
@@ -7940,7 +7948,7 @@ class ChatView {
    *  stamps its author so the coarse `scroll` sample can tell OUR write from
    *  native anchoring / content growth (`writeAgo`, `by`). Three assignments: the count (B-a7a9) lets the fine trace
    *  tell a scroll event that FOLLOWS a stamped write from one the browser made on its own. */
-  _traceExpect(by) { this._lastStWriteAt = Date.now(); this._lastStWriteBy = by || ''; this._stWriteSeq = (this._stWriteSeq || 0) + 1; }
+  _traceExpect(by) { this._lastStWriteAt = Date.now(); this._lastStWriteBy = by || ''; this._stWriteSeq = (this._stWriteSeq || 0) + 1; this._gapSettle?.wrote(by); }   // B-3e8b: a stamped writer owns the position it writes (the settle watch re-seeds after it)
   /** THE FINE SCROLL TRACE (lane run-open-jump, B-a7a9 — inc-mvzai8oc-j70t): the coarse sampler below logs only moves
    *  ≥ 400 px, and its `from` is the last LOGGED position, so a capture of «826 → 59 in one event» could not say what
    *  happened in between. For FINE_SCROLL_MS after a person's run toggle or the ↓, EVERY scroll event is kept (st, sh,
@@ -8073,6 +8081,7 @@ class ChatView {
     // load in a loop (real report: 往上翻阅跳动+翻不回来). Keep the topmost
     // visible element fixed across the pass. Skip when pinned (bottom-follow
     // owns the scroll) and skip run headers/footers (removed by the pass).
+    this._gapSettle?.flush();   // B-3e8b: a slab's settle pending before the pass measures is the watch's; the pass's own fold/unfold is its own
     const anchor = this._runsAnchor(list), sig0 = this._runsSig(list);
     this._runsMutating = true;
     try {

@@ -457,7 +457,7 @@ const FOLD_TALL = 120, NOTCH_PX = 120;
 // patched out — a leg that cannot go red proves nothing.
 console.log('§4c huge compact-mode session: no jump back > 1.5 viewports, no pin / bottom landing before the window reaches the tail, no blank > 25 %, the ring never empty after a page');
 const LIST_H = 790;
-const CADENCE = { slow: { notches: 1, deltaY: 120, gap: 0, settle: 1500 }, mid: { notches: 6, deltaY: 120, gap: 70, settle: 1500 }, fast: { notches: 4, deltaY: 700, gap: 30, settle: 2000 }, hold: { notches: 40, deltaY: 300, gap: 100, settle: 2400 } };
+const CADENCE = { slow: { notches: 1, deltaY: 120, gap: 0, settle: 1500 }, mid: { notches: 6, deltaY: 120, gap: 70, settle: 1500 }, fast: { notches: 4, deltaY: 700, gap: 30, settle: 2000 }, hold: { notches: 40, deltaY: 300, gap: 100, settle: 2400 }, shortHold: { notches: 10, deltaY: 300, gap: 100, settle: 700 }, tail1: { notches: 1, deltaY: 300, gap: 0, settle: 900 }, tail2: { notches: 2, deltaY: 300, gap: 150, settle: 900 }, tail3: { notches: 3, deltaY: 300, gap: 150, settle: 900 } };
 const OPEN_HUGE = (sid, cwd, title) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (!window.app || typeof window.app.viewSession !== 'function') return { ok: false, why: 'no app on this page (see the boot check)' };
@@ -734,22 +734,33 @@ const notchLaw = (reads, notchPx) => {
   const L = iv.findIndex((x) => x.landed);
   if (L < 0) return { ok: false, why: 'no slab landed during the hold', iv };
   const lost = iv.filter((x) => x.moved == null).length;
-  const carried = iv.slice(0, L + 1).reduce((m, x) => m + (x.moved || 0), 0) - notchPx * (L + 1);
-  const extras = iv.slice(L + 1).map((x) => (x.moved == null ? null : x.moved - notchPx));
+  // THE NOTCH's OWN DISTANCE ON SCREEN: at a chat font size or a UI scale other than 1 a notch moves the view by its px over
+  // the zoom, so the law reads the median of the notches after the landing (every notch moves alike) — the unit's own
+  const after = iv.slice(L + 1).map((x) => x.moved).filter((x) => x != null).sort((a, b) => a - b);
+  const med = after.length >= 5 ? after[after.length >> 1] : notchPx;
+  const np = Math.abs(med - notchPx) <= notchPx / 2 ? med : notchPx;
+  const carried = iv.slice(0, L + 1).reduce((m, x) => m + (x.moved || 0), 0) - np * (L + 1);
+  const extras = iv.slice(L + 1).map((x) => (x.moved == null ? null : x.moved - np));
   const worst = extras.reduce((m, x) => (x != null && Math.abs(x) > Math.abs(m) ? x : m), 0);
-  return { ok: !lost && Math.abs(carried) <= NOTCH_TOL_PX && Math.abs(worst) <= NOTCH_TOL_PX, L, carried: Math.round(carried), worst: Math.round(worst), lost, extras: extras.map((x) => (x == null ? 'gone' : Math.round(x))) };
+  return { ok: !lost && Math.abs(carried) <= NOTCH_TOL_PX && Math.abs(worst) <= NOTCH_TOL_PX, L, notch: Math.round(np * 10) / 10, carried: Math.round(carried), worst: Math.round(worst), lost, extras: extras.map((x) => (x == null ? 'gone' : Math.round(x))) };
 };
 const BLIND = {
   "(1')": `(() => { const v = window.__v; v._gapReaderCard = () => null; return { blinded: "(1') no reader read at the insert" }; })()`,
   '(2) off': `(() => { const v = window.__v; v._watchGapSettle = () => { }; return { blinded: '(2) the settle watch: the browser anchoring alone' }; })()`,
   '(2) twice': `(() => { const v = window.__v, w = v._watchGapSettle; v._watchGapSettle = function (...a) { const r = w.apply(this, a); this._messageList.style.overflowAnchor = ''; return r; }; return { blinded: '(2) answered beside the browser anchoring' }; })()`,
 };
-const firstHold = async (label, blind) => {
+const STORE = (o, set) => `(() => { ${Object.keys(o).map((k) => set ? `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(o[k])});` : `localStorage.removeItem(${JSON.stringify(k)});`).join(' ')} return 1; })()`;
+const firstHold = async (label, blind, { store = null, after = null } = {}) => {
+  if (store) await evaljs(STORE(store, true));   // a person's own setting, read by the page at its boot (the product's own road)
+  try { return await firstHoldOn(label, blind, after); } finally { if (store) await evaljs(STORE(store, false)).catch(() => 0); }
+};
+const firstHoldOn = async (label, blind, after) => {
   if (!(await pageReady(PORT, 'first hold ' + label))) return { label, law: { ok: false, why: 'no page' } };
   await sleep(1500);
   globalThis.__notchReads = [];
   const r = await runGestures([...(blind ? [['blind ' + blind, 'eval', BLIND[blind]]] : []), ['gap-jump', 'jump', 0], ['gap-up-hold-1', 'up', 'hold']], 'first hold ' + label);
   const reads = globalThis.__notchReads; globalThis.__notchReads = null;
+  const afterOut = after && r.opened?.ok ? await evaljs(after) : null;
   const row = (r.rows || []).find((x) => x.name === 'gap-up-hold-1');
   const ring = row ? row.ring : [];
   const n = (tag, by) => ring.filter((e) => e.tag === tag && (by === undefined || e.by === by)).length;
@@ -757,8 +768,57 @@ const firstHold = async (label, blind) => {
   const out = { label, row, law, dev: row && row.after.topDev != null ? Math.round(row.after.topDev + row.wheelPx) : null, slabs: n('gapUp:done'), carries: n('wheelCarry', 'gapUp:carry'),
     reader: ring.filter((e) => e.tag === 'gapUp:reader').map((e) => [e.px, e.rest]), settle: ring.filter((e) => e.tag === 'gapUp:settle').map((e) => e.px), less: ring.filter((e) => e.tag === 'wheelCarry' && e.less).map((e) => [e.px, e.less]) };
   console.log(`  [first hold ${label}] per notch: ${law.why || `carried + landing ${law.carried} px (${law.L + 1} notch(es)), then the worst notch ${law.worst} px, ${law.lost} read(s) lost`}; extras ${JSON.stringify(law.extras || [])}`);
+  out.after = afterOut; out.zoom = r.opened?.ok ? await evaljs('(() => [Number(window.__list.style.zoom || 1), Number(document.body.style.zoom || 1)])()') : null;
+  if (afterOut) console.log(`  [first hold ${label}] after the hold: ${JSON.stringify(afterOut)}`);
   console.log(`  [first hold ${label}] the original card ${out.dev} px past the wheel at the end (rows growing below the reading line count there); slabs ${out.slabs}, carried landings ${out.carries} ${JSON.stringify(out.less)}; (1') ${JSON.stringify(out.reader)}; (2) answered ${JSON.stringify(out.settle)}`);
   return out;
+};
+// THE MOVERS WHILE THE WATCH LIVES (主开发 r2922, round wdvne87yg's two musts): every height change above the reading line
+// is answered EXACTLY ONCE — by the watch, or by the mover that made it, never both, never neither. Two movers, each measured
+// as a distance of the card at the reading line (read in the frame the person saw): (a) SEARCH OPENS (the runs pass unfolds
+// every run and puts its own anchor back) after the person scrolled back down into the registered tail, the slab still in
+// the page; (b) A CARD ABOVE THE READING LINE IS REPLACED BY A NEWER VERSION OF ITSELF (_swapMessageEl, a tool result
+// landing on it), 200 px taller.
+const READ_TOP = `const list = window.__list, lt = () => list.getBoundingClientRect().top, paint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  const topCard = () => { const st = list.scrollTop; for (const c of list.children) { const cl = c.classList; if (c._isSeekSentinel || !cl || !cl.contains('chat-msg') || cl.contains('chat-run-header') || cl.contains('chat-run-footer')) continue; if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st + 0.5) return c; } return null; };`;
+const SWAP_ABOVE = `(async () => { ${READ_TOP}
+  const v = window.__v; await paint();
+  const st = list.scrollTop, top = topCard(); let above = null;
+  for (const c of list.children) { if (c === top) break; if (c.classList && c.classList.contains('chat-msg') && c.offsetHeight > 20 && c.offsetTop + c.offsetHeight < st - 40) above = c; }
+  if (!top || !above) return { ok: false, why: 'no card wholly above the reading line' };
+  const off0 = top.getBoundingClientRect().top - lt(), h0 = above.offsetHeight, alive = !!v._gapSettleRO;
+  const neu = above.cloneNode(true), pad = document.createElement('div'); pad.style.height = '200px'; neu.appendChild(pad);
+  v._swapMessageEl(above, neu, above.dataset.msgId);
+  await paint(); await new Promise((r) => setTimeout(r, 400)); await paint();
+  return { ok: true, alive, grew: Math.round(neu.offsetHeight - h0), moved: Math.round((top.getBoundingClientRect().top - lt()) - off0) };
+})()`;
+const SEARCH_OPEN = (stopFirst) => `(async () => { ${READ_TOP}
+  const v = window.__v; await paint();
+  if (${stopFirst ? 1 : 0}) v._stopGapSettle('scene: the browser anchoring alone');   // the comparison: the same scene in the browser's own world
+  const st = list.scrollTop, top = topCard();
+  if (!top || !v._search || !v._search._bar) return { ok: false, why: 'no card or no search bar' };
+  const headersAbove = [...list.querySelectorAll(':scope > .chat-run-header')].filter((h) => h.offsetTop + h.offsetHeight <= st).length;
+  const off0 = top.getBoundingClientRect().top - lt(), alive = !!v._gapSettleRO, gap = list.querySelectorAll(':scope > .chat-gap-msg').length;
+  const seq0 = (v._traceRing || []).length ? v._traceRing[v._traceRing.length - 1].seq : 0, st0 = Math.round(list.scrollTop);
+  v._search.open();
+  await new Promise((r) => setTimeout(r, 600)); await paint();
+  const off1 = top.isConnected ? top.getBoundingClientRect().top - lt() : null;
+  v._search._bar.classList.add('hidden'); v._search._clearSearch();
+  await new Promise((r) => setTimeout(r, 600)); await paint();
+  const off2 = top.isConnected ? top.getBoundingClientRect().top - lt() : null;
+  const ring = (v._traceRing || []).filter((e) => e.seq > seq0 && /^(runsRestore|gapUp:|anchor|wheelCarry|stableHeights|extend|trim)/.test(e.tag)).map((e) => e.tag + JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['tag', 'seq', 't'].includes(k)))).slice(0, 90));
+  return { ok: true, alive, gap, headersAbove, open: off1 == null ? null : Math.round(off1 - off0), closed: off2 == null ? null : Math.round(off2 - off0), st0, ws: v._windowStart, we: v._windowEnd, card: (top.className || '').replace(/chat-/g, '').slice(0, 40), ring: ring.slice(0, 12) };
+})()`;
+const searchScene = async (tail, stopFirst = false) => {
+  if (!(await pageReady(PORT, 'search scene ' + tail))) return { tail, why: 'no page' };
+  await sleep(1500);
+  // a slab lands (a short hold up), the person comes back down through it and a little into the registered tail (the tail
+  // extends below; not so far that the window leaves message 0 and the slab is dropped)
+  const r = await runGestures([['gap-jump', 'jump', 0], ['scene-up', 'up', 'shortHold'], ['scene-down', 'down', 'shortHold'], ['scene-' + tail, 'down', tail]], 'search scene ' + tail);
+  if (!r.opened?.ok) return { tail, why: 'not opened' };
+  const o = { tail, browserAlone: stopFirst, ...(await evaljs(SEARCH_OPEN(stopFirst))) };
+  console.log(`  [search scene ${tail}${stopFirst ? ', the browser alone' : ''}] ${JSON.stringify(o)}`);
+  return o;
 };
 {
   console.log(`§4h the first hold up into unloaded history, per notch: the card at the reading line moves exactly each notch (± ${NOTCH_TOL_PX} px), the carried ones exactly once at the landing (a fresh page); a control a part`);
@@ -771,6 +831,31 @@ const firstHold = async (label, blind) => {
   const c2 = await firstHold('control (2) off', '(2) off'), c3 = await firstHold('control (2) twice', '(2) twice');
   const red = (c) => c.slabs >= 1 && !c.law.ok;
   check(`§4h CONTROL (2), the pair: the settle watch blinded (no gapUp:settle: ${c2.settle.length === 0}, worst ${c2.law.worst} px) or answered beside the browser's anchoring (worst ${c3.law.worst} px) — at least one misses a notch by more than ${NOTCH_TOL_PX} px (here: ${[red(c2) && 'blinded', red(c3) && 'twice'].filter(Boolean).join(' + ') || 'none'})`, c2.settle.length === 0 && c3.settle.length > 0 && (red(c2) || red(c3)), JSON.stringify({ off: c2.law, twice: c3.law }));
+  // MUST 1: A PERSON WITH ANOTHER FONT SIZE OR UI SCALE — the same first hold at a chat font size of 16 (the list's zoom 16/14)
+  // and at a UI scale of 125 % (the body's zoom on a desktop): the watch's seed and its compare in one unit
+  for (const [label, store] of [['at chat font 16', { termFontSize: '16' }], ['at UI scale 125 %', { 'vibespace.uiScale': '125' }]]) {
+    const z = await firstHold(label, null, { store });
+    // (1')'s named bound (r2395): a range's shortfall LARGER than the carried notch leaves its rest, as before the cure — read
+    // from the landing's own traces (gapUp:reader's rest, wheelCarry's px + less), in layout px, times the zoom on screen
+    const zt = z.zoom ? z.zoom[0] * z.zoom[1] : 1, rest = (z.reader[0] || [0, 0])[1] || 0, landed = (z.less[0] || [0, 0]), leftover = Math.max(0, rest - ((landed[0] || 0) + (landed[1] || 0))) * zt;
+    const lawZ = !!z.law && !z.law.why && !z.law.lost && Math.abs(z.law.worst) <= NOTCH_TOL_PX && Math.abs(z.law.carried - leftover) <= NOTCH_TOL_PX;
+    check(`§4h ${label.toUpperCase()} (the zooms ${JSON.stringify(z.zoom)}): a slab landed and every notch moved the card at the reading line exactly its own distance (${z.law.notch} px on screen; worst ${z.law.worst} px), the carried notches exactly once (${z.law.carried} px; the range's own leftover ${Math.round(leftover)} px)`, z.slabs >= 1 && lawZ && !!z.zoom && (z.zoom[0] !== 1 || z.zoom[1] !== 1), JSON.stringify({ zoom: z.zoom, law: z.law, rest, landed, leftover: Math.round(leftover) }));
+  }
+  // MUST 2 (a): search opens while the watch lives, tail runs folded above the reading line
+  // each depth twice: with the watch (the scene) and with the watch stopped just before the press (the browser's own world,
+  // printed beside it): «exactly once» = the watch adds nothing to what the runs pass and the browser do there
+  const scenes = [], alone = [];
+  for (const tail of ['tail1', 'tail2', 'tail3']) { scenes.push(await searchScene(tail)); alone.push(await searchScene(tail, true)); }
+  // A depth is COMPARABLE when both pages stood alike before the press (the same scrollTop, the same kind of card at the reading
+  // line, the slab in both); there «exactly once» = the card moves as in the browser's own world (the runs pass's own restore
+  // can move it there: measured 314 px at one depth in both worlds — the release's, not the watch's) — never by the watch's
+  // second answer (at the first cure: −4 337 px, or off the page)
+  const held = scenes.map((x, i) => [x, alone[i]]).filter(([x, y]) => x.ok && x.alive && x.gap > 0 && x.headersAbove > 0 && y && y.ok && y.gap > 0 && y.st0 === x.st0 && y.card === x.card);
+  const once = ([x, y]) => x.open != null && y.open != null && Math.abs(x.open - y.open) <= NOTCH_TOL_PX && x.closed != null && y.closed != null && Math.abs(x.closed - y.closed) <= NOTCH_TOL_PX;
+  check(`§4h ONE AUTHORITY, SEARCH OPENS: at ${held.length} of ${scenes.length} depths the scene held (the watch alive, the slab in the page, run headers folded above the reading line) beside a twin page in the browser's own world, and the card at the reading line moved exactly as there (open / closed — the watch: ${held.map(([x]) => x.open + ' / ' + x.closed).join(', ') || '-'}; the browser alone: ${held.map(([, y]) => y.open + ' / ' + y.closed).join(', ') || '-'} px; ± ${NOTCH_TOL_PX})`, held.length >= 1 && held.every(once), JSON.stringify({ scenes, alone }));
+  // MUST 2 (b): a card above the reading line replaced by a newer, taller version of itself while the watch lives
+  const sw = await firstHold('a card above replaced', null, { after: SWAP_ABOVE });
+  check(`§4h ONE AUTHORITY, A CARD REPLACED ABOVE THE READING LINE: the scene held (the watch alive ${sw.after?.alive}, the card ${sw.after?.grew} px taller) and the card at the reading line stayed (${sw.after?.moved} px; ± ${NOTCH_TOL_PX})`, !!sw.after?.ok && sw.after.alive && sw.after.grew >= 150 && Math.abs(sw.after.moved) <= NOTCH_TOL_PX, JSON.stringify(sw.after));
 }
 
 // ── 4e. THE RELEASE FRAME (B-1192): a paging slab's fresh-height reservation
