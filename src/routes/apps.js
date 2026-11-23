@@ -73,7 +73,7 @@ function setup(deps) { ctx = deps; }
 
 const LOCAL = new Set(['', 'local']);
 const HOST_RE = /^[A-Za-z0-9._-]{1,80}$/;
-const STATUS = {
+const STATUS = { apps_unread: 503,   // r3005: app-proposals.json held — refused by name
   'bad-request': 400, bad_search: 400, bad_name: 400, bad_label: 400, bad_exec: 400, bad_args: 400, too_many_variants: 400, needs_root: 400, bad_icon: 400, shadow: 400, not_witnessed: 409, bad_source: 400, 'unsupported-host': 400, bad_address: 400, not_an_installer: 400, too_large: 400,
   agent_forbidden: 403, 'not-yours': 403,
   'not-found': 404, not_found: 404,
@@ -121,6 +121,7 @@ router.post('/api/apps/plan', async (req, res) => {
 router.post('/api/apps/install', async (req, res) => {
   const engine = userGate(req, res); if (!engine) return;
   const b = req.body || {};
+  if (b.proposalId && typeof engine.isHeldUnread === 'function' && engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: engine.heldWords() });   // r3104 (a): held — never «no proposal»
   const host = b.proposalId ? ((engine.get(String(b.proposalId)) || {}).host || 'local') : hostParam(req, res);
   if (!host) return;
   if (b.proposalId && !engine.get(String(b.proposalId))) return fail(res, { code: 'not-found', message: `no proposal ${String(b.proposalId).slice(0, 40)}` });
@@ -241,7 +242,7 @@ router.get('/api/agent/apps', async (req, res) => {
     const st = await g.engine.status(host);
     const entries = (st.manifest && st.manifest.entries || []).map((e) => ({ id: e.id, kind: e.kind, packages: e.packages, ...(e.label ? { label: pkgWords(e.label, 80) } : {}),
       ...(e.kind === 'registered' ? inertDeep({ launch: (e.launch || []).map((v) => ({ id: v.id, label: v.label, exec: v.exec, args: v.args })), remove: e.remove || null, reinstall: e.reinstall || null, witness: e.witness || null }) : {}), ...(e.kind === 'flatpak' ? { appId: e.appId, remote: e.remote || null } : {}), rows: (st.rows || []).filter((r) => r.app === e.id).map((r) => ({ id: r.id, label: pkgWords(r.label, 120) })), by: e.by && e.by.kind, addedAt: e.addedAt }));
-    res.json({ host, entries, proposals: g.who.conversation ? inertDeep(g.engine.proposalsOf(g.who.conversation)) : [], replay: st.replay && st.replay.decision, drift: st.drift && st.drift.drift ? { added: st.drift.added.map((x) => x.package) } : null, updates: st.updates ? st.updates.count : null, refreshedAt: st.refreshedAt || null });
+    res.json({ host, entries, proposals: g.who.conversation ? inertDeep(g.engine.proposalsOf(g.who.conversation)) : [], ...(typeof g.engine.isHeldUnread === 'function' && g.engine.isHeldUnread() ? { proposalsUnread: g.engine.heldWords() } : {}), replay: st.replay && st.replay.decision, drift: st.drift && st.drift.drift ? { added: st.drift.added.map((x) => x.package) } : null, updates: st.updates ? st.updates.count : null, refreshedAt: st.refreshedAt || null });
   } catch (e) { fail(res, e); }
 });
 router.get('/api/agent/apps/search', async (req, res) => {
@@ -275,6 +276,7 @@ router.post('/api/agent/apps/proposals', async (req, res) => {
 router.get('/api/agent/apps/proposals/:id', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
   const id = String(req.params.id);
+  if (typeof g.engine.isHeldUnread === 'function' && g.engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: g.engine.heldWords() });   // r3104 (a): held — the agent's wait hears why, never «no proposal»
   const p = g.engine.get(id);
   if (!p) return fail(res, { code: 'not-found', message: `no proposal ${id}` });
   if (!g.who.conversation || p.by.conversation !== g.who.conversation) return fail(res, { code: 'not-yours', message: `${id} is another conversation's proposal` });

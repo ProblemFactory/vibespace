@@ -2685,7 +2685,7 @@ app.get('/api/agent/channels/watches', (req, res) => {
 const rawApi = () => { const c = channelsEngine(); return c && c.rawApi ? c.rawApi : null; };
 // lane inline-receipts-compose-api: the API proposals' cards (src/server/channel-api-cards.js) — `collect` = the CLI waiting on one
 const apiCardsOf = () => { const c = channelsEngine(); return c && c.apiCards && typeof c.apiCards.collect === 'function' ? c.apiCards : null; };
-const API_STATUS = Object.freeze({ api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_unjudged: 502, api_redirect_loop: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
+const API_STATUS = Object.freeze({ api_unread: 503, api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_unjudged: 502, api_redirect_loop: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
 const apiAnswer = (res, r) => {
   const { touch, ...out } = r || {};
   if (out.ok) return res.json(out);

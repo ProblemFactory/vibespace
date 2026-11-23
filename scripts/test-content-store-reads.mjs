@@ -12,6 +12,9 @@
 // Stand-ins only: a scratch data folder of this suite's own, made-up rows, no vendor call.
 //   PP  published-pages.json — the share links a person gave out
 //   SS  session-status.json — every task's state, urgency and reason, the history, the pending notices
+//   AP  channels/api-proposals.json — the pending proposals, the decided history, the always-allow shapes (its derived cards:
+//       api-cards.json alone was KEPT at the candidate — the For-you store folds a re-filed card; their sync is AP's remover)
+//   XP  app-proposals.json — the pending app installs
 // Run: node scripts/test-content-store-reads.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -39,6 +42,69 @@ const world = (name) => { const d = path.join(ROOT, name); fs.mkdirSync(d, { rec
 const copiesOf = (F) => fs.readdirSync(path.dirname(F)).filter((n) => n.startsWith(path.basename(F) + '.corrupt-'));
 /** a response stand-in for a route or a gate: its status, its body */
 const resStub = () => { const r = { code: 200, body: null, headers: {} }; r.status = (c) => { r.code = c; return r; }; r.type = () => r; r.send = (b) => { r.body = b; return r; }; r.json = (b) => { r.body = b; return r; }; r.setHeader = (k, v) => { r.headers[k] = v; }; r.redirect = (u) => { r.code = 302; r.body = u; return r; }; return r; };
+
+/** THE FIVE LEGS of one store through its own calls (①–⑤ above). `s`: tag, mk(d) → an instance (its `_hold` = the helper's),
+ *  seed(d) → { F, ids } (two rows by the store's own calls), next(inst, n) → the ordinary next write's answer, code (its refusal
+ *  while held), passed(a) (the write went through), onDisk(doc) → the row ids in the file, listed(inst) → the row ids it serves,
+ *  after (the rows on disk after ④'s write), torn (bytes that do not parse), held2(inst, ctx) → ②'s store-own legs (the doors, the
+ *  words), remover(ctx) → ⑤'s remover leg */
+async function storeLegs(s) {
+  const run = async (fn) => { try { return await fn(); } catch (e) { return { thrown: (e && e.code) || 'thrown', status: e && e.status, error: e && e.message }; } };
+  const codeOf = (a) => (a && (a.thrown || a.code || a.why)) || null;
+  const passed = s.passed || ((a) => !!a && !codeOf(a));
+  // ① KEPT + ② HELD
+  {
+    const d = world(s.tag + '1'), { F, ids } = await s.seed(d);
+    ok(ids.length === 2 && ids.every(Boolean) && s.onDisk(json(F)).length === 2, `${s.tag}1 setup: two rows by the store's own calls, both on disk`, { ids });
+    const before = disk(F), pr = placeReads(F, 1);
+    let inst = null, a = null;
+    try { await quietly(async () => { inst = await s.mk(d); a = await run(() => s.next(inst, 3)); }); } finally { pr.restore(); }
+    ok(pr.seen.n === 1, `${s.tag}1 setup: the placed refusal met the store's read once`, pr.seen);
+    ok(disk(F) === before && codeOf(a) === s.code, `${s.tag}1 KEPT — a read that failed once is never written over by its ordinary next write: refused by name (${s.code}), the file byte for byte`, a);
+    if (s.held2) await s.held2(inst, { d, F, ids, run, codeOf });
+    ok(disk(F) === before, `${s.tag}2 nothing was written over the file while held`, null);
+    if (s.afterHeld) await s.afterHeld(inst, { d, F, ids, run, codeOf });
+    inst && inst._hold && inst._hold.stop();
+  }
+  // ③ a RESTART while held
+  {
+    const d = world(s.tag + '3'), { F } = await s.seed(d);
+    const before = disk(F), pr = placeReads(F, 2);
+    let b = null, a = null;
+    try { await quietly(async () => { const x = await s.mk(d); x._hold.stop(); b = await s.mk(d); a = await run(() => s.next(b, 3)); }); } finally { pr.restore(); }
+    ok(pr.seen.n === 2 && !!b._hold.held() && codeOf(a) === s.code && disk(F) === before, `${s.tag}3 a restart while held reads the same file again and is held again: refused, nothing written`, { placed: pr.seen.n, a });
+    b._hold.stop();
+  }
+  // ④ THE LIFT
+  {
+    const d = world(s.tag + '4'), { F, ids } = await s.seed(d);
+    const pr = placeReads(F, 1);
+    let inst = null;
+    try { await quietly(async () => { inst = await s.mk(d); }); } finally { pr.restore(); }
+    const lifted = await quietly(() => inst._hold.again());
+    const listed = await s.listed(inst);
+    const a = await quietly(() => run(() => s.next(inst, 3)));
+    if (s.settle) await s.settle(inst);
+    const on = s.onDisk(json(F));
+    ok(lifted === true && !inst._hold.held() && ids.every((id) => listed.includes(id)), `${s.tag}4 the file reads again (the helper's read off the loop) ⇒ the hold lifts and the rows are back`, { lifted, listed });
+    ok(passed(a) && ids.every((id) => on.includes(id)) && on.length === (s.after || 3), `${s.tag}4 after the lift the next write goes through and keeps both earlier rows on disk`, { a, on });
+    inst._hold.stop();
+  }
+  // ⑤ TORN BYTES, kept aside once; the remover question
+  {
+    const d = world(s.tag + '5'), seeded = await s.seed(d), F = seeded.F;
+    fs.writeFileSync(F, s.torn);
+    const settled = async (x) => { await x._hold.again(); for (let i = 0; i < 200 && x._hold.held(); i++) await new Promise((r) => setTimeout(r, 10)); return x; };   // the start's own read again may be the one in flight
+    const inst = await quietly(async () => settled(s.mk(d)));
+    const c1 = copiesOf(F);
+    ok(c1.length === 1 && disk(path.join(path.dirname(F), c1[0])) === s.torn && !inst._hold.held() && (await s.listed(inst)).length === 0, `${s.tag}5 torn bytes: kept aside beside the store (byte for byte), then it starts empty`, { copies: c1 });
+    fs.writeFileSync(F, s.torn);
+    await quietly(async () => { const x = await settled(s.mk(d)); x._hold.stop(); });
+    ok(copiesOf(F).length === 1, `${s.tag}5 a second start on the SAME torn bytes makes no second copy (kept aside once per content)`, copiesOf(F));
+    if (s.remover) await s.remover({ d, F, inst, seeded });
+    inst._hold.stop();
+  }
+}
 
 // ══ PP published-pages.json ══
 console.log('PP [published-pages.json] the share links a person gave out');
@@ -321,6 +387,96 @@ console.log('SS [session-status.json] every task\'s state, urgency and reason, t
     await quietly(async () => { const m = mk(d); await m._hold.again(); });
     ok(copiesOf(F).length === 1, 'SS5 a second start on the SAME torn bytes makes no second copy (kept aside once per content)', copiesOf(F));
   }
+}
+
+// ══ AP channels/api-proposals.json (+ its derived cards, api-cards.json) ══
+console.log('AP [channels/api-proposals.json] the pending API proposals, the decided history, the always-allow shapes');
+{
+  const F_API = require(path.join(REPO, 'src/channel-api.js')); void F_API;
+  const ACL = require(path.join(REPO, 'src/channel-acl.js'));
+  const ORCH = require(path.join(REPO, 'src/server/channel-api.js'));
+  const LARK = require(path.join(REPO, 'src/channels/lark.js'));
+  const CARDS = require(path.join(REPO, 'src/server/channel-api-cards.js'));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const quiet = { log() { }, info() { }, warn() { }, error() { } };
+  const noFetch = async () => { throw new Error('no network in this suite'); };
+  // the channels engine's stand-in (as test-channel-api's own): one Lark credential, the tier rows in memory — one per world
+  const engines = new Map(), todosOf = new Map();
+  const engineOf = (d) => { if (!engines.has(d)) { const e = { rows: [] }; e.apiAccounts = () => [{ id: 'lark-1', kind: 'lark', label: 'Lark (made-up)' }]; e.apiGrants = () => e.rows; e.apiTierFor = (ctx, cred) => ACL.effectiveApi(ctx, cred, e.rows); e.setApiGrants = async (cred, rows) => { e.rows = [...e.rows.filter((g) => g.scope.id !== cred), ...rows]; return { ok: true, rows }; }; e.apiCredential = (id) => (id === 'lark-1' ? { id, kind: 'lark', api: LARK.API_ROW, label: 'Lark (made-up)', source: 'channels', bearer: async () => 'u-MADE-UP', gate: () => null, charge: () => { }, rateLimited: () => { } } : null); engines.set(d, e); } return engines.get(d); };
+  const todos = (d) => { if (!todosOf.has(d)) todosOf.set(d, new UserTodoManager({ dataDir: path.join(d, 'todos'), onChange: () => { }, expirySweepMs: 0 })); return todosOf.get(d); };
+  const openCards = (d) => todos(d).openItems().filter((i) => i.sessionKey === 'channels').length;
+  const AGENT = { kind: 'agent', id: 'conv-A', name: 'Agent A', groups: [] };
+  const propose = (api, n) => api.call(AGENT, { cred: 'lark-1', method: 'POST', path: `/open-apis/docx/v1/documents/doxMADEUP${n}/blocks`, body: `{"title":"made-up ${n}"}` });
+  const mk = (d) => ORCH.create({ dataDir: d, engine: engineOf(d), fetchFn: noFetch, broadcast: () => { }, log: quiet });
+  await storeLegs({
+    tag: 'AP', mk, code: 'api_unread', torn: '{"proposals": {"api-madeup": {"id": "api-mad',
+    seed: async (d) => {
+      fs.mkdirSync(path.join(d, 'todos'), { recursive: true });
+      const a = mk(d);
+      await a.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);
+      const ids = [(await propose(a, 1)).proposal?.id, (await propose(a, 2)).proposal?.id];
+      const c = CARDS.create({ dataDir: d, api: a, userTodos: todos(d), now: () => Date.now(), timer: false, log: quiet });
+      await c.sync(); c.stop(); a.close();
+      return { F: path.join(d, 'channels', 'api-proposals.json'), ids };
+    },
+    next: (a, n) => propose(a, n),
+    passed: (r) => !!r && r.code === 'api_pending',
+    onDisk: (doc) => Object.keys((doc && doc.proposals) || {}),
+    listed: (a) => (a.ownerView().proposals || []).map((p) => p.id),
+    held2: async (a, { d, ids, codeOf }) => {
+      const r = [await a.approve(ids[0], { digest: 'x' }), a.reject(ids[1]), a.resubmit(ids[0], { digest: 'x' }), a.revokeShape('shape-madeup'), a.proposalFor(AGENT, ids[0])];
+      ok(r.every((x) => codeOf(x) === 'api_unread'), 'AP2 an Approve, a Reject, a Resubmit, a shape\'s revoke and the agent\'s `api wait` are refused by name (api_unread) — never «no such API proposal»', r.map(codeOf));
+      const v = a.ownerView();
+      ok(v.code === 'api_unread' && /cannot read /.test(v.held || ''), 'AP2 the owner\'s view says it (the API access dialog and the Outbox read it)', { code: v.code });
+      const CF = path.join(d, 'channels', 'api-cards.json'), cardsBefore = disk(CF), n0 = openCards(d);
+      const c = CARDS.create({ dataDir: d, api: a, userTodos: todos(d), now: () => Date.now(), timer: false, log: quiet });
+      await c.sync(); c.stop();
+      ok(cardsBefore !== null && disk(CF) === cardsBefore && openCards(d) === n0 && n0 === 2, 'AP2 THE REMOVER (the cards\' sync drops its rows of proposals the view no longer names): while held it removes ZERO — its file byte for byte, both For-you items open', { n0, after: openCards(d) });
+    },
+    remover: async ({ d, inst }) => {
+      const n0 = openCards(d);
+      const c = CARDS.create({ dataDir: d, api: inst, userTodos: todos(d), now: () => Date.now(), timer: false, log: quiet });
+      await c.sync(); c.stop();
+      ok(n0 === 2 && openCards(d) === 2, 'AP5 after torn bytes (kept aside, the list empty) the cards\' sync drops only its DERIVED link rows: the person\'s For-you items stay, none closed', { n0, after: openCards(d) });
+    },
+  });
+}
+
+// ══ XP app-proposals.json ══
+console.log('XP [app-proposals.json] the pending app installs');
+{
+  const AE = require(path.join(REPO, 'src/server/apps-engine.js'));
+  const quiet = { log() { }, info() { }, warn() { }, error() { } };
+  const mk = (d) => AE.create({ access: {}, dataDir: d, log: quiet });
+  await storeLegs({
+    tag: 'XP', mk, code: 'apps_unread', after: 2, torn: '{"proposals": [{"id": "ap-madeup1", "host": "lo',
+    seed: async (d) => {
+      const F = path.join(d, AE.STORE_FILE), t = Date.now();
+      fs.writeFileSync(F, JSON.stringify({ proposals: [1, 2].map((n) => ({ id: `ap-madeup${n}`, host: 'local', state: 'proposed', createdAt: t, request: { kind: 'apt', name: `made-up-${n}` }, by: { kind: 'agent', conversation: 'conv-A' } })), helpers: [] }, null, 2));
+      return { F, ids: ['ap-madeup1', 'ap-madeup2'] };
+    },
+    next: (e, n) => e.addHelper({ host: 'local', sessionId: `helper-madeup-${n}`, request: 'install a made-up app' }),
+    passed: (r) => !!r && r.sessionId === 'helper-madeup-3',
+    onDisk: (doc) => ((doc && doc.proposals) || []).map((p) => p.id),
+    listed: (e) => e.proposalsOf('conv-A').map((p) => p.id),
+    held2: async (e, { ids, run, codeOf }) => {
+      const r = [await run(() => e.propose({ host: 'local', request: { kind: 'apt', name: 'x' }, by: { kind: 'agent', conversation: 'conv-A' } })), await run(() => e.approve(ids[0])), await run(() => e.reject(ids[1])), await run(() => e.wait(ids[0], { ms: 10 })), await run(() => e.run({ host: 'local', proposalId: ids[0] }))];
+      ok(r.every((x) => codeOf(x) === 'apps_unread' && x.status === 503), 'XP2 a proposal, an Approve, a Decline, a wait and the Install of a proposal are refused by name (503 apps_unread) — never «no proposal»', r.map(codeOf));
+      const ROUTES = fs.readFileSync(path.join(REPO, 'src/routes/apps.js'), 'utf8');
+      ok(/const STATUS = \{ apps_unread: 503,/.test(ROUTES), 'XP2 the Apps routes answer it 503 by its code (the window\'s toast says the words)', null);
+    },
+  });
+}
+
+// ══ XP6 r3104 (a) the Apps routes that look a proposal up while held ══
+{
+  const R = fs.readFileSync(path.join(REPO, 'src/routes/apps.js'), 'utf8');
+  const L1 = "  if (b.proposalId && typeof engine.isHeldUnread === 'function' && engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: engine.heldWords() });";
+  const L2 = "  if (typeof g.engine.isHeldUnread === 'function' && g.engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: g.engine.heldWords() });";
+  const L3 = "...(typeof g.engine.isHeldUnread === 'function' && g.engine.isHeldUnread() ? { proposalsUnread: g.engine.heldWords() } : {})";
+  const roads = (r) => r.includes(L1) && r.indexOf(L1) < r.indexOf("if (b.proposalId && !engine.get(String(b.proposalId))) return fail(res, { code: 'not-found'") && r.includes(L2) && r.indexOf(L2) < r.indexOf("if (!p) return fail(res, { code: 'not-found', message: `no proposal ${id}` });") && r.includes(L3);
+  ok(roads(R), 'XP6 by their source lines: the Install of a proposal and the agent\'s proposal wait ask the hold BEFORE «no proposal» (503 apps_unread, the routes\' table); the agent\'s apps list carries proposalsUnread', null);
+  ok(!roads(anchored(R, L2 + '   // r3104 (a): held — the agent\'s wait hears why, never «no proposal»\n', '', 'xp6-wait-today')), 'XP6 RED: the agent\'s wait with today\'s line (no hold asked) fails the leg', null);
 }
 
 report();

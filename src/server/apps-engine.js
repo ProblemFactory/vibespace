@@ -28,6 +28,9 @@
  *     or done ⇒ the staged file is deleted at once.
  */
 const fs = require('fs');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): app-proposals.json under the store-read law
+const APPS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.proposals) && (v.helpers === undefined || Array.isArray(v.helpers));
 const path = require('path');
 const crypto = require('crypto');
 const A = require('../app-manifest.js');
@@ -132,12 +135,29 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   if (!access) throw new Error('apps-engine: access required');
   const file = dataDir ? path.join(dataDir, STORE_FILE) : null;
   let store = { proposals: [], helpers: [] };
-  if (file) { try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); if (j && Array.isArray(j.proposals)) store = { proposals: j.proposals, helpers: Array.isArray(j.helpers) ? j.helpers : [] }; } catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[apps] ${STORE_FILE} unreadable (${e.message}) — starting empty, the file left in place`); } }
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no proposal» (the
+  // file left in place) and the next helper started, proposal filed or decision wrote over it: every pending app install gone (its
+  // Install found nothing). HELD: a proposal, a decision, a withdraw, a wait, an Install of a proposal and a helper's start are
+  // refused by name (503 apps_unread); the sweep and a helper's end wait; nothing is written over the file; it is read again off
+  // the loop. Torn bytes are kept aside once per content, then it starts empty. NO REMOVER reads its silence: a staged download is
+  // deleted only for a proposal this store names (unstageOf at its decision, the sweep's expiry of a proposal it lists).
+  const hold = file ? HOLD.create({
+    file, valid: APPS_SHAPE, code: 'apps_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read its app proposals right now (${h.code}); it reads them again by itself every few minutes. No app proposal is lost: nothing is written over them, and app proposals, their decisions and helpers wait until it reads`,
+    log: (s) => log.warn?.('[apps] ' + s),
+    onLift: (v) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; bump('local'); },
+  }) : null;
+  const isHeld = () => !!(hold && hold.held());
+  if (file) {
+    let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: APPS_SHAPE });
+    if (hold.start(a0) === 'data') store = { proposals: a0.value.proposals, helpers: Array.isArray(a0.value.helpers) ? a0.value.helpers : [] };
+  }
   const replaying = new Map(); // host → {since, rung}
   const lastStatus = new Map(); // host → {at, status}
   const waiters = new Map();   // proposal id → Set<fn>
   const save = () => {
-    if (!file) return;
+    if (!file || !hold.writable('an app proposal change')) return;   // held: nothing written over it
     const t = now();
     store.proposals = store.proposals.filter((p) => !TERMINAL.has(p.state) || t - (p.finishedAt || p.createdAt || t) < KEEP_MS).slice(-MAX_PROPOSALS);
     try { writeJsonAtomic(file, store); } catch (e) { log.warn?.(`[apps] ${STORE_FILE} not written: ${e.message}`); }
@@ -172,6 +192,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   }
   /** An unanswered proposal of a downloaded installer expires after EXPIRE_MS: withdrawn (`expired`), told, its file gone. */
   function sweep() {
+    if (isHeld()) return;   // held: nothing expires from an unread list
     const t = now();
     for (const p of store.proposals.slice()) if (p.state === 'proposed' && p.request && p.request.staged && t - (p.createdAt || t) > EXPIRE_MS) { try { withdraw(p.id, { code: 'expired' }); } catch { /* raced */ } }
     // apps-joint r1 (F6): a FAILED download keeps its file for Try again — for EXPIRE_MS, then it expires like an unanswered one
@@ -188,6 +209,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread() && typeof userTodos.whenRead === 'function') userTodos.whenRead(go, "an app card's close"); else go();
   }
   function withdraw(id, { code = 'withdrawn', by = 'apps' } = {}) {
+    if (isHeld()) throw hold.refusal('withdrawing this app proposal');
     const p = get(id);
     if (!p) throw named('not-found', `no proposal ${id}`);
     if (p.state !== 'proposed') throw named('proposal_state', `that proposal is ${p.state}`);
@@ -281,6 +303,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   /** `by` = {kind:'agent', sessionId, conversation, name, sessionKey}. Plans first — a plan the machine refuses is never
    *  filed (the agent hears the refusal by name); a filed proposal is ONE For-you item. */
   async function propose({ host = 'local', request, by, why = '' }) {
+    if (isHeld()) throw hold.refusal('this app proposal');
     if (!by || by.kind !== 'agent' || !by.conversation) throw named('bad-request', 'a proposal names its conversation');
     // verify-r1 F2: ONE open proposal (and ONE For-you card) per conversation × machine × request — the same ask again
     // answers the open one (asked before the plan AND after its await: two asks in flight are one)
@@ -343,6 +366,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
    *  route streams them); `expectDigest` = the plan the dialog showed (plan_changed otherwise, nothing run). */
   async function run({ host = 'local', request = null, proposalId = null, expectDigest = null, by = { kind: 'user' }, onData = () => { }, onReattach = () => { } }) {
     let p = null, rq;
+    if (proposalId && isHeld()) throw hold.refusal('installing this proposal');
     if (proposalId) {
       p = get(proposalId);
       if (!p) throw named('not-found', `no proposal ${proposalId}`);
@@ -463,6 +487,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
    *  the proposal takes the new plan). The run goes on in the background: its progress IS the card (syncCard). A FAILED
    *  proposal's card offers Try again — the same click on the same stored plan. → {proposal: view, done: Promise}. */
   function approve(id, { shown = null } = {}) {
+    if (isHeld()) throw hold.refusal('approving this app proposal');
     const p = get(id);
     if (!p) throw named('not-found', `no proposal ${id}`);
     if (p.state !== 'proposed' && p.state !== 'failed') throw named('proposal_state', `that proposal is ${p.state}`);
@@ -500,6 +525,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   }
   /** The user said Not now (the item dismissed, or the dialog's button). */
   function reject(id, { by = 'user' } = {}) {
+    if (isHeld()) throw hold.refusal('declining this app proposal');
     const p = get(id);
     if (!p) throw named('not-found', `no proposal ${id}`);
     if (p.state !== 'proposed') throw named('proposal_state', `that proposal is ${p.state}`);
@@ -519,6 +545,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   /** `vibespace-app wait` — resolves when the proposal leaves `since` (or at ms ≤ 100 s); a TERMINAL answer takes back the
    *  stashed copy of the same outcome (the agent read it here — told once). */
   function wait(id, { ms = WAIT_MAX_MS, since = null, conversation = null } = {}) {
+    if (isHeld()) return Promise.reject(hold.refusal('waiting on this app proposal'));
     const p = get(id);
     if (!p) return Promise.reject(named('not-found', `no proposal ${id}`));
     if (conversation && p.by.conversation !== conversation) return Promise.reject(named('not-yours', `${id} is another conversation's proposal`));
@@ -652,12 +679,13 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
 
   // ── "Let an agent help…" — the temporary helper session ──
   function addHelper({ host = 'local', sessionId, request = '' }) {
+    if (isHeld()) throw hold.refusal('starting a helper');
     if (!/^[A-Za-z0-9._-]{1,80}$/.test(String(sessionId || ''))) throw named('bad-request', 'bad session id');
     store.helpers = store.helpers.filter((x) => x.sessionId !== sessionId).concat({ host, sessionId, request: String(request).slice(0, 500), at: now() }).slice(-50);
     save(); bump(host);
     return store.helpers.find((x) => x.sessionId === sessionId);
   }
-  function dropHelper(sessionId) { const n = store.helpers.length; store.helpers = store.helpers.filter((x) => x.sessionId !== sessionId); if (store.helpers.length !== n) { save(); bump('local'); } }
+  function dropHelper(sessionId) { if (isHeld()) return; const n = store.helpers.length; store.helpers = store.helpers.filter((x) => x.sessionId !== sessionId); if (store.helpers.length !== n) { save(); bump('local'); } }
   const helperIds = () => new Set(store.helpers.map((x) => x.sessionId));
   // lane apps-launcher-witness: a HELPER's turn end re-lists what is installed on its machine (it may have installed
   // around the door — the owner's JASP, a user flatpak) — the machine's `list` op with Check again's rule, then the
@@ -672,7 +700,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
 
   /** The staged icon of a proposal (the card's picture before anything is installed) → {host, name} | null. */
   const proposalIcon = (id) => { const p = get(id); const n = p && p.card && p.card.app && p.card.app.icon; return n && !TERMINAL.has(p.state) ? { host: p.host, name: n } : null; };
-  return { plan, planProposal, search, status, propose, register, adopt, ownerRemove, ownerForget, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
+  return { isHeldUnread: isHeld, heldWords: () => (hold ? hold.words() : null), _hold: hold, plan, planProposal, search, status, propose, register, adopt, ownerRemove, ownerForget, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
 }
 
 module.exports = { create, normRequest, recordOf, whatOf, SYS_REQUEST_KINDS, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, EXPIRE_MS, WORDS };

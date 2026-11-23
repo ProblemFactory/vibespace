@@ -124,6 +124,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
   async function doSync() {
     const a = A();
     if (stopped || !a || typeof a.ownerView !== 'function') return;
+    if (typeof a.isHeldUnread === 'function' && a.isHeldUnread()) return;   // r3005: the proposals are UNREAD — the cards file, close and drop nothing until they read
     let recs = records();
     const credIds = new Set(((a.ownerView().creds) || []).map((c) => c.id));
     const ends = C.sweepVerdicts(recs, { now: now(), live: liveness(a, credIds) });

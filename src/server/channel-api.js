@@ -14,6 +14,8 @@
  * src/mounts.js `oauthApiRows`) — this file names no vendor (test-architecture), adding an integration never edits it.
  */
 const fs = require('fs');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): channels/api-proposals.json under the store-read law
 const path = require('path');
 const crypto = require('crypto');
 const F = require('../channel-api.js');
@@ -31,11 +33,33 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   const eng = () => (typeof engine === 'function' ? engine() : engine);
   const dir = path.join(dataDir, 'channels');
   const stateFile = path.join(dir, 'api-proposals.json');
-  const state = (() => { try { const j = JSON.parse(fs.readFileSync(stateFile, 'utf8')); return { proposals: j.proposals || {}, shapes: Array.isArray(j.shapes) ? j.shapes : [] }; } catch { return { proposals: {}, shapes: [] }; } })();
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no proposal» and
+  // the agent's next proposal wrote over the file: the pending proposals (an Approve found nothing), the decided history and the
+  // owner's «always allow» shapes gone. HELD: a new proposal, an Approve / Reject / Resubmit and a shape's revoke are refused by
+  // name (api_unread); a write an always-allowed shape would run is ASKED, and the ask refused (the shapes are unread — never
+  // «allowed» on an unread list); a read call runs as before; nothing is written over the file; it is read again off the loop.
+  // THE LIFT judges every shape read back against the tiers NOW (a tier lowered while held ends it). Torn bytes are kept aside
+  // once per content, then it starts empty. A REMOVER reads its silence: the cards' sync (channel-api-cards.js) drops its link
+  // rows of proposals the view no longer names — while held it removes nothing (isHeldUnread); after torn bytes its drop is of
+  // derived rows only (the For-you items themselves stay).
+  const PROPOSALS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.proposals === undefined || (!!v.proposals && typeof v.proposals === 'object' && !Array.isArray(v.proposals))) && (v.shapes === undefined || Array.isArray(v.shapes));
+  const hold = HOLD.create({
+    file: stateFile, valid: PROPOSALS_SHAPE, code: 'api_unread', aside: (mark) => stateFile + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read its API proposals right now (${h.code}); it reads them again by itself every few minutes. No proposal is lost: nothing is written over them, and new API proposals and their decisions wait until it reads`,
+    log: (s) => log.warn('[channel-api] ' + s),
+    onLift: (v) => lifted(v),
+  });
+  const state = (() => {
+    let read; try { read = { text: fs.readFileSync(stateFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: PROPOSALS_SHAPE });
+    const j = hold.start(a0) === 'data' ? a0.value : {};
+    return { proposals: j.proposals || {}, shapes: Array.isArray(j.shapes) ? j.shapes : [] };
+  })();
+  const heldRefusal = () => ({ ok: false, code: 'api_unread', error: hold.words() });
   const stamps = new Map();        // `${cred}|${principal id}` -> call instants (the grant's budget)
   const mountTokens = new Map();   // mountId -> { token, until } (a refreshed access token, memory only)
   const refreshing = new Map();    // mountId -> the ONE refresh in flight (single-flight) | { failedUntil } after a refusal (paced)
-  const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api] state write failed:', e && e.message); } };
+  const save = () => { if (!hold.writable('an API proposal change')) return; try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api] state write failed:', e && e.message); } };
   const credDir = (cred) => path.join(dir, String(cred).replace(/[^A-Za-z0-9._-]/g, '_'), 'api.ndjson');
   const pkOf = (ctx) => `${ctx.kind}:${ctx.id}`;
   /** The call shapes this principal's cards made always-allowed on one credential (the verdict's `shapes`). */
@@ -294,6 +318,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (!vd.ok) { line(req, { verdict: 'refused', code: vd.code }); return { ...vd, touch }; }
     const bs = F.budgetCheck(stamps.get(`${cred}|${ctx.id}`) || [], now(), { perDay: tr.perDay });
     if (!bs.ok) { line(req, { verdict: 'refused', code: bs.code }); return { ...bs, touch }; }
+    if (vd.action === 'propose' && hold.held()) { line(req, { verdict: 'refused', code: 'api_unread' }); return { ...heldRefusal(), touch }; }   // r3005: held — no proposal filed into an unread list
     if (vd.action === 'propose') {
       // a proposal is a call of the budget, and one conversation keeps at most PENDING_MAX waiting (verify r1 M2)
       const waiting = pending().filter((p) => p.cred === cred && p.conv === ctx.id).length;
@@ -315,6 +340,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   }
   /** One of the caller's OWN proposals (its outcome, for `wait`); another's = the uniform not-found. */
   function proposalFor(ctx, id) {
+    if (hold.held()) return heldRefusal();
     const p = state.proposals[String(id || '')];
     if (!p || p.principal.id !== ctx.id || tierNow(ctx, p.cred).tier === 'none') return { ok: false, code: 'not-found', error: 'no such API proposal of yours' };
     return { ok: true, proposal: proposalView(p, { agent: true }) };
@@ -329,7 +355,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   function ownerView() {
     const e = eng();
     const rows = e && typeof e.apiGrants === 'function' ? e.apiGrants() : [];
-    return { ok: true, creds: allCreds().map((c) => ({ ...c, grants: rows.filter((g) => g.scope && g.scope.id === c.id).map((g) => ({ principal: g.principal, tier: g.api, perDay: g.perDay || null })), except: e && typeof e.apiExceptOf === 'function' ? e.apiExceptOf(c.id) : [], shapes: state.shapes.filter((s) => s.cred === c.id), sensitive: (F.vendorRowOf(credentialOf(c.id)) || { sensitive: [] }).sensitive.map((re) => re.source) })), proposals: Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(0, 50).map((p) => proposalView(p)) };
+    return { ...(hold.held() ? { held: hold.words(), code: 'api_unread' } : {}), ok: true, creds: allCreds().map((c) => ({ ...c, grants: rows.filter((g) => g.scope && g.scope.id === c.id).map((g) => ({ principal: g.principal, tier: g.api, perDay: g.perDay || null })), except: e && typeof e.apiExceptOf === 'function' ? e.apiExceptOf(c.id) : [], shapes: state.shapes.filter((s) => s.cred === c.id), sensitive: (F.vendorRowOf(credentialOf(c.id)) || { sensitive: [] }).sensitive.map((re) => re.source) })), proposals: Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(0, 50).map((p) => proposalView(p)) };
   }
   async function setTiers(cred, list, { by = 'user', except = undefined, removeExcept = [] } = {}) {
     const e = eng();
@@ -356,16 +382,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       // only a group row (or a group left out of a row) at Read + write or above can lift the tier back — a Read-only group row decides
       // nothing here; a shape kept on the unknown is STAMPED `keptHeld`, and once the store reads the next prune drops it
       const heldNow = require('./groups-hold.js').held();
-      let stamped = false;
-      state.shapes = state.shapes.filter((s) => {
-        if (s.cred !== cred) return true;
-        if (!heldNow && s.keptHeld === true) return false;
-        const sc = shapeCtx(s);
-        if (KEEP.includes(tierNow(sc, cred).tier)) return true;
-        if (heldNow && sc.groupsUnreadable === true && groupDecides(cred, KEEP)) { if (s.keptHeld !== true) { s.keptHeld = true; stamped = true; } return true; }
-        return false;
-      });
-      if (state.shapes.length !== n || stamped) save();
+      const mark = { stamped: false };
+      state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));
+      if (state.shapes.length !== n || mark.stamped) save();
       notifyOwner([]);
     }
     return r;
@@ -384,6 +403,23 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   // THROUGH a group reads the held [] as a known «none» — «no longer holds» there was false too)
   const groupDecides = (cred, tiers = null) => { const e = eng(); return (e && typeof e.apiGrants === 'function' ? e.apiGrants() : []).some((g) => g && g.scope && g.scope.id === cred && (!tiers || tiers.includes(g.api)) && ((g.principal && g.principal.kind === 'group') || (Array.isArray(g.except) && g.except.some((x) => x && x.kind === 'group')))); };
   const heldTierUnknown = (ctx, cred) => ctx.groupsUnreadable === true && groupDecides(cred);
+  /** the tier rule a kept «always allow» shape answers — setTiers' prune and the lift's (r3005) */
+  function shapeStays(s, cred, heldNow, mark, KEEP = ['write-ask', 'write-auto', 'write-all']) {
+    if (s.cred !== cred) return true;
+    if (!heldNow && s.keptHeld === true) return false;
+    const sc = shapeCtx(s);
+    if (KEEP.includes(tierNow(sc, cred).tier)) return true;
+    if (heldNow && sc.groupsUnreadable === true && groupDecides(cred, KEEP)) { if (s.keptHeld !== true) { s.keptHeld = true; mark.stamped = true; } return true; }
+    return false;
+  }
+  /** r3005: the hold lifted — the proposals back (or, torn bytes kept aside, none), every shape judged against the tiers NOW */
+  function lifted(v) {
+    state.proposals = (v && v.proposals) || {}; state.shapes = v && Array.isArray(v.shapes) ? v.shapes : [];
+    const heldNow = require('./groups-hold.js').held(), mark = { stamped: false }, n = state.shapes.length;
+    for (const cred of new Set(state.shapes.map((s) => s && s.cred))) state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark));
+    if (state.shapes.length !== n || mark.stamped) save();
+    try { notifyOwner(Object.keys(state.proposals)); } catch { }
+  }
   const HELD_TIER_WORDS = 'Task Groups cannot be read right now, and this access comes through a Task Group — nothing ran; the card stays — decide it again once they read';
   const FILED_UNREAD_WORDS = 'This was filed while Task Groups could not be read, and this access comes through a Task Group — the agent\'s groups then are unknown, so nothing ran; reject it and let the agent ask again';
   const unknownRefusal = (pr) => (pr && pr.groupsUnreadable !== true && require('./groups-hold.js').held() ? { ok: false, code: 'groups_unreadable', error: HELD_TIER_WORDS } : { ok: false, code: 'groups_unknown_filed', error: FILED_UNREAD_WORDS });
@@ -391,6 +427,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   /** `digest` = the frozen digest the user's card was drawn from: a record that changed since (a restart over an edited
    *  file) runs nothing (verify r1 M3). */
   async function approve(id, { always = false, by = 'user', digest = null } = {}) {
+    if (hold.held()) return heldRefusal();
     const p = state.proposals[String(id || '')];
     if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
     { const pz = pausedOf(p.cred); if (pz) return { ok: false, code: 'store-blocked', error: pz.error }; }   // B-f276: the card stays pending
@@ -424,6 +461,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
    *  words, chip and digest, judged like any call of the agent's — so what the user approves next is exactly what runs.
    *  Nothing runs here; once per card; `digest` = the failed card's own (the card the user pressed). */
   function resubmit(id, { by = 'user', digest = null } = {}) {
+    if (hold.held()) return heldRefusal();
     const p = state.proposals[String(id || '')];
     if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
     if (p.status !== 'failed' || !p.redirect || p.resubmittedAs) return { ok: false, code: 'not-resubmittable', error: p.resubmittedAs ? `this card was resubmitted already (${p.resubmittedAs})` : 'only a card whose run the vendor redirected can be resubmitted' };
@@ -447,6 +485,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     return { ok: true, proposal: proposalView(np) };
   }
   function reject(id, { reason = null, by = 'user' } = {}) {
+    if (hold.held()) return heldRefusal();
     const p = state.proposals[String(id || '')];
     if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
     if (p.status !== 'pending') return { ok: false, code: 'not-pending', error: `this proposal is ${p.status} already` };
@@ -456,6 +495,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     return { ok: true, proposal: proposalView(p) };
   }
   function revokeShape(id) {
+    if (hold.held()) return heldRefusal();
     const n = state.shapes.length;
     state.shapes = state.shapes.filter((s) => s.id !== id);
     if (state.shapes.length === n) return { ok: false, code: 'not-found', error: 'no such always-allowed shape' };
@@ -470,8 +510,8 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     state.shapes = state.shapes.filter((s) => s.keptHeld !== true);
     save(); notifyOwner([]);
   });
-  const close = () => { try { offShapeLift(); } catch { } };
-  return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, resubmit, reject, revokeShape, auditTail, pending, close };
+  const close = () => { try { offShapeLift(); } catch { } hold.stop(); };
+  return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, resubmit, reject, revokeShape, auditTail, pending, close, isHeldUnread: () => !!hold.held(), heldWords: () => hold.words(), _hold: hold };
 }
 
 module.exports = { create, AUDIT_RING_BYTES, TAIL_LINES, TAIL_BYTES };

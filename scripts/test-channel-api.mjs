@@ -427,7 +427,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       return r.code === 'api_not_granted' && !r.status && l.verdict === 'withheld' && l.status === 200; },
   };
   const R1 = [
-    ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ['state.shapes = state.shapes.filter((s) => {\n        if (s.cred !== cred) return true;', 'state.shapes = state.shapes.filter((s) => { return true;\n        if (s.cred !== cred) return true;']],
+    ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ['state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));', 'state.shapes = state.shapes.filter((s) => true || shapeStays(s, cred, heldNow, mark, KEEP));']],
     ['pending', `one conversation keeps at most ${F.PENDING_MAX} proposals waiting on a credential; the next is api_budget (M2)`, ['if (waiting >= F.PENDING_MAX)', 'if (false)']],
     ['digest', 'Approve carries the card\'s digest: a record rewritten on disk (digest recomputed) + a restart runs NOTHING (M3)', ['if (!digest || digest !== (p.frozen && p.frozen.digest))', 'if (false)']],
     ['refresh', 'a Google mount\'s refresh is single-flight (5 concurrent calls ⇒ 1) and paced after a refusal (4 calls ⇒ 1) (M4)', ['if (fl && fl.then) return fl;\n    if (fl && fl.failedUntil > now())', 'if (false) return fl;\n    if (false)']],
