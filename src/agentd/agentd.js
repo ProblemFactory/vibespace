@@ -591,22 +591,43 @@ async function runFs(action, params, timeoutMs) {
   return FS_ACTIONS[action]({ action, ...params }); // honest inline fallback
 }
 // ── THE FOLDER FIELD'S COLLECTOR (r1508 / r1636 / r1651 — the paired machine's folder listing: the hub PLANS and SHAPES, this machine
-// COLLECTS): src/dir-collect.js, the SAME collector the hub runs over its own pool, here over this daemon's fs worker pool — every call
-// IDLE-ONLY (no idle worker ⇒ refused at once and asked again inside the reply's bound: never queued ahead of a person's Files op),
-// under the hub pool's own deadline (DIR_CALL_MS: a deadline marks the folder PROBE_LATE_MS on both roads alike), NEVER inline on this
-// loop (a hung mount would hold every session pipe: no live worker ⇒ refused as busy). Its memory is this process's: a restart forgets
-// it (the first ask lists, states and walks again). The exclusion roots: none of this daemon's own — the home's checkouts named
-// vibespace are found by their own facts. One collector per daemon (its caches serve every hub link).
+// COLLECTS): src/dir-collect.js, the SAME collector the hub runs over its own pool, here over a pool of its OWN (r2752, below) — every
+// call in its turn, one at a time, onto an IDLE worker (a worker a stuck read holds refuses it as busy: asked again inside the reply's
+// bound, never queued in a worker), under the hub pool's own deadline (DIR_CALL_MS: a deadline marks the folder PROBE_LATE_MS on both
+// roads alike), NEVER inline on this loop (a hung mount would hold every session pipe: no live worker ⇒ refused as busy). Its memory
+// is this process's: a restart forgets it (the first ask lists, states and walks again). The exclusion roots: none of this daemon's
+// own — the home's checkouts named vibespace are found by their own facts. One collector per daemon (its caches serve every hub link).
 const DIR_CALL_MS = 15000;
+// r2752 (the round's MUST — THE LAW: A LISTING NEVER COSTS A PERSON THEIR FILES ON THAT MACHINE), in its numbers. The collector's reads
+// ride a pool of THEIR OWN, of ONE worker: ONE read of the folder field is out on this machine at a time (dirOne below). The person's
+// pool (workerPool: every Files act, transfer, upload) is never asked by the collector: it never takes a person's worker, the last or
+// any, and never spends that pool's replacements. While its read is stuck no further one is sent: the reads after it wait their turn
+// (dirOne), and a read the pool's deadline ended that the kernel still holds is NOT replaced (DIR_POOL_WEDGE_MAX 0) — its slot comes back
+// when that read returns (worker-pool: a wedged worker's own exit refills it). Until then every read is refused as busy and the field
+// says «still looking» on this machine; the person's files are untouched.
+const DIR_POOL_SIZE = 1, DIR_POOL_WEDGE_MAX = 0;
+let dirPool = null;
+const dirPoolOf = () => { if (dirPool === null) dirPool = require('./worker-pool.js').createWorkerPool({ file: __filename, workerData: { role: 'agentd-worker' }, size: DIR_POOL_SIZE, maxWedged: DIR_POOL_WEDGE_MAX, log: (m) => log('[folder field pool] ' + m) }) || false; return dirPool || null; };
+// ONE READ OUT AT A TIME (r2752's first number: 1): a read asked while another is out WAITS ITS TURN HERE — never in a worker and never
+// on the pool's clock (its deadline starts when it is sent, so a healthy folder's read is never marked by a dead one it waited behind) —
+// and goes when that read ends. The waits are bounded by the collector's own counters (its line, rows and facts slots) and its replies
+// never wait for them (each races its own soft bound); the mounts' read takes its turn too
+const dirTurn = { out: false, q: [] };
+const dirNext = () => { if (!dirTurn.out && dirTurn.q.length) dirTurn.q.shift()(); };
+const dirOne = (send) => new Promise((resolve, reject) => {
+  dirTurn.q.push(() => { dirTurn.out = true; Promise.resolve().then(send).then(resolve, reject).finally(() => { dirTurn.out = false; dirNext(); }); });
+  dirNext();
+});
 let dirCollector = null;
 const dirMounts = { at: 0, rows: [], p: null };
 // THIS machine's mounted folders (src/dir-ops.js mountRows — names only), read on the worker: once before the first ask (bounded — the
 // first walk and the first facts must know them, the fresh read's S7) and then BEHIND the answers, at most every 5 s (never taking a
 // worker as an ask's first stat goes, its N21)
 function dirMountsRefresh() {
-  if (dirMounts.p || !workerPool || !workerPool.alive()) return dirMounts.p || Promise.resolve();
+  const pool = dirPoolOf();   // (the collector's own pool, never the person's)
+  if (dirMounts.p || !pool || !pool.alive()) return dirMounts.p || Promise.resolve();
   dirMounts.at = Date.now();
-  dirMounts.p = workerPool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true })
+  dirMounts.p = dirOne(() => pool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true }))
     .then((r) => { if (r && r.result && Array.isArray(r.result.rows)) dirMounts.rows = r.result.rows; }, () => { }).finally(() => { dirMounts.p = null; });
   return dirMounts.p;
 }
@@ -622,11 +643,13 @@ function dirCollectorOf() {
     mounts: () => dirMounts.rows,   // (read behind the answers: dirMountsRefresh)
     // a Mac's ~/Library is never walked (the sh road's own prune: its caches would fill the 6000 folders, and it holds ~/Library/CloudStorage)
     walkSkip: process.platform === 'darwin' ? [require('path').join(require('os').homedir(), 'Library')] : [],
-    call: async (op, payload, opts) => {
-      if (!workerPool || !workerPool.alive()) throw Object.assign(new Error('no fs worker of this agent is running'), { code: 'no-worker' });
-      const refused = hung.refusal(op, payload); if (refused) throw refused;   // a dead path is never sent to a fresh worker
+    call: (op, payload) => dirOne(async () => {   // r2752: in its turn (one read out), on the collector's OWN pool — never the person's pool
+      const pool = dirPoolOf();
+      if (!pool || !pool.alive()) throw Object.assign(new Error('no folder-field worker of this agent is running'), { code: 'no-worker' });
+      const refused = hung.refusal(op, payload); if (refused) throw refused;   // a dead path is never sent to a fresh worker (judged at its turn)
       let r;
-      try { r = await workerPool.run(op, { ...payload, dirOp: true }, DIR_CALL_MS, { idleOnly: !!(opts && opts.idleOnly) }); } catch (e) {
+      // IDLE-ONLY at its turn: the read before it ended — a worker still held by it (terminated, left in the kernel) refuses this one as busy
+      try { r = await pool.run(op, { ...payload, dirOp: true }, DIR_CALL_MS, { idleOnly: true }); } catch (e) {
         if (e && /^fs deadline \(/.test(String(e.message))) { e.safeFsTimeout = true; hung.deadline(op, payload); }   // the pool's deadline ended it: its folder's mark, and the pool's memory of it
         else if (e && !e.code && /^(worker died|no workers)$/.test(String(e.message))) e.code = 'no-worker';   // no answer, no mark: asked again
         throw e;
@@ -634,12 +657,18 @@ function dirCollectorOf() {
       hung.landed(op, payload);   // it answered: forgotten
       if (r.error) throw Object.assign(new Error(r.error), { code: r.code });
       return r.result;
-    },
+    }),
   });
   return dirCollector;
 }
 // the daemon's own exits (the self-upgrade's re-exec, SIGTERM): one no fs worker blocked in the kernel can hold (verify r1)
-function exitDaemon(code) { if (workerPool) workerPool.exit(code); process.exit(code); }
+function exitDaemon(code) {
+  // a thread blocked in the kernel in EITHER pool would hold process.exit (it joins every thread): the folder field's own pool's SIGKILL
+  // road first when IT holds one (r2752), then the person's pool's own exit (its SIGKILL road, else process.exit)
+  if (dirPool && dirPool.stats().stuck) dirPool.exit(code);
+  if (workerPool) workerPool.exit(code);
+  process.exit(code);
+}
 // loop-lag canary: if the DAEMON loop ever stalls, sessions are at risk —
 // log it so a regression that puts weight back on the loop is visible.
 let loopLagMax = 0;

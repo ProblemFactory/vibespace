@@ -20,7 +20,38 @@ const gitOf = (d) => { try { fs.statSync(path.join(d, '.git')); return true; } c
 // leaves the folder's mtime where it was. The hub never sends a racy listing's mtime as `known` — the next re-statement lists the
 // folder again. A mtime AHEAD of the read (another machine's clock) is racy too: listed again, never trusted.
 const RACY_TICK_MS = 2000;
-const pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };
+// r2752 (the round's MUST, its second half): a file is READ only when it is a REGULAR file — a pipe or a device file named like a
+// manifest is never opened (a FIFO's open waits for a writer for ever and holds the worker). The stat says so first; the open is
+// non-blocking and its handle is judged again (a file swapped between the two is refused as well).
+const pkgOf = (d) => {
+  try {
+    const f = path.join(d, 'package.json');
+    const st = fs.statSync(f);
+    if (!st.isFile() || st.size > 65536) return {};
+    const fd = fs.openSync(f, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
+    try {
+      const st2 = fs.fstatSync(fd);
+      if (!st2.isFile() || st2.size > 65536) return {};
+      const buf = Buffer.alloc(st2.size); let n = 0;
+      while (n < buf.length) { const k = fs.readSync(fd, buf, n, buf.length - n, n); if (!k) break; n += k; }
+      const name = JSON.parse(buf.subarray(0, n).toString('utf8')).name;
+      return typeof name === 'string' ? { pkg: name.slice(0, 80) } : {};
+    } finally { fs.closeSync(fd); }
+  } catch { return {}; }
+};
+// THE SUITES' DEAD PATH (test-dir-collect; VIBESPACE_DIROPS_TEST=1 only — never set by a hub or an agent of its own): a path whose
+// name begins `vs-dead-` stands for a folder on a dead mount — its read is HELD in this worker (r2752: the suite's slow fact is a read
+// held where the collector's handle sent it, never a real pipe) until the suite lets it go (a `.go` file put inside that folder);
+// a `.held` file inside it says the read began and a `.left` one that it returned (the suite counts the reads out there by them;
+// inside, so the listed parent's time never moves; nothing is removed). A worker the pool's deadline terminates ends here. Nothing
+// else reads it.
+const deadStandIn = (p) => {
+  if (process.env.VIBESPACE_DIROPS_TEST !== '1' || !path.basename(String(p || '')).startsWith('vs-dead-')) return;
+  const held = path.join(String(p), '.held'), left = path.join(String(p), '.left'), go = path.join(String(p), '.go'), tick = new Int32Array(new SharedArrayBuffer(4));
+  if (fs.existsSync(go)) return;
+  fs.writeFileSync(held, '');
+  try { while (!fs.existsSync(go)) Atomics.wait(tick, 0, 0, 10); } finally { fs.writeFileSync(left, ''); }
+};
 
 const OPS = {
   // THE PATH FIELD'S SLICE (lane path-field — GET /api/dir-complete): each asked folder listed ONCE — its folders, its files
@@ -81,6 +112,7 @@ const OPS = {
   // already out, obeys the marks, the skip list and the pool's blocked check — the read of the fourth shape, 2026-11-20 11:34Z). `files`
   // lets a file be the answer.
   pathStat({ path: p, names = null, files = false, facts = false }) {
+    deadStandIn(p);
     const bare = (q) => { try { const st = fs.statSync(q); const o = { path: q, exists: true, isDir: st.isDirectory() }; if (o.isDir) { try { if (fs.lstatSync(q).isSymbolicLink()) o.link = fs.realpathSync(q); } catch { } } else if (facts) { o.size = st.size; o.mtime = st.mtimeMs; } return o; } catch (e) { return { path: q, exists: false, ...goneOf(e) }; } };
     const stat = bare(p);
     // `facts` (B-5561): a KID's facts in the kid's own call — a folder's git and package.json name, a file's size and mtime (a link to

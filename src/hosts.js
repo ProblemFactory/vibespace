@@ -1937,8 +1937,18 @@ class HostManager {
     const c = (this._collectCache = this._collectCache || new Map()).get(id) || { index: new Map(), names: null, namesAt: 0 };
     this._collectCache.set(id, c);
     const P = DSL.plan({ ...args, budgetMs: 450 }, info.home);
-    const have = {}; for (const r of P.wire.roots) { const e = c.index.get(r); if (e && !e.cut) have[r] = e.v; }   // a CUT copy is never named: the next late re-ask brings it whole
-    const F = await dm.dirCollect({ ...P.wire, ...(P.wire.roots.length ? { index: { have } } : {}) }, { signal, timeoutMs: 2400 });
+    // r2752 (c): a copy CUT at the cap is named too, by the version of the whole index it was cut from — the machine answers «the same»
+    // (still cut, the rows say so) and never sends it again at every keystroke; a new walk is a new version, sent whole or cut again
+    const have = {}; for (const r of P.wire.roots) { const e = c.index.get(r); if (e) have[r] = e.v; }
+    // r2752 (a): a collect REFUSED, LATE or FAILED (the agent's bound, its error, a reply with no facts) is shaped «still looking» —
+    // never an error line where the release showed a listing (the field asks again, bounded); the person's newer ask (abort) passes on
+    let F;
+    try { F = await dm.dirCollect({ ...P.wire, ...(P.wire.roots.length ? { index: { have } } : {}) }, { signal, timeoutMs: 2400 }); }
+    catch (e) {
+      if (e && e.code === 'aborted') throw e;
+      const late = { late: true };
+      F = { home: info.home, at: Date.now(), me: { home: info.home, roots: [] }, answers: P.wire.cands.map((x) => ({ path: x.c, answer: 'late', at: x.a })), rows: P.wire.rows.map(() => late), probes: P.wire.probes.map(() => late), index: P.wire.roots.map(() => late), listed: [], listedTyped: 0, mounts: [] };
+    }
     const got = Date.now(), shift = got - (Number(F && F.at) || got);
     for (const a of (F && F.answers) || []) if (a && Number.isFinite(a.until)) a.until += shift;   // THAT machine's clock → this hub's
     let stale = false;

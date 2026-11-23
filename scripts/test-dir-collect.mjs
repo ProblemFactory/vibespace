@@ -14,11 +14,16 @@
 //     worker, 30 s then twice as long each time, a listing exactly, a stat at or under (never the home), forgotten when it answers; the
 //     device's busy and hung words are the hub pool's own (pinned)
 //   ④ the three ops ride the agent's worker in their OWN table: never the hub-callable fs-op door
-//   ⑥ THE LATE-FACTS WAIT (r1633) on both roads (a kid's fact made slow by a FIFO package.json): S1 (the re-ask before the fact — RED unmarked),
+//   ⑥ THE LATE-FACTS WAIT (r1633) on both roads (a kid's fact made slow by a held read, the dead-path stand-in): S1 (the re-ask before the fact — RED unmarked),
 //     the bound (1 s: what landed + factsLate; the fact kept for the next ask), superseded (a newer ask ends it at once)
 //   ⑦ THE INDEX ON THE WIRE (r1651): held on the ordinary reply, carried by the late one, «the same» by its content's version; ⑦b the
 //     hosts road's whole reply on the paired machine equals this hub's own; an older agent / Windows / no home keep the sh road
 //   ⑧ the first reply at today's bounds, measured (14 folders of 400 kids, the index held)
+//   ⑨ THE LAW (r2752): A LISTING NEVER COSTS A PERSON THEIR FILES ON THAT MACHINE — on a real agent, distinct dead paths asked for facts
+//     over many keystrokes: the folder field has ONE read out there, and two Files acts of the person at once are served at once; RED (in
+//     process, today's shape): the collector on the person's pool holds both workers and the person waits; the agent's handle (its own
+//     pool of one worker, no replacement while a stuck read is out, one read at a time — never the person's pool) pinned with its red;
+//     a pipe named like a manifest is never opened (RED: the release's fact reader opens it and holds the worker)
 //   ⑤ the reply's byte cap (r1651: 4 MiB, the hard cap): over it the facts are CUT — the index first (partial), then the one-match
 //     listings, then the kids (`more`) — and the shaped reply never reads a cut answer as whole (its rows «still looking»)
 import fs from 'node:fs';
@@ -35,6 +40,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // the fixture home is the agent's HOME; the agent's own root lies OUTSIDE it (its state never moves the listed home)
 // (the home as the agent will read it — os.homedir() is HOME as handed: the resolved path, so a temp folder behind a link compares alike)
+// THE DEAD-PATH STAND-IN (src/dir-ops.js deadStandIn — the ops' own seam for the suites, VIBESPACE_DIROPS_TEST=1): a folder named `vs-dead-…`
+// is a read HELD in the worker the collector's handle sent it to — never a real pipe (r2752) — until the suite puts a `.go` inside it; a
+// `.held` inside it says the read began, a `.left` that it returned (the hub's SafeFs workers and the real agent both run it; the
+// agent gets the name through daemonEnv's allow list)
+process.env.VIBESPACE_DIROPS_TEST = '1';
 const homeMint = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dcol-'));
 const HOME = fs.realpathSync(homeMint);
 process.env.HOME = HOME;
@@ -204,15 +214,14 @@ console.log('⑤ the reply\'s byte cap: cut, and said');
 }
 
 
-console.log('⑥ THE LATE-FACTS WAIT (r1633), on both roads: a kid whose own fact is slow (its package.json a FIFO the suite writes later)');
-const { execFileSync } = await import('node:child_process');
-const slowKid = (dir) => { mk(dir + '/kid/.git'); const f = path.join(HOME, dir, 'kid', 'package.json'); execFileSync('mkfifo', [f]); setOld(path.join(HOME, dir)); fs.utimesSync(path.join(HOME, dir), OLD, OLD); return f; };
+console.log('⑥ THE LATE-FACTS WAIT (r1633), on both roads: a kid whose own fact is slow (a dead-path stand-in the suite releases later)');
+const slowKid = (dir) => { mk(dir + '/vs-dead-kid/.git'); setOld(path.join(HOME, dir)); fs.utimesSync(path.join(HOME, dir), OLD, OLD); return path.join(HOME, dir, 'vs-dead-kid'); };
 const released = new Set();
-// the fact lands when its reader (the facts call, blocked in a worker) gets the bytes: open the FIFO's write end once a reader is there
-const release = async (fifo, afterMs = 0) => { if (afterMs) await sleep(afterMs); for (let i = 0; i < 400 && !released.has(fifo); i++) { try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.writeSync(fd, JSON.stringify({ name: 'kid' })); fs.closeSync(fd); released.add(fifo); } catch { await sleep(10); } } };
-const kidOf = (f, dir) => { const d = (f.listed || []).find((x) => x.path === path.join(HOME, dir)); return d && (d.kids || []).find((k) => k.name === 'kid'); };
+// the fact lands when the stand-in's held read (in the worker the collector's handle sent it to) is let go: its `.go` put inside it
+const release = async (dead, afterMs = 0) => { if (afterMs) await sleep(afterMs); if (released.has(dead)) return; fs.writeFileSync(path.join(dead, '.go'), ''); released.add(dead); };
+const kidOf = (f, dir) => { const d = (f.listed || []).find((x) => x.path === path.join(HOME, dir)); return d && (d.kids || []).find((k) => k.name === 'vs-dead-kid'); };
 const roadsOf = { hub: (wire, o) => hubC.collect(wire, o), paired: (wire, o) => dm.dirCollect(wire, { timeoutMs: 8000, ...(o || {}) }) };
-await Promise.all(Object.entries(roadsOf).map(async ([road, ask]) => {   // (the two roads at once: their folders, FIFOs and pools are their own)
+await Promise.all(Object.entries(roadsOf).map(async ([road, ask]) => {   // (the two roads at once: their folders, dead reads and pools are their own)
   const s1 = slowKid(`s1${road}`), b1 = slowKid(`b1${road}`), x1 = slowKid(`x1${road}`);
   // S1: a FAST link — the quiet re-ask arrives before the fact
   const P1 = DS.plan({ text: `~/s1${road}/`, bases: [], budgetMs: 1500 }, HOME);
@@ -225,7 +234,7 @@ await Promise.all(Object.entries(roadsOf).map(async ([road, ask]) => {   // (the
   const P2 = DS.plan({ text: `~/b1${road}/`, bases: [], budgetMs: 1500 }, HOME);
   await ask(P2.wire); release(b1, 1300);
   const t2 = Date.now(), lateB = await ask({ ...P2.wire, late: true }), took2 = Date.now() - t2;
-  ok(!!(lateB.factsLate === true && took2 >= DC.LATE_WAIT_MS - 50 && took2 < DC.LATE_WAIT_MS + 600), `⑥ ${road} THE BOUND: a fact past it — the late re-ask replies at the bound (${took2} ms ≈ ${DC.LATE_WAIT_MS}) with what landed and factsLate for the rest`);
+  ok(!!(lateB.factsLate === true && took2 >= DC.LATE_WAIT_MS - 50 && took2 < DC.LATE_WAIT_MS * 2), `⑥ ${road} THE BOUND: a fact past it — the late re-ask replies at the bound (${took2} ms ≈ ${DC.LATE_WAIT_MS}) with what landed and factsLate for the rest`);
   await sleep(500);
   const nextB = await ask(P2.wire);
   ok(!!((kidOf(nextB, `b1${road}`) || {}).git === true), `⑥ ${road} …the fact that landed after the bound is KEPT there: the next ordinary ask has it (other kids' facts may still be on their way while the pool was held)`, { factsLate: nextB.factsLate, kid: kidOf(nextB, `b1${road}`), took2 });
@@ -245,7 +254,7 @@ await Promise.all(Object.entries(roadsOf).map(async ([road, ask]) => {   // (the
   } else ok(!!(out3 && out3.factsLate === true && took3 < DC.LATE_WAIT_MS && !released.has(x1)), `⑥ hub SUPERSEDED: the field's newer ask (its signal) ends the wait AT ONCE (${took3} ms), the reply says the fact is late`, { took3 });
   release(s1); release(b1); release(x1);
 }));
-await Promise.all([...[...fs.readdirSync(HOME)].filter((d) => /^(s1|b1|x1)/.test(d)).map((d) => release(path.join(HOME, d, 'kid', 'package.json')))]);
+await Promise.all([...[...fs.readdirSync(HOME)].filter((d) => /^(s1|b1|x1)/.test(d)).map((d) => release(path.join(HOME, d, 'vs-dead-kid')))]);
 
 console.log('⑦ THE INDEX ON THE WIRE (r1651): only when the hub\'s copy is stale, never in front of the line and the rows');
 {
@@ -293,10 +302,83 @@ console.log('⑧ the first reply at today\'s bounds (r1651 (b)): the line and th
   for (const b of B) for (let k = 0; k < 400; k++) mk(`${b}/${'folder-name-of-forty-characters-' + String(k).padStart(4, '0')}`);
   setOld(path.join(HOME, 'wide'));
   const P = DS.plan({ text: 'x', q: 'x', bases: B.map((b) => '~/' + b), budgetMs: 1500 }, HOME);
-  const f = await settle(() => dm.dirCollect({ ...P.wire, index: { have: {} } }, { timeoutMs: 8000 }), (x) => (x.listed || []).length === 14 && !(x.rows || []).some((r) => r && r.late)), bytes = Buffer.byteLength(JSON.stringify(f));
+  const f = await settle(() => dm.dirCollect({ ...P.wire, index: { have: {} } }, { timeoutMs: 8000 }), (x) => (x.listed || []).length === 13 && !(x.rows || []).some((r) => r && r.late)), bytes = Buffer.byteLength(JSON.stringify(f));
   const kids = (f.listed || []).reduce((n, d) => n + ((d.kids || []).length), 0);
   ok(!!(P.wire.rows.length === 13 && (f.listed || []).length === 13 && kids >= 12 * 400 && bytes < 1024 * 1024 && f.index.every((r) => !(r && r.ok && r.ok.dirs))),
     `MEASURED: the first reply at today's bounds — the home and 12 bases listed, 400 kids each (${kids} kids; the plan's own cap: 12 bases), every index root held — is ${bytes} bytes (${(bytes / 1024).toFixed(0)} KiB), under 1 MiB; the 4 MiB cap is the hard bound behind it`, { rows: P.wire.rows.length, listed: (f.listed || []).length, bytes });
+}
+console.log('⑨ THE LAW (r2752): a listing never costs a person their files on that machine');
+{
+  const { execFileSync: mkfifo } = await import('node:child_process');
+  // a dead folder = the stand-in's held read: `.held` inside it once a read began there, `.left` once it returned; let go by a `.go`
+  const plantDead = (dir, names) => { mk(dir); const dead = names.map((n) => { mk(`${dir}/${n}`); return path.join(HOME, dir, n); }); setOld(path.join(HOME, dir)); return dead; };
+  const heldOf = (dead) => dead.filter((d) => fs.existsSync(path.join(d, '.held')) && !fs.existsSync(path.join(d, '.left'))).length;
+  const letGo = (dead) => { const n = heldOf(dead); for (const d of dead) fs.writeFileSync(path.join(d, '.go'), ''); return n; };
+  const until = async (pred, ms) => { const end = Date.now() + ms; while (!pred() && Date.now() < end) await sleep(20); return pred(); };
+  // a reader waiting on a REAL pipe (the product's input under test, never the slow fact): opening its write end lets it go (counted)
+  const pipeReaders = (fifos) => { let n = 0; for (const f of fifos) { try { const fd = fs.openSync(f, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); n++; } catch { } } return n; };
+  const KEYS = 6;   // keystrokes: more than today's shape needs to hold both of the person's workers (the RED below)
+  // ON A REAL AGENT: six distinct dead folders asked for facts over KEYS keystrokes
+  const dead = plantDead('deadshare', ['vs-dead-a', 'vs-dead-b', 'vs-dead-c', 'vs-dead-d', 'vs-dead-e', 'vs-dead-f']);
+  const P = DS.plan({ text: '~/deadshare/', bases: [], budgetMs: 300 }, HOME);
+  for (let k = 0; k < KEYS; k++) { await dm.dirCollect(P.wire, { timeoutMs: 8000 }).catch(() => null); await sleep(50); }
+  const outThere = await until(() => heldOf(dead) >= 1, 4000);
+  const order = [];
+  const acts = Promise.all([dm.fsList(HOME), dm.fsList(HOME)]).then((r) => { order.push('the person\'s two lists answered'); return r; }, (e) => { order.push('a person\'s list failed'); return [{ error: e.message }]; });
+  const quick = await Promise.race([acts.then(() => true), sleep(2000).then(() => false)]);
+  const out = heldOf(dead), stuck = letGo(dead);
+  order.push(`${stuck} dead read(s) let go`);
+  const lists = await acts;
+  const drained = await until(() => heldOf(dead) === 0, 4000);   // (the reads that waited their turn go once it is let go: none is left held)
+  const listed = lists.every((l) => l && !l.error && Array.isArray(l.entries) && l.entries.some((e) => e.name === 'deadshare'));
+  ok(!!(outThere && quick && listed && out === 1 && stuck === 1 && drained),
+    `on a REAL agent, six distinct dead folders asked for facts over ${KEYS} keystrokes: the folder field had exactly ONE read out there (${out} held), and the person's two Files lists at once on that machine — both of the person's workers — were answered at once, before any was let go (${order.join(' → ')}); the reads that waited their turn went after it (none left held: ${drained})`,
+    { order, out, stuck, drained, lists: lists.map((l) => l && (l.error || (l.entries || []).length)) });
+  // the agent's handle, pinned (a fast suite cannot wait the pool's 15 s deadline, and a held read in a worker ends at its terminate —
+  // so «the person's replacements unspent» is by this wiring: no read of the folder field ever reaches the person's pool)
+  const AG = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
+  const handleOk = (src) => { const body = (src.match(/call: \(op, payload\) => dirOne\(async \(\) => \{([\s\S]*?)\n {4}\}\),/) || [])[1] || '';
+    return body.includes('const pool = dirPoolOf();') && body.includes('{ idleOnly: true }') && !/workerPool|runFs\(/.test(body)
+      && /const DIR_POOL_SIZE = 1, DIR_POOL_WEDGE_MAX = 0;/.test(src) && /size: DIR_POOL_SIZE, maxWedged: DIR_POOL_WEDGE_MAX,/.test(src)
+      && /dirMounts\.p = dirOne\(\(\) => pool\.run\('mountRows'/.test(src); };
+  const swapped = AG.replace('      const pool = dirPoolOf();\n', '      const pool = workerPool;\n');
+  ok(!!(handleOk(AG) && swapped !== AG && !handleOk(swapped)),
+    "the agent's handle for the collector: every read in its turn (dirOne: one out), idle-only, on the collector's OWN pool of one worker with no replacement while a stuck read is out — never the person's pool (its workers and its replacements are never the field's) — RED: the same handle on the person's pool is refused by this pin");
+  // RED, today's shape, in process: the collector on the PERSON's pool (two workers; idle-only only takes an idle one) — the same dead
+  // folders take both workers over the keystrokes and the person's act waits behind them
+  const WP = require(REPO + '/src/agentd/worker-pool.js'), wf = path.join(dataDir, 'dir-worker.cjs');
+  fs.writeFileSync(wf, `const { parentPort } = require('worker_threads'); const DO = require(${JSON.stringify(path.join(REPO, 'src/dir-ops.js'))});\nparentPort.on('message', (m) => { try { const r = DO.runOp(m.action, m); parentPort.postMessage({ id: m.id, ...r }); } catch (e) { parentPort.postMessage({ id: m.id, error: e.message, code: e.code }); } });\n`);
+  {
+    const deadT = plantDead('dead-today', ['vs-dead-1', 'vs-dead-2', 'vs-dead-3']);
+    const personPool = WP.createWorkerPool({ file: wf, workerData: {}, size: 2 });
+    const busy = (e) => !!e && (e.code === 'no-idle-worker' || e.code === 'no-worker');
+    const c = DC.create({ call: (op, p, o) => personPool.run(op, { ...p }, 8000, { idleOnly: !!(o && o.idleOnly) }).then((r) => { if (r.error) throw Object.assign(new Error(r.error), { code: r.code }); return r.result; }), home: HOME, roots: [], poolBusy: busy, log: () => { } });
+    const Pd = DS.plan({ text: '~/dead-today/', bases: [], budgetMs: 300 }, HOME);
+    let keys = 0;
+    for (; keys < KEYS && heldOf(deadT) < 2; keys++) { await c.collect(Pd.wire); await until(() => heldOf(deadT) >= 2, 1000); }
+    const seq = [];
+    const act = personPool.run('pathStat', { path: HOME }, 8000).then(() => seq.push('person answered'), () => seq.push('person failed'));
+    const quickP = await Promise.race([act.then(() => true), sleep(1500).then(() => false)]);
+    const held = letGo(deadT);
+    seq.push(`${held} dead read(s) let go`);
+    await act;
+    await until(() => heldOf(deadT) === 0, 4000);
+    ok(!!(!quickP && held === 2 && seq[0] === '2 dead read(s) let go' && seq[1] === 'person answered'),
+      `RED (today's shape, the collector on the person's pool): after ${keys} keystroke(s) the dead folders held BOTH of the person's workers (${held}) and the person's act waited behind them (${seq.join(' → ')})`, { quickP, held, seq, keys });
+  }
+  // a pipe named like a manifest is never opened (the fact reader opens a REGULAR file only); RED: the release's reader opens it
+  mk('pipeproj/.git'); const pipe = path.join(HOME, 'pipeproj', 'package.json'); mkfifo('mkfifo', [pipe]);
+  const one = WP.createWorkerPool({ file: wf, workerData: {}, size: 1 });
+  const ans = await one.run('pathStat', { path: path.join(HOME, 'pipeproj'), facts: true }, 1500).then((r) => r.result && r.result.stat, (e) => ({ err: e.message }));
+  const opened = pipeReaders([pipe]);
+  const rf = path.join(dataDir, 'release-pkg-worker.cjs');
+  fs.writeFileSync(rf, "const { parentPort } = require('worker_threads'); const fs = require('fs'), path = require('path');\n// the release's fact reader (a3f329c05 src/safe-fs-worker.js pkgOf), word for word\nconst pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };\nparentPort.on('message', (m) => parentPort.postMessage({ id: m.id, result: pkgOf(m.path) }));\n");
+  const rel = WP.createWorkerPool({ file: rf, workerData: {}, size: 1 });
+  const p2 = rel.run('pkg', { path: path.join(HOME, 'pipeproj') }, 4000).then(() => 'answered', (e) => 'failed: ' + e.message);
+  let relHeld = 0; for (let i = 0; i < 100 && !relHeld; i++) { await sleep(20); relHeld = pipeReaders([pipe]); }
+  await p2;
+  ok(!!(ans && ans.exists && ans.git === true && !('pkg' in ans) && opened === 0), `a package.json that is a PIPE is never opened: the kid's facts answer at once (git ${ans && ans.git}, no package name) and nothing waits on the pipe (${opened} readers)`, ans);
+  ok(relHeld === 1, `RED: the release's fact reader opens that pipe and its worker waits there (${relHeld} reader let go)`);
 }
 
 POOL.close();

@@ -1472,6 +1472,8 @@ class DeviceManager {
       asked.then((v) => { signal.removeEventListener('abort', end); resolve(v); }, (e) => { signal.removeEventListener('abort', end); reject(e); });
     }) : asked);
     if (r.error) throw new Error(r.error);
+    // r2752 (b): a reply with no facts is refused BY NAME (never a TypeError further on)
+    if (!r.facts || typeof r.facts !== 'object') throw Object.assign(new Error('the machine answered the folder ask with no facts'), { code: 'collect-no-facts' });
     return r.facts;
   }
 
