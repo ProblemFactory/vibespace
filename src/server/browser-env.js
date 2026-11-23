@@ -742,7 +742,16 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // a server restart delete a running session's own indirection — the pin
     // would silently revert and the next launch would land somewhere else.
     const live = new Set([...liveKeys].filter(Boolean));
-    for (const k of liveKeysFromMeta()) live.add(k);
+    // r3079 (主开发; lane bl-machines-b's remover route R1): the records ARE READ, or this pass removes NOTHING. A failed listing of
+    // session-meta/ answered «no conversation» and a record that did not parse was skipped, so a RUNNING conversation whose key was
+    // not in memory yet lost its indirection (the pin reverted, the next launch landed elsewhere) and its own scratch folder. UNKNOWN
+    // is never «none»: the pass sweeps nothing and says so; the next pass reads again.
+    const metaRead = metaKeysRead();
+    if (!metaRead.known) {
+      try { log.warn?.(`[browser] the boot sweep removed NOTHING this pass: the conversations' records could not all be read (${metaRead.why}) — a running conversation's browser could be among them`); } catch { }
+      return { swept: 0, kept: 0, spared: [], skipped: 'the conversations\' records could not all be read', metaUnreadable: true, why: metaRead.why };
+    }
+    for (const k of metaRead.keys) live.add(k);
     // lane browser-resume (§3.9): a KEPT browser's directory outlives its session — the kept store owns it (its end, its
     // size bound). Its config / link / cwd files still go by the rule above (the next spawn rewrites them). An unreadable
     // store spares EVERY key-named directory (fail closed: a login is never deleted because a file could not be read).
@@ -843,18 +852,26 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     const ks = keptKeySet(); if (ks && ks.has(K)) return true;
     return false;
   }
-  function liveKeysFromMeta() {
-    const out = new Set();
-    let names = []; try { names = fs.readdirSync(path.join(dataDir, 'session-meta')); } catch { return out; }
+  /** r3079: the conversations' records AS READ → `{ keys, known, why }`. `known: false` when the listing of session-meta/ fails (anything
+   *  but «no such folder»: a data folder with no conversation yet) or a record cannot be read or parsed (a record removed between the
+   *  listing and its read is a conversation that ended — known). The boot sweep removes nothing on an unknown read; the mint's
+   *  fresh-key rule keeps reading only the keys it found (an unknown list names nothing there, as before). */
+  function metaKeysRead() {
+    const keys = new Set();
+    let names = [];
+    try { names = fs.readdirSync(path.join(dataDir, 'session-meta')); }
+    catch (e) { return e && e.code === 'ENOENT' ? { keys, known: true, why: null } : { keys, known: false, why: `the listing failed (${(e && e.code) || 'unreadable'})` }; }
+    let why = null;
     for (const n of names) {
       if (!n.endsWith('.json')) continue;
       try {
         const m = JSON.parse(fs.readFileSync(path.join(dataDir, 'session-meta', n), 'utf8'));
-        if (m && B.isBrowserKey(m.browserKey)) out.add(String(m.browserKey));
-      } catch { }
+        if (m && B.isBrowserKey(m.browserKey)) keys.add(String(m.browserKey));
+      } catch (e) { if (!e || e.code !== 'ENOENT') why = why || `${n} could not be read (${(e && e.code) || 'did not parse'})`; }
     }
-    return out;
+    return { keys, known: !why, why };
   }
+  function liveKeysFromMeta() { return metaKeysRead().keys; }
 
   // ── §3.2.1 recovering the key a CONVERSATION already had ─────────────────
   /**

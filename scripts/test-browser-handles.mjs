@@ -562,5 +562,71 @@ console.log('— ④ MULTIVIEW: the strip\'s list (truth table + negative contro
   bridge.shutdown();
 }
 
+// ═══ r3079 (主开发; lane bl-machines-b's remover route R1) — THE CONVERSATIONS' RECORDS UNREAD ⇒ THE SWEEP REMOVES NOTHING ═══
+// The env's boot sweep reads the live browser keys from the conversations' records (session-meta/): a failed LISTING answered «no
+// conversation» and a record that did not parse was skipped, so a RUNNING conversation whose key was not in memory yet (right after a
+// restart) lost its indirection — the pin reverted, the next launch landed elsewhere — and its own scratch folder. THE LAW: a failed
+// listing or a record that cannot be read is UNKNOWN: that pass removes NO indirection. Placed refusals only, each leg's own data
+// folder: the records' folder not a folder (a listing that fails), a listing this process may not read (judged only where it holds),
+// a record that does not parse. CONTROL (RED): the release's reading in a copy removes the running conversation's indirection.
+console.log('— r3079: the conversations\' records unread — the boot sweep removes nothing that pass');
+{
+  const quietR1 = { warn() { }, log() { } };
+  const old = Date.now() / 1000 - 7200;   // past the sweep's in-flight grace
+  const RUN = 'bk-0c0c0c01', STRAY = 'bk-0c0c0c02';   // a running conversation known only from its record; a key nobody names
+  const placements = [
+    { name: 'a listing of the records that fails (its folder is not a folder)', place: (md) => { fs.rmSync(md, { recursive: true, force: true }); fs.writeFileSync(md, 'not a folder'); }, holds: () => true },
+    { name: 'a listing of the records this process may not read', place: (md) => fs.chmodSync(md, 0o000), holds: (md) => { try { fs.readdirSync(md); return false; } catch (e) { return e.code === 'EACCES'; } } },
+    { name: 'a record that does not parse', place: (md, rec) => fs.writeFileSync(path.join(md, rec.file), rec.body.slice(0, 9)), holds: () => true },
+  ];
+  const scene = (Mod, tag) => {
+    const d = path.join(ROOT, `r1-${tag}`), dataDir = path.join(d, 'data'), home = path.join(d, 'home');
+    fs.mkdirSync(path.join(dataDir, 'browser-env'), { recursive: true }); fs.mkdirSync(path.join(home, '.agent-browser'), { recursive: true });
+    const files = {};
+    for (const k of [RUN, STRAY]) {
+      const cfg = path.join(dataDir, 'browser-env', `${k}.json`); fs.writeFileSync(cfg, '{}'); fs.utimesSync(cfg, old, old);
+      const prof = path.join(dataDir, 'browser-profiles', k); fs.mkdirSync(path.join(prof, 'Default'), { recursive: true }); fs.writeFileSync(path.join(prof, 'Default', 'Cookies'), `the sign-ins of ${k}`); fs.utimesSync(prof, old, old);
+      files[k] = { cfg, prof };
+    }
+    const md = path.join(dataDir, 'session-meta'); fs.mkdirSync(md, { recursive: true });
+    const rec = { file: 'cw-r1-0001.json', body: JSON.stringify({ browserKey: RUN, webuiSessionId: 'sess-r1-0001' }) };
+    fs.writeFileSync(path.join(md, rec.file), rec.body);
+    const e = Mod.create({ dataDir, homeDir: home, serverNotice: null, telemetry: null, log: quietR1, env: { XDG_RUNTIME_DIR: SHORT }, socketDirBase: SOCKBASE });
+    return { e, md, rec, files };
+  };
+  const still = (f) => fs.existsSync(f.cfg) && fs.existsSync(f.prof);
+  // the scene when the records READ: the running conversation's record keeps its indirection and folder; the unnamed key is swept
+  {
+    const sc = scene(BE, 'read');
+    const r = sc.e.sweep(new Set());
+    ok(still(sc.files[RUN]) && !fs.existsSync(sc.files[STRAY].cfg) && !r.metaUnreadable, 'PREMISE: with the records read, a running conversation known only from its record keeps its indirection and folder, and a key nobody names is swept (as before)', JSON.stringify({ r: { swept: r.swept, kept: r.kept }, run: still(sc.files[RUN]), stray: fs.existsSync(sc.files[STRAY].cfg) }));
+  }
+  let n = 0;
+  for (const pl of placements) {
+    n += 1;
+    const sc = scene(BE, `p${n}`);
+    pl.place(sc.md, sc.rec);
+    if (!pl.holds(sc.md)) { try { fs.chmodSync(sc.md, 0o700); } catch { } console.log(`  (${pl.name}: this run lists a mode-0000 folder, so the placed refusal does not hold here — SAID, not judged)`); continue; }
+    const r = sc.e.sweep(new Set());
+    try { fs.chmodSync(sc.md, 0o700); } catch { }
+    ok(still(sc.files[RUN]) && still(sc.files[STRAY]) && r.swept === 0 && r.metaUnreadable === true && /could not all be read/.test(String(r.skipped || '')),
+      `${pl.name}: the boot sweep removes NO indirection that pass — the running conversation's config and folder stand (and the unnamed one waits too); it says why`, JSON.stringify({ r: { swept: r.swept, skipped: r.skipped || null, why: r.why || null }, run: still(sc.files[RUN]), stray: still(sc.files[STRAY]) }));
+  }
+  // CONTROL (RED): the release's reading in a copy — a failed listing is «no conversation»: the running conversation's indirection is removed
+  {
+    const M1 = mutantCopies('browser-handles-r1', REPO);
+    const src = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+    let pre = null; try { pre = editAnchor(src, '    if (!metaRead.known) {\n', '    if (false) {\n', 'src/server/browser-env.js'); } catch { pre = null; }
+    if (!pre) console.log('  (the control patches the cure\'s own line — not in this tree: no control here)');
+    else {
+    const BEpre = M1.load('src/server/browser-env.js', pre);
+    const sc = scene(BEpre, 'ctl');
+    placements[0].place(sc.md, sc.rec);
+    const r = sc.e.sweep(new Set());
+    ok(pre !== src && !fs.existsSync(sc.files[RUN].cfg) && r.swept >= 1, 'CONTROL (RED): with the release\'s reading (an unread listing is «no conversation») the copy\'s sweep removes the running conversation\'s indirection', JSON.stringify({ swept: r.swept, run: fs.existsSync(sc.files[RUN].cfg) }));
+    }
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
