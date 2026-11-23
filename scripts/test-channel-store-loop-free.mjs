@@ -30,7 +30,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CS = require(path.join(REPO, 'src/channel-store.js'));
@@ -187,9 +187,40 @@ console.log('(d) a synchronous flush behind a flying write: it waits — measure
   for (let k = 0; k < 300 && !(w.stats().find((x) => x.file === st.adaptersFile) || {}).inflight; k++) await sleep(5);
   st.stamps.set('acct/c1', { lastPollAt: 99 });
   let t0 = performance.now(); const d1 = st.stamps.flush(); const d1Ms = Math.round(performance.now() - t0);
+  // r3301 (B-3dbd unit 2): d1's case is a flying write that ENDS inside the bound. Whether it did is a FACT of the writer, read in
+  // the same tick the flush returned (its stats: the write still in flight or not); a run where the hold's remainder (the
+  // stand-in's own write on a loaded machine) ran past the bound is SAID, not judged as d1 — (d2) judges the past-the-bound case
+  const d1Flying = !!(w.stats().find((x) => x.file === st.adaptersFile) || {}).inflight;
   const d1Disk = readJson(st.stamps.file);
-  ok(d1 === true && d1Disk && JSON.stringify(d1Disk).includes('99'), `(d1) a flush behind a flying write WAITS for it, then writes (the main thread held ${d1Ms} ms — the write in flight's remainder; the bound is ${BOUND} ms)`, { d1, d1Ms });
+  // r3446 (主开发's must): «not this run's case» ONLY when the flush HELD ITS WHOLE BOUND (its time at or past the bound, a 5 % margin,
+  // by this suite's own measure). A false BEFORE the bound with the write in flight is the fault d1 exists for: RED by name
+  const judgeD1 = (x) => (x.d1 === true && x.disk ? 'green' : (!x.d1 && x.flying && x.ms >= x.bound * 0.95 ? 'not-this-case' : 'red'));
+  const v1 = judgeD1({ d1, flying: d1Flying, ms: d1Ms, bound: BOUND, disk: !!(d1Disk && JSON.stringify(d1Disk).includes('99')) });
+  if (v1 === 'not-this-case') console.log(`  · (d1) NOT THIS RUN'S CASE: the flying write was still in flight when the flush held its WHOLE bound (${d1Ms} ms of ${BOUND} ms; it returned false, as the bound says) — the case «it ends inside the bound» did not happen here, so (d1) is not judged on it`);
+  else ok(v1 === 'green', `(d1) a flush behind a flying write WAITS for it, then writes (the main thread held ${d1Ms} ms — the write in flight's remainder; the bound is ${BOUND} ms)${!d1 && d1Flying ? ` — the flush GAVE UP BEFORE its bound (${d1Ms} of ${BOUND} ms) with the write in flight` : ''}`, { d1, d1Ms, d1Flying });
   unhold('adapters.json');
+  // RED CONTROL (r3446): a writer copy whose flush gives up AT ONCE while a write is in flight — d1's verdict on it is RED, never «not this case»
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const swSrc = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8'), ANCH = 'if (busy && !settleInflight(deadline, waitedBy)) {';
+    let SWg = null; try { SWg = mutantCopies('loop-free-d1', REPO).load('src/store-writer.js', anchored(swSrc, ANCH, 'if (busy && true) {', 'd1-gives-up-at-once'), 'gives-up-at-once'); } catch { SWg = null; }   // anchored(): the anchor present ONCE, else no copy (said below)
+    let vr = null, rMs = null, rFlying = null;
+    if (SWg) {
+      const dirR = path.join(ROOT, 'd1r'); fs.mkdirSync(dirR, { recursive: true });
+      const w2 = SWg.create({ log: quiet, workerPath: STAND, graceMs: GRACE }), st2 = CS.createChannelStore({ dir: dirR, log: quiet, writer: w2 });
+      await st2.adapters.update((a) => { a.adapters.push({ id: 'acct', kind: 'fake' }); });
+      await st2.index.update(() => { st2.index.entry('acct', 'c1', { create: true }); });
+      hold('adapters.json', Math.round(BOUND / 2));
+      st2.adapters.update((a) => { a.adapters[0].lastPass = { at: 1 }; }, { paced: true });
+      for (let k = 0; k < 300 && !(w2.stats().find((x) => x.file === st2.adaptersFile) || {}).inflight; k++) await sleep(5);
+      st2.stamps.set('acct/c1', { lastPollAt: 99 });
+      const tR = performance.now(); const r2 = st2.stamps.flush(); rMs = Math.round(performance.now() - tR);
+      rFlying = !!(w2.stats().find((x) => x.file === st2.adaptersFile) || {}).inflight;
+      vr = judgeD1({ d1: r2, flying: rFlying, ms: rMs, bound: BOUND, disk: false });
+      unhold('adapters.json'); w2.stop();
+    }
+    ok(!!SWg && vr === 'red', `RED CONTROL (r3446): a writer whose flush gives up AT ONCE with the write in flight (${rMs} ms of ${BOUND}; in flight ${rFlying}) is judged RED by d1, never «not this run's case»${SWg ? '' : ' — ANCHOR gone: the copy is not the control it says'}`, { vr, rMs, rFlying });
+  }
   for (let k = 0; k < 400 && w.pending(st.adaptersFile); k++) await sleep(10);
   // d2: the write in flight outlasts the bound — the flush returns AT the bound, the store named as held (bounded)
   hold('adapters.json', BOUND * 3);
