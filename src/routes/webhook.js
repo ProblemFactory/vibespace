@@ -324,10 +324,12 @@ async function syncRow(slug, options) {
   }, { durable: true });
   // the conversation's send identity is resolved NOW (a path the owner just made is sendable — its convCaps say so)
   try { if (typeof e.refreshConvCaps === 'function') await e.refreshConvCaps(ADAPTER_ID, slug); } catch { }
-  const people = e.store.peopleRead(ADAPTER_ID);
-  const next = { self: people.self, people: { ...people.people } };
-  for (const c of st.callers(slug)) next.people[`caller:${c.id}`] = { name: c.name, at: D.now() };
-  e.store.peopleWrite(ADAPTER_ID, next);
+  // r3188 (iii): the callers' names land in the account's people memo as ONE read-modify-write — while that memo is held it WAITS and
+  // lands merged at its lift (no other path's caller names are written over from the held stand-in)
+  const named = st.callers(slug).map((c) => [`caller:${c.id}`, { name: c.name, at: D.now() }]);
+  const put = (p) => { for (const [k, v] of named) p.people[k] = v; return p; };
+  if (typeof e.store.peopleUpdate === 'function') e.store.peopleUpdate(ADAPTER_ID, put);
+  else { const people = e.store.peopleRead(ADAPTER_ID); e.store.peopleWrite(ADAPTER_ID, put({ self: people.self, people: { ...people.people } })); }
   // lane webhook-l2-ui: EVERY client hears of it NOW (a caller registered on one appears on the other without a reload) —
   // the index write alone broadcasts nothing; the engine's one notify door names this path's row
   try { if (typeof e.notify === 'function') e.notify([`${ADAPTER_ID}/${slug}`]); } catch { }

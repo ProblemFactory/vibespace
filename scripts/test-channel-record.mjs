@@ -544,6 +544,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     ['src/server/channels-engine.js', 'en.title = d.title', 'describe()\'s output — the registry\'s door'],
     ['src/server/channels-engine.js', 'en.authors = mergeAuthors(', 'mergeAuthors passes every author it keeps through the door (a stored legacy name heals at its next ingest)'],
     ['src/server/channels-engine.js', 'en.authors = Av.stampSelf(en.authors, selfIdOf(rec))', 'lane channels-list-polish: stampSelf only marks the account\'s own author `isSelf` — every name is mergeAuthors\' door output, untouched'],
+    ['src/server/channels-engine.js', 'en.authors = Av.stampSelf(en.authors, self)', 'B-f276 family r3188: the rows indexed while the account\'s own id was unknown, stamped at its people memo\'s lift — stampSelf only marks the own author `isSelf`, every name already mergeAuthors\' door output'],
     ['src/server/channels-engine.js', 'if (en.title === undefined) en.title = null', 'no name'],
     ['src/server/channels-engine.js', 'name: peerName(att.name, 256) || peerName(r && r.name, 256)', 'the door (the fetched file name is the vendor\'s)'],
     ['src/server/channels-engine.js', 'name: peerName(a.name, 256) || null, mime: h.mime', 'the door (lane channel-rich: a formatted body the adapter held at ingest — the .197 integration routed its name through it)'],

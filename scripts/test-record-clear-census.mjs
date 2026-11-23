@@ -213,7 +213,10 @@ const CHANNELS_GATES = {
   // lane channel-self-unread (int228): the unread RE-DERIVATION — a count past readAt (never a served record), the owner's own skipped;
   // flushPushBatch and markRead call it after their gates, countFresh (a helper of the three append sites) when the owner's own
   // message moves readAt — and each append site holds the conversation's index row before it counts
-  unreadSince: { callers: ['flushPushBatch', 'markRead', 'countFresh'] },
+  unreadSince: { callers: ['flushPushBatch', 'markRead', 'countFresh', 'settleSelf'] },
+  // B-f276 family r3188: the rows a pass indexed while the account's own id was unknown, settled at its people memo's lift — the row
+  // held (store.index.entry) before its count is re-derived
+  settleSelf: 'store.index.entry(',
   countFresh: { callers: ['landById', 'ingest', 'threadRefresh'] },
   landById: 'store.index.entry(',
   ingest: 'store.index.entry(',

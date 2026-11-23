@@ -161,6 +161,7 @@ const path = require('path');
 const FC = require('./fd-close.js');   // B-15ac: the ONE close of a written file (a failed close said in the journal)
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const SR = require('./store-read.js'); // PURE: what ONE read of a store answers (B-f276 — a failed read is held, never set aside)
+const SRH = require('./store-read-hold.js');   // B-f276 family (主开发 r3188): the store-read law's helper — each account's people memo
 const SH = require('./store-hold.js'); // B-f276 1b (主开发 r809): THE STORE HOLD — one per family: the read, the hold, the ladder, the lift
 const crypto = require('crypto');
 const { sideKey, validateSide, isSystemRecord, asSystemRecord, isDraftRecord, asDraftRecord } = require('./channel-record.js');   // + the system pair: lane lark-system-records; + the draft pair: lane gmail-draft-not-a-message
@@ -2398,13 +2399,57 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  IS (`self`, a resolved id) and what each author was named by (`people[id]` = {name, member, sender, alt, at, until,
    *  why}) — so a restart does not forget them. Written whole by the adapter (bounded there), read through a cache. */
   const peopleCache = new Map();
+  // B-f276 family (主开发 r3183 / r3188): THE PEOPLE MEMO UNDER THE STORE-READ LAW (src/store-read-hold.js), one hold an account. Its
+  // own id and the names it learned are no cache: a read that FAILED is HELD — read as UNKNOWN (never «nobody»), nothing written over
+  // it (peopleWrite asks writable; a read-modify-write waits — peopleUpdate), read again off the loop, and at its LIFT taken in and
+  // handed to the account's hooks (the adapter's copy merges, the engine settles what it indexed meanwhile). Torn bytes are kept aside
+  // once, then it starts empty: nobody removes by its silence (avatars are keyed by the author, never by the memo)
+  const peopleShape = (v) => (v && typeof v === 'object' ? { self: typeof v.self === 'string' && v.self.length <= 128 ? v.self : null, people: v.people && typeof v.people === 'object' && !Array.isArray(v.people) ? v.people : {} } : { self: null, people: {} });
+  const PEOPLE_OK = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const peopleHolds = new Map();     // adapterId → its hold (made at the account's first read)
+  const peopleQueued = new Map();    // adapterId → [fn] the read-modify-writes waiting for its lift, in order
+  const peopleLiftHooks = new Map(); // adapterId → Set(fn(memo)) told at its lift
   function peopleRead(adapterId) {
     if (peopleCache.has(adapterId)) return peopleCache.get(adapterId);
-    let v = null;
-    try { v = JSON.parse(fs.readFileSync(path.join(dir, safeSeg(adapterId), 'people.json'), 'utf-8')); } catch { v = null; }
-    const out = v && typeof v === 'object' ? { self: typeof v.self === 'string' && v.self.length <= 128 ? v.self : null, people: v.people && typeof v.people === 'object' ? v.people : {} } : { self: null, people: {} };
+    const file = path.join(dir, safeSeg(adapterId), 'people.json');
+    const H = SRH.create({ file, valid: PEOPLE_OK, code: 'channel_people_unread', aside: (mark) => `${file}.corrupt-${mark}`, now,
+      words: (h) => `the account's people memo could not be read (${h.code}) — its own id and the names it learned are unknown until it reads; nothing is written over it, and it is read again by itself`,
+      log: (m) => warn(`[channels] ${adapterId}: ${m}`), onLift: (v) => peopleLifted(adapterId, v) });
+    peopleHolds.set(adapterId, H);
+    let read;
+    try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: PEOPLE_OK });
+    const out = H.start(a) === 'data' ? peopleShape(a.value) : { self: null, people: {} };
     peopleCache.set(adapterId, out);
     return out;
+  }
+  /** the account's people memo is HELD now (its read failed): its own id is UNKNOWN, not absent */
+  function peopleHeld(adapterId) { const H = peopleHolds.get(adapterId); return !!(H && H.held()); }
+  /** a READ-MODIFY-WRITE of the memo (the webhook's caller names): held, it WAITS and lands merged at the lift — never written from the
+   *  held stand-in over the file's other entries. → true applied now, false waiting */
+  function peopleUpdate(adapterId, fn) {
+    const cur = peopleRead(adapterId);
+    if (peopleHeld(adapterId)) { const q = peopleQueued.get(adapterId) || []; q.push(fn); peopleQueued.set(adapterId, q); return false; }
+    peopleWrite(adapterId, fn({ self: cur.self, people: { ...cur.people } }));
+    return true;
+  }
+  /** a hook told at the memo's lift with the memo taken in (the adapter's copy, the engine's settle) → its remover */
+  function onPeopleLift(adapterId, fn) {
+    if (typeof fn !== 'function') return () => { };
+    let s = peopleLiftHooks.get(adapterId);
+    if (!s) { s = new Set(); peopleLiftHooks.set(adapterId, s); }
+    s.add(fn);
+    return () => s.delete(fn);
+  }
+  function peopleLifted(adapterId, v) {
+    if (closed) return;
+    let out = peopleShape(v);
+    peopleCache.set(adapterId, out);
+    const q = peopleQueued.get(adapterId) || [];
+    peopleQueued.delete(adapterId);
+    for (const fn of q) { try { out = peopleShape(fn({ self: out.self, people: { ...out.people } })); } catch (e) { warn(`[channels] ${adapterId}: a people-memo change waiting for its read was not applied: ${(e && e.message) || e}`); } }
+    if (q.length) peopleWrite(adapterId, out);
+    for (const fn of [...(peopleLiftHooks.get(adapterId) || [])]) { try { fn(peopleCache.get(adapterId)); } catch (e) { warn(`[channels] ${adapterId}: a people-memo lift hook threw: ${(e && e.message) || e}`); } }
   }
   // channel-store-off-loop (commit 1): PACED — the names an adapter learned (re-learned after a loss); the writer's thread
   // makes the account's directory (0700) when it is new — the field's 75 s were that mkdir on the main thread. Cure r1: ONLY
@@ -2413,6 +2458,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const peopleFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'people.json');
   function peopleWrite(adapterId, memo) {
     if (goneAccounts.has(adapterId)) return { self: null, people: {} };   // B-92fc: nothing owed for a purged account
+    peopleRead(adapterId);   // its first read made (the hold known before any write)
+    const H = peopleHolds.get(adapterId);
+    if (H && !H.writable(`the people memo of ${adapterId}`)) return null;   // r3188: HELD — nothing written over it (the caller keeps its copy; the lift takes it in)
     const out = { self: memo && typeof memo.self === 'string' ? memo.self : null, people: memo && memo.people && typeof memo.people === 'object' ? memo.people : {} };
     peopleCache.set(adapterId, out);
     const file = peopleFile(adapterId);
@@ -2961,6 +3009,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     closed = true;
     heldStopped = true;
     for (const h of holds.values()) { try { h.fam.H.stop(); } catch { } }
+    for (const H of peopleHolds.values()) { try { H.stop(); } catch { } }   // r3188: the people memos' holds
     if (interval) { clearInterval(interval); interval = null; }
     flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
     stampsFlush();
@@ -3200,7 +3249,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     startDamagedEmpty,   // B-f276 1b: the damaged family's one door (a person's choice — the engine's route asks it)
     appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
-    prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
+    prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite, peopleHeld, peopleUpdate, onPeopleLift,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     feedMissRead, feedMissWrite, feedMissDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush

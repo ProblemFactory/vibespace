@@ -1283,14 +1283,29 @@ function create(record = {}, deps = {}) {
   // name, the profile + its alternatives) — so a restart forgets nobody; bounded PEOPLE_MEMO_MAX, written at most every 10 s
   const peopleStore = deps.people && typeof deps.people.read === 'function' ? deps.people : null;
   const memo = (() => { let m = null; try { m = peopleStore ? peopleStore.read() : null; } catch { m = null; } return { self: m && typeof m.self === 'string' ? m.self : null, people: { ...((m && m.people) || {}) } }; })();
-  let memoDirty = false, memoWrittenAt = 0, selfAskedUntil = 0;
+  let memoDirty = false, memoWrittenAt = 0, selfAskedUntil = 0, selfStated = false;   // selfStated: the vendor named the own id in THIS life
+  const memoHeld = () => { try { return !!(peopleStore && typeof peopleStore.held === 'function' && peopleStore.held()); } catch { return false; } };
   const flushMemo = (force = false) => {
     if (!peopleStore || !memoDirty || (!force && now() - memoWrittenAt < 10e3)) return;
+    if (memoHeld()) return;   // r3188 (a): the memo's file could not be read — this copy never writes over it (the lift merges it in)
     const ids = Object.keys(memo.people);
     if (ids.length > PEOPLE_MEMO_MAX) for (const id of ids.sort((a, b) => (Number(memo.people[a].at) || 0) - (Number(memo.people[b].at) || 0)).slice(0, ids.length - PEOPLE_MEMO_MAX)) delete memo.people[id];
     memoDirty = false; memoWrittenAt = now();
     try { peopleStore.write({ self: memo.self, people: memo.people }); } catch (e) { log.warn && log.warn(`[channels] lark: the people memo was not written (${(e && e.message) || e})`); }
   };
+  // r3188 (a): AT THE LIFT the file's memo is taken in, merged with what this copy learned meanwhile — an author's fields learned since
+  // win over the file's (they are newer), the file's fill the rest; the own id from the file stands unless the vendor named another since
+  if (peopleStore && typeof peopleStore.onLift === 'function') {
+    peopleStore.onLift((file) => {
+      const fp = (file && file.people && typeof file.people === 'object') ? file.people : {};
+      const merged = { ...fp };
+      for (const [id, p] of Object.entries(memo.people)) { const f = fp[id] || {}; merged[id] = { ...f, ...p, at: Math.min(Number(f.at) || Infinity, Number(p.at) || Infinity) === Infinity ? now() : Math.min(Number(f.at) || Infinity, Number(p.at) || Infinity) }; }
+      memo.people = merged;
+      if (!selfStated && file && typeof file.self === 'string' && file.self) memo.self = file.self;
+      memoDirty = true;
+      flushMemo(true);
+    });
+  }
   const noteName = (id, field, name) => {
     const k = String(id || ''), v = pName(String(name || ''));
     if (!Feed.idOf(k) || !v) return;
@@ -2619,7 +2634,7 @@ function create(record = {}, deps = {}) {
       }
       const id = d && d.data && typeof d.data.open_id === 'string' ? d.data.open_id.trim() : '';
       if (!Feed.idOf(id)) return null;
-      memo.self = id; memoDirty = true; flushMemo(true);
+      memo.self = id; selfStated = true; memoDirty = true; flushMemo(true);
       return id;
     },
     /** lane channels-list-polish (the owner's "Kit" is Lark's "Mia (Marketing)"): EVERY author id a conversation carries

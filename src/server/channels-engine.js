@@ -923,7 +923,7 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); }, held: (convId) => !!store.index.entry(rec.id, String(convId), { create: false }),   /* B-2f6c: the row exists (a lost cursor reads it once) */
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m), held: () => !!(store.peopleHeld && store.peopleHeld(rec.id)), onLift: (fn) => (store.onPeopleLift ? store.onPeopleLift(rec.id, fn) : () => { }) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); }, held: (convId) => !!store.index.entry(rec.id, String(convId), { create: false }),   /* B-2f6c: the row exists (a lost cursor reads it once) */
         // lane webhook-l1-server: the account's OWN data directory (data/channels/<id>/), the channels secret-box, a stored
         // record by its vendor id, an instance setting — handed to every adapter, read by the ones that need them
         ownDir: path.join(dataDir, 'channels', String(rec.id)), secrets: { seal: (v) => box.enc(v), open: (v) => box.dec(v) }, findRecord: (convId, vendorId) => (store.index.entry(rec.id, String(convId), { create: false }) ? store.findRecord(rec.id, String(convId), String(vendorId)) : null), setting: (key) => { try { return serverSetting(key); } catch { return undefined; } },
@@ -3203,7 +3203,8 @@ function create(deps = {}) {
     if (trimNow) { try { store.trim(rec.id, convId); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }
     // lane channels-list-polish: the account's own id resolved once (a sign-in that never named it), and this
     // conversation's authors handed to the people warm-up (the adapter's bounds; never awaited by the pass)
-    if (typeof e.adapter.resolveSelf === 'function' && !selfIdOf(rec)) await e.adapter.resolveSelf().catch((err) => { if (err && err.code === 'rate-limited') throw err; });
+    // r3188 (i): NEVER while the account's people memo is HELD — the file may hold the id: a vendor call nobody pressed, at every pass
+    if (typeof e.adapter.resolveSelf === 'function' && !selfIdOf(rec) && !selfUnknown(rec)) await e.adapter.resolveSelf().catch((err) => { if (err && err.code === 'rate-limited') throw err; });
     if (typeof e.adapter.warmPeople === 'function') {
       const en0 = store.index.live()[`${rec.id}/${convId}`];
       const ids = (en0 && Array.isArray(en0.authors) ? en0.authors : []).filter((a) => a && a.id && !a.isSelf && !a.isBot).map((a) => String(a.id));
@@ -3241,8 +3242,50 @@ function create(deps = {}) {
     while (noSenderAt.size > 512) noSenderAt.delete(noSenderAt.keys().next().value);
     log.warn(`[channels] ${key}: ${n} record(s) name no sender and are not a system notice — shown as (no sender)`);
   }
+  // r3188 (b) + (ii): THE OWN ID UNKNOWN — the account's people memo HELD (its read failed): nothing is guessed. A pass's records count as
+  // the adapter stated them (an author not marked as the account's own adds to the row, the read mark does not move on it), and the row
+  // is NOTED (bounded); at the memo's LIFT the noted rows are SETTLED once, off the loop: their authors stamped with the own id, the read
+  // mark moved to the newest own message and the count re-derived past it, the «@ you» instants judged — never left wrong for good
+  const selfUnknown = (rec) => !!(rec && store.peopleHeld && store.peopleHeld(rec.id));
+  const SELF_SETTLE_MAX = 2000;
+  const selfSettle = new Map();   // adapterId → Set(convId) indexed while its own id was unknown
+  function noteSelfUnknown(rec, convId) {
+    let s = selfSettle.get(rec.id);
+    if (!s) {
+      s = new Set(); selfSettle.set(rec.id, s);
+      if (store.onPeopleLift) store.onPeopleLift(rec.id, () => { settleSelf(rec.id).catch((err) => log.warn(`[channels] ${rec.id}: the rows indexed while its own id was unknown were not settled: ${(err && err.message) || err}`)); });
+    }
+    if (s.size < SELF_SETTLE_MAX) s.add(String(convId));
+  }
+  async function settleSelf(adapterId) {
+    const s = selfSettle.get(adapterId);
+    selfSettle.delete(adapterId);
+    if (!s || !s.size) return 0;
+    const rec = adapterRecords().adapters.find((r) => r && r.id === adapterId);
+    const self = rec ? selfIdOf(rec) : null;
+    if (!self) return 0;   // the memo read again with no own id: nothing to settle (the adapter resolves it as before)
+    let n = 0;
+    for (const convId of s) {
+      if (engineCtx.stopped) break;
+      let recs = [];
+      try { const t = await store.readTailAsync(adapterId, convId, { limit: 200 }); recs = (t && t.records) || []; } catch { continue; }
+      await store.index.update(() => {
+        const en = store.index.entry(adapterId, convId, { create: false });
+        if (!en) return;
+        if (Array.isArray(en.authors)) en.authors = Av.stampSelf(en.authors, self);
+        const t = selfAtOf(recs, self);
+        if (t > (Number(en.readAt) || 0)) { en.readAt = t; en.unread = unreadSince(adapterId, convId, t); }
+        const ay = FO.keepAtYou(en.atYouAts, recs, self);
+        if (ay.length) { en.atYouAts = ay; en.atYouLast = atYouLastOf(en.atYouLast, recs, self); }
+      });
+      n++;
+    }
+    if (n) { log.log(`[channels] ${adapterId}: its people memo read again — ${n} conversation(s) indexed meanwhile settled with its own id`); try { notify([...s].map((c) => `${adapterId}/${c}`)); } catch { } }
+    return n;
+  }
   function countFresh(rec, convId, en, fresh) {
     noteNoSender(rec, convId, fresh);   // lane lark-system-records
+    if (!selfIdOf(rec) && selfUnknown(rec)) noteSelfUnknown(rec, convId);   // r3188: settled at the memo's lift
     const ra = FO.readAdvance(en.readAt, fresh, selfIdOf(rec));
     if (ra.moved) { en.readAt = ra.readAt; en.unread = unreadSince(rec.id, convId, ra.readAt); }
     else en.unread = (Number(en.unread) || 0) + ra.unread;
