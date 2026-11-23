@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.416 — 2026-11-21
+## 2.369.416 — 2026-11-23
 
 ### Added
 - The Vault window shows which background jobs use each secret, with ✕ to take it back; a job's card names its secrets and what it waits for.
