@@ -70,6 +70,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - WHY: a failed read of callers.json or pair-pending.json was an empty list, and the next registration, pairing or pairing code wrote it over the file: every webhook path and caller gone, every caller's call refused as unknown meanwhile.
 - WHAT: both files hold on src/store-read-hold.js (webhook_callers_unread, webhook_pairing_unread): every writer refused by name, nothing written, read again off the loop, lifted with no restart; torn bytes kept aside once. A caller's call and poll hear «try again later» (503), never «unknown»; every owner verb and the pairing's completion answer the hold; the page says it in place (the held codes' rows are the family's one table's, r3168; the torn lift worded in zh and ja).
 - LEGS FIRST: test-webhook-callers-held, red at the release, then the cure. Its store-write census rows: two 'answer' rows.
+- Its smalls (主开发 r2436, after line 438): said as they are — server.js's Auth line gains the witness (only the part the honour suite plants on is B3b-1's text), and the piped form's held reply carries a reason; the hidden copy under a late mount and the act that lifts it are a named limit; a copy in a folder the read allows and the write refuses is no longer rewritten nor warned about at each start; the boot's synced writes measured on the test machine; the page module's header names the table.
 
 ## 2.369.416 — 2026-11-23
 
