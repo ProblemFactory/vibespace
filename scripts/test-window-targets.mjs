@@ -1126,7 +1126,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     // the scroll verb's refusals (no backend here, or a bad direction)
     const sc = await err(() => e5.act('da-e2', b, { verb: 'scroll', direction: 'sideways' }));
     ok(sc && ['bad-request', 'no_injection_backend'].includes(sc.code), `scroll: a bad direction / no backend is refused by name (${sc && sc.code})`);
-    ok(WT.injectClick({ bins: { xdotool: '/bin/true' }, xenv: {}, x: 1, y: 1, button: 4 }).then((r) => r.code === 'bad-request' && /the wheel is/.test(r.why)), 'click --button 4 is refused by name (M8: a coerced wheel button became a LEFT click)');
+    ok(await WT.injectClick({ bins: { xdotool: '/bin/true' }, xenv: {}, x: 1, y: 1, button: 4 }).then((r) => r.code === 'bad-request' && /the wheel is/.test(r.why)), 'click --button 4 is refused by name (M8: a coerced wheel button became a LEFT click)');
     ok((await WT.injectClick({ bins: { xdotool: '/bin/true' }, xenv: {}, x: 1, y: 1, button: 4 })).code === 'bad-request' && (await WT.injectScroll({ bins: { xdotool: '/bin/true' }, xenv: {}, direction: 'down', by: 99 })).code === 'bad-request' && (await WT.injectType({ bins: { xdotool: '/bin/true' }, xenv: {}, text: '' })).code === 'bad-request', 'the pixel road refuses a wheel button on click, > 20 notches, an empty type — by name');
     const stubArgs = [];
     const fakeBin = path.join(dir, 'fake-xdotool.sh'); fs.writeFileSync(fakeBin, `#!/bin/sh\nprintf '%s\\n' "$@" >> ${JSON.stringify(path.join(dir, 'xdotool.args'))}\n`); fs.chmodSync(fakeBin, 0o755);

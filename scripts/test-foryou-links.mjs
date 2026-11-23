@@ -78,7 +78,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   ok(r9imp !== 'loaded', 'CONTROL r9\'s rewrite (the first path-linkify import and inbox-reply-text only) of the same copy ⇒ the import fails at the sibling\'s specifier — RED', r9imp);
   const r6seg = FY1.includes(ONE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(planted).replace(ONE, '  return segmentWords(src, has);')))).segmentText : null;
   ok(gen.left === 0 && typeof r6seg === 'function', 'r10 (F2) the control copies resolve EVERY relative import of the copied module — a copy that gains a sibling\'s imports (a second path-linkify import, secret-shapes) loads, no relative specifier left', { ...gen, loaded: typeof r6seg });
-  ok(r6seg, 'CONTROL needle present: the segmenter reads the cut runs (r7) — a tree without it has nothing to patch');
+  ok(typeof r6seg === 'function', 'CONTROL needle present: the segmenter reads the cut runs (r7) — a tree without it has nothing to patch');
   if (r6seg) ok(J(r6seg(keptQ).filter((g) => g.t === 'link').map((g) => g.kind + ':' + g.ref)) === J(['page:/p/' + P10]), 'CONTROL r6\'s segmenter (the cut runs unread) ⇒ the tray links «page:/p/' + P10 + '» before the «…» — RED');
   // r8 (X1): THE WHOLE LINK TOKEN, NEVER ITS WORD FRAGMENT — a URL or a path runs on across '.', '/', '?', '=', ':' where a
   // page id stops: the store's cut at EVERY position through a URL, an absolute path, a relative path, a home path, a mail
@@ -91,10 +91,10 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
     'r8 (X1) + r9 (Y2) the store\'s cut at every one of 184 positions through a URL (query and all), an absolute path, a relative path, a home path, a mailto:, a mail address and a path with its :line:col suffix (a cut right after either \':\' too) ⇒ never a link over the cut token (no other host, no truncated target); the uncut link before it a link at every position; a whole link a CJK mark, CJK words or a space ends before the cut stays a link', { through: sw8.through.slice(0, 6), first: sw8.first, n: sw8.n, cjk });
   const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs, caps = null, has = null) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs, caps = null, has = null) {')) + 2);
   const r7seg = FY1.includes(ONE) && R7CUT.length > 40 ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(R7CUT, "function uncutLinks(src, segs) {\n  const runs = cutRuns(src).filter(([b, e]) => e > b);\n  if (!runs.length) return segs;\n  let at = 0;\n  return segs.map((g) => { const a = at; at += g.s.length; return g.t === 'link' && runs.some(([b, e]) => b < at && e > a) ? { t: 'text', s: g.s } : g; });\n}")))).segmentText : null;
-  ok(r7seg, 'CONTROL needle present: the segmenter\'s cut-token rule (r8) — a tree without it has nothing to patch');
+  ok(typeof r7seg === 'function', 'CONTROL needle present: the segmenter\'s cut-token rule (r8) — a tree without it has nothing to patch');
   const PROBE = "return '0' + open.reverse().join('');"; // r9's digit — since the .399 follow-up, the continuation's head (the closers follow it)
   const r8seg = FY1.includes(PROBE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(PROBE, "return 'x' + open.reverse().join('');")))).segmentText : null;
-  ok(r8seg, 'CONTROL needle present: the segmenter\'s digit probe (r9) — a tree without it has nothing to patch');
+  ok(typeof r8seg === 'function', 'CONTROL needle present: the segmenter\'s digit probe (r9) — a tree without it has nothing to patch');
   if (r8seg) { const s8 = sweep(r8seg, TOKS.slice(6)); ok(s8.through.length === 2 && s8.through.every((x) => /main\.py:(120:)?… ⇒ /.test(x)), 'CONTROL r8\'s probe (a letter) ⇒ the two cuts right after a \':\' of main.py:120:4 still a link to the file, its line or its column dropped — RED', s8.through); }
   // r10 (n5): a RELATIVE path's `:line` — the relative grammar never takes it (path-linkify: an uncut «plan.md:42» is no link),
   // so a cut right after its ':' still read the file: the digit probe's text reads no link there at all. A link only the cut made
@@ -104,7 +104,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
     'r10 (n5) the store\'s cut at every one of 42 positions through a RELATIVE path with its :line / :line:col (a cut right after a \':\' too) ⇒ never a link; the uncut link before it a link at every position; a whole relative path a space ends before the cut stays a link (an uncut «plan.md:42» is no link — the relative grammar\'s own rule, unchanged)', s10);
   const CUTMADE = ' || cutMade(a, at)';
   const r9seg = FY1.includes(CUTMADE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CUTMADE, '')))).segmentText : null;
-  ok(r9seg, 'CONTROL needle present: a link only the cut made (r10) — a tree without it has nothing to patch');
+  ok(typeof r9seg === 'function', 'CONTROL needle present: a link only the cut made (r10) — a tree without it has nothing to patch');
   if (r9seg) { const s9 = sweep(r9seg, RELT); ok(s9.through.length === 2 && s9.through.every((x) => /(plan\.md|main\.py):… ⇒ (docs\/guide\/plan\.md|src\/app\/main\.py)$/.test(x)), 'CONTROL r9\'s rule (the probe\'s links only) ⇒ «docs/guide/plan.md:…» and «src/app/main.py:…» still link the file, the line dropped — RED', s9.through); }
   // .399 follow-up (the acceptance of 93c6e9132): THE MERGED GRAMMAR'S OWN TOKENS — a URL through each full-width pair
   // (FW_PAIRS: a balanced pair rides inside a URL) and a path through a [vault:…] mark (a whole mark rides inside a path):
@@ -118,7 +118,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
     '.399 follow-up: the store\'s cut at every one of 61 positions through a URL inside each of the six full-width pairs and a path through a [vault:…] mark (ASCII and CJK words around) ⇒ every link the cut text draws is one the whole text reads at the same offset with the same kind and ref; the uncut link before it a link at every position', { n: s11.n, created: [...s11.created, ...s11cjk.created].slice(0, 6) });
   const CONT = 'const c = continuation(src, e);', MASKED = "if (g.t !== 'link' && g.t !== 'masked') continue;";
   const r10cont = FY1.includes(CONT) && FY1.includes(MASKED) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CONT, "const c = '0';").replace(MASKED, "if (g.t !== 'link') continue;")))).segmentText : null;
-  ok(r10cont, 'CONTROL needle present: the continuation closes what the cut left open (.399 follow-up) — a tree without it has nothing to patch');
+  ok(typeof r10cont === 'function', 'CONTROL needle present: the continuation closes what the cut left open (.399 follow-up) — a tree without it has nothing to patch');
   if (r10cont) { const c11 = sweep11(r10cont); ok(c11.created.some((x) => /⇒ url:https:\/\/ja\.wikipedia\.org\/wiki\/$/.test(x)) && c11.created.some((x) => /⇒ path:\/srv\/app\/\[vault$/.test(x)), 'CONTROL r10\'s probe (a digit only, a masked segment not counted) ⇒ the cut makes a link to the parent page «…/wiki/» and to «/srv/app/[vault» — RED', c11.created.slice(0, 4)); }
   const R7N = 18; // r7's word run over the first six tokens' 150 positions
   if (r7seg) { const sw7 = sweep(r7seg, TOKS.slice(0, 6)); ok(sw7.through.length === R7N && sw7.through.some((x) => /⇒ https:\/\/docs\.example$/.test(x)), 'CONTROL r7\'s rule (the page id\'s word run before the mark) ⇒ ' + R7N + ' of 150 cut positions still a link — «https://docs.example.…» a link to ANOTHER host, «…/guide/» a parent — RED', { n: sw7.through.length, first: sw7.through.slice(0, 4) }); }
