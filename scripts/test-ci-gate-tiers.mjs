@@ -1189,6 +1189,42 @@ console.log('\n§8i a heavy census of the tree carries the everyGate mark, and a
   ok(said(fastMark, /^test-zz-census: everyGate on a fast row/), `CONTROL: the mark on a fast row is red (${fastMark.problems[0] || 'no problem'})`);
   const otherWords = one({ 'test-zz-census.mjs': CENSUS }, { everyGate: true });
   ok(said(otherWords, /^test-zz-census: everyGate says "true", not EVERY_GATE's words/), `CONTROL: a mark in other words is red (${otherWords.problems[0] || 'no problem'})`);
+  // THE ROUND's BLIND SPOTS (r3098): each form a future marked suite could start something through, red here
+  // (1) a module specifier is kept whatever its length: a twin or a helper past forty characters of path is still read
+  const LONG = 'test-zz-census-twin-whose-name-is-past-forty';
+  const longTwin = one({ 'test-zz-census.mjs': L(`await import('./${LONG}.mjs');`), [`${LONG}.mjs`]: CENSUS + "spawnSync('node', ['-e', '1']);\n" });
+  ok(said(longTwin, new RegExp(`it starts a child that is not git \\(twin ${LONG} line 6\\)`)),
+    `CONTROL: a marked suite whose twin's path is past forty characters is red, the twin read (${longTwin.problems[0] || 'no problem'})`);
+  const LONGH = 'zz-a-helper-module-whose-path-is-past-forty.mjs';
+  const longHelper = one({ 'test-zz-census.mjs': L(`import { countRows } from './${LONGH}';`, 'console.log(countRows());') + CENSUS, [LONGH]: HELPER });
+  ok(said(longHelper, /it starts a worker thread \(zz-a-helper-module-whose-path-is-past-forty\.mjs: countRows → inner line 3\)/),
+    `CONTROL: a helper whose path is past forty characters is still followed (${longHelper.problems[0] || 'no problem'})`);
+  // (2) child_process under any name, a dotted or computed member, a process binding, a bare network module, an unbound helper import
+  const FORMS = [
+    ['child', "import { spawnSync as run } from 'node:child_process';\nrun('node', ['-e', '1']);"],
+    ['child', "const { spawn: go } = require('child_process');\ngo('node');"],
+    ['child', "import * as cp from 'node:child_process';\ncp.exec('node x');"],
+    ['child', "import cp from 'node:child_process';\ncp['spawn']('node');"],
+    ['child', "require('child_process').execSync('node x');"],
+    ['child', "process.binding('spawn_sync');"],
+    ['socket', "const https = require('https');\nhttps.get(url);"],
+    ['socket', "import('http').then((h) => h.get(url));"],
+    ['socket', 'globalThis.fetch(url);'],
+    ['worker', "import('./zz-helper.mjs').then((m) => m.countRows());"],
+  ];
+  for (const [kind, text] of FORMS) {
+    const p = one({ 'test-zz-census.mjs': CENSUS + text + '\n', 'zz-helper.mjs': HELPER });
+    ok(p.problems.length === 1 && p.problems[0].startsWith('test-zz-census: marked everyGate, but it starts ') && p.problems[0].includes(ci.EVERY_GATE_STARTS[kind]),
+      `CONTROL: ${JSON.stringify(text.split('\n').pop())} is a start, ${ci.EVERY_GATE_STARTS[kind]} (${p.problems[0] || 'no problem'})`);
+  }
+  const aliasGit = one({ 'test-zz-census.mjs': L("import { execFileSync as run } from 'node:child_process';", "console.log(run('git', ['ls-files', '-z'], { encoding: 'utf8' }).length);") });
+  ok(aliasGit.problems.length === 0 && aliasGit.pass.join() === 'test-zz-census',
+    `a child binding under another name, called with 'git' first and 'ls-files' in its arguments, is a green census (${aliasGit.problems.join(' · ') || 'no problem'})`);
+  // (5) the tree list counts only as a git child's argument or a helper's binding
+  const bareWord = one({ 'test-zz-census.mjs': L("const args = ['ls-files', '-z'];", "console.log(args.includes('ls-files'));") });
+  ok(said(bareWord, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: the word 'ls-files' that no git child is handed is no listing (${bareWord.problems[0] || 'no problem'})`);
+  const localFn = one({ 'test-zz-census.mjs': L('function trackedFiles() { return []; }', 'console.log(trackedFiles().length);') });
+  ok(said(localFn, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: a local function named trackedFiles is no listing, only a helper's binding is (${localFn.problems[0] || 'no problem'})`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

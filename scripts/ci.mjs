@@ -3377,19 +3377,39 @@ export function hostFilter(suites, want, { sourceOf = () => '' } = {}) {
 // only who runs it, and when, changes. The kit and the integrator read the names from the tree at the tip they run
 // (everyGateNames), never from a file of their own.
 // THE CHECK IS STATIC (everyGateOf, pure over the texts). It reads the suite's code, with comments, string text, template
-// text and regex bodies blanked and a short plain literal ('git', 'ls-files', 'node:http') kept. It also reads every suite
-// the suite runs as a twin (an import of ./test-….mjs), and, for each binding the suite takes from a helper module of
-// scripts/ (./….mjs), that binding's top-level declaration plus every top-level declaration of the helper it names,
-// transitively. What a helper runs at its own import is the same for every suite and is not read; a product module the
-// suite requires is the census's object and is not followed. A START is:
+// text and regex bodies blanked. A short plain literal ('git', 'ls-files') is kept, and so is a MODULE SPECIFIER whatever its
+// length (a literal after from, import, import(, require( or createRequire(…)( ). It also reads every suite the suite runs as
+// a twin (an import of ./test-….mjs), whole. For each binding the suite takes from a helper module of scripts/ (./….mjs), it
+// reads that binding's top-level declaration and every top-level declaration of the helper it names, transitively. A helper
+// reached by an unbound import('./….mjs') (a .then) is read whole.
+// IT LISTS THE TREE: a git child whose arguments hold 'ls-files', or a call of trackedFiles / listSuiteFiles taken from a
+// helper. A local function of that name, or the bare word, is no listing.
+// A START is:
 //   - a call of spawn / spawnSync / execFile / execFileSync / execSync / exec / fork whose first argument is not the
 //     literal 'git';
-//   - new Worker( · fetch( · new WebSocket( · createServer( · .listen( · setTimeout( · setInterval( · Atomics.wait(;
-//   - a binding taken from, or a 'node:…' literal of, node:net · http · https · http2 · dgram · tls · ws (a socket),
-//     node:inspector, node:worker_threads, node:timers (a real wait).
+//   - ANY use of a binding taken from child_process that is not a call with 'git' first, under any name (an alias, a
+//     namespace with a dotted or computed member, a destructured require); an unbound child_process specifier the same;
+//     process.binding(;
+//   - new Worker( · fetch( · globalThis.fetch( · new WebSocket( · createServer( · .listen( · setTimeout( · setInterval( ·
+//     Atomics.wait(;
+//   - a binding taken from, a module specifier of, or a 'node:…' literal of net · http · https · http2 · dgram · tls · ws
+//     (a socket, with or without the node: prefix), inspector, worker_threads or timers (a real wait).
+// WHAT IT DOES NOT READ, by name (lane bl-ci, r3098: the round's blind spots):
+//   - a helper's own import-time code. One such step can start a process today: scripts/scratch.mjs, which every suite imports
+//     first, starts ONE node child (its cached copy's `node -p process.version`) on a re-homed run whose node has no cached copy
+//     yet, the same for every suite, fast ones included;
+//   - a .cjs helper (a require or createRequire of ./….cjs). A marked suite reads one today: test-egress-census requires
+//     scripts/egress-sampler.cjs for three names that start nothing (childVerdict, CENSUS_ROW, SUITE_NAME); at require time the
+//     sampler patches net and child_process only when VIBESPACE_SUITE_EGRESS_FILE is set, and starts nothing itself;
+//   - a product module the suite requires (the census's object), an `export * from` or an anonymous default export (no
+//     declaration is found, so no start is said), eval and new Function;
+//   - a regex literal right after `)` (as in `if (x) /re/.test(y)`): blankCode reads it as a division (a heuristic, not a parser);
+//   - a heavy row whose text names no tree list (ls-files, trackedFiles(, listSuiteFiles() and no twin is never judged: a census
+//     that lists the tree another way stays heavy-only, unmarked and without a red.
 // test-ci-gate-tiers §8i holds the law BOTH WAYS over the real table: every marked row passes the check, and every heavy row
-// that passes it is marked, so a new census suite cannot stay unread. Its stub controls hold each start kind, the helper
-// closure, a twin, and the blanker (a start word inside a comment, a string, a template or a regex is no start).
+// that passes it is marked, so a new census suite cannot stay unread. Its stub controls hold each start kind and each form
+// above, the helper closure, a twin, the tree list's own edges, and the blanker (a start word inside a comment, a string, a
+// template or a regex is no start).
 export const EVERY_GATE = 'a census of the tree: it starts nothing but git, so every lane gate and every train pick runs it, as well as the heavy runs';
 export const EVERY_GATE_STARTS = Object.freeze({
   child: 'a child that is not git',
@@ -3410,8 +3430,15 @@ const EVERY_CALLS = [
   ['worker', /\bnew\s+Worker\s*\(/g],
   ['socket', /(?<![\w$.])fetch\s*\(|\bnew\s+WebSocket\s*\(|\bcreateServer\s*\(|\.listen\s*\(/g],
   ['wait', /(?<![\w$.])(?:setTimeout|setInterval)\s*\(|\bAtomics\.wait\s*\(/g],
+  ['child', /\bprocess\s*\.\s*(?:binding|_linkedBinding)\s*\(/g],
+  ['socket', /\b(?:globalThis|global|self|window)\s*\.\s*fetch\s*\(/g],
 ];
-const EVERY_READS_TREE = /'ls-files'|"ls-files"|(?<![\w$])(?:trackedFiles|listSuiteFiles)\s*\(|\.(?:trackedFiles|listSuiteFiles)\s*\(/;
+// a literal in a module specifier's place (after from, import, import(, require( or createRequire(…)( ): kept whatever its length
+const EVERY_SPEC_BEFORE = /(?:(?<![\w$.])(?:from|import)|(?<![\w$.])(?:import|require)\s*\(|\bcreateRequire\s*\([^()]*\)\s*\()\s*$/;
+const EVERY_SPEC = /(?:(?<![\w$.])(?:from|import)\s*|(?<![\w$.])(?:import|require)\s*\(\s*|\bcreateRequire\s*\([^()]*\)\s*\(\s*)'([^']+)'/g;
+const EVERY_CHILD_MODULE = (spec) => String(spec).replace(/^node:/, '') === 'child_process';
+const EVERY_SPAWN_NAMES = /^(?:spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)$/;
+const EVERY_TREE_LISTERS = new Set(['trackedFiles', 'listSuiteFiles']);
 const EVERY_LITERAL_KEPT = /^[\w./:@ -]{0,40}$/;
 const EVERY_REGEX_AFTER = new Set('(,=:[!&|?{};+-*%<>~^'.split(''));
 const EVERY_REGEX_AFTER_WORD = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', 'instanceof']);
@@ -3437,7 +3464,8 @@ export function blankCode(src) {
       while (j < n && text[j] !== c && text[j] !== '\n') j += text[j] === '\\' ? 2 : 1;
       if (j >= n || text[j] !== c) { out.push(c + spaces(text.slice(i + 1, Math.min(j, n)))); i = from = Math.min(j, n); last = 'x'; word = ''; continue; }
       const body = text.slice(i + 1, j);
-      out.push(c + (EVERY_LITERAL_KEPT.test(body) ? body : spaces(body)) + c);
+      const keep = EVERY_LITERAL_KEPT.test(body) || EVERY_SPEC_BEFORE.test(text.slice(Math.max(0, i - 80), i));
+      out.push(c + (keep ? body : spaces(body)) + c);
       i = from = j + 1; last = 'x'; word = ''; continue;
     }
     if (c === '`' || (c === '}' && tpl.length && tpl[tpl.length - 1] === 0)) {
@@ -3482,6 +3510,17 @@ export function blankCode(src) {
 // the import forms a census suite or a helper uses, read off the BLANKED text (a specifier is a short plain literal)
 const EVERY_IMPORT = /^(?:import|export)\s+(?:type\s+)?(?:([\w$]+)\s*,?\s*)?(?:\*\s+as\s+([\w$]+)|\{([^}]*)\})?\s*(?:from\s*)?'([^']+)'/gm;
 const EVERY_DYNAMIC = /(?:const|let|var)\s+(?:([\w$]+)|\{([^}]*)\})\s*=\s*await\s+import\(\s*'([^']+)'\s*\)/g;
+const EVERY_REQUIRE = /(?:const|let|var)\s+(?:([\w$]+)|\{([^}]*)\})\s*=\s*(?:require|createRequire\s*\([^()]*\))\s*\(\s*'([^']+)'\s*\)/g;
+// the text a binding is USED in: the binding statements themselves blanked (a declaration is no use)
+const everyPlain = (b) => [EVERY_IMPORT, EVERY_DYNAMIC, EVERY_REQUIRE].reduce((t, re) => t.replace(re, (x) => x.replace(/[^\n]/g, ' ')), b);
+// the same text with every quoted literal's words blanked but 'git' (a name inside a string is no use of it)
+const everyNoQuote = (t) => t.replace(/'[^'\n]*'|"[^"\n]*"/g, (x) => (x.slice(1, -1) === 'git' ? x : x[0] + ' '.repeat(x.length - 2) + x[0]));
+/** the text between a call's `(` at `open` and its matching `)` (blanked code: no bracket inside a string is left) */
+function everyArgsAt(t, open) {
+  let depth = 0;
+  for (let k = open; k < t.length; k++) { const ch = t[k]; if (ch === '(') depth++; else if (ch === ')' && --depth === 0) return t.slice(open + 1, k); }
+  return t.slice(open + 1);
+}
 const EVERY_DECL = /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?\s*([\w$]+)|class\s+([\w$]+)|(?:const|let|var)\s+(?:([\w$]+)|\{([^}]*)\}))/;
 const namedParts = (list, flip) => String(list || '').split(',').map((p) => p.trim()).filter(Boolean).map((p) => {
   const m = flip ? /^(?:\.\.\.)?([\w$]+)(?:\s*:\s*([\w$]+))?/.exec(p) : /^([\w$]+)(?:\s+as\s+([\w$]+))?/.exec(p);
@@ -3495,7 +3534,7 @@ function everyImports(b) {
     if (ns) out.push({ local: ns, spec, name: '*' });
     for (const p of namedParts(named, false)) out.push({ local: p.local, spec, name: p.imported });
   }
-  for (const m of b.matchAll(EVERY_DYNAMIC)) {
+  for (const re of [EVERY_DYNAMIC, EVERY_REQUIRE]) for (const m of b.matchAll(re)) {
     const [, ns, named, spec] = m;
     if (ns) out.push({ local: ns, spec, name: '*' });
     for (const p of namedParts(named, true)) out.push({ local: p.local, spec, name: p.imported });
@@ -3535,7 +3574,24 @@ export function everyGateOf(row, { read = () => null, memo = new Map() } = {}) {
     const found = [];
     for (const [kind, re] of EVERY_CALLS) for (const m of b.matchAll(re)) found.push({ kind, at: `${via || 'its code'} line ${line0 + lineAt(b, m.index)}` });
     for (const m of b.matchAll(/'node:([\w/]+)'/g)) { const k = everyModuleKind(m[1]); if (k) found.push({ kind: k, at: `${via || 'its code'} line ${line0 + lineAt(b, m.index)} ('node:${m[1]}')` }); }
-    const plain = b.replace(EVERY_IMPORT, (s) => s.replace(/[^\n]/g, ' '));
+    const at = (k) => `${via || 'its code'} line ${line0 + lineAt(b, k)}`;
+    for (const m of b.matchAll(EVERY_SPEC)) { const k = everyModuleKind(m[1]); if (k && !m[1].startsWith('node:')) found.push({ kind: k, at: `${at(m.index)} ('${m[1]}')` }); }
+    const plain = everyPlain(b), noq = everyNoQuote(plain);
+    // child_process under any name: every use of its binding is a call with 'git' first, or a start
+    for (const im of imports) {
+      if (!EVERY_CHILD_MODULE(im.spec)) continue;
+      const ok = im.name === '*' || im.name === 'default' ? /^\s*\.\s*[\w$]+\s*\(\s*(['"])git\1\s*[,)]/ : /^\s*\(\s*(['"])git\1\s*[,)]/;
+      for (const m of noq.matchAll(new RegExp(`(?<![\\w$.])${im.local.replace(/\$/g, '\\$')}(?![\\w$])`, 'g'))) {
+        const after = noq.slice(m.index + im.local.length, m.index + im.local.length + 60);
+        if (/^\s*:(?!:)/.test(after) && /[{,]\s*$/.test(noq.slice(Math.max(0, m.index - 20), m.index))) continue;   // an object key of that name
+        if (!ok.test(after)) found.push({ kind: 'child', at: `${at(m.index)}: ${im.local} from '${im.spec}', not a call with 'git' first` });
+      }
+    }
+    for (const m of plain.matchAll(EVERY_SPEC)) {
+      if (EVERY_CHILD_MODULE(m[1]) && !/^\s*\)\s*\.\s*[\w$]+\s*\(\s*(['"])git\1\s*[,)]/.test(plain.slice(m.index + m[0].length, m.index + m[0].length + 60))) found.push({ kind: 'child', at: `${at(m.index)}: '${m[1]}' unbound, not a call with 'git' first` });
+      const rel = /^(?:import)/.test(m[0]) && /^\.\.?\//.test(m[1]) ? resolve(dir, m[1]) : null;
+      if (rel && !/(^|\/)test-[^/]*\.mjs$/.test(rel)) found.push(...judgeWhole(rel, seen));   // an unbound dynamic import of a helper: read whole
+    }
     const used = everyNames(plain);
     for (const im of imports) {
       if (!used.has(im.local)) continue;
@@ -3547,6 +3603,30 @@ export function everyGateOf(row, { read = () => null, memo = new Map() } = {}) {
       for (const mem of members) found.push(...judgeBinding(rel, mem, seen));
     }
     return found;
+  };
+  const judgeWhole = (rel, seen) => {
+    const key = `${rel}\0*`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const mod = modOf(rel);
+    return mod ? judgeText(mod.b, mod.imports, path.posix.dirname(rel), seen, `${rel} (read whole: an unbound import)`) : [];
+  };
+  // IT LISTS THE TREE: a git child whose arguments hold 'ls-files', or a call of trackedFiles / listSuiteFiles taken from a helper
+  const listsTree = (b, imports) => {
+    const plain = everyPlain(b), noq = everyNoQuote(plain);
+    const kids = new Set(imports.filter((im) => EVERY_CHILD_MODULE(im.spec)).map((im) => im.local));
+    for (const m of plain.matchAll(/(?:(?<![\w$.])([\w$]+)|\.\s*([\w$]+))\s*\(\s*(['"])git\3\s*,/g)) {
+      const name = m[1] || m[2];
+      if (!(EVERY_SPAWN_NAMES.test(name) || kids.has(name))) continue;
+      if (/(['"])ls-files\1/.test(everyArgsAt(plain, plain.indexOf('(', m.index + name.length)))) return true;
+    }
+    for (const im of imports) {
+      if (!/^\.\.?\//.test(im.spec)) continue;
+      const local = im.local.replace(/\$/g, '\\$');
+      if (EVERY_TREE_LISTERS.has(im.name) && new RegExp(`(?<![\\w$.])${local}\\s*\\(`).test(noq)) return true;
+      if (im.name === '*' && new RegExp(`(?<![\\w$.])${local}\\.(?:trackedFiles|listSuiteFiles)\\s*\\(`).test(noq)) return true;
+    }
+    return false;
   };
   const judgeBinding = (rel, name, seen, chain = '') => {
     const key = `${rel}\0${name}`;
@@ -3570,7 +3650,7 @@ export function everyGateOf(row, { read = () => null, memo = new Map() } = {}) {
   const suiteOf = (name, seenSuites, seen, isTwin = false) => {
     const rel = `${name}.mjs`, mod = modOf(rel);
     if (!mod) return null;
-    let reads = EVERY_READS_TREE.test(mod.b);
+    let reads = listsTree(mod.b, mod.imports);
     const via = isTwin ? `twin ${name}` : '';
     const starts = judgeText(mod.b, mod.imports, '.', seen, via), twins = [];
     for (const m of mod.b.matchAll(/(?:import\(\s*|from\s*|^import\s+)'\.\/(test-[\w.-]+)\.mjs'/gm)) {
@@ -3590,7 +3670,7 @@ export function everyGateWhy(v) {
   if (!v) return 'no verdict';
   if (!v.source) return 'its suite file cannot be read';
   const why = [];
-  if (!v.reads) why.push('it lists no tracked file of the tree (no git ls-files, trackedFiles or listSuiteFiles)');
+  if (!v.reads) why.push('it lists no tracked file of the tree (no git child with ls-files, no trackedFiles or listSuiteFiles taken from a helper)');
   const byKind = new Map();
   for (const st of v.starts) if (!byKind.has(st.kind)) byKind.set(st.kind, st.at);
   if (byKind.size) why.push(`it starts ${[...byKind].map(([k, at]) => `${EVERY_GATE_STARTS[k]} (${at})`).join(', ')}`);
