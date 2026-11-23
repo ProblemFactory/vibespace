@@ -1111,7 +1111,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
     const am = mk8(); fs.mkdirSync(am.dataDir, { recursive: true });
     fs.writeFileSync(path.join(am.dataDir, 'accounts.json'), '{"accounts":[{"id":"acct-1","keyEnc":"00:11:22"', { mode: 0o600 }); // truncated mid-write
     const am2 = new AccountManager({ dataDir: am.dataDir });
-    ok(refusal(() => am2.add({ name: 'A', key: APIKEY })) === 'key-missing' && !fs.existsSync(am2._keyFile), 'O1: an accounts.json the store could not load still holds what it holds — its ciphertext keeps the key from being minted');
+    ok(refusal(() => am2.add({ name: 'A', key: APIKEY })) === 'accounts_unread' && !fs.existsSync(am2._keyFile), 'O1: an accounts.json the store could not load still holds what it holds — the store HOLDS it (the B-f276 family, r3043: bytes that do not parse are kept, never «no accounts»), the add is refused by name, and no key is minted over its ciphertext');
   }
   { // a FRESH store: no key, no ciphertext ⇒ minted ONCE (0600, 64 hex), and every later instance reads that one
     const am = mk8(); const kf = am._keyFile; const existed = fs.existsSync(kf);

@@ -910,6 +910,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               });
             }
             catch (e) {
+              // the B-f276 family's accounts store (lane bl-windows, 主开发 r2947 — THE MONEY): the accounts could not be read, so NOTHING
+              // starts or resumes on another login — never the «deleted account» degrade below (it rewrites the conversation's account to
+              // none for good): refused by name, the conversation and its meta untouched; it starts once the accounts read
+              if (e && e.code === 'accounts_unread') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'accounts_unread', ...(data.resumeId ? { resumeId: data.resumeId } : {}), message: e.message })); return; }
               // Host-held subscription (2.199.0): an account whose login lives
               // ONLY on a host has an EMPTY local dir — resolveForSpawn throws
               // "not logged in" before the hostSubs mapping below ever runs

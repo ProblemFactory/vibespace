@@ -15,6 +15,10 @@
  * how the CLI's own trust list (customApiKeyResponses) fingerprints keys.
  */
 const fs = require('fs');
+const SR = require('./store-read.js');           // the B-f276 family (lane bl-windows, 主开发 r2947 / r3043): accounts.json under THE STORE READ
+const HOLD = require('./store-read-hold.js');    // …on the family's helper (bl-jobs, r3019): the hold, its read again, the torn bytes' copy
+const i18nKey = (k) => k;   // the extraction marker (scripts/i18n-extract.mjs): the client words a For-you item with t(key)
+const ACCOUNTS_HELD_TEXT = 'The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.';   // r3046: ONE notice while the list is unread
 const accountIdentity = require('./account-identity.js'); // PURE (row B-87fd unit 2): the ONE identity record + the ONE «same account?» comparison
 const DISPLAY = require('./account-display-facts.js'); // B-360d (lane chrome-157): the list's sign-in facts, read OFF the loop and kept a folder
 // B-360d, THE DECISION ROAD's bound (主开发 r1221): a DECIDER counts a folder's kept sign-in facts only while the snapshot that read
@@ -335,14 +339,76 @@ class AccountManager {
   // GLOBAL ~/.claude.json is never clobbered — the whole point.
   _seedConfigDir(dir) { return this._credsOf('claude').seedDir(dir); } // S2: the seeder lives on the claude descriptor
 
+  // THE B-f276 FAMILY'S GRAVEST STORE (lane bl-windows, 主开发 r2947 / r3043): accounts.json under THE STORE READ, on the family's helper
+  // (src/store-read-hold.js). The release read ANY failure — a read that failed or bytes that do not parse — as a fresh install, and the
+  // first adding save wrote its one row over the file: every other account, every pool and their order gone. Now «not there» alone is a
+  // fresh list; a failed read HOLDS it: ONE read-only fact every consumer asks (`held()`), nothing written over the file (the save's
+  // guard, every site), every adding and changing act refused by name (accounts_unread, 503), NOTHING starts or resumes on another login
+  // by a guess (the spawn door refuses), and the helper reads it again off the loop; a lift ADOPTS the file. A restart while held reads
+  // the same file again: held again.
+  _accountsValid(v) { return !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.accounts); }
   _load() {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
-      if (parsed && Array.isArray(parsed.accounts)) this._state = parsed;
-    } catch { /* fresh install */ }
+    this._hold = HOLD.create({
+      file: this._file, valid: (v) => this._accountsValid(v), code: 'accounts_unread', aside: (mark) => `${this._file}.corrupt-${mark}`,
+      words: (h) => (h && h.code === 'torn bytes'
+        ? `the accounts file is damaged — its damaged bytes are kept beside it as ${this._tornAside || 'a copy'}; nothing is changed and nothing starts on another login meanwhile. Mend the file by hand and restart VibeSpace, or remove it to start with no accounts and add them again`
+        : `the accounts could not be read (${h ? h.code : 'unreadable'}) — nothing was changed and nothing starts on another login until they read; VibeSpace reads them again by itself`),
+      log: (line) => { if (!(this._tornAside && /kept aside as .* — it starts empty/.test(line))) console.warn('[accounts] ' + line); },
+      onLift: (v, facts) => this._lifted(v, facts),
+    });
+    let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }   // the manager's own start
+    const a = SR.storeAnswer(read, { valid: (v) => this._accountsValid(v) });
+    if (this._hold.start(a) === 'data') this._state = a.value;
+    this._fileHeldNotice();   // (the tray is wired later by server.js — setUserTodos files it then)
   }
+  /** the hub's For-you tray (server.js, once it exists): the held list is TOLD ONCE (主开发 r3046: one notice, never one per page open) */
+  setUserTodos(todos) { this._todos = todos || null; this._fileHeldNotice(); }
+  _fileHeldNotice() {
+    const todos = this._todos, h = this.held();
+    if (!todos || typeof todos.add !== 'function' || !h || this._heldTodoId) return;
+    try {
+      const item = todos.add('accounts', {
+        origin: 'login', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Manage Agents', text: ACCOUNTS_HELD_TEXT,
+        detail: `${h.why}. No account is added, changed or removed and nothing is written over the list meanwhile; this notice closes when the accounts read.`,
+        i18n: { text: { key: i18nKey('The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.'), params: {} }, source: { key: i18nKey('Manage agents') } },
+      });
+      this._heldTodoId = (item && item.id) || null;
+    } catch (e) { console.warn('[accounts] could not file the For-you notice about the accounts:', e && e.message); }
+  }
+  _closeHeldNotice() {
+    const id = this._heldTodoId, todos = this._todos;
+    this._heldTodoId = null;
+    if (!id) return;
+    try { const it = todos && typeof todos.get === 'function' ? todos.get(id) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(id, 'done', 'system'); }
+    catch (e) { console.warn('[accounts] the accounts\' notice could not be closed:', e && e.message); }
+  }
+  /** the hold LIFTED (src/store-read-hold.js): the file read (its value, or null: «not there» twice in a row — a fresh list) */
+  _lifted(v, facts = {}) {
+    if (facts && facts.setAside) {
+      // r3019 / r3043 — «EMPTY» IS NOT SAFE WHERE A REMOVER READS THE STORE: the sign-in expiry sweep and the account migrations read
+      // this list's silence. Torn bytes, once the helper made their copy, stay HELD — never lifted as empty by themselves: the helper
+      // reads the file again on its ladder (the same bytes: no second copy); a good copy put back reads, a file removed (by a person)
+      // answers «not there» twice: a fresh list
+      if (this._tornAside !== facts.setAside) console.warn(`[accounts] accounts.json did not parse — its bytes are kept beside it as ${facts.setAside}; the accounts stay HELD (never «none») until the file reads or is removed`);
+      this._tornAside = facts.setAside;
+      this._hold.start({ state: 'unreadable', code: 'torn bytes', why: `did not parse — kept beside it as ${facts.setAside}` });
+      this._fileHeldNotice();   // the same notice (one a hold)
+      return;
+    }
+    this._tornAside = null;
+    this._state = v && this._accountsValid(v) ? v : { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };   // a lift ADOPTS the file
+    try { this._displayAll(); } catch { }   // the start's folder reads, now over the list (off the loop)
+    this._closeHeldNotice();
+    this._notify();
+  }
+  /** THE ONE READ-ONLY FACT «the list is unread» (主开发 r3043) — {code, at, why} while held, else null. Every consumer that must not act
+   *  on an EMPTY list asks it (never «unknown account», never «no limit», never «gone») */
+  held() { const h = this._hold && this._hold.held(); return h ? { code: h.code, at: h.since, why: this._hold.words() } : null; }
+  /** a person's adding or changing act while held: refused BY NAME (accounts_unread, 503) before anything moves */
+  _refuseWhileHeld(what = 'changing the accounts') { if (this._hold) this._hold.refuse(what); }
 
   _save() {
+    if (this._hold && !this._hold.writable('an accounts change')) return;   // THE GUARD (r2947 (1)): every one of the 35 sites — nothing written over a file that could not be read
     const tmp = this._file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, this._file);
@@ -417,6 +483,7 @@ class AccountManager {
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._rowsOf(this._state.accounts),
       tailsGen: this.tailsGen(),   // B-ee0a: the page reuses its read of the tails only for the same word
+      ...(this.held() ? { held: this.held() } : {}),   // r2947 (3) / r3043: the accounts could not be read — never an empty list as a fact
     };
   }
   /** THE LIST'S ROWS for `accs`, from the kept display facts only (B-360d): no file is opened here */
@@ -529,7 +596,7 @@ class AccountManager {
   /** every display read in flight landed (the suites' ONE seam; a clean shutdown) */
   displaySettled() { return this._display.settled(); }
   /** the store's OWN file door (built only when none was handed: a suite, a tool) is ended — its worker goes (round wldn7whag) */
-  close() { const d = this._ownDoor; this._ownDoor = null; try { if (d && typeof d.close === 'function') d.close(); } catch { } }
+  close() { const d = this._ownDoor; this._ownDoor = null; try { if (d && typeof d.close === 'function') d.close(); } catch { } try { this._hold && this._hold.stop(); } catch { } }
   /** ask a folder again now — a suite that wrote a sign-in file itself (the ONE seam, then displaySettled) */
   displayRefresh(id) { const a = this.get(id); if (a) this._displayRead(a, { after: this._display.clock() }); return this._display.settled(); }   // a read that started before the suite's own write is chained once
   /** a landed read that changed what is kept: ONE broadcast for the landings of 100 ms (a start lands many folders together) */
@@ -700,6 +767,7 @@ class AccountManager {
   // terminal through vibespace-claude-subscription-login.mjs; the caller
   // watches for the creds/status file, then calls finalizeSubscription.
   createSubscription({ name, signinPending = false } = {}) {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     const id = 'sub-' + crypto.randomBytes(6).toString('hex');
     fs.mkdirSync(this.subDir(id), { recursive: true, mode: 0o700 });
     this._seedConfigDir(this.subDir(id));
@@ -840,6 +908,7 @@ class AccountManager {
   _seedCodexDir(dir) { return this._credsOf('codex').seedDir(dir); } // S2: the seeder lives on the codex descriptor
 
   createCodexSubscription({ name } = {}) {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     const id = 'cxs-' + crypto.randomBytes(6).toString('hex');
     fs.mkdirSync(this.codexSubDir(id), { recursive: true, mode: 0o700 });
     this._seedCodexDir(this.codexSubDir(id));
@@ -856,6 +925,7 @@ class AccountManager {
   // login runs in a terminal against the account's dir; the store never sees a token. (codex keeps the
   // createCodexSubscription pair above, which predates this.)
   createHomeSubscription(backend, { name } = {}) {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     const c = this._credsOf(backend);
     if (!c || c.spawnForm !== 'isolated-home' || typeof c.loginCommand !== 'function' || !/^[a-z]{2,6}$/.test(c.idPrefix || '')) throw new Error(`${harnessOf(backend).label} has no login VibeSpace can run here`);
     const id = c.idPrefix + '-' + crypto.randomBytes(6).toString('hex');
@@ -973,6 +1043,7 @@ class AccountManager {
   }
 
   importBundle(bundle) {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     if (!bundle || !Array.isArray(bundle.accounts)) return { imported: 0, skipped: 0 };
     const FILE_OK = /^[.\w][\w.-]*$/; // whitelist shape — no separators, no traversal
     let imported = 0, skipped = 0;
@@ -1309,6 +1380,7 @@ class AccountManager {
   }
 
   add({ name, key, source = 'manual', originHost = null } = {}) {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     key = String(key || '').trim();
     if (!/^sk-ant-/.test(key)) throw new Error('not an Anthropic API key (must start with sk-ant-)');
     const tail = key.slice(-8);
@@ -1467,6 +1539,7 @@ class AccountManager {
   // backend has its OWN default (claude vs codex). When id is given the backend
   // is derived from the account; when clearing (id null) the caller passes it.
   setDefault(id, backend = 'claude') {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     let be = backend;
     if (id != null) {
       const a = this.get(id);
@@ -2523,6 +2596,7 @@ class AccountManager {
   }
 
   createPool({ name, members, backend = 'claude' } = {}) {
+    this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
     const be = backend || 'claude';
     if (!capsOf(be).pool || !this._credsOf(be)) throw new Error('pooling is not supported for backend ' + be); // unknown ids throw in harnessOf
     // The darwin exclusion is claude-specific (keychain service name = a hash
@@ -2637,6 +2711,9 @@ class AccountManager {
       if (!this._providerSpawn) throw Object.assign(new Error('third-party model providers are not available on this hub'), { code: 'provider-unwired' });
       return this._providerSpawn(String(pvWant), backend, opts);
     }
+    // THE MONEY (主开发 r2947 / r3043): while the accounts are held NOTHING starts or resumes on another login by a guess — the default and
+    // every named account are unknown: refused by name (never null = the machine's own login); a person's own «this machine's login» stays theirs
+    if (this._hold && this._hold.held() && requested !== 'subscription') throw this._hold.refusal('starting a conversation on an account');
     if (this._credsOf(backend)?.spawnForm === 'isolated-home') return this._resolveHomeSpawn(backend, requested, opts); // the descriptor's creds row picks the form (rv-harnesses H3)
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
@@ -2818,6 +2895,7 @@ class AccountManager {
   // login (default) or its shared home when none; an account id → that account's own dir as spawnEnvVar.
   _resolveHomeSpawn(backend, requested, opts = {}) {
     if (requested === 'subscription') return null; // codex's own global login
+    if (this._hold && this._hold.held()) throw this._hold.refusal('starting a conversation on an account');   // r3043: never the machine login for a list that could not be read
     const id = requested || this._state[this._credsOf(backend).defaultIdField];
     if (!id) return null;
     const a = this.get(id);

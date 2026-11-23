@@ -28,6 +28,14 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   // a client again (a second request resumes it twice) — the engine's ONE rule
   const claimRestarts = (affected) => (typeof engine.claimColdRestarts === 'function' ? engine.claimColdRestarts(affected) : affected);
   const accounts = mk(getAccounts);
+  // the B-f276 family (lane bl-windows, 主开发 r3104 (a)) — registered FIRST, before every /api/accounts route of this module: while the accounts are HELD every road that looks an account up — by id, a
+  // pool, a sign-in, a key, a tail — answers the hold's words (503 accounts_unread), never «unknown account» / «not found» from the
+  // EMPTY list; the list itself (GET /api/accounts) answers with `held`
+  if (typeof app.use === 'function') app.use('/api/accounts', (req, res, next) => {
+    let h = null; try { h = typeof accounts.held === 'function' ? accounts.held() : null; } catch { h = null; }
+    if (!h || (req.method === 'GET' && (req.path === '/' || req.path === ''))) return next();
+    return res.status(503).json({ error: h.why, code: 'accounts_unread' });
+  });
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
   const telemetry = mk(getTelemetry);
@@ -278,13 +286,16 @@ app.post('/api/usage-stats/pricing', (req, res) => {
 // /api/accounts/tails (src/routes/account-tails.js — behind the person verdict)
 require('../routes/account-tails.js').registerAccountTailRoutes(app, { accounts, providers });
 app.get('/api/accounts', (req, res) => res.json(require('../routes/account-tails.js').accountsAnswer({ accounts, hosts })));
+// the B-f276 family (lane bl-windows, 主开发 r2947 (2)): a change over accounts that could not be read is refused BY NAME — 503 with its
+// code and words (the dialog says nothing was changed and that it reads again by itself); every other refusal as before (400)
+const failAcct = (res, e) => (e && e.code === 'accounts_unread' ? res.status(503).json({ error: e.message, code: 'accounts_unread' }) : res.status(400).json({ error: e.message }));
 app.post('/api/accounts', (req, res) => {
   try { res.json({ success: true, account: accounts.add(req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 app.post('/api/accounts/import-cli', (req, res) => {
   try { res.json({ success: true, account: accounts.importFromCli() }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 // Anthropic login state ON a remote host (subscription OAuth? console key?) —
 // powers the Manage Agents accounts section when a host is selected.
@@ -354,7 +365,7 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
     } catch { }
     res.json(r);
   }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 // Import the console-login key minted on a REMOTE host into the central store
 // (the store is host-agnostic — keys are pushed per-session wherever needed).
@@ -364,13 +375,13 @@ app.post('/api/accounts/import-cli-host', async (req, res) => {
     if (!key) return res.status(400).json({ error: 'no primaryApiKey on that host — log in to a Console account there first' });
     const hostName = (() => { try { return hosts.get(req.body?.hostId)?.name; } catch { return null; } })();
     res.json({ success: true, account: accounts.add({ name: (org || 'Console') + ' (API' + (hostName ? ', ' + hostName : '') + ')', key, source: 'cli-import', originHost: hostName }) });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 app.post('/api/accounts/default', (req, res) => {
   // backend needed only when CLEARING (id null) — otherwise it's derived from
   // the account. Each backend (claude/codex) keeps its own default.
   try { accounts.setDefault(req.body?.id || null, req.body?.backend || 'claude'); res.json({ success: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 // reveal the decrypted key on request (the door: src/routes/account-tails.js revealKeyDoorOf — a set-up vault's window, else B-ee0a's
 // person verdict)
@@ -384,7 +395,7 @@ app.patch('/api/accounts/:id', (req, res) => {
     if (req.body?.email !== undefined) account = accounts.setEmail(req.params.id, req.body.email);
     if (req.body?.note !== undefined) account = accounts.setNote(req.params.id, req.body.note);
     res.json({ success: true, account });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 app.delete('/api/accounts/:id', (req, res) => {
   try {
@@ -417,7 +428,7 @@ app.delete('/api/accounts/:id', (req, res) => {
     }
     res.json({ success: true });
   }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 
 // ── Multi-subscription: hold several Claude Max/Pro logins at once, each in
@@ -435,7 +446,7 @@ app.post('/api/accounts/pool', (req, res) => {
   const b = req.body?.backend || 'claude';
   if (!require('../harnesses').has(b) || !require('../backend-caps.js').capsOf(b).pool) return res.status(400).json({ error: 'pooling is not supported for backend ' + String(b).slice(0, 40) });
   try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members, backend: b }) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')); // the pool's placement is the owner's to set — an agent's session/job token is refused
 app.patch('/api/accounts/pool/:id', (req, res) => {
@@ -498,7 +509,7 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
     }
     res.json({ success: true, retargeted: before !== after ? { from: before, to: after, name: after ? (accounts.get(after)?.name || after) : null } : null, evicted: evicted ? { removed: evicted.removed, moved: evicted.moved.length, restarted: evicted.restarted.length, stayed: evicted.stayed.length, held: (evicted.held || []).length } : null, affected: claimRestarts(affected) });
   }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 // Re-point. Returns the live sessions billed to this pool so the CLIENT can
 // restart them (v1 = cold swap; the client owns kill+resume, same machinery as
@@ -589,7 +600,7 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
     res.json({ success: true, ...r, previous: before, hot, member: memberName, defaultMoved: wholeOk && before !== memberId, moved: affected.length,
       skipped: { pinned: skipped.length - cannotServe.length, cannotServe: cannotServe.map((x) => ({ sid: x.sid, name: x.name, why: x.why })) },
       affected: hot ? [] : claimRestarts(affected) });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 
 // THE CONVERSATION'S PIN (2026-09-28): POST /api/accounts/:poolId/pin {sessionId, memberId|null} —
@@ -627,7 +638,7 @@ app.post('/api/accounts/:poolId/pin', (req, res) => {
     if (!r || !r.ok) return res.status((r && r.status) || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused' });
     try { broadcastActiveSessions(); } catch { }
     res.json({ success: true, pinned: r.pinned, placed: r.placed, reason: r.reason, code: r.code || null, current: r.current || null });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 
 // ── Long-lived token (oat01, B-211a) ──────────────────────────────────────
@@ -659,7 +670,7 @@ app.delete('/api/accounts/:id/oat', (req, res) => {
     sweepHostTokenCopies(req.params.id);
     res.json({ success: true });
   }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 // THE GUIDED DOOR'S WAY ② (lane oat-add-door, 2.369.399): GET/POST /api/accounts/:id/oat-shape — src/server/oat-shape-routes.js
 require('./oat-shape-routes.js').registerOatShapeRoutes(app, { accounts, isAgentBearer });
@@ -740,7 +751,7 @@ app.post('/api/accounts/subscription', (req, res) => {
       configDir: dir,
     });
     res.json({ success: true, id, dir, loginCmd });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 
 // Re-login an EXISTING Claude subscription on THIS machine (2.332.0, real ask
@@ -767,7 +778,7 @@ app.post('/api/accounts/:id/relogin', (req, res) => {
     let baselineAttempt = null;
     try { baselineAttempt = accounts._subscriptionLoginStatus?.(a.id)?.attempt || null; } catch { }
     res.json({ success: true, id: a.id, loginCmd, baselineAttempt });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 
 
@@ -806,7 +817,7 @@ app.post('/api/accounts/:id/relogin-finalize', (req, res) => {
       if (ls) { r.loginAttempt = ls.attempt || null; r.loginState = ls.state || null; }
     } catch { }
     res.json({ success: true, ...r });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 
 // THE FIRST SIGN-IN BECOMES THE DEFAULT (lane signin-card-real-screen): a card's row (signinPending, read before
@@ -912,7 +923,7 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
     }
     res.json({ success: true, ...fin, ...(foldUnjudged && foldUnjudged.length ? { foldUnjudged } : {}), ...adoptFirstSignin(cardRow, fin, req.params.id) });
   }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 // Add a Console account safely: the /login runs in an isolated dir so it can't
 // wipe the global subscription; we capture the minted key from that dir.
@@ -925,11 +936,11 @@ app.post('/api/accounts/console-login', (req, res) => {
     const q = JSON.stringify(dir);
     const loginCmd = `CLAUDE_CONFIG_DIR=${q} CLAUDE_SECURESTORAGE_CONFIG_DIR=${q} claude auth login --console`;
     res.json({ success: true, id, loginCmd });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 app.post('/api/accounts/console-login/:id/capture', (req, res) => {
   try { res.json({ success: true, ...accounts.captureConsoleLogin(req.params.id, req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 
 // ── Codex multi-subscription: same idea via CODEX_HOME. Codex has no auth-only
@@ -946,7 +957,7 @@ app.post('/api/accounts/codex-subscription', (req, res) => {
     // paste-code login. CODEX_HOME points at the isolated per-account dir.
     const loginCmd = `CODEX_HOME=${JSON.stringify(dir)} codex login --device-auth`;
     res.json({ success: true, id, dir, loginCmd });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 app.post('/api/accounts/codex-subscription/:id/finalize', (req, res) => {
   try {
@@ -958,7 +969,7 @@ app.post('/api/accounts/codex-subscription/:id/finalize', (req, res) => {
     if (fin?.loggedIn) sweepLoginExpiry('codex device-auth');
     if (fin?.loggedIn) wakeOnLoginSuccess(req.params.id, fin, 'codex device-auth');
     res.json({ success: true, ...fin });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 
 // ── Isolated-home logins of ANY harness whose descriptor declares one (lane antigravity-harness: «Add Google
@@ -970,19 +981,19 @@ app.post('/api/accounts/home-subscription', (req, res) => {
     const b = req.body || {};
     const { id, dir, loginCmd } = accounts.createHomeSubscription(String(b.backend || ''), { name: b.name });
     res.json({ success: true, id, dir, loginCmd });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 // "Sign in again" on an existing one (a lapsed or unfinished login): the same terminal + finalize loop
 app.post('/api/accounts/home-subscription/:id/login', (req, res) => {
   try { res.json({ success: true, ...accounts.homeLoginCommand(req.params.id) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { failAcct(res, e); }
 });
 app.post('/api/accounts/home-subscription/:id/finalize', (req, res) => {
   try {
     // no login-expiry sweep / pool wake here: the login declares no deadline (creds.loginState absent) and there
     // is no pool — the usage reading below is its own press
     res.json({ success: true, ...accounts.finalizeHomeSubscription(req.params.id) });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }
 });
 // THE ON-DEMAND USAGE READING of a named account whose harness declares one (quota.onDemand — antigravity's
 // `agy -p /usage`; lane antigravity-card-fixes): Manage agents' ⋯ Re-check, a PERSON'S press only (an agent bearer is

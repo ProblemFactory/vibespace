@@ -2645,7 +2645,7 @@ class App {
   refreshAccounts() {
     return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {   // B-ee0a: the list's word decides whether the last read holds
       const d = withTails(d0, tl);   // B-ba7d: the list carries no key tail; the person's own read (POST /api/accounts/tails) lays it on
-      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
+      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {}, held: d.held || null }; // every harness's default field (agent-meta); `held`: the B-f276 family (r2947)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);

@@ -4,6 +4,10 @@
 // fall back to English automatically.
 export default {
   "the agent's next browser command starts it again, and this view reconnects then": "エージェントの次のブラウザーコマンドで再び起動し、この表示もそのとき再接続します",
+  "The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.": "アカウントを読み取れません——消えたものとしては表示しません。読み取れるまで何も変更せず、別のログインで会話を始めることもありません。VibeSpace が自分で読み直します。",   // the B-f276 family (bl-windows, r2947 (3)): the accounts held — the panel and the notice
+  "The accounts could not be read": "アカウントを読み取れません",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
+  "Nothing was changed. VibeSpace reads them again by itself; Try again shows whether they read now.": "何も変更していません。VibeSpace が自分で読み直します。「再試行」で今読めるか確かめます。",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
+  "The accounts still could not be read — nothing was changed": "まだアカウントを読み取れません——何も変更していません",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
   "Stopped — {tail}": "停止しました — {tail}",
   "Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}": "自然に終了しました — 実行したコマンドから {sec} 秒以内に消えていました（{min} 分のアイドルタイムアウトより前）。理由はここではわかりません。{tail}",
   "Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}": "自然に終了しました — 実行したコマンドから {sec} 秒以内に消えていました。理由はここではわかりません。{tail}",

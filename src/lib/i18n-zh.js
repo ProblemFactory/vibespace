@@ -4,6 +4,10 @@
 // fall back to English automatically.
 export default {
   "the agent's next browser command starts it again, and this view reconnects then": "Agent 的下一条浏览器命令会再次启动它，这个视图随后会重新连接",
+  "The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.": "无法读取账户——不会显示为已不存在。在能读取之前不会更改任何内容，也不会有对话在其他登录上启动；VibeSpace 会自行再次读取。",   // the B-f276 family (bl-windows, r2947 (3)): the accounts held — the panel and the notice
+  "The accounts could not be read": "无法读取账户",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
+  "Nothing was changed. VibeSpace reads them again by itself; Try again shows whether they read now.": "没有做任何更改。VibeSpace 会自行再次读取；点“重试”看看现在能否读取。",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
+  "The accounts still could not be read — nothing was changed": "仍然无法读取账户——没有做任何更改",   // the B-f276 family (bl-windows, r2947 (2)): the held accounts' dialog
   "Stopped — {tail}": "已停止——{tail}",
   "Ended on its own — found gone within {sec} s of a command it served, before its {min} min idle timeout; why is not known here. {tail}": "它自己结束了——在它执行的一条命令后 {sec} 秒内发现已不在，早于 {min} 分钟的空闲超时；这里无法得知原因。{tail}",
   "Ended on its own — found gone within {sec} s of a command it served; why is not known here. {tail}": "它自己结束了——在它执行的一条命令后 {sec} 秒内发现已不在；这里无法得知原因。{tail}",

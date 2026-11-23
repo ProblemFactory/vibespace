@@ -1472,6 +1472,15 @@ export function installManageAgents(App, ctx = {}) {
   // "+ Add pooled account…" — ONE dialog for both rosters, wording per backend.
   // api() (not fetchJson): a 400 from createPool ("no logged-in … to pool")
   // used to toast "Pooled account created" and create nothing.
+  /** the B-f276 family (主开发 r2947 (2)): a change while the accounts are HELD — the dialog says so by name, nothing was changed, and Try
+   *  again asks the list now (the server reads the file again by itself, off its loop) */
+  async _accountsHeldDialog(refresh) {
+    const again = await showConfirmDialog({ title: t('The accounts could not be read'), message: t('Nothing was changed. VibeSpace reads them again by itself; Try again shows whether they read now.'), confirmText: t('Try again') });
+    if (!again) return;
+    try { await this.refreshAccounts?.(); } catch { }
+    refresh?.();
+    if (this._accounts?.held) showToast(t('The accounts still could not be read — nothing was changed'), { type: 'warning' });
+  },
   async _createPoolDialog(backend, refresh) {
     const codex = backend === 'codex';
     const name = await showInputDialog({
@@ -2460,6 +2469,10 @@ export function installManageAgents(App, ctx = {}) {
       if (stale() || !body.isConnected) return;
       body.querySelector('.ob-loading')?.remove();
       const actx = { body, selectedHost, hostLabel, done, run, refresh, st, stale, racct };
+      // the B-f276 family (主开发 r2947 (3)): accounts that could not be read are never shown as none — the panel says so above the rosters
+      if (!selectedHost && this._accounts?.held) { const hb = document.createElement('div'); hb.className = 'ob-backend'; hb.innerHTML = `<div class="usage-warn">${escHtml(t('The accounts could not be read — none is shown as gone. Nothing is changed and no conversation starts on another login until they read; VibeSpace reads them again by itself.'))}</div>`; body.appendChild(hb); }
+      // (r2947 (2)): while held, every Add… door of the panel is refused BY NAME in one dialog — never a list written from nothing
+      if (!selectedHost && this._accounts?.held && !body._accountsHeldDoor) { body._accountsHeldDoor = true; body.addEventListener('click', (ev) => { const b = ev.target && ev.target.closest ? ev.target.closest('.acct-add') : null; if (!b || !this._accounts?.held) return; ev.stopPropagation(); ev.preventDefault(); this._accountsHeldDialog(refresh); }, true); }
       // A THROWN roster render used to vanish the whole accounts list from the
       // section with no trace — that empty catch already hid a real
       // ReferenceError (`racct`) that killed the codex roster on every host
