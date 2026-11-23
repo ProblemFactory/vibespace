@@ -142,11 +142,12 @@ async function loginShellOf({ env = process.env, userInfo = () => os.userInfo(),
  * (the three flags spelled apart — fish takes them too), stdin /dev/null, TERM=dumb, the sanitized env (serviceEnv), its OWN
  * session (the starter's session option: an rc's `kill 0` or a job-control grab never reaches the hub's or the starter's
  * process group), bounded by `timeoutMs`; the starter ends the session's group when the shell exits or at the bound (an
- * rc's leftover background job that would hold the pipe). `judge(out, err, exitWhy)` = the answer, read once the run has
- * ended (`complete` is the caller's contract, no longer read here: the group's end closes the pipe at the shell's exit).
- * Resolves the judged answer + `shell` + `ms`, or { kind: 'unanswered', why } (timeout / spawn / no-reply).
+ * rc's leftover background job that would hold the pipe); the run is answered at the shell's exit whatever still holds its pipe
+ * (r2862: a holder outside the group — a `setsid` tool with no redirect — no longer holds the look to its bound). `judge(out, err,
+ * exitWhy)` = the answer. Resolves the judged answer + `shell` + `ms`, or { kind: 'unanswered', why } (timeout / spawn / no-reply /
+ * overflow).
  */
-function runShell({ shell, line, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now, complete, judge }) {
+function runShell({ shell, line, env = process.env, timeoutMs = SHELL_ASK_MS, now = Date.now, judge }) {
   const t0 = now();
   const home = typeof env.HOME === 'string' && env.HOME.startsWith('/') ? env.HOME : undefined;
   // B-323e's remainder (lane bl-chat-b, the coordinator's r2689 (a)): ASKED OF THE HUB'S STARTER, never started from the hub's own
@@ -161,6 +162,7 @@ function runShell({ shell, line, env = process.env, timeoutMs = SHELL_ASK_MS, no
   return Promise.resolve().then(() => require('./child-starter').childStarter().run(shell, ['-l', '-i', '-c', line], req)).then((r) => {
     if (!r || r.unknown) return { kind: 'unanswered', why: 'no-reply' };                        // the starter gave no answer
     if (r.started === false) return { kind: 'unanswered', why: `spawn:${r.error || 'error'}` };
+    if (r.overflow) return { kind: 'unanswered', why: 'overflow' };                          // r2862: the printout passed the starter's cap (the sentinels at its end were cut) — said as what it is
     if (r.timedOut) return { kind: 'unanswered', why: 'timeout' };
     const out = String(r.stdout || ''), err = String(r.stderr || '');
     return judge(out.length > OUT_CAP ? out.slice(-OUT_CAP) : out, err.length > 8192 ? err.slice(-8192) : err, r.signal ? `exit:${r.signal}` : `exit:${r.code}`);
@@ -180,7 +182,6 @@ function askShell(name, { shell, env = process.env, timeoutMs = SHELL_ASK_MS, no
   if (!LS.NAME_OK.test(String(name || ''))) return Promise.resolve({ kind: 'unanswered', why: 'bad-name', shell: shell || null, ms: 0 });
   if (!shell) return Promise.resolve({ kind: 'unanswered', why: 'no-shell', shell: null, ms: 0 });
   return runShell({ shell, line: LS.shellLine(name, shell), env, timeoutMs, now,
-    complete: (o) => LS.parseShellAnswer(o).pathDone,
     judge: (out, err, exitWhy) => {
       const p = LS.parseShellAnswer(out);
       if (!p.complete) return { kind: 'unanswered', why: exitWhy };

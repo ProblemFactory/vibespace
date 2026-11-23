@@ -665,13 +665,13 @@ WD.section('⑩');
   //      and still drops the hub's own names (a planted token) — the gate's own red found the mark dropped (the fake starter skips
   //      the belt); RED: a copy of the starter whose belt keeps no mark
   const markLegs = async (CSmod) => { const S = CSmod.createChildStarter(); try {
-    const r = await S.run('/bin/bash', ['-c', 'env'], { timeoutMs: 8000, capture: true, maxBuffer: 256 * 1024, wholeEnv: true, env: { PATH: process.env.PATH || '', VIBESPACE_SHELL_PROBE: '1', VIBESPACE_SESSION_TOKEN: ['vs', 'planted', 'x'].join('-') } });
+    const r = await S.run('/bin/bash', ['-c', 'env'], { timeoutMs: 8000, capture: true, maxBuffer: 256 * 1024, wholeEnv: true, session: { cwd: CWD10 }, env: { PATH: process.env.PATH || '', VIBESPACE_SHELL_PROBE: '1', VIBESPACE_SESSION_TOKEN: ['vs', 'planted', 'x'].join('-') } });
     const names = String((r && r.stdout) || '').split('\n').map((l) => l.split('=')[0]);
     return { mark: names.includes('VIBESPACE_SHELL_PROBE'), token: names.includes('VIBESPACE_SESSION_TOKEN'), n: names.length };
   } finally { S.closePipe(); } };
   const mk1 = await markLegs(CS);
   ok(mk1.mark && !mk1.token && mk1.n > 1, `(a2) a whole env through the REAL starter keeps the login-shell look's mark (${mk1.mark}) and drops the hub's own token (${!mk1.token})`, mk1);
-  const NOMARK = M.load('src/server/child-starter.js', anchored(read('src/server/child-starter.js'), 'if (HUB_OWN.test(k) && !WHOLE_MARKS.has(k)) { n++; continue; }', 'if (HUB_OWN.test(k)) { n++; continue; }', 'no mark kept'), 'no-mark');   // stale-pins: kept (the release's belt — the leg's RED)
+  const NOMARK = M.load('src/server/child-starter.js', anchored(read('src/server/child-starter.js'), 'if (HUB_OWN.test(k) && !(marks && WHOLE_MARKS.has(k))) { n++; continue; }', 'if (HUB_OWN.test(k)) { n++; continue; }', 'no mark kept'), 'no-mark');   // stale-pins: kept (the release's belt — the leg's RED)
   const mk2 = await markLegs(NOMARK);
   ok(!mk2.mark && !mk2.token, `(a2) RED: the starter's belt with no mark kept — the login-shell look's mark is dropped (${mk2.mark})`, mk2);
   // (b) THE OLD ROAD: a starter whose script ends at once — two faults, then the direct start from this process
@@ -680,8 +680,70 @@ WD.section('⑩');
   for (let i = 0; i < 6 && !S2.stats().direct; i++) await S2.run('/bin/bash', ['-c', 'true'], { timeoutMs: 500 });
   ok(S2.stats().direct === true, '(b) the starter that ends at once falls to the old road (the direct start) after its two faults', S2.stats());
   await sessionLegs(S2, 'b, the old road');
+  // (d) r2862 — A HOLDER OUTSIDE THE GROUP (the person's rc starts `setsid <tool> &` with no redirect: it keeps the shell's output open
+  //     and sits in a session of its own, which the group end cannot reach). THE LAW: the run is answered at the shell's exit, the
+  //     entry leaves the held list, and the group is signalled ONCE — nothing to that number after the leader's exit, at the bound or
+  //     at the starter's end. The starter's own process is driven by its protocol with a preload that COUNTS every group signal
+  //     (a negative pid); RED: today's text (the group end at every call, the run ended only at the pipes' close)
+  const PRE = path.join(TMP, 'count-group-kills.cjs');
+  fs.writeFileSync(PRE, "const fs = require('fs'), k = process.kill; process.kill = function (pid, sig) { if (Number(pid) < 0) fs.appendFileSync(process.env.VS_KILL_LOG, String(pid) + ' ' + String(sig) + '\\n'); return k.apply(this, arguments); };\n");
+  // the holder writes its pid from INSIDE its new session, and the shell waits for that file before it ends (by state, bounded): a shell
+  // that ended first had its group signal take the holder with it before it left the group (the first gate's REDs read green)
+  const HOLDER = 'F="$PWD/holder-ready.$$"; setsid sh -c \'echo "$$" > "$1"; exec sleep 20\' sh "$F" & for i in $(seq 1 200); do [ -s "$F" ] && break; sleep 0.02; done; echo "job=$(cat "$F" 2>/dev/null)"; echo answered';
+  const tick10 = (ms) => new Promise((r) => setTimeout(r, ms));
+  const holderRun = async (script) => {
+    const log = path.join(TMP, `group-kills-${path.basename(script)}.log`); fs.writeFileSync(log, '');
+    const p = cp.spawn(process.execPath, ['-r', PRE, script], { env: { PATH: process.env.PATH || '', VS_KILL_LOG: log }, stdio: ['pipe', 'pipe', 'inherit'] });
+    let buf = ''; const evs = [];
+    p.stdout.setEncoding('utf8'); p.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); try { evs.push(JSON.parse(l)); } catch { } } });
+    p.stdin.write(JSON.stringify({ op: 'run', id: 1, cmd: '/bin/bash', args: ['-c', HOLDER], env: { PATH: process.env.PATH || '' }, whole: true, timeoutMs: 700, maxBuffer: 65536, capture: true, session: { cwd: CWD10 } }) + '\n');
+    const exitEv = () => evs.find((e) => e.id === 1 && e.ev === 'exit'), boundEv = () => evs.find((e) => e.id === 1 && e.ev === 'timeout');
+    let ticks = 0;
+    for (; ticks < 300 && !exitEv() && !boundEv(); ticks++) await tick10(10);   // the answer, or the bound — whichever comes first
+    const answeredFirst = !!exitEv() && !boundEv();
+    for (; ticks < 85; ticks++) await tick10(10);                                // past the bound (700 ms from the start; each tick ≥ 10 ms): what it would send, it has sent
+    p.stdin.end();                                                                // the starter's end: every entry still held
+    await new Promise((r) => { const t = setTimeout(r, 3000); p.once('exit', () => { clearTimeout(t); r(); }); });
+    const kills = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+    const out = String((exitEv() || {}).stdout || ''), job = Number((/job=(\d+)/.exec(out) || [])[1]) || 0;
+    if (job > 1) endLeftover(job);
+    return { answeredFirst, timedOut: !!boundEv(), answered: /answered/.test(out), kills, job, stderr: String((exitEv() || {}).stderr || '').slice(0, 300) };
+  };
+  const STARTER_PROC = path.join(ROOT, 'src/server/child-starter-proc.js');
+  const hd = await holderRun(STARTER_PROC);
+  ok(hd.answeredFirst && !hd.timedOut && hd.answered && hd.kills === 1,
+    `(d) a holder outside the group (setsid, no redirect): the run is answered at the shell's exit, before its bound (${hd.answeredFirst}); the group signalled ONCE (${hd.kills}) — none at the bound, none at the starter's end (the entry left the held list)`, hd);
+  const PSRC10 = read('src/server/child-starter-proc.js');
+  const TODAY = anchored(anchored(PSRC10, "{ c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", "{ try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", 'the group end at every call'),
+    "  if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }, SESSION_DRAIN_MS); }); }",
+    "  if (session) { c.vsSession = true; c.on('exit', () => endOwnGroup(c)); }", 'the run ended only at the close');   // stale-pins: kept (35213bad6's text — the leg's RED)
+  const hdR = await holderRun(M.write('src/server/child-starter-proc.js', TODAY, 'today-session'));
+  ok(!hdR.answeredFirst && hdR.timedOut && hdR.kills >= 2,
+    `(d) RED: 35213bad6's starter — the look reaches its bound (${hdR.timedOut}), and the group of a leader already reaped is signalled again (${hdR.kills} group signals: at the exit, at the bound, at the starter's end)`, hdR);
+  // (e) THE OLD ROAD (the direct start after two faults, the hub's own file): the same law, counted in this process
+  const groupKillsIn = async (S) => {
+    const k0 = process.kill, neg = [];
+    process.kill = function (pid, sig) { if (Number(pid) < 0) neg.push(String(pid)); return k0.apply(this, arguments); };
+    try {
+      const r = await S.run('/bin/bash', ['-c', HOLDER], { timeoutMs: 700, capture: true, maxBuffer: 65536, envAdd: { PATH: process.env.PATH || '' }, session: { cwd: CWD10 } });
+      for (let i = 0; i < 85; i++) await tick10(10);   // past the bound (each tick ≥ 10 ms)
+      const job = Number((/job=(\d+)/.exec(String((r && r.stdout) || '')) || [])[1]) || 0;
+      return { timedOut: !!(r && r.timedOut), answered: /answered/.test(String((r && r.stdout) || '')), kills: neg.length, job, stderr: String((r && r.stderr) || '').slice(0, 300) };
+    } finally { process.kill = k0; }
+  };
+  const he = await groupKillsIn(S2); if (he.job > 1) endLeftover(he.job);
+  ok(!he.timedOut && he.answered && he.kills === 1, `(e) the old road: the same holder — answered at the exit (${!he.timedOut}), the group signalled ONCE (${he.kills})`, he);
+  const CSRC10 = read('src/server/child-starter.js');
+  const TODAY_CS = anchored(anchored(CSRC10, "{ c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", "{ try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", 'the group end at every call'),
+    "c.on('exit', (code, signal) => { endOwnGroup(c); if (t) { clearTimeout(t); t = null; } setTimeout(() => { if (done) return; done = true; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); }, SESSION_DRAIN_MS); }); }",
+    "c.on('exit', () => endOwnGroup(c)); }", 'the run ended only at the close');   // stale-pins: kept (35213bad6's text — the leg's RED)
+  const OLDCS = M.load('src/server/child-starter.js', TODAY_CS, 'today-old-road');
+  const S2R = OLDCS.createChildStarter({ script: DIES, log: { warn() { } } });
+  for (let i = 0; i < 6 && !S2R.stats().direct; i++) await S2R.run('/bin/bash', ['-c', 'true'], { timeoutMs: 500 });
+  const heR = await groupKillsIn(S2R); if (heR.job > 1) endLeftover(heR.job);
+  ok(S2R.stats().direct === true && heR.timedOut && heR.kills >= 2, `(e) RED: 35213bad6's old road — the bound reached (${heR.timedOut}), the reaped leader's group signalled again (${heR.kills})`, heR);
   const CSS = read('src/server/child-starter.js'), PROC = read('src/server/child-starter-proc.js');
-  const own = (src) => src.includes("function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }");
+  const own = (src) => src.includes("function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }");
   ok(own(CSS) && own(PROC) && (PROC.match(/process\.kill\(/g) || []).length === 1 && (CSS.match(/process\.kill\(/g) || []).length === 1,
     'THE KILL LAW: each road ends only the group of a child it started itself (`vsSession`, detached: its pid is the group\'s id) by that child\'s own handle — one group kill a file, never a name or a pattern');
 

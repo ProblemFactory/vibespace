@@ -23,9 +23,14 @@ const held = new Map();   // request id → the ChildProcess this process spawne
 let buf = '', ending = false;
 
 function send(o) { try { process.stdout.write(JSON.stringify(o) + '\n'); } catch { bye(); } }
-/** B-323e's remainder (lane bl-chat-b, the coordinator's r2689): a SESSION child's group — the one this process made itself (the child
- *  was started detached, so its pid is its group's id) — ended by this process's own handle on that child; never a name, never a pattern */
-function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }
+/** B-323e's remainder (lane bl-chat-b, the coordinator's r2689 / r2862): a SESSION child's group — the one this process made itself (the
+ *  child was started detached, so its pid is its group's id) — ended by this process's own handle on that child; never a name, never a
+ *  pattern. ONCE: at the child's exit (or at the bound while it still runs), and `vsSession` is cleared in the same step, so nothing is
+ *  ever sent to that number again — not at the bound, not at this process's end (r2862: the number of a reaped leader may be reused) */
+function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }
+/** r2862: a session child's run ENDS at its exit, after this short drain (its last output read), its pipes then closed — a holder the
+ *  person's rc started outside the group (a `setsid` tool with no redirect) never holds the answer, nor the entry in `held` */
+const SESSION_DRAIN_MS = 100;
 function bye() {
   if (ending) return;
   ending = true;
@@ -42,7 +47,7 @@ function handle(line) {
   const cmd = String(m.cmd || ''), args = Array.isArray(m.args) ? m.args.map(String) : [];
   const env = m.whole === true ? {} : { ...process.env };   // B-323e: a whole env is the child's env as its site built it
   for (const [k, v] of Object.entries(m.env || {})) { if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }   // null: the site's env lacks it
-  let c, out = '', err = '', done = false, timedOut = false, timer = null, outN = 0, errN = 0, overflow = false;
+  let c, out = '', err = '', done = false, timedOut = false, timer = null, outN = 0, errN = 0, overflow = false, drainT = null;
   // B-323e's remainder (r2689): a SESSION request — the child in its own session (detached) and folder; at its exit and at the bound
   // this process ends that session's group (a shell whose rc left a job holding the pipe answers when the shell itself has ended)
   const session = m.session && typeof m.session === 'object' ? { cwd: typeof m.session.cwd === 'string' && m.session.cwd ? m.session.cwd : undefined } : null;
@@ -52,9 +57,9 @@ function handle(line) {
   // the error listener FIRST (ckpt61): a start that fails at once (EMFILE / ENFILE) returns with no pipes and its 'error' queued for
   // the next tick — answered as the child's end, never an uncaught exception (this process's own table full: the hub's request
   // answers the error, the starter lives)
-  const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
+  const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); if (drainT) clearTimeout(drainT); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
   c.on('error', (e) => end({ code: null, signal: null, error: String((e && e.code) || e) }));
-  if (session) { c.vsSession = true; c.on('exit', () => endOwnGroup(c)); }
+  if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }, SESSION_DRAIN_MS); }); }   // r2862: the group ended ONCE, the run answered at the exit
   if (capture && c.stdout && c.stderr) {
     c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8');
     // past the bound the child is ENDED, as execFile's maxBuffer did (B-323e smalls, the reader's M2: kept running, a slow listing past

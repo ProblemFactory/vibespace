@@ -145,7 +145,7 @@ try {
   // child it started detached (endOwnGroup, guarded by `vsSession`) — is counted and set apart; every other kill is judged as before
   const OWN_GROUP = "process.kill(-c.pid, 'SIGKILL')";
   const law = (src) => { const own = src.split(OWN_GROUP).length - 1, rest = src.split(OWN_GROUP).join('');
-    return { own, ownGuard: src.includes('function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { try { ' + OWN_GROUP), bare: /process\.kill\(/.test(rest), pattern: /\b(pkill|killall)\b|kill\s+-/.test(rest), held: (rest.match(/\.kill\(/g) || []).length, ofHeld: (rest.match(/\b(p|c)\.kill\(/g) || []).length }; };
+    return { own, ownGuard: src.includes('function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { c.vsSession = false; try { ' + OWN_GROUP), bare: /process\.kill\(/.test(rest), pattern: /\b(pkill|killall)\b|kill\s+-/.test(rest), held: (rest.match(/\.kill\(/g) || []).length, ofHeld: (rest.match(/\b(p|c)\.kill\(/g) || []).length }; };
   const lh = law(hubSrc), lp = law(psSrc);
   const S3 = CS.createChildStarter();
   await S3.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });
