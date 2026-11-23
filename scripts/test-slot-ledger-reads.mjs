@@ -17,6 +17,8 @@
 //      land in the kept rows)
 //   ⑥ the look off the loop: a look that never answers holds no read and starts no second look (red: a look a bound)
 //   ⑦ two ledgers side by side never wake each other; two spellings of one path are one file (red: one state for the process)
+//   ⑨ the backstop measures the live file in bytes before decoding (red: the size after decoding)
+//   ⑩ the rows handed out are read-only, a write replaces them (red: handed out writable, written in place)
 // Run: node scripts/test-slot-ledger-reads.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -95,7 +97,7 @@ const moneyScene = (mod) => {
 };
 {
   const cure = moneyScene(copyOf());
-  const noLand = moneyScene(copyOf(anchored(SRC, '        st.rows.push(back);\n', '', 'the write not landed'), 'no-land'));
+  const noLand = moneyScene(copyOf(anchored(SRC, '        st.rows = Object.freeze(next);\n', '', 'the write not landed'), 'no-land'));
   const keepOnFail = moneyScene(copyOf(anchored(SRC, '    } catch { st.rows = null; st.gen++; return null; }', '    } catch { return null; }', 'a failed write keeps the rows'), 'keep-on-fail'));
   const judgeMove = (x) => x.moved.n === 0 && x.moved.last && x.moved.last.to === 'b' && x.moved.eqFile && x.back.eqFile;
   const judgeFail = (x) => x.afterFail.returned === null && x.afterFail.eqFile && x.afterGlue.eqFile && x.afterGlue.hasE === x.afterGlue.fileHasE && x.later.eqFile && x.later.hasF;
@@ -188,7 +190,7 @@ const engineScene = async (ledgerPath, tag) => {
 };
 {
   const cure = await engineScene(null, 'real');
-  const noLandPath = M.write('src/slot-transitions.js', anchored(SRC, '        st.rows.push(back);\n', '', 'the write not landed'), 'eng-no-land');
+  const noLandPath = M.write('src/slot-transitions.js', anchored(SRC, '        st.rows = Object.freeze(next);\n', '', 'the write not landed'), 'eng-no-land');
   const red = await engineScene(noLandPath, 'noland');
   const judge = (x) => x.onB === x.B && x.asks === 0 && x.afterMove === x.B && x.movedAt && x.movedAsks === 0 && x.next === x.A;
   ok(!!(judge(cure)), `the engine files a record on the member its request went out on: B before the move (${cure.asks} file asks over 50 records), still B after a move to A that came after the request (movedAt; ${cure.movedAsks} asks), A for the next request`, cure);
@@ -231,6 +233,49 @@ const sideScene = (mod) => {
   const judge = (x) => x.aSees && x.aCalls === 0 && x.bRows === 0 && x.bEqFile;
   ok(!!(judge(cure)), 'a write in ledger A is in A\'s reader (another spelling of A\'s folder: the same file, no file call), and ledger B\'s reader holds only B\'s file', cure);
   ok(!!(!judge(red) && red.bRows > 0), 'RED — the copy with one state for the process: B\'s reader holds rows B\'s file does not', red);
+}
+
+console.log('⑨ the backstop measures the live file in BYTES, before decoding');
+const byteScene = async (mod) => {
+  const s = seamed(mod);
+  const D = dir('bytes'), W = new mod.SlotTransitions({ dataDir: D }), R = new mod.SlotTransitions({ dataDir: D });
+  W.record(row('s1', null, 'a', 1000));
+  fs.appendFileSync(fileOf(D), Buffer.from([0xff, 0xfe, 0x0a]));   // a line that is no valid text, left by a hand
+  W.record(row('s1', 'a', 'b', 2000));
+  const T0 = s.T; R.all();
+  let calls = 0;
+  for (let k = 1; k <= 3; k++) { s.T = T0 + k * mod.LOOK_EVERY_MS; calls += syncCalls(() => R.all()).n; await ticks(); if (s.last) { await s.last.catch(() => { }); await ticks(); } }   // the look starts in a microtask: tick before reading it
+  const after = syncCalls(() => R.all());
+  return { looks: s.looks, calls: calls + after.n, rows: after.v.length, eqFile: same(after.v, fresh(D)) };
+};
+{
+  const cure = await byteScene(copyOf());
+  const red = await byteScene(copyOf(anchored(SRC, '      if (live) { bytes = buf.length;', "      if (live) { bytes = Buffer.byteLength(buf.toString('utf-8'));", 'the size after decoding'), 'decoded-size'));
+  const judge = (x) => x.looks >= 2 && x.calls === 0 && x.rows === 2 && x.eqFile;
+  ok(!!(judge(cure)), `a live file holding a byte that is no valid text: ${cure.looks} looks find its size unchanged and keep the rows — ${cure.calls} file calls over the reads that follow`, cure);
+  ok(!!(!judge(red) && red.calls > 0), `RED — the copy that measures the text AFTER decoding: every look finds the sizes differ and the reads read the files again (${red.calls} file calls)`, red);
+}
+
+console.log('⑩ the rows handed out are READ-ONLY: a caller\'s own sort, push or edit cannot change what the next reader gets');
+const roScene = (mod) => {
+  seamed(mod);
+  const D = dir('ro'), W = new mod.SlotTransitions({ dataDir: D }), R = new mod.SlotTransitions({ dataDir: D });
+  for (let i = 0; i < 4; i++) W.record(row('s1', i % 2 ? 'a' : 'b', i % 2 ? 'b' : 'a', 1000 + i * 1000));
+  const mine = R.all(), tries = {};
+  try { mine.sort((a, b) => b.at - a.at); tries.sort = 'done'; } catch { tries.sort = 'refused'; }
+  try { mine.push(row('s9', 'x', 'y', 9999)); tries.push = 'done'; } catch { tries.push = 'refused'; }
+  try { mine[0].to = 'zz'; tries.edit = 'done'; } catch { tries.edit = 'refused'; }
+  const held = R.all(), heldLen = held.length;
+  W.record(row('s1', 'a', 'c', 9000));   // a later write: a NEW array; the one a caller holds stays as it was
+  const next = R.all();
+  return { tries, nextEqFile: same(next, fresh(D)), heldKept: held.length === heldLen, nextHasC: next.some((r) => r.to === 'c') };
+};
+{
+  const cure = roScene(copyOf());
+  const red = roScene(copyOf(anchored(anchored(SRC, '    for (const r of rows) Object.freeze(r);\n    st.rows = Object.freeze(rows);', '    st.rows = rows;', 'handed out unfrozen'), '        st.rows = Object.freeze(next);\n', '        st.rows.push(back); st.rows.sort((a, b) => a.at - b.at);\n', 'pushed in place'), 'shared-writable'));
+  const judge = (x) => x.tries.sort === 'refused' && x.tries.push === 'refused' && x.tries.edit === 'refused' && x.nextEqFile && x.heldKept && x.nextHasC;
+  ok(!!(judge(cure)), `a caller's sort, push and edit of the handed-out rows are refused (${JSON.stringify(cure.tries)}); the next reader gets the files' rows; an array held across a later write keeps its own content`, cure);
+  ok(!!(!judge(red) && !red.nextEqFile), 'RED — the copy that hands out the kept array writable and writes into it in place: a caller\'s sort reaches the next reader', red);
 }
 
 console.log('⑧ pins: the census still counts the ledger\'s reader sites; the kb says the law');

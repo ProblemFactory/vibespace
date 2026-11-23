@@ -42,6 +42,14 @@ const DEDUP_MS = 60000;       // an identical consecutive (session → to) insid
 // drops the rows for the next read. So an outside edit is seen within the bound plus one look (a same-size rewrite right after a
 // write of the hub, before the next look has named the file's time, is the one shape it cannot tell), and a share that stops
 // answering holds nothing.
+// THE CLAIM, EXACTLY (round wuq1b1trm, 主开发 r2940): NO synchronous file ask on a record's READ road. The WRITE road still reads
+// the live file whole at its trim check (_maybeTrim: once a move, not once a record). A whole read of the live file AND every
+// shard happens at the first read, after a trim, after a write that failed and after the backstop found the file changed. The
+// kept rows hold every shard's rows for the life of the process, and the per-file map is never emptied (one ledger per hub; a
+// suite's folders are a handful) — fine for a hub. A look that never returns keeps its file's look out for good: the backstop is
+// OFF for that file from then on (said for whoever adds a writer outside the hub). The rows handed out are READ-ONLY: a frozen
+// array of frozen rows, and a write replaces the array (copy on write), so an array a caller holds never changes under it and a
+// caller's own sort, push or edit throws instead of changing what the next reader gets.
 const LOOK_EVERY_MS = 10 * 1000;
 const _files = new Map();     // resolved file path → { rows, bytes, clean, seen, lookAt, lookOut, gen }
 const _test = {};             // the suite's seam (test-slot-ledger-reads): a clock, the look's stat
@@ -63,7 +71,8 @@ class SlotTransitions {
     this._st = fileState(this.file);   // THE FILE's one in-process state, shared by every instance of this file
   }
   /** the rows kept for this file (null = the next read reads the file); assigning null drops them — a suite that edits the file
-   *  behind the ledger's back says so this way */
+   *  behind the ledger's back says so this way. all() hands out THE ONE KEPT ARRAY, READ-ONLY: frozen, its rows frozen, replaced
+   *  (never changed) by a write — a caller that wants its own order or its own rows copies them */
   get _cache() { return this._st.rows ? { rows: this._st.rows } : null; }
   set _cache(v) { if (v == null) { this._st.rows = null; this._st.gen++; } }
 
@@ -108,8 +117,9 @@ class SlotTransitions {
     if (st.rows && st.clean) {
       const back = JSON.parse(line);
       if (back && back.to && Number.isFinite(back.at)) {
-        st.rows.push(back);
-        if (st.rows.length > 1 && st.rows[st.rows.length - 2].at > back.at) st.rows.sort((a, b) => a.at - b.at);
+        const next = st.rows.concat([Object.freeze(back)]);   // copy on write: an array a caller holds never changes under it
+        if (next.length > 1 && next[next.length - 2].at > back.at) next.sort((a, b) => a.at - b.at);
+        st.rows = Object.freeze(next);
       }
       st.bytes = Math.max(0, st.bytes) + Buffer.byteLength(line);
     } else st.rows = null;
@@ -125,8 +135,11 @@ class SlotTransitions {
     const rows = [];
     let bytes = -1, clean = true;
     const eat = (fp, live = false) => {
-      let txt; try { txt = fs.readFileSync(fp, 'utf-8'); } catch { return; }
-      if (live) { bytes = Buffer.byteLength(txt); clean = !txt || txt.endsWith('\n'); }
+      let buf; try { buf = fs.readFileSync(fp); } catch { return; }
+      // the live file's size is its BYTES before decoding — the backstop compares it with the size on disk (a byte that is no
+      // valid text, left by a hand, decodes to more bytes and would make them differ for ever)
+      if (live) { bytes = buf.length; clean = !buf.length || buf[buf.length - 1] === 0x0a; }
+      const txt = buf.toString('utf-8');
       for (const line of txt.split('\n')) {
         if (!line) continue;
         try { const r = JSON.parse(line); if (r && r.to && Number.isFinite(r.at)) rows.push(r); } catch { }
@@ -139,7 +152,8 @@ class SlotTransitions {
     } catch { }
     eat(this.file, true);
     rows.sort((a, b) => a.at - b.at);
-    st.rows = rows; st.bytes = bytes; st.clean = clean; st.seen = null; st.lookAt = lookNow(); st.gen++;
+    for (const r of rows) Object.freeze(r);
+    st.rows = Object.freeze(rows); st.bytes = bytes; st.clean = clean; st.seen = null; st.lookAt = lookNow(); st.gen++;
     return rows;
   }
 
