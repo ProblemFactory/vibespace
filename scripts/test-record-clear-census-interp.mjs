@@ -508,7 +508,7 @@ const I_RECV = {
   'src/server/channel-api.js|e': ['channel', 'a vendor fetch error\'s name'], 'src/interface/main.js|e': ['error', 'the interface process\'s LAST RESORT: an uncaught Error\'s own name and message, said once before exit 1 — the process holds no record (its graph has no store), and a start line is never in the words'], 'src/server/channel-api.js|p': ['outbox proposal', 'an API proposal\'s reject / failure reason'], 'src/mounts.js|c': ['mount', 'a storage mount\'s name'],
   'src/server/channels-engine.js|e': ['channel', 'a SecretBoxError\'s `reason` — a refusal CODE (key-unreadable:vault_locked), compared, never worded (lane vault-e2e-password-fix-r2)'],
   'src/server/channels-engine.js|ctx': ['session', 'an agent session\'s name'], 'src/server/channels-engine.js|err': ['channel', 'a vendor error\'s detail'], 'src/server/channels-engine.js|fresh': ['outbox proposal', 'a decision reason'],
-  'src/server/channels-engine.js|head': ['channel', 'a failing adapter\'s head sentence'], 'src/server/channels-engine.js|h': ['host', 'a machine name'], 'src/server/channels-engine.js|mod': ['channel', 'an adapter label'],
+  'src/server/channels-engine.js|h': ['host', 'a machine name'], 'src/server/channels-engine.js|mod': ['channel', 'an adapter label'],
   'src/server/channels-engine.js|p.choice.fromMount': ['mount', 'a storage mount\'s name'], 'src/server/channels-engine.js|p': ['outbox proposal', 'a proposal\'s reason'], 'src/server/channels-engine.js|rec': ['channel', 'an account / adapter label'],
   'src/server/channels-engine.js|row': ['integration', 'an integration row label'], 'src/server/channels-engine.js|r': ['outbox proposal', 'a decision reason'], 'src/server/channels-engine.js|src': ['mount', 'a storage label'],
   'src/server/ledger-shape-notice.js|w': ['words', 'the growth alarm\'s For-you notice — its own words (PURE noticeOf: a machine name, the shard\'s file name, its size / ratio, fixed sentences) — the source of a new For-you record, never a copy of one (lane ledger-dedup-law F4)'],
@@ -672,7 +672,6 @@ const I_RECV = {
   'src/server/vault-paste-door.js|v.target': ['vault entry', 'a two-step ask\'s proposed NAME (`totpName`, judged by THE two-step name rule — src/totp.js entryOf: 1–120 letters, digits, «.», «_», «-»): the entry the request names, never a record\'s text'],
   'src/server/vault-paste-door.js|e': ['integration rule', 'the integration store\'s refusal detail on a pasted value — the field\'s own validate complaint (a fixed rule\'s words, never the value, never a record\'s text)'],
   'src/server/vault-job-door.js|card': ['vault job card', 'a Background job\'s approval CARD (PURE src/vault-job.js askCardOf — lane vault-job-approval): the job\'s BELTED label (the engine\'s labelOf), its kind, the entry\'s Vault name and reference, the program\'s / script\'s paths, the folder and the command (secret shapes masked, hidden characters shown) — the card carries the job\'s jobId, so a job\'s Clear content clears it through the For-you door (src/server/record-clear.js cascade)'],
-  'src/server/vault-job-door.js|r': ['vault job card', 'the job\'s --vault NAME (the grammar\'s ^[A-Z][A-Z0-9_]{0,63}$ — never free text) on the card\'s action'],
   'src/foryou-actions.js|wa': ['vault run', 'lane wake-approve-card r11: a run card\'s `facts.whyAgain` (the vault door\'s whyAgainOf — {code, name}): `name` is the NAME of the plain environment variable that changed between two runs (a variable name the command carries, never a value and never a record\'s text) worded in the card\'s «Asked again» line'],
   'src/lib/vault-paste-box.js|r': ['vault entry', 'a free entry\'s LABEL the owner typed a moment ago in 「其他密钥或密码…」, echoed by the add door in its toast — the entry\'s own name, never a record\'s text'],
   'src/lib/vault-totp-row.js|p': ['vault entry', 'lane vault-totp-add: a two-step entry\'s NAME from the add dialog\'s own plan (PURE addPlanOf — what the owner typed, or took from the link a moment ago) in its 已添加 toast — the entry\'s own name, never a record\'s text'],
@@ -721,6 +720,17 @@ const I_RECV = {
   // 主开发 r2090 (B-23e5 line 262, the hosted run on 61a1c21f5): the terminal window's guard over its Ctrl+G panes asks «{name} has unsaved
   // changes…» — `d` = unsavedPane(): the unsaved panes' file names (each pane's own basename, joined), a person's own files, never a record's words
   'src/lib/external-editor.js|d': ['file', 'the unsaved Ctrl+G panes\' own file names (unsavedPane(), joined) in the close question — a person\'s files, never a record\'s words'],
+  // ── 主开发 r2953 (box row 456 at the candidate c51494dbc): the thirteen sites the census met, as ten receivers, each followed to where its value is made ──
+  'src/interface/index.js|e': ['error', 'the Error the sign-in table threw on one head (failed(e)): its code / class name in the journal — never a record\'s words'],
+  'src/interface/signin.js|e': ['error', 'the Error the sign-in road\'s handle() rejected with: its code / class name in the journal'],
+  'src/opencode-provider-config.js|p': ['provider', 'a third-party provider record of Manage agents (configOf): its label is the owner\'s own name for a provider configuration, a setting — none of the kinds a clear reaches'],
+  'src/server/account-usage-routes.js|x': ['account', 'an account\'s decision row (decisionList) in a fold that could not be judged: its sign-in facts\' reason code and the account\'s own name'],
+  'src/server/cli-config-runner.js|whole': ['harness', 'the CLI-config helper\'s receipt for the plan as a whole (parseReceiptLines of its own stdout): the helper\'s refusal reason'],
+  'src/server/cli-config-runner.js|x': ['harness', 'a per-harness receipt of the same helper: its own reason'],
+  'src/server/conversation-deliver.js|p': ['words', 'askOwedPace\'s verdict: the wake pacer\'s own why / rule, or the error that failed the pace — never a message\'s words'],
+  'src/server/otel-ingest.js|t': ['words', 'the stash\'s trim plan: its `what` is made from counts only (`kept the newest N known lines inside 30 days and M unknown-org ones`)'],
+  'src/server/spawn-priority.js|machine': ['host', 'a paired machine\'s record: the owner\'s name for the device (control bytes stripped, 64 characters)'],
+  'src/usage-routes.js|acctMeta': ['account', 'the account\'s decision row (decisionRowOf): its sign-in facts\' reason code in the panel\'s why'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {
@@ -740,7 +750,7 @@ const I_SITES = {
   'src/lib/jobs-panel.js|title|job.name': ['live', 'the Job input window\'s title, re-worded on every render + generic in every layout record (WORDLESS_TITLES)'],
   'src/lib/user-todos-panel.js|toast|nameFor()': ['ref', 'the arrival toast: the history keeps the head + {kind: todo, id} (r4 ⑤ / r5 ⑩)'],
   'src/lib/user-todos-panel.js|toast|wordsOf()': ['ref', 'the arrival toast: the history keeps the head + {kind: todo, id} (r4 ⑤)'],
-  'src/lib/user-todos-actions.js|toast|row.name': ['ref', 'an ask\'s attachment gone at open (lane foryou-attachments): the history keeps the head + {kind: todo, id}'],
+  'src/lib/user-todos-actions.js|toast|row.name': ['ref', 'the two toasts of an ask\'s attachment at open (lane foryou-attachments): gone, and its folder did not answer (B-23e5 (a), r2960): the history keeps the head + {kind: todo, id}'],
   'src/server/conversation-deliver.js|peer|opts.fromName': ['transcript', 'the card drawn when a delivery REACHED the conversation (cardOk)'],
   'src/server/conversation-deliver.js|peer|opts.cardText': ['transcript', 'the card drawn when a delivery reached the conversation'],
   // notify-retry verify r2: the retry park's landing card is built AFTER the post from the entry's words AS THEY STAND (a clear
