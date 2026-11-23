@@ -2323,19 +2323,93 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const goneAccounts = new Set();
   const purging = new Map();   // 主开发 r2878: id → its purge's promise (a re-add clears the gone mark only after it settles)
   const purgeSeq = new Map();   // adapterId -> how many times its local copy was purged (主开发 r2557 (2): an async read across a purge answers nothing)
-  function lruOf(adapterId) {
-    let l = lruCache.get(adapterId);
-    if (l) return l;
-    try { l = JSON.parse(fs.readFileSync(lruFile(adapterId), 'utf-8')); } catch { l = null; }
-    if (!l || typeof l !== 'object' || !l.items || typeof l.items !== 'object') l = { v: 1, items: {} };
+  // B-f276 family (主开发 r3183 / r3188): THE LEDGER IS REBUILT FROM THE FOLDER. It decides the account's size bound (the eviction sums the
+  // LEDGER) and the card's footprint; the release read any failure as «nothing stored» and the next put wrote it over — every file it
+  // counted orphaned for good (never evicted, never counted). The folder is the truth (each cached file has its `<hash>.json` meta:
+  // bytes, at). A ledger that cannot be read, does not parse, or was written by an earlier version (no `v: 2` — the release's
+  // written-over ledgers among them) is REBUILT once at its first use: OFF the loop, over that one account's folder, LRU_REBUILD_READS
+  // metas read at a time. Meanwhile a new file is admitted and counted in memory, the ledger is NOT saved and NOTHING is evicted
+  // (under-evicting for a minute is fine, evicting from a part of the truth is not); at its landing what the folder holds is merged in
+  // (what was admitted meanwhile wins) and the ledger saved once. A meta that does not parse is counted by its file's own size, said
+  // once, never removed. THE REBUILD REMOVES NO FILE (r2943)
+  const LRU_V = 2;
+  const LRU_REBUILD_READS = 8;
+  const lruRebuilding = new Map();   // adapterId → its rebuild in flight (one an account)
+  const lruOk = (v) => !!v && typeof v === 'object' && !!v.items && typeof v.items === 'object' && !Array.isArray(v.items);
+  /** the ledger from its read's answer (`{text}` | `{error}`), cached; a rebuild started when it cannot be taken as it is */
+  function lruAnswer(adapterId, read) {
+    let v = null;
+    if (read && typeof read.text === 'string') { try { v = JSON.parse(read.text); } catch { v = null; } }
+    const good = lruOk(v);
+    const l = good ? v : { v: LRU_V, items: {} };
     lruCache.set(adapterId, l);
+    if (!good || Number(v.v) !== LRU_V) {
+      const why = read && read.error ? (read.error.code === 'ENOENT' ? 'missing' : `unreadable (${read.error.code || 'error'})`) : good ? 'written by an earlier version' : 'torn';
+      lruStartRebuild(adapterId, why);
+    }
     return l;
   }
+  function lruOf(adapterId) {
+    const l = lruCache.get(adapterId);
+    if (l) return l;
+    let read;
+    try { read = { text: fs.readFileSync(lruFile(adapterId), 'utf-8') }; } catch (error) { read = { error }; }
+    return lruAnswer(adapterId, read);
+  }
+  /** the account's cached files from its folder, off the loop → { found: { key: {bytes, usedAt} }, bad } | null (purged / closed meanwhile) */
+  async function lruWalk(adapterId, ep) {
+    const root = path.join(attRoot, safeSeg(adapterId));
+    let convs = [];
+    try { convs = (await fs.promises.readdir(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+    const jobs = [];
+    for (const c of convs) {
+      let names = [];
+      try { names = await fs.promises.readdir(path.join(root, c)); } catch { continue; }
+      for (const nm of names) if (!nm.endsWith('.json') && !nm.includes('.tmp-')) jobs.push([c, nm]);
+    }
+    const found = {};
+    let bad = 0;
+    for (let i = 0; i < jobs.length; i += LRU_REBUILD_READS) {
+      if (closed || (purgeSeq.get(adapterId) || 0) !== ep) return null;
+      await Promise.all(jobs.slice(i, i + LRU_REBUILD_READS).map(async ([c, nm]) => {
+        const f = path.join(root, c, nm);
+        let meta = null;
+        try { meta = JSON.parse(await fs.promises.readFile(f + '.json', 'utf-8')); } catch { meta = null; }
+        if (meta && typeof meta === 'object' && Number.isFinite(Number(meta.bytes))) { found[`${c}/${nm}`] = { bytes: Number(meta.bytes), usedAt: Number(meta.at) || 0 }; return; }
+        try { const st = await fs.promises.stat(f); if (st.isFile()) { found[`${c}/${nm}`] = { bytes: st.size, usedAt: Math.round(st.mtimeMs) || 0 }; bad++; } } catch { /* gone meanwhile */ }
+      }));
+    }
+    return { found, bad };
+  }
+  function lruStartRebuild(adapterId, why) {
+    if (lruRebuilding.has(adapterId)) return lruRebuilding.get(adapterId);
+    const ep = purgeSeq.get(adapterId) || 0;
+    const p = lruWalk(adapterId, ep).then((r) => {
+      if (lruRebuilding.get(adapterId) === p) lruRebuilding.delete(adapterId);   // ended, whatever it found
+      if (!r || closed || (purgeSeq.get(adapterId) || 0) !== ep) return;
+      const l = lruCache.get(adapterId);
+      if (!l) return;
+      let added = 0;
+      for (const [k, x] of Object.entries(r.found)) if (!l.items[k]) { l.items[k] = x; added++; }   // in place: what was admitted meanwhile wins
+      l.v = LRU_V;
+      if (r.bad) warn(`[channels] ${adapterId}: ${r.bad} cached attachment(s) have a meta that does not parse — counted by their own size, never removed`);
+      if (added || why !== 'missing') warn(`[channels] ${adapterId}: the attachment ledger (lru.json) ${why} — rebuilt from the folder: ${Object.keys(r.found).length} cached file(s), ${added} put back in the count`);
+      if (Object.keys(l.items).length) { lruDirty.add(adapterId); lruTouch(adapterId); }   // saved ONCE, by the ledger's own coalesced flush (never a second synchronous write site)
+    }).catch((e) => { if (lruRebuilding.get(adapterId) === p) lruRebuilding.delete(adapterId); warn(`[channels] ${adapterId}: the attachment ledger could not be rebuilt from its folder (${(e && e.code) || (e && e.message) || e}) — nothing is evicted until it is (asked again at the next use)`); lruCache.delete(adapterId); });
+    lruRebuilding.set(adapterId, p);
+    return p;
+  }
+  // r3188: never saved while it is rebuilt (its landing saves once) — but at the store's CLOSE a ledger still being rebuilt is
+  // saved UNFINISHED (no `v: 2`): what was admitted meanwhile is kept, and the next first use rebuilds it again (never taken as the truth)
   function lruSave(adapterId) {
+    if (lruRebuilding.has(adapterId) && !closed) { lruDirty.add(adapterId); return; }
+    const l = lruOf(adapterId);
+    if (lruRebuilding.has(adapterId) && !closed) { lruDirty.add(adapterId); return; }   // its first read started a rebuild just now
     lruDirty.delete(adapterId);
     if (goneAccounts.has(adapterId)) return;   // 主开发 r2819: a purged account's ledger is never written again
     fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
-    writeJsonAtomic(lruFile(adapterId), lruOf(adapterId), { mode: 0o600 });
+    l.v = lruRebuilding.has(adapterId) ? 1 : LRU_V;
+    writeJsonAtomic(lruFile(adapterId), l, { mode: 0o600 });
   }
   /** A cache HIT only moves a recency stamp (R3 §23): the ledger is written
    *  COALESCED — once per LRU_TOUCH_MS per account, and on close — never once
@@ -2347,7 +2421,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let lruTimer = null;
   function lruFlush() {
     if (lruTimer) { clearTimeout(lruTimer); lruTimer = null; }
-    for (const id of [...lruDirty]) { try { lruSave(id); } catch (e) { warn('[channels] attachment LRU write failed:', (e && e.message) || e); } }
+    for (const id of [...lruDirty]) { if (lruRebuilding.has(id) && !closed) continue; try { lruSave(id); } catch (e) { warn('[channels] attachment LRU write failed:', (e && e.message) || e); } }
   }
   function lruTouch(adapterId) {
     lruDirty.add(adapterId);
@@ -2537,6 +2611,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const l = lruOf(adapterId);
     const k = `${safeSeg(convId)}/${h}`;
     if (l.items[k]) { l.items[k].usedAt = now(); lruTouch(adapterId); }
+    if (!l.items[k] && lruRebuilding.has(adapterId) && meta && Number.isFinite(Number(meta.bytes))) l.items[k] = { bytes: Number(meta.bytes), usedAt: now() };   // r3188: a hit while it is rebuilt counts in memory (a statement of its own: a control's cut of the line above leaves it whole)
     return { file, meta };
   }
   /** B-360d r1360 (the loop-hold digest: 2 holds were ingest's held bodies asking attachmentGet — a synchronous open of a
@@ -2545,13 +2620,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   async function lruOfAsync(adapterId) {
     if (lruCache.has(adapterId)) return lruCache.get(adapterId);
     const ep = purgeSeq.get(adapterId) || 0;
-    let l = null;
-    try { l = JSON.parse(await fs.promises.readFile(lruFile(adapterId), 'utf-8')); } catch { l = null; }
+    let read;
+    try { read = { text: await fs.promises.readFile(lruFile(adapterId), 'utf-8') }; } catch (error) { read = { error }; }
     if ((purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): the account was purged during the read — its ledger is never put back (a hit would make its folder again)
     if (lruCache.has(adapterId)) return lruCache.get(adapterId);   // a synchronous first read won meanwhile
-    if (!l || typeof l !== 'object' || !l.items || typeof l.items !== 'object') l = { v: 1, items: {} };
-    lruCache.set(adapterId, l);
-    return l;
+    return lruAnswer(adapterId, read);   // r3188: rebuilt from the folder when it cannot be taken as it is
   }
   async function attachmentGetAsync(adapterId, convId, attId, msg = null) {
     const ep = purgeSeq.get(adapterId) || 0;
@@ -2563,6 +2636,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!l || (purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): purged during the wait — no answer, no touch
     const hit = l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`];
     if (hit) { hit.usedAt = now(); lruTouch(adapterId); }   // attachmentGet's touch on the async road, in words of its own (test-channels-images anchors the synchronous one)
+    if (!l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`] && lruRebuilding.has(adapterId) && meta && Number.isFinite(Number(meta.bytes))) l.items[`${safeSeg(convId)}/${attSlot(attId, msg)}`] = { bytes: Number(meta.bytes), usedAt: now() };   // r3188: a hit while it is rebuilt counts in memory (a statement of its own)
     return { file, meta };
   }
 
@@ -2600,7 +2674,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     l.items[key] = { bytes: buf.length, usedAt: now() };
     const evicted = [];
     let total = Object.values(l.items).reduce((n, x) => n + (Number(x && x.bytes) || 0), 0);
-    if (total > budgetBytes) {
+    if (total > budgetBytes && !lruRebuilding.has(adapterId)) {   // r3188: NEVER from a part of the truth (its rebuild in flight)
       const order = Object.entries(l.items).filter(([k]) => k !== key).sort((a, b) => (Number(a[1].usedAt) || 0) - (Number(b[1].usedAt) || 0));
       for (const [k, x] of order) {
         if (total <= budgetBytes) break;
@@ -2621,6 +2695,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const l = lruOf(adapterId);
     const items = Object.values(l.items);
     return { files: items.length, bytes: items.reduce((n, x) => n + (Number(x && x.bytes) || 0), 0) };
+  }
+  /** r3188: the account's ledger rebuild settled (resolves at once when none is in flight) — a suite's wait; the card's footprint
+   *  keeps its shape meanwhile (it under-counts for a moment) */
+  function attachmentLedgerSettled(adapterId) {
+    const p = lruRebuilding.get(adapterId);
+    return p ? p.then(() => true, () => true) : Promise.resolve(true);
   }
 
   // ── the audit log: append-only, rolled by DATE, ARCHIVED never deleted ──
@@ -3249,7 +3329,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     startDamagedEmpty,   // B-f276 1b: the damaged family's one door (a person's choice — the engine's route asks it)
     appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
-    prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite, peopleHeld, peopleUpdate, onPeopleLift,
+    prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, attachmentLedgerSettled, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite, peopleHeld, peopleUpdate, onPeopleLift,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     feedMissRead, feedMissWrite, feedMissDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
