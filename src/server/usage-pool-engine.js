@@ -283,6 +283,9 @@ function usageIdentityGroups() {
   // the identity key's EMAIL DECIDES a grouping (B-360d, 主开发 r1221 — the timer row): the decision road's rows, confirmed within
   // two of this memo's lives (60 s; a confirmation asked behind at 30 s) — an account not confirmed is its own identity (no merge)
   const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];
+  // B-87fd identity unit 4 (主开发 r3011): each file is a MEMBER first — its today's key (groupKeyOf) and its row's RECORD on the
+  // decision road (the keeper's kept facts: no read of its own) — then ONE GROUP = ONE ACCOUNT by the one comparison (identityGroupsOf)
+  const members = [];
   for (const fn of files) {
     try {
       // '__global_codex__' is a PSEUDO id like '__global__' (the machine's
@@ -311,15 +314,27 @@ function usageIdentityGroups() {
       const ownBe = gOwner || (acctRec?.backend && globalUsageKey(acctRec.backend) !== '__global__' ? acctRec.backend : null);
       const key = gOwner ? gOwner + ':__global__'
         : groupKeyOf({ accountId, cache, email: acctRec?.email, ownBe });   // B-6a92 r9: the ONE keying (module-level, the door's table runs it too)
-      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: ownBe || 'claude', tomb5h: null };
-      g.accountIds.push(gOwner ? fn.slice(0, -5) : (accountId || '__global__'));
+      // LANDED (r3022 (2)(c)): the keeper has read the row's folder within the bound, or found it unreadable — only then is it
+      // judged; a row not yet landed keeps its today's name's group as the release had it (its seed comes WITH that landing)
+      let rec = null, landed = true;
+      if (accountId) {
+        try { const f = accounts.signinFacts(accountId, { withinMs: 60000 }); landed = f.state === 'read' || f.why !== 'not-read-yet'; } catch { landed = false; }
+        if (landed) { try { rec = accounts.identityRecordOf(accountId, { withinMs: 60000 }); } catch { rec = null; } }
+      }
+      members.push({ id: gOwner ? fn.slice(0, -5) : (accountId || '__global__'), accountId, cache, today: key, backend: ownBe || 'claude', rec, landed, createdAt: accountId ? ((accounts.get(accountId) || {}).createdAt || 0) : 0 });
+    } catch { }
+  }
+  for (const [name, ms] of identityGroupsOf(members)) {
+    const g = { accountIds: [], cache: null, accountId: null, backend: ms[0].backend, tomb5h: null };
+    for (const m of ms) {
+      g.accountIds.push(m.id);
       // freshest cache is the identity's anchor source (the same real login can
       // surface as BOTH __global__ and a named sub — one quota, two files)
-      if (!g.cache || cache.fetchedAt > g.cache.fetchedAt) { g.cache = cache; g.accountId = accountId; }
+      if (!g.cache || m.cache.fetchedAt > g.cache.fetchedAt) { g.cache = m.cache; g.accountId = m.accountId; }
       // the file that stands «no 5h limit» (the newest such): the anchor sweep records no 5h bucket over it (no-5h-window r5)
-      if (quotaModel.fiveHourAbsent(cache) > (quotaModel.fiveHourAbsent(g.tomb5h) || 0)) g.tomb5h = cache;
-      groups.set(key, g);
-    } catch { }
+      if (quotaModel.fiveHourAbsent(m.cache) > (quotaModel.fiveHourAbsent(g.tomb5h) || 0)) g.tomb5h = m.cache;
+    }
+    groups.set(name, g);
   }
   return groups;
 }
@@ -9569,6 +9584,46 @@ function maybeStopOnFallback(session, id, from, to) {
 function groupKeyOf({ accountId = null, cache = null, email = null, ownBe = null } = {}) {
   return (ownBe ? ownBe + ':' : '') + require('../usage-anchors.js').identityKeyFor({ accountId, cache, email });
 }
+/** B-87fd identity unit 4 (主开发 r3011) — THE ENGINE'S GROUPS, PURE over its members ({ id, accountId, today, rec, createdAt }):
+ *  - two ROWS are one group iff their records are «same» (src/account-identity.js sameAccount: «different» and «unproven» stand
+ *    apart, a row with no record stands alone); a group is the union of its «same» pairs;
+ *  - a MACHINE LOGIN (no row: its seat is never read from a home, r1477) joins a group only when exactly ONE group holds a member
+ *    of its today's key, else it stands alone;
+ *  - NOTHING IS JUDGED BEFORE IT LANDED (r3022 (2)(c)): a today's name with a row the keeper has not landed yet (`landed: false`)
+ *    keeps ALL its rows together as the release grouped them, until each has landed or been found unreadable;
+ *  - THE NAMES (r3011 Q2 / Q3): a today's name whose members now stand in more than one group is SPLIT — nobody keeps it bare. A
+ *    group keeps the best of its members' unsplit today's names (org, then address, then id; then the smaller string); a group
+ *    with none takes its best today's name + '/' + its oldest row's id. A name carries no seat and no digest.
+ *  → Map(name → members), each group in its members' order */
+function identityGroupsOf(members, { same = (x, y) => require('../account-identity.js').sameAccount(x, y) } = {}) {
+  const all = (members || []).map((m, idx) => ({ ...m, idx })), machines = all.filter((m) => !m.accountId);
+  const pending = new Set(all.filter((m) => m.accountId && m.landed === false).map((m) => m.today));
+  const held = new Map(), rows = [];
+  for (const m of all.filter((x) => x.accountId)) { if (pending.has(m.today)) { if (!held.has(m.today)) held.set(m.today, []); held.get(m.today).push(m); } else rows.push(m); }
+  const up = rows.map((_, i) => i), root = (i) => (up[i] === i ? i : (up[i] = root(up[i])));
+  for (let i = 0; i < rows.length; i++) for (let j = i + 1; j < rows.length; j++) {
+    if (root(i) !== root(j) && rows[i].rec && rows[j].rec && same(rows[i].rec, rows[j].rec) === 'same') up[root(j)] = root(i);
+  }
+  const byRoot = new Map();
+  rows.forEach((m, i) => { const r = root(i); if (!byRoot.has(r)) byRoot.set(r, []); byRoot.get(r).push(m); });
+  const list = [...byRoot.values(), ...held.values()];
+  for (const m of machines) { const h = list.filter((s) => s.some((x) => x.today === m.today)); if (h.length === 1) h[0].push(m); else list.push([m]); }
+  const split = new Set(), first = new Map();
+  list.forEach((s, gi) => { for (const m of s) { if (!first.has(m.today)) first.set(m.today, gi); else if (first.get(m.today) !== gi) split.add(m.today); } });
+  const rank = (k) => { const r = /^(?:[a-z][a-z0-9-]*:)?(org|email|acct):/.exec(k); return r ? ['org', 'email', 'acct'].indexOf(r[1]) : 3; };
+  const best = (ks) => [...ks].sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))[0];
+  const out = new Map();
+  for (const s of list.map((g) => g.sort((a, b) => a.idx - b.idx)).sort((a, b) => a[0].idx - b[0].idx)) {
+    const keys = new Set(s.map((m) => m.today)), whole = [...keys].filter((k) => !split.has(k));
+    let name = whole.length ? best(whole) : null;
+    if (!name) {
+      const own = s.filter((m) => m.accountId), oldest = (own.length ? own : s).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || (a.id < b.id ? -1 : 1))[0];
+      name = best(keys) + '/' + oldest.id;
+    }
+    out.set(name, s);
+  }
+  return out;
+}
 /** WHO ANSWERED a panel: its own printed / rewritten org (idv.panel), else the folder's login it ran through (idv.expected) —
  *  {org, email} in memory, or null when neither names anyone. */
 function answeringLogin(idv) {
@@ -9593,4 +9648,4 @@ function heldLiftFactsOf({ key, idv, h, sameAccountIds = null, rowCache = null, 
   const facts = { rowKey, held, answer: answeringLogin(idv), onHeld: !!p7 && !!h && require('../reading-lag.js').weeklyNear(p7, h.phase) === true, panel: { refused: !!(idv && idv.refused), verified: !!(idv && idv.verified), phase: (idv && idv.phase) || null, org: (idv && idv.org) || null } };
   return facts;   // (never a line «  return {» after create's own: a census finds the engine's exports by its last one)
 }
-module.exports = { create, heldLiftFactsOf, groupKeyOf };
+module.exports = { create, heldLiftFactsOf, groupKeyOf, identityGroupsOf };

@@ -607,7 +607,7 @@ class AccountManager {
   _displayRead(a, { after = 0, ensure = false, urgent = false } = {}) {
     try {
       const { creds, dir, files, keep, ident } = this._displayFilesOf(a);
-      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after, keep, urgent, identity: ident ? (rd) => ident(dir, rd, { tied: this._tiedFn(a.id) }) : null });
+      const p = this._display[ensure ? 'ensure' : 'refresh'](dir, files, (rd) => creds.parseAuth(dir, rd), { link: this._acctType(a) === 'pooled', after, keep, urgent, identity: ident ? (rd) => ident(dir, rd, { tied: this._tiedFn(a.id, { seed: this._acctType(a) === 'subscription' }) }) : null });
       p.catch(() => { });
       return p;
     } catch { return Promise.resolve(null); }
@@ -618,7 +618,7 @@ class AccountManager {
    *  an off-loop read then only confirms */
   _displaySeed(a) {
     // the confirming read starts AFTER the seed (a read already in flight began before the act: it never overwrites the seed)
-    try { const { creds, dir, files, keep, ident } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR, { keep, identity: ident ? (rd) => ident(dir, rd, { tied: this._tiedFn(a.id) }) : null }); this._displayRead(a, { after: this._display.clock() }); } catch { }
+    try { const { creds, dir, files, keep, ident } = this._displayFilesOf(a); this._display.seed(dir, files, (rd) => creds.parseAuth(dir, rd), RR, { keep, identity: ident ? (rd) => ident(dir, rd, { tied: this._tiedFn(a.id, { seed: this._acctType(a) === 'subscription' }) }) : null }); this._displayRead(a, { after: this._display.clock() }); } catch { }
   }
   /** the switch: the pool's folder now shows `subId`'s files — seeded from the member the switch has just checked, target set */
   _displaySeedPool(pool, subId) {
@@ -710,7 +710,8 @@ class AccountManager {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription' || this.signinFacts(id, opts).state !== 'read') return null;
     const be = this._acctBackend(a);
-    return accountIdentity.identityRecordOf({ harness: be, declared: a.email || null, auth: this._display.identityOf(this._acctDir(be, a.id)) });
+    const rec = accountIdentity.identityRecordOf({ harness: be, declared: a.email || null, auth: this._display.identityOf(this._acctDir(be, a.id)) });
+    return rec ? { ...rec, tie: this._tieKindOf(id) } : rec;   // r3022 (2)(d): a SEEDED tie is told apart from a proven one
   }
   /** the facts a row carries: { state: 'read', at } | { state: 'unread' } | { state: 'unreadable', at, reason } */
   _factsOf(d) { return d.state === 'read' ? { state: 'read', at: d.at } : d.state === 'unreadable' ? { state: 'unreadable', at: d.at, reason: d.reason } : { state: 'unread' }; }
@@ -861,9 +862,12 @@ class AccountManager {
    *  a new sign-in replaces it — src/login-expiry.js) is kept on the row (a deadline, no identity); the refresh token it saw, by its
    *  fingerprint (src/login-tie.js) kept in MEMORY only (never written, never logged, never answered). The record names a seat only
    *  from a config tied so */
-  _noteLoginTie(id, { fresh = false } = {}) {
+  _noteLoginTie(id, { fresh = false, seeded = false } = {}) {
     const a = this.get(id);
     if (!a) return;
+    if (!this._tieSeeded) this._tieSeeded = new Set();
+    if (seeded) this._tieSeeded.add(id); else this._tieSeeded.delete(id);   // r3022 (2)(d): a sign-in through the product replaces a seeded tie by a proven one
+    if (a.loginTieDropped) { delete a.loginTieDropped; this._save(); }
     if (fresh) { try { RR.forget(this.subDir(id)); } catch { } }   // a file this run just moved or wrote: read it again
     let o = null;
     try { o = JSON.parse(RR.facts(this.subCredsPath(id)).text)?.claudeAiOauth || null; } catch { o = null; }
@@ -871,18 +875,46 @@ class AccountManager {
     const rt = o && typeof o.refreshToken === 'string' && o.refreshToken ? o.refreshToken : null;
     if (rt) this._loginTies.set(id, tokenTieOf(rt)); else this._loginTies.delete(id);
     const rte = o && Number.isFinite(o.refreshTokenExpiresAt) ? o.refreshTokenExpiresAt : null;
-    const was = a.loginTie && a.loginTie.rte;
-    if (rte) { if (was !== rte) { a.loginTie = { rte }; this._save(); } }   // a live sign-in's deadline — or the CLI's blanked residue's, its login's
+    const was = a.loginTie && a.loginTie.rte, wasSeeded = !!(a.loginTie && a.loginTie.seeded);
+    if (rte) { if (was !== rte || wasSeeded !== seeded) { a.loginTie = seeded ? { rte, seeded: true } : { rte }; this._save(); } }   // a live sign-in's deadline — or the CLI's blanked residue's, its login's
     else if (a.loginTie) { delete a.loginTie; this._save(); }
   }
   /** the row's tie DROPPED (r2972 1): after an unvouched outcome the folder holds a sign-in nothing tied — the next press seeds from it */
-  _dropLoginTie(id) { const a = this.get(id); if (this._loginTies) this._loginTies.delete(id); if (a && a.loginTie) { delete a.loginTie; this._save(); } }
+  _dropLoginTie(id) {
+    const a = this.get(id); if (this._loginTies) this._loginTies.delete(id); if (this._tieSeeded) this._tieSeeded.delete(id);
+    // …and the row is marked DROPPED (r3022 (2)(a): seeded once): its next landing never seeds it — the next press does (r2972 1)
+    if (a && (a.loginTie || !a.loginTieDropped)) { delete a.loginTie; a.loginTieDropped = true; this._save(); }
+  }
+  /** THE SEED AT A ROW's FIRST LANDING (主开发 r3022 (2)): a row with NO tie on record — signed in before the tie existed — takes its
+   *  tie from THAT landing's own snapshot (`o`: the credentials the keeper has just parsed — no read of its own, no new writer, no
+   *  vendor call, no timer), so the update never splits an account that spans two rows. Never over a tie, never on a row whose tie
+   *  was dropped (the next press seeds it), nothing from credentials naming no login session. MARKED SEEDED — its folder trusted
+   *  as the release trusted it — and a later sign-in through the product replaces it by a proven one (_noteLoginTie) */
+  _seedTieAt(id, o) {
+    const a = this.get(id);
+    if (!a || a.loginTieDropped || this._hasTie(id) || !o || typeof o !== 'object') return;
+    const rt = typeof o.refreshToken === 'string' && o.refreshToken ? o.refreshToken : null;
+    const rte = Number.isFinite(o.refreshTokenExpiresAt) ? o.refreshTokenExpiresAt : null;
+    if (!rt && !rte) return;
+    if (!this._loginTies) this._loginTies = new Map();
+    if (!this._tieSeeded) this._tieSeeded = new Set();
+    if (rt) this._loginTies.set(id, tokenTieOf(rt));
+    this._tieSeeded.add(id);
+    if (rte) { a.loginTie = { rte, seeded: true }; this._save(); }
+  }
+  /** the tie's kind for row `id`: 'proven' (a sign-in through the product), 'seeded' (its folder trusted: r3022 (2)(d)) or null */
+  _tieKindOf(id) {
+    if (!this._hasTie(id)) return null;
+    const a = this.get(id);
+    return (a && a.loginTie && a.loginTie.seeded) || (this._tieSeeded && this._tieSeeded.has(id)) ? 'seeded' : 'proven';
+  }
   /** a tie on record for row `id` (its deadline on the row, or its refresh token's fingerprint this process saw) */
   _hasTie(id) { const a = this.get(id); return !!((a && a.loginTie) || (this._loginTies && this._loginTies.has(id))); }
   /** → (claudeAiOauth) ⇒ tied to the login session the product's own sign-in saw for row `id` (its deadline, or its refresh token's hash) */
-  _tiedFn(id) {
+  _tiedFn(id, { seed = false } = {}) {
     return (o) => {
       if (!o || typeof o !== 'object') return false;
+      if (seed) { try { this._seedTieAt(id, o); } catch { } }   // a row's own landing seeds a row with no tie (r3022 (2))
       const a = this.get(id), rte = Number.isFinite(o.refreshTokenExpiresAt) ? o.refreshTokenExpiresAt : null;
       if (rte && a && a.loginTie && a.loginTie.rte === rte) return true;
       const fp = this._loginTies && this._loginTies.get(id);
@@ -946,7 +978,7 @@ class AccountManager {
     // A ROW WITH NO TIE ON RECORD (signed in before the tie existed, or a merge's survivor before r2915) takes its tie from the
     // credentials in its folder NOW — its own folder trusted as the release trusted it (主开发 r2915): a wrong seed names the config's
     // older seat, and the fresh sign-in of any other account then reads DIFFERENT (a move or a new row) — never a silent adoption
-    if (!this._hasTie(id)) this._noteLoginTie(id);
+    if (!this._hasTie(id)) this._noteLoginTie(id, { seeded: true });
     let live = null, last = null;
     const tied = this._tiedFn(id);   // a config untied to the credentials beside it names no seat (r2779: a /login inside one of the row's sessions)
     try { live = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(dir, RR, { tied }) : null; } catch { live = null; }
@@ -1021,7 +1053,7 @@ class AccountManager {
       if (x.id === id || !capsOf(this._acctBackend(x)).oauthUsage || this._acctType(x) !== 'subscription') return false;
       let rec = this.identityRecordOf(x.id, { withinMs: RELOGIN_BEFORE_TTL_MS });
       if (!this._hasTie(x.id)) {   // r2915: another account's row with NO tie on record is seeded from its own credentials and read now (it takes the move)
-        this._noteLoginTie(x.id);
+        this._noteLoginTie(x.id, { seeded: true });
         let auth = null;
         try { auth = typeof creds.folderIdentityOf === 'function' ? creds.folderIdentityOf(this.subDir(x.id), RR, { tied: this._tiedFn(x.id) }) : null; } catch { auth = null; }
         rec = auth ? accountIdentity.identityRecordOf({ harness: be, declared: x.email || null, auth }) : null;

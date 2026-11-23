@@ -123,6 +123,7 @@ try {
   const MUT = mutantCopies('relogin-door', REPO);
   const accSrc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
   const copyAM = (from, to, why) => { try { return require(MUT.write('src/accounts.js', anchored(accSrc, from, to, why))).AccountManager; } catch (e) { return { err: e.message }; } };
+  const copyAMs = (edits, why) => { try { return require(MUT.write('src/accounts.js', edits.reduce((s, [from, to]) => anchored(s, from, to, why), accSrc))).AccountManager; } catch (e) { return { err: e.message }; } };
   { const Old = copyAM("    if (!lost ? !(st && st.state === 'success' && st.attempt === kept.attempt) : !!(st && st.state === 'running')) return { outcome: 'pending' };\n", '', 'the release\'s resolve: no new-since-the-press gate (RED)'); // stale-pins: kept — the RED takes the gate out
     ok(!Old.err, 'RED CONTROL built: the resolve without the new-since-the-press gate', Old.err || '');
     if (!Old.err) { const f = firstPolls(new Old({ dataDir: path.join(tmp, 'red-gate') })); ok(f.r0 === 'same' && !f.kept0, 'RED: in that copy the FIRST poll judges the untouched folder «same» and spends BEFORE — the other account then lands with no question', JSON.stringify(f)); } }
@@ -157,7 +158,7 @@ try {
     return relogin(s, 'a40@example.invalid', undefined, M).outcome;
   };
   ok(preCure(am2, 1) === 'same' && preCure(am2, 2) === 'same', 'r2915 MUST: a row with NO tie on record (signed in before the update) — scene 1 and scene 2 with the same person back ⇒ SAME, in place, no question (the press seeds the tie from its own folder)');
-  { const NoSeed = copyAM("    if (!this._hasTie(id)) this._noteLoginTie(id);\n", '', 'the press does not seed a missing tie (RED)'); // stale-pins: kept — the RED takes the seed out
+  { const NoSeed = copyAMs([["    if (!this._hasTie(id)) this._noteLoginTie(id, { seeded: true });\n", ''], ["      if (seed) { try { this._seedTieAt(id, o); } catch { } }   // a row's own landing seeds a row with no tie (r3022 (2))\n", '']], 'neither the press nor the landing seeds a missing tie (RED)'); // stale-pins: kept — the RED takes both seeds out (unit 4: the landing seeds too)
     ok(!NoSeed.err, 'RED CONTROL built: the press without the seed', NoSeed.err || '');
     if (!NoSeed.err) { const M = new NoSeed({ dataDir: path.join(tmp, 'red-seed') }); ok(preCure(M, 1) === 'ask', 'RED: in that copy the same person back on a pre-update row is ASKED (the commonest scene)'); } }
   const untiedMove = async (M) => {
@@ -170,7 +171,7 @@ try {
   };
   { const u = await untiedMove(am2);
     ok(u.r === 'moved' && u.to && u.oIn, 'r2915 MUST: the OTHER account\'s row with no tie on record TAKES THE MOVE (seeded from its own credentials, read now) — never a duplicate row', JSON.stringify(u));
-    const NoSeed2 = copyAM("      if (!this._hasTie(x.id)) {", "      if (false) {", 'a move target with no tie is not seeded (RED)'); // stale-pins: kept
+    const NoSeed2 = copyAMs([["      if (!this._hasTie(x.id)) {", "      if (false) {"], ["      if (seed) { try { this._seedTieAt(id, o); } catch { } }   // a row's own landing seeds a row with no tie (r3022 (2))\n", '']], 'a move target with no tie is seeded neither by the move nor by its landing (RED)'); // stale-pins: kept
     if (!NoSeed2.err) { const u2 = await untiedMove(new NoSeed2({ dataDir: path.join(tmp, 'red-move') })); ok(u2.r === 'split', 'RED: in that copy the untied row of the same account gets a DUPLICATE (a split)', JSON.stringify(u2)); } else ok(false, 'RED CONTROL built: the move without the seed', NoSeed2.err); }
   const mergeTie = (M) => {
     const into = M.createSubscription({}).id; live(M.subDir(into), 'a44@example.invalid'); M.finalizeSubscription(into); untie(M, into);

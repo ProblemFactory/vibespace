@@ -188,8 +188,7 @@ DOORS.sameAccount = await sameWorld();
 
 // ── THE DEBT TABLE: what each door gets wrong today (door × law × pair kind). A row LEAVES when its door is cured ──
 const DEBT = [
-  // the engine's group key is ORG FIRST: one account whose organisation only one cache names splits; two seats of one org merge
-  ['usageIdentityGroups', 'proven-split', 'same-one-org'], ['usageIdentityGroups', 'false-merge', 'seats-one-org'], ['usageIdentityGroups', 'false-merge', 'seats-org-only'],
+  // (the engine's three rows LEFT with identity unit 4, 主开发 r3011: its groups ask the one comparison)
   // the machine login's link: the organisation first
   ['_usageGlobalLink', 'false-merge', 'seats-one-org'],
   // the record alone (a.email, or a name with «@»): one address in two organisations is one account; a declared address that differs
@@ -245,7 +244,9 @@ const RIGHT = {
   reloginResolve: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
   evaluateOnHost: ['same-both-org', 'same-one-org', 'same-no-org', 'seats-one-org', 'strangers', 'strangers-renamed'],
   _usageGlobalLink: ['same-both-org', 'same-one-org', 'same-no-org', 'same-declared-conflict', 'same-renamed', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
-  usageIdentityGroups: ['same-both-org', 'same-no-org', 'same-declared-conflict', 'same-renamed', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
+  // identity unit 4 (主开发 r3011): the engine's groups on the one comparison — same-one-org, seats-one-org and seats-org-only now
+  // right; same-no-org (an address with no organisation proves no account, Q4) and same-declared-conflict (ruling [1]) fall APART
+  usageIdentityGroups: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'seats-org-only', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
   // the one comparison: «unproven» on same-no-org (an address with no organisation), same-declared-conflict (nobody's twin until
   // the person resolves it) and seats-org-only (signed-out rows: no fact) — never wrong
   sameAccount: ['same-both-org', 'same-one-org', 'same-renamed', 'seats-one-org', 'one-address-two-orgs', 'strangers', 'strangers-renamed'],
@@ -275,8 +276,8 @@ const DOOR_MARKS = {
   reloginResolve: { 'reloginResolve(': { 'src/accounts.js': 2, 'src/server/account-usage-routes.js': 1 }, 'reloginBegin(': { 'src/accounts.js': 2, 'src/server/account-usage-routes.js': 1 }, 'reloginAnswer(': { 'src/accounts.js': 1, 'src/server/account-usage-routes.js': 1 }, 'beforeAfterVerdict(': { 'src/account-identity.js': 1, 'src/accounts.js': 1 } },   // + the press judging an unjudged success first, then pressing afresh (r2972 3): the same door
   evaluateOnHost: { 'evaluateOnHost(': { 'src/accounts.js': 1, 'src/ws-create.js': 2, 'src/routes/account-tails.js': 1, 'src/server/account-usage-routes.js': 1 } },
   _usageGlobalLink: { '_usageGlobalLink = ': { 'src/usage-routes.js': 4 } },
-  usageIdentityGroups: { 'usageIdentityGroups(': { 'src/server/usage-pool-engine.js': 3 }, 'groupKeyOf(': { 'src/server/usage-pool-engine.js': 3 } },
-  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 6 } },   // + the move search's seeded read of an untied row (r2915)
+  usageIdentityGroups: { 'usageIdentityGroups(': { 'src/server/usage-pool-engine.js': 3 }, 'groupKeyOf(': { 'src/server/usage-pool-engine.js': 3 }, 'identityGroupsOf(': { 'src/server/usage-pool-engine.js': 2 } },   // + its PURE grouping (unit 4)
+  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1, 'src/server/usage-pool-engine.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 6, 'src/server/usage-pool-engine.js': 1 } },   // + the move search's seeded read of an untied row (r2915)
   'usage-anchors identityKeyFor (alone)': { 'identityKeyFor(': { 'src/reading-repair.js': 1, 'src/usage-anchors.js': 1, 'src/server/usage-pool-engine.js': 1 } },
   // two of identityVerdict's four are a NAMESAKE: the mac helper's code-signing verdict (agentd), not an account door
   'oat-mint-model identityVerdict': { 'identityVerdict(': { 'src/oat-mint-model.js': 1, 'src/server/oat-mint.js': 1, 'src/mac-helper-identity.js': 1, 'src/agentd/stream-mac.js': 1 } },
