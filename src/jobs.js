@@ -204,6 +204,9 @@ function heldOf(r, reason) {
 // the newest of them deterministically
 const archiveOrder = (a, b) => ((b.archivedAt || 0) - (a.archivedAt || 0)) || (M.terminalAt(b) - M.terminalAt(a)) || String(b.id).localeCompare(String(a.id));
 
+// r3287: the words of a service's removal refused while the list of forwards cannot be read (the card says them in the reader's language)
+const RM_PORTS_HELD = "not removed: the list of forwards could not be read, so this service's public address could not be taken down — stop it now; remove it once the list of forwards reads";
+
 class JobManager {
   /** deps: { dataDir, broadcast(type,payload), notifyUser({words,fact,urgency,jobId,jobName,ownerCid})→{ok,why?}, log,
    *          deliverToConversation?(cid,text)→Promise<{ok,peerName?,reason?}>,   // 2.344.0 peer-message lane
@@ -330,6 +333,7 @@ class JobManager {
       for (const t of [t1, t2, t3, t4, t5, t6]) { t.unref?.(); this._timers.push(t); }
       this._cronTick().catch(() => { });
       this.ready = true;
+      this.forwardsReconcile('the jobs start');   // r3287: this engine has read and adopted — whichever list settles last runs the ONE pass
     } catch (e) {
       // engine failure must be LOUD but never block the server (§5 failure isolation)
       this.initError = e.message;
@@ -608,6 +612,7 @@ class JobManager {
       this._unreadTries[which] = 0; this._unreadSaid[which] = false; this._unreadSlow[which] = 0; this._unreadMissingAt[which] = 0;
       this.d.log(`[jobs] ${base} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${a.state === 'data' ? `${a.value.length} record(s)` : a.state === 'missing' ? 'the file is GONE — the records it held are not here; a new list starts, the job-logs clean-up stays held' : `torn bytes, set aside${pre && pre.bad ? ` as ${path.basename(pre.bad)}` : ''} — rebuilt from the job logs; the job-logs clean-up stays held`} — ${this.readOnly ? 'a read-only engine writes nothing' : 'writes resume'}`);
       try { this.d.broadcast('jobs-updated', { reread: which }); } catch { }
+      if (!this._recordsHeld()) this.forwardsReconcile('the job records read again');   // r3287: the records' lift asks too
     }
   }
   /** cure r1 — 主开发's ruling (00:40Z): a read again that ANSWERED and LOADED lifts what the failure filed. The records are in
@@ -3419,7 +3424,7 @@ class JobManager {
       const prevOwner = atPort && atPort.ownerJob && atPort.ownerJob !== job.id ? this.jobs.get(atPort.ownerJob) : null;
       const reown = atPort && atPort.ownerJob && atPort.ownerJob !== job.id && !(prevOwner && prevOwner.kind === 'service' && prevOwner.publish && ['up', 'starting'].includes(prevOwner.state)) ? atPort.ownerJob : null;
       const rec = await pf.forward('__local__', job.ports[0], { owner: job.id, claim: this._claimLabels(job), reown, label: 'service: ' + this.labelOf(job) });   // r4: the Ports label is a person's — the NAME belted
-      job._pfId = rec && rec.id; delete job.publishHeld; delete job.publishNotOwned;
+      job._pfId = rec && rec.id; delete job.publishHeld; delete job.publishNotOwned; delete job.publishRefusal;
       job._publish = { state: 'publishing' }; this._touch(job);
       const waitMs = this.d.publishWaitMs ?? 60_000;
       const up = await this._portAnswers(job, job.ports[0], waitMs, gen);
@@ -3442,31 +3447,45 @@ class JobManager {
       // r3174: refused because port-forwards.json is held — SAID on the job (its card, the agent's status); the lift publishes it again
       if (e && e.code === 'ports_unread') { job._publish = { state: 'held' }; job.publishHeld = 'not published yet: the list of forwards could not be read; published by itself when it reads'; this._touch(job); return; }
       // r3228: the port's row is a person's (or another service's) — never taken: SAID on the job, the row untouched
-      if (e && (e.code === 'forward_not_owned' || e.code === 'forward_owned')) { job._publish = { state: 'refused' }; job.publishNotOwned = e.message; this._touch(job); return; }
+      if (e && (e.code === 'forward_not_owned' || e.code === 'forward_owned')) { job._publish = { state: 'refused' }; job.publishNotOwned = e.message; job.publishRefusal = e.code === 'forward_owned' ? 'another-service' : 'by-hand'; this._touch(job); return; }
       this.d.log('[jobs] forward failed for', job.id, '—', e.message);
     }
   }
   /** r3228: the label the release's engine wrote on a row of this job («service: <its label>», the name through the ONE accessor —
    *  every publish since .361 relabelled its row so) — the one mark by which a row with no owner yet is claimed as this job's */
-  _claimLabels(job) { return ['service: ' + this.labelOf(job)]; }
-  /** r3228 (round whu7689zw): THE FORWARDS' ONE RECONCILE, from the facts as they are, after the Ports list's own replay settled (at
-   *  every start once the list reads, after every lift — src/port-forward.js restore / _lifted). No mark kept through a hold: a stop,
-   *  a removal or a restart while the list was held all end the same way here.
-   *   1) every row that says it is a job's (ownerJob): its service is up or starting and asks to be published ⇒ it is published and the
-   *      job knows its id (a row the replay already published only teaches the id: never published twice); anything else (the service
-   *      stopped, parked, failed, removed, or no longer asking) ⇒ its address is taken down and the row removed;
-   *   2) every service that asks, is up or starting and has no row ⇒ published.
-   *  A row with no owner yet that the release's engine wrote is claimed first by its own label (_claimLabels), or — its job cleared
-   *  meanwhile — by the cleared job holding that port. A person's row is never touched. → what it did */
-  async forwardsReconcile(why = 'the forwards') {
+  _claimLabels(job) { return [...new Set(['service: ' + this.labelOf(job), ...(job && job.name ? ['service: ' + job.name] : [])])]; }   // r3287: the release's raw spelling too (an identity, never shown)
+  /** r3228 (round whu7689zw) → r3287 (round wbbbpdgvd): THE FORWARDS' ONE RECONCILE — FOUR CALLERS ASK, ONE GATE DECIDES, whichever
+   *  list settles last runs the ONE pass (serialised: an ask while a pass runs waits for it):
+   *   callers — the Ports replay's end and the Ports lift (src/port-forward.js), this engine's init end and its records' lift;
+   *   THE GATE — the Ports list reads and HAS REPLAYED once (pf.replayedOnce: each relay call of the replay bounded); this engine is
+   *     READY, NOT read-only, and its records NOT held (store or archive). Anything else: nothing, the later caller runs it.
+   *   1) every row that says it is a job's, judged again at ITS TURN (the row and its job read again; a job whose publish is in flight
+   *      is skipped; a row whose replay the relay did not answer is left as it is): its service up or starting and asking ⇒ kept
+   *      published, the job learns its id (a published row is never published again), its label its job's; a job the engine KNOWS
+   *      that no longer asks (live or archived: stopped, parked, failed, not asking) ⇒ its address down (its name KEPT for its next
+   *      start) and the row removed. A row whose job the engine cannot name — gone, or only a skeleton of a torn list — is KEPT
+   *      (UNKNOWN KEEPS: removed is never inferred; the engine's own removal tears its row down when the list reads, and is refused
+   *      while it is held — rm). Its end is the person's own door in the Ports panel (unforward: no owner refuses it).
+   *   2) every service that asks, is up or starting, with no row ⇒ published, once.
+   *  A row with no owner yet that the release's engine wrote is claimed first by its own label (both spellings: _claimLabels), or —
+   *  its job cleared meanwhile — by the cleared job holding that port. A person's row is never touched. → what it did, or null */
+  forwardsReconcile(why = 'the forwards') {
+    const run = () => this._forwardsPass(why).catch((e) => { this.d.log(`[jobs] ${why}: the forwards reconcile failed — ${(e && e.message) || e}`); return null; });
+    const p = this._fwdChain = (this._fwdChain || Promise.resolve()).then(run, run);
+    return p;
+  }
+  async _forwardsPass(why) {
+    if (!this.ready || this.readOnly || this._recordsHeld()) return null;   // r3287 (a)(d): this engine not ready / read-only / its records held
     const pf = this.d.getPorts && this.d.getPorts();
     if (!pf || (typeof pf.heldWords === 'function' && pf.heldWords())) return null;   // held: nothing is known — the lift runs it
-    const out = { why, claimed: [], kept: [], down: [], published: [] }, served = new Set();
+    if (typeof pf.replayedOnce === 'function' && !pf.replayedOnce()) return null;     // r3287: the Ports list has not replayed yet — its replay's end asks
+    const boundMs = Number(pf.relayBoundMs) > 0 ? Number(pf.relayBoundMs) : 20000;
+    const out = { why, claimed: [], kept: [], down: [], published: [], unknown: [], unanswered: [], inFlight: [] }, served = new Set();
     const wants = (job) => !!job && job.kind === 'service' && !!job.publish && ['up', 'starting'].includes(job.state) && (job.ports || []).length > 0;
     const services = [...this.jobs.values()].filter((j) => j.kind === 'service');
     for (const job of services) { delete job.publishHeld; if (job._publish && job._publish.state === 'held') job._publish = null; }   // the list reads now: nothing is held
-    let rows = [];
-    try { rows = (pf.list && pf.list()) || []; } catch { rows = []; }
+    const listed = () => { try { return (pf.list && pf.list()) || []; } catch { return []; } };
+    const rows = listed();
     // 0) a row the release's engine wrote (no owner yet, its own «service: …» label, this machine's port): claimed once
     for (const rec of rows) {
       if (rec.ownerJob || rec.hostId !== '__local__' || rec.targetHost || !/^service: /.test(String(rec.label || ''))) continue;
@@ -3475,30 +3494,40 @@ class JobManager {
       if (!job) continue;
       try { await pf.forward('__local__', rec.remotePort, { owner: job.id, claim: [rec.label], label: 'service: ' + this.labelOf(job) }); rec.ownerJob = job.id; out.claimed.push(rec.id); } catch (e) { this.d.log(`[jobs] ${why}: ${rec.id} not claimed — ${(e && e.message) || e}`); }
     }
-    // 1) every row that says it is a job's
-    for (const rec of rows) {
-      if (!rec.ownerJob) continue;
-      const job = this.jobs.get(rec.ownerJob);
-      if (wants(job) && Number(job.ports[0]) === Number(rec.remotePort)) {
-        job._pfId = rec.id; delete job.publishNotOwned; served.add(job.id);
+    // 1) every row that says it is a job's — each judged again at its turn
+    for (const rec0 of rows) {
+      if (!rec0.ownerJob) continue;
+      const rec = listed().find((r) => r.id === rec0.id);
+      if (!rec || rec.ownerJob !== rec0.ownerJob) continue;   // gone or taken meanwhile (a start in the same window)
+      if (rec.relayUnanswered) { out.unanswered.push(rec.id); served.add(rec.ownerJob); continue; }   // its replay's relay call did not answer: left as it is (its job is not published again over it)
+      const live = this.jobs.get(rec.ownerJob);
+      const job = live && !LS.isSkeleton(live) ? live : null;
+      const archived = job ? null : (() => { try { return this.archivedById(rec.ownerJob); } catch { return null; } })();
+      if (!job && !archived) { out.unknown.push(rec.id); continue; }   // UNKNOWN KEEPS — its address and its name
+      if (job && job._publish && job._publish.state === 'publishing') { out.inFlight.push(rec.id); continue; }   // a start in flight owns it now
+      if (job && wants(job) && Number(job.ports[0]) === Number(rec.remotePort)) {
+        job._pfId = rec.id; delete job.publishNotOwned; delete job.publishRefusal; served.add(job.id);
         if (rec.label !== 'service: ' + this.labelOf(job)) { try { await pf.forward('__local__', rec.remotePort, { owner: job.id, label: 'service: ' + this.labelOf(job) }); } catch { } }   // its row reads its job's name now (a clear meanwhile)
         if (rec.publicUrl) { if (job.publishedUrl !== rec.publicUrl) { job._publish = null; this._publishOutcome(job, { ok: true, url: rec.publicUrl }); this._touch(job); } out.kept.push(rec.id); }
         else { this._ensurePublish(job); out.published.push(job.id); }
         continue;
       }
-      // its service stopped, parked, failed, was removed or no longer asks: the address down, the row removed (a removed one's name goes too)
-      const forget = !job;
+      // a job it KNOWS that no longer asks (live or archived): the address down — its name KEPT for its next start — the row removed
       if (job) { job._pfId = null; job.publishedUrl = null; this._touch(job); }
-      try { await pf.unpublish(rec.id, { keepName: !forget }); } catch (e) { this.d.log(`[jobs] ${why}: unpublish ${rec.id} — ${(e && e.message) || e}`); }
-      try { await pf.unforward(rec.id, { keepName: !forget }); } catch (e) { this.d.log(`[jobs] ${why}: unforward ${rec.id} — ${(e && e.message) || e}`); }
+      const p0 = Promise.resolve(pf.unpublish(rec.id, { keepName: true })).then(() => false, (e) => { this.d.log(`[jobs] ${why}: unpublish ${rec.id} — ${(e && e.message) || e}`); return false; });
+      const late = await Promise.race([p0, new Promise((res) => { const t = setTimeout(() => res(true), boundMs); p0.then(() => clearTimeout(t)); })]);   // a bound that must fire: never unref'd (cleared when the relay answers)
+      if (late) { out.unanswered.push(rec.id); this.d.log(`[jobs] ${why}: the relay did not answer the unpublish of ${rec.id} within ${Math.round(boundMs / 1000)} s — its row left as it is`); continue; }
+      const now2 = this.jobs.get(rec.ownerJob);   // judged again after the await: a start meanwhile owns the row — never unforwarded under it
+      if (now2 && (wants(now2) || (now2._publish && now2._publish.state === 'publishing'))) { out.inFlight.push(rec.id); continue; }
+      try { await pf.unforward(rec.id, { keepName: true }); } catch (e) { this.d.log(`[jobs] ${why}: unforward ${rec.id} — ${(e && e.message) || e}`); }
       out.down.push(rec.id);
     }
     // 2) every service that asks, is up or starting, and has no row
     for (const job of services) {
-      if (!wants(job) || served.has(job.id)) continue;
+      if (!wants(job) || served.has(job.id) || (job._publish && job._publish.state === 'publishing')) continue;
       this._ensurePublish(job); out.published.push(job.id);
     }
-    if (out.claimed.length || out.down.length || out.published.length) this.d.log(`[jobs] ${why}: the forwards reconciled — ${out.claimed.length} claimed, ${out.kept.length} kept, ${out.down.length} taken down, ${out.published.length} published`);
+    if (out.claimed.length || out.down.length || out.published.length || out.unknown.length || out.unanswered.length) this.d.log(`[jobs] ${why}: the forwards reconciled — ${out.claimed.length} claimed, ${out.kept.length} kept, ${out.down.length} taken down, ${out.published.length} published, ${out.unknown.length} kept unknown, ${out.unanswered.length} left unanswered`);
     return out;
   }
   /** THE ONE PLACE A PUBLISH OUTCOME LANDS (lane job-notice-dedupe): the job's own attempt and the relay's success the Ports
@@ -3685,7 +3714,7 @@ class JobManager {
       const pf = this.d.getPorts && this.d.getPorts();
       job._pubGen = (job._pubGen || 0) + 1; job._publish = null; this._endUrlCheck(job); delete job.urlPending; delete job._urlGaveUp; // B-74f5: a pending URL check (its timer, its give-up mark) ends with the publish
       delete job.publishDown; // the down episode ends with a deliberate stop / park / refusal (never at a restart: that is when it repeated)
-      delete job.publishHeld; delete job.publishNotOwned;
+      delete job.publishHeld; delete job.publishNotOwned; delete job.publishRefusal;
       if (!pf) return;
       // r3228 (round whu7689zw): ONLY the row that says it is this job's (its id, else its owner) — never one found by a port. While the
       // list is held nothing is known and nothing is owed: the reconcile after the lift takes down every row whose service is not wanted
@@ -5289,6 +5318,9 @@ class JobManager {
   }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
+    // r3287 (round wbbbpdgvd, line ten): a SERVICE's removal while port-forwards.json is held is REFUSED by name — its public address could
+    // not be taken down, and an unknown row is kept (never read as removed); the stop is not refused
+    if (job && job.kind === 'service') { const pf = this.d.getPorts && this.d.getPorts(); if (pf && typeof pf.heldWords === 'function' && pf.heldWords()) return { error: RM_PORTS_HELD, code: 'ports_unread' }; }
     if (this._notifsUnread && job && job.clearedAt) return { error: this._notifsClearedWords(job.id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
     const alive = this._verifyAlive(this._readStamp(job));
     if (alive && !stop && !orphan) return { error: `${job.id} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
@@ -5434,7 +5466,7 @@ class JobManager {
       id: job.id, kind: job.kind, name: author || !job.name ? job.name : this.labelOf(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
       // lane job-notice-dedupe: the down record is the state while the service runs (a re-publish in flight does not hide it);
       // a stopped service has none (teardown ends the episode)
-      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: job.publishHeld || job.publishNotOwned || (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
+      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : job.publish && !job.publishedUrl && job.publishNotOwned ? 'refused' : null, publishRefusal: job.publishNotOwned ? (job.publishRefusal || 'by-hand') : null, publishError: job.publishHeld || job.publishNotOwned || (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
       publishCause: (job.publishDown && job.publishDown.cause) || null, publishWhy: JN.whyOf(job.publishDown), publishSince: (job.publishDown && job.publishDown.sinceAt) || null, publishAttempts: (job.publishDown && job.publishDown.attempts) || 0,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: this._contextFor(job, author),

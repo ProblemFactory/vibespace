@@ -13439,6 +13439,8 @@ export default {
   "This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.": "このジョブは VibeSpace 自身を実行しています：VibeSpace とその会話がこのメモリ上限を超えると、すべて一緒に終了します。",
   "Not published yet: the list of forwards could not be read. It is published by itself when it reads.": "まだ公開されていません：ポート転送の一覧を読み込めませんでした。読み込めると自動で公開されます。",
   "Not published: port {port} is already forwarded by hand in the Ports panel. Publish it there, or remove that forward and start the service again.": "公開されていません：ポート {port} はポートパネルで手動で転送されています。そこで公開するか、その転送を削除してからサービスを再起動してください。",
+  "Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.": "公開されていません：ポート {port} はまだ動いている別のサービスに転送されています。そちらを止めるか、このサービスに別のポートを使ってください。",
+  "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.": "削除されていません：ポート転送の一覧を読み込めないため、このサービスの公開アドレスを取り下げられませんでした。今は停止し、ポート転送の一覧が読み込めるようになってから削除してください。",
   "Not restarted: it ran VibeSpace itself.": "再起動しません：VibeSpace 自身を実行していました。",
   "Runs VibeSpace: its memory bound ends it whole.": "VibeSpace を実行中：メモリ上限を超えると丸ごと終了します。",
   "Memory bound": "メモリ上限",

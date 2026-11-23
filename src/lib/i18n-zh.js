@@ -13440,6 +13440,8 @@ export default {
   "This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.": "此任务运行的是 VibeSpace 本身：当 VibeSpace 及其对话超出此内存上限时，它们会一起结束。",
   "Not published yet: the list of forwards could not be read. It is published by itself when it reads.": "尚未发布：无法读取端口转发列表。读取成功后会自动发布。",
   "Not published: port {port} is already forwarded by hand in the Ports panel. Publish it there, or remove that forward and start the service again.": "未发布：端口 {port} 已在“端口”面板中手动转发。请在那里发布，或移除该转发后重新启动服务。",
+  "Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.": "未发布：端口 {port} 已转发给另一个仍在运行的服务。请停止那个服务，或为此服务换一个端口。",
+  "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.": "未移除：无法读取端口转发列表，因此无法撤下此服务的公开地址。请先停止它；等端口转发列表能读取后再移除。",
   "Not restarted: it ran VibeSpace itself.": "未自动重启：它运行的是 VibeSpace 本身。",
   "Runs VibeSpace: its memory bound ends it whole.": "运行 VibeSpace：超出内存上限会让它整体结束。",
   "Memory bound": "内存上限",

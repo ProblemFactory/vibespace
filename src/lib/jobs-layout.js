@@ -222,6 +222,7 @@ const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state ===
 export function publishBlockedNote(j, t) {
   if (!j || !j.publish || j.publishedUrl) return '';
   if (j.publishState === 'held') return t('Not published yet: the list of forwards could not be read. It is published by itself when it reads.');
+  if (j.publishState === 'refused' && j.publishRefusal === 'another-service') return t('Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.', { port: (j.ports || [])[0] });   // r3287: the row is another live service's
   if (j.publishState === 'refused') return t('Not published: port {port} is already forwarded by hand in the Ports panel. Publish it there, or remove that forward and start the service again.', { port: (j.ports || [])[0] });
   return '';
 }

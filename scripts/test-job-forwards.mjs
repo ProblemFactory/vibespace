@@ -32,6 +32,7 @@ require('../src/server/owner-facts.js').configure({ setting: (k) => (k === 'inst
 const { JobManager } = require('../src/jobs.js');
 const { PortForwardManager } = require('../src/port-forward.js');
 const jobModel = require('../src/job-model.js');
+const LS = require('../src/job-logs-sweep.js');   // the engine's own skeleton predicate
 const { jobWhen } = require('../src/agent-routes.js');
 const JSRC = read('src/jobs.js'), PSRC = read('src/port-forward.js');
 const loadJM = (src, tag) => MUT.load('src/jobs.js', src, tag).JobManager;
@@ -46,18 +47,18 @@ process.on('exit', () => { for (const d of roots) { try { fs.rmSync(d, { recursi
 
 /** ONE SCENE: the list held at the start (its read refused), the boot's replay asked while held, `whileHeld` acts, the LIFT (the
  *  hold's own read again), then the replay and the reconcile settle. `restart`: the engine is dropped and made again before the lift. */
-async function scene({ JM = JobManager, PFM = PortForwardManager, rows = [], jobs = [], held = true, whileHeld = async () => { }, restart = false }) {
+async function scene({ JM = JobManager, PFM = PortForwardManager, rows = [], jobs = [], held = true, whileHeld = async () => { }, restart = false, boundMs = 20000, hang = [], unpubDelayMs = 0 }) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-job-fwd-')); roots.push(d);
   const pdir = path.join(d, 'pf'), edir = path.join(d, 'engine'); fs.mkdirSync(pdir, { recursive: true }); fs.mkdirSync(path.join(edir, 'bin'), { recursive: true });
   const file = path.join(pdir, 'port-forwards.json');
   fs.writeFileSync(file, JSON.stringify({ forwards: rows }, null, 2));
   const calls = [];
   const plugins = {
-    async frpPublish(name, localPort, o) { calls.push(['publish', name]); return { name, subdomain: (o && o.preferSub) || 'fresh', proto: 'http', url: `https://${(o && o.preferSub) || name}.relay.test/` }; },
-    async frpUnpublish(name) { calls.push(['unpublish', name]); return { ok: true }; },
+    async frpPublish(name, localPort, o) { calls.push(['publish', name]); if (hang.includes(name)) return new Promise(() => { }); return { name, subdomain: (o && o.preferSub) || 'fresh', proto: 'http', url: `https://${(o && o.preferSub) || name}.relay.test/` }; },
+    async frpUnpublish(name) { calls.push(['unpublish', name]); if (unpubDelayMs) await sleep(unpubDelayMs); return { ok: true }; },
   };
   let eng = null;
-  const mkPf = () => new PFM({ hosts: { list: () => [] }, dataDir: pdir, plugins, broadcast: () => { }, log: () => { }, getJobs: () => eng });
+  const mkPf = () => new PFM({ hosts: { list: () => [] }, dataDir: pdir, plugins, broadcast: () => { }, log: () => { }, getJobs: () => eng, relayBoundMs: boundMs });
   let pf = null;
   if (held) { const rf = fs.readFileSync; fs.readFileSync = function (q, ...a) { if (String(q) === file) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, q, ...a); }; try { pf = mkPf(); } finally { fs.readFileSync = rf; } }
   else pf = mkPf();
@@ -65,15 +66,15 @@ async function scene({ JM = JobManager, PFM = PortForwardManager, rows = [], job
   const stopE = (E) => { try { for (const t of E._timers || []) clearInterval(t); E.shutdown(); } catch { } };
   eng = mkE();
   for (const j of jobs) eng.jobs.set(j.id, { ...j });
-  await pf.restore();   // the boot's replay (server.js +5.5 s): held ⇒ only asked
+  await Promise.race([pf.restore(), sleep(2500)]);   // the boot's replay (server.js +5.5 s): held ⇒ only asked (a copy whose replay never ends waits its bound)
   const facts = {};
   await whileHeld({ E: eng, pf, calls, facts });
   if (restart) { stopE(eng); eng = mkE(); }   // VibeSpace restarted while the list was held: the engine made again from jobs.json
   if (held && pf._hold && pf._hold.again) await pf._hold.again().catch(() => false);   // THE LIFT
   // the replay and the reconcile settle: no publish in flight and the relay quiet for 150 ms (a copy that never settles waits its bound, 2.5 s)
   const inFlight = () => [...eng.jobs.values()].some((j) => j._publish && j._publish.state === 'publishing');
-  for (let t0 = Date.now(), last = -1, since = Date.now(); Date.now() - t0 < 2500;) { await sleep(25); if (calls.length !== last || inFlight()) { last = calls.length; since = Date.now(); } else if (Date.now() - since > 150) break; }
-  const out = { calls: calls.slice(), rows: pf.list().map((r) => ({ id: r.id, ownerJob: r.ownerJob, label: r.label, publicUrl: r.publicUrl })), names: Object.keys((pf._state && pf._state.names) || {}), jobs: {}, facts };
+  for (let t0 = Date.now(), last = -1, since = Date.now(); Date.now() - t0 < 2500;) { await sleep(25); if (calls.length !== last || inFlight()) { last = calls.length; since = Date.now(); } else if (Date.now() - since > 100) break; }
+  const out = { replayed: !!pf._replayed, calls: calls.slice(), rows: pf.list().map((r) => ({ id: r.id, ownerJob: r.ownerJob, label: r.label, publicUrl: r.publicUrl, relayUnanswered: !!r.relayUnanswered })), names: Object.keys((pf._state && pf._state.names) || {}), jobs: {}, facts };
   for (const j of eng.jobs.values()) out.jobs[j.id] = { pfId: j._pfId || null, publishedUrl: j.publishedUrl || null, state: j.state };
   stopE(eng);
   try { clearInterval(pf._watch); if (pf._hold && pf._hold.stop) pf._hold.stop(); } catch { }
@@ -91,27 +92,34 @@ const S1 = svc('jb-fwdstop01', 47411);
 const race = (JM, PFM) => scene({ JM, PFM, rows: [ownedRow(S1, 47411)], jobs: [S1], whileHeld: (c) => stopWhileHeld(c, S1.id) });
 const r1 = await race();
 ok(lastFor(r1, 'pf-__local__-47411') === 'unpublish' && !raced(r1, 'pf-__local__-47411') && !r1.rows.length, `§1: the stopped service's address down, its row removed — the replay first, then the reconcile, never interleaved (${r1.calls.map((c) => c.join(' ')).join(' → ')})`, r1);
-const LIFT_SEQ = "    if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }   // restore() ends with the reconcile\n    else this._jobsReconcile('the lift').catch(() => {});\n";
+const REPLAYED_GATE = '  replayedOnce() { return !this._hold.held() && this._replayed; }\n', NO_GATE = '  replayedOnce() { return !this._hold.held(); }\n';
 const REPLAY_TAIL = "    await this._jobsReconcile('the replay');   // r3228: after the replay settled — the jobs engine's ONE reconcile (at every start, after every lift)\n";
-const beside = anchored(anchored(PSRC, REPLAY_TAIL, '', 'reconcile-beside'), LIFT_SEQ, "    if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }\n    this._jobsReconcile('the lift').catch(() => {});\n", 'reconcile-beside');
-const r1red = await race(JobManager, loadPF(beside, 'reconcile-beside'));
-ok(raced(r1red, 'pf-__local__-47411'), `RED CONTROL §1: the reconcile BESIDE the replay (in a copy, the cure's first order) — the replay's republish lands after the reconcile's unpublish (${r1red.calls.map((c) => c.join(' ')).join(' → ')}): the race the round named`, r1red);
+const noReplayAsk = anchored(PSRC, REPLAY_TAIL, '', 'no-replay-ask');
+const r1red = await race(JobManager, loadPF(noReplayAsk, 'no-replay-ask'));
+ok(lastFor(r1red, 'pf-__local__-47411') === 'publish' && r1red.rows.some((r) => r.id === 'pf-__local__-47411' && !!r.publicUrl), `RED CONTROL §1: the replay's own ask cut (in a copy) — no pass after the replay: the stopped service's address stays up (${r1red.calls.map((c) => c.join(' ')).join(' → ')})`, r1red);
 
-console.log('§2 a REMOVAL while held: the row goes and its name with it');
-const S2 = svc('jb-fwdgone01', 47412);
-const removal = (JM) => scene({ JM, rows: [ownedRow(S2, 47412)], jobs: [S2], whileHeld: async (c) => { await stopWhileHeld(c, S2.id); c.E.jobs.delete(S2.id); } });
+console.log('§2 a REMOVAL while held is REFUSED by name (the stop is not); a row whose job the engine cannot name is KEPT (unknown keeps)');
+const S2 = svc('jb-fwdgone01', 47412), RMH = "not removed: the list of forwards could not be read, so this service's public address could not be taken down — stop it now; remove it once the list of forwards reads";
+const removal = (JM) => scene({ JM, rows: [ownedRow(S2, 47412)], jobs: [S2], whileHeld: async (c) => { c.facts.rm = c.E.rm(c.E.jobs.get(S2.id), { stop: true }); c.facts.still = c.E.jobs.has(S2.id); if (c.facts.still) await stopWhileHeld(c, S2.id); } });
 const r2 = await removal();
-ok(lastFor(r2, 'pf-__local__-47412') === 'unpublish' && !r2.rows.length && !r2.names.includes('pf-__local__-47412'), `§2: removed while held — at the lift its address down, its row and its kept name gone (${r2.calls.map((c) => c.join(' ')).join(' → ')})`, r2);
-const ROW_JOB = '      const job = this.jobs.get(rec.ownerJob);\n';
-const r2red = await removal(loadJM(anchored(JSRC, ROW_JOB, ROW_JOB + '      if (!job) continue;\n', 'gone-kept'), 'gone-kept'));
-ok(lastFor(r2red, 'pf-__local__-47412') === 'publish' && r2red.rows.some((r) => r.id === 'pf-__local__-47412' && r.publicUrl), 'RED CONTROL §2: a removed service\'s row kept (in a copy) — the lift republishes an address nobody owns', r2red);
+ok(!!r2.facts.rm && r2.facts.rm.code === 'ports_unread' && r2.facts.rm.error === RMH && r2.facts.still === true && lastFor(r2, 'pf-__local__-47412') === 'unpublish' && !r2.rows.length && r2.names.includes('pf-__local__-47412'), `§2: rm of a service while held refused by name («${r2.facts.rm && r2.facts.rm.error}»), the record kept; the stop is not refused — at the lift its address down, its name KEPT for its next start`, r2);
+const RM_GUARD = "    if (job && job.kind === 'service') { const pf = this.d.getPorts && this.d.getPorts(); if (pf && typeof pf.heldWords === 'function' && pf.heldWords()) return { error: RM_PORTS_HELD, code: 'ports_unread' }; }\n";
+const r2red = await removal(loadJM(anchored(JSRC, RM_GUARD, '', 'rm-while-held'), 'rm-while-held'));
+ok(r2red.facts.still === false, 'RED CONTROL §2: the removal\'s refusal cut (in a copy) — the service leaves the records while its row cannot be closed', r2red.facts);
+const S2b = svc('jb-fwdlost01', 47418);
+const unknownScene = (JM) => scene({ JM, rows: [ownedRow(S2b, 47418)], jobs: [S2b], whileHeld: async (c) => { c.E.jobs.delete(S2b.id); } });   // a record the engine can no longer name
+const r2b = await unknownScene();
+ok(!r2b.calls.some((c) => c[0] === 'unpublish') && r2b.rows.some((r) => r.id === 'pf-__local__-47418' && !!r.publicUrl && r.ownerJob === S2b.id), '§2: a row whose job the engine cannot name is KEPT at the lift — its address and its name (removed is never inferred)', r2b);
+const UNKNOWN_KEEPS = "      if (!job && !archived) { out.unknown.push(rec.id); continue; }   // UNKNOWN KEEPS — its address and its name\n";
+const r2bred = await unknownScene(loadJM(anchored(JSRC, UNKNOWN_KEEPS, '', 'unknown-taken'), 'unknown-taken'));
+ok(r2bred.calls.some((c) => c[0] === 'unpublish' && c[1] === 'pf-__local__-47418'), 'RED CONTROL §2: unknown keeps cut (in a copy) — the unnamed job\'s address is taken down', r2bred.calls);
 
 console.log('§3 a RESTART while held (the engine dropped and made again): the stopped service\'s address goes at the lift');
 const S3 = svc('jb-fwdrest01', 47413);
 const restart = (JM) => scene({ JM, rows: [ownedRow(S3, 47413)], jobs: [S3], restart: true, whileHeld: (c) => stopWhileHeld(c, S3.id) });
 const r3 = await restart();
 ok(lastFor(r3, 'pf-__local__-47413') === 'unpublish' && !r3.rows.length && !!r3.jobs[S3.id] && r3.jobs[S3.id].state === 'down', `§3: no mark carried through the hold — the engine made again reads the service down, and the reconcile takes its address down (${r3.calls.map((c) => c.join(' ')).join(' → ')})`, r3);
-const DOWN_RULE = '      const forget = !job;\n';
+const DOWN_RULE = '      // a job it KNOWS that no longer asks (live or archived): the address down — its name KEPT for its next start — the row removed\n';
 const r3red = await restart(loadJM(anchored(JSRC, DOWN_RULE, '      if (job) continue;\n' + DOWN_RULE, 'stopped-kept'), 'stopped-kept'));
 ok(lastFor(r3red, 'pf-__local__-47413') === 'publish' && r3red.rows.some((r) => r.id === 'pf-__local__-47413' && r.publicUrl), 'RED CONTROL §3: a stopped service\'s row kept (in a copy) — after the restart its address stays up', r3red);
 
@@ -150,11 +158,12 @@ console.log('§4b a row of a job that no longer asks for it is the next service\
     const snap = E.snapshot(E.jobs.get(N.id));
     try { for (const t of E._timers || []) clearInterval(t); E.shutdown(); } catch { }
     try { clearInterval(pf._watch); if (pf._hold && pf._hold.stop) pf._hold.stop(); } catch { }
-    return { owner: row.ownerJob || null, published: countOf({ calls }, 'publish', 'pf-__local__-47417'), state: snap.publishState };
+    return { owner: row.ownerJob || null, published: countOf({ calls }, 'publish', 'pf-__local__-47417'), state: snap.publishState, refusal: snap.publishRefusal || null, snap };
   };
   const gone = await reownScene(false), up = await reownScene(true);
   ok(gone.owner === 'jb-fwdnew001' && gone.published === 1, '§4b: the row of a job no longer here is taken by the service now on that port, and published once', gone);
-  ok(up.owner === 'jb-fwdold001' && up.published === 0 && up.state === 'refused', '§4b: the row of a job still up and asking is never taken — the second service is refused by name', up);
+  ok(up.owner === 'jb-fwdold001' && up.published === 0 && up.state === 'refused' && up.refusal === 'another-service', '§4b: the row of a job still up and asking is never taken — the second service is refused by name (another service\'s, not «by hand»)', { owner: up.owner, published: up.published, state: up.state, refusal: up.refusal });
+  globalThis.__fwdOwnedSnap = up.snap;
 }
 
 console.log('§5 started with publish WHILE HELD + a published service the release adopted: each published ONCE at the lift, never twice');
@@ -237,6 +246,161 @@ console.log('§8 THE READER TABLE\'s empty states (主开发 r3230): the machine
   const w0 = await sweep(PortForwardManager), w1 = await sweep(loadPF(anchored(PSRC, WATCH, '', 'watch-held'), 'watch-held'));
   ok(w0 === 0, `while held the new-port watcher scans nothing (${w0} scans): no forwarded port toasts as «new»`);
   ok(w1 >= 1, `RED CONTROL §8: the watcher's held line cut (in a copy) — it scans (${w1}) and compares against an unread list`);
+}
+
+/** A START WITH ITS OWN ORDER: jobs.json as given (`jobsFile`: records, `'held'` — a placed read refusal at the engine's init, or a
+ *  string of torn bytes), the Ports list readable; `portsFirst`: the Ports manager built and restored BEFORE the engine's init (a real
+ *  start's order); `liftJobs`: the jobs list's own read again after the replay. The relay stand-in records every call. */
+async function startScene({ JM = JobManager, PFM = PortForwardManager, rows = [], jobsFile = [], portsFirst = false, liftJobs = false, logIds = [], afterReplay = async () => { } }) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-job-fwd-start-')); roots.push(d);
+  const pdir = path.join(d, 'pf'), edir = path.join(d, 'engine'); fs.mkdirSync(pdir, { recursive: true }); fs.mkdirSync(path.join(edir, 'bin'), { recursive: true });
+  for (const id of logIds) fs.mkdirSync(path.join(edir, 'job-logs', id), { recursive: true });
+  fs.writeFileSync(path.join(pdir, 'port-forwards.json'), JSON.stringify({ forwards: rows }, null, 2));
+  const jfile = path.join(edir, 'jobs.json');
+  if (Array.isArray(jobsFile)) fs.writeFileSync(jfile, JSON.stringify(jobsFile)); else if (jobsFile === 'held') fs.writeFileSync(jfile, '[]'); else fs.writeFileSync(jfile, String(jobsFile));
+  const calls = [], plugins = { async frpPublish(name, lp, o) { calls.push(['publish', name]); return { name, subdomain: (o && o.preferSub) || 'fresh', proto: 'http', url: `https://${(o && o.preferSub) || name}.relay.test/` }; }, async frpUnpublish(name) { calls.push(['unpublish', name]); return { ok: true }; } };
+  let eng = null;
+  const pf = new PFM({ hosts: { list: () => [] }, dataDir: pdir, plugins, broadcast: () => { }, log: () => { }, getJobs: () => eng });
+  const E = new JM({ dataDir: edir, broadcast: () => { }, notifyUser: () => { }, log: () => { }, getPorts: () => pf, publishWaitMs: 30, publishRecheckMs: 60_000, deliverToConversation: async () => ({ ok: true }) });
+  E._verifyAlive = () => true;   // the adopted services' wrappers stand in as alive (no process is started by the adoption)
+  if (jobsFile === 'held') fs.writeFileSync(jfile, JSON.stringify(rows.length ? startScene.heldJobs || [] : []));
+  const initE = () => {
+    if (jobsFile !== 'held') { E.init(); return; }
+    const rf = fs.readFileSync; fs.readFileSync = function (q, ...a) { if (String(q) === jfile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, q, ...a); };
+    try { E.init(); } finally { fs.readFileSync = rf; }
+  };
+  const settle = async () => { for (let t0 = Date.now(), last = -1, since = Date.now(); Date.now() - t0 < 2500;) { await sleep(25); const fl = [...E.jobs.values()].some((j) => j._publish && j._publish.state === 'publishing'); if (calls.length !== last || fl) { last = calls.length; since = Date.now(); } else if (Date.now() - since > 100) break; } };
+  const snap = () => ({ calls: calls.slice(), rows: pf.list().map((r) => ({ id: r.id, ownerJob: r.ownerJob, publicUrl: r.publicUrl })), names: Object.keys((pf._state && pf._state.names) || {}), held: E._recordsHeld(), skeletons: [...E.jobs.values()].filter((j) => LS.isSkeleton(j)).map((j) => j.id), jobs: Object.fromEntries([...E.jobs.values()].map((j) => [j.id, { pfId: j._pfId || null, state: j.state }])) });
+  if (!portsFirst) { initE(); eng = E; }
+  else eng = E;   // the manager reaches the engine from its first moment (server.js getJobs) — the engine NOT ready yet
+  await pf.restore(); await settle();
+  await afterReplay({ E, pf, calls });
+  const atReplay = snap();
+  if (portsFirst) { initE(); await settle(); }
+  if (liftJobs) { await E._unreadRetry('store').catch(() => { }); await settle(); }
+  const after = snap();
+  try { for (const t of E._timers || []) clearInterval(t); E.shutdown(); } catch { }
+  try { clearInterval(pf._watch); if (pf._hold && pf._hold.stop) pf._hold.stop(); } catch { }
+  return { atReplay, after };
+}
+const GATE = "    if (!this.ready || this.readOnly || this._recordsHeld()) return null;   // r3287 (a)(d): this engine not ready / read-only / its records held\n";
+const guardsCut = (src) => anchored(anchored(src, GATE, '', 'r3228-form'), UNKNOWN_KEEPS, '', 'r3228-form');   // the r3228 form: no gate, no unknown keeps
+
+console.log('§9 MUST 1: the jobs list HELD at a start (a placed refusal of its read), the Ports list readable with a published job row');
+const A9 = svc('jb-fwdheld09', 47421, { publishedUrl: 'https://was-47421.relay.test/', lastPublicUrl: 'https://was-47421.relay.test/' });
+startScene.heldJobs = [A9];
+const heldStart = (JM) => startScene({ JM, rows: [ownedRow(A9, 47421)], jobsFile: 'held', liftJobs: true });
+const h9 = await heldStart();
+ok(h9.atReplay.held === true && !h9.atReplay.calls.some((c) => c[0] === 'unpublish') && h9.atReplay.rows.some((r) => r.id === 'pf-__local__-47421' && !!r.publicUrl) && h9.atReplay.names.length === 0, '§9: while the job records are held the replay\'s pass does NOTHING — no unpublish, the row and its address kept', h9.atReplay);
+ok(h9.after.held === false && countOf(h9.after, 'publish', 'pf-__local__-47421') === 1 && !h9.after.calls.some((c) => c[0] === 'unpublish') && !!h9.after.jobs[A9.id] && h9.after.jobs[A9.id].pfId === 'pf-__local__-47421', '§9: the records\' lift runs the ONE pass — the service knows its row, published once (the replay\'s), nothing taken down', h9.after);
+const h9red = await heldStart(loadJM(guardsCut(JSRC), 'r3228-form'));
+ok(h9red.atReplay.calls.some((c) => c[0] === 'unpublish' && c[1] === 'pf-__local__-47421'), 'RED CONTROL §9: the guards cut (the r3228 form, in a copy) — the held list\'s silence takes the address down', h9red.atReplay.calls);
+const LIFT_ASK = "      if (!this._recordsHeld()) this.forwardsReconcile('the job records read again');   // r3287: the records' lift asks too\n";
+const h9red2 = await heldStart(loadJM(anchored(JSRC, LIFT_ASK, '', 'no-lift-ask'), 'no-lift-ask'));
+ok(!!h9red2.after.jobs[A9.id] && !h9red2.after.jobs[A9.id].pfId, 'RED CONTROL §9: the records\' lift not asking (in a copy) — the adopted service never learns its row (a later stop would leave its address up)', h9red2.after.jobs);
+
+console.log('§10 MUST 2: a REAL START\'s order — the Ports manager built and replayed BEFORE the jobs engine\'s init');
+const A10 = svc('jb-fwdboot10', 47422, { publishedUrl: 'https://was-47422.relay.test/', lastPublicUrl: 'https://was-47422.relay.test/' }), B10 = svc('jb-fwdboot11', 47423);
+const portsFirst = (JM) => startScene({ JM, rows: [ownedRow(A10, 47422)], jobsFile: [A10, B10], portsFirst: true });
+const r10 = await portsFirst();
+ok(!r10.atReplay.calls.some((c) => c[0] === 'unpublish') && r10.atReplay.rows.some((r) => r.id === 'pf-__local__-47422' && !!r.publicUrl), '§10: the replay\'s pass before the engine is ready does nothing — the row and its address kept', r10.atReplay);
+ok(!r10.after.calls.some((c) => c[0] === 'unpublish') && countOf(r10.after, 'publish', 'pf-__local__-47422') === 1 && countOf(r10.after, 'publish', 'pf-__local__-47423') === 1 && r10.after.jobs[A10.id].pfId === 'pf-__local__-47422' && r10.after.jobs[B10.id].pfId === 'pf-__local__-47423', '§10: the init\'s own ask runs the ONE pass — each service published once (the row\'s by the replay, the other by the pass), both know their rows', r10.after);
+const r10red = await portsFirst(loadJM(guardsCut(JSRC), 'r3228-form-boot'));
+ok(r10red.atReplay.calls.some((c) => c[0] === 'unpublish' && c[1] === 'pf-__local__-47422'), 'RED CONTROL §10: the guards cut (the r3228 form, in a copy) — at a plain restart the empty engine takes the address down', r10red.atReplay.calls);
+const INIT_ASK = "      this.forwardsReconcile('the jobs start');   // r3287: this engine has read and adopted — whichever list settles last runs the ONE pass\n";
+const r10red2 = await portsFirst(loadJM(anchored(JSRC, INIT_ASK, '', 'no-init-ask'), 'no-init-ask'));
+ok(countOf(r10red2.after, 'publish', 'pf-__local__-47423') === 0, 'RED CONTROL §10: the init not asking (in a copy) — the service with no row is never published after the restart', r10red2.after.calls);
+
+console.log('§11 HOLD 1: a relay that never answers ONE row — the replay ENDS (each call bounded), the pass runs for the others');
+const X11 = svc('jb-fwdhang11', 47424), Y11 = svc('jb-fwdhang12', 47425, { state: 'down', desiredUp: false });
+const hangScene = (PFM) => scene({ PFM, held: false, boundMs: 200, hang: ['pf-__local__-47424'], rows: [ownedRow(X11, 47424), ownedRow(Y11, 47425)], jobs: [X11, Y11] });
+const r11 = await hangScene();
+ok(r11.replayed && lastFor(r11, 'pf-__local__-47425') === 'unpublish' && !r11.rows.some((r) => r.id === 'pf-__local__-47425') && !r11.calls.some((c) => c[0] === 'unpublish' && c[1] === 'pf-__local__-47424') && r11.rows.some((r) => r.id === 'pf-__local__-47424' && !!r.publicUrl && r.relayUnanswered), '§11: the unanswered row left as it is (marked, its address untouched), the replay ended, the stopped service\'s address taken down', r11);
+const BOUND_LINE = "    let t = null; const LATE = Symbol('late');\n";
+const r11red = await hangScene(loadPF(anchored(PSRC, BOUND_LINE, '    return await p;\n', 'no-bound'), 'no-bound'));
+ok(!r11red.replayed && !r11red.calls.some((c) => c[0] === 'unpublish'), 'RED CONTROL §11: the bound cut (in a copy) — the replay never ends and no pass runs: the stopped service\'s address stays up', { replayed: r11red.replayed, calls: r11red.calls });
+
+console.log('§12 HOLD 2: a TORN jobs list set aside (skeletons) — a row whose owner is only a skeleton is KEPT; the person\'s own door ends it');
+const SK = 'jb-fwdskel12', skRow = { ...ownedRow({ id: SK, name: 'skel' }, 47426) };
+const tornScene = (JM) => startScene({ JM, rows: [skRow], jobsFile: '[{"id": "jb-fwdskel12", "kind": "serv', logIds: [SK], afterReplay: async ({ pf, calls }) => { tornScene.before = calls.slice(); tornScene.rowBefore = pf.list().find((r) => r.id === skRow.id) || null; await pf.unforward(skRow.id); } });
+const r12 = await tornScene();
+const kept12 = tornScene.before, row12 = tornScene.rowBefore;
+ok(r12.atReplay.held === false && r12.atReplay.skeletons.includes(SK) && !kept12.some((c) => c[0] === 'unpublish') && !!row12 && !!row12.publicUrl, '§12: the torn list\'s skeleton names no job — its row is KEPT with its address and its name (unknown keeps)', { kept12, row12, skeletons: r12.atReplay.skeletons, held: r12.atReplay.held });
+ok(r12.atReplay.calls.some((c) => c[0] === 'unpublish' && c[1] === skRow.id) && !r12.atReplay.rows.some((r) => r.id === skRow.id), '§12: its END is the person\'s own door in the Ports panel — unforward (DELETE /api/port-forward/:id) takes the job-owned row and its address down: no «not yours»', r12.atReplay);
+const SKEL_LINE = '      const job = live && !LS.isSkeleton(live) ? live : null;\n';
+const r12red = await tornScene(loadJM(anchored(JSRC, SKEL_LINE, '      const job = live || null;\n', 'skeleton-known'), 'skeleton-known'));
+ok(tornScene.before.some((c) => c[0] === 'unpublish' && c[1] === skRow.id), 'RED CONTROL §12: a skeleton taken for a job (in a copy) — the torn list takes the address down', tornScene.before);
+const SRV12 = read('server.js');
+ok(/app\.delete\('\/api\/port-forward\/:id'[\s\S]{0,200}portForwards\.unforward\(String\(req\.params\.id\)\)/.test(SRV12) && !/ownerJob/.test(SRV12.slice(SRV12.indexOf("app.delete('/api/port-forward/:id'"), SRV12.indexOf("app.delete('/api/port-forward/:id'") + 300)), 'the person\'s door (DELETE /api/port-forward/:id) asks no owner of the row');
+
+console.log('§13 HOLD 3 + the shoulds\' words: the card says the removal\'s refusal and the other service\'s row in the reader\'s language');
+{
+  const RMW = "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.";
+  const OWNED = 'Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.';
+  const P13 = read('src/lib/jobs-panel.js'), Z13 = read('src/lib/i18n-zh.js'), J13 = read('src/lib/i18n-ja.js');
+  ok(P13.includes(`if (r?.error && r.code === 'ports_unread' && act === 'rm') r.error = t("${RMW}");`) && [RMW, OWNED].every((k) => Z13.includes(`  "${k}": "`) && J13.includes(`  "${k}": "`)), 'the card\'s remove press shows the removal\'s refusal in words (never a bare code), zh and ja carry both sentences');
+  const ownedSnap = globalThis.__fwdOwnedSnap;
+  ok(!!ownedSnap && LAYOUT.publishBlockedNote(ownedSnap, tt) === tt(OWNED, { port: 47417 }), 'should 1: a row of ANOTHER live service — the card names that, never «by hand»', ownedSnap && { state: ownedSnap.publishState, refusal: ownedSnap.publishRefusal });
+}
+
+console.log('§14 should 6: a Ports lift BEFORE the boot\'s replay was asked runs no pass — the replay, when it runs, ends with it');
+const S14 = svc('jb-fwdearly4', 47427, { state: 'down', desiredUp: false });
+const earlyLift = async (PFM) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-job-fwd-early-')); roots.push(d);
+  const pdir = path.join(d, 'pf'), edir = path.join(d, 'engine'); fs.mkdirSync(pdir, { recursive: true }); fs.mkdirSync(path.join(edir, 'bin'), { recursive: true });
+  const file = path.join(pdir, 'port-forwards.json'); fs.writeFileSync(file, JSON.stringify({ forwards: [ownedRow(S14, 47427)] }));
+  const calls = [], plugins = { async frpPublish(name) { calls.push(['publish', name]); return { name, subdomain: 's', proto: 'http', url: `https://${name}.relay.test/` }; }, async frpUnpublish(name) { calls.push(['unpublish', name]); return { ok: true }; } };
+  let eng = null, pf = null;
+  const rf = fs.readFileSync; fs.readFileSync = function (q, ...a) { if (String(q) === file) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, q, ...a); };
+  try { pf = new PFM({ hosts: { list: () => [] }, dataDir: pdir, plugins, broadcast: () => { }, log: () => { }, getJobs: () => eng }); } finally { fs.readFileSync = rf; }
+  const E = new JobManager({ dataDir: edir, broadcast: () => { }, notifyUser: () => { }, log: () => { }, getPorts: () => pf, publishWaitMs: 30, publishRecheckMs: 60_000, deliverToConversation: async () => ({ ok: true }) }); E.init(); eng = E;
+  E.jobs.set(S14.id, { ...S14 });
+  await pf._hold.again().catch(() => false); await sleep(150);   // THE LIFT — the boot's replay not asked yet
+  const atLift = calls.slice();
+  await pf.restore(); await sleep(150);
+  const out = { atLift, after: calls.slice(), rows: pf.list().map((r) => r.id) };
+  try { for (const t of E._timers || []) clearInterval(t); E.shutdown(); } catch { }
+  try { clearInterval(pf._watch); if (pf._hold && pf._hold.stop) pf._hold.stop(); } catch { }
+  return out;
+};
+const r14 = await earlyLift(PortForwardManager);
+ok(r14.atLift.length === 0 && lastFor({ calls: r14.after }, 'pf-__local__-47427') === 'unpublish' && !r14.rows.length, '§14: nothing at that lift; the replay then the ONE pass (the stopped service\'s address down)', r14);
+const EARLY = "    else if (this._replayed) this._jobsReconcile('the lift').catch(() => {});\n";
+const r14red = await earlyLift(loadPF(anchored(anchored(PSRC, EARLY, "    else this._jobsReconcile('the lift').catch(() => {});\n", 'early-lift'), REPLAYED_GATE, NO_GATE, 'early-lift'), 'early-lift'));
+ok(r14red.atLift.some((c) => c[0] === 'unpublish'), 'RED CONTROL §14: the replayed gate cut (in a copy) — the pass runs at the lift, before the replay', r14red.atLift);
+
+console.log('§15 the shoulds: the claim in both spellings; a start in the pass\'s own window; the refused state after a restart');
+{
+  const TOK = 'ghp_' + Array.from({ length: 36 }, (_, i) => 'abcdefghijklmnopqrstuvwxyz0123456789'[(i * 7 + 3) % 36]).join('');   // built at run time
+  const R15 = svc('jb-fwdrawn15', 47429, { name: 'deploy-' + TOK });
+  const rawRow = { id: 'pf-__local__-47429', hostId: '__local__', remotePort: 47429, label: 'service: deploy-' + TOK, publicUrl: 'https://raw.relay.test/', publicName: 'pf-__local__-47429', publicSub: 'raw', proto: 'http' };
+  const raw = (JM) => scene({ JM, held: false, rows: [rawRow], jobs: [R15] });
+  const r15 = await raw();
+  ok((r15.rows.find((r) => r.id === rawRow.id) || {}).ownerJob === R15.id && r15.jobs[R15.id].pfId === rawRow.id, 'should 2: a release row labelled with the job\'s RAW name (its belted label differs) is claimed as that job\'s', r15.rows);
+  const RAW_FORM = "...(job && job.name ? ['service: ' + job.name] : [])";
+  const r15red = await raw(loadJM(anchored(JSRC, RAW_FORM, '', 'raw-unclaimed'), 'raw-unclaimed'));
+  ok(!(r15red.rows.find((r) => r.id === rawRow.id) || {}).ownerJob, 'RED CONTROL should 2: the raw spelling cut (in a copy) — the release row stays nobody\'s', r15red.rows);
+  // a start during the pass's own await: a stopped service's unpublish waits, the person starts it meanwhile — its row is never unforwarded under it
+  const S15 = svc('jb-fwdwind15', 47430, { state: 'down', desiredUp: false });
+  const windowScene = (JM) => scene({ JM, held: false, unpubDelayMs: 300, rows: [ownedRow(S15, 47430)], jobs: [S15] });
+  // the start is made by a hook on the scene's engine: the scene runs restore; this leg polls the engine through the relay's own record
+  const runWin = async (JM) => {
+    const r = await windowScene(JM && JM !== JobManager ? JM : class extends JobManager {
+      async _forwardsPass(why) {
+        const j = this.jobs.get(S15.id);
+        if (why === 'the replay' && !this.__armed) { this.__armed = true; const t = setTimeout(() => { if (j) { j.state = 'up'; j.desiredUp = true; this._ensurePublish(j); } }, 120); t.unref?.(); }   // the person's start, mid-await of the pass's unpublish
+        return super._forwardsPass(why);
+      }
+    });
+    return r;
+  };
+  const r15w = await runWin();
+  ok(r15w.rows.some((r) => r.id === 'pf-__local__-47430' && r.ownerJob === S15.id && !!r.publicUrl) && lastFor(r15w, 'pf-__local__-47430') === 'publish', 'should 3: a start in the pass\'s own window keeps its row and its fresh address (judged again after the await; an unpublish that waited never clears a newer publish)', r15w);
+  // the refused state after a restart: derived from the persisted words, never «none while up»
+  const E15 = new JobManager({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-job-fwd-snap-')), broadcast: () => { }, notifyUser: () => { }, log: () => { } });
+  const j15 = { ...svc('jb-fwdsnap15', 47431), publishNotOwned: 'port 47431 is already forwarded in the Ports panel by hand', publishRefusal: 'by-hand' };
+  const sn15 = E15.snapshot(j15);
+  ok(sn15.publishState === 'refused' && sn15.publishRefusal === 'by-hand' && /by hand/.test(String(sn15.publishError)), 'should 4: the refused state is DERIVED from the persisted words after a restart (never «none while up»)', { s: sn15.publishState, r: sn15.publishRefusal });
 }
 
 report();

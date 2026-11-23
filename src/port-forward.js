@@ -63,9 +63,17 @@ const HOLD = require('./store-read-hold.js');
 const SR = require('./store-read.js');
 const PF_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // { forwards: [...], names?: {...} }
 
+// r3287 (round wbbbpdgvd): ONE relay call of the replay is bounded — a relay that never answers leaves that row as it is, marked, and
+// the replay ENDS (the jobs reconcile then runs with what it knows)
+const RELAY_BOUND_MS = 20000;
+
 class PortForwardManager {
   /** @param deps { hosts, dataDir, broadcast, log, plugins, serverSetting } */
-  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting, getJobs }) {
+  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting, getJobs, relayBoundMs = RELAY_BOUND_MS }) {
+    this.relayBoundMs = relayBoundMs;   // r3287: a relay call of the replay waits at most this long
+    this._replayed = false;             // r3287: the list has REPLAYED once (restore's end) — the jobs reconcile's gate
+    this._relayUnanswered = new Set();  // r3287: rows whose replay the relay did not answer within the bound (left as they are)
+    this._pubGen = new Map();           // r3287: a publish's generation per row — an unpublish that waited never clears a newer publish
     this.getJobs = getJobs || null; // Background Work registry (2.343.0): service⇄ports sync
     this.hosts = hosts;
     this.plugins = plugins || null; // PluginManager — for frp public exposure
@@ -147,6 +155,7 @@ class PortForwardManager {
    *  discards the subdomain (or the TCP port) the user or the broker gave this forward — only an explicit unpublish
    *  clears them — so a forward that comes back as http gets its old https://<sub>.… URL again. */
   _adoptPublish(rec, r) {
+    this._pubGen.set(rec.id, (this._pubGen.get(rec.id) || 0) + 1);   // r3287
     rec.publicUrl = r.url; rec.publicName = r.name; rec.publicProto = r.proto || null;
     rec.publicSub = r.subdomain || rec.publicSub || null;
     rec.publicPort = r.remotePort || rec.publicPort || null;
@@ -260,7 +269,23 @@ class PortForwardManager {
     // r3228 (round whu7689zw): THE LIST's OWN REPLAY FIRST (when it was asked while held), THEN the jobs engine's ONE reconcile from
     // the facts as they are — never beside the replay (a stop's unpublish raced the replay's republish of the same name)
     if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }   // restore() ends with the reconcile
-    else this._jobsReconcile('the lift').catch(() => {});
+    else if (this._replayed) this._jobsReconcile('the lift').catch(() => {});
+    // r3287: a lift BEFORE the boot's replay was asked does not reconcile — that replay, when it runs, ends with the one pass
+  }
+  /** r3287: the list reads AND has replayed once — what the jobs engine's reconcile waits for (it asks; this answers) */
+  replayedOnce() { return !this._hold.held() && this._replayed; }
+  /** r3287: ONE relay call, bounded (relayBoundMs): no answer in time ⇒ the row is marked not answered and `relay_unanswered` is thrown
+   *  (the call itself goes on: an answer that comes late clears the mark) */
+  async _relayBounded(p, rec, what) {
+    let t = null; const LATE = Symbol('late');
+    const r = await Promise.race([p, new Promise((res) => { t = setTimeout(() => res(LATE), this.relayBoundMs); })]).finally(() => clearTimeout(t));   // a bound that must fire: never unref'd (cleared when the call answers)
+    if (r === LATE) {
+      this._relayUnanswered.add(rec.id);
+      Promise.resolve(p).then(() => this._relayUnanswered.delete(rec.id), () => this._relayUnanswered.delete(rec.id));
+      throw Object.assign(new Error(`the relay did not answer within ${Math.round(this.relayBoundMs / 1000)} s (${what})`), { code: 'relay_unanswered' });
+    }
+    this._relayUnanswered.delete(rec.id);
+    return r;
   }
   /** r3228: the jobs engine's ONE reconcile of its forwards (src/jobs.js forwardsReconcile), after the list's replay settled */
   async _jobsReconcile(why) {
@@ -286,6 +311,7 @@ class PortForwardManager {
       publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
       publicSub: r.publicSub || null, pathMount: r.pathMount || null, pathPublic: !!r.pathPublic,
       ownerJob: r.ownerJob || null,   // r3228: the job whose service this row is (written by the jobs engine only); a person's row has none
+      relayUnanswered: this._relayUnanswered.has(r.id),   // r3287: its replay's relay call did not answer within the bound — left as it is
     }));
   }
 
@@ -695,7 +721,10 @@ class PortForwardManager {
     this._hold.refuse('unpublishing a forward');   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) return;
+    const gen0 = this._pubGen.get(id) || 0;
     try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
+    // r3287: a publish that landed while this unpublish waited (a start in the same window) stands — its address is never cleared under it
+    if ((this._pubGen.get(id) || 0) !== gen0) { this.log(`[ports] unpublish ${id}: a publish came meanwhile — the new address stands`); return; }
     rec.publicUrl = null; rec.publicName = null; delete rec.protoPending;
     if (!keepName) { rec.publicSub = null; rec.publicPort = null; rec.publicProto = null; if (this._state.names) delete this._state.names[id]; }
     this._published.delete(id);
@@ -751,10 +780,12 @@ class PortForwardManager {
     const localPort = this._live.get(rec.id)?.rec?.localPort;
     if (!localPort) return false; // not active — nothing to bind the proxy to
     try {
-      const r = await this.plugins.frpPublish(rec.id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || rec.publicProto || '' });
+      const r = await this._relayBounded(this.plugins.frpPublish(rec.id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || rec.publicProto || '' }), rec, 'republish');   // r3287: bounded
       this._adoptPublish(rec, r);
       return true;
     } catch (e) {
+      // r3287: NO ANSWER in time — the row is left as it is (no unpublish: the relay may well serve it), said on the row, retried by the heal sweep
+      if (e && e.code === 'relay_unanswered') { rec.error = 'public URL: ' + e.message + ' — kept as it is; tried again'; this.log('re-publish ' + rec.id + ': ' + e.message); return false; }
       // lane frp-token-proof: THE DROPPED LOGIN is the relay's state, not this forward's — ONE journal line per episode (the
       // frp plugin's For-you item carries it), never a line per forward per sweep; the forward's error is its words
       const dropped = e && e.code === 'relay_login_dropped';
@@ -790,6 +821,7 @@ class PortForwardManager {
     }
     this._persist();
     this._emit();
+    this._replayed = true;   // r3287: the replay ENDED (each relay call bounded) — the gate the jobs reconcile waits for
     await this._jobsReconcile('the replay');   // r3228: after the replay settled — the jobs engine's ONE reconcile (at every start, after every lift)
   }
 

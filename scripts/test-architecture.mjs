@@ -6204,6 +6204,7 @@ await section(async () => {
     ['src/jobs.js', 'const namesBefore = new Set([...liveHits, ...archHits].flatMap((j) => (j.name ? [j.name, this.labelOf(j)] : [])));', 'Clear content: the record\'s own copies, matched in both spellings'],
     ['src/jobs.js', 'const nameBefore = new Map([...liveHits, ...archHits].map((j) => [j.id, j.name]));', 'Clear content: the record\'s own name, matched'],
     ['src/jobs.js', "('service: ' + o.name === rec.label || 'service: ' + this.labelOf(o) === rec.label)", 'Clear content: a forward\'s label matched in both spellings'],
+    ['src/jobs.js', "...(job && job.name ? ['service: ' + job.name] : [])", 'r3287 the forwards\' claim: a release row\'s label matched in its raw spelling too — an identity, never shown'],
     ['src/job-model.js', 'const name = String((job && (job.name || job.id)) || \'job\');', 'forYouCopy: a For-you copy\'s FIELD — the store belts each param on its own (r3)'],
     ['src/agent-routes.js', 'vis.find((j) => j.name === ref)', 'a lookup by the caller\'s ref — an identity, never shown'],
     ['src/job-model.js', 'r.find((j) => j.name === ref)', 'B-3992 jobReadableRef: a lookup by a job token\'s ref among the jobs its grant reads — an identity, never shown'],
