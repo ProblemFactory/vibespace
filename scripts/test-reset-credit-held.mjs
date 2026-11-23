@@ -17,6 +17,11 @@
 //   ⑥ torn bytes found by a READ AGAIN are set aside OFF the loop (never a sync rename after the start). ⑦ a set-aside that FAILED
 //     is tried again by a press alone, never the pool's own pass. ⑧ a read again that never settles: past the bound the next press
 //     may read (still held), never more than two at once, the pool's pass never. ⑨ words: a cause that does not pass.
+//   THE HOTFIX after .416 (主开发 r2899) and its follow (r2973), the answers PLACED, each with its red control: H1 a «not there» right
+//   after a failed read is read once more; H2 only two in a row lift; H3 a file that appeared after «not there» refuses the press
+//   BEFORE anything is sent (the sends counted, the file's record already charged); H4 a read that keeps an attempt of this life
+//   writes it at once and the merge keeps every record (a restart reads them back); H5 the helper road's look; H6 nothing is sent
+//   after a save that did not land (the save only creates: a hard link).
 // In-process: the real engine over a scratch data/, a stub conversation whose wrapper takes the verb (nothing reaches a vendor).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -180,14 +185,14 @@ const au = await autoRun(engMod);
 console.log(`    facts: ${JSON.stringify(au)}`);
 ok(au.held && au.verbs === 0 && au.minted === 0 && au.kept, 'the automatic rung at a wall while held: NO verb to the wrapper, NO attempt minted, the file untouched', au);
 ok(au.refused === 'attempts_unread' && /Not used automatically: the reset-credit attempt records could not be read \(EIO\)/.test(au.text || '') && !/unattended-spend ceiling/.test(au.text || ''), 'the wall card names the TRUE reason (the attempt records could not be read) and carries the writer\'s own code — never «the unattended-spend ceiling refused it»', au);
-const aux = await autoRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  { const held = resetCreditTriesRefusal(); if (held) { console.log(`[codex] reset credit refused for ${session._webuiId}: ${held.why}`); return held; } }   // B-f276\'s remainder: the floor is in a file that could not be read\n', '', 'the writer\'s guard taken out'), 'rct-auto-unguarded'));
-ok(aux.verbs > 0 || aux.minted > 0, 'RED CONTROL (the writer\'s own guard taken out): the automatic rung spends while the attempts are held — a verb goes out, an attempt is minted — red', aux);
+const aux = await autoRun(MUT.load('src/server/usage-pool-engine.js', anchored(anchored(ESRC, '  { const held = resetCreditTriesRefusal({ press: true }); if (held) { console.log(`[codex] reset credit refused for ${session._webuiId}: ${held.why}`); return held; } }   // B-f276\'s remainder: the floor is in a file that could not be read\n', '', 'the writer\'s guard taken out'), '  if (!persistResetCreditTries()) {\n', '  if (!persistResetCreditTries() && false) {\n', 'the save\'s answer not asked (r2973\'s belt)'), 'rct-auto-unguarded'));
+ok(aux.verbs > 0 || aux.minted > 0, 'RED CONTROL (the writer\'s own guard taken out, and r2973\'s belt — a save that did not land is not asked — with it: the two doors of that road): the automatic rung spends while the attempts are held — a verb goes out, an attempt is minted — red', aux);
 
 console.log('⑤ THE HELPER\'s writer while held');
 const helperRun = async (engine) => { const { w } = await heldWorld(engine); return { held: !!heldOf(w), r: quiet(() => w.eng._writeResetCreditViaHelper(w.A, {})) }; };
 const hp = await helperRun(engMod);
 ok(hp.held && hp.r && hp.r.ok === false && hp.r.code === 'attempts_unread', 'the helper\'s writer while held refuses by name (attempts_unread) before it looks for its helper', hp);
-const hpx = await helperRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  { const held = resetCreditTriesRefusal(); if (held) return held; }   // B-f276\'s remainder: the floor is in a file that could not be read\n', '', 'the helper writer\'s guard taken out'), 'rct-helper-unguarded'));
+const hpx = await helperRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  { const held = resetCreditTriesRefusal({ press: true }); if (held) return held; }   // B-f276\'s remainder: the floor is in a file that could not be read\n', '', 'the helper writer\'s guard taken out'), 'rct-helper-unguarded'));
 ok(hpx.r && hpx.r.code !== 'attempts_unread', 'RED CONTROL (the helper writer\'s guard taken out): it goes on to look for its helper while held — red', hpx);
 
 console.log('⑥ torn bytes found by a READ AGAIN are set aside OFF the loop');
@@ -288,8 +293,8 @@ const flapRun = async (engine) => {
 const fl = await flapRun(engMod);
 console.log(`    facts: ${JSON.stringify(fl)}`);
 ok(fl.first.post === 'attempts_unread' && fl.first.held && fl.second.post === 'attempts_unread' && !fl.held && fl.back && fl.verbs === 0 && fl.onDisk, 'held; a press is refused and its read again answers «not there» ONCE: STILL HELD; the next read reads the file — the attempt that went out is back, no second request, the file untouched', fl);
-const flx = await flapRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (H && !H.missingOnce) { H.missingOnce = true; console.warn(\'[reset-credit] data/reset-credit-tries.json answered «not there» right after it could not be read — still HELD: it is read once more before anything is taken as «no attempts»\'); return 0; }\n', '', 'one «not there» lifts'), 'rct-hf-once'));
-ok(flx.verbs > 0, 'RED CONTROL (one «not there» lifts the hold, as at the candidate): the next press SENDS A SECOND reset request — red', flx);
+const flx = await flapRun(MUT.load('src/server/usage-pool-engine.js', anchored(anchored(anchored(ESRC, '  if (press && !_resetCreditTriesHeld && _resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) holdResetCreditTries({ code: \'appeared\', why: \'it appeared after it was read «not there» — it is read before anything is sent\' });\n', '', 'no look at the press'), '  if (!persistResetCreditTries()) {\n', '  if (!persistResetCreditTries() && false) {\n', 'the save\'s answer not asked'), '    if (H && !H.missingOnce) { H.missingOnce = true; console.warn(\'[reset-credit] data/reset-credit-tries.json answered «not there» right after it could not be read — still HELD: it is read once more before anything is taken as «no attempts»\'); return 0; }\n', '', 'one «not there» lifts'), 'rct-hf-once'));
+ok(flx.verbs > 0, 'RED CONTROL (the candidate\'s shape: one «not there» lifts the hold, no look at the press, the save\'s answer not asked — r2973\'s two doors catch a single «not there» too): the next press SENDS A SECOND reset request — red', flx);
 
 console.log('H2 THE HOTFIX: only two «not there» IN A ROW lift the hold — a failed read between starts the count again');
 const rowRun = async (engine) => {
@@ -309,21 +314,85 @@ ok(rw.held.join() === 'true,true,true,false', '«not there» (held, read once mo
 const rwx = await rowRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, 'missingOnce: false /* r2899: a failed read starts the «two in a row» again */,', 'missingOnce: !!(was && was.missingOnce),', 'the count carried over a failed read'), 'rct-hf-row'));
 ok(rwx.held[2] === false, 'RED CONTROL (the count carried across a failed read): «not there», a failure, «not there» lifts it — never two in a row — red', rwx);
 
-console.log('H3 THE HOTFIX: a save never writes over a file that was not read');
+console.log('H3 THE HOTFIX + its follow (主开发 r2973 must 1): a file that appeared after «not there» refuses the press BEFORE anything is sent');
+/** the file's attempt went out and was CHARGED by the life that wrote it (r2973: a fixture the revive does not charge) */
+const TRIES_CHARGED = (A) => TRIES(A).replace('"charged":false', '"charged":true');
 const appearRun = async (engine) => {
   const w0 = world({ engine });
   const w = world({ engine, root: w0.root, todos: { add: () => ({ id: 'ut-h3' }) }, session: true });   // its first read: «not there»
-  fs.writeFileSync(w.file, TRIES(w.A));   // a late mount: the file appears AFTER the read that found it missing — never read
-  const p1 = await w.call('POST', { sessionId: 'cx1' });   // a press goes (nothing held, nothing known yet): its save meets the file
-  const kept = fs.readFileSync(w.file, 'utf8').includes('k-held-1');
+  fs.writeFileSync(w.file, TRIES_CHARGED(w.A));   // a late mount: the file appears AFTER the read that found it missing — never read
+  const bytes = fs.readFileSync(w.file, 'utf8');
+  const p1 = await w.call('POST', { sessionId: 'cx1' });   // the press: nothing is held yet, nothing known
   const h1 = heldOf(w);
+  const first = { post: p1.body && p1.body.code, verbs: w.verbs(), held: h1 && h1.code, same: fs.readFileSync(w.file, 'utf8') === bytes, words: /appeared after they were found missing/.test(JSON.stringify(p1.body || {})), mem: w.eng._resetCreditTries.size };
   const p2 = await w.call('POST', { sessionId: 'cx1' }); await settle(w);   // refused while held; its read again reads the file
   const t = w.eng._resetCreditTries.get(w.A);
-  return { post1: p1.code, held: h1 && h1.code, kept, post2: p2.body && p2.body.code, prior: !!(t && t.prior && t.prior.idempotencyKey === 'k-held-1'), onDisk: fs.readFileSync(w.file, 'utf8').includes('k-held-1') };
+  const g3 = await w.call('GET');   // the dialog after the lift: the file's attempt is the floor now
+  return { first, post2: p2.body && p2.body.code, back: !!(t && t.idempotencyKey === 'k-held-1'), held: !!heldOf(w), floor: !!(g3.body && (g3.body.unsettled || g3.body.code === 'cooldown')) && (g3.body && g3.body.code) !== 'attempts_unread', verbs: w.verbs(), same: fs.readFileSync(w.file, 'utf8').includes('k-held-1') };
 };
 const ap = await appearRun(engMod);
-ok(ap.held === 'appeared' && ap.kept && ap.post2 === 'attempts_unread' && ap.prior && ap.onDisk, 'a file that appeared after the read found it missing: the save writes NOTHING over it — the store holds («appeared»), reads it at the next press, and the file\'s attempt becomes this life\'s prior (the floor reads both); both on disk', ap);
-const apx = await appearRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (_resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) { holdResetCreditTries({ code: \'appeared\', why: \'it appeared after it was read «not there» — it is read before anything is written\' }); return; }\n', '', 'the save renames over whatever is there'), 'rct-hf-over'));
-ok(!apx.kept, 'RED CONTROL (the save renames over whatever is there, as before): the file nobody read is WRITTEN OVER — the attempt that went out is gone from disk — red', apx);
+console.log(`    facts: ${JSON.stringify(ap)}`);
+ok(ap.first.post === 'attempts_unread' && ap.first.verbs === 0 && ap.first.held === 'appeared' && ap.first.same && ap.first.words && ap.first.mem === 0, 'the press meets a file that appeared after «not there»: refused BY NAME before an attempt is opened — NO request sent, no attempt minted, the file untouched byte for byte, the words name the cause (it appeared; read first)', ap.first);
+ok(ap.post2 === 'attempts_unread' && ap.back && !ap.held && ap.floor && ap.verbs === 0 && ap.same, 'the next press is refused and its read again reads the file: the attempt that went out is back and is THE FLOOR (the dialog after the lift says it blocks a free press); NO request sent by either press', ap);
+const apx = await appearRun(MUT.load('src/server/usage-pool-engine.js', anchored(anchored(ESRC, '  if (press && !_resetCreditTriesHeld && _resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) holdResetCreditTries({ code: \'appeared\', why: \'it appeared after it was read «not there» — it is read before anything is sent\' });\n', '', 'no look at the press'), '  if (!persistResetCreditTries()) {\n', '  if (!persistResetCreditTries() && false) {\n', 'a save that did not land is not asked'), 'rct-hf-appear'));
+ok(apx.first.verbs > 0, 'RED CONTROL (029124e08: no look at the press, the save\'s answer not asked): the first press SENDS a reset request over the attempt on disk nobody read — red', apx.first);
+
+console.log('H4 THE HOTFIX\'s follow (主开发 r2973 must 2): a read that keeps an attempt of THIS life writes it AT ONCE; the merge keeps every record');
+const mergeRun = async (engine) => {
+  const w0 = world({ engine });
+  const w = world({ engine, root: w0.root, todos: { add: () => ({ id: 'ut-h4' }) }, session: true });   // «not there»
+  fs.writeFileSync(w.file, TRIES_CHARGED(w.A));   // it appears (charged by the life that wrote it: the read charges nothing)
+  await w.call('POST', { sessionId: 'cx1' });   // refused: held «appeared» (H3)
+  // PLACED — the state the must names: attempts of THIS life in memory and on no disk (sent, charged; one with a prior of its own),
+  // and one on an account the file does not name
+  const now = Date.now();
+  const rec = (key, at, k, prior = null) => ({ key, at, sentAt: at, sid: 'cx1', via: 'session', origin: 'user', resetsAtSec: 0, idempotencyKey: k, identity: { key, name: 'Cx Held' }, charged: true, outcome: null, followers: new Map(), timer: null, ackTimer: null, hold: null, prior });
+  w.eng._resetCreditTries.set(w.A, rec(w.A, now, 'k-mine', rec(w.A, now - 30e3, 'k-mine-0')));
+  w.eng._resetCreditTries.set('cx-elsewhere', rec('cx-elsewhere', now, 'k-other'));
+  const p2 = await w.call('POST', { sessionId: 'cx1' }); await settle(w);   // refused; its read again reads the file and merges
+  const disk = fs.readFileSync(w.file, 'utf8');
+  const w2 = world({ engine, root: w0.root });   // A RESTART: the next life reads what is on disk
+  const chain = []; for (let x = w2.eng._resetCreditTries.get(w.A); x && chain.length < 8; x = x.prior) chain.push(x.idempotencyKey);
+  return { post2: p2.body && p2.body.code, held: !!heldOf(w), disk: Object.fromEntries(['k-mine', 'k-mine-0', 'k-held-1', 'k-other'].map((k) => [k, disk.includes(k)])), chain, other: !!w2.eng._resetCreditTries.get('cx-elsewhere') };
+};
+const mg = await mergeRun(engMod);
+console.log(`    facts: ${JSON.stringify(mg)}`);
+ok(!mg.held && Object.values(mg.disk).every(Boolean) && mg.chain[0] === 'k-mine' && mg.chain.includes('k-mine-0') && mg.chain.includes('k-held-1') && mg.other, 'the read lifts and WRITES AT ONCE: this life\'s attempt, its own prior, the file\'s attempt (at the END of the chain) and the attempt on an account the file does not name are all on disk — a restart reads every one back', mg);
+const mgx = await mergeRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  if (charged || kept) persistResetCreditTries();\n', '  if (charged) persistResetCreditTries();\n', 'a write only for a charge'), 'rct-hf-mergew'));
+ok(!mgx.disk['k-mine'] && !mgx.disk['k-other'], 'RED CONTROL (029124e08: written only when the read charged a record — the file\'s is charged already): this life\'s attempts are on NO disk after the merge, and the restart has lost them — red', mgx);
+const mgc = await mergeRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '      if (Number(cur.at) >= Number(t.at)) keepAsPrior(cur, t); else { keepAsPrior(t, cur); _resetCreditTries.set(t.key, t); }\n', '      if (Number(cur.at) > Number(t.at)) { if (!cur.prior) cur.prior = t; } else _resetCreditTries.set(t.key, t);\n', 'the merge of 029124e08'), 'rct-hf-chain'));
+ok(!mgc.disk['k-held-1'] && !mgc.chain.includes('k-held-1'), 'RED CONTROL (029124e08\'s merge: the file\'s record is a prior only when the head has none): the file\'s attempt is DROPPED — on no disk after the write — red', mgc);
+
+console.log('H5 THE HOTFIX\'s follow (r2973 must 1, the helper road): the look at the press comes before the helper is even looked for');
+const helperAppear = async (engine) => {
+  const w0 = world({ engine });
+  const w = world({ engine, root: w0.root, todos: { add: () => ({ id: 'ut-h5' }) } });   // «not there»; no conversation: the helper's road
+  fs.writeFileSync(w.file, TRIES_CHARGED(w.A));
+  const r = quiet(() => w.eng._writeResetCreditViaHelper(w.A, {}));
+  return { code: r && r.code, held: heldOf(w) && heldOf(w).code, mem: w.eng._resetCreditTries.size };
+};
+const ha = await helperAppear(engMod);
+ok(ha.code === 'attempts_unread' && ha.held === 'appeared' && ha.mem === 0, 'the helper\'s writer meets a file that appeared: refused by name (attempts_unread) before it looks for its helper — nothing minted', ha);
+const hax = await helperAppear(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  if (press && !_resetCreditTriesHeld && _resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) holdResetCreditTries({ code: \'appeared\', why: \'it appeared after it was read «not there» — it is read before anything is sent\' });\n', '', 'no look at the press'), 'rct-hf-helper'));
+ok(hax.code !== 'attempts_unread', 'RED CONTROL (no look at the press): the helper\'s writer goes on to look for its helper over a file nobody read — red', hax);
+
+console.log('H6 THE HOTFIX\'s follow (r2973 must 1): NOTHING IS SENT AFTER A SAVE THAT DID NOT LAND — the file lands between the look and the save');
+const windowRun = async (engine) => {
+  const w0 = world({ engine });
+  const w = world({ engine, root: w0.root, todos: { add: () => ({ id: 'ut-h6' }) }, session: true });   // «not there»
+  fs.writeFileSync(w.file, TRIES_CHARGED(w.A));
+  const bytes = fs.readFileSync(w.file, 'utf8');
+  const realE = fs.existsSync;
+  fs.existsSync = function (p, ...x) { return path.resolve(String(p)) === w.file ? false : realE.call(this, p, ...x); };   // PLACED: the press's look misses it (it lands just after)
+  let p1;
+  try { p1 = await w.call('POST', { sessionId: 'cx1' }); } finally { fs.existsSync = realE; }
+  return { post: p1.body && p1.body.code, verbs: w.verbs(), held: heldOf(w) && heldOf(w).code, mem: w.eng._resetCreditTries.size, same: fs.readFileSync(w.file, 'utf8') === bytes, marked: !!(w.session && w.session._codexResetTriedAt) };
+};
+const wn6 = await windowRun(engMod);
+ok(wn6.post === 'attempts_unread' && wn6.verbs === 0 && wn6.held === 'appeared' && wn6.mem === 0 && wn6.same && !wn6.marked, 'the save CREATES only (a hard link: EEXIST) — it finds the file, holds the store, and the attempt is BACKED OUT: no request sent, nothing in memory, the conversation not marked, the file untouched byte for byte', wn6);
+const wnx = await windowRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  if (!persistResetCreditTries()) {\n', '  if (!persistResetCreditTries() && false) {\n', 'the save\'s answer not asked'), 'rct-hf-belt'));
+ok(wnx.verbs > 0, 'RED CONTROL (the save\'s answer not asked, as at 029124e08): the request GOES OUT after a save that did not land — red', wnx);
+const wnl = await windowRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (_resetCreditTriesUnseen) {\n      let made = false;\n', '    if (false) {\n      let made = false;\n', 'the rename over whatever is there'), 'rct-hf-link'));
+ok(!wnl.same, 'RED CONTROL (the rename over whatever is there, no create-only write): the file nobody read is WRITTEN OVER — red', wnl);
 
 report();

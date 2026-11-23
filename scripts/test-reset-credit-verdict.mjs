@@ -170,8 +170,9 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
   ok('the old opt-in closure is gone (one rung, one verdict)', !/tryResetCredit/.test(eng));
   // lane reset-path: the CHARGE moved from the write to the SEND — the authorizer's hold rides the
   // attempt record (openResetCreditTry) and is converted by noteResetCreditSent, given back when it never went out
+  // (the reset-credit hotfix's follow, bl-windows r2973: the open's answer is asked first — a save that did not land sends nothing)
   ok('AUTO consumes through the spend ceiling, and charges the slot it authorized — when the request WENT OUT',
-    /spendGuard\.authorize\(\{ reason: 'codex-reset-credit'[^\n]*identity: key \? \{ key, name: nameOf\(key\) \|\| key \} : null \}\)[\s\S]{0,3000}openResetCreditTry\(\{[^\n]*\bav\b[^\n]*\}\);\s*\n\s*session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(eng)
+    /spendGuard\.authorize\(\{ reason: 'codex-reset-credit'[^\n]*identity: key \? \{ key, name: nameOf\(key\) \|\| key \} : null \}\)[\s\S]{0,3000}if \(key && !openResetCreditTry\(\{[^\n]*\bav\b[^\n]*\}\)\) \{[\s\S]{0,700}?\n    return r;\n  \}\n[\s\S]{0,700}?session\.pty\.write\(JSON\.stringify\(\{ type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/.test(eng)
     && /function noteResetCreditSent\(t, now = Date\.now\(\), \{ proof = 'record' \} = \{\}\) \{[\s\S]{0,1100}spendGuard\.note\(\{ reason: 'codex-reset-credit', session: [^\n]*identity: t\.identity, hold: t\.hold \}\)/.test(eng) // (verify r10: the guessed-send rule sits between the head and the charge)
     && /identity: \(av && av\.identity\) \|\| null/.test(eng) && /spendGuard\.release\(\{ hold: t\.hold \}\)/.test(eng));
   ok('ASK files ONE For-you action item with an i18n structure and a reset-credit action payload',

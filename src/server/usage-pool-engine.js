@@ -4181,7 +4181,7 @@ function resetCreditTryRecord(t) {
 function persistResetCreditTries() {
   if (_resetCreditTriesHeld) {   // B-f276's remainder: the file could not be read — NOTHING is written over it (said once a hold)
     if (!_resetCreditTriesHeld.saidPersist) { _resetCreditTriesHeld.saidPersist = true; console.warn('[reset-credit] attempts not written: data/reset-credit-tries.json is HELD (it could not be read) — nothing is written over it until it reads'); }
-    return;
+    return false;   // r2973: the caller is told it did not land
   }
   try {
     const now = Date.now();
@@ -4195,14 +4195,25 @@ function persistResetCreditTries() {
     const tmp = RESET_CREDIT_TRIES_FILE + '.tmp';
     fs.mkdirSync(path.dirname(RESET_CREDIT_TRIES_FILE), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: now, tries }));
-    // THE HOTFIX (主开发 r2899): A SAVE NEVER WRITES OVER A FILE THAT WAS NOT READ — after «not there» the rename only CREATES the file:
-    // one that appeared since (a late mount, a folder that flapped) HOLDS the store — nothing is written, it is read at the next press /
-    // pass, and its attempts come back beside this life's. (Checked just before the rename: a file landing in the microseconds between
-    // is the narrow limit, said in the kb.)
-    if (_resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) { holdResetCreditTries({ code: 'appeared', why: 'it appeared after it was read «not there» — it is read before anything is written' }); return; }
+    // THE HOTFIX (主开发 r2899) and its follow (r2973's should): A SAVE NEVER WRITES OVER A FILE THAT WAS NOT READ — after «not there»
+    // the write only CREATES the file: a hard link of the written copy (EEXIST over one that appeared since — a late mount, a folder
+    // that flapped — never a look then a rename); a folder without hard links: an exclusive create of the file itself. A file that
+    // appeared HOLDS the store («appeared»): nothing is written, and it is read at the next press / pass
+    if (_resetCreditTriesUnseen) {
+      let made = false;
+      try { fs.linkSync(tmp, RESET_CREDIT_TRIES_FILE); made = true; }
+      catch (e) {
+        if (!e || (e.code !== 'EEXIST' && !TRIES_LINKLESS.includes(e.code))) throw e;
+        if (e.code !== 'EEXIST') { try { fs.writeFileSync(RESET_CREDIT_TRIES_FILE, JSON.stringify({ v: 1, at: now, tries }), { flag: 'wx' }); made = true; } catch (e2) { if (!e2 || e2.code !== 'EEXIST') throw e2; } }
+      }
+      try { fs.unlinkSync(tmp); } catch { }
+      if (!made) { holdResetCreditTries({ code: 'appeared', why: 'it appeared after it was read «not there» — it is read before anything is written' }); return false; }
+      _resetCreditTriesUnseen = false;   // the store's own file now
+      return true;
+    }
     fs.renameSync(tmp, RESET_CREDIT_TRIES_FILE);
-    _resetCreditTriesUnseen = false;   // the store's own file now
-  } catch (e) { console.warn('[reset-credit] attempts not persisted:', e.message); }
+    return true;
+  } catch (e) { console.warn('[reset-credit] attempts not persisted:', e.message); return false; }
 }
 // verify r2 (reproduced): an unreadable attempts file was SILENTLY ignored at boot — no line, the bytes left in place
 // to be overwritten by the next write, and the next press minted a key as if no request had ever gone out. The
@@ -4242,6 +4253,7 @@ const TRIES_VALID = (d) => !!d && typeof d === 'object' && d.v === 1 && Array.is
 // THE HOTFIX (主开发 r2899): the store's last answer was «not there» (a first start, a hold lifted as «no attempts», bytes set aside) —
 // its next write CREATES the file and never replaces one: a file that appeared since was never read (a late mount, a flapping folder)
 let _resetCreditTriesUnseen = false;
+const TRIES_LINKLESS = Object.freeze(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'EMLINK', 'ENOSYS']);   // a folder without hard links (src/harness-config.js's list): the exclusive create instead
 let _resetCreditTriesHeld = null;   // { code, why, at, tries, filed, todoId, saidPersist, lasting, asideFailed } while the file could not be read
 let _resetCreditTriesReading = null;   // the held file's read again in flight (a promise), or null
 // line 429's follow (主开发 r2413, smalls): A READ AGAIN THAT NEVER SETTLES (a dead mount) keeps no later one from starting for good: past
@@ -4256,6 +4268,7 @@ const RESET_CREDIT_TRIES_LASTING_TEXT = 'The reset-credit attempt records cannot
 const RESET_CREDIT_TRIES_LASTING = new Set(['EACCES', 'EPERM', 'EISDIR', 'ENOTDIR', 'ELOOP', 'set-aside failed']);
 /** the held file's words for a refusal (the writers, the preview) */
 function resetCreditTriesHeldWords(H) {
+  if (H.code === 'appeared') return 'the reset-credit attempt records appeared after they were found missing — nothing is sent until they are read; they are read at the next press (try again in a moment)';   // r2973's should: the door named
   return H.lasting
     ? `the reset-credit attempt records cannot be read (${H.code}) — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder (reset-credit-tries.json) and its access (its owner and permissions)`
     : `the reset-credit attempt records could not be read (${H.code}) — no reset credit is used until they read again (they are read again at the next press and at the pool's next pass; a passing fault heals by itself)`;
@@ -4312,7 +4325,10 @@ function liftResetCreditTriesHold(how) {
   if (H.todoId) { try { const todos = getUserTodos(); const it = todos && typeof todos.get === 'function' ? todos.get(H.todoId) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(H.todoId, 'done', 'the attempt records read again'); } catch (e) { console.warn('[reset-credit] the held attempts\' notice could not be resolved:', e.message); } }
 }
 /** a reset-credit use refused while the attempts are held → {ok:false, code, why} | null (the ONE writer of the verb asks it) */
-function resetCreditTriesRefusal() {
+function resetCreditTriesRefusal({ press = false } = {}) {
+  // THE HOTFIX's follow (主开发 r2973 must 1): AT A PRESS (both writers), BEFORE an attempt is opened or anything is sent — after «not
+  // there», a file that appeared since HOLDS the store («appeared») and the press is refused by name: it is read first (the next press)
+  if (press && !_resetCreditTriesHeld && _resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) holdResetCreditTries({ code: 'appeared', why: 'it appeared after it was read «not there» — it is read before anything is sent' });
   const H = _resetCreditTriesHeld;
   return H ? { ok: false, code: 'attempts_unread', why: resetCreditTriesHeldWords(H), detail: null } : null;
 }
@@ -4336,6 +4352,7 @@ function settleTornTries(a, why, asideAs, asideOk) {
   if (a.state === 'unreadable') { holdResetCreditTries({ code: 'set-aside failed', why: 'its bytes did not parse and could not be set aside', asideFailed: true }); return 0; }   // their only copy: HELD, never written over
   _resetCreditTriesUnseen = true;   // the bytes moved aside: the next write creates the file
   liftResetCreditTriesHold('did not parse — set aside');
+  if (_resetCreditTries.size) persistResetCreditTries();   // r2973 must 2: this life's attempts on disk at once (the write creates the file)
   console.warn(`[reset-credit] data/reset-credit-tries.json is unreadable (${why}) — set aside as ${path.basename(asideAs)}; every reset-credit request open before this start is UNKNOWN now (a press on a codex account should refresh it first)`);
   _resetCreditTriesLost = { file: RESET_CREDIT_TRIES_FILE, asideAs, at: Date.now(), why, filed: false };
   fileResetCreditTriesLost();
@@ -4351,6 +4368,7 @@ function applyResetCreditTriesRead(read, { aside = 'sync' } = {}) {
     if (H && !H.missingOnce) { H.missingOnce = true; console.warn('[reset-credit] data/reset-credit-tries.json answered «not there» right after it could not be read — still HELD: it is read once more before anything is taken as «no attempts»'); return 0; }
     _resetCreditTriesUnseen = true;   // its next write creates the file, never replaces one
     liftResetCreditTriesHold(H ? 'is not there twice in a row (no attempts on file)' : 'is not there (no attempts on file)');
+    if (H && _resetCreditTries.size) persistResetCreditTries();   // r2973 must 2: this life's attempts on disk at once (the write creates the file)
     return 0;
   }   // no file = no attempts (the common first boot)
   if (a.state === 'unreadable') { holdResetCreditTries(a); return 0; }
@@ -4395,18 +4413,33 @@ function applyResetCreditTriesRead(read, { aside = 'sync' } = {}) {
     if (Number(t.sentAt) > 0) t.prior = resetCredit.supersede(t.prior, Number(t.sentAt), clockOpts(Number(t.sentAt)));
     return t;
   };
-  let n = 0, charged = 0;
+  let n = 0, charged = 0, kept = 0;
+  const own = new Set(_resetCreditTries.keys()), fileKeys = new Set();   // r2973 must 2: what THIS life holds before the file's records come in
+  // r2973's should: `older` rides at the end of `head`'s prior chain — the same record once, bounded as the floor reads a chain
+  const keepAsPrior = (head, older) => { let x = head; for (let i = 0; x.prior && i < 16; i++) { if (x.prior === older || (older.idempotencyKey && x.prior.idempotencyKey === older.idempotencyKey)) return; x = x.prior; } if (!x.prior) x.prior = older; };
   for (const r of doc.tries) {
+    const mine = r && typeof r.key === 'string' ? _resetCreditTries.get(r.key) : null;
+    if (mine && mine.idempotencyKey && r.idempotencyKey === mine.idempotencyKey) { fileKeys.add(r.key); n++; continue; }   // this life's own record read back: memory's (its timers live; never revived, never charged twice)
     const t = revive(r);
     if (!t) continue;
     // THE HOTFIX (r2899): an attempt THIS life made while the file was not read (it came back after «not there») keeps its place, and
     // the file's older one becomes its prior — the floor reads the chain (unsettledInChain): neither is lost
     const cur = _resetCreditTries.get(t.key);
-    if (cur && Number(cur.at) > Number(t.at)) { if (!cur.prior) cur.prior = t; n++; continue; }
+    fileKeys.add(t.key);
+    if (cur) {
+      // r2973's should: BOTH are kept — the newer is the head and the older rides at the END of its prior chain (never dropped
+      // because the head already has a prior; never replaced because the file's is newer)
+      if (Number(cur.at) >= Number(t.at)) keepAsPrior(cur, t); else { keepAsPrior(t, cur); _resetCreditTries.set(t.key, t); }
+      kept++; n++; continue;
+    }
     _resetCreditTries.set(t.key, t); n++;
   }
+  // THE HOTFIX's follow (主开发 r2973 must 2): an attempt of THIS life the read kept (merged with the file's, or on an account the file
+  // does not name) is written AT ONCE — an attempt that went out is on disk, never in memory only until some later change (a restart
+  // would lose it and its floor)
+  for (const k of own) if (!fileKeys.has(k)) kept++;
   if (n) console.log(`[reset-credit] ${n} attempt record${n === 1 ? '' : 's'} restored from the last run${charged ? ` (${charged} open at the stop, charged now)` : ''}`);
-  if (charged) persistResetCreditTries();
+  if (charged || kept) persistResetCreditTries();
   return n;
 }
 loadResetCreditTries();
@@ -4993,7 +5026,7 @@ function resetCreditOffer(session) {
  * → {ok:true, identity} | {ok:false, why, detail} (why = the ceiling's refusal CODE, detail its sentence — which names the identity and the count; why null when it threw)
  */
 function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'auto', now = Date.now(), key = null, readFirst = false } = {}) {
-  { const held = resetCreditTriesRefusal(); if (held) { console.log(`[codex] reset credit refused for ${session._webuiId}: ${held.why}`); return held; } }   // B-f276's remainder: the floor is in a file that could not be read
+  { const held = resetCreditTriesRefusal({ press: true }); if (held) { console.log(`[codex] reset credit refused for ${session._webuiId}: ${held.why}`); return held; } }   // B-f276's remainder: the floor is in a file that could not be read
   key = key || creditIdentityFor(session).key;
   // THE READ BEFORE A PERSON'S PRESS (verify r8 T0, the owner's yes): the verb asks the wrapper for ONE
   // `account/rateLimits/read` before its consume; the wrapper's push (`rate_limits_updated {beforeReset, idempotencyKey}`)
@@ -5004,13 +5037,6 @@ function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'aut
   try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session, sessionId: session._webuiId, sessionName: session.name || null, identity: key ? { key, name: nameOf(key) || key } : null }); }
   catch (e) { console.warn('[codex] spend authorizer threw — not spending a reset credit:', e.message); return { ok: false, why: null }; }
   if (av && av.ok === false) { console.log(`[codex] reset credit refused for ${session._webuiId} (spend budget: ${av.why})`); return { ok: false, why: av.why || 'refused', detail: av.detail || null }; }
-  session._codexResetTriedAt = now;
-  session._codexLastResetsAt = Number(resetsAtSec) || 0;
-  // …and WHICH LANE it was: if the credit fails we arm from these two, and an
-  // arm with no lane can never be reopened by a reading.
-  session._codexLastLane = lane || null;
-  session._resetCreditOrigin = origin === 'user' ? 'user' : 'auto';
-  session._resetCreditKey = key || null;
   // THE PRESS'S IDEMPOTENCY KEY (lane-codex-0159): codex-cli >= 0.159 REFUSES a
   // consume without one ("Invalid request: missing field `idempotencyKey`" — the
   // 0.153 request had no params) and dedupes by it: "reuse the same value when
@@ -5023,7 +5049,20 @@ function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'aut
   const idemKey = crypto.randomUUID();
   // the IDENTITY's attempt (r2): the floor every session and the preview read — OPEN until the
   // wrapper reports the request went out (lane reset-path: the floor and the charge wait for it)
-  if (key) openResetCreditTry({ key, sid: session._webuiId, via: 'session', origin: session._resetCreditOrigin, resetsAtSec, lane, now, idemKey, av, creditsAt: resetCreditsLeft(session, key), reportsSent: wrapperKeyState(session) === 'keyed', window: spentWindowOf(readRawUsageCache(key)), readFirst: rf });
+  if (key && !openResetCreditTry({ key, sid: session._webuiId, via: 'session', origin: origin === 'user' ? 'user' : 'auto', resetsAtSec, lane, now, idemKey, av, creditsAt: resetCreditsLeft(session, key), reportsSent: wrapperKeyState(session) === 'keyed', window: spentWindowOf(readRawUsageCache(key)), readFirst: rf })) {
+    // THE HOTFIX's follow (主开发 r2973 must 1): the attempt's save did NOT land (a file that appeared, a write that failed) — NOTHING
+    // is sent and the session is not marked: the press is refused by name (the store holds an appeared file: read first)
+    const r = resetCreditTriesRefusal() || { ok: false, code: 'attempts_unwritten', why: 'the reset-credit attempt could not be written — nothing was sent (try again in a moment)', detail: null };
+    console.log(`[codex] reset credit refused for ${session._webuiId}: ${r.why}`);
+    return r;
+  }
+  session._codexResetTriedAt = now;
+  session._codexLastResetsAt = Number(resetsAtSec) || 0;
+  // …and WHICH LANE it was: if the credit fails we arm from these two, and an
+  // arm with no lane can never be reopened by a reading.
+  session._codexLastLane = lane || null;
+  session._resetCreditOrigin = origin === 'user' ? 'user' : 'auto';
+  session._resetCreditKey = key || null;
   session.pty.write(JSON.stringify({ type: 'codex-reset-credit', idempotencyKey: idemKey, ...(rf ? { readFirst: true } : {}) }) + '\n');
   return { ok: true, identity: av && av.identity, idempotencyKey: idemKey, readFirst: rf };
 }
@@ -5032,8 +5071,6 @@ function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'aut
  *  goes out (noteResetCreditSent), given back when it never does (onResetCreditNotSent). */
 function openResetCreditTry({ key, sid = null, via = 'session', origin = 'auto', resetsAtSec = 0, lane = null, now = Date.now(), idemKey, av = null, creditsAt = null, reportsSent = true, window = null, readFirst = false }) {
   const prev = _resetCreditTries.get(key);
-  try { clearTimeout(prev && prev.timer); } catch { }
-  try { clearTimeout(prev && prev.ackTimer); } catch { }
   const R = Number(resetsAtSec) || 0;
   // verify r1 (the unknown consume): `creditsAt` = the stored count at the attempt and `window` = the wall's
   // bucket {resetsAtSec, periodSec} — the two witnesses a later reading settles an unanswered consume by;
@@ -5049,11 +5086,20 @@ function openResetCreditTry({ key, sid = null, via = 'session', origin = 'auto',
     creditsAt: creditsAt != null && creditsAt !== '' && Number.isFinite(Number(creditsAt)) ? Number(creditsAt) : null, reportsSent: reportsSent !== false, window: window && Number(window.resetsAtSec) > 0 ? { resetsAtSec: Number(window.resetsAtSec), periodSec: Number(window.periodSec) || null } : null, settled: null, readFirst: via === 'helper' || readFirst === true, prior: resetCredit.priorForPress(prev, clockOpts(now)) };
   // NOBODY SAID IT WENT OUT within the ack window ⇒ it did not (a wrapper that never took the
   // verb, a dead process): nothing armed, the hold given back, a person told, the followers walk
+  _resetCreditTries.set(key, t);
+  // THE HOTFIX's follow (主开发 r2973 must 1): NOTHING IS SENT AFTER A SAVE THAT DID NOT LAND — the attempt is on disk before its request
+  // can go out. A save that did not land (a file that appeared since «not there», a write that failed) backs the attempt out: the
+  // previous record back in its place (its timers untouched), the spend hold given back; → null and the caller refuses by name
+  if (!persistResetCreditTries()) {
+    if (prev) _resetCreditTries.set(key, prev); else _resetCreditTries.delete(key);
+    try { if (av && av.hold) spendGuard.release({ hold: av.hold }); } catch { }
+    return null;
+  }
+  try { clearTimeout(prev && prev.timer); } catch { }
+  try { clearTimeout(prev && prev.ackTimer); } catch { }
   t.ackTimer = setTimeout(() => onResetCreditNotSent(t), RESET_CREDIT_ACK_MS);
   if (t.ackTimer.unref) t.ackTimer.unref();
-  _resetCreditTries.set(key, t);
   if (_resetCreditTries.size > 256) _resetCreditTries.delete(_resetCreditTries.keys().next().value);
-  persistResetCreditTries();
   return t;
 }
 /** THE REQUEST WENT OUT (the wrapper's `reset_credit_sent`, the helper's onSent, or an answer that
@@ -5390,7 +5436,7 @@ function wrapperReadsFirst(s) {
   try { const wc = wrapperCaps(path.join(rootDir, 'data', 'session-buffers'), s._webuiId, s.socketPath); return !!(wc && wc.caps && wc.caps.resetCreditReadFirst === true); } catch { return false; }
 }
 function writeResetCreditViaHelper(key, { resetsAtSec = 0, now = Date.now() } = {}) {
-  { const held = resetCreditTriesRefusal(); if (held) return held; }   // B-f276's remainder: the floor is in a file that could not be read
+  { const held = resetCreditTriesRefusal({ press: true }); if (held) return held; }   // B-f276's remainder: the floor is in a file that could not be read
   const h = resetCreditHelperFor(key);
   if (!h.ok) return { ok: false, code: 'no_live_session', why: null, detail: h.why };
   let av = null;
@@ -5399,6 +5445,8 @@ function writeResetCreditViaHelper(key, { resetsAtSec = 0, now = Date.now() } = 
   if (av && av.ok === false) { console.log(`[codex] reset credit refused for the helper on ${nameOf(key)} (spend budget: ${av.why})`); return { ok: false, why: av.why || 'refused', detail: av.detail || null }; }
   const idemKey = crypto.randomUUID();
   const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });
+  // THE HOTFIX's follow (主开发 r2973 must 1): the attempt's save did not land — no helper is spawned, nothing is sent
+  if (!t) return resetCreditTriesRefusal() || { ok: false, code: 'attempts_unwritten', why: 'the reset-credit attempt could not be written — nothing was sent (try again in a moment)', detail: null };
   const env = { ...sanitizedSpawnEnv(process.env, { drop: agentCredentialEnvNames(harnesses.list()) }), [h.envVar]: h.home };
   // verify r1: an UNSETTLED earlier attempt rides as `prior` — the helper reads first and consumes only if no
   // unsettled attempt remains on this identity (landed ⇒ the credit was used then; a reading that cannot tell
