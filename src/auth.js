@@ -72,7 +72,7 @@ class Auth {
     this._dataDir = dataDir; this._witnessCfg = witness; this._facts = null; this._said = new Set();
     // H1: the hub's worker pool (server.js hands it once built; a suite in `witness.pool`), the network home's look, the boot's held password road
     this._pool = (witness && witness.pool) || null; this._net = null; this._netEnsure = null; this._netWrites = null; this._startId = null;
-    if (this._pool && typeof this._pool.onWorkerEnded === 'function') this._pool.onWorkerEnded(() => this._netResume());   // r3172: a stuck worker that exits lets a parked look go on (a pool handed at the start, as by attachWitnessPool)
+    this._hookPool(this._pool);   // r3172: a stuck worker that exits lets a parked look go on (a pool handed at the start, as by attachWitnessPool)
     this._startNewUsed = false; this._netStartNewOwed = false;   // r2869 (2) + r2926 (1): the person's start-new act at this start
     this._state = null; // { passwordHash, salt, tokens: { token: {createdAt, ua} } }
     this._attempts = new Map(); // ip -> { fails, lockUntil }
@@ -165,12 +165,33 @@ class Auth {
     if (!this._pool) { this._netStartNewOwed = true; return; }   // attachWitnessPool runs it
     this._netStartNewOwed = false;
     const root = SW.digestOf(f.root);
-    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(done), (e) => this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`));
+    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(done), (e) => this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`), 'start-new');
   }
   /** ONE ask of the witness worker, bounded (a pool that throws is a refusal, never a throw out of the start) */
   _netAsk(op, payload) { try { return Promise.resolve(this._pool.call(op, payload, { timeoutMs: this._netBound() })); } catch (e) { return Promise.reject(e); } }
   /** the network copy's writes and removals, ONE AT A TIME in their order (r3030: the start-new removal before the boot's sign-in write) */
-  _netQueue(run, onFail) { const next = (this._netChain || Promise.resolve()).then(run).catch(onFail); this._netChain = next; this._netWrites = next; return next; }
+  _netQueue(run, onFail, kind = 'witness') {
+    const next = (this._netChain || Promise.resolve()).then(() => {
+      const ending = this._netEnding();
+      if (ending >= NET_ENDING_MAX) {   // r3219 (1): a WRITE is never asked past the same two stuck threads — OWED (the latest of its kind), asked at a thread's exit
+        (this._netOwed || (this._netOwed = new Map())).set(kind, [run, onFail]);
+        const f = this._facts;
+        this._sayOnce('net-write-parked', `[auth] the sign-in witness on the home folder ${f && f.netHome} is not ${kind === 'start-new' ? 'removed' : 'written or removed'} now: ${ending} earlier asks of the home folder still hold their worker threads (stuck in the kernel) — it is asked when one of them exits, or at the next start`);
+        return;
+      }
+      return run();
+    }).catch(onFail);
+    this._netChain = next; this._netWrites = next; return next;
+  }
+  /** r3219 (4): ONE exit hook a pool, whichever road it came by (at the start, handed later, or both) */
+  _hookPool(pool) { if (!pool || pool === this._hookedPool || typeof pool.onWorkerEnded !== 'function') return; this._hookedPool = pool; pool.onWorkerEnded(() => this._netOnExit()); }
+  /** a worker the pool ended has exited: a parked look goes on, and the writes owed past the count are asked (r3219 (1)) */
+  _netOnExit() {
+    this._netResume();
+    if (!this._netOwed || !this._netOwed.size || this._netEnding() >= NET_ENDING_MAX) return;
+    const owed = [...this._netOwed.entries()]; this._netOwed.clear();
+    for (const [kind, [run, onFail]] of owed) this._netQueue(run, onFail, kind);
+  }
   /** the hub's worker pool, handed by server.js once built (after Auth): the look starts then; the network copy rides it */
   attachWitnessPool(pool) {
     if (!this._witnessCfg || !pool) return;
@@ -181,7 +202,7 @@ class Auth {
     }
     if (!pool || typeof pool.call !== 'function') return;
     this._pool = pool;
-    if (typeof pool.onWorkerEnded === 'function') pool.onWorkerEnded(() => this._netResume());   // r3172: a stuck worker that exits lets a parked look go on
+    this._hookPool(pool);   // r3172: a stuck worker that exits lets a parked look go on — ONE hook a pool, whichever roads it came by (r3219 (4))
     if (this._netStartNewOwed) this._netStartNew();   // the start-new removal owed, first on the queue
     if (this._net && !this._net.done) this._netLook();
     else if (!this._held) this._netWitness({ atStart: true, startId: this._startId });   // the start-time write (after it, on the queue)
@@ -192,7 +213,7 @@ class Auth {
   /** r3172: how many workers the pool ended at their deadline still hold their thread (SafeFs stats().ending; a stand-in has none) */
   _netEnding() { try { const s = this._pool && typeof this._pool.stats === 'function' ? this._pool.stats() : null; return Number(s && s.ending) || 0; } catch { return 0; } }
   /** r3172: an ended worker's thread exited — a look parked past NET_ENDING_MAX goes on (one at a time, as ever) */
-  _netResume() { const n = this._net; if (!n || n.done || !n.parked || n.pending || n.timer) return; n.parked = false; this._netLook(); }
+  _netResume() { const n = this._net; if (!n || n.done || !n.parked || n.pending || n.timer) return; n.parked = false; if (this._held) delete this._held.parked; this._netLook(); }
   _netLook() {
     const n = this._net, f = this._facts;
     if (!n || n.done || n.pending || !this._pool) return;   // ONE look at a time (r2869 (1))
@@ -202,6 +223,7 @@ class Auth {
       // mount): with NET_ENDING_MAX such threads no new look starts — the hold stays «home» with its start-new act, said once; the look goes on
       // when one of them exits (attachWitnessPool: the pool's onWorkerEnded), never before
       n.parked = true;
+      if (this._held && this._held.kind === 'home') this._held.parked = true;   // r3219 (2): the page says the parked state in its own words
       this._sayOnce('net-parked', `[auth] the home folder ${f.netHome} has not answered since ${new Date(n.since).toISOString()}: ${ending} looks ended at their deadline still hold their worker threads (a read stuck in the kernel) — no new look until one of them exits; to start this data folder as a new VibeSpace now, create an empty file ${path.join(this._dataDir, SW.START_NEW)} and restart`);
       return;
     }
@@ -227,7 +249,11 @@ class Auth {
       if (this._held && (this._held.kind === 'checking' || this._held.kind === 'unchecked')) {
         this._held.kind = 'home';
         this._held.why = `the home folder ${f.netHome} that keeps the sign-in witness has not answered since ${new Date(n.since || Date.now()).toISOString()} (${a.why}), so it cannot be known whether the data folder ${this._dataDir} is the one its sign-in was set in`;
+        if (a.machine) this._held.machine = a.machine;   // r3351: the reason is this machine's own id, not the home — its own words
         try { console.warn(`[auth] ${heldJournal(this._file, this._held.why, !!this._clerk?.enabled, this._held)}`); } catch { }   // r3030 (f): warn, past the bound only
+      } else if (this._held && this._held.kind === 'home') {   // r3351: each unanswered look says its own reason (the id read again, or the home silent)
+        if (a.machine) { this._held.machine = a.machine; this._held.why = `${a.why}, so it cannot be known whether the data folder ${this._dataDir} is the one its sign-in was set in`; }
+        else delete this._held.machine;
       }
       // r3172: the re-ask BACKS OFF — 30 s, doubling, to 8 min (NET_REASK_MAX_MS) — for as long as the home does not answer
       const again = () => { const wait = Math.min(this._netReaskMax(), this._netReask() * 2 ** Math.min(n.waits || 0, 20)); n.waits = (n.waits || 0) + 1; n.timer = setTimeout(() => { n.timer = null; n.reasks = (n.reasks || 0) + 1; if (n.done) return; if (n.pending) { again(); return; } this._netLook(); }, wait); if (n.timer.unref) n.timer.unref(); };

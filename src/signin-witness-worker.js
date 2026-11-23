@@ -25,20 +25,33 @@ const LI = require('./local-index.js');
 
 const nameOf = (root, machine) => `signin-${root}${machine ? '-' + machine : ''}.json`;
 let MACHINE = null;
-/** THIS MACHINE's key: the digest of its machine id (stable across reboots; never the host name, which may change) — none ⇒ '' */
-function machineKey() {
-  if (MACHINE !== null) return MACHINE;
-  for (const f of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
-    try { const t = fs.readFileSync(f, 'utf-8').trim(); if (/^[0-9a-f]{16,64}$/i.test(t)) return (MACHINE = crypto.createHash('sha256').update(t).digest('hex').slice(0, 12)); } catch { /* the next */ }
+const MACHINE_FILES = ['/etc/machine-id', '/var/lib/dbus/machine-id'];
+/** THIS MACHINE's key: the digest of its machine id (stable across reboots; never the host name, which may change) → {key} | {unknown}.
+ *  ABSENT (no such file, or no id in it) is «none» (the next file, then '' — the root-only name); a read that FAILED (EACCES, EIO…) is
+ *  UNKNOWN (主开发 r3351: never «none», which would look under the root-only name, find nothing and let an empty data folder open while
+ *  this machine's own copy stands) — and is NOT kept: the next ask reads again. A key found, or none at all, is kept for the worker's life */
+function machineFacts() {
+  if (MACHINE !== null) return { key: MACHINE };
+  for (const f of MACHINE_FILES) {
+    let t;
+    try { t = fs.readFileSync(f, 'utf-8'); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue; return { key: null, unknown: { file: f, code: String((e && e.code) || 'EUNKNOWN') } }; }
+    t = String(t).trim();
+    if (/^[0-9a-f]{16,64}$/i.test(t)) return { key: (MACHINE = crypto.createHash('sha256').update(t).digest('hex').slice(0, 12)) };
   }
-  return (MACHINE = '');
+  return { key: (MACHINE = '') };
 }
-/** this machine's ONE name in the home folder (round wefspq2j3: the root-only name is a machine-id-less machine's, never touched by one with an id) */
-const fileOf = (dir, root) => path.join(dir, nameOf(root, machineKey()));
+/** the key, or '' (none — or, for a caller that only names files, unknown: every op below asks machineFacts itself) */
+const machineKey = () => machineFacts().key || '';
+/** an op on this machine's copy while its key is UNKNOWN: refused by name (never a write or a removal under a guessed name) */
+const unknownError = (u) => Object.assign(new Error(`this machine's own id (${u.file}) could not be read (${u.code}), so its sign-in copy cannot be named`), { code: 'EMACHINEID' });
+// this machine's ONE name in the home folder (round wefspq2j3: the root-only name is a machine-id-less machine's, never touched by one with
+// an id): each op below names it from machineFacts — an UNKNOWN key names nothing (r3351)
 
 const OPS = {
   netRead({ path: dir, root, maxBytes = 4096 }) {
-    const file = fileOf(dir, root), shape = machineKey() ? 'machine' : 'root';
+    const m = machineFacts();
+    if (m.unknown) return { result: { machineUnknown: m.unknown } };   // r3351: unknown is no answer (the hub asks again: the next look reads the id again)
+    const file = path.join(dir, nameOf(root, m.key)), shape = m.key ? 'machine' : 'root';
     const failed = (e) => ({ result: { file, code: String((e && e.code) || 'EUNKNOWN'), message: String((e && e.message) || e).slice(0, 200) } });
     let st;
     try { st = fs.lstatSync(file); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return { result: { file, none: true } }; return failed(e); }
@@ -48,7 +61,9 @@ const OPS = {
     return { result: { file, text, shape } };
   },
   netWrite({ path: dir, root, content, uid = null }) {
-    const file = fileOf(dir, root);
+    const m = machineFacts();
+    if (m.unknown) throw unknownError(m.unknown);
+    const file = path.join(dir, nameOf(root, m.key));
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const st = fs.lstatSync(dir);
     const law = LI.rungFolderOf({ exists: true, symlink: st.isSymbolicLink(), dir: st.isDirectory(), uid: st.uid, mode: st.mode & 0o7777 }, { uid, dir });
@@ -66,7 +81,9 @@ const OPS = {
     return { result: { file, ...(note ? { note } : {}) } };
   },
   netRemove({ path: dir, root }) {
-    const file = fileOf(dir, root);
+    const m = machineFacts();
+    if (m.unknown) throw unknownError(m.unknown);
+    const file = path.join(dir, nameOf(root, m.key));
     try { fs.unlinkSync(file); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) throw e; }
     return { result: { file } };
   },
@@ -86,4 +103,4 @@ if (!isMainThread && parentPort) {
   });
 }
 
-module.exports = { runOp, machineKey, nameOf };
+module.exports = { runOp, machineKey, machineFacts, nameOf, MACHINE_FILES };

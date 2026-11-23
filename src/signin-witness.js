@@ -123,6 +123,10 @@ function netAnswerOf({ result = null, error = null } = {}, { root, dataDir } = {
     return { answered: false, why: String((error && error.message) || error).slice(0, 200) };
   }
   if (!result || typeof result !== 'object') return { answered: false, why: 'no answer from the witness worker' };
+  if (result.machineUnknown) {   // 主开发 r3351: this machine's own id could not be read — its copy cannot be named: NO answer (asked again), never «none»
+    const u = result.machineUnknown;
+    return { answered: false, machine: String(u.file || ''), why: `this machine's own id (${u.file}) could not be read (${u.code}), so its sign-in witness on the home folder cannot be named` };
+  }
   if (result.none) return { answered: true, found: null };
   if (result.code) {   // the worker's read failed on a NAMED copy: a quiet network road is silence; a refusal the read answered holds it
     const code = String(result.code);

@@ -685,7 +685,7 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
   {
     const { execFileSync } = require('child_process');
     const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
-    const wedgeOf = (tag) => {
+    const wedgeOf = (tag, size = 1) => {
       const dir = path.join(ROOT, `wedge-${tag}`); fs.mkdirSync(dir, { recursive: true });
       const fifo = path.join(dir, 'home.fifo'), flag = path.join(dir, 'stall'), wf = path.join(dir, 'worker.js');
       execFileSync('mkfifo', [fifo]); fs.writeFileSync(flag, '');
@@ -695,7 +695,7 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
         `  if (op === 'netRead' && fs.existsSync(${J(flag)})) fs.closeSync(fs.openSync(${J(fifo)}, 'r'));   // blocks in the kernel until a writer comes`,
         `  parentPort.postMessage({ id, ok: true, result: op === 'netRead' ? { file: ${J(path.join(dir, 'signin-x.json'))}, none: true } : {} });`,
         '});', ''].join('\n'));
-      const pool = new SafeFs({ workerPath: wf, name: `dc3f-wedge-${tag}`, poolSize: 1, hungMs: 0 });
+      const pool = new SafeFs({ workerPath: wf, name: `dc3f-wedge-${tag}`, poolSize: size, hungMs: 0 });
       // the release: the flag gone, then the FIFO held open read-write by this thread — a writer now exists, so every open() of it
       // returns at once (the stuck ones, and one that raced past the flag)
       let rw = null;
@@ -705,19 +705,32 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
     };
     const threads = () => fs.readdirSync('/proc/self/task').length;
     const cfgW = { netBoundMs: 30, netReaskMs: 60, netReaskMaxMs: 120 };
-    const WG = wedgeOf('fix'), WR = wedgeOf('red'), KG = await netIt('h1-wedge'), KR = await netIt('h1-wedge-red');
-    const RCAP = authCut('    if (ending >= NET_ENDING_MAX) {', '    if (false) {', 'ending-cap-cut');
+    const KG = await netIt('h1-wedge'), KR = await netIt('h1-wedge-red');
+    const RCAP = authCut('    if (ending >= NET_ENDING_MAX) {   // round wefspq2j3 (r3172)', '    if (false) {   // round wefspq2j3 (r3172)', 'ending-cap-cut');
+    const fillParked = (lang) => LW.loginWords(lang)['signin-held-home-parked'].replace('{home}', KG.home).replace('{dir}', KG.it.data);
     const said = [], warn0 = console.warn, err0 = console.error;
     console.warn = (...a) => said.push(a.join(' ')); console.error = (...a) => said.push(a.join(' '));
+    const thrBefore = threads(), WG = wedgeOf('fix');
+    let WR = null;
     try {
-      // the fixed hub takes its pool the way server.js hands it (attachWitnessPool, after the start); the red's is handed at the start
-      const g = start(KG.it, { mountinfo: KG.mi, ...cfgW }).v, r = start(KR.it, { mountinfo: KR.mi, pool: WR.pool, ...cfgW }, RCAP).v;
+      // the fixed hub takes its pool the way server.js hands it (attachWitnessPool, after the start), alone: the PROCESS's own thread
+      // count is read while it is parked (r3219 (3)) — before the six forced looks and after them, a loop turn each
+      const g = start(KG.it, { mountinfo: KG.mi, ...cfgW }).v;
       g.attachWitnessPool(WG.pool);
-      await until(() => g._net.parked && WR.pool.stats().ending > 2, 15000);
-      for (let i = 0; i < 6; i++) g._netLook();   // six more re-asks while parked
-      const sg = WG.pool.stats(), sr = WR.pool.stats(), parkedLines = said.filter((l) => l.includes('no new look until') && l.includes(KG.home));
-      ok(g._net.parked && sg.ending === 2 && sg.timeouts === 2 && g.held && g.held.kind === 'home' && api(g).body.fix.includes(SW.START_NEW) && parkedLines.length === 1,
-        `a home that hangs for good: ${sg.timeouts} looks ended at their deadline, ${sg.ending} threads stuck in the kernel — then NO new look over ${g._net.reasks || 0} re-asks and 6 more; held «home» with its start-new act; said once (${parkedLines.length})`, { sg, held: g.held && g.held.kind });
+      await until(() => g._net.parked && WG.pool.stats().alive === 1, 15000);
+      const thrParked = threads();
+      for (let i = 0; i < 6; i++) { g._netLook(); await new Promise((r0) => setImmediate(r0)); }   // six more re-asks while parked
+      const thrAfter = threads(), sg = WG.pool.stats(), parkedLines = said.filter((l) => l.includes('no new look until') && l.includes(KG.home));
+      ok(g._net.parked && sg.ending === 2 && sg.timeouts >= 2 && thrParked <= thrBefore + 3 && thrAfter === thrParked && g.held && g.held.kind === 'home' && api(g).body.fix.includes(SW.START_NEW) && parkedLines.length === 1,
+        `a home that hangs for good: ${sg.timeouts} looks ended at their deadline (a fresh worker that missed its deadline before the op ran exits as ever), ${sg.ending} threads stuck in the kernel — then NO new look over ${g._net.reasks || 0} re-asks and 6 more; the process's own threads: ${thrBefore} before the pool, ${thrParked} parked, ${thrAfter} after the six (two stuck and one live at most); held «home» with its start-new act; said once (${parkedLines.length})`, { sg, thrBefore, thrParked, thrAfter, held: g.held && g.held.kind });
+      // r3219 (2): THE PARKED STATE's OWN WORDS — nothing is asked until a stuck check ends; the restart named as the other way out
+      const pb = api(g).body, langs = ['zh', 'ja'].filter((l) => api(g, l).body.why === fillParked(l));
+      ok(pb.reason === 'home' && pb.why === fillParked('en') && /restart VibeSpace/.test(pb.fix) && pb.fix.includes(SW.START_NEW) && langs.length === 2, `while parked the page says so: «${pb.why.slice(-90)}» — and names the restart beside the start-new act (zh / ja through the table: ${langs.join(', ')})`, pb);
+      // RED CONTROL: the cap cut — its pool of THREE workers ends one more at each look with no 500 ms respawn to wait for
+      WR = wedgeOf('red', 3);
+      const r = start(KR.it, { mountinfo: KR.mi, pool: WR.pool, ...cfgW }, RCAP).v;
+      await until(() => WR.pool.stats().ending > 2, 15000);
+      const sr = WR.pool.stats();
       ok(sr.ending > 2, `RED CONTROL: the cap cut — each re-ask leaves one more thread stuck in the kernel (${sr.ending} and growing)`, sr);
       // the red's pool goes first (it keeps ending fresh workers until its home answers); then the fixed pool, whose look is parked:
       // no look of its own is out, so its thread count moves by its stuck threads only
@@ -727,8 +740,62 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
       await until(() => WG.pool.stats().ending === 0 && !g.held && before - threads() >= stuck, 8000);
       const after = threads();
       ok(WG.pool.stats().ending === 0 && !g.held && !g.passwordEnabled && before - after >= stuck, `the stuck threads EXIT once the kernel lets go (${before} → ${after} threads, ${stuck} were stuck: the pool's count follows the real threads) — and the parked look RESUMES at that exit: the home answers, the instance opens`, { ending: WG.pool.stats().ending, held: g.held && g.held.kind, net: g._net && { parked: g._net.parked, pending: g._net.pending, timer: !!g._net.timer, done: g._net.done }, said: said.slice(-4) });
-    } finally { console.warn = warn0; console.error = err0; WG.release(); WR.release(); WG.pool.close(); WR.pool.close(); WG.done(); WR.done(); }
+    } finally { console.warn = warn0; console.error = err0; WG.release(); WG.pool.close(); WG.done(); if (WR) { WR.release(); WR.pool.close(); WR.done(); } }
   }
+  // (10b) r3219 (1): THE WRITE ROADS ASK THE SAME COUNT — past two stuck threads a person's write of the network copy is OWED (the latest
+  // of its kind), said once, and asked at a stuck thread's exit; (10c) r3219 (4): ONE exit hook a pool, whichever roads it came by.
+  // The pool's two names here (stats().ending, onWorkerEnded) are the real SafeFs's own — (10) reads them over the real pool.
+  {
+    const endingPool = () => { const calls = [], hooks = []; const P = { calls, hooks, ending: 0, stats: () => ({ ending: P.ending }), onWorkerEnded: (fn) => { hooks.push(fn); return () => {}; }, call(op, payload) { calls.push(op); return Promise.resolve(op === 'netRead' ? { file: path.join(payload.path, 'signin-x.json'), none: true } : {}); } }; return P; };
+    const capRun = async (name, A0) => {
+      const P = endingPool(), W = await netIt(name), q = start(W.it, { mountinfo: W.mi, pool: P, ...quick }, A0).v;
+      await until(() => !q.held); await q._netWrites;
+      P.ending = 2; const c0 = P.calls.length, lines = [], w0 = console.warn;
+      console.warn = (...a) => lines.push(a.join(' '));
+      try { q.setPassword('pw-cap-0004', { userSet: true }); await q._netWrites; q.removePassword(); await q._netWrites; } finally { console.warn = w0; }
+      const parked = P.calls.slice(c0).join(','), owed = q._netOwed ? q._netOwed.size : 0;
+      P.ending = 1; P.hooks.forEach((h) => h()); await q._netWrites;
+      return { parked, owed, after: P.calls.slice(c0).join(','), said: lines.filter((l) => l.includes('is not written or removed now')).length };
+    };
+    const cw = await capRun('h1-write-cap');
+    ok(cw.parked === '' && cw.owed === 1 && cw.said === 1 && cw.after === 'netRemove', `past two stuck threads a person's write is NOT asked (a new sign-in word, then turning it off: ${cw.parked || 'none'} asked), owed once as the latest (${cw.owed}), said once (${cw.said}); at a stuck thread's exit the latest is asked (${cw.after})`, cw);
+    const RW2 = authCut("      if (ending >= NET_ENDING_MAX) {   // r3219 (1)", "      if (false) {   // r3219 (1)", 'write-cap-cut');
+    const cr = await capRun('h1-write-cap-red', RW2);
+    ok(cr.parked === 'netWrite,netRemove', `RED CONTROL: the write's cap cut — each act asks the home that hangs (${cr.parked}): one more stuck thread an act`, cr);
+    const P2 = endingPool(), hh = start(install('h1-hook-once'), { pool: P2 }).v; hh.attachWitnessPool(P2);
+    const RH = authCut('if (!pool || pool === this._hookedPool || typeof', 'if (!pool || typeof', 'hook-twice');
+    const P3 = endingPool(), h3 = start(install('h1-hook-twice'), { pool: P3 }, RH).v; h3.attachWitnessPool(P3);
+    ok(P2.hooks.length === 1 && P3.hooks.length === 2, `ONE exit hook a pool handed by both roads (${P2.hooks.length}); RED CONTROL: the check cut — two hooks, every exit heard twice (${P3.hooks.length})`);
+  }
+  // (11) 主开发 r3351: THE MACHINE's NAME — a read of this machine's id that FAILED is UNKNOWN, never «none». PLACED: the read call
+  // refused for the two machine id files only (no system file touched, no mode changed), over a fresh copy of the worker run in-process
+  if (WW.machineKey()) {
+    const WSRC3 = fs.readFileSync(path.join(REPO, 'src/signin-witness-worker.js'), 'utf-8');
+    const inproc = (W0) => ({ call: (op, payload) => { try { return Promise.resolve(W0.runOp(op, payload).result); } catch (e) { return Promise.reject(e); } } });
+    const refused = new Set(WW.MACHINE_FILES), rf0 = fs.readFileSync;
+    let refusing = true;
+    fs.readFileSync = function (p, ...r) { if (refusing && typeof p === 'string' && refused.has(p)) throw Object.assign(new Error(`EACCES: permission denied, open '${p}'`), { code: 'EACCES' }); return rf0.call(this, p, ...r); };
+    try {
+      const machineRun = async (name, text) => {
+        refusing = true;
+        const W = await netIt(name), copy = path.join(W.home, WW.nameOf(SW.digestOf(W.it.root), WW.machineKey()));
+        fs.mkdirSync(W.home, { recursive: true, mode: 0o700 }); fs.writeFileSync(copy, docOf(W, W.id));   // this machine's own copy stands in the home; the data folder is empty
+        const a = start(W.it, { mountinfo: W.mi, pool: inproc(MUT.load('src/signin-witness-worker.js', text, `worker-${name}`, { same: text === WSRC3 })), ...quick }).v;   // the green's copy is the file itself, on purpose: a fresh worker (its own unknown key)
+        await until(() => !a.held || a.held.kind !== 'checking');
+        const at = { kind: a.held ? a.held.kind : null, machine: a.held ? a.held.machine : null, body: a.held ? api(a).body : null, zh: a.held ? api(a, 'zh').body.why : null };
+        refusing = false;   // the read answers again: the NEXT look reads the id again (unknown is never kept)
+        await until(() => !a.held || a.held.kind === 'folder', 3000);
+        return { at, after: a.held ? { kind: a.held.kind, witness: a.held.witness } : null, copy, W };
+      };
+      const fillM = (lang, W) => LW.loginWords(lang)['signin-held-home-machine'].replace('{machine}', WW.MACHINE_FILES[0]).replace('{home}', W.home).replace('{dir}', W.it.data);
+      const m1 = await machineRun('h1-machine', WSRC3);
+      ok(m1.at.kind === 'home' && m1.at.machine === WW.MACHINE_FILES[0] && m1.at.body.why === fillM('en', m1.W) && m1.at.zh === fillM('zh', m1.W) && m1.at.body.fix.includes(SW.START_NEW), `this machine's id read REFUSED (EACCES), its own copy in the home, the data folder empty: HELD «home» by THAT name — «${m1.at.body && m1.at.body.why.slice(0, 80)}…» — never the root-only name's «none»`, m1.at);
+      ok(!!m1.after && m1.after.kind === 'folder' && m1.after.witness === m1.copy, 'unknown is NOT kept: the read answers again, the next look reads the id — this machine\'s own copy found, held by the folder\'s rule', m1.after);
+      const OLDM = anchored(WSRC3, "    try { t = fs.readFileSync(f, 'utf-8'); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue; return { key: null, unknown: { file: f, code: String((e && e.code) || 'EUNKNOWN') } }; }\n", "    try { t = fs.readFileSync(f, 'utf-8'); } catch (e) { continue; }   // e31a56467's form: any failed read falls to the next file, then to none\n", 'machine-any-failure-none');
+      const m2 = await machineRun('h1-machine-red', OLDM);
+      ok(m2.at.kind === null, 'RED CONTROL: e31a56467\'s form (any failed read of the id is «none», kept) — the root-only name, nothing there: the empty data folder OPENS while this machine\'s own copy stands', m2.at);
+    } finally { fs.readFileSync = rf0; }
+  } else console.log('  · (this machine has no readable machine id: the machine-name legs have nothing to refuse)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
