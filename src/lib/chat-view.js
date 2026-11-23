@@ -21,7 +21,8 @@ const MOVED_PRESS_ROWS = '.chat-channel-touch, .chat-peer-name';
  *  rebuilt by innerHTML when its message re-renders) — so no node is kept and a redrawn row is the same row */
 const pressKeyOf = (row) => (!row ? null : row.dataset?.key ? 'k:' + row.dataset.key : 'm:' + (row.closest?.('[data-msg-id]')?.dataset?.msgId || '') + '|' + (row.textContent || ''));
 import { stampAt as when, num, span, stampSpan, clockOf } from './page-time.js';
-import { reaskNext, retryAtOf } from './history-reask.js'; // row B-422c (r1461): the page's re-ask of a history «not loaded» — PURE // lane ui-language: the ONE formatter of a time / number a person reads
+import { reaskNext, retryAtOf } from './history-reask.js';
+import { readerKindOf, readerAskWords, readerLineWords } from './reader-words.js'; // row B-422c (r3077): the reader's refusal in the words of the cause it has // row B-422c (r1461): the page's re-ask of a history «not loaded» — PURE // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
@@ -2770,8 +2771,9 @@ class ChatView {
     // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
     // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
     if (data && data.notLoaded) {
-      if (!quietRefusal) this._sayReaderRestarting({ storageHung: !!data.storageHung, readerGone: !!data.readerGone, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null });
-      throw Object.assign(new Error(t('The transcript reader is restarting — try again in a moment.')), { code: data.notLoaded });
+      const info = { storageHung: !!data.storageHung, readerGone: !!data.readerGone, readerCause: data.readerCause || null, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null };
+      if (!quietRefusal) this._sayReaderRestarting(info);
+      throw Object.assign(new Error(this._readerAskWords(info)), { code: data.notLoaded });
     }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
     return data;
@@ -3491,7 +3493,7 @@ class ChatView {
       if (!res.ok) {
         // row B-422c (主开发 r1006 item 3): a read the transcript reader REFUSED asks the person to try again — a toast, never silence
         let body = null; try { body = await res.json(); } catch { }
-        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, readerGone: !!body.readerGone, retryAt: body.retryAt || null, retryIn: body.retryIn ?? null });
+        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, readerGone: !!body.readerGone, readerCause: body.readerCause || null, retryAt: body.retryAt || null, retryIn: body.retryIn ?? null });
         return { ok: false, error: (body && body.error) || `HTTP ${res.status}`, code: (body && body.code) || null };
       }
       return { ok: true, data: await res.json() };
@@ -3507,10 +3509,13 @@ class ChatView {
     const now = Date.now();
     if (this._readerRestartingSaidAt && now - this._readerRestartingSaidAt < 5000) return;
     this._readerRestartingSaidAt = now;
+    showToast(this._readerAskWords(info, now));
+  }
+  /** r3077: the words of the cause the refusal HAS (src/lib/reader-words.js) — the storage's and a gone reader's with their next try (a gone
+   *  reader's listing promises no time: none said) */
+  _readerAskWords(info, now = Date.now()) {
     const at = retryAtOf(info, now);
-    if (info && info.storageHung) showToast(t("This conversation's file is not answering — trying again at {time}.", { time: this._clockOf(at) }));
-    else if (info && info.readerGone) showToast(at ? t('The transcript reader is not running — trying again at {time}.', { time: this._clockOf(at) }) : t('The transcript reader is not running.'));   // no time said (a listing): none promised
-    else showToast(t('The transcript reader is restarting — try again in a moment.'));
+    return readerAskWords(info, readerKindOf(info) === 'gone' && !at ? null : this._clockOf(at));
   }
   /** the page's own clock (src/lib/page-time.js — the page's language and zone) */
   _clockOf(ms) { return clockOf(Number(ms) || Date.now(), { seconds: true }); }
@@ -3523,10 +3528,7 @@ class ChatView {
     if (!code) return;
     if (this._readOnly) this._listenHistoryReady();   // a view: the hub tells it too (its view waits on that history — r1461 (2))
     const at = this._reaskEvent({ type: 'not-loaded', code, info }).due;   // the time the page REALLY asks again (the back-off, an earlier ask kept)
-    let words;
-    if (info && info.storageHung) words = t("This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.", { time: this._clockOf(at) });
-    else if (info && info.readerGone) words = t('The history is not loaded yet, or not all of it — the transcript reader is not running. Trying again at {time}.', { time: this._clockOf(at) });
-    else words = t('The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.');
+    const words = readerLineWords(info, this._clockOf(at));   // r3077: in the words of the cause it has; the page asks again by itself
     const el = this._historyNotLoadedEl, inner = el && el.isConnected ? el.querySelector('.chat-system') : null;
     if (inner) { inner.textContent = words; return; }   // the line stands: only its words change (no row added, none moved)
     this._historyNotLoadedEl = this._renderers.appendSystem(words);

@@ -710,7 +710,7 @@ const _fpOf = new Map();       // claudeSessionId → its transcript's path, as 
 const _reWarmAt = new Map();   // claudeSessionId → when the parse may ask the warm again
 const FP_OF_MAX = 8192;
 const knowFp = (id, fp) => { _fpOf.delete(id); _fpOf.set(id, fp); while (_fpOf.size > FP_OF_MAX) _fpOf.delete(_fpOf.keys().next().value); };
-const notLoadedList = (info = {}) => Object.assign([], { notLoaded: NOT_LOADED, storageHung: !!info.storageHung, retryAt: info.retryAt || null, readerGone: !!info.readerGone });   // r1461 (1): readerGone — the pool is gone: the page promises no «moment»
+const notLoadedList = (info = {}) => Object.assign([], { notLoaded: NOT_LOADED, storageHung: !!info.storageHung, retryAt: info.retryAt || null, readerGone: !!info.readerGone, readerCause: info.readerCause || null });   // r1461 (1): readerGone — the pool is gone: the page promises no «moment»
 // r1243 item 2 — A PAGE TOLD «NOT LOADED» IS NOTIFIED when its history becomes readable (the tree's law: a cache a page also keeps is
 // NOTIFIED at its one entry point): a session answered «not loaded» is remembered; the warm or the parse that next LOADS it tells
 // every listener once (ws-handler pushes `history-ready` to that conversation's clients — the page asks again, never a re-open)
@@ -722,7 +722,7 @@ function noteReadable(id) { if (!_awaitingRead.delete(id)) return; for (const fn
 const C = () => require('./adapters/codex');   // lazily (the adapter requires nothing of this module at load)
 // the kept copy's tagged twin, ONE per cache entry (an entry's list never changes in place): the merge memo keys on the array
 const _taggedKept = new WeakMap();
-const taggedKeptOf = (list, info = {}) => { let c = _taggedKept.get(list); if (!c) { c = Object.assign(list.slice(), { notLoaded: NOT_LOADED, kept: true }); _taggedKept.set(list, c); } c.storageHung = !!info.storageHung; c.retryAt = info.retryAt || null; c.readerGone = !!info.readerGone; return c; };   // the twin is ours: its door and its next try are told fresh
+const taggedKeptOf = (list, info = {}) => { let c = _taggedKept.get(list); if (!c) { c = Object.assign(list.slice(), { notLoaded: NOT_LOADED, kept: true }); _taggedKept.set(list, c); } c.storageHung = !!info.storageHung; c.retryAt = info.retryAt || null; c.readerGone = !!info.readerGone; c.readerCause = info.readerCause || null; return c; };   // the twin is ours: its door and its next try are told fresh
 // B-cd4b unit 2 (hold 3): THE WARM'S COLD READ IN PAGES. Its one-shot reply (`jsonlTail`: readJsonlTail's whole entry, a 100 MB
 // conversation's ~70 MB of records) crossed to the main thread in ONE structured clone — measured at a hub restart with 80
 // survivors, the page's re-attaches: the loop held ~1.0–1.3 s at its deserialize. Now the ONE pager carries it
@@ -886,7 +886,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
       }
     }
     const kept = _jsonlCache.get(claudeSessionId);   // after the warm's synchronous part (an append it folded in)
-    const info = { storageHung: hung, retryAt: C().nextReadAt(known), readerGone: C().poolGone() };   // r1243 items 1 + 2: the page says which door refused, and when it asks again
+    const info = { storageHung: hung, retryAt: C().nextReadAt(known), readerGone: C().poolGone(), readerCause: C().readerCauseFor(known) };   // r1243 items 1 + 2: the page says which door refused, and when it asks again (r3077: its cause)
     if (!kept || !Array.isArray(kept.messages)) { noteAwaiting(claudeSessionId); return notLoadedList(info); }
     if (!hung && known) {
       let st = null; try { st = fs.statSync(known); } catch { st = null; }
@@ -1363,6 +1363,7 @@ class SessionMessages {
     this.notLoadedStorage = !!(jsonl && jsonl.notLoaded && jsonl.storageHung);   // r1243 item 1: which door refused (the storage's: its own words)
     this.notLoadedRetryAt = (jsonl && jsonl.notLoaded && jsonl.retryAt) || null;   // r1243 item 2: when the page asks again by itself
     this.notLoadedReaderGone = !!(jsonl && jsonl.notLoaded && jsonl.readerGone);   // r1461 (1): the pool is gone — no «moment» promised
+    this.notLoadedReaderCause = (jsonl && jsonl.notLoaded && jsonl.readerCause) || null;   // r3077: the cause it has (busy / restarting), else none named
     // THE MERGE MEMO (perf chunk C): the merge below is a pure function of
     // (the jsonl array, the buffer string) and the cache hands back the SAME
     // array until the file changes, so a burst of SessionMessages over one

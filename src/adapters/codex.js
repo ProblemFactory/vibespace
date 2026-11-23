@@ -715,8 +715,19 @@ function poolRemembersHung(fp) { const p = _transcriptPool; try { return !!(fp &
 // `ownCall`: the HISTORY LANE runs one call at a time (a waiting call is refused `history_busy`, never queued on a worker) — a deadline
 // there is the call's OWN, the storage's for the files it names (主开发 r1006: «a deadline … means the storage hangs»)
 const isStorageHung = (e, fp, { ownCall = false } = {}) => !!e && (e.code === 'path-hung' || e.code === 'storage-blocked' || (ownCall && e.deadline === true) || poolRemembersHung(fp));   // `deadline`: the call RAN and overran (src/safe-fs.js) — never a wait that expired   // + a mount the door holds blocked (src/mount-door.js)
+// THE CAUSE a refusal names to the page (主开发 r3077 — the notice says the cause it HAS): 'restarting' — no live worker (one is
+// started again after a deadline's kill, none could start, or the pool itself is built again after its build failed); 'busy' — the
+// reader is alive and BUSY or AT ITS BOUND (every worker out on a look, the history lane's turn not come, the heap bound, a call that
+// waited behind others past its deadline); null — not known (the page then names no cause). The storage's (storageHung) and a reader
+// gone for good (readerGone) outrank it at the page.
+function readerCauseOf(e) {
+  if (!e) return 'restarting';   // no pool object: its build is tried again (POOL_RETRY_MS) — given up for good is readerGone
+  if (e.code === 'no-worker' || e.noWorker === true) return 'restarting';
+  if (e.code === 'no-idle-worker' || e.code === 'history_busy' || e.code === 'heap_bound' || e.safeFsTimeout === true) return 'busy';
+  return null;
+}
 function readerRefusal(e, fp = null, opts = {}) {
-  return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e, fp, opts) });
+  return Object.assign(new Error(READER_RESTARTING), { code: 'transcript_reader_restarting', status: 503, why: (e && (e.code || e.message)) || 'no transcript pool on this process', storageHung: isStorageHung(e, fp, opts), readerCause: readerCauseOf(e) });
 }
 /** row B-422c (r1243 / r1461): the transcript reader's refusal by name as the HTTP answer — PURE → { status, retryAfter, body }: which
  *  door refused (storageHung: the storage's own words; readerGone: the pool gone — no «moment»), its next try as the hub's instant
@@ -724,7 +735,7 @@ function readerRefusal(e, fp = null, opts = {}) {
 function readerRefusedAnswer(e, now = Date.now()) {
   const at = Number(e && e.retryAt) || 0;
   return { status: 503, retryAfter: String(Math.max(2, Math.ceil((at - now) / 1000))),
-    body: { error: e && e.message, code: e && e.code, storageHung: !!(e && e.storageHung), readerGone: !!(e && e.readerGone), retryAt: at || null, retryIn: at ? Math.max(0, at - now) : null } };
+    body: { error: e && e.message, code: e && e.code, storageHung: !!(e && e.storageHung), readerGone: !!(e && e.readerGone), readerCause: (e && e.readerCause) || null, retryAt: at || null, retryIn: at ? Math.max(0, at - now) : null } };
 }
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
 async function poolRead(op, payload, opts) {
@@ -907,7 +918,8 @@ function storageRetryDue(fp) {
 let _poolRefusedAt = 0;
 const POOL_WIDE = new Set(['no-worker']);   // SafeFs's own code (src/safe-fs.js NO_WORKER); its `no-idle-worker` (NO_IDLE: an `idleOnly` call while every worker
 // is busy) is ORDINARY LOAD, never a pool that refuses — dropped ON PURPOSE (round w5gioyat2 asked; no transcript call passes idleOnly)
-function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') _poolRefusedAt = Date.now(); }
+function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') { _poolRefusedAt = Date.now(); _poolRefusedCause = e && e.readerCause !== undefined ? e.readerCause : readerCauseOf(e); } }
+let _poolRefusedCause = null;   // r3077: the cause of the pool-wide refusal standing (its own words at the page)
 // an answer of the pool ends «refusing every call»; only a HISTORY READ's answer forgives the file (a task scan or a gap read answered
 // on the other worker says nothing of whether its tail can be read: the whole-state read's MUST)
 const HISTORY_OPS = new Set(['jsonlTail', 'boundedParsed', 'boundedParsedPage', 'codexHistoryMergedPage']);
@@ -944,6 +956,7 @@ function noteFileRefusal(fp, refusal, { history = false } = {}) {
   }
   rec.lastAt = now; rec.count++;
   rec.why = (refusal && refusal.why) || rec.why || 'refused';
+  rec.cause = (refusal && refusal.readerCause) || null;   // r3077: the cause the newest refusal named (the page's words)
   if (storage && !rec.storage) {   // the STORAGE's — for the record's life: only a history read's answer for the file forgives it (never a timer: the pool's own retry may still be wedged in it)
     rec.storage = true;
     rec.retryGap = STORAGE_RETRY_MS;   // the first retry waits one gap; each RETRY then doubles it (storageRetryDue) — never each refusal (a tail and a task scan refused at once are one event)
@@ -952,6 +965,14 @@ function noteFileRefusal(fp, refusal, { history = false } = {}) {
   return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
+/** r3077: the cause to name for this file's refusal — its own record's, else the pool-wide refusal's (a pool not built yet: restarting);
+ *  null = not known. Memory only */
+function readerCauseFor(fp) {
+  const r = fp && _fileRefusals.get(fp);
+  if (r && r.cause) return r.cause;
+  if (_transcriptPool === false) return 'restarting';
+  return _poolRefusedAt && Date.now() - _poolRefusedAt <= POOL_REFUSING_MS ? _poolRefusedCause : null;
+}
 /** has the pool refused this file with no answer for it since (any pool answer for it forgives the record)? — memory only */
 function fileRefused(fp) { return !!(fp && _fileRefusals.get(fp)); }
 /** the storage's, as far as memory knows (its record, the mount door) — never a file call */
@@ -1841,7 +1862,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, readerRefusedAnswer, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, readerRefusedAnswer, readerCauseOf, readerCauseFor, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

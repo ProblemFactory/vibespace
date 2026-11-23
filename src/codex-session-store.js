@@ -729,7 +729,7 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
         try { return await C.readCodexRolloutSliced(fp); } catch (e) { why = `${why}; the main process's read failed too (${(e && e.message) || e})`; }
       }
       noteNotLoadedOnce(threadId, why);
-      return Object.assign([], { notLoaded: NOT_LOADED, why, storageHung: !!refusal.storageHung || C.fileStorageHung(fp), retryAt: C.nextReadAt(fp), readerGone: C.poolGone() });   // r1243 items 1 + 2: which door refused, when the page asks again
+      return Object.assign([], { notLoaded: NOT_LOADED, why, storageHung: !!refusal.storageHung || C.fileStorageHung(fp), retryAt: C.nextReadAt(fp), readerGone: C.poolGone(), readerCause: refusal.readerCause || C.readerCauseFor(fp) });   // r1243 items 1 + 2: which door refused (r3077: and its cause), when the page asks again
     }
   }
   return parseCodexSessionJsonl(threadId, { why, fp });   // no rollout on disk: the thread/read copy (no file read), never a second walk; an op's own failure: the old road, said
@@ -857,8 +857,8 @@ class CodexSessionMessages {
         // the storage's (row B-422c: its find would stat the dead storage on this loop; its path stays, its read answers «not loaded»)
         { const C = require('./adapters/codex'); for (const [id, fp] of fps) if (fp && !C.fileStorageHung(fp)) fps.delete(id); }
       }
-      let history = [], notLoaded = null, notLoadedStorage = false, notLoadedRetryAt = null, notLoadedReaderGone = false;
-      const said = (read) => { if (!read.notLoaded) return; notLoaded = read.notLoaded; if (read.storageHung) notLoadedStorage = true; if (read.readerGone) notLoadedReaderGone = true; if (read.retryAt && (!notLoadedRetryAt || read.retryAt < notLoadedRetryAt)) notLoadedRetryAt = read.retryAt; };   // the earliest next try of its files
+      let history = [], notLoaded = null, notLoadedStorage = false, notLoadedRetryAt = null, notLoadedReaderGone = false, notLoadedReaderCause = null;
+      const said = (read) => { if (!read.notLoaded) return; notLoaded = read.notLoaded; if (read.storageHung) notLoadedStorage = true; if (read.readerGone) notLoadedReaderGone = true; if (read.readerCause && !notLoadedReaderCause) notLoadedReaderCause = read.readerCause; if (read.retryAt && (!notLoadedRetryAt || read.retryAt < notLoadedRetryAt)) notLoadedRetryAt = read.retryAt; };   // the earliest next try of its files
       for (const { id: forkId, untilOrdinal } of ancestry) {
         const forkRead = await parseCodexSessionJsonlAsync(forkId, { fp: fps.get(forkId) });
         said(forkRead);
@@ -867,7 +867,7 @@ class CodexSessionMessages {
       }
       const currentRead = threadId ? await parseCodexSessionJsonlAsync(threadId, { fp: fps.get(threadId) }) : [];
       said(currentRead);
-      if (notLoaded) { this.notLoaded = notLoaded; this.notLoadedStorage = notLoadedStorage; this.notLoadedRetryAt = notLoadedRetryAt; this.notLoadedReaderGone = notLoadedReaderGone; }
+      if (notLoaded) { this.notLoaded = notLoaded; this.notLoadedStorage = notLoadedStorage; this.notLoadedRetryAt = notLoadedRetryAt; this.notLoadedReaderGone = notLoadedReaderGone; this.notLoadedReaderCause = notLoadedReaderCause; }
       noteHistoryMark(notLoaded ? 'noteAwaiting' : 'noteReadable', threadId);   // r1461 (2): the waiting mark by THIS conversation's id (the one its windows wait under) — a later read that loads it tells them   // row B-422c: the page says the history waits on the reader (the live buffer still shown) — which door, when again
       const currentHistory = threadId ? tagRecordThread(currentRead, threadId) : [];
       if (currentHistory.length) history = await mergeCodexRecordsAsync(history, currentHistory);

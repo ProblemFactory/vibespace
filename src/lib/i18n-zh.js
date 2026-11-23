@@ -15199,4 +15199,8 @@ export default {
   "VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.": "VibeSpace 现在读不了它的模型提供方列表——没有任何提供方丢失，不会覆盖写入，也不会在别的提供方上启动对话。几分钟后它会自己再读一次。", // lane lg-providers B-f276 family (providers.json held)
   "VibeSpace cannot read its list of model providers right now — nothing was changed. Try again in a few minutes (it reads the list again by itself).": "VibeSpace 现在读不了它的模型提供方列表——什么都没有改。几分钟后再试（它会自己再读一次列表）。", // lane lg-providers B-f276 family (providers.json held)
   "A damaged copy of the provider list that VibeSpace kept aside still names this key's provider — nothing was removed. Restore that copy in VibeSpace's data folder, or remove it there, first.": "VibeSpace 留存的一份损坏的提供方列表副本里仍写着这个密钥的提供方——什么都没有删除。请先在 VibeSpace 的数据文件夹里恢复那份副本，或把它删除。", // lane lg-providers B-f276 family (the Vault row's Remove of a key a kept torn copy names)
+  "The transcript reader is busy — try again in a moment.": "转录读取器正忙——请稍后再试。",
+  "This conversation's history could not be read just now — try again in a moment.": "此对话的历史记录刚才没能读取——请稍后再试。",
+  "The history is not loaded yet, or not all of it — the transcript reader is busy. It fills in here by itself in a moment.": "历史记录尚未加载，或只加载了一部分——转录读取器正忙。稍后会在这里自动补全。",
+  "The history is not loaded yet, or not all of it — it could not be read just now. It fills in here by itself in a moment.": "历史记录尚未加载，或只加载了一部分——刚才没能读取。稍后会在这里自动补全。",
 };

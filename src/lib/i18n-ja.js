@@ -15198,4 +15198,8 @@ export default {
   "VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.": "VibeSpace は今、モデルプロバイダーの一覧を読めません — どのプロバイダーも失われず、上書きもせず、別のプロバイダーで会話を始めることもありません。数分後に自分でもう一度読みます。", // lane lg-providers B-f276 family (providers.json held)
   "VibeSpace cannot read its list of model providers right now — nothing was changed. Try again in a few minutes (it reads the list again by itself).": "VibeSpace は今、モデルプロバイダーの一覧を読めません — 何も変えていません。数分後にもう一度お試しください（一覧は自分でもう一度読みます）。", // lane lg-providers B-f276 family (providers.json held)
   "A damaged copy of the provider list that VibeSpace kept aside still names this key's provider — nothing was removed. Restore that copy in VibeSpace's data folder, or remove it there, first.": "VibeSpace が取っておいた壊れたプロバイダー一覧のコピーが、まだこのキーのプロバイダーを名指ししています — 何も削除していません。先に VibeSpace のデータフォルダーでそのコピーを戻すか、そこで削除してください。", // lane lg-providers B-f276 family (the Vault row's Remove of a key a kept torn copy names)
+  "The transcript reader is busy — try again in a moment.": "記録の読み取りが混み合っています。少し後でもう一度お試しください。",
+  "This conversation's history could not be read just now — try again in a moment.": "この会話の履歴は今は読み込めませんでした。少し後でもう一度お試しください。",
+  "The history is not loaded yet, or not all of it — the transcript reader is busy. It fills in here by itself in a moment.": "履歴はまだ読み込まれていないか、一部だけです。記録の読み取りが混み合っています。少し後にここで自動的に補われます。",
+  "The history is not loaded yet, or not all of it — it could not be read just now. It fills in here by itself in a moment.": "履歴はまだ読み込まれていないか、一部だけです。今は読み込めませんでした。少し後にここで自動的に補われます。",
 };

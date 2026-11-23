@@ -1553,7 +1553,7 @@ function registerWsHandler(wss, ctx) {
           if (!parsed) { reply({ type: 'history-not-loaded', historyNotLoaded: 'transcript_reader_restarting', historyNotLoadedInfo: null }); break; }   // never «ready» for a read that failed
           if (!sm.notLoaded) { reply({ type: 'history-ready' }); break; }
           if (viewHid) _viewWaiters.note(viewHid, ws, data.sessionId);   // a VIEW waiting on it: told at its readable (r1461 (2))
-          reply({ type: 'history-not-loaded', historyNotLoaded: sm.notLoaded, historyNotLoadedInfo: withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone }) });
+          reply({ type: 'history-not-loaded', historyNotLoaded: sm.notLoaded, historyNotLoadedInfo: withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null }) });
           break;
         }
 
@@ -1742,7 +1742,7 @@ function registerWsHandler(wss, ctx) {
                   // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
-                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host, notLoaded: sm.notLoaded || null, notLoadedInfo: sm.notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone } : null }); // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host, notLoaded: sm.notLoaded || null, notLoadedInfo: sm.notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null } : null }); // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
@@ -2051,7 +2051,7 @@ function registerWsHandler(wss, ctx) {
             try { if (typeof mm.endLateAllows === 'function') mm.endLateAllows(false); } catch { }   // B-9ff2's remainder (r1296 (2)): a STOPPED conversation's waiting late Allows — the agent never said
             if (sm.notLoaded) _viewWaiters.note(SSH.getHistorySessionId({ backendSessionId, claudeSessionId: data.claudeSessionId || backendSessionId }), ws, data.sessionId);   // r1461 (2): this view waits on it — told at its readable
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
-              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
+              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
             if (ws.readyState === WS_OPEN && !sm.notLoaded) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {
             // Include sessionId so the requesting ChatView can correlate the

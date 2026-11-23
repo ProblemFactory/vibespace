@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import './scratch.mjs';   // FIRST (§113, B-ba47's order): a temp home of its own before any of this suite's code
 import { checker } from './lib/check.mjs';
 import { anchored } from './scratch.mjs';
@@ -155,6 +155,49 @@ for (const [name, shape, hung, extra] of KINDS) {
   C._setTranscriptPoolForTest(refusing(shape, extra || {}));
   let e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
   ok(!!e && e.code === 'transcript_reader_restarting' && e.status === 503 && e.storageHung === hung, `${name} ⇒ the refusal by name (transcript_reader_restarting, 503, the storage's: ${hung})`, { code: e && e.code, status: e && e.status, storageHung: e && e.storageHung });
+}
+// ── r3077 (主开发): THE NOTICE NAMES THE CAUSE IT HAS — each refusal kind PLACED at the fetch: the refusal by name → the HTTP answer's
+// facts (readerRefusedAnswer) → the page's words (src/lib/reader-words.js, the one table of the toast, the line and the search): the
+// storage's, a gone reader's, a BUSY or BOUNDED reader's, a RESTARTING one's; a refusal whose cause is not known names NO cause (never
+// «restarting»). RED: the page's old rule — every refusal neither the storage's nor a gone reader's said «restarting» — tells a busy
+// reader it is restarting
+{
+  const RW = await import(pathToFileURL(path.join(REPO, 'src/lib/reader-words.js')).href);
+  const WORDS = { storage: 'not answering', gone: 'is not running', busy: 'is busy', restarting: 'is restarting', none: 'could not be read just now' };
+  const PLACED = [
+    ...KINDS.map(([name, shape, hung, extra]) => [name, shape, extra || {}, hung ? 'storage' : shape.code === 'no-worker' ? 'restarting' : 'busy']),
+    ['a 503 that names nothing (no code, no deadline)', { status: 503 }, {}, null],
+    ['a deadline while no worker of the pool ever ran (none could start)', { status: 503, safeFsTimeout: true, noWorker: true }, {}, 'restarting'],
+  ];
+  const bad = [];
+  for (const [name, shape, extra, want] of PLACED) {
+    C._setTranscriptPoolForTest(refusing(shape, extra));
+    let e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
+    const body = e ? C.readerRefusedAnswer(e).body : null, kind = RW.readerKindOf(body), ask = RW.readerAskWords(body, '12:00:00'), line = RW.readerLineWords(body, '12:00:00');
+    const key = want || 'none';
+    if (!body || kind !== want || !ask.includes(WORDS[key]) || !line.includes(WORDS[key]) || (key !== 'restarting' && (ask.includes('restarting') || line.includes('restarting')))) bad.push({ name, want, kind, cause: body && body.readerCause, ask });
+  }
+  ok(!bad.length, `r3077: each refusal kind placed at the fetch is said by the cause it HAS — ${PLACED.length} kinds (the storage's, a busy or bounded reader's, a restarting one's, none named when not known); none but a restarting reader is told «restarting»`, bad);
+  // a reader gone for good (the pool closed): its own words, and a listing with no time promises none
+  C._setTranscriptPoolForTest({ _closed: true, calls: [], call() { return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 })); } });
+  let eg = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { eg = x; }
+  const bg = eg ? C.readerRefusedAnswer(eg).body : null;
+  ok(!!bg && RW.readerKindOf(bg) === 'gone' && RW.readerAskWords(bg, '12:00:00').includes(WORDS.gone) && RW.readerAskWords({ readerGone: true }, null) === 'The transcript reader is not running.' && RW.readerLineWords(bg, '12:00:00').includes(WORDS.gone),
+    'r3077: a reader gone for good (its pool closed) is said gone — with its next try, and a listing with none promises no time', bg);
+  // the history-ask's own «not loaded» (its read gave nothing: no facts) names no cause
+  ok(RW.readerKindOf(null) === null && RW.readerLineWords(null, 'x').includes(WORDS.none) && !RW.readerLineWords(null, 'x').includes('restarting'), 'r3077: «not loaded» with no facts (the hub\'s history-ask that read nothing) names no cause');
+  // RED: the page's OLD RULE (the cause never read: everything else «restarting») — a busy reader is told «restarting»
+  const RWsrc = fs.readFileSync(path.join(REPO, 'src/lib/reader-words.js'), 'utf8');
+  let red = anchored(RWsrc, "  return info.readerCause === 'busy' || info.readerCause === 'restarting' ? info.readerCause : null;\n", "  return 'restarting';\n", 'reader-old-rule');   // stale-pins: kept — the old rule, planted back as the RED
+  red = anchored(red, "import { t } from './i18n.js';", `import { t } from ${JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/i18n.js')).href)};`, 'reader-old-rule-i18n');
+  const redDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pool-down-r3077-')), redFile = path.join(redDir, 'reader-words-old.mjs');
+  fs.writeFileSync(redFile, red);
+  const RWold = await import(pathToFileURL(redFile).href);
+  C._setTranscriptPoolForTest(refusing({ code: 'history_busy' }));
+  let eb = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { eb = x; }
+  const bb = eb ? C.readerRefusedAnswer(eb).body : null;
+  ok(!!bb && bb.readerCause === 'busy' && RWold.readerAskWords(bb, 'x').includes('is restarting'), `RED: the page's old rule tells a BUSY reader «${RWold.readerAskWords(bb, 'x')}»`, bb);
+  fs.rmSync(redDir, { recursive: true, force: true });
 }
 {
   C._setTranscriptPoolForTest(refusing({ code: 'EACCES' }));
@@ -665,13 +708,14 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 // ── THE PAGE'S WIRING (the page's words are drawn by the chrome suites; these pins hold the roads that say them) ──
 {
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), csr = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+  const rw = fs.readFileSync(path.join(REPO, 'src/lib/reader-words.js'), 'utf8');   // r3077: the one table of the words
   const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const askCase = ws.slice(ws.indexOf("case 'history-ask': {"), ws.indexOf("case 'attach': {"));
   const pins = [
-    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in its door\'s words', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \}\);\n\s+throw /.test(cv)],
+    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in the words of the cause it has (r3077)', /if \(data && data\.notLoaded\) \{\n\s+const info = \{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, readerCause: data\.readerCause \|\| null, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \};\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(info\);\n\s+throw Object\.assign\(new Error\(this\._readerAskWords\(info\)\)/.test(cv)],
     ['the read-only 2 s poll asks quietly', /_fetchMessagePage\(nextOffset, 200, \{ withStatus: true, quietRefusal: true \}\)/.test(cv)],
     ['the view reset says the line again (after the heal: test-hidden-view-suspend pins nothing between the rebuild and it)', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\s*\n(\s*\/\/.*\n)*\s*this\._seqPoisoned = false;\n\s+if \(msg && msg\.historyNotLoaded\) this\._sayHistoryNotLoaded\(msg\.historyNotLoaded, \{ again: true, info: msg\.historyNotLoadedInfo \|\| null \}\);/.test(cv)],
-    ['the words of the door that refused: the storage\'s, the reader GONE\'s (no «moment» — r1461 (1)), the reader restarting\'s', /if \(info && info\.storageHung\) words = t\("This conversation's file is not answering, so its history is not loaded yet/.test(cv) && /else if \(info && info\.readerGone\) words = t\('The history is not loaded yet, or not all of it — the transcript reader is not running\. Trying again at \{time\}\.'/.test(cv) && /else if \(info && info\.readerGone\) showToast\(at \? t\('The transcript reader is not running — trying again at \{time\}\.'/.test(cv)],
+    ['the words of the cause the refusal has (r3077, src/lib/reader-words.js — ONE table: the storage\'s, the reader GONE\'s with no «moment» (r1461 (1)), a busy reader\'s, a restarting one\'s, else no cause named): the line asks again by itself', /const words = readerLineWords\(info, this\._clockOf\(at\)\);/.test(cv) && /if \(k === 'storage'\) return t\("This conversation's file is not answering, so its history is not loaded yet/.test(rw) && /if \(k === 'gone'\) return t\('The history is not loaded yet, or not all of it — the transcript reader is not running\. Trying again at/.test(rw) && /return t\('The history is not loaded yet, or not all of it — it could not be read just now\. It fills in here by itself in a moment\.'\);/.test(rw)],
     ['ONE line: a later answer changes its WORDS in place — a re-ask that changes nothing adds no row and moves none (r1461 (3))', /if \(inner\) \{ inner\.textContent = words; return; \}/.test(cv)],
     ['the page\'s re-ask is the PURE decision\'s (src/lib/history-reask.js — legs above): its timer, its act', /import \{ reaskNext, retryAtOf \} from '\.\/history-reask\.js';/.test(cv) && /const \{ state, act \} = reaskNext\(this\._reask, \{ now: Date\.now\(\), \.\.\.ev \}\);/.test(cv) && /setTimeout\(\(\) => this\._reaskEvent\(\{ type: 'due' \}\)/.test(cv)],
     ['the timer\'s ask is the CHEAP one (`history-ask`); the reload — a live window\'s re-attach — only when the hub said readable', /: \{ type: 'history-ask', sessionId: this\.sessionId \};/.test(cv) && /_reloadHistory\(\) \{\n\s+if \(this\._disposed\) return;\n\s+if \(!this\._readOnly\) \{ this\._reattach\(false\); return; \}/.test(cv) && /msg\.type === 'history-ready' && msg\.sessionId === sessionId\) \{\n\s+this\._onHistoryReady\(\);/.test(cv)],
@@ -684,11 +728,11 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
     ['a closed view asks nothing again', /clearTimeout\(this\._historyReaskTimer\); this\._historyReaskTimer = null; try \{ this\._historyAskCancel\?\.\(\); this\._historyReloadCancel\?\.\(\); this\._historyReadyOff\?\.\(\); \} catch \{ \}   \/\/ row B-422c: a closed view/.test(cv)],
     ['r1243: a view-only window keeps its own request for the re-ask', /chatView\._viewAttachSpec = viewSpec;/.test(sl) && /this\._viewAttachSpec = spec;/.test(cv)],
     ['the minimap fallback draws nothing from it', /if \(d\.turns\?\.length && !d\.notLoaded\) this\._chatMinimap\.render\(d\.turns\)/.test(cv)],
-    ['/api/subagents\' reason in the page\'s words — the reader gone\'s with no time promised', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\{ readerGone: !!r\.readerGone \}\); return; \}/.test(cv) && /: t\('The transcript reader is not running\.'\)\);/.test(cv)],
+    ['/api/subagents\' reason in the page\'s words — the reader gone\'s with no time promised', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\{ readerGone: !!r\.readerGone \}\); return; \}/.test(cv) && /: t\('The transcript reader is not running\.'\);/.test(rw) && /return readerAskWords\(info, readerKindOf\(info\) === 'gone' && !at \? null : this\._clockOf\(at\)\);/.test(cv)],
     ['a VIEW hears its own history-ready (the hub notes the view waiting at its view attach and its ask, and tells it at the readable)', /this\._historyReadyOff = this\.ws\.onGlobal\(\(m\) => \{ if \(m && m\.type === 'history-ready' && m\.sessionId === vid && !this\._disposed\) this\._onHistoryReady\(\); \}\);/.test(cv) && /for \(const \[vws, vsid\] of _viewWaiters\.take\(historyId, \(w\) => w\.readyState === WS_OPEN\)\)/.test(ws) && /if \(sm\.notLoaded\) _viewWaiters\.note\(SSH\.getHistorySessionId\(\{ backendSessionId, claudeSessionId: data\.claudeSessionId \|\| backendSessionId \}\), ws, data\.sessionId\);/.test(ws) && /if \(viewHid\) _viewWaiters\.note\(viewHid, ws, data\.sessionId\);/.test(askCase)],
     ['the hub\'s ask: a newer ask of the same window supersedes an older one before it reads; a read that failed is never «ready»', /await readOffLoop\(sm, \{ label: `history-ask \$\{data\.sessionId\}`, wanted: current, bulk: live \? BULK\.isBulk\(live\) : false \}\);/.test(askCase) && /if \(!parsed\) \{ reply\(\{ type: 'history-not-loaded', historyNotLoaded: 'transcript_reader_restarting', historyNotLoadedInfo: null \}\); break; \}/.test(askCase)],
-    ['a search of it says the door\'s words (the storage\'s, the reader gone\'s, the reader restarting\'s), never «No results»', /this\._searchStatus\.textContent = data\.storageHung \? t\("This conversation's file is not answering — trying again at \{time\}\.", \{ time: when \}\)\n\s+: data\.readerGone \? t\('The transcript reader is not running — trying again at \{time\}\.', \{ time: when \}\)/.test(csr)],
-    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \} \}\);/.test(sl)],
+    ['a search of it says the words of the cause the refusal has (the one table), never «No results»', /this\._searchStatus\.textContent = readerAskWords\(data, when\);/.test(csr) && /import \{ readerAskWords \} from '\.\/reader-words\.js';/.test(csr)],
+    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, readerGone: !!data\.readerGone, readerCause: data\.readerCause \|\| null, retryAt: data\.retryAt \|\| null, retryIn: data\.retryIn \?\? null \} \}\);/.test(sl)],
     ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(ws)],   // stale-pins: kept (the absence check: ws-handler writes it no more)
   ];
   for (const [name, held] of pins) ok(held, `the page: ${name}`);

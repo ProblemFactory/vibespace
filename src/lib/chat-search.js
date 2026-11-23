@@ -1,6 +1,7 @@
 import { t } from './i18n.js';
 import { clockOf } from './page-time.js';   // row B-422c: the page's own clock (its language, its zone)
-import { retryAtOf } from './history-reask.js';   // row B-422c: the hub's next try counted on this page's clock
+import { retryAtOf } from './history-reask.js';
+import { readerAskWords } from './reader-words.js';   // row B-422c (r3077): the refusal in the words of the cause it has   // row B-422c: the hub's next try counted on this page's clock
 import { metric } from './telemetry-client.js';
 import { enterSubmits } from './chat-enter-keys.js';
 
@@ -168,9 +169,7 @@ class ChatSearch {
       if (data && data.notLoaded) {   // r1243 item 1: in the words of the door that refused
         if (!stale()) {
           const when = clockOf(retryAtOf(data, Date.now()) || Date.now(), { seconds: true });   // the hub's next try on this page's clock (its delay)
-          this._searchStatus.textContent = data.storageHung ? t("This conversation's file is not answering — trying again at {time}.", { time: when })
-            : data.readerGone ? t('The transcript reader is not running — trying again at {time}.', { time: when })   // r1461 (1): the pool gone — no «moment»
-              : t('The transcript reader is restarting — try again in a moment.');
+          this._searchStatus.textContent = readerAskWords(data, when);   // the storage's, a gone reader's (r1461 (1): no «moment»), a busy or restarting reader's, else no cause named
         }
         return;
       }
