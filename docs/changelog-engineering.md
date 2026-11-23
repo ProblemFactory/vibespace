@@ -66,6 +66,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - SMALLS: the masker's wait for the pipes' end counts the engine's kill step from the ENGINE's time (its stop's, or its intent's own; none for a signal), with a 50 ms floor; the stale words of the kb's INDEX line and invariant paragraph made true; the agent manual says the log lags only by an unfinished line's last characters.
 - LEGS (test-vault-job ①e): a coloured last line, a line with an ampersand pair, a line ending in the value's first character (its until-marker fires), a marker in two pieces of one line (the carry); a base64 spelling split by a quiet still masked whole; REDs: 7e1674a83's settle (a vault-scrubber.js copy in the job's scratch src), the scan without its carry, the release's quiet flush.
 
+### bl-ci — B-f276's family, its third form, unit 1: the webhook callers' list under the store-read law (主开发 r3145)
+- WHY: a failed read of callers.json or pair-pending.json was an empty list, and the next registration, pairing or pairing code wrote it over the file: every webhook path and caller gone, every caller's call refused as unknown meanwhile.
+- WHAT: both files hold on src/store-read-hold.js (webhook_callers_unread, webhook_pairing_unread): every writer refused by name, nothing written, read again off the loop, lifted with no restart; torn bytes kept aside once. A caller's call and poll hear «try again later» (503), never «unknown»; every owner verb and the pairing's completion answer the hold; the page says it in place (the held codes' rows are the family's one table's, r3168; the torn lift worded in zh and ja).
+- LEGS FIRST: test-webhook-callers-held, red at the release, then the cure. Its store-write census rows: two 'answer' rows.
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
