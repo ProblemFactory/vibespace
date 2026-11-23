@@ -89,12 +89,12 @@ if (process.env.QUIETSPLIT) {   // round wtlm3ig4w: a marker written in TWO piec
   for (let i = 0; i < 600 && !fs.existsSync(path.join(out, 'release')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
   process.exit(0);
 }
-if (process.env.CRONMARK) {   // round w3aprsv38's MUST: a scheduled task's two runs — run 1 prints its marker on an UNTERMINATED line; run 2 works first, its marker only when the leg says
-  const nl = String.fromCharCode(10), cnt = path.join(out, 'cron-runs'), hold = (f) => { for (let i = 0; i < 600 && !fs.existsSync(path.join(out, f)); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15); };
+if (process.env.CRONMARK) {   // round w3aprsv38's MUST (r2890 / r3108): a task's two runs (a cron's fires, or a start by hand) — run 1 prints its marker on an UNTERMINATED line; run 2 works first (a first line longer than run 1's log), its marker only when the leg says. Its files are its marker's
+  const nl = String.fromCharCode(10), mk = process.env.CRONMARK, cnt = path.join(out, 'runs-' + mk), hold = (f) => { for (let i = 0; i < 600 && !fs.existsSync(path.join(out, f + '-' + mk)); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15); };
   let n = 0; try { n = Number(fs.readFileSync(cnt, 'utf8')) || 0; } catch { n = 0; }
   fs.writeFileSync(cnt, String(n + 1));
-  if (n === 0) { process.stdout.write('run one ' + process.env.CRONMARK); hold('go1'); process.exit(0); }
-  process.stdout.write('run two working' + nl); hold('mark2'); process.stdout.write(process.env.CRONMARK + nl); hold('go2'); process.exit(0);
+  if (n === 0) { process.stdout.write('run one ' + mk); hold('go1'); process.exit(0); }
+  process.stdout.write('run two working ' + 'x'.repeat(200) + nl); hold('mark2'); process.stdout.write(mk + nl); hold('go2'); process.exit(0);
 }
 if (process.env.QUIETLINE) {   // r2600's MUST: ONE short line (a service's «listening on …», a task's until-marker), then a quiet — round wtlm3ig4w: unterminated (QUIETNL=0), or ending in the value's own first character (QUIETHEAD)
   process.stdout.write(process.env.QUIETLINE + (process.env.QUIETHEAD ? v[0] : '') + (process.env.QUIETNL === '0' ? '' : String.fromCharCode(10)));
@@ -354,9 +354,48 @@ async function legPiecesEncoded(wrap = null) {
 // 主开发 r2773 (1): THE MASKER MAY HIDE A VALUE; IT NEVER LOSES A BYTE OF THE JOB'S OWN WORDS — every scene of the settle through
 // the REAL wrapper: what the job wrote, with only the value replaced, comes out — every byte counted (the log's job text, its
 // placeholders taken out, against the job's own words), every word in its pipe's order. RED: a settle that drops the run it keeps
-// round w3aprsv38's MUST (主开发 r2890): THE UNTIL SCAN'S CARRY ENDS WITH ITS RUN — a scheduled task's run that hit its marker on an
-// UNTERMINATED line left the marker in the carry, and the next fire's first read joined it in front: that run was «completing» at its
-// first output. RED: the fire's fresh-run reset without the carry's clear
+// round w3aprsv38's MUST (主开发 r2890 / r3108): THE UNTIL SCAN'S CARRY IS ITS RUN'S — a task's run that hit its marker on an
+// UNTERMINATED line left the marker in the carry, and the next run's first read joined it in front: that run was «completing» at its
+// first output. Cleared at the run's judged end. Two roads: a cron's next fire (①h) and a start by hand (①i). RED: the end without the clear
+// A START BY HAND keeps its last run's cursor (the release's): the carry would join only when the new run's log has passed the old
+// cursor at its first read (else the rotated branch clears it) — the leg sweeps only after the long first line is in, and a scene an
+// engine tick scanned first (the cursor moved before the leg's own sweep) is tried once more with a fresh job
+async function legHandCarry({ jobs = null } = {}) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(jobs ? 'hcarrym' : 'hcarry', { jobs });
+  const logOf = (j) => { try { return fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { return ''; } };
+  const tries = [];
+  for (let k = 1; k <= 2; k++) {
+    const mk = 'HAND-RUN-MARK-' + k, put = (f) => fs.writeFileSync(path.join(W.root, 'out', f + '-' + mk), '1');
+    const r = W.jm.create({ kind: 'task', name: 'hand-mark-' + k, cmd: { argv: [process.execPath, path.join(W.root, 'prog.js'), path.join(W.root, 'out')], cwd: W.root, env: { CRONMARK: mk } }, untilOutput: mk, owner: { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] } }, { conversationId: 'conv-a', groups: new Set(), isUser: true });
+    const job = W.jm.jobs.get(r.job && r.job.id);
+    const t = { k, hit1: false, carried: false, end1: false, started: null, working: false, scene: false, early: null, hit2: false };
+    tries.push(t);
+    if (!job) break;
+    t.hit1 = (await W.untilMs(() => job._untilHit === true, 8000)).ok;
+    t.carried = String(job._untilCarry || '').includes(mk);   // run 1 hit on its UNTERMINATED line: its marker in the carry
+    put('go1');
+    t.end1 = (await W.untilMs(() => !['up', 'starting'].includes(job.state), 8000)).ok;
+    const c0 = job._untilCursor, n1 = job.runs.length;
+    const st = W.jm.start(job);   // BY HAND — the release keeps the cursor; the end's clear has taken the carry
+    t.started = !!(st && st.ok);
+    for (let i = 0; i < 400 && !(job.runs.length > n1 && logOf(job).includes('run two working')); i++) await nap(15);   // NO sweep of the leg's own until the long first line is in
+    t.working = job.runs.length > n1 && logOf(job).includes('run two working');
+    t.scene = t.hit1 && t.carried && t.end1 && t.started && t.working && job._untilCursor === c0 && fs.statSync(job.runs[job.runs.length - 1].log).size >= (c0 || 0);
+    for (let i = 0; i < 4; i++) { try { await W.jm._sweep(); } catch { } await nap(15); }   // the scan has read the second run's first line
+    t.early = job._untilHit === true;
+    put('mark2');
+    t.hit2 = (await W.untilMs(() => job._untilHit === true, 8000)).ok;
+    put('go2');
+    if (t.scene) break;   // a scene an engine tick scanned first: once more, a fresh job
+  }
+  const last = tries[tries.length - 1] || {};
+  Object.assign(rows, { scene: !!last.scene, early: last.early, tries: tries.length });
+  if (jobs) { W.end(); return rows; }
+  row(!!last.scene && last.early === false && last.hit2 === true, 'round w3aprsv38 MUST (r3108) — a task whose run hit its marker on an UNTERMINATED line, STARTED AGAIN BY HAND (its new log past the old cursor at the first read): not «completing» at its first output, and it hits when it prints the marker itself', { tries });
+  W.end();
+  return rows;
+}
 async function legCronCarry({ jobs = null } = {}) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world(jobs ? 'ccarrym' : 'ccarry', { jobs });
@@ -368,17 +407,17 @@ async function legCronCarry({ jobs = null } = {}) {
   if (cron) W.jm._fireCron(cron, 'test');
   const hit1 = await W.untilMs(() => !!kid() && kid()._untilHit === true, 8000);
   const carried = !!kid() && String(kid()._untilCarry || '').includes('CRON-RUN-MARK');   // the scene: run 1 hit on its UNTERMINATED line (its marker in the carry)
-  fs.writeFileSync(path.join(W.root, 'out', 'go1'), '1');
+  fs.writeFileSync(path.join(W.root, 'out', 'go1-CRON-RUN-MARK'), '1');
   const end1 = await W.untilMs(() => !!kid() && !['up', 'starting'].includes(kid().state), 8000);
   const k = kid(), n1 = k ? k.runs.length : 0;
   if (cron) W.jm._fireCron(cron, 'test');
   const working = await W.untilMs(() => !!k && k.runs.length > n1 && logOf(k).includes('run two working'), 8000);
   for (let i = 0; i < 4; i++) { try { await W.jm._sweep(); } catch { } await nap(15); }   // the scan has read the second run's first line
   const early = !!k && k._untilHit === true;
-  fs.writeFileSync(path.join(W.root, 'out', 'mark2'), '1');
+  fs.writeFileSync(path.join(W.root, 'out', 'mark2-CRON-RUN-MARK'), '1');
   const hit2 = await W.untilMs(() => !!k && k._untilHit === true, 8000);
   Object.assign(rows, { scene: hit1.ok && carried && end1.ok && working.ok, early });
-  fs.writeFileSync(path.join(W.root, 'out', 'go2'), '1');
+  fs.writeFileSync(path.join(W.root, 'out', 'go2-CRON-RUN-MARK'), '1');
   if (jobs) { W.end(); return rows; }
   row(hit1.ok && carried && end1.ok && working.ok && !early && hit2.ok, 'round w3aprsv38 MUST — a scheduled task whose run hit its marker on an UNTERMINATED line (the marker in the carry): its NEXT run is not «completing» at its first output, and hits only when it prints the marker itself', { hit1: hit1.ok, carried, end1: end1.ok, working: working.ok, early, hit2: hit2.ok, state: k && k.state });
   W.end();
@@ -1660,7 +1699,7 @@ const UNTIL_NOCARRY = (() => { try { return swap(JOBS_SRC, "      const lines = 
 // the MUST: the fire's reset without the clear
 const SETTLE_NOFLAG = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", "    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln)); };"); } catch { return null; } })();
 const SETTLE_NOLINE = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", '    const lastLine = (x) => cutTailStart(x, { unfinished: true });'); } catch { return null; } })();
-const CRON_NOCLEAR = (() => { try { return swap(JOBS_SRC, '      delete child._untilCursor; delete child._untilHit; delete child._untilCarry; // fresh run', '      delete child._untilCursor; delete child._untilHit; // fresh run'); } catch { return null; } })();   // stale-pins: kept (the release's own reset, put back by the control)
+const CARRY_NOEND = (() => { try { return swap(JOBS_SRC, "\n    delete job._untilCarry;   // THE CARRY IS ITS RUN'S", '\n    void 0;   // (the control: the end without the carry\'s clear) —'); } catch { return null; } })();
 const SETTLE_DROPS = (() => { try { return scrubMut('    held = kept;   // the uncertain tails stay held — the masker lives on', '    held = [];   // (the control: the kept run dropped)'); } catch { return null; } })();
 const QUIET_NONE = (() => { try { return swap(WRAP_SRC, '  try { o = vmask.settle(); } catch { o = null; }', '  o = null;'); } catch { return null; } })();
 const MUTANTS = [
@@ -1736,14 +1775,14 @@ const offRuns = [legFactsOffLoop(null, stOff), MUT_NOBOUND ? legFactsOffLoop(MUT
 let tBegan = null;
 await Promise.race([Promise.all([stOff.began, MUT_NOBOUND ? stNoBound.began : null]), new Promise((r) => { tBegan = setTimeout(r, 3000); })]);
 clearTimeout(tBegan);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut, noFlagMut, noLineMut, carryRows, carryMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut, noFlagMut, noLineMut, carryRows, carryMut, handRows, handMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
   legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
   legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {},
   legQuietLine(), QUIET_NONE ? legQuietLine(QUIET_NONE) : {},
   legSettleLines(), SETTLE_OLD ? legSettleLines({ srcMut: SETTLE_OLD }) : {}, UNTIL_NOCARRY ? legSettleLines({ jobs: UNTIL_NOCARRY }) : {}, legPiecesEncoded(), QUIET_FLUSH ? legPiecesEncoded(QUIET_FLUSH) : {},
   legBytes(), SETTLE_DROPS ? legBytes({ srcMut: SETTLE_DROPS }) : {}, SETTLE_OLD ? legBytes({ srcMut: SETTLE_OLD }) : {},
-  SETTLE_NOFLAG ? legSettleLines({ srcMut: SETTLE_NOFLAG }) : {}, SETTLE_NOLINE ? legSettleLines({ srcMut: SETTLE_NOLINE }) : {}, legCronCarry(), CRON_NOCLEAR ? legCronCarry({ jobs: CRON_NOCLEAR }) : {}]);
+  SETTLE_NOFLAG ? legSettleLines({ srcMut: SETTLE_NOFLAG }) : {}, SETTLE_NOLINE ? legSettleLines({ srcMut: SETTLE_NOLINE }) : {}, legCronCarry(), CARRY_NOEND ? legCronCarry({ jobs: CARRY_NOEND }) : {}, legHandCarry(), CARRY_NOEND ? legHandCarry({ jobs: CARRY_NOEND }) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1767,7 +1806,9 @@ console.log(`      7e1674a83's settle (a copy) over the same scenes: ${JSON.stri
 ok(!!SETTLE_NOFLAG && noFlagMut.a === false && noFlagMut.b === false && noFlagMut.c === true, 'CONTROL — MUST ONE cut ALONE (the last line still searched alone, every view\'s first trigger an end): the coloured and the ampersand last lines are NOT whole in the log in time, the completed line still is — RED on the copy', SETTLE_NOFLAG ? { a: noFlagMut.a, b: noFlagMut.b, c: noFlagMut.c } : 'the copy could not be built (its anchor is missing)');
 ok(!!SETTLE_NOLINE && noLineMut.a === true && noLineMut.b === true && noLineMut.c === false, 'CONTROL — MUST TWO cut ALONE (the whole held text searched, the unfinished-piece rule kept): the line that ENDS in the value\'s own first character is NOT whole in the log in time, the coloured and the ampersand lines still are — RED on the copy', SETTLE_NOLINE ? { a: noLineMut.a, b: noLineMut.b, c: noLineMut.c } : 'the copy could not be built (its anchor is missing)');
 print('①h THE UNTIL SCAN\'S CARRY ENDS WITH ITS RUN (round w3aprsv38\'s MUST)', carryRows);
-ok(!!CRON_NOCLEAR && carryMut.scene === true && carryMut.early === true, 'CONTROL — the fire\'s fresh-run reset WITHOUT the carry\'s clear: the next run is «completing» at its first output — RED on the copy', CRON_NOCLEAR ? { scene: carryMut.scene, early: carryMut.early } : 'the copy could not be built (its anchor is missing)');
+ok(!!CARRY_NOEND && carryMut.scene === true && carryMut.early === true, 'CONTROL — the run\'s end WITHOUT the carry\'s clear: the cron\'s next run is «completing» at its first output — RED on the copy', CARRY_NOEND ? { scene: carryMut.scene, early: carryMut.early } : 'the copy could not be built (its anchor is missing)');
+print('①i THE CARRY IS ITS RUN\'S: A START BY HAND (round w3aprsv38\'s MUST, r3108)', handRows);
+ok(!!CARRY_NOEND && handMut.scene === true && handMut.early === true, 'CONTROL — the run\'s end WITHOUT the carry\'s clear: the task started again by hand is «completing» at its first output — RED on the copy', CARRY_NOEND ? { scene: handMut.scene, early: handMut.early, tries: handMut.tries } : 'the copy could not be built (its anchor is missing)');
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');
