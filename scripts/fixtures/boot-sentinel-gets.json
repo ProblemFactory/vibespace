@@ -257,6 +257,7 @@
   "/api/throwaway",
   "/api/may-use",
   "/api/mount-tokens",
+  "/api/held-lists",
   "/api/mounts",
   "/api/mounts/:id/config",
   "/api/mounts/drive-defaults",

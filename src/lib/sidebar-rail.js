@@ -9,6 +9,7 @@
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
 import { paintIndexLine } from './search-window.js';
+import { paintHeldLists } from './held-lists.js'; // B-f276 family unit B: the section «Lists that could not be read» (each by its plain name + «Read again now»)
 import { paintVaultLine } from './vault-window.js'; // lane vault-contents-window: the System panel's vault line (its state + 「查看内容…」)
 import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
@@ -651,9 +652,10 @@ export function installSidebarRail(Sidebar) {
       if (!c.isConnected) return;
       // zone order: bars → history charts → process table LAST (owner
       // report: the long table pushed the charts out of sight)
-      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div><div class="sys-search"></div><div class="sys-vault"></div>';
+      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div><div class="sys-held" hidden></div><div class="sys-search"></div><div class="sys-vault"></div>';
       paintIndexLine(c.querySelector('.sys-search')).catch(() => {}); // lane global-search: the search index's size + Rebuild (one line)
       paintVaultLine(c.querySelector('.sys-vault'), this.app).catch(() => {}); // lane vault-contents-window: the vault's state + 「查看内容…」 (one line)
+      paintHeldLists(c.querySelector('.sys-held')); // B-f276 family unit B: the held lists, each by its plain name, and ONE «Read again now» (drawn only while one is held)
       const hostRow = c.querySelector('.sys-host-row');
       const live = c.querySelector('.sys-live');
       const procsEl = c.querySelector('.sys-procs');

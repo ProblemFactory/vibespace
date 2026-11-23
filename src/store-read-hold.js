@@ -30,16 +30,23 @@ const COPY_LOOK = 20;   // the newest copies of torn bytes compared at a keep (m
 const CEILING = 4;      // round wom600meg (2): the helper's reads in flight across ALL stores (the hub's file pool is shared)
 let active = 0;         // …the reads (with their copies) in flight now, every store's
 const LIVE = new Set(); // every hold made and not stopped (holds() reads their facts)
+// B-f276 unit B (主开发 r3032, lane bl-phone-ui): THE SET's CHANGE — a hold begun, lifted or stopped tells its listeners (the family's ONE
+// notice: src/server/held-lists.js broadcasts the list); a listener's throw never reaches a store
+const CHANGE = new Set();
+const changed = () => { for (const fn of [...CHANGE]) { try { fn(); } catch { /* a listener's own */ } } };
+function onHoldsChange(fn) { if (typeof fn !== 'function') return () => {}; CHANGE.add(fn); return () => CHANGE.delete(fn); }
 
 function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now } = {}) {
   if (!file || typeof aside !== 'function' || typeof words !== 'function' || !code) throw new Error('store-read-hold: file, aside, words and code are required');
   const name = path.basename(file);
-  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null;
+  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0;   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
   const prefix = path.basename(aside(''));   // the copies' common head (`<file>.corrupt-`)
   const onErr = (e) => { log(`${name}: a read again failed: ${(e && e.message) || e}`); arm(); };
   function arm() {
     if (stopped || !held || timer) return;
-    timer = setTimeout(() => { timer = null; again().catch(onErr); }, SR.retryDelay(++tries));
+    const ms = SR.retryDelay(++tries);
+    nextAt = now() + ms;
+    timer = setTimeout(() => { timer = null; again().catch(onErr); }, ms);
     timer.unref?.();
   }
   /** the torn bytes' copy, OFF the loop. A copy of THESE bytes already beside the store (the same size, the same bytes — the newest
@@ -66,6 +73,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     log(torn ? `${name} did not parse (${held.why}) — held while its bytes are copied aside; then it starts empty`
       : `${name} could not be read (${held.code}) — held: nothing is written over it, changes to it are refused, and it is read again off the main loop`);
     if (torn) Promise.resolve().then(again).catch(onErr); else arm();   // torn: the copy at once (off the loop); failed: the ladder
+    changed();   // B-f276 unit B: the family's notice hears the set change
     return 'held';
   }
   /** ONE read again, off the loop → true when the hold lifted. ONE in flight a store (the read AND its copy), at most CEILING across
@@ -95,6 +103,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     if (a.setAside) tornLift = { copy: a.setAside, since: was.since, at: now() };
     log(`${name} read again (held since ${new Date(was.since).toISOString()}, ${was.code}): ${a.state === 'data' ? 'its records are back' : a.setAside ? `torn bytes, kept aside as ${a.setAside} — it starts empty` : 'the file is gone — it starts empty'}`);
     try { onLift?.(a.state === 'data' ? a.value : null, { was, setAside: a.setAside || null }); } catch (e) { log(`${name}: its lift's hooks failed: ${(e && e.message) || e}`); }
+    nextAt = 0; changed();   // B-f276 unit B: lifted — the notice hears it
     return true;
   }
   const facts = () => (held ? { file: name, code: held.code, since: held.since } : null);
@@ -110,10 +119,10 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     words: () => (held ? words(facts()) : null),
     /** the caller's save asks it: false while held — nothing is written over the file (said ONCE a hold in the journal) */
     writable(what = 'a write') { if (!held) return true; if (!saveSaid) { saveSaid = true; log(`${what} to ${name} was refused: the file could not be read, and nothing is written over it until it reads`); } return false; },
-    stop() { stopped = true; LIVE.delete(H); if (timer) { clearTimeout(timer); timer = null; } },
+    stop() { const listed = !!held || !!tornLift; stopped = true; LIVE.delete(H); if (timer) { clearTimeout(timer); timer = null; } if (listed) changed(); },
     file,
     /** (the list's row — holds() below) */
-    _entry: () => (held ? { file: name, code: held.code, since: held.since, torn: !!held.torn, copy: null, held: true }
+    _entry: () => (held ? { file: name, code: held.code, since: held.since, torn: !!held.torn, copy: null, held: true, next: nextAt || null }
       : tornLift ? { file: name, code: 'torn bytes', since: tornLift.since, torn: true, copy: tornLift.copy, held: false } : null),
   };
   LIVE.add(H);
@@ -126,4 +135,4 @@ function holds() { const out = []; for (const h of LIVE) { const e = h._entry();
 /** a read again of ONE held store, by its file's base name → true when it lifted (false: not held, not found, or its turn not come) */
 async function readAgainOf(fileName) { for (const h of LIVE) if (path.basename(h.file) === String(fileName) && h.held()) return h.again(); return false; }
 
-module.exports = { create, holds, readAgainOf, CEILING };
+module.exports = { create, holds, readAgainOf, onHoldsChange, CEILING };

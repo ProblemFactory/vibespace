@@ -103,6 +103,7 @@ import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-
 import { enterSubmits } from './chat-enter-keys.js';
 import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
 import { initVault, listenVaultDoor, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
+import { initHeldLists, applyHeldLists, placeHeldChip } from './held-lists.js'; // B-f276 family unit B: THE ONE NOTICE of the held lists (the chip; the system panel's section)
 import { insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself); B-df5f: the page's cwds of a row
 import { oatDeadFor, oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: the New Session list reads the ONE verdict + the server's last day
 
@@ -459,6 +460,7 @@ class App {
           if (cur === root || cur.startsWith(root + '/')) { try { ex.navigate(ex.currentPath); } catch {} }
         }
       }
+      if (msg.type === 'held-lists') applyHeldLists(msg.lists);   // B-f276 family unit B: the set of held lists changed (the chip, the system panel's section)
       if (msg.type === 'server-notice' && msg.text) {
         // Probe-reported condition (2.226.0): server-side silent failures now
         // surface as toasts (+ notification history) instead of dying in the
@@ -642,6 +644,7 @@ class App {
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       this._homeFactsSeen?.(true); // B-7959: whether this workspace is protected is known now
       initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed
+      initHeldLists(this); // B-f276 family unit B: the held lists' first read (then the hub's `held-lists` broadcast)
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
       setInstanceUrl(d.instancePublicUrl || null); // the address every "link to something here" helper uses (utils.absUrl)
@@ -858,6 +861,7 @@ class App {
     const applyArr = () => {
       if (this.isMobile) return;
       applyArrangement(this.settings.get('chrome.arrangement'), this.settings.get('chrome.springs'));
+      placeHeldChip(); // B-f276 family unit B: the held lists' chip beside For you, as the vault's
       placeVaultChip(); // lane vault-chip-zone-errors: the vault's lock chip follows For-you into whichever zone it now sits
       placeWarmthChip(); // lane cache-warmth-band: …and so does the warmth summary chip (nothing while there is none)
     };

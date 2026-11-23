@@ -464,6 +464,20 @@ try {
 const DIAL_ROOT_RE = /^\$HOME\/\.vibespace\/device@[A-Za-z0-9][A-Za-z0-9.-]*$/;   // = src/hosts.js dialRootOk (B-2ca0's law, met at the move onto 6ce6b8124): the folder the graduation writes
 const skippedRootOf = (h) => (h && h.dialRoot && !DIAL_ROOT_RE.test(String(h.dialRoot)) ? String(h.dialRoot).slice(0, 120) : null);
 const hubPinRm = (h) => 'rm -f ' + ['$HOME/.vibespace/agentd', ...(h && DIAL_ROOT_RE.test(String(h.dialRoot || '')) ? [String(h.dialRoot)] : [])].map((r) => `"${r}/state/hub.pub"`).join(' ');
+// B-f276 family unit B (主开发 r3032, lane bl-phone-ui): THE ONE NOTICE's hub half (src/server/held-lists.js) — every held list of the family
+// (the page names each by its plain name), ONE broadcast when the set changes, ONE «Read again now» (the owner's press). The older holds
+// join by their own doors: For you (user-todos), the Task Groups, the paired machines (hosts: it reads again by itself — no press of its own)
+const heldLists = require('./held-lists.js').create({
+  broadcast: (m) => bcastAll(m), log: (m) => console.log(m),
+  older: [
+    { key: 'user-todos', facts: () => { const u = userTodos && typeof userTodos.unreadState === 'function' ? userTodos.unreadState() : null; return u ? { since: u.at || null } : null; },
+      readAgain: () => userTodos.readAgain(), onLift: (fn) => { if (userTodos && typeof userTodos.whenRead === 'function') userTodos.whenRead(fn, 'the held lists notice'); } },
+    { key: 'task-groups', facts: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; const u = tg && typeof tg.unreadState === 'function' ? tg.unreadState() : null; return u ? { since: u.at || null } : null; },
+      readAgain: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; return tg && typeof tg.readAgain === 'function' ? tg.readAgain() : Promise.resolve(false); } },
+    { key: 'hosts', facts: () => (hosts && typeof hosts.held === 'function' && hosts.held() ? { since: null } : null),
+      onLift: (fn) => { if (hosts && typeof hosts.whenRead === 'function') hosts.whenRead(fn, 'the held lists notice'); } },
+  ],
+});
 app.delete('/api/hosts/:id/hub-pin', async (req, res) => {
   if (/^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string') return res.status(403).json({ error: 'the user lets a machine pin this hub again — an agent token may not', code: 'human_only' });
   let h = null; try { h = hosts.get(req.params.id); } catch (e) { if (e && e.code === 'hosts-unread') return res.status(503).json({ error: e.message, code: 'hosts-unread' }); h = null; }
@@ -998,6 +1012,13 @@ app.post('/api/mounts/import', (req, res) => {
 app.post('/api/mounts/:id/ceph-share', async (req, res) => {
   try { res.json(await mounts.mintCephShare(req.params.id, req.body || {})); }
   catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
+});
+
+// B-f276 family unit B: THE ONE NOTICE's two routes (its hub half is made above the first route: `heldLists`)
+app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list() }));
+app.post('/api/held-lists/read-again', async (req, res) => {
+  if (isAgentBearer(req)) return res.status(403).json({ error: 'reading the held lists again is the owner\'s press — an agent token cannot press it', code: 'agent-forbidden' });
+  try { res.json(await heldLists.readAgain()); } catch (e) { res.status(500).json({ error: (e && e.message) || 'failed' }); }
 });
 
 // Mount tokens (WebDAV bridge): mint returns the link ONCE; stored hashed
