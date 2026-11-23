@@ -1508,6 +1508,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
     lgD.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW_D }, { who: 'owner' });
     lgD.grant('web-login:https://shop.example.test#alice', 'any-account', 'session:conv-b21cc-d');
     let cur = null;
+    let leasesNow = [];   // r3159: the leases the conversation still holds (the prune asks the keeper)
     const kcalls = [], inputFns = [], leaseFns = [];
     // the keeper stand-in: EVERY member it is asked for is counted — any call during a note is a read
     const mkKeeperD = ({ road = 'mediated', clock = null } = {}) => new Proxy({
@@ -1519,6 +1520,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       loginFenceStateOf: () => null,
       loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ proxy: road === 'mediated', ephemeral, remoteSession, hasCdp: Boolean(fkD.wsUrl), action }),
       currentTabOf: async () => (typeof cur === 'function' ? cur() : cur),
+      leasesFor: () => leasesNow.slice(),
     }, { get(o, p) { const v = o[p]; return typeof v === 'function' ? (...a) => { kcalls.push(String(p)); return v.apply(o, a); } : v; } });
     const T = { profileId: 'bp-b21cc-d', browserKey: 'bk-b21ccd' };
     const SHOP = 'https://shop.example.test/login', OTHER = 'https://other.example.test/account';
@@ -1730,7 +1732,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       const r = await fillRef(w); const landed = valOf(tidS) === PW_D;
       resetD(); w.shutdown();
       ok(!!(r && r.ok && landed), 'RED CONTROL (r2849): the moment not asked — a snapshot taken BEFORE a mover is adopted on the tab after it: the moment leg can go red', { r: r && r.code });
-      const older = anchored(bdD, '    if (s.unknown) return { ok: false, why: moved };\n', '    if (s.unknown) return { ok: true, refs: e.snapshotRefs };\n', 'B-21cc control: the older snapshot used');
+      const older = anchored(bdD, "    if (s.unknown) return { ok: false, why: s.unknown === 'blackout' ? '— VibeSpace was not watching this browser when that snapshot was taken' : moved }; // r3159 (3): the true reason\n", '    if (s.unknown) return { ok: true, refs: e.snapshotRefs };\n', 'B-21cc control: the older snapshot used');
       const w7 = await worldD(MD.load('src/server/browser-dialogs.js', older, 'older-snapshot'));
       resetD(); await noteNow(w7, '@e2'); await fillRef(w7, '@e2'); resetD();
       await w7.noteSnapshot(T, { parsedRefs: REF('@e2', 'Email'), since: 0 }); const r7 = await fillRef(w7, '@e2'); const landed7 = valOf(tidS) === PW_D;
@@ -1756,9 +1758,9 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       return res;
     };
     const bo = await blackout(Dm);
-    ok(bo.rA && bo.landedA && bo.nB && bo.nB.code === 'not_watched' && refusedMoved(bo.rB) && bo.nothingB, 'B-21cc (r2992 (1)): A BLACKOUT — a snapshot taken while the watch is not open makes the slot UNKNOWN, so the fill by reference after the watch returns refuses by name; the OLDER snapshot the stash restored on the tab is never used', bo);
+    ok(bo.rA && bo.landedA && bo.nB && bo.nB.code === 'not_watched' && !!(bo.rB && !bo.rB.ok && bo.rB.code === 'target_not_found' && /VibeSpace was not watching this browser when that snapshot was taken/.test(bo.rB.error || '') && /snapshot -i/.test(bo.rB.error || '')) && bo.nothingB, 'B-21cc (r2992 (1), r3159 (3)): A BLACKOUT — a snapshot taken while the watch is not open makes the slot UNKNOWN, so the fill by reference after the watch returns refuses by name with the TRUE reason (VibeSpace was not watching the browser then; take a new snapshot); the OLDER snapshot the stash restored on the tab is never used', bo);
     {
-      const boSrc = anchored(bdD, "    if (!w || w.state !== 'open') { if (pid) snapSlots.set(slotKeyOf(pid, target && target.browserKey), { seq: ++snapSeq, at: now(), tid: null, epoch: null, navSeqs: null, specs: null, unknown: true }); return { ok: false, count: 0, code: 'not_watched' }; }", "    if (!w || w.state !== 'open') return { ok: false, count: 0 };", 'B-21cc control: a note in a blackout leaves the slot as it was');
+      const boSrc = anchored(bdD, "    if (!w || w.state !== 'open') { if (pid) snapSlots.set(slotKeyOf(pid, target && target.browserKey), { seq: ++snapSeq, at: now(), tid: null, epoch: null, navSeqs: null, specs: null, unknown: 'blackout' }); return { ok: false, count: 0, code: 'not_watched' }; }", "    if (!w || w.state !== 'open') return { ok: false, count: 0 };", 'B-21cc control: a note in a blackout leaves the slot as it was');
       const boR = await blackout(MD.load('src/server/browser-dialogs.js', boSrc, 'blackout-keeps-slot'));
       ok(boR.landedB, 'RED CONTROL (r2992 (1)): a note in a blackout that leaves the slot as it was — the stash restores the OLDER snapshot and the newer @e2 fills the older one\'s field: the leg above can go red', { rB: boR.rB });
     }
@@ -1811,6 +1813,7 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       const before = w.tabMovesOf();
       fire(leaseFns, { kind: 'detach', browserKey: T.browserKey + '.1', profileId: T.profileId });
       const afterHelper = w.tabMovesOf();
+      leasesNow = [];   // the conversation's own lease ends and it holds no other: its entry may go
       fire(leaseFns, { kind: 'detach', browserKey: T.browserKey, profileId: T.profileId });
       const afterEnd = w.tabMovesOf();
       fire(leaseFns, { kind: 'browser-stopped', profileId: T.profileId });
@@ -1819,10 +1822,32 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       return { before, afterHelper, afterEnd, afterStop };
     };
     const pr = await pruneScene(Dm);
-    ok(pr.before.conversations.includes(T.browserKey) && pr.before.browsers.includes(T.profileId) && pr.afterHelper.conversations.includes(T.browserKey) && !pr.afterEnd.conversations.includes(T.browserKey) && pr.afterEnd.browsers.includes(T.profileId) && !pr.afterStop.browsers.includes(T.profileId),
-      'B-21cc (r2992 (4)): THE MOVES\' MAPS ARE PRUNED where the slots go — the conversation\'s entry at its own lease\'s end (a helper\'s end keeps it), the browser\'s at its stop (after the watch\'s own last mover)', pr);
+    ok(pr.before.conversations.includes(T.browserKey) && pr.before.browsers.includes(T.profileId) && pr.afterHelper.conversations.includes(T.browserKey) && !pr.afterEnd.conversations.includes(T.browserKey) && pr.afterEnd.browsers.includes(T.profileId) && pr.afterStop.browsers.includes(T.profileId),
+      'B-21cc (r2992 (4), r3159 (1)): THE MOVES\' MAPS — the conversation\'s entry goes when it holds NO lease on any browser (a helper\'s end keeps it); the browser\'s own mover STAYS at its stop (a stop is a mover a later note is judged against)', pr);
+    // r3159 (1a): a conversation that still holds a lease on ANOTHER browser — that other lease's end never forgets ITS mover: a snapshot
+    // whose verb was in flight when its own tab act moved the tab stays unknown, never adopted on the moved tab
+    const pruneLive = async (Dmod) => {
+      const w = await worldD(Dmod);
+      cur = { ok: true, targetId: tidS }; resetD();
+      leasesNow = [{ profileId: T.profileId, browserKey: T.browserKey }];   // it still holds THIS browser
+      const since0 = Date.now(); await sleepD(3);
+      w.moveTab('tab-verb', { browserKey: T.browserKey });   // its own tab act moves the tab while the snapshot's verb is in flight
+      fire(leaseFns, { kind: 'detach', browserKey: T.browserKey, profileId: 'bp-b21cc-other' });   // the OTHER browser's lease ends
+      const n = await w.noteSnapshot(T, { parsedRefs: REF('@e5'), since: since0 });
+      const r = await fillRef(w, '@e5');
+      const res = { n, r: r && { ok: r.ok, code: r.code, error: r.error }, landed: valOf(tidS) === PW_D, nothing: valOf(tidS) === '' && valOf(tidO) === '', kept: w.tabMovesOf().conversations.includes(T.browserKey) };
+      resetD(); w.shutdown(); leasesNow = [];
+      return res;
+    };
+    const pl = await pruneLive(Dm);
+    ok(!!(pl.kept && pl.n && pl.n.code === 'tab_moved' && refusedMoved(pl.r) && pl.nothing), 'B-21cc (r3159 (1a)): another browser\'s lease ending keeps the conversation\'s moves entry while it holds a lease here — the snapshot in flight across its own tab act stays UNKNOWN and the fill refuses by name', pl);
     {
-      const keepMoves = anchored(bdD, '      if (parentKey(browserKey) === String(browserKey)) tabMoves.byConv.delete(String(browserKey));\n', '', 'B-21cc control: the moves never pruned');
+      const forgetSrc = anchored(bdD, '      if (parentKey(browserKey) === String(browserKey) && !holdsAnyLease(browserKey)) tabMoves.byConv.delete(String(browserKey));\n', '      if (parentKey(browserKey) === String(browserKey)) tabMoves.byConv.delete(String(browserKey));\n', 'B-21cc control: the prune forgets a live mover'); // stale-pins: kept — r2992's prune, planted back as this RED control
+      const plR = await pruneLive(MD.load('src/server/browser-dialogs.js', forgetSrc, 'prune-forgets-mover'));
+      ok(plR.landed, 'RED CONTROL (r3159 (1a), r2992\'s prune): the other lease\'s end deletes the conversation\'s whole entry — the note sees no mover since the /resolve and the snapshot is adopted on the MOVED tab: the leg above can go red', plR);
+    }
+    {
+      const keepMoves = anchored(bdD, '      if (parentKey(browserKey) === String(browserKey) && !holdsAnyLease(browserKey)) tabMoves.byConv.delete(String(browserKey));\n', '', 'B-21cc control: the moves never pruned');
       const prR = await pruneScene(MD.load('src/server/browser-dialogs.js', keepMoves, 'moves-unpruned'));
       ok(prR.afterEnd.conversations.includes(T.browserKey), 'RED CONTROL (r2992 (4)): the conversation\'s entry never pruned — it outlives its lease: the leg above can go red', prR);
     }
@@ -1851,19 +1876,19 @@ if (typeof LF?.resolveSnapshotRef === 'function') {
       // the same-millisecond tie: an ack, then a mover in the SAME millisecond (tried until both land in one) — by number the mover outranks
       const tie = async (Dmod) => {
         const w = await worldD(Dmod);
-        let got = null;
-        for (let i = 0; i < 40 && got === null; i++) {
+        let reached = false, got = null;   // r3159 (2): the run says the tie was reached, and the legs require it
+        for (let i = 0; i < 40 && !reached; i++) {
           await sleepD(2);
           const t0 = Date.now(); w.noteActiveTab(T, tidO); w.moveTab('person-tab-act', { profileId: T.profileId }); const t1 = Date.now();
-          if (t0 === t1) got = w.rememberedTabOf(T);
+          if (t0 === t1) { reached = true; got = w.rememberedTabOf(T); }
         }
         w.shutdown();
-        return got;
+        return { reached, got };
       };
       const tieNow = await tie(Dm);
       const tieAt = anchored(bdD, '    return m && m.tid && Number.isInteger(m.moveSeq) && tabEpochOf(pid, target && target.browserKey).seq <= m.moveSeq && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;', '    return m && m.tid && m.at >= tabEpochOf(pid, target && target.browserKey).at && tabs.some((x) => x.targetId === m.tid) ? m.tid : null;', 'B-21cc control: the remembered tab by instants'); // stale-pins: kept — the older line, planted back as this RED control
       const tieOld = await tie(MD.load('src/server/browser-dialogs.js', tieAt, 'remembered-by-instant'));
-      ok(tieNow === null && tieOld === tidO, 'B-21cc (r2992 (5)): the remembered tab is judged by NUMBER — an ack and a mover in the SAME millisecond: the mover outranks the ack (none named); RED: judged by instants, the tie trusts the ack', { tieNow, tieOld });
+      ok(tieNow.reached && tieNow.got === null && tieOld.reached && tieOld.got === tidO, 'B-21cc (r2992 (5)): the remembered tab is judged by NUMBER — an ack and a mover in the SAME millisecond: the mover outranks the ack (none named); RED: judged by instants, the tie trusts the ack', { tieNow, tieOld });
     }
 
     // (5) THE FRAME NOTE's TAB, WITHOUT A READ: the only tab, or the last ack no mover followed — else none (silent rather than wrong)

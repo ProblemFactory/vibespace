@@ -1004,7 +1004,6 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w) return;
     try { w.ws && w.ws.close(1000); } catch { /* closing */ }
     down(w, why);
-    if (why === 'the browser stopped' && pid) dropSnapSlots(pid); // B-21cc r2992 (4): after the watch's own last mover — a stopped browser keeps no entry
   }
   /** acceptance r1 (MAJOR 1): THE WATCH'S MODE re-read from the holder rows — 'person' (only he holds it: observation only) /
    *  'agent' (a conversation holds it: the agent browser's policies). Standard Chrome flips in place over the same socket; a
@@ -4885,20 +4884,23 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return { seq: Math.max(P ? P.seq : 0, C ? C.seq : 0), at: Math.max(P ? P.at : 0, C ? C.at : 0) };
   }
   const slotKeyOf = (profileId, browserKey) => `${String(profileId || '')}\0${String(browserKey || '') || '*'}`; // r2992 (2): one per DRIVER — the browser's own key, a helper's apart from its parent's
-  /** r2849 (4): a browser's slots (its stop, a fresh start), or one driver's (its lease ended) — never another's; r2992 (4): with them
-   *  the moves' own entries — the browser's, and the conversation's when its OWN lease ended (a dropped entry only fails closed: an
-   *  epoch never comes back to a value a slot recorded) */
+  /** r2849 (4): a browser's slots (its stop, a fresh start), or one driver's (its lease ended) — never another's. r3159 (1): a MOVER
+   *  IS NEVER FORGOTTEN WHILE A LIVE SLOT MAY BE JUDGED AGAINST IT — dropping one makes a later note read «no mover since the
+   *  /resolve», which is NOT failing closed. So a conversation's moves entry goes only when it holds no lease on ANY browser (a keeper
+   *  that cannot say keeps it), and a browser's own mover STAYS at its stop (a stop between a snapshot's /resolve and its note is a
+   *  mover; one entry a browser, bounded by the profiles). */
   function dropSnapSlots(profileId, browserKey = null) {
     const pid = String(profileId || '');
     if (!pid) return;
     if (browserKey) {
       snapSlots.delete(slotKeyOf(pid, browserKey));
-      if (parentKey(browserKey) === String(browserKey)) tabMoves.byConv.delete(String(browserKey));
+      if (parentKey(browserKey) === String(browserKey) && !holdsAnyLease(browserKey)) tabMoves.byConv.delete(String(browserKey));
       return;
     }
     for (const k of [...snapSlots.keys()]) if (k.startsWith(`${pid}\0`)) snapSlots.delete(k);
-    tabMoves.byProfile.delete(pid);
   }
+  /** r3159 (1): whether a conversation still holds a lease on any browser (the keeper's registry; unknown ⇒ it does). */
+  function holdsAnyLease(browserKey) { try { return !(keeper && typeof keeper.leasesFor === 'function') || (keeper.leasesFor(String(browserKey)) || []).length > 0; } catch { return true; } }
   /** A suite's look at the moves' two maps (r2992 (4)): their keys only. */
   function tabMovesOf() { return { conversations: [...tabMoves.byConv.keys()], browsers: [...tabMoves.byProfile.keys()] }; }
   function writeSnapshotRefs(w, e, specs, { seq, at }) {
@@ -4927,7 +4929,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!Array.isArray(parsedRefs)) return { ok: false, count: 0 };
     // r2992 (1): a snapshot the watch could not see (not open — a blackout) still REPLACES the slot, as UNKNOWN: the next fill by
     // reference refuses by name — never the OLDER snapshot a stash restores on its tab when the watch returns
-    if (!w || w.state !== 'open') { if (pid) snapSlots.set(slotKeyOf(pid, target && target.browserKey), { seq: ++snapSeq, at: now(), tid: null, epoch: null, navSeqs: null, specs: null, unknown: true }); return { ok: false, count: 0, code: 'not_watched' }; }
+    if (!w || w.state !== 'open') { if (pid) snapSlots.set(slotKeyOf(pid, target && target.browserKey), { seq: ++snapSeq, at: now(), tid: null, epoch: null, navSeqs: null, specs: null, unknown: 'blackout' }); return { ok: false, count: 0, code: 'not_watched' }; }
     const specs = new Map();
     for (const pr of parsedRefs.slice(0, 16384)) {
       if (!pr || typeof pr.ref !== 'string' || !pr.ref) continue;
@@ -4973,7 +4975,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const s = snapSlots.get(slotKeyOf(target && target.profileId, target && target.browserKey));
     const moved = '— the tab changed since the last snapshot (a tab opened, closed or switched)';
     if (!s) return { ok: true, refs: null }; // no snapshot noted: the gate's own words
-    if (s.unknown) return { ok: false, why: moved };
+    if (s.unknown) return { ok: false, why: s.unknown === 'blackout' ? '— VibeSpace was not watching this browser when that snapshot was taken' : moved }; // r3159 (3): the true reason
     if (s.tid) {
       if (s.tid !== e.targetId) return { ok: false, why: moved };
       return { ok: true, refs: e.snapshotRefs && e.snapshotRefs.seq === s.seq ? e.snapshotRefs : null };
