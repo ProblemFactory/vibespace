@@ -530,7 +530,10 @@ if (!OTHER && leg('i')) {
   // after the road's own unmoved stores (the census debt) — the check above must fail on the order itself
   const NO_RANK0 = (wt) => { const f = path.join(wt, 'server.js'), s = fs.readFileSync(f, 'utf8'), a = "w0.beginExit({ crash: true }); w0.exitFlush({ only: 'rank0' }); }"; if (s.split(a).length !== 2) throw new Error('the anchor of the red «no rank-0 pass on the crash road» is not in the booted server.js'); fs.writeFileSync(f, s.replace(a, 'w0.beginExit({ crash: true }); }')); };
   const rM = await crashScene('crash500-no-rank0', true, NO_RANK0);
-  if (rM) ok(!rM.law && rM.onDisk, `(i) RED (the crash road's rank-0 pass removed: the act written only after the unmoved stores): the check above fails (first ${rM.first}; ${rM.line || 'no exit line'})`, { line: rM.line, first: rM.first });
+  // pinned to the line it removes (r2719): the law is a conjunction — it also fails when the hub does not end by itself or the exit
+  // line changes — so the red asks that the hub DID end by itself, its exit line there, and the act is NOT among the exit's first writes
+  if (rM) { const byItself = rM.crashMs != null && !!rM.line && !/exit after the crash: [\d.]+ s after the crash/.test(rM.log), actFirst = rM.names.slice(0, rM.first).includes('channels-acts.write');
+    ok(!rM.law && byItself && !actFirst && rM.onDisk, `(i) RED (the crash road's rank-0 pass removed: the act written only after the unmoved stores): the check above fails FOR THAT LINE — the hub ended by itself (${rM.crashMs} ms after the crash, its exit line there) and the act is NOT among the exit's first writes (first ${rM.first}${rM.first ? ': ' + rM.names.slice(0, rM.first).join(', ') : ''}; ${rM.line || 'no exit line'})`, { line: rM.line, first: rM.first, crashMs: rM.crashMs }); }
 }
 
 // ── (k) THE KEEPER IS THERE FROM BOOT (round 6, E3 a): the REAL server.js booted (a stated grace of 3 s), then the install
