@@ -4195,7 +4195,13 @@ function persistResetCreditTries() {
     const tmp = RESET_CREDIT_TRIES_FILE + '.tmp';
     fs.mkdirSync(path.dirname(RESET_CREDIT_TRIES_FILE), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: now, tries }));
+    // THE HOTFIX (主开发 r2899): A SAVE NEVER WRITES OVER A FILE THAT WAS NOT READ — after «not there» the rename only CREATES the file:
+    // one that appeared since (a late mount, a folder that flapped) HOLDS the store — nothing is written, it is read at the next press /
+    // pass, and its attempts come back beside this life's. (Checked just before the rename: a file landing in the microseconds between
+    // is the narrow limit, said in the kb.)
+    if (_resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) { holdResetCreditTries({ code: 'appeared', why: 'it appeared after it was read «not there» — it is read before anything is written' }); return; }
     fs.renameSync(tmp, RESET_CREDIT_TRIES_FILE);
+    _resetCreditTriesUnseen = false;   // the store's own file now
   } catch (e) { console.warn('[reset-credit] attempts not persisted:', e.message); }
 }
 // verify r2 (reproduced): an unreadable attempts file was SILENTLY ignored at boot — no line, the bytes left in place
@@ -4233,6 +4239,9 @@ function fileResetCreditTriesLost() {
 // were READ and do not parse are set aside, as before — and a set-aside that fails leaves them HELD (their only copy).
 const SR = require('../store-read.js');
 const TRIES_VALID = (d) => !!d && typeof d === 'object' && d.v === 1 && Array.isArray(d.tries);
+// THE HOTFIX (主开发 r2899): the store's last answer was «not there» (a first start, a hold lifted as «no attempts», bytes set aside) —
+// its next write CREATES the file and never replaces one: a file that appeared since was never read (a late mount, a flapping folder)
+let _resetCreditTriesUnseen = false;
 let _resetCreditTriesHeld = null;   // { code, why, at, tries, filed, todoId, saidPersist, lasting, asideFailed } while the file could not be read
 let _resetCreditTriesReading = null;   // the held file's read again in flight (a promise), or null
 // line 429's follow (主开发 r2413, smalls): A READ AGAIN THAT NEVER SETTLES (a dead mount) keeps no later one from starting for good: past
@@ -4272,7 +4281,7 @@ function fileResetCreditTriesHeld() {
 function holdResetCreditTries(a) {
   const was = _resetCreditTriesHeld;
   const code = String(a.code || 'unreadable');
-  _resetCreditTriesHeld = { code, why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, saidPersist: !!(was && was.saidPersist), lasting: RESET_CREDIT_TRIES_LASTING.has(code), asideFailed: !!a.asideFailed || !!(was && was.asideFailed) };
+  _resetCreditTriesHeld = { code, why: String(a.why || 'the read failed'), at: was ? was.at : Date.now(), tries: (was ? was.tries : 0) + 1, filed: !!(was && was.filed), todoId: was ? was.todoId : null, saidPersist: !!(was && was.saidPersist), lasting: RESET_CREDIT_TRIES_LASTING.has(code), missingOnce: false /* r2899: a failed read starts the «two in a row» again */, asideFailed: !!a.asideFailed || !!(was && was.asideFailed) };
   // line 429's follow (r2413 (3)): no timer — said as it is: read again at a press and at the pool's pass (a failed set-aside: a press alone)
   if (!was) console.warn(`[reset-credit] data/reset-credit-tries.json could not be read (${code}) — HELD: kept as it is, nothing is written over it, and no reset credit is used until it reads (an attempt made before this start may have gone out); read again at the next reset-credit press${_resetCreditTriesHeld.asideFailed ? '' : ' and at the pool\'s next pass'}, never on a timer${_resetCreditTriesHeld.lasting ? ' — a cause that does not pass by itself: check the file and its access' : ''}`);
   fileResetCreditTriesHeld();
@@ -4325,6 +4334,7 @@ function asideTornTriesAsync(a, why, asideAs) {
 function settleTornTries(a, why, asideAs, asideOk) {
   a = SR.afterSetAside(a, asideOk ? path.basename(asideAs) : null);
   if (a.state === 'unreadable') { holdResetCreditTries({ code: 'set-aside failed', why: 'its bytes did not parse and could not be set aside', asideFailed: true }); return 0; }   // their only copy: HELD, never written over
+  _resetCreditTriesUnseen = true;   // the bytes moved aside: the next write creates the file
   liftResetCreditTriesHold('did not parse — set aside');
   console.warn(`[reset-credit] data/reset-credit-tries.json is unreadable (${why}) — set aside as ${path.basename(asideAs)}; every reset-credit request open before this start is UNKNOWN now (a press on a codex account should refresh it first)`);
   _resetCreditTriesLost = { file: RESET_CREDIT_TRIES_FILE, asideAs, at: Date.now(), why, filed: false };
@@ -4334,7 +4344,15 @@ function settleTornTries(a, why, asideAs, asideOk) {
 /** ONE read's outcome → the attempts it brings back (the load, and the held file's read again). → how many */
 function applyResetCreditTriesRead(read, { aside = 'sync' } = {}) {
   let a = SR.storeAnswer(read, { valid: TRIES_VALID });
-  if (a.state === 'missing') { liftResetCreditTriesHold('is not there (no attempts on file)'); return 0; }   // no file = no attempts (the common first boot)
+  if (a.state === 'missing') {
+    // THE HOTFIX (主开发 r2899, the store-read law's own): while HELD, a «not there» from a read again is read ONCE MORE before the hold
+    // lifts — a network folder that flaps answers «not there» once between two failed reads; only two in a row are «no attempts»
+    const H = _resetCreditTriesHeld;
+    if (H && !H.missingOnce) { H.missingOnce = true; console.warn('[reset-credit] data/reset-credit-tries.json answered «not there» right after it could not be read — still HELD: it is read once more before anything is taken as «no attempts»'); return 0; }
+    _resetCreditTriesUnseen = true;   // its next write creates the file, never replaces one
+    liftResetCreditTriesHold(H ? 'is not there twice in a row (no attempts on file)' : 'is not there (no attempts on file)');
+    return 0;
+  }   // no file = no attempts (the common first boot)
   if (a.state === 'unreadable') { holdResetCreditTries(a); return 0; }
   let doc = a.state === 'data' ? a.value : null;
   let why = a.state === 'corrupt' ? (a.code === 'did not parse' ? 'not JSON: ' + String((a.error && a.error.message) || '').slice(0, 80) : 'not the attempts shape (v 1, tries[])') : null;
@@ -4345,6 +4363,7 @@ function applyResetCreditTriesRead(read, { aside = 'sync' } = {}) {
     try { fs.renameSync(RESET_CREDIT_TRIES_FILE, asideAs); asideOk = true; } catch (e) { console.warn('[reset-credit] could not set the unreadable attempts file aside:', e.message); }   // the boot's own road (before the first loop turn)
     return settleTornTries(a, why, asideAs, asideOk);
   }
+  _resetCreditTriesUnseen = false;   // its bytes were read: the next write replaces what was read
   liftResetCreditTriesHold('reads again — its attempts are back');   // before the revive: a charged revive persists below
   const revive = (r) => {
     if (!r || typeof r !== 'object' || typeof r.key !== 'string' || !Number(r.at)) return null;
@@ -4377,7 +4396,15 @@ function applyResetCreditTriesRead(read, { aside = 'sync' } = {}) {
     return t;
   };
   let n = 0, charged = 0;
-  for (const r of doc.tries) { const t = revive(r); if (t) { _resetCreditTries.set(t.key, t); n++; } }
+  for (const r of doc.tries) {
+    const t = revive(r);
+    if (!t) continue;
+    // THE HOTFIX (r2899): an attempt THIS life made while the file was not read (it came back after «not there») keeps its place, and
+    // the file's older one becomes its prior — the floor reads the chain (unsettledInChain): neither is lost
+    const cur = _resetCreditTries.get(t.key);
+    if (cur && Number(cur.at) > Number(t.at)) { if (!cur.prior) cur.prior = t; n++; continue; }
+    _resetCreditTries.set(t.key, t); n++;
+  }
   if (n) console.log(`[reset-credit] ${n} attempt record${n === 1 ? '' : 's'} restored from the last run${charged ? ` (${charged} open at the stop, charged now)` : ''}`);
   if (charged) persistResetCreditTries();
   return n;

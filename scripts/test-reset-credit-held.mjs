@@ -269,4 +269,61 @@ const lastRun = async () => {
 const lr = await lastRun();
 ok(lr.code === 'EACCES' && /until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder and its access/.test(lr.text || '') && !/data\//.test(lr.text || '') && /reset-credit-tries\.json/.test(lr.detail || '') && !/heals by itself/.test(lr.text || '') && /check the file and its access/.test(lr.detail || '') && /until the file can be read/.test(lr.error || '') && !/heals by itself/.test(lr.error || ''), 'a permission (EACCES) never says «heals by itself»: the item and the refusal say until the file can be read, and name the file and its access', lr);
 
+console.log('H1 THE HOTFIX (主开发 r2899): a «not there» right after a failed read is read ONCE MORE — the verifier\'s scene, its answers placed');
+const flapRun = async (engine) => {
+  const realP = fs.promises.readFile;
+  let n = 0, H;
+  fs.promises.readFile = async function (p, ...a) { if (H && path.resolve(String(p)) === H.file && ++n === 1) throw Object.assign(new Error('ENOENT: stand-in'), { code: 'ENOENT' }); return realP.call(this, p, ...a); };   // the first read again: «not there» ONCE (a folder that flaps)
+  const out = {};
+  try {
+    H = await heldWorld(engine, { opts: { todos: { add: () => ({ id: 'ut-h1' }) }, session: true } });   // the start's read fails (EIO): held
+    const p1 = await H.w.call('POST', { sessionId: 'cx1' }); await settle(H.w);
+    out.first = { post: p1.body && p1.body.code, held: !!heldOf(H.w) };
+    const p2 = await H.w.call('POST', { sessionId: 'cx1' }); await settle(H.w);
+    out.second = { post: p2.body && p2.body.code };
+  } finally { fs.promises.readFile = realP; }
+  const t = H.w.eng._resetCreditTries.get(H.w.A);
+  return { ...out, held: !!heldOf(H.w), back: !!(t && t.idempotencyKey === 'k-held-1'), verbs: H.w.verbs(), onDisk: fs.readFileSync(H.file, 'utf8').includes('k-held-1') };
+};
+const fl = await flapRun(engMod);
+console.log(`    facts: ${JSON.stringify(fl)}`);
+ok(fl.first.post === 'attempts_unread' && fl.first.held && fl.second.post === 'attempts_unread' && !fl.held && fl.back && fl.verbs === 0 && fl.onDisk, 'held; a press is refused and its read again answers «not there» ONCE: STILL HELD; the next read reads the file — the attempt that went out is back, no second request, the file untouched', fl);
+const flx = await flapRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (H && !H.missingOnce) { H.missingOnce = true; console.warn(\'[reset-credit] data/reset-credit-tries.json answered «not there» right after it could not be read — still HELD: it is read once more before anything is taken as «no attempts»\'); return 0; }\n', '', 'one «not there» lifts'), 'rct-hf-once'));
+ok(flx.verbs > 0, 'RED CONTROL (one «not there» lifts the hold, as at the candidate): the next press SENDS A SECOND reset request — red', flx);
+
+console.log('H2 THE HOTFIX: only two «not there» IN A ROW lift the hold — a failed read between starts the count again');
+const rowRun = async (engine) => {
+  const realP = fs.promises.readFile;
+  const answers = ['ENOENT', 'EIO', 'ENOENT', 'ENOENT'];
+  let H;
+  fs.promises.readFile = async function (p, ...a) { if (H && path.resolve(String(p)) === H.file && answers.length) { const c = answers.shift(); throw Object.assign(new Error(c + ': stand-in'), { code: c }); } return realP.call(this, p, ...a); };
+  const held = [];
+  try {
+    H = await heldWorld(engine, { opts: { todos: { add: () => ({ id: 'ut-h2' }) } } });
+    for (let i = 0; i < 4; i++) { await H.w.call('GET'); await settle(H.w); held.push(!!heldOf(H.w)); }
+  } finally { fs.promises.readFile = realP; }
+  return { held };
+};
+const rw = await rowRun(engMod);
+ok(rw.held.join() === 'true,true,true,false', '«not there» (held, read once more) · a failed read (held: the count starts again) · «not there» (held) · «not there» (two in a row: lifted as «no attempts»)', rw);
+const rwx = await rowRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, 'missingOnce: false /* r2899: a failed read starts the «two in a row» again */,', 'missingOnce: !!(was && was.missingOnce),', 'the count carried over a failed read'), 'rct-hf-row'));
+ok(rwx.held[2] === false, 'RED CONTROL (the count carried across a failed read): «not there», a failure, «not there» lifts it — never two in a row — red', rwx);
+
+console.log('H3 THE HOTFIX: a save never writes over a file that was not read');
+const appearRun = async (engine) => {
+  const w0 = world({ engine });
+  const w = world({ engine, root: w0.root, todos: { add: () => ({ id: 'ut-h3' }) }, session: true });   // its first read: «not there»
+  fs.writeFileSync(w.file, TRIES(w.A));   // a late mount: the file appears AFTER the read that found it missing — never read
+  const p1 = await w.call('POST', { sessionId: 'cx1' });   // a press goes (nothing held, nothing known yet): its save meets the file
+  const kept = fs.readFileSync(w.file, 'utf8').includes('k-held-1');
+  const h1 = heldOf(w);
+  const p2 = await w.call('POST', { sessionId: 'cx1' }); await settle(w);   // refused while held; its read again reads the file
+  const t = w.eng._resetCreditTries.get(w.A);
+  return { post1: p1.code, held: h1 && h1.code, kept, post2: p2.body && p2.body.code, prior: !!(t && t.prior && t.prior.idempotencyKey === 'k-held-1'), onDisk: fs.readFileSync(w.file, 'utf8').includes('k-held-1') };
+};
+const ap = await appearRun(engMod);
+ok(ap.held === 'appeared' && ap.kept && ap.post2 === 'attempts_unread' && ap.prior && ap.onDisk, 'a file that appeared after the read found it missing: the save writes NOTHING over it — the store holds («appeared»), reads it at the next press, and the file\'s attempt becomes this life\'s prior (the floor reads both); both on disk', ap);
+const apx = await appearRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (_resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) { holdResetCreditTries({ code: \'appeared\', why: \'it appeared after it was read «not there» — it is read before anything is written\' }); return; }\n', '', 'the save renames over whatever is there'), 'rct-hf-over'));
+ok(!apx.kept, 'RED CONTROL (the save renames over whatever is there, as before): the file nobody read is WRITTEN OVER — the attempt that went out is gone from disk — red', apx);
+
 report();
