@@ -1013,6 +1013,12 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const Q2 = arrive(realEng, { v: roP, vProven: true, oProven: true }), q2 = await heldOn(Q2);
     ok('B-6a92 r2543 A PROVEN ROW IS NEVER HELD: Orin stamped by its own proven read keeps its window and Vela (unproven, on its instant) is held naming Orin; two proven rows on one instant: nobody',
       !!q1.v && q1.v.names[0] === Q1.O && !q1.o && !q1.ou && !q2.v && !q2.o && !q2.vu && !q2.ou, { q1, q2 });
+    // (r2923 3) …BY THE STAND-IN'S PROOF CARRY: Orin's anchor is its own proven read (a panel's: never compared), its exact witness
+    // stands in for it WITH that proof — cut the carry (in a copy) and the honest, lifted Orin is held
+    const rlNoCarry = MUT.write('src/reading-lag.js', anchored(rlsrcSI, 'proven: standsIn && !!r.anchor.proven, anchor: standsIn });', 'proven: false, anchor: standsIn });', 'b6a92-si-no-proof-carry'), 'b6a92-si-no-proof-carry');
+    const engNoCarry = require(MUT.write(ENG, anchored(esrc, "const readingLag = require('../reading-lag.js');", `const readingLag = require(${J(rlNoCarry)});`, 'b6a92-si-no-proof-carry-eng'), 'b6a92-si-no-proof-carry-eng'));
+    const Q1c = arrive(engNoCarry, { v: roP, oProven: true }), q1c = await heldOn(Q1c);
+    ok('B-6a92 RED CONTROL (r2923 3: the stand-in carries no proof, in a copy): the lifted honest Orin (its own proven read, its exact witness agreeing) is HELD — the leg above can fail', !!q1c.o && q1c.o.by === 'same-instant', q1c);
     // (4) AGREEING READINGS NEVER LIFT IT, and its numbers are not filed
     await run6(Q1);
     const q1b = await heldOn(Q1), q1own = Q1.own();
@@ -1135,6 +1141,93 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       const pk = park(AP, ['copy', 'orin', 'm']), pkAll = park(AP, ['copy', 'orin']), pkX = park(APpark, ['copy', 'orin', 'm']);
       ok('B-6a92 r2855 THE PARKING DEFAULT NEVER FALLS ON A HELD MEMBER: listed first, the held members are passed over for the measured one; every member held ⇒ none (as a pool whose members are all signed out)', pk === 'm' && pkAll == null, { pk, pkAll });
       ok('B-6a92 RED CONTROL (r2855 small: parking reads no mark, in a copy): the held member listed first is the parking pick — the leg above can fail', pkX === 'copy', pkX);
+      // (r2923) THE REAL WALL ROAD: a pool [Hale, Mira]; Hale held at the start (it and Zeno, outside the pool, on one weekly instant
+      // to the second, neither proven), Mira measured and busy (60 % used); a conversation on Hale that moved 5 s ago. Its wall
+      // signal on Hale goes through the engine's own demote road (the session's wall recorded, the wall written into Hale's file);
+      // then the per-session pass moves it to Mira — past the 180 s dwell belt (a wall is a fact on the belt too) — and the
+      // notice says why. With no wall the conversation stays on Hale (judged as any unknown member)
+      const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+      const poolWorld = (engMod, { wall = true } = {}) => {
+        const root = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-si-pool-')));
+        const dataDir = path.join(root, 'data'), am = new AccountManager({ dataDir });
+        if (!am.poolSupported()) return null;
+        const sub = (name) => { const id = am.createSubscription({ name }).id; fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 }); return id; };
+        const H = sub('Hale'), M = sub('Mira'), Z = sub('Zeno');
+        const P = am.createPool({ name: 'Pool', members: [H, M] }).id;
+        am.setPoolTarget(P, H); am.updatePool(P, { auto: true, hot: true });
+        const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+        const nS = Math.floor(Date.now() / 1000), INST = nS + 4 * 86400 + 7 * 3600 + 17;
+        for (const k of [H, Z]) {
+          fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(k)), stampOf(INST, 60e3, false));
+          fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(k)), witOf(INST, 60e3));
+          fs.writeFileSync(path.join(cacheDir, k + '.json'), J({ fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.2, resetsAt: nS + 3600 }, sevenDay: { utilization: 0.3, resetsAt: INST } }));
+        }
+        fs.writeFileSync(path.join(cacheDir, M + '.json'), J({ fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.1, resetsAt: nS + 3600 }, sevenDay: { utilization: 0.6, resetsAt: nS + 2 * 86400 } }));
+        const sessions = new Map(), notices = [];
+        const eng = engMod.create({
+          app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
+          wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(String(t)), serverSetting: () => undefined, getAccounts: () => am,
+          getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
+          getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
+          getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow: () => false, armedIds: () => [] }),
+          getQuotaProbe: () => null, getSessionMetaStore: () => null,
+        });
+        eng.usageEstimator.burnFor = () => ({});
+        eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });
+        quiet(() => eng.repairIdentityAnchors('boot'));   // the start's warm: the standing check holds Hale (and Zeno)
+        const sid = 'si-pool-conv';
+        const sx = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv', cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
+          _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 70 * 60e3, _lastRequestAt: Date.now() - 70 * 60e3, _isStreaming: false, _turnState: 'idle' };
+        sessions.set(sid, sx); am.ensureSessionPoolLink(P, sid, H, { why: 'spawn' });
+        eng._poolSwitchAt.set(P + ':' + sid, Date.now() - 5000);   // it moved 5 s ago: inside the 180 s dwell belt
+        const heldAtStart = !!(eng.poolReadCache(P)(H) || {}).held;
+        if (wall) quiet(() => eng.demoteWalledAccount(sx, [{ key: H, bucket: 'fiveHour', slot: true, resetsAtMs: (nS + 3600) * 1000, at: Date.now() }]));
+        const walled = eng._sessionWalls.get(sid);
+        quiet(() => eng.maybePoolAutoSwitchForPool(P, { force: true }));
+        return { on: am.poolCurrentFor(P, sid), H, M, heldAtStart, walledH: !!(walled && walled.has(H)), notices };
+      };
+      const PW = poolWorld(realEng), PWq = poolWorld(realEng, { wall: false });
+      const APesc = MUT.write(APF, anchored(apsrc, "...(curHeldWalled ? { escape: 'held-walled' } : {}), ...scrapsInfo(best)", '...scrapsInfo(best)', 'b6a92-si-held-wall-belt'), 'b6a92-si-held-wall-belt');
+      const engNoEsc = require(MUT.write(ENG, anchored(esrc, "require('../account-pool-auto.js')", `require(${J(APesc)})`, 'b6a92-si-held-wall-belt-eng', { count: 'any' }), 'b6a92-si-held-wall-belt-eng'));
+      const PWx = poolWorld(engNoEsc);
+      if (!PW) ok('B-6a92 r2923 THE REAL WALL ROAD — SKIP: pools unsupported on this platform', true);
+      else {
+        const heldNote = (PW.notices.find((t) => /answered it with a limit while its own numbers are unknown/.test(t)) || null);
+        ok('B-6a92 r2923 THE REAL WALL ROAD: Hale held at the start; its wall on the conversation recorded by the engine\'s own demote road; the per-session pass moves the conversation to the measured Mira — inside the 180 s dwell belt (a wall is a fact on the belt too) — and the notice names the cause (Hale answered it with a limit while held)',
+          PW.heldAtStart && PW.walledH && PW.on === PW.M && !!heldNote && /Hale/.test(heldNote), { heldAtStart: PW.heldAtStart, walledH: PW.walledH, on: PW.on === PW.M ? 'Mira' : PW.on === PW.H ? 'Hale' : PW.on, heldNote, notices: PW.notices.slice(-3) });
+        ok('B-6a92 r2923 …WITH NO WALL the conversation stays on the held Hale (judged as any unknown member: nothing moves it)', !!PWq && PWq.heldAtStart && !PWq.walledH && PWq.on === PWq.H, { on: PWq && (PWq.on === PWq.H ? 'Hale' : PWq.on) });
+        ok('B-6a92 RED CONTROL (r2923 1: the held wall\'s move carries no escape, in a copy): the 180 s dwell belt holds the walled conversation on Hale — the leg above can fail', !!PWx && PWx.walledH && PWx.on === PWx.H, { on: PWx && (PWx.on === PWx.H ? 'Hale' : PWx.on === PWx.M ? 'Mira' : PWx.on) });
+      }
+      // (r2923 4) THE REMOVAL'S JOURNAL SAYS THE TRUE REASON: the removed default's only other listed member is held — the parking pick
+      // passes it over, the default stays, and the line names the hold (never «no member is signed in and active»)
+      const rmWorld = (engMod) => {
+        const root = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-si-rm-')));
+        const dataDir = path.join(root, 'data'), am = new AccountManager({ dataDir });
+        if (!am.poolSupported()) return null;
+        const sub = (name) => { const id = am.createSubscription({ name }).id; fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 }); return id; };
+        const D = sub('Dara'), H = sub('Hale'), Z = sub('Zeno');
+        const P = am.createPool({ name: 'Pool', members: [D, H] }).id;
+        am.setPoolTarget(P, D); am.updatePool(P, { auto: true, hot: true });
+        const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+        const nS = Math.floor(Date.now() / 1000), INST = nS + 3 * 86400 + 5 * 3600 + 41;
+        for (const k of [H, Z]) { fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(k)), stampOf(INST, 60e3, false)); fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(k)), witOf(INST, 60e3)); }
+        const eng = engMod.create({ app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
+          serverNotice() { }, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getQuotaProbe: () => null });
+        quiet(() => eng.repairIdentityAnchors('boot'));
+        // an older record as it arrives (a boot before the first sweep): the pool lists Hale only, its default still Dara
+        am.get(P).members = [H];
+        const said = [], o = console.log, w = console.warn; console.log = (...a) => said.push(a.join(' ')); console.warn = () => { };
+        try { eng.memberRemoved(P, [D]); } finally { console.log = o; console.warn = w; }
+        return said.filter((l) => /removed-member evict .*\/default/.test(l));
+      };
+      const rmL = rmWorld(realEng);
+      const engRmOld = require(MUT.write(ENG, anchored(esrc, "          const heldN = (accounts.poolMembers(poolId) || []).filter((m) => m && m.id !== def && membership.includes(m.id) && heldForPool(m.id)).length;\n", '          const heldN = 0;\n', 'b6a92-si-rm-reason'), 'b6a92-si-rm-reason'));
+      const rmX = rmWorld(engRmOld);
+      if (rmL) {
+        ok('B-6a92 r2923 THE REMOVAL\'S JOURNAL SAYS THE TRUE REASON: the removed default\'s only other listed member is held — the default stays and the line names the hold (1 held on another account\'s weekly instant), never «no member the pool lists is signed in and active»',
+          rmL.length === 1 && /stays — no member the pool lists can take it: 1 held on another account's weekly instant/.test(rmL[0]) && !/is signed in and active/.test(rmL[0]), rmL);
+        ok('B-6a92 RED CONTROL (r2923 4: the hold not counted, in a copy): the line gives the untrue reason — the leg above can fail', !!rmX && rmX.length === 1 && /is signed in and active/.test(rmX[0]), rmX);
+      }
       const engSrc = read(ENG);
       // THE CHECK STARTS NO READ — by its own text, able to fail: holdSameInstants calls nothing on the read road
       const bodyOf = (t) => { const a = t.indexOf('function holdSameInstants('); const b = a < 0 ? -1 : t.indexOf('\n}\n', a); return a >= 0 && b > a ? t.slice(a, b) : ''; };
