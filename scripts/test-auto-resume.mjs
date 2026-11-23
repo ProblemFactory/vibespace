@@ -2418,6 +2418,8 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
       fires: { w1: { windowStart: now - 60e3, count: 1, fails: [{ at: now - 30e3, key: 'acct:a1' }], last: { at: now - 30e3 } } } }));
     return { dir, f, before: fs.readFileSync(f) };
   };
+  // a hold that lifts by itself (torn bytes: their copy is made off the loop, real I/O) — waited for ON THE FACT, bounded at 20 s
+  const heldGone = async (ar) => { const t0 = Date.now(); while (ar._hold.held() && Date.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 10)); };
   // the PLACED refusal of the module's own read (its one readFileSync of this file answers EIO; no mount, no mode change)
   const refusedRead = (f, fn) => { const rs0 = fs.readFileSync; fs.readFileSync = function (p2, ...a) { if (String(p2) === f) throw Object.assign(new Error('EIO: a placed refusal'), { code: 'EIO' }); return rs0.call(this, p2, ...a); }; try { return fn(); } finally { fs.readFileSync = rs0; } };
   const heldScene = (createFn) => {
@@ -2470,7 +2472,7 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-torn-')), f = path.join(dir, 'auto-resume.json'), torn = '{"armed":{"w1":{"at":';
     fs.writeFileSync(f, torn);
     const a = mkWith(create, dir);
-    for (let i = 0; i < 400 && a.ar._hold.held(); i++) await new Promise((r) => setImmediate(r));
+    await heldGone(a.ar);   // the torn bytes' copy is real I/O: the wait ends on the FACT (the hold lifted), bounded at 20 s — never a count of turns
     const copies = fs.readdirSync(dir).filter((n) => n.startsWith('auto-resume.json.corrupt-'));
     ok('19e. TORN BYTES: held while kept aside ONCE as their own copy (byte for byte), then it starts empty', a.ar._hold.held() === null && copies.length === 1 && fs.readFileSync(path.join(dir, copies[0]), 'utf8') === torn && a.ar._armed.size === 0, JSON.stringify(copies));
     a.ar.stop();
@@ -2500,7 +2502,7 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-lost-')), f = path.join(dir, 'auto-resume.json');
       fs.writeFileSync(f, '{"armed":{"w1":{"at":');
       const a = mkWith(createFn, dir);
-      for (let i = 0; i < 400 && a.ar._hold.held(); i++) await new Promise((r2) => setImmediate(r2));
+      await heldGone(a.ar);   // the same fact-ended wait (the trial's run of 11-23 13:10Z: 400 turns beat the copy on a loaded machine, the control saw no copy)
       const stopped = sess({ _stoppedBy: { kind: 'quota', at: Date.now() - 60e3, resetsAt: Date.now() + 3600e3 } });
       a.sessions.set('w1', stopped); a.sessions.set('w3', sess());
       const copy = fs.readdirSync(dir).find((n) => n.startsWith('auto-resume.json.corrupt-')) || null;

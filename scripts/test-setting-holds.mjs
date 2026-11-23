@@ -598,7 +598,8 @@ console.log('⑨ r3004 THE STORE-READ LAW — a failed read HOLDS the holds: no 
       const k = mk9(M, { bytes: torn });
       await k.S.start();
       const atStart = k.S._hold.held() === null;
-      await turns(400, () => k.S._hold.held() === null); await turns(50);
+      { const t0 = Date.now(); while (k.S._hold.held() !== null && Date.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 10)); }   // the copy is real I/O: ends on the FACT, bounded at 20 s — never a count of turns
+      await turns(50);
       const copies = fs.readdirSync(k.dir).filter((f) => f.startsWith('setting-holds.json.corrupt-'));
       return { k, atStart, copies, now: fs.readFileSync(k.file, 'utf8') };
     };
