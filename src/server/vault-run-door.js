@@ -906,17 +906,17 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** lane vault-use-grants: THE CARRY — the verified store's «always» rows (command shapes) become vault-use members (each
    *  entry × the conversation × the shape's hosts × its end), then the store keeps none; ONE audit line says how many. */
   function carryAlways() {
-    // r3130 (a): ONE row at a time — a row the vault-use marks' hold (or an undecided row) refused STAYS in the old list for the next
-    // read; never «carried» into an empty list
-    const c = { carried: 0, expired: 0, hostless: 0, failed: 0, legacy: 0, waits: 0 }, keep = [];
-    for (const a of db.always) {
-      let one = null;
-      try { one = useGrants.carry([a], { toolOfWild: VR.wildcardToolOf }); } catch (e) { log(`the «always» rows could not be carried (${e.message}) — they stay in data/${STORE_FILE}`); return; }
-      for (const k of Object.keys(c)) c[k] += Number(one && one[k]) || 0;
-      if (one && (one.held || one.waits)) keep.push(a);
-    }
+    // r3130 (a) + r3205 (round wg20wcxhh, its readers): ONE carry of the list (one read of the marks). While the marks are HELD nothing
+    // was carried, so every row STAYS whole for the next read; else a row keeps ONLY the entries that waited (an UNDECIDED row) — an
+    // entry already carried is never carried again, so the owner's ✕ or 除了 on it since stands
+    let c = null;
+    try { c = useGrants.carry(db.always, { toolOfWild: VR.wildcardToolOf }); } catch (e) { log(`the «always» rows could not be carried (${e.message}) — they stay in data/${STORE_FILE}`); return; }
+    c = c || {};
+    const waited = new Set((Array.isArray(c.waitedFor) ? c.waitedFor : []).map((x) => `${x.resource}\n${x.conv}`));
+    const keep = c.held ? db.always.slice() : db.always.map((a) => ({ ...a, entries: (Array.isArray(a.entries) ? a.entries : []).filter((id) => waited.has(`${id}\n${a.conv}`)) })).filter((a) => a.entries.length);
+    for (const k of ['carried', 'expired', 'hostless', 'failed', 'legacy', 'waits']) c[k] = Number(c[k]) || 0;
     const r = save({ runnable: db.runnable, always: keep });
-    audit('vault-run-always-carried', { ...c, rows: c.carried + c.expired + c.hostless + c.failed, saved: !!r.ok });
+    audit('vault-run-always-carried', { carried: c.carried, expired: c.expired, hostless: c.hostless, failed: c.failed, legacy: c.legacy, waits: c.waits, rows: c.carried + c.expired + c.hostless + c.failed + c.waits, saved: !!r.ok });   // r3205: the rows that wait are counted
     log(`data/${STORE_FILE}: ${c.carried} «always» member(s) carried into the vault-use grants (${c.expired} expired, ${c.hostless} with no host)${r.ok ? '' : ' — the store could not be rewritten; carried again at the next read'}`);
   }
   /** r3 (MAJOR 1 — the acceptance: the 2.369.363/.364 carry wrote legacy aws «always» members as `*.amazonaws.com` with NO tool;
@@ -1238,7 +1238,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       out.push({ ref: r ? r.ref : null, store: ref.store, label: ew.name, ...(ew.note ? { note: ew.note } : {}), kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), scopes: scopesWordsOf(hd.scopes), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
     }
     let standingUnread = null; try { standingUnread = useGrants && typeof useGrants.marksUnread === 'function' ? useGrants.marksUnread() : null; } catch { standingUnread = null; }   // r3104 (a): the standing approvals' marks held — said, never «none held»
-    return { ok: true, entries: out.filter((x) => x.ref), ...(standingUnread ? { standingUnread } : {}) };
+    const undecidedNow = undecidedOf(caller);   // r3205 (2): an UNDECIDED row naming this conversation — said, never «none held»
+    return { ok: true, entries: out.filter((x) => x.ref), ...(standingUnread ? { standingUnread } : {}), ...(undecidedNow.length ? { standingUndecided: { entries: undecidedNow, words: UNDECIDED_WORDS } } : {}) };
   }
 
   // ── THE CARD (exit-proxy's ask: one per conversation × shape, 60 s, the item and the ask ONE state) ──
@@ -2139,6 +2140,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return { ok: true, until, hours: GRANT_MS / 3600e3, hosts: gh, id: r.id, at: t };   // (r1823) + the grant's own id and time: its paste record keeps them
   }
   /** lane vault-standing-request: the standing (vault-use) grants THIS caller holds, as `uses` / `list` say them. */
+  // r3205 (2): the entries whose standing row is UNDECIDED (the vault-use marks were damaged) and names this conversation as stored
+  const UNDECIDED_WORDS = 'the vault-use marks of these approvals were damaged — they wait for the user, who decides each by saving «Who may use it» again; a run asks its card meanwhile, and asking for them again changes nothing';
+  function undecidedOf(caller) {
+    if (!useGrants || typeof useGrants.undecidedFor !== 'function' || !caller || !caller.conversationId) return [];
+    try {
+      const uf = useFacts(caller) || {};
+      const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
+      return useGrants.undecidedFor({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] }).map((h) => refOfId(h.id)).filter(Boolean);
+    } catch { return []; }
+  }
   function standingOf(caller) {
     if (!useGrants || !caller || !caller.conversationId) return [];
     try {
@@ -2171,6 +2182,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), ...wordsOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
       requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString(), ...(q.standing ? { standing: true, hosts: q.hosts, ...(q.commandWords ? { command: q.commandWords } : {}) } : {}) })),
       standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
+      ...(() => { let w = null; try { w = useGrants && typeof useGrants.marksUnread === 'function' ? useGrants.marksUnread() : null; } catch { w = null; } return w ? { standingUnread: w } : {}; })(),   // r3205 (1): the uses verb says the hold as the list verb does — never «none» from a held list
+      ...(() => { const u = undecidedOf(caller); return u.length ? { standingUndecided: { entries: u, words: UNDECIDED_WORDS } } : {}; })(),   // r3205 (2)
       // B-a14b: the approvals of this conversation that ENDED in the last 24 h — newest first — so an agent never reads a gone
       // approval as a bug: how it ended, when, and the request that asks again
       ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !usableHere(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && offSinceOf(dOn, e.id) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry THIS conversation can use now — ON, and its member resumed where a press opened it — is never «ask again»; B-a14b)

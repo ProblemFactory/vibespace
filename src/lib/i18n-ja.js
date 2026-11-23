@@ -12885,7 +12885,8 @@ export default {
   "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "この行のマークが失われました——行全体を望む形で保存すると（验证是你）決まります。✕ ひとつでは残すメンバーを保証できません。何も変更していません", // r3104 (a); r3130 (e)
   "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "壊れたマークはストアの横に {name} として残してあります——復元に使うコピーではありません。", // r3104 (a)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "検証できません：保管庫の使用マークを読み取れません——読み取れるまで使用されません。失われたものはありません。", // r3002 (a)
-  "Unverified: this row's marks were lost — save it again (验证是你) to keep these members; not in use until then.": "検証できません：この行のマークが失われました——もう一度保存すると（验证是你）これらのメンバーが保たれます。それまでは使用されません。", // r3002 (a)
+  "Unverified: this row's marks were damaged — save the row as you want it (验证是你): that decides it; not in use until then.": "未検証：この行のマークが壊れています——行を望む形で保存すると（验证是你）決まります。それまでは使用されません。", // r3002 (a); r3205
+  "unknown — this entry's vault-use marks were damaged; save «Who may use it» on it to decide (nothing is lost)": "不明——このエントリの保管庫使用マークが壊れています。「誰が使えるか」で保存すると決まります（失われたものはありません）", // r3205 (2)
   "Un-pause this — let it be used again": "一時停止を解除——再び使用可にする", // lane vault-use-grants (round 6)
   "every {host} host": "{host} のすべてのホスト", // lane vault-use-grants (round 3)
   "every {host} host (incl. other customers’ endpoints)": "{host} のすべてのホスト（他の顧客のエンドポイントを含む）", // lane vault-use-grants (round 3)

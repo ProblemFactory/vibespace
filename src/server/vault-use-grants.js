@@ -158,7 +158,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!raw || typeof raw !== 'object') return false;
     const res = raw.res && typeof raw.res === 'object' && !Array.isArray(raw.res) ? Object.fromEntries(Object.keys(raw.res).filter((k) => GM.resourceShapeOk(U.DOOR, k)).map((k) => [k, Number(raw.res[k]) || 0])) : {};
     const und = Array.isArray(raw.undecided) ? raw.undecided.filter((k) => typeof k === 'string' && GM.resourceShapeOk(U.DOOR, k)) : [];
-    const asideRead = und.length && typeof raw.aside === 'string' && /^vault-use-marks\.json\.corrupt-[\w.-]{1,80}$/.test(raw.aside) ? raw.aside : null;
+    const asideRead = und.length && typeof raw.aside === 'string' && raw.aside.length <= 300 ? raw.aside : null;   // r3205 (its reader): the second mark is verified over the copy's name AS STORED (a name the hold kept by hand still verifies); only what is SHOWN keeps the name's shape (publicFor)
     const g = Number(raw.gen) || 0;
     const macOk = (label, body, got) => { let want = null; try { want = vault.macOf(label, body); } catch { want = null; } const h = typeof got === 'string' && /^[0-9a-f]{64}$/.test(got) ? got : null; return !!(want && h && crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(want, 'hex'))); };
     if (!(g >= markGen && macOk(GEN_LABEL, genBody(g, res), raw.mark))) return false;
@@ -473,13 +473,13 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function carry(always, { resourceOf = (x) => x, toolOfWild = null } = {}) {
     const plan = U.alwaysCarry(always, { now: now(), resourceOf, toolOfWild });
     loadGen(); if (marksHeld()) return { held: true, carried: 0, expired: plan.expired, hostless: plan.hostless, failed: 0, legacy: 0, waits: plan.members.length };   // r3130 (a): nothing carried while held — the rows stay for the next read
-    let carried = 0, failed = 0, legacy = 0, waits = 0;
+    let carried = 0, failed = 0, legacy = 0, waits = 0; const waitedFor = [];   // r3205: which (entry, conversation) waited — the door keeps only those
     for (const m of plan.members) {
       const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null, legacy: !!m.legacy }, { by: 'migration' });
-      if (!r.ok && (r.code === 'marks_undecided' || r.code === 'vault_use_marks_unread')) { waits++; continue; }   // r3130 (a): it waits for the row's decision — never «failed»   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
+      if (!r.ok && (r.code === 'marks_undecided' || r.code === 'vault_use_marks_unread')) { waits++; waitedFor.push({ resource: String(m.resource), conv: (m.principal && m.principal.key) || null }); continue; }   // r3130 (a): it waits for the row's decision — never «failed»   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
       if (r.ok) { carried++; if (m.legacy) legacy++; } else { failed++; log(`[vault-use] an «always» row could not be carried (${m.resource}: ${r.code})`); }
     }
-    return { carried, expired: plan.expired, hostless: plan.hostless, failed, legacy, waits };
+    return { carried, expired: plan.expired, hostless: plan.hostless, failed, legacy, waits, waitedFor };
   }
   /** r3 (MAJOR 1): THE WILDCARD CARRY — every stored member's wildcard host with NO tool (the 2.369.363/.364 carry wrote them)
    *  gets the CLI the tool table names for it (`toolOfWild`), through the ONE writer, by 'migration'; one the table cannot name
@@ -515,7 +515,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // round 6 (MINOR item 6): while locked the members cannot be verified — list them «unverified until unlocked» (names/hosts,
     // never the value, never as a held grant), so a hand-written data/grants.json member is not shown as a real grant.
     if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
-    if (raw) { loadGen(); const why = marksHeld() ? 'marks_unread' : undecided.has(String(id)) ? 'marks_undecided' : null; if (why) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, unverifiedWhy: why, ...(why === 'marks_undecided' && undecidedAside ? { marksAside: undecidedAside } : {}), rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; } }   // r3002 (a): listed, never as a held grant
+    if (raw) { loadGen(); const why = marksHeld() ? 'marks_unread' : undecided.has(String(id)) ? 'marks_undecided' : null; if (why) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, unverifiedWhy: why, ...(why === 'marks_undecided' && undecidedAside && /^vault-use-marks\.json\.corrupt-[\w.-]{1,80}$/.test(undecidedAside) ? { marksAside: undecidedAside } : {}), rev: revSeen(id), to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; } }   // r3002 (a): listed, never as a held grant
     const p = U.publicGrants(verifiedRow(raw), { now: now() });
     const by = (counts && counts.grants) || {};
     return { ...p, rev: revSeen(id), to: p.to.map((e) => ({ ...e, uses: (by[e.grant] && by[e.grant].uses) || 0, convs: (by[e.grant] && by[e.grant].convs) || 0 })) };   // r11: by its grant id (`grant`); B-f212's remainder: the row's stamp (`rev`) a Save sends back
@@ -542,6 +542,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     for (const row of store().rowsOfDoor(U.DOOR)) {
       const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
       const base = { door: U.DOOR, resource: String(row.resource), name: nameOf(row.resource) };
+      if (undecided.has(String(row.resource))) { let rv = null; try { rv = U.useVerdict([row], facts, { destinationKnown: false, now: now() }); } catch { rv = null; } if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' }); continue; }   // r3205 (2): an UNDECIDED row that names this caller as stored is listed as unknown — never skipped as «nothing held» (it fails closed: a run asks its card)
       if (U.holds(v)) {
         const m = v.member || {}; const p = bare(m.principal || (v.entry ? GM.principalKey(v.entry) : ''));
         out.push({ ...base, ok: true, via: m.via || (v.entry && v.entry.kind), ...(p && p.kind === 'group' ? { groupId: p.id } : {}), detail: { hosts: Array.isArray(m.hosts) ? m.hosts.slice(0, 16) : [], until: m.until || null } });
@@ -550,9 +551,22 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     }
     return out;
   }
+  /** r3205 (2): the entries whose row is UNDECIDED and names this caller AS STORED (the agent's list and uses say them as waiting for
+   *  the owner — never «none»): [{ id }]. Nothing while held (marksUnread says it) or locked. */
+  function undecidedFor(facts = {}) {
+    if (!unlocked()) return [];
+    loadGen(); if (marksHeld() || !undecided.size) return [];
+    const out = [];
+    for (const row of store().rowsOfDoor(U.DOOR)) {
+      if (!row || !undecided.has(String(row.resource))) continue;
+      let v = null; try { v = U.useVerdict([row], facts, { destinationKnown: false, now: now() }); } catch { v = null; }
+      if (v && U.holds(v)) out.push({ id: String(row.resource) });
+    }
+    return out;
+  }
   /** r3104 (a): the hold's words while the marks are held (a second road's lookup — the agent's list — says it), else null */
   const marksUnread = () => { if (!unlocked()) return null; loadGen(); return marksHeld() ? marksHold.words() : null; };
-  return { _marksHold: marksHold, marksUnread, rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  return { _marksHold: marksHold, marksUnread, undecidedFor, rowsOf, verdictFor, heldBy, mayUseFor, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };

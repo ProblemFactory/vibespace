@@ -235,8 +235,99 @@ async function main() {
     ok(r.held && r.kept === 1 && r.carried && r.left === 0, '(a) THE RUN DOOR\'s carry of an old «always» row while the marks are HELD: the row STAYS in data/vault-run.json for the next read — and the next life, the marks read, carries it (the list then empty)', r);
     const M = mutantCopies('vault-side-stores-carry', REPO);
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-    const r2 = await alwaysScene(M.load('src/server/vault-run-door.js', anchored(SRC, '      if (one && (one.held || one.waits)) keep.push(a);\n', '', 'carry-keeps-nothing'), 'carry-keeps-nothing'));
+    const r2 = await alwaysScene(M.load('src/server/vault-run-door.js', anchored(SRC, 'const keep = c.held ? db.always.slice() : ', 'const keep = false ? db.always.slice() : ', 'carry-keeps-nothing'), 'carry-keeps-nothing'));
     ok(r2.kept === 0 && !r2.carried, '(a) CONTROL (a door whose carry keeps nothing): the held read empties the list and the row is never carried — red', r2);
+  }
+  // ── r3205 (round wg20wcxhh on line 669): the round's SMALLS and its readers' shoulds ──
+  const TORN = '{"v":1,"gen":2,"res":{"secrets:secr';
+  const nameOfId = (id) => id.slice('secrets:'.length, -'#secret'.length);
+  async function decideE1(w, ug) {   // torn marks: both rows undecided; the owner's Save decides e1 — e2 stays undecided
+    fs.writeFileSync(w.MARKS, TORN); ug.publicFor(w.e1);
+    await until(() => { try { return !fs.readFileSync(w.MARKS, 'utf8').startsWith(TORN); } catch { return false; } }, 3000); await sleep(30); ug.publicFor(w.e1);
+    return ug.setRow(w.e1, { to: [w.m1] }, { reauthed: true });
+  }
+  const RUNR = require(path.join(REPO, 'src/server/vault-run-door.js'));
+  {
+    // SMALLS 1 + 2: the agent's `uses` says the hold as `list` does; an UNDECIDED row naming the caller is listed as unknown in
+    // Session Properties' «what it may use» and as waiting in the agent's list and uses — never skipped as «nothing held».
+    // REDs: a door whose uses drops the hold's words; a copy whose undecided answers are taken out
+    const usesScene = async (runMod, ugMod = UG) => {
+      const w = await marksWorld(ugMod);
+      const door = (ug) => runMod.create({ dataDir: w.dataDir, vault: w.vault, userTodos: null, sources: {}, log: () => { }, useGrants: ug });
+      const me = { conversationId: 'cid-made-up-2', scope: 'cid-made-up-2' };
+      const pr = placeRefusal(w.MARKS);
+      let heldUses = null;
+      try { heldUses = door(w.mk()).usesFor(me); } finally { pr.lift(); }
+      const ug = w.mk(); await decideE1(w, ug);
+      const may = ug.mayUseFor({ conversationKeys: ['cid-made-up-2'] }) || [];
+      const d = door(ug), ref = `vault://secrets/${nameOfId(w.e2)}/secret`;
+      const usesUnd = ((d.usesFor(me) || {}).standingUndecided || {}).entries || [], listUnd = ((d.runnableFor(me) || {}).standingUndecided || {}).entries || [];
+      return { heldWords: !!(heldUses && /could not be read/.test(String(heldUses.standingUnread || ''))), mayUnd: may.some((r) => r.resource === w.e2 && r.code === 'marks_undecided' && r.ok === false), usesUnd: usesUnd.includes(ref), listUnd: listUnd.includes(ref) };
+    };
+    const r = await usesScene(RUNR);
+    ok(r.heldWords, '(a) r3205 (1): the agent\'s `uses` while the marks are HELD carries the hold\'s words, as `list` does — never «none» from a held list', r);
+    ok(r.mayUnd && r.usesUnd && r.listUnd, '(a) r3205 (2): an UNDECIDED row that names the conversation is listed as unknown in «what it may use», and as waiting for the user in the agent\'s list and uses', r);
+    const M = mutantCopies('vault-side-stores-uses', REPO);
+    const SRCd = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const noHeldUses = anchored(SRCd, "      ...(() => { let w = null; try { w = useGrants && typeof useGrants.marksUnread === 'function' ? useGrants.marksUnread() : null; } catch { w = null; } return w ? { standingUnread: w } : {}; })(),", '', 'uses-no-hold');
+    const r2 = await usesScene(M.load('src/server/vault-run-door.js', noHeldUses, 'uses-no-hold'));
+    ok(!r2.heldWords, '(a) CONTROL (a door whose uses drops the hold\'s words): `uses` says nothing of the hold — red', r2);
+    const SRCg = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8');
+    const noUnd = anchored(anchored(SRCg, "if (rv && U.holds(rv)) out.push({ ...base, ok: false, code: 'marks_undecided' }); continue; }", '}', 'may-no-undecided'), 'if (v && U.holds(v)) out.push({ id: String(row.resource) });', '', 'list-no-undecided');
+    const r3 = await usesScene(RUNR, M.load('src/server/vault-use-grants.js', noUnd, 'no-undecided'));
+    ok(!r3.mayUnd && !r3.usesUnd && !r3.listUnd, '(a) CONTROL (a copy without the undecided answers): the undecided row is skipped as «nothing held» everywhere — red', r3);
+  }
+  {
+    // SMALL 3: the second word on a DECIDING Save has a red of its own — a copy that drops ONLY the «undecided» half of the check
+    const M = mutantCopies('vault-side-stores-word', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-use-grants.js'), 'utf8');
+    const half = anchored(SRC, 'undecided.has(String(id)) || widens(was, { to: rowTo, except: v.row.except })', 'widens(was, { to: rowTo, except: v.row.except })', 'no-undecided-word');
+    const w = await marksWorld(M.load('src/server/vault-use-grants.js', half, 'no-undecided-word')), ug = w.mk();
+    fs.writeFileSync(w.MARKS, TORN); ug.publicFor(w.e2);
+    await until(() => { try { return !fs.readFileSync(w.MARKS, 'utf8').startsWith(TORN); } catch { return false; } }, 3000); await sleep(30);
+    const undecidedFirst = ug.publicFor(w.e2).unverifiedWhy === 'marks_undecided';
+    const noWord = ug.setRow(w.e2, { to: [w.m2] }, { reauthed: false });
+    ok(undecidedFirst && !!noWord && noWord.ok, '(a) CONTROL (r3205 (3): a copy without the «undecided» half of the second word): the deciding Save goes through with no 验证是你 — red', { undecided: undecidedFirst, save: noWord && (noWord.ok ? 'ok' : noWord.code) });
+  }
+  {
+    // SMALL 4: an entry's delete while HELD, at the PASTE DOOR's own reply — the hold's code and words, and the entry stays
+    const PD = require(path.join(REPO, 'src/server/vault-paste-door.js'));
+    const w = await marksWorld();
+    const paste = PD.create({ vault: w.vault, useGrants: w.mk(), log: () => { } });
+    const pr = placeRefusal(w.MARKS);
+    let r = null;
+    try { r = paste.dropEntry(nameOfId(w.e2).slice('secret:'.length)); } finally { pr.lift(); }
+    const still = (w.vault.secretNames() || []).some((x) => x && `secrets:${x.name}#secret` === w.e2);
+    ok(!!r && !r.ok && r.code === 'vault_use_marks_unread' && /could not be read/.test(String(r.words || r.error || '')) && still, '(a) r3205 (4): an entry\'s delete while HELD, at the paste door\'s own reply: the hold\'s code and words — the entry stays', { code: r && r.code, words: !!(r && (r.words || r.error)), still });
+  }
+  {
+    // ALSO (the round's readers): an old «always» row of TWO entries, one UNDECIDED — the door keeps ONLY the entry that waited; the
+    // carried one is never carried again, so the owner's ✕ on it stands at the next read. RED: the whole row kept when one entry waits
+    const VRC = require(path.join(REPO, 'src/vault-run.js'));
+    async function twoScene(runMod) {
+      const w = await marksWorld(), ug = w.mk();
+      await decideE1(w, ug);
+      const ids = [w.e1, w.e2].sort();
+      const key = VRC.shapeKeyOf({ tool: '/usr/bin/curl', sub: [], flags: ['-s'], args: ['url'], hosts: ['api.router.lan'], entries: ids.map((id) => `vault://secrets/${nameOfId(id)}/secret`), injection: ['env:T'], env: [], templates: [], on: null, script: null, keyed: [] });
+      const body = JSON.stringify({ v: 1, gen: 7, runnable: ids, always: [{ conv: 'cid-made-up-9', key, until: null, entries: ids, at: Date.now(), by: 'user' }] });
+      const STORE = path.join(w.dataDir, RUNR.STORE_FILE);
+      fs.writeFileSync(STORE, JSON.stringify({ ...JSON.parse(body), mark: w.vault.macOf(RUNR.MARK_LABEL, body) }));
+      const door = (u) => runMod.create({ dataDir: w.dataDir, vault: w.vault, userTodos: null, sources: {}, log: () => { }, useGrants: u });
+      const row = { id: w.e1, store: 'secrets', entry: nameOfId(w.e1), field: 'secret' };
+      door(ug).rowFacts(row);
+      const on = () => JSON.stringify(w.onDisk(w.e1)).includes('cid-made-up-9');
+      const carried = on();
+      const rv = ug.revoke(w.e1, 'conversation:cid-made-up-9');   // the owner's ✕ on the carried member
+      door(w.mk()).rowFacts(row);   // the next read (a new life)
+      return { carried, revoked: !!(rv && rv.ok), back: on(), kept: ((jsonOr(STORE) || {}).always || []).map((a) => (a.entries || []).length) };
+    }
+    const r = await twoScene(RUNR);
+    ok(r.carried && r.revoked && !r.back && r.kept.length === 1 && r.kept[0] === 1, '(a) r3205 (its readers): an old «always» row of two entries, one UNDECIDED — the door keeps ONLY the entry that waited; the owner\'s ✕ on the carried one stands at the next read', r);
+    const M = mutantCopies('vault-side-stores-two', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const whole = anchored(SRC, '.filter((a) => a.entries.length);', '.filter((a) => a.entries.length); if (c.waits) keep.splice(0, keep.length, ...db.always);', 'whole-row-keep');
+    const r2 = await twoScene(M.load('src/server/vault-run-door.js', whole, 'whole-row-keep'));
+    ok(r2.carried && r2.back, '(a) CONTROL (the whole row kept when one entry waits): the next read puts the ✕-ed member back — red', r2);
   }
   {
     // the HELD scene's own red: a copy whose write doors do not ask the hold

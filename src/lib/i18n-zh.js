@@ -12886,7 +12886,8 @@ export default {
   "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "这一行的标记丢失了——按你想要的样子保存整行（验证是你）即可决定它；单独一个 ✕ 无法为它留下的成员作保。没有做任何改动", // r3104 (a); r3130 (e)
   "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "损坏的标记保存在存储旁边，名为 {name}——它不是可以用来恢复的副本。", // r3104 (a)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "无法验证：保险库的使用标记读不出来——在读出之前不生效；没有丢失任何东西。", // r3002 (a)
-  "Unverified: this row's marks were lost — save it again (验证是你) to keep these members; not in use until then.": "无法验证：这一行的标记丢失了——再保存一次（验证是你）即可保留这些成员；在此之前不生效。", // r3002 (a)
+  "Unverified: this row's marks were damaged — save the row as you want it (验证是你): that decides it; not in use until then.": "无法验证：这一行的标记已损坏——按你想要的样子保存这一行（验证是你）即可决定它；在此之前不生效。", // r3002 (a); r3205
+  "unknown — this entry's vault-use marks were damaged; save «Who may use it» on it to decide (nothing is lost)": "未知——这个条目的保险库使用标记已损坏；在它的「谁可以用」里保存一次即可决定（没有丢失任何东西）", // r3205 (2)
   "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)
   "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)
   "every {host} host (incl. other customers’ endpoints)": "{host} 下的每个主机（含其他客户的端点）", // lane vault-use-grants (round 3)

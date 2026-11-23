@@ -263,9 +263,11 @@ async function usesCmd() {
   const d = await callCoded('GET', '/api/agent/vault/uses', undefined, 'uses');
   if (d.state && d.state !== 'unlocked') console.log('vault: ' + (SAYS[d.state] || d.state));
   console.log('grants (this conversation):');
-  if (!d.grants || !d.grants.length) console.log('  none');
+  if ((!d.grants || !d.grants.length) && !d.standingUnread && !d.standingUndecided) console.log('  none');   // r3205 (1): never «none» from a held or undecided list
   for (const g of d.grants || []) console.log(`  ${g.entry}${g.name ? `  «${g.name}»` : ''}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}${g.note ? `\n      what it is: ${g.note}` : ''}`);   // name / note: lane vault-entry-description
   for (const s of d.standing || []) console.log(`  ${s.entry}  standing · ${standingScope(s)} · since ${s.since ? whenAt(s.since) : '?'}${s.until && !perScope(s) ? ` · until ${whenAt(s.until)}` : ''}${s.paused ? ' · PAUSED (the user turned the entry off)' : ''}  (${s.grant})`);   // lane vault-standing-request
+  if (d.standingUnread) console.log(`  standing approvals: ${d.standingUnread}`);   // r3205 (1): the marks held — a run asks its card meanwhile
+  if (d.standingUndecided) console.log(`  standing approvals waiting for the user: ${(d.standingUndecided.entries || []).join(', ')} — ${d.standingUndecided.words}`);   // r3205 (2)
   // B-a14b: an approval that ENDED is listed as itself (an agent once reported a lost 8-hour approval as a bug) — how and when
   // it ended, and the request that asks again
   if (d.ended && d.ended.length) {
@@ -447,6 +449,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (d && d.standingUnread) console.log(`standing approvals: ${d.standingUnread}`);   // r3104 (a): the marks held — a run asks its card meanwhile
+    if (d && d.standingUndecided) console.log(`standing approvals waiting for the user: ${(d.standingUndecided.entries || []).join(', ')} — ${d.standingUndecided.words}`);   // r3205 (2)
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
     for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until && !perScope(e) ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}${e.note ? `\n    what it is: ${e.note}` : '\n    what it is: (no description — if you know it, propose one: vibespace-vault describe ' + e.ref + ' --note "…")'}`);   // own: lane vault-agent-own · standing: lane vault-use-grants   // lane vault-entry-description r2 (MINOR d): line 1 = the base's reference line, its access fact on it; the description its OWN next line
     return;
