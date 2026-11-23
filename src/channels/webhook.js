@@ -16,6 +16,15 @@
  *              HMAC caller the secret-box ciphertext `tokenEnc`; `generation` moves on every rotate / revoke
  *   pending  = data/channels/webhook/pair-pending.json (0600, atomic; lane webhook-pair-join): the pairing codes A minted
  *              and their deadlines — each token as a secret-box `tokenEnc`, never the code itself (pairPendingDoor)
+ *   THE STORE-READ LAW (B-f276's family, 主开发 r3145, lane bl-ci): the release read ANY failure of either file (a refused read,
+ *              torn bytes) as an empty list, and the next registration, pairing or pairing code saved that empty list plus one
+ *              row over the file: every path and caller gone (their token hashes, sealed tokens and pairings), every caller's
+ *              call refused as unknown meanwhile, the last ten minutes' codes void. Each file now reads through src/store-read.js
+ *              and HOLDS on src/store-read-hold.js: «not there» (start empty) is told from «the read failed» (HELD: nothing
+ *              written over it, read again off the loop on the helper's ladder, lifted with no restart) and from «the bytes do not
+ *              parse» (kept aside once per content, then empty). While held every act that writes is refused BY NAME (503, its
+ *              code) before any side effect, and every road that looks a caller up answers the hold — a caller's own call and
+ *              poll «try again later» (503), never «unknown» — through `held()` / the refusal a read throws.
  *
  * Declared facts the engine reads instead of a `builtin` branch: `removable: false`, `consent: null`, `reach: 'grants'`
  * (AgentReach rows, like any vendor), `listed: true` (the first screen and the lists count it), `seed: true` (the engine
@@ -32,6 +41,8 @@ const WP = require('../webhook-pair.js');   // lane webhook-l3-cli-pair: a `peer
 const WA = require('../webhook-auth.js');
 const RP = require('../webhook-reply.js');
 const WR = require('../webhook-record.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // B-f276's family (主开发 r3145): callers.json + pair-pending.json under the store-read law
 
 const KIND = 'webhook';
 
@@ -62,6 +73,15 @@ const NAME_MAX = 80;
 const REPLY_NAME_DEFAULT = 'VibeSpace';
 const DELIVERY = RP.DELIVERY_MODES;
 const hmacHex = (key, text) => crypto.createHmac('sha256', String(key)).update(String(text)).digest('hex');
+// THE TWO HELD CODES (503) and their words — the store's plain name, what still holds, what to do; never a path, a caller's name,
+// a token, a hash or a sealed field (the secret lens). The page words them by code (src/lib/channel-webhook.js heldWords).
+const CALLERS_UNREAD = 'webhook_callers_unread';
+const PENDING_UNREAD = 'webhook_pairing_unread';
+const CALLERS_SHAPE = (d) => !!d && typeof d === 'object' && !Array.isArray(d) && !!d.paths && typeof d.paths === 'object' && !Array.isArray(d.paths);
+const PENDING_SHAPE = (d) => !!d && typeof d === 'object' && !Array.isArray(d) && (d.rows === undefined || Array.isArray(d.rows));
+const callersWords = (h) => `VibeSpace cannot read its webhook callers right now (${(h && h.code) || 'unreadable'}) — nothing was changed and nothing is written over them, and each caller is told to try again later. VibeSpace reads them again by itself every few minutes.`;
+const pendingWords = (h) => `VibeSpace cannot read its pending pairing codes right now (${(h && h.code) || 'unreadable'}) — no code was made or used and nothing is written over them. VibeSpace reads them again by itself every few minutes.`;
+const holdLog = (s) => console.warn(`[webhook] ${s}`);
 
 function writeJsonAtomic(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -77,10 +97,23 @@ const cleanName = (s, max = NAME_MAX) => String(s == null ? '' : s).replace(/[\u
  *  new one); `write(rows)` seals each token and writes the file atomically at 0600. Never a GET, never a broadcast. */
 function pairPendingDoor(dir, { secrets }) {
   const file = path.join(dir, PENDING_FILE);
-  return {
-    file,
+  // B-f276's family (r3145): the file HOLDS — a read that failed is never «no code pending» (the next mint wrote its one row over
+  // the others); `read()` throws the refusal while held, `write()` refuses, the lift calls the door's `onLift` (the routes bind again)
+  let value = null, started = false;
+  const door = { file, onLift: null };
+  const hold = HOLD.create({ file, valid: PENDING_SHAPE, code: PENDING_UNREAD, aside: (mark) => `${file}.corrupt-${mark}`, words: pendingWords, log: holdLog,
+    onLift: (v) => { value = v || { v: 1, rows: [] }; if (typeof door.onLift === 'function') door.onLift(); } });
+  return Object.assign(door, {
+    held: () => hold.held(), words: () => hold.words(), refusal: (what) => hold.refusal(what), stop: () => hold.stop(),
     read() {
-      let d; try { d = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return []; }
+      if (!started) {   // the ONE sync read, at the routes' bind (as before)
+        started = true;
+        let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+        const a = SR.storeAnswer(read, { valid: PENDING_SHAPE });
+        value = hold.start(a) === 'data' ? a.value : { v: 1, rows: [] };
+      }
+      hold.refuse('reading the pending pairing codes');
+      const d = value;
       return (d && Array.isArray(d.rows) ? d.rows : []).map((r) => {
         if (!r || typeof r !== 'object' || typeof r.tokenEnc !== 'string') return null;
         let token = null; try { token = secrets.open(r.tokenEnc); } catch { token = null; }
@@ -88,8 +121,12 @@ function pairPendingDoor(dir, { secrets }) {
         return token ? { ...rest, token } : null;
       }).filter(Boolean);
     },
-    write(rows) { writeJsonAtomic(file, { v: 1, rows: rows.map(({ token, ...r }) => ({ ...r, tokenEnc: secrets.seal(token) })) }); },
-  };
+    write(rows) {
+      if (!hold.writable('a pairing code change')) throw hold.refusal('this pairing code change');   // held: nothing written over it
+      const next = { v: 1, rows: rows.map(({ token, ...r }) => ({ ...r, tokenEnc: secrets.seal(token) })) };
+      writeJsonAtomic(file, next); value = next;
+    },
+  });
 }
 
 /** A caller as anybody may SEE it — never a hash, a ciphertext or a token. */
@@ -109,15 +146,35 @@ function callersStore(dir, { secrets, now = Date.now } = {}) {
   if (have) { if (secrets) have.secrets = secrets; return have; }
   const bus = new EventEmitter(); bus.setMaxListeners(0);
   let doc = null;
+  // B-f276's family (r3145): callers.json HOLDS on a failed read — every read below throws the hold's refusal (no road hears «no
+  // caller»), every writer is refused before its side effect (its first step is a read), and `save` refuses on its own
+  const hold = HOLD.create({ file, valid: CALLERS_SHAPE, code: CALLERS_UNREAD, aside: (mark) => `${file}.corrupt-${mark}`, words: callersWords, log: holdLog,
+    onLift: (v) => { doc = v || { v: 1, paths: {} }; bus.emit('change', { lifted: true }); } });
   const load = () => {
-    if (doc) return doc;
-    try { const d = JSON.parse(fs.readFileSync(file, 'utf-8')); doc = d && typeof d === 'object' && d.paths && typeof d.paths === 'object' ? d : { v: 1, paths: {} }; } catch { doc = { v: 1, paths: {} }; }
+    if (!doc) {   // the ONE sync read at the store's first use (as before)
+      let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: CALLERS_SHAPE });
+      doc = hold.start(a) === 'data' ? a.value : { v: 1, paths: {} };
+    }
+    hold.refuse('reading the webhook callers');
     return doc;
   };
-  const save = (next) => { writeJsonAtomic(file, next); doc = next; };
+  const save = (next) => { if (!hold.writable('a webhook callers change')) throw hold.refusal('this change'); writeJsonAtomic(file, next); doc = next; };
   const clone = () => JSON.parse(JSON.stringify(load()));
   const S = {
     secrets: secrets || null, bus, file, dir,
+    /** the hold's facts {file, code, since} while callers.json could not be read — null when it reads (asked after the first read) */
+    held() { if (!doc) { try { load(); } catch { /* held: the facts below */ } } return hold.held(); },
+    /** the words a person reads while held (null: not held) — no path, caller, token or hash */
+    heldWords: () => hold.words(),
+    /** the refusal BY NAME (503, webhook_callers_unread) of `what` while held */
+    refusal: (what) => hold.refusal(what),
+    /** a lift from TORN bytes in this run: { copy, since, at } (the copy's base name) — null when none */
+    torn: () => hold.torn(),
+    /** a slug a torn lift of THIS run may have lost: not in the list, and the list started empty from torn bytes — the door
+     *  answers it «try again later», never «unknown» (the restart-proof half is the helper's copy question: owed) */
+    lostSlug(slug) { if (!hold.torn()) return false; try { return !load().paths[slug]; } catch { return false; } },
+    stopHold: () => hold.stop(),
     paths() { return Object.keys(load().paths); },
     path(slug) { const p = load().paths[slug]; return p ? { slug, title: p.title || slug, replyName: p.replyName || REPLY_NAME_DEFAULT, disabled: p.disabled === true, ipAllow: Array.isArray(p.ipAllow) ? p.ipAllow.slice() : [] } : null; },
     /** the RAW rows (hash / ciphertext included) — the auth step's and the send's read; never a view. */
@@ -233,7 +290,7 @@ function callersStore(dir, { secrets, now = Date.now } = {}) {
       if (c.auth === 'bearer') return typeof c.tokenHash === 'string' ? c.tokenHash : null;
       try { return S.secrets && c.tokenEnc ? S.secrets.open(c.tokenEnc) : null; } catch { return null; }
     },
-    reset() { doc = null; },
+    reset() { if (!hold.held()) doc = null; },   // a held store is read again by its ladder, never here
   };
   STORES.set(file, S);
   return S;
@@ -301,7 +358,9 @@ function create(record = {}, deps = {}) {
   const findRecord = typeof deps.findRecord === 'function' ? deps.findRecord : () => null;
   const fetchFence = typeof deps.fenceFetch === 'function' ? deps.fenceFetch : EF.fenceFetch;
   let emitter = null, onState = null, beat = null;
-  const need = () => { if (!S) throw new ChannelError('send-not-available', 'the webhook adapter has no data directory', { retryable: false, detail: { why: 'no-store' } }); return S; };
+  // B-f276's family (r3145): callers.json HELD answers its own words to every lookup — retryable, never «not found» / «no caller»
+  const heldError = () => new ChannelError('transport', S.heldWords(), { retryable: true, detail: { why: 'callers-unread', named: true } });
+  const need = () => { if (!S) throw new ChannelError('send-not-available', 'the webhook adapter has no data directory', { retryable: false, detail: { why: 'no-store' } }); if (S.held()) throw heldError(); return S; };
   const refusal = (r) => new ChannelError(r.code === 'bad-proposal' ? 'send-not-available' : r.code, r.error, { retryable: false, detail: { why: r.why, named: true, callers: (r.callers || []).map((c) => ({ id: c.id, name: c.name, delivery: c.delivery })) } });
 
   async function deliverTo(convId, c, { text, replyId, inReplyTo }) {
@@ -348,10 +407,12 @@ function create(record = {}, deps = {}) {
     },
     async listConversations() {
       if (!S) return { conversations: [], cursor: null, complete: true };
+      if (S.held()) throw heldError();   // r3145: a held list is no COMPLETE listing — its paths are never marked unlisted by its silence
       const conversations = S.paths().map((slug) => { const p = S.path(slug); const cs = S.callers(slug).filter((c) => !c.revokedAt); return { id: slug, vendorId: slug, title: p.title, kind: cs.length > 1 ? 'group' : 'dm', participants: cs.map((c) => c.name).join(', ') || p.title, lastAt: null }; });
       return { conversations, cursor: null, complete: true };
     },
     async convCaps(convId) {
+      if (S && S.held()) throw heldError();   // r3145: held — never «not-found» for a path the unread list may hold
       const p = S ? S.path(convId) : null;
       const n = p ? S.callers(convId).filter((c) => !c.revokedAt).length : 0;
       return p && !p.disabled ? { read: 'yes', sendAs: ['user'], why: null, at: clock(), audience: { kind: 'external', orgs: [], members: n } } : { read: 'yes', sendAs: [], why: p ? 'disabled' : 'not-found', at: clock() };
@@ -378,6 +439,8 @@ function create(record = {}, deps = {}) {
     },
     /** THE SEND — the caller is RE-READ now (revoked ⇒ not-found; rotated ⇒ its new key signs). */
     async send(convId, { text, idemKey, envelope = null } = {}) {
+      // r3145: held — the send waits (retryable, the hold's words), never «no longer a caller» of a caller the unread list holds
+      if (S && S.held()) return { ok: false, code: 'transport', retryable: true, detail: { why: 'callers-unread', reason: S.heldWords() } };
       const st = need();
       const to = envelope && typeof envelope.to === 'string' ? envelope.to : null;
       const c = to ? st.caller(convId, to) : null;
@@ -440,5 +503,6 @@ module.exports = {
   vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's rows of callers.json (the engine asks a module that declares them)
   kind: KIND, caps, create, label: 'Webhook', policyDefault: 'direct', sendStartsTurn: false, EGRESS,
   removable: false, consent: null, reach: 'grants', listed: true, seed: true,
-  callersStore, callerView, deliveryVerdict, pollAnswer, cursorOf, cursorSeq, queueAppend, hmacHex, POLL_MAX, POLL_TTL_MS, REPLY_NAME_DEFAULT, pairPendingDoor, PENDING_FILE,
+  callersStore, callerView, deliveryVerdict, pollAnswer, cursorOf, cursorSeq, queueAppend, hmacHex, POLL_MAX, POLL_TTL_MS, REPLY_NAME_DEFAULT, pairPendingDoor, PENDING_FILE, CALLERS_FILE,
+  CALLERS_UNREAD, PENDING_UNREAD,   // B-f276's family (r3145): the two held codes (503) the routes and the page answer by name
 };

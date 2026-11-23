@@ -87,8 +87,12 @@ async function hookDoor(req, res, slugIn) {
   // ② verify r1 #4: the stranger gate is ASKED here and CHARGED only by a refusal at ①–⑤ (a proven caller pays ⑪)
   if (ipGate.blocked(addr, t)) return refused(req, res, { step: 'ip', answer: 'rate-limited' });           // ②
   const st = store();
+  // B-f276's family (主开发 r3145): callers.json HELD (its read failed) — every caller hears «try again later» (503), never the
+  // 401 of an unknown caller (a caller told «unknown» may drop its registration); nothing read, the stranger gate not charged
+  if (st && st.held()) return refused(req, res, { step: 'held', answer: 'try-again' });
   const sv = WA.verdict('slug', { slug });                                                                   // ③
   const p = !sv.miss && st ? st.path(slug) : null;
+  if (!p && !sv.miss && st && st.lostSlug(slug)) return refused(req, res, { step: 'held', answer: 'try-again' });   // r3145: a path a torn lift of this run may have lost
   const cv = WA.verdict('caller', { path: p, callers: p ? st.callersRaw(slug) : [], remote: addr });         // ④ (the allow-list judges the client address)
   const av = WA.verdict('auth', { bearer: bearerOf(req.headers.authorization), headers: req.headers, callers: cv.callers, now: t }, { tokenMatches: PT.tokenMatches, dummyHash: DUMMY_HASH });   // ⑤
   if (!av.ok) { ipGate.charge(addr, t); return refused(req, res, av); }
@@ -165,6 +169,7 @@ router.get('/api/channels/webhook/:slug/replies', async (req, res) => {
   const addr = clientAddr(req);
   if (ipGate.blocked(addr, t0)) return answer(res, 'rate-limited');   // verify r1 #4: a caller's own poll is never charged — only a refused one
   const st = store();
+  if (st && (st.held() || st.lostSlug(slug))) return answer(res, 'try-again');   // r3145: the callers list held — «try again later», never 401
   const c = pollCaller(req, st, slug, addr);
   if (!c) { ipGate.charge(addr, t0); return answer(res, 'unauthorized'); }
   const gen = c.generation;
@@ -193,6 +198,10 @@ const pending = WP.createPending();
 /** lane webhook-pair-join (B-5ee0 b): the pending codes live in data/channels/webhook/pair-pending.json (sealed tokens,
  *  0600) — reloaded here at boot, the expired swept; a timer sweeps each row at its deadline. No secret box ⇒ memory. */
 let sweepTimer = null;
+// B-f276's family (主开发 r3145): the pending codes' door HOLDS while pair-pending.json could not be read — the memo is left
+// unbound (its read threw the refusal), a mint and a completion are refused by name, and the lift binds it again
+let pendingDoor = null;
+const pendingHeld = () => (pendingDoor && pendingDoor.held() ? pendingDoor : null);
 function armSweep() {
   if (sweepTimer) clearTimeout(sweepTimer);
   sweepTimer = null;
@@ -203,15 +212,31 @@ function armSweep() {
 }
 function bindPending() {
   const e = engine();
+  if (pendingDoor) { try { pendingDoor.stop(); } catch { } }
+  pendingDoor = null;
   try {
     if (!e || !e.secrets || !D.dataDir) pending.bind(null, D.now());
     else {
       const door = WH.pairPendingDoor(path.join(D.dataDir, 'channels', ADAPTER_ID), { secrets: e.secrets });
-      pending.bind({ read: door.read, write: (rows) => { door.write(rows); armSweep(); } }, D.now());
+      pendingDoor = door;
+      const bindTo = () => pending.bind({ read: door.read, write: (rows) => { door.write(rows); armSweep(); } }, D.now());
+      door.onLift = () => { try { bindTo(); } catch (err) { console.warn('[webhook] pair-pending reload at the lift:', err && err.message); } armSweep(); };
+      bindTo();
     }
-  } catch (err) { console.warn('[webhook] pair-pending reload:', err && err.message); }
+  } catch (err) { if (!(err && err.code === WH.PENDING_UNREAD)) console.warn('[webhook] pair-pending reload:', err && err.message); }   // held: said once by the hold
   armSweep();
 }
+/** r3145: a held webhook file refuses an OWNER's act BY NAME (503, its code, the hold's words) before any side effect;
+ *  `pairing` = the act also mints or reads a pending code (pair-pending.json held refuses it too) */
+function heldRefused(res, { pairing = false } = {}) {
+  const st = store();
+  const h = st && st.held() ? { f: st.held(), code: WH.CALLERS_UNREAD, words: st.heldWords() } : pairing && pendingHeld() ? { f: pendingDoor.held(), code: WH.PENDING_UNREAD, words: pendingDoor.words() } : null;
+  if (!h) return false;
+  res.set('Cache-Control', 'no-store'); res.set('Retry-After', '60');
+  res.status(503).json({ ok: false, code: h.code, error: h.words, held: { file: h.f.file, code: h.f.code, since: h.f.since } });
+  return true;
+}
+const PAIR_HELD = 'this side cannot read its webhook callers or pairing codes right now — nothing was written and the code is not spent; try the same code again in a few minutes';
 const pairParser = express.raw({ type: () => true, limit: `${WP.FRAME_MAX}b` });
 const allowPrivate = () => D.serverSetting('webhook.allowPrivateReplyUrl') === true;
 /** This instance's own URL (instanceUrl — the frp mapping layered over agentd.publicUrl), no trailing slash, or null. */
@@ -229,6 +254,9 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
   const addr = clientAddr(req);
   if (ipGate.blocked(addr, t)) return answer(res, 'rate-limited');
   const st = store();
+  // r3145: either file held — refused by name before a byte is read (the code not spent, nothing written): the other side's
+  // join reads `store-blocked` as «try the same code again once it reads»
+  if ((st && st.held()) || pendingHeld()) { res.set('Connection', 'close'); res.set('Retry-After', '60'); return res.status(503).set('Cache-Control', 'no-store').json({ ok: false, code: 'store-blocked', error: PAIR_HELD }); }
   const callerId = String(req.headers[WA.HEADERS.caller] || '');
   // verify r1 #2: the path's allow-list holds here too (the ONE check, over the client address)
   const p = st && WA.SLUG_RE.test(slug) && st.path(slug) && WA.allowVerdict(st.path(slug), addr) ? pending.get(slug, callerId, t) : null;
@@ -309,10 +337,11 @@ async function syncRow(slug, options) {
 const pausedNow = () => { const e = engine(); return e && typeof e.pausedState === 'function' ? e.pausedState() : null; };   // B-f276 1c: the pause as a fact (the pairing's own place)
 const pausedRefused = (res) => { const e = engine(); const pz = e && typeof e.pausedState === 'function' ? e.pausedState() : null; if (!pz) return false; res.set('Cache-Control', 'no-store'); res.status(503).json({ ok: false, code: 'store-blocked', error: pz.error }); return true; };
 const pathView = (st, slug) => ({ ...st.path(slug), options: optionsOf(slug), callers: st.callers(slug), hookUrl: `/hook/${slug}` });
-router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; if (pausedRefused(res)) return; /* B-f276 1b: each path's options are read from the held list — never its defaults shown as the truth */ const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)) }); });
+router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; if (pausedRefused(res)) return; /* B-f276 1b: each path's options are read from the held list — never its defaults shown as the truth */ if (heldRefused(res)) return; /* r3145: the callers list held — never «no path» */ const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); const torn = st.torn(); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)), ...(torn ? { torn: { copy: torn.copy, since: torn.since } } : {}) }); });
 router.post('/api/channels/webhook/paths', json, async (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res)) return;   // r3145: callers.json held — refused BY NAME before any state change (nothing written over it)
   if (pathRefused(req, res)) return;   // r5: a NEW path's events reach the account's wake / a rule's (no slug yet: the grains above it)
   try {
     const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable');
@@ -329,6 +358,7 @@ router.post('/api/channels/webhook/paths', json, async (req, res) => {
 router.put('/api/channels/webhook/paths/:slug', json, async (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res)) return;   // r3145: callers.json held — refused BY NAME before any state change (nothing written over it)
   if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
@@ -346,6 +376,7 @@ router.put('/api/channels/webhook/paths/:slug', json, async (req, res) => {
 router.post('/api/channels/webhook/paths/:slug/send', json, async (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res)) return;   // r3145: callers.json held — refused BY NAME before any state change (nothing written over it)
   try {
     const e = engine(); const st = store(); const slug = String(req.params.slug || '');
     if (!e || !st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -358,6 +389,7 @@ router.post('/api/channels/webhook/paths/:slug/send', json, async (req, res) => 
 router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res)) return;   // r3145: callers.json held — refused BY NAME before any state change (nothing written over it)
   if (pathRefused(req, res)) return;   // r5: a new caller = new events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
@@ -372,6 +404,7 @@ router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) 
 router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res)) return;   // r3145: callers.json held — refused BY NAME before any state change (nothing written over it)
   if (pathRefused(req, res)) return;   // r5: rotate / revoke / delivery — who may post the events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || ''); const id = String(req.params.id || '');
@@ -394,6 +427,7 @@ router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (
 router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res, { pairing: true })) return;   // r3145: callers.json or pair-pending.json held — refused BY NAME before a code is made
   if (pathRefused(req, res)) return;   // r5: the code IS the authority of the completion (/:slug/pair) that writes a caller
   try {
     const st = store(); const slug = String(req.params.slug || '');
@@ -434,6 +468,7 @@ function joinRefusal(r, from) {
 router.post('/api/channels/webhook/join', json, async (req, res) => {
   if (!owner(req, res)) return;
   if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
+  if (heldRefused(res)) return;   // r3145: callers.json held — refused BY NAME before any state change (nothing written over it)
   try {
     const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable');
     const b = req.body || {};

@@ -57,6 +57,9 @@ const ANSWERS = Object.freeze({
   conflict: Object.freeze({ status: 409, body: Object.freeze({ ok: false, error: 'idempotency-conflict' }), headers: Object.freeze({}) }),
   'unsupported-type': Object.freeze({ status: 415, body: Object.freeze({ ok: false, error: 'unsupported-media-type' }), headers: Object.freeze({}) }),
   'bad-body': Object.freeze({ status: 400, body: Object.freeze({ ok: false, error: 'bad-body' }), headers: Object.freeze({}) }),
+  // B-f276's family (主开发 r3145, lane bl-ci): the callers list could not be read (held) — a registered caller hears «try again
+  // later», never «unknown» (a caller told «unknown» may drop its registration); nothing about why, the same answer for any slug
+  'try-again': Object.freeze({ status: 503, body: Object.freeze({ ok: false, error: 'try-again-later' }), headers: Object.freeze({ 'Retry-After': '60' }) }),
 });
 const refuse = (answer, step, extra = {}) => ({ ok: false, step, answer, ...extra });
 const OK = Object.freeze({ ok: true });

@@ -15217,4 +15217,5 @@ export default {
   "This conversation's history could not be read just now — try again in a moment.": "この会話の履歴は今は読み込めませんでした。少し後でもう一度お試しください。",
   "The history is not loaded yet, or not all of it — the transcript reader is busy. It fills in here by itself in a moment.": "履歴はまだ読み込まれていないか、一部だけです。記録の読み取りが混み合っています。少し後にここで自動的に補われます。",
   "The history is not loaded yet, or not all of it — it could not be read just now. It fills in here by itself in a moment.": "履歴はまだ読み込まれていないか、一部だけです。今は読み込めませんでした。少し後にここで自動的に補われます。",
+  "The webhook callers list was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and the list starts empty: register your callers and pair your instances again, or mend the file by hand and restart VibeSpace.": "webhook の呼び出し元リストが壊れていて読み込めませんでした。そのバイトは VibeSpace のデータフォルダ内で隣に {copy} として保存され、リストは空から始まります。呼び出し元を登録し直してインスタンスを再ペアリングするか、ファイルを手で直して VibeSpace を再起動してください。",
 };

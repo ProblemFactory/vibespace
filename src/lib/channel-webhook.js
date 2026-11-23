@@ -19,8 +19,8 @@ const JSON_HDR = { 'Content-Type': 'application/json' };
 const BASE = '/api/channels/webhook/paths';
 const enc = encodeURIComponent;
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
-/** a refusal in the server's own words (the validator's detail), else the code worded */
-const why = (r) => (r && r.error) || routeErrorText(r);
+/** a refusal in the server's own words (the validator's detail), else the code worded — a held file's in the page's words */
+const why = (r) => V.heldWords(r) || (r && r.error) || routeErrorText(r);
 const hookUrl = (slug) => `${location.origin}/hook/${slug}`;
 
 function whInput(value = '', placeholder = '', type = 'text') {
@@ -183,10 +183,16 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
   let callers = [];
   async function load() {
     const r = await fetchJson(BASE);
+    // r3145: a held list is said IN PLACE (the list's own place), once — never «No caller yet»
+    const hw = V.heldWords(r);
+    list.querySelector('.chan-wh-held')?.remove();
+    if (hw) { const n = whNote(hw, true); n.classList.add('chan-wh-held'); list.prepend(n); return; }
     if (!r || !r.ok) { showToast(t('Could not read the callers: {why}', { why: why(r) }), { type: 'error' }); return; }
     const p = (r.paths || []).find((x) => x.hookUrl === `/hook/${slug}`);
     callers = p ? p.callers || [] : [];
     draw();
+    const tw = V.tornWords(r.torn);   // r3145: a torn lift of this run — said in place, above the list it emptied
+    if (tw) { const n = whNote(tw, true); n.classList.add('chan-wh-held'); list.prepend(n); }
   }
   function draw() {
     const seen = new Set();

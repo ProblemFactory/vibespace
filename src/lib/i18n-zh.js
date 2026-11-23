@@ -15218,4 +15218,5 @@ export default {
   "This conversation's history could not be read just now — try again in a moment.": "此对话的历史记录刚才没能读取——请稍后再试。",
   "The history is not loaded yet, or not all of it — the transcript reader is busy. It fills in here by itself in a moment.": "历史记录尚未加载，或只加载了一部分——转录读取器正忙。稍后会在这里自动补全。",
   "The history is not loaded yet, or not all of it — it could not be read just now. It fills in here by itself in a moment.": "历史记录尚未加载，或只加载了一部分——刚才没能读取。稍后会在这里自动补全。",
+  "The webhook callers list was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and the list starts empty: register your callers and pair your instances again, or mend the file by hand and restart VibeSpace.": "webhook 调用方列表已损坏，无法读取。它的原始字节保存在 VibeSpace 数据文件夹中旁边的 {copy}，列表从空开始：请重新登记调用方、重新配对实例，或手动修好该文件后重启 VibeSpace。",
 };

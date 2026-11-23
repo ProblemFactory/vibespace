@@ -8,6 +8,16 @@ import { t as tDevice, deviceLocale } from './i18n.js';
 import { stampAt as pageWhen } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import * as WA from '../webhook-auth.js';
 
+/** B-f276's family (主开发 r3145 + r3168, lane bl-ci): a held webhook file's refusal (503 webhook_callers_unread /
+ *  webhook_pairing_unread) — said IN PLACE in the hub's own words until the family's ONE table (src/lib/utils.js HELD_WORDS,
+ *  bl-phone-ui's commit) holds their rows in the page's words (zh, ja): this unit never touches that table or its dictionaries.
+ *  → the sentence, or null for any other answer */
+const HELD_CODES = new Set(['webhook_callers_unread', 'webhook_pairing_unread']);
+export function heldWords(r) { return r && HELD_CODES.has(r.code) ? String(r.error || r.code) : null; }
+/** …and a lift from TORN bytes (the paths list's `torn` {copy}, not a code): where the damaged bytes are kept and what a person can
+ *  do — never «restore that copy» (they are the damaged bytes: restoring them brings the damage back) */
+export function tornWords(torn, { t = tDevice } = {}) { return torn && torn.copy ? t("The webhook callers list was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and the list starts empty: register your callers and pair your instances again, or mend the file by hand and restart VibeSpace.", { copy: String(torn.copy) }) : null; }
+
 /** An account whose capability row declares an inbound door offers paths and callers. */
 export const offersPaths = (a) => !!(a && a.pushTransport === 'http-inbound');
 /** lane webhook-section-place (the owner, 2026-10-12: "webhook应该保持在列表最后或者顶部，因为不是自由添加的"): THE ACCOUNT
