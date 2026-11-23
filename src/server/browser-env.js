@@ -835,8 +835,12 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     try { fs.lstatSync(scratchDirFor(K)); return true; } catch (e) { if (!e || e.code !== 'ENOENT') return true; }
     try { if (liveKeysFromMeta().has(K)) return true; } catch { return true; }
     // lane browser-resume (§3.9): a KEPT browser (a tabs-only one has no directory to lstat) is its conversation's —
-    // a fresh key never lands on it; an unreadable store counts as named (fail closed)
-    const ks = keptKeySet(); if (!ks || ks.has(K)) return true;
+    // a fresh key never lands on it. r3023 (the kept-store cut's round, the coordinator's ruling): the kept rule names a key
+    // only when the store READS and names it — an UNKNOWN store names nothing HERE (it used to name every candidate: a store
+    // that could not be read made every mint exhaust its 64 tries, each a walk of every conversation's meta, on the loop). A
+    // kept browser WITH a folder is still named by the folder's lstat above; only a tabs-only kept entry could meet a fresh
+    // key, at one in 2^32. The SWEEP's rule does not change: an unknown store spares every key-named folder.
+    const ks = keptKeySet(); if (ks && ks.has(K)) return true;
     return false;
   }
   function liveKeysFromMeta() {
