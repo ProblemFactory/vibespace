@@ -7,7 +7,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { stampAt } from './page-time.js';
-import { slotBeside } from './customize-mode.js';
+import { slotBeside, seatBeside } from './customize-mode.js';
 import { openRailPanel } from './sidebar-rail.js';
 import { heldChipWords, heldChipTitle, heldSectionTitle, heldSectionNote, heldPressLabel, heldRowWords, heldPressWords, heldSoonWord } from './held-lists-words.js';
 
@@ -22,12 +22,7 @@ function drawChip() {
   for (const [hostId, besideId, id] of CHIP_SLOTS) {
     let chip = document.getElementById(id);
     if (!n) { chip?.remove(); continue; }
-    const slot = slotBeside(besideId, document.getElementById(hostId));
-    if (!slot) continue;
-    // r3212: ONE fixed order beside For you — this chip, then the vault's (it inserts before the vault's chip when that stands there), so
-    // the two never trade places at a redraw
-    const vault = document.getElementById(id === 'taskbar-held' ? 'taskbar-vault' : 'mobile-nav-vault');
-    const before = vault && vault.parentNode === slot.parent ? vault : slot.before;
+    if (!slotBeside(besideId, document.getElementById(hostId))) continue;
     if (!chip) {
       chip = document.createElement('button');
       chip.className = 'vault-chip held-chip';
@@ -36,16 +31,26 @@ function drawChip() {
     }
     chip.textContent = heldChipWords(n, t);
     chip.title = heldChipTitle(t);
-    if (chip.parentNode !== slot.parent || chip.nextSibling !== before) slot.parent.insertBefore(chip, before);
+    // r3284: ONE order for every chip beside For you (customize-mode.js BESIDE_ORDER: the cache warmth, this chip, the vault's lock) — none
+    // trades places with another at a redraw, whichever draws first
+    seatBeside(chip, besideId, document.getElementById(hostId));
   }
 }
-/** the hub's list (the first read, a broadcast, a press's answer) → the chip and every open section */
-export function applyHeldLists(next) {
+// r3284: THE HUB's MARK of the list the page holds ({ epoch: the hub's start, seq: its broadcasts so far }) — an answer the hub made
+// BEFORE the last broadcast the page took (a read sent at a reconnect, answered after a newer broadcast) is older: it is dropped, never
+// put back over the newer list. Another hub (a restart: another epoch) is always taken.
+let mark = null;
+const olderThanHeld = (m) => !!(m && mark && String(m.epoch) === mark.epoch && Number(m.seq) < mark.seq);
+/** the hub's list (the first read, a broadcast, a press's answer) with its mark → the chip and every open section; false = older, dropped */
+export function applyHeldLists(next, m = null) {
+  if (olderThanHeld(m)) return false;
+  if (m && m.epoch) mark = { epoch: String(m.epoch), seq: Number(m.seq) || 0 };
   lists = Array.isArray(next) ? next.filter((r) => r && typeof r === 'object') : [];
   drawChip();
   for (const fn of [...listeners]) { try { fn(lists); } catch { /* one section's error never stops another */ } }
+  return true;
 }
-export async function refreshHeldLists() { const r = await fetchJson('/api/held-lists'); if (r && Array.isArray(r.lists)) applyHeldLists(r.lists); return lists; }
+export async function refreshHeldLists() { const r = await fetchJson('/api/held-lists'); if (r && Array.isArray(r.lists)) applyHeldLists(r.lists, r); return lists; }
 /** re-seat the chip beside For you (app.js, after every arrangement — as the vault's) */
 export const placeHeldChip = () => drawChip();
 export function initHeldLists(app) { appRef = app; refreshHeldLists().catch(() => { }); }
@@ -55,15 +60,20 @@ export function openHeldSection(app = appRef) {
   if (!app) return;
   scrollWanted = true;
   openRailPanel(app, 'system');
+  // r3284: the panel already open as a window is only brought forward (openRailPanel paints nothing again): its section is in the page —
+  // scrolled at once, so the flag never waits for a later draw (a reconnect's) to scroll the panel with no press
+  const sec = scrollWanted && typeof document !== 'undefined' ? document.querySelector('.sys-held') : null;
+  if (sec && sec.isConnected && !sec.hidden && sec.getClientRects?.().length) { scrollWanted = false; try { sec.scrollIntoView?.({ block: 'nearest' }); } catch { /* none */ } }
 }
 let pressing = false;
+const NEXT_TRY_REPAINT_MAX_MS = 3_600_000;   // r3284: the section's own timer waits at most an hour (a next try further away is worded again then)
 /** «Read again now» — ONE press reads every held list again (the hub paces it; a press while one runs is said, never greyed) */
 export async function readHeldAgain() {
   if (pressing) { showToast(heldPressWords({ ok: false, code: 'held_read_running' }, t).text); return null; }
   pressing = true;
   try {
     const r = await fetchJson('/api/held-lists/read-again', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    if (r && Array.isArray(r.lists)) applyHeldLists(r.lists);
+    if (r && Array.isArray(r.lists)) applyHeldLists(r.lists, r);
     const w = heldPressWords(r, t);
     showToast(w.text, { type: w.tone === 'error' ? 'error' : w.tone === 'warn' ? 'warn' : undefined, duration: 6000 });
     return r;
@@ -72,10 +82,12 @@ export async function readHeldAgain() {
 /** THE SYSTEM PANEL's SECTION: drawn while any list is held, nothing otherwise; follows the live list until the panel closes */
 export function paintHeldLists(el) {
   if (!el) return () => { };
-  let off = () => { };
+  let off = () => { }, timer = null;
+  const leave = () => { if (timer) { clearTimeout(timer); timer = null; } off(); };
   const draw = () => {
-    if (!el.isConnected) { off(); return; }   // the panel closed or re-drew: this section leaves the list's listeners
-    if (!lists.length) { el.hidden = true; el.replaceChildren(); return; }
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (!el.isConnected) { leave(); return; }   // the panel closed or re-drew: this section leaves the list's listeners (and its timer)
+    if (!lists.length) { el.hidden = true; el.replaceChildren(); scrollWanted = false; return; }
     el.hidden = false;
     const title = document.createElement('div'); title.className = 'usage-section-title'; title.textContent = heldSectionTitle(t);
     const at = Date.now();   // r3212: a next try that has passed is worded at paint («soon»), never a time in the past
@@ -85,9 +97,12 @@ export function paintHeldLists(el) {
     press.onclick = () => { readHeldAgain().catch(() => { }); };
     el.replaceChildren(title, ...rows, note, press);
     if (scrollWanted) { scrollWanted = false; try { el.scrollIntoView?.({ block: 'nearest' }); } catch { /* none */ } }
+    // r3284: a next try that passes while the section stays open is worded again when it passes («in a moment»), by the section's own timer
+    const due = lists.map((r) => Number(r.next) || 0).filter((n) => n > at);
+    if (due.length) timer = setTimeout(draw, Math.min(Math.min(...due) - at + 250, NEXT_TRY_REPAINT_MAX_MS));
   };
   off = onHeldLists(draw);
   draw();
   refreshHeldLists().catch(() => { });
-  return () => off();
+  return () => leave();
 }

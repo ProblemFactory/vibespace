@@ -460,7 +460,7 @@ class App {
           if (cur === root || cur.startsWith(root + '/')) { try { ex.navigate(ex.currentPath); } catch {} }
         }
       }
-      if (msg.type === 'held-lists') applyHeldLists(msg.lists);   // B-f276 family unit B: the set of held lists changed (the chip, the system panel's section)
+      if (msg.type === 'held-lists') applyHeldLists(msg.lists, msg);   // B-f276 family unit B: the set of held lists changed (the chip, the system panel's section)
       if (msg.type === 'server-notice' && msg.text) {
         // Probe-reported condition (2.226.0): server-side silent failures now
         // surface as toasts (+ notification history) instead of dying in the

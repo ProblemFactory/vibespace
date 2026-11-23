@@ -15,7 +15,7 @@
 import { warmthOf, warmthTitle, worstOf, warmthCounts, byTimeLeft } from '../cache-warmth.js';
 import { t } from './i18n.js';
 import { sessionOf } from './desktop-record.js';
-import { slotBeside } from './customize-mode.js';
+import { seatBeside } from './customize-mode.js';
 import { windowTypeIcon } from './window-types.js';
 import { showWindowList } from './taskbar.js';
 
@@ -330,8 +330,7 @@ function paintSummary(app) {
   chip.appendChild(total);
 }
 function seatChip(chip) {
-  const slot = slotBeside('taskbar-user-todos', document.getElementById('taskbar-tray'));
-  if (slot && (chip.parentNode !== slot.parent || chip.nextSibling !== slot.before)) slot.parent.insertBefore(chip, slot.before);
+  seatBeside(chip, 'taskbar-user-todos', document.getElementById('taskbar-tray'));   // B-f276 follow (r3284): ONE order beside For-you (customize-mode.js BESIDE_ORDER)
 }
 /** Re-seat the summary chip beside For-you — app.js calls it after the chrome applied an arrangement (beside
  *  placeVaultChip). Nothing while there is no chip. */

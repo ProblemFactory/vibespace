@@ -476,7 +476,7 @@ const heldLists = require('./held-lists.js').create({
       readAgain: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; return tg && typeof tg.readAgain === 'function' ? tg.readAgain() : Promise.resolve(false); },
       onLift: (fn) => { const tg = typeof getTasks === 'function' ? getTasks() : null; if (!tg || typeof tg.onLift !== 'function') return false; tg.onLift(fn); return true; } },   // r3212: the manager's own lift signal (armed once it exists)
     { key: 'hosts', facts: () => (hosts && typeof hosts.held === 'function' && hosts.held() ? { since: null } : null),
-      onLift: (fn) => { if (!hosts || typeof hosts.whenRead !== 'function') return false; hosts.whenRead(fn, 'the held lists notice', 'held-lists'); return true; } },   // keyed: one wait, never let go among the bound
+      onLift: (fn, again) => { if (!hosts || typeof hosts.whenRead !== 'function') return false; hosts.whenRead(fn, 'the held lists notice', 'held-lists', { onLetGo: again }); return true; } },   // keyed: one wait; let go past the machines' bound of waits, it is armed again at once (r3284)
   ],
 });
 app.delete('/api/hosts/:id/hub-pin', async (req, res) => {
@@ -1016,7 +1016,7 @@ app.post('/api/mounts/:id/ceph-share', async (req, res) => {
 });
 
 // B-f276 family unit B: THE ONE NOTICE's two routes (its hub half is made above the first route: `heldLists`)
-app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list() }));
+app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list(), ...heldLists.mark() }));   // r3284: with its mark (the page drops an answer older than its last broadcast)
 app.post('/api/held-lists/read-again', async (req, res) => {
   if (require('../write-origin.js').pressBearer(req.headers)) return res.status(403).json({ error: 'reading the held lists again is the owner\'s press — no token presses it (an agent\'s, a job\'s, an automation\'s)', code: 'agent-forbidden' });   // r3212: the tree's ONE verdict for every bearer
   try { res.json(await heldLists.readAgain()); } catch (e) { res.status(500).json({ error: (e && e.message) || 'failed' }); }

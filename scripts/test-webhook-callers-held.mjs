@@ -267,7 +267,11 @@ try {
   const zh = onDisk(path.join(REPO, 'src/lib/i18n-zh.js')) || '', ja = onDisk(path.join(REPO, 'src/lib/i18n-ja.js')) || '';
   const keys = [...page.matchAll(/t\("(The webhook callers list was damaged[^"]*)"/g)].map((m) => m[1]);
   const held = /const HELD_CODES = new Set\(\['webhook_callers_unread', 'webhook_pairing_unread'\]\);/.test(page) && /export function heldWords\(r\) \{ return r && HELD_CODES\.has\(r\.code\) \? String\(r\.error \|\| r\.code\) : null; \}/.test(page);
-  const notHere = ['VibeSpace cannot read its webhook callers', 'VibeSpace cannot read its pending pairing codes'].every((w) => !zh.includes(w) && !ja.includes(w));
+  // B-f276 follow (主开发 r3314, lane bl-phone-ui): the family's ONE table now holds both rows (src/lib/utils.js HELD_WORDS, this lane's words) — so
+  // the two sentences are the TABLE's, in both dictionaries; before the table held them, in neither (this unit never wrote them there)
+  const U = onDisk(path.join(REPO, 'src/lib/utils.js')) || '';
+  const tabled = ['webhook_callers_unread', 'webhook_pairing_unread'].every((c) => U.includes(`\n  ${c}: () => t('`));
+  const notHere = ['VibeSpace cannot read its webhook callers', 'VibeSpace cannot read its pending pairing codes'].every((w) => (tabled ? zh.includes(w) && ja.includes(w) : !zh.includes(w) && !ja.includes(w)));
   ok(held && notHere && /export function tornWords/.test(page) && keys.length === 1 && !/restore/i.test(keys[0]) && zh.includes(JSON.stringify(keys[0]) + ':') && ja.includes(JSON.stringify(keys[0]) + ':'), 'the page says both held codes IN PLACE (the hub\'s words until the family\'s ONE table holds their rows — r3168: never in this unit\'s dictionaries) and words the torn lift in zh and ja (never «restore that copy»)', { held, notHere, keys });
 }
 

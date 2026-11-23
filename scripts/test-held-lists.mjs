@@ -11,8 +11,12 @@
 //   ③ THE PAGE's WIRING (source): the chip in the vault chip's two slots beside For you, its press opens the system panel; the panel's
 //     section; app.js's first read, the broadcast, the re-seat; the press's route refuses an agent's token; nothing greyed.
 //   ④ THE NAMES' CENSUS: every store the helper holds (its callers' files) has a plain name — a new caller with none is red by name.
+//   ⑤ THE FOLLOW (主开发 r3284): every list the hub answers carries its mark and the page drops an answer older than its last broadcast;
+//     the paired machines' wait, let go past their bound, is armed again (the real hosts.js whenRead, the wiring's own row); the chip's
+//     press scrolls an already-open section at once; a next try that passes while the section is open is worded again by its timer; the
+//     chips beside For you keep ONE order whichever draws first — the page's module and customize-mode.js compiled from their source.
 //   REDs over copies in memory: the helper without the start's change (no broadcast at a hold); the press without its gap (a second press
-//   reads again at once); the names census over a planted caller.
+//   reads again at once); the names census over a planted caller, an unmapped caller, a second store in a mapped file; each ⑤ leg's cure cut.
 // FAST, in-process: the real helper on a scratch folder, nothing spawned, nothing fetched.
 import { scratch, anchored } from './scratch.mjs';
 import fs from 'node:fs';
@@ -101,7 +105,7 @@ const HL_H = memOf('src/server/held-lists.js', "const HOLD = require('../store-r
 const SR1 = await scene(HOLD_R, HL_H, 'red-start');
 ok(SR1.atStart.length === 0, 'RED control: the helper without the start\'s change — a hold begins and nothing is broadcast (the chip would not stand)', SR1.atStart);
 // RED: the press without its gap
-const HL_G = memOf('src/server/held-lists.js', "    if (pressAt && at - pressAt < PRESS_GAP_MS) return { ok: false, code: 'held_read_too_soon', retryAfterMs: PRESS_GAP_MS - (at - pressAt), error: 'the lists were read again a moment ago', lists: list() };\n", '', 'held-lists: the gap cut');
+const HL_G = memOf('src/server/held-lists.js', "    if (pressAt && at - pressAt < PRESS_GAP_MS) return { ok: false, code: 'held_read_too_soon', retryAfterMs: PRESS_GAP_MS - (at - pressAt), error: 'the lists were read again a moment ago', lists: list(), ...mark() };\n", '', 'held-lists: the gap cut');
 const SR2 = await scene(HOLD, HL_G, 'red-gap');
 ok(SR2.tooSoon.ok === true, 'RED control: the press without its gap — a second press reads every list again at once', SR2.tooSoon);
 
@@ -131,17 +135,21 @@ ok(PAGE.includes("const CHIP_SLOTS = [['taskbar-tray', 'taskbar-user-todos', 'ta
   'the chip stands in the vault chip\'s own two slots — beside For you in the taskbar\'s tray and in the phone\'s nav');
 ok(PAGE.includes("chip.onclick = () => openHeldSection();") && PAGE.includes("openRailPanel(app, 'system');") && PAGE.includes('scrollWanted = true;'), 'the chip\'s press opens the system panel and brings its section into view — the act lives there, never behind the chip alone');
 ok(RAIL.includes('<div class="sys-held" hidden></div>') && RAIL.includes("paintHeldLists(c.querySelector('.sys-held'));"), 'the system panel carries the section «Lists that could not be read» (drawn only while one is held)');
-ok(APP.includes("initHeldLists(this);") && APP.includes("if (msg.type === 'held-lists') applyHeldLists(msg.lists);") && APP.includes("placeHeldChip();"), 'app.js: the first read at boot, the hub\'s broadcast, the chip re-seated after every arrangement (as the vault\'s)');
-ok(WIRE.includes("app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list() }));") && !/held-lists\/read-again[\s\S]{0,200}isAgentBearer\(req\)/.test(WIRE), 'the list is the page\'s first read; the press\'s route asks no file-local token rule (the one verdict below)');
+ok(APP.includes("initHeldLists(this);") && APP.includes("if (msg.type === 'held-lists') applyHeldLists(msg.lists, msg);") && APP.includes("placeHeldChip();"), 'app.js: the first read at boot, the hub\'s broadcast (with its mark), the chip re-seated after every arrangement (as the vault\'s)');
+ok(WIRE.includes("app.get('/api/held-lists', (req, res) => res.json({ lists: heldLists.list(), ...heldLists.mark() }));") && !/held-lists\/read-again[\s\S]{0,200}isAgentBearer\(req\)/.test(WIRE), 'the list is the page\'s first read; the press\'s route asks no file-local token rule (the one verdict below)');
 ok(!/\.disabled\s*=\s*true/.test(PAGE), 'nothing of the notice is greyed: a press while one runs is said, never disabled');
 ok(APP.includes("      refreshStoreHolds();   // B-225b R7: a hold said — or lifted — while this page was away (its word never arrives)\n      refreshHeldLists().catch(() => { });"), 'r3212 MUST 1: the held lists are read again at EVERY reconnect, beside the store strip\'s own re-read (a lift broadcast while the page was away is never missed)');
-ok(PAGE.includes("const before = vault && vault.parentNode === slot.parent ? vault : slot.before;") && PAGE.includes("chip.nextSibling !== before) slot.parent.insertBefore(chip, before);"), 'r3212: one fixed order beside For you — this chip before the vault\'s, so the two never trade places at a redraw');
+const WARM = read('src/lib/warmth-chrome.js'), CM = read('src/lib/customize-mode.js');
+ok(PAGE.includes("seatBeside(chip, besideId, document.getElementById(hostId));") && WARM.includes("seatBeside(chip, 'taskbar-user-todos', document.getElementById('taskbar-tray'));")
+  && VAULT.includes("if (chip.parentNode !== slot.parent || chip.nextSibling !== slot.before) slot.parent.insertBefore(chip, slot.before);")
+  && CM.includes("const BESIDE_ORDER = Object.freeze([Object.freeze(['taskbar-warmth', 'taskbar-held', 'taskbar-vault']), Object.freeze(['mobile-nav-held', 'mobile-nav-vault'])]);"),
+  'r3284: the chips beside For you are seated by ONE order (customize-mode.js BESIDE_ORDER) — the held lists\' and the cache warmth\'s through seatBeside; the vault\'s lock is each row\'s last, so its own seating (just before For you) is that order (⑤ drives it)');
 ok(PAGE.includes('scrollWanted = true;') && PAGE.includes('if (scrollWanted) { scrollWanted = false;') && !PAGE.includes('setTimeout(() => { try { document.querySelector'), 'r3212: the section scrolls into view at its FIRST draw after the chip opened the panel (never a fixed wait that can come before it exists)');   // stale-pins: kept — a deliberate absence check (the fixed wait the cure removed)
 ok(PAGE.includes('r.next > at ? stampAt(r.next) : heldSoonWord(t)'), 'r3212: a next try that has passed is worded at paint («in a moment»), never a time in the past');
 ok(/app\.post\('\/api\/held-lists\/read-again', async \(req, res\) => \{\n {2}if \(require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(WIRE), 'r3212: the press refuses EVERY bearer by the tree\'s ONE verdict (write-origin.js pressBearer: an agent\'s, a job\'s, an automation\'s) — a person\'s press');
 // r3212 MUST 2 + small: EVERY bridged row hands a lift signal, and every name it asks is a method its production object carries
 const OLDER = (() => { const i = WIRE.indexOf('  older: ['), j = WIRE.indexOf('\n  ],\n});', i); return i < 0 || j < 0 ? [] : WIRE.slice(i, j).split(/\n    \{ key: '/).slice(1).map((b) => ({ key: b.slice(0, b.indexOf("'")), body: b })); })();
-const liftless = (rows) => rows.filter((r) => !/\bonLift: \(fn\) =>/.test(r.body)).map((r) => r.key);
+const liftless = (rows) => rows.filter((r) => !/\bonLift: \(fn(?:, again)?\) =>/.test(r.body)).map((r) => r.key);
 ok(OLDER.length === 3 && liftless(OLDER).length === 0, `every bridged row (${OLDER.map((r) => r.key).join(', ')}) hands a lift signal`, liftless(OLDER));
 ok(liftless([...OLDER, { key: 'frobs', body: "frobs', facts: () => null, readAgain: () => frobs.readAgain() }" }]).includes('frobs'), 'CONTROL: a bridged row without a lift signal is RED by name');
 const METHODS = { 'user-todos': ['src/user-todos.js', ['unreadState', 'readAgain', 'whenRead']], 'task-groups': ['src/task-groups.js', ['unreadState', 'readAgain', 'onLift']], hosts: ['src/hosts.js', ['held', 'whenRead']] };
@@ -152,23 +160,205 @@ ok(read('src/task-groups.js').includes("      for (const fn of [...(this._liftHo
 console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain name');
 // THE HELPER's CALLERS, each with its store's file (a STATED map — a caller's file names more than its store; r3224: the stores that joined the
 // helper on the hotfix's tip): a caller the tree has and this map does not is red by name (name its store, then its plain name in the words)
-const CALLERS = { 'src/mounts.js': 'mounts.json', 'src/webdav.js': 'mount-tokens.json', 'src/plugins.js': 'plugins.json', 'src/accounts.js': 'accounts.json', 'src/server/apps-engine.js': 'app-proposals.json',
-  'src/server/auto-resume.js': 'auto-resume.json', 'src/server/browser-trace.js': 'browser-forgotten.json', 'src/server/channel-api.js': 'api-proposals.json', 'src/server/channels-attention.js': 'decision-examples.json',
-  'src/server/design-engine.js': 'designs.json', 'src/server/feedback-forward.js': 'feedback-outbox.json', 'src/server/feedback-store.js': 'feedback.json', 'src/server/provider-store.js': 'providers.json',
-  'src/server/published-pages.js': 'published-pages.json', 'src/server/setting-holds.js': 'setting-holds.json', 'src/server/vault-use-grants.js': 'vault-use-marks.json', 'src/session-status.js': 'session-status.json' };
-function heldStoreFiles(files) {
+// r3284: EVERY store a file holds (a list a file): the count of the helper's holds in each file (its `<name>.create(`) must equal its row's —
+// a SECOND held store in an already-mapped file is red by name, as an unmapped caller is
+const CALLERS = { 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tokens.json'], 'src/plugins.js': ['plugins.json'], 'src/accounts.js': ['accounts.json'], 'src/server/apps-engine.js': ['app-proposals.json'],
+  'src/server/auto-resume.js': ['auto-resume.json'], 'src/server/browser-trace.js': ['browser-forgotten.json'], 'src/server/channel-api.js': ['api-proposals.json'], 'src/server/channels-attention.js': ['decision-examples.json'],
+  'src/server/design-engine.js': ['designs.json'], 'src/server/feedback-forward.js': ['feedback-outbox.json'], 'src/server/feedback-store.js': ['feedback.json'], 'src/server/provider-store.js': ['providers.json'],
+  'src/server/published-pages.js': ['published-pages.json'], 'src/server/setting-holds.js': ['setting-holds.json'], 'src/server/vault-use-grants.js': ['vault-use-marks.json'], 'src/session-status.js': ['session-status.json'],
+  // r3314: the units picked into the hotfix's trial after the chain
+  'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],
+  // A STORE MADE PER THING from ONE create site (r3314): { sites, stores } — `sites` the file's create sites, `stores` the names the hub lists them
+  // by (a shape's example where each thing has its own file), checked against the notice's names, not against the file's literals
+  'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } };
+function heldStoreFiles(files, map = CALLERS) {
   const out = new Map();
   for (const [f, src] of files) {
     if (!/require\(['"][./]*store-read-hold\.js['"]\)/.test(src) || /held-lists\.js$/.test(f)) continue;
-    out.set(f, CALLERS[f] && src.includes(`'${CALLERS[f]}'`) ? [CALLERS[f]] : []);
+    const bound = /\bconst (\w+) = require\(['"][./]*store-read-hold\.js['"]\)/.exec(src);
+    const creates = (bound ? (src.match(new RegExp(`\\b${bound[1]}\\.create\\(`, 'g')) || []).length : 0) + (src.match(/require\(['"][./]*store-read-hold\.js['"]\)\.create\(/g) || []).length;   // bound by a name, or called inline
+    const row = map[f], many = !!row && !Array.isArray(row), want = many ? row.stores : row || [];
+    out.set(f, { mapped: Object.prototype.hasOwnProperty.call(map, f), want, sites: many ? row.sites : want.length, names: many ? want.slice() : want.filter((n) => src.includes(`'${n}'`)), creates });
   }
   return out;
 }
 const srcFiles = () => { const out = new Map(); const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.posix.join(d, e.name); if (e.isDirectory()) { if (r !== 'src/lib') walk(r); } else if (/\.(?:c?js)$/.test(e.name)) out.set(r, read(r)); } }; walk('src'); return out; };
-const STORES = heldStoreFiles(srcFiles());
-const unnamed = (stores) => [...stores].flatMap(([f, names]) => (names.length ? names.filter((n) => !W.HELD_NAMED.includes(n)).map((n) => `${n} (${f})`) : [`${f}: a caller of the helper with no store in the census\'s map (CALLERS in this suite)`]).map((x) => x + ' — add its plain name to src/lib/held-lists-words.js NAMES'));
-ok(STORES.size >= 3 && unnamed(STORES).length === 0, `every store the helper holds has a plain name (${[...STORES.values()].flat().join(', ')})`, unnamed(STORES));
-const planted = new Map(STORES); planted.set('src/frobs.js', ['frobs.json']);
+const SRC_ALL = srcFiles();   // the tree read once (the controls plant over copies of it)
+const STORES = heldStoreFiles(SRC_ALL);
+const unnamed = (stores) => [...stores].flatMap(([f, s]) => {
+  if (!s.mapped) return [`${f}: a caller of the helper with no store in the census's map (CALLERS in this suite) — name its stores, then their plain names in src/lib/held-lists-words.js NAMES`];
+  if (s.creates !== s.sites || s.names.length !== s.want.length) return [`${f}: ${s.creates ? `${s.creates} hold(s) of the helper` : 'no hold of the helper the census reads'} but ${s.sites} in the census's map (${s.names.length} of ${s.want.length} store(s) named in the file) — name every store it holds`];
+  return s.names.filter((n) => !W.heldNamed(n)).map((n) => `${n} (${f}) — add its plain name to src/lib/held-lists-words.js NAMES`);
+});
+ok(STORES.size >= 3 && unnamed(STORES).length === 0, `every store the helper holds has a plain name, each file's holds counted (${[...STORES.values()].flatMap((s) => s.names).join(', ')})`, unnamed(STORES));
+const FROBS = "const HOLD = require('./store-read-hold.js');\nconst h = HOLD.create({ file: path.join(dir, 'frobs.json'), code: 'frobs_unread' });\n";
+const planted = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS]]), { ...CALLERS, 'src/frobs.js': ['frobs.json'] });
 ok(unnamed(planted).some((x) => x.startsWith('frobs.json')), 'CONTROL: a new store held by the helper with no plain name is RED by name', unnamed(planted));
+const unmapped = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS]]));
+ok(unnamed(unmapped).some((x) => x.startsWith('src/frobs.js: a caller of the helper with no store')), 'CONTROL: a new caller of the helper the census\'s map does not name is RED by name', unnamed(unmapped));
+const second = new Map(SRC_ALL); second.set('src/mounts.js', second.get('src/mounts.js') + "\nconst h2 = HOLD.create({ file: path.join(dir, 'frobs.json'), code: 'frobs_unread' });\n");
+ok(unnamed(heldStoreFiles(second)).some((x) => x.startsWith('src/mounts.js: 2 hold(s) of the helper but 1 in the census')), 'CONTROL: a SECOND store held in an already-mapped file (src/mounts.js) is RED by name — never unnamed with every leg green', unnamed(heldStoreFiles(second)));
+
+const shaped = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS]]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['frob-7.json'] } });
+ok(unnamed(shaped).some((x) => x.startsWith('frob-7.json (src/frobs.js)')), 'CONTROL (r3314): a store made per thing from one create site, its name unknown to the notice, is RED by name', unnamed(shaped));
+const shapedSites = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS + FROBS.split('\n')[1] + '\n']]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } });
+ok(unnamed(shapedSites).some((x) => x.startsWith('src/frobs.js: 2 hold(s) of the helper but 1 in the census')), 'CONTROL (r3314): a second create site in a file stated as one site making its stores is RED by its count', unnamed(shapedSites));
+ok(W.heldListName('cw-12-1700000000123.json', tt) === 'a conversation’s saved details' && W.heldListName('cw-x.json', tt) === 'a saved list' && W.heldListName('callers.json', tt) === 'the webhook callers' && W.heldNamed('vault-grants.json') && W.heldNamed('usage-reset-claims.json') && !W.heldNamed('frobs.json'),
+  'r3314: the trial\'s new stores have their plain names (the webhook callers, the pending pairing codes, who may receive your two-step codes, the reset marks); a conversation\'s record is named by its shape (cw-<seq>-<ms>.json), any other shape by «a saved list»');
+// r3314 (3): «Read again now» reads each helper hold BY ITS ROW — two held stores of ONE base name (each channel account's people file) are each read
+{
+  const calls = [];
+  const two = { holds: () => [{ key: 'h1', file: 'people.json', held: true, since: 1 }, { key: 'h2', file: 'people.json', held: true, since: 2 }], readAgainOf: async (w) => { calls.push(w); return false; }, onHoldsChange: () => () => { } };
+  const hl = HL.create({ hold: two, broadcast: () => { } });
+  const listed = hl.list(); await hl.readAgain(); hl.stop();
+  ok(listed.length === 2 && listed[0].key !== listed[1].key && calls.length === 2 && calls.every((c) => c && typeof c === 'object' && /^h[12]$/.test(c.key)),
+    'r3314: two held stores of one base name are two rows of the notice, and the press reads EACH by its row (the helper matches a row\'s key; the shared base name would match neither)', { keys: listed.map((r) => r.key), calls: calls.map((c) => (c && c.key) || c) });
+  const calls2 = [];
+  const HLX = memOf('src/server/held-lists.js', 'await hold.readAgainOf(h.key ? h : h.file);', 'await hold.readAgainOf(h.file);', 'held-lists: the press by base name');   // stale-pins: kept — the press as unit B had it, planted as the RED control (r3314)
+  const hx = HLX.create({ hold: { ...two, readAgainOf: async (w) => { calls2.push(w); return false; } }, broadcast: () => { } });
+  await hx.readAgain(); hx.stop();
+  ok(calls2.length === 2 && calls2.every((c) => c === 'people.json'), 'CONTROL: the press by base name — both reads ask «people.json», which the helper matches for neither: RED', calls2);
+}
+
+console.log('⑤ THE FOLLOW (主开发 r3284) — the mark, the let-go wait, the scroll, the next try, the one order');
+// (1) the hub's mark: every list it answers carries its start and its broadcasts so far
+{
+  const seqs = S.casts.map((m) => m.seq);
+  ok(S.casts.length >= 2 && S.casts.every((m) => typeof m.epoch === 'string' && m.epoch === S.casts[0].epoch) && seqs.every((n, i) => n === i + 1)
+    && S.first.epoch === S.casts[0].epoch && Number.isInteger(S.first.seq) && S.tooSoon.seq === S.first.seq && S.lift.seq === S.casts[S.casts.length - 1].seq,
+    'r3284: every list the hub answers carries its mark — one start (epoch) on every broadcast and answer, the broadcasts counted one by one (seq), a press\'s answer marked as of the last broadcast', { seqs, first: S.first.seq, lift: S.lift.seq });
+}
+// (2) THE PAIRED MACHINES' WAIT, LET GO PAST THEIR BOUND, IS ARMED AGAIN — the real hosts.js whenRead (its bound of 256 waits) and the
+// wiring's OWN row (compiled from mounts-plugins-wiring.js), its lift the real read again of hosts.json
+const HOSTS_ROW = OLDER.find((r) => r.key === 'hosts');
+const hostsRowOf = (H) => new Function('hosts', `return { key: '${HOSTS_ROW.body.slice(0, HOSTS_ROW.body.lastIndexOf('}') + 1)};`)(H);   // eslint-disable-line no-new-func
+async function letGo(hlMod, tag) {
+  const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+  const d = path.join(ROOT, tag), f = path.join(d, 'hosts.json'); fs.mkdirSync(f, { recursive: true });   // THE PLACED REFUSAL: hosts.json is a directory
+  const warn = console.warn; console.warn = () => { };
+  try {
+    const H = new HostManager({ dataDir: d }), casts = [];
+    const hl = hlMod.create({ broadcast: (m) => casts.push(m), older: [hostsRowOf(H)] });
+    hl.say();
+    for (let i = 0; i < 300; i++) H.whenRead(() => { }, `another wait ${i}`, `w${i}`);   // 300 other waits: past the bound, the oldest are let go
+    const kept = !!(H._readWaits && H._readWaits.has('held-lists'));
+    fs.rmSync(f, { recursive: true, force: true }); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));
+    const n0 = casts.length;
+    await H._unreadRetry();   // hosts.json reads again by itself: its waits run
+    const last = casts[casts.length - 1];
+    const out = { held0: !!(casts[0] && casts[0].lists.some((r) => r.key === 'hosts')), kept, told: casts.length > n0 && !!last && last.lists.length === 0, lifted: !H.held() };
+    H._unreadStopped = true; if (H._unreadT) { clearTimeout(H._unreadT); H._unreadT = null; } hl.stop();
+    return out;
+  } finally { console.warn = warn; }
+}
+ok(!!HOSTS_ROW && HOSTS_ROW.body.includes("{ onLetGo: again }"), 'control setup: the wiring\'s paired-machines row is read, and hands its let-go answer');
+const LG = await letGo(HL, 'let-go');
+ok(LG.held0 && LG.kept && LG.lifted && LG.told, 'r3284: the paired machines\' wait for the notice, let go past their bound of waits (300 others), is ARMED AGAIN — when hosts.json reads by itself the lift is broadcast (the chip goes)', LG);
+ok(read('src/server/held-lists.js').includes('ok = !!o.onLift(say, () => again(o));'), 'control setup: the held lists\' arm hands each row its again');
+const LGX = await letGo(memOf('src/server/held-lists.js', 'ok = !!o.onLift(say, () => again(o));', 'ok = !!o.onLift(say);', 'held-lists: the re-arm cut'), 'let-go-red');   // stale-pins: kept — the arm as unit B's cure had it, planted as the RED control (r3284)
+ok(LGX.held0 && !LGX.kept && LGX.lifted && !LGX.told, 'CONTROL: the re-arm cut — the wait let go, hosts.json reads by itself and NOTHING is broadcast (the chip stays): RED', LGX);
+
+// THE PAGE's MODULE compiled from its source (src/lib/held-lists.js; its imports stood in, the words the real PURE module's)
+const PAGE_NAMES = ['t', 'fetchJson', 'showToast', 'stampAt', 'slotBeside', 'seatBeside', 'openRailPanel', 'heldChipWords', 'heldChipTitle', 'heldSectionTitle', 'heldSectionNote', 'heldPressLabel', 'heldRowWords', 'heldPressWords', 'heldSoonWord', 'document', 'setTimeout', 'clearTimeout', 'Date'];
+const pageOf = (src, env) => {
+  const i = src.indexOf('\nlet lists = [];');
+  if (i < 0) return null;
+  const body = src.slice(i).replace(/^export (async function|function|const) /gm, '$1 ');
+  return new Function(...PAGE_NAMES, `${body}\nreturn { applyHeldLists, refreshHeldLists, paintHeldLists, openHeldSection, onHeldLists };`)(...PAGE_NAMES.map((n) => env[n]));   // eslint-disable-line no-new-func
+};
+const pageEnv = (over = {}) => {
+  const timers = [];
+  const doc = { getElementById: () => null, querySelector: () => null, createElement: (tag) => ({ tag, className: '', textContent: '', type: '', onclick: null }) };
+  const env = { t: tt, fetchJson: async () => null, showToast: () => { }, stampAt: (ms) => `@${ms}`, slotBeside: () => null, seatBeside: () => false, openRailPanel: () => true,
+    heldChipWords: W.heldChipWords, heldChipTitle: W.heldChipTitle, heldSectionTitle: W.heldSectionTitle, heldSectionNote: W.heldSectionNote, heldPressLabel: W.heldPressLabel, heldRowWords: W.heldRowWords, heldPressWords: W.heldPressWords, heldSoonWord: W.heldSoonWord,
+    document: doc, setTimeout: (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].cleared = true; }, Date: { now: () => 1_000 }, ...over };
+  return { env, timers, doc };
+};
+const A1 = [{ key: 'store:mounts.json', what: 'mounts.json', since: 500 }];
+// (3) an answer made BEFORE the last broadcast the page took is dropped (a reconnect's read answered after the lift's broadcast)
+async function order(src) {
+  let answer = null;
+  const P = pageOf(src, pageEnv({ fetchJson: () => new Promise((r) => { answer = r; }) }).env);
+  P.applyHeldLists(A1, { type: 'held-lists', epoch: 'e1', seq: 1 });
+  const out = P.refreshHeldLists();   // a reconnect's read, out
+  P.applyHeldLists([], { type: 'held-lists', epoch: 'e1', seq: 2 });   // the lift's broadcast comes first
+  answer({ lists: A1, epoch: 'e1', seq: 1 }); const older = (await out).length;   // the read's answer, made before the lift
+  const o2 = P.refreshHeldLists(); answer({ lists: A1, epoch: 'e1', seq: 2 }); const same = (await o2).length;   // made after it: taken
+  const o3 = P.refreshHeldLists(); answer({ lists: [], epoch: 'e2', seq: 0 }); const other = (await o3).length;   // another hub (a restart): taken
+  return { older, same, other };
+}
+const OR = await order(PAGE);
+ok(OR.older === 0 && OR.same === 1 && OR.other === 0, 'r3284: a read\'s answer made before the last broadcast the page took is DROPPED (the lift stands, the chip stays gone); an answer as new is taken; another hub\'s (a restart) is taken', OR);
+const DROP = '  if (olderThanHeld(m)) return false;\n';
+const ORX = await order(anchored(PAGE, DROP, '', 'held-lists page: the mark cut'));
+ok(ORX.older === 1, 'CONTROL: the mark\'s check cut — the older answer puts the held list back after the lift: RED', ORX);
+// (4) the chip's press with the System panel already open as a window (brought forward, nothing painted again): its section scrolls AT ONCE
+function press(src) {
+  let scrolled = 0;
+  const sec = { isConnected: true, hidden: false, kids: [], getClientRects: () => [1], scrollIntoView: () => { scrolled++; }, replaceChildren(...k) { this.kids = k; } };
+  const pe = pageEnv({ openRailPanel: () => ({ id: 'w-system' }) });
+  pe.doc.querySelector = (q) => (q === '.sys-held' ? sec : null);
+  const P = pageOf(src, pe.env);
+  P.applyHeldLists(A1, { epoch: 'e', seq: 1 });
+  P.paintHeldLists(sec);   // the panel open as a window, its section drawn
+  P.openHeldSection({});
+  const atPress = scrolled;
+  P.applyHeldLists([...A1, { key: 'hosts', what: 'hosts', since: 600 }], { epoch: 'e', seq: 2 });   // a later draw (a reconnect's, a broadcast)
+  return { atPress, after: scrolled };
+}
+const PR = press(PAGE);
+ok(PR.atPress === 1 && PR.after === 1, 'r3284: the chip\'s press with the panel already open as a window scrolls its section AT ONCE — and a later draw (a reconnect\'s) scrolls nothing with no press', PR);
+const NOW = '  if (sec && sec.isConnected && !sec.hidden && sec.getClientRects?.().length) { scrollWanted = false; try { sec.scrollIntoView?.({ block: \'nearest\' }); } catch { /* none */ } }\n';
+const PRX = press(anchored(PAGE, NOW, '', 'held-lists page: the at-once scroll cut'));
+ok(PRX.atPress === 0 && PRX.after === 1, 'CONTROL: the at-once scroll cut — the press scrolls nothing and the NEXT draw scrolls the panel with no press: RED', PRX);
+// (5) a next try that passes while the section stays open is worded again — by the section's own timer, at the try
+function nextTry(src) {
+  let now = 1_000;
+  const pe = pageEnv({ Date: { now: () => now } });
+  const P = pageOf(src, pe.env);
+  P.applyHeldLists([{ key: 'store:mounts.json', what: 'mounts.json', since: 500, next: 61_000 }], { epoch: 'e', seq: 1 });
+  const el = { isConnected: true, hidden: false, kids: [], replaceChildren(...k) { this.kids = k; }, scrollIntoView() { } };
+  P.paintHeldLists(el);
+  const row = () => ((el.kids.find((k) => k.className === 'sys-held-row') || {}).textContent || '');
+  const before = row(), live = pe.timers.filter((x) => !x.cleared);
+  now = 61_300; if (live.length) live[live.length - 1].fn();
+  return { before, after: row(), timers: live.length, ms: live.length ? live[0].ms : null, left: pe.timers.filter((x) => !x.cleared).length };
+}
+const NT = nextTry(PAGE);
+ok(NT.before.includes('@61000') && NT.timers === 1 && NT.ms === 60_250 && NT.after.includes(W.heldSoonWord(tt)) && !NT.after.includes('@61000') && NT.left === 0,
+  'r3284: the section shows the next try\'s time, its own timer fires just after it, and the row then says «in a moment» — never a time in the past while it stays open', NT);
+const TIMER = '    if (due.length) timer = setTimeout(draw, Math.min(Math.min(...due) - at + 250, NEXT_TRY_REPAINT_MAX_MS));\n';
+const NTX = nextTry(anchored(PAGE, TIMER, '', 'held-lists page: the next-try timer cut'));
+ok(NTX.timers === 0 && NTX.after.includes('@61000'), 'CONTROL: the timer cut — the passed try keeps its time until the next change: RED', NTX);
+// (6) ONE ORDER beside For you, whichever chip draws first — customize-mode.js seatBeside compiled from its source over a stand-in zone;
+// the vault's lock seated by its own line (just before For you, pinned in ③)
+const seatOf = (src) => {
+  const END = '\n  return true;\n}\n', i = src.indexOf('export function slotBeside('), j = src.indexOf(END, src.indexOf('export function seatBeside('));
+  if (i < 0 || j < 0) return null;
+  return (doc) => new Function('document', `${src.slice(i, j + END.length).replaceAll('export function', 'function')}\nreturn { slotBeside, seatBeside };`)(doc);   // eslint-disable-line no-new-func
+};
+function seated(src, draws) {
+  const nodes = new Map();
+  const mk = (id) => { const n = { id, parentNode: null, get nextSibling() { if (!this.parentNode) return null; const k = this.parentNode.kids; return k[k.indexOf(this) + 1] || null; } }; nodes.set(id, n); return n; };
+  const tray = { id: 'taskbar-tray', kids: [], parentNode: null, insertBefore(n, ref) { if (n.parentNode) n.parentNode.kids.splice(n.parentNode.kids.indexOf(n), 1); const at = ref ? this.kids.indexOf(ref) : -1; if (at < 0) this.kids.push(n); else this.kids.splice(at, 0, n); n.parentNode = this; return n; } };
+  nodes.set(tray.id, tray); tray.insertBefore(mk('taskbar-user-todos'), null);
+  const M = seatOf(src)({ getElementById: (id) => { const n = nodes.get(id); return n && (n === tray || n.parentNode) ? n : null; } });
+  const draw = (id) => {
+    const chip = nodes.get(id) || mk(id);
+    if (id === 'taskbar-vault') { const s = M.slotBeside('taskbar-user-todos', tray); if (chip.parentNode !== s.parent || chip.nextSibling !== s.before) s.parent.insertBefore(chip, s.before); }   // vault-unlock.js's own line
+    else M.seatBeside(chip, 'taskbar-user-todos', tray);
+  };
+  const orders = draws.map((seq) => { for (const id of seq) draw(id); return tray.kids.map((k) => k.id).join(' '); });
+  return orders;
+}
+const THREE = ['taskbar-warmth', 'taskbar-held', 'taskbar-vault'];
+const PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].map((p) => p.map((k) => THREE[k]));
+const ONE = 'taskbar-warmth taskbar-held taskbar-vault taskbar-user-todos';
+const orderOf = (src) => PERMS.map((first) => seated(src, [first, ...PERMS])).flat();
+const SO = orderOf(CM);
+ok(SO.length === 42 && SO.every((o) => o === ONE), `r3284: whichever chip draws first and however they redraw (6 first orders × 6 redraws each), the chips beside For you stand in ONE order: ${ONE}`, [...new Set(SO)]);
+const SEARCH = '  for (const later of row.slice(row.indexOf(chip.id) + 1)) {';
+const SOX = orderOf(anchored(CM, SEARCH, '  for (const later of []) {', 'customize-mode: the later chips\' search cut'));
+ok(new Set(SOX).size > 1, 'CONTROL: the search for the later chips cut (each chip just before For you, as before) — the chips trade places at redraws: RED', [...new Set(SOX)]);
 
 report();

@@ -1979,10 +1979,11 @@ export function pagesListHeldWords() { return t('VibeSpace cannot read its list 
 export function pagesHeldWords() { return t('VibeSpace cannot read its list of published pages right now — nothing was changed: the page stays as it was, and a public page is served again as soon as the list reads. Press again in a few minutes.'); }
 /** B-f276 family (主开发 r3032): THE FAMILY's HELD CODES, ONE TABLE. A store whose file could not be read is HELD and its route answers
  *  the store's code (503); the page says it in its OWN words — what could not be read by its plain name, that nothing was changed, that
- *  it is read again by itself — never the hub's English, never a file name. The older holds keep their own branches (hosts-unread,
- *  mounts-unread, store_unread by its file and kind, plugins_unread: heldWordsOf and refusalWords above / below); every other held code is
- *  worded HERE: a row, or — a list hold the census classed with no row of its own (HELD_GENERIC) — the ONE generic sentence; ANY other
- *  code keeps its own words (r3123). A lane whose cure adds a held store adds its code as a row here; scripts/test-held-words.mjs is the
+ *  it is read again by itself — never the hub's English, never a file name. The older holds keep their own branches in heldWordsOf
+ *  (hosts-unread, mounts-unread, store_unread by its file and kind); every other held code is worded HERE: a row — a unit's own sentence
+ *  function stays its row's value (plugins_unread, providers_unread, pages_unread, status_unread: moved under the table, r3224 / r3233) —
+ *  or, a list hold the census classed with no row of its own (HELD_GENERIC), the ONE generic sentence; ANY other code keeps its own
+ *  words (r3123). A lane whose cure adds a held store adds its code as a row here; scripts/test-held-words.mjs is the
  *  census (every held 503 of the tree, and every code ending in unread / unreadable whatever its status). */
 const HELD_WORDS = Object.freeze({
   storage_unread: () => t('VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'),   // mounts.json (src/mounts.js)
@@ -1999,9 +2000,15 @@ const HELD_WORDS = Object.freeze({
   feedback_unread: () => t('VibeSpace cannot read its feedback reports right now — nothing was changed. Press again in a few minutes (it reads them again by itself).'),   // card-door-in-chat (the content stores, lines 678 + 679 — r3233) — the lane's words (r3168)
   accounts_unread: () => t('VibeSpace cannot read your accounts list right now — nothing was changed and no conversation starts on another login meanwhile. If it does not come back by itself, see the notice in For you.'),   // bl-windows (lines 625 + follow; bl-accounts' consumers reuse it — bl-windows' wording) — the lane's words (r3168)
   setting_holds_unread: () => t('The record of raised spending ceilings could not be read, so nothing was changed. VibeSpace reads it again by itself every few minutes; press again then. You can still lower a ceiling on its row.'),   // bl-loop-b (lines 618 + 641: data/setting-holds.json) — the lane's words (r3168)
-  automation_unread: () => t('Automation keys can\'t be read right now. Nothing was changed, and no key works until they read again. VibeSpace reads them again by itself; if this stays, the saved list may need mending by hand and a restart.'),   // login-request-card (lines 613 + 630: the automation store) — the lane's words (r3168)
+  automation_unread: () => t('Automation keys can\'t be read right now. Nothing was lost or changed, and no key works until they read again. VibeSpace reads them again by itself.'),   // login-request-card (lines 613 + 630: the automation store) — the lane's words (r3168)
   forgotten_unread: () => t('The list of browsers you set aside can\'t be read right now, so nothing was set aside or deleted. VibeSpace reads it again by itself every few minutes — try again then.'),   // bl-browser-b (browser-forgotten.json) — the lane's words (r3168)
   vault_use_marks_unread: () => t('VibeSpace cannot read who may use your stored values right now — nothing was changed and no permission is lost. It reads the list again by itself; try again in a few minutes.'),   // lg-vault-env (unit (a): the vault-use marks) — the lane's words (r3168)
+  // the units picked into the hotfix's trial after the chain (主开发 r3314): each lane's own words (r3168)
+  vault_grants_unread: () => t('VibeSpace cannot read who may receive your two-step codes right now — nothing was changed and no code is given out until it reads. It reads the list again by itself; try again in a few minutes.'),   // lg-vault-env (unit (c): vault-grants.json, line 695) — the lane's words
+  reset_claims_unread: () => t('The reset marks could not be read just now — VibeSpace reads them again by itself; nothing was lost or changed. Marking a limit as reset waits until they read.'),   // hub-loop-stalls (line 701: usage-reset-claims.json) — the lane's words
+  'session-meta-unread': () => t('VibeSpace cannot read this conversation\'s saved details right now. Nothing has been changed: what you do meanwhile is kept and saved as soon as they read again.'),   // bl-chat-c (line 663: a conversation's record in data/session-meta) — the lane's words
+  webhook_callers_unread: () => t('VibeSpace cannot read its webhook callers right now — nothing was changed, and each caller is told to try again later. It reads them again by itself in a few minutes.'),   // bl-ci (the webhook callers, callers.json) — the lane's words; its page (webhook-view.js heldWords) shows the answer's words, these now
+  webhook_pairing_unread: () => t('VibeSpace cannot read its pending pairing codes right now — no code was made or used. It reads them again by itself in a few minutes.'),   // bl-ci (pair-pending.json) — the lane's words
 });
 const HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;   // THE STATED PATTERN the census finds held-looking codes by — never what the step words by (r3123)
 // 主开发 r3123 (a must of this unit, found by its own read): the pattern also matches codes that are NO list hold (a vault's unreadable key,
@@ -2012,7 +2019,7 @@ const HELD_GENERIC = new Set(['hosts-unread', 'mounts-unread', 'store_unread', '
 export function heldGenericWords() { return t('VibeSpace cannot read one of its saved lists right now — nothing was changed. Try again in a few minutes.'); }
 /** a held code → its row's sentence, else the generic one when the census classed it a list hold (HELD_GENERIC); any other code → null (its own words stand) */
 export function familyHeldWords(code) { const c = String(code || ''); return Object.prototype.hasOwnProperty.call(HELD_WORDS, c) ? HELD_WORDS[c]() : HELD_GENERIC.has(c) ? heldGenericWords() : null; }
-export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d ? familyHeldWords(d.code) : null; }   // r3224: plugins_unread, providers_unread, pages_unread are rows of the table (one lookup)
+export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d ? familyHeldWords(d.code) : null; }   // r3224 / r3233: plugins_unread, providers_unread, pages_unread, status_unread are rows of the table (one lookup)
 /** …and session-status.json (503 `status_unread`, 主开发 r3005): an override, a clear refused */
 /** …the same store read as «none» (a status timeline, the board): what is not shown, and why */
 export function statusListHeldWords() { return t('VibeSpace cannot read the conversations’ statuses right now, so none is shown. Nothing is lost: they come back when they read (it tries again every few minutes); status changes wait until then.'); }

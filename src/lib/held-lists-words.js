@@ -20,10 +20,20 @@ const NAMES = Object.freeze({
   'setting-holds.json': i18nKey('the raised spending ceilings'),
   'vault-use-marks.json': i18nKey('who may use your stored values'),
   'session-status.json': i18nKey('the conversations’ statuses'),
+  // the stores of the units picked into the hotfix's trial after the chain (主开发 r3314)
+  'callers.json': i18nKey('the webhook callers'),
+  'pair-pending.json': i18nKey('the pending pairing codes'),
+  'vault-grants.json': i18nKey('who may receive your two-step codes'),
+  'usage-reset-claims.json': i18nKey('the reset marks'),
 });
+/** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
+const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);
 /** the names this module knows (a lane whose store joins adds its name here — the census reds a held store with none) */
 export const HELD_NAMED = Object.freeze(Object.keys(NAMES));
-export function heldListName(what, t) { const k = NAMES[String(what || '')]; return k ? t(k) : t(i18nKey('a saved list')); }
+const nameKey = (what) => { const w = String(what || ''); return Object.prototype.hasOwnProperty.call(NAMES, w) ? NAMES[w] : (NAMED_BY_SHAPE.find(([re]) => re.test(w)) || [])[1] || null; };
+/** true when the notice has a plain name for what the hub names a held list (the names' census asks it) */
+export function heldNamed(what) { return !!nameKey(what); }
+export function heldListName(what, t) { const k = nameKey(what); return k ? t(k) : t(i18nKey('a saved list')); }
 export function heldChipWords(n, t) { return t(i18nKey('Lists unreadable · {n}'), { n }); }
 export function heldChipTitle(t) { return t(i18nKey('Some of VibeSpace’s lists cannot be read right now — the system panel names them')); }
 export function heldSectionTitle(t) { return t(i18nKey('Lists that could not be read')); }

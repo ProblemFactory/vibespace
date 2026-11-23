@@ -10,16 +10,17 @@
 //     of that ending with no class is red by name. The step words ONLY the classed list holds: a new code keeps its own words until judged.
 //   ① THE CENSUS — every code a route of the tree answers with 503 (read from the source: `status(503).json({… code: '…'`, an error
 //     carrying `status: 503` and its `code`, every caller of the store-read hold's create({ code })) is CLASSIFIED: a row of the table,
-//     an older hold's own branch, the generic one by the pattern, or NOT A HOLD with its why (NOT_HELD below). A new code with none is
-//     RED by name; a NOT_HELD row naming no live code is DEAD (red); a not-held code that matches the pattern is red (it would be worded
+//     an older hold's own branch, the generic one by the pattern, a list hold its OWN door words (OWN_DOOR below), or NOT A HOLD with its
+//     why (NOT_HELD below). A new code with none is RED by name; a NOT_HELD or OWN_DOOR row naming no live code is DEAD (red); a not-held code that matches the pattern is red (it would be worded
 //     as a held list).
 //   ② THE WORDS — every row's sentence, the generic one and the phone Files card's have their zh and ja rows; none names a file.
 //   ③ THE PASS, DRIVEN — the page's refusal words compiled from utils.js's own source (hostsHeldWords … refusalWords, `t` stood in):
 //     a held answer of the family is worded by its code, the hub's sentence kept as `said`; an unknown held code takes the generic
-//     sentence; another refusal and an answer that is no refusal pass as they came; heldWordsOf agrees.
+//     sentence; another refusal and an answer that is no refusal pass as they came; heldWordsOf agrees; the codes moved under the table
+//     (providers, pages, statuses) answer their units' own sentence functions (r3284).
 //   ④ THE PHONE — the Files card (src/lib/phone-files.js) keeps the list's `unread` and says the held list in one sentence.
 //   CONTROLS (each RED by name, over a copy in memory): a planted 503 code; a planted hold with a code of its own; the pattern cut; a
-//   table row cut; the pass's fallback cut; the card's sentence cut.
+//   table row cut; a moved row re-pointed; the pass's fallback cut; the card's sentence cut.
 // FAST, PURE: source text only — nothing runs, nothing is fetched.
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -103,20 +104,25 @@ const NOT_HELD = {
   proposal_door_not_ready: 'the proposal card not on this instance yet — the job\'s row says what to tick',
   write_never_started: 'a write to a machine that never started — not saved, said',
   write_unknown: 'a write to a machine that did not answer — it may have been saved, said',
-  auto_resume_unread: 'a list hold worded by its OWN door by its message (bulk-resume.js) — the step leaves it (classed so in ①b)',
   outbox_unread: 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it',
 };
 
+// A LIST HOLD WORDED BY ITS OWN DOOR (r3284: its own class, not «not a hold»): a 503 that IS a held list, whose own door words it — the
+// step leaves it, so that door's words stand (classed so in ①b too)
+const OWN_DOOR = {
+  auto_resume_unread: 'its own door words it BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words',
+};
 function census(codes, table) {
   const red = [], held = [], generic = [];
+  const has = (o, c) => Object.prototype.hasOwnProperty.call(o, c);
   for (const [code, files] of [...codes].sort(([a], [b]) => a.localeCompare(b))) {
-    const row = table.rows.includes(code) || table.older.has(code), gen = table.generic.has(code), not = Object.prototype.hasOwnProperty.call(NOT_HELD, code);
-    if (not && (row || gen)) red.push(`${code}: listed NOT_HELD but the step words it as a held list (${[...files].join(', ')})`);
+    const row = table.rows.includes(code) || table.older.has(code), gen = table.generic.has(code), not = has(NOT_HELD, code), own = has(OWN_DOOR, code);
+    if ((not || own) && (row || gen)) red.push(`${code}: listed ${own ? 'OWN_DOOR' : 'NOT_HELD'} but the step words it as a held list (${[...files].join(', ')})`);
     else if (row) held.push(code);
     else if (gen) generic.push(code);
-    else if (!not) red.push(`${code}: a 503 with no row, no older branch, not a classed list hold (HELD_GENERIC) and not NOT_HELD (${[...files].join(', ')}) — classify it`);
+    else if (!not && !own) red.push(`${code}: a 503 with no row, no older branch, not a classed list hold (HELD_GENERIC), not OWN_DOOR and not NOT_HELD (${[...files].join(', ')}) — classify it`);
   }
-  const dead = Object.keys(NOT_HELD).filter((c) => !codes.has(c));
+  const dead = [...Object.keys(NOT_HELD), ...Object.keys(OWN_DOOR)].filter((c) => !codes.has(c));
   return { red, held, generic, dead };
 }
 
@@ -125,19 +131,22 @@ const CODES = heldCodesOf(SOURCES), TABLE = tableOf(UTILS);
 const C = census(CODES, TABLE);
 ok(TABLE.rows.length >= 4 && !!TABLE.pattern && TABLE.older.size >= 4, 'control setup: the table, its pattern and the older holds\' branches are read from src/lib/utils.js', { rows: TABLE.rows, pattern: String(TABLE.pattern), older: [...TABLE.older] });
 ok(['storage_unread', 'tokens_unread', 'plugins_unread', 'hosts-unread', 'store_unread'].every((c) => CODES.has(c)), 'control setup: the census finds the helper\'s three callers\' codes and the older holds\' 503s in the tree', [...CODES.keys()]);
-ok(C.red.length === 0, `every 503 code of the tree is classified — ${C.held.length} worded by a row or an older branch (${C.held.join(', ')}), ${C.generic.length} by the generic sentence (${C.generic.join(', ')}), ${Object.keys(NOT_HELD).length - C.dead.length} not a hold`, C.red);
-ok(C.dead.length === 0, 'every NOT_HELD row names a live 503 code (a dead row is red)', C.dead);
+ok(C.red.length === 0, `every 503 code of the tree is classified — ${C.held.length} worded by a row or an older branch (${C.held.join(', ')}), ${C.generic.length} by the generic sentence (${C.generic.join(', ')}), ${Object.keys(OWN_DOOR).length} worded by its own door, ${Object.keys(NOT_HELD).length} not a hold`, C.red);
+ok(C.dead.length === 0, 'every NOT_HELD and OWN_DOOR row names a live 503 code (a dead row is red)', C.dead);
 const LIVE_CODES = new Set([...CODES.keys(), ...endingsOf(SOURCES, TABLE.pattern).keys()]);   // a row's code answered with any status (automation_unread rides a held mark, not a 503)
 ok(TABLE.rows.every((c) => LIVE_CODES.has(c)), 'every row of the table names a code the tree answers, whatever its status (no row for nothing)', TABLE.rows.filter((c) => !LIVE_CODES.has(c)));
 
 
 // ①b THE ENDING (r3123): every code of the tree ending in unread / unreadable, whatever its status — classed by groups, each with its why
 const LEFT_ALONE = [
-  ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread']],
+  ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread', 'usage-reading-unread']],
   ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
   ['own', 'a store whose own door words its refusal BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words', ['auto_resume_unread']],
   ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'designs-unread', 'labels-unread', 'status-unread']],
   ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
+  // r3314: the units picked into the hotfix's trial after the chain
+  ['own', 'a spend guard refusal\'s why (an unattended turn waits on an account whose usage reading cannot be read): the guard words it in its OWN table (src/spend-authorizer.js REFUSAL_WORDS, the owning lane\'s) — no page refusal code', ['reading-unread']],
+  ['not', 'a door\'s or a decision\'s own why word — the webhook door\'s held `why` (its words ride `reason`), a pool switch\'s `reason` — no code a route answers', ['callers-unread', 'held-unread']],
   ['own', 'another store whose own door words its hold (its lane gives it a row of the table when its cure lands)', ['desktop_apps_unread', 'registry_unread', 'store-unreadable', 'store_unreadable', 'records-unreadable', 'kept-unreadable', 'signin-held-unread', 'template_unread', 'version-unread']],
   ['not', 'a state or fact word, not a list\'s refusal code (store-read\'s own states, a row\'s field)', ['unread', 'unreadable']],
   ['not', 'a key, a credential or a vault entry (the vault and its key files word it — a locked vault is never an unreadable list)', ['key-unreadable', 'key_unreadable', 'oat-unreadable', 'proxy_credential_unreadable', 'vault-reveal-unreadable', 'entry_unreadable', 'job_secrets_unreadable', 'job_secrets_record_unreadable', 'host-key-known-unreadable', 'table_unreadable', 'command_unreadable']],
@@ -190,16 +199,17 @@ const passOf = (src) => {
   const i = src.indexOf('export function hostsHeldWords() {'), j = src.indexOf('\n}\n', src.indexOf('function refusalWords(body) {'));
   if (i < 0 || j < 0) return null;
   // eslint-disable-next-line no-new-func
-  return new Function('t', `${src.slice(i, j + 2).replaceAll('export function', 'function')}\nreturn { refusalWords, heldWordsOf };`)((k) => `«${k}»`);
+  return new Function('t', `${src.slice(i, j + 2).replaceAll('export function', 'function')}\nreturn { refusalWords, heldWordsOf, providersHeldWords, pagesHeldWords, statusHeldWords };`)((k) => `«${k}»`);
 };
 const HUB = (code, file) => ({ error: `changing it: ${file} in VibeSpace's data folder could not be read (EIO); VibeSpace reads it again every few minutes.`, code });
 const drive = (P) => {
   if (!P) return null;
   const out = {};
-  for (const [code, file] of [['storage_unread', 'mounts.json'], ['tokens_unread', 'mount-tokens.json'], ['plugins_unread', 'plugins.json'], ['store-blocked', 'index.json'], ['TASK_GROUPS_UNREAD', 'task-groups.json'], ['records-unread', 'jobs.json'], ['frobs_unread', 'frobs.json']]) {
+  for (const [code, file] of [['storage_unread', 'mounts.json'], ['tokens_unread', 'mount-tokens.json'], ['plugins_unread', 'plugins.json'], ['store-blocked', 'index.json'], ['providers_unread', 'providers.json'], ['pages_unread', 'published-pages.json'], ['status_unread', 'session-status.json'], ['TASK_GROUPS_UNREAD', 'task-groups.json'], ['records-unread', 'jobs.json'], ['frobs_unread', 'frobs.json']]) {
     const body = HUB(code, file), w = P.refusalWords(body);
     out[code] = { error: w.error, said: w.said, code: w.code, held: P.heldWordsOf(body) };
   }
+  out.own = { providers_unread: P.providersHeldWords(), pages_unread: P.pagesHeldWords(), status_unread: P.statusHeldWords() };
   out.other = P.refusalWords({ error: 'no such mount', code: 'not-found' });
   out.success = P.refusalWords({ ok: true, code: 'records-unread', jobs: [] });
   return out;
@@ -211,9 +221,13 @@ ok(!!D && word('storage_unread') === '«VibeSpace cannot read its storage list r
   && word('tokens_unread') === '«VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).»'
   && /^«VibeSpace cannot read its plugins’ settings right now — nothing was changed/.test(word('plugins_unread') || '') && /^«Paused: a channels file could not be read/.test(word('store-blocked') || ''),
   'a held answer of the family is worded by its code, from the table: the storage list, the folder links, the plugins\' settings, the channels\' held files', D);
+// r3284: the codes MOVED under the table (r3224 / r3233) answer their units' OWN sentence functions — a row re-pointed is red
+const MOVED = ['providers_unread', 'pages_unread', 'status_unread'];
+const movedOwn = (d) => !!d && MOVED.every((c) => !!d.own[c] && d[c].error === d.own[c] && d[c].held === d.own[c] && d[c].error !== GEN);
+ok(movedOwn(D), 'the moved rows answer their units\' own sentences: providers_unread → providersHeldWords(), pages_unread → pagesHeldWords(), status_unread → statusHeldWords() — in the pass and in heldWordsOf', D && MOVED.map((c) => [c, D[c].error === D.own[c]]));
 ok(!!D && ['TASK_GROUPS_UNREAD', 'records-unread'].every((c) => word(c) === GEN), 'a classed list hold with no row of its own (HELD_GENERIC) takes the ONE generic sentence — never the hub\'s English', D && { TASK_GROUPS_UNREAD: word('TASK_GROUPS_UNREAD'), records: word('records-unread') });
 ok(!!D && word('frobs_unread') === HUB('frobs_unread', 'frobs.json').error, 'a code of that ending NOBODY classed keeps its own words through the step (the generic sentence never reaches an unjudged code — r3123)', D && D.frobs_unread);
-ok(!!D && Object.keys(D).filter((k) => !['other', 'success', 'frobs_unread'].includes(k)).every((k) => D[k].said && /data folder/.test(D[k].said) && !/\.json|data folder|\(EIO\)/.test(D[k].error) && D[k].held === D[k].error),
+ok(!!D && Object.keys(D).filter((k) => !['other', 'success', 'frobs_unread', 'own'].includes(k)).every((k) => D[k].said && /data folder/.test(D[k].said) && !/\.json|data folder|\(EIO\)/.test(D[k].error) && D[k].held === D[k].error),
   'the hub\'s own sentence is kept as `said` (the journal\'s), the page\'s carries no file name; heldWordsOf agrees with the pass', D);
 ok(!!D && D.other.error === 'no such mount' && D.success.error === undefined && D.success.ok === true, 'another refusal passes as it came; an answer that is no refusal is not touched (a held code on a success is no refusal)', D && { other: D.other, success: D.success });
 
@@ -252,6 +266,9 @@ console.log('CONTROLS — each over a copy in memory, RED by name');
   const FB = "  const fw = body && typeof body === 'object' && body.code && (body.error || body.ok === false) ? familyHeldWords(body.code) : null;";
   const D5 = drive(passOf(anchored(UTILS, FB, '  const fw = null;', 'held-words: the fallback cut')));
   ok(!!D5 && D5.storage_unread.error === HUB('storage_unread', 'mounts.json').error, 'CONTROL: the pass\'s fallback cut — the hub\'s English (the file\'s name, the read\'s error) reaches the page: RED', D5 && D5.storage_unread);
+  const PROW = '  pages_unread: () => pagesHeldWords(),';
+  const D6 = drive(passOf(anchored(UTILS, PROW, '  pages_unread: () => heldGenericWords(),', 'held-words: a moved row re-pointed')));
+  ok(!!D6 && !movedOwn(D6) && D6.pages_unread.error === GEN, 'CONTROL: the pages\' row re-pointed at the generic sentence — the moved rows\' check above goes RED', D6 && D6.pages_unread);
   const PHX = anchored(PHONE, PH_SAY, "held.textContent = '';", 'held-words: the card\'s sentence cut');
   ok(!PHX.includes(PH_SAY), 'CONTROL: the Files card\'s sentence cut — ④ goes RED (a held list reads as no storage again)');
 }

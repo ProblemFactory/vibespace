@@ -125,6 +125,22 @@ export function slotBeside(id, fallback = null) {
   if (el && el.parentNode) return { parent: el.parentNode, before: el };
   return fallback ? { parent: fallback, before: null } : null;
 }
+/** B-f276 follow (主开发 r3284): the chips that stand beside For-you keep ONE order whichever draws first — left to right, each row
+ *  ends at For-you: the cache warmth, the held lists, the vault's lock. A chip is seated before the first LATER chip of its row that
+ *  stands in the same zone, else before For-you (slotBeside) — so a redraw never trades two chips' places. */
+const BESIDE_ORDER = Object.freeze([Object.freeze(['taskbar-warmth', 'taskbar-held', 'taskbar-vault']), Object.freeze(['mobile-nav-held', 'mobile-nav-vault'])]);
+export function seatBeside(chip, id, fallback = null) {
+  const slot = chip ? slotBeside(id, fallback) : null;
+  if (!slot) return false;
+  const row = BESIDE_ORDER.find((r) => r.includes(chip.id)) || [];
+  let before = slot.before;
+  for (const later of row.slice(row.indexOf(chip.id) + 1)) {
+    const e = document.getElementById(later);
+    if (e && e !== chip && e.parentNode === slot.parent) { before = e; break; }
+  }
+  if (chip.parentNode !== slot.parent || chip.nextSibling !== before) slot.parent.insertBefore(chip, before);
+  return true;
+}
 
 /** Fill in a complete zone→ids map from a possibly partial/stale stored one. */
 function normalizeArrangement(raw) {
