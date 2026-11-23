@@ -33,12 +33,14 @@ function registerAccountModelRoutes(app, { accounts, providers }) {
   const answer = (t) => ({ account: t.account, provider: t.provider ? { ...(({ keyRef, baseUrl, tail, ...rest }) => rest)(t.provider), refreshable: MP.refreshable(t.provider) } : null, editable: !!t.provider && providers.editable(t.provider.id) });
   app.get('/api/accounts/:id/models', (req, res) => {
     const t = targetOf(String(req.params.id));
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!t) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
     res.json(answer(t));
   });
   app.put('/api/accounts/:id/models', async (req, res) => { try {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'the owner enters an account\'s models — an agent cannot', code: 'agent_forbidden' });
     const t = targetOf(String(req.params.id));
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!t) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
     if (!t.provider) return res.status(409).json({ error: 'this account has no model provider', code: 'no_provider' });
     const r = providers.setModels(t.provider.id, req.body || {});

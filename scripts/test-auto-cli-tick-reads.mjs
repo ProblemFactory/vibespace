@@ -359,7 +359,8 @@ async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}
 console.log('§5 resolveAccount reads the record, not list()');
 {
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-  const m = srv.match(/  resolveAccount: \(id\) => \{\n([\s\S]*?)\n  \},\n\}\);/);
+  // the resolver's FIRST line may carry its «held» answer (r3060 Q1: the one existing line changed, none added) — kept in the body
+  const m0 = srv.match(/  resolveAccount: \(id\) => \{([^\n]*)\n([\s\S]*?)\n  \},\n\}\);/), m = m0 && [m0[0], (m0[1].trim() ? m0[1] + '\n' : '') + m0[2]];
   ok('§5 WIRING: server.js hands UsageHistory a resolveAccount that never calls accounts.list()', !!m && !/accounts\.list\(/.test(m[1]) && /accounts\.get\(id\)/.test(m[1]), m && m[1]);
   const resolveNew = m && new Function('accounts', 'require', `return (id) => {\n${m[1]}\n};`); // dc-ws-create: the ledger type is the descriptor's creds.ledgerType (require'd like server.js does)
   const w = mkWorld({ members: 3, pooled: 0 });

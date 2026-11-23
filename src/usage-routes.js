@@ -300,7 +300,8 @@ const _accountUsage = {}; // id → { ...usage, name }
 // A PERSON'S RESET CLAIM + A RESET SEEN IN A READING (lane account-reset-door): the ONE claim store (src/usage-reset-claim.js —
 // the pool engine reads the same one); a reading that shows a vendor-side reset is said once and ends a claim on its lane
 // a claim of an account that is gone — or that takes no claim (src/backend-caps.js oauthUsage: Claude's typed lanes) — is dropped
-const claimable = (key) => { if (key === '__global__') return true; try { const a = accounts.get(key); return !!a && oauthUsageAccount(a); } catch { return true; } };
+// r3044 (5) / r3019: while the list is UNREAD the answer is «unknown» (null — safeKnown keeps it): prune and viewOf drop NOTHING
+const claimable = (key) => { if (key === '__global__') return true; if ((() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })()) return null; try { const a = accounts.get(key); return !!a && oauthUsageAccount(a); } catch { return true; } };
 const keyName = (key) => (key === '__global__' ? 'the machine login' : (accounts.get(key)?.name || key));
 // (the store hears the write path's statements of ITS data dir itself — usage-reset-claim at(): the lanes a write stated
 // settle a claim, a reset a write showed is said once, named here)
@@ -819,7 +820,8 @@ async function refreshViaCliPanel(key) {
   // not true: no reading was recorded, and the caller's backoff is the right
   // response to a panel whose subject vanished.
   if (!isGlobal && !(accounts.list().accounts || []).some((x) => x.id === key)) {
-    console.log(`[usage] the /usage panel for ${key} answered after the account was removed — discarding the reading`);
+    if (typeof accounts.held === 'function' && accounts.held()) console.log(`[usage] the /usage panel for ${key} answered while the accounts list could not be read — the reading is not filed`);   // r3044 (5)
+    else console.log(`[usage] the /usage panel for ${key} answered after the account was removed — discarding the reading`);
     logProbe('account-removed');
     return false;
   }
@@ -1237,6 +1239,7 @@ app.post('/api/usage/refresh', async (req, res) => {
   let acctMeta = null;
   if (!isGlobal) {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!acctMeta) return res.status(404).json({ error: 'unknown subscription account' });
   }
   // CLI-PANEL rung (2.327.0, user-verified: `claude -p /usage` prints ALL
@@ -1290,6 +1293,7 @@ app.post('/api/usage/refresh', async (req, res) => {
   // write for it) must not fall through to the token ladder: that costs one
   // real vendor request on a SIBLING's token and can re-create the phantom
   // cache entry the belt exists to prevent (member-wake r3 verifier, LOW).
+  { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
   if (!isGlobal && !(accounts.list().accounts || []).some((x) => x.id === key)) return res.status(404).json({ error: 'that account was removed while its usage was being read' });
   // THE USAGE BEARER LAW (acceptance r3, login-expiry usageBearerOk — kb-design-lessons §9): every rung of this ladder hands
   // only the CLI's own login token, never a long-lived one (ours or planted without our mark) — a usage read is never made with one
@@ -1658,6 +1662,7 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   const key = String(req.params.id || '');
   const isGlobal = key === '__global__';
   const acct = isGlobal ? null : (() => { try { return accounts.get(key) || null; } catch { return null; } })();
+  { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
   if (!isGlobal && !(acct && acct.type === 'subscription')) return res.status(404).json({ error: 'unknown subscription account', code: 'unknown_account' });
   // GATED ON THE HARNESS ROW (r2, MUST 6): a claim is for the lanes that go through the pool's ONE reading door — Claude's
   // typed limits (src/backend-caps.js oauthUsage). Another harness's readings (Codex, Antigravity) are refused BY NAME.
@@ -1760,6 +1765,9 @@ function usageAnswer(req, res) {
     usageFolder: usageFolder.state(),   // B-360d U3: { asOf, ageMs, held, since, error } — a held folder's readings are its last reply's
     rateLimit: globalOut, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: lanesAt,
     subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: accountsOut,
+    // r3060 Q4: THE ACCOUNTS LIST UNREAD — the reply says so ({ code, at }, from the list's ONE fact), so `accounts` is never read as
+    // «zero accounts, zero usage» (absent while the list reads); the panel's sentence that reads it is the list's lane's
+    ...((() => { try { const h = typeof accounts.held === 'function' ? accounts.held() : null; return h ? { accountsHeld: { code: h.code || 'unread', at: Number(h.at) || null } } : {}; } catch { return { accountsHeld: { code: 'held-unknown', at: null } }; } })()),
     // Dead-reckoned CURRENT utilization per account key (B-fcff v2): anchor +
     // learned-rate × ledger-cost-since. Purely local computation (30s memo);
     // keys match `accounts` + '__global__'. The popup renders these as a dim

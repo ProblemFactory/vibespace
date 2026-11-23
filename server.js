@@ -788,7 +788,7 @@ const usageHistory = new UsageHistory({
   // walker asks this once per ledger line — seconds of synchronous NFS reads per walk step on
   // production. The same three fields list()'s row carries: its type/backend defaults, and a
   // NO key tail (B-ba7d: a usage row reaches every reader of /api/usage-stats; the page lays the person's read on).
-  resolveAccount: (id) => {
+  resolveAccount: (id) => { if (typeof accounts.held === 'function' && accounts.held()) return { held: true, type: 'unknown', name: null };   // r3060 Q1: a list that could not be read names nobody — the walk waits, never bakes «unknown»
     const a = accounts.get(id);
     if (!a) { let p = null; try { p = accounts.providerRecordOf(id); } catch { } return p ? { type: 'provider', name: p.label || id } : null; }   // B-d578 P1-b: a third-party provider's RECORD (no account) — its name, never «unknown» / deleted
     const type = a.type || 'api', backend = a.backend || 'claude';
@@ -886,7 +886,7 @@ const userTodos = new UserTodoManager({
   },
 });
 require('./src/server/helper-asks').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, persistAskedAt: (s, map) => { if (s && s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), helperAskedAt: map }); } }); require('./src/server/main-asks').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, readAskedAt: (s) => (s && s.sockName ? (readSessionMeta(s.sockName) || {}).mainAskedAt : null), persistAskedAt: (s, map) => { if (s && s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), mainAskedAt: map }); } }); // lane S1: a helper's ask unanswered for 60 s ⇒ ONE For-you item, resolved when it is answered; lane parked-ask-inbox: a conversation's OWN ask the same (main-asks)
-require('./src/server/unexpected-exit').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, clients: () => wss.clients, buffersDir: BUFFERS_DIR }); // B-f698: an unexpected exit while working is resumed ONCE by itself (one client asked) + one For-you item
+require('./src/server/unexpected-exit').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, clients: () => wss.clients, buffersDir: BUFFERS_DIR, accounts }); // B-f698: an unexpected exit while working is resumed ONCE by itself (one client asked) + one For-you item
 const loginExpiryWatch = require('./src/server/login-expiry-watch.js').create({ accounts, userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); loginExpiryWatch.start(); // PASSIVE (file reads only, §ban-safety): warns the inbox at 24h/1h/expired before a subscription's LOGIN SESSION dies AND retracts those warnings once the member is re-logged in — see src/login-expiry.js. The handle is kept so the accounts login routes can sweep it IMMEDIATELY on a successful login (up to 5 min of staring at the item you just fixed is the reported defect)
 try { accounts.setUserTodos(userTodos); } catch (e) { console.warn('[accounts] the For-you tray could not be wired:', e.message); }   // the B-f276 family (bl-windows, r3046): an unread accounts list is told ONCE in For you
 require('./src/server/ledger-shape-notice.js').wire({ usageHistory, userTodos }); // lane ledger-dedup-law F4: a shard out of shape pauses its machine's ingest — ONE named For-you notice per machine, resolved when it is back in shape

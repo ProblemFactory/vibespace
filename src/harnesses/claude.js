@@ -183,6 +183,7 @@ function claudeBillingIdentity(s, { accounts, withHost, poolAuth }) {
   if (s._accountId) {
     const a = accounts.get(s._accountId);
     if (!a && /^pv-/.test(String(s._accountId))) return providerBillingIdentity(s, accounts, withHost);   // lane lg-providers: a third party
+    if (!a && typeof accounts.held === 'function' && accounts.held()) return withHost({ source: 'unknown', name: null });   // r3044 (5): the list UNREAD makes no billing claim (never the amber «API key»)
     if (a && a.type === 'pooled') return poolAuth(a);
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
     // name, no amber key warning.

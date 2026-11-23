@@ -140,6 +140,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     held.set(m.id, token); kill(m); wipe(m);
     m.phase = 'confirm'; m.verdict = 'unproven';
     m.choices = (accounts.list().accounts || []).filter((x) => x && x.type === 'subscription' && !x.pooled && canHoldOat(x.id)).map((x) => ({ id: x.id, name: x.name || x.id }));
+    { const accountsHeld = (() => { try { const h = accounts && typeof accounts.held === 'function' ? accounts.held() : null; return h ? { code: h.code || 'unread', at: Number(h.at) || null, why: h.why || null } : null; } catch { return { code: 'held-unknown', at: null, why: null }; } })(); if (accountsHeld) m.accountsHeld = accountsHeld; }   // 主开发 r3132 (d): its empty choices are «not known», never «no account can hold it»
     note(m, 'awaiting-owner', { why });
     emit(m);
   };
@@ -199,6 +200,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
 
   function start({ accountId }) {
     const a = accounts.get(accountId);
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return { ok: false, status: 503, error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }; }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!a) return { ok: false, status: 404, error: 'unknown account: ' + accountId, code: 'unknown_account' };
     const running = forAccount(accountId);
     if (live(running)) return { ok: false, status: 409, error: 'a sign-in for this account is already running', code: 'mint_running', mint: publicMint(running) };

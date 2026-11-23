@@ -584,9 +584,13 @@ class UsageHistory {
       return new Set(Array.isArray(raw) ? raw : []);
     } catch { return new Set(); }
   }
+  /** THE ACCOUNTS LIST UNREAD (主开发 r3060 Q1): the resolver server.js hands this history answers `{ held: true }` while the list
+   *  could not be read — its one channel to the list's fact. Nothing is BAKED while it does: a baked row's kind is for good. */
+  _accountsListHeld() { try { const r = this._resolveAccount ? this._resolveAccount(null) : null; return !!(r && r.held); } catch { return false; } }
   _maybeRebakeAttribution() {
     const marker = path.join(this.dir, '.attrib-rebake-v1');
     try { if (fs.existsSync(marker)) return; } catch {}
+    if (this._accountsListHeld()) return;   // r3060 Q1: never re-baked against an unread list (its marker NOT written: it runs at a later start)
     const attrib = this._attribMap();
     const emptied = this._emptiedAttribSids();
     const meta = this._metaMap();
@@ -662,6 +666,10 @@ class UsageHistory {
 
   async _walkAndAppend() {
     let added = 0, filesTouched = 0;
+    // r3060 Q1: THE WALK WAITS while the accounts list is unread — its cursors do not move, so its first pass after the lift (its own
+    // next tick) bakes those events ONCE, by the read list; nothing baked before the hold is touched
+    if (this._accountsListHeld()) { if (!this._accountsHeldSaid) { this._accountsHeldSaid = true; console.log('[usage-history] the ledger walk waits — the accounts list could not be read; nothing baked until it reads'); } return { added: 0, filesTouched: 0, held: true }; }
+    this._accountsHeldSaid = false;
     try {
       const meta = await this._metaMapAsync();
       this._lastMetaMap = meta; // reused by aggregate() for session-name labels
@@ -834,6 +842,9 @@ class UsageHistory {
    *  ACKED (r5: the push road's verdict, the same function). Write order: hold → ledger → cursor — crash-safe (a crash
    *  between two re-sends rows that cost zero bytes), not fsync-durable (the project's appends never fsync). */
   ingestRemoteEvents(hostId, hostName, text, { cursors = null, since = null } = {}) {
+    // r3060 Q1: a paired machine's rows are not baked while the accounts list is unread: DEFERRED, so unacked (ackOf) — the device
+    // walks them again and they land once the list reads
+    if (this._accountsListHeld()) return { added: 0, appended: 0, duplicates: 0, deferred: true, held: true };
     let added = 0;
     const shardBuffers = {};
     for (const line of String(text || '').split('\n')) {

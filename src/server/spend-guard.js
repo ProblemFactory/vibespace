@@ -110,7 +110,7 @@ function noticeExpiry(about, now = Date.now()) {
  *        inbox is created further down the boot (TDZ otherwise).
  * @param deps.log                console.log
  */
-function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null, lockSchedule = null, lockUnschedule = null } = {}) {
+function create({ dataDir, serverSetting = () => undefined, identityOf = null, listHeld = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) , readLedgerSync = null, readLedgerAsync = null, lockSchedule = null, lockUnschedule = null } = {}) {
   // B-ef83: the LOCK's own timers (its heartbeat and its retry), apart from the guard's — a suite that counts the guard's timers
   // never meets them
   const lsched = typeof lockSchedule === 'function' ? lockSchedule : (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; };
@@ -627,6 +627,12 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       credential: credentialFor(key), spendControl: spendControlFor(key),
       pending, ledger: ledgerFact(), now,
     });
+    // r3060 / r3088: THE ACCOUNTS LIST UNREAD — the engine names NO identity (never a pool's own id as a fresh name whose counts
+    // start at zero), so the authorizer refuses; the refusal NAMES its cause, and no counter of any real identity is touched
+    if (!v.ok && v.why === 'identity-unknown' && typeof listHeld === 'function') {
+      let lh = null; try { lh = listHeld(); } catch { lh = { code: 'held-unknown' }; }
+      if (lh) { v.accountsHeld = { code: lh.code || 'unread', at: Number(lh.at) || null }; v.detail = 'the accounts list could not be read, so the account this turn would bill cannot be named — no turn nobody typed is spent until it reads'; }
+    }
     // AN "ALLOWED" ANSWER HOLDS ITS SLOT (r5). The caller carries `hold` back
     // to `note()` (it became a turn) or to `release()` (it did not); an answer
     // nobody carries back expires at A.RESERVE_TTL_MS and is counted.

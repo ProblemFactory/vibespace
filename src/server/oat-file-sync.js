@@ -23,10 +23,11 @@
  */
 const RECHECK_MS = 15 * 60e3;
 const BOOT_DELAY_MS = 20e3;
+const HELD_RETRY_MS = 60e3;   // 主开发 r3132 (b): a tick that met the accounts list UNREAD looks again in a minute — the first after the lift syncs every row
 
 function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = (...a) => console.log(...a), recheckMs = RECHECK_MS, bootDelayMs = BOOT_DELAY_MS } = {}) {
   if (!accounts || typeof accounts.noteCliVersion !== 'function' || !machineProbes || typeof machineProbes.cliVersion !== 'function') return { stop() { }, tick: async () => null };
-  let timer = null, stopped = false, said = undefined, running = null, again = false;
+  let timer = null, stopped = false, said = undefined, running = null, again = false, heldLast = false;
   // ONE CLI, ONE BINARY (lane cli-shell-truth r2): `claudeCmd` may be THE accessor (cliCmds.current('claude')) — the binary
   // the sessions spawn is the one measured; an adoption calls tick() at once, ONE tick at a time (a second ask re-runs it)
   function tick() {
@@ -36,6 +37,10 @@ function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = 
   }
   async function tickOnce() {
     let caps = null;
+    // r3132 (b): over the accounts list UNREAD the sweep does nothing (its rows read empty) — and looks again in a minute, so the
+    // lift's first tick writes every long-lived sign-in's file at once (never only at the next 15-min tick)
+    try { heldLast = typeof accounts.held === 'function' && !!accounts.held(); } catch { heldLast = true; }
+    if (heldLast) return null;
     try {
       const bin = typeof claudeCmd === 'function' ? claudeCmd() : claudeCmd; // the COMMAND (a string) — the name every hook here reads
       const v = await machineProbes.cliVersion(bin || 'claude');
@@ -59,7 +64,7 @@ function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = 
   }
   if (typeof accounts.setCliRecheck === 'function') accounts.setCliRecheck(() => tick());
   function loop() {
-    timer = setTimeout(async () => { await tick(); if (!stopped) loop(); }, timer === null ? bootDelayMs : recheckMs);
+    timer = setTimeout(async () => { await tick(); if (!stopped) loop(); }, timer === null ? bootDelayMs : (heldLast ? Math.min(HELD_RETRY_MS, recheckMs) : recheckMs));
     if (timer.unref) timer.unref();
   }
   loop();

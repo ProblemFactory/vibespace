@@ -27,6 +27,7 @@ function registerOatShapeRoutes(app, { accounts, isAgentBearer, plans: plansOf =
   const shapeRowOf = (id) => { try { return accounts.rowOf(id); } catch { return null; } };   // B-360d: ONE row by its id, never a whole list for one
   app.get('/api/accounts/:id/oat-shape', (req, res) => {
     if (refuseBearer(req, res)) return;
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!accounts.get(req.params.id)) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
     const o = shapeOffer();
     const row = shapeRowOf(req.params.id);

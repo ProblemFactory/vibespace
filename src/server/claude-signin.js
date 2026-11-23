@@ -141,6 +141,7 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
 
   function start({ accountId }) {
     const a = accounts.get(accountId);
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return { ok: false, status: 503, error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }; }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!a) return { ok: false, status: 404, error: 'unknown account: ' + accountId, code: 'unknown_account' };
     const running = forAccount(accountId);
     // ONE login run per account (lane signin-card-real-screen — a second press, a second card, the tour's terminal

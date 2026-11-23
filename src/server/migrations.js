@@ -13,6 +13,14 @@ const { runMigrations, failedLine } = require('../migration-runner.js'); // fail
 const { RETIRED_2026_10, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it); 2026-10-settings-rows-retired strips the keys it shipped with
 const { redactSecrets } = require('../secret-shapes.js'); // PURE: the one secret-shape rule (2026-10-job-secrets-retired shows no name it flags)
 
+/** THE ACCOUNTS LIST UNREAD (主开发 r3044 (3)): an account-store migration over a list it could not read has NOT run — it throws,
+ *  is not recorded, and the runner tries it again at the next start (only «not there» is nothing to do). Asked through the
+ *  store's ONE fact (accounts.held()) on the live road, the read's own failure on the store-less one. */
+function heldThrows(am) {
+  let h = null; try { h = typeof am.held === 'function' ? am.held() : null; } catch { h = { code: 'held-unknown' }; }
+  if (h) throw new Error(`the accounts list could not be read (${h.code || 'unread'}) — not run; tried again at the next start`);
+}
+const accountsUnread = (e) => new Error(`data/accounts.json could not be read (${(e && e.code) || 'unparsable'}) — not run; tried again at the next start`);
 /** 2026-09-runaway-parks-void: the old guard's sentence and what replaces it. */
 const OLD_RUNAWAY_PREFIX = 'stopped as a runaway: RSS ';
 const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS sum — retired in 2.369.171)';
@@ -223,7 +231,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           try {
             const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8'));
             for (const a of (st?.accounts || [])) if (a && a.id && a.oatEnc && a.oatMintedAt) out[a.id] = Number(a.oatMintedAt) || 0;
-          } catch { }
+          } catch (e) { if (!(e && e.code === 'ENOENT')) throw accountsUnread(e); }   // r3060 Q3: only «not there» is nothing to do
           return out;
         })();
         for (const d of names) {
@@ -271,7 +279,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           // migration's map a second, weaker spelling of the engine's.
           accounts = (st?.accounts || []).filter((a) => a && a.id);
           roster = accounts.filter((a) => a.type === 'subscription').map((a) => a.id);
-        } catch { }
+        } catch (e) { if (!(e && e.code === 'ENOENT')) throw accountsUnread(e); }   // r3060 Q3: only «not there» is nothing to do
         const rep = repairByWindow({ dataDir, roster, accounts, id: '2026-09-refile-readings-by-window-v2' });
         const a = rep.anchors, c = rep.caches;
         console.log('[migrate] readings-by-window:', JSON.stringify({
@@ -301,7 +309,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       run() {
         const { repairSidecarsByApiPhase } = require('../reading-repair.js');
         let accounts = null;
-        try { accounts = (JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8'))?.accounts || []).filter((a) => a && a.id); } catch { }
+        try { accounts = (JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8'))?.accounts || []).filter((a) => a && a.id); } catch (e) { if (!(e && e.code === 'ENOENT')) throw accountsUnread(e); }   // r3060 Q3: only «not there» is nothing to do
         if (!accounts) return; // no roster yet = nothing to anchor
         const rep = repairSidecarsByApiPhase({ dataDir, accounts, id: '2026-09-repair-sidecars-by-api-phase' });
         // Say what happened even when it is nothing — a repair nobody can see
@@ -702,11 +710,12 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const am = typeof accounts === 'function' ? accounts() : accounts;
         if (!am || typeof am.migrateManualPools !== 'function') {
           // no store on this boot: nothing to reshape is a success; a manual pool is a FAILURE by name (retried next boot)
-          let doc = null; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8')); } catch { return []; }
+          let doc = null; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8')); } catch (e) { if (e && e.code === 'ENOENT') return []; throw accountsUnread(e); }   // r3044 (3): only «not there» is nothing to do
           const manual = (doc && Array.isArray(doc.accounts) ? doc.accounts : []).filter((a) => a && a.type === 'pooled' && a.auto !== true).length; // manual = anything the retired switch read as manual (`!!auto` false)
           if (manual) throw new Error(`no live account store to reshape ${manual} manual pool(s) through`);
           return [];
         }
+        heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start
         const rep = am.migrateManualPools();
         console.log('[migrate] pool-manual-priority:', JSON.stringify(rep.map((r) => ({ id: r.id, priority: r.priority.length }))));
         return rep;
@@ -1065,11 +1074,12 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const am = typeof accounts === 'function' ? accounts() : accounts;
         if (!am || typeof am.renameDefaultKeyNames !== 'function') {
           // no store on this boot: a stored default name is a FAILURE by name (retried next boot); none is a success
-          let doc = null; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8')); } catch { return []; }
+          let doc = null; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8')); } catch (e) { if (e && e.code === 'ENOENT') return []; throw accountsUnread(e); }   // r3044 (3): only «not there» is nothing to do
           const left = (doc && Array.isArray(doc.accounts) ? doc.accounts : []).filter((a) => a && a.tail && a.name === 'API key …' + a.tail).length;
           if (left) throw new Error(`no live account store to rename ${left} default key name(s) through`);
           return [];
         }
+        heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start
         const rep = am.renameDefaultKeyNames();
         console.log('[migrate] default-key-names:', JSON.stringify({ renamed: rep.length }));
         return rep;

@@ -221,6 +221,7 @@ function measureLoginSpan(info, seen, now, gapMs) {
  *   now        injectable clock (the suite drives the ladder on a fake one)
  */
 function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date.now(), sweepMs = SWEEP_MS } = {}) {
+  let heldSaid = false;   // the held sweep is said once an unread episode
   const file = path.join(dataDir, 'login-expiry.json');
   let ledger = {};       // accountId → { exp, sent: [...], items: [{id,text}] } — what we have SAID
   // THE OBSERVATION LOG, separate from the warning ledger (2026-09-07):
@@ -296,6 +297,11 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   // every death after it read as pre-existing, filed silent (主开发 r2067)
   function sweep({ since: factsSince } = {}) {
     const emitted = [], resolved = [];
+    // r3044 (4): THE LIST UNREAD — nothing is alive or dead by its silence: the sweep files, retracts and drops NOTHING (its
+    // «drop rows for accounts that no longer exist» would delete every warning and every measured session length)
+    const listHeld = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })();
+    if (listHeld) { if (!heldSaid) { heldSaid = true; log(`[login-expiry] sweep skipped — the accounts list could not be read (${listHeld.code || 'unread'}); nothing filed or dropped until it reads`); } return { emitted, resolved, held: true }; }
+    heldSaid = false;
     let rows = [];
     try { rows = accounts.list().accounts || []; } catch (e) { log('[login-expiry] roster read failed:', e.message); return { emitted, resolved }; }
     const t = now();

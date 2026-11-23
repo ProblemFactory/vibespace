@@ -123,6 +123,7 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
       const caller = person ? 'person' : wall === true ? 'wall' : afterTurn === true ? 'afterTurn' : null;
       if (!caller) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
       const a = accounts.get(id);
+      { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return { ok: false, status: 503, error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }; }   // r3044 (5): the list UNREAD is not «unknown account»
       if (!a) return { ok: false, status: 404, code: 'unknown-account', error: 'unknown account' };
       const be = a.backend || 'claude';
       const od = harnessOf(be)?.quota?.onDemand;

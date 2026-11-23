@@ -772,6 +772,7 @@ const spendGuard = require('./spend-guard.js').create({
   dataDir: path.join(rootDir, 'data'),
   serverSetting,
   identityOf: (session) => fireIdentityFor(session),
+  listHeld: () => accountsHeld(),   // r3088: a refusal while the accounts list is unread names that cause
   readCacheFor: (key) => readRawUsageCache(key),
   // the ACCOUNT reader, not the slot one — an oat-only subscription serves
   // turns with no credential file at all (see accountCredentialState)
@@ -1174,7 +1175,24 @@ function logControlProbe(session, key, parsed, raw, outcome, extra) {
     });
   } catch { }
 }
+// ── THE ACCOUNTS LIST UNREAD (主开发 r3044 / r3047): every spend and filing road of the engine asks the list's ONE fact —
+// accounts.held(): nothing while the list reads, { code, why, at } while it is unread — and never its own guess. An unread
+// list is UNKNOWN: a continue HOLDS, an identity is NONE (the spend authorizer refuses an unknown key), a verdict is not
+// usable, a reading is NOT FILED. A fact that throws is held (fail closed). The machine's own logins need no list.
+function accountsHeld() { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown', why: 'the accounts store did not answer', at: 0 }; } }
+const machineLoginKey = (k) => typeof k === 'string' && (k === '__global__' || !!globalKeyOwner(k) || k.startsWith('host-'));
+const _heldSaid = new Set();   // one line a thing a held episode (its `at`), never a line a tick
+function sayHeldOnce(what, held, line) {
+  const k = what + '@' + ((held && held.at) || 0);
+  if (_heldSaid.has(k)) return;
+  _heldSaid.add(k); if (_heldSaid.size > 512) _heldSaid.delete(_heldSaid.values().next().value);
+  console.log(line);
+}
+const HELD_RECHECK_MS = 60e3;   // a held continue looks again in a minute (re-armed: nothing is spent until the list reads)
+// r3044 (2): a conversation that names an account while the list is unread has NO filing identity — its readings are not filed
+// under a key no account owns (a pool's own id), and its fire identity is none (the authorizer refuses)
 function resolveUsageKey(session) {
+  if (session && session._accountId && accountsHeld()) return null;
   let acct = session._accountId || null;
   try {
     if (acct && accounts.get(acct)?.type === 'pooled') {
@@ -2366,6 +2384,9 @@ function wallCount(key, now = Date.now()) {
 // model-projected. Pool = any member usable / min over members' blockedUntil.
 function sessionPoolOf(session) { try { const p = session && session._accountId; return p && !session.host && isPoolId(p) ? p : null; } catch { return null; } }
 function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only = null } = {}) {
+  // r3044 (1): a scope that names an account (a pool or a member) while the list is unread: NOT usable, nothing known — every
+  // caller (the wall's arm, the probe ladder, the pre-fire gate) holds; the machine's own logins need no list
+  if (!machineLoginKey(scope)) { const lh = accountsHeld(); if (lh) return { usable: false, known: false, blockedUntil: 0, accountsHeld: true, reason: 'the accounts list could not be read' }; }
   // ONE CLOCK (lane pool-silent-members R4): the pre-fire gate hands the instant its switch judged, so the switch
   // and this verdict can never answer the reset second differently (nowSecOf = the pool's one floored clock)
   const nowSec = nowSecOf(now);
@@ -3760,6 +3781,7 @@ const WALL_PROBE_BACKOFF = [0, 1800000, 3600000, 7200000];
 // ran): a GATE arms the ladder only when none is pending — every 30 s gate cleared and re-set it, so it never fired
 function scheduleWallProbe(session, scope, model, attempt, { once = false } = {}) {
   const id = session._webuiId;
+  { const lh = !machineLoginKey(scope) ? accountsHeld() : null; if (lh) { sayHeldOnce('probe:' + id, lh, `[wall] ${id}: no wall probe — the accounts list could not be read (${lh.code || 'unread'}); the conversation waits`); return; } }
   if (once && session._wallProbeTimer) return;
   if (attempt >= WALL_PROBE_BACKOFF.length) { console.log(`[wall] ${id}: no reset time after ${attempt} probes — giving up (manual resume needed)`); return; }
   try { clearTimeout(session._wallProbeTimer); } catch { }
@@ -3825,6 +3847,13 @@ async function beforeAutoResumeFire(id, session) {
     // ONE CLOCK (lane pool-silent-members R4, inc-mvsjhna7 13:01:00): the switch and the verdict below judge the SAME
     // instant — the switch read a fractional clock and the verdict a floored one, so at reset + grace the switch moved
     // every conversation onto the member whose window had just landed while the verdict dropped that member
+    // r3044 (1): AN UNREAD LIST IS UNKNOWN — the continue HOLDS (never «no account» read as «no limit»), re-armed to look again
+    const listHeld = session && session._accountId ? accountsHeld() : null;
+    if (listHeld) {
+      sayHeldOnce('fire:' + id, listHeld, `[auto-resume] ${id}: continue held at the fire — the accounts list could not be read (${listHeld.code || 'unread'}); it waits until the list reads, nothing spent`);
+      try { getAutoResume()?.armIfEnabled?.(id, session, Date.now() + HELD_RECHECK_MS, 're-armed at fire: the accounts list could not be read'); } catch { }
+      return false;
+    }
     const now = Date.now();
     const model = sessionModelFor(session);
     const scope = _wallScope(session);
@@ -3915,6 +3944,8 @@ function recordRateLimitEventNow(session, msg) {
     const sig = quotaSourceFor(session.backend).signalFromStream(msg);
     let ev = sig && sig.source === 'rate_limit_event' ? sig.ev : null;
     if (!ev) return;
+    // r3044 (2): NOT FILED while the list is unread — said once a conversation (never under a key no account owns)
+    { const lh = session && session._accountId ? accountsHeld() : null; if (lh) { sayHeldOnce('reading:' + (session._webuiId || '?'), lh, `[usage] rate-limit-event: ${session._webuiId || '?'}'s readings are not filed — the accounts list could not be read (${lh.code || 'unread'})`); return; } }
     // THE MODEL-CAP LANE IS NAMED BEFORE ANYTHING READS THE EVENT'S KIND
     // (inc-mubu23bd-5vxi). `seven_day_overage_included` names the account's
     // per-model weekly bucket by its ACCOUNTING, not by model, so the record
@@ -4678,6 +4709,8 @@ function sweepResetCreditAsks() {
  *  non-hot pool process with no stamp and no ledger row before it started:
  *  whose login it speaks as cannot be named, so the auto rung refuses it too. */
 function creditIdentityFor(session) {
+  // r3044 (1): no reset credit is consumed or previewed on a key the list cannot confirm (a pool's own id while unread)
+  if (session && session._accountId && accountsHeld()) return { key: null, current: null, moved: false, unknown: true };
   let key = null;
   try { key = wallKeyFor(session); } catch { }
   key = key || liveQuotaKeyFor(session);

@@ -227,13 +227,19 @@ function walkAt(list, ts) {
   return { entry: list[gi].e, prev: gi > 0 ? list[gi - 1].e : null };
 }
 
+/** data/accounts.json read straight off disk (r3060 Q3): «not there» is null (nothing to do); ANY other failure throws — a migration
+ *  over a list it could not read has not run (the runner tries it again at the next start), never «the members are none» */
+function accountsOffDisk(dataDir) {
+  const f = path.join(dataDir, 'accounts.json');
+  try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) { if (e && e.code === 'ENOENT') return null; throw new Error(`data/accounts.json could not be read (${(e && e.code) || 'unparsable'}) — not run; tried again at the next start`); }
+}
 /** Members whose credential files can date their own death, read straight off
  *  disk (this runs before any AccountManager exists) — the readings-by-slot
  *  migration's roster, including the long-lived-token half. */
 function membersOffDisk(dataDir) {
   const subsDir = path.join(dataDir, 'subs');
   const oat = {};
-  for (const a of (_readJson(path.join(dataDir, 'accounts.json'))?.accounts || [])) if (a && a.id && a.oatEnc && a.oatMintedAt) oat[a.id] = Number(a.oatMintedAt) || 0;
+  for (const a of (accountsOffDisk(dataDir)?.accounts || [])) if (a && a.id && a.oatEnc && a.oatMintedAt) oat[a.id] = Number(a.oatMintedAt) || 0;
   const out = [];
   let names = []; try { names = fs.readdirSync(subsDir); } catch { return out; }
   for (const d of names) {
@@ -357,7 +363,7 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
   if (!stash.rows) { report.ms = Date.now() - t0; return report; } // nothing on this instance was ever attributed by OTel
   if (!transitions) { const { SlotTransitions } = require('./slot-transitions.js'); transitions = new SlotTransitions({ dataDir }); }
   const markers = deathMarkers(members || membersOffDisk(dataDir), { now });
-  const roster = accounts || (_readJson(path.join(dataDir, 'accounts.json'))?.accounts || []).filter((a) => a && a.id);
+  const roster = accounts || (accountsOffDisk(dataDir)?.accounts || []).filter((a) => a && a.id);
   const labelOf = (acct) => {
     if (!acct) return { atype: 'global', aname: null };
     const a = roster.find((x) => x.id === acct);

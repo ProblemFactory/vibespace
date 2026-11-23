@@ -17,6 +17,9 @@ function recordUsageAttribution(meta) {
   if (!sid) return;
   let acct = meta.accountId || null;
   let pool = null;
+  // r3044 (5): THE LIST UNREAD — a session that names an account is NOT recorded (the journal only appends: a line under a key
+  // no account owns, a pool's own id, would bill its requests there for good); the next meta write after the read records it
+  if (acct && (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })()) return;
   // A POOLED session bills whatever the pool currently points at — attribute
   // the ledger to the REAL target at record time (attribution is by-time, so
   // a later re-point + re-record moves subsequent requests to the new target).

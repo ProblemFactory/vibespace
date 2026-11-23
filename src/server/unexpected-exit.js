@@ -49,8 +49,8 @@ let ticker = null;
 let healed = new WeakMap();  // live session → the conversation key its ONE heal pass ran for (an id adopted later ⇒ a new pass)
 
 function install({ userTodos = null, sessionKeyFor = null, activeSessions = null, clients = () => [], log = console, buffersDir = null,
-  now = () => Date.now(), tickMs = 5000, landMs = 60 * 1000, pendMaxMs = RESPAWN_ONCE_MS } = {}) {
-  deps = { userTodos, sessionKeyFor, activeSessions, clients, log, buffersDir, now, tickMs, landMs, pendMaxMs };
+  now = () => Date.now(), tickMs = 5000, landMs = 60 * 1000, pendMaxMs = RESPAWN_ONCE_MS, accounts = null } = {}) {
+  deps = { userTodos, sessionKeyFor, activeSessions, clients, log, buffersDir, now, tickMs, landMs, pendMaxMs, accounts };
   respawnedAt.clear(); pending.clear(); healed = new WeakMap();
   if (ticker) { clearInterval(ticker); ticker = null; }
 }
@@ -103,11 +103,16 @@ function pickClient(entry) {
   return null;
 }
 
+/** 主开发 r3132 (c): the accounts list UNREAD — the resume road would refuse (accounts_unread), so the ONE shot is NOT spent on that
+ *  refusal: no client is asked and the wait does not run out; the first tick after the lift asks (the list's ONE fact) */
+function accountsHeld() { const a = deps && deps.accounts; if (!a || typeof a.held !== 'function') return null; try { return a.held() || null; } catch { return { code: 'held-unknown' }; } }
 function tick() {
   if (!deps) return;
   const t = deps.now();
+  const listHeld = accountsHeld();
   for (const [cid, entry] of [...pending]) {
     if (liveCarrier(entry)) { pending.delete(cid); file(entry, 'respawned'); continue; }
+    if (listHeld && !entry.askedAt) { if (!entry.heldSaid) { entry.heldSaid = true; deps.log?.log?.(`[unexpected-exit] ${entry.deadId} "${entry.name}": its resume waits — the accounts list could not be read; asked once it reads`); } entry.waitFrom = t; continue; }
     if (entry.askedAt) {
       if (t - entry.askedAt >= deps.landMs) { pending.delete(cid); file(entry, 'failed'); }
       continue;
@@ -119,7 +124,7 @@ function tick() {
         entry.askedAt = t;
         deps.log?.log?.(`[unexpected-exit] ${entry.deadId} "${entry.name}": a client was asked to resume ${cid}`);
       } catch { /* the next tick tries another */ }
-    } else if (t - entry.exitedAt >= deps.pendMaxMs) { pending.delete(cid); file(entry, 'no-window'); }
+    } else if (t - (entry.waitFrom || entry.exitedAt) >= deps.pendMaxMs) { pending.delete(cid); file(entry, 'no-window'); }   // the wait counts from the lift when the list was unread (its exit time stays the item's)
   }
   if (pending.size && !ticker) { ticker = setInterval(tick, deps.tickMs); ticker.unref?.(); }
   if (!pending.size && ticker) { clearInterval(ticker); ticker = null; }

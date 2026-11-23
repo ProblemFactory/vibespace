@@ -168,6 +168,7 @@ function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, age
     return !!a && (a.backend || 'claude') === be && a.type !== 'pooled';
   };
   const fresh = () => ({ schema: SCHEMA, harnesses: Object.create(null) });
+  const listHeld = () => (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })();   // the accounts list's ONE fact (主开发 r3047)
   function load() {
     if (state) return Promise.resolve(state);
     if (!loading) loading = (async () => {
@@ -204,7 +205,8 @@ function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, age
     const st = state;
     // an entry whose account is gone goes with it (ruling E2) — at EVERY write, not only on the delete route
     for (const be of Object.keys(st.harnesses)) {
-      for (const key of Object.keys(st.harnesses[be])) if (!accountOk(be, key)) delete st.harnesses[be][key];
+      // r3044 (5): the list UNREAD — no entry is dropped by its silence (they are kept until the list reads)
+      if (!listHeld()) for (const key of Object.keys(st.harnesses[be])) if (!accountOk(be, key)) delete st.harnesses[be][key];
       if (!Object.keys(st.harnesses[be]).length) delete st.harnesses[be];
     }
     const body = JSON.stringify({ schema: SCHEMA, harnesses: st.harnesses }, null, 1) + '\n';
@@ -311,6 +313,7 @@ function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, age
       const explicit = want === 'refresh';
       const hd = descOf(be);
       if (!hd) return { ok: false, status: 400, code: 'no-report', error: `${be} does not report its models` };
+      if (k !== MACHINE && listHeld()) return { ok: false, status: 503, code: 'accounts_unread', error: (() => { try { return (accounts.held() || {}).why || null; } catch { return null; } })() || 'the accounts list could not be read — try again once it reads' };   // r3044 (5): refused by name, never «unknown account»
       if (!accountOk(be, k)) return { ok: false, status: 404, code: 'unknown-account', error: 'unknown account' };
       await load();
       const s = slot(be, k);

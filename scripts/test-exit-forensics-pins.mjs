@@ -27,7 +27,7 @@ const KINDS = ['chat', 'pty', 'codex'];
 console.log('— the unexpected-exit wiring (source pins)');
 {
   // WIRING PINS: the server installs it with the live clients; the client routes the ask to the sidebar Resume's own path
-  ok(/require\('\.\/src\/server\/unexpected-exit'\)\.install\(\{ userTodos, sessionKeyFor: [^\n]*activeSessions, clients: \(\) => wss\.clients(?:, buffersDir: BUFFERS_DIR)? \}\)/.test(read('server.js')), 'server.js installs the orchestrator with the store, the key fn and the live ws clients');
+  ok(/require\('\.\/src\/server\/unexpected-exit'\)\.install\(\{ userTodos, sessionKeyFor: [^\n]*activeSessions, clients: \(\) => wss\.clients(?:, buffersDir: BUFFERS_DIR)?(?:, accounts)? \}\)/.test(read('server.js')), 'server.js installs the orchestrator with the store, the key fn and the live ws clients');
   const appSrc = read('src/lib/app.js'), lcSrc = read('src/lib/session-lifecycle.js');
   const body = lcSrc.slice(lcSrc.indexOf('  _respawnAfterExit(sess = {}) {'), lcSrc.indexOf('  // Jump the sidebar to a conversation'));
   ok(/msg\.type === 'unexpected-exit-respawn' && msg\.session\) \{ try \{ this\._respawnAfterExit\(msg\.session\); \}/.test(appSrc)
