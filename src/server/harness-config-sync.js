@@ -133,7 +133,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     if (!hooks) for (const f of plan.files || []) delete f.hooks;
     return plan;
   }
-  /** THE ONE WRITE ROAD of this machine's CLI config → Promise<landing> ({ ok, receipts, created, why } | a refusal) */
+  /** THE ONE WRITE ROAD of this machine's CLI config → Promise<landing> ({ ok, receipts, created, parts, why } | a refusal) */
   // r1518: the request's KIND is fixed when it is made (a removal, a registration, the managed keys alone) and never replaced by
   // another kind's in the runner's queue; `before()` runs at the run's own start (the registration's before-read of its files)
   function applyThisMachine({ reason = 'apply', hooks = hooksWanted(), strip = false, before = null, after = null, when = null } = {}) {
@@ -172,10 +172,11 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     if (refused) { if (typeof refuseOwnerWrite === 'function') refuseOwnerWrite(); else log(`[cli-config] skipped (${reason}): ${refused.why}`); return Promise.resolve({ skipped: true, refused }); }
     // → Promise: the landing of the helper's run on this machine (one in flight, the newest waiting) — never an in-process write
     return applyThisMachine({ reason }).then((r) => {
-      if (!r.ok) { warn(`[cli-config] failed (${reason}): ${r.why}`); return { error: r.why, receipts: r.receipts || [], files: [] }; }
+      if (!r.ok) return { error: r.why, receipts: r.receipts || [], parts: r.parts || [], files: [] };   // r2844: journalled ONCE — by the runner («not applied on this machine»)
       const files = (r.created || []).map((c) => ({ harness: c.harness, rel: c.rel, created: true }));
       lastWrite = { at: r.at, reason, receipts: r.receipts, files };
       for (const x of r.receipts) {
+        if (x.key === 'hooks') continue;   // r2844: our hook entries' receipt is the registration's to say (a missing CLI folder is no failure, r1518)
         if (x.state === 'applied') log(`[cli-config] ${x.harness}.${x.key} = ${JSON.stringify(x.want)} written on this machine (${reason})`);
         else if (x.state !== 'unchanged') warn(`[cli-config] ${x.harness}.${x.key}: not applied on this machine — ${x.state}${x.reason ? ': ' + x.reason : ''}`);
       }

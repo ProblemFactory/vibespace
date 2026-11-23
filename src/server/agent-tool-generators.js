@@ -505,6 +505,8 @@ async function hookFileFacts() {
     const file = def.file();
     let text = null, code = null;
     try { text = await fs.promises.readFile(file, 'utf-8'); } catch (e) { code = (e && e.code) || 'EIO'; }
+    // r2844: a LINK TO NOWHERE is there and unreadable (the helper refuses it by name, never «created» over it) — not a missing file
+    if (code === 'ENOENT') { try { if ((await fs.promises.lstat(file)).isSymbolicLink()) code = 'EDANGLING'; } catch { } }
     let dirExists = true; try { await fs.promises.stat(path.dirname(file)); } catch { dirExists = false; }
     out[key] = { file, text, fileExists: text !== null || (code !== 'ENOENT' && code !== 'ENOTDIR'), dirExists };
   }
@@ -730,14 +732,21 @@ function ensureAgentHooks({ auto = false } = {}) {
     const a = landing && landing.after;
     return a && !a.error ? a : Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: (a && a.error) || (landing && landing.why) || 'no landing' }]));
   });
-  // the helper prints KEY receipts only: each hook file is VERIFIED off the loop (fs.promises) by the run's own `after` — INSIDE its
-  // job, before the next queued request starts (r1675: a check after the queue moved on read the NEXT run's files)
+  // each CLI's hooks part is judged by its receipt (r2844), and each hook file is still VERIFIED off the loop (fs.promises) by the
+  // run's own `after` — INSIDE its job, before the next queued request starts (r1675: a check after the queue moved on read the NEXT
+  // run's files)
   async function verifyFiles(landing) {
     const before = (landing && landing.before) || {};
     const results = {};
     for (const [key, def] of Object.entries(HOOK_FILES)) {
       const rel = def.rel.join('/'), file = def.file(), dir = path.dirname(file);
-      if (!landing || !landing.ok) { console.log(`Hook registration (${key}) not done on this machine: ${landing && landing.why}`); results[key] = { ok: false, error: (landing && landing.why) || 'no landing' }; continue; }
+      if (!landing || !landing.ok) {
+        // r2844: each CLI is told ITS OWN part — a CLI whose hooks receipt landed (or found no folder) is checked on its file below; one whose part was
+        // refused hears its own reason (said once); a run that broke before any receipt tells every CLI the run's reason (r1813)
+        const rs = (landing && landing.receipts) || [], mine = ((landing && landing.parts) || []).filter((p) => p.harness === key && p.key === 'hooks');   // the hooks part's own: refused / failed / not known (a row's refusal is the settings answer's)
+        const mineAnswered = !mine.length && rs.some((x) => x.harness === key && x.key === 'hooks' && (x.state === 'applied' || x.state === 'unchanged' || x.state === 'missing'));   // missing = no folder here: no failure (r1518), checked below
+        if (!mineAnswered) { results[key] = { ok: false, error: mine.length ? mine.map((p) => p.why).join('; ') : ((landing && landing.why) || 'no landing') }; continue; }   // the runner journalled this landing once («not applied on this machine»)
+      }
       let dirThere = true; try { await fsp.stat(dir); } catch { dirThere = false; }
       if (!dirThere) { const why = `~/${path.dirname(rel)} not found — the CLI has not run on this machine; nothing is created`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why, missing: 'no-dir' }; continue; }
       let root = null; try { root = JSON.parse(await fsp.readFile(file, 'utf8')); } catch (e) { const why = e && e.code === 'ENOENT' ? `~/${rel} does not exist and was not created` : `~/${rel} cannot be read as JSON`; console.log(`Hook registration (${key}) skipped:`, why); results[key] = { ok: false, error: why }; continue; }
@@ -792,9 +801,10 @@ function stripAgentHookEntries({ ifOptedOut = false } = {}) {
   { const r = refuseOwnerWrite(); if (r) return Promise.resolve({ ok: false, skipped: true, refused: r, receipts: [], created: [], why: r.line || r.why || 'refused on this server — nothing removed' }); } // a worktree / temp server: never edit the owner's CLI configs
   { const held = settingsHeldNow(); if (held) return Promise.resolve({ ok: false, skipped: true, settingsHeld: { kind: held.kind, code: held.code || null }, receipts: [], created: [], why: 'the settings could not be read — the hooks were not removed; nothing was written' }); }   // r2109: ONE shape for a held refusal on both roads (the registration's: skipped + settingsHeld {kind, code})   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
   if (typeof applyThisMachine !== 'function') return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server — nothing removed' });
-  // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here. The
-  // helper prints KEY receipts only (a removal has none), so the OUTCOME is read on the files, off the loop, before «removed» is
-  // said (r1518): a file that cannot be read or parsed, or that still holds one of our entries, is a removal that did not land
+  // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here. Its
+  // hooks receipt is judged by the runner (r2844: a refused one is not landed, by name; none at all reads «not known»), and the
+  // OUTCOME of a landed run is still read on the files, off the loop, before «removed» is said (r1518): a file that cannot be read
+  // or parsed, or that still holds one of our entries, is a removal that did not land
   const stillOptedOut = async () => { try { await fs.promises.access(HOOK_OPTOUT_FILE); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; } };   // r1876: an UNREADABLE mark is a failed read (its reason said), never «no longer asked»
   return applyThisMachine({ reason: ifOptedOut ? 'hooks removed (a start: still opted out)' : 'hooks removed', strip: true, when: ifOptedOut ? stillOptedOut : null, after: (landing) => (landing && landing.ok && !landing.skipped ? ourRowsOnDisk() : []) }).then((landing) => {
     // r1675: the check ran INSIDE the removal's job (before the next queued request could put rows back)

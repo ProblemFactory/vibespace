@@ -268,9 +268,48 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       fs.writeFileSync(sf, good.slice(0, -3));   // torn: not valid JSON (the CAS writer refuses it, our entries stay in it)
       genSay.length = 0;
       const bad = await GEN.stripAgentHookEntries();
-      ok(bad && bad.ok === false && /~\/\.claude\/settings\.json is not valid JSON — not touched/.test(bad.why || '') && genSay.some((l) => /\[hooks\] the removal did not land: /.test(l)) && !genSay.some((l) => /Removed VibeSpace hooks/.test(l)),
+      ok(bad && bad.ok === false && /claude\.hooks: \S*\.claude\/settings\.json exists but is not valid JSON — not touching it/.test(bad.why || '') && genSay.some((l) => /\[hooks\] the removal did not land: /.test(l)) && !genSay.some((l) => /Removed VibeSpace hooks/.test(l)),
         'r1518: a removal the files did not take (a torn ~/.claude/settings.json) is said NOT landed, by name — never «Removed VibeSpace hooks»', { bad, genSay });
       fs.writeFileSync(sf, good);
+      // r2844 (the adversarial read, 3): r1518's check ON THE FILES, on real files — a helper that answers «landed» (its hooks receipt
+      // «unchanged») and strips nothing: the removal's own read of the files says it did not land, by name, our entries still there
+      {
+        const GEN_REL = 'src/server/agent-tool-generators.js', HELPER_P = path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs');
+        const STRIPLESS = path.join(ROOT, 'stripless-helper', 'vibespace-hook-register.mjs');
+        fs.mkdirSync(path.dirname(STRIPLESS), { recursive: true });
+        fs.writeFileSync(STRIPLESS, anchored(fs.readFileSync(HELPER_P, 'utf8'), "          if (uninstall) { if (stripHookEntries(root)) { changed = true; out.hooks = 'stripped'; } }", "          if (uninstall) { /* strips nothing */ }", 'a helper that strips nothing'));
+        const pairWith = (Gmod) => { let S2 = null; const G2 = Gmod.create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => S2.applyThisMachine(o), homeRead: (fn) => S2.homeRead(fn) }); S2 = require(path.join(REPO, SYNC_REL)).create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: STRIPLESS, starter, hooksWanted: () => true, log: () => {}, warn: () => {} }); return G2; };
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+        genSay.length = 0;
+        const kept = await pairWith(require(path.join(REPO, GEN_REL))).stripAgentHookEntries();
+        const keptSay = genSay.splice(0);
+        ok(!!(kept && kept.ok === false && /our hook entries are still in ~\/\.claude\/settings\.json/.test(kept.why || '') && oursIn(JSON.parse(fs.readFileSync(sf, 'utf8'))) && keptSay.some((l) => /\[hooks\] the removal did not land: /.test(l)) && !keptSay.some((l) => /Removed VibeSpace hooks/.test(l))),
+          'r2844 (r1518 on real files): a run that «lands» and strips nothing — the removal reads the files and says it did not land, by name (our entries still there)', { kept, keptSay });
+        const noRead = await pairWith(require(MC.write(GEN_REL, anchored(src(GEN_REL), 'after: (landing) => (landing && landing.ok && !landing.skipped ? ourRowsOnDisk() : [])', 'after: null', 'the removal without its read of the files'), 'gen-no-read'))).stripAgentHookEntries();
+        const noReadSay = genSay.splice(0);
+        ok(!!(noRead && noRead.ok === true && noReadSay.some((l) => /Removed VibeSpace hooks/.test(l))), 'RED (the removal without its read of the files): «Removed VibeSpace hooks» over a file that still holds them', { noRead, noReadSay });
+      }
+      // r2844 (the adversarial read, 1): THE JOURNAL SAYS IT ONCE — a sync's journal names no hooks receipt (the registration's to say; a
+      // missing CLI folder is no failure, r1518) and a failed landing is journalled once, by the runner. RED: the sync journalling them too
+      {
+        const journalOf = async (Smod) => {
+          const said = [];
+          const S3 = Smod.create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), starter, hooksWanted: () => true, log: (m) => said.push(String(m)), warn: (m) => said.push(String(m)) });
+          await S3.syncCliConfig({ reason: 'a save' });   // a good file, no ~/.codex: landed
+          const landed = said.splice(0);
+          const g3 = fs.readFileSync(sf, 'utf8');
+          fs.writeFileSync(sf, g3.slice(0, -3));   // hand-broken
+          try { await S3.syncCliConfig({ reason: 'a save' }); } finally { fs.writeFileSync(sf, g3); }
+          return { landed, broken: said, hooksNamed: landed.filter((l) => /\.hooks[ :=]/.test(l)), brokenTimes: said.filter((l) => /claude\.hooks: /.test(l)).length };
+        };
+        const jn = await journalOf(require(path.join(REPO, SYNC_REL)));
+        ok(!!(jn.hooksNamed.length === 0 && jn.brokenTimes === 1), 'r2844: the journal says it once — a landed sync names no hooks receipt (no «codex.hooks: not applied — missing» where codex never ran), a refused hooks part is journalled once (the runner)', jn);
+        const jr = await journalOf(require(MC.write(SYNC_REL, anchored(anchored(src(SYNC_REL),
+          "      if (!r.ok) return { error: r.why, receipts: r.receipts || [], parts: r.parts || [], files: [] };",
+          "      if (!r.ok) { warn(`[cli-config] failed (${reason}): ${r.why}`); return { error: r.why, receipts: r.receipts || [], parts: r.parts || [], files: [] }; }", 'the sync saying the failure too'),
+          "        if (x.key === 'hooks') continue;", "", 'the sync journalling the hooks receipt'), 'sync-says-too')));
+        ok(!!(jr.hooksNamed.length > 0 && jr.brokenTimes === 2), 'RED (the sync journalling the runner\'s words and the hooks receipt): «codex.hooks: not applied — missing» at a landed sync, the refusal journalled twice', jr);
+      }
       // r1675 (1) on the real files: Remove, then Install, both inside one helper run in flight — each answer is about ITS run
       const SK = mkK(null), GENK = require(path.join(REPO, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SK.applyThisMachine(o) });
       let releaseK; hold = new Promise((r) => { releaseK = r; });
@@ -474,6 +513,79 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const GENB = require(path.join(REPO, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, applyThisMachine: async () => ({ at: 1, ok: false, receipts: [], created: [], why: 'the plan could not be built' }) });
       const rb = await GENB.ensureAgentHooks({ auto: false });
       ok(!!(rb.claude && rb.claude.ok === false && rb.claude.error === 'the plan could not be built'), 'r1813: a run that broke before its check tells each CLI the RUN\'s reason («the plan could not be built»)', rb);
+      // r2844 (the verifier's law 4): A REFUSED HOOKS PART IS NEVER «LANDED». The usual plan (our hooks, no managed row set) on a
+      // settings file that is hand-broken, unreadable or a link to nowhere: the file is left untouched (rightly) and the refusal is now a
+      // receipt the helper prints and the runner judges — not landed, by name. Through the REAL helper.
+      const isRootR = typeof process.getuid === 'function' && process.getuid() === 0;   // root reads a mode-000 file: that plant reads only unprivileged
+      const sfH = path.join(home, '.claude', 'settings.json');
+      const PLANTS = {
+        'hand-broken': () => { const j0 = fs.readFileSync(sfH, 'utf8'); fs.writeFileSync(sfH, '{ "model": "opus", '); return () => fs.writeFileSync(sfH, j0); },
+        unreadable: () => { fs.chmodSync(sfH, 0o000); return () => fs.chmodSync(sfH, 0o600); },
+        dangling: () => { fs.renameSync(sfH, sfH + '.kept'); fs.symlinkSync(path.join(home, '.claude', 'nowhere.json'), sfH); return () => { fs.unlinkSync(sfH); fs.renameSync(sfH + '.kept', sfH); }; },
+      };
+      const PLAN_H = HCJ.encodePlan(SYNC.cliConfigPlan({ hooksOnly: true }));   // the usual plan: our hooks, NO managed row set (the verifier's scene)
+      const hooksRun = async (Rn, plant) => {
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });   // our rows in place first
+        const before = fs.lstatSync(sfH).isSymbolicLink() ? null : fs.readFileSync(sfH, 'utf8');
+        const restore = plant ? PLANTS[plant]() : () => {};
+        let l = null, gate = null, untouched = null;
+        try {
+          const planted = (() => { try { return fs.lstatSync(sfH).isSymbolicLink() ? 'link' : fs.readFileSync(sfH, 'utf8'); } catch { return 'unread'; } })();
+          l = await Rn.apply(() => PLAN_H, 'hooks', { kind: 'apply+hooks' });
+          gate = await Rn.landedWithin(50);
+          untouched = (() => { try { return (fs.lstatSync(sfH).isSymbolicLink() ? 'link' : fs.readFileSync(sfH, 'utf8')) === planted; } catch { return planted === 'unread'; } })();
+        } finally { restore(); }
+        return { ok: l && l.ok, why: l && l.why, hooks: ((l && l.receipts) || []).filter((x) => x.key === 'hooks').map((x) => `${x.harness}:${x.state}`).join(), gate: gate && (gate.failed ? 'failed' : gate.late ? 'late' : 'landed'), untouched, before: !!before };
+      };
+      const HELPER = path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs');
+      const OLD_HELPER = path.join(ROOT, 'old-helper', 'vibespace-hook-register.mjs');   // today's helper: no receipt for our hook entries
+      fs.mkdirSync(path.dirname(OLD_HELPER), { recursive: true });
+      { let h = fs.readFileSync(HELPER, 'utf8');
+        for (const line of ["      if (touchesHooks) receipts.push(receipt(f, HOOKS_ROW, 'refused', { reason: badRel }));\n", "      if (touchesHooks) receipts.push(receipt(f, HOOKS_ROW, state, { reason: e.message, ...(e.missing ? { missing: e.missing } : {}) }));\n", "    if (touchesHooks && out.hooks !== 'error') receipts.push(receipt(f, HOOKS_ROW, out.hooks === 'unchanged' ? 'unchanged' : 'applied', { current: out.hooks }));\n"]) h = anchored(h, line, '', 'today: no receipt for our hook entries');
+        fs.writeFileSync(OLD_HELPER, h); }
+      const RUNNER_TODAY = require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), '    const silent = status ? [] : hooksHarnessesOf(planB64, uninstall).filter((h) => !receipts.some((x) => x.harness === h && x.key === \'hooks\'));', '    const silent = [];', 'today: a silent hooks part read as landed'), 'runner-no-hooks-check'));
+      const runnerWith = (Rm, helperPath) => Rm.createCliConfigRunner({ starter, helperPath, home, journal: () => {}, warn: () => {} });
+      const SNEW = runnerWith(R, HELPER), STODAY = runnerWith(RUNNER_TODAY, OLD_HELPER), SOLD = runnerWith(R, OLD_HELPER);
+      for (const plant of ['hand-broken', 'unreadable', 'dangling']) {
+        if (plant === 'unreadable' && isRootR) { ok(true, `r2844: ${plant} — not read as root (root reads a mode-000 file); read where the suite runs unprivileged`); continue; }
+        const h = await hooksRun(SNEW, plant);
+        ok(!!(h.ok === false && /claude\.hooks: /.test(h.why || '') && /claude:(refused|error)/.test(h.hooks) && h.gate === 'failed' && h.untouched),
+          `r2844: a ${plant} settings file — untouched, and the run is NOT landed, by name («claude.hooks: …»), the spawn gate told «failed»`, h);
+        const t = await hooksRun(STODAY, plant);
+        ok(!!(t.ok === true && t.gate === 'landed'), `RED (today's helper and runner, ${plant}): the refused hooks part reads «landed» — the gate says landed, our hooks are not in the file`, t);
+      }
+      const o = await hooksRun(SOLD, null);   // an OLDER helper (no hooks receipt) on a good file: whether our hooks landed is not known
+      ok(!!(o.ok === false && /claude\.hooks: not known — the helper printed no word of our hook entries \(an older helper\)/.test(o.why || '') && o.gate === 'failed'),
+        'r2844: an older helper prints no word of our hook entries — the newer runner says «not known», never «landed»', o);
+      const om = await hooksRun(STODAY, null);
+      ok(!!(om.ok === true && om.gate === 'landed'), 'RED (the runner without the check): the older helper\'s silence reads «landed»', om);
+      // the Apply press says EACH failed part ONCE (the hooks part by the hooks answer for the CLI it belongs to, each refused row once),
+      // and the status never calls our hooks installed
+      {
+        const HL_REL = 'src/server/hooks-late.js';
+        const press = async (HLm) => {
+          await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+          const restore = PLANTS['hand-broken']();
+          let body = null, st = null;
+          try {
+            const routes = {}, app = { post: (pp, fn) => { routes[pp] = fn; } };
+            HLm.create({ activeSessions: new Map(), getSessionStatus: () => null, getUserTodos: () => null, sessionStatusKey: () => null, harnesses: { list: () => [] }, log: () => { }, warn: () => { } })
+              .registerApplyRoute(app, { ensureAgentHooks: (a) => GEN.ensureAgentHooks(a), agentHooksStatus: () => GEN.agentHooksStatus(), integrationEnabled: () => true, harnessConfig: SYNC, hookRegistrationSafe: () => true });
+            const res = { status() { return res; }, json(x) { body = x; return res; } };
+            await routes['/api/cli-config/apply']({ body: {}, query: {}, headers: {} }, res);
+            st = (await GEN.agentHooksStatus()).claude;
+          } finally { restore(); }
+          const segs = ((body && body.error) || '').split('; ').filter(Boolean);
+          return { error: body && body.error, ok: body && body.ok, said: (((body && body.error) || '').match(/hooks: /g) || []).length, twice: segs.filter((x, i) => segs.indexOf(x) !== i), installed: st && st.installed };
+        };
+        const ap = await press(require(path.join(REPO, HL_REL)));
+        ok(!!(ap.ok === false && /claude: hooks: /.test(ap.error || '') && ap.said === 1 && !ap.twice.length && /claude\.transcriptRetentionDays: /.test(ap.error || '') && ap.installed === false),
+          'r2844: the Apply press says each failed part ONCE — the refused hooks part for the CLI it belongs to, the refused row once — and the status never calls our hooks installed', ap);
+        const HL_BESIDE = require(MC.write(HL_REL, anchored(src(HL_REL), "        ...(cfg && cfg.error && Array.isArray(cfg.parts) && cfg.parts.length\n          ? cfg.parts.filter((p) => !(p.key === 'hooks' && saidHooks(p.harness))).map((p) => `${p.harness}.${p.why}`)\n          : cfg && cfg.error && !Object.keys(hooks && typeof hooks === 'object' ? hooks : {}).some((k) => saidHooks(k) && (hooks[k].error || hooks[k].why) === cfg.error) ? [cfg.error] : []),",
+          "        ...((cfg && cfg.receipts) || []).filter((x) => (x.state === 'error' || x.state === 'refused') && x.key !== 'hooks').map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`),\n        ...(cfg && cfg.error ? [cfg.error] : []),", 'the error beside its parts'), 'apply-beside'));
+        const apb = await press(HL_BESIDE);
+        ok(!!(apb.ok === false && apb.said === 2 && apb.twice.length > 0), 'RED (the settings answer\'s error said beside its receipts): the hooks part is said twice and a refused row twice', apb);
+      }
     } finally { console.warn = warn0; console.log = log0b; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
     // r1813 (3): a removal the refusal door stopped (this suite's own env refuses: VIBESPACE_SKIP_AGENT_HOOKS) is ANSWERED as a refusal
     const rf = await GEN.stripAgentHookEntries();

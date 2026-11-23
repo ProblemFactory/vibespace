@@ -54,7 +54,13 @@ const __applier = (() => { const module = { exports: {} }; const exports = modul
 // and decodePlan drops such a plan. The JSON writer re-serialises the WHOLE
 // file (2-space JSON + trailing newline, exactly as Claude Code itself
 // rewrites settings.json) — "only the touched line" is the TOML writer's
-// promise, not this one's.
+// promise, not this one's. A value the parser cannot keep CHANGES in that
+// rewrite (r2844) — on our write, as on Claude Code's own rewrite of
+// settings.json: an integer past 2^53 rounds to the nearest double, and so
+// does a decimal past about 17 significant digits; a number past the
+// double's range (1e400) becomes Infinity and is written null; -0 becomes 0;
+// a key written twice keeps its last value; 1.50 → 1.5 and the like keep
+// their meaning.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -583,6 +589,10 @@ function writeTomlManaged(file, { createIfMissing = false } = {}, sets) {
 const RECEIPT_STATES = Object.freeze(['applied', 'unchanged', 'differs', 'missing', 'unreadable', 'refused', 'error', 'unknown']);
 const relOf = (f) => (Array.isArray(f.rel) ? f.rel.join('/') : String(f.rel || ''));
 const receipt = (f, s, state, extra = {}) => ({ harness: f.harness, id: f.id, rel: relOf(f), key: s ? s.key : null, path: s ? s.path.join('.') : null, want: s ? s.value : undefined, state, ...extra });
+// r2844: OUR HOOK ENTRIES ARE A PART OF THE PLAN LIKE A ROW — a file whose plan touches them gets ONE receipt for them (applied /
+// unchanged / missing / refused / error, with its reason), printed by the helper and judged by the reader of the run: a refused or
+// failed hooks part (a hand-broken, unreadable or dangling settings file — left untouched, rightly) is never read as «landed»
+const HOOKS_ROW = Object.freeze({ key: 'hooks', path: ['hooks'], value: 'our hook entries' });
 /** Apply `plan` under `home`: managed keys always; our hook entries when
  *  `hookCmd` is given (the remote helper) — `uninstall` strips ONLY the hook
  *  entries and never a managed key. Returns per-key receipts + per-file hook
@@ -598,6 +608,7 @@ function applyConfigPlan(plan, { home = null, hookCmd = null, uninstall = false 
     const badRel = checkRel(f.rel); // the plan is trusted nowhere: a `..` here would leave $HOME
     if (badRel) {
       for (const s of sets) receipts.push(receipt(f, s, 'refused', { reason: badRel }));
+      if (touchesHooks) receipts.push(receipt(f, HOOKS_ROW, 'refused', { reason: badRel }));
       files.push({ harness: f.harness, id: f.id, rel: relOf(f), file: null, hooks: touchesHooks ? 'error' : null, error: badRel });
       continue;
     }
@@ -630,7 +641,9 @@ function applyConfigPlan(plan, { home = null, hookCmd = null, uninstall = false 
       const state = e.missing ? 'missing' : /not valid JSON|not touching it|could not read/.test(e.message) ? 'refused' : 'error';
       for (const s of sets) receipts.push(receipt(f, s, state, { reason: e.message, ...(e.missing ? { missing: e.missing } : {}) }));
       out.error = e.message; if (e.missing) out.missing = e.missing; if (touchesHooks) out.hooks = 'error';
+      if (touchesHooks) receipts.push(receipt(f, HOOKS_ROW, state, { reason: e.message, ...(e.missing ? { missing: e.missing } : {}) }));
     }
+    if (touchesHooks && out.hooks !== 'error') receipts.push(receipt(f, HOOKS_ROW, out.hooks === 'unchanged' ? 'unchanged' : 'applied', { current: out.hooks }));
     files.push(out);
   }
   return { receipts, files };
@@ -667,7 +680,8 @@ function readConfigPlan(plan, { home = null } = {}) {
   }
   return receipts;
 }
-// Receipt lines on the remote helper's stdout — one per managed key:
+// Receipt lines on the remote helper's stdout — one per managed key, and one
+// for our hook entries per file whose plan touches them (key `hooks`, r2844):
 //   CFG|<harness>|<key>|<state>|<current>|<want>|<reason>
 // the three free-text fields are encodeURIComponent(JSON) so neither a `|` nor
 // a newline in a value can shear the line.

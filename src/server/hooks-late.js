@@ -69,10 +69,15 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
       // nothing; the door answers the hold BY NAME (the store's unread refusal with the held fact), never «applied» over nothing
       const heldOf = (x) => (x && x.skipped && x.settingsHeld ? x.settingsHeld : null), held = heldOf(hooks) || heldOf(cfg);
       if (held) return res.status(503).json({ error: `the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — the CLI config was not applied; nothing was written`, code: 'store_unread', held: { file: 'settings.json', kind: held.kind, code: held.code || null, since: held.since || null, rung: 'said' } });
+      const saidHooks = (k) => { const v = hooks && typeof hooks === 'object' ? hooks[k] : null; return !!(v && v.ok === false && v.missing !== 'no-dir'); };   // the hooks answers this press says
       const failed = [
-        ...Object.entries(hooks && typeof hooks === 'object' ? hooks : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir').map(([k, v]) => `${k}: ${v.error || v.why || 'not applied'}`),   // r1813: a landing carries `why` (an opted-out start's removal)
-        ...((cfg && cfg.receipts) || []).filter((x) => x.state === 'error' || x.state === 'refused').map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`),
-        ...(cfg && cfg.error ? [cfg.error] : []),
+        ...Object.entries(hooks && typeof hooks === 'object' ? hooks : {}).filter(([k]) => saidHooks(k)).map(([k, v]) => `${k}: ${v.error || v.why || 'not applied'}`),   // r1813: a landing carries `why` (an opted-out start's removal)
+        // r2844: the settings answer's failed PARTS, each ONCE (its error is their joined words — never said beside them); a hooks part the
+        // CLI's hooks answer above SAID is left out. A failure with no part (no helper road, a late or broken run) is its error, unless
+        // the hooks answers said those very words
+        ...(cfg && cfg.error && Array.isArray(cfg.parts) && cfg.parts.length
+          ? cfg.parts.filter((p) => !(p.key === 'hooks' && saidHooks(p.harness))).map((p) => `${p.harness}.${p.why}`)
+          : cfg && cfg.error && !Object.keys(hooks && typeof hooks === 'object' ? hooks : {}).some((k) => saidHooks(k) && (hooks[k].error || hooks[k].why) === cfg.error) ? [cfg.error] : []),
         ...(hooks && hooks.optedOut && typeof hooks.error === 'string' ? [hooks.error] : []),   // r2345 (1): an opted-out start whose look at our rows was not read (the guard) — the press says it, never «applied» over it
       ];
       res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: harnessConfig.cliConfigStatus(), status: await agentHooksStatus() });

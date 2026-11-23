@@ -18,8 +18,8 @@
 //     again at the next request.
 //   · A LANDING IS SAID: `landedWithin(ms)` answers { landed } / { late } / { failed, why } for the spawn gate (a conversation
 //     is never refused for a late apply: it starts, and says once what may be missing); `last()` the newest landing.
-//   · «CREATED» is read off the loop: each plan file's existence before and after the run (fs.promises), since the helper
-//     prints key receipts only.
+//   · «CREATED» is read off the loop: each plan file's existence before and after the run (fs.promises), since the helper's
+//     receipts name keys and our hook entries, never a file's creation.
 //   · THE ENV (f): the starter's own service env + the names this site sets (VIBESPACE_CLI_CONFIG, HOME): no secret shape,
 //     nothing on argv but the helper's path and its flag.
 const fsp = require('fs').promises;
@@ -37,11 +37,13 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   if (!helperPath) throw new Error('cli-config-runner: the helper path is required');
   let inFlight = null;          // the run in flight: Promise<landing>
   const queue = [];             // the requests waiting, IN THE ORDER ASKED: { kind, planOf, reason, uninstall, before, resolvers }
-  let last = null;              // the newest landing: { at, reason, ok, receipts, created, why }
+  let last = null;              // the newest landing: { at, reason, ok, receipts, created, parts, why }
   const watchers = new Set();   // landedWithin's waiters: (landing) => void
 
   const filesOf = (planB64) => { const plan = decodePlan(planB64); return plan && Array.isArray(plan.files) ? plan.files.filter((f) => Array.isArray(f.rel)).map((f) => ({ rel: f.rel.join('/'), file: path.join(home || require('os').homedir(), ...f.rel), harness: f.harness })) : []; };
   const exists = async (p) => { try { await stat(p); return true; } catch { return false; } };
+  // the harnesses whose hook entries a plan touches, as the helper reads it (r2844): a JSON file with hook events (a strip: with hooks named)
+  const hooksHarnessesOf = (planB64, uninstall) => { const plan = decodePlan(planB64); return plan && Array.isArray(plan.files) ? [...new Set(plan.files.filter((f) => f && f.format === 'json' && f.hooks && (uninstall || Array.isArray(f.hooks.events))).map((f) => f.harness))] : []; };
 
   /** ONE helper run (never two at once — the queue below guarantees it). → a landing */
   async function runOnce(planB64, { reason, uninstall = false, status = false } = {}) {
@@ -73,7 +75,12 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const after = la.value;
     const created = files.filter((f, k) => !before[k] && after[k]);
     const bad = receipts.filter((x) => x.state === 'error' || x.state === 'refused');
-    return { at, reason, ok: bad.length === 0, receipts, created, why: bad.length ? bad.map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`).join('; ') : null };
+    // r2844: our hook entries are a part of the plan with a receipt of their own (a refused hooks part is a `refused` receipt, judged
+    // above). An OLDER helper (a machine not updated yet) prints none: whether they landed is NOT KNOWN, said so — never «landed»
+    const silent = status ? [] : hooksHarnessesOf(planB64, uninstall).filter((h) => !receipts.some((x) => x.harness === h && x.key === 'hooks'));
+    // the failed PARTS, each ONCE ({ harness, key, why }): a reader that says one part (a CLI's hooks answer) leaves it out of the rest
+    const parts = [...bad.map((x) => ({ harness: x.harness, key: x.key, why: `${x.key}: ${x.reason || x.state}` })), ...silent.map((h) => ({ harness: h, key: 'hooks', why: 'hooks: not known — the helper printed no word of our hook entries (an older helper)' }))];
+    return { at, reason, ok: parts.length === 0, receipts, created, parts, why: parts.length ? parts.map((p) => `${p.harness}.${p.why}`).join('; ') : null };
   }
 
   // the spawn gate's waiters hear the landing that leaves the queue EMPTY (this machine's config as every request asked it)
