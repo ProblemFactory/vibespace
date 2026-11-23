@@ -1340,7 +1340,7 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
   const at = (ms) => { const d = new Date(Date.now() + ms); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCHours() % 12 || 12}${d.getUTCHours() < 12 ? 'am' : 'pm'} (UTC)`; };
   const PANEL = `Current session: 4% used · resets ${at(3 * 3600e3)}\nCurrent week (all models): 10% used · resets ${at(3 * 86400e3)}\n`;
 
-  function mkUsage({ delayMs = 400, usageModule = usageMod, app: appIn = null } = {}) {
+  function mkUsage({ delayMs = 400, usageModule = usageMod, app: appIn = null, held = false } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-wake-panel-'));
     cleanup.push(root);
     const dataDir = path.join(root, 'data');
@@ -1349,9 +1349,11 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
     fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'),
       JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 29 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
-    // the fake CLI: sleeps, then prints a panel this build's own parser accepts
-    const bin = path.join(root, 'fake-claude');
-    fs.writeFileSync(bin, `#!/bin/sh\nsleep ${(delayMs / 1000).toFixed(2)}\ncat <<'EOF'\n${PANEL}EOF\n`, { mode: 0o755 });
+    // the fake CLI: sleeps, then prints a panel this build's own parser accepts. HELD (B-3dbd, 主开发 r3297): it marks that it RUNS, then
+    // prints only once the scene releases it (a file; polled every 10 ms, 30 s at most) — the race's window placed by state, never a delay
+    const bin = path.join(root, 'fake-claude'), startedMark = path.join(root, 'panel-started'), releaseMark = path.join(root, 'panel-release');
+    const hold = held ? `: > '${startedMark}'\ni=0; while [ ! -e '${releaseMark}' ] && [ $i -lt 3000 ]; do sleep 0.01; i=$((i+1)); done\n` : `sleep ${(delayMs / 1000).toFixed(2)}\n`;
+    fs.writeFileSync(bin, `#!/bin/sh\n${hold}cat <<'EOF'\n${PANEL}EOF\n`, { mode: 0o755 });
     const app = appIn || { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
     const u = usageModule.setupUsage({
       app, accounts: am, hosts: null, usageHistory: null, activeSessions: new Map(),
@@ -1363,7 +1365,9 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
       apiDerivedWindow: (k) => (k === id ? apiWinFor : null),
     });
     const files = () => fs.readdirSync(cacheDir).filter((f) => f.includes(id)).sort();
-    return { root, am, id, cacheDir, u, files };
+    const panelRunning = async () => { for (let i = 0; i < 6000 && !fs.existsSync(startedMark); i++) await tick(5); return fs.existsSync(startedMark); };   // bounded 30 s
+    const releasePanel = () => fs.writeFileSync(releaseMark, 'go');
+    return { root, am, id, cacheDir, u, files, panelRunning, releasePanel };
   }
   // Since B-855a c2 the `.window-` sidecar is stamped ONLY by a panel whose
   // identity was verified — the org the CLI reports, or the weekly PHASE
@@ -1453,11 +1457,15 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
 
   // THE RACE: the record is removed while the panel is running
   {
-    const w = mkUsage();
+    // B-3dbd (主开发 r3297): the removal lands WHILE THE PANEL RUNS, by its own mark — the release removed it after a fixed 120 ms, and on the
+    // loaded pod the panel had not even spawned then, so the pre-fix copy (the roster asked at the spawn) refused at its spawn: «0 red»
+    const w = mkUsage({ held: true });
     const p = w.u.refreshViaCliPanel(w.id);
-    await tick(120);
+    const running = await w.panelRunning();
     w.am.remove(w.id);
+    w.releasePanel();
     const okd = await p;
+    ok('the race\'s scene: the account was removed while its panel RAN (the panel\'s own mark, waited for)', running === true, JSON.stringify({ running }));
     ok('a panel that answers AFTER its account was removed writes NOTHING — no cache file, no window sidecar, and it says the reading was not recorded',
       okd === false && w.files().length === 0 && !w.am.get(w.id), JSON.stringify({ okd, files: w.files() }));
 
@@ -1467,11 +1475,13 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
         "  if (false) { // PRE-FIX: the roster is asked only before the spawn"],
     ]);
     ok('control setup: the pre-fix refresher copy applied its replacement', mut.hits === 1, JSON.stringify(mut));
-    const w2 = mkUsage({ usageModule: mut.mod });
+    const w2 = mkUsage({ usageModule: mut.mod, held: true });
     const p2 = w2.u.refreshViaCliPanel(w2.id);
-    await tick(120);
+    const running2 = await w2.panelRunning();
     w2.am.remove(w2.id);
+    w2.releasePanel();
     const okd2 = await p2;
+    ok('control setup: the pre-fix copy\'s account was removed while its panel RAN (the panel\'s own mark)', running2 === true, JSON.stringify({ running2 }));
     ok('NEGATIVE CONTROL (pre-fix): the same race leaves a cache file AND a window sidecar keyed to an id the roster no longer knows',
       okd2 === true && !w2.am.get(w2.id) && w2.files().some((f) => f.endsWith('.json')) && w2.files().some((f) => f.startsWith('.window-')),
       JSON.stringify({ okd2, files: w2.files() }));
