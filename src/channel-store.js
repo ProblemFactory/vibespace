@@ -401,6 +401,9 @@ function readIndexFamily(dir) {
   return ix;
 }
 
+/** B-92fc follow (主开发 r3021 (1)): THE STORE's OWN FOLDERS under data/channels — ONE list, and every one of them is made from it
+ *  (never an account's id: a purge mark naming one is a bad id, L6). The staged outbox files' folder is its module's own name, pinned equal. */
+const OWN_FOLDERS = Object.freeze({ msgs: 'msgs', archive: 'archive', attachments: 'attachments', outboxFiles: 'outbox-files' });   // outboxFiles = src/channel-outbox-files.js DIR (a SHARED store imports no such module: test-channel-store-forget ⑫ pins them equal)
 function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsFlushMs = STAMPS_FLUSH_MS, walk = null, heldRetry = null } = {}) {
   // lane hub-loop-stalls commit 2: the index reaches the disk through THE STORE WRITER (its own thread; a pace stated for
   // the index's size) — a 21.7 MB index's rename held the owner's main loop 1.3 s median, 58 times in six hours
@@ -411,8 +414,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const wrote = (adapterId, convId, what) => { if (typeof onWrite !== 'function') return; try { onWrite(adapterId, convId, what); } catch (e) { try { (log.warn || console.warn)('[channels] store write hook threw:', (e && e.message) || e); } catch { } } };
   if (!dir) throw new Error('channel-store: dir is required');
   const warn = (...a) => { try { (log.warn || log.log || console.warn).apply(log, a); } catch { } };
-  const msgsDir = path.join(dir, 'msgs');
-  const archiveDir = path.join(dir, 'archive');
+  const msgsDir = path.join(dir, OWN_FOLDERS.msgs);
+  const archiveDir = path.join(dir, OWN_FOLDERS.archive);
   const indexFile = path.join(dir, 'index.json');
   const adaptersFile = path.join(dir, 'adapters.json');
   const auditFile = path.join(dir, 'audit.ndjson');
@@ -578,7 +581,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // the outbox's attachment folders. The door sets them aside WITH it, under the same dated name (nothing deleted): a journal left
   // behind takes this life's acts (dropped as «backwards» at the next start, or its lines deleted by a compaction), and the files sweep
   // discards every folder of the proposals in the copy
-  const COMPANIONS = Object.freeze({ 'index.json': ['index-acts.ndjson'], 'poll-stamps.json': ['poll-stamps.log'], 'outbox.json': ['outbox-files'] });
+  const COMPANIONS = Object.freeze({ 'index.json': ['index-acts.ndjson'], 'poll-stamps.json': ['poll-stamps.log'], 'outbox.json': [OWN_FOLDERS.outboxFiles] });
   const emptying = new Map();   // file → the press in flight (ONE at a time: a second press waits for the first's answer)
   async function startDamagedEmpty(fileName) {
     const fam = [...holds.values()].map((x) => x.fam).find((f) => f.name === String(fileName || ''));
@@ -2309,7 +2312,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
 
   // ── ATTACHMENTS, fetched on demand, LRU per ACCOUNT (2026-09-26) ─────────
-  const attRoot = path.join(dir, 'attachments');
+  const attRoot = path.join(dir, OWN_FOLDERS.attachments);
   const attHash = (id) => crypto.createHash('sha1').update(String(id)).digest('hex');
   const attDir = (adapterId, convId) => path.join(attRoot, safeSeg(adapterId), safeSeg(convId));
   const lruFile = (adapterId) => path.join(attRoot, safeSeg(adapterId), 'lru.json');
@@ -2672,7 +2675,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // client secret (`credential.appSecretEnc`) — owner-only like the key file.
     // r2878 + r2943 (L3): an account added again under a gone or MARKED id — its gone mark cleared and its purge mark ENDED (readded);
     // a re-add DURING its purge only after that purge settles
-    const run = adChain.then(() => fn(ad)).then((r) => { for (const a of (ad && ad.adapters) || []) if (a && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) readded(a.id); owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); return r; });
+    // r3021 (2) + (3): never an id being REMOVED now (its fresh mark is the removal's), and the mark ends only once this write LANDED
+    const run = adChain.then(() => fn(ad)).then((r) => { const back = []; for (const a of (ad && ad.adapters) || []) if (a && !removing.has(a.id) && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id); owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); for (const id of back) readded(id); return r; });
     adChain = run.then(() => {}, () => {});
     return paced ? run : run.then((r) => landed(adaptersFile).then(() => r));
   }
@@ -2698,7 +2702,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // design 005 §2.B (B-fd1f): a pruned proposal takes its attachments' folder with it (src/channel-outbox-files.js layout)
   function dropOutboxFiles(id) {
     if (!/^p-[a-z0-9]+-[a-z0-9]+$/.test(String(id))) return;
-    try { fs.rmSync(path.join(dir, 'outbox-files', String(id)), { recursive: true, force: true }); } catch { /* the sweep tries again */ }
+    try { fs.rmSync(path.join(dir, OWN_FOLDERS.outboxFiles, String(id)), { recursive: true, force: true }); } catch { /* the sweep tries again */ }
   }
   // channel-store-off-loop (commit 1): the outbox is the send's WRITE-AHEAD (the attempt on disk before the send, the
   // vendor's handle after it) — every update is DURABLE: its promise resolves only once the bytes holding it are on disk
@@ -2981,7 +2985,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let pending = pdLoad.value;
   // L6: an id in the mark is an ACCOUNT's (a kind, or a kind and its minted suffix) — never a name of the folder's own (a hand edit
   // naming «msgs» would be every account's message logs) nor a file's: a bad one is skipped, said once, dropped from the mark
-  const OWN_NAMES = new Set([path.basename(msgsDir), path.basename(attRoot), path.basename(archiveDir)]);
+  const OWN_NAMES = new Set(Object.values(OWN_FOLDERS));   // r3021 (1): every folder of the store's own, the staged outbox files' too
   const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);
   const badSaid = new Set();
   // L2: the accounts' records READ — not held, not blocked (a file that appeared since is HELD for the length of its read: tookAppeared);
@@ -2996,11 +3000,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   /** before the record leaves (the remove road): the account in the mark → true; false = NOT marked (a bad id, the mark held, its write
    *  failed) — the remove road tells the person when something is left */
-  async function purgeBegin(adapterId) {
+  // r3033: the mark keeps the removed account's NAME as a person knows it — its service and the label they gave it, never its login —
+  // so the panel's line names it (the record is gone by then); it goes with the entry
+  const markName = (who) => (who && typeof who === 'object' && (who.service || who.label) ? { service: String(who.service || '').slice(0, 80), label: String(who.label || '').slice(0, 80) } : null);
+  async function purgeBegin(adapterId, who = null) {
     if (!accountIdOk(adapterId)) return false;
     removing.add(adapterId);
     if (pdLoad.blocked) return false;
-    pending.ids[adapterId] = { at: now(), left: null };
+    const name = markName(who);
+    pending.ids[adapterId] = { at: now(), left: null, ...(name ? { name } : {}) };
     try { await pendingWrite(); return true; } catch (e) { warn(`[channels] ${adapterId}: the purge's mark was not written (${(e && e.code) || (e && e.message) || e})`); return false; }
   }
   /** the remove road's record write failed after purgeBegin: the id leaves `removing` (its mark, if written, is listed as not known) */
@@ -3018,8 +3026,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         continue;
       }
       if (removing.has(id) || purging.has(id)) continue;
-      if (recordsRead() && recordOf(id)) { endMark(id, 'an account with this id has a record'); continue; }
-      out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null });
+      if (!recordsRead()) continue;   // r3021 (6): the accounts' records not read — the id is left off until they read (it may be a live account's)
+      if (recordOf(id)) { endMark(id, 'an account with this id has a record'); continue; }
+      out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null, name: markName(e && e.name) });
     }
     if (dropped) pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — its bad ids are dropped in memory`));
     return out;
@@ -3028,26 +3037,33 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  one — said ONCE in the journal; the add's answer takes it once (joinedOf) */
   const joined = new Map();   // id → { left } of the account removed under it (left null = not known)
   const ending = new Map();   // id → the end waiting for a purge of it in flight to settle
-  function endMark(id, why) {
+  function endMark(id, why, { readd = false } = {}) {
     const e = pending.ids[id];
     if (!e || pdLoad.blocked) return;
     delete pending.ids[id];
     const left = Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null;
-    joined.set(id, { left });
+    if (readd) joined.set(id, { left });   // r3021 (2): the add's note on the re-add road only
     warn(`[channels] ${id}: ${why} — the purge noted under this id ends (left of the removed account: ${left ? left.join(', ') || 'nothing' : 'not known, its removal was cut in its middle'}); what is on disk under it is now that account's, and it is no longer listed to try again`);
     pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — ${id}'s mark is ended in memory`));
   }
-  /** a record written under a gone or marked id (adaptersUpdate): the gone mark cleared and the purge mark ended — once a purge of it
-   *  in flight settled, whether it resolved or rejected (never an unhandled rejection) */
+  /** a record written under a gone or marked id (adaptersUpdate, its write owed): the gone mark cleared once a purge of it in flight
+   *  settled (resolved or rejected: never an unhandled rejection); the purge mark ended only once the record's write LANDED (r3021 (3):
+   *  a record write that fails leaves the mark, said) — never for an id being removed now (r3021 (2)) */
   function readded(id) {
-    const after = () => { try { goneAccounts.delete(id); endMark(id, 'an account was added again under its id'); } catch (e) { warn(`[channels] ${id}: its re-add's mark not ended: ${(e && e.message) || e}`); } };
-    const pp = purging.get(id);
-    if (!pp) return after();
     if (ending.has(id)) return;
-    const q = pp.then(after, after);
+    const pp = purging.get(id);
+    if (!pp) goneAccounts.delete(id);
+    const q = (async () => {
+      if (pp) { try { await pp; } catch { } if (!removing.has(id)) goneAccounts.delete(id); }
+      try { await landed(adaptersFile); } catch (e) { if (pending.ids[id]) warn(`[channels] ${id}: an account was added again under its id, but its record's write failed (${(e && e.code) || (e && e.message) || e}) — the purge noted under the id is kept`); return; }
+      if (removing.has(id)) return;
+      endMark(id, 'an account was added again under its id', { readd: true });
+    })().catch((e) => warn(`[channels] ${id}: its re-add's mark not ended: ${(e && e.message) || e}`));
     ending.set(id, q);
     q.then(() => { if (ending.get(id) === q) ending.delete(id); });
   }
+  /** r3021 (5): a purge of the id running now (a second press joins it) */
+  const purgeRunning = (id) => purging.has(String(id));
   /** the add's answer (connect, duplicate): what was left of an account removed under the same id, ONCE → { left } | null */
   async function joinedOf(id) {
     const q = ending.get(id);
@@ -3120,7 +3136,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let markUnwritten = null;
     if (pdLoad.blocked) markUnwritten = 'held';
     else {
-      if (left.length) pending.ids[adapterId] = { at: (pending.ids[adapterId] && pending.ids[adapterId].at) || now(), left: left.map((x) => x.what), codes: Object.fromEntries(left.map((x) => [x.what, x.code])) };
+      const was = pending.ids[adapterId] || null, name = markName(was && was.name);
+      if (left.length) pending.ids[adapterId] = { at: (was && was.at) || now(), left: left.map((x) => x.what), codes: Object.fromEntries(left.map((x) => [x.what, x.code])), ...(name ? { name } : {}) };
       else delete pending.ids[adapterId];
       try { await pendingWrite(); } catch (e) { markUnwritten = (e && e.code) || 'error'; }
     }
@@ -3135,7 +3152,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   if (!ixLoad.blocked && plainRows(ix.conversations)) { try { if (Object.keys(ix.conversations).length > LAYOUT_SYNC_ROWS) warmLayout({ atOpen: true }); else buildLayout(ix.conversations); } catch (e) { warn('[channels] the index layout at open failed:', (e && e.message) || e); } }
   return {
     rootClosed,   // the root closed to other accounts: resolves true once it is (or already was), false when the filesystem refused (said once)
-    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount, purgeBegin, purgeNotBegun, pendingList, joinedOf,
+    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount, purgeBegin, purgeNotBegun, pendingList, joinedOf, purgeRunning,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
       // B-526c × B-360d unit 1 (主开发 r1765): a row has LANDED exactly when its own change is on disk by the road that carries it —
@@ -3222,7 +3239,7 @@ function pauseDoorsOf(api, table, { held, error, answer, say = () => {} }) {
 }
 
 module.exports = {
-  createChannelStore, readIndexFamily, replayIndexJournal, pauseDoorsOf, HELD_WALLS, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_FLUSH_MS,
+  createChannelStore, OWN_FOLDERS, readIndexFamily, replayIndexJournal, pauseDoorsOf, HELD_WALLS, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_FLUSH_MS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
   SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES, PLACE_CACHE_MAX, PLACE_KEEP_MAX,
 };

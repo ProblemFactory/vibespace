@@ -77,6 +77,12 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     // person's language, never dropped
     case 'not-durable': return t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.');
     case 'not-found': return t('No such conversation');
+    // B-92fc follow (主开发 r3021 (4)): «Try again» on a removed account's leftovers — its five refusals, in the person's language
+    case 'not-pending': return t('Nothing of that removed account is listed to try again');
+    case 'records-held': return t('The accounts could not be read now — nothing was removed; try again once they read');
+    case 'record-stands': return t('An account with this id exists again — the data is that account\'s; nothing was removed');
+    case 'records-unwritten': return t('The accounts\' file has a change that is not on disk yet — nothing was removed; try again in a moment');
+    case 'bad-id': return t('That is no account\'s id — nothing was removed');
     // lane bl-msg B-da74 cure: «Send the rest»'s four refusals, in the person's language (the engine's English `error` is the CLI's)
     case 'rest-not-sent': return t('Only a sent message has a rest to send');
     case 'rest-already': return t('The rest is on its way already');

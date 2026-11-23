@@ -417,23 +417,24 @@ export default {
   "Channels: {file} started empty — its damaged bytes are kept as {where}": "チャンネル：{file} を空から始めました — 破損したバイトは {where} として保持しています",   // B-f276 1b: the store hold's words
   "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts": "チャンネルを一時停止しました：{file} を読めません — 再び読めるようになり VibeSpace を再起動するまで、何も取得も送信もしません",   // B-f276 1b: the store hold's words
   "Channels paused: {file} could not be read as itself — nothing is fetched or sent until it is started empty or a good copy is put back": "チャンネルを一時停止しました：{file} を本来の形で読めません — 空から始めるか正常なコピーを戻すまで、何も取得も送信もしません",   // B-f276 1b: the store hold's words
-  "{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back": "{file} を本来の形で読めません（破損）— 保留中：何も退避・上書きしていません。「あなた宛て」から空で始めるか、正常なコピーを戻してください",   // B-f276 1b: the store hold's words
-  "{file} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace": "{file} は起動後に現れました（または保存先がファイル番号を保てない） — そのまま保持し、VibeSpace の次回起動で読み込みます",   // B-f276 1b: the store hold's words
-  "{file} was started empty — its damaged bytes are kept as {where}": "{file} を空から始めました — 破損したバイトは {where} として保持しています",   // B-f276 1b: the store hold's words
+  "{what} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back": "{what} を本来の形で読めません（破損）— 保留中：何も退避・上書きしていません。「あなた宛て」から空で始めるか、正常なコピーを戻してください",   // B-f276 1b: the store hold's words
+  "{what} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace": "{what} は起動後に現れました（または保存先がファイル番号を保てない） — そのまま保持し、VibeSpace の次回起動で読み込みます",   // B-f276 1b: the store hold's words
+  "{what} was started empty — its damaged bytes are kept as {where}": "{what} を空から始めました — 破損したバイトは {where} として保持しています",   // B-f276 1b: the store hold's words
   "Nothing was set aside or written over. A pushed message is delivered again only while its sender retries, so reading it again soon matters. VibeSpace reads it again; once it reads, restart VibeSpace to load it.": "退避も上書きもしていません。プッシュされたメッセージは送信元が再試行している間だけ再送されるため、早く読めるようになることが大切です。VibeSpace が読み直します。読めたら VibeSpace を再起動して読み込んでください。",
   "It is loaded at the next start of VibeSpace; until then the channels stay paused — nothing is fetched or sent.": "次回の VibeSpace 起動時に読み込まれます。それまでチャンネルは一時停止のままで、取得も送信もしません。",
-  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it": "チャンネルを一時停止しました: {file} を読み込めません — 読めるようになるまで取得も送信もしません。読めたら VibeSpace を再起動して読み込んでください",
+  "Channels paused: {what} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it": "チャンネルを一時停止しました: {what} を読み込めません — 読めるようになるまで取得も送信もしません。読めたら VibeSpace を再起動して読み込んでください",
   "Channels: {file} reads again — restart VibeSpace to load it": "チャンネル: {file} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
   "It is loaded at the next start of VibeSpace; until then it stays held and every change to it is refused.": "次回の VibeSpace 起動時に読み込まれます。それまでは保留のままで、変更はすべて拒否されます。",
   "Channels: {file} read again and loaded — nothing to do": "チャンネル: {file} を読み直して読み込みました — 操作は不要です",
-  "{file} read again and is loaded": "{file} を読み直して読み込みました",
-  "The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "チャンネルは一時停止中です — {file} を読み込めないため、ここは一覧のすべてではありません。読めるようになるまで取得も送信もしません",
+  "{what} read again and is loaded": "{what} を読み直して読み込みました",
+  "The channels are paused: {what} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "チャンネルは一時停止中です — {what} を読み込めないため、ここは一覧のすべてではありません。読めるようになるまで取得も送信もしません",
   "The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again": "エージェントのグループは一時停止中です — そのファイルの一つを読めないため、この一覧はすべてではありません。再び読めるまで何も送信しません",   // B-f276 1c
   "It read again and is loaded; changes to it are written again.": "読み直して読み込みました。変更は再び書き込まれます。",
   "{file} reads again — restart VibeSpace to load it": "{file} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
-  "{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら次回の VibeSpace 起動時に読み込みます",
-  "{file} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたらアカウントは自動で戻ります",
-  "{file} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら自動で読み込みます",
+  "{what} reads again — restart VibeSpace to load it": "{what} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
+  "{what} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{what} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら次回の VibeSpace 起動時に読み込みます",
+  "{what} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{what} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたらアカウントは自動で戻ります",
+  "{what} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads": "{what} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら自動で読み込みます",
   "The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.": "プレビュー後にグループが変わりました（メンバーの名前変更・参加・退出・通知モードの変更）— プレビューを更新しました。確認してから送り直してください。",
   "Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.": "何も削除していません。サーバー停止中に JSON を直して元に戻すか、新しいストアを使い続け、不要になったらコピーを削除してください。",
   "For you could not read its saved list and set it aside as {where} \u2014 the list started empty": "「あなた宛て」は保存済みの一覧を読めなかったため {where} として退避しました — 一覧は空から始まります",
@@ -5657,10 +5658,24 @@ export default {
   "Removed \"{name}\" — {left} could not be removed from disk now; the Channels panel lists it with Try again": "「{name}」を削除しました — {left}は今ディスクから削除できませんでした。チャンネルパネルに表示され、「再試行」できます",
   "Removed \"{name}\" — {left} could not be removed from disk now, and VibeSpace could not note it to list it again": "「{name}」を削除しました — {left}は今ディスクから削除できず、VibeSpace は再表示のために記録することもできませんでした",
   "Some of its saved data is not erased from disk yet either; it is erased when the disk takes the next write": "保存データの一部もまだディスクから消去されていません。ディスクが次の書き込みを受け付けたときに消去されます",
-  "A removed account ({id}): {left} could not be removed from disk — nothing removes it by itself": "削除したアカウント（{id}）：{left}をディスクから削除できませんでした — 自動では削除されません",
+  "The removed account {name}: {left} could not be removed from disk — nothing removes it by itself": "削除したアカウント（{name}）：{left}をディスクから削除できませんでした — 自動では削除されません",
   "its local copy": "そのローカルコピー",
-  "The rest of the removed account {id} was removed from disk": "削除したアカウント {id} の残りをディスクから削除しました",
-  "{left} of the removed account {id} could still not be removed — it stays listed": "削除したアカウント {id} の{left}はまだ削除できません — 引き続きここに表示されます",
+  "The conversation list": "会話リスト",
+  "The conversations' fetch times": "会話の取得時刻",
+  "The channel accounts list": "チャンネルアカウントの一覧",
+  "The outbox": "送信トレイ",
+  "The agent groups list": "エージェントグループの一覧",
+  "The names you gave people": "あなたが人に付けた名前",
+  "The agents' wake pace": "エージェントの起動ペース",
+  "The agent groups' delivery record": "エージェントグループの配信記録",
+  "The list of what removed accounts left on disk": "削除したアカウントがディスクに残したものの一覧",
+  "Nothing of that removed account is listed to try again": "この削除済みアカウントには再試行できるものがありません",
+  "The accounts could not be read now — nothing was removed; try again once they read": "アカウントの記録を今読み込めません — 何も削除していません。読み込めたらもう一度試してください",
+  "An account with this id exists again — the data is that account's; nothing was removed": "この ID のアカウントがまた存在します — そのデータはそのアカウントのものです。何も削除していません",
+  "The accounts' file has a change that is not on disk yet — nothing was removed; try again in a moment": "アカウントのファイルにまだディスクへ書き込まれていない変更があります — 何も削除していません。少し待ってからもう一度試してください",
+  "That is no account's id — nothing was removed": "これはどのアカウントの ID でもありません — 何も削除していません",
+  "The rest of the removed account {name} was removed from disk": "削除したアカウント {name} の残りをディスクから削除しました",
+  "{left} of the removed account {name} could still not be removed — it stays listed": "削除したアカウント {name} の{left}はまだ削除できません — 引き続きここに表示されます",
   "\"{name}\" was added under the id of a removed account whose local copy was not all removed — what was left ({left}) is now part of this account": "「{name}」は、ローカルコピーが完全には削除されなかった削除済みアカウントの ID で追加されました — 残った部分（{left}）は今このアカウントのものです",
   "its messages": "そのメッセージ",
   "its fetched files": "取得したファイル",

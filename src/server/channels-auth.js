@@ -1236,7 +1236,7 @@ function create(engineCtx) {
     // 主开发 r2878 + r2943: the purge's MARK on disk BEFORE the record leaves — a crash from here on leaves its local copy LISTED on the
     // Channels panel (never removed by itself); a mark not written is answered to the person with what is left (markUnwritten)
     let marked = true;
-    if (purgesOnRemove(rec) && typeof store.purgeBegin === 'function') { marked = await store.purgeBegin(rec.id).catch(() => false); if (marked === false) log.warn(`[channels] ${rec.id}: the purge's mark could not be written — a crash in the middle of this removal would leave its local copy unlisted, for a person to remove`); }
+    if (purgesOnRemove(rec) && typeof store.purgeBegin === 'function') { marked = await store.purgeBegin(rec.id, { service: (registry.vendor(rec.kind) || {}).label || rec.kind, label: rec.label || '' }).catch(() => false); if (marked === false) log.warn(`[channels] ${rec.id}: the purge's mark could not be written — a crash in the middle of this removal would leave its local copy unlisted, for a person to remove`); }
     try { await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); }); }
     catch (e) { try { if (store.purgeNotBegun) store.purgeNotBegun(rec.id); } catch { } throw e; }
     const purged = await purgeIfDeclared(rec);   // r1542 (1): its answer reaches the person (remove())
@@ -1293,7 +1293,9 @@ function create(engineCtx) {
    *  holds a change not on disk yet (a removal whose record write failed is no removal) → { ok, id, done, purgeLeft? } */
   async function purgeAgain(adapterId) {
     const id = String(adapterId || '');
-    if (!(store.pendingList ? store.pendingList() : []).some((x) => x.id === id)) throw httpErr(404, 'not-pending', `nothing of a removed account ${JSON.stringify(id).slice(0, 80)} is listed to try again`);
+    // r3021 (5): a second press while the first purge runs JOINS it (the running purge's answer) — never «not listed»
+    const running = !!(store.purgeRunning && store.purgeRunning(id));
+    if (!running && !(store.pendingList ? store.pendingList() : []).some((x) => x.id === id)) throw httpErr(404, 'not-pending', `nothing of a removed account ${JSON.stringify(id).slice(0, 80)} is listed to try again`);
     let onDisk = false;
     try { onDisk = await Promise.race([store.adapters.landed().then(() => true), new Promise((z) => { const t = setTimeout(() => z(false), 10000); if (t.unref) t.unref(); })]); } catch { onDisk = false; }
     if (!onDisk) throw httpErr(409, 'records-unwritten', 'the accounts\' file (adapters.json) holds a change that is not on disk yet — nothing was removed; try again in a moment');

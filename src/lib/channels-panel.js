@@ -95,16 +95,29 @@ import './channel-outbox.js';
 import { accountEnableDoor, showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf, purgeLeftText } from './channel-account-dialogs.js';
 /** r2943 (B-92fc, L1): one removed account's leftovers on the first screen — what is left, and «Try again», the person's press (nothing
  *  removes it by itself; a second press while one runs waits for it — the control stays live) */
+/** r3033 (bl-phone-ui's page, row 4): a removed account by its NAME as a person knows it — its service and the label they gave it (the
+ *  mark keeps both); a mark without them (none this road writes) names the service its id starts with, never the whole id */
+function removedName(p) {
+  const n = p && p.name, svc = n && n.service ? n.service : String((p && p.id) || '').split(':')[0];
+  return n && n.label && n.label !== svc ? `${svc} · ${n.label}` : svc;
+}
+/** r3033: a held store of the channels by its PLAIN name on the panel (each heads its sentence) — never its file's name: the table is
+ *  keyed by the store's own name (the file without its extension; only the store names its files), a store it does not know keeps its own */
+function heldName(file) {
+  const plain = { index: t('The conversation list'), 'poll-stamps': t("The conversations' fetch times"), adapters: t('The channel accounts list'), outbox: t('The outbox'), groups: t('The agent groups list'), aliases: t('The names you gave people'), 'wake-pace': t("The agents' wake pace"), 'dispatch-ledger': t("The agent groups' delivery record"), 'purge-pending': t('The list of what removed accounts left on disk') };
+  const stem = String(file || '').replace(/\.json$/, '');
+  return plain[stem] || String(file || '');
+}
 function purgeLeftLine(p) {
-  const purgeNote = noteLine('chan-purge-left-note', t('A removed account ({id}): {left} could not be removed from disk — nothing removes it by itself', { id: p.id, left: purgeLeftText(p.left) }), { warn: true });
+  const purgeNote = noteLine('chan-purge-left-note', t('The removed account {name}: {left} could not be removed from disk — nothing removes it by itself', { name: removedName(p), left: purgeLeftText(p.left) }), { warn: true });
   let busy = null;
   purgeNote.appendChild(btn(t('Try again'), () => {
     if (busy) return;
     busy = (async () => {
       const r = await fetchJson(`/api/channels/purge-left/${encodeURIComponent(p.id)}/retry`, { method: 'POST' });
       if (!r || r.error) showToast(routeErrorText(r), { type: 'error' });
-      else if (r.done) showToast(t('The rest of the removed account {id} was removed from disk', { id: p.id }));
-      else showToast(t('{left} of the removed account {id} could still not be removed — it stays listed', { id: p.id, left: purgeLeftText(r.purgeLeft) }), { type: 'warn', duration: 9000 });
+      else if (r.done) showToast(t('The rest of the removed account {name} was removed from disk', { name: removedName(p) }));
+      else showToast(t('{left} of the removed account {name} could still not be removed — it stays listed', { name: removedName(p), left: purgeLeftText(r.purgeLeft) }), { type: 'warn', duration: 9000 });
     })().catch(() => { }).finally(() => { busy = null; });
   }));
   return purgeNote;
@@ -1683,15 +1696,15 @@ export function renderChannelsPanel(app, c) {
       // B-f276: a file whose READ failed is HELD — nothing set aside, nothing written over — and the line names what lifts it
       // B-f276 1b (r809): every entry is a HOLD — damaged (its one door: For you), appeared since the start, started empty, or a read that failed
       {
-        const held = q.done && q.to ? t("{file} was started empty — its damaged bytes are kept as {where}", { file: q.file, where: q.to })
-          : q.loadedAt ? t('{file} read again and is loaded', { file: q.file })
-          : q.kind === 'damaged' ? t("{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back", { file: q.file })
-          : q.kind === 'appeared' ? t("{file} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace", { file: q.file })
-          : q.file === 'index.json' && !q.readsAt ? t('Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it', { file: q.file })
+        const held = q.done && q.to ? t("{what} was started empty — its damaged bytes are kept as {where}", { what: heldName(q.file), where: q.to })
+          : q.loadedAt ? t('{what} read again and is loaded', { what: heldName(q.file) })
+          : q.kind === 'damaged' ? t("{what} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back", { what: heldName(q.file) })
+          : q.kind === 'appeared' ? t("{what} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace", { what: heldName(q.file) })
+          : q.file === 'index.json' && !q.readsAt ? t('Channels paused: {what} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it', { what: heldName(q.file) })
           : q.lifts === 'next-start'
-            ? (q.readsAt ? t('{file} reads again — restart VibeSpace to load it', { file: q.file }) : t('{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace', { file: q.file }))
-            : q.file === 'adapters.json' ? t('{file} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads', { file: q.file })
-              : t('{file} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads', { file: q.file });
+            ? (q.readsAt ? t('{what} reads again — restart VibeSpace to load it', { what: heldName(q.file) }) : t('{what} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace', { what: heldName(q.file) }))
+            : q.file === 'adapters.json' ? t('{what} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads', { what: heldName(q.file) })
+              : t('{what} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads', { what: heldName(q.file) });
         into.appendChild(noteLine('chan-quarantine-note', held, { warn: !q.loadedAt && !q.done }));
         continue;
       }
@@ -1708,7 +1721,7 @@ export function renderChannelsPanel(app, c) {
     if (groupsPausedNow && !pausedNow) {
       list.appendChild(chanLine('empty-hint chan-groups-empty chan-paused', t('The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again')));   // B-f276 1c
     } else if (pausedNow) {
-      list.appendChild(chanLine('empty-hint chan-groups-empty chan-paused', t('The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again', { file: pausedNow[0] })));   // B-f276 (r566 #8)
+      list.appendChild(chanLine('empty-hint chan-groups-empty chan-paused', t('The channels are paused: {what} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again', { what: heldName(pausedNow[0]) })));   // B-f276 (r566 #8)
     } else if (!rows.length) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
     } else if (fs.view === 'focus' && !focusN) {

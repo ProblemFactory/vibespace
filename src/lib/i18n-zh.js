@@ -417,23 +417,24 @@ export default {
   "Channels: {file} started empty — its damaged bytes are kept as {where}": "频道：{file} 已从空开始——它损坏的字节保留为 {where}",   // B-f276 1b: the store hold's words
   "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts": "频道已暂停：{file} 无法读取——在它能再次读取并重启 VibeSpace 之前，不获取也不发送任何内容",   // B-f276 1b: the store hold's words
   "Channels paused: {file} could not be read as itself — nothing is fetched or sent until it is started empty or a good copy is put back": "频道已暂停：{file} 无法按原样读取——在它从空开始或放回完好副本之前，不获取也不发送任何内容",   // B-f276 1b: the store hold's words
-  "{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back": "{file} 无法按原样读取（已损坏）——已保持不动：没有移走或覆盖；可在「待你处理」里让它从空开始，或放回一份完好的副本",   // B-f276 1b: the store hold's words
-  "{file} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace": "{file} 在启动后才出现（或其存储不能让文件编号保持不变）——按原样保留，在 VibeSpace 下次启动时载入",   // B-f276 1b: the store hold's words
-  "{file} was started empty — its damaged bytes are kept as {where}": "{file} 已从空开始——它损坏的字节保留为 {where}",   // B-f276 1b: the store hold's words
+  "{what} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back": "{what} 无法按原样读取（已损坏）——已保持不动：没有移走或覆盖；可在「待你处理」里让它从空开始，或放回一份完好的副本",   // B-f276 1b: the store hold's words
+  "{what} appeared since the start (or its storage does not keep file numbers stable) — it is kept as it is and loaded at the next start of VibeSpace": "{what} 在启动后才出现（或其存储不能让文件编号保持不变）——按原样保留，在 VibeSpace 下次启动时载入",   // B-f276 1b: the store hold's words
+  "{what} was started empty — its damaged bytes are kept as {where}": "{what} 已从空开始——它损坏的字节保留为 {where}",   // B-f276 1b: the store hold's words
   "Nothing was set aside or written over. A pushed message is delivered again only while its sender retries, so reading it again soon matters. VibeSpace reads it again; once it reads, restart VibeSpace to load it.": "没有另存，也没有覆盖。推送来的消息只会在发送方重试期间再次送达，所以尽快能再读取很重要。VibeSpace 会再读；读到后，请重启 VibeSpace 以载入。",
   "It is loaded at the next start of VibeSpace; until then the channels stay paused — nothing is fetched or sent.": "它会在 VibeSpace 下次启动时载入；在此之前频道保持暂停 —— 不获取也不发送任何内容。",
-  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it": "频道已暂停：{file} 无法读取 —— 在能再次读取之前，不获取也不发送任何内容；读到后请重启 VibeSpace 以载入",
+  "Channels paused: {what} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it": "频道已暂停：{what} 无法读取 —— 在能再次读取之前，不获取也不发送任何内容；读到后请重启 VibeSpace 以载入",
   "Channels: {file} reads again — restart VibeSpace to load it": "频道：{file} 已能读取 —— 重启 VibeSpace 即可载入",
   "It is loaded at the next start of VibeSpace; until then it stays held and every change to it is refused.": "它会在 VibeSpace 下次启动时载入；在此之前仍暂停使用，对它的每一次修改都会被拒绝。",
   "Channels: {file} read again and loaded — nothing to do": "频道：{file} 已重新读取并载入 —— 你无需操作",
-  "{file} read again and is loaded": "{file} 已重新读取并载入",
-  "The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "频道已暂停 —— {file} 无法读取，所以这里不是完整的列表；在能再次读取之前，不获取也不发送任何内容",
+  "{what} read again and is loaded": "{what} 已重新读取并载入",
+  "The channels are paused: {what} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "频道已暂停 —— {what} 无法读取，所以这里不是完整的列表；在能再次读取之前，不获取也不发送任何内容",
   "The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again": "智能体群已暂停——它们的一个文件无法读取，所以这个列表不完整；能再次读取前不会发送任何内容",   // B-f276 1c
   "It read again and is loaded; changes to it are written again.": "已重新读取并载入；对它的修改会再次写入。",
   "{file} reads again — restart VibeSpace to load it": "{file} 已能读取 —— 重启 VibeSpace 即可载入",
-  "{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会在 VibeSpace 下次启动时载入",
-  "{file} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后你的账号会自动回来",
-  "{file} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会自动载入",
+  "{what} reads again — restart VibeSpace to load it": "{what} 已能读取 —— 重启 VibeSpace 即可载入",
+  "{what} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{what} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会在 VibeSpace 下次启动时载入",
+  "{what} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{what} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后你的账号会自动回来",
+  "{what} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads": "{what} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会自动载入",
   "The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.": "群在预览之后有变化（有成员改名、加入、离开或更改了通知方式）—— 预览已更新；请检查后再发送。",
   "Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.": "没有删除任何内容。可在服务器停止时修好 JSON 再移回原处；或者保留新的存储，确认不再需要后删除这份副本。",
   "For you could not read its saved list and set it aside as {where} \u2014 the list started empty": "「待你处理」无法读取保存的列表，已把它另存为 {where} — 列表从空开始",
@@ -5658,10 +5659,24 @@ export default {
   "Removed \"{name}\" — {left} could not be removed from disk now; the Channels panel lists it with Try again": "已移除 \"{name}\" —— {left}暂时无法从磁盘删除；频道面板会列出它，可按“重试”",
   "Removed \"{name}\" — {left} could not be removed from disk now, and VibeSpace could not note it to list it again": "已移除 \"{name}\" —— {left}暂时无法从磁盘删除，且 VibeSpace 无法记下它以便再次列出",
   "Some of its saved data is not erased from disk yet either; it is erased when the disk takes the next write": "它的部分已保存数据也尚未从磁盘抹去；磁盘接受下一次写入时会抹去",
-  "A removed account ({id}): {left} could not be removed from disk — nothing removes it by itself": "已移除的账号（{id}）：{left}未能从磁盘删除 —— 不会自动删除",
+  "The removed account {name}: {left} could not be removed from disk — nothing removes it by itself": "已移除的账号（{name}）：{left}未能从磁盘删除 —— 不会自动删除",
   "its local copy": "它的本地副本",
-  "The rest of the removed account {id} was removed from disk": "已移除账号 {id} 的剩余部分已从磁盘删除",
-  "{left} of the removed account {id} could still not be removed — it stays listed": "已移除账号 {id} 的{left}仍无法删除 —— 它会继续列在这里",
+  "The conversation list": "会话列表",
+  "The conversations' fetch times": "会话的获取时间",
+  "The channel accounts list": "频道账号列表",
+  "The outbox": "发件箱",
+  "The agent groups list": "智能体群组列表",
+  "The names you gave people": "你给联系人起的名字",
+  "The agents' wake pace": "智能体的唤醒节奏",
+  "The agent groups' delivery record": "智能体群组的投递记录",
+  "The list of what removed accounts left on disk": "已移除账号留在磁盘上的内容列表",
+  "Nothing of that removed account is listed to try again": "这个已移除账号没有可重试的内容",
+  "The accounts could not be read now — nothing was removed; try again once they read": "暂时无法读取账号记录 —— 没有删除任何内容；记录可读后再试",
+  "An account with this id exists again — the data is that account's; nothing was removed": "已有一个使用此 id 的账号 —— 这些数据属于它；没有删除任何内容",
+  "The accounts' file has a change that is not on disk yet — nothing was removed; try again in a moment": "账号文件有一项更改尚未写入磁盘 —— 没有删除任何内容；请稍后再试",
+  "That is no account's id — nothing was removed": "这不是任何账号的 id —— 没有删除任何内容",
+  "The rest of the removed account {name} was removed from disk": "已移除账号 {name} 的剩余部分已从磁盘删除",
+  "{left} of the removed account {name} could still not be removed — it stays listed": "已移除账号 {name} 的{left}仍无法删除 —— 它会继续列在这里",
   "\"{name}\" was added under the id of a removed account whose local copy was not all removed — what was left ({left}) is now part of this account": "\"{name}\" 使用了一个已移除账号的 id，该账号的本地副本未完全删除 —— 剩下的部分（{left}）现在属于这个账号",
   "its messages": "它的消息",
   "its fetched files": "它已获取的文件",
