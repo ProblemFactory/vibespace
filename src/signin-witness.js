@@ -108,18 +108,30 @@ function netHomeOf({ home = '', uid = null, mountinfo = '', varTmp = undefined, 
   const t = (p.tried || []).find((x) => x.via === 'home');
   return t && LI.landedPathOf(t.dir, { lstat, readlink, mountinfo }).blocked ? t.dir : null;
 }
-/** THE NETWORK HOME's ANSWER (PURE), from a worker's read — {text} or {error}: nothing there (ENOENT / ENOTDIR) ⇒ answered, none;
- *  an fs error the read itself answered (EACCES, EIO…) or a text that is not this folder's witness ⇒ answered, unread (it holds);
- *  a deadline, a refused or a dead pool (no fs code of its own, or a status) ⇒ NOT answered */
-function netAnswerOf({ text = null, error = null } = {}, { root, dataDir, file = null } = {}) {
+/** THE NETWORK HOME's ANSWER (PURE), from the witness worker's read (src/signin-witness-worker.js netRead) — {result} or {error}.
+ *  EVERY entry it makes is MARKED `net: true` (round wom600meg's must): no synchronous writer or remover ever takes it.
+ *  nothing there ⇒ answered, none; a copy the worker judged unreadable (not a plain file, over the size bound: r3030 (c)), an fs
+ *  error the read itself answered (EACCES, EPERM…) or a text that is not this folder's witness ⇒ answered, unread (it holds);
+ *  a network road that went quiet (ESTALE, EIO, a timed-out or unreachable host: r3030 (d)), a deadline, a refused or a dead
+ *  pool ⇒ NOT answered (asked again, like silence) */
+const NET_SILENT = new Set(['ESTALE', 'EIO', 'ETIMEDOUT', 'EHOSTDOWN', 'EHOSTUNREACH', 'ENETDOWN', 'ENETUNREACH', 'ENOTCONN', 'ECONNRESET', 'ECONNREFUSED']);
+function netAnswerOf({ result = null, error = null } = {}, { root, dataDir } = {}) {
   if (error) {
     const code = String((error && error.code) || '');
     if (code === 'ENOENT' || code === 'ENOTDIR') return { answered: true, found: null };
-    if (/^E[A-Z]+$/.test(code) && !error.status) return { answered: true, found: { file, unread: `it cannot be read (${code})` } };
+    if (/^E[A-Z]+$/.test(code) && !error.status && !NET_SILENT.has(code)) return { answered: true, found: { file: error.file || null, net: true, unread: `it cannot be read (${code})` } };
     return { answered: false, why: String((error && error.message) || error).slice(0, 200) };
   }
-  const doc = witnessOf(text, { root, dataDir });
-  return { answered: true, found: doc ? { file, doc } : { file, unread: 'its text is not this folder\'s witness' } };
+  if (!result || typeof result !== 'object') return { answered: false, why: 'no answer from the witness worker' };
+  if (result.none) return { answered: true, found: null };
+  if (result.code) {   // the worker's read failed on a NAMED copy: a quiet network road is silence; a refusal the read answered holds it
+    const code = String(result.code);
+    if (NET_SILENT.has(code) || !/^E[A-Z]+$/.test(code)) return { answered: false, why: `${code} reading ${result.file}` };
+    return { answered: true, found: { file: result.file, net: true, unread: `it cannot be read (${code})` } };
+  }
+  if (result.unread) return { answered: true, found: { file: result.file, net: true, unread: String(result.unread) } };
+  const doc = witnessOf(result.text, { root, dataDir });
+  return { answered: true, found: doc ? { file: result.file, net: true, doc, shape: result.shape || null } : { file: result.file, net: true, unread: 'its text is not this folder\'s witness' } };
 }
 
 /**
@@ -139,7 +151,7 @@ function verdictOf({ auth = 'present', dataLink = null, instance = null, witness
   if (auth === 'missing' && dataLink === 'dangling') return { hold: { kind: 'link', why: `the data folder ${dataDir} is a link to a place that is not there`, files } };
   const off = auth === 'off' ? '; its own sign-in file says sign-in is off' : '';
   const unread = all.find((w) => w.unread);
-  if (unread) return { hold: { kind: 'folder', unread: true, why: `the sign-in witness ${unread.file} is there but ${unread.unread}, so it cannot be known whether the data folder ${dataDir} is the one its sign-in was set in${off}`, files } };
+  if (unread) return { hold: { kind: 'folder', unread: true, ...(unread.net ? { net: true } : {}), why: `the sign-in witness ${unread.file} is there but ${unread.unread}, so it cannot be known whether the data folder ${dataDir} is the one its sign-in was set in${off}`, files } };
   const other = all.find((w) => w.doc && (!instance || instance.id !== w.doc.id));
   if (other) {
     return { hold: { kind: 'folder', why: `the data folder ${dataDir} is not the one this instance's sign-in was set in (${instance ? `it holds the id ${instance.id}, the sign-in was set in ${other.doc.id}` : `it holds no id; the sign-in was set in ${other.doc.id}`})${off}`, files } };
@@ -175,9 +187,9 @@ function startFactsSync({ dataDir, root = path.dirname(dataDir), home = os.homed
     .map((w) => ({ ...w, writable: LI.rungFolderOf(facts(path.dirname(w.file)), { uid, dir: path.dirname(w.file) }).ok }));
   const own = found.find((w) => w.file === file && w.doc) || found.find((w) => w.doc);
   // 主开发 r2780 (2) H1: the network home (its copy is the worker's to read) and the person's start-new file (r2869 (2))
-  const netHome = netHomeOf(ask), netFile = netHome ? path.join(netHome, witnessFileOf(root)) : null;
+  const netHome = netHomeOf(ask);   // its copy is named and touched by the witness worker alone (src/signin-witness-worker.js)
   const startNew = facts(path.join(dataDir, START_NEW)).exists === true;
-  return { root, dataDir, dataLink, instance, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid, netHome, netFile, startNew };
+  return { root, dataDir, dataLink, instance, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid, netHome, startNew };
 }
 
 /** data/instance.json, written ONCE (a start that finds none and is not held) → the id */

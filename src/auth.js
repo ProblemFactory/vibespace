@@ -98,8 +98,8 @@ class Auth {
     if (this._startNewUsed) {   // r2869 (2) + r2926 (1): THE PERSON's START-NEW ACT — this start does not wait for the home folder and READS
       // none of it; as the person's act (like deleting the witness) every witness copy is removed — the home folder's off the loop — and
       // the file is removed only once that copy is gone, so the decision lasts past the next start
-      for (const w of (f.found || [])) { try { SW.removeWitness({ file: w.file }); } catch { } }
-      f.found = []; f.witness = null;
+      for (const w of (f.found || [])) if (!w.net) { try { SW.removeWitness({ file: w.file }); } catch { } }
+      f.found = (f.found || []).filter((w) => w.net); f.witness = null;
       this._sayOnce('start-new', `[auth] ${path.join(this._dataDir, SW.START_NEW)} was there: this start did not wait for the home folder ${f.netHome} and read none of it; every sign-in witness copy is removed (the home folder's off the loop), then the file`);
       try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id could not be written (${(e && e.message) || e})`); }
       this._netStartNew();
@@ -126,12 +126,12 @@ class Auth {
     if (atStart && !set && SW.foreignAt(found, startId)) { this._sayOnce('foreign', `[auth] a sign-in witness names another data folder than ${this._dataDir} (${found.map((w) => w.file).join(', ')}) — this start keeps every copy as it is`); return; }
     const each = (file, act, fn) => { try { fn(); } catch (e) { this._sayOnce('witness', `[auth] the sign-in witness ${file} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start`); } };
     if (set) {
-      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => w.writable !== false).map((w) => w.file)])];   // the ladder's place + every copy found whose folder takes a write (r2436 (3))
+      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => !w.net && w.writable !== false).map((w) => w.file)])];   // the ladder's place + every LOCAL copy whose folder takes a write (r2436 (3)); a network entry is the worker's alone (r3030)
       for (const file of files) each(file, 'written', () => SW.writeWitness({ place: { dir: path.dirname(file) }, file, root: f.root, dataDir: f.dataDir, id: f.instance.id, uid: f.uid }));
-      f.witness = { id: f.instance.id }; f.found = files.map((file) => ({ file, doc: { id: f.instance.id } }));
+      f.witness = { id: f.instance.id }; f.found = [...files.map((file) => ({ file, doc: { id: f.instance.id } })), ...found.filter((w) => w.net)];
     } else {
-      for (const w of found) each(w.file, 'removed', () => SW.removeWitness({ file: w.file }));   // the sign-in turned off: every copy
-      f.found = []; f.witness = null;
+      for (const w of found) if (!w.net) each(w.file, 'removed', () => SW.removeWitness({ file: w.file }));   // the sign-in turned off: every LOCAL copy (the network one through the worker: _netWitness)
+      f.found = found.filter((w) => w.net); f.witness = null;
     }
   }
   /** B-dc3f (1), 主开发 r2780 (2) H1 + r2869: THE NETWORK HOME's LOOK — a start that would OPEN (the sign-in file missing, or saying
@@ -152,7 +152,7 @@ class Auth {
       if (!n || n.done || this._pool || !this._held || this._held.kind !== 'checking') return;
       this._held.kind = 'unchecked';
       this._held.why = `the check of the home folder ${f.netHome} for the sign-in witness could not be started (no worker pool to read it with), so it cannot be known whether the data folder ${this._dataDir} is the one its sign-in was set in`;
-      try { console.error(`[auth] ${heldJournal(this._file, this._held.why, !!this._clerk?.enabled, this._held)}`); } catch { }
+      try { console.warn(`[auth] ${heldJournal(this._file, this._held.why, !!this._clerk?.enabled, this._held)}`); } catch { }   // r3030 (f): warn, past the bound only
     }, this._netBound());
     if (unstarted.unref) unstarted.unref();
   }
@@ -160,19 +160,23 @@ class Auth {
   _netStartNew() {
     const f = this._facts, marker = path.join(this._dataDir, SW.START_NEW);
     const done = () => { try { SW.removeWitness({ file: marker }); } catch { } };
-    if (!f || !f.netFile) return done();
+    if (!f || !f.netHome) return done();
     if (!this._pool) { this._netStartNewOwed = true; return; }   // attachWitnessPool runs it
     this._netStartNewOwed = false;
-    let asked; try { asked = Promise.resolve(this._pool.call('unlink', { path: f.netFile }, { timeoutMs: this._netBound() })); } catch (e) { asked = Promise.reject(e); }
-    this._netWrites = asked.then(done, (e) => this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netFile} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`));
+    const root = SW.digestOf(f.root);
+    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(done), (e) => this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`));
   }
+  /** ONE ask of the witness worker, bounded (a pool that throws is a refusal, never a throw out of the start) */
+  _netAsk(op, payload) { try { return Promise.resolve(this._pool.call(op, payload, { timeoutMs: this._netBound() })); } catch (e) { return Promise.reject(e); } }
+  /** the network copy's writes and removals, ONE AT A TIME in their order (r3030: the start-new removal before the boot's sign-in write) */
+  _netQueue(run, onFail) { const next = (this._netChain || Promise.resolve()).then(run).catch(onFail); this._netChain = next; this._netWrites = next; return next; }
   /** the hub's worker pool, handed by server.js once built (after Auth): the look starts then; the network copy rides it */
   attachWitnessPool(pool) {
     if (!this._witnessCfg || !pool || typeof pool.call !== 'function') return;
     this._pool = pool;
-    if (this._netStartNewOwed) { this._netStartNew(); return; }
+    if (this._netStartNewOwed) this._netStartNew();   // the start-new removal owed, first on the queue
     if (this._net && !this._net.done) this._netLook();
-    else if (!this._held) this._netWitness({ atStart: true, startId: this._startId });
+    else if (!this._held) this._netWitness({ atStart: true, startId: this._startId });   // the start-time write (after it, on the queue)
   }
   _netBound() { const v = Number(this._witnessCfg && this._witnessCfg.netBoundMs); return v > 0 ? v : NET_BOUND_MS; }
   _netReask() { const v = Number(this._witnessCfg && this._witnessCfg.netReaskMs); return v > 0 ? v : NET_REASK_MS; }
@@ -184,12 +188,12 @@ class Auth {
     let over = false;
     const timer = setTimeout(() => { over = true; this._netAnswer({ answered: false, why: `no answer in ${bound} ms` }); }, bound);
     if (timer.unref) timer.unref();
-    let asked;   // the look starts AT ONCE (a pool that throws is an answer of «no answer», never a throw out of the start)
-    try { asked = Promise.resolve(this._pool.call('readText', { path: f.netFile, maxSize: NET_MAX_BYTES }, { timeoutMs: bound })); } catch (e) { asked = Promise.reject(e); }
-    asked.then((r) => ({ text: r && r.content }), (error) => ({ error }))
+    // the look starts AT ONCE, through the witness worker (src/signin-witness-worker.js netRead: the machine's copy, else the older shape)
+    this._netAsk('netRead', { path: f.netHome, root: SW.digestOf(f.root), maxBytes: NET_MAX_BYTES })
+      .then((result) => ({ result }), (error) => ({ error }))
       .then((res) => {
         clearTimeout(timer); n.pending = false;
-        const a = SW.netAnswerOf(res, { root: f.root, dataDir: f.dataDir, file: f.netFile });
+        const a = SW.netAnswerOf(res, { root: f.root, dataDir: f.dataDir });
         if (!a.answered && over) return;   // said at the bound already; the re-ask asks again
         this._netAnswer(a);
       });
@@ -201,19 +205,20 @@ class Auth {
       if (this._held && (this._held.kind === 'checking' || this._held.kind === 'unchecked')) {
         this._held.kind = 'home';
         this._held.why = `the home folder ${f.netHome} that keeps the sign-in witness has not answered (${a.why}), so it cannot be known whether the data folder ${this._dataDir} is the one its sign-in was set in`;
-        try { console.error(`[auth] ${heldJournal(this._file, this._held.why, !!this._clerk?.enabled, this._held)}`); } catch { }
+        try { console.warn(`[auth] ${heldJournal(this._file, this._held.why, !!this._clerk?.enabled, this._held)}`); } catch { }   // r3030 (f): warn, past the bound only
       }
-      const again = () => { n.timer = setTimeout(() => { n.timer = null; if (n.done) return; if (n.pending) { again(); return; } this._netLook(); }, this._netReask()); if (n.timer.unref) n.timer.unref(); };
+      const again = () => { n.timer = setTimeout(() => { n.timer = null; n.reasks = (n.reasks || 0) + 1; if (n.done) return; if (n.pending) { again(); return; } this._netLook(); }, this._netReask()); if (n.timer.unref) n.timer.unref(); };
       if (!n.timer) again();
       return;
     }
-    n.done = true; if (n.timer) { clearTimeout(n.timer); n.timer = null; }
-    if (a.found) f.found = [...(f.found || []), a.found];
+    const past = !!this._held && this._held.kind !== 'checking';   // r3030 (f): said only when the look went past its bound
+    n.done = true; n.answer = a; if (n.timer) { clearTimeout(n.timer); n.timer = null; }
+    if (a.found) f.found = [...(f.found || []), a.found];   // MARKED net (SW.netAnswerOf): the local writer never takes it
     const v = SW.verdictOf({ auth: n.was, dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir });
     this._held = null;
     if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule (r2869 (3))
     this._state = n.was === 'off' ? n.table : null;
-    try { console.warn(`[auth] the home folder ${f.netHome} answered: no sign-in witness of another folder there — the instance opens as it would have`); } catch { }
+    if (past) { try { console.warn(`[auth] the home folder ${f.netHome} answered: no sign-in witness of another folder there — the instance opens as it would have`); } catch { } }
     this._afterLoad();
     if (this._netEnsure) {   // the boot's own password road, held until the answer (server.js asked it while this was checking)
       const r = this.ensurePassword(this._netEnsure); this._netEnsure = null;
@@ -225,26 +230,21 @@ class Auth {
    *  another folder's copy (H2); never while the home's answer is unknown. A failure is said once; the next start learns it. */
   _netWitness({ atStart = false, startId = null } = {}) {
     const f = this._facts;
-    if (!f || !f.netFile || !this._pool || this._held || (this._net && !this._net.done) || !f.instance) return null;
-    const set = !!(this._state && this._state.passwordHash), id = f.instance.id, bound = this._netBound(), pool = this._pool, file = f.netFile;
-    const say = (act, e) => this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${file} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start`);
-    const ask = (op, payload) => pool.call(op, payload, { timeoutMs: bound });
-    const run = async () => {
-      if (atStart) {   // H2: a start reads it first, and keeps another folder's copy as it is
-        const a = SW.netAnswerOf(await ask('readText', { path: file, maxSize: NET_MAX_BYTES }).then((r) => ({ text: r && r.content }), (error) => ({ error })), { root: f.root, dataDir: f.dataDir, file });
+    if (!f || !f.netHome || !this._pool || this._held || (this._net && !this._net.done) || !f.instance) return null;
+    const set = !!(this._state && this._state.passwordHash), id = f.instance.id, home = f.netHome, root = SW.digestOf(f.root);
+    const say = (act, e) => this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${home} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start`);
+    // this start's look answered already: never read twice; the START-NEW start reads none of the home (r2926): its copy is the act's to remove
+    const seen = atStart && this._startNewUsed ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;
+    return this._netQueue(async () => {
+      if (atStart) {   // H2: a start reads it first, and with no password keeps another folder's copy as it is
+        const a = seen || SW.netAnswerOf(await this._netAsk('netRead', { path: home, root, maxBytes: NET_MAX_BYTES }).then((result) => ({ result }), (error) => ({ error })), { root: f.root, dataDir: f.dataDir });
         if (!a.answered) return say(set ? 'written' : 'removed', a.why);
-        if (!set && a.found && SW.foreignAt([a.found], startId)) return this._sayOnce('foreign', `[auth] a sign-in witness names another data folder than ${this._dataDir} (${file}) — this start keeps it as it is`);
+        if (!set && a.found && SW.foreignAt([a.found], startId)) return this._sayOnce('foreign', `[auth] a sign-in witness names another data folder than ${this._dataDir} (${a.found.file}) — this start keeps it as it is`);
         if (!set && !a.found) return;
       }
-      if (set) {
-        await ask('mkdir', { path: path.dirname(file) });
-        const tmp = `${file}.tmp-${process.pid}`;
-        await ask('writeFile', { path: tmp, content: JSON.stringify(SW.witnessDoc({ root: f.root, dataDir: f.dataDir, id })) });
-        await ask('rename', { oldPath: tmp, newPath: file });
-      } else await ask('unlink', { path: file });
-    };
-    this._netWrites = run().catch((e) => say(set ? 'written' : 'removed', e));
-    return this._netWrites;
+      if (set) await this._netAsk('netWrite', { path: home, root, uid: f.uid, content: JSON.stringify(SW.witnessDoc({ root: f.root, dataDir: f.dataDir, id })) });
+      else await this._netAsk('netRemove', { path: home, root });
+    }, (e) => say(set ? 'written' : 'removed', e));
   }
   /** B-dc3f (1): the opt-in declaration (VIBESPACE_SIGNIN=required, set nowhere by default) — read from the start's inputs */
   _declaredNow() { return !!(this._witnessCfg && SW.declaredOf(this._witnessCfg.env || {})); }
@@ -294,6 +294,8 @@ class Auth {
     const files = verdict && Array.isArray(verdict.files) ? verdict.files : [];   // B-dc3f (1): every witness file there (both places)
     this._held = { why, kind, ...(kind !== 'file' ? { dir: this._dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };
     if (verdict && verdict.home) this._held.home = verdict.home;   // H1: the network home the look reads
+    if (verdict && verdict.net) this._held.net = true;   // r3030 (d): an unreadable NETWORK copy — its act names the start-new file
+    if (kind === 'checking') return;   // r3030 (f): an open instance's look is said only past its bound (warn), never as a held error at every start
     try { console.error(`[auth] ${heldJournal(this._file, why, sso, this._held)}`); } catch { }   // the table's shared words (src/signin-table.js): a folder / link / declared hold says its own act
   }
 
@@ -306,6 +308,7 @@ class Auth {
   /** THE BOOT'S SIGN-IN LINE (server.js prints it): true in every state — while held it says HELD by name, never «a password is
    *  set» (主开发 r1195 4: `passwordEnabled` answers «on» while held, for the gate) → the line, or null with no password */
   bootLine() {
+    if (this._held && this._held.kind === 'checking') return null;   // r3030 (f): the look of an open instance says nothing unless it goes past its bound
     if (this._held) {
       const cause = heldCause(this._held);   // B-dc3f (1): the hold's own cause (src/signin-table.js) — the file's, as before, for a file that cannot be read
       return this._clerk?.enabled ? `  Password auth: HELD — ${cause} (said above): single sign-on still guards, the password sign-in is refused` : `  Password auth: HELD — ${cause} (said above): every page and API is refused but the sign-in page`;

@@ -38,7 +38,7 @@ function heldWords(lang, sso, held = null) {
   const root = held.dir ? String(held.dir).replace(/\/+[^/]+\/*$/, '') || '/' : '';   // the install the data folder sits in
   const fill = (t) => String(t || '').replace(/\{dir\}/g, held.dir || '').replace(/\{root\}/g, root).replace(/\{home\}/g, held.home || '').replace(/\{witness\}/g, named).replace(/\{env\}/g, DECLARE_ENV);
   const whyKey = kind === 'folder' && held.unread ? 'signin-held-unread' : `signin-held-${kind}`;
-  const fixKey = kind === 'link' && held.witness ? 'signin-held-link-witness-fix' : `${whyKey}-fix`;
+  const fixKey = kind === 'link' && held.witness ? 'signin-held-link-witness-fix' : kind === 'folder' && held.unread && held.net ? 'signin-held-unread-net-fix' : `${whyKey}-fix`;
   return { title: w.title, why: fill(w[whyKey]) + (sso ? ' ' + w['signin-held-sso-still'] : ''), fix: fill(w[fixKey]) };
 }
 const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
