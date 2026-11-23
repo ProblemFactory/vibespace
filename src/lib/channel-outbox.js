@@ -1017,7 +1017,7 @@ function setLineOpen(card, open) {
 /** A card's signature WITHOUT its fate (a fate-only change patches the line). */
 function cardSig(p, compact, line = false) {
   const q = { ...p };
-  delete q.receiptDelivery; delete q.receiptDrainedAt; delete q.receiptDrainedHow; delete q.receiptEvictedAt; delete q.receiptEvictedHeld;
+  delete q.receiptDelivery; delete q.receiptDrainedAt; delete q.receiptDrainedHow; delete q.receiptEvictedAt; delete q.receiptEvictedHeld; delete q.receiptEvictedHow;
   return JSON.stringify([q, !!compact, rememberedDelivery(), !!line]);
 }
 const fateSig = (p) => JSON.stringify([p.receiptDelivery || null, p.receiptDrainedAt || null, p.receiptDrainedHow || null, p.receiptEvictedAt || null]);

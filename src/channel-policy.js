@@ -1544,6 +1544,8 @@ function receiptFateOf(p) {
   // lane channel-direct-send-sync: the drafting CLI read this receipt inline from its own command — never "waiting"
   if (del.road === 'inline') return { kind: 'inline', who, at: Number(del.at) || null, woke: false, collected: del.collected !== false };
   // the cap dropped it before any message picked it up (recorded when it happened, so it wins over a later guess)
+  // round wozyl97qk (g): the list of messages waiting for the agent was DAMAGED while this receipt waited in it (its bytes kept aside) — its end, said
+  if (q.receiptEvictedAt && q.receiptEvictedHow === 'torn') return { kind: 'torn', who, at: Number(q.receiptEvictedAt) || null, woke: false };
   if (q.receiptEvictedAt) return { kind: 'evicted', who, at: Number(q.receiptEvictedAt) || null, woke: false, held: Number(q.receiptEvictedHeld) || null };
   // `reconciled` (verify): its stash entry was found gone at a boot — handed
   // by an earlier message, at a time nobody recorded (no `at`)
@@ -1579,6 +1581,7 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
       return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
     case 'gone': return t('{agent} is gone — receipt kept', { agent });
     case 'evicted': return t('Not delivered — {agent}\'s queue was full; the receipt is kept here', { agent });
+    case 'torn': return t('Not delivered — the list of messages waiting for {agent} was damaged; the receipt is kept here', { agent });
     case 'undelivered': return t('Receipt not delivered: {why}', { why: (f.refused && refusalText(f.refused)) || f.why || '' });
     case 'inline': return f.collected ? t('{agent} read the receipt with its own command', { agent }) : t('Being read by {agent} inline', { agent });
     case 'recorded': return t('Receipt recorded');

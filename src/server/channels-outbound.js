@@ -1477,9 +1477,9 @@ function create(engineCtx) {
       for (const id of ids) {
         const q = ob.proposals[id];
         if (!q || !q.draftedBy || String(q.draftedBy.id) !== String(cid)) continue;
-        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; changed.push(id); }
-        else if (ev === 'stashed' && (q.receiptDrainedAt || q.receiptEvictedAt)) { q.receiptDrainedAt = null; q.receiptDrainedHow = null; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; changed.push(id); }
-        else if (ev === 'evicted') { q.receiptEvictedAt = t; q.receiptEvictedHeld = Number(extra && extra.held) || null; q.receiptDrainedAt = null; q.receiptDrainedHow = null; changed.push(id); }
+        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; changed.push(id); }
+        else if (ev === 'stashed' && (q.receiptDrainedAt || q.receiptEvictedAt)) { q.receiptDrainedAt = null; q.receiptDrainedHow = null; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; changed.push(id); }
+        else if (ev === 'evicted') { q.receiptEvictedAt = t; q.receiptEvictedHeld = Number(extra && extra.held) || null; q.receiptEvictedHow = null; q.receiptDrainedAt = null; q.receiptDrainedHow = null; changed.push(id); }
       }
     });
     if (changed.length) notifyOutbox(changed);
@@ -1499,6 +1499,8 @@ function create(engineCtx) {
    * the card says "with an earlier message"). Read-only on the stash; the
    * ladder's `stashPeek` is optional (a ladder without it: nothing changes).
    */
+  // round wozyl97qk (e): the reconcile decided nothing while the stash was held (its peek refused): it runs again at the stash's lift
+  try { if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(() => { reconcileReceiptFates().catch((err) => log.warn(`[channels] the receipt-fate reconcile at the stash's lift failed: ${(err && err.message) || err}`)); }); } catch { }
   async function reconcileReceiptFates() {
     if (!deliver || typeof deliver.stashPeek !== 'function' || engineCtx.stopped) return [];
     const ob = store.outbox.snapshot();
@@ -1507,14 +1509,21 @@ function create(engineCtx) {
     // were kept aside at `tornAt` (the stash remembers the instant across restarts): a receipt stashed before it is UNKNOWN — never
     // read as handed; it stays as it is until a person decides (the card keeps «waiting»)
     let tornAt = null; try { tornAt = typeof deliver.stashTornAt === 'function' ? deliver.stashTornAt() : null; } catch { tornAt = null; }
+    const tornIds = [];
     for (const q of Object.values(ob.proposals || {})) {
       const d = q.receiptDelivery;
       if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
-      if (tornAt != null && !(Number(d.at) > tornAt)) continue;   // stashed before the torn bytes (or with no instant): unknown — decides nothing
+      if (tornAt != null && !(Number(d.at) > tornAt)) { if (d.at != null && Number.isFinite(Number(d.at))) tornIds.push(q.id); continue; }   // a legacy row with no instant: unknown, as before (never «torn», never «handed»)   // stashed before the torn bytes: never «handed» — round wozyl97qk (g): it ENDS «torn» (its entry was in the damaged list, kept aside)
       let held = null;
       try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
       const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));
       if (!still) gone.push(q.id);
+    }
+    if (tornIds.length) {
+      const t0 = now();
+      await store.outbox.update((ob2) => { for (const id of tornIds) { const q = ob2.proposals[id]; if (q && !q.receiptDrainedAt && !q.receiptEvictedAt) { q.receiptEvictedAt = t0; q.receiptEvictedHow = 'torn'; } } });
+      notifyOutbox(tornIds);
+      log.log(`[channels] ${tornIds.length} stashed receipt(s) were in the list of waiting messages when its bytes were damaged (kept aside) — said «not delivered», kept on their cards: ${tornIds.join(', ').slice(0, 400)}`);
     }
     if (!gone.length) return [];
     const t = now();

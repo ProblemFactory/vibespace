@@ -159,8 +159,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  Reads only the conversations a store names — never every row. */
   function waitingAll() {
     const d = getDeliver(), jm = jobsReady();
+    // r3299 row 7 (the law's «never none»): the stash HELD — the ended rows' fact carries it (`__stashUnread`: every stopped row says the hold, never «nothing waiting»)
+    const unread = !!(d && typeof d.stashHeld === 'function' && d.stashHeld());
+    const mark = (o) => (unread ? Object.assign(o, { __stashUnread: { code: 'msg_stash_unread' } }) : o);
     const cids = new Set([...((d && typeof d.stashCids === 'function') ? d.stashCids() : []), ...((jm && typeof jm.notifCids === 'function') ? jm.notifCids() : [])]);
-    if (!cids.size) return {};
+    if (!cids.size) return mark({});
     const live = new Set(); for (const s of activeSessions.values()) { const c = cidOf(s); if (c) live.add(c); }
     const out = {};
     for (const cid of cids) {
@@ -172,7 +175,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       const a = d && typeof d.endedAnswerOf === 'function' ? d.endedAnswerOf(cid) : null;
       out[cid] = { n, code: (a && a.code) || (a && a.outcome === 'failed' ? 'failed' : null), until: (a && a.until) || null };
     }
-    return out;
+    return mark(out);
   }
   /** The `stash` session fact (null = nothing waits); `billed` = the strip's "starts a turn"; `inFlight` = a hand-over
    *  is on its way (another client's click); `held` = what one hand-over would leave; `reachable` = a hand-over exists
@@ -195,7 +198,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       // r3003 (a): the stash HELD (its file could not be read) is said ON THE STRIP — never «nothing waiting»: its entries wait unread;
       // a torn lift names where the damaged bytes are kept (their base name) — never «restore that copy»
       const unread = d && typeof d.stashUnreadWords === 'function' ? d.stashUnreadWords() : null;
-      const torn = !unread && d && typeof d.stashTorn === 'function' ? d.stashTorn() : null;
+      const torn = !unread && d && typeof d.stashTorn === 'function' && !(typeof d.stashTornActed === 'function' && d.stashTornActed(cid)) ? d.stashTorn() : null;   // round wozyl97qk (d): until this conversation's next turn or hand-over
       const stashFacts = unread ? { stashUnread: { code: 'msg_stash_unread' } } : torn ? { stashTorn: { copy: torn.copy } } : {};
       if (!sum && (unread || torn)) return { count: 0, items: [], billed: false, inFlight: false, held: 0, reachable: false, ...stashFacts };
       if (sum && unread) return { ...sum, ...stashFacts, billed: billedFor(s), inFlight: !!inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: false };   // nothing is handed over while held

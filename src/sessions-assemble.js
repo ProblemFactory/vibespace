@@ -94,6 +94,8 @@ function assembleSweep({ perHarness = [], signInPids = [], kept = [], discovered
   // the manager design's piece 7: an ENDED row with words waiting carries `waiting` {n, code, until} (the page words «n notices
   // are waiting for it») — `waiting` = stash-handover's waitingAll() read on the main thread for the few conversations a store names
   if (waiting && typeof waiting === 'object') for (const r of sessions) { const c = r && (r.backendSessionId || r.sessionId); if (r && r.status === 'stopped' && c && waiting[c]) r.waiting = waiting[c]; }
+  // r3299 row 7: the stash HELD (its file could not be read) — every stopped row carries it: what waits for it is not known, never «none»
+  if (waiting && waiting.__stashUnread) for (const r of sessions) if (r && r.status === 'stopped') r.waiting = { ...(r.waiting || { n: 0 }), stashUnread: true };
   sessions.sort((a, b) => b.startedAt - a.startedAt);
   return sessions;
 }

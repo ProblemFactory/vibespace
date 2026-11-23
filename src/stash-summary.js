@@ -181,7 +181,7 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
   const k = Number(kept) > 0 ? Number(kept) : 0;
   // r3003 (a): the stash's file HELD (could not be read) or TORN (its bytes kept aside) — said IN PLACE, never «nothing waiting»; a torn
   // lift names where the damaged bytes are kept and what the person can do (never «restore that copy»: those ARE the damaged bytes)
-  const unreadLine = summary && summary.stashUnread ? t('The messages waiting for this agent could not be read just now — VibeSpace reads them again by itself; nothing that waits was lost or changed.') : null;
+  const unreadLine = summary && summary.stashUnread ? t('The messages waiting for this agent could not be read just now — VibeSpace reads them again by itself; the ones already waiting are kept as they were.') : null;
   const tornLine = summary && summary.stashTorn && summary.stashTorn.copy ? t('The list of messages waiting for agents was damaged, so what it held cannot be read; the damaged bytes are kept as {copy} in the data folder. Send again anything that should still reach them.', { copy: summary.stashTorn.copy }) : null;
   const stashLine = unreadLine || tornLine;
   if (summary && !summary.count && !k && stashLine) return { head: stashLine, parts: [], line: stashLine, button: t('Hand over now'), cost: null, held: null, noButton: unreadLine ? t('they are handed over once it reads') : null, title: stashLine };
@@ -285,7 +285,7 @@ function clockAt(at, { now = Date.now(), locale = undefined, timeZone = undefine
 function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
   const code = r && r.code;
   // r3003 (a): the stash's file could not be read — nothing is handed over until it reads (its entries wait unread, none lost)
-  if (code === 'msg_stash_unread') return { text: t('Not handed over — the messages waiting for this agent could not be read just now. VibeSpace reads them again by itself; nothing that waits was lost.') };
+  if (code === 'msg_stash_unread') return { text: t('Not handed over — the messages waiting for this agent could not be read just now. VibeSpace reads them again by itself; the ones already waiting are kept as they were.') };
   if (code === 'spend_refused') {
     // r2: ONE row per `why`, the same table as the For-you notice (spend-authorizer REFUSAL_WORDS): a cap set to 0 is
     // «switched off», a signed-out account's door is the Usage window, a body with no identity never says «the limit

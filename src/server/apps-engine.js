@@ -570,8 +570,13 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
       timer.unref?.();
     });
   }
+  // r3326 (lane hub-loop-stalls): A TAKE-BACK WHILE THE STASH's LIST IS UNREAD reaches what memory holds now; the list's own copy is taken
+  // back at the lift (asked again then). A restart in between: the outcome is told twice at worst — never lost
+  const heldTakeBacks = new Map();
+  if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(() => { const ps = [...heldTakeBacks.values()]; heldTakeBacks.clear(); for (const q of ps) takeBack(q); });
   function takeBack(p) {
     if (!deliver || typeof deliver.stashEntries !== 'function' || !p.by || !p.by.conversation) return;
+    if (typeof deliver.stashHeld === 'function' && deliver.stashHeld()) heldTakeBacks.set(p.id, p);
     try { const mine = deliver.stashEntries(p.by.conversation).filter((e) => e && e.ref === p.id && e.fromName === FROM_NAME && !e.ho); if (mine.length) deliver.drainStash(p.by.conversation, new Set(mine)); } catch { /* the next turn tells it */ }
   }
   /** `vibespace-app add --kind …` — a user-level tool the agent installed as the user (HELD by its CLI's card): recorded. */

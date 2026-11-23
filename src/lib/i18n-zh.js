@@ -6569,6 +6569,7 @@ export default {
   "This proposal can no longer be withdrawn": "这条提议已无法撤回",
   "Take back one of its proposed replies": "撤回它提议的一条回复",
   "Not delivered — {agent}'s queue was full; the receipt is kept here": "未送达 —— {agent} 的队列已满；回执保留在此",
+  "Not delivered — the list of messages waiting for {agent} was damaged; the receipt is kept here": "未送达 —— 等待 {agent} 的消息列表已损坏；回执保留在此",
   // §26 (B-099e): the channel witness — the tool card rows, the channels chip, the conversation window's reverse link
   "drafted a reply": "起草了一条回复",
   "drafted {n} replies": "起草了 {n} 条回复",
@@ -6652,10 +6653,11 @@ export default {
   "{n} more wait whose reach cannot be judged now": "另有 {n} 条在等待，目前无法判断它们还能否送达",   // B-f276 1b: kept stash entries
   "a channels file could not be read — they are handed over once it reads again": "一个频道文件读不出来——等能再次读取时就会交出",   // B-f276 1b: kept stash entries
   "they wait until VibeSpace can judge them": "它们会等到 VibeSpace 能判断为止",   // B-f276 1b: kept stash entries
-  "The messages waiting for this agent could not be read just now — VibeSpace reads them again by itself; nothing that waits was lost or changed.": "等待这个代理的消息刚才没能读取——VibeSpace 会自己再读一次；等待中的内容没有丢失，也没有改动。",
+  "The messages waiting for this agent could not be read just now — VibeSpace reads them again by itself; the ones already waiting are kept as they were.": "等待这个代理的消息刚才没能读取——VibeSpace 会自己再读一次；已经在等待的消息保持原样。",
   "The list of messages waiting for agents was damaged, so what it held cannot be read; the damaged bytes are kept as {copy} in the data folder. Send again anything that should still reach them.": "等待代理处理的消息列表已损坏，里面的内容无法读取；损坏的字节以 {copy} 保存在数据文件夹里。仍应送达的内容请重新发送。",
   "they are handed over once it reads": "读出来后就会交给它",
-  "Not handed over — the messages waiting for this agent could not be read just now. VibeSpace reads them again by itself; nothing that waits was lost.": "未交出——等待这个代理的消息刚才没能读取。VibeSpace 会自己再读一次；等待中的内容没有丢失。",
+  "the list of messages waiting could not be read just now — VibeSpace reads it again by itself": "等待中的消息列表刚才没能读取——VibeSpace 会自己再读一次",
+  "Not handed over — the messages waiting for this agent could not be read just now. VibeSpace reads them again by itself; the ones already waiting are kept as they were.": "未交出——等待这个代理的消息刚才没能读取。VibeSpace 会自己再读一次；已经在等待的消息保持原样。",
   "VibeSpace cannot tell now whether these still reach this agent (a channels file could not be read) — nothing is handed over until it can": "VibeSpace 现在无法判断这些是否还能送达这个 agent（一个频道文件读不出来）——在能判断之前不会交出任何内容",   // B-f276 1b: kept stash entries
   "they ride the next turn": "它们随下一轮送达",
   "1 group message rides the next turn, after this one ends": "1 条群消息随本轮结束后的下一轮送达",

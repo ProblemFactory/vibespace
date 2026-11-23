@@ -122,6 +122,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     const claim = sh.claimForWake(cid, { bare: peer });
     // B-f276 1a: nothing but KEPT entries (their reach cannot be judged now) — the wake stays owed and goes at the lift; never «nothing is waiting»
     if (!claim.ok && claim.code === 'nothing_waiting' && Number(claim.kept) > 0) return { ok: false, outcome: 'held', code: 'kept', why: `${Number(claim.kept)} entr${Number(claim.kept) === 1 ? 'y waits' : 'ies wait'} for it whose reach cannot be judged now — it is resumed once they can be` };
+    // round wozyl97qk MUST 1 (the belt): the stash HELD (its file could not be read) — the wake stays owed and goes at the lift, never «failed»
+    if (!claim.ok && claim.code === 'msg_stash_unread') return { ok: false, outcome: 'held', code: 'held', why: String(claim.error || 'the messages waiting for conversations could not be read now').slice(0, 200) };
     if (!claim.ok) return claim.code === 'nothing_waiting' ? { ok: false, outcome: 'refused', code: 'nothing_waiting', why: 'nothing is waiting for it any more' } : { ok: false, outcome: 'failed', code: claim.code, why: claim.error };
     let r = null;
     try { r = await seams.reopen({ sessionKey: key, cwd: (facts && facts.cwd) || '', hostId: (facts && facts.hostId) || undefined }, { by: BY, accountId: payer._accountId || null }); }   // VibeSpace by itself — never a person's press; on the judged account

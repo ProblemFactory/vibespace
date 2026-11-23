@@ -123,6 +123,32 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // reserved key, like `__slots`) remembers the instant: a receipt stashed before it is «unknown» to the reconcile that reads the
   // stash's silence as «handed» (src/server/channels-outbound.js) — r3019's remover law, across restarts.
   const STASH_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const liftListeners = new Set();   // round wozyl97qk (e): who hears the hold's lift (onStashLift)
+  // r3326 (主开发, round w3hz6jc4e — THE SHAPE): WHILE HELD THE STASH ACCEPTS EVERYTHING AND KEEPS IT IN ONE PLACE OF ITS OWN: the SIDE
+  // FILE beside the list (msg-stash-held.json, 0600 from its create): memory's whole held set — the entries with the id each is given at
+  // acceptance (`sid`), `__slots`, `__gen` its generation. Its write is the list's own synchronous tmp+rename and stands IN PLACE of the
+  // list's write while held, one for one: a producer's «stored» follows bytes on disk at the same moment as today, and no side write is
+  // ever in flight at a lift (both move to the store writer TOGETHER, when lane bl-loop-b's row reaches them). Only the CLAIM waits (it
+  // must read the list's own entries); every other caller does what it does when the list reads. THE LIFT: the list's entries, then
+  // memory's (never twice — by `sid`, by a producer's `ref`; one entry a slot), ONE list write carrying `__sideMerged` (the merged
+  // generations); the side file removed only after that write returned (off the loop). A side file whose generation the list names is
+  // removed at the next start, never merged again; one the list does not name is merged at the start (or at the list's lift).
+  const sideFile = path.join(dataDir, 'msg-stash-held.json');
+  const RUN_TAG = Math.random().toString(36).slice(2, 8);
+  let sidSeq = 0, sideHold = null, sideGen = null, sideMerged = [], sideToRemove = null, memOnly = 0, memOnlySaid = 0;
+  const SIDE_MERGED_KEEP = 8;
+  const takenFrom = [];   // the side copies read into memory while the list was held: { gen, sids } — dropped at the lift if the list names the gen merged
+  const mintSid = () => `s-${Date.now().toString(36)}-${RUN_TAG}-${(++sidSeq).toString(36)}`;
+  const mintGen = () => `g-${Date.now().toString(36)}-${RUN_TAG}`;
+  /** the id an entry is given when it is accepted (kept for its life: the merge never adds it twice) */
+  const sidOf = (e) => (e && typeof e === 'object' ? (e.sid || (e.sid = mintSid())) : null);
+  /** «a conversation's name»: EVERY loop over the stash's names asks it — a reserved key (`__slots`, `__tornAt`, `__sideMerged`, `__gen`,
+   *  any `__…`) is never counted, handed over, trimmed or drawn */
+  const isConvName = (k) => typeof k === 'string' && k.length > 0 && !k.startsWith('__');
+  /** the hold that stands now: the list's, else the side copy's (unreadable or torn at a start) — null when both read */
+  const heldHold = () => (stashHold.held() ? stashHold : sideHold && sideHold.held() ? sideHold : null);
+  const isHeld = () => !!heldHold();
+  const tornActed = new Set();   // round wozyl97qk (d): the conversations whose next turn or hand-over came after a torn lift — their strip no longer says it
   let stash = {};
   const stashHold = HOLD.create({ file: stashFile, valid: STASH_SHAPE, code: 'msg_stash_unread', aside: (mark) => stashFile + '.corrupt-' + mark,
     words: (h) => `the messages waiting for the conversations' next turns could not be read (${h && h.code}) — VibeSpace reads them again by itself every few minutes. Nothing that waits was lost or changed: nothing is written over the file, and they go to their conversations once it reads`,
@@ -136,12 +162,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const takeReserved = (o) => {
     const sl = o && o.__slots && typeof o.__slots === 'object' && !Array.isArray(o.__slots) ? o.__slots : {};
     const ta = o && Number.isFinite(o.__tornAt) ? o.__tornAt : null;
-    if (o) { delete o.__slots; delete o.__tornAt; }
-    return { sl, ta };
+    const sm = o && Array.isArray(o.__sideMerged) ? o.__sideMerged.filter((g) => typeof g === 'string').slice(-SIDE_MERGED_KEEP) : [];
+    const gen = o && typeof o.__gen === 'string' ? o.__gen : null;
+    if (o) for (const k of Object.keys(o)) if (!isConvName(k)) delete o[k];   // r3326: every reserved name out — never a conversation
+    return { sl, ta, sm, gen };
   };
   let slots = {}, tornAt = null;
-  { const r = takeReserved(stash); slots = r.sl; tornAt = r.ta; }
-  const stashBody = () => JSON.stringify(Object.keys(slots).length || tornAt != null ? { ...stash, ...(Object.keys(slots).length ? { __slots: slots } : {}), ...(tornAt != null ? { __tornAt: tornAt } : {}) } : stash);
+  { const r = takeReserved(stash); slots = r.sl; tornAt = r.ta; sideMerged = r.sm; }
+  const stashBody = () => JSON.stringify(Object.keys(slots).length || tornAt != null || sideMerged.length ? { ...stash, ...(Object.keys(slots).length ? { __slots: slots } : {}), ...(tornAt != null ? { __tornAt: tornAt } : {}), ...(sideMerged.length ? { __sideMerged: sideMerged } : {}) } : stash);
+  const sideBody = () => JSON.stringify({ ...stash, ...(Object.keys(slots).length ? { __slots: slots } : {}), __gen: sideGen });
   // A CLAIM THE PREVIOUS PROCESS DID NOT SETTLE (channel-jump verify r2, 2026-09-27): an entry stamped `ho:<id>` was
   // being handed over when the server stopped. The shutdown path WAITS for a hand-over in flight (server.js
   // `stashView.settle`), so a stamp here means the process died mid-post (SIGKILL / OOM) inside the socket
@@ -151,7 +180,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const releaseClaims = (obj) => {
     const out = [];
     for (const [cid, q] of Object.entries(obj)) {
-      if (!Array.isArray(q)) { delete obj[cid]; continue; }
+      if (!isConvName(cid) || !Array.isArray(q)) { delete obj[cid]; continue; }
       const ids = new Set();
       for (const e of q) if (e && e.ho) { ids.add(e.ho); delete e.ho; }
       if (ids.size) out.push({ cid, ids: [...ids], n: q.length });
@@ -159,7 +188,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return out;
   };
   releasedAtBoot.push(...releaseClaims(stash));
-  if (releasedAtBoot.length && stashHold.writable('the release of an earlier hand-over')) { try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
+  if (releasedAtBoot.length && stashHold.writable('the release of an earlier hand-over')) { try { fs.writeFileSync(stashFile + '.tmp', stashBody(), { mode: 0o600 }); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
   // lane report-mark-on-ack: a `carry` claim is an UNCONFIRMED ANSWER's (src/turn-carry.js) — it posts no frame, so its line
   // names no hand-over to look for; a hand-over's keeps its words; both on one conversation are named apart
   const claimedWords = (ids) => {
@@ -177,8 +206,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   let lastWriteError = null, retryTimer = null;
   const STASH_RETRY_MS = 30 * 1000;
   const writeStashNow = () => {
-    if (!stashHold.writable('a write of the messages waiting for conversations')) return false;   // HELD: never over a file that could not be read (the lift writes)
-    try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; return true; }
+    if (sideHold && sideHold.held()) { sideHold.writable('a write of the messages accepted while their list is unread'); return false; }   // the side copy unread: nothing over it (nor over the list)
+    const toSide = !!stashHold.held();   // r3326: HELD — the side write stands IN PLACE of the list's write, one for one (never over the unread list)
+    if (toSide && !sideGen) sideGen = mintGen();
+    const target = toSide ? sideFile : stashFile;
+    try { fs.writeFileSync(target + '.tmp', toSide ? sideBody() : stashBody(), { mode: 0o600 }); fs.renameSync(target + '.tmp', target); lastWriteError = null; if (toSide && memOnly) { log(`[deliver] the ${memOnly} entr${memOnly === 1 ? 'y' : 'ies'} kept in memory only this hold ${memOnly === 1 ? 'is' : 'are'} now on disk beside the list`); memOnly = 0; memOnlySaid = 0; } if (!toSide && sideToRemove) removeSide(); return true; }
     catch (e) {
       lastWriteError = { at: Date.now(), message: String(e && e.message || e) };
       log('[deliver] stash persist failed:', e.message);
@@ -192,6 +224,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   };
   /** Is the file behind the queue current? `{durable, error}` — a producer's reply can say so. */
   const stashHealth = () => ({ durable: !lastWriteError, error: lastWriteError ? lastWriteError.message : null, since: lastWriteError ? lastWriteError.at : null });
+  // r3326: THE SIDE FILE AT A START — what an earlier held life accepted, read once through its own hold (unreadable or torn ⇒ nothing is
+  // written over it, and the stash counts as held until BOTH read; torn bytes are kept aside once, 0600)
+  sideHold = HOLD.create({ file: sideFile, valid: STASH_SHAPE, code: 'msg_stash_unread', aside: (mark) => sideFile + '.corrupt-' + mark,
+    words: (h) => `the messages accepted while their list could not be read are kept beside it, and that copy could not be read now (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing that waits was lost or changed: nothing is written over it`,
+    log: (l) => log('[deliver] ' + l), onLift: (v, facts) => liftSide(v, facts) });
+  { let s0; try { s0 = { text: fs.readFileSync(sideFile, 'utf-8') }; } catch (error) { s0 = { error }; }
+    const a = SR.storeAnswer(s0, { valid: STASH_SHAPE });
+    if (sideHold.start(a) === 'data') takeSide(a.value); }
   // SIGTERM/SIGINT belt (review-caught): a debounced-only write loses a
   // just-stashed "queued" promise on the ROUTINE restart path — same law as
   // every other data/*.json store.
@@ -268,6 +308,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), ...(about ? { about } : {}), ...(envelope.held && typeof envelope.held === 'object' && envelope.held.kind ? { held: { ...envelope.held } } : {}), fromName: envelope.fromName || null, text: kind ? String(envelope.text || '') : belt.maskForSink(String(envelope.text || ''), { dataDir, message: true }), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };   // `held` (lane notify-retry): why the producer could not deliver it — the hand-over's words read it
     // "Clear content…" (verify r4): the stores judge the entry BEFORE it is written — a frame handed back after the clear
     // (see judgeEntry) is held as the sentence, never as the words the clear already took
+    sidOf(entry);   // r3326: the id it is given at acceptance (the merge never adds it twice)
     if (judgeEntry(entry)) log(`[deliver] ${cid}: a held entry named a cleared record — stored as the cleared sentence`);
     const before = q.slice();   // the take-back below restores the queue EXACTLY (the cap may drop from anywhere between claimed entries)
     q.push(entry);
@@ -299,8 +340,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       q.splice(0, q.length, ...before);   // the take-back: the entry out, whatever the cap dropped back in its place
       if (!q.length) delete stash[cid];
       stashChanged(cid);
-      if (stashHold.held()) throw stashHold.refusal('this entry was not stored');   // HELD (r3003 (a)): refused by name — never written over the unread file
-      throw new Error(`the stash could not be written to disk (${path.basename(stashFile)}) — the entry was not stored`);
+      if (sideHold && sideHold.held()) throw sideHold.refusal('this entry was not stored');   // r3326 (e): the side copy unread — nothing can be kept on disk now
+      throw new Error(`the stash could not be written to disk (${path.basename(stashHold.held() ? sideFile : stashFile)}) — the entry was not stored`);
     }
     // the journal names an evicted entry by its KIND, a peer by its sender's name — never by a label VibeSpace composed
     // from a record (`Background Work · <the job's name>`): every console line rides the server's ring into each incident
@@ -313,7 +354,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (keptOff.length) emitStash('evicted', cid, keptOff, { held: q.length, heldCap: HELD_CAP });
     if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });
     stashChanged(cid);
-    if (!stored) { const why = `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`; emitStash('unwritten', cid, [entry], { why }); return { stored: false, why }; }
+    if (!stored) { const why = isHeld() ? 'the messages waiting for conversations could not be read, so this one is kept in memory until they read — it is lost if VibeSpace restarts before then or before that conversation\'s next turn' : `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`; if (isHeld()) noteMemOnly(); emitStash('unwritten', cid, [entry], { why }); return { stored: false, why }; }
     return { stored: true, why: null };
   }
   // THE STASH IS VISIBLE (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): every write and
@@ -385,7 +426,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // verify r2: THE CLAIM IS THE ENTRY'S OWN `ho` STAMP, WRITTEN THROUGH TO DISK SYNCHRONOUSLY (was: an in-memory Set a
   // restart forgot while the entries stayed on disk ⇒ the next boot's injection re-delivered what the post had
   // carried). The stamp is the hand-over's id; the loader above releases what a dead process left stamped.
-  function claimStash(cid, entries, id = null) {
+  function claimStash(cid, entries, id = null) { if (tornAt != null) tornActed.add(cid);   // (d): this conversation's next turn or hand-over — the torn line has been seen
+
     const mine = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === 'object');
     const tag = id ? String(id) : 'ho';
     for (const e of mine) e.ho = tag;
@@ -401,7 +443,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  (a hand-over in flight owns it — see `claimStash`). EVERY drain persists SYNCHRONOUSLY (verify r2): a drain is
    *  a delivery, and a debounced write after it left a 500 ms window in which a killed process re-delivered at its
    *  next boot; a drain happens once per turn, the write is small. */
-  function drainStash(cid, only = null) {
+  function drainStash(cid, only = null) { if (tornAt != null) tornActed.add(cid);   // (d): this conversation's next turn or hand-over — the torn line has been seen
+
     if (!(only instanceof Set)) gateQueue(cid);   // B-f276: a full drain judges first — a kept entry stays
     const q = stash[cid] || [];
     if (!q.length) return q;
@@ -422,7 +465,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return q;
   }
   /** the conversations holding an entry in `slot`, or a set it handed (the watch asks them when their set empties) */
-  const slotHolders = (slot) => [...new Set([...Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].some((e) => e && e.slot === slot)), ...Object.keys(slots).filter((cid) => slots[cid] && slots[cid][slot])])];
+  const slotHolders = (slot) => [...new Set([...Object.keys(stash).filter((cid) => isConvName(cid) && Array.isArray(stash[cid]) && stash[cid].some((e) => e && e.slot === slot)), ...Object.keys(slots).filter((cid) => slots[cid] && slots[cid][slot])])];
   /** a keyed slot's entry that went out: its set is the one it HANDED (written with the drain's own stash write) */
   function noteSlotsHanded(cid, took) {
     for (const e of took || []) if (e && e.slot) (slots[cid] || (slots[cid] = {}))[e.slot] = { handed: e.setKey || '[]', at: Date.now() };
@@ -462,7 +505,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!cid || !mine.length) return 0;
     const q = stash[cid] || (stash[cid] = []);
     for (const e of mine) {
-      delete e.ho; judgeEntry(e);
+      delete e.ho; sidOf(e); judgeEntry(e);
       if (e.slot) { const mem = (slots[cid] || {})[e.slot]; if (mem && mem.handed === e.setKey) delete slots[cid][e.slot]; if (q.some((x) => x !== e && x && x.slot === e.slot)) continue; }   // shape C: it was not handed; a newer slot entry wins
       if (!q.includes(e)) q.push(e);
     }   // judged at the write like every entry (verify r4)
@@ -506,6 +549,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     let n = 0;
     const touched = new Set();
     for (const [cid, q] of Object.entries(stash)) {
+      if (!isConvName(cid) || !Array.isArray(q)) continue;
       for (const e of q) {
         let r = null;
         try { r = match(e); } catch { r = null; }
@@ -584,10 +628,66 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** A READ of one conversation's held entries (2026-09-27 verify: the
    *  channels engine's boot reconcile asks whether a receipt is still
    *  waiting). Copies; never drains, never re-orders. */
-  function stashPeek(cid) { stashHold.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }   // HELD: a road that DECIDES from the stash is told «unknown» (r3104 (a))
-  /** the hold LIFTED (r3003 (a), src/store-read-hold.js): the entries read (null: torn bytes kept aside — none), each judged again by the
-   *  stores that own their words (a clear made while held reaches them), an earlier process's hand-over stamps released, then what
-   *  memory took meanwhile after them — written once, every conversation told */
+  function stashPeek(cid) { const hh = heldHold(); if (hh) hh.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }   // HELD: a road that DECIDES from the stash is told «unknown» (r3104 (a))
+  /** ONE ENTRY, ONCE (r3329 (2)): `incoming`'s entries after `base`'s — an entry whose acceptance id (`sid`) or producer `ref` the base
+   *  already holds is never added again; a slot entry of `incoming` (not in a hand-over) replaces the base's entry of the same slot (round
+   *  wozyl97qk (c): the agent never reads one notice twice). → the count added */
+  function mergeQueues(base, incoming) {
+    let n = 0;
+    for (const cid of Object.keys(incoming)) {
+      if (!isConvName(cid) || !Array.isArray(incoming[cid]) || !incoming[cid].length) continue;
+      const q0 = Array.isArray(base[cid]) ? base[cid] : [];
+      const sids = new Set(q0.map((e) => e && e.sid).filter(Boolean)), refs = new Set(q0.map((e) => e && e.ref).filter(Boolean));
+      const add = incoming[cid].filter((e) => e && typeof e === 'object' && !(e.sid && sids.has(e.sid)) && !(e.ref && refs.has(e.ref)));
+      const slotsIn = new Set(add.filter((e) => e.slot && !e.ho).map((e) => e.slot));
+      const kept = q0.filter((e) => !(e && e.slot && !e.ho && slotsIn.has(e.slot)));
+      if (add.length || kept.length !== q0.length) base[cid] = [...kept, ...add];
+      n += add.length;
+    }
+    return n;
+  }
+  /** A SIDE COPY READ (at a start, or at its own lift): a generation the list already merged ⇒ removed, never merged again; else its
+   *  entries join memory after what memory holds (never twice) — written to the list at once when it reads, the side copy rewritten
+   *  whole while it is held */
+  function takeSide(v) {
+    const side = STASH_SHAPE(v) ? v : {};
+    const r = takeReserved(side);
+    if (r.gen && sideMerged.includes(r.gen)) { sideToRemove = r.gen; removeSide(); log(`[deliver] the copy kept beside the list (${r.gen}) was merged into it already — removed, never merged again`); return 0; }
+    for (const x of releaseClaims(side)) log(`[deliver] ${x.cid}: ${claimedWords(x.ids)}`);
+    const n = mergeQueues(stash, side);
+    // the order: what was already there, then the copy's (an earlier life's), then what THIS run accepted (its ids carry this run's tag) —
+    // by origin, never by stamp (two lives' entries can share a millisecond)
+    const mine = (e) => !!(e && typeof e.sid === 'string' && e.sid.includes('-' + RUN_TAG + '-'));
+    for (const cid of Object.keys(side)) if (isConvName(cid) && Array.isArray(stash[cid])) stash[cid] = [...stash[cid].filter((e) => !mine(e)), ...stash[cid].filter(mine)];
+    slots = { ...r.sl, ...slots };   // this run's slot memory wins over the copy's (it is newer)
+    if (stashHold.held()) {
+      sideGen = r.gen || sideGen || mintGen();
+      const sids = new Set(); for (const cid of Object.keys(side)) if (isConvName(cid) && Array.isArray(side[cid])) for (const e of side[cid]) if (e && e.sid) sids.add(e.sid);
+      if (r.gen) takenFrom.push({ gen: r.gen, sids });
+      writeStashNow();   // memory = the copy + what this run took: the copy rewritten whole
+    } else {
+      const g = r.gen || mintGen();
+      sideMerged = [...sideMerged.filter((x) => x !== g), g].slice(-SIDE_MERGED_KEEP);
+      sideToRemove = g;
+      writeStashNow();   // the list reads: ONE write to it (naming the copy merged), then the copy removed
+    }
+    log(`[deliver] the copy kept beside the list read: ${n} entr${n === 1 ? 'y' : 'ies'} ${stashHold.held() ? 'back in memory (the list itself is still unread)' : 'merged into the list'}`);
+    return n;
+  }
+  /** THE SIDE COPY's OWN HOLD LIFTED (it could not be read at the start, or its bytes were torn): its entries join memory (null: torn —
+   *  none; kept aside once and named, and the instant remembered as the list's torn instant is: a receipt stashed before it is unknown to
+   *  the reconcile), then what could not be written meanwhile is written */
+  function liftSide(v, facts) {
+    if (facts && facts.setAside) { tornAt = Date.now(); log(`[deliver] the copy kept beside the list was damaged — kept aside as ${facts.setAside}; none of its entries could be read`); }
+    if (v) takeSide(v);
+    else { if (!stashHold.held()) sideToRemove = sideToRemove || 'torn'; writeStashNow(); }
+    if (!isHeld()) afterLift();
+  }
+  /** THE LIST's HOLD LIFTED (r3003 (a), r3326): the list's entries (null: torn bytes kept aside — none) — each judged again by the stores
+   *  that own their words, an earlier process's hand-over stamps released — then MEMORY's after them (every entry accepted while held:
+   *  the side copy's and this run's; never twice), ONE write to the list naming the copy merged; the copy removed only after that write
+   *  returned. The merge is that one write: a throw before it leaves the list and the copy as they were (the next lift or start merges
+   *  again); the steps after it are each their own try (afterLift) */
   function liftStash(v, facts) {
     const read = STASH_SHAPE(v) ? v : {};
     const r = takeReserved(read);
@@ -596,15 +696,51 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const q of Object.values(read)) for (const e of q) { try { judgeEntry(e); } catch { } }
     let kept = 0;
     for (const q of Object.values(read)) kept += q.length;
-    let took = 0;
-    for (const [cid, q] of Object.entries(stash)) { if (!Array.isArray(q) || !q.length) continue; read[cid] = [...(read[cid] || []), ...q]; took += q.length; }
+    // a copy this process read while the list was held, which the list now names merged (a crash after that merge's write, before the
+    // copy's removal, then a start that could not read the list): its entries are in the list already — never added twice
+    for (const t of takenFrom.splice(0)) if (r.sm.includes(t.gen)) for (const cid of Object.keys(stash)) if (Array.isArray(stash[cid])) stash[cid] = stash[cid].filter((e) => !(e && e.sid && t.sids.has(e.sid)));
+    const took = mergeQueues(read, stash);
     stash = read;
     slots = { ...r.sl, ...slots };
     tornAt = facts && facts.setAside ? Date.now() : (r.ta != null ? r.ta : tornAt);
-    const ok = writeStashNow();
-    for (const cid of Object.keys(stash)) stashChanged(cid);
-    log(`[deliver] the stash read again: ${facts && facts.setAside ? `torn bytes, kept aside as ${facts.setAside} — none of its entries could be read` : `${kept} entr${kept === 1 ? 'y' : 'ies'} back`}${took ? `, ${took} stashed meanwhile after them` : ''}${ok ? '' : ' (its write failed — retried)'}`);
+    sideMerged = r.sm;
+    if (sideGen) { sideMerged = [...sideMerged.filter((g) => g !== sideGen), sideGen].slice(-SIDE_MERGED_KEEP); sideToRemove = sideGen; }
+    const ok = writeStashNow();   // ONE write to the list (none yet while the copy beside it is unread: its own lift writes)
+    log(`[deliver] the stash read again: ${facts && facts.setAside ? `torn bytes, kept aside as ${facts.setAside} — none of its entries could be read` : `${kept} entr${kept === 1 ? 'y' : 'ies'} back`}${took ? `, ${took} accepted meanwhile after them` : ''}${ok ? '' : isHeld() ? ' — not written yet: the copy kept beside the list is still unread' : ' — its write failed (retried on its own clock)'}`);
+    if (!isHeld()) afterLift();
   }
+  /** after BOTH read: every strip told once, the owed wakes the hold set aside due NOW (never at their next minute's ask) and the park
+   *  armed, the lift's listeners (the receipt reconcile) — each step its own try: a throw in one never stops the next */
+  function afterLift() {
+    memOnly = 0; memOnlySaid = 0;
+    const step = (name, fn) => { try { fn(); } catch (err) { log(`[deliver] the stash's lift — ${name} failed:`, err && err.message); } };
+    step('the strips', () => { for (const cid of Object.keys(stash)) if (isConvName(cid)) stashChanged(cid); stashChanged(null); });
+    step('the owed wakes', () => { const dueAt = clock.now(); for (const q of Object.values(retry)) for (const e of q) if (e && e.waitsHeld && e.waitsHeld.stash && !e.inflight) e.nextAt = dueAt; scheduleRetry(); });
+    for (const fn of liftListeners) step('a lift listener', fn);
+  }
+  /** the copy beside the list, removed OFF the loop once the list's write naming it merged returned; a removal that fails is said — the
+   *  list names it merged, so the next start removes it and never merges it again */
+  function removeSide() {
+    const gen = sideToRemove; sideToRemove = null; sideGen = null;
+    fs.promises.unlink(sideFile).then(() => log(`[deliver] the copy kept beside the list is merged into it and removed (${gen})`),
+      (e) => { if (e && e.code === 'ENOENT') return; log(`[deliver] the copy kept beside the list could not be removed (${(e && (e.code || e.message)) || e}) — the list names it merged (${gen}): the next start removes it, never merges it again`); });
+  }
+  /** r3329 (4): an entry kept in memory only because the copy beside the list could not be written — the journal counts EVERY one: a
+   *  line at the first, again at each doubling, the whole count when a later write lands or at the stop (never a word of a message) */
+  function noteMemOnly() {
+    memOnly++;
+    if (memOnly < Math.max(1, memOnlySaid * 2)) return;
+    memOnlySaid = memOnly;
+    log(`[deliver] the messages waiting for conversations could not be read and the copy kept beside them could not be written — ${memOnly} entr${memOnly === 1 ? 'y is' : 'ies are'} kept in memory only (a restart before the read loses them): their producers were told`);
+  }
+  /** the hub's stop: the last write; what still lives in memory only is counted, whole */
+  function flushAtStop() {
+    const ok = flush();
+    if (isHeld() && memOnly) log(`[deliver] the stop while the messages waiting for conversations are unread: ${memOnly} entr${memOnly === 1 ? 'y' : 'ies'} kept in memory only this hold ${memOnly === 1 ? 'is' : 'are'} lost with this process (their producers were told)`);
+    return ok;
+  }
+  /** one read again of whatever is held (the list, the copy beside it) → true when nothing is held any more */
+  async function stashReadAgain() { if (stashHold.held()) await stashHold.again(); if (sideHold && sideHold.held()) await sideHold.again(); return !isHeld(); }
   /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). Every
    *  read passes the stash gate first (verify r3): what a revoked reach no longer covers is never handed out. */
   function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }   // B-f276: a kept entry is not handed out
@@ -1138,6 +1274,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const producersOf = (e) => (isEnded(e) ? (Array.isArray(e.producers) ? e.producers : [e.producer]) : isOwed(e) ? [e.producer] : []).filter(Boolean);
   /** → {why, by} (by = the producer that said held) | null */
   function heldWhy(e) {
+    // round wozyl97qk MUST 1: THE STASH ITSELF HELD (its file could not be read) — a wake that meets it STAYS OWED (set aside, as a kept one is):
+    // its hand-over would be refused (msg_stash_unread) and the wake ended «failed» for good; it goes at the lift (the lift arms the park)
+    if (isEnded(e) && isHeld()) return { why: 'the messages waiting for conversations could not be read now (their file is held)', by: null, stash: true };   // r3326: ENDED wakes only (a live one posts to its inbox, no claim)
     const ps = producersOf(e);
     let first = null, every = ps.length > 0;
     for (const p of ps) {
@@ -1190,7 +1329,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const e of q) {
       if (!e || e.inflight || e.ho || !(isOwed(e) || isEnded(e))) continue;
       const h = heldWhy(e);
-      if (h) { if (setAside(e, h.why, at, h.by ? { by: h.by } : h.pace ? { pace: true } : {})) marked.push(e); continue; }
+      if (h) { if (setAside(e, h.why, at, h.by ? { by: h.by } : h.pace ? { pace: true } : h.stash ? { stash: true } : {})) marked.push(e); continue; }
       if (!e.waitsHeld) continue;
       // the producer that said held is not registered yet (the boot's window): unknown is held — the mark stays until it registers
       // B-f276 1c (主开发 r809 (2)): a mark the PACE said (its file held) stays until the pacer registers — unknown is held, never a wake
@@ -1298,7 +1437,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // not settled — the wake STAYS OWED (kept on disk, marked), runs ONCE at the settle (readoptSettled), never on a timer; the row says so
         // B-f276 1a: the line found NOTHING BUT KEPT entries (their reach cannot be judged now): the wake stays owed, set aside, and goes
         // when the stash keeps none (or a new delivery brings words) — never ended «nothing is waiting» over entries that wait
-        if (r && r.outcome === 'held') { if (e.attempts.length && e.attempts[e.attempts.length - 1] && e.attempts[e.attempts.length - 1].phase === 'line') e.attempts.pop(); const hh = r.code === 'kept' ? null : heldWhy(e); setAside(e, r.why || 'every entry waiting for it is kept (its reach cannot be judged now)', clock.now(), r.code === 'kept' ? { kept: true } : hh && hh.by ? { by: hh.by } : {}); endedAnswers.delete(e.cid); writeRetryNow();   /* no refusal: the row keeps «{n} notices are waiting for it» — true */ stashChanged(e.cid); scheduleRetry(); return; }
+        if (r && r.outcome === 'held') { if (e.attempts.length && e.attempts[e.attempts.length - 1] && e.attempts[e.attempts.length - 1].phase === 'line') e.attempts.pop(); const hh = r.code === 'kept' ? null : heldWhy(e); setAside(e, r.why || 'every entry waiting for it is kept (its reach cannot be judged now)', clock.now(), r.code === 'kept' ? { kept: true } : hh && hh.by ? { by: hh.by } : hh && hh.stash ? { stash: true } : {}); endedAnswers.delete(e.cid); writeRetryNow();   /* no refusal: the row keeps «{n} notices are waiting for it» — true */ stashChanged(e.cid); scheduleRetry(); return; }
         if (r && r.outcome === 'waits') { e.waitsReadopt = true; endedAnswers.set(e.cid, { outcome: 'waits', code: r.code || 'readopt-pending', why: r.why || null, until: null, at: clock.now() }); if (readoptDone) { delete e.waitsReadopt; e.nextAt = clock.now(); } writeRetryNow(); stashChanged(e.cid); scheduleRetry(); return; }
         endEnded(e, r && r.outcome === 'again' ? { outcome: 'failed', why: r.why } : r);
       });
@@ -1336,7 +1475,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** the conversation runs again (a turn started, a delivery landed): its last refusal is history — never an old one after a later end */
   function clearEndedAnswer(cid) { endedAnswers.delete(cid); }
   /** the conversations a stash entry waits for (the ladder's own stash) — the row's count reads these few, never every row */
-  function stashCids() { return Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].length > 0); }
+  function stashCids() { return Object.keys(stash).filter((cid) => isConvName(cid) && Array.isArray(stash[cid]) && stash[cid].length > 0); }
   function endEnded(e, r = {}) {
     if (!retry[e.cid] || !retry[e.cid].includes(e)) return;
     noteSettledHeld(e.cid, r.outcome);   // line 494's follow (r2695 (1)) + line 529's small (r2795): the file's older wake for this conversation folds into this settle at the lift
@@ -2586,9 +2725,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   return {
     retryHeldState: () => (retryHeld ? { ...retryHeld } : null), _retryReading: () => retryReading,   // B-f276's remainder: the park held unread (a copy), its read again in flight
     deliverToConversation, peerReachable, liveForWake, unreachableOf, machineAwayOf, machineNameOf: (hid) => { const h = pairingOf(hid).host; return String((h && (h.name || h.id)) || hid || '').slice(0, 80); }, pairingOf: (hid) => pairingOf(hid).reply, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
-    stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,
+    stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush: flushAtStop,
     // r3003 (a): the stash's hold — its facts (null: read), the person's words, a torn lift's copy and its instant, one read again
-    stashHeld: () => stashHold.held(), stashUnreadWords: () => stashHold.words(), stashTorn: () => stashHold.torn(), stashTornAt: () => tornAt, stashReadAgain: () => stashHold.again(), stashRefusal: (what) => stashHold.refusal(what), capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
+    stashHeld: () => { const h = heldHold(); return h ? h.held() : null; }, stashUnreadWords: () => { const h = heldHold(); return h ? h.words() : null; }, stashTorn: () => stashHold.torn() || (sideHold && sideHold.torn()) || null, stashTornAt: () => tornAt, stashReadAgain, stashRefusal: (what) => (heldHold() || stashHold).refusal(what),
+    stashTornActed: (cid) => tornActed.has(cid),
+    onStashLift: (fn) => { if (typeof fn !== 'function') return () => { }; liftListeners.add(fn); return () => liftListeners.delete(fn); }, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     // lane queued-is-not-woke (law 1): the wrapper's queue and turn edges, and a queued frame handed back — read off its records

@@ -1276,10 +1276,10 @@ async function takenLeg(ladderMod, name) {
     await W2.eng.reconcileReceiptFates();
     const q = W2.eng.store.outbox.snapshot().proposals[p.proposal.id];
     W2.eng.stop();
-    return { tornAt: W2.real.stashTornAt(), drained: q.receiptDrainedHow || null, fate: fateOf(W2, p.proposal.id).kind };
+    return { tornAt: W2.real.stashTornAt(), drained: q.receiptDrainedHow || null, how: q.receiptEvictedHow || null, fate: fateOf(W2, p.proposal.id).kind, text: fateOf(W2, p.proposal.id).text };
   };
   const tl = await tornLeg('torn-remover', false), tr = await tornLeg('torn-remover-red', true);
-  ok(Number.isFinite(tl.tornAt) && tl.drained === null && tl.fate === 'waiting', `THE REMOVER LAW: a receipt stashed before the stash's torn bytes is UNKNOWN to the boot reconcile — never read as handed (${tl.fate})`, tl);
+  ok(Number.isFinite(tl.tornAt) && tl.drained === null && tl.how === 'torn' && tl.fate === 'torn' && /was damaged; the receipt is kept here/.test(tl.text), `THE REMOVER LAW: a receipt stashed before the stash's torn bytes is never read as handed — it ENDS «torn» (round wozyl97qk (g)): «${tl.text}»`, tl);
   ok(tr.drained === 'reconciled', `RED: a reconcile that cannot see the torn instant reads the stash's silence as handed (${tr.drained})`, tr);
 }
 {
@@ -1395,7 +1395,7 @@ async function drainAfterGuessLeg(ENGmod, name) {
 {
   const dg = await drainAfterGuessLeg(ENG, 'drain-guess');
   ok(dg.at > 5 && dg.how === 'drained' && /Handed to Worker at \d\d:\d\d$/.test(dg.text), `a real drain after a reconciled stamp: the time recorded, "${dg.text}"`, JSON.stringify(dg));
-  const HOW = "        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; changed.push(id); }";
+  const HOW = "        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; changed.push(id); }";
   ok(esrcV2.split(HOW).length === 2, 'the drained branch is present once (the control keeps the old guess)');
   const stale = MV2.load('src/server/channels-engine.js', esrcV2.replace(HOW, "        if (ev === 'drained') { q.receiptDrainedAt = t; changed.push(id); }"), 'drain-keeps-guess');
   const dc = await drainAfterGuessLeg(stale, 'drain-guess-ctl');

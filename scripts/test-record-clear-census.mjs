@@ -617,7 +617,7 @@ const HOLDERS = [
   // the codex queue — an unbounded window, past a restart) re-entered the ladder's stash WHOLE; now EVERY entry is judged
   // at its write by the stores that own its words (store-backed, never a memory of past clears)
   ['a frame handed back after the clear: every entry is judged at the ladder\'s write', 'src/server/conversation-deliver.js', 'if (judgeEntry(entry)) log('],
-  ['…a restore is a write, judged too', 'src/server/conversation-deliver.js', 'delete e.ho; judgeEntry(e);'],
+  ['…a restore is a write, judged too', 'src/server/conversation-deliver.js', 'delete e.ho; sidOf(e); judgeEntry(e);'],
   ['…the jobs engine\'s judge: a cleared job named by id, the frame not yet reading the sentence', 'src/jobs.js', 'judgeHeldEntry(e) {'],
   ['…registered on the ladder by the jobs wiring', 'src/server/jobs-wiring.js', 'deliver.registerStashJudge((e) => jm.judgeHeldEntry(e));'],
   ['…a job cleared AGAIN is stamped (reclearedAt): the judge fails closed on its sentence-reading frames, the in-flight rule reads the latest clear', 'src/jobs.js', 'if (j.clearedAt) { j.reclearedAt = at; liveChanged = true; }'],

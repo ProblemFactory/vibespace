@@ -88,6 +88,8 @@ export async function wakeGrantDoor(session) {
  *  the viewer's zone). '' when nothing waits. `fmt` = the page's one time formatter (page-time stampAt). */
 export function waitingWords(w, fmt) {
   const n = w && Number(w.n);
+  // r3299 row 7: the stash HELD — said on every stopped row (what waits is not known: never «nothing waiting»), beside a count it has
+  if (w && w.stashUnread) { const held = t('the list of messages waiting could not be read just now — VibeSpace reads it again by itself'); return n > 0 ? `${t('{n} notices are waiting for it', { n })} · ${held}` : held; }
   if (!n || n < 1) return '';
   const code = w.code || null;
   if (!code) return t('{n} notices are waiting for it', { n });
