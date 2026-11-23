@@ -9,6 +9,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Deleting a secret in the Vault window stops the background jobs that use it; locking the vault does not stop them.
 - A background job that needs a stored secret now asks you once in For you: Allow (with your second password) starts it, Deny refuses it.
 - A machine whose host key is not pinned now says so on its row; one press pins the key this hub already trusts, and «Pin all» pins every such machine.
+- A background job that uses several stored secrets asks once, on one card naming them all; its card also says which of them you already allowed.
+- A background job's card now says its program's own files are unprotected; the Vault row says a running job keeps an old key until it restarts.
 
 ### Changed
 - The chat window's status bar is arranged by what you need: one row on a wide window, the same two rows on a narrow one, nothing hidden behind «⋯».
