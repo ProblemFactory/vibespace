@@ -5,7 +5,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ## INDEX (one line per file; the essay is below)
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
-scripts/test-browser-kept-sweep.mjs (fast, NEW — r3006, the sweep's fail-closed law; r3054 ④: the bindings file, the second door) — a kept store whose read was refused at a start: the real boot sweep removes no kept browser's profile folder, nothing is written over the file; red = the release's rename
+scripts/test-browser-kept-sweep.mjs (fast, NEW — r3006 the sweep's fail-closed law; r3054 ④ the bindings) — a kept store whose read was refused at a start: the real boot sweep removes no kept browser's profile folder, nothing is written over the file; red = the release's rename
 scripts/test-channel-store-heap.mjs (NEW, fast — B-360d r2542) — the channel store keeps no start-read text: a stand-in index of 8 000 rows (a title outside Latin-1), the store in a child (--expose-gc), its settled heap a row under twice the file's bytes a row; RED: the takeText line removed
 scripts/fixtures/channel-store-heap-child.cjs (NEW — B-360d r2542) — test-channel-store-heap's child: one store over a stand-in, its settled heap after the open's layout warm-up landed
 src/server/subagent-transcript.js (NEW — 主开发 r2374) — a finished agent's transcript found (kept place, cwd's folder first, async walk) and read by the transcript pool's pages, whole, one read at a time; the sub-agent attach + GET /api/subagent-messages; a pool refusal said ⇒ kb-file-structure
