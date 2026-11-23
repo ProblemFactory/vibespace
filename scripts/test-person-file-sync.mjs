@@ -11,8 +11,10 @@
 //     are synced BEFORE the swap, through the thread pool (no fsyncSync on the loop); a failed sync throws by name, nothing
 //     swapped, the transcript's bytes as they were, the temp gone, the backup kept.
 //     RED: today's rescue (the sync taken out): the swap happens with nothing synced, and a failed sync is never seen.
-// The census of the renames (test-temp-rename-census) reads both sites «synced» (OWED_MAX 148 → 147: the mail copy was a
-// «derived» row). A CLI's own settings file (src/harness-config.js) is the next unit: its writer runs on the hub's loop.
+//   ② a CLI's own settings file (src/harness-config.js commitWrite / commitCreate — B-ddf3 unit 2 line 2): the shipped helper's
+//     writer (every machine's, the hub's own since line 1) syncs its temp before the rename or the link; a failed sync is an
+//     «error» receipt said by name, the file as it was, no temp left. RED: today's writer (both syncs taken out).
+// The census of the renames (test-temp-rename-census) reads the sites «synced» (OWED_MAX 150 → 148 by unit 1; 146 → 144 by this unit, on the train's count).
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -115,6 +117,41 @@ async function rescueRun(mod, fail) {
   ok(!today.err && !today.log.some((x) => x.startsWith('sync')) && today.log.some((x) => x.startsWith('rename')), 'RED (today\'s rescue): the swap happens with nothing synced — the leg above reads it', today.log.join(' → '));
   const todayFail = await rescueRun(MC.write(TS_REL, todayTs, 'today-rescue-fail'), (k, p) => k === 'sync' && /\.rescue-tmp$/.test(String(p)));
   ok(!todayFail.err && todayFail.now !== todayFail.bytes, 'RED (today\'s rescue): a failing disk is never asked, the transcript is swapped anyway', todayFail.err ? todayFail.err.message : 'swapped');
+}
+
+// ── ② a CLI's own settings file ──────────────────────────────────────────────────────────────────────────────────────────────
+console.log('② a CLI\'s own settings file (src/harness-config.js commitWrite / commitCreate — the shipped helper\'s writer)');
+const HC_REL = 'src/harness-config.js', HCT = fs.readFileSync(path.join(REPO, HC_REL), 'utf8');
+const PLAN = { v: 1, files: [{ harness: 'claude', id: 'settings', rel: ['.claude', 'settings.json'], format: 'json', createIfMissing: 'dir-exists', set: [{ key: 'transcriptRetentionDays', path: ['cleanupPeriodDays'], value: 36500 }] }] };
+async function cliRun(mod, { exists = true, fail } = {}) {
+  const home = path.join(ROOT, `home-${++seq}`), dir = path.join(home, '.claude'), file = path.join(dir, 'settings.json');
+  fs.mkdirSync(dir, { recursive: true });
+  const was = exists ? JSON.stringify({ model: 'opus', cleanupPeriodDays: 30 }, null, 2) + '\n' : null;
+  if (was !== null) fs.writeFileSync(file, was);
+  const out = await recorded(() => require(mod).applyConfigPlan(PLAN, { home }), fail);
+  const receipt = out.r && out.r.receipts && out.r.receipts[0];
+  return { ...out, receipt, was, now: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, tmpLeft: fs.readdirSync(dir).some((f) => f.endsWith('.tmp')) };
+}
+{
+  for (const [road, exists, last] of [['an existing file (commitWrite)', true, 'rename settings.json.tmp'], ['a created file (commitCreate)', false, 'link settings.json.tmp']]) {
+    const live = await cliRun(path.join(REPO, HC_REL), { exists });
+    ok(!live.err && live.receipt && live.receipt.state === 'applied' && JSON.parse(live.now).cleanupPeriodDays === 36500 && before(live.log, 'fsyncSync settings.json.tmp', last) && !live.tmpLeft,
+      `${road}: the temp is synced BEFORE its name points at it, the key applied, no temp left`, live.log.join(' → '));
+    const f = await cliRun(path.join(REPO, HC_REL), { exists, fail: (k, p) => k === 'fsyncSync' && /settings\.json\.tmp$/.test(String(p)) });
+    ok(!f.err && f.receipt && f.receipt.state === 'error' && /settings\.json: the new settings could not be put on disk \(EIO\) — not written, the file is as it was/.test(f.receipt.reason || ''),
+      `${road}: a failed sync is a failed write, said by name in the receipt the hub reads («could not be put on disk (EIO) — not written»)`, f.receipt);
+    ok(f.now === f.was && !f.tmpLeft && !f.log.some((x) => x === last), `${road}: …and the file is as it was (${f.was === null ? 'still absent' : 'its bytes unchanged'}), no temp left, nothing renamed or linked`, f.log.join(' → '));
+  }
+  // the shipped helper embeds THIS text: every machine's helper writes the same way (test-claude-retention pins the embed too)
+  ok(fs.readFileSync(path.join(REPO, 'data/bin/vibespace-hook-register.mjs'), 'utf8').includes(HCT), 'the shipped helper (data/bin/vibespace-hook-register.mjs) carries this writer byte for byte');
+  // RED: today's writer — both syncs taken out (anchored: a moved line fails by name)
+  const SYNC_LINE = "  try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }\n";
+  const todayHc = anchored(anchored(HCT, '  ' + SYNC_LINE, '', 'today: commitCreate links with nothing synced'), SYNC_LINE, '', 'today: commitWrite renames with nothing synced');   // commitCreate's (deeper) line first: the shallower anchor is a substring of it
+  for (const [road, exists, last] of [['commitWrite', true, 'rename settings.json.tmp'], ['commitCreate', false, 'link settings.json.tmp']]) {
+    const t = await cliRun(MC.write(HC_REL, todayHc, `today-${road}`), { exists, fail: (k, p) => k === 'fsyncSync' && /settings\.json\.tmp$/.test(String(p)) });
+    ok(t.receipt && t.receipt.state === 'applied' && !t.log.some((x) => x.startsWith('fsyncSync')) && t.log.includes(last),
+      `RED (today's ${road}): the name points at a temp nothing synced, and a failing disk is never asked — the legs above read it`, t.log.join(' → '));
+  }
 }
 
 report();

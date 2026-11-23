@@ -127,12 +127,19 @@ function writeTarget(file) {
   const target = st.isSymbolicLink() ? fs.realpathSync(file) : file;
   return { target, mode: fs.statSync(target).mode & 0o777 };
 }
-/** tmp beside the target → the file's own mode → atomic rename onto the target. */
+/** B-ddf3 (THE LAW of B-9275: a file's new bytes are on disk before its name points at them): each commit syncs its temp
+ *  before the rename / the link. A failed sync is a failed write, said by name: the temp is removed, the file stays as it was. */
+function syncRefused(tmp, file, e) {
+  try { fs.unlinkSync(tmp); } catch { }
+  return new Error(`${file}: the new settings could not be put on disk (${(e && e.code) || (e && e.message) || e}) — not written, the file is as it was`);
+}
+/** tmp beside the target → the file's own mode → its bytes synced → atomic rename onto the target. */
 function commitWrite(file, out) {
   const { target, mode } = writeTarget(file);
   const tmp = target + '.tmp';
   fs.writeFileSync(tmp, out, mode == null ? undefined : { mode });
   if (mode != null) fs.chmodSync(tmp, mode); // the umask clears bits at create time; the file's own mode wins
+  try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }
   fs.renameSync(tmp, target);
 }
 /** CREATE a missing file (the 'dir-exists' rule): mode 0600, its directory's
@@ -149,6 +156,8 @@ function commitCreate(file, out) {
       const d = fs.statSync(path.dirname(file));
       if (d.uid !== 0) fs.chownSync(tmp, d.uid, d.gid);
     }
+    // its bytes, mode and owner on disk before the link (or the rename) names it
+    try { const fd = fs.openSync(tmp, 'r+'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } } catch (e) { throw syncRefused(tmp, file, e); }
     try { fs.linkSync(tmp, file); } catch (e) {
       if (e && e.code === 'EEXIST') return false;
       // a filesystem without hard links (some FUSE / network mounts): the rename the old create used, only while the
