@@ -82,7 +82,7 @@ class PortForwardManager {
     // silence); it is read again off the loop; torn bytes are kept aside once per content, then the list starts empty
     this._hold = HOLD.create({
       file: this.file, valid: PF_SHAPE, code: 'ports_unread', aside: (mark) => this.file + '.corrupt-' + mark,
-      words: (h) => `port-forwards.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No forward is lost: nothing is written over it, and new forwards wait until it reads.`,
+      words: (h) => `port-forwards.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No forward is lost: nothing is written over it, and new forwards wait until it reads. Addresses published before stay published at the relay; to take them all down now, stop the relay plugin.`,
       log: (m) => this.log('[ports] ' + m), onLift: (v, f) => this._lifted(v, f),
     });
     let read; try { read = { text: fs.readFileSync(this.file, 'utf-8') }; } catch (error) { read = { error }; }
@@ -254,6 +254,12 @@ class PortForwardManager {
     if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
     this._emit();
     if (this._restoreAsked) { this._restoreAsked = false; this.restore().catch(() => {}); }
+    // r3174 (round wgr2jhoz9): what the hold REFUSED is done now — a machine unpaired meanwhile loses its forwards, and the jobs engine
+    // publishes again every service that asks to be (so it learns its forward's id and a later stop tears it down) and ends what
+    // a stop owed while held
+    const unpaired = this._unpairedHeld; this._unpairedHeld = null;
+    if (unpaired) for (const h of unpaired) { try { this.onMachineUnpaired(h); } catch (e) { this.log('[ports] unpair at the lift: ' + e.message); } }
+    try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.portsLifted === 'function') jm.portsLifted(); } catch (e) { this.log('[ports] the jobs at the lift: ' + e.message); }
   }
 
   _emit() {
@@ -815,6 +821,7 @@ class PortForwardManager {
 
   /** A machine was unpaired/removed — drop its forwards. */
   onMachineUnpaired(hostId) {
+    if (this._hold.held()) { (this._unpairedHeld = this._unpairedHeld || new Set()).add(hostId); return; }   // r3174: held — its forwards go at the lift
     for (const rec of this._state.forwards.filter((r) => r.hostId === hostId)) {
       // unpublish FIRST — dropping the record without frpUnpublish left the
       // public relay proxy live (pointing at a freed loopback port) with no

@@ -1164,7 +1164,7 @@ autoResume.start(); const bulkResume = require('./src/server/bulk-resume-routes.
 const permissionRules = require('./src/server/permission-rules.js').create({ activeSessions, adapterRegistry, accounts, agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), buffersDir: BUFFERS_DIR, codexCmdRef: () => cliCmds.current('codex') || CODEX_CMD, telemetry: { record: (e) => { try { telemetry.record(e); } catch { } } } }); permissionRules.registerRoutes(app); instanceUrl.registerRoutes(app); hub.registerRoutes(app); instanceUrl.restore(); Object.defineProperty(app.locals, 'instancePublicUrl', { get: () => { try { return instanceUrl.url(); } catch { return null; } } }); app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list(), held: portForwards.heldWords(), torn: portForwards.tornCopy() })); // permissionRules = the READ-ONLY "where does this rule come from" view (owner ruling 10) + the human-triggered zero-network local oracles (ruling 6) ⇒ src/server/permission-rules.js
 app.get('/api/hosts/:id/ports', async (req, res) => {
   // the UI path probes protocols (http/https/tcp chip); the watch sweep doesn't
-  try { res.json({ ports: await portForwards.detect(req.params.id, { probe: true }) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json({ ports: await portForwards.detect(req.params.id, { probe: true }) }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 app.post('/api/hosts/:id/port-forward', async (req, res) => {
   try {
@@ -1173,24 +1173,24 @@ app.post('/api/hosts/:id/port-forward', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/port-forward/:id', async (req, res) => {
-  try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 // public exposure (frp relay) — publish/unpublish a forward; body.sub = a
 // user-chosen FIXED subdomain (2.358.0; blank keeps prior/random)
 app.post('/api/port-forward/:id/publish', async (req, res) => {
-  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub })); } catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it)
+  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it); r3174: the store's own status (503 while the list is held)
 });
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
-  try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code
+  try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code; r3174: the store's own status (503 while the list is held)
 });
 // main-domain PATH mount (2.358.0): /svc/<name>/ → the forward. body.public
 // (2.359.0) = shareable WITHOUT login; default private, auth enforced
 // per-mount inside path-mounts (the /svc prefix is middleware-exempt).
 app.post('/api/port-forward/:id/path', (req, res) => {
-  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null, { public: (req.body || {}).public })); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null, { public: (req.body || {}).public })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 app.delete('/api/port-forward/:id/path', (req, res) => {
-  try { res.json(portForwards.setPathMount(String(req.params.id), null)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(portForwards.setPathMount(String(req.params.id), null)); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards, requestAuthed: (req) => auth.requestAuthed(req) });
 app.use('/svc', pathMounts.handler);
@@ -1208,7 +1208,7 @@ app.post('/api/port-forward/:id/proto', async (req, res) => {
 // Kill a LOCAL orphaned listener (B-16d9): killOrphan re-verifies the
 // deleted-cwd condition at kill time, so this can't target a healthy process.
 app.post('/api/ports/kill-orphan', (req, res) => {
-  try { res.json(portForwards.killOrphan((req.body || {}).pid)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(portForwards.killOrphan((req.body || {}).pid)); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 // On-demand EXIT (task #164): let an agent borrow a machine's network / run a command on it for ONE command.
 // Who may, per machine: two lists (lane-pairing ⑥, PURE src/exit-reach.js) — the routes are src/server/exit-routes.js.

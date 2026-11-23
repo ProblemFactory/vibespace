@@ -414,6 +414,25 @@ try {
     clearInterval(ph._watch);
     fs.rmSync(sdir, { recursive: true, force: true });
   }
+  // r3174 smalls: a machine UNPAIRED while held loses its forwards at the LIFT (never before: the list is unread), and /svc answers a
+  // caller who is not signed in with a plain 503 (the hold's words are a signed-in page's)
+  {
+    const udir = fs.mkdtempSync(path.join(path.dirname(dataDir), 'pf-unpair-')), ufile = path.join(udir, 'port-forwards.json');
+    fs.writeFileSync(ufile, JSON.stringify({ forwards: [{ id: 'pf-h1-7001', hostId: 'h1', remotePort: 7001, label: 'on h1' }, { id: 'pf-__local__-7002', hostId: '__local__', remotePort: 7002, label: 'local' }] }, null, 2));
+    const before = fs.readFileSync(ufile, 'utf8'), realRead = fs.readFileSync;
+    fs.readFileSync = function (q, ...a) { if (String(q) === ufile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, q, ...a); };
+    let pu = null; try { pu = new PortForwardManager({ hosts, dataDir: udir, broadcast: () => {}, log: () => {} }); } finally { fs.readFileSync = realRead; }
+    pu.onMachineUnpaired('h1');
+    const heldFile = fs.readFileSync(ufile, 'utf8');
+    const PMu = require('../src/server/path-mounts.js').create({ getPortForwards: () => pu, requestAuthed: () => false });
+    const anon = await new Promise((resolve) => { const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b }); }, redirect(c, u) { resolve({ c, u }); } }; PMu.handler({ originalUrl: '/svc/x/', url: '/svc/x/', headers: {} }, res); });
+    if (pu._hold && pu._hold.again) await pu._hold.again().catch(() => false);
+    const afterIds = pu.list().map((r) => r.id).sort().join(','), onDisk = JSON.parse(fs.readFileSync(ufile, 'utf8')).forwards.map((r) => r.id).sort().join(',');
+    check('r3174: a machine unpaired WHILE HELD writes nothing then (the file as it was) and loses its forwards at the LIFT (listed and on disk: only the other machine\'s)', heldFile === before && afterIds === 'pf-__local__-7002' && onDisk === 'pf-__local__-7002', JSON.stringify({ afterIds, onDisk }));
+    check('r3174: /svc to a caller NOT signed in while held — a plain 503 (no hold words, no file name)', anon.c === 503 && anon.b && !/port-forwards|could not be read/.test(JSON.stringify(anon.b)), JSON.stringify(anon));
+    clearInterval(pu._watch);
+    fs.rmSync(udir, { recursive: true, force: true });
+  }
   // r3104: TORN BYTES — kept aside once (the helper), the list then starts EMPTY, and the store NAMES the copy for the Ports panel
   // («the list was damaged; its damaged bytes are kept beside it as <name>» — never «restore it»: they are the damaged bytes)
   {

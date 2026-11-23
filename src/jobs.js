@@ -1298,6 +1298,8 @@ class JobManager {
     if (svcLabels.size && this.d.getPorts) {
       try {
         const pf = this.d.getPorts();
+        // r3174: port-forwards.json held — its list reads EMPTY: the relabel is OWED and runs at the lift (portsLifted)
+        if (pf && typeof pf.heldWords === 'function' && pf.heldWords()) { this._relabelOwed = new Set([...(this._relabelOwed || []), ...svcLabels]); this._relabelGone = new Set([...(this._relabelGone || []), ...gone]); }
         for (const rec of (pf && pf.list && pf.list()) || []) {
           if (!svcLabels.has(rec.label)) continue;
           if (sameNameLive(rec)) continue;
@@ -3414,7 +3416,7 @@ class JobManager {
       const pf = this.d.getPorts && this.d.getPorts();
       if (!pf) return;
       const rec = await pf.forward('__local__', job.ports[0], { label: 'service: ' + this.labelOf(job) });   // r4: the Ports label is a person's — the NAME belted
-      job._pfId = rec && rec.id;
+      job._pfId = rec && rec.id; delete job.publishHeld;
       job._publish = { state: 'publishing' }; this._touch(job);
       const waitMs = this.d.publishWaitMs ?? 60_000;
       const up = await this._portAnswers(job, job.ports[0], waitMs, gen);
@@ -3433,7 +3435,30 @@ class JobManager {
         this.d.log(`[jobs] publish unavailable for ${job.id} — ${(e && e.message) || e} (${o.cause}, attempt ${o.attempts}${o.notice ? ', said to the owner' : ', not said again'})`);
       }
       this._touch(job);
-    } catch (e) { this.d.log('[jobs] forward failed for', job.id, '—', e.message); }
+    } catch (e) {
+      // r3174: refused because port-forwards.json is held — SAID on the job (its card, the agent's status); the lift publishes it again
+      if (e && e.code === 'ports_unread') { job._publish = { state: 'held' }; job.publishHeld = 'not published yet: the list of forwards could not be read; published by itself when it reads'; this._touch(job); return; }
+      this.d.log('[jobs] forward failed for', job.id, '—', e.message);
+    }
+  }
+  /** r3174 (round wgr2jhoz9): port-forwards.json READ AGAIN after a hold — what it refused is done now: every service that asks to be
+   *  published and is up or starting publishes again (so it learns its forward's id: a later stop tears it down), a stop that came
+   *  while held ends its forward now, and a clear's relabel owed while held runs */
+  portsLifted() {
+    for (const job of this.jobs.values()) {
+      if (job.kind !== 'service') continue;
+      if (job._teardownOwed && !['up', 'starting'].includes(job.state)) { job._teardownOwed = false; this._teardownPublish(job).catch(() => { }); continue; }
+      job._teardownOwed = false;
+      if (job.publish && ['up', 'starting'].includes(job.state) && (job.ports || []).length) { delete job.publishHeld; this._ensurePublish(job); }
+    }
+    const owed = this._relabelOwed, gone = this._relabelGone || new Set(); this._relabelOwed = null; this._relabelGone = null;
+    if (owed && owed.size && this.d.getPorts) {
+      try {
+        const pf = this.d.getPorts();
+        const live = (rec) => [...this.jobs.values()].some((o) => !gone.has(o.id) && o.kind === 'service' && o.publish && ('service: ' + o.name === rec.label || 'service: ' + this.labelOf(o) === rec.label) && (o.ports || []).map(Number).includes(Number(rec.remotePort)));
+        for (const rec of (pf && pf.list && pf.list()) || []) { if (owed.has(rec.label) && !live(rec)) Promise.resolve(pf.forward(rec.hostId, rec.remotePort, { label: 'service: ' + CLEARED_TEXT, targetHost: rec.targetHost || '' })).catch(() => { }); }
+      } catch { }
+    }
   }
   /** THE ONE PLACE A PUBLISH OUTCOME LANDS (lane job-notice-dedupe): the job's own attempt and the relay's success the Ports
    *  manager adopted (relayPublished). The down record (`publishDown`, persisted — the repeat came at every restart) follows
@@ -3618,9 +3643,17 @@ class JobManager {
       const pf = this.d.getPorts && this.d.getPorts();
       job._pubGen = (job._pubGen || 0) + 1; job._publish = null; this._endUrlCheck(job); delete job.urlPending; delete job._urlGaveUp; // B-74f5: a pending URL check (its timer, its give-up mark) ends with the publish
       delete job.publishDown; // the down episode ends with a deliberate stop / park / refusal (never at a restart: that is when it repeated)
-      if (!pf || !job._pfId) return;
-      try { await pf.unpublish(job._pfId, { keepName: !forget }); } catch { }
-      try { await pf.unforward(job._pfId, { keepName: !forget }); } catch { }
+      delete job.publishHeld;
+      if (!pf) return;
+      // r3174: an adopted service may hold no id (its publish was refused while held): its OWN forward by the port, as the adopt does
+      let id = job._pfId;
+      if (!id) { try { const rec = ((pf.list && pf.list()) || []).find((r) => this._isJobForward(job, r)); id = rec ? rec.id : null; } catch { id = null; } }
+      const held = () => typeof pf.heldWords === 'function' && !!pf.heldWords();
+      if (!id) { if (held()) job._teardownOwed = true; return; }   // r3174: held — its forward is unknown now: ended at the lift
+      let refused = false;
+      try { await pf.unpublish(id, { keepName: !forget }); } catch (e) { if (e && e.code === 'ports_unread') refused = true; }
+      try { await pf.unforward(id, { keepName: !forget }); } catch (e) { if (e && e.code === 'ports_unread') refused = true; }
+      if (refused) { job._teardownOwed = true; return; }
       job._pfId = null; job.publishedUrl = null;
       this._touch(job);
     } catch { }
@@ -5359,7 +5392,7 @@ class JobManager {
       id: job.id, kind: job.kind, name: author || !job.name ? job.name : this.labelOf(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
       // lane job-notice-dedupe: the down record is the state while the service runs (a re-publish in flight does not hide it);
       // a stopped service has none (teardown ends the episode)
-      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
+      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: job.publishHeld || (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
       publishCause: (job.publishDown && job.publishDown.cause) || null, publishWhy: JN.whyOf(job.publishDown), publishSince: (job.publishDown && job.publishDown.sinceAt) || null, publishAttempts: (job.publishDown && job.publishDown.attempts) || 0,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: this._contextFor(job, author),
