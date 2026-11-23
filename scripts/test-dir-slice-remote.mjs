@@ -5,7 +5,8 @@
 //     the real HostManager, its ssh rung stubbed to run the SAME sh script here under a temp HOME with PLACED stalls (a process that
 //     ignores TERM and sleeps, its pid recorded, ended by this suite): the healthy typed folder listed while a base and a probe hang —
 //     judged by the ORDER (it lands while the hung run is still out, and the next ask serves it; 主开发 r2574: never a wall-clock bound;
-//     r2691: the same for ②, ③, the base-relative ask and the link-reached file ask — each waits on its landing, ends its own stall); a
+//     r2691: the same for ②, ③, the base-relative ask and the link-reached file ask — each waits on its landing, ends its own stall;
+//     r2789: ④'s slow folder and ⑦'s landing step too); a
 //     mount point child by name only; links never followed (unchecked); / as /x; one typed ask a folder; the cap; slow is not hung; ten
 //     asks one run; a hung typed folder marked 30 s; the rest's hold doubling; (r949) a child's marker file never read through a link;
 //     THE MOUNT TEST COMPARES REAL PATHS (a typed folder reached through a link whose real child is a mount point lands; the home's walk
@@ -66,12 +67,13 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     INM, INM + (mount ? '\nMP="$MP$NL$H/net$NL' + REALMH + '/real/stallm"' : '') + '\n' + OVR, 'B-99b9 the plant after the mount table');
   const unwrap = (cmd) => { const m = /^exec sh -c '([\s\S]*)'$/.exec(cmd); return m ? m[1].split(`'\\''`).join("'") : cmd; };   // the ssh rung's plain-sh wrapper
   const WAITT = 200, runs = [];
-  // the run's own bound there: 800 ms on the machine whose typed folders are SLOW (0.3 s: past the hub's 200 ms wait, inside the bound), 250 ms on
-  // the others (their stalls never end: a short bound keeps the suite short)
+  // the run's own bound there: 250 ms where a hung run must END at it (its stalls never end: ⑥'s hung typed folder, ⑦'s hung rests — their
+  // misses are those legs' facts); a NET of 20 s that judges nothing where a leg judges a healthy or slow run by its LANDING (r2574 / r2691 /
+  // r2789: ④'s slow folder — 0.3 s, past the hub's 200 ms wait — and ⑦'s landing step, run while the no-stall mark is set)
   // h-99o (主开发 r2574): ① judges the ORDER — the healthy typed folder LANDS while the hung run is still OUT — so its runs carry a NET
   // of 20 s that judges nothing (a real sh and ls under twelve lanes read past the hub's own 200 ms wait once); the leg ends its own stall
-  const NET20 = new Set(['h-99o', 'h-99a', 'h-99e', 'h-99g']);   // r2691: every host whose leg judges a healthy typed run by its LANDING (①, ②, ③, the base-relative ask, the link-reached file ask)
-  const runtOf = (id) => (NET20.has(id) ? 20e3 : id === 'h-99b' ? 800 : 250);   // their net twice the legs' 10 s landing wait: a hung run of theirs is surely still out then
+  const NET20 = new Set(['h-99o', 'h-99a', 'h-99e', 'h-99g', 'h-99b']);   // r2691 / r2789: every host whose leg judges a healthy or slow typed run by its LANDING (①, ②, ③, the base-relative ask, the link-reached file ask, ④)
+  const runtOf = (id) => (NET20.has(id) || (id === 'h-99d' && fs.existsSync(NOSTALL)) ? 20e3 : 250);   // their net twice the legs' 10 s landing wait: a hung run of theirs is surely still out then
   const shOf = (script, timeout) => new Promise((resolve, reject) => execFile('sh', ['-c', script], { env: { HOME: MH, PATH: `${FB}:/usr/bin:/bin`, VS_PL: PL }, timeout, maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
   const mkHm = (id) => {
     const hm = new HostManager({ dataDir: path.join(TMP, 'hub-data-' + id) });
@@ -183,10 +185,11 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     // 4. SLOW IS NOT HUNG: a typed folder that lists in 0.3 s (past the hub's wait) — partial, never marked; its landing KEPT for the next ask
     const a4 = await field('h-99b', '~/slow/');
     const e4 = () => [...(hmOf('h-99b')._sliceCache.get('h-99b').r1.values())].find((e) => e.raw && e.raw.dirs.some((d) => d.path.endsWith('/slow')));
-    await until(() => !!e4(), 3000);
+    const landed4 = await until(() => !!e4(), 10e3);   // r2789: the slow run's landing waited on as a fact (its run carries the net — never killed for being slow)
+    const notHung4 = ![...hmOf('h-99b')._sliceCache.get('h-99b').hung.keys()].includes('~/slow');   // its read: «never marked» read off the hub's own hung marks
     const a4b = await field('h-99b', '~/slow/');
     ok('B-99b9 SLOW IS NOT HUNG: past the hub\'s wait the first reply is partial (no landed result, no «asked again» mark); the run lands, and the next ask serves it — not partial',
-      a4.partial === true && !a4.verdict && listed(a4b, '~/slow', 'kid') && a4b.partial === false, { a4: [a4.partial, a4.verdict], a4b: a4b.partial });
+      a4.partial === true && landed4 && notHung4 && !a4b.verdict && listed(a4b, '~/slow', 'kid') && a4b.partial === false, { landed4, notHung4, a4: [a4.partial, a4.verdict], a4b: [a4b.partial, a4b.verdict] });
     // 5. TEN ASKS IN TWO SECONDS ARE ONE R1 (joined)
     const n0 = runs.filter((r) => r.id === 'h-99b' && r.sc.includes("ls1 \"$H\"'/slow2'")).length;
     await Promise.all(Array.from({ length: 10 }, (_, i) => sleep(i * 20).then(() => field('h-99b', '~/slow2/'))));
@@ -209,11 +212,12 @@ console.log('\n── ① THE TWO ASKS on the field\'s own road: one hung source
     const t0s = await stuck();
     const h1 = await holdNext(); H7._clock += 31e3; const h2 = await holdNext(); H7._clock += 61e3; const h3 = await holdNext();
     const t1s = await stuck();
-    fs.writeFileSync(NOSTALL, '1'); H7._clock += 121e3; await field('h-99d', '', ['~/net/a']); await until(() => !r2Of().p, 3000); fs.rmSync(NOSTALL, { force: true });
+    fs.writeFileSync(NOSTALL, '1'); H7._clock += 121e3; await field('h-99d', '', ['~/net/a']); const stepEnded = await until(() => !r2Of().p, 10e3); fs.rmSync(NOSTALL, { force: true });   // r2789: the healthy rest's END waited on as a fact (its run, started under the mark, carries the net) — its landing is landedMiss === 0
     const landedMiss = r2Of().miss; H7._clock += 1e3; const h4 = await holdNext();
     ok(`B-99b9 THE REST'S HOLD: ${[h1, h2, h3, h4].map((a) => a.heldFor).join(' / ')} ms — 30 s, doubled to 60 s and 120 s on the misses in a row, back to 30 s after a landing; said «held» (rowsHeld), never partial; ONE stuck process a hold window (${t1s - t0s} for three)`,
-      [h1, h2, h3, h4].every((a) => a.rowsHeld === true && a.partial === false) && h1.heldFor === 30e3 && h2.heldFor === 60e3 && h3.heldFor === 120e3 && landedMiss === 0 && h4.heldFor === 30e3 && t1s - t0s === 3,
-      { held: [h1, h2, h3, h4].map((a) => [a.heldFor, a.rowsHeld, a.partial]), landedMiss, stuck: t1s - t0s });
+      [h1, h2, h3, h4].every((a) => a.rowsHeld === true && a.partial === false) && h1.heldFor === 30e3 && h2.heldFor === 60e3 && h3.heldFor === 120e3 && stepEnded && landedMiss === 0 && h4.heldFor === 30e3 && t1s - t0s === 3,
+      { held: [h1, h2, h3, h4].map((a) => [a.heldFor, a.rowsHeld, a.partial]), stepEnded, landedMiss, stuck: t1s - t0s });
+    { const end7 = Date.now() + 3000; while (planted().some((pid) => !seenDead.has(pid) && alive(pid)) && Date.now() < end7) { for (const pid of planted()) { if (seenDead.has(pid)) continue; if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } } else seenDead.add(pid); } await sleep(30); } }   // r2789: ⑦ ends every live placed stall (its own and the ones before it), by the pids they wrote
     // 8. (主开发 r949, RULED) THE MOUNT TEST COMPARES REAL PATHS — the machine's table holds real paths: ~/viaw is a LINK to ~/real,
     // whose child «stallm» the table names a mount point by its REAL path; a test of it (its stat, as a file field asks) is the placed
     // stall. The typed folder reached through the link LANDS, the child said by name only
