@@ -18,6 +18,10 @@
 //      the watcher armed when the walk answers; five watchers whose files are not written yet share ONE listing; a file at the
 //      cwd's folder still starts its watch at once (its first read synchronous, as before); RED: a copy of the release's finder
 //   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
+//   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
+//      conversation or out of the projects folder, and a conversation id with a parent step, are refused by name before any file
+//      call; an aimed ask tells nothing of whether a file exists; a link that leads out answers as a missing agent; a linked meta is
+//      not read; a path handed straight to the reader is refused; the honest asks answer as today; RED: a copy without the law
 // Run: node scripts/test-subagent-transcript.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,7 +42,8 @@ const quiet = () => { console.warn = () => {}; console.error = () => {}; };
 const loud = () => { console.warn = REAL.warn; console.error = REAL.error; };
 
 // ── the stand-in home: a scratch home (HOME pointed at it: every road reads the home at its call) with 300 project folders ──
-const HOME = scratch('subagent-transcript-home');
+const HOME0 = scratch('subagent-transcript-home'); fs.mkdirSync(HOME0, { recursive: true });
+const HOME = fs.realpathSync(HOME0);   // its real path: the helper answers real paths (r2865)
 process.env.HOME = HOME;
 const PROJ = path.join(HOME, '.claude', 'projects');
 const { cwdToProjectDir } = require(path.join(REPO, 'src/session-store.js'));
@@ -218,7 +223,9 @@ console.log('④b THE META READ\'S BOUND — a meta file that never answers is r
 {
   T._resetForTest();
   const never = () => new Promise(() => {});
-  const fp1 = path.join(SUB, `agent-${STORM[4]}.jsonl`), fp2 = path.join(SUB, `agent-${STORM[5]}.jsonl`);
+  // the reader reads only a path the helper judged (r2865): each module finds its two agents first
+  const judge = async (M, id) => (await M.findAgentTranscript({ claudeSessionId: SID, agentId: id, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ })).fp;
+  const fp1 = await judge(T, STORM[4]), fp2 = await judge(T, STORM[5]);
   const first = T.readAgentTranscript(fp1, { metaRead: never, metaBoundMs: 150 });
   const next = T.readAgentTranscript(fp2);
   const within = (p, ms) => Promise.race([p, sleep(ms).then(() => ({ late: true }))]);
@@ -227,12 +234,14 @@ console.log('④b THE META READ\'S BOUND — a meta file that never answers is r
   ok(Array.isArray(b.records) && b.records.length > 0, `…and the next read in the queue is answered (${(b.records || []).length} records), never held behind it`);
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
   const unbounded = MUT.load('src/server/subagent-transcript.js', anchored(SRC, '        new Promise((res) => { timer = setTimeout(() => res(LATE), metaBoundMs); }),\n', '', 'the meta read\'s bound'), 'meta-unbounded');
-  const f1 = unbounded.readAgentTranscript(fp1, { metaRead: never, metaBoundMs: 150 });
-  const f2 = unbounded.readAgentTranscript(fp2);
+  const u1 = await judge(unbounded, STORM[4]), u2 = await judge(unbounded, STORM[5]);
+  const f1 = unbounded.readAgentTranscript(u1, { metaRead: never, metaBoundMs: 150 });
+  const f2 = unbounded.readAgentTranscript(u2);
   const [ra, rb] = await Promise.all([within(f1, 800), within(f2, 800)]);
   ok(ra.late && rb.late, 'RED CONTROL: a copy whose meta read has no bound holds that read and every read after it (neither answered in 0.8 s) — the leg above would be RED');
 }
 
+let ROUTE = null, ASK = null;   // ⑤'s mounted route, asked again by ⑧
 console.log('⑤ THE ROUTE\'S SAME — GET /api/subagent-messages through the helper');
 {
   T._resetForTest();
@@ -241,6 +250,7 @@ console.log('⑤ THE ROUTE\'S SAME — GET /api/subagent-messages through the he
   const ask = (h, q) => new Promise((resolve) => { const res = { code: 200 }; res.status = (c) => { res.code = c; return res; }; res.json = (o) => { res.body = o; resolve(res); return res; }; Promise.resolve(h({ query: q }, res)).catch((e) => resolve({ code: 'threw', body: String(e) })); });
   const S = require(path.join(REPO, 'src/routes/sessions.js'));
   const route = routeOf(S);
+  ROUTE = route; ASK = ask;
   const ref = await releaseCards(a5.fp, { attach: false, id: `sub-agent-${A5}` });
   const r = await counted(() => ask(route, { claudeSessionId: SID, cwd: CWD, agentId: A5 }));
   ok(r.code === 200 && J(r.body.messages) === J(ref.messages) && r.body.total === ref.total, `the route answers the release's cards (${(r.body.messages || []).length})`);
@@ -349,6 +359,63 @@ console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 Mi
   const bounded = await CX.readJsonlBoundedParsedPagedAsync(big.fp, { tailOnly: false, slot: 'subagent' });
   ok(Array.isArray(bounded) && bounded.length < big.lines, `CONTROL: the histories' bounded read of the same file keeps ${(bounded || []).length} of its ${big.lines} records — without \`whole\` the viewer would hide its middle`);
   fs.rmSync(big.fp, { force: true });
+}
+
+console.log('⑧ THE READ CANNOT BE AIMED (主开发 r2865) — whatever a caller sends, only a transcript inside that conversation\'s own subagents folder');
+{
+  T._resetForTest();
+  const said = (w, i) => ({ type: i % 2 ? 'assistant' : 'user', uuid: `${w}-${i}`, timestamp: new Date(Date.UTC(2026, 10, 23, 3, 0, i)).toISOString(), message: { role: i % 2 ? 'assistant' : 'user', content: [{ type: 'text', text: `${w} line ${i}` }] } });
+  const write = (fp, w) => { fs.mkdirSync(path.dirname(fp), { recursive: true }); fs.writeFileSync(fp, [0, 1, 2, 3].map((i) => J(said(w, i)) + '\n').join('')); fs.writeFileSync(fp.replace('.jsonl', '.meta.json'), J({ agentType: 'general-purpose', description: `${w} meta` })); return fp; };
+  const SID_B = '0b5e7c1a-2222-4333-8444-955566667777', B9 = 'b0000000000000b9', OWN = 'e00000000000000e', WF = 'f0000000000000f1', LINKED = 'e0000000000000e7', META_LINKED = 'e0000000000000e8';   // ids no other leg wrote (⑦'s e1 / e2 sit in another folder: the walk would find them)
+  const DIR = path.join(PROJ, cwdToProjectDir(CWD));
+  write(path.join(DIR, SID_B, 'subagents', `agent-${B9}.jsonl`), 'WORDS-OF-CONVERSATION-B');
+  const OUT = write(path.join(HOME, 'outside', 'secret.jsonl'), 'WORDS-OUTSIDE-EVERY-CONVERSATION');
+  write(path.join(SUB, `agent-${OWN}.jsonl`), 'plum-own-words-of-A');
+  write(path.join(SUB, 'workflows', 'wf_run1', `agent-${WF}.jsonl`), 'plum-workflow-words-of-A');
+  fs.symlinkSync(OUT, path.join(SUB, `agent-${LINKED}.jsonl`));   // a link inside A's subagents folder that leads out
+  write(path.join(SUB, `agent-${META_LINKED}.jsonl`), 'plum-meta-linked-of-A');
+  fs.rmSync(path.join(SUB, `agent-${META_LINKED}.meta.json`)); fs.symlinkSync(OUT.replace('.jsonl', '.meta.json'), path.join(SUB, `agent-${META_LINKED}.meta.json`));
+  const text = (r) => J(r && r.body);
+  // the verifier's table (its geometry: the cwd's folder sits right under the projects root)
+  const toB = '/' + '../'.repeat(3) + `${SID_B}/subagents/agent-${B9}`, toOut = '/' + '../'.repeat(6) + 'outside/secret', toNone = '/' + '../'.repeat(6) + 'outside/nothing-here';
+  const own = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: OWN });
+  const wf = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: WF });
+  const walked = await ASK(ROUTE, { claudeSessionId: SID, agentId: OWN });
+  ok(own.code === 200 && text(own).includes('plum-own-words-of-A') && wf.code === 200 && text(wf).includes('plum-workflow-words-of-A') && walked.code === 200 && text(walked).includes('plum-own-words-of-A'), `the honest asks answer as today: a plain sub-agent, a workflow run's agent, the walked road with no working directory (${own.code} / ${wf.code} / ${walked.code})`);
+  for (const [name, q, w] of [
+    ['an agent id climbing into conversation B', { claudeSessionId: SID, cwd: CWD, agentId: toB }, 'WORDS-OF-CONVERSATION-B'],
+    ['an agent id climbing out of the projects folder', { claudeSessionId: SID, cwd: CWD, agentId: toOut }, 'WORDS-OUTSIDE'],
+    ['the same on the walked road (no cwd)', { claudeSessionId: SID, agentId: toOut }, 'WORDS-OUTSIDE'],
+    ['a conversation id with a parent step («A/../B»)', { claudeSessionId: `${SID}/../${SID_B}`, cwd: CWD, agentId: B9 }, 'WORDS-OF-CONVERSATION-B'],
+  ]) {
+    const r = await counted(() => ASK(ROUTE, q));
+    ok(r.code === 400 && !!r.body.refused && !text(r).includes(w) && ASYNC.length + SYNC.length === 0, `the route, ${name}: refused by name before any file call (${r.code}, «${String(r.body.refused || '').slice(0, 64)}», ${ASYNC.length + SYNC.length} file calls)`);
+  }
+  const rOut = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: toOut }), rNone = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: toNone });
+  ok(rOut.code === rNone.code && text(rOut).length === text(rNone).length, `an aimed ask tells nothing of whether a file exists (outside / missing: ${rOut.code} / ${rNone.code}, ${text(rOut).length} / ${text(rNone).length} bytes)`);
+  const rLink = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: LINKED }), rMissing = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: 'e0000000000000e9' });
+  ok(rLink.code === 200 && !text(rLink).includes('WORDS-OUTSIDE') && text(rLink) === text(rMissing) && T.stats().outside >= 1, `a link inside A's subagents folder that leads out is no place: answered as a missing agent (${rLink.code}, ${(rLink.body.messages || []).length} messages; judged outside ${T.stats().outside})`);
+  const rMeta = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: META_LINKED });
+  ok(rMeta.code === 200 && text(rMeta).includes('plum-meta-linked-of-A') && !text(rMeta).includes('WORDS-OUTSIDE') && J(rMeta.body.meta) === '{}', `a meta file that is a link leading out is not read: the transcript answers, its meta empty (${J(rMeta.body.meta)})`);
+  const H = hub(require(WSH_PATH));
+  const at = await counted(() => attachOf(H, toOut));
+  ok(!!at.frame && /agent id is not one the CLI gives/.test(at.frame.loadRefused || '') && !J(at.frame).includes('WORDS-OUTSIDE') && ASYNC.length + SYNC.length === 0, `the attach of «sub-agent-/../…/outside/secret»: refused by name, nothing read (${ASYNC.length + SYNC.length} file calls, «${String((at.frame || {}).loadRefused || '').slice(0, 64)}»)`);
+  const atLink = await attachOf(H, LINKED), atOwn = await attachOf(H, OWN);
+  ok(!!atLink.frame && (atLink.frame.messages || []).length === 0 && !J(atLink.frame).includes('WORDS-OUTSIDE') && !!atOwn.frame && J(atOwn.frame.messages).includes('plum-own-words-of-A'), 'the attach: a link that leads out answers as a missing agent; A\'s own agent answers as today');
+  const third = await T.readAgentTranscript(OUT);
+  ok(!!third.refused && !third.records, `the reader reads only a path the helper judged: a path handed straight in is refused («${third.refused}»)`);
+  // RED: the helper before r2865 (no shape test, no real-path judge, the meta read as found), planted in a copy
+  const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
+  const lawless = MUT.load('src/server/subagent-transcript.js',
+    anchored(anchored(anchored(HSRC,
+      '  const refused = idsRefusal(claudeSessionId, agentId);\n', '  const refused = null;   /* stale-pins: kept — the helper before r2865, planted as leg ⑧\'s RED control */\n', 'the shape test'),
+      '  if (!inside) { _stats.outside++; return null; }\n', '', 'the real-path judge'),
+      "fsp.realpath(metaPath).then((r) => (r === metaPath ? (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath) : null))", "Promise.resolve().then(() => (metaRead || ((p) => fsp.readFile(p, 'utf-8')))(metaPath))", 'the meta judge'), 'lawless');   // stale-pins: kept — the helper's meta read before r2865, planted as leg ⑧'s RED control
+  const lB = await lawless.agentTranscript({ claudeSessionId: SID, agentId: toB, exactDir: DIR, root: PROJ });
+  const lOut = await lawless.agentTranscript({ claudeSessionId: SID, agentId: toOut, root: PROJ });
+  const lLink = await lawless.agentTranscript({ claudeSessionId: SID, agentId: LINKED, exactDir: DIR, root: PROJ });
+  const lMeta = await lawless.agentTranscript({ claudeSessionId: SID, agentId: META_LINKED, exactDir: DIR, root: PROJ });
+  ok(J(lB.records).includes('WORDS-OF-CONVERSATION-B') && J(lOut.records).includes('WORDS-OUTSIDE') && J(lLink.records).includes('WORDS-OUTSIDE') && J(lMeta.meta).includes('WORDS-OUTSIDE'), 'RED CONTROL: a copy without the shape test and the real-path judge returns conversation B\'s words, the outside file\'s (on the walked road too, and through the link) and the linked meta — the legs above would be RED');
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);

@@ -234,6 +234,9 @@ function setup(ctx) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     try {
       const got = await require('../server/subagent-transcript').agentTranscript({ claudeSessionId: String(claudeSessionId), agentId: String(agentId), exactDir: cwd ? path.join(projectsDir, cwdToProjectDir(String(cwd))) : null, root: projectsDir });
+      // r2865: ids not of the CLI's shape — refused by name before any file call (400); a file the helper does not judge inside this
+      // conversation's own subagents folder answers as a missing one (below), so nothing tells whether a file elsewhere exists
+      if (got.aimed) return res.status(400).json({ error: `this agent's transcript is not asked by ids the CLI gives: ${got.refused}`, refused: got.refused, messages: [], total: 0, meta: {} });
       if (got.refused) return res.status(503).json({ error: `this agent's transcript could not be read here: ${got.refused}`, refused: got.refused, messages: [], total: 0, meta: {} });
       if (!got.fp) return res.json({ messages: [], total: 0, meta: {} });
       const mm = createMessageManager('claude', `sub-agent-${agentId}`);

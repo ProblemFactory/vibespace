@@ -1625,7 +1625,9 @@ function registerWsHandler(wss, ctx) {
               // pull the agent transcript into the local cache first — the
               // helper then reads it like any other place.
               const subHost = data.hostId || parentSession?.host || null;
-              if (subHost && hosts && /^[\w-]+$/.test(agentId)) {
+              // r2865: ids not of the CLI's shape are refused by name (the helper says it) BEFORE any file call — the pull too
+              const aimed = require('./server/subagent-transcript').idsRefusal(claudeId, agentId);
+              if (!aimed && subHost && hosts && /^[\w-]+$/.test(agentId)) {
                 try {
                   const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });
                   if (p) pulled.push(p);
