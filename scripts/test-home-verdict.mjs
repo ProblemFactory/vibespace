@@ -897,6 +897,67 @@ console.log(JSON.stringify({ home: S.REHOMED && S.REHOMED.home, linked: (S.REHOM
   ok(!!r4.j && !r4.j.linked.includes('agent-browser') && /VS_AGENT_BROWSER_BIN names .*shim\/agent-browser: no usable agent-browser there/.test(r4.err),
     'a NAMED program that is VibeSpace\'s own shim (its marker) is not the driver: none, said by name', { j: r4.j, err: r4.err.slice(-300) });
   ok(CUT.present && !!rc.j && !rc.j.linked.includes('agent-browser') && rc.j.real !== D2.want, 'CONTROL: the named scene through a copy with the link cut — no driver reaches the suite (the skip whole the box read)', { j: rc.j, err: rc.err.slice(-300) });
+  // THE DOOR LEFT ALONE (主开发 r2775): a suite whose home is ALREADY a throwaway (a box row's own scratch home, r2203) is left alone by
+  // the re-home, so the door must apply there too — the program the variable names is linked into a folder of its own, FIRST on its
+  // PATH, and the suite's own fence (src/browser-facts.js binaryResolver) finds THAT program; no name, none; a gone name or the shim,
+  // none, said by name. RED CONTROL: the release's early return (the door inside the re-home only — the box's NO READING at will)
+  const LA = path.join(DIR, 'drv-left-alone'), LA_HOME = path.join(LA, 'home'), LA_BIN = path.join(LA, 'bin');
+  fs.mkdirSync(LA_HOME, { recursive: true }); fs.mkdirSync(LA_BIN, { recursive: true });
+  const LA_WANT = fake(path.join(LA, 'named/agent-browser'), REAL_BODY), LA_SHIM = fake(path.join(LA, 'shim/agent-browser'), SHIM_BODY);
+  const PROBE_LA = (url) => `import fs from 'node:fs'; import { createRequire } from 'node:module';
+const S = await import(${JSON.stringify(url)});
+const Ff = createRequire(import.meta.url)(${JSON.stringify(path.join(REPO, 'src/browser-facts.js'))});
+let fence = null; try { fence = Ff.binaryResolver('agent-browser', process.env)(); } catch { }
+let real = null; try { real = fence && fs.realpathSync(fence); } catch { }
+console.log(JSON.stringify({ rehomed: !!S.REHOMED, left: S.DRIVER_LEFT_ALONE || null, fence, real, path: process.env.PATH }));`;
+  const LA_PATH = `${LA_BIN}:/usr/bin:/bin`, laEnv = (extra = {}) => ({ HOME: LA_HOME, PATH: LA_PATH, LANG: 'C.UTF-8', ...extra });
+  const LA_CUT = mutant('drvlacut', "  if (v.rehome || v.why !== 'temp-home') return null;", '  return null;');
+  const goLA = (tag, env, url = SCRATCH_URL, dir = DIR) => start(path.join(dir, `test-hv-drvla-${tag}.mjs`), env, PROBE_LA(url), { clean: true });
+  const [l1, l2, l3, l4, lc] = await Promise.all([goLA('named', laEnv({ VS_AGENT_BROWSER_BIN: LA_WANT })), goLA('noname', laEnv()),
+    goLA('gone', laEnv({ VS_AGENT_BROWSER_BIN: path.join(LA, 'none/agent-browser') })), goLA('shim', laEnv({ VS_AGENT_BROWSER_BIN: LA_SHIM })),
+    goLA('cut', laEnv({ VS_AGENT_BROWSER_BIN: LA_WANT }), LA_CUT.url, path.dirname(LA_CUT.probe))]);
+  const laDir = l1.j && l1.j.left && l1.j.left.dir;
+  ok(!!l1.j && l1.j.rehomed === false && !!laDir && l1.j.path === `${laDir}:${LA_PATH}` && l1.j.fence === path.join(laDir, 'agent-browser') && l1.j.real === LA_WANT && !fs.existsSync(laDir),
+    'LEFT ALONE (r2775): a suite whose home is already a throwaway is not re-homed, and the program VS_AGENT_BROWSER_BIN names still reaches its own fence — linked into a folder of the run\'s own, FIRST on its PATH, removed at its exit', { j: l1.j, err: l1.err.slice(-300) });
+  ok(!!l2.j && l2.j.rehomed === false && l2.j.left === null && l2.j.path === LA_PATH && l2.j.real !== LA_WANT && !/VS_AGENT_BROWSER_BIN names/.test(l2.err),
+    'LEFT ALONE, NO NAME, NO DRIVER: nothing changes — no folder made, the PATH as handed, the fence answers in its own words', { j: l2.j, err: l2.err.slice(-300) });
+  ok(!!l3.j && !!l3.j.left && l3.j.left.dir === null && l3.j.path === LA_PATH && l3.j.real !== LA_WANT && /VS_AGENT_BROWSER_BIN names .*none\/agent-browser: no usable agent-browser there/.test(l3.err)
+    && !!l4.j && !!l4.j.left && l4.j.left.dir === null && l4.j.path === LA_PATH && /VS_AGENT_BROWSER_BIN names .*shim\/agent-browser: no usable agent-browser there/.test(l4.err),
+    'LEFT ALONE, a NAMED program that is not there, or that is VibeSpace\'s own shim (its marker): none, said by name on stderr — the PATH as handed', { l3: l3.j, l4: l4.j, err: (l3.err + l4.err).slice(-400) });
+  ok(LA_CUT.present && !!lc.j && lc.j.rehomed === false && !lc.j.left && lc.j.path === LA_PATH && lc.j.real !== LA_WANT,
+    'RED CONTROL: the release\'s early return (the door inside the re-home only) — the same named scene left alone reaches no driver: the box\'s «NO REAL DRIVER» skip, made at will', { j: lc.j, err: lc.err.slice(-300) });
+  // THE DRIVER'S INSTALLED BROWSERS (主开发 r2777, row 401): the folder VS_AGENT_BROWSER_BROWSERS names is linked as
+  // <home>/.agent-browser/browsers — where the driver and the suites (os.homedir()) look: in the re-home's own home, or in a left-alone
+  // suite's home only where none is there (taken back at its exit); no name, none; a name that is no folder, none, said by name; one
+  // already there is never covered. RED CONTROL: the release's scratch (no such door) — the suite's home has none (row 401's skip)
+  const BR = fake(path.join(LA, 'builds/chrome-151.0.7922.34/chrome'), REAL_BODY), BR_DIR = path.dirname(path.dirname(BR));
+  const PROBE_BR = (url) => `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+const S = await import(${JSON.stringify(url)});
+const at = path.join(os.homedir(), '.agent-browser', 'browsers');
+let real = null; try { real = fs.realpathSync(at); } catch { }
+let builds = null; try { builds = fs.readdirSync(at); } catch { }
+console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, builds, placed: (S.REHOMED ? S.REHOMED.browsers : S.DRIVER_LEFT_ALONE && S.DRIVER_LEFT_ALONE.browsers) || null }));`;
+  const brHome = (tag) => { const h = path.join(LA, `br-${tag}`); fs.mkdirSync(h, { recursive: true }); return h; };
+  const BH = { left: brHome('left'), none: brHome('none'), gone: brHome('gone'), there: brHome('there'), cut: brHome('cut') };
+  fs.mkdirSync(path.join(BH.there, '.agent-browser', 'browsers', 'chrome-1.0.0.0'), { recursive: true });   // a folder already there: never covered
+  const brEnv = (h, extra = {}) => ({ HOME: h, PATH: LA_PATH, LANG: 'C.UTF-8', ...extra });
+  const DB = scene('browsers', () => ({ env: { VS_AGENT_BROWSER_BROWSERS: BR_DIR } }));   // a stand-in the re-home takes
+  const BR_CUT = mutant('brcut', 'function placeBrowsers(home, me, { own = false } = {}) {\n', 'function placeBrowsers(home, me, { own = false } = {}) {\n  return null;\n');
+  const goBR = (tag, env, url = SCRATCH_URL, dir = DIR, o = { clean: true }) => start(path.join(dir, `test-hv-drvbr-${tag}.mjs`), env, PROBE_BR(url), o);
+  const [b1, b2, b3, b4, b5, bc] = await Promise.all([goBR('left', brEnv(BH.left, { VS_AGENT_BROWSER_BROWSERS: BR_DIR })), goBR('rehomed', { ...DB.s.env, ...DB.env }, SCRATCH_URL, DIR, {}),
+    goBR('noname', brEnv(BH.none)), goBR('gone', brEnv(BH.gone, { VS_AGENT_BROWSER_BROWSERS: path.join(LA, 'no-builds') })),
+    goBR('there', brEnv(BH.there, { VS_AGENT_BROWSER_BROWSERS: BR_DIR })), goBR('cut', brEnv(BH.cut, { VS_AGENT_BROWSER_BROWSERS: BR_DIR }), BR_CUT.url, path.dirname(BR_CUT.probe))]);
+  const BUILD = 'chrome-151.0.7922.34';
+  ok(!!b1.j && b1.j.rehomed === false && b1.j.real === BR_DIR && (b1.j.builds || []).includes(BUILD) && !!b1.j.placed && b1.j.placed.at === path.join(BH.left, '.agent-browser', 'browsers') && !fs.existsSync(path.join(BH.left, '.agent-browser'))
+    && !!b2.j && b2.j.rehomed === true && b2.j.real === BR_DIR && (b2.j.builds || []).includes(BUILD) && b2.j.home !== DB.s.home,
+    'THE INSTALLED BROWSERS (r2777): the folder VS_AGENT_BROWSER_BROWSERS names reaches the suite at <home>/.agent-browser/browsers — a left-alone suite\'s home (taken back at its exit) and the re-home\'s own — where the driver and the suites look', { b1: b1.j, b2: b2.j, err: (b1.err + b2.err).slice(-300) });
+  ok(!!b3.j && b3.j.real === null && b3.j.placed === null && !fs.existsSync(path.join(BH.none, '.agent-browser'))
+    && !!b4.j && b4.j.real === null && !!b4.j.placed && b4.j.placed.at === null && /VS_AGENT_BROWSER_BROWSERS names .*no-builds: no folder of installed browsers there/.test(b4.err),
+    'NO NAME, NO BROWSERS: nothing is placed; a NAMED folder that is not there is none, said by name on stderr — never found, never fetched', { b3: b3.j, b4: b4.j, err: b4.err.slice(-300) });
+  ok(!!b5.j && !!b5.j.placed && b5.j.placed.at === null && (b5.j.builds || []).join() === 'chrome-1.0.0.0' && /is there already/.test(b5.err) && fs.existsSync(path.join(BH.there, '.agent-browser', 'browsers', 'chrome-1.0.0.0')),
+    'a home that HAS its installed browsers keeps them: the named folder never covers one, said by name, and what was there stays after the exit', { b5: b5.j, err: b5.err.slice(-300) });
+  ok(BR_CUT.present && !!bc.j && bc.j.real === null && bc.j.placed === null,
+    'RED CONTROL: the release\'s scratch (no browsers door) — the named folder never reaches the suite\'s home: row 401\'s «no installed browser under …», made at will', { j: bc.j, err: bc.err.slice(-300) });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

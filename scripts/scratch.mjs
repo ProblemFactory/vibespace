@@ -278,7 +278,9 @@ const HANDED = Object.freeze({ HOME: HOME_COMPARED, PATH: process.env.PATH || ''
   // the agent CLI PINS as handed (VS_<CLI>_BIN) — the real-CLI accessor's alone: the built environment carries none of them
   ...Object.fromEntries(HV.AGENT_CLIS.map((c) => `VS_${c.toUpperCase().replace(/-/g, '_')}_BIN`).map((k) => [k, process.env[k] || ''])),
   // the browser DRIVER's pin as handed (主开发 r2068): the driver's door below reads it alone
-  VS_AGENT_BROWSER_BIN: process.env.VS_AGENT_BROWSER_BIN || '' });
+  VS_AGENT_BROWSER_BIN: process.env.VS_AGENT_BROWSER_BIN || '',
+  // …and its INSTALLED BROWSERS as handed (主开发 r2777): the folder door below reads it alone
+  VS_AGENT_BROWSER_BROWSERS: process.env.VS_AGENT_BROWSER_BROWSERS || '' });
 /** THE ENVIRONMENT THIS PROCESS WAS STARTED WITH (B-ba47 B2, 主开发 2026-11-15 11:17Z item 3): the kernel's copy of the
  *  exec-time block, which no setenv changes (measured: a planted name, a changed one, a removed one, a long title set on the process
  *  leave it as it was) — what tells a name the suite set ITSELF from one it was handed (rehomeEnv `handed`: its own is kept
@@ -324,12 +326,13 @@ export const linkTools = HL.linkTools;
  *  .vs-bin + the system's folders), so a driver the run hands on PATH (npm -g puts it in node's own folder, never carried, r1083
  *  V1) no longer reaches the suites' fence (src/browser-facts.js binaryResolver over the suite's own PATH): every real-driver suite
  *  skipped whole. THE VARIABLE ONLY (r2095): a real browser's driver runs only where a runner NAMES it, on purpose — the program
- *  VS_AGENT_BROWSER_BIN names (as handed) is linked into the suite's own .vs-bin; named and unusable (gone, not executable, or
+ *  VS_AGENT_BROWSER_BIN names (as handed) is linked into the suite's own .vs-bin (a process LEFT ALONE: into a folder of its own, first
+ *  on its PATH — DRIVER_LEFT_ALONE below, r2775); named and unusable (gone, not executable, or
  *  VibeSpace's own shim by its marker) is none, said by name; with no name, none — the fence skips in its own words, and no driver
  *  standing on a person's PATH is ever picked up. PURE over its probes (`usable`, `isShim`). */
 // `skip`: THE ONE SENTENCE every real-driver suite's driver-less skip begins with (主开发 r2095), whole or a leg — the integrator's runner finds
 // a skipped driver leg in any row's output by this fixed string and reports it NO READING / PARTIAL, never a plain green
-export const DRIVER = Object.freeze({ name: 'agent-browser', env: 'VS_AGENT_BROWSER_BIN', shimMarker: 'VIBESPACE-AGENT-BROWSER-SHIM',   // test-home-verdict pins name + marker to src/browser-verbs.js
+export const DRIVER = Object.freeze({ name: 'agent-browser', env: 'VS_AGENT_BROWSER_BIN', browsersEnv: 'VS_AGENT_BROWSER_BROWSERS', shimMarker: 'VIBESPACE-AGENT-BROWSER-SHIM',   // test-home-verdict pins name + marker to src/browser-verbs.js
   skip: 'NO REAL DRIVER (VS_AGENT_BROWSER_BIN names none usable here):' });
 export function driverDoor({ named = '', usable = () => false, isShim = () => false } = {}) {
   if (!named) return { path: null, named: false };
@@ -337,6 +340,35 @@ export function driverDoor({ named = '', usable = () => false, isShim = () => fa
 }
 const isExecFile = (p) => { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } };
 const isDriverShim = (p) => { try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(512); const n = fs.readSync(fd, b, 0, 512, 0); return b.subarray(0, n).toString('utf8').includes(DRIVER.shimMarker); } finally { fs.closeSync(fd); } } catch { return false; } };
+/** THE DRIVER'S INSTALLED BROWSERS (主开发 r2777, the box's row 401): a real-driver suite that needs the driver's OWN installed Chrome
+ *  builds reads them where the driver installs them, <home>/.agent-browser/browsers (os.homedir(): test-browser-live-input,
+ *  test-browser-live-fit, test-browser-profiles-ui; test-browser-live uses them when there), and a suite's own home — re-homed, or
+ *  a row's scratch — has none. The driver documents NO variable for that folder (agent-browser.dev/configuration: only
+ *  AGENT_BROWSER_EXECUTABLE_PATH, «Custom browser executable path», ONE executable — the suites list builds), so THE SAME LAW AS THE
+ *  DOOR: the folder VS_AGENT_BROWSER_BROWSERS names (as handed; the driver's layout, chrome-<version>/chrome) is linked as
+ *  <home>/.agent-browser/browsers; named and not a folder is none, said by name; with no name, none — never found, never fetched.
+ *  PURE over its probe (`isDir`). */
+export function browsersDoor({ named = '', isDir = () => false } = {}) {
+  if (!named) return { path: null, named: false };
+  return named.startsWith('/') && isDir(named) ? { path: named, named: true } : { path: null, named: true, why: `${DRIVER.browsersEnv} names ${named}: no folder of installed browsers there` };
+}
+const isDirAt = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+/** places the named folder as <home>/.agent-browser/browsers — never over one that is there (said, left as it is); `own`: the home
+ *  is not this run's to keep (a left-alone suite's), so what this placed is taken back at exit → null (no name) | { at, target } | { at: null, why } */
+function placeBrowsers(home, me, { own = false } = {}) {
+  const b = browsersDoor({ named: HANDED[DRIVER.browsersEnv], isDir: isDirAt });
+  if (!b.named) return null;
+  if (!b.path) { process.stderr.write(`[scratch] ${me}: ${b.why} — its installed-browser legs cannot run\n`); return Object.freeze({ at: null, why: b.why }); }
+  const parent = path.join(home, '.agent-browser'), at = path.join(parent, 'browsers');
+  let there = false; try { fs.lstatSync(at); there = true; } catch { }
+  if (there) { process.stderr.write(`[scratch] ${me}: ${at} is there already — ${DRIVER.browsersEnv} left unplaced\n`); return Object.freeze({ at: null, why: `${at} is there already` }); }
+  let real = b.path; try { real = fs.realpathSync(b.path); } catch { }
+  const madeParent = !fs.existsSync(parent);
+  fs.mkdirSync(parent, { recursive: true });
+  fs.symlinkSync(real, at);
+  if (own) process.on('exit', () => { try { fs.unlinkSync(at); } catch { } if (madeParent) { try { fs.rmdirSync(parent); } catch { } } });   // the link only, never its target
+  return Object.freeze({ at, target: real });
+}
 export const makeResolver = HL.makeResolver;
 export const resolveFs = HL.resolveFs;
 const isFile = HL.isFile;
@@ -449,6 +481,7 @@ export const REHOMED = (() => {
   const drv = driverDoor({ named: HANDED[DRIVER.env], usable: isExecFile, isShim: isDriverShim });
   if (drv.path) { let real = drv.path; try { real = fs.realpathSync(drv.path); } catch { } linked.push(...linkTools(binDir, [{ name: DRIVER.name, target: real }])); }
   else if (drv.named) process.stderr.write(`[scratch] ${me}: ${drv.why} — its real-driver legs cannot run\n`);
+  const browsers = placeBrowsers(home, me);   // the driver's installed browsers the run NAMES (r2777), in this home of its own
   for (const k of Object.keys(process.env)) if (!Object.prototype.hasOwnProperty.call(env, k)) delete process.env[k];
   Object.assign(process.env, env);
   let initPaths = null;
@@ -469,7 +502,34 @@ export const REHOMED = (() => {
     + `${SEAM ? `; the seam ${NOT_TEMP_ENV} made ${SEAM} not a temp root` : ''}`
     + `${own.length || ownPath.length ? `; LOADED AFTER ITS OWN CODE RAN — what it set itself is kept as it is: ${[...own, ...(ownPath.length ? [`${ownPath.length} PATH entr${ownPath.length === 1 ? 'y' : 'ies'} of its own (in front)`] : [])].join(', ')}` : ''}`
     + `${STARTED_ENV ? '' : '; the environment it was started with is not readable here (no /proc): every name was judged'}\n`);
-  return Object.freeze({ home, why: v.why, dropped: Object.freeze(dropped), notCarried: Object.freeze(notCarried), linked: Object.freeze(linked), node: node ? Object.freeze({ file: node.file }) : null, initPaths, seam: SEAM, carried: Object.freeze(carried), notCarriedNames: Object.freeze(notCarriedNames), compared: HANDED.HOME, own: Object.freeze(own), ownPath: Object.freeze(ownPath) });
+  return Object.freeze({ home, why: v.why, dropped: Object.freeze(dropped), notCarried: Object.freeze(notCarried), linked: Object.freeze(linked), node: node ? Object.freeze({ file: node.file }) : null, initPaths, seam: SEAM, carried: Object.freeze(carried), notCarriedNames: Object.freeze(notCarriedNames), compared: HANDED.HOME, own: Object.freeze(own), ownPath: Object.freeze(ownPath), browsers });
+})();
+/** THE DRIVER'S DOOR, LEFT ALONE (主开发 r2775, the box's real-driver rows read NO READING): a process the re-home LEAVES ALONE (its
+ *  handed home is already under a temp root — every box row's own scratch home, r2203; a suite or debug script only, never the tier
+ *  runner) keeps the PATH it was handed, and a runner
+ *  names the driver in the variable only (r2095). The door applies WHEREVER A RUNNER NAMES A USABLE DRIVER, re-homed or not: here
+ *  the one program VS_AGENT_BROWSER_BIN names is linked as agent-browser into a folder of this run's own (under the scratch temp
+ *  root, stamped, removed at exit) put FIRST on PATH, so the suite's fence (src/browser-facts.js binaryResolver over its own PATH)
+ *  finds THAT program; named and unusable (gone, not executable, the shim) is none, said by name; with no name, none: nothing
+ *  changes. null when re-homed (the re-home's own door above) or with no name; else { dir, linked, target } or { dir: null, why }. */
+export const DRIVER_LEFT_ALONE = (() => {
+  if (!REHOMES || REHOMED) return null;   // only a SUITE (or debug script) the re-home left alone — never the tier runner, never a person's home
+  const v = HV.suiteRehome({ home: HANDED.HOME, tmpRoots: TMP_ROOTS, varRoots: [os.tmpdir()], notTemp: SEAM ? [SEAM] : [], resolve: makeResolver() });
+  if (v.rehome || v.why !== 'temp-home') return null;   // its home is a throwaway (a box row's own scratch, a lane's): the door's case
+  const me = path.basename(process.argv[1] || '');
+  const drv = driverDoor({ named: HANDED[DRIVER.env], usable: isExecFile, isShim: isDriverShim });
+  let driver = null;
+  if (drv.named && !drv.path) { process.stderr.write(`[scratch] ${me}: ${drv.why} — its real-driver legs cannot run\n`); driver = { dir: null, why: drv.why }; }
+  else if (drv.path) {
+    let real = drv.path; try { real = fs.realpathSync(drv.path); } catch { }
+    const dir = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}driver-`)));
+    stampScratchRun(dir);   // this run's own, as the scratch homes are
+    const linked = linkTools(dir, [{ name: DRIVER.name, target: real }]);
+    process.env.PATH = dir + (process.env.PATH ? path.delimiter + process.env.PATH : '');
+    driver = { dir, linked: Object.freeze(linked), target: real };
+  }
+  const browsers = placeBrowsers(HANDED.HOME, me, { own: true });   // the home is the runner's: taken back at exit
+  return driver || browsers ? Object.freeze({ ...(driver || { dir: null }), browsers }) : null;
 })();
 /** Is the process whose main file RESOLVES to `me` a row of `rows` — the row's FILE in this checkout's scripts folder,
  *  compared where both resolve (主开发 18:25Z item 2: a file with a row's name elsewhere, or a link named after one, is not
