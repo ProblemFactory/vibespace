@@ -111,8 +111,8 @@ const WebSocket = require('ws');
 const target = await until(async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'), 20000, 250);
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
-let seq = 0; const pend = new Map();
-ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+let seq = 0; const pend = new Map(), cdpEvents = new Set();   // cdpEvents: ⑦'s own control of one response (Fetch.requestPaused)
+ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method) for (const f of cdpEvents) { try { f(m); } catch { } } });
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails)).slice(0, 400)); return r.result.value; };
 await cdp('Page.enable');
@@ -235,6 +235,71 @@ try {
   await confirmOk();
   const down3 = await until(async () => { const j = await jobOf(S.j3); return j && j.desiredUp === false && j.state !== 'up' ? j : null; }, 20000, 400);
   ok(!!(!!l3 && !!x390 && x390.inside && x390.topmost && !!conf3 && conf3.ok && conf3.native === 0 && !!down3), '⑥ 390: the job card\'s ✕ (on screen) asks in the theme\'s confirm ⇒ the job STOPS — no native dialog on any road', { l3, x390, conf3, job: down3 && { state: down3.state, desiredUp: down3.desiredUp } });
+
+  // ⑦ A NOTIFY DURING THE WINDOW'S FIRST READ (主开发 r2966 — the candidate's hosted run 45112121215: the first chip read «running»
+  // with no start count, for good). «telegram-bot» stopped first; the page opened afresh; the Vault window's FIRST /api/vault/contents
+  // answer HELD by this suite's own control of that one response (the CDP Fetch domain at the response stage: the list the server
+  // answered BEFORE the start); the job STARTED while it is held, until its new use line's ONE notify has reached the page; the answer
+  // let go ⇒ the chip reaches the new count. RED: the release's order (the notify dropped while there is no list yet) — the page's
+  // bundle built as the tree builds it (its build's own flags: minified) with that one order put back in src/lib/vault-window.js,
+  // served for /bundle.js by the same control
+  const releaseBundle = async () => {
+    const src = fs.readFileSync(path.join(wt, 'src', 'lib', 'vault-window.js'), 'utf8');
+    const from = '    if (contentsBusy) { contentsAgain = true; return; }\n    if (!st.data) return;\n';
+    const hits = src.split(from).length - 1;
+    if (hits !== 1) return { hits, js: null };
+    const swapped = src.replace(from, '    if (!st.data) return;\n    if (contentsBusy) { contentsAgain = true; return; }\n');
+    const r = await require('esbuild').build({ entryPoints: [path.join(wt, 'src', 'client.js')], bundle: true, write: false, outfile: path.join(root, 'release-order', 'bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent',
+      plugins: [{ name: 'release-order', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]lib[\\/]vault-window\.js$/ }, () => ({ contents: swapped, loader: 'js' })); } }] });
+    const js = (r.outputFiles || []).find((o) => o.path.endsWith('.js'));
+    return { hits, js: js ? js.text : null };
+  };
+  const jobAct = (act) => evalJs(`fetch('/api/jobs/${S.j1}/${act}', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(async (r) => ({ status: r.status, body: (await r.text()).slice(0, 300) }))`);
+  const firstReadScene = async (release) => {
+    const held = [], out = { swapped: release ? release.hits : null, n0: null, stopped: null, held: 0, start: null, notified: false, after: null, chip: null, last: null };
+    const onPause = async (m) => {
+      if (m.method !== 'Fetch.requestPaused') return;
+      const p = m.params;
+      if (!/\/bundle\.js(?:[?#]|$)/.test(p.request.url)) { held.push(p); return; }   // the contents answer: held
+      await cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: p.responseStatusCode || 200, responseHeaders: p.responseHeaders || [], body: Buffer.from(release.js, 'utf8').toString('base64') });
+    };
+    cdpEvents.add(onPause);
+    try {
+      await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+      if (release) { await cdp('Network.enable'); await cdp('Network.setCacheDisabled', { cacheDisabled: true }); await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Response' }] }); }
+      await openPage(1280, 800, false);   // a fresh page: no Vault window yet
+      if (release) await cdp('Fetch.disable');
+      await jobAct('stop');
+      out.stopped = !!(await until(async () => { const j = await jobOf(S.j1); return j && j.state !== 'up' && j.state !== 'starting' ? j.state : null; }, 30000, 250));
+      const list = await evalJs(`fetch('/api/vault/contents').then((r) => r.json())`);
+      const row = ((list && list.rows) || []).find((r) => r.id === ROW(S.e1));
+      out.n0 = Number((((row && row.jobs) || []).find((j) => j.id === S.j1) || {}).starts) || 0;
+      await evalJs("window.__vcN = 0; app.ws.onGlobal((m) => { if (m && m.type === 'vault-contents') window.__vcN++; }); true");
+      await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/vault/contents*', requestStage: 'Response' }] });
+      await evalJs("window.dispatchEvent(new Event('vs-vault-door')); true");
+      await until(() => held.length >= 1 || null, 15000, 100);
+      out.held = held.length;
+      const vc0 = await evalJs('window.__vcN');
+      out.start = await jobAct('start');
+      out.notified = !!(await until(async () => ((await evalJs('window.__vcN')) > vc0) || null, 30000, 150));   // the new use line's notify reached the page — the first read still held
+      const ja = await jobOf(S.j1); out.after = ja && { state: ja.state, runs: (ja.runs || []).length };
+      for (const p of held.splice(0)) { try { await cdp('Fetch.continueRequest', { requestId: p.requestId }); } catch { } }
+      await cdp('Fetch.disable');
+      const want = new RegExp('· running · started ' + (out.n0 + 1) + '×$');
+      out.chip = await until(async () => { const c = await chipsOf(S.e1); return c && c.length && want.test(c[0].words) ? c[0].words : null; }, release ? 8000 : 15000);
+      out.last = ((await chipsOf(S.e1)) || [])[0] || null;
+    } finally {
+      cdpEvents.delete(onPause);
+      try { await cdp('Fetch.disable'); } catch { }
+      if (release) { try { await cdp('Network.setCacheDisabled', { cacheDisabled: false }); } catch { } }
+    }
+    return out;
+  };
+  const r7 = await firstReadScene(null);
+  ok(!!(r7.stopped && r7.held === 1 && r7.notified && !!r7.chip), '⑦ a notify during the Vault window\'s FIRST read (its first list held while «telegram-bot» starts, the new use line\'s notify in the page before the list): the chip reaches its new count once the list is let go', r7);
+  const rel = await releaseBundle().catch((e) => ({ hits: -1, js: null, error: String((e && e.message) || e).slice(0, 300) }));
+  const c7 = rel.js ? await firstReadScene(rel) : { swapped: rel.hits, error: rel.error || 'no bundle built' };
+  ok(!!(c7.swapped === 1 && c7.stopped && c7.held === 1 && c7.notified && !c7.chip), 'CONTROL — the release\'s order (a notify while the window has no list yet dropped), the page\'s bundle built as the tree builds it with that one order put back: the chip never reaches the new count — RED on the copy', c7);
 } catch (e) {
   ok(false, 'the legs ran to their end', String((e && (e.stack || e.message)) || e));
 } finally {

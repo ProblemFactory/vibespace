@@ -716,7 +716,13 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     }
   }
   function lockedNow() { forgetReveal(); hideAll(); drawTimer(); refresh(); }
+  // EVERY read of the list is counted in flight (`contentsBusy`) — the window's FIRST read too (r2966: a notify that landed while the
+  // first read was out was dropped, so a job's chip kept no start count until another change); its end hands a notify it met to ONE read
   async function refresh() {
+    contentsBusy++;
+    try { await readList(); } finally { contentsBusy--; contentsSettled(); }
+  }
+  async function readList() {
     // lane vault-slow-load (inc-mvk5jyv3 «保险库操作好像加载时间有点长»): until the first answer the list SAYS it is reading — a busy
     // hub left it blank, the rail without counts — and the keys' grants are asked WITH the list, not after it (one round trip,
     // not two; q-046's order below is kept: no row is published before them)
@@ -762,12 +768,20 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // until it was reopened): the vault's ONE notify (`vault-contents`, a counter — a paste, mint / put, a delete, a grant, in this
   // tab or any other client) ⇒ the list read again and PATCHED in place (keyed rows: the search box, the scroll and an open
   // value stay; a row the search now matches shows, the counts and the «N stored values» line follow). One read at a time.
-  let contentsDue = null, contentsBusy = false, contentsAgain = false;
+  // r2966: a notify that lands while ANY read is in flight — the first one included — is marked, and taken by exactly ONE read after
+  // the reads have published (many notifies in one span: one more read); a read that failed, or a locked list, keeps the mark
+  let contentsDue = null, contentsBusy = 0, contentsAgain = false;
   const contentsMoved = () => {
-    if (st.closed || !st.data || st.data.state === 'locked') return;
+    if (st.closed || (st.data && st.data.state === 'locked')) return;
     if (contentsBusy) { contentsAgain = true; return; }
+    if (!st.data) return;
     clearTimeout(contentsDue);
-    contentsDue = setTimeout(async () => { contentsBusy = true; try { await refresh(); } finally { contentsBusy = false; if (contentsAgain && !st.closed) { contentsAgain = false; contentsMoved(); } } }, 120);
+    contentsDue = setTimeout(() => { contentsDue = null; refresh(); }, 120);
+  };
+  const contentsSettled = () => {
+    if (contentsBusy || !contentsAgain || st.closed || !st.data || st.data.state === 'locked') return;
+    contentsAgain = false;
+    contentsMoved();
   };
   const off = app.ws?.onGlobal?.((msg) => {
     if (msg && msg.type === 'vault-contents') { contentsMoved(); return; }
