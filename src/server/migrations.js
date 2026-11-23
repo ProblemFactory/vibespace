@@ -1660,6 +1660,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
    *  those rows only: the ledger backfill touches no For-you item, so its synchronous load never runs here) — said as WAITING, never
    *  as «failed»; every other failed row is said as before («will retry on next restart»). */
   function sayFailures(results) {
+    // r2999: the ledger is there and could not be read — every migration answers failed by that ONE cause: said once, never one
+    // notice an id (nothing ran, nothing was rewritten; the next start reads the ledger again)
+    if (results && results.ledgerUnread) { try { serverNotice?.('migrations-ledger-unread', `Data migrations did not run at this start: ${results.ledgerUnread}.`, { level: 'warn' }); } catch { } return; }
     // waiting only when the LIVE store can say when it reads (a private store a suite wires says nothing — said as failed, as before)
     const ut = typeof userTodos === 'function' ? userTodos() : userTodos, canWait = !!(ut && typeof ut.whenRead === 'function');
     const waiting = canWait ? results.filter((r) => r.status === 'failed' && r.code === 'todos-unread').map((r) => r.id) : [];

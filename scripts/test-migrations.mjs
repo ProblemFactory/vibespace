@@ -3712,6 +3712,74 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   const planted = anchored(MIG, RET, "        rep.write.catch(() => { });   // MUTANT: the release's road — recorded before the write lands\n", 'the stamp returns its landing');
   ok(steppedCensus(planted).includes('2026-09-channel-credential-key'), 'B-a09e CONTROL (the stamp\'s write not returned, in a copy of the text): the census names it', steppedCensus(planted));
 }
+// ── r2999 (row B-f276, MG1 first): THE LEDGER's OWN READ — a ledger that is THERE and could not be read is NOT an empty ledger ──
+// NOTHING runs at that start (hub and device alike), the ledger is NOT rewritten, the start goes on and SAYS SO once; only «not
+// there» is a first start. The unreadable file is a PLACED refusal of the read call (fs.readFileSync answers EIO for that one
+// path) — never a mount, never a mode change
+{
+  console.log('r2999 the ledger\'s own read');
+  const REPO_R = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+  const runSrc2 = fs.readFileSync(path.join(REPO_R, 'src/migration-runner.js'), 'utf8');
+  const refused = (file, code, fn) => { const real = fs.readFileSync; fs.readFileSync = function (p, ...a) { if (String(p) === file) throw Object.assign(new Error(`${code}: a placed refusal of the read, '${p}'`), { code }); return real.call(this, p, ...a); }; try { return fn(); } finally { fs.readFileSync = real; } };
+  const probe = (ran) => [{ id: 'r2999-a', run: () => { ran.push('a'); } }, { id: 'r2999-b', run: () => { ran.push('b'); } }];
+  const world = (name, text) => { const d = path.join(tmp, name); fs.mkdirSync(d, { recursive: true }); const f = path.join(d, 'migrations.json'); if (text !== null) fs.writeFileSync(f, text); return f; };
+  const LEDGER = JSON.stringify({ applied: { 'r2999-a': 1795000000000 } }, null, 2);
+  const runWith = (R, f, code) => { const ran = [], warned = []; const go = () => R.runMigrations({ ledgerPath: f, migrations: probe(ran), log: () => { }, warn: (m) => warned.push(m) }); const res = code ? refused(f, code, go) : go(); return { res, ran, warned, bytes: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null }; };
+  // (a) THERE AND UNREADABLE (EIO): nothing runs, nothing rewritten, said once
+  const fa = world('r2999-eio', LEDGER), a = runWith(require('../src/migration-runner.js'), fa, 'EIO');
+  ok(a.ran.length === 0 && a.bytes === LEDGER && a.res.length === 2 && a.res.every((r) => r.status === 'failed' && r.code === 'ledger-unread') && !!a.res.ledgerUnread && a.warned.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1,
+    'r2999 a ledger THERE and unreadable (EIO): NOTHING runs (not even the one it never recorded), the ledger is NOT rewritten, every migration answers failed by that one cause, said ONCE', { ran: a.ran, res: a.res, warned: a.warned });
+  // (b) THERE AND TORN (its bytes do not parse): the same
+  const torn = LEDGER.slice(0, 20), fb = world('r2999-torn', torn), b = runWith(require('../src/migration-runner.js'), fb, null);
+  ok(b.ran.length === 0 && b.bytes === torn && b.res.every((r) => r.code === 'ledger-unread') && /its bytes do not parse/.test(b.res.ledgerUnread || ''), 'r2999 a TORN ledger (its bytes do not parse): nothing runs, its bytes stay as they are, said', { ran: b.ran, res: b.res });
+  // (c) NOT THERE: a first start — every migration runs and the ledger is written
+  const fc = world('r2999-none', null), c = runWith(require('../src/migration-runner.js'), fc, null);
+  ok(c.ran.join() === 'a,b' && !!c.bytes && JSON.parse(c.bytes).applied['r2999-b'] > 0, 'r2999 a ledger NOT THERE is a first start: every migration runs and the ledger is written', { ran: c.ran });
+  // (d) the next start, the read answering again: the ledger it kept is read — only the one never recorded runs
+  const d = runWith(require('../src/migration-runner.js'), fa, null);
+  ok(d.ran.join() === 'b', 'r2999 the NEXT start (the read answers): the ledger it kept is read — only the migration it never recorded runs', { ran: d.ran });
+  // RED: today's read (any failure = «nothing was ever applied»)
+  const OLD_READ = "function readLedger(ledgerPath) {\n  let ledger = { applied: {} };\n  try { ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8')); } catch { }\n  if (!ledger || typeof ledger !== 'object') ledger = { applied: {} };\n  if (!ledger.applied || typeof ledger.applied !== 'object') ledger.applied = {};\n  return ledger;\n}\n";   // stale-pins: kept (today's read, the red control)
+  const NEW_HEAD = runSrc2.slice(runSrc2.indexOf('function readLedger(ledgerPath) {\n'), runSrc2.indexOf('function writeLedger('));
+  const OldRead = mutantCopies('migrations-ledger', REPO_R).load('src/migration-runner.js', anchored(runSrc2, NEW_HEAD, OLD_READ, 'today\'s ledger read'), 'old-ledger-read');
+  const fr = world('r2999-red', LEDGER), r = runWith(OldRead, fr, 'EIO');
+  ok(r.ran.join() === 'a,b' && r.bytes !== LEDGER, 'r2999 RED today\'s read: an unreadable ledger reads as «nothing applied» — every migration runs AGAIN and the ledger is rewritten', { ran: r.ran });
+  // (e) A STEPPED migration that ENDS while the ledger cannot be read: not recorded, the ledger not rewritten, said as failed
+  // (it runs again at the next start) — RED: the late record without its guard (its read answers no `applied`: a throw in the step's
+  // settle, an unhandled rejection, and the migration said by nobody)
+  const stepped = (R, f) => new Promise((done) => {
+    const warned = [], late = [];
+    let release = null; const gate = new Promise((r) => { release = r; });
+    const res = R.runMigrations({ ledgerPath: f, migrations: [{ id: 'r2999-step', run: () => gate.then(() => ({ n: 1 })) }], log: () => { }, warn: (m) => warned.push(m), onLate: (r) => late.push(r) });
+    const real = fs.readFileSync, unhandled = [];
+    const onUn = (e) => unhandled.push(String((e && e.message) || e));
+    process.on('unhandledRejection', onUn);
+    fs.readFileSync = function (p0, ...a) { if (String(p0) === f) throw Object.assign(new Error(`EIO: a placed refusal of the read, '${p0}'`), { code: 'EIO' }); return real.call(this, p0, ...a); };
+    release();
+    setTimeout(() => { fs.readFileSync = real; process.off('unhandledRejection', onUn); done({ res, warned, late, unhandled, bytes: real.call(fs, f, 'utf8') }); }, 50);
+  });
+  const fe = world('r2999-step', LEDGER), e = await stepped(require('../src/migration-runner.js'), fe);
+  ok(e.res[0] && e.res[0].status === 'started' && e.bytes === LEDGER && e.late.length === 1 && e.late[0].status === 'failed' && e.late[0].code === 'ledger-unread' && e.unhandled.length === 0 && e.warned.some((m) => /r2999-step ended but is not recorded/.test(m)),
+    'r2999 a STEPPED migration ending while the ledger cannot be read (EIO): not recorded, the ledger NOT rewritten, said as failed (it runs again next start)', { late: e.late, warned: e.warned, unhandled: e.unhandled });
+  const LATE_GUARD = runSrc2.slice(runSrc2.indexOf('          if (late.unread) {'), runSrc2.indexOf('          late.applied[m.id] = Date.now();'));
+  const NoGuard = mutantCopies('migrations-ledger-late', REPO_R).load('src/migration-runner.js', anchored(runSrc2, LATE_GUARD, '', 'the late record without its guard'), 'late-no-guard');
+  const fe2 = world('r2999-step-red', LEDGER), e2 = await stepped(NoGuard, fe2);
+  ok(e2.late.length === 0 && e2.unhandled.length === 1, 'r2999 RED the late record without its guard: the step\'s settle throws (an unhandled rejection) and nobody says the migration', { late: e2.late, unhandled: e2.unhandled });
+  // THE HUB: one notice, never one an id
+  const rootH = path.join(tmp, 'r2999-hub'); fs.mkdirSync(path.join(rootH, 'data'), { recursive: true });
+  const ledH = path.join(rootH, 'data', 'migrations.json'); fs.writeFileSync(ledH, LEDGER);
+  const notices = [];
+  const mmH = create({ rootDir: rootH, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k) });
+  refused(ledH, 'EIO', () => mmH.runLocalMigrations());
+  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER,
+    'r2999 THE HUB: its boot\'s migrations over an unreadable ledger — ONE notice (migrations-ledger-unread), no notice an id, the ledger untouched', notices);
+  // THE DEVICE: its registry goes through the same runner (src/agentd/agentd.js) — its own journal line, nothing rewritten
+  const AG = fs.readFileSync(path.join(REPO_R, 'src/agentd/agentd.js'), 'utf8');
+  const fd = world('r2999-device', LEDGER), lines = [];
+  const dv = refused(fd, 'EIO', () => require('../src/migration-runner.js').runMigrations({ ledgerPath: fd, migrations: [], log: (m) => lines.push(m), warn: (m) => lines.push(m) }));
+  ok(AG.includes("runMigrations({ ledgerPath: path.join(STATE, 'migrations.json'), migrations: DEVICE_MIGRATIONS, log: (m) => process.stderr.write(m + '\\n'), warn: (m) => process.stderr.write(m + '\\n') });") && !!dv.ledgerUnread && lines.filter((m) => /is there and could not be read \(EIO\)/.test(m)).length === 1 && fs.readFileSync(fd, 'utf8') === LEDGER,
+    'r2999 THE DEVICE: its registry\'s ledger goes through the same runner (pinned) — an unreadable one runs nothing, rewrites nothing, and says it once in the device\'s journal (its warn → stderr)', lines);
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
 /** B-a09e: a STEPPED migration's ledger row — polled on the scratch folder's own migrations.json (bounded: 10 s) until the runner

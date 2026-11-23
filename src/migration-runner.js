@@ -59,10 +59,16 @@ function sayRan(todos, id) {
   try { for (const x of store?.idsWhere?.((i) => i.sessionKey === FAILED_INBOX_KEY && i.itemKey === id && i.status === 'open') || []) store.setStatus(x, 'done', 'system'); } catch { }
 }
 
+/** THE LEDGER's OWN READ (主开发 r2999, row B-f276): only «not there» (ENOENT) is a first start. A ledger that is THERE and could
+ *  not be read (an I/O error, a timeout on the share), or whose bytes do not parse as a ledger, is NOT an empty ledger: it answers
+ *  `{ unread: why }` and runMigrations runs NOTHING at that start, rewrites no ledger and says so once — the next start reads it
+ *  again (before: «nothing was ever applied», every migration ran again and the ledger was rewritten). */
 function readLedger(ledgerPath) {
-  let ledger = { applied: {} };
-  try { ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8')); } catch { }
-  if (!ledger || typeof ledger !== 'object') ledger = { applied: {} };
+  let text;
+  try { text = fs.readFileSync(ledgerPath, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { applied: {} }; return { unread: (e && e.code) || 'error' }; }
+  let ledger;
+  try { ledger = JSON.parse(text); } catch { return { unread: 'its bytes do not parse' }; }
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) return { unread: 'it holds no ledger' };
   if (!ledger.applied || typeof ledger.applied !== 'object') ledger.applied = {};
   return ledger;
 }
@@ -88,6 +94,13 @@ function noteReport(ledger, id, report) {
 // For you. Without it (a script, a suite, the vault's seal — none of them hands bytes to the writer) nothing waits.
 function runMigrations({ ledgerPath, migrations, log = console.log, warn = console.warn, onLate = null, todos = null, landStores = null }) {
   const ledger = readLedger(ledgerPath);
+  if (ledger.unread) {   // r2999: a ledger there and unread — nothing runs, nothing is rewritten, said ONCE (each migration answers failed by that one cause)
+    const why = `${require('path').basename(ledgerPath)} is there and could not be read (${ledger.unread}) — no migration ran at this start and the ledger was not rewritten; the next start reads it again`;
+    warn(`[migrate] ${why}`);
+    const held = migrations.filter((m) => m && m.id).map((m) => ({ id: m.id, status: 'failed', error: why, code: 'ledger-unread' }));
+    held.ledgerUnread = why;
+    return held;
+  }
   const results = [];
   const ranNow = [];
   // THE ORDER LAW (lane lg-store-writes U5b cure's readers): a migration that threw EVSNOTONDISK left a store reshaped in memory
@@ -107,6 +120,13 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
         log(`[migrate] ${m.id} started (stepped — recorded when it ends)${m.note ? ' — ' + m.note : ''}`);
         report.then((rep) => {
           const late = readLedger(ledgerPath);
+          if (late.unread) {   // r2999: the ledger there and unread when the step ENDS — not recorded, not rewritten: it runs again next start
+            const why = `${require('path').basename(ledgerPath)} is there and could not be read (${late.unread}) — ${m.id} ended but is not recorded and the ledger was not rewritten; it runs again at the next start`;
+            warn(`[migrate] ${why}`);
+            sayFailed(todos, m.id, Object.assign(new Error(why), { code: 'ledger-unread' }), warn);
+            try { onLate?.({ id: m.id, status: 'failed', error: why, code: 'ledger-unread' }); } catch { }
+            return;
+          }
           late.applied[m.id] = Date.now();
           const rec = { id: m.id, status: 'ran' };
           if (noteReport(late, m.id, rep)) rec.report = rep;
