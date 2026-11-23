@@ -478,9 +478,45 @@ console.log('— ③b the forgotten ledger through a failed read: never emptied,
       await until(() => !hold || !hold.held(), 4000);   // torn: the helper keeps the bytes aside off the loop, then starts empty
       const copies = fs.readdirSync(path.dirname(h.forgottenFile)).filter((x) => x.startsWith(path.basename(h.forgottenFile) + '.corrupt-'));
       const same = copies.some((x) => fs.readFileSync(path.join(path.dirname(h.forgottenFile), x)).equals(bytes0));
-      ok(same && fs.readFileSync(h.forgottenFile).equals(bytes0), `${pl.name}: its torn bytes are kept aside BYTE FOR BYTE beside the store before it starts empty (no remover reads this store's silence), the live file untouched until a write`, JSON.stringify({ copies }));
+      let live = null; try { live = JSON.parse(fs.readFileSync(h.forgottenFile, 'utf8')); } catch (e) { live = { unread: e.code || String(e) }; }
+      ok(same && !!live && Array.isArray(live.forgotten) && live.forgotten.length === 0 && !!live.damaged && copies.includes(live.damaged.copy), `${pl.name}: its torn bytes are kept aside BYTE FOR BYTE beside the store before it starts empty (no remover reads this store's silence); the live file is now the NEW empty list, its damaged mark naming that copy (r3185)`, JSON.stringify({ copies, live }));
       const hvD = await h.housekeeping();
       ok(!!hvD.forgottenDamaged && copies.includes(hvD.forgottenDamaged.copy) && !hvD.forgottenUnread, `${pl.name}: the panel's answer says the list was DAMAGED and names where its bytes are kept (the copy's base name) — the person is told in place, never «Nothing set aside»`, JSON.stringify(hvD.forgottenDamaged || null));
+      // r3185: THE MARK SURVIVES A RESTART — a new instance over the same data folder (a restart) still says DAMAGED with the copy's name
+      const restart = (Mod) => Mod.create({ dataDir: LD, homeDir: path.join(LH, 'home'), keeper: stubKeeper, bridge, serverSetting: (k) => settings[k], broadcast: () => { }, log: quiet, now, execFileImpl: fakeDu, sweepEveryMs: 0 });
+      const h2 = restart(R); const hvR = await h2.housekeeping(); h2.shutdown();
+      ok(!!hvR.forgottenDamaged && hvR.forgottenDamaged.copy === hvD.forgottenDamaged.copy && !hvR.forgottenUnread, `${pl.name}: after a RESTART the panel still says the list was damaged, with the copy's name — the mark lives in the new list's own file, never in memory only`, JSON.stringify({ after: hvR.forgottenDamaged || null, file: (() => { try { return JSON.parse(fs.readFileSync(h.forgottenFile, 'utf8')).damaged || null; } catch (e) { return 'unread'; } })() }));
+      // CONTROL (RED): the note in memory only (a copy whose lift and save never write the mark) — after a restart it says nothing
+      {
+        const REPO_FG = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+        const RS = fs.readFileSync(path.join(REPO_FG, 'src/server/browser-trace.js'), 'utf8');
+        let cut = null;
+        try { cut = anchored(anchored(RS, ' if (!v && fgDamaged) saveForgotten();', '', 'fg-mark-no-lift-write'), ", ...(fgDamaged ? { damaged: { ...fgDamaged } } : {})", '', 'fg-mark-no-save'); } catch { cut = null; }
+        if (!cut) console.log('  (the control cuts the mark\'s own lines — not in this tree: no control here)');
+        else {
+          const LDc = path.join(LH, 'data-ctl'); fs.mkdirSync(LDc, { recursive: true });
+          const Rm = mutantCopies('hk-fg-mark', REPO_FG).load('src/server/browser-trace.js', cut, 'fg-mark-memory-only');
+          const mk = () => Rm.create({ dataDir: LDc, homeDir: path.join(LH, 'home'), keeper: stubKeeper, bridge, serverSetting: (k) => settings[k], broadcast: () => { }, log: quiet, now, execFileImpl: fakeDu, sweepEveryMs: 0 });
+          const hc = mk(); fs.mkdirSync(path.dirname(hc.forgottenFile), { recursive: true }); fs.writeFileSync(hc.forgottenFile, bytes0);
+          await hc.housekeeping(); await until(() => !hc._forgottenHold || !hc._forgottenHold.held(), 4000); const before = (await hc.housekeeping()).forgottenDamaged || null;
+          const co = path.join(LAB, 'ctl-orphan'); fs.mkdirSync(co); fs.writeFileSync(path.join(co, 'Local State'), '{}');
+          let cf = null; try { cf = hc.forgetOrphan(co); } catch (e) { cf = { error: e && e.code }; }   // a save after the lift writes the new list
+          hc.shutdown();
+          const hc2 = mk(); const after = (await hc2.housekeeping()).forgottenDamaged || null; hc2.shutdown();
+          ok(!!before && !!cf && cf.ok === true && !after, 'CONTROL (RED): with the note in MEMORY ONLY (a copy whose lift and save never write the mark), a Forget after the lift then a restart says nothing — the folders the old list named are seen by no list', JSON.stringify({ before, forget: cf && (cf.error || cf.to), after }));
+        }
+      }
+      // …and every SAVE carries it: a Forget after the lift, then a restart — still damaged with the same copy's name
+      {
+        const mid = path.join(LAB, 'mid'); fs.mkdirSync(mid); fs.writeFileSync(path.join(mid, 'Local State'), '{}');
+        let fm = null; try { fm = h.forgetOrphan(mid); } catch (e) { fm = { error: e && e.code }; }
+        const h4 = restart(R); const hv4 = await h4.housekeeping(); h4.shutdown();
+        ok(!!fm && fm.ok === true && !!hv4.forgottenDamaged && hv4.forgottenDamaged.copy === hvD.forgottenDamaged.copy && (hv4.forgotten || []).some((r) => r.id === fm.ledger.id), `${pl.name}: a Forget after the lift, then a restart: the mark is still there (every save carries it) beside the new row`, JSON.stringify({ forget: fm && (fm.error || fm.to), damaged: hv4.forgottenDamaged || null }));
+      }
+      // …and the mark is GONE once a list without it is read (the person mended the file by hand, then restarted)
+      fs.writeFileSync(h.forgottenFile, good);
+      const h3 = restart(R); const hvM = await h3.housekeeping(); h3.shutdown();
+      ok(!hvM.forgottenDamaged && (hvM.forgotten || []).some((r) => r.id === seededId), `${pl.name}: a mended list (no mark) read at a start clears the note and answers its rows`, JSON.stringify({ damaged: hvM.forgottenDamaged || null, rows: (hvM.forgotten || []).map((r) => r.id) }));
     }
     // afterwards the ledger behaves as before: a Forget works, its row kept beside what the ledger answers
     const after = path.join(LAB, 'after'); fs.mkdirSync(after); fs.writeFileSync(path.join(after, 'Local State'), '{}');

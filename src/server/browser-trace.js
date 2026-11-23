@@ -127,12 +127,16 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     file: forgottenFile, valid: FORGOTTEN_SHAPE, code: 'forgotten_unread', aside: (mark) => forgottenFile + '.corrupt-' + mark,
     words: (h) => `the list of the browsers set aside (browser-forgotten.json in VibeSpace's data folder) could not be read (${h.code}); VibeSpace reads it again every few minutes. Nothing set aside is lost: nothing is written over it, and setting a browser aside or deleting one waits until it reads`,
     log: (s) => log.warn?.('[browser-trace] ' + s), now,
-    onLift: (v, f) => { forgotten = v && Array.isArray(v.forgotten) ? v.forgotten : []; fgDamaged = !v && f && f.setAside ? { copy: String(f.setAside), at: now() } : null; bc({ type: 'browser-housekeeping-updated' }); },
+    onLift: (v, f) => { forgotten = v && Array.isArray(v.forgotten) ? v.forgotten : []; fgDamaged = !v && f && f.setAside ? { copy: String(f.setAside), at: now() } : damagedOf(v); if (!v && fgDamaged) saveForgotten(); bc({ type: 'browser-housekeeping-updated' }); },   // r3185: the mark is WRITTEN with the new list at the torn lift
   });
   let fgStarted = false;
   // r3104: TORN bytes lifted as empty — the person is told IN PLACE that the list was damaged and WHERE its bytes are kept (the copy's
   // base name; never «restore that copy»: they are the damaged bytes), with what they can do (the panel's words)
   let fgDamaged = null;
+  // r3185 (主开发): THE MARK SURVIVES A RESTART — the new list's own file carries `damaged {copy, at}` from the torn lift on, read back at
+  // a start, shown as today, and gone when a list without it is read (the person mended it or wrote a new one by hand). The release reads
+  // `forgotten` only: an extra field it ignores (a way back keeps the rows; its first save drops the mark)
+  const damagedOf = (v) => (v && v.damaged && typeof v.damaged === 'object' && typeof v.damaged.copy === 'string' && v.damaged.copy ? { copy: v.damaged.copy, at: Number(v.damaged.at) || null } : null);
   let lastSweep = null;
   let timer = null;
   let unsubLease = null;
@@ -823,12 +827,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       fgStarted = true;
       let read; try { read = { text: fs.readFileSync(forgottenFile, 'utf8') }; } catch (error) { read = { error }; }
       const a = SR.storeAnswer(read, { valid: FORGOTTEN_SHAPE });
-      if (fgHold.start(a) === 'data') { forgotten = Array.isArray(a.value.forgotten) ? a.value.forgotten : []; return forgotten; }
+      if (fgHold.start(a) === 'data') { forgotten = Array.isArray(a.value.forgotten) ? a.value.forgotten : []; fgDamaged = damagedOf(a.value); return forgotten; }
     }
     if (fgHold.held()) return [];
     forgotten = []; return forgotten;
   }
-  function saveForgotten() { if (!fgHold.writable('a row of the browsers set aside')) return; try { fs.mkdirSync(path.dirname(forgottenFile), { recursive: true }); writeJsonAtomic(forgottenFile, { version: 1, forgotten: loadForgotten() }); } catch (e) { log.warn?.(`[browser-trace] forgotten ledger not saved: ${e && e.message}`); } }
+  function saveForgotten() { if (!fgHold.writable('a row of the browsers set aside')) return; try { fs.mkdirSync(path.dirname(forgottenFile), { recursive: true }); writeJsonAtomic(forgottenFile, { version: 1, forgotten: loadForgotten(), ...(fgDamaged ? { damaged: { ...fgDamaged } } : {}) }); } catch (e) { log.warn?.(`[browser-trace] forgotten ledger not saved: ${e && e.message}`); } }
   function fileForgotten({ profileId = null, label = '', dir, to, bytes = null, why = 'forgotten' }) {
     const row = { id: 'fg-' + crypto.randomBytes(4).toString('hex'), profileId, label, from: dir, dir: to, bytes, at: now(), why, deletedAt: null };
     loadForgotten().push(row);
