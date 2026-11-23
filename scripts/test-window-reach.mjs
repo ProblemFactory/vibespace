@@ -647,40 +647,81 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
   ok(/const keysPointOf = \(px, lease\) => \{ const r = dialogWindow\(px, lease\) \|\| \(px && px\.plan && px\.plan\.main\) \|\| null; return r \? visiblePoint\(r\) : null; \};/.test(esrc), 'only a point the PLAN gives is judged (a dialog\'s window, else the main window\'s) — with no main, mainFocus\'s tree-bounds fallback (the toolkit\'s coordinates, never the X root\'s) makes no claim');
 }
 
-// ── r3085 (lane bl-machines-a, the family's second law r3019): desktop-apps.json HELD (desktop-serve's own hold) keeps an EMPTY memory;
-// the window reconcile drops a lease whose window has «no live record» and prunes a share whose window has none — read while held that
-// is UNKNOWN: ZERO leases dropped, ZERO shares ended. The keeper a stand-in in desktop-serve's shape answering as a held desktop-serve
-// does (held() true, its records gone from memory); RED: the reconcile as it was (the held fact cut, in a copy) ends them ──
+// ── r3085 + r3189 (lane bl-machines-a, the family's second law r3019): desktop-apps.json HELD (desktop-serve's own hold) keeps an EMPTY
+// memory; the window reconcile dropped a lease whose window has «no live record» and pruned a share whose window has none — read while
+// held that is UNKNOWN: ZERO leases dropped, ZERO shares ended. r3189: THE FACT REACHES THE ENGINE ON THE ROAD PRODUCTION WIRES — the
+// REAL keeper (src/server/desktop-app-keeper.js) over the REAL desktop-serve, its store's read refused by a PLACED EIO at its create (no
+// display: the create and the read need no desktop host, only a launch does), the engine handed what src/server/window-live-wiring.js
+// hands it (keeper.local || keeper, pinned below). Three starts over ONE data folder: (1) the file reads — both windows shared with the
+// session, one attached (the lease and the shares on disk); (2) the restart whose read FAILS — its boot reconcile (graceMs 0); (3) the
+// start after the file reads again — what the held reconcile left. REDS in copies: the keeper that does not hand the fact on, and the
+// reconcile that does not ask it — the lease dropped, the shares pruned ──
 {
-  const ENG85 = require(path.join(REPO, 'src/server/window-targets-engine.js'));
-  const dir85 = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wreach-held-'));
-  process.on('exit', () => { try { fs.rmSync(dir85, { recursive: true, force: true }); } catch { } });
-  const mkRec85 = (id) => ({ id, label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242 }, starts: {}, backend: 'vnc-display', startedAt: 1 });
-  const P85 = 'aaaaaaaa-1111-4000-8000-000000000085';
-  const scene85 = (M, sub) => {
-    const recs = new Map([['da-h1', mkRec85('da-h1')], ['da-h2', mkRec85('da-h2')]]); let held = false;
-    const sessions = new Map([['w-P', { agentToken: 'vsst_P85', claudeSessionId: P85, backendSessionId: P85, backend: 'claude', name: 'parent', mode: 'chat' }]]);
-    const e = M.create({ keeper: { listApps: () => [...recs.values()], get: (id) => recs.get(id) || null, sessionPids: (rec) => Object.values(rec.pids).filter(Boolean), x11EnvFor: () => null, held: () => held, registry: () => [] }, dataDir: path.join(dir85, sub), env: () => ({}), activeSessions: sessions, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null });
-    const f = e.factsForToken('vsst_P85');
-    e.grantReach('da-h1', { kind: 'session', id: 'w-P', name: 'parent' }); e.grantReach('da-h2', { kind: 'session', id: 'w-P', name: 'parent' });   // both windows shared with the session
-    let leaseErr = null; try { e.attach('da-h1', f); } catch (x) { leaseErr = (x && (x.code || x.message)) || String(x); }
-    const before = { lease: !!e.leaseOf('da-h1'), share: !!e.reachOf('da-h2') };
-    held = true; const kept = new Map(recs); recs.clear();   // desktop-apps.json held: desktop-serve's memory reads EMPTY
-    const r = e.reconcile({ graceMs: 0 });
-    held = false; for (const [k, v] of kept) recs.set(k, v);   // the hold LIFTS: the records read again — what survived the held reconcile shows now
-    return { leaseErr, before, after: { lease: !!e.leaseOf('da-h1'), share: !!e.reachOf('da-h2') }, dropped: r.dropped.length, pruned: r.pruned };
+  const KPR89 = require(path.join(REPO, 'src/server/desktop-app-keeper.js'));
+  const ENG89 = require(path.join(REPO, 'src/server/window-targets-engine.js'));
+  const DD89 = require(path.join(REPO, 'src/desktop-display.js'));
+  const { anchored: anch89 } = await import('./scratch.mjs');
+  const dir89 = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wreach-held-'));
+  process.on('exit', () => { try { fs.rmSync(dir89, { recursive: true, force: true }); } catch { } });
+  const quiet89 = { log() { }, warn() { }, error() { } };
+  const display89 = { ...DD89, hostFacts: async () => ({ hostId: null, bins: {}, xpra: null, browsers: {}, office: { exec: null, path: null, program: null, confinement: null, modules: null }, at: Date.now() }) };   // no host probe
+  const P89 = 'aaaaaaaa-1111-4000-8000-000000000089';
+  const rec89 = (id) => ({ id, appId: 'x', label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242 }, starts: {}, backend: 'vnc-display', startedAt: 1, lastInputAt: Date.now() });
+  const sessions89 = () => new Map([['w-P', { agentToken: 'vsst_P89', claudeSessionId: P89, backendSessionId: P89, backend: 'claude', name: 'parent', mode: 'chat' }]]);
+  // the refusal PLACED on the one read desktop-serve's load makes of its record file (synchronous, at its create)
+  const failingRead89 = (file, fn) => { const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === file) throw Object.assign(new Error('a stand-in i/o error'), { code: 'EIO' }); return rf.call(this, f, ...a); }; try { return fn(); } finally { fs.readFileSync = rf; } };
+  const handed89 = (k) => k.local || k;   // the wiring's own expression (pinned below)
+  const rows89 = (e, h) => { const r = e.reachOf(h); return r && Array.isArray(r.rows) ? r.rows.length : 0; };
+  const scene89 = (KM, EM, sub) => {
+    const d = path.join(dir89, sub); fs.mkdirSync(d, { recursive: true });
+    const F = path.join(d, KPR89.STORE_FILE);
+    fs.writeFileSync(F, JSON.stringify({ apps: { 'da-h1': rec89('da-h1'), 'da-h2': rec89('da-h2') } }));
+    const keeperAt = (reads) => { const mk = () => KM.create({ dataDir: d, env: () => ({ HOME: d, PATH: process.env.PATH }), broadcast() { }, display: display89, registryRows: [], log: quiet89, tickMs: 3600e3, writer: null }); return reads ? mk() : failingRead89(F, mk); };
+    const engineOver = (k, E, log = quiet89) => E.create({ keeper: handed89(k), dataDir: d, env: () => ({}), activeSessions: sessions89(), bins: { xdotool: null, gdbus: null }, log, procExe: () => null });
+    // (1) the file reads: both windows shared with the session, one attached
+    const k1 = keeperAt(true), e1 = engineOver(k1, ENG89);
+    e1.grantReach('da-h1', { kind: 'session', id: 'w-P', name: 'parent' }); e1.grantReach('da-h2', { kind: 'session', id: 'w-P', name: 'parent' });
+    let leaseErr = null; try { e1.attach('da-h1', e1.factsForToken('vsst_P89')); } catch (x) { leaseErr = (x && (x.code || x.message)) || String(x); }
+    const before = { lease: !!e1.leaseOf('da-h1'), shares: rows89(e1, 'da-h1') + rows89(e1, 'da-h2') };
+    const carried = new Set(Object.keys(handed89(k1)));
+    k1.shutdown();
+    // (2) the restart whose read of desktop-apps.json FAILS — its boot reconcile
+    const k2 = keeperAt(false), said = [];
+    const heldNow = typeof k2.machine.held === 'function' && k2.machine.held() === true;
+    const factHanded = (() => { try { const h = handed89(k2); return typeof h.held === 'function' && h.held() === true; } catch { return false; } })();
+    const e2 = engineOver(k2, EM, { log() { }, warn: (m) => said.push(String(m)) });
+    const r = e2.reconcile({ graceMs: 0 });
+    k2.shutdown();
+    // (3) the start after the file reads again: what the held reconcile left
+    const k3 = keeperAt(true), e3 = engineOver(k3, ENG89);
+    const after = { lease: !!e3.leaseOf('da-h1'), shares: rows89(e3, 'da-h1') + rows89(e3, 'da-h2') };
+    k3.shutdown();
+    return { leaseErr, before, heldNow, factHanded, dropped: r.dropped.length, pruned: r.pruned, after, said: said.filter((m) => m.startsWith('[window]')), carried };
   };
-  const now85 = scene85(ENG85, 'held-now');
-  const src85 = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
-  const CUT85 = "    const storeHeld = (() => { try { return typeof keeper.held === 'function' && !!keeper.held(); } catch { return false; } })();\n";
-  const { anchored: anch85 } = await import('./scratch.mjs');
-  const red85 = src85.split(CUT85).length === 2 ? scene85(MUT.load('src/server/window-targets-engine.js', anch85(src85, CUT85, '    const storeHeld = false;\n', 'held-ignored'), 'held-ignored'), 'held-red') : null;
-  console.log('  r3085, the facts judged: ' + JSON.stringify({ now: now85, red: red85 }));
-  ok(now85.before.lease && now85.before.share && now85.after.lease && now85.after.share && now85.dropped === 0 && now85.pruned === 0,
-    `r3085: desktop-apps.json HELD (its memory empty) — the real reconcile drops ZERO leases and ends ZERO shares (lease ${now85.before.lease} → ${now85.after.lease}, share ${now85.before.share} → ${now85.after.share}; dropped ${now85.dropped}, pruned ${now85.pruned})`, now85);
-  // (the copy's share is judged by its OWN prune count: reachOf after the lift reads the grants rows through another module's view)
-  ok(!!red85 && red85.before.lease && red85.before.share && !red85.after.lease && red85.dropped >= 1 && red85.pruned >= 1,
-    `RED CONTROL r3085: the reconcile as it was (the held fact cut, in a copy) drops the lease and prunes the shares (dropped ${red85 && red85.dropped}, pruned ${red85 && red85.pruned})`, red85);
+  const WIRE89 = fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf8');
+  ok(WIRE89.split("require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, ").length === 2, 'r3189 pin: src/server/window-live-wiring.js hands the window engine keeper.local || keeper — the object this leg hands it');
+  const now89 = scene89(KPR89, ENG89, 'held-now');
+  const { carried } = now89; delete now89.carried;
+  const ESRC89 = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8'), KSRC89 = fs.readFileSync(path.join(REPO, 'src/server/desktop-app-keeper.js'), 'utf8');
+  // every fact the engine asks its keeper is carried by the copy the wiring hands it (`keeper.js` is a file name in its prose)
+  const asked89 = [...new Set([...ESRC89.matchAll(/\bkeeper\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))].filter((n) => n !== 'js').sort();
+  const missing89 = asked89.filter((n) => !carried.has(n));
+  ok(asked89.includes('held') && asked89.includes('heldWords') && missing89.length === 0, `r3189: every fact the engine asks its keeper (${asked89.join(', ')}) is carried by keeper.local — none missing (${missing89.join(', ') || 'none'})`, { asked89, missing89 });
+  const KCUT89 = "    held: machine.held, heldWords: machine.heldWords, // r3189: desktop-apps.json's own hold (src/desktop-serve.js) — keeper.local carries it to the window engine's reconcile\n";
+  const ECUT89 = "    const storeHeld = (() => { try { return typeof keeper.held === 'function' && !!keeper.held(); } catch { return false; } })();\n";
+  const redK89 = scene89(MUT.load('src/server/desktop-app-keeper.js', anch89(KSRC89, KCUT89, '', 'keeper-no-held'), 'keeper-no-held'), ENG89, 'red-keeper');
+  const redE89 = scene89(KPR89, MUT.load('src/server/window-targets-engine.js', anch89(ESRC89, ECUT89, '    const storeHeld = false;\n', 'held-ignored'), 'held-ignored'), 'red-engine');
+  delete redK89.carried; delete redE89.carried;
+  console.log('  r3189, the facts judged: ' + JSON.stringify({ now: now89, redKeeper: redK89, redEngine: redE89 }));
+  const setUp89 = (o) => o.leaseErr === null && o.before.lease && o.before.shares === 2 && o.heldNow;
+  ok(setUp89(now89) && now89.factHanded && now89.dropped === 0 && now89.pruned === 0 && now89.after.lease && now89.after.shares === 2,
+    `r3085/r3189: a restart whose read of desktop-apps.json FAILS (the real keeper, its fact handed on: ${now89.factHanded}) — the real boot reconcile drops ZERO leases and ends ZERO shares (dropped ${now89.dropped}, pruned ${now89.pruned}); once the file reads, the lease and both shares are there (lease ${now89.after.lease}, shares ${now89.after.shares})`, now89);
+  ok(now89.said.length === 1 && now89.said[0].includes('desktop-apps.json could not be read (EIO') && now89.said[0].includes('no window lease is dropped and no share pruned'),
+    `r3189: the reconcile says it once, in the store's own words (${now89.said[0] || 'nothing said'})`, now89.said);
+  ok(setUp89(redK89) && !redK89.factHanded && redK89.dropped >= 1 && redK89.pruned >= 1 && !redK89.after.lease && redK89.after.shares === 0,
+    `RED CONTROL r3189: the keeper that does not hand the fact on (a copy) — the reconcile over the held store drops the lease and prunes the shares (dropped ${redK89.dropped}, pruned ${redK89.pruned}; after: lease ${redK89.after.lease}, shares ${redK89.after.shares})`, redK89);
+  ok(setUp89(redE89) && redE89.factHanded && redE89.dropped >= 1 && redE89.pruned >= 1 && !redE89.after.lease && redE89.after.shares === 0,
+    `RED CONTROL r3085: the reconcile that does not ask the hold (a copy) — the lease dropped and the shares pruned (dropped ${redE89.dropped}, pruned ${redE89.pruned}; after: lease ${redE89.after.lease}, shares ${redE89.after.shares})`, redE89);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -821,6 +821,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   const keeper = { launch, launchDisplay: machine.launchDisplay /* lane one-browser-b1: a browser's display-only session (this machine) */, relaunch, startDeferred: machine.startDeferred, stop, reshapeStore: machine.reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe: machine.setWatchProbe, fitApp: machine.fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor: machine.x11EnvFor, windows, xpraWww: machine.xpraWww, xpraWwwFor, instancePrefs: machine.instancePrefs, facts: machine.facts, registry: machine.registry, adoptAll, adoptRemote, syncHost, start, shutdown, tick, sessionPids: machine.sessionPids,
     viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, carrySeat, relaunchSeatMs, // P8-2 x5 + A r1
     machine, // lane C1: device #0's machine keeper — src/server/desktop-access.js runs its local rung against THIS object (never a second keeper on the same store)
+    held: machine.held, heldWords: machine.heldWords, // r3189: desktop-apps.json's own hold (src/desktop-serve.js) — keeper.local carries it to the window engine's reconcile
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,
     remoteFile, REMOTE_FILE, _remote: () => remote, // lane C2
     installedOf, noteInstalled, // the installed-apps list, owner 2026-10-11

@@ -1113,7 +1113,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // keeps an EMPTY memory, so «no live record» is UNKNOWN there, never «gone»: while the hold stands no lease is dropped and no share
     // is pruned by it (the holder-gone and agent-browser ends read the sessions, not the store, and keep their road)
     const storeHeld = (() => { try { return typeof keeper.held === 'function' && !!keeper.held(); } catch { return false; } })();
-    if (storeHeld && !reconcileHeldSaid) { reconcileHeldSaid = true; log.warn?.('[window] desktop-apps.json is held: no window lease is dropped and no share pruned for a window it cannot name, until it reads'); }
+    if (storeHeld && !reconcileHeldSaid) { reconcileHeldSaid = true; const w = (() => { try { return typeof keeper.heldWords === 'function' ? keeper.heldWords() : null; } catch { return null; } })(); log.warn?.(`[window] ${w || 'desktop-apps.json is held'}; no window lease is dropped and no share pruned for a window it cannot name until it reads`); }
     if (!storeHeld) reconcileHeldSaid = false;
     const t = now();
     const dropped = [], stamped = [];
