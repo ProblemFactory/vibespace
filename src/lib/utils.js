@@ -1977,7 +1977,23 @@ export function pluginsHeldWords() { return t('VibeSpace cannot read its plugins
 /** …the same list read as «none» (the chat status bar's pages chip): what is not shown, and why */
 export function pagesListHeldWords() { return t('VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, though it answers «cannot be shown right now» until the list reads, and the list comes back by itself (it tries again every few minutes).'); }
 export function pagesHeldWords() { return t('VibeSpace cannot read its list of published pages right now — nothing was changed: the page stays as it was, and a public page is served again as soon as the list reads. Press again in a few minutes.'); }
-export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d && d.code === 'plugins_unread' ? pluginsHeldWords() : d && d.code === 'providers_unread' ? providersHeldWords() : d && d.code === 'pages_unread' ? pagesHeldWords() : d && d.code === 'status_unread' ? statusHeldWords() : null; }
+/** B-f276 family (主开发 r3032): THE FAMILY's HELD CODES, ONE TABLE. A store whose file could not be read is HELD and its route answers
+ *  the store's code (503); the page says it in its OWN words — what could not be read by its plain name, that nothing was changed, that
+ *  it is read again by itself — never the hub's English, never a file name. The older holds keep their own branches (hosts-unread,
+ *  mounts-unread, store_unread by its file and kind, plugins_unread: heldWordsOf and refusalWords above / below); every other held code is
+ *  worded HERE, and a held code this table does not know yet takes the ONE generic sentence by the stated pattern HELD_CODE_RE. A lane
+ *  whose cure adds a held store adds its code as a row here; scripts/test-held-words.mjs is the census (every held 503 of the tree). */
+const HELD_WORDS = Object.freeze({
+  storage_unread: () => t('VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'),   // mounts.json (src/mounts.js)
+  tokens_unread: () => t('VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'),   // mount-tokens.json (src/webdav.js)
+  plugins_unread: () => pluginsHeldWords(),   // plugins.json (src/plugins.js)
+  'store-blocked': () => t('Paused: a channels file could not be read — this change is refused, and nothing is fetched or sent, until it reads again (see For you)'),   // the channels' held files (src/server/groups-engine.js, src/channel-store.js) — channel-words routeErrorText's own sentence, one key
+});
+const HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;   // THE STATED PATTERN: a held code the table does not know yet (TASK_GROUPS_UNREAD, todos-unread, records-unread, ledger_unreadable, …)
+export function heldGenericWords() { return t('VibeSpace cannot read one of its saved lists right now — nothing was changed. Try again in a few minutes.'); }
+/** a held code → its row's sentence, else the generic one when the code matches the pattern; any other code → null (its own words stand) */
+export function familyHeldWords(code) { const c = String(code || ''); return Object.prototype.hasOwnProperty.call(HELD_WORDS, c) ? HELD_WORDS[c]() : c && HELD_CODE_RE.test(c) ? heldGenericWords() : null; }
+export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d && d.code === 'plugins_unread' ? pluginsHeldWords() : d && d.code === 'providers_unread' ? providersHeldWords() : d && d.code === 'pages_unread' ? pagesHeldWords() : d && d.code === 'status_unread' ? statusHeldWords() : d ? familyHeldWords(d.code) : null; }
 /** …and session-status.json (503 `status_unread`, 主开发 r3005): an override, a clear refused */
 /** …the same store read as «none» (a status timeline, the board): what is not shown, and why */
 export function statusListHeldWords() { return t('VibeSpace cannot read the conversations’ statuses right now, so none is shown. Nothing is lost: they come back when they read (it tries again every few minutes); status changes wait until then.'); }
@@ -2037,8 +2053,11 @@ function refusalWords(body) {
   if (body && typeof body === 'object' && body.code === 'point_unread') return { ...body, said: body.error, error: t('This rollback point could not be read — nothing was restored. Pick another.') };   // B-225b's remainder P5
   if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
   if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };
+  const fw = body && typeof body === 'object' && body.code && (body.error || body.ok === false) ? familyHeldWords(body.code) : null;   // B-f276 family (r3032): every other held code, by the table or the generic sentence
+  if (fw) return { ...body, said: body.error, error: fw };
   return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;
 }
+export { HELD_CODE_RE };   // the census reads the pattern (scripts/test-held-words.mjs)
 
 /** «NOT ON DISK» REACHES THE PERSON (lane lg-store-writes, the U4/U5 cure — 主开发's as-if-must): an answer carrying
  *  `notOnDisk: true` (the act is applied in the hub's memory; its store's file was not written inside the bound — the store

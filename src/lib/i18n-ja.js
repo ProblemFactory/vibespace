@@ -2751,6 +2751,8 @@ export default {
   "Your storage was not imported — VibeSpace cannot read its storage list right now. Import it again in a few minutes.": "ストレージはインポートされませんでした — VibeSpace はいまストレージの一覧を読み込めません。数分後にもう一度インポートしてください。",
   "the storage list cannot be read right now — an export now carries none": "いまストレージの一覧を読み込めません — いまエクスポートするとストレージは含まれません",
   "VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace はいまストレージの一覧を読み込めません — 何も変更されていません。数分後にもう一度お試しください（自動で再読み込みします）。",
+  "VibeSpace cannot read one of its saved lists right now — nothing was changed. Try again in a few minutes.": "VibeSpace はいま保存している一覧の一つを読み込めません — 何も変更されていません。数分後にもう一度お試しください。",
+  "VibeSpace cannot read its storage list right now, so your storage is not shown here — it comes back by itself when the list reads.": "VibeSpace はいまストレージの一覧を読み込めないため、ここにはストレージが表示されていません — 一覧を読み込めた時点で自動で戻ります。",
   "VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace はいまフォルダーリンクを読み込めません — 何も変更されていません。数分後にもう一度お試しください（自動で再読み込みします）。",
   "VibeSpace cannot read its plugins’ settings right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace はいまプラグインの設定を読み込めません — 何も変更されていません。数分後にもう一度お試しください（自動で再読み込みします）。",
   "VibeSpace cannot read its plugins’ settings right now, so every plugin shows as off. Nothing is lost: VibeSpace starts none of them and changes wait until the settings read (it tries again every few minutes).": "VibeSpace はいまプラグインの設定を読み込めないため、すべてのプラグインがオフと表示されています。失われてはいません。VibeSpace はどれも起動せず、プラグインの変更は設定を読み込めるまで待機します（数分ごとに再試行します）。",

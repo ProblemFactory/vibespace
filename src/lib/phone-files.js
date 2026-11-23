@@ -70,7 +70,8 @@ export function installNavFilesDoor(app) {
 let mountsCache = { at: 0, p: null };
 const loadMounts = () => {
   const now = Date.now();
-  if (!mountsCache.p || now - mountsCache.at > 30e3) mountsCache = { at: now, p: fetchJson('/api/mounts').then((d) => (d && Array.isArray(d.mounts) ? d.mounts : [])).catch(() => []) };
+  // B-f276 family (主开发 r3032 finding 1): the answer's `unread` (mounts.json HELD) rides beside the list — a held list is no «no storage»
+  if (!mountsCache.p || now - mountsCache.at > 30e3) mountsCache = { at: now, p: fetchJson('/api/mounts').then((d) => ({ mounts: d && Array.isArray(d.mounts) ? d.mounts : [], held: !!(d && d.unread) })).catch(() => ({ mounts: [], held: false })) };
   return mountsCache.p;
 };
 const tilde = (p, home) => (home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p === home ? '~' : p);
@@ -95,12 +96,17 @@ export function filesCard(app) {
       return b;
     }));
   };
+  // B-f276 family (r3032 finding 1): a HELD storage list says so in one sentence under the chips — never a silent «no storage»
+  const held = Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline ph-files-held', hidden: true });
+  card.appendChild(held);
   const home = app._localHome || '';
   draw(filesCardChips({ home }), home); // the home chip at once — the rest when the hub answers
-  Promise.all([loadHomeFolders(), loadMounts()]).then(([folders, mounts]) => {
+  Promise.all([loadHomeFolders(), loadMounts()]).then(([folders, m]) => {
     if (!card.isConnected) return;
     const h = app._localHome || home;
-    draw(filesCardChips({ home: h, folders, recent: recentLocalCwds(app), mounts }), h);
+    draw(filesCardChips({ home: h, folders, recent: recentLocalCwds(app), mounts: m.mounts }), h);
+    held.hidden = !m.held;
+    held.textContent = m.held ? t('VibeSpace cannot read its storage list right now, so your storage is not shown here — it comes back by itself when the list reads.') : '';
   });
   return card;
 }

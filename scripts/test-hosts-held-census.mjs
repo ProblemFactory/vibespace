@@ -647,7 +647,10 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const ROWU = "  if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };";
   ok(U.split(ROWU).length === 2, 'control setup: the row is found once');
   const wx = wordsOf(U.replace(ROWU, '')); const wxx = wx && wx(HELD);
-  ok(wxx && wxx.error === HELD.error, 'CONTROL (the row cut, in the source): the server\'s English reaches the page — RED', wxx);
+  // B-f276 family (主开发 r3032): a held code with no row of its own now takes the family's ONE generic sentence (utils.js HELD_CODE_RE) — the
+  // row cut loses the machines' own words, never to the hub's English
+  const GENERIC = '«VibeSpace cannot read one of its saved lists right now — nothing was changed. Try again in a few minutes.»';
+  ok(wxx && wxx.error === GENERIC && wxx.error !== `«${SENT}»`, 'CONTROL (the row cut, in the source): the machines\' own sentence is lost (the family\'s generic one stands in, never the server\'s English) — RED', wxx);
   ok(EX.includes("    case 'hosts-unread': return hostsHeldWords();") && EX.includes("body.textContent = codeWords(e.code, { error: e.message });") && EX.includes("import { createModalShell, showToast, hostsHeldWords } from './utils.js';"),
     'the exit dialog (opened and saved, and the dial status through exitCodeWords) words `hosts-unread` by its code');
   ok(SM.includes("why: e && e.code === 'hosts-unread' ? hostsHeldWords() : e && e.code === 'tokens_unread' ? thrownText(e) : (e && e.message) || tr('server unreachable')"), 'a machine\'s removal words `hosts-unread` by its code');
@@ -658,8 +661,8 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const MHELD = { error: 'adding a push mount: machine-mounts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'mounts-unread' };
   const ROWM = "  if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };\n";
   const wm = RW && RW(MHELD), RWX = wordsOf(anchored(U, ROWM, '', 'hhc-8m1')), wmx = RWX && RWX(MHELD);
-  ok(wm && wm.error === `«${MSENT}»` && wm.said === MHELD.error && wm.code === 'mounts-unread' && wmx && wmx.error === MHELD.error,
-    'fetchJson\'s refusalWords words `mounts-unread` by its code (the server\'s words kept as `said`); CONTROL (the row cut, in a copy): the server\'s English — RED', { wm, wmx });
+  ok(wm && wm.error === `«${MSENT}»` && wm.said === MHELD.error && wm.code === 'mounts-unread' && wmx && wmx.error === GENERIC,
+    'fetchJson\'s refusalWords words `mounts-unread` by its code (the server\'s words kept as `said`); CONTROL (the row cut, in a copy): the mounts\' own sentence is lost (the family\'s generic one stands in) — RED', { wm, wmx });
   const MDS = fs.readFileSync(path.join(ROOT, 'src/lib/mounts-dialog.js'), 'utf8');
   const AH = 'export async function api(url, opts = {}) {', HW = "  const worded = d.code === 'hosts-unread' ? hostsHeldWords() : d.code === 'mounts-unread' ? mountsHeldWords()\n    : d.code";
   ok(MDS.includes(AH) && MDS.split(HW).length === 2, 'control setup: the mount doors\' api() and its hold branch are in mounts-dialog.js');
@@ -688,8 +691,8 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
     return new Function('t', `${src.slice(i, j).replaceAll('export function', 'function')}\nreturn heldWordsOf;`)((s) => `«${s}»`); };   // eslint-disable-line no-new-func
   const HO = heldOf(U), HOX = heldOf(anchored(U, "d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread'", "d && d.code === 'store_unread'", 'hhc-8m3'));
   const ho = HO && [HO({ code: 'hosts-unread', error: 'x' }), HO({ code: 'mounts-unread', error: 'x' }), HO({ code: 'no_dav_path', error: 'x' }), HO(null)];
-  ok(!!ho && JSON.stringify(ho) === JSON.stringify([`«${SENT}»`, `«${MSENT}»`, null, null]) && !!HOX && HOX({ code: 'mounts-unread' }) === null,
-    'heldWordsOf: a hold\'s code (machines, mounts) → the page\'s sentence; another code or none → null (its own words stand); CONTROL (the mounts branch cut, in a copy): a mounts hold is not worded — RED', { ho });
+  ok(!!ho && JSON.stringify(ho) === JSON.stringify([`«${SENT}»`, `«${MSENT}»`, null, null]) && !!HOX && HOX({ code: 'mounts-unread' }) === GENERIC,
+    'heldWordsOf: a hold\'s code (machines, mounts) → the page\'s sentence; another code or none → null (its own words stand); CONTROL (the mounts branch cut, in a copy): the mounts\' own sentence is lost (the family\'s generic one stands in) — RED', { ho });
   // the pages that fetch by hand: each refusal line asks heldWordsOf first (the exit runs and device activity dialogs; Settings' config export and import)
   const HAND = [['src/lib/exit-runs-dialog.js', 1], ['src/lib/device-acts-dialog.js', 1], ['src/lib/app.js', 1]].map(([f, n]) => { const t = fs.readFileSync(path.join(ROOT, f), 'utf8'); return { f, want: n, got: (t.match(/throw new Error\(heldWordsOf\(d\) \|\| d\.error \|\| `HTTP \$\{res\.status\}`\)|\(heldWordsOf\(d\) \|\| credentialDoorWords\(d\) \|\| d\.error/g) || []).length, bare: (t.match(/throw new Error\(d\.error \|\| `HTTP \$\{res\.status\}`\)|: \(credentialDoorWords\(d\) \|\| d\.error \|\| t\('Export failed'\)/g) || []).length }; });   // stale-pins: kept (the bare forms are counted to be ABSENT)
   ok(HAND.every((h) => h.got === h.want && h.bare === 0), 'the pages that fetch by hand word a hold first (heldWordsOf) — the exit runs dialog, the device activity dialog, Settings\' config export (its import route never answers a hold\'s code); none shows the hub\'s English for it', HAND);

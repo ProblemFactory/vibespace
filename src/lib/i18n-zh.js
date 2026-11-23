@@ -2751,6 +2751,8 @@ export default {
   "Your storage was not imported — VibeSpace cannot read its storage list right now. Import it again in a few minutes.": "你的存储没有导入 — VibeSpace 暂时读不到它的存储列表。几分钟后再导入一次。",
   "the storage list cannot be read right now — an export now carries none": "暂时读不到存储列表 — 现在导出不会包含任何存储",
   "VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到它的存储列表 — 没有更改任何东西。几分钟后再试（它会自己再读一次）。",
+  "VibeSpace cannot read one of its saved lists right now — nothing was changed. Try again in a few minutes.": "VibeSpace 暂时读不到它保存的某个列表 — 没有更改任何东西。几分钟后再试。",
+  "VibeSpace cannot read its storage list right now, so your storage is not shown here — it comes back by itself when the list reads.": "VibeSpace 暂时读不到它的存储列表，所以这里不显示你的存储 — 列表读到后会自己回来。",
   "VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到它的文件夹链接 — 没有更改任何东西。几分钟后再试（它会自己再读一次）。",
   "VibeSpace cannot read its plugins’ settings right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到插件的设置 — 没有更改任何东西。几分钟后再试（它会自己再读一次）。",
   "VibeSpace cannot read its plugins’ settings right now, so every plugin shows as off. Nothing is lost: VibeSpace starts none of them and changes wait until the settings read (it tries again every few minutes).": "VibeSpace 暂时读不到插件的设置，所以每个插件都显示为关闭。没有丢失：VibeSpace 不会启动其中任何一个，对插件的更改要等到设置读到为止（每隔几分钟会再试一次）。",
