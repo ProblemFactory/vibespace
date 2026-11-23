@@ -1437,7 +1437,8 @@ console.log('§7 the REAL producer (usage-pool-engine recordRateLimitEvent) — 
     // sessionFromMeta also spreads the seen marks (lane hook-seen-marks, B-86d3): the REAL restoreMarks + a build version, as
     // test-seen-marks compiles it; a tree without src/seen-marks.js gets a restorer that restores nothing
     const restoreMarks = (() => { try { return require(path.join(REPO, 'src/seen-marks.js')).restoreMarks; } catch { return () => ({}); } })();
-    const sessionFromMeta = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', body + '\nreturn sessionFromMeta;')(os, () => null, restoreMarks, '');
+    const forkSource = (() => { try { return require(path.join(REPO, 'src/claude-lock-capture.js')).restoredForkSource || (() => null); } catch { return () => null; } })();   // B-5a4d root (r3282): the restore's fork source rule, handed as restoreMarks is
+    const sessionFromMeta = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'restoredForkSource', body + '\nreturn sessionFromMeta;')(os, () => null, restoreMarks, '', forkSource);
     const nw = sessionFromMeta({ accountId: 'sub-a', billingHow: 'oat', oatRoad: 'env', oatGen: 1790000000123 }, {});
     const old = sessionFromMeta({ accountId: 'sub-a' }, {});
     const junk = sessionFromMeta({ accountId: 'sub-a', billingHow: 7, oatRoad: 'tunnel', oatGen: 'x' }, {});

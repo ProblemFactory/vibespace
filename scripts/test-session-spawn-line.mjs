@@ -564,12 +564,12 @@ console.log('\n── B-460d follow: the ssh roads\' facts say what they are bel
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), BR = read('src/server/boot-restore.js');
   ok(wL === tt(KL, { n: '5' }) && wJ === tt(KJ, { n: '5' }) && wA === 'Below its machine’s agent (nice +5), and everything it starts' && [KL, KJ].every((k) => ZH.includes(J(k) + ': ') && JA.includes(J(k) + ': ')),
     'Session Properties says it: «Below its ssh login on that machine (nice +5)…», and for the terminal «… when this terminal started its shell — a terminal that joined a shell already running keeps that shell’s» (en, zh, ja); the device road keeps «Below its machine’s agent»', { wL, wJ, wA });
-  // the boot's restore: sessionFromMeta stands alone (its suites hand it os, poolPinFromMeta, restoreMarks, BUILD_VERSION only) — so its
+  // the boot's restore: sessionFromMeta stands alone (its suites hand it os, poolPinFromMeta, restoreMarks, BUILD_VERSION, restoredForkSource only) — so its
   // rule is inline; held equal to factOf over every shape here
   const restoredSame = () => {
     const br = read('src/server/boot-restore.js'), body = (br.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0];
     if (!body) return false;
-    const sfm = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', `${body}\nreturn sessionFromMeta;`)(os, () => null, () => ({}), '');
+    const sfm = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'restoredForkSource', `${body}\nreturn sessionFromMeta;`)(os, () => null, () => ({}), '', () => null);
     // r1911: the shapes are the PRODUCERS' own output (every fact a start can write), each held to a ROUND TRIP — a field a producer adds
     // and the restore drops is red here — beside hand-made junk the restore must read as factOf reads it
     const q = { warn() { } }, offS = (k) => (k === SPRI.SETTING ? false : undefined);

@@ -280,6 +280,20 @@ const RED_LIVE = ssRed('nolive', '{ liveSince: session.pty || session.socketPath
 const RED_FIRST = ssRed('nofirst', '    drawn = drawn.filter((d) => !(d.rec && typeof d.rec.cliUuid === \'string\' && recorded.has(d.rec.cliUuid)));\n', '');
 const RED_FORK = ssRed('forkchain', 'session.forkedFrom.filter((x) => x && x !== forkSource)', 'session.forkedFrom');
 const RED_WARM = ssRed('nowarm', 'HANDED.warm([claudeSessionId], opts && opts.handedDir ? { dir: opts.handedDir } : {}).catch(() => null)', 'Promise.resolve(null)');
+// r3282 (round w7fd2q32u): the cure's REDs
+const LC = require(path.join(ROOT, 'src/claude-lock-capture.js'));
+const RED_PENDING = ssRed('pending', '    if (forkSource && historySessionId === forkSource) return;\n', '');
+const R_NOFORK = redWrapper('nofork', [["const IS_FORK = args.includes('--fork-session');", 'const IS_FORK = false;   // MUTANT: the fork flag never read']]);
+const R_INPROC = redWrapper('inproc', [['  const { tail, from } = await tailViaChild(file);', "  const { tail, from } = await (async () => { const st = await fs.promises.stat(file); return { tail: await fs.promises.readFile(file, 'utf8'), from: Math.max(0, st.size - DEAD_TAIL_MAX) }; })();   // MUTANT: read in this process"]]);
+const R_NOCOMPACT = redWrapper('nocompact', [['        else if (compactAt && !(d.at && compactAt < d.at)) { left.push(d.msgId); compacted++; }\n', '']]);
+const R_NOHEAD = redWrapper('nohead', [['    for (const r of [...all.values()]) if (r.copy) { const head =', '    for (const r of []) if (r.copy) { const head =']]);
+const PI_SRC = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8');
+const RED_VERDICTS = M.load('src/proc-identity.js', anchored(PI_SRC, "    if (!(rows instanceof Map) || !rows.size) return 'unknown';", "    if (!(rows instanceof Map) || !rows.size) return 'gone';   // MUTANT: a failed listing read as gone", 'the identity RED listing'), 'listing');
+const HR_SRC = fs.readFileSync(path.join(ROOT, 'src/handed-records.js'), 'utf8');
+const RED_RANK = M.load('src/handed-records.js', anchored(HR_SRC, "const RANK = { handed: 0, undelivered: 1, landed: 2, 'own-turn': 2, kept: 2 };", "const RANK = { handed: 0, landed: 1, 'own-turn': 1, kept: 1, undelivered: 1 };   // MUTANT: the ranks before", 'the drawer RED rank'), 'rank');
+const LC_SRC = fs.readFileSync(path.join(ROOT, 'src/claude-lock-capture.js'), 'utf8');
+const RED_LEGACY = M.load('src/claude-lock-capture.js', anchored(LC_SRC, "  return meta.forkRequested === true && cur && ff.length && !ff.includes(cur) ? ff[0] : null;", '  return null;   // MUTANT: no reading of a pre-.134 record', 'the restore RED legacy'), 'legacy');
+const DEAD_READ = Number((/^const DEAD_READ_MS = (\d+);/m.exec(CW_SRC) || [])[1]) || 2000;   // the product's own bound (a wait, never a literal)
 /** a reader built as the attach builds it (`SSmod` = this tree's store or a RED copy), after the store's OWN warm of the transcript */
 async function readerOf(c, session, { SSmod = SS, ids = [session.backendSessionId] } = {}) {
   await SSmod.warmSessionJsonlAsync(ids[0], c.cwd, { handedDir: c.buffers });
@@ -302,19 +316,55 @@ async function nextWrapper(tag, wrapper = WRAPPER) {
   return { c, said, recs: recordsOf(c), log: w.log() };
 }
 /** ⑪ A FORK: the parent has a record; the fork (--fork-session, its own id) hands a frame */
-async function forkScene() {
-  const c = conversation('fork');
+async function forkScene(tag = 'fork', wrapper = WRAPPER) {
+  const c = conversation(tag);
   place(c, [recordOf('msg-parent-lost', { pid: 1, start: 'l1', boot: '' }, { state: 'undelivered', settledAt: Date.now() - 1000 })]);
   const F = uuid(500);
   writeTranscript(c, F, [{ type: 'user', uuid: uuid(501), timestamp: new Date(Date.now() - 10000).toISOString(), message: { role: 'user', content: 'forked' } }]);
-  const w = startWrapper(c, 'sess-11-fork', { extra: ['--fork-session', '--session-id', F] });
+  const w = startWrapper(c, 'sess-11-' + tag, { wrapper, extra: ['--fork-session', '--session-id', F] });
   await handOne(w, 'msg-in-fork', words('msg-in-fork'));
   await until(() => recordsOf(c, F).has('msg-in-fork'), 3000);
   await stopWrapper(w.child);
   return { c, F };
 }
+/** ⑳ THE JUDGE's MAPPING: a recycled pid, a real zombie, a birth this machine cannot read, no identity — over a whole, small transcript */
+async function zombieOf() {
+  const sh = spawn('sh', ['-c', 'sleep 0 & echo $!; exec sleep 60'], { stdio: ['ignore', 'pipe', 'ignore'] }); sleepers.push(sh);
+  let out = ''; sh.stdout.on('data', (d) => { out += d; });
+  await until(() => /^\d+\n/.test(out), 3000);
+  const pid = Number(out.split('\n')[0]);
+  await until(() => PI.stateOf(pid) === 'Z', 3000);
+  return { pid, start: PI.startToken(pid), boot: PI.bootToken(), state: PI.stateOf(pid) };
+}
+async function mapScene() {
+  const c = conversation('map');
+  const [rec, live, z] = await Promise.all([cliOf({ alive: true }), cliOf({ alive: true }), zombieOf()]);
+  place(c, [recordOf('mR-recycled', { ...rec, start: 'l1' }), recordOf('mZ-zombie', z), recordOf('mU-unknown', { pid: live.pid, start: 'pMon Jan  1 00:00:00 2001', boot: '' }), recordOf('mN-noid', { pid: 4242, start: '', boot: '' })]);
+  const w = startWrapper(c, 'sess-20-map');
+  await until(() => logHas(w, /handed records at this start: \d+ frame/), 6000);
+  await stopWrapper(w.child);
+  return { c, recs: recordsOf(c), log: w.log(), zstate: z.state };
+}
+/** ⑲'s RED: a copy that reads the tail IN ITS OWN PROCESS, over the same pipe — still running when the lane has exited and the
+ *  product's own read bound has passed again */
+let laneDone = () => { };
+const laneExited = new Promise((r) => { laneDone = r; });
+async function pipeRed() {
+  const c = conversation('fifo-red');
+  const w = startWrapper(c, 'sess-d-fifo-red', { wrapper: R_INPROC.path });
+  const MS = 'msg-fifo-red';
+  await handOne(w, MS, words(MS));
+  await until(() => recordsOf(c).has(MS), 3000);
+  fs.rmSync(c.tfile(), { force: true }); spawnSyncLocal('mkfifo', [c.tfile()]);
+  killCli(w);
+  const [laneOk] = await Promise.all([laneExited, sleep(DEAD_READ)]);   // the lane has exited, and this copy's own read bound has passed
+  const exited = await Promise.race([w.exited.then(() => true), sleep(DEAD_READ).then(() => false)]);   // …and passed again: a copy not held would be gone
+  if (!exited) { try { w.child.kill('SIGKILL'); } catch { } await w.exited; }
+  fs.rmSync(c.tfile(), { force: true });
+  return { exited, laneOk };
+}
 /** ⑭ / ⑯ / ⑲: a dying wrapper whose transcript is past 4 MB and newer than the send, whose frame is long, or whose transcript is a FIFO */
-async function diesWith(tag, { wrapper = WRAPPER, text = null, transcript = 'small' } = {}) {
+async function diesWith(tag, { wrapper = WRAPPER, text = null, transcript = 'small', onExit = null } = {}) {
   const c = conversation(tag);
   const w = startWrapper(c, 'sess-d-' + tag, { wrapper });
   const MS = 'msg-' + tag;
@@ -322,9 +372,11 @@ async function diesWith(tag, { wrapper = WRAPPER, text = null, transcript = 'sma
   await until(() => recordsOf(c).has(MS), 3000);
   if (transcript === 'big-newer') { const later = new Date(Date.now() + 60000).toISOString(); const pad = 'the turn says more '.repeat(14); const lines = []; for (let i = 0; i < 12000; i++) lines.push(J({ sessionId: c.conv, cwd: c.cwd, type: 'assistant', uuid: uuid(20000 + i), timestamp: later, message: { id: 'msg_p' + i, role: 'assistant', content: [{ type: 'text', text: pad }] } })); fs.writeFileSync(c.tfile(), lines.join('\n') + '\n'); }
   if (transcript === 'fifo') { fs.rmSync(c.tfile(), { force: true }); spawnSyncLocal('mkfifo', [c.tfile()]); }
+  if (transcript === 'compacted') writeTranscript(c, c.conv, [{ type: 'user', uuid: uuid(960 + k), timestamp: new Date(Date.now() - 60000).toISOString(), message: { role: 'user', content: 'start' } }, { type: 'system', subtype: 'compact_boundary', uuid: uuid(970 + k), timestamp: new Date(Date.now() + 1000).toISOString() }]);   // the whole file, compacted after the send, the frame's record not in it
   killCli(w);
   // ⑲'s evidence is the exit itself: nothing ever opens the pipe for writing, so a wrapper whose exit an fs call holds never exits
   const exited = await Promise.race([w.exited.then(() => true), sleep(8000).then(() => false)]);
+  if (onExit) onExit(exited);
   WF.removeWrapperFiles(c.buffers, w.hubId);
   await until(() => !fs.existsSync(path.join(c.buffers, w.hubId + '.img')), 3000);
   if (transcript === 'fifo') fs.rmSync(c.tfile(), { force: true });
@@ -346,10 +398,11 @@ async function handsOver(tag, { wrapper = WRAPPER, before = null, between = null
 const { spawnSync: spawnSyncLocal } = await import('node:child_process');
 const ROOTUSER = typeof process.getuid === 'function' && process.getuid() === 0;
 const BIGCOPY = 'x'.repeat(170 * 1024);   // 48 of them read under the 8 MB bound; the frame after them passes it
-const [U10, U10r, U11, U14, U14r, U16, U19, U7, U7m, U7r, U17b, U17c, U18t, U18r, U18rr] = await Promise.all([
+const HUGE = 'h'.repeat(9 * 1024 * 1024);   // one message past the records file's 8 MB bound
+const [U10, U10r, U11, U14, U14r, U16, U19, U7, U7m, U7r, U17b, U17c, U18t, U18r, U18rr, U11r, U20, U25, U25r, U24, U24r, U19r] = await Promise.all([
   nextWrapper('next'), nextWrapper('next-red', R_SKIPID.path), forkScene(),
   diesWith('window', { transcript: 'big-newer' }), diesWith('window-red', { wrapper: R_NOWINDOW.path, transcript: 'big-newer' }),
-  diesWith('long', { text: 'LONG-START ' + 'w'.repeat(12000) + ' LONG-END' }), diesWith('fifo', { transcript: 'fifo' }),
+  diesWith('long', { text: 'LONG-START ' + 'w'.repeat(12000) + ' LONG-END' }), diesWith('fifo', { transcript: 'fifo', onExit: (x) => laneDone(x) }),
   ...['merge', 'merge-red', 'rank-red'].map((tag) => handsOver(tag, {
     wrapper: tag === 'merge-red' ? R_NOMERGE.path : tag === 'rank-red' ? R_ANYRANK.path : WRAPPER,
     before: (c) => place(c, [recordOf('msg-other-writer', null, { state: 'undelivered', settledAt: Date.now() - 4000 })]),
@@ -361,6 +414,10 @@ const [U10, U10r, U11, U14, U14r, U16, U19, U7, U7m, U7r, U17b, U17c, U18t, U18r
   handsOver('torn', { before: (c) => { fs.mkdirSync(path.join(c.buffers, 'handed'), { recursive: true }); fs.writeFileSync(HANDED.fileOf(c.buffers, c.conv), '{"v":1,"frames":[{"msgId":"x","co'); }, frames: ['msg-after-torn'] }),
   handsOver('refused', { before: (c) => { place(c, [recordOf('msg-locked', null, { state: 'undelivered' })]); fs.chmodSync(HANDED.fileOf(c.buffers, c.conv), 0o000); }, frames: ['msg-after-refused'] }),
   handsOver('refused-red', { wrapper: R_WRITEOVER.path, before: (c) => { place(c, [recordOf('msg-locked', null, { state: 'undelivered' })]); fs.chmodSync(HANDED.fileOf(c.buffers, c.conv), 0o000); }, frames: ['msg-after-refused'] }),
+  forkScene('fork-red', R_NOFORK.path), mapScene(),
+  diesWith('compact', { transcript: 'compacted' }), diesWith('compact-red', { wrapper: R_NOCOMPACT.path, transcript: 'compacted' }),
+  handsOver('huge', { frames: ['mH-huge', 'mA-after'], texts: [HUGE, words('mA-after')] }), handsOver('huge-red', { wrapper: R_NOHEAD.path, frames: ['mH-huge', 'mA-after'], texts: [HUGE, words('mA-after')] }),
+  pipeRed(),
 ]);
 
 say('⑩ THE NEXT WRAPPER judges what a killed wrapper left handed — by each record\'s OWN CLI, before the transcript');
@@ -368,19 +425,42 @@ WD.section('⑩');
 const st10 = (id) => U10.recs.get(id)?.state;
 ok(st10('msg-cli-gone') === 'undelivered' && st10('msg-ran-own') === 'own-turn' && st10('msg-cli-alive') === 'handed' && st10('msg-no-identity') === 'handed'
   && U10.said.some((r) => r.state === 'undelivered' && r.msg_ids.includes('msg-cli-gone')) && U10.said.some((r) => r.state === 'own-turn' && r.msg_ids.includes('msg-ran-own'))
-  && /1 left — the CLI it was handed to still runs; 1 left — its record names no CLI to judge \(unknown, never «gone»\)/.test(U10.log),
+  && /1 left — the CLI it was handed to still runs; 1 left — its record names no CLI this machine can judge \(unknown, never «gone»\)/.test(U10.log),
   `its CLI gone and absent → «${st10('msg-cli-gone')}»; its CLI gone and the transcript's user record names its stamp → «${st10('msg-ran-own')}»; its CLI ALIVE → left («${st10('msg-cli-alive')}»); NO identity → unknown, left («${st10('msg-no-identity')}») — said as the successor's`, { states: [...U10.recs.values()].map((r) => [r.msgId, r.state]) });
 ok(R_SKIPID.counts[0] === 1 && U10r.recs.get('msg-cli-alive')?.state === 'undelivered', `RED: a copy that judges no identity (anchor ×${R_SKIPID.counts[0]}) calls the frame whose CLI still runs «not delivered» — the person would send it twice`);
 
 say('⑪ A FORK takes none of its parent\'s records');
 WD.section('⑪');
 {
-  const fRecs = recordsOf(U11.c, U11.F), pRecs = recordsOf(U11.c);
-  const session = { backendSessionId: U11.F, forkedFrom: [U11.c.conv], _forkSourceId: U11.c.conv };
-  const lane = bubbleOf(await readerOf(U11.c, session, { ids: [U11.F, U11.c.conv] }), 'msg-parent-lost');
-  const red = RED_FORK.SS ? bubbleOf(await readerOf(U11.c, session, { SSmod: RED_FORK.SS, ids: [U11.F, U11.c.conv] }), 'msg-parent-lost') : 'no control';
-  ok(fRecs.has('msg-in-fork') && !fRecs.has('msg-parent-lost') && pRecs.get('msg-parent-lost')?.state === 'undelivered' && !lane && RED_FORK.n === 1 && !!red && red !== 'no control',
-    `the fork's own file holds its own frame and none of its parent's; the parent's record stays the parent's; the fork's history draws none of it — RED: a drawer that reads a fork's parent in its chain draws ${red ? 'the parent\'s bubble' : 'nothing'}`, { fork: [...fRecs.keys()], red });
+  const fRecs = recordsOf(U11.c, U11.F), pRecs = recordsOf(U11.c), P = U11.c.conv, F = U11.F;
+  const draws = async (session, SSmod = SS, ids = [F, P]) => !!bubbleOf(await readerOf(U11.c, session, { SSmod, ids }), 'msg-parent-lost');
+  // THE LIVE ROAD — ws-create's own fields (its ONE rule, forkSourceOf; the assignment pinned below), then the adoption's chain
+  const live = { _forkRequested: true, claudeSessionId: P, backendSessionId: P, forkedFrom: null, _forkSourceId: LC.forkSourceOf({ fork: true, resumeId: P }), createdAt: Date.now() - 5000 };
+  const pending = await draws(live, SS, [P]), pendingRed = await draws(live, RED_PENDING.SS, [P]);
+  LC.adoptCapturedId(live, F);   // the adoption pushes the parent into the chain, as both production roads do
+  const adopted = await draws(live), adoptedRed = await draws(live, RED_FORK.SS);
+  // THE RESTORE ROAD — the meta as ws-create and the adoption wrote it, the fork source by the restore's ONE rule (pinned below)
+  const fromMeta = (m) => ({ claudeSessionId: m.claudeSessionId, backendSessionId: m.claudeSessionId, forkedFrom: m.forkedFrom || null, _forkSourceId: LC.restoredForkSource(m), createdAt: m.createdAt });
+  const metaF = { claudeSessionId: F, forkedFrom: [P], forkRequested: true, forkSourceId: LC.forkSourceOf({ fork: true, resumeId: P }), createdAt: Date.now() - 5000 };
+  const restored = await draws(fromMeta(metaF));
+  // A FORK FROM BEFORE 2.369.134 — no forkSourceId in its meta: its own chain names the source (restoredForkPending's reading)
+  const metaOld = { claudeSessionId: F, forkedFrom: [P], forkRequested: true, createdAt: Date.now() - 5000 };
+  const old = await draws(fromMeta(metaOld)), oldRed = await draws({ ...fromMeta(metaOld), _forkSourceId: RED_LEGACY.restoredForkSource(metaOld) });
+  // AN IMPLICIT FORK (a resume that minted a new id — no fork flag): its earlier id IS this conversation's, its records drawn
+  const imp = await draws(fromMeta({ claudeSessionId: F, forkedFrom: [P], forkRequested: false, createdAt: Date.now() - 5000 }));
+  ok(fRecs.has('msg-in-fork') && !fRecs.has('msg-parent-lost') && pRecs.get('msg-parent-lost')?.state === 'undelivered' && recordsOf(U11r.c, U11r.F).has('msg-parent-lost'),
+    'the wrapper\'s half: the fork\'s own file holds its own frame and none of its parent\'s; the parent\'s record stays the parent\'s — RED: a copy that never reads the fork flag merges the parent\'s records into the fork\'s file', { fork: [...fRecs.keys()], red: [...recordsOf(U11r.c, U11r.F).keys()] });
+  ok(!pending && !adopted && !restored && !old && imp && live._forkSourceId === P && LC.restoredForkSource(metaF) === P && LC.restoredForkSource(metaOld) === P,
+    'the drawer\'s half, by production\'s roads: a live fork still borrowing its parent\'s id draws nothing; adopted (the parent pushed into its chain) it draws none of the parent\'s; restored from its meta, and from a meta older than 2.369.134 (no fork source: its own chain names it), the same; a resume\'s implicit fork draws its earlier id\'s records (its own)', { pending, adopted, restored, old, imp });
+  ok(pendingRed && adoptedRed && oldRed, 'RED: a drawer that draws for a fork still borrowing its parent\'s id, a drawer that keeps the parent in the chain, and a restore that does not read a pre-.134 record each draw the parent\'s «Not delivered» in the fork', { pendingRed, adoptedRed, oldRed });
+  // THE ASSIGNMENTS — where production builds the session: ws-create's literal, boot-restore's sessionFromMeta (each with its control)
+  const WC = fs.readFileSync(path.join(ROOT, 'src/ws-create.js'), 'utf8'), BRT = fs.readFileSync(path.join(ROOT, 'src/server/boot-restore.js'), 'utf8');
+  const wcPin = (t) => /\{[^}]*\bforkSourceOf\b[^}]*\} = require\('\.\/claude-lock-capture'\)/.test(t) && /\n\s+_forkRequested: !!data\.fork && !!capsOf\(backend\)\.fork,[^\n]*\n\s+_forkSourceId: forkSourceOf\(data\),/.test(t)
+    && t.includes('forkSourceId: (data.fork && (data.forkedFromId || data.resumeId)) ? String(data.forkedFromId || data.resumeId) : undefined,');
+  const brPin = (t) => /\{[^}]*\brestoredForkSource\b[^}]*\} = require\('\.\.\/claude-lock-capture'\)/.test(t) && /function sessionFromMeta\(meta, transportFacts\) \{\n  return \{[\s\S]{0,1500}?\n    _forkSourceId: restoredForkSource\(meta\),/.test(t);
+  const same = ['p-1', 'x-2'].every((id) => LC.forkSourceOf({ fork: true, resumeId: id }) === id) && LC.forkSourceOf({ fork: true, forkedFromId: 'x-3', resumeId: 'p-3' }) === 'x-3' && LC.forkSourceOf({ resumeId: 'p-4' }) === null;
+  ok(wcPin(WC) && brPin(BRT) && same && !wcPin(anchored(WC, '            _forkSourceId: forkSourceOf(data),', '            // (MUTANT: no fork source)', 'the create RED')) && !brPin(anchored(BRT, '    _forkSourceId: restoredForkSource(meta),', '    // (MUTANT: no fork source)', 'the restore RED')),
+    'ws-create\'s session carries _forkSourceId by forkSourceOf (the meta\'s forkSourceId is the same rule) and boot-restore\'s sessionFromMeta (all three restore roads) by restoredForkSource — CONTROL: either assignment removed, its pin is red');
 }
 
 say('⑫ A FRAME IN FLIGHT after a Resume is never drawn — through the store\'s own line');
@@ -467,12 +547,90 @@ say('⑲ THE READ BOUND — a transcript that never answers holds nothing');
 WD.section('⑲');
 ok(U19.rec?.state === 'handed' && /not read in 2 s/.test(U19.log) && U19.exited === true, `the transcript is a pipe nobody writes: the settle gives up at its bound (said), the frame is left, and the wrapper EXITS though nothing ever wrote the pipe (a read held in this process would hold its exit: the unit's first gate waited it out) — exited ${U19.exited}`);
 
+ok(U19r.laneOk === true && U19r.exited === false, `RED: a copy that reads the tail in ITS OWN process over the same pipe is still running after the lane's wrapper exited and the read bound (${DEAD_READ} ms) passed again — its exit held`, U19r);
+ok(/spawn\(process\.execPath, \['-e', TAIL_JS, file, String\(DEAD_TAIL_MAX\)\], \{ stdio: \['ignore', 'pipe', 'ignore'\], env: \{\} \}\)/.test(CW_SRC),
+  'the tail\'s child is handed NO environment (env: {} — none of the account\'s names; the spawn census reads it as built from nothing)');
+
+say('⑳ THE JUDGE\'s MAPPING — a recycled pid and a zombie are gone, a birth this machine cannot read is unknown');
+WD.section('⑳');
+{
+  const st = (id) => U20.recs.get(id)?.state;
+  ok(U20.zstate === 'Z' && st('mR-recycled') === 'undelivered' && st('mZ-zombie') === 'undelivered' && st('mU-unknown') === 'handed' && st('mN-noid') === 'handed' && /2 left — /.test(U20.log),
+    `a record whose pid now belongs to another birth (recycled) and one whose CLI is a zombie are judged GONE — the whole transcript proves them «${st('mR-recycled')}» / «${st('mZ-zombie')}»; a birth recorded by a rung this machine cannot read and a record with no birth are UNKNOWN — left «${st('mU-unknown')}» / «${st('mN-noid')}», said`, { states: [...U20.recs.values()].map((r) => [r.msgId, r.state]) });
+}
+
+say('㉑ ONE LOOK OFF A PROCFS — a listing that failed proves nothing, and one listing answers every record');
+WD.section('㉑');
+{
+  let calls = 0;
+  const rows = new Map([[101, { stat: 'S', lstart: 'Mon Nov 23 05:00:00 2026' }], [102, { stat: 'Z', lstart: 'Mon Nov 23 05:00:01 2026' }], [103, { stat: 'S', lstart: 'Mon Nov 23 05:00:02 2026' }]]);
+  const asks = [{ pid: 101, token: 'pMon Nov 23  05:00:00 2026' }, { pid: 102, token: 'pMon Nov 23 05:00:01 2026' }, { pid: 103, token: 'pTue Nov 24 05:00:02 2026' }, { pid: 104, token: 'pMon Nov 23 05:00:03 2026' }, { pid: 101, token: 'l12345' }, { pid: 105, token: '' }];
+  const answered = await PI.tokenVerdicts(asks, { procfs: false, listing: async () => { calls++; return rows; } });
+  const failed = await PI.tokenVerdicts(asks, { procfs: false, listing: async () => null });
+  const threw = await PI.tokenVerdicts(asks, { procfs: false, listing: async () => { throw new Error('ps did not answer'); } });
+  const red = await RED_VERDICTS.tokenVerdicts(asks, { procfs: false, listing: async () => null });
+  ok(J(answered) === J(['same', 'zombie', 'pid-recycled', 'gone', 'unknown', 'unknown-identity']) && calls === 1,
+    'a listing that answered: the same start = same, Z = zombie, another start = recycled, not listed = GONE, a procfs birth = unknown here, no birth = unknown-identity — ONE listing for all six', { answered, calls });
+  ok(failed.every((v) => v === 'unknown' || v === 'unknown-identity') && threw.every((v) => v === 'unknown' || v === 'unknown-identity'),
+    'a listing that failed or passed its bound (no answer) or threw: every verdict UNKNOWN — never «gone» (a living CLI is never called gone because ps did not answer)', { failed, threw });
+  ok(red.includes('gone'), 'RED: a copy that reads a failed listing as an answer calls the records gone', { red });
+  const probe = spawnSyncLocal('ps', ['-p', String(process.pid), '-o', 'lstart='], { encoding: 'utf8' });
+  if (probe.status !== 0 || !String(probe.stdout || '').trim()) say('  · (no ps answers here: the REAL listing is not judged in this run)');
+  else {
+    const [alive, dead] = await Promise.all([cliOf({ alive: true }), cliOf()]);
+    const t = 'p' + String(spawnSyncLocal('ps', ['-p', String(alive.pid), '-o', 'lstart='], { encoding: 'utf8' }).stdout || '').trim();
+    const real = await PI.tokenVerdicts([{ pid: alive.pid, token: t }, { pid: dead.pid, token: t }], { procfs: false });
+    ok(J(real) === J(['same', 'gone']), 'the REAL listing (ps -A, its own env) reads a living process\'s start in the words its own ps -p wrote, and a dead pid as gone', { real });
+  }
+  ok(/let vs = null; try \{ vs = PI && PI\.tokenVerdicts \? await PI\.tokenVerdicts\(asked\) : null; \} catch \{ vs = null; \}/.test(CW_SRC) && !/PI\.tokenVerdict\(Number\(r\.cli\.pid\)/.test(CW_SRC),   // stale-pins: kept — an ABSENCE check: the one-ps-a-record call is gone
+    'the wrapper\'s start asks ONE look for all its records (tokenVerdicts), never one ps a record');
+}
+
+say('㉒ THE RANKS — what the CLI or the person said beats a proven absence, in both places');
+WD.section('㉒');
+{
+  const c = conversation('rank'), earlier = uuid(700);
+  place(c, [recordOf('mL-landed', null, { state: 'undelivered', settledAt: Date.now() - 1000 }), recordOf('mO-own', null, { state: 'own-turn', settledAt: Date.now() - 1000 })]);
+  place(c, [recordOf('mL-landed', null, { state: 'landed', settledAt: Date.now() }), recordOf('mO-own', null, { state: 'undelivered', settledAt: Date.now() })], earlier);
+  const ids = [c.conv, earlier];
+  await HANDED.warm(ids, { dir: c.buffers }); await RED_RANK.warm(ids, { dir: c.buffers });
+  const lane = HANDED.recordsFor(ids, { dir: c.buffers }), redRecs = RED_RANK.recordsFor(ids, { dir: c.buffers });
+  const rankOf = (t, f) => (new RegExp('^const RANK = (\\{[^}]*\\});', 'm').exec(t) || [])[1];
+  ok(lane.get('mL-landed')?.state === 'landed' && lane.get('mO-own')?.state === 'own-turn' && HANDED.drawnFor(lane).length === 0 && rankOf(CW_SRC) === rankOf(HR_SRC) && !!rankOf(CW_SRC),
+    'the drawer\'s merge: «landed» beats an «undelivered» found first, «own-turn» stays over a later «undelivered» — nothing drawn; the wrapper\'s RANK is the drawer\'s, the same table', { lane: [...lane.values()].map((r) => r.state) });
+  ok(redRecs.get('mL-landed')?.state === 'undelivered', 'RED: with the ranks before, the first word written wins — «undelivered» drawn for a frame the CLI took');
+}
+
+say('㉓ THE PRODUCTION FOLDER — the drawer\'s default records folder IS the server\'s buffers folder');
+WD.section('㉓');
+{
+  const SRV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8'), WIRE = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(/^const DEFAULT_DIR = HUB_MAIN \? path\.join\(__dirname, '\.\.', 'data', 'session-buffers'\) : null;/m.test(HR_SRC) && /require\.main\.filename === path\.join\(__dirname, '\.\.', 'server\.js'\)/.test(HR_SRC)
+    && /^const BUFFERS_DIR = path\.join\(__dirname, 'data', 'session-buffers'\);/m.test(SRV) && path.join(ROOT, 'src', '..', 'data', 'session-buffers') === path.join(ROOT, 'data', 'session-buffers')
+    && /new SessionMessages\(session, sessionId, \{ buffersDir: BUFFERS_DIR/.test(WIRE) && HANDED.DEFAULT_DIR === null,
+    'in the hub\'s own process (require.main = server.js) the records folder is <root>/data/session-buffers/handed = server.js BUFFERS_DIR, and the history reader the hub builds is handed BUFFERS_DIR; in any other process (this suite) there is none');
+}
+
+say('㉔ ONE RECORD PAST THE FILE\'s BOUND — its words go, its head stays');
+WD.section('㉔');
+{
+  const h = U24.recs.get('mH-huge');
+  ok(!!h && h.copy === null && /past the file's bound/.test(h.copyGone || '') && !!h.cli && U24.recs.has('mA-after') && /mH-huge: one record alone passes \d+ bytes — its words are not kept, its head is/.test(U24.log),
+    'a message of 9 MB in one frame: its record keeps its head (its id, its state, the CLI it was handed to), its words not — said; the frame after it is recorded', { h: h && { copy: h.copy, gone: h.copyGone, state: h.state }, keys: [...U24.recs.keys()] });
+  ok(!U24r.recs.has('mH-huge') && U24r.recs.has('mA-after'), 'RED: a copy that keeps no head loses that frame\'s record entirely (the next write dropped it to fit; the writes after it were never stopped)', { keys: [...U24r.recs.keys()] });
+}
+
+say('㉕ A COMPACTION AT OR AFTER THE SEND proves no absence');
+WD.section('㉕');
+ok(U25.rec?.state === 'handed' && /compacted at or after the send — its absence proves nothing/.test(U25.log) && U25r.rec?.state === 'undelivered',
+  `a whole transcript compacted after the send, the frame's record not in it: left «${U25.rec?.state}» and said — RED: a copy without the guard calls it «${U25r.rec?.state}»`);
+
 say('⑦b TWO WRITERS — the merge and the forward-only state, each with its control');
 WD.section('⑦b');
 ok(U7.recs.get('msg-other-writer')?.state === 'undelivered' && U7.recs.get('msg-z-merge')?.state === 'undelivered' && U7.recs.has('msg-y-merge')
   && R_NOMERGE.counts[0] === 1 && !U7m.recs.has('msg-other-writer') && R_ANYRANK.counts[0] === 1 && U7r.recs.get('msg-z-rank-red')?.state === 'handed',
   `another writer's record is kept and a verdict another writer wrote («undelivered») is never moved back by this wrapper's older «handed» — RED: a write that does not read the file loses the other's record; a merge where the later wins moves the verdict back («${U7r.recs.get('msg-z-rank-red')?.state}»)`, { lane: [...U7.recs.values()].map((r) => [r.msgId, r.state]) });
 
-for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 4, label: 'B-5a4d root ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: 'B-5a4d root ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 say(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

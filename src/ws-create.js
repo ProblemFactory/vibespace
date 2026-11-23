@@ -28,7 +28,7 @@ const { sessionSpawnLine } = require('./spawn/line'); // PURE (lane antigravity-
 const SPRI = require('./server/spawn-priority.js'); // B-460d: the start's CPU priority — a local conversation starts below the hub (nice +5 on the line itself)
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
-const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
+const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId, forkSourceOf } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
 const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
@@ -1299,6 +1299,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
             _forkRequested: !!data.fork && !!capsOf(backend).fork, // per-harness (codex thread/fork since 2.369.21)
+            _forkSourceId: forkSourceOf(data),   // B-5a4d root (r3282): the conversation a fork was made FROM, on the LIVE session too (the meta's forkSourceId below, the same one rule)
             // resume spawn marker (2.219.0): lets the parser adopt claude's
             // IMPLICIT fork (locked-conversation resume mints a new id)
             _resumeSpawn: !!SP.resumeMayFork && !!(data.resume && data.resumeId),

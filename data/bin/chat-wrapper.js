@@ -261,7 +261,7 @@ const HANDED_FILE_MAX = 8 * 1024 * 1024; // its file's bound — the read refuse
 const RECORD_COPY_MAX = 2 * 1024 * 1024; // one record's resolved copy: past it its pictures stay out (the words kept), said
 const DEAD_TAIL_MAX = 4 * 1024 * 1024;   // the transcript's tail read
 const DEAD_READ_MS = 2000;               // that read's bound, from before its stat: past it nothing is settled, said once
-const RANK = { handed: 0, landed: 1, 'own-turn': 1, kept: 1, undelivered: 1 };
+const RANK = { handed: 0, undelivered: 1, landed: 2, 'own-turn': 2, kept: 2 };   // r3282: what the CLI or the person said (landed / own-turn / kept) beats a proven absence
 const FINISHED = new Set(['landed', 'own-turn', 'kept']);
 const IS_FORK = args.includes('--fork-session');   // a requested fork: a new conversation — it takes none of its parent's records
 let convId = IS_FORK ? null : (argSettings(args, '--resume')[0] || null);   // the conversation's id (the CLI's); the CLI's init may move it
@@ -313,6 +313,10 @@ function writeRecords() {
   let text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] });
   while (Buffer.byteLength(text) > HANDED_FILE_MAX && all.size > 1) { drop(); text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] }); }
   if (dropped.length) log(`handed records: past ${HANDED_MAX} records or ${HANDED_FILE_MAX} bytes — ${dropped.length} record(s) not finished left ${path.basename(file)}: ${dropped.join(', ')}`);
+  if (Buffer.byteLength(text) > HANDED_FILE_MAX) {   // r3282: one record alone past the file's bound — its WORDS go, its head stays
+    for (const r of [...all.values()]) if (r.copy) { const head = { ...r, copy: null, copyGone: `past the file's bound (${HANDED_FILE_MAX} bytes)` }; all.set(r.msgId, head); if (HR.has(r.msgId)) HR.set(r.msgId, head); log(`handed records: ${r.msgId}: one record alone passes ${HANDED_FILE_MAX} bytes — its words are not kept, its head is (nothing can be drawn of it)`); }
+    text = JSON.stringify({ v: 1, conv: recordsName(), frames: [...all.values()] });
+  }
   if (Buffer.byteLength(text) > HANDED_FILE_MAX) { sayOnce('big:' + file, `one record alone passes ${HANDED_FILE_MAX} bytes — not written`); return false; }
   const tmp = `${file}.${process.pid}.tmp`;
   try { fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, file); }
@@ -377,7 +381,7 @@ const TAIL_JS = "const fs = require('fs'); const [f, m] = process.argv.slice(1);
 function tailViaChild(file) {
   return new Promise((resolve, reject) => {
     let c = null;
-    try { c = spawn(process.execPath, ['-e', TAIL_JS, file, String(DEAD_TAIL_MAX)], { stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { reject(e); return; }
+    try { c = spawn(process.execPath, ['-e', TAIL_JS, file, String(DEAD_TAIL_MAX)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch (e) { reject(e); return; }   // r3282: a reader of builtins needs no env (none of the account's names)
     const parts = []; let done = false;
     const timer = setTimeout(() => { if (done) return; done = true; try { c.kill('SIGKILL'); } catch { } reject(Object.assign(new Error(`not read in ${DEAD_READ_MS / 1000} s`), { code: 'BOUND' })); }, DEAD_READ_MS);
     c.stdout.on('data', (d) => parts.push(d));
@@ -400,8 +404,12 @@ async function readTailFor(stamped) {
   const { tail, from } = await tailViaChild(file);
   const where = new Map();
   let first = from === 0 ? 0 : null;
+  // r3282 (a compaction): the CLI is read to APPEND its compaction (a compact_boundary / summary record; the records before it stay in
+  // the file) — not verified for every version, so a compaction at or after a send proves no absence for it (left, said)
+  let compactAt = 0;
   for (const line of tail.split('\n')) {
     if (first === null && line.includes('"timestamp"')) { try { const r = JSON.parse(line); if (r && typeof r.timestamp === 'string' && Date.parse(r.timestamp)) first = Date.parse(r.timestamp); } catch { } }
+    if (line.includes('"compact_boundary"') || line.includes('"type":"summary"')) { try { const r = JSON.parse(line); if (r && ((r.type === 'system' && r.subtype === 'compact_boundary') || r.type === 'summary')) compactAt = Math.max(compactAt, Date.parse(r.timestamp) || Infinity); } catch { } }
     for (const d of stamped) {
       if (where.has(d.msgId) || !line.includes(d.cliUuid)) continue;
       let r = null; try { r = JSON.parse(line); } catch { continue; }
@@ -410,7 +418,7 @@ async function readTailFor(stamped) {
       else if (r.type === 'user' && (r.uuid === d.cliUuid || (Array.isArray(r.mergedSendUuids) && r.mergedSendUuids.includes(d.cliUuid)))) where.set(d.msgId, 'own');
     }
   }
-  return { where, from, first };
+  return { where, from, first, compactAt };
 }
 /** The verdicts of records whose CLI is KNOWN gone, by one transcript read; said once in the journal → then the words, via `via` */
 async function settleGone(open, via, label) {
@@ -421,16 +429,18 @@ async function settleGone(open, via, label) {
   if (!convId) { left.push(...stamped.map((r) => r.msgId)); why.push('no conversation id was announced'); }
   else if (stamped.length) {
     try {
-      const { where, from, first } = await readTailFor(stamped);
-      let unproven = 0;
+      const { where, from, first, compactAt } = await readTailFor(stamped);
+      let unproven = 0, compacted = 0;
       for (const d of stamped) {
         const w = where.get(d.msgId);
         if (w === 'steered') steered.push(d.msgId);
         else if (w === 'own') own.push(d.msgId);
+        else if (compactAt && !(d.at && compactAt < d.at)) { left.push(d.msgId); compacted++; }
         else if (from === 0 || (first !== null && d.at && first < d.at)) lost.push(d.msgId);
         else { left.push(d.msgId); unproven++; }
       }
       if (unproven) why.push(`${unproven} the last ${DEAD_TAIL_MAX} bytes of the transcript cannot prove either way`);
+      if (compacted) why.push(`${compacted} the transcript was compacted at or after the send — its absence proves nothing`);
     } catch (e) { left.push(...stamped.map((r) => r.msgId)); why.push(e && e.code === 'BOUND' ? `the transcript was ${e.message}` : `the transcript was not read (${(e && e.code) || (e && e.message)})`); }
   }
   if (steered.length) record('input_handover', { state: 'landed', msg_ids: steered, via });
@@ -452,15 +462,20 @@ async function settleLeftRecords() {
   if (got.kind === 'refused') { sayOnce('refused-left:' + file, `${path.basename(file)} could not be read (${got.why}) — the frames it holds are unknown; nothing is written over it`); return; }
   if (got.kind !== 'ok') return;
   const mine = Number(meta.childPid) || 0;
-  const open = [...got.map.values()].filter((r) => (r.state === 'handed' || !knownState(r.state)) && !(r.cli && Number(r.cli.pid) === mine && mine > 1));
+  const mineStart = String(meta.childStart || '');
+  const open = [...got.map.values()].filter((r) => (r.state === 'handed' || !knownState(r.state)) && !(r.cli && Number(r.cli.pid) === mine && mine > 1 && String(r.cli.start || '') === mineStart));
   if (!open.length) return;
   const gone = [], alive = [], unknown = [];
-  for (const r of open) {   // THE CLI IT WAS HANDED TO, from ITS record — before any transcript stat
-    const v = !r.cli || !(Number(r.cli.pid) > 1) || !r.cli.start ? 'unknown-identity' : PI ? PI.tokenVerdict(Number(r.cli.pid), r.cli.start, r.cli.boot) : 'unknown';
+  // THE CLI IT WAS HANDED TO, from ITS record — before any transcript stat; ONE look for all of them (r3282: off a procfs one bounded
+  // listing, and a birth that could not be READ is unknown, never gone)
+  const asked = open.map((r) => ({ pid: r.cli ? Number(r.cli.pid) : 0, token: r.cli ? r.cli.start : '', bootId: r.cli ? r.cli.boot : '' }));
+  let vs = null; try { vs = PI && PI.tokenVerdicts ? await PI.tokenVerdicts(asked) : null; } catch { vs = null; }
+  open.forEach((r, i) => {
+    const v = vs ? vs[i] : 'unknown';
     if (v === 'gone' || v === 'pid-recycled' || v === 'zombie') gone.push(r); else if (v === 'same') alive.push(r); else unknown.push(r);
-  }
+  });
   for (const r of open) if (!HR.has(r.msgId)) HR.set(r.msgId, { ...r });   // this wrapper now carries them: its verdicts are written into them
-  if (alive.length || unknown.length) log(`handed records at this start: ${alive.length} left — the CLI ${alive.length === 1 ? 'it was' : 'they were'} handed to still runs; ${unknown.length} left — ${unknown.length === 1 ? 'its record names' : 'their records name'} no CLI to judge (unknown, never «gone»)`);
+  if (alive.length || unknown.length) log(`handed records at this start: ${alive.length} left — the CLI ${alive.length === 1 ? 'it was' : 'they were'} handed to still runs; ${unknown.length} left — ${unknown.length === 1 ? 'its record names' : 'their records name'} no CLI this machine can judge (unknown, never «gone»)`);
   await settleGone(gone.map((r) => HR.get(r.msgId)), 'successor', 'handed records at this start');
 }
 

@@ -54,7 +54,8 @@ const hush = (fn) => { const l = console.log, w = console.warn; console.log = (.
 // ── boot-restore's REAL meta→session spelling (the one all three restore paths call) ──
 const brSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf-8');
 const sfmSrc = (brSrc.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0];
-const sessionFromMetaAt = (ver) => new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', `${sfmSrc}\nreturn sessionFromMeta;`)(os, () => null, SEEN.restoreMarks, ver);
+const FORK_SOURCE = (() => { try { return require(path.join(REPO, 'src/claude-lock-capture.js')).restoredForkSource || (() => null); } catch { return () => null; } })();   // B-5a4d root (r3282): the restore's fork source rule (src/claude-lock-capture.js), handed as its fellow names are
+const sessionFromMetaAt = (ver) => new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'restoredForkSource', `${sfmSrc}\nreturn sessionFromMeta;`)(os, () => null, SEEN.restoreMarks, ver, FORK_SOURCE);
 const sessionFromMeta = sessionFromMetaAt(VERSION);
 
 // ── the rig: the real routes, fakes for the rest, a Map as the session-meta store ──

@@ -22,7 +22,7 @@ const { capsOf } = require('../backend-caps.js'); // PURE: caps.streamProtocol (
 const { spawnGroupIds } = require('../new-session-spec.js'); // PURE (lane new-session-form): meta `taskIds` (else an older meta's `taskId`) → the spawned-into list
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
-const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId, addressableId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
+const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, restoredForkSource, ownsItsId, addressableId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
 const { readPpid } = require('../cli-identity');
 const { restoreMarks } = require('../seen-marks.js'); // PURE (B-86d3, lane hook-seen-marks): the hook injection's seen marks come back with the session
 const BUILD_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // the build an intro mark must name to count as seen
@@ -161,6 +161,7 @@ function sessionFromMeta(meta, transportFacts) {
     _purpose: meta.purpose === 'sign-in' ? 'sign-in' : null, // lane door-day-one-landing: a sign-in terminal is not a session row
     createdAt: meta.createdAt || Date.now(),
     claudeSessionId: meta.claudeSessionId || null,
+    _forkSourceId: restoredForkSource(meta),   // B-5a4d root (r3282): the conversation a fork was made FROM comes back with it (the restore's one rule — a pre-.134 record's by its own chain)
     agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
     _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving process)
     // …and the ROAD its readings came by (lane oat-identity-fix-r3, verify r3 F-R1): how it billed, which road its long-lived

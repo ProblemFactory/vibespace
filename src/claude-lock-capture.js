@@ -323,6 +323,25 @@ function restoredForkPending(meta) {
   return !(ff.length > 0 && !ff.includes(cur));
 }
 
+/** THE CONVERSATION A FORK WAS MADE FROM (B-5a4d root, r3282) — the create road's ONE rule: the parent a fork resumes
+ *  (`--fork-session`), else null. ws-create puts it on the LIVE session (`_forkSourceId`) and in the meta (`forkSourceId`) from
+ *  this one function; the handed records' drawer keeps the parent out of the fork's chain by it. */
+function forkSourceOf(data) {
+  return data && data.fork && (data.forkedFromId || data.resumeId) ? String(data.forkedFromId || data.resumeId) : null;
+}
+/** THE SAME FACT FROM A RECORD (the restore's ONE rule): the meta's `forkSourceId`; a record from before 2.369.134 has none, and
+ *  then restoredForkPending's own reading decides — a pre-.134 server never cleared `forkRequested` on a chat fork it adopted,
+ *  and the adoption pushed the PARENT first into `forkedFrom` (the seed it resumed): a record with `forkRequested: true` whose
+ *  non-empty chain does not name its current id is such a fork, and its source is the chain's first id. Anything else
+ *  (a resume's implicit fork — no fork flag — or a pending one) has no source: its earlier ids are the conversation's own. */
+function restoredForkSource(meta) {
+  if (!meta) return null;
+  if (meta.forkSourceId) return String(meta.forkSourceId);
+  const cur = meta.claudeSessionId || meta.backendSessionId || null;
+  const ff = Array.isArray(meta.forkedFrom) ? meta.forkedFrom.filter((x) => typeof x === 'string' && x) : [];
+  return meta.forkRequested === true && cur && ff.length && !ff.includes(cur) ? ff[0] : null;
+}
+
 /** THE SAME QUESTION OF A LIVE SESSION (lane channel-withdraw verify r3,
  *  2026-09-27): does this session still carry its fork SOURCE's conversation
  *  id? `_forkRequested` alone is not the fact — it stays `true` for ever on a
@@ -366,4 +385,5 @@ function ownsItsId(meta) {
 module.exports = {
   lockCaptureWanted, claimedLockIds, pickClaudeLock, wrapperDepthOf, readClaudeLocks, wrapperPidOf,
   lockWrittenByItsPid, captureLockId, forkResumedParent, captureForkProof, captureDelay, armLockCapture, adoptCapturedId, restoredForkPending, liveForkPending, addressableId, ownsItsId,
+  forkSourceOf, restoredForkSource,
 };

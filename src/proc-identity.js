@@ -28,7 +28,7 @@
  * SHARED: node builtins only (the agentd bundle carries it to paired machines).
  */
 const fs = require('fs');
-const { spawnSync } = require('child_process');
+const { spawnSync, execFile } = require('child_process');
 const i18nKey = (k) => k; // the extraction marker scripts/i18n-extract.mjs reads (zh/ja: src/lib/i18n-zh.js / i18n-ja.js)
 
 const PROC_ROOT = '/proc';
@@ -413,6 +413,43 @@ function tokenVerdict(pid, token, bootId) {
 }
 // ── SHIPPED TWIN END ──
 
+/** THE BIRTHS OF MANY RECORDS IN ONE LOOK (B-5a4d root, r3282 — a chat wrapper's start judges every record a killed wrapper left,
+ *  up to fifty): [{ pid, token, bootId }] → tokenVerdict's words, in order. On Linux's procfs each is tokenVerdict (there its silence
+ *  is the answer: gone). WITHOUT ONE (macOS, BSD — a paired machine runs the chat wrapper) ONE listing of every process answers them
+ *  all, off the loop and bounded: a listing that failed, passed its bound or said nothing PROVES NOTHING — every verdict is 'unknown',
+ *  never 'gone'; only a listing that answered and does not hold the pid is 'gone'. `listing` is a seam (→ Map pid → {stat, lstart}). */
+async function tokenVerdicts(list, { procfs = process.platform === 'linux' && hasProc(), listing = processListing } = {}) {
+  const items = Array.isArray(list) ? list : [];
+  if (procfs) return items.map((x) => tokenVerdict(x && x.pid, x && x.token, x && x.bootId));
+  let rows = null;
+  if (items.some((x) => x && Number(x.pid) > 1 && x.token)) { try { rows = await listing(); } catch { rows = null; } }
+  const norm = (t) => String(t || '').trim().replace(/\s+/g, ' ');
+  return items.map((x) => {
+    if (!x || !(Number(x.pid) > 1) || !x.token) return 'unknown-identity';
+    if (!(rows instanceof Map) || !rows.size) return 'unknown';
+    const t = String(x.token);
+    if (t[0] !== 'p') return 'unknown';   // a birth another rung recorded (a procfs's ticks) is not readable here
+    const row = rows.get(Number(x.pid));
+    if (!row) return 'gone';
+    if (norm(row.lstart) !== norm(t.slice(1))) return 'pid-recycled';
+    return /Z/.test(String(row.stat || '')) ? 'zombie' : 'same';
+  });
+}
+/** ONE `ps` listing of every process — pid, state, start (startToken's off-procfs rung, the same env: the same words) → Map, or null
+ *  when it failed, passed its bound or listed nothing */
+function processListing({ timeoutMs = 3000 } = {}) {
+  return new Promise((resolve) => {
+    try {
+      execFile('ps', ['-A', '-o', 'pid=,stat=,lstart='], { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+        if (err) { resolve(null); return; }
+        const m = new Map();
+        for (const line of String(stdout || '').split('\n')) { const r = /^\s*(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line); if (r) m.set(Number(r[1]), { stat: r[2], lstart: r[3] }); }
+        resolve(m.size ? m : null);
+      });
+    } catch { resolve(null); }
+  });
+}
+
 /** A record's start token (+ bootId) → the identity judge() / signalIdentity() read. No token = a birth-less record
  *  (`unknown-identity`: never signalled by proof — the caller's legacy rung decides, said once). */
 function identityFromToken(pid, token, bootId) {
@@ -506,7 +543,7 @@ module.exports = {
   childTreeOf, keptByChain, hubChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
   hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, ppidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
-  bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
+  bootToken, tokenVerdict, tokenVerdicts, processListing, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   wallStartOf, birthReading,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

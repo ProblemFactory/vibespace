@@ -83,6 +83,7 @@ export const ROWS = Object.freeze([
   ['src/plugins/frp.js', "'tar'", 'start', 1, 'frpc\'s install (boot replay, a press)'], ['src/plugins/frp.js', 'bin', 'long', 1, 'frpc'],
   ['src/plugins/tailscale.js', 'run[0]', 'press', 1, 'the DNS setting at a start'],
   ['src/plugins/tailscale.js', 'cmd', 'long', 1, 'tailscaled'], ['src/plugins/tailscale.js', "useSudo ? 'sudo' : cli", 'long', 1, '`tailscale up` (the sign-in)'],
+  ['src/proc-identity.js', "'ps'", 'not-hub', 1, 'tokenVerdicts (B-5a4d root, r3282): ONE listing of every process, asked only by the chat wrapper\'s start (data/bin/chat-wrapper.js settleLeftRecords) in the WRAPPER\'s own process — never the hub\'s — and only on a machine with no procfs'],
   ['src/remote-fs.js', "'ssh'", 'press', 3, 'Files on an ssh machine (list, read, save, download)'],
   ['src/remoteapp-facts.js', 'how.argv[0]', 'not-hub', 1, 'the device agent'],
   ['src/routes/files.js', "'find'", 'press', 1, 'an unresolved link in chat, Search by name'],

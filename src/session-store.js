@@ -1451,8 +1451,11 @@ class SessionMessages {
    *  is unknown — at its send time, in the stopped view and after a Resume alike. A live session's own frames in flight are not drawn. */
   _drawHanded(session, historySessionId) {
     if (!historySessionId) return;
-    // the conversation's chain: the ids it moved through — never a REQUESTED fork's parent (a fork takes none of its parent's records)
+    // the conversation's chain: the ids it moved through — never a REQUESTED fork's parent (a fork takes none of its parent's records).
+    // r3282: the live and restored session CARRY the fork's source (ws-create / boot-restore, through claude-lock-capture's one rule
+    // each); a fork still borrowing its parent's id (its own not yet announced) draws nothing
     const forkSource = session._forkSourceId || session.forkSourceId || null;
+    if (forkSource && historySessionId === forkSource) return;
     const ids = [historySessionId, ...(Array.isArray(session.forkedFrom) ? session.forkedFrom.filter((x) => x && x !== forkSource) : [])];
     let drawn = [];
     try { drawn = HANDED.drawnFor(HANDED.recordsFor(ids, this._buffersDir ? { dir: this._buffersDir } : {}), { liveSince: session.pty || session.socketPath ? Number(session.createdAt) || 0 : 0 }); } catch { drawn = []; }
