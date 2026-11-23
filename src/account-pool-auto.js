@@ -652,7 +652,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const curHeldWalled = !!excluded && excluded.has(currentId) && isHeld(currentId);
   // B-6a92 (主开发 r2688 (2)): a member HELD on another account's weekly instant — its reading is the engine's mark { held:
   // 'same-instant' } (a held string, as above), or the caller's `held(id)`: the pool reads NONE for it (its file froze and may be the
-  // other account's numbers). A START on it names that cause: held-unknown (a file that cannot be read: held-unread)
+  // other account's numbers). A START on it names that cause: held-same-instant (r2855; a file that cannot be read: held-unread)
   const sameInstant = (r) => !!(r && typeof r === 'object' && r.held === 'same-instant');
   const curHeldSame = curHeldStart && ((typeof held === 'function' && !!held(currentId)) || sameInstant(readCache(currentId)) || (typeof readReading === 'function' && sameInstant(readReading(currentId))));
   const notMember = membership != null && !(typeof membership.has === 'function' ? membership : new Set(membership)).has(currentId);
@@ -997,7 +997,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const bestSettle = pool.find((r) => r.settleOk) || null;
   // r3136 / B-6a92 (r2688 (2)): a START on a held default goes to the best measured member that can settle (never ranked below the
   // copy; with none it stays, as any unknown default)
-  if (curHeldStart && bestSettle) return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: null, toRemaining: bestSettle.remaining, reason: curHeldSame ? 'held-unknown' : 'held-unread', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(bestSettle.id) < priority.length ? prioRank(bestSettle.id) + 1 : null } : {}) };
+  if (curHeldStart && bestSettle) return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: null, toRemaining: bestSettle.remaining, reason: curHeldSame ? 'held-same-instant' : 'held-unread', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(bestSettle.id) < priority.length ? prioRank(bestSettle.id) + 1 : null } : {}) };
   // which rule ORDERED the target (reporting — the notices say "(priority #2)"):
   // present only under a manual priority, so automatic verdicts are byte-identical
   const placed = (pick) => (prioRank ? { placedBy: 'priority', priorityRank: prioRank(pick.id) < priority.length ? prioRank(pick.id) + 1 : null } : {});
@@ -1251,7 +1251,7 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     const ap = apart(m.id);
     if (ap < 0) return;
     const rd = readCache(m.id);
-    if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;   // r3136: never parked on a member whose reading cannot be told
+    if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;   // r3136 / B-6a92 (r2855): never parked on a member whose reading cannot be told (unread, or held on another account's instant)
     const v = quotaVerdict(rd, nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
     rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)), rank: rank ? rank(m.id) : 0, i, ap });

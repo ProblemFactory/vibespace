@@ -937,6 +937,8 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // or null — the store then re-points the default off it, or refuses the placement by name ('all_lapsed')
     if (verdictOnly && (!fam || (!staleDefault && memberServeLapsed(cur)))) return null;   // (r3319 MUST) the move back's verdict FAILS CLOSED: no family (a guess) or a lapsed default (its stand-in) is no verdict — the two returns below would pass by the exclusions
     if (!staleDefault && memberServeLapsed(cur)) return fallbackDefaultTarget(poolId, cur);
+    // B-6a92 (r2855): a start with no model family stays on the default — held on another account's instant, that is said once
+    if (!fam && !staleDefault && heldForPool(cur) && !_heldPlacedSaid.has(`nofam|${poolId}|${cur}`)) { _heldPlacedSaid.add(`nofam|${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": stays on the pool's default ${personNameOf(cur)}, held on another account's weekly instant (its numbers unknown until its own read) — the start names no model family to choose another member by`); }
     if (!fam && !staleDefault) return cur; // no identity → the pool's default target
     // decidePoolSwitch FROM the default target under the projected view: if
     // the default serves this family, stay (fewest distinct billing dirs);
@@ -965,7 +967,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     }
     if (byClaim) console.log(`[pool] spawn on "${a.name || poolId}": placed on ${nameOf((d && d.to) || cur)} on your reset claim (${byClaim}) — unconfirmed until its first reading`);
     // B-6a92 (r2688 (2)): a start moved off a default held on another account's instant — said once a pool and default
-    if (d && d.reason === 'held-unknown' && d.to && !_heldPlacedSaid.has(`${poolId}|${cur}`)) { _heldPlacedSaid.add(`${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": placed on ${personNameOf(d.to)} — the pool's default ${personNameOf(cur)} is held on another account's weekly instant, its numbers unknown until its own read`); }
+    if (d && d.reason === 'held-same-instant' && d.to && !_heldPlacedSaid.has(`${poolId}|${cur}`)) { _heldPlacedSaid.add(`${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": placed on ${personNameOf(d.to)} — the pool's default ${personNameOf(cur)} is held on another account's weekly instant, its numbers unknown until its own read`); }
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
     // first sweep: the engine's fallback, a member the pool lists, verify r2)
     // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that
@@ -1724,7 +1726,10 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       if (!keepSame) delete next.foreign;   // the run agrees with the row's own window, or moves onto a phase no known account holds: no longer unknown
       const w = moved ? { sevenDay: null, scoped: {} } : { sevenDay: next.sevenDay, scoped: { ...next.scoped } };
       for (const e of agreeing) { if (e.kind === 'sevenDay') w.sevenDay = e.resetsAt; else if (e.name) w.scoped[e.name] = e.resetsAt; }
-      next.sevenDay = w.sevenDay; next.scoped = w.scoped; next.at = entry.at; next.sessionId = entry.sid; next.source = 'rate-limit-events'; next.n = run;
+      // B-6a92 (r2855): the weekly instant is EXACT only when this run's own weekly readings set it — a kept value (a lift's or a
+      // renewal's panel read, rounded) keeps its own label, never the events' (the standing check compares only exact instants)
+      const keptWeek = Number(w.sevenDay) > 0 && !agreeing.some((e) => e.kind === 'sevenDay') && !readingLag.eventPreciseWitness(raw);
+      next.sevenDay = w.sevenDay; next.scoped = w.scoped; next.at = entry.at; next.sessionId = entry.sid; next.source = keptWeek ? (raw.source || null) : 'rate-limit-events'; next.n = run;
       res.established = true; res.moved = moved;
       // WHO PRODUCED THE RUN (lane oat-identity-fix-r2, verify r2 F-A): the newest K candidates all the login's ⇒ 'login'
       // (the row's own sign-in proved the phase); else any candidate a token spent ⇒ that token's `oat:<gen>`; else (a
@@ -1740,7 +1745,7 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       if (!anchor || moved || proven) {
         // THE ONE WRITER names the run's producer (null = a run of readings whose road is unknown, fix r3 F-R1) and a stamp
         // the login did not write CARRIES the row's identity it replaces (the guard reads only the window)
-        const stamp = { sevenDay: w.sevenDay, fiveHour: null, scoped: { ...w.scoped }, at: entry.at, source: 'api', verifiedAt: entry.at, verifiedBy: 'rate-limit-events', n: run, sessionId: entry.sid };
+        const stamp = { sevenDay: w.sevenDay, fiveHour: null, scoped: { ...w.scoped }, at: entry.at, source: 'api', verifiedAt: entry.at, verifiedBy: keptWeek ? (raw.source === 'own-panel' || raw.source === 'renewal-panel' ? raw.source : 'api-phase') : 'rate-limit-events', n: run, sessionId: entry.sid };
         // B-6a92 (r2688 (1)): the sign-in proving a TOKEN-written window keeps the token's proof (a copy on its instant never holds it)
         const tp = proven && anchor ? (typeof anchor.tokenProof === 'string' ? anchor.tokenProof : (typeof anchor.producer === 'string' && anchor.producer.startsWith('oat:') ? anchor.producer : null)) : null;
         if (tp) stamp.tokenProof = tp;

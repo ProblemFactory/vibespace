@@ -451,7 +451,9 @@ function provenOwnStamp(st) {
  *  witness: { sevenDay, at } | null }], each statement with `exact` — stated at event precision (eventPreciseStamp /
  *  eventPreciseWitness); only exact statements are compared (r2688 (3): a panel's rounding equals honest neighbours' minute).
  *  → [{ key, names, phase, at }]: every row to HOLD — its ANCHOR unproven and on the same instant as another identity group's anchor
- *  or witness. A proven anchor is never held. Of two unproven rows on one instant NEITHER is believed: both are held, each naming the
+ *  or witness. A proven anchor is never held. An anchor a PANEL wrote is never compared, but when the row's EXACT witness agrees
+ *  with it (weeklyNear) the witness stands in as that row's holdable statement, proven by the anchor's own proof (主开发 r2855 (1):
+ *  the copy's anchor is the panel's, its readings the other account's events — it is held with the row it copied, never free). Of two unproven rows on one instant NEITHER is believed: both are held, each naming the
  *  other (主开发 r2561: a stamp's time is when it was last WRITTEN — every honest re-stamp moves it — so no clock tells which row
  *  copied; each row's own proven read sorts them: the owner's lifts it, the copy's answers as the other account and is refused). */
 function sameInstantHolds(rows) {
@@ -460,8 +462,11 @@ function sameInstantHolds(rows) {
   const apart = (a, b) => !(groupOf.get(a) || new Set([a])).has(b) && !(groupOf.get(b) || new Set([b])).has(a);
   const occ = [];
   for (const r of list) {
-    if (r.anchor && r.anchor.exact === true && Number(r.anchor.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.anchor.sevenDay), at: Number(r.anchor.at) || 0, proven: !!r.anchor.proven, anchor: true });
-    if (r.witness && r.witness.exact === true && Number(r.witness.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.witness.sevenDay), at: Number(r.witness.at) || 0, proven: false, anchor: false });
+    const anchorExact = !!r.anchor && r.anchor.exact === true && Number(r.anchor.sevenDay) > 0;
+    if (anchorExact) occ.push({ key: r.key, instant: Number(r.anchor.sevenDay), at: Number(r.anchor.at) || 0, proven: !!r.anchor.proven, anchor: true });
+    // r2855 (1): the anchor a panel wrote (rounded: not compared) — the exact witness that agrees with it stands in for it
+    const standsIn = !anchorExact && !!r.anchor && Number(r.anchor.sevenDay) > 0 && !!r.witness && weeklyNear(r.anchor.sevenDay, r.witness.sevenDay) === true;
+    if (r.witness && r.witness.exact === true && Number(r.witness.sevenDay) > 0) occ.push({ key: r.key, instant: Number(r.witness.sevenDay), at: Number(r.witness.at) || 0, proven: standsIn && !!r.anchor.proven, anchor: standsIn });
   }
   const out = [];
   for (const a of occ) {

@@ -1050,6 +1050,34 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const engPanel = require(MUT.write(ENG, anchored(esrc, "const readingLag = require('../reading-lag.js');", `const readingLag = require(${J(rlPanel)});`, 'b6a92-si-panel-eng'), 'b6a92-si-panel-eng'));
     const PHx = arrive(engPanel, { vStampJ: panelStampOf(roP, 60e3), vWitJ: witOf(roP + 10, 60e3), oStampJ: panelStampOf(roP, 3600e3), oWitJ: witOf(roP + 40, 3600e3) }), phx = await heldOn(PHx);
     ok('B-6a92 RED CONTROL (panel stamps compared, in a copy): the two honest rows on one panel hour are BOTH held — the leg above can fail', !!phx.v && !!phx.o, phx);
+    // (r2855 (1)) THE COPY'S ANCHOR A PANEL WROTE (the commonest way a copy arises): Vela's stamp is the panel's (rounded, on Orin's
+    // reset), its witness Orin's events to the second; Orin's own anchor is exact on that second — BOTH held, each naming the other
+    // (neither proven), never the honest row alone while the copy goes free
+    const CP = arrive(realEng, { vStampJ: panelStampOf(roP, 60e3), vWitJ: witOf(roP, 60e3) }), cp = await heldOn(CP);
+    ok('B-6a92 r2855 THE COPY\'S ANCHOR A PANEL WROTE: Vela stamped by a panel read on Orin\'s reset, its witness Orin\'s events to the second, Orin\'s own anchor exact there — BOTH held, each naming the other: the witness stands in for the anchor it agrees with',
+      !!cp.v && cp.v.by === 'same-instant' && cp.v.names[0] === CP.O && !!cp.o && cp.o.by === 'same-instant' && cp.o.names[0] === CP.V && !!cp.vu && !!cp.ou, cp);
+    const STANDS = 'proven: standsIn && !!r.anchor.proven, anchor: standsIn });';
+    const rlNoStand = MUT.write('src/reading-lag.js', anchored(rlsrcSI, STANDS, 'proven: false, anchor: false });', 'b6a92-si-no-stand-in'), 'b6a92-si-no-stand-in');   // stale-pins: kept (the red control puts the rule before back)
+    const engNoStand = require(MUT.write(ENG, anchored(esrc, "const readingLag = require('../reading-lag.js');", `const readingLag = require(${J(rlNoStand)});`, 'b6a92-si-no-stand-eng'), 'b6a92-si-no-stand-eng'));
+    const CPx = arrive(engNoStand, { vStampJ: panelStampOf(roP, 60e3), vWitJ: witOf(roP, 60e3) }), cpx = await heldOn(CPx);
+    ok('B-6a92 RED CONTROL (r2855 (1): no stand-in, in a copy — the rule before): the honest Orin is held naming the copy and the copy goes FREE — the leg above can fail', !!cpx.o && !cpx.v, cpx);
+    // (r2855, small) A ROUNDED INSTANT NEVER TAKES THE EXACT LABEL THROUGH A KEPT VALUE: Vela's witness holds a lift's panel week
+    // (source own-panel); a run of scoped events only (the week kept) leaves its label the panel's — the standing check never
+    // compares it as exact
+    const XL = held(realEng, { ro: roP });
+    fs.writeFileSync(path.join(XL.cacheDir, readingLag.apiWindowSidecarName(XL.V)), J({ sevenDay: XL.RV, scoped: {}, at: Date.now() - 60e3, sessionId: null, source: 'own-panel', n: 1, ring: [] }));
+    const scopedRun = (E, X) => { for (let i = 0; i < E.API_WITNESS_K + 1; i++) quiet(() => E.noteApiDerivedWindow(X.V, { resetsAt: X.RV + 5, kind: 'scoped', scopedName: 'opus' }, null, { producer: 'login' })); };
+    scopedRun(XL.eng, XL);
+    const xlW = XL.wit() || {};
+    const KEPTW = "      const keptWeek = Number(w.sevenDay) > 0 && !agreeing.some((e) => e.kind === 'sevenDay') && !readingLag.eventPreciseWitness(raw);\n";
+    const engKeptW = require(MUT.write(ENG, anchored(esrc, KEPTW, '      const keptWeek = false;\n', 'b6a92-si-kept-week'), 'b6a92-si-kept-week'));
+    const XLx = held(engKeptW, { ro: roP });
+    fs.writeFileSync(path.join(XLx.cacheDir, readingLag.apiWindowSidecarName(XLx.V)), J({ sevenDay: XLx.RV, scoped: {}, at: Date.now() - 60e3, sessionId: null, source: 'own-panel', n: 1, ring: [] }));
+    scopedRun(XLx.eng, XLx);
+    const xlxW = XLx.wit() || {};
+    ok('B-6a92 r2855 A ROUNDED INSTANT NEVER TAKES THE EXACT LABEL THROUGH A KEPT VALUE: a run of scoped events over a witness whose week a panel read stated keeps that week and its label (own-panel) — never «rate-limit-events»; the run\'s own scoped window is written',
+      xlW.sevenDay === XL.RV && xlW.source === 'own-panel' && !readingLag.eventPreciseWitness(xlW) && !!xlW.scoped && xlW.scoped.opus === XL.RV + 5, { sevenDay: xlW.sevenDay, source: xlW.source, scoped: xlW.scoped });
+    ok('B-6a92 RED CONTROL (r2855 small: the kept week labelled by the run, in a copy): the panel\'s week takes the exact label — the leg above can fail', xlxW.sevenDay === XLx.RV && xlxW.source === 'rate-limit-events' && readingLag.eventPreciseWitness(xlxW), { sevenDay: xlxW.sevenDay, source: xlxW.source });
     // (r2688 (1)) THE WAY OUT STAYS OPEN: Vela's own read lifts it WITH the organisation agreeing (its cache names its organisation, its
     // folder holds its own login) — the route's second write keeps the lift's mark, and the next start holds it no more
     // the panel's stand-in REPORTS the organisation the way the CLI does: it rewrites its isolated config — the SAME organisation
@@ -1086,8 +1114,27 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       const mem3 = [{ id: 'copy', name: 'Vela' }, { id: 'orin', name: 'Orin' }, { id: 'm', name: 'Mira' }];
       const dStart = decide(mem3, ['copy', 'orin']), dAll = decide(mem3.slice(0, 2), ['copy', 'orin']), dRel = decide(mem3, ['copy', 'orin'], false);
       ok('B-6a92 r2688 A START NEVER RANKS THE COPY ABOVE A MEASURED MEMBER: the pool\'s default held, a measured member beside it — the start goes to the measured member; a pool whose members are ALL held places on its first member (nothing to rank; the row says why its numbers are unknown)',
-        !!dStart && dStart.to === 'm' && !!dAll && dAll.to == null, { dStart, dAll });
+        !!dStart && dStart.to === 'm' && dStart.reason === 'held-same-instant' && !!dAll && dAll.to == null, { dStart, dAll });
       ok('B-6a92 RED CONTROL (the held rows read as plain none, no mark — the chooser not told): the held default reads «unread» and the start lands on it to prove it', !!dRel && dRel.to !== 'm' && (dRel.to === 'copy' || dRel.to == null), dRel);
+      // (r2855 (2)) A WALL IS A FACT ABOUT THE MEMBER, whatever its reading: a conversation RUNNING on a held member (not a start)
+      // that walled it (the caller's `exclude`) moves to the measured member, a busy one (60 % used): it leaves as from any walled member
+      const busy = { fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.1, resetsAt: nowS + 3600 }, sevenDay: { utilization: 0.6, resetsAt: nowS + 3 * 86400 } };
+      const rW = (id) => (id === 'copy' || id === 'orin' ? MARK : id === 'm' ? busy : null);
+      const walled = (Mod) => Mod.decidePoolSwitch({ currentId: 'copy', members: mem3, readCache: rW, readReading: rW, nowSec: nowS, exclude: ['copy'], explain: true });
+      const dWall = walled(AP), dQuiet = AP.decidePoolSwitch({ currentId: 'copy', members: mem3, readCache: rW, readReading: rW, nowSec: nowS, explain: true });
+      ok('B-6a92 r2855 A WALL IS A FACT ABOUT THE MEMBER: a conversation running on a held member that walled it moves to the measured member (a hard leave, as from any walled member); with no wall it stays (the held member is judged as unknown)',
+        !!dWall && dWall.to === 'm' && dWall.reason === 'exhausted' && dWall.band === 'hard' && !!dQuiet && dQuiet.to == null && dQuiet.reason === 'no-data', { dWall, dQuiet });
+      const APF = 'src/account-pool-auto.js', apsrc = read(APF);
+      const APnoWall = require(MUT.write(APF, anchored(apsrc, '  const curHeldWalled = !!excluded && excluded.has(currentId) && isHeld(currentId);\n', '  const curHeldWalled = false;\n', 'b6a92-si-mark-masks-wall'), 'b6a92-si-mark-masks-wall'));
+      const dWallX = walled(APnoWall);
+      ok('B-6a92 RED CONTROL (r2855 (2): the mark masks the wall, in a copy): the walled conversation stays on the held member («no data») — the leg above can fail',
+        !!dWallX && dWallX.to == null && dWallX.reason === 'no-data', dWallX);
+      // (r2855, small) THE PARKING DEFAULT NEVER FALLS ON A HELD MEMBER (soonestUsableMember: the default's fallback, a removal's hold)
+      const park = (Mod, ids) => Mod.soonestUsableMember({ members: ids.map((id) => ({ id })), readCache: rW, nowSec: nowS });
+      const APpark = require(MUT.write(APF, anchored(apsrc, "    if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;", '    if (false) return;', 'b6a92-si-park-held'), 'b6a92-si-park-held'));
+      const pk = park(AP, ['copy', 'orin', 'm']), pkAll = park(AP, ['copy', 'orin']), pkX = park(APpark, ['copy', 'orin', 'm']);
+      ok('B-6a92 r2855 THE PARKING DEFAULT NEVER FALLS ON A HELD MEMBER: listed first, the held members are passed over for the measured one; every member held ⇒ none (as a pool whose members are all signed out)', pk === 'm' && pkAll == null, { pk, pkAll });
+      ok('B-6a92 RED CONTROL (r2855 small: parking reads no mark, in a copy): the held member listed first is the parking pick — the leg above can fail', pkX === 'copy', pkX);
       const engSrc = read(ENG);
       // THE CHECK STARTS NO READ — by its own text, able to fail: holdSameInstants calls nothing on the read road
       const bodyOf = (t) => { const a = t.indexOf('function holdSameInstants('); const b = a < 0 ? -1 : t.indexOf('\n}\n', a); return a >= 0 && b > a ? t.slice(a, b) : ''; };
