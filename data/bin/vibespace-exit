@@ -33,7 +33,7 @@
 // FILES (lane exit-transfer, 2026-10-03): `pull` / `push` move ONE regular file between here and the machine under the
 // SAME grant as `run` (and its "ask me each time"), through the machine's own file ops — no shell, no 30 s cap, no
 // output bound: up to the user's limit (default 1 GiB), sha256-checked on both ends, never half-kept on failure. A pull
-// lands under this conversation's project directory, /tmp or ~/Downloads (default: ./<the remote file's name>).
+// lands under this conversation's project directory, the hub's temp folder or ~/Downloads (a refusal names each; default: ./<the remote file's name>).
 // lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
 // this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
 const CC = (() => {
@@ -68,7 +68,7 @@ const USAGE = [
   '  vibespace-exit pull <machine> <remote-path> [<local-path>] [--overwrite]',
   '                                          copy ONE file from the machine to here (needs "run"; no shell, no 30 s cap): the',
   '                                            remote path is absolute (C:\\Users\\me\\out.zip or /home/me/out.zip); it lands at',
-  '                                            <local-path> (default ./<its name>) under the project, /tmp or ~/Downloads;',
+  '                                            <local-path> (default ./<its name>) under the project, the temp folder or ~/Downloads (a refusal names each);',
   '                                            sha256-checked; an existing file is replaced only with --overwrite. A folder: archive',
   '                                            it first with `run`. Bounded by the user\'s limit (default 1 GiB).',
   '  vibespace-exit push <local-path> <machine> <remote-path> [--overwrite]',

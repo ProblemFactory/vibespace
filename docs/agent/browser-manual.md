@@ -74,7 +74,7 @@ vibespace-browser find role button click --name Submit
 vibespace-browser scroll down 600 · scrollintoview @ref · wait <ms|@ref> · wait --load networkidle
 vibespace-browser back · forward · reload
 vibespace-browser tab list · tab new [url] · tab <id> · tab close [<id>]   YOUR tabs only (§3 "Your tabs, and only yours")
-vibespace-browser screenshot <path> [--annotate] · pdf <path>   (write under the project, /tmp or ~/Downloads only)
+vibespace-browser screenshot <path> [--annotate] · pdf <path>   (write under the project, the temp folder your shell sees — the help names it, /tmp only when TMPDIR is unset — or ~/Downloads only)
 vibespace-browser eval "<js that READS the page>"
 vibespace-browser cookies get|set|clear · storage local|session · state save|load <file>
 vibespace-browser console · errors · vitals · a11y [url] · trace/profiler/record start|stop · network requests|route

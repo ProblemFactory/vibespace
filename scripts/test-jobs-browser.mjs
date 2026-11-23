@@ -544,6 +544,22 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
   ok(/write_path_refused/.test(outside.log) && /the job's working directory \(/.test(outside.log) && !/session started before|session directory/.test(outside.log), 'F6: a path OUTSIDE the job\'s cwd is still refused — the words name "the job\'s working directory", never a session restart', outside.log.slice(0, 600));
   const noCwd = await runJob('shot-no-cwd', ['sh', '-c', `cd ${JSON.stringify(WD)} && exec ${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)} screenshot ./x.png`]);
   ok(/write_path_refused/.test(noCwd.log) && /Background Work job's working directory is not known here/.test(noCwd.log) && !/session started before this VibeSpace version|once it is restarted/.test(noCwd.log), 'F6: a job with NO directory of its own (never the server\'s cwd, never the shell\'s `cd`) is refused in the JOB\'s words — never "your session is too old, restart it"', noCwd.log.slice(0, 600));
+  // r2886: THE WORDS NAME THE TEMP FOLDER THE FENCE ALLOWS — the OS temp folder AS THE JOB's CLI SEES IT (its TMPDIR: TMP here, by its
+  // real path), never «/tmp» (a Mac's /var/folders/…, any shell that sets TMPDIR); a save there passes. RED: the release's words,
+  // through a copy of the CLI beside a verb table whose sentences say «/tmp» again (today's). TMP's own path ends in /tmp: the
+  // release's words are judged by «, /tmp or» / «only /tmp or», never by a bare «/tmp or»
+  const TMP_REAL = fs.realpathSync(TMP), RELEASE_WORDS = /(?:, |only |under )\/tmp or ~\/Downloads/;   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+  ok(outside.log.includes(`${TMP_REAL} or ~/Downloads; nothing ran`) && outside.log.includes(`save under the job's working directory, ${TMP_REAL} or ~/Downloads`)
+    && noCwd.log.includes(`so only ${TMP_REAL} or ~/Downloads`) && !RELEASE_WORDS.test(outside.log + noCwd.log),
+    'r2886: the refusal and its remedy name the temp folder the job\'s CLI sees (its TMPDIR, by its real path) — never «/tmp»', (outside.log + noCwd.log).slice(-500));
+  const inTmp = await runJob('shot-in-tmp', [process.execPath, CLI, 'screenshot', path.join(TMP, 'shot.png')], WD);
+  ok(!/write_path_refused/.test(inTmp.log) && /127\.0\.0\.1:9|ECONNREFUSED|fetch failed|unreachable|not answer/i.test(inTmp.log), 'r2886: …and a screenshot in THAT folder passes the fence (it reaches the server call)', inTmp.log.slice(-300));
+  const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8'), today = anchored(vsrc, '${TMP} or ~/Downloads', '/tmp or ~/Downloads', 'the release words (r2886)', { count: 7 });   // stale-pins: kept — the release's words restored for the RED control (r2886)
+  const DT = path.join(D, 'ctl-words', 'bin'); fs.mkdirSync(DT, { recursive: true });
+  fs.copyFileSync(CLI, path.join(DT, 'vibespace-browser')); fs.writeFileSync(path.join(DT, 'vibespace-browser-verbs.js'), today); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(DT, 'cli-call.js'));
+  const outToday = await runJob('shot-outside-today', [process.execPath, path.join(DT, 'vibespace-browser'), 'screenshot', path.join(D, 'elsewhere.png')], WD);
+  ok(today !== vsrc && /write_path_refused/.test(outToday.log) && RELEASE_WORDS.test(outToday.log) && !outToday.log.includes(`${TMP_REAL} or ~/Downloads`),
+    'RED CONTROL: the release\'s words (a verb table whose sentences say «/tmp», beside a copy of the CLI) tell a job whose temp folder is elsewhere to save under «/tmp» — a folder its fence then refuses', outToday.log.slice(-300));
   // F11's engine seam: an exit 0, a crash (exit 3) and a stop each call onRunEnded once (server.js wires it to the keeper's releaseJob)
   const crash = await runJob('crash', ['sh', '-c', 'exit 3']);
   const st = jm.create({ kind: 'task', name: 'stopped', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller); const sj = jm.jobs.get(st.job.id);

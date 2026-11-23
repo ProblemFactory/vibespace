@@ -2259,7 +2259,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!r.ok) return null;
     const root = typeof sessionCwd === 'string' && sessionCwd[0] === '/' ? b.physicalPath(sessionCwd, { base: '/', home, ...physOps }) : null;
     const v = b.writePathVerdict([{ file: p, paths: path.resolve(p) === r.path ? [r.path] : [path.resolve(p), r.path] }], {
-      allow: [tmpDir, path.join(home, 'Downloads')].flatMap(spell), homes: spell(home), dataDir: spell(dataDir), sessionRoot: root && root.ok ? root.path : null });
+      allow: [tmpDir, path.join(home, 'Downloads')].flatMap(spell), homes: spell(home), dataDir: spell(dataDir), sessionRoot: root && root.ok ? root.path : null, tempDir: spell(tmpDir).pop() });
     return v ? null : r.path;
   }
   /** argv[0] → its real path: a name with a slash from the cwd, a bare name on the base env's PATH (absolute entries only). */

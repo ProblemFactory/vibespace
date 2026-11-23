@@ -868,7 +868,7 @@ class ExitProxyManager {
     const cwd = session && typeof session.cwd === 'string' && session.cwd[0] === '/' ? BV.physicalPath(session.cwd, { base: '/', home, ...ops }) : null;
     const lexical = path.resolve(local);
     const v = BV.writePathVerdict([{ file: String(local), paths: lexical === r.path ? [r.path] : [lexical, r.path] }], {
-      allow: [os.tmpdir(), path.join(home, 'Downloads')].flatMap(spell), homes: spell(home),
+      allow: [os.tmpdir(), path.join(home, 'Downloads')].flatMap(spell), homes: spell(home), tempDir: spell(os.tmpdir()).pop(),   // the words name the hub's own temp folder (r2886)
       dataDir: this.dataDir ? spell(this.dataDir) : null, sessionRoot: cwd && cwd.ok ? cwd.path : null });
     if (v) return { ok: false, code: 'local_path_refused', error: words(v.error) };
     return { ok: true, path: r.path };

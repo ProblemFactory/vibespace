@@ -93,7 +93,7 @@ does it).
 - The remote path is absolute in the machine's own spelling (`C:\Users\me\out.zip`, `/home/me/out.zip`;
   `~/…` when its agent expands it). A folder: archive it first with `run` (`tar -czf`, `Compress-Archive`).
 - A pull lands at `<local-path>` (default `./<the remote file's name>`; an existing folder takes the
-  file inside it) — only under this conversation's project directory, /tmp or ~/Downloads, never in
+  file inside it) — only under this conversation's project directory, the hub's temp folder (a refusal names it) or ~/Downloads, never in
   ~/.ssh, ~/.claude, a `.git` or VibeSpace's data (`local_path_refused`). An existing file is replaced
   only with `--overwrite` (`exists` otherwise), on either side.
 - Every 8 MiB window is checked against the machine's sha256 (an agent older than this checks the

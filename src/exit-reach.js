@@ -693,7 +693,7 @@ function transferCardText(rec, { machine = '' } = {}) {
     hash_mismatch: 'the bytes did not match (sha256) — nothing was kept',
     transfer_failed: `it stopped${r.error ? ` (${String(r.error).slice(0, 120)})` : ''} — nothing was kept`,
     agent_outdated: `its agent cannot receive files (${PUSH_SINCE} or later can)`,
-    local_path_refused: 'the local path is outside the project, /tmp and ~/Downloads',
+    local_path_refused: 'the local path is outside the project, the temp folder and ~/Downloads',
     local_changed: 'the local folder changed after it was judged — nothing was kept',
     target_busy: 'another pull is writing that local file right now (nothing replaced)',
     bad_path: String(r.error || 'the path is not one a transfer takes').slice(0, 160),

@@ -63,7 +63,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, deadPort } from './scratch.mjs';
+import { scratch, deadPort, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
 
@@ -1148,6 +1148,27 @@ try {
     ok(r7.status === 0 && realCalls().pop().argv[2] === '/tmp/vs-r4-dl.bin', 'lane L r4 CONTROL: a path in the OS temp dir (/tmp) writes', r7.stderr);
     r7 = await nodeCli(CLI, ['screenshot', '~/Downloads/x.png'], { env: wenv, cwd: WD });
     ok(r7.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['screenshot', path.join(HOME, 'Downloads', 'x.png')]), 'lane L r5 F4: a path in ~/Downloads is ALLOWED and the binary is handed the EXPANDED absolute word (the binary never expands `~` — measured: `pdf \'~/x.pdf\'` looked for a directory named ~; r4 pinned the word as given)', r7.stderr);
+    // THE WORDS NAME THE TEMP FOLDER THE FENCE ALLOWS (主开发 r2886): the fence allows the OS temp folder AS THE CLI's PROCESS SEES IT —
+    // with TMPDIR elsewhere (a Mac's /var/folders/…, any shell that sets it) the refusal, its remedy and the help name THAT folder by
+    // its real path, never «/tmp», and a save there passes. RED: the release's words, through a copy of the CLI beside a verb table
+    // whose sentences say «/tmp» again (today's)
+    {
+      const ALT = path.join(ROOT, 'alt-tmp'); fs.mkdirSync(ALT, { recursive: true }); const ALT_REAL = fs.realpathSync(ALT);
+      const aenv = { ...wenv, TMPDIR: ALT };
+      const named = (r) => r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`${ALT_REAL} or ~/Downloads; nothing ran`) && r.stderr.includes(`remedy: save under the project, ${ALT_REAL} or ~/Downloads`) && !/\/tmp or ~\/Downloads/.test(r.stderr);   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+      const ra = await nodeCli(CLI, ['pdf', '/etc/x.pdf'], { env: aenv, cwd: WD });
+      const rh = await nodeCli(CLI, ['help'], { env: aenv, cwd: WD });
+      ok(named(ra) && rh.stdout.includes(`(files are written under the project, ${ALT_REAL} or ~/Downloads only)`) && rh.stdout.includes(`to a path outside the project, ${ALT_REAL}`) && !/the project, \/tmp/.test(rh.stdout),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+        'THE TEMP FOLDER NAMED (r2886): with TMPDIR elsewhere the refusal, its remedy and the help name THAT folder by its real path — never «/tmp»', { stderr: ra.stderr.slice(-400), help: (rh.stdout.match(/files are written under[^\n]*/) || [''])[0] });
+      const rs = await nodeCli(CLI, ['pdf', path.join(ALT, 'alt.pdf')], { env: aenv, cwd: WD });
+      ok(rs.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['pdf', path.join(ALT_REAL, 'alt.pdf')]), '…and a save in THAT folder passes the fence (the fake binary ran it, handed its real path)', rs.stderr);
+      const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8'), today = anchored(vsrc, '${TMP} or ~/Downloads', '/tmp or ~/Downloads', 'the release words (r2886)', { count: 7 });   // stale-pins: kept — the release's words restored for the RED control (r2886)
+      const DT = path.join(ROOT, 'ctl', 'r2886-words', 'bin'); fs.mkdirSync(DT, { recursive: true });
+      fs.copyFileSync(CLI, path.join(DT, 'vibespace-browser')); fs.writeFileSync(path.join(DT, 'vibespace-browser-verbs.js'), today); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(DT, 'cli-call.js'));
+      const rt = await nodeCli(path.join(DT, 'vibespace-browser'), ['pdf', '/etc/x.pdf'], { env: aenv, cwd: WD });
+      ok(today !== vsrc && rt.status === 1 && /\[write_path_refused\]/.test(rt.stderr) && /\/tmp or ~\/Downloads/.test(rt.stderr) && !named(rt),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+        'RED CONTROL: the release\'s words (a verb table whose sentences say «/tmp», beside a copy of the CLI) tell an agent with TMPDIR elsewhere to save under «/tmp» — a folder its fence then refuses', rt.stderr.slice(-300));
+    }
     // NEGATIVE CONTROL: the pre-r4 CLI (no write check) in a patched copy hands the store path to the binary
     const src = fs.readFileSync(CLI, 'utf8');
     const pre = editAnchor(editAnchor(src, '  if (cls.writeFiles && cls.writeFiles.length) {', '  if (false) {', "data/bin/vibespace-browser"),

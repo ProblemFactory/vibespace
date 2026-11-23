@@ -469,7 +469,7 @@ conversation's browser trace as the job's. Concretely:
   `resume` are refused `job_token`; run those from the conversation.
 * `vibespace-browser status` in a job names the profile its page verbs land
   on and the conversation's pin. A screenshot, PDF or download may be saved
-  under the job's own working directory (its `--cwd`), /tmp or ~/Downloads.
+  under the job's own working directory (its `--cwd`), the temp folder (the CLI's help names it) or ~/Downloads.
 * It keeps browsing while its run is alive, even after the conversation that
   created it stopped; when the run ends its window closes and its lease is
   released. A finished job's token is refused `job_not_running`.

@@ -1239,7 +1239,7 @@ await section('§8 lane exit-transfer: pull / push over a fake device — window
   ok(h1.e && h1.e.code === 'not_a_file' && /device, a pipe or a socket/.test(h1.e.message) && h2.e && h2.e.code === 'not_a_file' && /is a folder/.test(h2.e.message) && h3.e && h3.e.code === 'not_a_file' && /does not exist/.test(h3.e.message), '/dev/zero, a folder, a missing file ⇒ not_a_file, each said', [h1.e && h1.e.message, h2.e && h2.e.message, h3.e && h3.e.message]);
   ok(h4.e && h4.e.code === 'exists' && h4kept === 'old' && h5.v && fs.readFileSync(path.join(wh.proj, 'h.bin'), 'utf8') === 'new', 'an existing local file ⇒ exists; --overwrite replaces it', h4.e && h4.e.message);
   ok(h6.e && h6.e.code === 'bad_path' && h7.e && h7.e.code === 'bad_path' && /control or invisible/.test(h7.e.message) && wh.reads.length === 1, 'a relative remote path, a newline in the local path ⇒ bad_path before anything is asked', [h6.e && h6.e.message, h7.e && h7.e.message]);
-  // (i) THE FENCE: the local side is the project, /tmp or ~/Downloads — physically
+  // (i) THE FENCE: the local side is the project, the hub's temp folder or ~/Downloads (a refusal names each, r2886) — physically
   const wi = xworld(); wi.files.set('/srv/i.bin', { data: Buffer.from('x') });
   const sshDir = path.join(os.homedir(), '.ssh');
   fs.symlinkSync(sshDir, path.join(wi.proj, 'keys'));
@@ -1252,7 +1252,7 @@ await section('§8 lane exit-transfer: pull / push over a fake device — window
     const v = await settle(wi.mgr.pull(wi.A, 'wa', 'BOX', { remote: '/srv/i.bin', local: p }));
     ok(v.e && v.e.code === 'local_path_refused' && !fs.existsSync(p) && /nothing was copied/.test(v.e.message) && !/browser/.test(v.e.message), `the fence: ${name} ⇒ local_path_refused, nothing written`, v.e ? v.e.message : v.v);
   }
-  ok(wi.reads.length === 0 && wi.audit().filter((l) => l.refusal === 'local_path_refused').length === fence.length && wi.cards.every((c) => /outside the project, \/tmp and ~\/Downloads/.test(c.text)), '…refused before the machine is asked; each attempt is an audit line and a card', wi.cards.map((c) => c.text));
+  ok(wi.reads.length === 0 && wi.audit().filter((l) => l.refusal === 'local_path_refused').length === fence.length && wi.cards.every((c) => /outside the project, the temp folder and ~\/Downloads/.test(c.text)), '…refused before the machine is asked; each attempt is an audit line and a card', wi.cards.map((c) => c.text));
   // (j) the ask: "ask me each time" files the transfer line; Allow lands it, Deny refuses
   const wj = xworld({ ask: true }); wj.files.set('/srv/j.bin', { data: Buffer.from('jjj') });
   const pj = settle(wj.mgr.pull(wj.A, 'wa', 'BOX', { remote: '/srv/j.bin', local: path.join(wj.proj, 'j.bin') }));
