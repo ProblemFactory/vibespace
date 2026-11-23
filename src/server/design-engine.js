@@ -98,7 +98,7 @@ const PREVIEW_TICKETS = 64;
 const STATUS = Object.freeze({
   bad_dir: 400, not_registered: 404, not_found: 404, not_a_dir: 400, too_big: 413, read_failed: 502, host_unreachable: 502,
   no_remote: 503, not_publishable: 409, empty: 400, too_long: 400, too_many: 400, bad_change: 400, no_change: 400, bad_files: 400, no_conversation: 409, rewind_out: 409, input_rejected: 400,
-  too_large: 400, send_failed: 500, publish_failed: 500, no_pages: 503, page_not_found: 404, page_forbidden: 403,
+  too_large: 400, send_failed: 500, publish_failed: 500, no_pages: 503, page_not_found: 404, page_forbidden: 403, pages_unread: 503,   // r3139 (a): the held list's refusal answers 503 on the wire
   watch_limit: 429, agent_forbidden: 403, no_session: 409,
   not_yours: 403, bad_questions: 400, no_questions: 409, stale: 409, bad_file: 400, not_previewable: 409, unauthorized: 401,
   bad_tweaks: 400, unknown_tweak: 400, bad_tweak: 400, not_tweakable: 409, user_not_file: 409, write_failed: 500,

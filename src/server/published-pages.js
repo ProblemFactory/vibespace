@@ -124,7 +124,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   // re-publish of the same record — never by a sweep of what the list does not name.
   const hold = HOLD.create({
     file: storeFile, valid: PAGES_SHAPE, code: HELD_CODE, aside: (mark) => storeFile + '.corrupt-' + mark,
-    words: (h) => `published-pages.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No page is lost: nothing is written over it, every share link answers «cannot be shown right now», and publishing waits until it reads`,
+    words: (h) => `VibeSpace cannot read its list of published pages right now (${h.code}); it reads it again by itself every few minutes. No page is lost: nothing is written over the list, every share link answers «cannot be shown right now», and publishing waits until it reads`,   // r3139 (c): the plain name, never a file under the data folder
     log: (s) => log('[pages] ' + s),
     onLift: (v) => { store = normalize(v || { pages: [] }); },
   });
@@ -505,7 +505,7 @@ self.addEventListener('fetch', (e) => {
     });
   }
 
-  return { publish, publishContent, setFlags, remove, list, byId, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim, heldWords: () => hold.words(), _hold: hold };
+  return { publish, publishContent, setFlags, remove, list, byId, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim, heldWords: () => hold.words(), heldFacts: () => hold.held(), _hold: hold };
 }
 
 module.exports = { create, injectShim, COMPAT_PRELUDE, STORAGE_SHIM, CSP }; // CSP: the design preview's header too (lane design-ask)

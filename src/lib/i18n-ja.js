@@ -9582,6 +9582,7 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "添付がなくなりました",
   "A link in an item was not found": "項目内のリンクが見つかりません",
+  "VibeSpace cannot read its list of published pages right now, so it is not known whether this design was published. Nothing is lost: every link given out stays, and publishing waits until the list reads (it tries again every few minutes).": "VibeSpace は公開ページの一覧をいま読めないため、このデザインが公開済みかどうかわかりません。失われたものはありません：渡したリンクはすべて残り、公開は一覧が読めるまで待ちます（数分ごとに再試行します）。",
   "VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, and the list comes back by itself (it tries again every few minutes).": "VibeSpace は公開ページの一覧をいま読めないため、ここには何も表示されません。失われたものはありません：渡したリンクはすべて残り、一覧は自動で戻ります（数分ごとに再試行します）。",
   "VibeSpace cannot read its list of published pages right now, so no design shows as published. Nothing is lost: every link given out stays (it tries again every few minutes).": "VibeSpace は公開ページの一覧をいま読めないため、公開済みと表示されるデザインはありません。失われたものはありません：渡したリンクはすべて残ります（数分ごとに再試行します）。",
   "VibeSpace cannot read its list of published pages right now — nothing was changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace は公開ページの一覧をいま読めません — 何も変更していません。数分後にもう一度お試しください（自動でもう一度読みます）。",

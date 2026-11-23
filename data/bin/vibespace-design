@@ -438,6 +438,7 @@ function printTweaks(b, { full = false } = {}) {
   if (verb === 'list') {
     const r = await call('GET', '/api/agent/designs');
     if (!r.ok) refuse(r);
+    if (r.body.pagesUnread) console.log('note: VibeSpace cannot read its list of published pages right now — a design shown below with no page is NOT known to be unpublished (ask again in a few minutes)');   // r3139 MUST 2
     if (!r.body.designs.length) { console.log('no designs in this conversation yet — vibespace-design new <slug> starts one'); return; }
     for (const d of r.body.designs) console.log(`${d.dir}${d.host ? ` (on ${d.host})` : ''}  "${d.title}"${d.kind === 'system' ? '  [design system]' : ''}${d.page ? `  ${d.page.path} (${d.page.public ? 'public' : 'private'})` : ''}`);
     return;

@@ -266,7 +266,7 @@ function registerDesignRoutes(app, { design, activeSessions, getJobs = () => nul
     if (!a.sessionId && !a.conversationId) return res.json({ designs: [] });   // a caller with no scope sees nothing (no all-designs oracle)
     const rows = [...design.list(a.sessionId ? { sessionId: a.sessionId } : {}), ...(a.conversationId ? design.list({ conversationId: a.conversationId }) : [])];
     const seen = new Set();
-    res.json({ designs: rows.filter((d) => (seen.has(d.id) ? false : seen.add(d.id))).map((d) => ({ ...design.agentRow(d), page: design.pageOf(d.host, d.dir) })) });
+    res.json({ designs: rows.filter((d) => (seen.has(d.id) ? false : seen.add(d.id))).map((d) => ({ ...design.agentRow(d), page: design.pageOf(d.host, d.dir) })), ...(design.pagesHeldWords && design.pagesHeldWords() ? { pagesUnread: 'pages_unread' } : {}) });   // r3139 MUST 2: a design shown with no page is UNREAD while the list is held — the mark the home's has
   });
 }
 

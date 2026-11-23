@@ -2810,6 +2810,10 @@ app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25m
 // session or this conversation — the attribution publish records); a page outside it is "not among yours", never a
 // hint that it exists. The ref: the page id, its /p/ link (relative or absolute), or the published file's absolute path
 // (the CLI resolves it on the caller's machine; the key is host + path, as publish keys it).
+/** r3139 MUST 1: a refused take-down / visibility CHANGE while the list is held says FIRST that it was NOT done — the agent passes it on, and
+ *  «cannot be shown right now» alone reads like «down»: nothing was changed, the page stays as it was (a public page is served again the
+ *  moment the list reads), ask again in a few minutes; then the cause, by its plain name */
+const heldChange = (what, cause) => `Not done — ${what}, and nothing was changed: the page stays as it was, and if it is public it is served again as soon as VibeSpace reads its list of published pages. Ask again in a few minutes. Why: VibeSpace cannot read its list of published pages right now (${cause}); it reads it again by itself.`;
 const ownPage = (a, ref) => {
   const publishedPages = getPublishedPages();
   if (!publishedPages) return { code: 503, error: 'published pages not available on this server' };
@@ -2817,7 +2821,7 @@ const ownPage = (a, ref) => {
   if (!r) return { code: 400, error: 'name the page: its id (pg…), its /p/ link, or the published file\'s path' };
   // r3107: the list is HELD (published-pages.json could not be read) — never «not among yours» (it reads EMPTY while held): the hold's words, 503
   const heldW = typeof publishedPages.heldWords === 'function' ? publishedPages.heldWords() : null;
-  if (heldW) return { code: 503, error: heldW, held: 'pages_unread' };
+  if (heldW) return { code: 503, error: heldW, held: 'pages_unread', cause: ((typeof publishedPages.heldFacts === 'function' && publishedPages.heldFacts()) || {}).code || 'unreadable' };
   const mine = (a.sessionId || a.conversationId) ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }) : [];
   const m = /(?:^|\/p\/)(pg[a-z0-9]{10})(?=$|[/?#])/.exec(r);
   const key = `${a.hostId || 'local'}:${r}`;
@@ -2828,7 +2832,7 @@ const ownPage = (a, ref) => {
 app.post('/api/agent/pages/unpublish', (req, res) => {
   const a = pageAuth(req, res); if (!a) return;
   const o = ownPage(a, req.body?.ref);
-  if (o.error) return res.status(o.code).json({ error: o.error, ...(o.held ? { code: o.held } : {}) });
+  if (o.error) return res.status(o.code).json({ error: o.held ? heldChange('the page was not taken down', o.cause) : o.error, ...(o.held ? { code: o.held } : {}) });
   const r = o.publishedPages.remove(o.page.id);
   if (r.error) return res.status(r.status === 503 ? 503 : 404).json(r);
   res.json({ ok: true, page: pageAnswer({ ...o.page, removed: true }) });
@@ -2838,7 +2842,7 @@ app.post('/api/agent/pages/visibility', (req, res) => {
   const v = req.body?.visibility;
   if (v !== 'public' && v !== 'private') return res.status(400).json({ error: 'visibility is public or private' });
   const o = ownPage(a, req.body?.ref);
-  if (o.error) return res.status(o.code).json({ error: o.error, ...(o.held ? { code: o.held } : {}) });
+  if (o.error) return res.status(o.code).json({ error: o.held ? heldChange(`its visibility was not changed to ${v}`, o.cause) : o.error, ...(o.held ? { code: o.held } : {}) });
   const r = o.publishedPages.setFlags(o.page.id, { makePublic: v === 'public' });
   if (r.error) return res.status(r.status === 503 ? 503 : 404).json(r);
   res.json({ ...r, page: pageAnswer(r.page) });

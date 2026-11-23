@@ -126,6 +126,20 @@ async function drive(Bar) {
   ok(refill.length > 0 && !/replaceChildren\(|innerHTML/.test(refill) && /pagesChipGroups\(/.test(src) && /const pc = this\._pagesChip\(\);[^\n]*\n\s*const n = pc\.chipCount, dTitle = (?:this\._pagesUnread \? `\$\{pc\.tip\}\\n\$\{this\._pagesUnread\}` : )?pc\.tip;/.test(src), '③ pins: the pages list is patched by key (no replaceChildren / innerHTML), the chip\'s number + tooltip are the model\'s');
 }
 
+console.log('— ③b r3139: a held list DRAWN (the REAL ChatStatusBar): the open list says why it is empty');
+{
+  const bar = new ChatStatusBar({ send() {} }, 'sid-held', { backend: 'claude', getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {}, onSearch: () => {}, onDesignRequest: () => {} });
+  const list = new El('div');
+  bar._designListEl = list;
+  const W = 'the made-up held words of the pages list';
+  bar.setPages([], { unread: W });
+  const held = list.children.find((el) => /chat-pages-held/.test(el.className));
+  ok(!!held && held.textContent === W && list.children[0] === held && !list._cls.has('hidden'), '③b held: the open list draws the held words FIRST and is shown, though no page is listed', list.children.map((el) => el.className));
+  bar.setPages([]);   // the call as it was (no unread): the RED — an empty list that says nothing
+  ok(!list.children.some((el) => /chat-pages-held/.test(el.className)) && list._cls.has('hidden'), '③b RED: the call as it was (setPages(pages), no unread) draws nothing about why the list is empty', null);
+  bar.dispose?.();
+}
+
 console.log('— ④ CONTROL: a model copy that mixes the groups');
 {
   const src = fs.readFileSync(MODEL, 'utf8');
