@@ -336,7 +336,13 @@ for (const [name, spec] of EVENTS) {
   const dir = path.join(SCR, 'restart'); fs.mkdirSync(dir, { recursive: true });
   const w = world(ExitProxyManager, dir);
   const hid = w.hosts.add({ name: 'Box', user: 'u', host: 'box.invalid' });
+  // r2969 / r2976 (主开发; placed by reading: work/place-exit-rejudge.md of lane bl-machines-b): the scene is a hub whose machine was
+  // added long before it died — ON DISK. hosts.json is written through the store writer: an URGENT write (its _save asks durable()),
+  // queued on the writer's one thread behind the process's other stores' writes, then its IO; the death below runs no code (no exit
+  // flush), so the leg waits for the scene's machine writes to land — a fact; before, a loaded gate's second world read hosts.json
+  // before the first one's write landed and started with no machines
   w.sessions.set('w1', S('c1')); grantBoth(w, hid, [{ kind: 'session', id: 'claude:c1' }]);
+  const landed = await w.hosts.persisted();   // its read: after the machine's own access write too (grantBoth's setExitAccess)
   const a = await arm(w, hid, 'w1');
   // the process dies: its listening socket and every connection with it; nothing settles (no code runs)
   const live = w.ex._live.get(hid); for (const s of live.sockets) s.destroy(); live.server.close();
@@ -351,9 +357,24 @@ for (const [name, spec] of EVENTS) {
   const refused = await auth(a.port, a.cr); // the old port is closed (ECONNREFUSED) — or, were it reused, the pair is unknown
   ok(cut && n === 1 && it.status === 'done' && it.resolvedBy === 'ask-expired' && w2.ex.listAsks().length === 0 && !w2.ex._live.size && refused !== 0 && w2.ex._credOk(hid, a.cr.user, a.cr.pass) === false,
     'a HUB RESTART: the open connection died with the process, the dead ask\'s item resolves ask-expired at boot, nothing is lent, the old pair opens nothing', { cut, n, by: it && it.resolvedBy, refused });
-  const r2 = await w2.ex.use(w2.sessions.get('w1'), 'w1', 'Box');
-  ok(credsOf(r2.url).pass !== a.cr.pass, '…a `use` after the restart mints a NEW pair (never the old one)');
+  const r2 = await w2.ex.use(w2.sessions.get('w1'), 'w1', 'Box').catch((e) => ({ error: String((e && e.message) || e) }));   // a refusal is a named cross, never an unhandled crash
+  ok(landed === true && !r2.error && credsOf(r2.url).pass !== a.cr.pass, '…a `use` after the restart mints a NEW pair (never the old one) — the machine on disk before its hub died', { landed, error: r2.error });
   for (const [k] of w2.ex._live) await w2.ex.stop(k); w2.todos.stop();
+}
+
+// r2969 RED, made by STATE (never load): the machine's write still QUEUED when its hub dies — a writer whose write never lands — and
+// no wait: the next life over the same folder starts with no machines, and the use is refused BY NAME (the gates' crash, at will)
+{
+  const dir = path.join(SCR, 'restart-held'); fs.mkdirSync(dir, { recursive: true });
+  const w = world(ExitProxyManager, dir);
+  w.hosts._storeWriter = { dirty() { }, durable: () => new Promise(() => { }), whyNotDurable: () => ({ why: 'queued' }) };   // its write queued, never landed
+  w.hosts.add({ name: 'Box', user: 'u', host: 'box.invalid' });
+  const guard = await Promise.race([w.hosts.persisted().then(() => 'landed'), new Promise((r) => setTimeout(() => r('pending'), 50))]);   // its read: the GUARD pinned too — the wait the leg relies on is still pending while its write is queued
+  const w2 = world(ExitProxyManager, dir); w2.sessions.set('w1', S('c1'));
+  const r = await w2.ex.use(w2.sessions.get('w1'), 'w1', 'Box').then((x) => x, (e) => ({ error: String((e && e.message) || e) }));
+  ok(guard === 'pending' && !!r.error && /no machine matches/.test(r.error) && !w2.hosts.list().some((h) => h.name === 'Box'),
+    'RED (by state): the machine\'s write still queued when its hub dies — its wait still pending, the next life has no «Box» and the use is refused by name; the restart leg above waits for the landing', { guard, ...r });
+  w.todos.stop(); w2.todos.stop();
 }
 
 // ════════════════════════════════ ③ CONTROL ════════════════════════════════
