@@ -1239,7 +1239,7 @@ app.post('/api/usage/refresh', async (req, res) => {
   let acctMeta = null;
   if (!isGlobal) {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
-    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
+    if (!isGlobal) { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: 'the accounts list could not be read — try again once it reads', code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!acctMeta) return res.status(404).json({ error: 'unknown subscription account' });
   }
   // CLI-PANEL rung (2.327.0, user-verified: `claude -p /usage` prints ALL
@@ -1293,7 +1293,7 @@ app.post('/api/usage/refresh', async (req, res) => {
   // write for it) must not fall through to the token ladder: that costs one
   // real vendor request on a SIBLING's token and can re-create the phantom
   // cache entry the belt exists to prevent (member-wake r3 verifier, LOW).
-  { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
+  if (!isGlobal) { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: 'the accounts list could not be read — try again once it reads', code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
   if (!isGlobal && !(accounts.list().accounts || []).some((x) => x.id === key)) return res.status(404).json({ error: 'that account was removed while its usage was being read' });
   // THE USAGE BEARER LAW (acceptance r3, login-expiry usageBearerOk — kb-design-lessons §9): every rung of this ladder hands
   // only the CLI's own login token, never a long-lived one (ours or planted without our mark) — a usage read is never made with one
@@ -1662,7 +1662,7 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   const key = String(req.params.id || '');
   const isGlobal = key === '__global__';
   const acct = isGlobal ? null : (() => { try { return accounts.get(key) || null; } catch { return null; } })();
-  { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
+  if (!isGlobal) { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: 'the accounts list could not be read — try again once it reads', code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
   if (!isGlobal && !(acct && acct.type === 'subscription')) return res.status(404).json({ error: 'unknown subscription account', code: 'unknown_account' });
   // GATED ON THE HARNESS ROW (r2, MUST 6): a claim is for the lanes that go through the pool's ONE reading door — Claude's
   // typed limits (src/backend-caps.js oauthUsage). Another harness's readings (Codex, Antigravity) are refused BY NAME.

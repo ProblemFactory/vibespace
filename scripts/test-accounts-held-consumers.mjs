@@ -76,6 +76,7 @@ function held(w) {
 
 // ── THE ENGINE: S1 S2 S3 S4 F1 — a real pool engine over the world, its release twin for the red ──
 const ENG = 'src/server/usage-pool-engine.js';
+const w0P = (() => { let v = null; return () => (v === null ? (v = !!world('pools').P) : v); })();   // pools supported on this platform
 const engRed = copy(ENG, [["function accountsHeld() { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown', why: 'the accounts store did not answer', at: 0 }; } }", 'function accountsHeld() { return null; }']], 'the engine never asks (RED)');
 ok(!engRed.err, 'RED CONTROL built: an engine that never asks held()', engRed.err || '');
 async function engineScene(engPath, am, w) {
@@ -121,6 +122,24 @@ if (!fs.existsSync(path.join(REPO, ENG))) ok(false, 'the engine is where this su
     ok(got.key === null && !got.filed && !got.poolFile && got.said.some((l) => /readings are not filed — the accounts list could not be read/.test(l)), 'F1 · held: a pooled conversation\'s reading has NO filing identity and is NOT filed (said once), never under the pool\'s own id', JSON.stringify({ key: got.key, filed: got.filed, poolFile: got.poolFile }));
     if (red) ok(red.gate === true && red.fire && red.fire.key === w.P, 'RED: the engine that never asks fires the continue and keys its spend on the pool\'s own id', JSON.stringify({ gate: red.gate, fire: red.fire }));
   } }
+// ── r3197 THE ROUND's MUST: the second road of the readings — a pooled CODEX conversation's push while held files NOTHING ──
+async function codexScene(engPath, am, w) {
+  const engMod = require(engPath);
+  const cacheDir = path.join(w.D, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+  const eng = (await quiet(async () => engMod.create({ app: { get() { }, post() { }, put() { }, delete() { }, patch() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: cacheDir, activeSessions: new Map(),
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
+    recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null }))).r;
+  const s = { backend: 'codex', mode: 'chat', host: null, _webuiId: 'w-cx-' + (++n), backendSessionId: 'cx-' + n, _accountId: w.P, pty: { write() { } }, name: 'codex pooled' };
+  const nowS = Math.floor(Date.now() / 1000);
+  const said = (await quiet(async () => { try { eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 30, window_minutes: 300, resets_at: nowS + 3600 }, secondary: null } }); } catch { } })).said;
+  return { poolFile: fs.readdirSync(cacheDir).some((f) => f.startsWith(w.P)), said };
+}
+if (w0P()) {
+  const w = world('codex'), { h, undo } = held(w); let got = null, red = null;
+  try { got = await codexScene(path.join(REPO, ENG), h, w); if (!engRed.err) { const w2 = world('codex-red'), t2 = held(w2); try { red = await codexScene(engRed.path, t2.h, w2); } finally { t2.undo(); } } } finally { undo(); }
+  ok(!!got && !got.poolFile && got.said.some((l) => /codex:.*readings are not filed — the accounts list could not be read/.test(l)), 'r3197 MUST · held: a pooled CODEX conversation\'s quota push files NOTHING (never a cache file under the pool\'s own id), said once', JSON.stringify(got && { poolFile: got.poolFile }));
+  if (red) ok(red.poolFile === true, 'RED: the engine that never asks files the codex reading under the POOL\'s own id (the phantom pool reading the round found)', JSON.stringify({ poolFile: red.poolFile }));
+}
 // S2's other half: the authorizer refuses an identity that is none (fail closed) — the pure rule the engine's NONE lands on
 { const SA = require(path.join(REPO, 'src/spend-authorizer.js'));
   const fn = SA.authorizeUnattendedSpend || SA.authorize;
@@ -147,7 +166,8 @@ async function guardScene(engPath, w) {
   const v1 = await ask(true); await spend(v1); const v2 = await ask(false); const before = ids();
   const { h, undo } = held(w); let v3 = null, after = null;
   try { cur = h; v3 = await ask(true); await spend(v3); after = ids(); } finally { cur = w.am; undo(); }
-  return { v1, v2, v3, before, after };
+  const v4 = await ask(false);   // the list read again: the member's own count, as the hold left it
+  return { v1, v2, v3, v4, before, after };
 }
 { const w = world('guard');
   if (!w.P) ok(true, 'SG · SKIP — pools unsupported on ' + process.platform);
@@ -155,7 +175,8 @@ async function guardScene(engPath, w) {
     const g = await guardScene(path.join(REPO, ENG), w);
     ok(!!(g.v1 && g.v1.ok && g.v2 && g.v2.ok === false && g.v2.why === 'hour-cap'), 'SG · CONTROL (the list read): a cap of one turn nobody typed an hour — the first is let through and charged on its member, the second REFUSED by the hour cap', JSON.stringify({ first: g.v1 && g.v1.ok, second: g.v2 && g.v2.why }));
     ok(!!(g.v3 && g.v3.ok === false && g.v3.why === 'identity-unknown' && g.v3.accountsHeld && /accounts list could not be read/.test(String(g.v3.detail))), 'SG · held: the SAME conversation\'s next turn nobody typed is REFUSED BY NAME (the accounts list could not be read) — never counted under a fresh name', JSON.stringify(g.v3 && { ok: g.v3.ok, why: g.v3.why, held: !!g.v3.accountsHeld }));
-    ok(JSON.stringify(g.after) === JSON.stringify(g.before) && !(g.after && w.P in g.after), 'SG · …and the hour and day counters of every real identity are UNTOUCHED by that refusal (no key for the pool\'s own id)', JSON.stringify({ before: g.before && Object.values(g.before), after: g.after && Object.values(g.after), poolKey: !!(g.after && w.P in g.after) }));
+    const ck = (v) => (v && v.counts) || {}, k2 = g.v2 && g.v2.identity && g.v2.identity.key;
+    ok(!!k2 && k2 !== w.P && Number(ck(g.v2).hour) >= 1 && !!g.v4 && g.v4.why === 'hour-cap' && g.v4.identity && g.v4.identity.key === k2 && ck(g.v4).hour === ck(g.v2).hour && ck(g.v4).day === ck(g.v2).day, 'SG · …and the hour and day counters of every real identity are UNTOUCHED by that refusal: the list read again, the MEMBER (never the pool) still meets its cap at the same counts', JSON.stringify({ member: !!k2 && k2 !== w.P, before: { hour: ck(g.v2).hour, day: ck(g.v2).day }, after: g.v4 && { why: g.v4.why, hour: ck(g.v4).hour, day: ck(g.v4).day } }));
     if (!engRed.err) { const w2 = world('guard-red'); const r = await guardScene(engRed.path, w2); ok(!!(r.v3 && r.v3.ok === true && r.v3.identity && r.v3.identity.key === w2.P), 'RED (the base\'s way, as the verifier found it): an engine that never asks lets the turn nobody typed THROUGH, past the cap, under the pool\'s own id as a fresh name', JSON.stringify(r.v3 && { ok: r.v3.ok, poolKey: !!(r.v3.identity && r.v3.identity.key === w2.P) })); }
   } }
 
@@ -170,7 +191,7 @@ async function guardScene(engPath, w) {
   const run = async (p, w) => { const u = refuseReadsOf(w.file); try { return (await quiet(async () => runMigrations({ ledgerPath: path.join(w.D, 'migrations.json'), migrations: require(p).create({ rootDir: w.root, homeDir: os.homedir(), serverNotice: () => { } }).MIGRATIONS.filter((x) => IDS.includes(x.id)), log: () => { }, warn: () => { } }))).r; } finally { u(); } };
   const stashRow = (w) => { const hd = path.join(w.D, 'usage-history'); fs.mkdirSync(hd, { recursive: true }); fs.writeFileSync(path.join(hd, 'otel-truth.ndjson'), JSON.stringify({ acctKnown: true, rid: 'r-made-up', sid: 's-made-up', acct: w.A, ts: Date.now() - 36e5 }) + '\n'); };   // the backfill's own input (else it has nothing to do and reads no list)
   const w = world('sept'); stashRow(w); const t0 = tree(w), res = await run(path.join(REPO, MIG), w);
-  ok(nThrow === 3 && recorded(w).length === 0 && tree(w) === t0, 'M3 · held (the file\'s read refused): NONE of the four September migrations is recorded — nothing archived, nothing re-filed; each tried again at the next start', JSON.stringify({ statuses: (res || []).map((x) => [x.id.slice(8), x.status]), same: tree(w) === t0 }));
+  ok(nThrow === 3 && recorded(w).length === 0 && IDS.every((id) => (res || []).some((x) => x.id === id && x.status === 'failed')) && tree(w) === t0, 'M3 · held (the file\'s read refused): NONE of the four September migrations is recorded — nothing archived, nothing re-filed; each tried again at the next start', JSON.stringify({ statuses: (res || []).map((x) => [x.id.slice(8), x.status]), same: tree(w) === t0 }));
   if (!red.err) { const w2 = world('sept-red'); stashRow(w2); await run(red.path, w2); ok(recorded(w2).length >= 3, 'RED: September reads that say nothing on a refused read are recorded as run (never retried)', JSON.stringify(recorded(w2).map((x) => x.slice(8)))); } else ok(false, 'RED CONTROL built: the September reads', red.err);
   const LB = copy('src/ledger-slot-backfill.js', [["  try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) { if (e && e.code === 'ENOENT') return null; throw new Error(`data/accounts.json could not be read (${(e && e.code) || 'unparsable'}) — not run; tried again at the next start`); }", "  try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; }"]], 'the ledger read says nothing (RED)');
   if (!LB.err) { const w3 = world('sept-lb'); stashRow(w3); const u = refuseReadsOf(w3.file); let threw = null; try { (await quiet(async () => require(LB.path).backfillLedgerBySlot({ dataDir: w3.D, id: 'red' }))); } catch (e) { threw = e.message; } finally { u(); } ok(threw === null, 'RED: a ledger backfill whose read says nothing carries on over the refused list', threw || ''); } else ok(false, 'RED CONTROL built: the ledger read', LB.err); }

@@ -909,7 +909,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               const usd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: msg.message.model, i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
               const cwUsd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: msg.message.model, i: 0, o: 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: 0 }, whole);
               const crUsd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: msg.message.model, i: 0, o: 0, cw5: 0, cw1: 0, cr: u.cache_read_input_tokens || 0 }, whole);
-              usageEstimator.noteLive({ rid: msg.requestId || msg.message.id, accountId: acctKey, model: msg.message.model, usd, cwUsd, crUsd });
+              if (acctKey != null) usageEstimator.noteLive({ rid: msg.requestId || msg.message.id, accountId: acctKey, model: msg.message.model, usd, cwUsd, crUsd });
               kickPoolEval();
             } catch { }
           }

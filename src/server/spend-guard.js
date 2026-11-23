@@ -616,6 +616,17 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
   /** THE GATE. Every producer of a turn nobody typed calls this BEFORE it
    *  spends, and nothing else may decide. Returns the PURE verdict; the side
    *  effects of a refusal (journal + telemetry + inbox) happen here, once. */
+  /** r3060 / r3088 / r3197: THE ACCOUNTS LIST UNREAD — the engine's fact (`listHeld`), asked; a throw is held (fail closed) */
+  function heldNow() { if (typeof listHeld !== 'function') return null; try { return listHeld() || null; } catch { return { code: 'held-unknown' }; } }
+  function heldFact() { const lh = heldNow(); return lh ? { accountsHeld: { code: lh.code || 'unread', at: Number(lh.at) || null } } : {}; }
+  /** an identity-unknown refusal while the list is unread NAMES its cause (the engine named no identity: never a pool's own id as a
+   *  fresh name whose counts start at zero); no counter of any real identity is touched */
+  function heldWords(v) {
+    if (!v || v.ok || v.why !== 'identity-unknown') return v;
+    const f = heldFact();
+    if (f.accountsHeld) { v.accountsHeld = f.accountsHeld; v.detail = 'the accounts list could not be read, so the account this turn would bill cannot be named — no turn nobody typed is spent until it reads'; }
+    return v;
+  }
   function authorize({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
     if (resetNotice && now - lastNoticeTry > 60 * 1000) fileResetNotice(now);   // B-23c3: a reset's notice the store could not take at boot (tried once a minute at most)
     sweepHolds(now);
@@ -629,10 +640,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     });
     // r3060 / r3088: THE ACCOUNTS LIST UNREAD — the engine names NO identity (never a pool's own id as a fresh name whose counts
     // start at zero), so the authorizer refuses; the refusal NAMES its cause, and no counter of any real identity is touched
-    if (!v.ok && v.why === 'identity-unknown' && typeof listHeld === 'function') {
-      let lh = null; try { lh = listHeld(); } catch { lh = { code: 'held-unknown' }; }
-      if (lh) { v.accountsHeld = { code: lh.code || 'unread', at: Number(lh.at) || null }; v.detail = 'the accounts list could not be read, so the account this turn would bill cannot be named — no turn nobody typed is spent until it reads'; }
-    }
+    heldWords(v);
     // AN "ALLOWED" ANSWER HOLDS ITS SLOT (r5). The caller carries `hold` back
     // to `note()` (it became a turn) or to `release()` (it did not); an answer
     // nobody carries back expires at A.RESERVE_TTL_MS and is counted.
@@ -741,6 +749,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     const named = resolved.filter((it) => it.identity && it.identity.key);
     if (!list.length || (unnamed && (!pressBatch || !named.length))) {
       const v = { ok: false, why: list.length ? 'identity-unknown' : 'empty-batch', detail: list.length ? `the credential slot ${(unnamed && unnamed.sessionName) || 'one conversation'} would bill could not be resolved` : 'the batch names no turn to authorize', retryAfter: 0, identity: null, reason, n: list.length, groups: [], counts: { hour: 0, day: 0, instanceDay: 0 }, limits: limits() };
+      heldWords(v);   // 主开发 r3197: an unnamed slot while the accounts list is unread says so, as the single turn's refusal does
       if (list.length) sayRefusal({ reason, sessionId: unnamed && unnamed.sessionId, sessionName: unnamed && unnamed.sessionName, identity: null, key: null, v, now, inbox: false });
       return v;
     }
@@ -789,7 +798,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
    *  nothing journalled, nothing filed, nothing granted. `refusedSlots` = [{identity, why, detail, n}]. */
   function previewBatch({ reason, items = [], now = Date.now() } = {}) {
     const resolved = (Array.isArray(items) ? items.filter(Boolean) : []).map((it) => ({ ...it, identity: identityFor(it.session || null, it.identity || null) })).filter((it) => it.identity && it.identity.key);
-    if (!resolved.length) return { refusedSlots: [] };
+    if (!resolved.length) return { refusedSlots: [], ...heldFact() };   // 主开发 r3197: the preview says the list could not be read (its unnamed conversations stay stopped)
     const byKey = new Map();
     for (const it of resolved) { const g = byKey.get(it.identity.key) || { identity: it.identity, n: 0 }; g.n++; byKey.set(it.identity.key, g); }
     const v = A.authorizeUnattendedBatch({ reason, groups: [...byKey.values()], state, limits: limits(), overagePolicy: overagePolicy(), pending, now, ledger: ledgerFact(),
@@ -800,7 +809,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     const overageAllowed = overagePolicy() === 'allow';
     const off = new Set(refusedSlots.map((r) => r && r.identity && r.identity.key).filter(Boolean));
     const overageBilled = overageAllowed ? [...byKey.values()].filter((g) => !off.has(g.identity.key)).filter((g) => { const o = overageFor(g.identity.key); return !!o && o.inUse === 'yes'; }).map((g) => ({ identity: g.identity, n: g.n })) : [];
-    return { refusedSlots, overageAllowed, overageBilled };
+    return { refusedSlots, overageAllowed, overageBilled, ...heldFact() };
   }
 
   /** Renew the batch's holds it has not reached yet (spend-authorizer renewPending) — see authorizeBatch. */

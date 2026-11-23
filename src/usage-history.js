@@ -586,7 +586,7 @@ class UsageHistory {
   }
   /** THE ACCOUNTS LIST UNREAD (主开发 r3060 Q1): the resolver server.js hands this history answers `{ held: true }` while the list
    *  could not be read — its one channel to the list's fact. Nothing is BAKED while it does: a baked row's kind is for good. */
-  _accountsListHeld() { try { const r = this._resolveAccount ? this._resolveAccount(null) : null; return !!(r && r.held); } catch { return false; } }
+  _accountsListHeld() { try { const r = this._resolveAccount ? this._resolveAccount(null) : null; return !!(r && r.held); } catch { return true; } }   // a resolver that throws is held (fail closed, r3197)
   _maybeRebakeAttribution() {
     const marker = path.join(this.dir, '.attrib-rebake-v1');
     try { if (fs.existsSync(marker)) return; } catch {}

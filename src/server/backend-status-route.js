@@ -41,7 +41,7 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = n
     // legitimately idles to token-less — count usable named identities so the
     // client can say what's actually true instead of "not logged in".
     // 主开发 r3132 (d): the accounts list UNREAD — its counts below are «not known», never «no named login»: the reply carries the fact
-    { const accountsHeld = (() => { try { const h = accounts && typeof accounts.held === 'function' ? accounts.held() : null; return h ? { code: h.code || 'unread', at: Number(h.at) || null, why: h.why || null } : null; } catch { return { code: 'held-unknown', at: null, why: null }; } })(); if (accountsHeld) out.accountsHeld = accountsHeld; }
+    { const accountsHeld = (() => { try { const h = accounts && typeof accounts.held === 'function' ? accounts.held() : null; return h ? { code: h.code || 'unread', at: Number(h.at) || null } : null; } catch { return { code: 'held-unknown', at: null }; } })(); if (accountsHeld) out.accountsHeld = accountsHeld; }
     try {
       const l = accounts.list();
       out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>

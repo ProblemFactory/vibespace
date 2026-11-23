@@ -313,7 +313,7 @@ function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, age
       const explicit = want === 'refresh';
       const hd = descOf(be);
       if (!hd) return { ok: false, status: 400, code: 'no-report', error: `${be} does not report its models` };
-      if (k !== MACHINE && listHeld()) return { ok: false, status: 503, code: 'accounts_unread', error: (() => { try { return (accounts.held() || {}).why || null; } catch { return null; } })() || 'the accounts list could not be read — try again once it reads' };   // r3044 (5): refused by name, never «unknown account»
+      if (k !== MACHINE && listHeld()) return { ok: false, status: 503, code: 'accounts_unread', error: 'the accounts list could not be read — try again once it reads' };   // never the list's own why (a torn copy's path, r3197)   // r3044 (5): refused by name, never «unknown account»
       if (!accountOk(be, k)) return { ok: false, status: 404, code: 'unknown-account', error: 'unknown account' };
       await load();
       const s = slot(be, k);

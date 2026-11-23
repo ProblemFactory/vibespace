@@ -171,7 +171,7 @@ function limitChoices({ accounts = null } = {}) {
   let list = [];
   try { const l = accounts && typeof accounts.list === 'function' ? accounts.list() : null; list = ((l && l.accounts) || []).map((a) => ({ id: a.id, name: a.name || a.id, backend: a.backend || 'claude', type: a.type || null })); } catch { list = []; }
   // 主开发 r3132 (d): the accounts list UNREAD — the roster says so (the list's words), never an empty list read as «no accounts»
-  const accountsHeld = (() => { try { const h = accounts && typeof accounts.held === 'function' ? accounts.held() : null; return h ? { code: h.code || 'unread', at: Number(h.at) || null, why: h.why || null } : null; } catch { return { code: 'held-unknown', at: null, why: null }; } })();
+  const accountsHeld = (() => { try { const h = accounts && typeof accounts.held === 'function' ? accounts.held() : null; return h ? { code: h.code || 'unread', at: Number(h.at) || null } : null; } catch { return { code: 'held-unknown', at: null }; } })();
   return { accounts: list, permissionModes, models, ...(accountsHeld ? { accountsHeld } : {}) };
 }
 

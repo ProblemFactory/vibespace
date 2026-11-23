@@ -192,9 +192,9 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
     // the hub's own check moves the words (lane cli-self-measure): a new state of it is a new read, never 15 min later
     const lc = caps.local && typeof caps.local.state === 'string' ? caps.local : null;
     const key = `${v}|${lc ? lc.state + (lc.state === 'checking' && Number(lc.lateAt) && t >= Number(lc.lateAt) ? ':late' : '') : '-'}`;
+    try { if (typeof acc.held === 'function' && acc.held()) return null; } catch { return null; }   // r3044 (5): the list UNREAD closes NOTHING (it is not «nobody left»); asked BEFORE the recheck stamp, so the lift is read at once (r3197)
     if (readFor === key && t - readAt < RECHECK_MS) return null;
     readFor = key; readAt = t;
-    try { if (typeof acc.held === 'function' && acc.held()) return null; } catch { return null; }   // r3044 (5): the list UNREAD closes NOTHING (it is not «nobody left»)
     let n = null;
     try { n = acc.cliUnmeasuredNotice(); } catch { n = null; }
     if (n && cliVersionOf(n.cli) !== v) n = null;

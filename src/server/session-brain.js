@@ -340,7 +340,7 @@ function claudeSideEffects(session, sid, msg) {
         const acctKey = resolveUsageKey(session);
         const whole = (u.input_tokens || 0) + (cc.ephemeral_5m_input_tokens || 0) + (cc.ephemeral_1h_input_tokens || 0) + (u.cache_read_input_tokens || 0); // parts of ONE request: the long-context rule is the request's
         const mkCost = (i, o, cw5, cw1, cr) => usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: msg.message.model, i, o, cw5, cw1, cr }, whole);
-        usageEstimator.noteLive({ rid: msg.requestId || msg.message.id, accountId: acctKey, model: msg.message.model,
+        if (acctKey != null) usageEstimator.noteLive({ rid: msg.requestId || msg.message.id, accountId: acctKey, model: msg.message.model,
           usd: mkCost(u.input_tokens || 0, u.output_tokens || 0, cc.ephemeral_5m_input_tokens || 0, cc.ephemeral_1h_input_tokens || 0, u.cache_read_input_tokens || 0),
           cwUsd: mkCost(0, 0, cc.ephemeral_5m_input_tokens || 0, cc.ephemeral_1h_input_tokens || 0, 0),
           crUsd: mkCost(0, 0, 0, 0, u.cache_read_input_tokens || 0) });

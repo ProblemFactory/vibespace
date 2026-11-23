@@ -367,6 +367,9 @@ console.log('§5 resolveAccount reads the record, not list()');
   w.am._state.accounts.push({ id: 'acct-k', name: 'key', type: 'api', tail: 'abcd1234', createdAt: 1 }, { id: 'acct-legacy', name: 'legacy', tail: 'zz' }, { id: 'cxs-1', name: 'codex', type: 'subscription', backend: 'codex', createdAt: 1 }, { id: 'oat-1', name: 'oat', type: 'oat', tail: 'q', createdAt: 1 });
   const resolveOld = (id) => { const a = (w.am.list().accounts || []).find((x) => x.id === id); if (!a) return null; return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name }; };   // B-ba7d: neither the list nor the resolver carries a key tail
   const fn = resolveNew && resolveNew(w.am, createRequire(path.join(REPO, 'server.js')));
+  // r3197 (lens 3): the SERVER.JS wiring the usage history's wait rests on — its resolver answers «held» over a held store (a fast pin)
+  const fnHeld = resolveNew && resolveNew({ held: () => ({ code: 'EIO', at: 1 }), get: () => null, providerRecordOf: () => null }, createRequire(path.join(REPO, 'server.js')));
+  ok('§5 held: server.js\'s resolver answers { held: true } while the accounts list is unread (the history\'s walk waits on it)', !!fnHeld && !!(fnHeld('acct-k') || {}).held);
   const probes = [...w.ids, w.P, 'acct-k', 'acct-legacy', 'cxs-1', 'oat-1', 'nope', null];
   const bad = probes.filter((id) => !isDeepStrictEqual(settle(() => fn(id)), settle(() => resolveOld(id))));
   ok(`§5 the same {type, name, tail} as the list() row for ${probes.length} ids (subscription, pool, API key, legacy, codex, oat, unknown)`, !!fn && !bad.length, bad.map((id) => `${id}: ${JSON.stringify(settle(() => fn(id)))} vs ${JSON.stringify(settle(() => resolveOld(id)))}`).join(' | '));

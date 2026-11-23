@@ -4710,7 +4710,7 @@ function sweepResetCreditAsks() {
  *  whose login it speaks as cannot be named, so the auto rung refuses it too. */
 function creditIdentityFor(session) {
   // r3044 (1): no reset credit is consumed or previewed on a key the list cannot confirm (a pool's own id while unread)
-  if (session && session._accountId && accountsHeld()) return { key: null, current: null, moved: false, unknown: true };
+  if (session && session._accountId && accountsHeld()) return { key: null, current: null, moved: false, unknown: true, listHeld: true };
   let key = null;
   try { key = wallKeyFor(session); } catch { }
   key = key || liveQuotaKeyFor(session);
@@ -5382,6 +5382,7 @@ function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = 
   // name null = the machine's own login (the client says so in its own words)
   const base = { key, name: recName, backend, vendor, creditsLeft: null, resetsAtSec: null, periodSec: null, remainingPct: null, sessionId: null, cooldownUntilSec: null };
   if (capsOf(backend).resetCredit !== true) return { ...base, code: 'not_supported', error: 'this agent has no reset-credit interface (Claude Code offers only the interactive /limit-reset)' };
+  if (!machineLoginKey(key)) { const lh = accountsHeld(); if (lh) return { ...base, code: 'accounts_unread', error: 'the accounts list could not be read — no reset credit is used until it reads' }; }   // 主开发 r3197: the list's own words, never «no helper process can use it here»
   if (_resetCreditTriesHeld) return { ...base, code: 'attempts_unread', error: `${resetCreditTriesHeldWords(_resetCreditTriesHeld)}: a request made before the restart may have gone out` };   // B-f276's remainder (主开发 r1694, r1702)
   // ONLY A WRAPPER THAT SENDS THE KEY carries a person's press (lane reset-path): an older one would
   // be refused by codex (the key is required on every measured CLI), so the press goes to the HELPER
@@ -5742,6 +5743,10 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
     // pool's current member through it was the pre-stamp misattribution — B's
     // credit charged, A's login asked. Refused by name (and such a process is
     // no carrier for a person's Use… either — resetCreditCarriers).
+    if (ci.unknown && ci.listHeld) {   // 主开发 r3197: the accounts list UNREAD — its own cause, never «started before the stamp»
+      if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (the accounts list could not be read — no credit is spent until it reads) mode=${mode}`);
+      return 'skipped';
+    }
     if (ci.unknown) {
       if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (held-unknown — this process started before the pool stamped its member and no slot-transition row names the pool default at its start; it is re-stamped at its next restart) mode=${mode}`);
       return 'skipped';
@@ -6091,6 +6096,9 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // the helper's reading names its identity (lane reset-path: no session — the key IS the login it ran on)
   // B-87fd: filed nowhere — a READING only: the limit banner is a REFUSAL (the wall's own road, as a claude rejection keeps rejectionSlotFor)
   if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session)) { saidUnknownHolderReading(session, 'codex:' + source); return { key: null, snap, archived: true, why: 'holder-unknown' }; }
+  // 主开发 r3197 (the round's MUST): THE SECOND ROAD OF THE READINGS — a conversation that names an account while the list is UNREAD files
+  // NOTHING here either (its key would fall to liveQuotaKeyFor: the pool's own id), on every source, said once a conversation
+  if (!forKey && session && session._accountId) { const lh = accountsHeld(); if (lh) { sayHeldOnce('reading:' + (session._webuiId || '?'), lh, `[usage] codex:${source}: ${session._webuiId || '?'}'s readings are not filed — the accounts list could not be read (${lh.code || 'unread'})`); return { key: null, snap, archived: true, why: 'accounts-held' }; } }
   const _k0 = forKey || readingSlotFor(session).key || liveQuotaKeyFor(session);
   const key = guardReadingTarget(_k0, readingLag.windowOf(snap), { session, what: 'codex:' + source, entry: snap });
   // an ARCHIVED reading is not an unparseable one — the waiter must be told
@@ -6905,7 +6913,7 @@ function armWorkflowUsageWatcher(session, sessionId, runId) {
         const usd = cost({ i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
         const cwUsd = cost({ cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0 });
         const crUsd = cost({ cr: u.cache_read_input_tokens || 0 });
-        usageEstimator.noteLive({ rid, accountId: acctKey, model, usd, cwUsd, crUsd });
+        if (acctKey != null) usageEstimator.noteLive({ rid, accountId: acctKey, model, usd, cwUsd, crUsd });
       },
       onDrain: (n) => {
         // Observability: this feature died silently for four releases because

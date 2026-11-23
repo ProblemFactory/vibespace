@@ -87,7 +87,7 @@ function registerProviderModelRoutes(app, { accounts, providers, activeSessions,
     const host = q.host ? String(q.host) : null; // the New Session dialog's machine when it is not this hub
     if (!id || id === 'subscription') return res.json(menu(backend, null, host));
     const a = acctGet(id) || (/^pv-/.test(id) && providers.get(id) ? { id, backend, type: 'provider', name: providers.get(id).label } : null);
-    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: (lh.why || 'the accounts list could not be read — try again once it reads'), code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
+    { const lh = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })(); if (lh) return res.status(503).json({ error: 'the accounts list could not be read — try again once it reads', code: 'accounts_unread' }); }   // r3044 (5): the list UNREAD is not «unknown account»
     if (!a) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
     res.json(menu(backend, a, host));
   });
