@@ -8,6 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the accounts file cannot be read, VibeSpace keeps it untouched, changes nothing and starts no conversation on another login until it reads again.
 - If the list of browsers you set aside cannot be read, VibeSpace now says so and keeps it instead of starting it empty, so those browsers can still be deleted.
 - After a restart on slow or failing storage, a running conversation's agent browser no longer loses its setup and its own browser folder to the cleanup.
+- A stored secret a background job prints in two pieces (a pause between them, or its child printing the rest after it ends) no longer lands whole in its log.
 
 ## 2.369.416 — 2026-11-23
 
