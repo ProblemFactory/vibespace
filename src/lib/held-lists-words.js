@@ -5,6 +5,21 @@ const i18nKey = (s) => s;   // a declared visible template (scripts/i18n-extract
 const NAMES = Object.freeze({
   'mounts.json': i18nKey('the storage list'), 'mount-tokens.json': i18nKey('the folder links'), 'plugins.json': i18nKey('the plugins’ settings'),
   'user-todos': i18nKey('For you'), 'task-groups': i18nKey('the Task Groups'), hosts: i18nKey('the paired machines'),
+  // the stores that joined the helper on the hotfix's tip (r3224 / r3233 — the family's rows): each list's plain name
+  'accounts.json': i18nKey('your accounts list'),
+  'app-proposals.json': i18nKey('the app proposals'),
+  'auto-resume.json': i18nKey('the record of waiting continues'),
+  'browser-forgotten.json': i18nKey('the browsers you set aside'),
+  'api-proposals.json': i18nKey('the API proposals'),
+  'decision-examples.json': i18nKey('the labels you taught'),
+  'designs.json': i18nKey('the list of designs'),
+  'feedback-outbox.json': i18nKey('the feedback waiting to be sent'),
+  'feedback.json': i18nKey('the feedback reports'),
+  'providers.json': i18nKey('the list of model providers'),
+  'published-pages.json': i18nKey('the list of published pages'),
+  'setting-holds.json': i18nKey('the raised spending ceilings'),
+  'vault-use-marks.json': i18nKey('who may use your stored values'),
+  'session-status.json': i18nKey('the conversations’ statuses'),
 });
 /** the names this module knows (a lane whose store joins adds its name here — the census reds a held store with none) */
 export const HELD_NAMED = Object.freeze(Object.keys(NAMES));

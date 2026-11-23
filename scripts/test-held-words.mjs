@@ -103,6 +103,8 @@ const NOT_HELD = {
   proposal_door_not_ready: 'the proposal card not on this instance yet — the job\'s row says what to tick',
   write_never_started: 'a write to a machine that never started — not saved, said',
   write_unknown: 'a write to a machine that did not answer — it may have been saved, said',
+  auto_resume_unread: 'a list hold worded by its OWN door by its message (bulk-resume.js) — the step leaves it (classed so in ①b)',
+  outbox_unread: 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it',
 };
 
 function census(codes, table) {
@@ -125,13 +127,17 @@ ok(TABLE.rows.length >= 4 && !!TABLE.pattern && TABLE.older.size >= 4, 'control 
 ok(['storage_unread', 'tokens_unread', 'plugins_unread', 'hosts-unread', 'store_unread'].every((c) => CODES.has(c)), 'control setup: the census finds the helper\'s three callers\' codes and the older holds\' 503s in the tree', [...CODES.keys()]);
 ok(C.red.length === 0, `every 503 code of the tree is classified — ${C.held.length} worded by a row or an older branch (${C.held.join(', ')}), ${C.generic.length} by the generic sentence (${C.generic.join(', ')}), ${Object.keys(NOT_HELD).length - C.dead.length} not a hold`, C.red);
 ok(C.dead.length === 0, 'every NOT_HELD row names a live 503 code (a dead row is red)', C.dead);
-ok(TABLE.rows.every((c) => CODES.has(c)), 'every row of the table names a code the tree answers (no row for nothing)', TABLE.rows.filter((c) => !CODES.has(c)));
+const LIVE_CODES = new Set([...CODES.keys(), ...endingsOf(SOURCES, TABLE.pattern).keys()]);   // a row's code answered with any status (automation_unread rides a held mark, not a 503)
+ok(TABLE.rows.every((c) => LIVE_CODES.has(c)), 'every row of the table names a code the tree answers, whatever its status (no row for nothing)', TABLE.rows.filter((c) => !LIVE_CODES.has(c)));
 
 
 // ①b THE ENDING (r3123): every code of the tree ending in unread / unreadable, whatever its status — classed by groups, each with its why
 const LEFT_ALONE = [
   ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread']],
   ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
+  ['own', 'a store whose own door words its refusal BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words', ['auto_resume_unread']],
+  ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'designs-unread', 'labels-unread', 'status-unread']],
+  ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
   ['own', 'another store whose own door words its hold (its lane gives it a row of the table when its cure lands)', ['desktop_apps_unread', 'registry_unread', 'store-unreadable', 'store_unreadable', 'records-unreadable', 'kept-unreadable', 'signin-held-unread', 'template_unread', 'version-unread']],
   ['not', 'a state or fact word, not a list\'s refusal code (store-read\'s own states, a row\'s field)', ['unread', 'unreadable']],
   ['not', 'a key, a credential or a vault entry (the vault and its key files word it — a locked vault is never an unreadable list)', ['key-unreadable', 'key_unreadable', 'oat-unreadable', 'proxy_credential_unreadable', 'vault-reveal-unreadable', 'entry_unreadable', 'job_secrets_unreadable', 'job_secrets_record_unreadable', 'host-key-known-unreadable', 'table_unreadable', 'command_unreadable']],

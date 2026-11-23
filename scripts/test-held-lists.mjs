@@ -150,18 +150,23 @@ ok(missingNames.length === 0, 'every name a bridged row asks is a method its pro
 ok(read('src/task-groups.js').includes("      for (const fn of [...(this._liftHooks || [])]) { try { fn(); } catch { /* a listener's own */ } }   // B-f276 unit B"), 'the Task Groups\' manager fires its lift signal in its own lift (after its listeners are told)');
 
 console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain name');
+// THE HELPER's CALLERS, each with its store's file (a STATED map — a caller's file names more than its store; r3224: the stores that joined the
+// helper on the hotfix's tip): a caller the tree has and this map does not is red by name (name its store, then its plain name in the words)
+const CALLERS = { 'src/mounts.js': 'mounts.json', 'src/webdav.js': 'mount-tokens.json', 'src/plugins.js': 'plugins.json', 'src/accounts.js': 'accounts.json', 'src/server/apps-engine.js': 'app-proposals.json',
+  'src/server/auto-resume.js': 'auto-resume.json', 'src/server/browser-trace.js': 'browser-forgotten.json', 'src/server/channel-api.js': 'api-proposals.json', 'src/server/channels-attention.js': 'decision-examples.json',
+  'src/server/design-engine.js': 'designs.json', 'src/server/feedback-forward.js': 'feedback-outbox.json', 'src/server/feedback-store.js': 'feedback.json', 'src/server/provider-store.js': 'providers.json',
+  'src/server/published-pages.js': 'published-pages.json', 'src/server/setting-holds.js': 'setting-holds.json', 'src/server/vault-use-grants.js': 'vault-use-marks.json', 'src/session-status.js': 'session-status.json' };
 function heldStoreFiles(files) {
   const out = new Map();
   for (const [f, src] of files) {
     if (!/require\(['"][./]*store-read-hold\.js['"]\)/.test(src) || /held-lists\.js$/.test(f)) continue;
-    const names = [...src.matchAll(/_file = path\.join\([^)]*'([A-Za-z0-9._-]+\.json)'\)/g)].map((m) => m[1]);
-    out.set(f, names);
+    out.set(f, CALLERS[f] && src.includes(`'${CALLERS[f]}'`) ? [CALLERS[f]] : []);
   }
   return out;
 }
 const srcFiles = () => { const out = new Map(); const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.posix.join(d, e.name); if (e.isDirectory()) { if (r !== 'src/lib') walk(r); } else if (/\.(?:c?js)$/.test(e.name)) out.set(r, read(r)); } }; walk('src'); return out; };
 const STORES = heldStoreFiles(srcFiles());
-const unnamed = (stores) => [...stores].flatMap(([f, names]) => (names.length ? names.filter((n) => !W.HELD_NAMED.includes(n)).map((n) => `${n} (${f})`) : [`${f}: its store file is not found by the census`]).map((x) => x + ' — add its plain name to src/lib/held-lists-words.js NAMES'));
+const unnamed = (stores) => [...stores].flatMap(([f, names]) => (names.length ? names.filter((n) => !W.HELD_NAMED.includes(n)).map((n) => `${n} (${f})`) : [`${f}: a caller of the helper with no store in the census\'s map (CALLERS in this suite)`]).map((x) => x + ' — add its plain name to src/lib/held-lists-words.js NAMES'));
 ok(STORES.size >= 3 && unnamed(STORES).length === 0, `every store the helper holds has a plain name (${[...STORES.values()].flat().join(', ')})`, unnamed(STORES));
 const planted = new Map(STORES); planted.set('src/frobs.js', ['frobs.json']);
 ok(unnamed(planted).some((x) => x.startsWith('frobs.json')), 'CONTROL: a new store held by the helper with no plain name is RED by name', unnamed(planted));
