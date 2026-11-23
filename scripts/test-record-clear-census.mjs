@@ -110,7 +110,8 @@ const STORE_FILES = [
   { token: 'msg-stash.json', owners: ['src/server/conversation-deliver.js'], inPlace: [] },
   { token: "'stash-handover.json'", owners: ['src/server/stash-handover.js'], inPlace: [] },   // the lane-redact merge onto 2.369.196: the hand-over memory (a delivered hand-over's originals + frame) is a copy of held words
   { token: "'groups.json'", owners: ['src/channel-store.js'], inPlace: [] },
-  { token: 'join(dir, OWN_FOLDERS.msgs)', owners: ['src/channel-store.js'], inPlace: [] },   // B-92fc follow (r3021 (1)): the store's own folders are ONE list (OWN_FOLDERS) — the message logs' folder is made from it
+  { token: 'join(dir, OWN_FOLDERS.msgs)', owners: ['src/channel-store.js'], inPlace: [] },
+  { token: "join(dir, 'msgs')", owners: [], inPlace: [] },   // r3131 (4): the old literal, owned by NOBODY now — a module that writes it again reddens   // B-92fc follow (r3021 (1)): the store's own folders are ONE list (OWN_FOLDERS) — the message logs' folder is made from it
   { token: "'TASK.md'", owners: ['src/task-groups.js'], inPlace: ['src/task-context.js'] },   // lane task-group-context: task-context.js names a KEY FILE a person keeps in a Context row's folder (CLAUDE.md, README.md, … TASK.md) — the folder's own file, never this store's .vibespace/ mirror (the listing never walks .vibespace/)
   { token: "'task-groups-archive'", owners: ['src/task-groups.js'], inPlace: [] },   // 2.369.204: the Activity log's overflow, MOVED (append-only month files); clearProgress rewrites the one month a cleared entry sits in
 ];

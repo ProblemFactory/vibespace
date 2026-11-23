@@ -430,7 +430,6 @@ export default {
   "The channels are paused: {what} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "频道已暂停 —— {what} 无法读取，所以这里不是完整的列表；在能再次读取之前，不获取也不发送任何内容",
   "The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again": "智能体群已暂停——它们的一个文件无法读取，所以这个列表不完整；能再次读取前不会发送任何内容",   // B-f276 1c
   "It read again and is loaded; changes to it are written again.": "已重新读取并载入；对它的修改会再次写入。",
-  "{file} reads again — restart VibeSpace to load it": "{file} 已能读取 —— 重启 VibeSpace 即可载入",
   "{what} reads again — restart VibeSpace to load it": "{what} 已能读取 —— 重启 VibeSpace 即可载入",
   "{what} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{what} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会在 VibeSpace 下次启动时载入",
   "{what} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{what} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后你的账号会自动回来",

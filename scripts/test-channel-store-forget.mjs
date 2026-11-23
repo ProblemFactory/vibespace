@@ -36,6 +36,9 @@
 //   ⑭ (3) A RE-ADD WHOSE RECORD WRITE FAILS (placed): the mark is kept on disk and said; nothing joined. RED: the mark ended before the
 //      record's write landed.
 //   ⑮ (5) A SECOND PRESS while the first purge runs joins it (the same answer). (4) and (5)'s remove-road side are ⑦'s pins.
+//   r3131 (round wm2wgs2kb's small commit): ⑯ (1) A RE-ADD DURING THE REMOVAL's PURGE (held open by a placed stall): after it settles
+//      the live account is not counted gone (its new message is taken). RED: the follow's loop, blind to a record after it left. ⑭ (2)
+//      the list road ends no mark while the record's write failed. ⑪ (3) an API log folder's name (mount_abc) is no account's id.
 //   r3033 (bl-phone-ui's page, row 4): ⑦ pins the panel's plain names (a list by its name, the account by its service and label) + red;
 //      ⑬ the mark keeps the name, never the login.
 // Run: node scripts/test-channel-store-forget.mjs
@@ -298,7 +301,7 @@ async function heldStartLeg(mod, tag, red = false) {
 {
   const r = await heldStartLeg(CS, 'held');
   ok(r.before.length === 3 && r.held && r.afterStart.length === 3 && !r.listed && r.refused === 'records-held' && r.afterPress.length === 3 && r.marked, `⑧ adapters.json HELD at the start (EIO placed), the mark naming the live account: NOTHING removed by itself (left after the start: ${r.afterStart.join(' ')}); not listed while the records are held (r3021 (6): ${r.listed}); a press refused by name (${r.refused}), nothing touched (${r.afterPress.join(' ')}); the mark kept (${r.marked})`, r);
-  const OLD = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (!recordsRead()) { removing.delete(adapterId); return refusedPurge('records-held',", "    if (false) { removing.delete(adapterId); return refusedPurge('records-held',", 'the purge blind to the held records'), '  acctWarmStart();   // B-dfa4 cut 3', "  setTimeout(() => { for (const id of Object.keys(pending.ids)) if (!recordOf(id)) purgeAccount(id).catch(() => { }); }, 0);\n  acctWarmStart();   // B-dfa4 cut 3", 'the start pass (a48ee5788)'), 'start-pass');
+  const OLD = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (!recordsRead()) { notRemoving(adapterId); return refusedPurge('records-held',", "    if (false) { notRemoving(adapterId); return refusedPurge('records-held',", 'the purge blind to the held records'), '  acctWarmStart();   // B-dfa4 cut 3', "  setTimeout(() => { for (const id of Object.keys(pending.ids)) if (!recordOf(id)) purgeAccount(id).catch(() => { }); }, 0);\n  acctWarmStart();   // B-dfa4 cut 3", 'the start pass (a48ee5788)'), 'start-pass');
   const UNHID = M.load('src/channel-store.js', anchored(SRC, "      if (!recordsRead()) continue;", '', 'the list blind to the held records'), 'list-held');
   const ru = await heldStartLeg(UNHID, 'held-list-red');
   ok(ru.listed, `⑧ RED CONTROL (r3021 (6)): a list blind to the held records shows the live account as «a removed account» — the leg above would go red`, ru);
@@ -330,7 +333,7 @@ async function readdLeg(mod, tag) {
   const NOEND = M.load('src/channel-store.js', anchored(SRC, 'for (const id of back) readded(id);', 'for (const id of back) goneAccounts.delete(id);', 'a re-add that leaves the mark'), 'readd-keeps-mark');
   const rn = await readdLeg(NOEND, 'readd-red');
   ok(!rn.ended, `⑨ RED CONTROL: a re-add that leaves the mark — it still names the live account after the add — the leg above would go red`, rn);
-  const BLIND = M.load('src/channel-store.js', anchored(SRC, "    if (recordOf(adapterId)) { removing.delete(adapterId); return refusedPurge('record-stands',", "    if (false) { removing.delete(adapterId); return refusedPurge('record-stands',", 'a press blind to the record'), 'press-blind');
+  const BLIND = M.load('src/channel-store.js', anchored(SRC, "    if (recordOf(adapterId)) { notRemoving(adapterId); return refusedPurge('record-stands',", "    if (false) { notRemoving(adapterId); return refusedPurge('record-stands',", 'a press blind to the record'), 'press-blind');
   const rb = await readdLeg(BLIND, 'press-red');
   ok(rb.afterPress.length < 3, `⑨ RED CONTROL: a press blind to the account's record removes the re-added account's local copy (left: ${rb.afterPress.join(' ') || 'nothing'}) — the leg above would go red`, rb);
 }
@@ -378,24 +381,30 @@ async function badIdLeg(mod, tag) {
   const dir = tmp(tag), warns = [];
   const logw = { log() { }, info() { }, warn: (x) => warns.push(String(x)), error() { } };
   { const o = open(CS, dir); await fill(o.st, o.w, dir, B); await fill(o.st, o.w, dir, A); shut(o); }   // B: another account's logs under msgs/; A: a removed account's remainder
-  fs.writeFileSync(markF(dir), JSON.stringify({ v: 1, ids: { msgs: { at: 1, left: ['logs'] }, '../x': { at: 1, left: null }, 'index.json': { at: 1, left: null }, [A]: { at: 1, left: ['files'] } } }));
+  fs.mkdirSync(path.join(dir, 'mount_abc'), { recursive: true }); fs.writeFileSync(path.join(dir, 'mount_abc', 'api.ndjson'), '{}\n');   // r3131 (3): a storage mount's API log (src/server/channel-api.js credDir)
+  fs.writeFileSync(markF(dir), JSON.stringify({ v: 1, ids: { msgs: { at: 1, left: ['logs'] }, '../x': { at: 1, left: null }, 'index.json': { at: 1, left: null }, mount_abc: { at: 1, left: ['own'] }, [A]: { at: 1, left: ['files'] } } }));
   const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: logw, writer: w });
   const ids = st.pendingList().map((x) => x.id);
   st.pendingList();   // a second read says nothing again
   await w.durable(markF(dir));
   const mark = readMark(dir);
   const bad = await st.purgeAccount('msgs');
+  const api = await st.purgeAccount('mount_abc');
   const good = await st.purgeAccount(A);
-  const r = { ids, said: warns.filter((l) => /which is no account's id/.test(l)).length, kept: mark ? Object.keys(mark.ids) : null, badRefused: bad.refused || null, goodDone: good.done, otherLogs: fs.existsSync(path.join(dir, 'msgs', B)), aLeft: left(dir, A) };
+  const r = { ids, said: warns.filter((l) => /which is no account's id/.test(l)).length, kept: mark ? Object.keys(mark.ids) : null, badRefused: bad.refused || null, apiRefused: api.refused || null, apiLog: fs.existsSync(path.join(dir, 'mount_abc', 'api.ndjson')), goodDone: good.done, otherLogs: fs.existsSync(path.join(dir, 'msgs', B)), aLeft: left(dir, A) };
   try { st.close(); } catch { } try { w.stop(); } catch { }
   return r;
 }
 {
   const r = await badIdLeg(CS, 'bad');
-  ok(JSON.stringify(r.ids) === JSON.stringify([A]) && r.said === 3 && JSON.stringify(r.kept) === JSON.stringify([A]) && r.badRefused === 'bad-id' && r.goodDone && r.otherLogs && r.aLeft.length === 0, `⑪ three bad ids in the mark (a folder's own name «msgs», a path, a file's name): skipped — listed ${JSON.stringify(r.ids)} —, said once each (${r.said}), dropped (the mark keeps ${JSON.stringify(r.kept)}); a press on «msgs» refused (${r.badRefused}); the good one finished (${r.goodDone}); another account's logs stand (${r.otherLogs})`, r);
-  const OPEN = M.load('src/channel-store.js', anchored(SRC, "const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);", "const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_@:+-]{0,79}$/.test(id);", 'the id check without the folder\'s own names'), 'bad-id-open');
+  ok(JSON.stringify(r.ids) === JSON.stringify([A]) && r.said === 4 && JSON.stringify(r.kept) === JSON.stringify([A]) && r.badRefused === 'bad-id' && r.apiRefused === 'bad-id' && r.apiLog && r.goodDone && r.otherLogs && r.aLeft.length === 0, `⑪ four bad ids in the mark (a folder's own name «msgs», a path, a file's name, a storage mount's API log folder «mount_abc»): skipped — listed ${JSON.stringify(r.ids)} —, said once each (${r.said}), dropped (the mark keeps ${JSON.stringify(r.kept)}); a press on «msgs» and on «mount_abc» refused (${r.badRefused}, ${r.apiRefused}), the API log stands (${r.apiLog}); the good one finished (${r.goodDone}); another account's logs stand (${r.otherLogs})`, r);
+  const IDOK = "const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);";
+  const OPEN = M.load('src/channel-store.js', anchored(SRC, IDOK, "const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9@:+-]{0,79}$/.test(id);", 'the id check without the folder\'s own names'), 'bad-id-open');
   const red = await badIdLeg(OPEN, 'bad-red');
   ok(!red.otherLogs, `⑪ RED CONTROL: the id check without the folder's own names — a press on «msgs» removes every account's message logs (another account's logs stand: ${red.otherLogs}) — the leg above would go red`, red);
+  const UNDER = M.load('src/channel-store.js', anchored(SRC, IDOK, "const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);", 'the id check that lets an API log folder\'s name through (the follow\'s)'), 'bad-id-under');   // stale-pins: kept (the red control restores the follow's line)
+  const ru = await badIdLeg(UNDER, 'bad-red-api');
+  ok(!ru.apiLog, `⑪ RED CONTROL (r3131 (3)): the follow's id check, «_» allowed — a press on «mount_abc» removes a storage mount's API log (it stands: ${ru.apiLog}) — the leg above would go red`, ru);
 }
 
 // ═══ ⑫ r3021 (1): EVERY FOLDER OF THE STORE's OWN, made from ONE list and refused as an id ═══
@@ -448,7 +457,7 @@ async function inFlightLeg(mod, tag) {
   const r = await inFlightLeg(CS, 'inflight');
   ok(r.began && r.kept && r.said === 0 && r.joined === null, `⑬ a removal in flight and another records update: the removal's fresh mark stands on disk (${r.kept}), no re-add said (${r.said}), nothing joined (${JSON.stringify(r.joined)})`, r);
   ok(JSON.stringify(r.name) === JSON.stringify({ service: 'Slack', label: 'Work' }), `⑬ (r3033) the mark keeps the removed account's name as a person knows it — its service and label (${JSON.stringify(r.name)}), never its login`, r.name);
-  const BLIND = M.load('src/channel-store.js', anchored(anchored(SRC, "if (a && !removing.has(a.id) && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id);", "if (a && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id);", 'the re-add blind to a removal in flight'), '      if (removing.has(id)) return;\n', '', 'and its end'), 'readd-blind');
+  const BLIND = M.load('src/channel-store.js', anchored(anchored(SRC, "if (a && !(removing.has(a.id) && removingRec.get(a.id) === a) && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id);", "if (a && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id);", 'the re-add blind to a removal in flight'), '      if (removing.has(id)) return;\n', '', 'and its end'), 'readd-blind');
   const rb = await inFlightLeg(BLIND, 'inflight-red');
   ok(!rb.kept && rb.said >= 1, `⑬ RED CONTROL: the re-add's end blind to a removal in flight — any records update ends the removal's fresh mark and says a re-add that did not happen — the leg above would go red`, rb);
 }
@@ -473,15 +482,20 @@ async function failAddLeg(mod, tag) {
   let threw = null;
   try { await st.adapters.update((a) => { a.adapters.push({ id: SLACK, kind: 'slack', label: 'Slack', enabled: true }); }); } catch (e) { threw = (e && e.code) || 'error'; }
   const j = await st.joinedOf(SLACK);
+  const listed = st.pendingList().some((x) => x.id === SLACK);   // r3131 (2): the panel's list, built at every broadcast — the record is in memory only
+  await turns(30);
   failing = false;
   await w0.durable(markF(dir));
   const mark = readMark(dir);
   try { st.close(); } catch { } try { w0.stop(); } catch { }
-  return { threw, kept: !!(mark && mark.ids && mark.ids[SLACK]), said: warns.filter((l) => /its record's write failed/.test(l)).length, joined: j };
+  return { threw, kept: !!(mark && mark.ids && mark.ids[SLACK]), listed, said: warns.filter((l) => /its record's write failed/.test(l)).length, joined: j };
 }
 {
   const r = await failAddLeg(CS, 'failadd');
-  ok(r.threw === 'EIO' && r.kept && r.said === 1 && r.joined === null, `⑭ a re-add whose record write fails (EIO placed: the add answered ${r.threw}): the mark is KEPT on disk (${r.kept}), said once (${r.said}), nothing joined (${JSON.stringify(r.joined)})`, r);
+  ok(r.threw === 'EIO' && r.kept && r.said === 1 && r.joined === null && !r.listed, `⑭ a re-add whose record write fails (EIO placed: the add answered ${r.threw}): the mark is KEPT on disk (${r.kept}) — the list built after it too (r3131 (2): not listed, not ended: ${!r.listed}) —, said once (${r.said}), nothing joined (${JSON.stringify(r.joined)})`, r);
+  const LISTEND = M.load('src/channel-store.js', anchored(SRC, "      if (recordOf(id)) { if (!ending.has(id) && adaptersOnDisk()) endMark(id, 'an account with this id has a record'); continue; }", "      if (recordOf(id)) { endMark(id, 'an account with this id has a record'); continue; }", 'the list road ending a mark on a record in memory only (the follow\'s)'), 'list-ends-early');   // stale-pins: kept (the red control restores the follow's line)
+  const rl = await failAddLeg(LISTEND, 'failadd-list-red');
+  ok(!rl.kept, `⑭ RED CONTROL (r3131 (2)): the follow's list road — the panel's list ends the mark while the re-added record is in memory only (its write failed) — the leg above would go red`, rl);
   const EARLY = M.load('src/channel-store.js', anchored(SRC, "      try { await landed(adaptersFile); } catch (e) { if (pending.ids[id]) warn(`[channels] ${id}: an account was added again under its id, but its record's write failed (${(e && e.code) || (e && e.message) || e}) — the purge noted under the id is kept`); return; }\n", '', 'the mark ended before the record\'s write landed'), 'end-early');
   const re = await failAddLeg(EARLY, 'failadd-red');
   ok(!re.kept, `⑭ RED CONTROL: the mark ended before the record's write landed — a failed record write leaves neither record nor mark — the leg above would go red`, re);
@@ -499,6 +513,39 @@ console.log('⑮ a second press while the first purge runs joins it');
   const after = o.st.purgeRunning(A);
   shut(o);
   ok(running && r1 === r2 && r1.done === true && !after && left(dir, A).length === 0, `⑮ a second press while the first purge runs (running: ${running}) JOINS it — the same answer (${r1 === r2}), one purge, done; not running after it (${after})`, { running, same: r1 === r2, after });
+}
+
+// ═══ ⑯ r3131 (1): A RE-ADD DURING THE REMOVAL's PURGE ═══
+console.log('⑯ a re-add during the removal\'s purge (held open by a placed stall): after it settles the live account is not counted gone');
+async function readdDuringLeg(mod, tag) {
+  const dir = tmp(tag);
+  fs.writeFileSync(path.join(dir, 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: SLACK, kind: 'slack', label: 'Slack', enabled: true }] }));
+  const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+  await fill(st, w, dir, SLACK);
+  await st.purgeBegin(SLACK, { service: 'Slack', label: 'Slack' });   // the remove road: the mark, then the record leaves, then the purge
+  await st.adapters.update((a) => { const i = a.adapters.findIndex((x) => x.id === SLACK); if (i >= 0) a.adapters.splice(i, 1); });
+  const target = path.join(dir, SLACK), r0 = fs.promises.rm;
+  let hit = false, release = null;
+  const gate = new Promise((z) => { release = z; });
+  fs.promises.rm = async function (q, ...x) { if (path.resolve(String(q)) === target && !hit) { hit = true; await gate; } return r0.call(this, q, ...x); };   // THE PURGE HELD OPEN at its own folder (placed)
+  try {
+    const p = st.purgeAccount(SLACK);
+    for (let k = 0; k < 300 && !hit; k++) await turns(10);
+    await st.adapters.update((a) => { a.adapters.push({ id: SLACK, kind: 'slack', label: 'Slack', enabled: true }); });   // THE RE-ADD, during the purge
+    release();
+    await p;
+  } finally { fs.promises.rm = r0; release(); }
+  await st.joinedOf(SLACK);   // the re-add's end: after the purge settled and the record's write landed
+  const late = st.appendRecords(SLACK, 'c2', [{ vendorId: 'm9', at: 9, text: 'a new message' }]);
+  try { st.close(); } catch { } try { w.stop(); } catch { }
+  return { hit, gone: late.gone === true, appended: late.appended };
+}
+{
+  const r = await readdDuringLeg(CS, 'readd-during');
+  ok(r.hit && !r.gone && r.appended === 1, `⑯ a re-add during the removal's purge (held open by a placed stall: ${r.hit}): after the purge settled the live account is NOT counted gone — its new message is taken (${r.appended})`, r);
+  const ANYREM = M.load('src/channel-store.js', anchored(SRC, 'if (a && !(removing.has(a.id) && removingRec.get(a.id) === a) && (', 'if (a && !removing.has(a.id) && (', 'the follow\'s loop, blind to a record after it left'), 'readd-during-blind');   // stale-pins: kept (the red control restores the follow's line)
+  const rr = await readdDuringLeg(ANYREM, 'readd-during-red');
+  ok(rr.gone, `⑯ RED CONTROL: the follow's loop (it skips the id for the whole of its removal's purge) — the re-added account is still counted gone after the purge: its new message refused (gone: ${rr.gone}) — the leg above would go red`, rr);
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

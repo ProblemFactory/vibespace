@@ -430,7 +430,6 @@ export default {
   "The channels are paused: {what} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "チャンネルは一時停止中です — {what} を読み込めないため、ここは一覧のすべてではありません。読めるようになるまで取得も送信もしません",
   "The agent groups are paused — a file of theirs could not be read, so this list is not the whole list; nothing is sent until it reads again": "エージェントのグループは一時停止中です — そのファイルの一つを読めないため、この一覧はすべてではありません。再び読めるまで何も送信しません",   // B-f276 1c
   "It read again and is loaded; changes to it are written again.": "読み直して読み込みました。変更は再び書き込まれます。",
-  "{file} reads again — restart VibeSpace to load it": "{file} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
   "{what} reads again — restart VibeSpace to load it": "{what} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
   "{what} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{what} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら次回の VibeSpace 起動時に読み込みます",
   "{what} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{what} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたらアカウントは自動で戻ります",

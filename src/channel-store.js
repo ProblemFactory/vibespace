@@ -2675,8 +2675,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // client secret (`credential.appSecretEnc`) — owner-only like the key file.
     // r2878 + r2943 (L3): an account added again under a gone or MARKED id — its gone mark cleared and its purge mark ENDED (readded);
     // a re-add DURING its purge only after that purge settles
-    // r3021 (2) + (3): never an id being REMOVED now (its fresh mark is the removal's), and the mark ends only once this write LANDED
-    const run = adChain.then(() => fn(ad)).then((r) => { const back = []; for (const a of (ad && ad.adapters) || []) if (a && !removing.has(a.id) && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id); owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); for (const id of back) readded(id); return r; });
+    // r3021 (2) + (3): never the record being REMOVED now (its fresh mark is the removal's), and the mark ends only once this write LANDED;
+    // r3131 (1): only while the record in the list IS the one being removed — a record under that id after it left is a re-add (it waits
+    // for the purge, then its gone mark is cleared and its purge mark ended)
+    const run = adChain.then(() => fn(ad)).then((r) => { const back = []; for (const a of (ad && ad.adapters) || []) if (a && !(removing.has(a.id) && removingRec.get(a.id) === a) && (goneAccounts.has(a.id) || (pending && pending.ids[a.id]))) back.push(a.id); owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); for (const id of back) readded(id); return r; });
     adChain = run.then(() => {}, () => {});
     return paced ? run : run.then((r) => landed(adaptersFile).then(() => r));
   }
@@ -2986,13 +2988,19 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // L6: an id in the mark is an ACCOUNT's (a kind, or a kind and its minted suffix) — never a name of the folder's own (a hand edit
   // naming «msgs» would be every account's message logs) nor a file's: a bad one is skipped, said once, dropped from the mark
   const OWN_NAMES = new Set(Object.values(OWN_FOLDERS));   // r3021 (1): every folder of the store's own, the staged outbox files' too
-  const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);
+  // r3131 (3): no «_» either — src/server/channel-api.js makes <root>/<credential with every unsafe character made «_»>/ (a mount's
+  // mount_<id>, an account kind:hex's kind_hex): a name of that shape is an API log's folder, and no minted account id holds «_»
+  const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);
   const badSaid = new Set();
   // L2: the accounts' records READ — not held, not blocked (a file that appeared since is HELD for the length of its read: tookAppeared);
   // a held read's empty stand-in is never «no record»
   const recordsRead = () => !adLoad.held && !adLoad.blocked;
   const recordOf = (id) => ((ad && ad.adapters) || []).some((a) => a && a.id === id);
+  // r3131 (2): the accounts' file holds no change still owed or failed (the writer's own answer, asked in this turn)
+  const adaptersOnDisk = () => { try { const w = W(); if (typeof w.pending === 'function' && w.pending(adaptersFile)) return false; return !(typeof w.whyNotDurable === 'function' && w.whyNotDurable(adaptersFile)); } catch { return false; } };
   const removing = new Set();   // the ids between their mark and their purge's end (the remove road): never listed, never ended
+  const removingRec = new Map();   // r3131 (1): id → the record purgeBegin met in the list (the one being removed; null = none)
+  const notRemoving = (id) => { removing.delete(id); removingRec.delete(id); };
   function pendingWrite() {
     if (pdLoad.blocked) return Promise.reject(blockedError(pdLoad.blocked));   // L4: HELD — nothing is written over a mark that could not be read
     owe(pendingFile, { name: 'channels-purge-pending.write', produce: () => JSON.stringify(pending, null, 1), mode: 0o600, act: true });
@@ -3005,14 +3013,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const markName = (who) => (who && typeof who === 'object' && (who.service || who.label) ? { service: String(who.service || '').slice(0, 80), label: String(who.label || '').slice(0, 80) } : null);
   async function purgeBegin(adapterId, who = null) {
     if (!accountIdOk(adapterId)) return false;
-    removing.add(adapterId);
+    removing.add(adapterId); removingRec.set(adapterId, ((ad && ad.adapters) || []).find((a) => a && a.id === adapterId) || null);
     if (pdLoad.blocked) return false;
     const name = markName(who);
     pending.ids[adapterId] = { at: now(), left: null, ...(name ? { name } : {}) };
     try { await pendingWrite(); return true; } catch (e) { warn(`[channels] ${adapterId}: the purge's mark was not written (${(e && e.code) || (e && e.message) || e})`); return false; }
   }
   /** the remove road's record write failed after purgeBegin: the id leaves `removing` (its mark, if written, is listed as not known) */
-  function purgeNotBegun(adapterId) { removing.delete(adapterId); }
+  function purgeNotBegun(adapterId) { notRemoving(adapterId); }
   /** THE PERSON's VIEW of the mark (the panel's line, L1): each removed account whose local copy is not all removed — its id, when, what
    *  is left by kind (null = not known: a removal cut in its middle). Never a bad id (L6: dropped, said once); never an id a record
    *  carries (L3: its mark ended, said once) — decided only while the accounts' records are read (L2) */
@@ -3027,7 +3035,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       }
       if (removing.has(id) || purging.has(id)) continue;
       if (!recordsRead()) continue;   // r3021 (6): the accounts' records not read — the id is left off until they read (it may be a live account's)
-      if (recordOf(id)) { endMark(id, 'an account with this id has a record'); continue; }
+      if (recordOf(id)) { if (!ending.has(id) && adaptersOnDisk()) endMark(id, 'an account with this id has a record'); continue; }   // r3131 (2): only once its record is on disk
       out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null, name: markName(e && e.name) });
     }
     if (dropped) pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — its bad ids are dropped in memory`));
@@ -3077,8 +3085,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  refused by name, nothing touched, while the accounts' records are not read or while a record carries the id; L6: never a bad id */
   async function purgeAccount(adapterId) {
     if (!accountIdOk(adapterId)) return refusedPurge('bad-id', `${JSON.stringify(String(adapterId)).slice(0, 80)} is no account's id — nothing was removed`);
-    if (!recordsRead()) { removing.delete(adapterId); return refusedPurge('records-held', 'the accounts\' records (adapters.json) could not be read now — nothing was removed; it can be tried again once they read'); }
-    if (recordOf(adapterId)) { removing.delete(adapterId); return refusedPurge('record-stands', `an account with the id ${adapterId} exists — the data under it is that account's; nothing was removed`); }
+    if (!recordsRead()) { notRemoving(adapterId); return refusedPurge('records-held', 'the accounts\' records (adapters.json) could not be read now — nothing was removed; it can be tried again once they read'); }
+    if (recordOf(adapterId)) { notRemoving(adapterId); return refusedPurge('record-stands', `an account with the id ${adapterId} exists — the data under it is that account's; nothing was removed`); }
     if (purging.has(adapterId)) return purging.get(adapterId);   // a second press while one runs: its answer
     const p = purgeOne(adapterId);   // its marks are set synchronously, before any wait
     purging.set(adapterId, p);
@@ -3132,7 +3140,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const left = Object.keys(folders).filter((k) => r[k].state === 'left').map((k) => ({ what: k, folder: NAMES[k], code: r[k].code }));
     // the mark REMEMBERS what is left (by kind and code) for the panel's line — or ends; never written while it is held (L4), and a
     // failed write is ANSWERED (markUnwritten), never a rejection after the record and folders are gone
-    removing.delete(adapterId);
+    notRemoving(adapterId);
     let markUnwritten = null;
     if (pdLoad.blocked) markUnwritten = 'held';
     else {

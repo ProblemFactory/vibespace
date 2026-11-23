@@ -1296,8 +1296,8 @@ function create(engineCtx) {
     // r3021 (5): a second press while the first purge runs JOINS it (the running purge's answer) — never «not listed»
     const running = !!(store.purgeRunning && store.purgeRunning(id));
     if (!running && !(store.pendingList ? store.pendingList() : []).some((x) => x.id === id)) throw httpErr(404, 'not-pending', `nothing of a removed account ${JSON.stringify(id).slice(0, 80)} is listed to try again`);
-    let onDisk = false;
-    try { onDisk = await Promise.race([store.adapters.landed().then(() => true), new Promise((z) => { const t = setTimeout(() => z(false), 10000); if (t.unref) t.unref(); })]); } catch { onDisk = false; }
+    let onDisk = running;   // r3131: a second press joins the running purge at once — no wait for the accounts' file first
+    if (!running) { try { onDisk = await Promise.race([store.adapters.landed().then(() => true), new Promise((z) => { const t = setTimeout(() => z(false), 10000); if (t.unref) t.unref(); })]); } catch { onDisk = false; } }
     if (!onDisk) throw httpErr(409, 'records-unwritten', 'the accounts\' file (adapters.json) holds a change that is not on disk yet — nothing was removed; try again in a moment');
     const r = await store.purgeAccount(id);
     if (r && r.refused) throw httpErr(409, r.refused, r.error);
