@@ -2472,7 +2472,7 @@ function create(engineCtx) {
     // lane lg-group-parents (B-526c): what the rows carry — every inline filter body a stored watcher names (the one this write
     // mints, else the index's), the agents' blocks at this grain as they stand after this write, a rule's record
     const bodies = new Map(filterWrites.map((fw) => [fw.id, fw.filter]));
-    for (const w of stored) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId) && inlineFilterId(w.filterId)) { const f0 = filterFor(w.filterId); if (f0) bodies.set(w.filterId, filterBody(f0)); }
+    addCarriedBodies(bodies, stored);   // r2933: the ONE rule (inline ids only) — the start's heal goes through it too
     const blocksAfter = scopeBlocksOf(site.scope, res);   // r937 (a): the index's and the record's
     for (const pk of liftBlocks) blocksAfter.delete(pk);
     for (const w of droppedAgent) blocksAfter.set(pkOf(w.principal), { at: t, by });
@@ -2534,6 +2534,13 @@ function create(engineCtx) {
   /** lane lg-group-parents (B-526c): an inline filter's id (minted per grain + principal — the same test the grain's own GC reads),
    *  a stored filter's BODY (what validateFilter answers), the agents' blocks at one grain as they stand (pk → {at, by}). */
   const inlineFilterId = (fid) => /\|/.test(fid);   // r1040: the bar marks an inline id — the only bodies the record carries
+  /** r2933 (line 575's must) — THE INLINE FILTER BODIES A GRAIN's ROWS CARRY: the save's ONE rule, the start's heal through it too
+   *  (never a copy): only an INLINE id's body (the bar) — never a conversation's own filter, which its route edits in the index
+   *  alone (a carried copy of it would be put back over the person's later edit at every start). → `bodies` (filled). */
+  function addCarriedBodies(bodies, watchers) {
+    for (const w of watchers || []) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId) && inlineFilterId(w.filterId)) { const f0 = filterFor(w.filterId); if (f0) bodies.set(w.filterId, filterBody(f0)); }
+    return bodies;
+  }
   const filterBody = (f) => ({ name: f.name || null, match: f.match, rules: f.rules });
   /** The agents' blocks at ONE grain as they stand (pk → {at, by}): the index's table at that scope — a key split at its LAST «|»
    *  (a scope id may hold one: never a sibling scope's key) — AND (r937 (a)) the record's own on the grain's watch row, so neither
@@ -2682,25 +2689,38 @@ function create(engineCtx) {
     return { completed: got.completed, skipped: owed.skipped };
   }
   /**
-   * r2541 (a) / r2548 — THE HEAL AT A START: a grants row an OLDER release rewrote WITHOUT what this release carries (its row model
-   * kept six fields: the entry's WHO, never its settings, never the row's `rule` / `blocks`) takes them from the channel index's
-   * copy, by name in the journal, ONCE a row (a healed row carries: the next start finds it whole). WHO stays the row's. A row and a
-   * copy that DISAGREE are never guessed — THE LATER STAMP OF THE ACT WINS, both ways: an entry later than its index watcher keeps
-   * the record (its act's settings are not in the index: said, never healed from an older copy); a carrying row later than the
-   * index is today's completion (completeGrainActs, run first). A watcher the row names and the index never got (a stop between the
-   * two writes, then the older release's rewrite) is SAID LOST by name — nothing is invented. Each said once per version of its row
-   * (the index's `grainSkipsSaid`, the completion's own ledger). → {healed: [words], lost: [words], later: [words]}.
+   * r2541 (a) / r2548, cured by r2933 — THE HEAL AT A START: a grants row written by an EARLIER release — an ordinary upgrade (no
+   * release before this block carries these fields: every watch and rule row arrives without them) or a return to it (its row model
+   * keeps six fields: the entry's WHO, never its settings, never the row's `rule` / `blocks`) — takes what this release's own SAVE
+   * would carry for it from the channel index's copy, BY THE SAVE's OWN RULES (addCarriedBodies: inline bodies only; CG.carriedOf:
+   * every bound), WHO as the row has it, ONE ROW A WRITE (a row the store refuses, or one that cannot carry, stays as it is and is
+   * said once; the others land). A healed row carries: the next start finds it whole. A row and a copy that DISAGREE are never
+   * guessed — THE LATER STAMP OF THE ACT WINS: an entry later than its index watcher is kept as written (its act's settings are not
+   * in the index); a carrying row later than the index is the completion's (run first). A watcher the row names that has no
+   * settings in the index (one another door added; one whose save a stop cut short before a return) stays bare — nothing invented.
+   * A reach row's entries stamp ACCESS grants, never its rule's pattern: a short reach row says nothing of the pattern, so its rule
+   * is taken from the index's record (no disagreement to judge). Each «kept» line is said ONCE per version of its row (the index's
+   * `grainSkipsSaid`, keyed `heal|door|resource`, its value the row's names and stamps: a second return with another bare entry is
+   * said again) — that ledger is never pruned, bounded by the rows. The engine's start waits while its index is held, so the heal
+   * never reads an unread index. → {healed: [words], none: [words], later: [words], cannot: [words]}.
    */
   async function healGrainRows() {
     let rows = [];
     try { rows = CG.rowsShort(); } catch { rows = []; }
-    const out = { healed: [], lost: [], later: [] };
+    const out = { healed: [], none: [], later: [], cannot: [] };
     if (!rows.length) return out;
     const accounts = new Set(adapterRecords().adapters.map((r) => r.id));
     const said = store.index.table('grainSkipsSaid') || {}, newSaid = {};
-    const pas = store.index.table('patternAssignments') || {}, aas = store.index.table('accountAssignments') || {}, filters = store.index.table('filters') || {};
-    const stampOf = (row) => Math.max(0, ...row.to.map((e) => Number(e.at) || 0));
-    const changes = [];
+    const pas = store.index.table('patternAssignments') || {}, aas = store.index.table('accountAssignments') || {};
+    const sigOf = (row) => `${Math.max(0, ...row.to.map((e) => Number(e.at) || 0))}|${row.to.map((e) => pkOf(GM_toChannel(e))).sort().join(',')}`;
+    // the holder's watchers AS ITS READERS SEE THEM — a pre-split (legacy) record lifted, never reshaped here (a pure read)
+    const watchersOf = (holder, kind) => {
+      try {
+        if (kind === 'conversation') { const legacy = legacyConvAssignment(holder); if (legacy || !Array.isArray(holder.access) || !Array.isArray(holder.watchers)) return F.grainOf({ access: holder.access, watchers: holder.watchers }, legacy).watchers || []; return holder.watchers; }
+        const l = F.liftGrainRecord(holder);
+        return l && l.rec && Array.isArray(l.rec.watchers) ? l.rec.watchers : (Array.isArray(holder.watchers) ? holder.watchers : []);
+      } catch { return Array.isArray(holder.watchers) ? holder.watchers : []; }
+    };
     for (const row of rows) {
       const m = /^(account|rule|conversation):(.+)$/.exec(row.resource);
       if (!m) continue;
@@ -2709,45 +2729,53 @@ function create(engineCtx) {
       if (kind === 'account') { holder = aas[id] || null; scope = { kind: 'adapter', id }; }
       else if (kind === 'pattern') { holder = pas[id] || null; scope = { kind: 'pattern', id }; }
       else { const aid = [...accounts].find((a) => id.startsWith(`${a}/`)); holder = aid ? store.index.live()[id] || null : null; scope = { kind: 'conversation', id }; }
-      const tell = (list, words) => { const key = `heal|${row.door}|${row.resource}`, st = stampOf(row); if (said[key] === st) return; list.push(words); newSaid[key] = st; };
-      if (!holder) {   // the index never got this grain (a stop between the two writes, then the older release's rewrite): nothing to take from — said LOST, never invented
-        if (row.door === DOORS_WATCH) for (const e of row.to) tell(out.lost, `${pkOf(GM_toChannel(e))} on ${row.resource} (its settings: the index never got them)`);
-        else if (kind === 'pattern') tell(out.lost, `rule ${id} (its record: the index never got it)`);
+      const tell = (list, words) => { const key = `heal|${row.door}|${row.resource}`, sig = sigOf(row); if (said[key] === sig) return; list.push(words); newSaid[key] = sig; };
+      if (!holder) {   // the channel index holds no copy of this grain: nothing to take — the row stays as written
+        if (row.door === DOORS_WATCH) for (const e of row.to) tell(out.none, `${pkOf(GM_toChannel(e))} on ${row.resource} (the channel index holds no copy of this grain)`);
+        else if (kind === 'pattern') tell(out.none, `rule ${id} (the channel index holds no copy of its record)`);
         continue;
       }
-      const rule = kind === 'pattern' && holder.pattern && holder.adapterId ? { adapterId: holder.adapterId, pattern: holder.pattern, ...(Number(holder.updatedAt) > 0 ? { at: Number(holder.updatedAt) } : {}) } : null;
+      const ruleRec = kind === 'pattern' && holder.pattern && holder.adapterId ? { adapterId: holder.adapterId, pattern: holder.pattern, ...(Number(holder.updatedAt) > 0 ? { at: Number(holder.updatedAt) } : {}) } : undefined;
       if (row.door === DOORS_REACH) {
-        if (!rule) continue;
-        if (stampOf(row) > (Number(holder.updatedAt) || 0)) { tell(out.later, `rule ${id} (its record: the record's act is later than the index's copy)`); continue; }
-        changes.push({ door: DOORS_REACH, resource: row.resource, to: row.to, except: row.except, rule });
-        out.healed.push(`rule ${id} (its record, on its reach row)`);
+        if (!ruleRec) continue;
+        const c = CG.carriedOf(row.resource, { rule: ruleRec });
+        if (!c.rule) { tell(out.cannot, `rule ${id} (its pattern is past what a row carries — the row stays as the save itself writes it)`); continue; }
+        const r = CG.healRow({ door: DOORS_REACH, resource: row.resource, to: row.to, except: row.except, rule: c.rule });
+        if (r && r.ok) out.healed.push(`rule ${id} (its record, on its reach row)`);
+        else tell(out.cannot, `rule ${id} (the grants store refused its reach row: ${(r && (r.code || r.error)) || 'refused'})`);
         continue;
       }
-      const ws = Array.isArray(holder.watchers) ? holder.watchers : [];
-      let healedHere = 0;
-      const to = row.to.map((e) => {
+      const ws = watchersOf(holder, kind), take = new Map();
+      for (const e of row.to) {
         const pk = pkOf(GM_toChannel(e));
         const w = ws.find((x) => x && x.principal && pkOf(x.principal) === pk) || null;
-        if (!w || typeof w.notify !== 'string') { tell(out.lost, `${pk} on ${row.resource} (its settings: the index never got them)`); return e; }
-        if ((Number(e.at) || 0) > (Number(w.updatedAt || w.createdAt) || 0)) { tell(out.later, `${pk} on ${row.resource} (its record's act is later than the index's copy)`); return e; }
-        const body = w.mode === 'filtered' && w.filterId && filters[w.filterId] ? filterBody(filters[w.filterId]) : null;
-        const ne = CG.entryOfWatch(w, body, []);
-        if (!ne || typeof ne.notify !== 'string') return e;   // not carried whole (a body past its bound): the row stays as it reads
-        healedHere++;
+        if (!w || typeof w.notify !== 'string') { tell(out.none, `${pk} on ${row.resource} (no settings for it in the channel index)`); continue; }
+        if ((Number(e.at) || 0) > (Number(w.updatedAt || w.createdAt) || 0)) { tell(out.later, `${pk} on ${row.resource} (the record's act is later than the index's copy)`); continue; }
+        take.set(pk, w);
+      }
+      if (!take.size) continue;
+      const blocks = [...scopeBlocksOf(scope)].map(([key, v]) => ({ key, ...(v && Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v && typeof v.by === 'string' && v.by ? { by: v.by } : {}) }));
+      const c = CG.carriedOf(row.resource, { rule: ruleRec, blocks, bodies: addCarriedBodies(new Map(), [...take.values()]) });
+      const short = [...c.short];
+      let n = 0;
+      const to = row.to.map((e) => {
+        const w = take.get(pkOf(GM_toChannel(e)));
+        if (!w) return e;
+        const ne = CG.entryOfWatch(w, c.bodies && w.mode === 'filtered' && w.filterId ? c.bodies.get(w.filterId) || null : null, short);
+        if (!ne || typeof ne.notify !== 'string') return e;   // not carried whole (as the save writes it short): the entry stays as it reads
+        n++;
         return ne;
       });
-      if (!healedHere) continue;
-      const blocks = [...scopeBlocksOf(scope)].map(([key, v]) => ({ key, ...(v && Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v && typeof v.by === 'string' && v.by ? { by: v.by } : {}) }));
-      changes.push({ door: DOORS_WATCH, resource: row.resource, to, except: row.except, blocks, ...(rule ? { rule } : {}) });
-      out.healed.push(`${row.resource} (${healedHere} watcher${healedHere === 1 ? '' : 's'}' settings${blocks.length ? `, ${blocks.length} block${blocks.length === 1 ? '' : 's'}` : ''}${rule ? ', its rule' : ''})`);
+      if (!n) { tell(out.cannot, `${row.resource} (what its watchers carry is past what a row carries — the row stays as the save itself writes it)`); continue; }
+      const r = CG.healRow({ door: DOORS_WATCH, resource: row.resource, to, except: row.except, ...(c.blocks ? { blocks: c.blocks } : {}), ...(c.rule ? { rule: c.rule } : {}) });
+      if (r && r.ok) out.healed.push(`${row.resource} (${n} watcher${n === 1 ? '' : 's'}' settings${c.blocks && c.blocks.length ? `, ${c.blocks.length} block${c.blocks.length === 1 ? '' : 's'}` : ''}${c.rule ? ', its rule' : ''}${short.length ? ` — not carried, as the save would not: ${short.join(', ')}` : ''})`);
+      else tell(out.cannot, `${row.resource} (the grants store refused the row: ${(r && (r.code || r.error)) || 'refused'})`);
     }
-    if (changes.length) {
-      const r = CG.healRows(changes);
-      if (!r || !r.ok) { log.warn(`[channels] boot: the grants rows an older release rewrote could not be healed from the index's copy (${(r && (r.code || r.error)) || 'refused'}) — the next start tries again`); out.healed = []; }
-    }
-    if (out.healed.length) log.log(`[channels] boot: healed ${out.healed.length} grants row${out.healed.length === 1 ? '' : 's'} from the channel index's copy (an older release rewrote them without what they carry): ${out.healed.slice(0, 8).join(' · ')}${out.healed.length > 8 ? ` · and ${out.healed.length - 8} more` : ''}`);
-    if (out.lost.length) log.warn(`[channels] boot: ${out.lost.length} watcher setting${out.lost.length === 1 ? '' : 's'} LOST — an older release rewrote the row after a stop, before the index got them (said once): ${out.lost.slice(0, 8).join(' · ')}${out.lost.length > 8 ? ` · and ${out.lost.length - 8} more` : ''}`);
-    if (out.later.length) log.warn(`[channels] boot: ${out.later.length} grants entr${out.later.length === 1 ? 'y' : 'ies'} not healed — the record's act is later than the index's copy (said once): ${out.later.slice(0, 8).join(' · ')}${out.later.length > 8 ? ` · and ${out.later.length - 8} more` : ''}`);
+    const list = (xs) => `${xs.slice(0, 8).join(' · ')}${xs.length > 8 ? ` · and ${xs.length - 8} more` : ''}`;
+    if (out.healed.length) log.log(`[channels] boot: ${out.healed.length} grants row${out.healed.length === 1 ? '' : 's'} written by an earlier release now carr${out.healed.length === 1 ? 'ies' : 'y'} what the channel index holds for ${out.healed.length === 1 ? 'it' : 'them'} (an upgrade, or a return to that release): ${list(out.healed)}`);
+    if (out.none.length) log.log(`[channels] boot: ${out.none.length} grants entr${out.none.length === 1 ? 'y keeps' : 'ies keep'} no settings — the channel index holds none to carry (said once): ${list(out.none)}`);
+    if (out.later.length) log.log(`[channels] boot: ${out.later.length} grants entr${out.later.length === 1 ? 'y is' : 'ies are'} kept as written — the record's act is later than the index's copy (said once): ${list(out.later)}`);
+    if (out.cannot.length) log.warn(`[channels] boot: ${out.cannot.length} grants row${out.cannot.length === 1 ? '' : 's'} not given what ${out.cannot.length === 1 ? 'it carries' : 'they carry'} (said once; the others were): ${list(out.cannot)}`);
     if (Object.keys(newSaid).length) await store.index.update((ix) => { const t2 = ix.grainSkipsSaid && typeof ix.grainSkipsSaid === 'object' ? ix.grainSkipsSaid : (ix.grainSkipsSaid = {}); Object.assign(t2, newSaid); });
     if (out.healed.length) notify([], { full: true });
     return out;

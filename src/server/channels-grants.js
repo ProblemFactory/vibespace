@@ -356,9 +356,11 @@ function create({ grants = null, dataDir = null } = {}) {
   }
   /** ONE grain's rows, written together (all or nothing). → the store's answer; lane lg-group-parents B-526c: + `short` = the
    *  watchers (principal keys) and `rule` the record could not carry whole — the caller's act then waits for the index's disk. */
-  function setGrainRows(res, lists, by) {
-    const s = S();
-    if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
+  /** r2933 (line 575's must) — WHAT A GRAIN's ROWS CARRY, BY THE SAVE's OWN BOUNDS: ONE rule for setGrain's write and the start's
+   *  heal (never a second copy of it): the rule's record (past its bound ⇒ not carried, short 'rule'), the agents' blocks (a list
+   *  the record cannot carry ⇒ short 'blocks'), the inline filter bodies (past the TOTAL bound over every other watch row's ⇒
+   *  none, short 'bodies'). → {rule, blocks, bodies, short} */
+  function carriedOf(res, lists = {}) {
     const short = [];
     const rule = lists && lists.rule !== undefined && lists.rule !== null ? (GM.rowFieldsOf(DOORS.reach, res, { rule: lists.rule }).fields.rule || null) : undefined;
     if (rule === null) short.push('rule');
@@ -375,7 +377,13 @@ function create({ grants = null, dataDir = null } = {}) {
       for (const b of bodies.values()) total += Buffer.byteLength(JSON.stringify(b), 'utf8');
       if (total > CARRY_BODIES_MAX) { bodies = null; short.push('bodies'); }
     }
-    const ch = grainChanges(res, { ...lists, bodies, blocks, rule: rule || undefined, short });
+    return { rule: rule || undefined, blocks, bodies, short };
+  }
+  function setGrainRows(res, lists, by) {
+    const s = S();
+    if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
+    const { rule, blocks, bodies, short } = carriedOf(res, lists);
+    const ch = grainChanges(res, { ...lists, bodies, blocks, rule, short });
     const r = ch.length ? s.setMany(ch, by) : { ok: true, changed: [] };
     return r && r.ok ? { ...r, short } : r;
   }
@@ -411,11 +419,13 @@ function create({ grants = null, dataDir = null } = {}) {
     }
     return out;
   }
-  /** THE HEAL's WRITE: whole rows (`{door, resource, to, except, rule?, blocks?}`), WHO as stored — through the ONE writer, together. */
-  function healRows(changes, by = 'boot') {
+  /** THE HEAL's WRITE: ONE whole row (`{door, resource, to, except, rule?, blocks?}`), WHO as stored, through the ONE writer — a
+   *  row at a time (r2933 (2)): a row the store refuses is that row's alone, the others land. The row's own `at` / `by` become the
+   *  heal's (the store stamps the writer of every row: «boot»); its entries keep theirs. */
+  function healRow(change, by = 'boot') {
     const s = S();
     if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
-    return changes.length ? s.setMany(changes.map((c) => ({ removeExcept: [], ...c })), by) : { ok: true, changed: [] };
+    return s.setMany([{ removeExcept: [], ...change }], by);
   }
   /** One principal's row in a conversation's `#user` / `#request` row (null level ⇒ removed). */
   function setLevel(res, principal, level, { at = null, by = 'user' } = {}) {
@@ -464,7 +474,7 @@ function create({ grants = null, dataDir = null } = {}) {
     DOORS, RES, grainResource, rowOf, resourcesOf, refusalOf, watchAdmitsFor, exceptBare, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
     entryOfWatch, watcherOfEntry, rowsCarrying, CARRY_BODIES_MAX,   // lane lg-group-parents B-526c
-    rowsShort, healRows,   // r2541 (a): the heal at a start
+    rowsShort, healRow, carriedOf,   // r2541 (a) / r2933: the heal at a start, by the save's own bounds
   };
 }
 

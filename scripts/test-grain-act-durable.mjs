@@ -29,11 +29,12 @@
 //      stamp is the grain's newest over the index's rows AND the record's own (a watch removed and set again inside the pace, the
 //      clock stepped back, a kill); a conversation's own filter, edited through its route, is never put back at a boot (inline ids
 //      are only those with the bar). Real processes, each with its red
-//   ⑥ r2541 (a) — THE HEAL AT A START: the train writes, the RELEASE's own row model (its bytes, ①) rewrites the grants file, the
-//      train starts. (1) a clean stop loses nothing: the rows carry again, said once; (2) a kill in the window, then the release: what
-//      is lost (the watcher's settings, the rule's record) is said by name, once, nothing invented; (3) the record's act later than
-//      the index's copy is never healed from it. Real processes; REDS: no heal, a lost watcher not said, the stamp rule inverted
-// Run: node scripts/test-grain-act-durable.mjs
+//   ⑥ r2541 (a) / r2933 — THE HEAL AT A START: the train writes, the RELEASE's own row model (its bytes, ①) rewrites the grants
+//      file — the same shape an ORDINARY UPGRADE brings — the train starts: (1) nothing lost, the words true, said once; (2) a kill,
+//      then the release: what the index never got said by name, once, nothing invented; (3) the later stamp wins (and an entry the
+//      release wrote, with no stamp, takes the index's copy); (4) a watcher naming the conversation's OWN filter: no body carried —
+//      the route edit after the heal stands; (5) a removal made on the release brings nothing back; (6) a refused row stays as it
+//      is, said once, the others land. REDS: no heal, a never-got watcher not said, the stamp rule inverted, every body carried
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -199,6 +200,33 @@ if (process.argv[2] === '--child') {
     say({ role, ok: !!(r1 && r1.ok), pid });
     process.exit(0);
   }
+  if (role === 'write-clean-two') {   // r2933 (3): two watchers on the rule, every write landed, a clean stop (a removal is then made on the release)
+    await seed();
+    const r1 = await eng.setGrain(A, { kind: 'pattern' }, { pattern: RULE, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 45, dailyWakeCap: 7 }, { principal: OTHER, delivery: 'wake', notify: 'wake' }] }, { by: 'user' });
+    await eng.store.index.update(() => {}); eng.store.index.flush(); try { real.flushSync(); } catch { }
+    eng.stop();
+    say({ role, ok: !!(r1 && r1.ok), pid: r1 && r1.grain ? r1.grain.id : null });
+    process.exit(0);
+  }
+  if (role === 'write-convfilter') {   // r2933 (575's must): a watcher that names the conversation's OWN filter (its route's id, no bar), a clean stop
+    await seed();
+    await eng.setFilter(A, C, F1);
+    const fid = (eng.store.index.peek(KEY) || {}).filterId;
+    const r1 = await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', mode: 'filtered', filterId: fid }] }, { by: 'user' });
+    await eng.store.index.update(() => {}); eng.store.index.flush(); try { real.flushSync(); } catch { }
+    eng.stop();
+    say({ role, ok: !!(r1 && r1.ok), fid });
+    process.exit(0);
+  }
+  if (role === 'boot-edit') {   // a start (its heal), then the person edits the conversation's own filter THROUGH ITS ROUTE, a clean stop
+    eng.start();
+    await eng.store.index.update(() => {}); await eng.store.index.update(() => {});
+    const ed = await eng.setFilter(A, C, F3);
+    await eng.store.index.update(() => {}); eng.store.index.flush(); try { real.flushSync(); } catch { }
+    eng.stop();
+    say({ role, edit: !!(ed && ed.ok), journal: lines.filter((l) => /grants|carr|healed|kept as written|not given/.test(l)) });
+    process.exit(0);
+  }
   if (role === 'boot') {
     eng.start();
     await eng.store.index.update(() => {}); await eng.store.index.update(() => {});   // behind the boot's own queued completion
@@ -225,7 +253,7 @@ if (process.argv[2] === '--child') {
     const rewatch = await eng.agentWatch(AG, KEY, { delivery: 'next-turn' });
     eng.stop();
     say({ role, count, recCount, convFilter, newRow: newRow ? { watchers: (newRow.watchers || []).map((x) => x && x.principal && x.principal.id) } : null, roomW: room ? { notify: room.notify, delivery: room.delivery || null, digestMinutes: room.digestMinutes, dailyWakeCap: room.dailyWakeCap } : null,
-      journal: lines.filter((l) => /grain|completed|carried|without access|healed|LOST|not healed/.test(l)), roomWatchers, rule: pa ? { pattern: pa.pattern } : null,
+      journal: lines.filter((l) => /grain|completed|carried|without access|healed|LOST|not healed|carr(?:y|ies) what the channel index|keeps? no settings|kept as written|not given what/.test(l)), ruleWatchers: pa && Array.isArray(pa.watchers) ? pa.watchers.map((x) => x && x.principal && x.principal.id).sort() : null, roomWatchers, rule: pa ? { pattern: pa.pattern } : null,
       watcher: w ? { notify: w.notify, mode: w.mode, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, delivery: w.delivery || null, filter: w.filterId && filters[w.filterId] ? filters[w.filterId].rules : null } : null,
       block: Object.keys(blocks).filter((k) => k.endsWith('|agent:agent-1')), held, flushed: fl ? !!fl.ok : null, delivered: delivered.filter((d) => d.cid === 'agent-1').map((d) => /deploy at noon/.test(d.text) && !/lunch at noon/.test(d.text)), rewatch: { ok: !!rewatch.ok, code: rewatch.code || null } });
     process.exit(0);
@@ -492,77 +520,120 @@ console.log('⑤ r1040 (the follow): a row written short lifts nothing; one stam
     '3. the conversation\'s own filter (its route\'s id, no bar) is never an inline id: the watcher\'s inline filter gets its own; the route\'s edit stands at EVERY boot', { fw, f1: f1.convFilter, f2: f2.convFilter });
   ok(!!(fr.convFilter && J(fr.convFilter) !== J(['gamma'])), 'RED «any f- id reused and carried»: the route\'s edit is put back to the record\'s older body at the boot', fr.convFilter);
 }
-console.log('⑥ r2541 (a) — THE HEAL AT A START: the train writes, the RELEASE\'s own row model rewrites the grants file, the train starts');
+console.log('⑥ r2541 (a) / r2933 — THE HEAL AT A START: the train writes, the RELEASE\'s own row model rewrites the grants file, the train starts');
 {
   // the release 2.369.415's OWN row model (its bytes, pinned in ①) rewrites every row the way its first write of the grants file
   // does: each row through its model (the entry's WHO kept, its settings and the row's rule / blocks / cleared dropped), its store's
-  // own `at` / `by` beside them — `{v, rows, syncVersion}` as it writes the file
+  // own `at` / `by` beside them — `{v, rows, syncVersion}` as it writes the file. The SAME shape is an ORDINARY UPGRADE's: no
+  // release before this block carries these fields, so every row it wrote looks exactly like this
   const RELM = MUT.load('src/grant-model.js', fs.readFileSync(path.join(REPO, 'scripts/fixtures/grain-act-durable/release-a3f329c05/src/grant-model.js.frozen'), 'utf8'), 'release-model-rt');
-  const releaseRewrite = (dir, { bump = 0 } = {}) => {
+  const releaseRewrite = (dir, { bump = 0, dropAt = false, drop = null } = {}) => {
     const f = path.join(dir, 'grants.json'), doc = JSON.parse(fs.readFileSync(f, 'utf8'));
-    doc.rows = (doc.rows || []).map((r) => { const n = RELM.normRow(r); const row = n.ok ? { ...n.row, ...(r.at !== undefined ? { at: r.at } : {}), ...(r.by !== undefined ? { by: r.by } : {}) } : r; return bump ? { ...row, to: row.to.map((e) => ({ ...e, at: (Number(e.at) || 0) + bump })) } : row; });
+    doc.rows = (doc.rows || []).map((r) => {
+      const n = RELM.normRow(r);
+      let row = n.ok ? { ...n.row, ...(r.at !== undefined ? { at: r.at } : {}), ...(r.by !== undefined ? { by: r.by } : {}) } : r;
+      if (bump) row = { ...row, to: row.to.map((e) => ({ ...e, at: (Number(e.at) || 0) + bump })) };
+      if (dropAt) row = { ...row, to: row.to.map((e) => { const { at, ...rest } = e; return rest; }) };   // the release's OWN grain writes put no `at` on a watch entry
+      if (drop && row.door === 'channel-watch') row = { ...row, to: row.to.filter((e) => !(e.kind === 'conversation' && e.key === drop)) };   // a removal made ON the release (its row no longer names it)
+      return row;
+    });
     fs.writeFileSync(f, JSON.stringify(doc));
     return doc.rows;
   };
   const rowsAt = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'grants.json'), 'utf8')).rows || []; } catch { return []; } };
   const ruleRows = (rows, pid) => ({ watch: rows.find((r) => r.door === 'channel-watch' && r.resource === `rule:${pid}`) || null, reach: rows.find((r) => r.door === 'channel-reach' && r.resource === `rule:${pid}`) || null });
   const said = (j, re) => (j || []).filter((l) => re.test(l));
+  const HEALED = /grants rows? written by an earlier release now carr(?:y|ies) what the channel index holds/, NONE = /keeps? no settings — the channel index holds none to carry/, LATER = /kept as written — the record's act is later/, CANNOT = /not given what/;
+  const ANY = /carr(?:y|ies) what the channel index|keeps? no settings|kept as written|not given what/;
   const HEAL = '  async function healGrainRows() {\n';
-  const NO_HEAL = MUT.write('src/server/channels-access.js', anchored(asrc, HEAL, HEAL + '    return { healed: [], lost: [], later: [] };\n', 'no heal at a start'), 'no-heal');
-  const NO_LOST = MUT.write('src/server/channels-access.js', anchored(asrc, "        if (row.door === DOORS_WATCH) for (const e of row.to) tell(out.lost, `${pkOf(GM_toChannel(e))} on ${row.resource} (its settings: the index never got them)`);\n", '', 'a lost watcher not said'), 'no-lost');
+  const NO_HEAL = MUT.write('src/server/channels-access.js', anchored(asrc, HEAL, HEAL + '    return { healed: [], none: [], later: [], cannot: [] };\n', 'no heal at a start'), 'no-heal');
+  const NO_SAY = MUT.write('src/server/channels-access.js', anchored(asrc, "        if (row.door === DOORS_WATCH) for (const e of row.to) tell(out.none, `${pkOf(GM_toChannel(e))} on ${row.resource} (the channel index holds no copy of this grain)`);\n", '', 'a watcher the index never got not said'), 'no-say');
   const INVERTED = MUT.write('src/server/channels-access.js', anchored(asrc, '        if ((Number(e.at) || 0) > (Number(w.updatedAt || w.createdAt) || 0))', '        if ((Number(e.at) || 0) < (Number(w.updatedAt || w.createdAt) || 0))', 'the stamp rule inverted'), 'inverted');
-  const roundTrip = async (dir, { writer = 'write-clean', bump = 0, mutant = '', boots = 1 } = {}) => {
+  const ANY_BODY = MUT.write('src/server/channels-access.js', anchored(asrc, "    for (const w of watchers || []) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId) && inlineFilterId(w.filterId)) {", "    for (const w of watchers || []) if (w && w.mode === 'filtered' && w.filterId && !bodies.has(w.filterId)) {", 'every filter body carried (the inline check removed)'), 'any-body');
+  const REFUSED = MUT.write('src/server/channels-grants.js', anchored(csrc, "  function healRow(change, by = 'boot') {\n", "  function healRow(change, by = 'boot') {\n    if (change && change.door === 'channel-watch') return { ok: false, code: 'planted-refusal' };\n", 'the store refuses every healed watch row'), 'refused');
+  const roundTrip = async (dir, { writer = 'write-clean', rw = {}, mutant = '', boots = 1, between = null } = {}) => {
     const d = path.join(ROOT, dir);
     const w = await child(writer, d);
-    const before = rowsAt(d), rewritten = releaseRewrite(d, { bump });
-    const b = await child('boot', d, { mutant });
+    const before = rowsAt(d), rewritten = releaseRewrite(d, rw);
+    const b = await child(between || 'boot', d, { mutant });
     const after = rowsAt(d);
     const b2 = boots > 1 ? await child('boot', d, { mutant }) : null;
     return { w, before, rewritten, b, after, b2 };
   };
   const t1 = Date.now();
-  const [H1, H1R, H2, H2R, H3, H3R] = await pool([
+  const [H1, H1R, H2, H2R, H3, H3R, HA, HF, HFR, HD, HX] = await pool([
     () => roundTrip('h1', { boots: 2 }), () => roundTrip('h1r', { mutant: ACC(NO_HEAL) }),
-    () => roundTrip('h2', { writer: 'write', boots: 2 }), () => roundTrip('h2r', { writer: 'write', mutant: ACC(NO_LOST) }),
-    () => roundTrip('h3', { bump: 3600e3 }), () => roundTrip('h3r', { bump: 3600e3, mutant: ACC(INVERTED) }),
+    () => roundTrip('h2', { writer: 'write', boots: 2 }), () => roundTrip('h2r', { writer: 'write', mutant: ACC(NO_SAY) }),
+    () => roundTrip('h3', { rw: { bump: 3600e3 }, boots: 2 }), () => roundTrip('h3r', { rw: { bump: 3600e3 }, mutant: ACC(INVERTED) }),
+    () => roundTrip('ha', { rw: { dropAt: true } }),
+    () => roundTrip('hf', { writer: 'write-convfilter', between: 'boot-edit', boots: 2 }), () => roundTrip('hfr', { writer: 'write-convfilter', between: 'boot-edit', boots: 2, mutant: ACC(ANY_BODY) }),
+    () => roundTrip('hd', { writer: 'write-clean-two', rw: { drop: 'agent-2' }, boots: 2 }),
+    () => roundTrip('hx', { mutant: CGF(REFUSED), boots: 2 }),
   ], 4);
-  console.log(`    (the six round trips, at most four at once, in ${Date.now() - t1} ms)`);
-  // (1) A CLEAN STOP: nothing lost — the rows carry again after the start, said once
+  console.log(`    (the eleven round trips, at most four at once, in ${Date.now() - t1} ms)`);
+  const sorted = (o) => J(Object.keys(o || {}).sort().map((k) => [k, o[k]]));
+  // (1) AN ORDINARY UPGRADE — or a clean return: rows that never carried / were rewritten take what the save would carry; true words, once
   {
     const pid = H1.w.facts && H1.w.facts.pid, b4 = ruleRows(H1.before, pid), rw = ruleRows(H1.rewritten, pid), af = ruleRows(H1.after, pid);
     const e4 = b4.watch && b4.watch.to[0], erw = rw.watch && rw.watch.to[0], eaf = af.watch && af.watch.to[0];
     const j1 = H1.b.facts ? H1.b.facts.journal : null, j2 = H1.b2 && H1.b2.facts ? H1.b2.facts.journal : null;
-    console.log('    (1) clean stop: ' + J({ before: e4, rewritten: erw, after: eaf, reachRule: !!(af.reach && af.reach.rule), first: said(j1, /healed|LOST/), second: said(j2, /healed|LOST/) }));
+    console.log('    (1) the upgrade\'s shape: ' + J({ rewritten: erw, after: eaf, reachRule: !!(af.reach && af.reach.rule), first: said(j1, ANY), second: said(j2, ANY) }));
     ok(!!(pid && e4 && e4.notify === 'digest' && erw && !('notify' in erw) && rw.reach && !rw.reach.rule && rw.watch && !('rule' in rw.watch)),
-      '(1) the round trip is real: the train\'s rule rows carry the watcher\'s settings and the rule; the RELEASE\'s own row model rewrites them without either (the entry\'s WHO kept)', { e4, erw });
-    const sorted = (o) => J(Object.keys(o || {}).sort().map((k) => [k, o[k]]));
-    ok(!!(eaf && e4 && sorted(eaf) === sorted(e4) && eaf.notify === 'digest' && eaf.digestMinutes === 45 && J(eaf.filter.rules) === J(FILTER.rules) && af.watch.rule && af.reach && af.reach.rule && J(af.reach.rule.pattern) === J(RULE) && Array.isArray(af.watch.blocks)),
-      '(1) A CLEAN STOP LOSES NOTHING: the start heals the rows from the index\'s copy — the watcher\'s entry reads back EXACTLY as the train wrote it (its settings, its filter\'s body, its stamp), the rule\'s record on both its rows, the scope\'s blocks', { eaf, e4, reach: af.reach });
-    ok(!!(said(j1, /boot: healed 2 grants rows from the channel index's copy/).length === 1 && said(j2, /healed|LOST|not healed/).length === 0),
-      '(1) said ONCE by name in the journal («healed 2 grants rows … rule:… · rule … (its record)»); the second start finds the rows whole and says nothing', { j1: said(j1, /healed/), j2 });
+      '(1) the round trip is real: the train\'s rule rows carry the watcher\'s settings and the rule; the RELEASE\'s own row model (the same shape as any row an earlier release wrote) has neither (the entry\'s WHO kept)', { e4, erw });
+    ok(!!(eaf && e4 && sorted(eaf) === sorted(e4) && af.watch.rule && af.reach && af.reach.rule && J(af.reach.rule.pattern) === J(RULE) && Array.isArray(af.watch.blocks)),
+      '(1) NOTHING LOST: the start gives each row what the save would carry — the watcher\'s entry reads back EXACTLY as the train wrote it (settings, its inline filter\'s body, its stamp), the rule\'s record on both its rows, the scope\'s blocks', { eaf, e4, reach: af.reach });
+    ok(!!(said(j1, HEALED).length === 1 && /2 grants rows written by an earlier release now carry .* \(an upgrade, or a return to that release\)/.test(said(j1, HEALED)[0]) && !said(j1, /LOST|rewrote the row after a stop/).length && said(j2, ANY).length === 0),   // stale-pins: kept (an absence check: the old alarming words must not come back)
+      '(1) the words are TRUE on an ordinary upgrade and on a return («written by an earlier release … an upgrade, or a return to that release»), nothing alarming, said ONCE — the second start finds the rows whole and says nothing', { j1: said(j1, ANY), j2 });
     const r = ruleRows(H1R.after, H1R.w.facts && H1R.w.facts.pid);
-    ok(!!(r.watch && r.watch.to[0] && !('notify' in r.watch.to[0]) && r.reach && !r.reach.rule), 'RED «no heal at a start»: the rows stay as the older release wrote them — the record keeps neither the settings nor the rule', r);
+    ok(!!(r.watch && r.watch.to[0] && !('notify' in r.watch.to[0]) && r.reach && !r.reach.rule), 'RED «no heal at a start»: the rows stay as the earlier release wrote them', r);
   }
-  // (2) A KILL IN THE WINDOW (rows written, the index not), THEN THE RELEASE: what is lost is said by name, nothing invented
+  // (2) A KILL IN THE WINDOW, THEN THE RELEASE: what the index never got is said by name, once; nothing invented
   {
     const j1 = H2.b.facts ? H2.b.facts.journal : null, j2 = H2.b2 && H2.b2.facts ? H2.b2.facts.journal : null;
-    const pid = H2.w.facts && H2.w.facts.act1 ? H2.w.facts.act1.pid : null, af = ruleRows(H2.after, pid);
-    const lost = said(j1, /LOST/);
-    console.log('    (2) a kill, then the release: ' + J({ lost, after: af.watch && af.watch.to[0], second: said(j2, /LOST|healed/) }));
-    ok(!!(pid && lost.length === 1 && lost[0].includes(`agent:agent-1 on rule:${pid}`) && af.watch && af.watch.to[0] && !('notify' in af.watch.to[0])),
-      '(2) A KILL IN THE WINDOW, THEN THE RELEASE: the start says by name what is lost (the watcher\'s settings on the rule — the index never got them) and invents nothing (the entry stays as the release wrote it)', { lost, entry: af.watch && af.watch.to[0] });
-    ok(!!(said(j1, new RegExp(`rule ${pid} \\(its record: the index never got it\\)`)).length === 1 && said(j2, /LOST/).length === 0),
-      '(2) the rule\'s own record is said lost too — and all of it ONCE: the second start says nothing', { j1: said(j1, /LOST/), j2: said(j2, /LOST/) });
-    ok(!!(said(H2R.b.facts && H2R.b.facts.journal, /agent:agent-1 on rule:/).length === 0), 'RED «a lost watcher not said»: the start is silent about the settings the person set', H2R.b.facts && H2R.b.facts.journal);
+    const pid = H2.w.facts && H2.w.facts.act1 ? H2.w.facts.act1.pid : null, af = ruleRows(H2.after, pid), none = said(j1, NONE);
+    console.log('    (2) a kill, then the release: ' + J({ none, after: af.watch && af.watch.to[0], second: said(j2, ANY) }));
+    ok(!!(pid && none.length === 1 && none[0].includes(`agent:agent-1 on rule:${pid} (the channel index holds no copy of this grain)`) && none[0].includes(`rule ${pid} (the channel index holds no copy of its record)`) && af.watch && af.watch.to[0] && !('notify' in af.watch.to[0])),
+      '(2) A KILL IN THE WINDOW, THEN THE RELEASE: the start says BY NAME what the index never got (the watcher on the rule, the rule\'s record) and invents nothing (the entry stays as the release wrote it)', { none, entry: af.watch && af.watch.to[0] });
+    ok(!!(said(j2, ANY).length === 0), '(2) said ONCE: the second start says nothing', j2);
+    ok(!!(said(H2R.b.facts && H2R.b.facts.journal, /agent:agent-1 on rule:/).length === 0), 'RED «a watcher the index never got not said»: the start is silent about the settings the person set', H2R.b.facts && H2R.b.facts.journal);
   }
-  // (3) A ROW AND A COPY THAT DISAGREE: the later stamp of the act wins (the record's act later than the index's copy ⇒ never healed from that older copy)
+  // (3) A ROW AND A COPY THAT DISAGREE: the later stamp of the act wins; said once
   {
-    const pid = H3.w.facts && H3.w.facts.pid, af = ruleRows(H3.after, pid), later = said(H3.b.facts && H3.b.facts.journal, /not healed/);
-    console.log('    (3) the record later than the index: ' + J({ later, entry: af.watch && af.watch.to[0] }));
+    const pid = H3.w.facts && H3.w.facts.pid, af = ruleRows(H3.after, pid), later = said(H3.b.facts && H3.b.facts.journal, LATER);
+    console.log('    (3) the record later than the index: ' + J({ later, entry: af.watch && af.watch.to[0], second: said(H3.b2 && H3.b2.facts && H3.b2.facts.journal, ANY) }));
     ok(!!(later.length === 1 && later[0].includes(`agent:agent-1 on rule:${pid}`) && af.watch && !('notify' in af.watch.to[0])),
-      '(3) THE LATER STAMP WINS: an entry whose act is later than its index watcher is NOT healed from that older copy — said once by name', { later, entry: af.watch && af.watch.to[0] });
+      '(3) THE LATER STAMP WINS: an entry whose act is later than its index watcher is kept as written, never healed from that older copy — said by name', { later, entry: af.watch && af.watch.to[0] });
+    ok(!!(said(H3.b2 && H3.b2.facts && H3.b2.facts.journal, LATER).length === 0), '(3) said ONCE: the second start does not say it again', H3.b2 && H3.b2.facts && H3.b2.facts.journal);
     const r = ruleRows(H3R.after, H3R.w.facts && H3R.w.facts.pid);
     ok(!!(r.watch && r.watch.to[0] && r.watch.to[0].notify === 'digest'), 'RED «the stamp rule inverted»: the older index copy is written over the later act', r.watch && r.watch.to[0]);
+    // the release's own entries carry NO stamp (its grain writes put none): the index (the release's live copy) is the later — healed
+    const ha = ruleRows(HA.after, HA.w.facts && HA.w.facts.pid);
+    ok(!!(ha.watch && ha.watch.to[0] && ha.watch.to[0].notify === 'digest' && ha.watch.to[0].digestMinutes === 45), '(3) an entry the RELEASE wrote (no stamp of its own) takes the index\'s copy — the release\'s live state — never «later»', ha.watch && ha.watch.to[0]);
+  }
+  // (4) r2933 THE MUST: a watcher that names the conversation's OWN filter (its route's id) — the heal carries no body of it; the
+  //     person's edit of that filter through its route, AFTER the heal, still stands at the next start
+  {
+    const fid = HF.w.facts && HF.w.facts.fid, e = (HF.after.find((r) => r.door === 'channel-watch' && r.resource === `conversation:${KEY}`) || { to: [] }).to[0] || null;
+    const g2 = HF.b2 && HF.b2.facts ? HF.b2.facts.convFilter : null, r2 = HFR.b2 && HFR.b2.facts ? HFR.b2.facts.convFilter : null;
+    console.log('    (4) the conversation\'s own filter: ' + J({ fid, entry: e, edit: HF.b.facts && HF.b.facts.edit, second: g2, red: r2 }));
+    ok(!!(fid && !/\|/.test(fid) && e && e.notify === 'digest' && e.filterId === fid && !('filter' in e) && HF.b.facts && HF.b.facts.edit && J(g2) === J(['gamma'])),
+      '(4) THE HEAL CARRIES WHAT THE SAVE WOULD, BY ITS RULE: the watcher\'s settings, its filter\'s id, and NO body of the conversation\'s own filter (an id without the bar) — the person\'s route edit after the heal still stands at the next start', { fid, e, g2 });
+    ok(!!(J(r2) !== J(['gamma'])), 'RED «every filter body carried» (the inline check removed): the heal carries the older body and the next start puts it back over the person\'s edit', r2);
+  }
+  // (5) a REMOVAL made on the release: nothing comes back — the row no longer names the watcher, the healed row carries, the next
+  //     start's completion takes the index's row of it away (a release's kill had cut that removal short)
+  {
+    const pid = HD.w.facts && HD.w.facts.pid, af = ruleRows(HD.after, pid), w2 = HD.b2 && HD.b2.facts ? HD.b2.facts.ruleWatchers : null;
+    console.log('    (5) a removal on the release: ' + J({ row: af.watch && af.watch.to.map((x) => x.key), index: w2 }));
+    ok(!!(af.watch && J(af.watch.to.map((x) => x.key)) === J(['agent-1']) && af.watch.to[0].notify === 'digest' && J(w2) === J(['agent-1'])),
+      '(5) A REMOVAL MADE ON THE RELEASE: nothing comes back — the healed row names only the watcher left, and the next start\'s index holds only it', { row: af.watch, index: w2 });
+  }
+  // (6) THE STORE REFUSES A ROW: the start goes on, the row stays as it is, said ONCE (one refused row never stops the rest)
+  {
+    const j1 = HX.b.facts ? HX.b.facts.journal : null, j2 = HX.b2 && HX.b2.facts ? HX.b2.facts.journal : null, pid = HX.w.facts && HX.w.facts.pid, af = ruleRows(HX.after, pid);
+    console.log('    (6) a refused row: ' + J({ first: said(j1, ANY), second: said(j2, ANY), reach: !!(af.reach && af.reach.rule) }));
+    ok(!!(HX.b.facts && said(j1, CANNOT).length === 1 && said(j1, CANNOT)[0].includes(`rule:${pid} (the grants store refused the row: planted-refusal)`) && af.watch && !('notify' in af.watch.to[0]) && af.reach && af.reach.rule && said(j2, CANNOT).length === 0),
+      '(6) ONE ROW THE STORE REFUSES stays as it is and is said ONCE; the others land (the rule\'s reach row took its record); the start goes on', { j1: said(j1, ANY), j2: said(j2, ANY) });
   }
 }
 report();
