@@ -829,6 +829,43 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     ok(skipOwn && skipOwn.bad.length > 0 && twoAsOne && twoAsOne.rename !== STORE2 && noHome && noHome.data !== DATA2,
       `RED CONTROLS: a fast road that skips the own-tree verdict disagrees with the loop (${skipOwn && skipOwn.bad.length} calls); renameSync taken as one path misses the storage row (${twoAsOne && twoAsOne.rename}); the own-mount hit dropped names nothing (${noHome && noHome.data})`, { skipOwn: skipOwn && skipOwn.bad.slice(0, 2), twoAsOne: twoAsOne && twoAsOne.rename, noHome: noHome && noHome.data });
   }
+  // ROW 410 (主开发 r2811 — box row 410: ONE of test-store-slow-storage's 23 witness lines said «not under a mount» for its bindfs data
+  // dir): THE DATA FOLDER ITSELF IS A PATH OF THE DATA FOLDER. A folder's own sync opens it by path.dirname, no slash at its end
+  // (src/secret-file.js replaceShredding, at every first start since line 438). HELD, it is worded by the data folder's own mount on
+  // both roads, as a file inside it is: (1) a one-path call on the folder; (2) the folder opened and its descriptor synced (row 410's
+  // scene: the fd road, pathsOf); (3) a path of the checkout beside it — the checkout's own file, and a sibling whose name only
+  // begins with the folder's — keeps its words. Every call reads 60 ms on the counted clock (count's step), past heldMs: each is
+  // held; the witness is ARMED (a 'home' hit is witnessed, never refused). RED: the old compare (the data folder's only for a path
+  // that starts with the folder plus a slash) put back through the helper: red on (1) and (2)
+  const selfRun = (W) => {
+    const F4 = {}; let fdN = 40;
+    const w4 = W.create({ rootDir: ROOT, dataDir: DATA2, fresh: true, armed: true, live: false, heldMs: 50, ringMs: 50, log: quiet, readMountinfo: () => MI2, registry: () => [{ mountpoint: STORE2, name: 'S', id: 'mnt-s' }] });
+    F4.statSync = function () { return true; }; F4.openSync = function () { return ++fdN; }; F4.fsyncSync = function () { }; F4.closeSync = function () { };
+    LB.install({ fsMod: F4, root: ROOT }); w4.refresh(); LB.setHook(w4.hook);
+    const held = (f) => { const n0 = w4.ring().length; let threw = null; try { count(60, f); } catch (e) { threw = (e && e.code) || 'threw'; }
+      return { threw, calls: w4.ring().slice(n0).map((e) => ({ fn: e.fn, path: e.path, ms: e.ms, words: SW.callWords(e) })) }; };
+    const one = held(() => F4.statSync(DATA2));
+    const fdRoad = held(() => { const fd = F4.openSync(DATA2, 'r'); try { F4.fsyncSync(fd); } finally { F4.closeSync(fd); } });
+    const beside = held(() => { F4.statSync(IN); F4.statSync(`${DATA2}-old`); });
+    w4.stop(); LB.setHook(null);
+    return { one, fdRoad, beside };
+  };
+  const HOME_WORDS = `under the nfs4 mount «${DATA2}» this instance lives on (witnessed, never refused)`;
+  const named = (r) => !!r && !r.threw && r.calls.length > 0 && r.calls.every((c) => c.ms >= 50 && c.words.includes(HOME_WORDS));
+  const S410 = selfRun(SW);
+  ok(named(S410.one) && S410.one.calls.length === 1 && S410.one.calls[0].path === DATA2,
+    `ROW 410 (1): a held one-path call on the data folder ITSELF names its mount — ${S410.one.calls.map((c) => c.words).join(' | ')}`, S410.one);
+  ok(named(S410.fdRoad) && S410.fdRoad.calls.map((c) => c.fn).join() === 'openSync,fsyncSync,closeSync' && S410.fdRoad.calls.every((c) => c.path === DATA2),
+    `ROW 410 (2): the data folder opened and its descriptor synced, held — each of the three names its mount (the fd road; row 410's scene): ${S410.fdRoad.calls.map((c) => `${c.fn} ${c.words.includes(HOME_WORDS) ? 'names it' : 'NOT'}`).join(' · ')}`, S410.fdRoad);
+  ok(!S410.beside.threw && S410.beside.calls.length === 2 && S410.beside.calls.every((c) => c.words.includes('not under a mount')),
+    `ROW 410 (3): a path of the checkout beside the data folder keeps its words — ${S410.beside.calls.map((c) => c.words).join(' | ')}`, S410.beside);
+  { // ITS RED CONTROL: the old compare put back through the anchored helper (the data folder itself no longer its own) — red on (1) and (2)
+    const ws410 = cut(WSRC, '    if (DATA_SELF !== null && p === DATA_SELF) return ownHit;   // the data folder itself, by its own mount (row 410)\n', '');
+    const R410 = ws410 ? selfRun(M.load('src/server/sync-fs-witness.js', ws410, 'data-self-old-compare')) : null;
+    const said = (r) => (r ? r.calls.filter((c) => c.words.includes('not under a mount')).map((c) => c.fn) : []);
+    ok(!!R410 && said(R410.one).join() === 'statSync' && said(R410.fdRoad).includes('fsyncSync') && !named(R410.one) && !named(R410.fdRoad),
+      `RED CONTROL: the old compare put back — the data folder itself is worded «not under a mount» on the one-path road (${said(R410.one).join() || 'none'}) and on the fd road (${said(R410.fdRoad).join(', ') || 'none'})`, R410);
+  }
   const noKept = cut(WSRC, "if (typeof p !== 'string' || p.length > ROOT_MEMO_PATH_MAX) return judged(p);", 'return judged(p);');
   const muts = {
     'every call dated': [cut(LSRC, 'const at = ms >= datedFrom ? Math.round(now() - ms) : NaN;', 'const at = now();'), null, 'date', OUT],
