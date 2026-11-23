@@ -12885,6 +12885,9 @@ export default {
   "The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself": "保险库的使用标记读不出来——没有做任何改动；VibeSpace 会自动再读", // r3104 (a)
   "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "这一行的标记丢失了——按你想要的样子保存整行（验证是你）即可决定它；单独一个 ✕ 无法为它留下的成员作保。没有做任何改动", // r3104 (a); r3130 (e)
   "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "损坏的标记保存在存储旁边，名为 {name}——它不是可以用来恢复的副本。", // r3104 (a)
+  "The grants of the two-step codes could not be read — nothing was changed; VibeSpace reads them again by itself": "两步验证码的授权读不出来——没有做任何改动；VibeSpace 会自动再读", // r3104 (c)
+  "The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.": "授权列表损坏了，已从空开始——损坏的内容保存在旁边，名为 {name}（不是可以用来恢复的副本）；请重新授权这些验证码，或者手动修好文件后重启。", // r3104 (c)
+  "The grants of the two-step codes could not be read — nothing is lost; they show again once they read.": "两步验证码的授权读不出来——没有丢失任何东西；读出之后会再显示。", // r3002 (c)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "无法验证：保险库的使用标记读不出来——在读出之前不生效；没有丢失任何东西。", // r3002 (a)
   "Unverified: this row's marks were damaged — save the row as you want it (验证是你): that decides it; not in use until then.": "无法验证：这一行的标记已损坏——按你想要的样子保存这一行（验证是你）即可决定它；在此之前不生效。", // r3002 (a); r3205
   "unknown — this entry's vault-use marks were damaged; save «Who may use it» on it to decide (nothing is lost)": "未知——这个条目的保险库使用标记已损坏；在它的「谁可以用」里保存一次即可决定（没有丢失任何东西）", // r3205 (2)

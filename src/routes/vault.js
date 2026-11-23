@@ -34,6 +34,7 @@ const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-r
 // this file's words (test-vault-routes ⑮: the census + the wire)
 const STATUS = Object.freeze({
   ...UGC.STATUS,
+  vault_grants_unread: 503,   // r3002 (c)
   wrong_password: 403, corrupt: 500, paced: 429, code_paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
   password_too_short: 400, password_too_long: 400, password_not_text: 400, same_as_sign_in: 400, same_password: 400, bad_hours: 400,
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
@@ -62,6 +63,7 @@ const STATUS = Object.freeze({
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
+  vault_grants_unread: 'the grants of the two-step codes (data/vault-grants.json) could not be read — nothing was changed; VibeSpace reads them again by itself',   // r3002 (c)
   wrong_password: 'that is not the second password',
   corrupt: 'the vault record (data/vault.json) is damaged — nothing can be opened; restore it from a backup',
   paced: 'too many wrong passwords — wait a minute, then try again',

@@ -12884,6 +12884,9 @@ export default {
   "The vault-use marks could not be read — nothing was changed; VibeSpace reads them again by itself": "保管庫の使用マークを読み取れません——何も変更していません。VibeSpace が自動で読み直します", // r3104 (a)
   "This row's marks were lost — save the whole row as you want it (验证是你): that decides it; a single ✕ cannot vouch for the members it leaves. Nothing was changed": "この行のマークが失われました——行全体を望む形で保存すると（验证是你）決まります。✕ ひとつでは残すメンバーを保証できません。何も変更していません", // r3104 (a); r3130 (e)
   "The damaged marks are kept beside the store as {name} — they are not a copy to restore.": "壊れたマークはストアの横に {name} として残してあります——復元に使うコピーではありません。", // r3104 (a)
+  "The grants of the two-step codes could not be read — nothing was changed; VibeSpace reads them again by itself": "2段階コードの許可を読み取れません——何も変更していません。VibeSpace が自動で読み直します", // r3104 (c)
+  "The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.": "許可の一覧が壊れていたため、空から始めました——壊れた内容は {name} として横に残してあります（復元に使うコピーではありません）。コードを許可し直すか、ファイルを手で直して再起動してください。", // r3104 (c)
+  "The grants of the two-step codes could not be read — nothing is lost; they show again once they read.": "2段階コードの許可を読み取れません——失われたものはありません。読み取れたら再び表示されます。", // r3002 (c)
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "検証できません：保管庫の使用マークを読み取れません——読み取れるまで使用されません。失われたものはありません。", // r3002 (a)
   "Unverified: this row's marks were damaged — save the row as you want it (验证是你): that decides it; not in use until then.": "未検証：この行のマークが壊れています——行を望む形で保存すると（验证是你）決まります。それまでは使用されません。", // r3002 (a); r3205
   "unknown — this entry's vault-use marks were damaged; save «Who may use it» on it to decide (nothing is lost)": "不明——このエントリの保管庫使用マークが壊れています。「誰が使えるか」で保存すると決まります（失われたものはありません）", // r3205 (2)

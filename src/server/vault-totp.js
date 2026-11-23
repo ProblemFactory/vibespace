@@ -28,6 +28,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const T = require('../totp.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3002 (c): vault-grants.json under the store-read law
 const VI = require('../vault-inventory.js');
 
 const GRANTS_FILE = 'vault-grants.json';
@@ -54,6 +56,22 @@ const runOfToken = (token) => (token ? crypto.createHash('sha256').update(String
 function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, randomBytes = crypto.randomBytes, log = () => {} } = {}) {
   if (!dataDir || !vault) throw new TypeError('vault-totp: dataDir and vault are required');
   const FILE = path.join(dataDir, GRANTS_FILE);
+  // r3002 (c) — THE GRANTS UNDER THE STORE-READ LAW (src/store-read-hold.js). The release held a READ that failed (`bad`) but read
+  // bytes of another SHAPE as empty — valid JSON with no grants array (a later layout), or rows its reader rejects (a later subject
+  // kind) — and the next grant or ungrant wrote over them. Now: the start's read goes through the law — HELD (a read that failed)
+  // refuses every change by name and is read again off the loop; bytes of another shape are TORN bytes: kept aside once (a dated
+  // copy), then the store starts empty (the live file written empty, its bytes beside it). A row of the right file the reader
+  // cannot read is CARRIED: kept verbatim in every write (never dropped, never used — no code is granted by it). WHO REMOVES BY
+  // THIS STORE's SILENCE: nobody — a code with no grant is refused (fail closed), and nothing deletes an entry or a file because it
+  // has no grant (the search: every reader of vault-grants.json is this file)
+  const GRANTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.grants);
+  const hold = HOLD.create({
+    file: FILE, valid: GRANTS_SHAPE, code: 'vault_grants_unread', aside: (m) => `${FILE}.corrupt-${m}`,
+    words: (h) => `${GRANTS_FILE} in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No grant is lost: nothing is written over it, no two-step code is given to anybody until it reads, and a grant or its ✕ is refused until then`,
+    log: (s) => log(s),
+    onLift: (v, f) => { if (f && f.setAside) { try { writeGrants([], [], f.setAside); } catch (e) { log(`${GRANTS_FILE} could not be started empty after its bytes were kept aside (${e.code || e.message})`); } } },   // r3104: the empty store names WHERE the damaged bytes are (said in the window until the person's next grant)
+  });
+  { let read; try { read = { text: fs.readFileSync(FILE, 'utf8') }; } catch (error) { read = { error }; } hold.start(SR.storeAnswer(read, { valid: GRANTS_SHAPE })); }
   const viewPace = new Map();   // who → the instants of its views answered in the last minute
   const usePace = new Map();    // conversation → the instants of its answers in the last minute
   let viewAll = [];
@@ -66,20 +84,29 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
 
   // ── the grants ──
   function readGrants() {
-    let raw;
-    try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); }
-    catch (e) { if (e && e.code === 'ENOENT') return { grants: [], bad: false }; log(`${GRANTS_FILE} could not be read (${e.code || e.message}) — no code is granted until it is fixed`); return { grants: [], bad: true }; }
-    return { grants: (raw && Array.isArray(raw.grants) ? raw.grants : []).map(T.grantOf).filter(Boolean), bad: false };
+    if (hold.held()) return { grants: [], carried: [], bad: true };   // r3002 (c): held — read again off the loop; nothing granted until then
+    let read; try { read = { text: fs.readFileSync(FILE, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: GRANTS_SHAPE });
+    if (a.state === 'missing') return { grants: [], carried: [], bad: false };
+    if (a.state !== 'data') { log(`${GRANTS_FILE} could not be read (${a.code}) — no code is granted and nothing is written over it until it reads`); return { grants: [], carried: [], bad: true }; }
+    // r3002 (c): a row the reader cannot read is CARRIED verbatim (never dropped, never used)
+    const grants = [], carried = [];
+    for (const raw of a.value.grants) { const g = T.grantOf(raw); if (g) grants.push(g); else if (raw && typeof raw === 'object') carried.push(raw); }
+    carriedNow = carried;
+    const lostAside = typeof a.value.aside === 'string' && /^vault-grants\.json\.corrupt-[\w.-]{1,80}$/.test(a.value.aside) ? a.value.aside : null;
+    return { grants, carried, bad: false, lostAside };
   }
-  const writeGrants = (grants) => writeJsonAtomic(FILE, { v: 1, grants });
+  let carriedNow = [];   // the rows the last read carried — every write puts them back as they were
+  const writeGrants = (grants, carried = carriedNow, aside = null) => writeJsonAtomic(FILE, { v: 1, grants: [...grants, ...carried], ...(aside ? { aside } : {}) });   // r3104: `aside` only on the torn lift's empty start — the next grant or ✕ writes it away
   const publicGrant = (g, live) => ({ id: g.id, subject: g.subject, at: g.at, by: g.by, ...(live ? { live: !!live(g) } : {}) });
   /** Every grant of `entry` gone (a delete, an add over a stale name). → true | false (could not be written). */
   function dropGrantsOf(entry) {
     const { grants, bad } = readGrants();
     if (bad) return false;
     const left = grants.filter((g) => g.entry !== entry);
-    if (left.length === grants.length) return true;
-    try { writeGrants(left); return true; } catch (e) { log(`${GRANTS_FILE} could not be written (${e.code || e.message})`); return false; }
+    const carriedLeft = carriedNow.filter((r) => r.entry !== entry);   // r3002 (c): a carried row of the deleted entry goes with it
+    if (left.length === grants.length && carriedLeft.length === carriedNow.length) return true;
+    try { writeGrants(left, carriedLeft); return true; } catch (e) { log(`${GRANTS_FILE} could not be written (${e.code || e.message})`); return false; }
   }
 
   // ── the entry ──
@@ -173,6 +200,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   function drop(name, { who = null, ip = null } = {}) {
     const entry = T.entryOf(String(name == null ? '' : name));
     if (!entry || !has(entry)) return named('not_found');
+    if (hold.held()) return named('vault_grants_unread', hold.words());   // r3230's reader table: an entry's delete while HELD answers the hold's own code and words (the entry and its grants stay)
     if (!dropGrantsOf(entry)) return named('failed', `${GRANTS_FILE} could not be read or written — nothing was deleted`);
     const d = vault.secretDrop(entry);
     if (!d || !d.ok) return named('failed', d && d.code);
@@ -189,7 +217,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     const badOne = list.find((s) => !T.SUBJECT_RE.test(s));
     if (badOne) return named('bad_args', `not a conversation or task group: "${clip(badOne)}"`);
     const { grants, bad } = readGrants();
-    if (bad) return named('failed', `${GRANTS_FILE} could not be read — nothing is written over it`);
+    if (bad) return named(hold.held() ? 'vault_grants_unread' : 'failed', hold.words() || `${GRANTS_FILE} could not be read — nothing is written over it`);
     const t = now(), next = grants.slice(), added = [];
     for (const s of list) {
       let run = null;
@@ -208,7 +236,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   /** The ✕ on a grant chip. */
   function ungrant(id, { who = null, ip = null } = {}) {
     const { grants, bad } = readGrants();
-    if (bad) return named('failed', `${GRANTS_FILE} could not be read — nothing is written over it`);
+    if (bad) return named(hold.held() ? 'vault_grants_unread' : 'failed', hold.words() || `${GRANTS_FILE} could not be read — nothing is written over it`);
     const g = grants.find((x) => x.id === String(id || ''));
     if (!g) return named('not_found');
     try { writeGrants(grants.filter((x) => x.id !== g.id)); } catch (e) { return named('failed', `${GRANTS_FILE} could not be written (${e.code || e.message})`); }
@@ -218,8 +246,8 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   /** The window's list: every two-step entry's name, when it was sealed, its grants (`live` = a conversation's grant whose run
    *  still runs — `live(grant)` from the wiring). Names only — never a value, never a run digest. */
   function list({ live = () => true } = {}) {
-    const { grants } = readGrants();
-    return { ok: true, state: vaultState(), entries: names().map((s) => ({ name: T.nameOfEntry(s.name), at: s.at || null, grants: grants.filter((g) => g.entry === s.name).map((g) => publicGrant(g, live)) })) };
+    const { grants, bad, lostAside } = readGrants();
+    return { ok: true, state: vaultState(), ...(bad ? { grantsUnread: hold.words() || `${GRANTS_FILE} could not be read` } : {}), ...(lostAside ? { grantsLost: lostAside } : {}), entries: names().map((s) => ({ name: T.nameOfEntry(s.name), at: s.at || null, grants: grants.filter((g) => g.entry === s.name).map((g) => publicGrant(g, live)) })) };
   }
 
   // ── AN AGENT's door ──
@@ -230,7 +258,8 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     const subject = caller && caller.conversationId ? `session:${clip(caller.conversationId, 200)}` : 'unknown';
     const done = (r, via = null) => { vault.audit('vault-totp-use', { by: 'agent', subject, entry: entry || clip(name, 130), ip, ok: !!r.ok, ...(r.ok ? { via } : { code: r.code }) }); return r; };
     if (!entry) return done(named('not_granted'));
-    const { grants } = readGrants();
+    const { grants, bad } = readGrants();
+    if (bad) return done(named('vault_grants_unread', hold.words() || `${GRANTS_FILE} could not be read`));   // r3104 (a): a lookup through the list while held says so — never «not granted»
     const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });   // owner: lane vault-agent-own (a seed it added itself)
     if (!v.ok) return done(v);
     const t = now(), k = subject;
@@ -266,7 +295,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     done({ ok: true });
     return { ok: true, code: r.code, secondsLeft: r.secondsLeft };
   }
-  return { addEntry, agentAdd, view, drop, grant, ungrant, list, use, codeForLogin, GRANTS_FILE };   // addEntry, never `add(`: a For-you add site's name (test-user-todos-layout's census)
+  return { _hold: hold, addEntry, agentAdd, view, drop, grant, ungrant, list, use, codeForLogin, GRANTS_FILE };   // addEntry, never `add(`: a For-you add site's name (test-user-todos-layout's census)
 }
 
 module.exports = { create, runOfToken, GRANTS_FILE };

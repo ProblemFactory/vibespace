@@ -4,6 +4,7 @@
 // its read call (the read answers EIO; never a mount, never a mode change), then the store's ORDINARY next save or start runs: the
 // file's content survives, the person is told what is known, and — r3019's law — WHO REMOVES BY THE STORE's SILENCE removes nothing.
 //   (a) vault-use-marks.json — src/server/vault-use-grants.js (the marks held; a row UNDECIDED when its marks are lost)
+//   (c) vault-grants.json — src/server/vault-totp.js (held; a later layout kept aside once; a row it cannot read CARRIED)
 // Every value here is made up at run time; no value, no sealed thing is printed.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,6 +21,7 @@ const note = (s) => console.log('  · ' + s);
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));
 const UG = require(path.join(REPO, 'src/server/vault-use-grants.js'));
+const VT = require(path.join(REPO, 'src/server/vault-totp.js'));
 
 const ROOT = scratchDir('vside');
 let nw = 0;
@@ -338,6 +340,68 @@ async function main() {
     const ug = w.mk(); const pr = placeRefusal(w.MARKS);
     let save = null; try { save = ug.setRow(w.e1, { to: [w.m1] }, { reauthed: true }); } finally { pr.lift(); }
     ok(!!save && save.ok === true, '(a) CONTROL (a copy whose write doors do not ask the hold): the owner\'s Save goes through on a mark that could not be read — red', save && (save.ok ? 'written' : save.code));
+  }
+  console.log('(c) vault-grants.json');
+  async function totpWorld(vtMod = VT) {
+    const dataDir = freshDir('totp');
+    const vault = mkEngine(dataDir); await vault.setup(PW);
+    const mk = () => vtMod.create({ dataDir, vault, log: () => { } });
+    const t0 = mk();
+    const seed = Array.from(crypto.randomBytes(20)).map((b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[b % 32]).join('');   // a made-up seed, built here
+    const r = [t0.addEntry({ seed, issuer: 'MadeUp', account: 'made-up-account', name: 'madeup-code' }), t0.grant('madeup-code', ['group:T-made-up-one']), t0.grant('madeup-code', ['group:T-made-up-two'])];
+    if (!r.every((x) => x && x.ok)) throw new Error('the two-step world: ' + r.map((x) => x && x.code).join(','));
+    return { dataDir, vault, mk, FILE: path.join(dataDir, 'vault-grants.json') };
+  }
+  const caller = { conversationId: 'cid-made-up-c', groups: ['T-made-up-one'], run: 'r'.repeat(24) };
+  {
+    const w = await totpWorld();
+    const before = fs.readFileSync(w.FILE, 'utf8');
+    const pr = placeRefusal(w.FILE);
+    let t1, g = null, l = null, u = null, dr = null;
+    try { t1 = w.mk(); g = t1.grant('madeup-code', ['group:T-made-up-three']); l = t1.list(); u = t1.use(caller, 'madeup-code'); dr = t1.drop('madeup-code'); } finally { pr.lift(); }
+    ok(!!dr && !dr.ok && dr.code === 'vault_grants_unread' && /could not be read/.test(dr.why || '') && fs.readFileSync(w.FILE, 'utf8') === before, '(c) …an entry\'s DELETE while held answers the hold\'s own code and words (r3230\'s reader table): the entry and its grants stay', { code: dr && dr.code });
+    ok(!!g && !g.ok && /could not be read/.test(g.why || '') && fs.readFileSync(w.FILE, 'utf8') === before, '(c) a read that failed at the start HOLDS the grants: the next grant is refused by name («could not be read»), nothing written over the file', g && (g.ok ? 'granted' : g.code));
+    ok(!!g && g.code === 'vault_grants_unread' && !!l && !!l.grantsUnread && !!u && !u.ok && u.code === 'vault_grants_unread', '(c) …the window\'s list says the grants could not be read, and an agent\'s request for its code is answered the HOLD\'s code — never «not granted» (r3104; no code is given: fail closed)', { grant: g && g.code, listed: !!(l && l.grantsUnread), use: u && (u.ok ? 'given' : u.code) });
+    const lifted = await t1._hold.again();
+    const u2 = t1.use(caller, 'madeup-code'), l2 = t1.list();
+    const grantsOf = (x) => ((x && x.entries) || []).flatMap((e) => e.grants || []);
+    ok(lifted === true && !!u2 && u2.ok && !l2.grantsUnread && grantsOf(l2).length === 2, '(c) …and the read again off the loop lifts it in the same life: both grants back, the code given again', { lifted, use: u2 && (u2.ok ? 'given' : u2.code), grants: grantsOf(l2).length });
+  }
+  async function carryScene(vtMod) {
+    const w = await totpWorld(vtMod);
+    const doc = JSON.parse(fs.readFileSync(w.FILE, 'utf8'));
+    doc.grants[1] = { ...doc.grants[1], subject: 'team:made-up-later-kind' };   // a row of a later shape this reader cannot read
+    fs.writeFileSync(w.FILE, JSON.stringify(doc));
+    const t = w.mk();
+    const g = t.grant('madeup-code', ['group:T-made-up-four']);
+    const after = JSON.parse(fs.readFileSync(w.FILE, 'utf8'));
+    return { g, carried: after.grants.some((x) => x.subject === 'team:made-up-later-kind'), granted: after.grants.some((x) => x.subject === 'group:T-made-up-four') };
+  }
+  {
+    const r = await carryScene(VT);
+    ok(!!r.g && r.g.ok && r.carried && r.granted, '(c) a row the reader cannot read (a later shape) is CARRIED verbatim through the next grant — never written over, never used', { grant: r.g && (r.g.ok ? 'ok' : r.g.code), carried: r.carried });
+  }
+  {
+    const w = await totpWorld();
+    const later = JSON.stringify({ v: 2, grantsByEntry: { 'madeup-code': [{ subject: 'group:T-made-up-one' }] } });   // a later layout: no grants array
+    fs.writeFileSync(w.FILE, later);
+    const t = w.mk();
+    await until(() => fs.readdirSync(w.dataDir).some((n) => n.startsWith('vault-grants.json.corrupt-')) && (() => { try { return Array.isArray(JSON.parse(fs.readFileSync(w.FILE, 'utf8')).grants); } catch { return false; } })(), 3000);
+    const copies = fs.readdirSync(w.dataDir).filter((n) => n.startsWith('vault-grants.json.corrupt-'));
+    const copyBytes = copies.length ? fs.readFileSync(path.join(w.dataDir, copies[0]), 'utf8') : null;
+    const lostBefore = t.list().grantsLost;
+    const g = t.grant('madeup-code', ['group:T-made-up-five']);
+    const lostAfter = t.list().grantsLost;
+    ok(lostBefore === copies[0] && !lostAfter, '(c) …the window says the list was damaged and WHERE its bytes are kept (the copy\'s base name) — what to do: grant again or mend by hand, never «restore that copy» — until the person\'s next grant', { before: lostBefore, named: copies[0], after: lostAfter || null });
+    ok(copies.length === 1 && copyBytes === later && !!g && g.ok, '(c) a file of another LAYOUT (no grants array) at the start is kept aside ONCE (its bytes, byte for byte), then the store starts empty and takes grants again', { copies: copies.length, same: copyBytes === later, grant: g && (g.ok ? 'ok' : g.code) });
+  }
+  {
+    const M = mutantCopies('vault-side-stores-c', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-totp.js'), 'utf8');
+    const cut = 'else if (raw && typeof raw === \'object\') carried.push(raw);';
+    ok(SRC.split(cut).length === 2, '(c) the carry is there once (the control below takes it out)');
+    const r = await carryScene(M.load('src/server/vault-totp.js', anchored(SRC, cut, '', 'no-carry'), 'no-carry'));
+    ok(!!r.g && r.g.ok && !r.carried, '(c) CONTROL (a copy that drops the rows it cannot read): the later row is written over by the next grant — red', { carried: r.carried });
   }
 }
 

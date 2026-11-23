@@ -19,7 +19,7 @@ import { addPlanOf, ADD_DEFAULTS, ADD_CHOICES } from '../totp.js';   // PURE: th
 import { showUnlock } from './vault-unlock.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
+const failWords = (r) => (r && r.code === 'vault_grants_unread' ? t('The grants of the two-step codes could not be read — nothing was changed; VibeSpace reads them again by itself') : t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }));   // r3104: the held code's own words
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const AUTO_MAX = 10;   // automatic re-asks after 看码 (one per step) — then the code hides
 const grouped = (c) => { const s = String(c || ''); return s.length === 6 ? `${s.slice(0, 3)} ${s.slice(3)}` : s.length === 8 ? `${s.slice(0, 4)} ${s.slice(4)}` : s; };
@@ -114,7 +114,10 @@ export function totpExtras(row, data, { refresh, signal, show } = {}) {
   const box = el('div', 'vw-ak vw-totp');
   box.dataset.totp = name;
   const grants = el('div', 'vw-ak-grants');
-  if (entry.grants.length) {
+  if (data && data.grantsLost) { grants.append(el('span', 'vw-ak-to', t('The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.', { name: data.grantsLost }))); }   // r3104: what was lost, where its bytes are, what to do
+  if (data && data.grantsUnread) { grants.append(el('span', 'vw-ak-to', t('The grants of the two-step codes could not be read — nothing is lost; they show again once they read.'))); }   // r3002 (c): the store held
+  if (data && (data.grantsUnread || data.grantsLost)) box.append(grants);
+  if (!(data && data.grantsUnread) && entry.grants.length) {
     grants.append(el('span', 'vw-ak-to', t('Code granted to:')));
     for (const g of entry.grants) {
       const chip = el('span', 'vw-ak-chip');
