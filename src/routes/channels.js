@@ -683,7 +683,7 @@ router.post('/api/channels/decision/label', (req, res) => {
     if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
     const b = req.body || {};
     const r = engine().labelJudged(String(b.key || ''), Number(b.lastAt) || 0, b.label);
-    if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
+    if (!r.ok) return res.status(r.code === 'labels_unread' ? 503 : r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });   // r3139 (a) for the labels: a held refusal is 503 on the wire
     res.json(r);
   } catch (e) { fail(res, e); }
 });

@@ -17,12 +17,14 @@
 //   XP  app-proposals.json — the pending app installs
 //   DS  designs.json — the design list, the names given by Rename, the agents' unanswered questions
 //   DX  decision-examples.json — every Needs / Not label the person taught the attention judge
+//   FB  feedback.json — every feedback report and its handled mark
+//   FO  feedback-outbox.json — the origin key (the maintainers' hub sends its marks back to it) and the reports waiting
 // Run: node scripts/test-content-store-reads.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scratchDir, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 
@@ -250,9 +252,20 @@ console.log('PP [published-pages.json] the share links a person gave out');
       const CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-design'), 'utf8'), NOTE = "    if (r.body.pagesUnread) console.log('note: VibeSpace cannot read its list of published pages right now — a design shown below with no page is NOT known to be unpublished (ask again in a few minutes)');";
       const cliSays = (c) => c.includes(NOTE) && c.indexOf(NOTE) > c.indexOf("if (verb === 'list') {") && c.indexOf(NOTE) < c.indexOf('for (const d of r.body.designs) console.log(');
       ok(cliSays(CLI) && !cliSays(anchored(CLI, NOTE + '   // r3139 MUST 2\n', '', 'pp6-cli-today')), 'PP6 the CLI prints one line before the list: the pages list cannot be read, a design with no page is not known to be unpublished (RED: today\'s list, the line taken out)', null);
-      const DW = fs.readFileSync(path.join(REPO, 'src/lib/design-window.js'), 'utf8'), MARK = "    if (r && r.pagesUnread) { known = false; state.textContent = t('VibeSpace cannot read its list of published pages right now, so it is not known whether this design was published.";
-      const dialog = (dw) => dw.includes(MARK) && dw.indexOf(MARK) < dw.indexOf("else state.textContent = known ? t('Not published yet.") && dw.includes("err: heldWordsOf(r) || (r && (r.why || r.error)) || t('server unreachable')");
-      ok(dialog(DW) && !dialog(anchored(DW, MARK, '    if (false) {', 'pp6-dialog-today')), 'PP6 the design\'s Publish dialog reads the mark BEFORE «Not published yet» and says the held words; its refusal toast words a held refusal by its code (RED: today\'s dialog, the mark unread)', null);   // stale-pins: kept
+      // r3170 (4): the design's Publish dialog DRAWN — its words module executed on a held reply and on a held refusal (never only pinned)
+      const DPW = await import(pathToFileURL(path.join(REPO, 'src/lib/design-publish-words.js')).href);
+      const { heldWordsOf, pagesHeldWords, pagesListHeldWords } = await import(pathToFileURL(path.join(REPO, 'src/lib/utils.js')).href);
+      const tt = (x, prm) => String(x).replace(/\{(\w+)\}/g, (all, k) => (prm && k in prm ? String(prm[k]) : all));
+      const drow = { dir: '/scratch-made-up/design-pp6', page: null };
+      const heldState = DPW.publishStateWords({ designs: [drow], pagesUnread: 'pages_unread' }, drow, tt), todayState = DPW.publishStateWords({ designs: [drow] }, drow, tt);
+      ok(heldState.known === false && /not known whether this design was published/.test(heldState.text) && /cannot be shown right now/.test(heldState.text) && /a publish pressed now is not taken — press it again/.test(heldState.text) && /^Not published yet/.test(todayState.text), 'PP6 the design\'s Publish dialog DRAWN on a held reply: «not known whether this design was published», the link answers «cannot be shown right now», a press now is not taken — RED: the reply as it was (no mark) draws «Not published yet»', { held: heldState.text, today: todayState.text });
+      const failW = DPW.publishFailWords({ ok: false, code: 'pages_unread', error: 'the hub sentence in English' }, tt, heldWordsOf);
+      ok(!/hub sentence in English/.test(failW) && /cannot read its list of published pages/.test(failW) && /Press again/.test(failW), 'PP6 the dialog\'s refusal toast DRAWN on a held refusal: the page\'s words by the code (heldWordsOf), never the hub\'s English', failW);
+      const DW = fs.readFileSync(path.join(REPO, 'src/lib/design-window.js'), 'utf8');
+      ok(DW.includes('const w = publishStateWords(r, row, t);') && DW.includes('showToast(publishFailWords(r, t, heldWordsOf)'), 'PP6 the dialog draws from that module (its state line and its toast)', null);
+      // r3170 (1)-(3): the person's own take-down doors and the lists say what the agent's words say
+      const S1 = pagesHeldWords(), S3 = pagesListHeldWords();
+      ok(/nothing was changed/.test(S1) && /a public page is served again as soon as the list reads/.test(S1) && /Press again/.test(S1) && /cannot be shown right now/.test(S3) && !/publishing waits/.test(S1 + S3 + heldState.text), 'PP6 the person\'s own take-down / visibility / publish refusals say nothing changed, a public page is served again when the list reads, press again; the lists say a link answers «cannot be shown right now» (never «publishing waits»)', { S1, S3 });   // stale-pins: kept
     }
     ok(/cannot read its list of published pages/.test(de.pagesHeldWords() || ''), 'PP6 the design engine says the pages list is held (GET /api/designs carries pagesUnread; the Designs home words it, zh / ja)', null);
     cur._hold.stop(); srv.close();
@@ -551,6 +564,84 @@ console.log('DX [decision-examples.json] every Needs / Not label the person taug
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/design-engine.js'), 'utf8');
   ok(!/fail\('not_registered', /.test(SRC.replace("const unregistered = (msg) => (hold.held() ? heldFail() : fail('not_registered', msg));", '')), 'DS6 every «not registered» answer of the engine goes through the held-first helper (no bare fail(\'not_registered\') left)', null);
   e2._hold.stop();
+}
+
+// ══ FB feedback.json ══
+console.log('FB [feedback.json] every feedback report and its handled mark');
+{
+  const FS = require(path.join(REPO, 'src/server/feedback-store.js'));
+  const mk = (d) => FS.create({ dataDir: d });
+  const rep = (s, n) => s.report({ text: `a made-up report ${n}`, about: 'vibespace-task' }, { session: { id: `sess-madeup-${n}`, name: `Made-up ${n}` } });
+  await storeLegs({
+    tag: 'FB', mk, code: 'feedback_unread', torn: '{"v": 1, "records": [{"id": "fb-madeup", "te',
+    seed: async (d) => { const s = mk(d); const ids = [rep(s, 1), rep(s, 2)].map((r) => r && r.report && r.report.id); return { F: path.join(d, 'feedback.json'), ids }; },
+    next: (s, n) => rep(s, n),
+    passed: (r) => !!r && r.ok === true,
+    onDisk: (doc) => ((doc && doc.records) || []).map((r) => r.id),
+    listed: (s) => s.list().reports.map((r) => r.id),
+    held2: async (s, { ids, codeOf }) => {
+      const r = [s.setStatus(ids[0], 'handled'), s.receive({}, { key: 'k'.repeat(16) }), s.applyMarks([{ id: ids[0] }])];
+      const l = s.list();
+      ok(r.every((x) => codeOf(x) === 'feedback_unread') && l.code === 'feedback_unread' && /cannot read /.test(l.unread || ''), 'FB2 a handled mark, a forwarded report and the hub\'s marks are refused by name (feedback_unread); the owner\'s list says it', r.map(codeOf));
+    },
+  });
+}
+
+// ══ FO feedback-outbox.json ══
+console.log('FO [feedback-outbox.json] the origin key (the hub\'s marks come back to it) and the reports waiting');
+{
+  const FFW = require(path.join(REPO, 'src/server/feedback-forward.js'));
+  const noFetch = async () => { throw new Error('no network in this suite'); };
+  const mk = (d) => FFW.create({ dataDir: d, target: () => ({ url: 'https://hub.example.test', token: 'made-up-token' }), instance: () => ({ name: 'made-up', version: '0' }), backlog: () => [], fetch: noFetch, setTimeout: () => ({ unref() { } }), clearTimeout: () => { }, log: () => { } });
+  const row = (n) => ({ id: `fb-madeup${n}`, text: `a made-up report ${n}`, about: 'vibespace-task', kind: 'other', at: Date.now(), session: { id: `sess-${n}`, name: `Made-up ${n}` } });
+  const keys = new Map();
+  await storeLegs({
+    tag: 'FO', mk, code: 'outbox_unread', torn: '{"v": 1, "key": "fk_madeup", "queue": [{"id": "fb-',
+    seed: async (d) => { const o = mk(d); o.enqueue(row(1)); o.enqueue(row(2)); keys.set(d, o.keyId()); return { F: path.join(d, 'feedback-outbox.json'), ids: ['fb-madeup1', 'fb-madeup2'] }; },
+    next: (o, n) => o.enqueue(row(n)),
+    passed: (r) => !!r && r.queued === true,
+    onDisk: (doc) => ((doc && doc.queue) || []).map((x) => x.id),
+    listed: (o) => [1, 2, 3, 9].map((n) => `fb-madeup${n}`).filter((id) => o.forwardOf(id) === 'waiting'),
+    held2: async (o, { d }) => {
+      const p = await o.pump(), m = await o.pullMarks();
+      ok(o.keyId() === null && !!(p && p.held) && !!(m && m.held), 'FO2 held: no origin key is minted over the unread one, nothing is sent, no mark is pulled', { keyId: o.keyId(), p, m });
+      void d;
+    },
+    afterHeld: async (o, { d, F }) => {
+      o.enqueue(row(9));
+      await quietly(() => o._hold.again());
+      const doc = json(F) || {};
+      ok(o.keyId() === keys.get(d) && ((doc.queue || []).map((x) => x.id)).includes('fb-madeup9') && ((doc.queue || []).map((x) => x.id)).includes('fb-madeup1'), 'FO4 the lift keeps the SAME origin key, and a report filed while held is queued then (the earlier ones stay)', { keyKept: o.keyId() === keys.get(d), queue: (doc.queue || []).map((x) => x.id) });
+    },
+  });
+}
+
+// ══ FB6 r3104 (a) the agent's `vibespace-feedback list` while held ══
+{
+  const R = fs.readFileSync(path.join(REPO, 'src/routes/feedback.js'), 'utf8');
+  const L = "    if (typeof store.isHeldUnread === 'function' && store.isHeldUnread()) { const w = store.list().unread; return res.status(503).json({ error: w, code: 'feedback_unread', unread: w, reports: [] }); }";
+  const road = (r) => r.includes(L) && r.indexOf(L) > r.indexOf("app.get('/api/agent/feedback/mine'") && r.indexOf(L) < r.indexOf('res.json({ reports: store.mine(c.ids)');
+  ok(road(R), 'FB6 by its source line: the agent\'s list asks the hold first — 503 with the words (the CLI prints a refusal\'s words), never «no reports filed»', null);
+  ok(!road(anchored(R, L + '   // r3104 (a): held — never «no reports filed»\n', '', 'fb6-mine-today')), 'FB6 RED: the list with today\'s line fails the leg', null);
+}
+
+// ══ r3139 (a) for the family: every held code of the chain answers 503 ON THE WIRE (the routes' own status tables) ══
+{
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const tables = [
+    ['src/agent-routes.js', /const API_STATUS = Object\.freeze\(\{ api_unread: 503,/, 'the agent\'s API answers (api_unread)'],
+    ['src/routes/channels.js', /r\.code === 'api_unread' \? 503 :/, 'the owner\'s proposal routes (api_unread)'],
+    ['src/routes/apps.js', /const STATUS = \{ apps_unread: 503,/, 'the Apps routes (apps_unread)'],
+    ['src/server/design-engine.js', /pages_unread: 503, designs_unread: 503,/, 'the design routes (pages_unread, designs_unread)'],
+    ['src/routes/feedback.js', /const STATUS = \{ feedback_unread: 503,/, 'the feedback routes (feedback_unread)'],
+    ['src/routes/channels.js', /r\.code === 'labels_unread' \? 503 :/, 'the label route (labels_unread)'],
+  ];
+  const miss = tables.filter(([f, re]) => !re.test(src(f))).map(([, , w]) => w);
+  ok(!miss.length, `every held code answers 503 on the wire, by its routes' table: ${tables.map(([, , w]) => w).join('; ')}`, miss);
+  const owner = (src('src/routes/channels.js').match(/r\.code === 'api_unread' \? 503 :/g) || []).length;
+  ok(owner >= 4, `the owner's proposal routes (approve, resubmit, reject, revoke — and setTiers' shared answer) map api_unread to 503 (${owner})`, owner);
+  const words = ['src/session-status.js', 'src/server/channel-api.js', 'src/server/apps-engine.js', 'src/server/design-engine.js', 'src/server/channels-attention.js', 'src/server/feedback-store.js', 'src/server/feedback-forward.js', 'src/server/published-pages.js'].filter((f) => /in VibeSpace's data folder could not be read/.test(src(f)));
+  ok(!words.length, 'no held words of the chain name a file under the data folder (agents pass them on): «VibeSpace cannot read …», by the plain name', words);
 }
 
 report();

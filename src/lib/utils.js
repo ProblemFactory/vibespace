@@ -1975,8 +1975,8 @@ export function providersHeldWords() { return t('VibeSpace cannot read its list 
 export function pluginsHeldWords() { return t('VibeSpace cannot read its plugins’ settings right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
 /** …and published-pages.json (503 `pages_unread`, 主开发 r3005): a publish, a rename, a flag or an unpublish refused */
 /** …the same list read as «none» (the chat status bar's pages chip): what is not shown, and why */
-export function pagesListHeldWords() { return t('VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, and the list comes back by itself (it tries again every few minutes).'); }
-export function pagesHeldWords() { return t('VibeSpace cannot read its list of published pages right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'); }
+export function pagesListHeldWords() { return t('VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, though it answers «cannot be shown right now» until the list reads, and the list comes back by itself (it tries again every few minutes).'); }
+export function pagesHeldWords() { return t('VibeSpace cannot read its list of published pages right now — nothing was changed: the page stays as it was, and a public page is served again as soon as the list reads. Press again in a few minutes.'); }
 export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d && d.code === 'plugins_unread' ? pluginsHeldWords() : d && d.code === 'providers_unread' ? providersHeldWords() : d && d.code === 'pages_unread' ? pagesHeldWords() : d && d.code === 'status_unread' ? statusHeldWords() : null; }
 /** …and session-status.json (503 `status_unread`, 主开发 r3005): an override, a clear refused */
 /** …the same store read as «none» (a status timeline, the board): what is not shown, and why */

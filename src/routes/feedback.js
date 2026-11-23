@@ -34,7 +34,7 @@ const { collectorVerdict } = require('../telemetry.js');      // the collector's
 const { keyIdOf, HEADER } = require('../server/feedback-forward.js');
 
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
-const STATUS = { origin_key_bad: 400, origin_id_bad: 400, origin_instance_missing: 400, text_not_text: 400, text_missing: 400, text_too_long: 400, about_not_text: 400, about_too_long: 400, kind_unknown: 400, status_unknown: 400, paced: 429, not_found: 404, write_failed: 503 };
+const STATUS = { feedback_unread: 503, origin_key_bad: 400, origin_id_bad: 400, origin_instance_missing: 400, text_not_text: 400, text_missing: 400, text_too_long: 400, about_not_text: 400, about_too_long: 400, kind_unknown: 400, status_unknown: 400, paced: 429, not_found: 404, write_failed: 503 };
 const answer = (res, r) => {
   if (r && r.ok) return res.json(r);
   if (r && r.retryAfterS) res.set('Retry-After', String(r.retryAfterS));
@@ -93,6 +93,7 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
   app.get('/api/agent/feedback/mine', (req, res) => {
     const c = agentCaller(req, res);
     if (!c) return;
+    if (typeof store.isHeldUnread === 'function' && store.isHeldUnread()) { const w = store.list().unread; return res.status(503).json({ error: w, code: 'feedback_unread', unread: w, reports: [] }); }   // r3104 (a): held — never «no reports filed»
     res.json({ reports: store.mine(c.ids).map((r) => { const f = forwardOf(r.id); return f ? { ...r, forward: f } : r; }) });
   });
   // ── owner ──

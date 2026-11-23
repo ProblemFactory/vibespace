@@ -124,7 +124,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   // re-publish of the same record — never by a sweep of what the list does not name.
   const hold = HOLD.create({
     file: storeFile, valid: PAGES_SHAPE, code: HELD_CODE, aside: (mark) => storeFile + '.corrupt-' + mark,
-    words: (h) => `VibeSpace cannot read its list of published pages right now (${h.code}); it reads it again by itself every few minutes. No page is lost: nothing is written over the list, every share link answers «cannot be shown right now», and publishing waits until it reads`,   // r3139 (c): the plain name, never a file under the data folder
+    words: (h) => `VibeSpace cannot read its list of published pages right now (${h.code}); it reads it again by itself every few minutes. No page is lost: nothing is written over the list, every share link answers «cannot be shown right now» until it reads, and a publish is refused until then — press it again once it reads`,   // r3139 (c): the plain name, never a file under the data folder
     log: (s) => log('[pages] ' + s),
     onLift: (v) => { store = normalize(v || { pages: [] }); },
   });

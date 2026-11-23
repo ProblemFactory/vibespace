@@ -20,6 +20,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const M = require('../feedback-model.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): feedback.json under the store-read law
+const FB_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.records);
 const FF = require('../feedback-forward-model.js');   // lane feedback-forward: the forward's rules (PURE)
 const PT = require('../peer-text.js');   // the belt: another agent's words toward an agent (feedback.list)
 const { SyncStore } = require('../sync-store.js');
@@ -39,10 +42,22 @@ class FeedbackSync extends SyncStore {
 function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(), log = () => { }, onNew = null, tell = null }) {
   const file = path.join(dataDir, 'feedback.json');
   let state = { v: 1, records: [], dropped: 0, syncVersion: 0 };
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    if (raw && Array.isArray(raw.records)) state = { v: 1, records: raw.records.filter((r) => r && typeof r.id === 'string'), dropped: Number(raw.dropped) || 0, syncVersion: Number(raw.syncVersion) || 0 };
-  } catch { /* none yet (ENOENT) or unreadable: an empty ring — the next report writes a whole file */ }
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no report» and the
+  // next report wrote over the file: every report and its handled mark gone. HELD: a report, a handled / open mark, a forwarded
+  // report and the hub's marks are refused by name (503 feedback_unread — the filing agent hears it), the owner's list says it,
+  // nothing is written over the file, it is read again off the loop. Torn bytes are kept aside once per content, then it starts
+  // empty. NO REMOVER reads its silence: a report leaves only by the ring's own bound (M.fold) inside this store.
+  const fromRaw = (raw) => ({ v: 1, records: raw.records.filter((r) => r && typeof r.id === 'string'), dropped: Number(raw.dropped) || 0, syncVersion: Number(raw.syncVersion) || 0 });
+  const hold = HOLD.create({
+    file, valid: FB_SHAPE, code: 'feedback_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read its feedback reports right now (${h.code}); it reads them again by itself every few minutes. No report is lost: nothing is written over them, and new reports and marks wait until it reads`,
+    log: (s) => log('[feedback] ' + s),
+    onLift: (v) => lifted(v),
+  });
+  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: FB_SHAPE });
+    if (hold.start(a0) === 'data') state = fromRaw(a0.value); }
+  const heldRefusal = () => ({ ok: false, code: 'feedback_unread', error: hold.words(), status: 503 });
   let dirty = false;
   const lastPost = new Map();   // session id → the instant of its last accepted report (pacing; memory only)
   const api = {};
@@ -60,6 +75,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   };
 
   const save = () => {
+    if (!hold.writable('a feedback change')) return false;   // held: nothing written over it (every writer refused first)
     state.syncVersion = sync.version;
     try { writeJsonAtomic(file, state); dirty = false; return true; }
     catch (e) { dirty = true; log('[feedback] data/feedback.json not written:', e.message); return false; }
@@ -70,6 +86,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
 
   /** an agent's report. caller = the ROUTE's facts: { session: {id, name}, group, harness, instance } */
   api.report = (body, caller) => {
+    if (hold.held()) return heldRefusal();
     const v = M.validate(body);
     if (!v.ok) return v;
     const sid = caller && caller.session && caller.session.id;
@@ -90,6 +107,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   /** the owner's open / handled — THE one call (the owner's PATCH and the maintainer's feedback.handled); `version` /
    *  `note`: the release that shipped the fix and a line about it (lane feedback-handled-verb) */
   api.setStatus = (id, status, { by = 'owner', version = null, note = null } = {}) => {
+    if (hold.held()) return heldRefusal();
     const i = state.records.findIndex((r) => r.id === id);
     if (i < 0) return { ok: false, code: 'not_found', error: `no report ${String(id).slice(0, 40)}` };
     const s = M.setStatus(state.records[i], status, { by, now: now(), version, note });
@@ -103,6 +121,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   };
   /** THE HUB: a report another instance FORWARDED (POST /api/feedback/forward; `key` = its origin key's hash) → the record */
   api.receive = (body, { key } = {}) => {
+    if (hold.held()) return heldRefusal();
     if (!FF.KEY_ID_RE.test(String(key || ''))) return { ok: false, code: 'origin_key_bad', error: 'the origin key is missing' };
     const at = now();
     const v = FF.validateForward(body, at);
@@ -127,6 +146,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   api.marks = (key, since) => FF.marksAnswer(state.records, key, since);
   /** THE ORIGIN: the maintainer's marks (src/server/feedback-forward.js's pull), each applied to the OWN report it names */
   api.applyMarks = (marks) => {
+    if (hold.held()) return { ok: false, applied: 0, code: 'feedback_unread' };   // held: the marks wait (the pull asks again)
     let applied = 0;
     const done = [];
     for (const m of Array.isArray(marks) ? marks : []) {
@@ -145,10 +165,17 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     return { ok: true, applied };
   };
   /** every report, newest first, as the owner reads them */
-  api.list = () => ({ reports: state.records.slice().sort(M.byNewest).map(M.publicRow), open: M.openCount(state.records), dropped: state.dropped });
+  api.list = () => ({ ...(hold.held() ? { unread: hold.words(), code: 'feedback_unread' } : {}), reports: state.records.slice().sort(M.byNewest).map(M.publicRow), open: M.openCount(state.records), dropped: state.dropped });
   /** one session's own reports (ids: its conversation id and / or its live session id) */
   api.mine = (ids) => state.records.filter((r) => M.isMine(r, ids)).sort(M.byNewest).map(M.publicRow);
   api.flush = () => { if (dirty) save(); };
+  /** r3005: the hold lifted — the reports back (or, torn bytes kept aside, none), the sync table and the mark cursor rebuilt */
+  function lifted(v) {
+    state = v ? fromRaw(v) : { v: 1, records: [], dropped: 0, syncVersion: sync.version };
+    for (const r of state.records) sync.set(r.id, M.publicRow(r));
+    lastMark = state.records.reduce((m, r) => Math.max(m, Number(r.markedAt) || 0), lastMark);
+  }
+  Object.assign(api, { isHeldUnread: () => !!hold.held(), _hold: hold });   // r3005: the hold's state (the suite reaches the helper)
   api.sync = sync;
   api.file = file;
   return api;

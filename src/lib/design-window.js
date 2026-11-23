@@ -27,6 +27,7 @@
 //   · The bar folds into ⋯ by priority (bar-fold.js — never wraps); a phone (≤ 768) keeps 44 px targets, Publish in ⋯,
 //     a bottom sheet of artboards (tap = focused).
 import { showToast, fetchJson, createModalShell, freshKey, showContextMenu, copyText, absUrl, uiScale, COUNTER_ZOOM, heldWordsOf } from './utils.js';
+import { publishStateWords, publishFailWords } from './design-publish-words.js';   // r3170 (4): the dialog's words, executed by a leg
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType } from './window-types.js';
@@ -108,12 +109,10 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
   let page = null, known = false;
   const info = fetchJson('/api/designs').then((r) => {
     const rows = r && Array.isArray(r.designs) ? r.designs : null;
-    known = !!rows;
     const row = rows && rows.find((x) => hostKey(x.host) === hostKey(host) && foldPath(String(x.dir || '')) === foldPath(dir));
-    page = (row && row.page) || null;
-    if (r && r.pagesUnread) { known = false; state.textContent = t('VibeSpace cannot read its list of published pages right now, so it is not known whether this design was published. Nothing is lost: every link given out stays, and publishing waits until the list reads (it tries again every few minutes).'); return; }   // r3139 MUST 3: never «Not published yet» on an unread list
-    if (page) { pub.checked = !!page.public; state.textContent = page.public ? t('Published before as a public page — publishing again keeps its link and leaves it public unless you untick the box') : t('Published before as a private page — publishing again keeps its link and leaves it private unless you tick the box'); }
-    else state.textContent = known ? t('Not published yet. Publishing makes a new link; only people signed in to VibeSpace can see it unless you tick the box.') : t('Could not check whether this design was published before — the box decides');
+    const w = publishStateWords(r, row, t);   // r3170 (4): the words from src/lib/design-publish-words.js (a leg executes them)
+    known = w.known; page = w.page; state.textContent = w.text;
+    if (page) pub.checked = !!page.public;
   });
   let busy = false;
   go.onclick = async () => {
@@ -125,7 +124,7 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
     const r = await fetchJson('/api/design/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: hostKey(host), dir, title: name.value.trim(), ...(wantPublic === undefined ? {} : { public: wantPublic }) }) });
     busy = false;
     go.textContent = t('Publish');
-    if (!r || !r.page) { showToast(t('Publish failed: {err}', { err: heldWordsOf(r) || (r && (r.why || r.error)) || t('server unreachable') }), { type: 'error' }); return; }   // r3139: a held refusal in the page's words, never the hub's English
+    if (!r || !r.page) { showToast(publishFailWords(r, t, heldWordsOf), { type: 'error' }); return; }   // r3139 / r3170 (4): a held refusal in the page's words, never the hub's English
     close();
     const url = absUrl(r.page.url || r.page.path || '');
     const { body: b2, close: c2, raised } = createModalShell({ id: 'design-published-dialog', key: freshKey('published'), beside: true, title: t('Page published'), escapeToClose: true, minWidth: '380px', kind: 'form' });

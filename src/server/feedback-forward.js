@@ -24,6 +24,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): feedback-outbox.json under the store-read law
+const OUTBOX_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const FF = require('../feedback-forward-model.js');
 
 const HEADER = 'X-VibeSpace-Feedback-Origin';
@@ -52,21 +55,34 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   const pauseOf = (p) => (p && typeof p === 'object' && typeof p.door === 'string' && p.door
     ? { door: p.door, target: String(p.target || ''), version: str(p.version, 40), status: Number(p.status) || 0, reason: 'no-door', since: Number(p.since) || 0, pausedUntil: Number(p.pausedUntil) || 0, probes: Number(p.probes) || 0, todoId: str(p.todoId, 80) }
     : null);
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    if (raw && typeof raw === 'object') {
-      state = {
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no outbox» and the
+  // next report queued wrote over the file with a NEW origin key: the maintainers' hub never sent its marks back to the old key and
+  // the open reports went again as duplicates. HELD: no key is minted, nothing is sent or pulled, nothing is written over the file;
+  // a report filed meanwhile is queued at the lift; it is read again off the loop. Torn bytes are kept aside once per content, then
+  // it starts empty (and mints a key at its next send, as a new instance does). NO REMOVER reads its silence: a queued report leaves
+  // only by its send, the hub's refusal of it or the outbox's own bound.
+  const fromRaw = (raw) => {
+    return {
         ...state,
         key: FF.KEY_RE.test(String(raw.key || '')) ? raw.key : null,
         queue: Array.isArray(raw.queue) ? raw.queue.filter((x) => x && typeof x.id === 'string' && x.body && typeof x.body === 'object').slice(-FF.LIMITS.outboxMax) : [],
         sent: Number(raw.sent) || 0, dropped: Number(raw.dropped) || 0, refused: Number(raw.refused) || 0, fails: Number(raw.fails) || 0, holdUntil: Number(raw.holdUntil) || 0,
         marksSince: Number(raw.marksSince) || 0, marksAt: Number(raw.marksAt) || 0, backfilled: raw.backfilled === true,
         pause: pauseOf(raw.pause), targetVersion: str(raw.targetVersion, 40), lost: Array.isArray(raw.lost) ? raw.lost.filter((x) => typeof x === 'string').slice(-FF.LIMITS.outboxMax) : [],
-      };
-    }
-  } catch { /* none yet (ENOENT) or unreadable: an empty outbox — the next report writes a whole file */ }
+    };
+  };
+  const owed = [];   // reports filed while held — queued at the lift
+  const hold = HOLD.create({
+    file, valid: OUTBOX_SHAPE, code: 'outbox_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read its feedback outbox right now (${h.code}); it reads it again by itself every few minutes. Nothing is lost: nothing is written over it or sent until it reads`,
+    log: (s) => log('[feedback] ' + s),
+    onLift: (v) => { if (v) state = fromRaw(v); for (const row of owed.splice(0)) push(row); if (owed.length || state.queue.length) { key(); save(); } schedule(); },
+  });
+  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: OUTBOX_SHAPE });
+    if (hold.start(a0) === 'data') state = fromRaw(a0.value); }
   let timer = null, marksTimer = null, pumping = null, pulling = null, stopped = false;
-  const save = () => { try { writeJsonAtomic(file, state); return true; } catch (e) { log('[feedback] data/feedback-outbox.json not written:', e.message); return false; } };
+  const save = () => { if (!hold.writable('the feedback outbox')) return false; try { writeJsonAtomic(file, state); return true; } catch (e) { log('[feedback] data/feedback-outbox.json not written:', e.message); return false; } };
   const doors = () => {
     const t = target() || {};
     const token = String(t.token || '').trim();
@@ -74,6 +90,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     return d && token ? { ...d, token } : null;
   };
   const key = () => {
+    if (!state.key && hold.held()) return null;   // held: never a new origin key over an unread one
     if (!state.key) { state.key = 'fk_' + crypto.randomBytes(32).toString('base64url'); save(); }
     return state.key;
   };
@@ -165,6 +182,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   /** a NEW report filed here → queued (never blocks the filer). → { queued, why? } */
   api.enqueue = (row) => {
     if (!row || !row.id) return { queued: false, why: 'no_report' };
+    if (hold.held()) { if (!owed.some((x) => x.id === row.id)) owed.push(row); return { queued: false, why: 'outbox_unread', later: true }; }   // r3005: queued at the lift
     if (!doors()) return { queued: false, why: 'no_target' };
     backfillOnce();
     push(row);
@@ -176,6 +194,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   /** send the queued reports, oldest first, one at a time; the first failure ends the pass and holds the outbox (the hub is
    *  likely down): 1 min, 2, 4 … 1 h after consecutive failed passes */
   api.pump = () => {
+    if (hold.held()) return Promise.resolve({ held: true });   // r3005: nothing sent from an unread outbox
     if (pumping) return pumping;
     pumping = (async () => {
       const out = { sent: 0, dropped: 0, retry: 0, paused: 0 };
@@ -221,6 +240,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   };
   /** THE MARK-BACK: ask the hub for the marks on this origin's reports since the cursor; apply each to the own record */
   api.pullMarks = () => {
+    if (hold.held()) return Promise.resolve({ held: true });   // r3005: no pull under an unread key
     if (pulling) return pulling;
     pulling = (async () => {
       const d = doors();
@@ -258,7 +278,8 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     if (!marksTimer) every(FF.LIMITS.marksBootMs);
     return api;
   };
-  api.stop = () => { stopped = true; if (timer) clearT(timer); if (marksTimer) clearT(marksTimer); timer = marksTimer = null; };
+  Object.assign(api, { isHeldUnread: () => !!hold.held(), _hold: hold });   // r3005: the hold's state (the suite reaches the helper)
+  api.stop = () => { hold.stop(); stopped = true; if (timer) clearT(timer); if (marksTimer) clearT(marksTimer); timer = marksTimer = null; };
   /** lane feedback-forward-404: an answer the TELEMETRY forward got (src/telemetry.js onForwardAnswer) — the same target's
    *  VERSION_HEADER. A paused outbox asks again at once when the version moved (a hub updated to a build with the door
    *  catches up the same hour); a collector that names no version changes nothing. → true when the version moved */

@@ -165,7 +165,7 @@ export function openDesignHome(app, { syncId } = {}) {
     if (signal.aborted) return;
     if (!r || !Array.isArray(r.designs)) { status.textContent = t('Could not read the designs — the server did not answer'); if (!rows.length) render(); return; }
     rows = readDesignRows(r.designs);
-    held.textContent = r.pagesUnread ? t('VibeSpace cannot read its list of published pages right now, so no design shows as published. Nothing is lost: every link given out stays (it tries again every few minutes).') : ''; held.hidden = !r.pagesUnread;
+    held.textContent = r.pagesUnread ? t('VibeSpace cannot read its list of published pages right now, so no design shows as published. Nothing is lost: every link given out stays, though it answers «cannot be shown right now» until the list reads (it tries again every few minutes).') : ''; held.hidden = !r.pagesUnread;
     render();
   }
 
