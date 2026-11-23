@@ -304,7 +304,7 @@ const legsG = await Promise.all([
   ...[
     // lane hub-loop-stalls commit 2: session-status reaches the disk through THE STORE WRITER — its temp is the writer's
     ['src/session-status.js', 'SessionStatusManager', 'session-status.json', (m) => { m._state.statuses.k = { at: 1 }; m._save(); }, (f) => `${f}.tmp-${process.pid}-w`],
-    ['src/user-todos.js', 'UserTodoManager', 'user-todos.json', (m) => { m._state.items.push({ id: 'x', status: 'open', text: 't', createdAt: 1 }); m._save(); }],   // through the store's OWN timer (verify r1: a poke that armed the guarded timer by hand let a reverted guard go green)
+    ['src/user-todos.js', 'UserTodoManager', 'user-todos.json', (m) => { m._state.items.push({ id: 'x', status: 'open', text: 't', createdAt: 1 }); m._save(); }, (f) => `${f}.tmp-${process.pid}-w`],   // B-0248: the store writer's temp (the list is on the writer, as session-status)   // through the store's OWN timer (verify r1: a poke that armed the guarded timer by hand let a reverted guard go green)
   ].map(writerLeg),
   channelLeg(),
   controlLeg(),

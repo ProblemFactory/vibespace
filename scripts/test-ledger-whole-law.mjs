@@ -270,6 +270,18 @@ await leg('②', async () => {
 const ASK = opt('/src/server/hub-act-ask.js');
 const P = require(REPO + '/src/hub-act-policy.js');
 const { UserTodoManager } = require(REPO + '/src/user-todos.js');
+// B-0248 step 2: the list's write is the STORE WRITER's now (500 ms later, on its thread; the release armed its own
+// `_writeTimer` and wrote on the loop). A world's list gets a writer of its own on the stand-in thread
+// (scripts/fixtures/store-stand-writer.cjs: the real writeJob): a restart STOPS that writer with what it still owed (a
+// process dead before its debounce: what was not flushed is lost, as before), and `refuse(true)` is the storage refusing
+// the list's writes on that thread (`_flush` stays the flush road's seam: flush() calls it)
+const SW = require(REPO + '/src/store-writer.js'), STAND = require(REPO + '/scripts/fixtures/store-stand-writer.cjs');
+const QUIET_LOG = { log() { }, info() { }, warn() { }, error() { } };
+function todosLife(d) {
+  const S = STAND.make(d + '-stand'), mk = () => { w = SW.create({ log: QUIET_LOG, workerPath: S.path }); return new UserTodoManager({ dataDir: d, expirySweepMs: 0, writer: w }); };
+  let w = null, t = mk();
+  return { todos: () => t, reboot: () => { t._dirty = false; t._letGo(); w.stop(); t = mk(); return t; }, refuse: (on) => S.failOn('user-todos.json', on) };
+}
 const { HostManager } = require(REPO + '/src/hosts.js');
 function asker(name, { setting = () => undefined, userTodos = null, clock = null } = {}) {
   const d = dirOf(name);
@@ -1190,13 +1202,14 @@ await leg('⑲', async () => {
   const world = (name) => {
     const d = dirOf(name), sh = shardOf(d);
     fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
-    let todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const TL = todosLife(d); let todos = TL.todos();
     const W = { d, sh, heldDir: path.join(d, 'usage-history', '_held') };
     W.todos = () => todos;
     W.notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
     W.life = () => { const uh = seams(newUh(d)); const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
     // a restart whose notice store is read back from DISK (its 500 ms debounce: what was not flushed is lost)
-    W.reboot = () => { if (todos._writeTimer) { clearTimeout(todos._writeTimer); todos._writeTimer = null; } todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 }); };
+    W.reboot = () => { todos = TL.reboot(); };   // B-0248: its writer stopped with what it owed (todosLife)
+    W.refuse = TL.refuse;
     W.heldFiles = (host) => (fs.existsSync(W.heldDir) ? realReaddir(W.heldDir).filter((f) => f.includes(`~${host}.`)).sort() : []);
     return W;
   };
@@ -1458,12 +1471,13 @@ await leg('⑳', async () => {
   const world = (name) => {
     const d = dirOf(name), sh = shardOf(d);
     fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
-    let todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const TL = todosLife(d); let todos = TL.todos();
     const W = { d, sh, nov: path.join(d, 'usage-history', 'events-2026-11.ndjson'), heldDir: path.join(d, 'usage-history', '_held') };
     W.todos = () => todos;
     W.notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
     W.life = (inShape = false) => { const uh = seams(newUh(d)); if (inShape) uh.shapeMaxBytes = 2 * GiB; const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
-    W.reboot = () => { if (todos._writeTimer) { clearTimeout(todos._writeTimer); todos._writeTimer = null; } todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 }); };
+    W.reboot = () => { todos = TL.reboot(); };   // B-0248: its writer stopped with what it owed (todosLife)
+    W.refuse = TL.refuse;
     W.heldFiles = (host) => (fs.existsSync(W.heldDir) ? realReaddir(W.heldDir).filter((f) => f.includes(`~${host}.`)).sort() : []);
     return W;
   };
@@ -1519,9 +1533,10 @@ await leg('⑳', async () => {
     if (v === 'c3') { W.reboot(); die(L1.uh); L = W.life(true); } else L.uh.shapeMaxBytes = 2 * GiB;
     const T = W.todos(); let refused = 0;
     T._flush = () => { refused++; throw fail('ENOSPC'); };
+    W.refuse(true);   // B-0248: the list's own debounced write is the store writer's: the storage refuses it on that thread too
     if (v === 'c3') await quiet(() => L.wired.reconcile()); else await quiet(() => L.uh.ingestRemoteEvents(host, 'X', batchOf(NOV, 1)));
     const kept = W.heldFiles(host);
-    die(L.uh); W.reboot();
+    die(L.uh); W.reboot(); W.refuse(false);
     const L2 = W.life(true); await quiet(() => L2.wired.reconcile());
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', batchOf(NOV + 1, 1)));
     const n = said(W, host), rec = ids.filter((i) => ledgerOf(W.sh, host).includes(hidOf(i, host))).length, f = W.heldFiles(host);
@@ -1570,12 +1585,12 @@ await leg('⑳', async () => {
   // the SAME generation continued ──
   {
     const W = world('w20d'), host = 'host-x', ids = Array.from({ length: 48 }, (_, k) => 9300 + k);
-    W.todos()._flush = () => { throw fail('ENOSPC'); };
+    W.todos()._flush = () => { throw fail('ENOSPC'); }; W.refuse(true);   // B-0248: and its debounced write, on the writer's thread
     const L1 = W.life();
     await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', lines(ids)));
     L1.uh.shapeMaxBytes = 2 * GiB;
     const undo = busy(segFile); try { await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', batchOf(NOV, 1))); } finally { undo(); }
-    die(L1.uh); W.reboot();
+    die(L1.uh); W.reboot(); W.refuse(false);
     const L2 = W.life(); await quiet(() => L2.wired.reconcile());
     const n0 = said(W, host);
     await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', lines([9400, 9401, 9402, 9403])));
@@ -1678,13 +1693,14 @@ await leg('㉑', async () => {
   const world = (name) => {
     const d = dirOf(name), sh = shardOf(d);
     fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
-    let todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const TL = todosLife(d); let todos = TL.todos();
     const W = { d, sh, nov: path.join(d, 'usage-history', 'events-2026-11.ndjson'), heldDir: path.join(d, 'usage-history', '_held') };
     W.todos = () => todos;
     W.notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
     W.reads = () => W.notices().filter((i) => String(i.itemKey || '').startsWith('hold-read'));
     W.life = (inShape = false) => { const uh = seams(newUh(d)); if (inShape) uh.shapeMaxBytes = 2 * GiB; const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
-    W.reboot = () => { if (todos._writeTimer) { clearTimeout(todos._writeTimer); todos._writeTimer = null; } todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 }); };
+    W.reboot = () => { todos = TL.reboot(); };   // B-0248: its writer stopped with what it owed (todosLife)
+    W.refuse = TL.refuse;
     W.heldFiles = (host) => (fs.existsSync(W.heldDir) ? fs.readdirSync(W.heldDir).filter((f) => f.includes(`~${host}.`)).sort() : []);
     return W;
   };

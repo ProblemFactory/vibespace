@@ -1845,6 +1845,7 @@ export default {
   "Refreshes as this account’s sessions run": "该账号的会话运行时自动刷新",
   "not reported by Codex": "Codex 不上报此项",
   "Could not update the item": "无法更新该事项",
+  "The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.": "已做出更改，但尚未保存到磁盘：存储较慢或出现故障。存储可用时会写入；在此之前重启会丢失这次更改。", // B-0248 (lane bl-loop-b)
   "Dismiss (not going to act on this)": "忽略(不打算处理)",
   "For you": "待你处理",
   "For-you inbox": "待你处理收件箱",

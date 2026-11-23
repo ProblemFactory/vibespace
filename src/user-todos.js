@@ -455,8 +455,9 @@ class UserTodoManager {
    *  engine runs on, so a filing's createdAt and the engine's `now` agree at any
    *  wall-clock time (test-decision-inbox's ONE CLOCK census: no other wall-clock read in the class);
    *  the default reads the global per call, so a suite that swaps it still steers the store */
-  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, maxItems = MAX_ITEMS, unreadRetry = null, now = () => Date.now() }) {
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, maxItems = MAX_ITEMS, unreadRetry = null, writer = null, now = () => Date.now() }) {
     this._now = now;
+    this._writer = writer;   // B-0248 (lane bl-loop-b): the store writer (a suite's seam; the hub's one writer by default)
     this._maxItems = Number.isInteger(maxItems) && maxItems > 0 ? maxItems : MAX_ITEMS; // the total cap (a suite's seam)
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
@@ -465,7 +466,7 @@ class UserTodoManager {
     this._statusListeners = []; // onStatus(fn): an item LEAVING 'open' by any door (verify-r2 ask-b), and (verify-r6 W2) a reopen
     this._pluginGate = null; // lane foryou-plugin-notices: setPluginGate(fn) — does plugin <id> declare 'reminders'? (the server's; null = shape rules only)
     this._state = { items: [] };
-    this._writeTimer = null; this._dirty = false; this._lastWritten = null;
+    this._dirty = false; this._lastWritten = null;
     // r9 (THE ATOMIC-WRITE + NO-SILENT-FAILURE LAWS — the acceptance: a truncated user-todos.json started the store FRESH with
     // nothing said, and a held decision lost its card): a MISSING file is an empty store; one that exists but cannot be read,
     // parsed, or has the wrong shape is SET ASIDE beside itself exactly as the channel store's index.json is
@@ -501,7 +502,7 @@ class UserTodoManager {
     // interval — the store's OWN timer, because server.js has no shared sweep
     // cadence other stores hook into (each keeper runs its own).
     this._expiryTimer = null;
-    if (setAside) { this._fileSetAside(setAside); if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flushFromTimer(); this.whenWritten().then(() => this._dropIntentOff(), () => { }); }   // 主开发 r348 (2): at once, and a failed write takes the store's own road (reported, retried with its backoff)   // B-44f3: the notice naming the bytes on disk AT ONCE (a crash later in this boot keeps it); the intent goes after
+    if (setAside) { this._fileSetAside(setAside); this._handToWriter({ act: true }); this.whenWritten().then(() => this._dropIntentOff(), () => { }); }   // 主开发 r348 (2): at once, and a failed write takes the store's own road (reported, retried with its backoff)   // B-44f3: the notice naming the bytes on disk AT ONCE (a crash later in this boot keeps it); the intent goes after
     this.expireDue();
     if (expirySweepMs > 0) {
       this._expiryTimer = setInterval(() => { try { this.expireDue(); } catch { } }, expirySweepMs);
@@ -727,7 +728,7 @@ class UserTodoManager {
   stop() {
     if (this._expiryTimer) { clearInterval(this._expiryTimer); this._expiryTimer = null; }
     this._unreadStopped = true; if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }   // B-44f3: no read again after the stop
-    if (!this._unread) this.flush();   // held: nothing was ever made dirty (every write refused) — nothing to write, nothing over the file
+    if (!this._unread) { try { this.flush(); } finally { this._letGo(); } }   // held: nothing was ever made dirty (every write refused) — nothing to write, nothing over the file
   }
 
   /** THE ITEM'S END IS ONE EVENT (verify-r2 ask-b, lane-pairing): a producer whose item STANDS FOR a pending
@@ -823,40 +824,62 @@ class UserTodoManager {
       if (drop.size) this._state.items = this._state.items.filter((i) => !drop.has(i.id));
     }
     this._dirty = true;
-    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);
+    this._handToWriter();
   }
 
-  // THE DEBOUNCED WRITE MAY NOT THROW — the twin of session-status.js's
-  // (lane-dead-bridge: that one's bare writeFileSync met a relayed EMFILE at
-  // 12:03:17 and killed the server). Dirty kept, backoff retry, reported.
-  _flushFromTimer() {
-    try { this._flush(); this._writeFailures = 0; }
-    catch (e) {
-      this._writeFailures++;
-      this._dirty = true;
-      const retryMs = Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1));
-      if (!this._writeTimer) { this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, retryMs); this._writeTimer.unref?.(); }
-      try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs }); } catch { }
-    }
+  /** B-0248 (lane bl-loop-b, 主开发 r3320): THE WRITE GOES THROUGH THE STORE WRITER (src/store-writer.js) — its own thread does the
+   *  temp, the write and the rename; the loop never waits on the storage (measured, the page bl-loop-b/b0248-page.md: this
+   *  whole-file rewrite held the loop for its rename's whole delay — 507 ms at 500 ms a rename over 300 items). A burst still
+   *  coalesces (its 500 ms debounce; the writer asks `produce` for the bytes at the moment it writes: the latest state). A
+   *  failed write keeps the state dirty, is retried by the writer (1 s … 60 s) and REPORTED through onWriteError — never thrown
+   *  (lane-dead-bridge's law, the twin of session-status.js's). `act` (rank 0): an act the reply waits for (`persisted`). */
+  _handToWriter({ act = false } = {}) {
+    // THE PROCESS DOES NOT END WITH THE LIST OWED: the writer's own timers are unref'd, so a short-lived process (a suite, a tool)
+    // that adds an item and ends would lose it — the release's 500 ms timer held the process up the same way. ONE referenced
+    // handle while a write is owed, let go when it lands or fails (the writer's retries are unref'd, as the release's were)
+    if (!this._keepAlive) this._keepAlive = setInterval(() => { }, 60e3);
+    this._W().dirty(this._file, { name: 'user-todos.write', debounceMs: 500, ...(act ? { rank: 0 } : {}),
+      produce: () => {
+        if (!this._dirty) { this._letGo(); return null; }
+        const json = JSON.stringify(this._state, null, 2);
+        this._dirty = false;
+        if (json === this._lastWritten) { this._letGo(); return null; }   // no real change → no write
+        this._writing = json;
+        return json;
+      },
+      onWritten: (ok, e) => {
+        this._letGo();
+        if (ok) { this._lastWritten = this._writing; this._writeFailures = 0; return; }
+        this._dirty = true; this._writeFailures++;
+        try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs: Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1)) }); } catch { }
+      } });
   }
-
+  _W() { return this._writer || require('./store-writer.js').storeWriter(); }
+  _letGo() { if (this._keepAlive) { clearInterval(this._keepAlive); this._keepAlive = null; } }
+  /** what is owed is written NOW, through the writer's synchronous flush (at the hub's exit the writer's own bounded exit flush
+   *  writes it — no store byte on the main thread then); a write it could not land THROWS (the release's contract to its guarded
+   *  callers: server.js's exit, a migration's «flushed», a suite) */
   _flush() {
-    if (!this._dirty) return;
-    const json = JSON.stringify(this._state, null, 2);
-    if (json !== this._lastWritten) {
-      const tmp = this._file + '.tmp';
-      timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
-      this._lastWritten = json;
-    }
-    this._dirty = false;
-    // lane job-logs-sweep r4: what memory holds IS on disk either way (written now, or already) — a waiter is answered on both roads
-    const ws = this._writtenWaiters; this._writtenWaiters = null; if (ws) for (const r of ws) { try { r(true); } catch { } }
+    if (this._dirty) this._handToWriter({ act: true });
+    const r = this._W().flushSync([this._file]);
+    const left = r && Array.isArray(r.left) ? r.left.find((x) => x && (x.file === this._file || x.name === 'user-todos.write')) : null;
+    if (left) throw Object.assign(new Error(`user-todos.json could not be written: ${left.why}`), { code: 'todos-not-written' });
   }
-
-  flush() { this._refuseUnread('writing the list'); if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }   // B-44f3: held ⇒ refused by name (a migration's «flushed» never reads true over nothing)
-  /** lane job-logs-sweep r3 §6: a promise resolved once what is in memory NOW has been written by the debounced write (a caller that
-   *  records «I told the owner» does it after the item is on disk); resolved at once when nothing is pending */
-  whenWritten() { if (!this._dirty) return Promise.resolve(true); return new Promise((resolve) => { (this._writtenWaiters || (this._writtenWaiters = [])).push(resolve); }); }
+  /** Synchronous flush (the process's exit, a stop, a migration's «flushed») */
+  flush() { this._refuseUnread('writing the list'); this._flush(); }   // B-44f3: held ⇒ refused by name (a migration's «flushed» never reads true over nothing)
+  /** B-0248: a write is OWED (memory ahead of the disk, or the writer still to land it) — the release's `_writeTimer !== null` */
+  writeOwed() { return !!this._dirty || !!this._W().pending(this._file); }
+  /** lane job-logs-sweep r3 §6: a promise resolved once what is in memory NOW is on disk (a caller that records «I told the owner»
+   *  does it after the item is on disk); resolved at once when nothing is owed — B-0248: the writer's own `durable` (false: the
+   *  write failed — kept and retried) */
+  whenWritten() { if (!this._dirty && !this._W().pending(this._file)) return Promise.resolve(true); return this._W().durable(this._file); }
+  /** B-0248 (r3320): A PERSON's ACT (an answer, a resolve, a press) and AN AGENT's ACKNOWLEDGED ASK are on disk BEFORE their
+   *  reply: the writer's NEXT write (rank 0) and the promise resolves when it is on disk — false when it failed (kept in memory,
+   *  retried); the route then answers that it is NOT on disk yet, never a promise memory alone holds */
+  persisted() {
+    if (this._dirty) this._handToWriter({ act: true });
+    return this._W().durable(this._file);   // the writer's own: an owed write made urgent (rank 0); true at once when nothing is owed
+  }
 
   _notify() { try { this._onChange(this.snapshot()); } catch { } }
 
@@ -1450,4 +1473,7 @@ class UserTodoManager {
   }
 }
 
-module.exports = { fillWords, UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };
+/** B-0248 (r3320): the words of an act whose write is NOT on disk yet (the writer's durable answered false) — the route answers
+ *  them by its code `todos-not-on-disk`, the page words the code; nothing a reply promised is in memory only */
+const NOT_ON_DISK = 'the change is made, but it is not on disk yet: the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it';
+module.exports = { NOT_ON_DISK, fillWords, UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };

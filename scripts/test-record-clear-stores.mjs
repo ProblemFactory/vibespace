@@ -472,6 +472,7 @@ console.log('§3b a clear is on disk before the broadcast (For-you + status, ver
     r.statusAfterKill = ss2.history(ME)[0];
     // the in-memory managers' pending debounce timers must not fire into a removed dir: cancel them, never flush
     for (const m of [ut, ss]) { if (m._writeTimer) { clearTimeout(m._writeTimer); m._writeTimer = null; } }
+    if (typeof ut._letGo === 'function') { ut._dirty = false; ut._letGo(); }   // B-0248: the list's write is the store writer's: its producer now gives nothing
     try { ut2.stop(); } catch { }
     return r;
   };

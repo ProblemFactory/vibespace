@@ -667,7 +667,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         const reqLocalOk = pasteDoor.request({ caller: callerA, words: 'login for chanr29', purpose: 'sign in', kind: 'login', hosts: ORIGIN });
         const openCardsAfterLocal = (userTodos.snapshot()?.open || []).length;
         keeper.detach({ profileId: profShop.id, browserKey: KEY_AGENT, by: 'user' });
-        if (userTodos._writeTimer) { clearTimeout(userTodos._writeTimer); userTodos._writeTimer = null; }
+        userTodos._dirty = false; userTodos._letGo();   // B-0248: the list's owed write is the store writer's: its producer now gives nothing (the release cleared its own timer)
 
         ok(
           VPD.STATUS?.login_channel_unmediated === 409 && pasteDoor.statusOf('login_channel_unmediated') === 409

@@ -79,6 +79,7 @@ function tableOf(src) {
 const NOT_HELD = {
   unavailable: 'a door whose engine is not on this server (a feature off / not wired) — its own sentence',
   'not-durable': 'a person\'s act kept in memory, not on disk yet — channel-words / ws words «not on disk yet» (written later)',
+  'todos-not-on-disk': 'B-0248 (lane bl-loop-b): a For-you act made, its write not on disk yet (the store writer still to land it) — the For-you handlers word it (src/lib/user-todos-actions.js, -panel.js), en / zh / ja',
   not_durable: 'the same as not-durable (the exit routes\' spelling)',
   no_engine: 'a browser engine plugin not installed',
   'no-engine': 'a browser engine plugin not installed (the other spelling)',

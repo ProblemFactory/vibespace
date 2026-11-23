@@ -323,6 +323,7 @@ export function inboxModel(app) {
     // fetchJson never throws (returns null / the parsed {error} body) — check
     // the success flag or the failure is a silent no-op.
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+    if (r && r.code === 'todos-not-on-disk') { showToast(t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.'), { type: 'warn', duration: 12000 }); return true; }   // B-0248: the change stands; its write is not on disk yet — said, never «could not»
     if (!r || !r.success) { showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' }); return false; }
     return true;
   };
@@ -351,12 +352,15 @@ export function inboxModel(app) {
     const list = Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && x) : [];
     if (!list.length) return [];
     const post = (door, body) => fetchJson(`/api/user-todos/notices/${door}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const r = await post('read-all', { ids: list });
+    const r0 = await post('read-all', { ids: list });
+    const r = r0 && r0.code === 'todos-not-on-disk' ? { ...r0, ok: true } : r0;   // B-0248: read in memory, its write not on disk yet — said below, the Undo still offered
+    if (r0 && r0.code === 'todos-not-on-disk') showToast(t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.'), { type: 'warn', duration: 12000 });
     if (!r || !r.ok) { showToast(t('Could not update {n} items: {why}', { n: list.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' }); return null; }
     const read = Array.isArray(r.changed) ? r.changed : [];
     if (read.length) {
       showToast(t('{n} notices marked read', { n: read.length }), { duration: 5000, actions: [{ label: t('Undo'), run: async () => {
         const u = await post('unread', { ids: read });
+        if (u && u.code === 'todos-not-on-disk') { showToast(t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.'), { type: 'warn', duration: 12000 }); return; }
         if (!u || !u.ok) showToast(t('Could not update {n} items: {why}', { n: read.length, why: u && u.error ? u.error : t('server unreachable') }), { type: 'error' });
       } }] });
     }
@@ -389,6 +393,7 @@ export function inboxModel(app) {
       replyFailures.delete(id); drafts.delete(id); if (images) dropSentPictures(pictures, id, pics);
       if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r, at); }
       else showToast(sentToast || t('Reply sent'));
+      if (r.written === false) showToast(t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.'), { type: 'warn', duration: 12000 });   // B-0248: the reply went; the item's resolve is not on disk yet
       return true;
     }
     // a refused picture is worded with the limits the route judged it by (its `picture.limits`: THAT harness's numbers); a reply the

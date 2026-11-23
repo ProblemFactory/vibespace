@@ -87,7 +87,7 @@ console.log('① THE STORE — held on a failed read, every write refused by nam
     if (!e || e.code !== 'todos-unread' || !/For you cannot read its saved list right now \(user-todos\.json: EISDIR\) — .+ is refused and nothing was recorded/.test(e.message)) bad.push({ name, code: e && e.code, msg: e && String(e.message).slice(0, 120) });
   }
   ok(!bad.length, `EVERY writer (${WRITERS.length}: ${WRITERS.map((w) => w[0]).join(', ')}) is refused BY NAME — code todos-unread, the words name the act`, bad);
-  ok(m._writeTimer == null && m._dirty === false, 'no write is armed and nothing is dirty after every refusal (the belt: _save refuses first)', { t: !!m._writeTimer, dirty: m._dirty });
+  ok(!m.writeOwed() && m._dirty === false, 'no write is armed and nothing is dirty after every refusal (the belt: _save refuses first)', { owed: m.writeOwed(), dirty: m._dirty });
   ok(m.expireDue() === 0, 'the expiry sweep resolves nothing while held (its own timer skips; asked, it finds no item)');
   // whenRead waits; the read again lifts the hold with the FILE's items
   const seen = [];
@@ -196,7 +196,7 @@ console.log('① THE STORE — held on a failed read, every write refused by nam
   const m = quiet(() => new Mb.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
   let e = null; try { quiet(() => m.add('accounts', { origin: 'spend', text: 'past its own check' })); } catch (x) { e = x; }
   quiet(() => m.stop());
-  ok(e && e.code === 'todos-unread' && /a write is refused/.test(e.message) && m._writeTimer == null && fs.statSync(f).isDirectory(), 'THE BELT ALONE (add\'s own refusal cut): the save refuses by name — no write armed, the live path untouched', { e: e && e.message });
+  ok(e && e.code === 'todos-unread' && /a write is refused/.test(e.message) && !m.writeOwed() && fs.statSync(f).isDirectory(), 'THE BELT ALONE (add\'s own refusal cut): the save refuses by name — no write armed, the live path untouched', { e: e && e.message });
 }
 
 {
@@ -853,6 +853,99 @@ console.log('④ the page draws the hold where «Nothing needs you» would stand
   ok(RR.includes("'todos-unread': 503") && RR.includes("if (userTodos.isHeldUnread?.()) return fail(res, 'todos-unread', userTodos.unreadRefusal('a reply'));") && RR.includes("return res.status(503).json({ error: userTodos.unreadRefusal('reading an item'), code: 'todos-unread' });")
     && RR.split("if (e && e.code === 'todos-unread') return fail(503, e.code, e.message);").length === 3, 'the reply, the one-item read, resolve-many and the notices doors answer 503 todos-unread');
   ok(AR.includes("if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) return res.status(503).json({ error: userTodos.unreadRefusal(add ? 'filing this ask'"), 'vibespace-ask answers 503 todos-unread for every verb while held');
+}
+
+// ── ⑤ B-0248 (lane bl-loop-b, 主开发 r3320): THE LIST's WRITE IS OFF THE LOOP ─────────────────────────────────────────────────────
+// The list's whole-file rewrite held the loop for its rename's whole delay (the page bl-loop-b/b0248-page.md: 507 ms at 500 ms
+// a rename over 300 items). It is the store writer's now. A person's act and an agent's acknowledged ask are on disk before
+// their answer; a write that is not is answered by its code (todos-not-on-disk) and the page words it.
+console.log('⑤ B-0248: the list\'s write is the store writer\'s (off the loop); a person\'s act and an agent\'s ask are on disk before their answer');
+{
+  const SRC5 = read('src/user-todos.js');
+  const STALL = require(path.join(ROOT, 'scripts/fixtures/fs-stall.cjs'));
+  const STALL_MS = 400, TICK_MS = 10;
+  const lateMeter = () => { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last - TICK_MS); last = n; }, TICK_MS); return { stop() { clearInterval(t); return Math.round(worst); } }; };
+  // (a) THE PLACED STALL: the real list, the real store writer's thread, a scratch dir; every synchronous write-family call of
+  // THIS thread under the dir is held STALL_MS (scripts/fixtures/fs-stall.cjs: the writer's thread loads its own fs, never held)
+  const stallScene = async (Mod) => {
+    const d = dataDir();
+    const m = quiet(() => new Mod.UserTodoManager({ dataDir: d, onChange() { }, expirySweepMs: 0 }));
+    for (let i = 0; i < 50; i++) m.add('claude:s' + (i % 10), { text: 'ask ' + i, detail: 'x'.repeat(1500), urgency: 'normal', by: 'agent', origin: 'agent' });
+    await m.whenWritten();
+    const S = STALL.install({ under: d, ms: STALL_MS });
+    const meter = lateMeter();
+    let late = null, written = null;
+    try {
+      for (let i = 0; i < 4; i++) { m.add('claude:t' + i, { text: 'late ' + i, urgency: 'normal', by: 'agent', origin: 'agent' }); await new Promise((r) => setTimeout(r, 150)); }
+      written = await m.whenWritten();
+    } finally { late = meter.stop(); S.restore(); }
+    let last = false; try { last = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf8')).items.some((x) => x.text === 'late 3'); } catch { }
+    try { quiet(() => m.stop()); } catch { }
+    return { late, written, last, stalled: S.calls.filter((c) => c.kind === 'write' && c.stalled).length };
+  };
+  const A = await stallScene(UT);
+  ok(A.late < STALL_MS && A.stalled === 0 && A.written === true && A.last, `⑤a THE PLACED STALL (${STALL_MS} ms in every main-thread write under the list's dir): four For-you changes, the loop's worst lateness ${A.late} ms < one stall, NO main-thread write stalled, every change on disk (the writer's thread)`, A);
+  const Rel = MJ.load('src/user-todos.js', anchored(SRC5, '    this._dirty = true;\n    this._handToWriter();\n  }', "    this._dirty = true;\n    { const json = JSON.stringify(this._state, null, 2); fs.writeFileSync(this._file + '.tmp', json); fs.renameSync(this._file + '.tmp', this._file); this._lastWritten = json; this._dirty = false; }\n  }", 'the release\'s write on the loop'), 'b0248-release');
+  const AX = await stallScene(Rel);
+  ok(AX.late >= STALL_MS && AX.stalled > 0, `⑤a RED control (the release's write: temp + rename on the loop): the loop is held a stall's length or more (${AX.late} ms; ${AX.stalled} main-thread writes stalled) (red)`, AX);
+  // (b) DURABLE BEFORE THE ANSWER: a writer that HOLDS its write until released — persisted() answers only once the bytes are on disk
+  const holdingWriter = (landOk = true) => {
+    const st = new Map(); let release; const gate = new Promise((r) => { release = r; });
+    const land = (file, s) => { const b = s.produce ? s.produce() : null; if (landOk && b != null) fs.writeFileSync(file, b); s.dirty = false; try { s.onWritten && s.onWritten(landOk, landOk ? null : Object.assign(new Error('EIO: a placed failure'), { code: 'EIO' })); } catch { } return landOk; };
+    return { release: () => release(), W: {
+      dirty(file, o) { const s = st.get(file) || {}; for (const [k, v] of Object.entries(o || {})) if (v !== undefined) s[k] = v; s.dirty = true; st.set(file, s); },
+      pending(file) { const s = st.get(file); return !!(s && s.dirty); },
+      durable(file) { const s = st.get(file); if (!s || !s.dirty) return Promise.resolve(true); return gate.then(() => land(file, s)); },
+      flushSync(files) { for (const f of files) { const s = st.get(f); if (s && s.dirty) land(f, s); } return { left: [] }; },
+    } };
+  };
+  const durScene = async (Mod) => {
+    const d = dataDir(), HW = holdingWriter();
+    const m = quiet(() => new Mod.UserTodoManager({ dataDir: d, onChange() { }, expirySweepMs: 0, writer: HW.W }));
+    const it = m.add('claude:s1', { text: 'an ask', urgency: 'normal', by: 'agent', origin: 'agent' });
+    let answered = null; const p = m.persisted().then((ok1) => { answered = ok1; });
+    await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    const early = answered; let earlyOnDisk = false; try { earlyOnDisk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf8')).items.some((x) => x.id === it.id); } catch { }
+    HW.release(); await p;
+    let onDisk = false; try { onDisk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf8')).items.some((x) => x.id === it.id); } catch { }
+    try { quiet(() => m.stop()); } catch { }   // the stop lands what is owed: the list lets go of its process handle
+    return { early, earlyOnDisk, answered, onDisk };
+  };
+  const B = await durScene(UT);
+  ok(B.early === null && B.answered === true && B.onDisk, '⑤b DURABLE BEFORE THE ANSWER: persisted() does not answer while the writer holds the write, and answers true once the ask is ON DISK', B);
+  const Rx = MJ.load('src/user-todos.js', anchored(SRC5, '    if (this._dirty) this._handToWriter({ act: true });\n    return this._W().durable(this._file);', '    return Promise.resolve(true);', 'persisted answering at once'), 'b0248-persisted');
+  const BX = await durScene(Rx);
+  ok(BX.early === true && !BX.earlyOnDisk, '⑤b RED control (persisted answers at once): «on disk» is answered while the ask is in memory only (red)', BX);
+  // (c) A FAILED WRITE IS SAID: a writer whose write fails — persisted() answers false; the routes answer by the code; a reply
+  // already SENT answers ok with `written: false` (never a 503 a retry would send twice)
+  {
+    const d = dataDir(), HW = holdingWriter(false);
+    const m = quiet(() => new UT.UserTodoManager({ dataDir: d, onChange() { }, expirySweepMs: 0, writer: HW.W, onWriteError() { } }));
+    m.add('claude:s1', { text: 'an ask', urgency: 'normal', by: 'agent', origin: 'agent' });
+    const p = m.persisted(); HW.release();
+    const okc = await p;
+    m._letGo();   // a write that failed for good here (the stand-in retries nothing): the process handle let go
+    const RR = require(path.join(ROOT, 'src/routes/user-todos-reply.js'));
+    const resOf = () => { const r = { code: 200, body: null, headersSent: false }; r.status = (c) => { r.code = c; return r; }; r.json = (b) => { r.body = b; r.headersSent = true; return r; }; return r; };
+    const ans = RR.answerDurableOf({ persisted: () => Promise.resolve(false) });
+    const r1 = resOf(); await ans(r1, { ok: true, changed: 2 });
+    const r2 = resOf(); await ans(r2, { ok: true, msgId: 'm1' }, { sent: true });
+    const r3 = resOf(); await RR.answerDurableOf({ persisted: () => Promise.resolve(true) })(r3, { ok: true });
+    ok(okc === false && r1.code === 503 && r1.body.code === 'todos-not-on-disk' && r1.body.error === UT.NOT_ON_DISK && r2.code === 200 && r2.body.ok === true && r2.body.written === false && r2.body.code === 'todos-not-on-disk' && r3.code === 200 && r3.body.ok === true,
+      '⑤c A FAILED WRITE IS SAID: persisted() answers false; a store act answers 503 todos-not-on-disk with the store\'s words; a SENT reply answers ok with written: false; a write on disk answers ok', { okc, r1: r1.code, r2: r2.body && r2.body.written });
+  }
+  // (d) the doors that answer through it (pins): the status press (server.js), the reply's two roads, resolve-many, the notices'
+  // doors, the agent's ask (acknowledged only once on disk) — and the page words the code in zh and ja
+  {
+    const SJ = read('server.js'), RT = read('src/routes/user-todos-reply.js'), ST = read('src/agent-routes/status.js'), ACT = read('src/lib/user-todos-actions.js'), PAN = read('src/lib/user-todos-panel.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+    const K = 'The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.';
+    ok(/const item = userTodos\.setStatus\(req\.params\.id, req\.body\?\.status, 'user', \{ pressed: press \}\); userTodos\.persisted\(\)\.then\(\(ok\) => \(ok === false \? res\.status\(503\)/.test(SJ)
+      && (RT.match(/return answerDurable\(res, /g) || []).length === 4 && /\{ sent: true \}\);/.test(RT)
+      && /return Promise\.resolve\(typeof userTodos\.persisted === 'function' \? userTodos\.persisted\(\) : true\)\.then\(\(ok\) => \(res\.headersSent \? undefined : ok === false \? res\.status\(503\)/.test(ST),
+      '⑤d the doors answer after the disk: the status press, the reply\'s two roads and resolve-many / the notices\' doors (four), the agent\'s acknowledged ask');
+    ok((ACT.match(/code === 'todos-not-on-disk'/g) || []).length === 4 && /r\.written === false/.test(ACT) && /code === 'todos-not-on-disk'/.test(PAN) && [ZH, JA].every((dd) => dd.includes('\n  ' + JSON.stringify(K) + ': ')),
+      '⑤d the page words the code (the status press, «Mark all read» and its Undo, the bulk dismiss, a sent reply) in its language — zh and ja');
+  }
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'todos-held-census ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));

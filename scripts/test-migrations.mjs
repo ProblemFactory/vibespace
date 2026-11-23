@@ -781,7 +781,7 @@ try {
       // migration flushed the live store's 500 ms debounce itself, so the
       // reshaping is on disk before the runner wrote applied[id]
       const disk0 = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
-      ok(judge(disk0, t0, t1).oldAll && judge(disk0, t0, t1).fresh && live._writeTimer === null, 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: !!live._writeTimer });
+      ok(judge(disk0, t0, t1).oldAll && judge(disk0, t0, t1).fresh && !live.writeOwed(), 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: !!live._writeTimer });
       const j = judge(live._state.items, t0, t1);
       ok(res?.status === 'ran' && j.oldAll, 'the 13 stale Spending items become notices AND are resolved done/expired at the end of the window they were about (kept in the store, never deleted)', res);
       const newestRetired = Math.max(...live._state.items.filter((x) => /^ut-old/.test(x.id)).map((x) => x.resolvedAt));
@@ -839,15 +839,20 @@ try {
     // (d) NEGATIVE CONTROL for the live-path flush (LOW-1): a patched copy of
     // the registry whose flush is back behind `if (priv)` — the pre-fix run —
     // leaves the FILE unchanged when run() returns (the runner has already
-    // written applied[id]) until the store's 500 ms debounce fires
+    // written applied[id]) until the store's 500 ms debounce fires.
+    // B-0248 step 2 (lane bl-loop-b): the list's write is the STORE WRITER's now, so the runner's own landing (lg-store-writes
+    // U5, `landStores`: every store a migration dirtied lands before the ledger is stamped) lands the reshaping too — a second
+    // belt. The copy turns BOTH off for the red; (d2) below proves the runner's belt alone
     {
       const { root, d } = setup('inst-spend-noflush');
       const srcDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'src');
       const orig = fs.readFileSync(path.join(srcDir, 'server', 'migrations.js'), 'utf-8');
       const FIXED = '          store.flush();\n        } finally { if (priv) store.stop(); }';
-      const patched = orig.split(FIXED).join('          if (priv) store.flush();\n        } finally { if (priv) store.stop(); }')
-        .replace(/require\('\.\.\//g, `require('${srcDir}/`).replace(/require\('\.\//g, `require('${srcDir}/server/`);
-      ok(orig.split(FIXED).length === 2 && patched !== orig, 'CONTROL setup: the patched copy differs from the registry in exactly the live-path flush');
+      const LAND = '      const owed = storesToLand(before, SWm.stats());';
+      const relink = (t) => t.replace(/require\('\.\.\//g, `require('${srcDir}/`).replace(/require\('\.\//g, `require('${srcDir}/server/`);
+      const noFlush = orig.split(FIXED).join('          if (priv) store.flush();\n        } finally { if (priv) store.stop(); }');
+      const patched = relink(noFlush.split(LAND).join('      const owed = [];   // the copy: the runner lands nothing'));
+      ok(orig.split(FIXED).length === 2 && orig.split(LAND).length === 2 && patched !== orig, 'CONTROL setup: the patched copy differs from the registry in exactly the live-path flush and the runner\'s landing');
       const pdir = path.join(tmp, 'patched-registry'); fs.mkdirSync(pdir, { recursive: true });
       fs.writeFileSync(path.join(pdir, 'migrations.js'), patched);
       const pre = require(path.join(pdir, 'migrations.js'));
@@ -855,12 +860,23 @@ try {
       const live = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
       const res = pre.create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live }).runLocalMigrations().find((r) => r.id === ID);
       const led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
-      ok(res?.status === 'ran' && !!led.applied[ID] && fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8') === before && live._writeTimer !== null,
+      ok(res?.status === 'ran' && !!led.applied[ID] && fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8') === before && live.writeOwed(),
         'CONTROL: the pre-fix run left the file UNCHANGED with the ledger row already written (a crash now would lose the reshaping for good) — the flush leg above fails on it');
       await new Promise((r) => setTimeout(r, 700));
       const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
       ok(disk.filter((x) => /^ut-old/.test(x.id)).every((x) => x.status === 'done'), 'CONTROL: …and the change reached the file only when the debounce fired');
       live.stop();
+      // (d2) THE RUNNER's BELT: the copy with ONLY the live-path flush behind `if (priv)` — the store writer's landing puts the
+      // list's owed write on disk before the runner stamps applied[id]
+      const { root: root2, d: d2 } = setup('inst-spend-noflush-landed');
+      const pdir2 = path.join(tmp, 'patched-registry-landed'); fs.mkdirSync(pdir2, { recursive: true });
+      fs.writeFileSync(path.join(pdir2, 'migrations.js'), relink(noFlush));
+      const live2 = new UserTodoManager({ dataDir: d2, expirySweepMs: 0 });
+      const t2a = Date.now();
+      const res2 = require(path.join(pdir2, 'migrations.js')).create({ rootDir: root2, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live2 }).runLocalMigrations().find((r) => r.id === ID);
+      const t2b = Date.now(), disk2 = JSON.parse(fs.readFileSync(path.join(d2, 'user-todos.json'), 'utf-8')).items;
+      ok(res2?.status === 'ran' && judge(disk2, t2a, t2b).oldAll && !live2.writeOwed(), 'the RUNNER lands it too (B-0248 step 2): with the live-path flush gone, the store writer\'s landing puts the reshaping on disk before applied[id] — nothing owed when run() returns', { status: res2?.status, owed: live2.writeOwed() });
+      live2.stop();
     }
 
     // (e) THE WINDOW A NOTICE WAS ABOUT (the verifier's INFO): an open Spending

@@ -107,7 +107,18 @@ function sessionForItem(item, activeSessions, sessionStatusKey) {
 }
 
 const CAPS_WAIT_MS = 15000, CAPS_POLL_MS = 200, BIG_FRAME = 64 * 1024;   // B-51dd: how long a reopen waits for its wrapper's frame-file verb, how often it looks, the frame size that needs it (the sender's own 64 KiB)
+/** B-0248 (lane bl-loop-b, 主开发 r3320): A PERSON's ACT IS ON DISK BEFORE ITS ANSWER — the store writer's durable (the list's
+ *  `persisted`); a write that is not answers by its code `todos-not-on-disk` with the store's words. An act that cannot be
+ *  undone (a reply already SENT to its conversation) answers ok with `written: false` — never a 503 a retry would send twice */
+const answerDurableOf = (userTodos) => (res, body, { sent = false } = {}) => Promise.resolve(typeof userTodos.persisted === 'function' ? userTodos.persisted() : true).then((ok) => {
+  if (res.headersSent) return undefined;
+  if (ok !== false) return res.json(body);
+  const words = require('../user-todos.js').NOT_ON_DISK;
+  return sent ? res.json({ ...body, written: false, code: 'todos-not-on-disk', warning: words }) : res.status(503).json({ ...body, ok: false, error: words, code: 'todos-not-on-disk' });
+});
+
 function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen = null, now = () => Date.now() }) {
+  const answerDurable = answerDurableOf(userTodos);
   const fail = (res, code, error, extra = null) => res.status(STATUS[code] || 400).json({ error, code, ...(extra || {}) });
   // THE REOPEN (lane inbox-reply-dead-session): the conversation ended ⇒ resume it, then the reply is its first input
   // (`frame` = what is typed: the quoted reply, or — B-51dd — the composer's frame carrying its pictures)
@@ -133,7 +144,8 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
     const tooLarge = r && r.code === 'too_large' && r.reason === 'no-sidecar' ? { words: { key: REPLY_WORDS.reopenTooLarge, params: { mb: (frame.length / 1048576).toFixed(1) } } } : {};   // only «still starting» is a wait (an old wrapper needs Terminate + Resume: its English stays)
     if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ ...tooLarge, error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', ...(r && r.i18n ? { i18n: r.i18n } : {}), reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
     const updated = userTodos.resolveByReply(item.id, text, undefined, { pictures });
-    res.json({ ok: true, reopened: true, sessionId: o.sessionId, conversation: o.conversation || null, msgId: r.msgId, item: updated });
+    const body = { ok: true, reopened: true, sessionId: o.sessionId, conversation: o.conversation || null, msgId: r.msgId, item: updated };
+    return answerDurable(res, body, { sent: true });
   }).catch((e) => { if (!res.headersSent) fail(res, 'resume_failed', 'the conversation could not be reopened: ' + e.message); });
   app.post('/api/user-todos/:id/reply', (req, res) => {
     try {
@@ -164,7 +176,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
         return fail(res, code, (r && r.error) || 'the reply was not sent', r && r.i18n ? { i18n: r.i18n } : null);   // B-437e: a refusal in the reader's language
       }
       const updated = userTodos.resolveByReply(item.id, t.text, undefined, { pictures: pics.blocks.length });   // B-51dd: the reply keeps how many pictures it carried
-      res.json({ ok: true, msgId: r.msgId, item: updated });
+      return answerDurable(res, { ok: true, msgId: r.msgId, item: updated }, { sent: true });
     } catch (e) { res.status(500).json({ error: e.message, code: 'send_failed' }); }
   });
 }
@@ -176,6 +188,7 @@ const RESOLVE_MANY_STATUSES = ['dismissed', 'done'];
 const NOTICES_READ_MAX = 1000;
 
 function registerResolveManyRoute(app, { userTodos }) {
+  const answerDurable = answerDurableOf(userTodos);
   app.post('/api/user-todos/resolve-many', (req, res) => {
     const fail = (status, code, error) => res.status(status).json({ error, code });
     try {
@@ -185,7 +198,7 @@ function registerResolveManyRoute(app, { userTodos }) {
       if (ids.length > RESOLVE_MANY_MAX) return fail(400, 'too_many', `at most ${RESOLVE_MANY_MAX} ids per request (got ${ids.length})`);
       if (!RESOLVE_MANY_STATUSES.includes(status)) return fail(400, 'bad_status', `status must be one of ${RESOLVE_MANY_STATUSES.join('/')}`);
       const r = userTodos.setStatusMany(ids, status, 'user');
-      res.json({ ok: true, changed: r.changed.length, unknown: r.unknown, decisions: r.decisions || [] });   // lane wake-approve-card r2: a decision row stays until decided
+      return answerDurable(res, { ok: true, changed: r.changed.length, unknown: r.unknown, decisions: r.decisions || [] });   // lane wake-approve-card r2: a decision row stays until decided
     } catch (e) { if (e && e.code === 'todos-unread') return fail(503, e.code, e.message); fail(500, 'failed', e.message); }   // B-44f3: held — by name
   });
   // «Mark all read» (lane inbox-fyi-mark-all): POST /api/user-todos/notices/read-all {ids} — every open NOTICE among the
@@ -199,7 +212,7 @@ function registerResolveManyRoute(app, { userTodos }) {
       if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === 'string' && x)) return fail(400, 'bad_ids', 'ids must be a non-empty array of item ids');
       if (ids.length > NOTICES_READ_MAX) return fail(400, 'too_many', `at most ${NOTICES_READ_MAX} ids per request (got ${ids.length})`);
       const r = userTodos.readNotices(ids, read, 'user');
-      res.json({ ok: true, changed: r.changed, already: r.already.length, refused: r.refused, unknown: r.unknown });
+      return answerDurable(res, { ok: true, changed: r.changed, already: r.already.length, refused: r.refused, unknown: r.unknown });
     } catch (e) { if (e && e.code === 'todos-unread') return fail(503, e.code, e.message); fail(500, 'failed', e.message); }   // B-44f3: held — by name
   };
   app.post('/api/user-todos/notices/read-all', noticesDoor(true));
@@ -223,4 +236,4 @@ function registerItemReadRoute(app, { userTodos }) {
   });
 }
 
-module.exports = { registerUserTodoReplyRoutes, registerResolveManyRoute, registerItemReadRoute, RESOLVE_MANY_MAX, NOTICES_READ_MAX, STATUS, sessionForItem, picturesOf, CAPS_WAIT_MS };
+module.exports = { answerDurableOf, registerUserTodoReplyRoutes, registerResolveManyRoute, registerItemReadRoute, RESOLVE_MANY_MAX, NOTICES_READ_MAX, STATUS, sessionForItem, picturesOf, CAPS_WAIT_MS };

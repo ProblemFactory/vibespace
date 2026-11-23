@@ -578,11 +578,11 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-stop-'));
       const m3 = new UserTodoManager({ dataDir: sdir, expirySweepMs: 0 });
       m3.add('claude:s', { text: 'pending at stop', origin: 'agent' });
-      const pendingBefore = m3._writeTimer !== null && !fs.existsSync(path.join(sdir, 'user-todos.json'));
+      const pendingBefore = m3.writeOwed() && !fs.existsSync(path.join(sdir, 'user-todos.json'));   // B-0248: the list's write is the store writer's — `writeOwed()` is the release's `_writeTimer !== null`
       m3.stop();
       let onDisk = null;
       try { onDisk = JSON.parse(fs.readFileSync(path.join(sdir, 'user-todos.json'), 'utf8')); } catch { }
-      ok(pendingBefore && m3._writeTimer === null && m3._expiryTimer === null && !!onDisk && onDisk.items.some((i) => i.text === 'pending at stop'), 'stop() clears BOTH timers and flushes the pending write before it returns (the owner may remove the dir right after)', { pendingBefore, timer: m3._writeTimer !== null, onDisk: !!onDisk });
+      ok(pendingBefore && !m3.writeOwed() && m3._expiryTimer === null && !!onDisk && onDisk.items.some((i) => i.text === 'pending at stop'), 'stop() clears BOTH timers and flushes the pending write before it returns (the owner may remove the dir right after)', { pendingBefore, timer: m3._writeTimer !== null, onDisk: !!onDisk });
       fs.rmSync(sdir, { recursive: true, force: true });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }

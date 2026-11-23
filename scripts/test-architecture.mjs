@@ -4260,11 +4260,11 @@ await section(async () => {
   ];
   const got = planted.map(([t]) => unwrapped72(body72(t, '_save').text, ['task-groups.write']).length);
   ok(got.join() === planted.map(([, n]) => n).join(), `§72 NEGATIVE CONTROLS: unwrapped / wrong name / beside the span caught, a wrapped write passes (${got.join()})`);
-  // lane lg-store-writes U4: jobs.js's save moved onto the store writer — the control reads a store that still times its own
-  // synchronous write (user-todos' _flush)
-  const todosBare = strip72(read('src/user-todos.js')).replace("timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });", 'fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file);');
-  const hit = unwrapped72(body72(todosBare, '_flush').text, ['user-todos.write']);
-  ok(hit.length === 1 && /fs\.writeFileSync\(tmp, json\)/.test(hit[0]), `§72 CONTROL: the real user-todos.js _flush with its write unwrapped is printed (${hit.join(' | ')})`);
+  // lane lg-store-writes U4: jobs.js's save moved onto the store writer, and B-0248 (lane bl-loop-b, r3320) the For-you list's —
+  // the control reads a store that still times its own synchronous write (session-meta's FIRST version, writeSessionMeta)
+  const metaBare = strip72(read('src/server/session-stdout.js')).replace("timedSync('session-meta.write', () => { fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp); });", 'fs.writeFileSync(tmp, text); fs.renameSync(tmp, fp);');
+  const hit = unwrapped72(body72(metaBare, 'writeSessionMeta').text, ['session-meta.write']);
+  ok(hit.length === 1 && /fs\.writeFileSync\(tmp, text\)/.test(hit[0]), `§72 CONTROL: the real session-stdout.js writeSessionMeta with its first write unwrapped is printed (${hit.join(' | ')})`);
 });
 
 // §73 NO FILE OPENS A DATABASE FOR USAGE (row B-360d unit 1, the design read w0r2kz4cb law 1 — 2026-11-21; was «the usage index

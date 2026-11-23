@@ -993,7 +993,8 @@ export function installUserTodos(app) {
     btnEl.dataset.busy = '1'; btnEl.disabled = true;
     const r = await fetchJson('/api/user-todos/resolve-many', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, status: 'dismissed' }) });
     delete btnEl.dataset.busy; btnEl.disabled = false;
-    if (!r || !r.ok) showToast(t('Could not update {n} items: {why}', { n: ids.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' });
+    if (r && r.code === 'todos-not-on-disk') showToast(t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.'), { type: 'warn', duration: 12000 });   // B-0248: dismissed in memory, its write not on disk yet
+    else if (!r || !r.ok) showToast(t('Could not update {n} items: {why}', { n: ids.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' });
     // lane wake-approve-card r2: a DECISION row is passed by — it stays until you Approve or Deny it (or it expires); said, never silent
     else if (Array.isArray(r.decisions) && r.decisions.length) showToast(r.decisions.length === 1 ? t('1 decision left for you — Approve or Deny it') : t('{n} decisions left for you — Approve or Deny each', { n: r.decisions.length }));
   };
