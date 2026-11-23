@@ -10,7 +10,8 @@
 //     a row's (since, next try), the section's, the press's answers; zh and ja for every sentence; no file named.
 //   ③ THE PAGE's WIRING (source): the chip in the vault chip's two slots beside For you, its press opens the system panel; the panel's
 //     section; app.js's first read, the broadcast, the re-seat; the press's route refuses an agent's token; nothing greyed.
-//   ④ THE NAMES' CENSUS: every store the helper holds (its callers' files) has a plain name — a new caller with none is red by name.
+//   ④ THE NAMES' CENSUS: every store the helper holds (its callers' files) has a plain name — a new caller with none is red by name;
+//     a file that only ASKS the helper (its kept copies) holds nothing through it and needs no row (r3354).
 //   ⑤ THE FOLLOW (主开发 r3284): every list the hub answers carries its mark and the page drops an answer older than its last broadcast;
 //     the paired machines' wait, let go past their bound, is armed again (the real hosts.js whenRead, the wiring's own row); the chip's
 //     press scrolls an already-open section at once; a next try that passes while the section is open is worded again by its timer; the
@@ -171,12 +172,19 @@ const CALLERS = { 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tok
   // A STORE MADE PER THING from ONE create site (r3314): { sites, stores } — `sites` the file's create sites, `stores` the names the hub lists them
   // by (a shape's example where each thing has its own file), checked against the notice's names, not against the file's literals
   'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } };
+// r3354: A FILE THAT ONLY ASKS the helper (its kept copies: copiesOf — no create site, inline or bound, and no destructured create) holds
+// no store through it: it needs no row and no plain name (hosts.js, jobs.js, machine-mounts.js ask it for their OLDER holds' copies, which
+// the notice bridges by their own doors). A file in the map is never let off this way (its rows would go dead unseen), and an asker that
+// ALSO creates a hold is a caller like any other (red by name until mapped).
 function heldStoreFiles(files, map = CALLERS) {
   const out = new Map();
+  out.askers = [];
   for (const [f, src] of files) {
     if (!/require\(['"][./]*store-read-hold\.js['"]\)/.test(src) || /held-lists\.js$/.test(f)) continue;
     const bound = /\bconst (\w+) = require\(['"][./]*store-read-hold\.js['"]\)/.exec(src);
     const creates = (bound ? (src.match(new RegExp(`\\b${bound[1]}\\.create\\(`, 'g')) || []).length : 0) + (src.match(/require\(['"][./]*store-read-hold\.js['"]\)\.create\(/g) || []).length;   // bound by a name, or called inline
+    const destructured = /\bconst \{[^}]*\bcreate\b[^}]*\} = require\(['"][./]*store-read-hold\.js['"]\)/.test(src);
+    if (!creates && !destructured && !Object.prototype.hasOwnProperty.call(map, f)) { out.askers.push(f); continue; }   // r3354: it only asks
     const row = map[f], many = !!row && !Array.isArray(row), want = many ? row.stores : row || [];
     out.set(f, { mapped: Object.prototype.hasOwnProperty.call(map, f), want, sites: many ? row.sites : want.length, names: many ? want.slice() : want.filter((n) => src.includes(`'${n}'`)), creates });
   }
@@ -202,6 +210,14 @@ ok(unnamed(heldStoreFiles(second)).some((x) => x.startsWith('src/mounts.js: 2 ho
 const shaped = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS]]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['frob-7.json'] } });
 ok(unnamed(shaped).some((x) => x.startsWith('frob-7.json (src/frobs.js)')), 'CONTROL (r3314): a store made per thing from one create site, its name unknown to the notice, is RED by name', unnamed(shaped));
 const shapedSites = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS + FROBS.split('\n')[1] + '\n']]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } });
+const ASKER = "const HOLD = require('./store-read-hold.js');\nconst kept = HOLD.copiesOf(path.join(dir, 'frobs.json'));\n";
+const asks = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', ASKER]]));
+ok(!asks.has('src/frobs.js') && asks.askers.includes('src/frobs.js') && unnamed(asks).length === 0 && STORES.askers.length >= 1,
+  `r3354: a file that only ASKS the helper (its kept copies) holds no store through it — no row, no plain name (the tree's askers: ${STORES.askers.join(', ')})`, { askers: STORES.askers, planted: asks.askers });
+const asksAndHolds = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', ASKER + "const h = HOLD.create({ file: path.join(dir, 'frobs.json'), code: 'frobs_unread' });\n"]]));
+ok(unnamed(asksAndHolds).some((x) => x.startsWith('src/frobs.js: a caller of the helper with no store')), 'CONTROL (r3354): the same asker that ALSO creates a hold is RED by name', unnamed(asksAndHolds));
+const mappedGone = new Map(SRC_ALL); mappedGone.set('src/mounts.js', "const HOLD = require('./store-read-hold.js');\nconst kept = HOLD.copiesOf(path.join(dir, 'mounts.json'));\n");
+ok(unnamed(heldStoreFiles(mappedGone)).some((x) => x.startsWith('src/mounts.js: no hold of the helper the census reads but 1')), 'CONTROL (r3354): a MAPPED file whose hold is gone (only an ask left) is RED by its count — never let off as an asker', unnamed(heldStoreFiles(mappedGone)));
 ok(unnamed(shapedSites).some((x) => x.startsWith('src/frobs.js: 2 hold(s) of the helper but 1 in the census')), 'CONTROL (r3314): a second create site in a file stated as one site making its stores is RED by its count', unnamed(shapedSites));
 ok(W.heldListName('cw-12-1700000000123.json', tt) === 'a conversation’s saved details' && W.heldListName('cw-x.json', tt) === 'a saved list' && W.heldListName('callers.json', tt) === 'the webhook callers' && W.heldNamed('vault-grants.json') && W.heldNamed('usage-reset-claims.json') && !W.heldNamed('frobs.json'),
   'r3314: the trial\'s new stores have their plain names (the webhook callers, the pending pairing codes, who may receive your two-step codes, the reset marks); a conversation\'s record is named by its shape (cw-<seq>-<ms>.json), any other shape by «a saved list»');
