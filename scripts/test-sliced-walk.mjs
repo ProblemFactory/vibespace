@@ -46,6 +46,9 @@
 //   cut 3d: (c6) UNDER the rebuild line — a big account's rows touched outside any walk, more than walk.rekeyMax: the next
 //       read MERGES them in slices (never one by one in its turn); at most rekeyMax: re-keyed at once by one merge of the
 //       list (dueRekeyMany); the served due list equals a whole build's after each.
+//   B-fbd6 item 7 (2026-11-23, lane bl-mail): the whole builds the legs compare with are made the SAME way, cheaper — the unchanged
+//   stand-in's whole digest and due list read once (the legs that place no write), and (c5) / (c7) ask ONE oracle engine a leg (its
+//   ops replayed in order, a whole build forced at each check) where a fresh engine over a copy was made at every check.
 // Run: node scripts/test-sliced-walk.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -292,6 +295,9 @@ console.log('(c) an account\'s due index, built in slices');
 const NC = 1500;
 const { D: TPL_C } = await standInEngine('tpl-c', NC);
 const dueRows = (l) => JSON.stringify([...l].map((d) => [d.key, d.dueAt]));
+// B-fbd6 item 7: the whole build of the UNCHANGED stand-in (no write placed) is one list — read once, never an engine a leg
+let plainDueOnce = null;
+const plainDue = () => plainDueOnce || (plainDueOnce = (() => { const w = mkEng(ENG, copyOf(TPL_C, 'c-plain-whole'), { syncRows: 1e9 }); const l = w.dueListOf(A); w.stop(); return l; })());
 async function dueLeg(EM, tag, place = null) {
   const D = copyOf(TPL_C, `c-${tag}`);
   let e = null, placedAt = null;
@@ -303,11 +309,9 @@ async function dueLeg(EM, tag, place = null) {
   const stats = e.dueIndexStats();
   e.stop();
   // the whole build: the same store (a copy), the same writes placed BEFORE it, built in one turn
-  const D2 = copyOf(TPL_C, `c-${tag}-whole`);
-  const w = mkEng(ENG, D2, { syncRows: 1e9 });
-  if (place) await place(w);
-  const whole = w.dueListOf(A);
-  w.stop();
+  let whole = null;
+  if (place) { const w = mkEng(ENG, copyOf(TPL_C, `c-${tag}-whole`), { syncRows: 1e9 }); await place(w); whole = w.dueListOf(A); w.stop(); }
+  else whole = plainDue();
   return { firstSaid, list, whole, stats, placedAt };
 }
 const placeDue = async (e) => {
@@ -344,9 +348,7 @@ const placeDue = async (e) => {
   await until('the due index to answer', () => { asked++; const l = e.dueListOf(A, { sync: false }); if (!l.notReady) { list = l; return true; } return false; });
   const stats = e.dueIndexStats();
   e.stop();
-  const w = mkEng(ENG, copyOf(TPL_C, 'c4-whole'), { syncRows: 1e9 });
-  const whole = w.dueListOf(A);
-  w.stop();
+  const whole = plainDue();
   const said = warns.filter((x) => /made stale by whole-map writes during 3 sliced builds in a row/.test(x)).length;
   ok(touched === 3 && stats.whole === 1 && said === 1 && dueRows(list) === dueRows(whole) && whole.length > 0, `(c4) THE BOUND: three sliced builds made stale (whole-map touches) — the next built in one turn (${stats.whole}), said ONCE (${said}), answering the whole build's ${whole.length} due rows (asked ${asked}×)`, { stats, warns: warns.slice(0, 3) });
 }
@@ -366,14 +368,34 @@ const replayOp = async (eng, op) => {
   else if (op.kind === 'born') await eng.store.index.update(() => { Object.assign(eng.store.index.entry(A, op.id), rowShape(op.i), { lastAt: T }); });
   else if (op.kind === 'delete') await eng.store.index.update(() => { delete eng.store.index.live()[op.key]; });
 };
-const replayWhole = async (applied, tag) => { const w = mkEng(ENG, copyOf(TPL_C, tag), { syncRows: 1e9 }); for (const op of applied) await replayOp(w, op); const l = w.dueListOf(A); w.stop(); return l; };
+// THE WHOLE BUILD OF AN INSTANT (B-fbd6 item 7): ONE oracle engine a leg over its own copy of the stand-in — the leg's ops replayed into
+// it IN ORDER (each read's ops are the leg's list as it stood at its check: a prefix, never shorter than the last read's), then a
+// whole-map touch makes its index stale and the read builds it WHOLE, in one turn (syncRows 1e9) — the rows and the one-turn build a
+// fresh engine over a copy made at every check (37 engines and their stops, ~1.9 s of the suite), never the merge under test. Reads
+// run one at a time (a check asked while another is replayed waits for it)
+function wholeOracle(tag) {
+  const w = mkEng(ENG, copyOf(TPL_C, `${tag}-oracle`), { syncRows: 1e9 });
+  let done = 0, chain = Promise.resolve();
+  const read = (ops, opts = {}) => {
+    const job = chain.then(async () => {
+      if (ops.length < done) throw new Error(`the oracle's ops went backwards (${ops.length} < ${done})`);
+      for (; done < ops.length; done++) await replayOp(w, ops[done]);
+      await w.store.index.update((x) => { x.conversations; });   // a whole touch: the next read builds the index whole
+      return w.dueListOf(A, opts);
+    });
+    chain = job.then(() => { }, () => { });
+    return job;
+  };
+  return { read, stop: () => { try { w.stop(); } catch { } } };
+}
 async function mergeLeg(EM, tag) {
   const applied = [];
   let e = null, armed = 0, walks = 0, placed = false, lists = 0;
   const during = [];   // {phase, same}
   const apply = async (op) => { await replayOp(e, op); applied.push(op); };
-  // the ops so far, copied (a slice placed while the replay awaits is the next check's)
-  const check = async (phase) => { const served = e.dueListOf(A, { sync: false }); const whole = await replayWhole(applied.slice(), `c5-${tag}-w${during.length}`); during.push({ phase, same: !served.notReady && dueRows(served) === dueRows(whole) }); };
+  const O = wholeOracle(`c5-${tag}`);
+  // the ops so far, copied in the check's own turn (a slice placed while the oracle replays is the next check's)
+  const check = async (phase) => { const served = e.dueListOf(A, { sync: false }); const whole = await O.read(applied.slice()); during.push({ phase, same: !served.notReady && dueRows(served) === dueRows(whole) }); };
   e = mkEng(EM, copyOf(TPL_C, `c5-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
     if (i !== 1) return;
     if (armed > 0 && (what === 'due' || what === 'due-merge-keys')) {   // the FIRST walk of a build or of a merge
@@ -400,7 +422,8 @@ async function mergeLeg(EM, tag) {
   }
   const stats = e.dueIndexStats();
   e.stop();
-  const whole = await replayWhole(applied, `c5-${tag}-final`);
+  const whole = await O.read(applied.slice());
+  O.stop();
   return { same: dueRows(l) === dueRows(whole), n: whole.length, stats, walks, during, placed };
 }
 {
@@ -466,13 +489,14 @@ async function capLeg(EM, tag) {
   const applied = [], caps = [];
   let e = null, armed = 0, del = false;
   const apply = async (op) => { await replayOp(e, op); applied.push(op); };
+  const O = wholeOracle(`c7-${tag}`);
   e = mkEng(EM, copyOf(TPL_C, `c7-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
     if (i !== 1 || what !== 'due-merge-list' || armed <= 0) return;
     armed--;
     await apply({ kind: 'stamp', from: 900, n: 120, at: T });   // the pass's stamps: touched since the merge began
     const served = e.dueListOf(A, { sync: false, turnMax: 50 });
-    const whole = await replayWhole(applied.slice(), `c7-${tag}-w${caps.length}`);
-    const wt = mkEng(ENG, copyOf(TPL_C, `c7-${tag}-t${caps.length}`), { syncRows: 1e9 }); for (const op of applied) await replayOp(wt, op); const wturn = wt.dueListOf(A, { turnMax: 50 }); wt.stop();   // the whole build's own turn
+    const snap = applied.slice(), wP = O.read(snap), tP = O.read(snap, { turnMax: 50 });   // both asked in this turn: the same instant
+    const whole = await wP, wturn = await tP;   // the whole build, and the whole build's own turn
     const wk = new Set(whole.map((d) => `${d.key}|${d.dueAt}`));
     const idx = (d) => { const m = /\/m-(\d+)$/.exec(d.key); return m ? Number(m[1]) : -1; };
     const pendServed = [...served].filter((d) => { const i = idx(d); return (i >= 600 && i < 900) || (i >= 1020 && i < 1100); }).length;   // merge 2's pending rows, not re-stamped — never a head (their keys in the list are past the clock)
@@ -495,7 +519,8 @@ async function capLeg(EM, tag) {
   await until('merge 2 read and the index current', () => { l = e.dueListOf(A, { sync: false }); return armed === 0 && !l.notReady && !(e.dueIndexStats().merging > 0); }, 15000);
   const s1 = e.dueIndexStats();
   e.stop();
-  const whole = await replayWhole(applied, `c7-${tag}-final`);
+  const whole = await O.read(applied.slice());
+  O.stop();
   return { caps, same: dueRows(l) === dueRows(whole), rebuilt: s1b.sliced - s0.sliced, endedMerged: s1b.merged - s0.merged, merged: s1.merged - s1c.merged, whole: s1.whole - s0.whole };
 }
 {
@@ -698,6 +723,10 @@ async function releaseLeg(EM, tag) {
 // ═══ (h) THE FIRST DIGEST'S WARM-UP (cut 4) ═══
 console.log('(h) the first digest\'s indexes warmed in slices — parity, a write between two slices, readers that wait, a reader that reads at once, the bound');
 const digestOf = (e) => JSON.stringify(e.digest({ scope: 'first' }));
+// B-fbd6 item 7: the whole build's digest of the UNCHANGED stand-in (no write placed) is one string — read once: nine legs made a fresh
+// engine over a copy for it
+let plainDigestOnce = null;
+const plainDigest = () => plainDigestOnce || (plainDigestOnce = (() => { const w = mkEng(ENG, copyOf(TPL_D, 'h-plain-whole'), { syncRows: 1e9 }); const d = digestOf(w); w.stop(); return d; })());
 async function warmLeg(EM, tag, { place = null, during = null, bcast = null, warns = null, at = 'row-facts' } = {}) {
   const logw = warns ? { log() { }, info() { }, warn: (x) => warns.push(String(x)), error() { } } : quiet;
   let e = null, placed = null, readyEarly = null, duringOut = null;
@@ -713,10 +742,9 @@ async function warmLeg(EM, tag, { place = null, during = null, bcast = null, war
   const got = digestOf(e), stats = e.digestWarmStats();
   const fkBuilds = e.firstReadParity().stats.builds, censusRebuilt = e.censusIndexStats().builds - c0;   // the landed indexes READ, never rebuilt
   e.stop();
-  const w = mkEng(ENG, copyOf(TPL_D, `h-${tag}-whole`), { syncRows: 1e9 });
-  if (place) await place(w);
-  const whole = digestOf(w);
-  w.stop();
+  let whole = null;
+  if (place) { const w = mkEng(ENG, copyOf(TPL_D, `h-${tag}-whole`), { syncRows: 1e9 }); await place(w); whole = digestOf(w); w.stop(); }
+  else whole = plainDigest();
   return { warmed, same: got === whole, got, whole, stats, placed, readyEarly, duringOut, fkBuilds, censusRebuilt };
 }
 const placeWarm = async (e) => { await e.store.index.update(() => { e.store.index.entry(A, 'm-0', { create: false }).unread = 5; Object.assign(e.store.index.entry(A, 'm-born'), rowShape(0), { lastAt: T, unread: 3 }); }); };
@@ -740,7 +768,7 @@ const placeWarm = async (e) => { await e.store.index.update(() => { e.store.inde
   const sb = eb.digestWarmStats(), saidB = wb.filter((x) => /warm-up was started again 3 times/.test(x)).length;
   const dB = digestOf(eb);
   eb.stop();
-  const wwB = mkEng(ENG, copyOf(TPL_D, 'h-bound2-whole'), { syncRows: 1e9 }); const dW = digestOf(wwB); wwB.stop();
+  const dW = plainDigest();
   ok(tb === 3 && wbOk === false && sb.gaveUp === 1 && saidB === 1 && dB === dW, `(h5) THE BOUND: three whole touches during the warm-up — it stops (said ONCE: ${saidB}), the first read builds whole and answers the whole build's digest`, { sb, wb: wb.slice(0, 2) });
   const SRC4 = engineSource(REPO);
   const EMh = M.load('src/server/channels-engine.js', anchored(SRC4, 'rowKept.at = t0; rowKept.stale = new Set(touched); }', 'rowKept.at = t0; rowKept.stale = new Set(); }', 'the warm-up forgets the rows touched during it'), 'warm-forget');
@@ -791,9 +819,7 @@ async function boundLeg(EM, tag, { only = null } = {}) {   // `only`: 'ready' / 
   const after = sent();
   const stats = e.digestWarmStats();
   e.stop();
-  const w = mkEng(ENG, copyOf(TPL_D, `h8-${tag}-whole`), { syncRows: 1e9 });
-  const whole = digestOf(w);
-  w.stop();
+  const whole = plainDigest();
   return { ready: readyAtBound, armed, before, after, same: got === whole, stats };
 }
 {
@@ -823,9 +849,7 @@ async function throwLeg(EM, tag) {
   const sent = bc.filter((m) => m && m.type === 'channels-updated').length - bc.slice(0, n0).filter((m) => m && m.type === 'channels-updated').length;
   const got = digestOf(e), stats = e.digestWarmStats();
   e.stop();
-  const w = mkEng(ENG, copyOf(TPL_D, `h9-${tag}-whole`), { syncRows: 1e9 });
-  const whole = digestOf(w);
-  w.stop();
+  const whole = plainDigest();
   return { end, ready, sent, same: got === whole, stats };
 }
 {
