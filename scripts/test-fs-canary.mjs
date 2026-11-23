@@ -781,7 +781,7 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
   const ONE = ['statSync', 'lstatSync', 'existsSync', 'readFileSync', 'readdirSync', 'accessSync', 'realpathSync', 'mkdirSync', 'openSync', 'writeFileSync', 'appendFileSync', 'rmSync', 'unlinkSync', 'chmodSync', 'utimesSync'];
   const DATA2 = path.join(ROOT, 'data'), STORE2 = `${ROOT}-store/S`, NFS2 = '/srv/fscan-cost-nfs2';
   const MI2 = `900 42 0:73 / ${NFS2} rw,relatime - nfs4 192.0.2.10:/v rw\n901 42 0:74 / ${DATA2} rw,relatime - nfs4 192.0.2.11:/d rw\n`;
-  const PATHS = { ownData: path.join(DATA2, 'x.json'), ownTree: IN, nfs: `${NFS2}/a/b`, storage: `${STORE2}/b.md`, climbs: `${ROOT}/../${path.basename(ROOT)}-store/S/c.md`,
+  const PATHS = { ownSelf: DATA2, ownData: path.join(DATA2, 'x.json'), ownTree: IN, nfs: `${NFS2}/a/b`, storage: `${STORE2}/b.md`, climbs: `${ROOT}/../${path.basename(ROOT)}-store/S/c.md`,
     relative: 'rel/x.json', buffer: Buffer.from(`${NFS2}/buf`), url: new URL(`file://${STORE2}/u.md`) };
   const eqRun = (W) => {
     const F2 = {}, seen = [];
@@ -799,7 +799,7 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     return r;
   };
   const EQ = eqRun(SW);
-  ok(!EQ.bad.length && EQ.store === STORE2 && EQ.nfs === NFS2, `the one-path fast road judges as the loop does: ${ONE.length} calls × ${Object.keys(PATHS).length} kinds of path (own data, own tree, a network mount, a storage row, a path that climbs into storage, relative, a Buffer, a URL) — same root, same shown path`, EQ.bad.slice(0, 6));
+  ok(!EQ.bad.length && EQ.store === STORE2 && EQ.nfs === NFS2, `the one-path fast road judges as the loop does: ${ONE.length} calls × ${Object.keys(PATHS).length} kinds of path (the data folder itself, own data, own tree, a network mount, a storage row, a path that climbs into storage, relative, a Buffer, a URL) — same root, same shown path`, EQ.bad.slice(0, 6));
   ok(EQ.rename === STORE2 && EQ.fromHome === STORE2 && EQ.fromNfs === STORE2, `a call of two paths INTO a storage row is judged by the path that hits — the loop's road, never the first path alone: from the own tree (no hit), from the own data on its mount (a 'home' hit) and from a network mount (a network hit), a later storage hit wins (${EQ.rename} · ${EQ.fromHome} · ${EQ.fromNfs})`, EQ);
   ok(EQ.data === DATA2, `THE OWN DATA ON ITS OWN MOUNT (a data dir on an nfs4 mount): its paths are the 'home' hit — named by that mount (${EQ.data})`, EQ);
   // …and NEVER REFUSED — on an ARMED witness (eqRun's is disarmed: it refuses nothing), beside a storage row that IS refused
@@ -821,6 +821,10 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
     const skipOwn = eqMut('{ p0 = args[0]; hit = verdictOf(p0); }', '{ p0 = args[0]; hit = MPC.rootOf(p0, CTX); }', 'fast-skips-own');
     const twoAsOne = eqMut("FNS.filter((f) => !f.startsWith('Dir.') && !FD_FNS.has(f) && !TWO_PATH.has(f))", "FNS.filter((f) => !f.startsWith('Dir.') && !FD_FNS.has(f))", 'two-as-one');
     const noHome = eqMut('(ownHit && p.startsWith(DATA_SLASH) ? ownHit : null)', 'null', 'no-home');
+    // the loop given back its own inline compare (the old one: the data folder's only for a path that starts with the folder plus a
+    // slash) while the one-path road keeps the helper: the parity table's data-folder row disagrees
+    const loopOld = eqMut("            const o = ownVerdict(p);\n            if (o !== undefined) { if (o && !hit) { hit = o; hp = p; } continue; }   // the own tree: never refused, worded by ownVerdict\n",
+      "            if (ownPath(p)) { if (ownHit && !hit && p.startsWith(DATA_SLASH)) { hit = ownHit; hp = p; } continue; }\n", 'loop-old-compare');   // stale-pins: kept — the loop's old compare, planted back as the RED
     const firstWins = eqMut("if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }", 'if (r && !hit) { hit = r; hp = p; }', 'first-hit-wins');
     const wsStorage = cut(WSRC, "Object.freeze({ kind: 'home',", "Object.freeze({ kind: 'storage',");
     const asStorage = wsStorage ? armedRun(M.load('src/server/sync-fs-witness.js', wsStorage, 'home-as-storage')) : null;
@@ -828,18 +832,21 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
       `RED CONTROLS: the first hit kept (a later storage hit never wins) names the data dir and the network mount, never the storage row (${firstWins && firstWins.fromHome} · ${firstWins && firstWins.fromNfs}); the own-mount hit made a storage hit refuses the data dir's own stat and write (${asStorage && asStorage.data})`, { firstWins, asStorage });
     ok(skipOwn && skipOwn.bad.length > 0 && twoAsOne && twoAsOne.rename !== STORE2 && noHome && noHome.data !== DATA2,
       `RED CONTROLS: a fast road that skips the own-tree verdict disagrees with the loop (${skipOwn && skipOwn.bad.length} calls); renameSync taken as one path misses the storage row (${twoAsOne && twoAsOne.rename}); the own-mount hit dropped names nothing (${noHome && noHome.data})`, { skipOwn: skipOwn && skipOwn.bad.slice(0, 2), twoAsOne: twoAsOne && twoAsOne.rename, noHome: noHome && noHome.data });
+    ok(!!loopOld && loopOld.bad.length > 0 && loopOld.bad.every((x) => x.includes('(ownSelf)')),
+      `RED CONTROL: the loop given back its old compare — the parity table's data-folder row disagrees, and only it (${loopOld && loopOld.bad.length} of ${ONE.length} calls: ${loopOld && loopOld.bad.slice(0, 2).join(' · ')})`, loopOld && loopOld.bad.slice(0, 6));
   }
-  // ROW 410 (主开发 r2811 — box row 410: ONE of test-store-slow-storage's 23 witness lines said «not under a mount» for its bindfs data
-  // dir): THE DATA FOLDER ITSELF IS A PATH OF THE DATA FOLDER. A folder's own sync opens it by path.dirname, no slash at its end
-  // (src/secret-file.js replaceShredding, at every first start since line 438). HELD, it is worded by the data folder's own mount on
-  // both roads, as a file inside it is: (1) a one-path call on the folder; (2) the folder opened and its descriptor synced (row 410's
-  // scene: the fd road, pathsOf); (3) a path of the checkout beside it — the checkout's own file, and a sibling whose name only
-  // begins with the folder's — keeps its words. Every call reads 60 ms on the counted clock (count's step), past heldMs: each is
-  // held; the witness is ARMED (a 'home' hit is witnessed, never refused). RED: the old compare (the data folder's only for a path
-  // that starts with the folder plus a slash) put back through the helper: red on (1) and (2)
-  const selfRun = (W) => {
+  // THE DATA FOLDER ITSELF IS A PATH OF THE DATA FOLDER. A folder's own sync opens it by path.dirname, no slash at its end
+  // (src/secret-file.js replaceShredding: the atomic replace that writes data/instance.json at a first start ends with a sync of the
+  // folder). HELD, it is worded by the data folder's own mount on both roads, as a file inside it is: (1) a one-path call on the
+  // folder; (2) the folder opened and its descriptor synced (the fd road, pathsOf); (3) a path of the checkout beside it — the
+  // checkout's own file, and a sibling whose name only begins with the folder's — keeps its words; (4) a data folder handed
+  // unresolved ('/./', '//', a trailing slash): the folder itself still named (the compare is built from the resolved folder).
+  // Every call reads 60 ms on the counted clock (count's step), past heldMs: each is held; the witness is ARMED (a 'home' hit is
+  // witnessed, never refused). REDS: the old compare (the data folder's only for a path that starts with the folder plus a slash)
+  // put back through the helper: red on (1) and (2); the compare built from the folder as handed: red on (4)
+  const selfRun = (W, dataDir = DATA2) => {
     const F4 = {}; let fdN = 40;
-    const w4 = W.create({ rootDir: ROOT, dataDir: DATA2, fresh: true, armed: true, live: false, heldMs: 50, ringMs: 50, log: quiet, readMountinfo: () => MI2, registry: () => [{ mountpoint: STORE2, name: 'S', id: 'mnt-s' }] });
+    const w4 = W.create({ rootDir: ROOT, dataDir, fresh: true, armed: true, live: false, heldMs: 50, ringMs: 50, log: quiet, readMountinfo: () => MI2, registry: () => [{ mountpoint: STORE2, name: 'S', id: 'mnt-s' }] });
     F4.statSync = function () { return true; }; F4.openSync = function () { return ++fdN; }; F4.fsyncSync = function () { }; F4.closeSync = function () { };
     LB.install({ fsMod: F4, root: ROOT }); w4.refresh(); LB.setHook(w4.hook);
     const held = (f) => { const n0 = w4.ring().length; let threw = null; try { count(60, f); } catch (e) { threw = (e && e.code) || 'threw'; }
@@ -852,19 +859,27 @@ console.log('§10 THE INSTRUMENT\'S OWN COST IS COUNTED (B-9169) — clock reads
   };
   const HOME_WORDS = `under the nfs4 mount «${DATA2}» this instance lives on (witnessed, never refused)`;
   const named = (r) => !!r && !r.threw && r.calls.length > 0 && r.calls.every((c) => c.ms >= 50 && c.words.includes(HOME_WORDS));
-  const S410 = selfRun(SW);
-  ok(named(S410.one) && S410.one.calls.length === 1 && S410.one.calls[0].path === DATA2,
-    `ROW 410 (1): a held one-path call on the data folder ITSELF names its mount — ${S410.one.calls.map((c) => c.words).join(' | ')}`, S410.one);
-  ok(named(S410.fdRoad) && S410.fdRoad.calls.map((c) => c.fn).join() === 'openSync,fsyncSync,closeSync' && S410.fdRoad.calls.every((c) => c.path === DATA2),
-    `ROW 410 (2): the data folder opened and its descriptor synced, held — each of the three names its mount (the fd road; row 410's scene): ${S410.fdRoad.calls.map((c) => `${c.fn} ${c.words.includes(HOME_WORDS) ? 'names it' : 'NOT'}`).join(' · ')}`, S410.fdRoad);
-  ok(!S410.beside.threw && S410.beside.calls.length === 2 && S410.beside.calls.every((c) => c.words.includes('not under a mount')),
-    `ROW 410 (3): a path of the checkout beside the data folder keeps its words — ${S410.beside.calls.map((c) => c.words).join(' | ')}`, S410.beside);
-  { // ITS RED CONTROL: the old compare put back through the anchored helper (the data folder itself no longer its own) — red on (1) and (2)
-    const ws410 = cut(WSRC, '    if (DATA_SELF !== null && p === DATA_SELF) return ownHit;   // the data folder itself, by its own mount (row 410)\n', '');
-    const R410 = ws410 ? selfRun(M.load('src/server/sync-fs-witness.js', ws410, 'data-self-old-compare')) : null;
+  const SELF = selfRun(SW), UNRESOLVED = `${ROOT}/./data//`, SELFU = selfRun(SW, UNRESOLVED);
+  ok(named(SELF.one) && SELF.one.calls.length === 1 && SELF.one.calls[0].path === DATA2,
+    `THE DATA FOLDER ITSELF (1): a held one-path call on the folder names its mount — ${SELF.one.calls.map((c) => c.words).join(' | ')}`, SELF.one);
+  ok(named(SELF.fdRoad) && SELF.fdRoad.calls.map((c) => c.fn).join() === 'openSync,fsyncSync,closeSync' && SELF.fdRoad.calls.every((c) => c.path === DATA2),
+    `THE DATA FOLDER ITSELF (2): the folder opened and its descriptor synced, held — each of the three names its mount (the fd road): ${SELF.fdRoad.calls.map((c) => `${c.fn} ${c.words.includes(HOME_WORDS) ? 'names it' : 'NOT'}`).join(' · ')}`, SELF.fdRoad);
+  ok(!SELF.beside.threw && SELF.beside.calls.length === 2 && SELF.beside.calls.every((c) => c.words.includes('not under a mount')),
+    `THE DATA FOLDER ITSELF (3): a path of the checkout beside the folder keeps its words — ${SELF.beside.calls.map((c) => c.words).join(' | ')}`, SELF.beside);
+  ok(named(SELFU.one) && named(SELFU.fdRoad),
+    `THE DATA FOLDER ITSELF (4): the data folder handed unresolved (${UNRESOLVED.slice(ROOT.length)}) — the folder itself still names its mount on both roads (${SELFU.one.calls.map((c) => c.words.includes(HOME_WORDS) ? 'named' : 'NOT').join()} · ${SELFU.fdRoad.calls.map((c) => c.words.includes(HOME_WORDS) ? 'named' : 'NOT').join()})`, SELFU);
+  { // ITS RED CONTROLS: the old compare put back through the anchored helper (the data folder itself no longer its own) — red on (1) and
+    // (2); the folder-itself compare built from the folder as handed (its trailing slashes cut, never resolved) — red on (4)
+    const wsOld = cut(WSRC, '    if (DATA_SELF !== null && p === DATA_SELF) return ownHit;   // the data folder itself (its own sync opens it by path.dirname), by its own mount\n', '');
+    const ROld = wsOld ? selfRun(M.load('src/server/sync-fs-witness.js', wsOld, 'data-self-old-compare')) : null;
     const said = (r) => (r ? r.calls.filter((c) => c.words.includes('not under a mount')).map((c) => c.fn) : []);
-    ok(!!R410 && said(R410.one).join() === 'statSync' && said(R410.fdRoad).includes('fsyncSync') && !named(R410.one) && !named(R410.fdRoad),
-      `RED CONTROL: the old compare put back — the data folder itself is worded «not under a mount» on the one-path road (${said(R410.one).join() || 'none'}) and on the fd road (${said(R410.fdRoad).join(', ') || 'none'})`, R410);
+    ok(!!ROld && said(ROld.one).join() === 'statSync' && said(ROld.fdRoad).includes('fsyncSync') && !named(ROld.one) && !named(ROld.fdRoad),
+      `RED CONTROL: the old compare put back — the data folder itself is worded «not under a mount» on the one-path road (${said(ROld.one).join() || 'none'}) and on the fd road (${said(ROld.fdRoad).join(', ') || 'none'})`, ROld);
+    const wsHanded = cut(WSRC, "  const DATA_SELF = typeof dataDir === 'string' && dataDir[0] === '/' && path.resolve(dataDir) !== '/' ? path.resolve(dataDir) : null;\n",
+      "  const DATA_SELF = DATA_SLASH && DATA_SLASH[0] === '/' && DATA_SLASH.length > 1 ? DATA_SLASH.slice(0, -1) : null;\n");   // stale-pins: kept — the compare as first built, planted back as the RED
+    const RHanded = wsHanded ? selfRun(M.load('src/server/sync-fs-witness.js', wsHanded, 'data-self-as-handed'), UNRESOLVED) : null;
+    ok(!!RHanded && said(RHanded.one).join() === 'statSync' && !named(RHanded.one),
+      `RED CONTROL: the folder-itself compare built from the folder as handed — the unresolved data folder is worded «not under a mount» (${said(RHanded.one).join() || 'none'})`, RHanded);
   }
   const noKept = cut(WSRC, "if (typeof p !== 'string' || p.length > ROOT_MEMO_PATH_MAX) return judged(p);", 'return judged(p);');
   const muts = {

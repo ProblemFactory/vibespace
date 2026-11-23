@@ -133,20 +133,21 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   const OWN = [rootDir, dataDir].filter((d) => typeof d === 'string' && d[0] === '/' && d.length > 1).map((d) => d.replace(/\/+$/, '') + '/');
   const ownPath = (p) => typeof p === 'string' && p.indexOf('/..') < 0 && OWN.some((o) => p.startsWith(o));
   const DATA_SLASH = dataDir ? String(dataDir).replace(/\/+$/, '') + '/' : null;
-  // row 410 (主开发 r2811): THE DATA FOLDER ITSELF IS A PATH OF THE DATA FOLDER — a folder's own sync opens it by path.dirname, with
-  // no slash at its end (src/secret-file.js replaceShredding, at every first start since line 438). ONE helper words a path of the
-  // instance's own tree on BOTH roads (the one-path road's `judged` and the loop over pathsOf), so the two cannot differ again:
-  // the data folder's own network / FUSE mount (ownHit) for the data folder or a path in it, else null (never refused);
-  // undefined = not the own tree (MPC.rootOf judges it). No stat, no read: compares only
-  const DATA_SELF = DATA_SLASH && DATA_SLASH[0] === '/' && DATA_SLASH.length > 1 ? DATA_SLASH.slice(0, -1) : null;
+  // THE DATA FOLDER ITSELF IS A PATH OF THE DATA FOLDER: a folder's own sync opens it by path.dirname, with no slash at its end
+  // (src/secret-file.js replaceShredding — the atomic replace that writes data/instance.json at a first start ends with a sync of
+  // the folder). ONE helper words a path of the instance's own tree on BOTH roads (the one-path road's `judged` and the loop over
+  // pathsOf), so the two cannot differ again: the data folder's own network / FUSE mount (ownHit) for the data folder or a path
+  // in it, else null (never refused); undefined = not the own tree (MPC.rootOf judges it). The folder-itself compare is built
+  // from the RESOLVED folder ('/a/./data', '/a//data/' are '/a/data'). No stat, no read: compares only
+  const DATA_SELF = typeof dataDir === 'string' && dataDir[0] === '/' && path.resolve(dataDir) !== '/' ? path.resolve(dataDir) : null;
   const ownVerdict = (p) => {
-    if (DATA_SELF !== null && p === DATA_SELF) return ownHit;   // the data folder itself, by its own mount (row 410)
+    if (DATA_SELF !== null && p === DATA_SELF) return ownHit;   // the data folder itself (its own sync opens it by path.dirname), by its own mount
     if (!ownPath(p)) return undefined;
     return (ownHit && p.startsWith(DATA_SLASH) ? ownHit : null);
   };
   // B-9169: A PATH'S VERDICT IS KEPT per path string until the roots refresh (a new CTX), bounded — both parts are PURE
   // over the path and what the refresh set: outside the instance's own tree, MPC.rootOf's root row (or null); inside it,
-  // the data dir's own network / FUSE mount (ownHit) for a path under the data dir, else null (never refused). A path
+  // the data dir's own network / FUSE mount (ownHit) for the data dir itself or a path under it, else null (never refused). A path
   // that is not a string (a Buffer, a URL), or is longer than ROOT_MEMO_PATH_MAX, is judged every time.
   const rootMemo = new Map();
   let memoCtx = null;
