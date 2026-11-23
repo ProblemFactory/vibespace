@@ -714,6 +714,49 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), jp = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8');
     ok(/if \(!jm\.ready\) \{ res\.status\(503\)[^\n]*\n  if \(jm\._unread && jm\._unread\.store\) \{ res\.status\(503\)\.json\(\{ error: jm\.unreadWords\(\), code: 'records-unread' \}\); return null; \}/.test(ar) && (jp.match(/listErrorText\(r\)/g) || []).length === 2, 'B-f276 cure WIRING: every agent job verb (jobAuth: list, show, poll, stop, run) answers the same words; the panel\'s two lists word the code in the person\'s language');
   }
+  // A3. THE READER TABLE's older roads (r3230), while jobs.json is HELD: the wake-grant rows, a job's token, the logs remover's «a live
+  // record names it» — each says the hold or keeps, never «none» / «unknown token» / gone
+  {
+    const d = mkDir('jobs-triage-unread-table'), F = path.join(d, 'jobs.json');
+    plant(F, body, 'folder');
+    const { jm: R, call: callR } = boot(d);
+    const wg = await callR('GET', '/api/jobs-wake-grants', { query: { conversation: 'conv-made-x' } });
+    ok(wg.status === 503 && wg.body.code === 'records-unread' && /a conversation's jobs cannot be listed while the job records cannot be read/.test(wg.body.error), 'the reader table (r3230): a conversation\'s wake-grant rows (the Terminate confirm) while held answer the hold by name (503) — never «owns no job»', wg);
+    const tk = R.tokenHeldAnswer('jbt_' + '0'.repeat(32));
+    ok(!!tk && tk.status === 503 && tk.code === 'records-unread' && /a job's token cannot be checked/.test(tk.error) && R.tokenHeldAnswer('vsst_made') === null, 'the reader table: a job\'s token while held is answered by the hold\'s words (503) — never «unknown job token» to a job that may be running', tk);
+    const LD = path.join(R.logsDir, 'jb-f2760a01'); fs.mkdirSync(LD, { recursive: true }); fs.writeFileSync(path.join(LD, 'run-1.log'), 'made-up');
+    const lw = await R._logsWhole(['jb-f2760a01']);
+    ok(!!lw && (lw.gone || []).length === 0 && (lw.keptWhy || {})['jb-f2760a01'] === 'named' && fs.existsSync(LD), 'the reader table: the logs remover while held NAMES every id (kept) — a live job\'s folder never goes on «no live record names it»', lw);
+    R.shutdown();
+    // RED CONTROL: the remover's held branch cut (in a copy) — the same ask takes the folder
+    const MJT = mutantCopies('jobs-unread-table', ROOT), jsT = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+    const JT = MJT.load('src/jobs.js', editAnchor(jsT, 'filterWhole: (ids) => (this._unread && this._unread.store ? [] : ids.filter((id) => !this.jobs.has(id)))', 'filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id))', 'src/jobs.js'), 'logs-unheld');
+    const dT = mkDir('jobs-triage-unread-table-ctl'), FT = path.join(dT, 'jobs.json');
+    plant(FT, body, 'folder');
+    const XT = engine(JT, dT, []); XT._unreadStopped = true;
+    const LT = path.join(XT.logsDir, 'jb-f2760a01'); fs.mkdirSync(LT, { recursive: true }); fs.writeFileSync(path.join(LT, 'run-1.log'), 'made-up');
+    const lx = !!XT._unread.store ? await XT._logsWhole(['jb-f2760a01']) : null;
+    ok(!!XT._unread.store && !!lx && (lx.gone || []).includes('jb-f2760a01') && !fs.existsSync(LT), 'RED CONTROL — the logs remover\'s held branch cut (in a copy): while held the live job\'s folder goes', lx);
+    XT.shutdown();
+    for (const rr of copiesCensus(MJT.files, MJT.dir, ROOT, { minCopies: 1, label: 'reader-table ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+    // THE TOKEN DOORS' CENSUS: every src file that looks a jbt_ token up is a row — its lookups and its held answers counted (a new
+    // door, or a door without the hold's answer, is red until its row says it). jobAuth asks the hold before its lookup (A2's pin);
+    // the vault's four lookups share ONE answer at its doors' gate. RED CONTROL: the census over a copy of the texts with one answer cut
+    const TOKEN_DOORS = { 'src/agent-routes.js': [4, 3], 'src/routes/design.js': [1, 1], 'src/routes/feedback.js': [1, 1], 'src/routes/browser.js': [1, 1], 'src/routes/vault.js': [4, 1] };
+    const walkSrc = (dir, out = []) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); if (e.isDirectory()) walkSrc(f, out); else if (/\.(c|m)?js$/.test(e.name)) out.push(f); } return out; };
+    const texts = new Map(walkSrc(path.join(ROOT, 'src')).map((f) => [path.relative(ROOT, f), fs.readFileSync(f, 'utf8')]));
+    const census = (T) => { const bad = []; for (const [rel, src] of T) { if (rel === 'src/jobs.js') continue; const n = src.split('jobByToken(').length - 1; if (!n) continue; const h = src.split('tokenHeldAnswer(').length - 1, row = TOKEN_DOORS[rel]; if (!row || row[0] !== n || row[1] !== h) bad.push(`${rel}: ${n} lookup(s), ${h} held answer(s)${row ? ` — its row says ${row[0]}, ${row[1]}` : ' — no row'}`); } for (const rel of Object.keys(TOKEN_DOORS)) if (!T.has(rel)) bad.push(`${rel}: a row with no file`); return bad; };
+    const cb = census(texts);
+    ok(cb.length === 0, 'THE TOKEN DOORS\' CENSUS (the reader table): every file that looks a job\'s token up answers the hold by name while jobs.json is held — its lookups and answers are its row', cb);
+    const cut = new Map(texts); cut.set('src/routes/design.js', cut.get('src/routes/design.js').split('tokenHeldAnswer(').join('noAnswer('));
+    ok(census(cut).length === 1, 'RED CONTROL — one door\'s held answer cut (in a copy of the texts): the census names it', census(cut));
+    // the page's half (pins): the rows' loader keeps the hold (never «none owned»), the Terminate confirm and the proposal card SAY it,
+    // in the person's three languages
+    { const WG = fs.readFileSync(path.join(ROOT, 'src/lib/wake-grant-rows.js'), 'utf8'), UT = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
+      const W = 'This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.';
+      const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+      ok(WG.includes("if (r && r.code === 'records-unread') return Object.assign([], { held: true });") && WG.includes("if (!rows.length) return rows.held ? { node: wakeGrantHeldNode(), save: async () => 0 } : null;") && UT.includes('if (!rows.length) { if (rows.held) place.replaceChildren(wakeGrantHeldNode()); return; }') && WG.includes(`t('${W}')`) && zh.includes(`"${W}":`) && ja.includes(`"${W}":`), 'the reader table (pins): the wake-grant rows\' loader keeps the hold; the Terminate confirm and the proposal card say it (zh, ja beside) — never an empty list read as «none owned»'); }
+  }
   // B. THE ARCHIVE, EISDIR (a real mode): the boot's sweep would write over it — it keeps its records in the store instead
   const dB = mkDir('jobs-triage-unread-archive'), AF = path.join(dB, 'jobs-archive.json');
   fs.writeFileSync(path.join(dB, 'jobs.json'), JSON.stringify([rec('jb-f2760b01')]));

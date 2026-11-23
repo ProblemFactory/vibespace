@@ -326,7 +326,7 @@ function create(engineCtx) {
     if (b.credentialKey || b.clientPreset || b.credential || b.clientId != null || b.clientSecret != null) throw httpErr(400, 'ambiguous-client', 'the request names a storage mount\'s client AND another client — name one');
     return true;
   }
-  const mountRefusal = (e) => { const code = (e && e.code) || 'mount-no-client'; return httpErr(code === 'mount-gone' ? 404 : code === 'no-mounts' ? 503 : code === 'mount-client-vendor' ? 400 : 409, code, String((e && e.message) || e)); };
+  const mountRefusal = (e) => { const code = (e && e.code) || 'mount-no-client'; return httpErr(code === 'mount-gone' ? 404 : code === 'no-mounts' || code === 'storage_unread' ? 503 : code === 'mount-client-vendor' ? 400 : 409, code, String((e && e.message) || e)); };
   /** THE KEY-LESS HALF of a borrow (verify r2): the row's vendor, the mounts
    *  door, the mount's ID and every refusal that needs no key — gone / no
    *  client / another vendor's (`mountClients.head`, nothing decrypted) —

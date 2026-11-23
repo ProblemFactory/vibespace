@@ -1126,6 +1126,18 @@ console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder o
   const at = (root, ...p) => path.join(root, ...p);
   const why = (cwd, o) => (CW.verdict(cwd, o) || { why: null }).why;
   ok(why(at(sealedAt, 'proj'), { missing: false }) === null && why(at(sealedAt, 'proj')) === 'mount_down' && why(at(d, 'elsewhere')) === null && why(sealedAt + '-other/x') === null, 'a vault NOT SET UP: an existing folder waits for nothing; a MISSING one under a recorded mount that is down is mount_down (never «gone»); no mount on the path (or a prefix only) ⇒ null');
+  // the reader table (r3230): mounts.json HELD (its memory empty because unread) — a MISSING folder is mount_down by the list's words,
+  // never «gone» and never made (it may sit on a mount point that is not up); an existing folder waits for nothing. RED CONTROL: the
+  // held branch cut (in a copy) — the missing folder reads null, and the create's recreate road would make it under the mount point
+  { const was = mounts.unreadWords; mounts.unreadWords = () => 'mounts.json in VibeSpace\'s data folder could not be read (EIO)';
+    try {
+      const wh = CW.verdict(at(d, 'elsewhere'));
+      ok(!!wh && wh.why === 'mount_down' && wh.held === true && /cannot read its list of storage mounts/.test(wh.name) && CW.verdict(at(d, 'elsewhere'), { missing: false }) === null, 'mounts.json HELD: a missing folder is mount_down by the held list\'s words — never «gone», never recreated; an existing one waits for nothing', wh);
+      const { mutantCopies: MC } = await import('./mutant-copy.mjs'), CS = fs.readFileSync(path.join(REPO, 'src/server/cwd-wait.js'), 'utf8');
+      const CWh = MC('vs-cwdwait-held', REPO).load('src/server/cwd-wait.js', editAnchor(CS, "  if (!d) { const held = missing ? heldListOf() : null; return held ? { why: 'mount_down', root: null, name: held, held: true } : null; }", '  if (!d) return null;', 'src/server/cwd-wait.js'), 'held-unasked');
+      CWh.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [] }) });
+      ok(CWh.verdict(at(d, 'elsewhere')) === null, 'RED CONTROL — the held branch cut (in a copy): the missing folder over a held mounts list reads null («gone»)');
+    } finally { mounts.unreadWords = was; } }
   await v.setup(PW, {}); v.lock('door');
   const row = mounts.list().find((r) => r.id === 'm-team');
   ok(row && row.keyFile && row.keyFile.code === KF.VAULT_LOCKED, 'the REAL list row of a mount whose secret is sealed says its key waits for the vault', row && row.keyFile);

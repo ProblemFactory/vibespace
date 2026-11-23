@@ -942,6 +942,8 @@ const PRINTS = {
     'x.error': 'judged:msgName — the hand-over refusal sentence (our words around the caller\'s own path and a conversation id)',
   }),
   ...rows('data/bin/vibespace-channels', {
+    // B-f276 family unit 2, the reader table (r3230): mounts.json held — the creds answer's hold words (src/mounts.js unreadWords)
+    'r.mountsHeld': `${V}:the mounts' hold words (src/mounts.js unreadWords: our sentence around the store's file name and its code)`,
     // lane lg-store-writes (B-15ac): the close helper's sentence (src/fd-close.js closeFailedWords — our words around the site's name and an errno)
     'closeSaid': `${V}:the close helper's one sentence (src/fd-close.js: our words around the site's name and an errno)`,
     // lane pod-oauth-callback: `connect <kind>` and `list`'s not-connected line — a vendor TYPE's label / kind and counts, our words

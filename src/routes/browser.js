@@ -1651,7 +1651,7 @@ function jobFactsOf(token, { mint = true } = {}) {
   const jm = typeof ctx?.getJobs === 'function' ? ctx.getJobs() : null;
   if (!jm || !jm.ready || typeof jm.jobByToken !== 'function') return { refusal: { status: 503, code: 'unavailable', error: 'the jobs engine is not ready — retry shortly' } };
   const job = jm.jobByToken(token);
-  if (!job) return { refusal: { status: 401, code: 'unauthorized', error: 'unknown job token' } };
+  if (!job) return { refusal: (typeof jm.tokenHeldAnswer === 'function' && jm.tokenHeldAnswer(token)) || { status: 401, code: 'unauthorized', error: 'unknown job token' } };   // B-f276 (r3230's table): jobs.json held ⇒ the hold by name
   const cid = J.ownerConversationOf(job);
   let s = null, id = null;
   // verify r1 (MED, the channel-withdraw r4/r5 class): the owner's LIVE session is the one ADDRESSABLE by the owner's id —

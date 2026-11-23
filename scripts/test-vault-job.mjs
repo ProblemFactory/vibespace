@@ -585,6 +585,14 @@ async function legHeldPress(doorSrc = null) {
   row(!!rv && rv.ok === false && rv.code === 'records-unread' && cards(W).length === 1, 'round wgbjnr750: the job card\'s ✕ while held is refused BY NAME (records-unread), never «bad_revoke» — nothing taken back', rv);
   { const VR = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
     row(VR.includes("'records-unread': 503,") && VR.includes("(code === 'records-unread' && r && r.words)"), 'round wgbjnr750 (pin): the route answers a held refusal 503 with the hold\'s words — never the bare code with 400'); }
+  // the reader table (r3230): AFTER A TORN LIFT (the list read, the job no longer in it) a job a kept copy still names is UNKNOWN, never
+  // «over»: the press is refused by name and the card stays (the stand-in answers the production name: a kept copy names the job)
+  { W.jm._unread.store = was; const nb = W.jm.namedByCopy; W.jm.namedByCopy = () => true;
+    const tn = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
+    await W.door.factsLanded();
+    rows.torn = tn; rows.tornOpen = cards(W).length;
+    row(!!tn && tn.ok === false && tn.code === 'records-unread' && /kept copy still names it/.test(String(tn.words)) && cards(W).length === 1, 'the reader table: after a torn lift a press for a job a kept copy names is refused by name — the card stays, never «the job that asked is gone»', tn);
+    W.jm.namedByCopy = nb; }
   W.jm.jobs.clear(); for (const [k, v] of keep) W.jm.jobs.set(k, v); W.jm._unread.store = was;
   const d = W.door.answer(a.askId, { answer: 'deny', by: 'user', person: true });
   await W.door.factsLanded();
@@ -1863,9 +1871,11 @@ ok(!!MUT_REAUTH && !!cardMutReauth.unauthed && cardMutReauth.unauthed.ok === tru
 ok(!!MUT_DEDUPE && cardMutDedupe.rejudge > 1, 'CONTROL — a card per re-judge (the open-card check removed): a second card — RED on the copy', MUT_DEDUPE ? cardMutDedupe.rejudge : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_DENY && denyMut.state === 'waiting', 'CONTROL — a Deny that leaves its job (the refusal removed): the job still waits — RED on the copy', MUT_DENY ? denyMut.state : 'the copy could not be built (its anchor is missing)');
 const MUT_HELDPRESS = dmut("    if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords() : 'the Background Work records cannot be read right now' };\n", '');
-const [heldPress, heldPressMut] = await Promise.all([legHeldPress(), MUT_HELDPRESS ? legHeldPress(MUT_HELDPRESS) : {}]);
+const MUT_TORNPRESS = dmut("    if (!job && jm && typeof jm.namedByCopy === 'function' && jm.namedByCopy(String(q.jobId))) return { ok: false, code: 'records-unread', words: 'the job that asked is no longer listed (its records were damaged and a kept copy still names it) — this card stays until that copy is put back or cleared' };\n", '');
+const [heldPress, heldPressMut, tornPressMut] = await Promise.all([legHeldPress(), MUT_HELDPRESS ? legHeldPress(MUT_HELDPRESS) : {}, MUT_TORNPRESS ? legHeldPress(MUT_TORNPRESS) : {}]);
 print('⑨g THE JOBS STORE HELD (B-f276 family unit 2, the census\'s J2 — 主开发 r3115)', heldPress);
 ok(!!MUT_HELDPRESS && heldPressMut.open === 0, 'CONTROL — the hold not asked (the release\'s road): the press closes the card as over — RED on the copy', MUT_HELDPRESS ? { held: heldPressMut.held, open: heldPressMut.open } : 'the copy could not be built (its anchor is missing)');
+ok(!!MUT_TORNPRESS && tornPressMut.tornOpen === 0, 'CONTROL — the kept copy not asked (the reader table, r3230): after a torn lift the press closes the card as over — RED on the copy', MUT_TORNPRESS ? { torn: tornPressMut.torn, open: tornPressMut.tornOpen } : 'the copy could not be built (its anchor is missing)');
 ok(!!MUT_CAP && capsMut.n === 5, 'CONTROL — no per-conversation bound: a fifth card — RED on the copy', MUT_CAP ? capsMut.n : 'the copy could not be built (its anchor is missing)');
 print('⑩ TAKEN BACK = STOPPED · A LOCK STOPS NOTHING (lane vault-job-approval — decisions ④ ③)', [...revoke, ...gone, ...jgone, ...lockRuns, ...pdel, ...adel]);
 print('⑩e A LOCK WITHDRAWS THE CARDS (B-a08e, 主开发 r1665) — the job waits, the unlock asks again', lockWithdraw);

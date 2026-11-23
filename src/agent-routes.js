@@ -1903,7 +1903,7 @@ function msgCaller(req, res) {
     const jm = getJobs && getJobs();
     if (!jm || !jm.ready || !jm.jobByToken) { res.status(503).json({ error: 'the jobs engine is not ready — retry shortly', code: 'unavailable' }); return null; }
     const job = jm.jobByToken(token);
-    if (!job) { res.status(401).json({ error: 'unknown job token', code: 'auth' }); return null; }
+    if (!job) { const h = (jm && typeof jm.tokenHeldAnswer === 'function' ? jm.tokenHeldAnswer(token) : null); if (h) { res.status(h.status).json({ error: h.error, code: h.code }); return null; } res.status(401).json({ error: 'unknown job token', code: 'auth' }); return null; }   // B-f276 (r3230's table): jobs.json held ⇒ the hold by name
     const cid = (job.owner && job.owner.conversation && job.owner.conversation.id) || null;
     if (!cid) { res.status(409).json({ error: 'this job has no owner conversation to speak for — run vibespace-msg from a conversation', code: 'job-token' }); return null; }
     // the owner's LIVE session (if any) lends its Task Groups to reach; a job
@@ -2685,7 +2685,7 @@ app.get('/api/agent/channels/watches', (req, res) => {
 const rawApi = () => { const c = channelsEngine(); return c && c.rawApi ? c.rawApi : null; };
 // lane inline-receipts-compose-api: the API proposals' cards (src/server/channel-api-cards.js) — `collect` = the CLI waiting on one
 const apiCardsOf = () => { const c = channelsEngine(); return c && c.apiCards && typeof c.apiCards.collect === 'function' ? c.apiCards : null; };
-const API_STATUS = Object.freeze({ api_unread: 503, api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_unjudged: 502, api_redirect_loop: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
+const API_STATUS = Object.freeze({ api_unread: 503, api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_unjudged: 502, api_redirect_loop: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404, 'store-blocked': 503 });   // B-f276 (r3230's table): a held store's refusal by name, never a 500
 const apiAnswer = (res, r) => {
   const { touch, ...out } = r || {};
   if (out.ok) return res.json(out);
@@ -2752,7 +2752,7 @@ const serveAgentDoc = (req, res, topic) => {
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (bearer.startsWith('jbt_')) {
     const jm = getJobs && getJobs();
-    if (!jm || !jm.jobByToken || !jm.jobByToken(bearer)) return res.status(401).json({ error: 'unknown job token' });
+    if (!jm || !jm.jobByToken || !jm.jobByToken(bearer)) { const h = jm && typeof jm.tokenHeldAnswer === 'function' ? jm.tokenHeldAnswer(bearer) : null; return h ? res.status(h.status).json({ error: h.error, code: h.code }) : res.status(401).json({ error: 'unknown job token' }); }   // B-f276 (r3230's table)
   } else {
     const hit = agentSession(req, res); if (!hit) return;
   }
@@ -2775,7 +2775,7 @@ const pageAuth = (req, res) => {
   if (token.startsWith('jbt_')) {
     const jm = getJobs && getJobs();
     const job = jm && jm.ready ? jm.jobByToken(token) : null;
-    if (!job) { res.status(401).json({ error: 'unknown job token' }); return null; }
+    if (!job) { const h = (jm && typeof jm.tokenHeldAnswer === 'function' ? jm.tokenHeldAnswer(token) : null); if (h) { res.status(h.status).json({ error: h.error, code: h.code }); return null; } res.status(401).json({ error: 'unknown job token' }); return null; }   // B-f276 (r3230's table)
     return { sessionId: null, conversationId: (job.owner && job.owner.conversation && job.owner.conversation.id) || null, hostId: job.hostId || null, jobId: job.id }; // the job's OWNER conversation (jobs.js shape) — review-caught
   }
   const hit = agentSession(req, res);

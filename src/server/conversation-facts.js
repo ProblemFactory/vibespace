@@ -211,6 +211,7 @@ function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, per
     const jm = getJobs(); if (!jm || !jm.ready || !(jm.jobs instanceof Map)) return null;
     const by = new Map();
     by.ownerless = 0;
+    by.held = !!(jm._unread && jm._unread.store);   // B-f276 (r3230's table): its memory is empty because UNREAD
     for (const j of jm.jobs.values()) {
       const cid = j && j.owner && j.owner.conversation && j.owner.conversation.id;
       if (!cid) { if (isSkeleton(j)) by.ownerless++; continue; }   // only the store recovery's OWN skeletons (a person's unverified job is nobody's conversation's)
@@ -269,7 +270,7 @@ function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, per
     asksOf: (key) => { if (!userTodos) return undefined; if (typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread()) return undefined; /* B-44f3: For you held unread — its asks are UNKNOWN, never «none» */ const all = userTodos.forSession([key]); return Array.isArray(all) ? all.filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page') : undefined; },
     goalOf: (s) => { if (!s) return undefined; if (!s._goal) return 'none'; const st = String(s._goalStatus || '').toLowerCase(); return st === 'complete' ? 'none' : st ? 'active' : undefined; },
     continueOf: (s, id) => { const ar = autoResume(); if (!ar || typeof ar.statusFor !== 'function') return undefined; const st = ar.statusFor(id); return st ? { armed: !!st.armed, resetsAt: st.resetsAt || null } : undefined; },
-    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; if (by.ownerless) return { why: `${by.ownerless} job${by.ownerless === 1 ? '' : 's'} recovered from the store with no owner — whose they are is unknown` }; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null, items: [] }; },
+    jobsOf: (key) => { const by = jobsIndex(); if (!by) return undefined; if (by.held) return { why: 'the job records cannot be read right now — which jobs are running is unknown' }; /* B-f276 (r3230's table): jobs.json held, never «0 jobs» */ if (by.ownerless) return { why: `${by.ownerless} job${by.ownerless === 1 ? '' : 's'} recovered from the store with no owner — whose they are is unknown` }; return by.get(cidOfKey(key)) || { running: 0, schedules: 0, nextFireAt: null, items: [] }; },
     handoverOf: (s) => { const cid = idOf(s); const sv = stashView(), dv = deliver(); if (!cid || !sv || typeof sv.inFlight !== 'function') return undefined; return !!(sv.inFlight(cid) || (dv && typeof dv.handoverArmed === 'function' && dv.handoverArmed(cid))); },
     browserOf: (s, id) => {
       const k = keeper(); if (!k || typeof k.inputSummaryFor !== 'function') return { known: false, why: WHY.notCollected };

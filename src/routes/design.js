@@ -75,7 +75,7 @@ function registerDesignRoutes(app, { design, activeSessions, getJobs = () => nul
     if (token.startsWith('jbt_')) {
       const jm = getJobs && getJobs();
       const job = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null;
-      if (!job) { res.status(401).json({ error: 'unknown job token', code: 'unauthorized' }); return null; }
+      if (!job) { const h = (jm && typeof jm.tokenHeldAnswer === 'function' ? jm.tokenHeldAnswer(token) : null); if (h) { res.status(h.status).json({ error: h.error, code: h.code }); return null; } res.status(401).json({ error: 'unknown job token', code: 'unauthorized' }); return null; }   // B-f276 (r3230's table): jobs.json held ⇒ the hold by name
       const cid = (job.owner && job.owner.conversation && job.owner.conversation.id) || null;
       let sid = null, s = null;
       if (cid) for (const [id, x] of activeSessions) if (x && addressableId(x) === cid) { sid = id; s = x; break; }

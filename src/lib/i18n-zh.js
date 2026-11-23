@@ -42,6 +42,7 @@ export default {
   "«{name}» asks that {n} jobs may wake the conversations they belong to after those are ended": "「{name}」请求让 {n} 个任务在各自所属的对话被终止后仍可唤醒它们",
   "wakes «{name}»": "唤醒「{name}」",
   "Each ticked job may resume the conversation named on its row after that conversation is ended — every resume starts a turn billed to that conversation’s account:": "勾选的每个任务都可以在其所在行列出的对话被终止后恢复该对话——每次恢复都会开始一轮计费，记在那个对话的账号上：",
+  "This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.": "这个对话的任务现在无法列出：后台工作读不到它的记录。它们保留现有的唤醒选择——等记录能读取后，再到后台工作里修改。",
   "Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):": "它的任务和定时任务——勾选的那些可以在你终止它之后恢复它（随「终止所选」一起保存；每次恢复都会开始一轮计费）：",
   "This card changed since you looked at it — read it again, then press": "这张卡片在你查看后有了变化——请再读一遍后再按",
   "This card is being answered on another page": "另一个页面正在回应这张卡片",

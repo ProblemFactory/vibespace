@@ -42,6 +42,7 @@ export default {
   "«{name}» asks that {n} jobs may wake the conversations they belong to after those are ended": "「{name}」は、{n} 件のジョブがそれぞれの会話の終了後もそれを起こせるよう求めています",
   "wakes «{name}»": "「{name}」を起こす",
   "Each ticked job may resume the conversation named on its row after that conversation is ended — every resume starts a turn billed to that conversation’s account:": "チェックした各ジョブは、その行にある会話が終了した後にその会話を再開できます。再開するたびに、その会話のアカウントで課金されるターンが始まります：",
+  "This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.": "この会話のジョブは今は一覧にできません：バックグラウンド作業が記録を読めないためです。ジョブは今の再開の設定のままです — 記録が読めるようになったら、バックグラウンド作業で変更してください。",
   "Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):": "この会話のジョブと予定 — チェックしたものは終了後にこの会話を再開できます（「選択したものを終了」と一緒に保存。再開のたびに課金されるターンが始まります）：",
   "This card changed since you looked at it — read it again, then press": "このカードは表示後に変わりました — もう一度読んでから押してください",
   "This card is being answered on another page": "このカードは別のページで回答中です",

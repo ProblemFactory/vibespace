@@ -420,6 +420,18 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       tokenFail = false; return one && tokenHits === 1; },
     // B-f276 family unit 2 (round wgbjnr750's MUST, MS1's second road): mounts.json HELD — a person's Approve of a pending proposal
     // on a mount's lent client is refused BY NAME (store-blocked, the hold's words), the card stays pending, and it runs after the lift
+    // the reader table (r3230): mounts.json HELD — the agent's creds say the hold (never «none granted»), a mount credential's docs and
+    // the owner's grants answer store-blocked by name (never api_not_granted / «no such credential»)
+    async mountWords(Mod, which = 'creds') { const eng = fakeEngine(); let held = false;
+      const hm = { oauthClientsFor: () => (held ? [] : [{ mountId: 'm1', name: 'Drive' }]), oauthTokenOf: mountTok, oauthApiRows: () => MountManager.OAUTH_API, unreadWords: () => (held ? 'mounts.json could not be read (EIO) — the storage list is held' : null) };
+      const api = Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => hm, fetchFn, broadcast: () => {} });
+      await grantA(api, 'mount:m1', 'write-ask');
+      held = true;
+      if (which === 'creds') { const c = api.creds(A); return /held/.test(String(c.mountsHeld)); }
+      if (which === 'docs') { const dz = api.docs(A, 'mount:m1'); return dz.code === 'store-blocked' && /held/.test(String(dz.error)); }
+      const g = await api.setTiers('mount:m1', []); return g.code === 'store-blocked' && /held/.test(String(g.error)); },
+    async mountDocs(Mod) { return legs.mountWords(Mod, 'docs'); },
+    async mountGrants(Mod) { return legs.mountWords(Mod, 'grants'); },
     async mountHeld(Mod) { const eng = fakeEngine(); let held = false;
       const hm = { oauthClientsFor: () => (held ? [] : [{ mountId: 'm1', name: 'Drive' }]), oauthTokenOf: mountTok, oauthApiRows: () => MountManager.OAUTH_API, unreadWords: () => (held ? 'mounts.json could not be read (EIO) — the storage list is held' : null) };
       const api = Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => hm, fetchFn, broadcast: () => {} });
@@ -441,6 +453,9 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
     ['pending', `one conversation keeps at most ${F.PENDING_MAX} proposals waiting on a credential; the next is api_budget (M2)`, ['if (waiting >= F.PENDING_MAX)', 'if (false)']],
     ['digest', 'Approve carries the card\'s digest: a record rewritten on disk (digest recomputed) + a restart runs NOTHING (M3)', ['if (!digest || digest !== (p.frozen && p.frozen.digest))', 'if (false)']],
     ['refresh', 'a Google mount\'s refresh is single-flight (5 concurrent calls ⇒ 1) and paced after a refusal (4 calls ⇒ 1) (M4)', ['if (fl && fl.then) return fl;\n    if (fl && fl.failedUntil > now())', 'if (false) return fl;\n    if (false)']],
+    ['mountWords', 'mounts.json HELD: the agent\'s creds say the hold — never «no API credentials are granted» (the reader table, r3230)', ["    const mh = mountsHeldOf();   // B-f276 (r3230's table): mounts.json held — a mount's credentials are UNKNOWN, never «none granted»", '    const mh = null;']],
+    ['mountDocs', 'mounts.json HELD: a mount credential\'s docs answer store-blocked by name — never api_not_granted (the reader table)', ["    { const mh = String(cred || '').startsWith('mount:') ? mountsHeldOf() : null; if (mh) return { ok: false, code: 'store-blocked', error: mh }; }   // B-f276 (r3230's table)", '']],
+    ['mountGrants', 'mounts.json HELD: the owner\'s grants on a mount credential answer store-blocked by name — never «no such credential» (the reader table)', ["const mh = String(cred || '').startsWith('mount:') ? mountsHeldOf() : null; return mh ? { ok: false, code: 'store-blocked', error: mh } : { ok: false, code: 'not-found', error: 'no such credential' };", "return { ok: false, code: 'not-found', error: 'no such credential' };"]],
     ['mountHeld', 'mounts.json HELD: a person\'s Approve of a pending proposal on a mount\'s client is refused by name, the card stays pending, and it runs after the lift (B-f276 family unit 2, MS1\'s second road)', ["if (String(cred || '').startsWith('mount:')) { const w = mountsHeldOf(); return w ? { error: w, code: 'storage_unread' } : null; }", "if (String(cred || '').startsWith('mount:')) return null;"]],
     ['echo', 'the bearer echoed by the vendor in a BINARY body never reaches the agent (M5)', ['...beltBody(scrubToken(b.body, token),', '...beltBody(b.body,']],
     ['withheld', 'a revoke while the vendor stalls: the answer withheld, the audit says `withheld` with the vendor\'s status (M6)', ["verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status", "verdict: r.ok ? 'ok' : 'refused', code: r.ok ? null : r.code, status"]],

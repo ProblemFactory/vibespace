@@ -901,7 +901,7 @@ class MountManager {
   oauthClientIdOf(mountId, { vendor = null } = {}) {
     const refuse = (code, message) => { const e = new Error(message); e.code = code; return e; };
     const m = this._state.mounts.find((x) => x.id === String(mountId || ''));
-    if (!m) throw refuse('mount-gone', 'that storage mount no longer exists');
+    if (!m) { const held = this.unreadWords(); if (held) throw refuse('storage_unread', held); throw refuse('mount-gone', 'that storage mount no longer exists'); }   // B-f276 (r3230's table): held ⇒ by name, never «gone»
     if (!this._lendsOAuthClient(m)) throw refuse('mount-no-client', `the storage mount "${MountManager.lentName(m)}" holds no custom OAuth client of its own (a preset, or no client at all)`);
     const v = MountManager.OAUTH_CLIENT_VENDOR[m.type];
     // verify r1: the vendor is judged BEFORE the secret is opened — a body naming another vendor's

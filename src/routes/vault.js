@@ -185,6 +185,12 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
     res.once('finish', () => { const ms = Number(process.hrtime.bigint() - t0) / 1e6; if (ms > slowMs) { try { log(slowLineOf(req, ms)); } catch { /* the answer went out */ } } });
+    // B-f276 family unit 2, the reader table (r3230): a job's token while jobs.json is HELD names no job (its hashes live in the unread
+    // records) — every vault door that reads a jbt_ bearer is answered the hold by name here (503), never as a caller nobody holds
+    { const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String((req.body && req.body.token) || '');
+      const jm = token.startsWith('jbt_') && getJobs ? getJobs() : null;
+      const h = jm && typeof jm.tokenHeldAnswer === 'function' ? jm.tokenHeldAnswer(token) : null;
+      if (h) return res.status(h.status).json({ ...vault.facts(), ok: false, code: h.code, error: h.error }); }
     next();
   });
   const answer = (res, r) => {

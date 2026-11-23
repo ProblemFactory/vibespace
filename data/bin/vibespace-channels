@@ -927,7 +927,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       if (res._neterr) return { error: 'vibespace-channels: server unreachable (' + res._neterr + ')', code: 'unreachable' };
       try { return await answerOf(res); } catch { return { error: 'the server answered something that is not JSON (HTTP ' + res.status + ')', code: 'bad-answer' }; }
     };
-    if (!sub || sub === 'creds') { const r = await call('GET', '/api/agent/channels/api/creds'); if (!r.creds.length) console.log('no API credentials are granted to this conversation — the user grants them in Channels → the account → API access…'); else console.log(JSON.stringify(r.creds, null, 2)); return; }
+    if (!sub || sub === 'creds') { const r = await call('GET', '/api/agent/channels/api/creds'); if (r.mountsHeld) console.log('storage mounts: ' + r.mountsHeld + ' (their credentials are not listed until it reads)'); if (!r.creds.length) console.log('no API credentials are granted to this conversation — the user grants them in Channels → the account → API access…'); else console.log(JSON.stringify(r.creds, null, 2)); return; }
     if (sub === 'docs' || sub === 'log') {
       if (!args[2]) { console.error(`usage: vibespace-channels api ${sub} <cred>   (api creds lists yours)`); process.exit(1); }
       const r = await call('GET', `/api/agent/channels/api/${sub}?cred=${encodeURIComponent(args[2])}`);

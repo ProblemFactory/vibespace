@@ -3674,6 +3674,13 @@ class JobManager {
     if (!job._tokenRaw) { job._tokenRaw = 'jbt_' + crypto.randomBytes(16).toString('hex'); job.tokenHash = crypto.createHash('sha256').update(job._tokenRaw).digest('hex'); }
     return job._tokenRaw;
   }
+  /** B-f276 family unit 2, the reader table (r3230): a job's token cannot be checked while jobs.json is HELD (its hashes live in the unread
+   *  records) — every door that looks a jbt_ token up asks this when the lookup finds nothing: the hold's words by name (503), never
+   *  «unknown job token» to a job that may be running. → { status, code, error } | null */
+  tokenHeldAnswer(raw) {
+    if (!(this._unread && this._unread.store) || !raw || !String(raw).startsWith('jbt_')) return null;
+    return { status: 503, code: 'records-unread', error: this.unreadWords('a job\'s token cannot be checked while the job records cannot be read') };
+  }
   jobByToken(raw) {
     if (!raw || !raw.startsWith('jbt_')) return null;
     const h = crypto.createHash('sha256').update(raw).digest('hex');
@@ -4535,7 +4542,9 @@ class JobManager {
   _logsRemover() {
     const o = (this.d && this.d.logsSweep) || {};   // workerPath: a suite's slow-storage stand-in around the real worker
     // filterWhole: THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS (round 2) — an id a live record names again by then keeps its dir
-    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id)), procRoot: typeof o.procRoot === 'string' ? o.procRoot : null });
+    // B-f276 family unit 2, the reader table (r3230): while jobs.json is HELD its memory is empty because UNREAD — «no live record names it»
+    // is unknown then, so EVERY id is named (kept): the hourly clean-up's archive leg and an archived row's ✕ never take a live job's folder
+    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => (this._unread && this._unread.store ? [] : ids.filter((id) => !this.jobs.has(id))), procRoot: typeof o.procRoot === 'string' ? o.procRoot : null });
     return this._logsRm;
   }
   /** a WHOLE job dir — its caller's verdict (the gc's two legs, the archive cap, the ✕, the boot collapse) — removed in the

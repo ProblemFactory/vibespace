@@ -272,10 +272,12 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   /** The credentials this conversation may use (tier ≠ none). */
   function creds(ctx) {
     const list = allCreds().map((c) => ({ ...c, ...tierNow(ctx, c.id) })).filter((c) => c.tier !== 'none');
-    return { ok: true, creds: list.map((c) => ({ id: c.id, kind: c.kind, label: c.label, source: c.source, tier: c.tier, tierSays: F.TIER_SAYS[c.tier] || c.tier, perDay: c.perDay || F.BUDGET_DEFAULT.perDay, perMin: F.BUDGET_DEFAULT.perMin })) };
+    const mh = mountsHeldOf();   // B-f276 (r3230's table): mounts.json held — a mount's credentials are UNKNOWN, never «none granted»
+    return { ok: true, ...(mh ? { mountsHeld: mh } : {}), creds: list.map((c) => ({ id: c.id, kind: c.kind, label: c.label, source: c.source, tier: c.tier, tierSays: F.TIER_SAYS[c.tier] || c.tier, perDay: c.perDay || F.BUDGET_DEFAULT.perDay, perMin: F.BUDGET_DEFAULT.perMin })) };
   }
   /** The vendor's OWN docs + the fence summary — nothing else is "known" by VibeSpace. */
   function docs(ctx, cred) {
+    { const mh = String(cred || '').startsWith('mount:') ? mountsHeldOf() : null; if (mh) return { ok: false, code: 'store-blocked', error: mh }; }   // B-f276 (r3230's table)
     const tr = tierNow(ctx, cred);
     const c = tr.tier !== 'none' && allCreds().some((x) => x.id === cred) ? credentialOf(cred) : null;
     const v = F.vendorRowOf(c);
@@ -367,7 +369,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   async function setTiers(cred, list, { by = 'user', except = undefined, removeExcept = [] } = {}) {
     const e = eng();
     if (!e || typeof e.setApiGrants !== 'function') return { ok: false, code: 'unavailable', error: 'Channels are not available' };
-    if (!allCreds().some((c) => c.id === cred)) return { ok: false, code: 'not-found', error: 'no such credential' };
+    if (!allCreds().some((c) => c.id === cred)) { const mh = String(cred || '').startsWith('mount:') ? mountsHeldOf() : null; return mh ? { ok: false, code: 'store-blocked', error: mh } : { ok: false, code: 'not-found', error: 'no such credential' }; }   // B-f276 (r3230's table)
     let rows;
     try { rows = (Array.isArray(list) ? list : []).filter((r) => r && r.tier && r.tier !== 'none').map((r) => F.apiGrant({ principal: r.principal, cred, tier: r.tier, perDay: r.perDay, at: now(), by, allWrite: r.allWrite === true })); }
     catch (err) { return { ok: false, code: /write_all_named_only/.test(err.message) ? 'write_all_named_only' : 'bad-request', error: err.message }; }

@@ -372,6 +372,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // delivers nothing more), with its next fire and its STORED grant (PURE src/delivery-wake.js wakeChoiceRows). Read-only.
   app.get('/api/jobs-wake-grants', (req, res) => {
     if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
+    // B-f276 family unit 2, the reader table (r3230): jobs.json HELD — its memory is empty because UNREAD, never «owns no job»
+    if (jm._unread && jm._unread.store) return res.status(503).json({ error: jm.unreadWords('a conversation\'s jobs cannot be listed while the job records cannot be read'), code: 'records-unread' });
     const cid = String(req.query.conversation || '');
     if (!cid) return res.status(400).json({ error: 'conversation required' });
     const live = [...jm.jobs.values()].filter((j) => !j.cronParent && ownerOf(j).conversationId === cid && !M.isTerminal(j));

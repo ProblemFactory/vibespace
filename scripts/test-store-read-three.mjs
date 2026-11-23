@@ -610,6 +610,17 @@ try {
       ok(HT._turnsOf(big).length === 1, 'RED CONTROL — the turn at the copy\'s size (in a copy): the whole copy is scanned in one loop turn');
       ok(fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8').includes('if (k + 1 < turns.length) await new Promise((r) => setImmediate(r)); }   // the loop is given back between turns'), 'THE SCAN IN TURNS (pin): the copies\' read gives the loop back between turns');
       ok(got.has('jb-00008999') && got.has('conv-made-8999'), 'THE SCAN reads a made-up jobs list of about 4 MiB whole (round wjgchwl6a (9): its time is said in the line above)', { size: got.size, bytes: big.length }); }
+    // the reader table (r3230): mounts.json HELD — borrowing a mount's own sign-in client is refused BY NAME (storage_unread, 503 at the
+    // channels' door), never «that storage mount no longer exists». RED CONTROL: the held branch cut (in a copy)
+    { const borrow = (X, tag) => { const d = dirOf(tag), f = path.join(d, 'mounts.json'); fs.writeFileSync(f, JSON.stringify({ mounts: [], shares: [] }));
+        const un = refuse(f); let m = null; try { m = new X.MountManager({ dataDir: d }); } finally { un(); }
+        const e = tryCode(() => m.oauthClientIdOf('mnt-made0001')); const held = !!m.unreadWords(); stopOf(m); return { held, code: e && e.code, words: e && e.message }; };
+      const b1 = borrow({ MountManager }, 'borrow-held');
+      const bx = borrow(mutant('src/mounts.js', [["    if (!m) { const held = this.unreadWords(); if (held) throw refuse('storage_unread', held); throw refuse('mount-gone', 'that storage mount no longer exists'); }", "    if (!m) throw refuse('mount-gone', 'that storage mount no longer exists');"]]), 'borrow-held-ctl');
+      ok(b1.held && b1.code === 'storage_unread' && /mounts\.json/.test(String(b1.words)), 'the reader table: mounts.json HELD — borrowing a mount\'s sign-in client is refused by name, never «that storage mount no longer exists»', b1);
+      ok(bx.held && bx.code === 'mount-gone', 'RED CONTROL — the held branch cut (in a copy): the borrow is told the mount no longer exists', bx);
+      const CA = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+      ok(CA.includes("code === 'no-mounts' || code === 'storage_unread' ? 503 :"), 'the reader table (pin): the channels\' door answers the held refusal 503 (the family\'s status), never the 409 of a mount with no client'); }
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));

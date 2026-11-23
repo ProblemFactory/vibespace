@@ -22,7 +22,7 @@ import { wordsFor as mountWords } from '../mount-error-words.js'; // B-af94: a c
 import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's interface words in the reader's language
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a check's switch
 import { isProposal } from '../end-proposal.js'; // PURE (CJS, lane login-request-card piece 3b): THE proposal card's type, spelled once
-import { wakeGrantRowsNode, loadWakeGrantRows } from './wake-grant-rows.js'; // piece 7's ONE helper — the proposal card's job rows (lane login-request-card piece 3b)
+import { wakeGrantRowsNode, loadWakeGrantRows, wakeGrantHeldNode } from './wake-grant-rows.js'; // piece 7's ONE helper — the proposal card's job rows (lane login-request-card piece 3b)
 import { ROW_OF as FORYOU_ROW_OF, buttonsOf, opensOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf, itemFoldLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
@@ -117,7 +117,7 @@ export function mountProposalRows(container, itemOf) {
       place._wake = h; place.replaceChildren(h.node); held(it, h.node); continue;
     }
     const key = (place.closest('.ut-ep-row') || {}).dataset?.key || '';
-    loadWakeGrantRows(key.slice(key.indexOf(':') + 1)).then((rows) => { if (!rows.length || !place.isConnected) return; const h = wakeGrantRowsNode(rows, { head: t('Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):') }); place._wake = h; place.replaceChildren(h.node); held(it, h.node); }).catch(() => { });
+    loadWakeGrantRows(key.slice(key.indexOf(':') + 1)).then((rows) => { if (!place.isConnected) return; if (!rows.length) { if (rows.held) place.replaceChildren(wakeGrantHeldNode()); return; } const h = wakeGrantRowsNode(rows, { head: t('Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):') }); place._wake = h; place.replaceChildren(h.node); held(it, h.node); }).catch(() => { });
   }
 }
 /** …and what a press on that card sends, read off its drawn nodes: the ticked conversations, the changed job ticks (an end), the

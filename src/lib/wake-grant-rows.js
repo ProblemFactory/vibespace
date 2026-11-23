@@ -14,7 +14,15 @@ import { stampAt } from './page-time.js';
 export async function loadWakeGrantRows(conversationId) {
   if (!conversationId) return [];
   const r = await fetchJson(`/api/jobs-wake-grants?conversation=${encodeURIComponent(conversationId)}`);
+  if (r && r.code === 'records-unread') return Object.assign([], { held: true });   // B-f276 (r3230's table): the records are unread — never «none owned»
   return r && Array.isArray(r.rows) ? r.rows : [];
+}
+/** the line a door shows instead of the rows while Background Work cannot read its records (rows.held) */
+export function wakeGrantHeldNode() {
+  const box = document.createElement('div');
+  box.className = 'wake-grant-rows wake-grant-held';
+  box.textContent = t('This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.');
+  return box;
 }
 
 /** the rows as a node + what the person changed. `rows` = loadWakeGrantRows's. → {node, changes(): [{id, grant}]}
@@ -70,7 +78,7 @@ export async function wakeGrantDoor(session) {
   const cid = session && (session.backendSessionId || session.claudeSessionId);
   let rows = [];
   try { rows = await loadWakeGrantRows(cid); } catch { rows = []; }
-  if (!rows.length) return null;
+  if (!rows.length) return rows.held ? { node: wakeGrantHeldNode(), save: async () => 0 } : null;   // held: said, and nothing is changed
   const v = wakeGrantRowsNode(rows);
   return { node: v.node, save: () => saveWakeGrants(v.changes()) };
 }

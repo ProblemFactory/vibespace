@@ -55,10 +55,21 @@ function downMountOf(cwd) {
   return null;
 }
 
-/** Why a local `cwd` waits, or cannot start, because of the mount it sits on (see the head) — or null. */
+/** B-f276 family unit 2, the reader table (r3230): a mounts list HELD (its read failed) holds an EMPTY memory because it is unread —
+ *  «no mount on the path» is then unknown: the words of the list that cannot be read, or null */
+function heldListOf() {
+  const m = reg.mounts;
+  if (m && typeof m.unreadWords === 'function' && call(() => m.unreadWords(), null)) return 'a storage mount (VibeSpace cannot read its list of storage mounts right now)';
+  const mm = typeof reg.getMachineMounts === 'function' ? call(() => reg.getMachineMounts(), null) : null;
+  if (mm && typeof mm.unreadWords === 'function' && call(() => mm.unreadWords(), null)) return 'a machine folder (VibeSpace cannot read its list of machine folders right now)';
+  return null;
+}
+
+/** Why a local `cwd` waits, or cannot start, because of the mount it sits on (see the head) — or null. A MISSING folder while a mounts
+ *  list is held is `mount_down` by that list's words: never «gone», never recreated (it may sit on a mount point that is not up). */
 function verdict(cwd, { missing = true, now = Date.now() } = {}) {
   const d = downMountOf(cwd);
-  if (!d) return null;
+  if (!d) { const held = missing ? heldListOf() : null; return held ? { why: 'mount_down', root: null, name: held, held: true } : null; }
   const f = reg.vault && typeof reg.vault.facts === 'function' ? call(() => reg.vault.facts(), null) : null;
   const at = { root: d.root, name: d.name };
   if (f && f.state === 'locked' && d.sealed) return { why: 'vault_locked', ...at };

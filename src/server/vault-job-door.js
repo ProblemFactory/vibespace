@@ -488,6 +488,9 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     // B-f276 family unit 2 (the census's J2): jobs.json HELD — its memory is EMPTY because it is unread, never «the job is over»: the
     // press is refused by name and the card stays open (it is judged once the records read)
     if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords() : 'the Background Work records cannot be read right now' };
+    // the reader table (r3230): after a TORN lift a job a kept copy of the torn bytes still names is UNKNOWN, never «over» — refused by
+    // name, the card stays (it ends when the copy is put back, or cleared: then the job is truly gone)
+    if (!job && jm && typeof jm.namedByCopy === 'function' && jm.namedByCopy(String(q.jobId))) return { ok: false, code: 'records-unread', words: 'the job that asked is no longer listed (its records were damaged and a kept copy still names it) — this card stays until that copy is put back or cleared' };
     if (!job) return over('ask_over');
     const fact = person ? { decidedBy: 'person', decidedAt: now() } : null;
     const who = String(by || 'user').slice(0, 40);
