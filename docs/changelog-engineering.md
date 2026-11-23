@@ -1883,6 +1883,22 @@ This file is the engineers' record of every release: the lanes, the verification
 ### lg-store-writes — two sightings of the train's whole fast tier, placed and cured in their suites (the coordinator's r2226; tests only)
 - test-auto-resume 17c (UTC, twice): the leg read the last conversation's meta a fixed 500 ms after the flip. The OFF patch's write is the store writer's PACED write: when the ON patch's write landed first (its read off the loop came late under five lanes), OFF waited its gap and the read saw ON. The leg now reads the flag by state, bounded at 10 s; a held-reads leg (the meta reads held 300 ms) reads OFF with the meta's other fields kept. That leg does NOT place the sighted order: a patch that finds a copy pending in memory patches it without a read, so held reads coalesce ON and OFF (OFF on disk at 500 ms on the test machine); the order stays a reading. Not a product order a person meets: the flip is right in memory, and a stop before the write lands is the exit flush's to write.
 - test-store-writer-r4 THE ONE FIX (UTC): one of twenty flushes had a wait end by its 50 ms poll because its write took 56 ms on a loaded machine. The law is held by what the writer reports: a wait may end by its poll once for each 50 ms the thread's own write took. The red (the notify on the wrong cell) still ends every fast write's wait by its poll.
+### bl-browser-a — r3054: the kept browsers' SECOND door, the bindings file — UNKNOWN IS NOT EMPTY (for 2.369.416)
+- THE FAULT (bl-machines-b's census; checked by the coordinator at f67463581, the same in the release): `browser-bindings.js readAll` answered an EMPTY list to ANY failed read or bytes that do not parse (a bare catch), and `keys()` never threw. The kept store's sweep — at a start, EVERY HOUR, and from the panel — asked those keys, so its guard «the bindings could not be read: nothing ends this pass» never fired. With an empty list every kept browser that no live conversation carries, stopped past the grace, got «its conversation can never come back», and its profile folder (its sign-ins) was removed. One failed read at any hourly pass was enough. And `record` read all and wrote all, so after a failed read the next record left only the new binding.
+- THE CUT:
+  - `readState` tells ok / absent (a fresh instance: truly empty) / UNKNOWN (a failed read, torn bytes).
+  - `boundKeys` throws on unknown, and the kept sweep asks it: its existing guard ends nothing that pass.
+  - `record` writes nothing over an unread file: said once per kind with the base name only, and offered again at the next record.
+  - The one-shot grants-unify step waits while the file is unknown.
+  - The readers that only SHOW, or resolve a resume, keep `readAll` and `keys()` (unknown ⇒ no rows).
+- THE READERS, each with its verdict:
+  - the kept sweep: fixed, ends nothing;
+  - the fresh-key rule (browser-env keyNamed): mints only, never removes; the env-dir, scratch, meta and kept-store rungs still name every key with a browser on disk;
+  - the resume's rung 1 (priorKeyFor): unknown ⇒ rung 2 (the session meta) or a fresh key for that run, never ending or moving the kept browser;
+  - the late key's log line, the trace's and the kept panel's names, the proposals' key: shown only;
+  - the grants-unify migration: moved a grant to a bare key ⇒ now waits;
+  - the env's own sweep: does not read the bindings.
+- LEG: test-browser-kept-sweep ④ (fast, in-process, stand-in folders, the refusal PLACED on the very read). A refused read and torn bytes at the REAL kept sweep over the REAL bindings, an hour past the grace: zero ended, zero folders removed, and a record then leaves the file byte for byte. RED: the release's bare catch — both ended, both folders removed, the file written over.
 
 ## 2.369.415 — 2026-11-21
 
