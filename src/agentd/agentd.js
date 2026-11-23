@@ -599,25 +599,23 @@ async function runFs(action, params, timeoutMs) {
 // own — the home's checkouts named vibespace are found by their own facts. One collector per daemon (its caches serve every hub link).
 const DIR_CALL_MS = 15000;
 // r2752 (the round's MUST — THE LAW: A LISTING NEVER COSTS A PERSON THEIR FILES ON THAT MACHINE), in its numbers. The collector's reads
-// ride a pool of THEIR OWN, of ONE worker: ONE read of the folder field is out on this machine at a time (dirOne below). The person's
+// ride a pool of THEIR OWN, of ONE worker: ONE read of the folder field is out on this machine at a time (the handle's turn, below). The person's
 // pool (workerPool: every Files act, transfer, upload) is never asked by the collector: it never takes a person's worker, the last or
 // any, and never spends that pool's replacements. While its read is stuck no further one is sent: the reads after it wait their turn
-// (dirOne), and a read the pool's deadline ended that the kernel still holds is NOT replaced (DIR_POOL_WEDGE_MAX 0) — its slot comes back
-// when that read returns (worker-pool: a wedged worker's own exit refills it). Until then every read is refused as busy and the field
-// says «still looking» on this machine; the person's files are untouched.
+// (the handle's), and a read the pool's deadline ended that the kernel still holds is NOT replaced (DIR_POOL_WEDGE_MAX 0) — its slot comes back
+// when that read returns (worker-pool: a wedged worker's own exit refills it). One thread stuck for good stays the bound.
+// r2974 (THE LAW: A MACHINE's LISTING IS NEVER WORSE THAN THE RELEASE's): meanwhile this agent SAYS so by name — the folder ask is
+// refused `collector-stuck` (src/agentd/dir-handle.js state(): no usable worker, or its one read out past any reply's budget) and the
+// hub serves it by the release's road (a child a call, which touches neither pool) until this agent says it has a live worker again.
 const DIR_POOL_SIZE = 1, DIR_POOL_WEDGE_MAX = 0;
 let dirPool = null;
 const dirPoolOf = () => { if (dirPool === null) dirPool = require('./worker-pool.js').createWorkerPool({ file: __filename, workerData: { role: 'agentd-worker' }, size: DIR_POOL_SIZE, maxWedged: DIR_POOL_WEDGE_MAX, log: (m) => log('[folder field pool] ' + m) }) || false; return dirPool || null; };
-// ONE READ OUT AT A TIME (r2752's first number: 1): a read asked while another is out WAITS ITS TURN HERE — never in a worker and never
-// on the pool's clock (its deadline starts when it is sent, so a healthy folder's read is never marked by a dead one it waited behind) —
-// and goes when that read ends. The waits are bounded by the collector's own counters (its line, rows and facts slots) and its replies
-// never wait for them (each races its own soft bound); the mounts' read takes its turn too
-const dirTurn = { out: false, q: [] };
-const dirNext = () => { if (!dirTurn.out && dirTurn.q.length) dirTurn.q.shift()(); };
-const dirOne = (send) => new Promise((resolve, reject) => {
-  dirTurn.q.push(() => { dirTurn.out = true; Promise.resolve().then(send).then(resolve, reject).finally(() => { dirTurn.out = false; dirNext(); }); });
-  dirNext();
-});
+// THE COLLECTOR'S HANDLE (src/agentd/dir-handle.js): ONE read out at a time in its turn (the line's stats first; a read whose asks all
+// ended not sent), idle-only on this pool, B-23e5's memory of a dead path — and its state, said by name (r2974). The waits are bounded
+// by the collector's own counters (its line, rows and facts slots) and its replies never wait for them (each races its own soft bound);
+// the mounts' read takes its turn too
+let dirHandle = null;
+const dirHandleOf = () => { if (!dirHandle) dirHandle = require('./dir-handle.js').createDirHandle({ poolOf: dirPoolOf, hung: require('../dir-collect.js').hungMemory({ home: require('os').homedir() }), callMs: DIR_CALL_MS }); return dirHandle; };
 let dirCollector = null;
 const dirMounts = { at: 0, rows: [], p: null };
 // THIS machine's mounted folders (src/dir-ops.js mountRows — names only), read on the worker: once before the first ask (bounded — the
@@ -627,14 +625,14 @@ function dirMountsRefresh() {
   const pool = dirPoolOf();   // (the collector's own pool, never the person's)
   if (dirMounts.p || !pool || !pool.alive()) return dirMounts.p || Promise.resolve();
   dirMounts.at = Date.now();
-  dirMounts.p = dirOne(() => pool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true }))
+  dirMounts.p = dirHandleOf().turn(() => pool.run('mountRows', { dirOp: true, home: require('os').homedir(), platform: process.platform }, 5000, { idleOnly: true }))
     .then((r) => { if (r && r.result && Array.isArray(r.result.rows)) dirMounts.rows = r.result.rows; }, () => { }).finally(() => { dirMounts.p = null; });
   return dirMounts.p;
 }
 const dirWaits = new Map();   // a late ask's key → its wait's end (r1633 (1)): `dir-collect-end` ends it at once
 function dirCollectorOf() {
   if (dirCollector) return dirCollector;
-  const DCm = require('../dir-collect.js'), hung = DCm.hungMemory({ home: require('os').homedir() });   // B-23e5's law for this pool (the fresh read's MUST)
+  const DCm = require('../dir-collect.js');   // (B-23e5's law for this pool: the handle's memory)
   dirCollector = DCm.create({
     home: require('os').homedir(),
     roots: [],
@@ -643,21 +641,7 @@ function dirCollectorOf() {
     mounts: () => dirMounts.rows,   // (read behind the answers: dirMountsRefresh)
     // a Mac's ~/Library is never walked (the sh road's own prune: its caches would fill the 6000 folders, and it holds ~/Library/CloudStorage)
     walkSkip: process.platform === 'darwin' ? [require('path').join(require('os').homedir(), 'Library')] : [],
-    call: (op, payload) => dirOne(async () => {   // r2752: in its turn (one read out), on the collector's OWN pool — never the person's pool
-      const pool = dirPoolOf();
-      if (!pool || !pool.alive()) throw Object.assign(new Error('no folder-field worker of this agent is running'), { code: 'no-worker' });
-      const refused = hung.refusal(op, payload); if (refused) throw refused;   // a dead path is never sent to a fresh worker (judged at its turn)
-      let r;
-      // IDLE-ONLY at its turn: the read before it ended — a worker still held by it (terminated, left in the kernel) refuses this one as busy
-      try { r = await pool.run(op, { ...payload, dirOp: true }, DIR_CALL_MS, { idleOnly: true }); } catch (e) {
-        if (e && /^fs deadline \(/.test(String(e.message))) { e.safeFsTimeout = true; hung.deadline(op, payload); }   // the pool's deadline ended it: its folder's mark, and the pool's memory of it
-        else if (e && !e.code && /^(worker died|no workers)$/.test(String(e.message))) e.code = 'no-worker';   // no answer, no mark: asked again
-        throw e;
-      }
-      hung.landed(op, payload);   // it answered: forgotten
-      if (r.error) throw Object.assign(new Error(r.error), { code: r.code });
-      return r.result;
-    }),
+    call: (op, payload) => dirHandleOf().call(op, payload),   // r2752: in its turn (one read out), on the collector's OWN pool — never the person's pool
   });
   return dirCollector;
 }
@@ -2748,19 +2732,31 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (msg.op === 'dir-collect') {
         (async () => {
           try {
-            const DCm = require('../dir-collect.js');
+            const DCm = require('../dir-collect.js'), H = dirHandleOf();
+            // r2974: THE COLLECTOR SAYS WHETHER IT CAN SERVE — asked alone (`state`, the hub's look behind its answers while it serves this
+            // machine by the release's road), and before every ask and at its reply: no usable worker (`gone`), or its one read out past
+            // THIS ask's budget (`held`), is refused BY NAME (`collector-stuck`, with the state) — never «busy», never a late shape that
+            // cannot come true
+            if (msg.state === true) { mux.control({ op: 'dir-collect-result', id: msg.id, state: H.state() }); return; }
+            const stuckNo = (s) => mux.control({ op: 'dir-collect-result', id: msg.id, error: `the folder field's collector on this machine cannot serve (${s.why}${s.ms ? ', ' + s.ms + ' ms' : ''})`, code: 'collector-stuck', state: s });
             // r1633 (1): a late ask's wait is ended at once by its field's newer ask — `dir-collect-end` names it by the ask's own key
             const ac = typeof msg.key === 'string' && msg.key ? new AbortController() : null;
             if (ac) { dirWaits.set(msg.key, ac); if (dirWaits.size > 64) dirWaits.delete(dirWaits.keys().next().value); }
             try {
               const plan = { ...(msg.plan || {}) }, b = Number(plan.budgetMs);
             plan.budgetMs = Number.isFinite(b) && b > 0 ? Math.min(b, 2000) : 450;   // the reply's own bound: at most 2 s whatever a hub asks
+            const s0 = H.state({ boundMs: plan.budgetMs });   // r2974: one read out past THIS ask's budget, or no usable worker ⇒ by name
+            if (!s0.live) { stuckNo(s0); return; }
             if (!dirMounts.at) await Promise.race([dirMountsRefresh(), new Promise((r) => setTimeout(r, 300))]);   // the first ask knows the mounts
-            const facts = DCm.cutToCap(await dirCollectorOf().collect(plan, { signal: ac ? ac.signal : null }), DCm.COLLECT_CAP_BYTES);
+            H.begin();
+            let facts; try { facts = DCm.cutToCap(await dirCollectorOf().collect(plan, { signal: ac ? ac.signal : null }), DCm.COLLECT_CAP_BYTES); } finally { H.end(); }
+              // …and at its reply: an answer still missing what a stuck turn holds is refused by name too (the release's road answers it whole)
+              const s1 = H.state({ boundMs: plan.budgetMs });
+              if (!s1.live && DCm.incomplete(facts)) { stuckNo(s1); return; }
               mux.control({ op: 'dir-collect-result', id: msg.id, facts });
               if (Date.now() - dirMounts.at >= 5000) dirMountsRefresh();   // behind the answer
             } finally { if (ac) dirWaits.delete(msg.key); }
-          } catch (e) { mux.control({ op: 'dir-collect-result', id: msg.id, error: String((e && e.message) || e).slice(0, 200) }); }
+          } catch (e) { mux.control({ op: 'dir-collect-result', id: msg.id, error: String((e && e.message) || e).slice(0, 200), ...(e && typeof e.code === 'string' ? { code: e.code } : {}) }); }
         })();
         return;
       }

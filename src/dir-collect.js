@@ -535,6 +535,13 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
  *  (`more`: the page decides no absence from it, B-0f3d), then the probes' facts (late). CUT BY ARITHMETIC (the fresh read's S6: this
  *  runs on the agent's loop): each item is measured once, the whole once before and once after — never a measure per step. A copy; the
  *  facts under the cap come back as they are. */
+/** r2974: does this answer still MISS something a reply promised (a line's verdict, a row, a probe, an index root or a kid's fact still
+ *  late)? A machine whose collector cannot serve refuses such an answer by name — the hub's release road answers it whole */
+function incomplete(F) {
+  if (!F || typeof F !== 'object') return true;
+  const late = (x) => !!x && x.late === true;
+  return (F.answers || []).some((a) => a && a.answer === 'late') || (F.rows || []).some(late) || (F.probes || []).some(late) || (F.index || []).some(late) || F.factsLate === true;
+}
 const COLLECT_CAP_BYTES = 4 * 1024 * 1024 - 64 * 1024;   // the op's answer cap (answer-caps 'dir-collect', 4 MiB) less the line's own envelope
 function cutToCap(facts, cap = COLLECT_CAP_BYTES) {
   const bytes = (x) => Buffer.byteLength(JSON.stringify(x === undefined ? null : x));
@@ -601,4 +608,4 @@ function hungMemory({ home = os.homedir(), ms = 30000, keep = 256, capX = 16, no
   };
 }
 
-module.exports = { create, cutToCap, COLLECT_CAP_BYTES, hungMemory, LATE_WAIT_MS, IDLE_ONLY, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, MAX_LIST, MAX_PROBES, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };
+module.exports = { create, cutToCap, incomplete, COLLECT_CAP_BYTES, hungMemory, LATE_WAIT_MS, IDLE_ONLY, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, MAX_LIST, MAX_PROBES, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS, FACT_SLOTS, KID_FACTS, LINK_FACTS };

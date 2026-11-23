@@ -24,6 +24,7 @@
 //     process, today's shape): the collector on the person's pool holds both workers and the person waits; the agent's handle (its own
 //     pool of one worker, no replacement while a stuck read is out, one read at a time — never the person's pool) pinned with its red;
 //     a pipe named like a manifest is never opened (RED: the release's fact reader opens it and holds the worker)
+//   ⑩ (r2974, a machine's listing never worse than the release's): its own suite, scripts/test-dir-collect-fallback.mjs
 //   ⑤ the reply's byte cap (r1651: 4 MiB, the hard cap): over it the facts are CUT — the index first (partial), then the one-match
 //     listings, then the kids (`more`) — and the shaped reply never reads a cut answer as whole (its rows «still looking»)
 import fs from 'node:fs';
@@ -182,9 +183,9 @@ console.log('③b one dead thing, one call: the device pool remembers a path its
   ok(!!(r1 && r1.code === 'path-hung' && /not asked again for 30 s/.test(r1.message) && r2 && !r3 && !r4 && r5 && !r6 && !r7 && r8 && !r9 && !r10),
     'a path the deadline ended is REFUSED by name before any worker for 30 s (a stat at or under it), then asked again; ended again: 60 s; once it answers it starts over at 30 s; a listing is remembered exactly; the home never covers what is under it',
     { r1: r1 && r1.message, r2: !!r2, r3: !!r3, r4: !!r4, r5: !!r5, r6: !!r6, r7: !!r7, r8: !!r8, r9: !!r9, r10: !!r10 });
-  const SFm = require(REPO + '/src/safe-fs.js'), ag = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8'), wp = fs.readFileSync(path.join(REPO, 'src/agentd/worker-pool.js'), 'utf8');
+  const SFm = require(REPO + '/src/safe-fs.js'), ag = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8'), wp = fs.readFileSync(path.join(REPO, 'src/agentd/worker-pool.js'), 'utf8'), dh = fs.readFileSync(path.join(REPO, 'src/agentd/dir-handle.js'), 'utf8');
   ok(!!(SFm.NO_IDLE.code === 'no-idle-worker' && SFm.NO_WORKER.code === 'no-worker' && SFm.PATH_HUNG.code === 'path-hung' && wp.includes("{ code: live ? 'no-idle-worker' : 'no-worker' }") && ag.includes("poolBusy: (err) => !!err && (err.code === 'no-idle-worker' || err.code === 'no-worker'),")
-    && ag.includes('const refused = hung.refusal(op, payload); if (refused) throw refused;') && ag.includes('hung.deadline(op, payload);') && ag.includes('hung.landed(op, payload);')),
+    && dh.includes('const refused = hung.refusal(op, p); if (refused) throw refused;') && dh.includes('hung.deadline(op, p);') && dh.includes('hung.landed(op, p);')),
     "the device pool's words are the hub pool's own (no-idle-worker / no-worker: asked again; path-hung: refused by name), and the agent's collector asks the memory before each call");
 }
 
@@ -336,13 +337,14 @@ console.log('⑨ THE LAW (r2752): a listing never costs a person their files on 
     { order, out, stuck, drained, lists: lists.map((l) => l && (l.error || (l.entries || []).length)) });
   // the agent's handle, pinned (a fast suite cannot wait the pool's 15 s deadline, and a held read in a worker ends at its terminate —
   // so «the person's replacements unspent» is by this wiring: no read of the folder field ever reaches the person's pool)
-  const AG = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  const handleOk = (src) => { const body = (src.match(/call: \(op, payload\) => dirOne\(async \(\) => \{([\s\S]*?)\n {4}\}\),/) || [])[1] || '';
-    return body.includes('const pool = dirPoolOf();') && body.includes('{ idleOnly: true }') && !/workerPool|runFs\(/.test(body)
-      && /const DIR_POOL_SIZE = 1, DIR_POOL_WEDGE_MAX = 0;/.test(src) && /size: DIR_POOL_SIZE, maxWedged: DIR_POOL_WEDGE_MAX,/.test(src)
-      && /dirMounts\.p = dirOne\(\(\) => pool\.run\('mountRows'/.test(src); };
-  const swapped = AG.replace('      const pool = dirPoolOf();\n', '      const pool = workerPool;\n');
-  ok(!!(handleOk(AG) && swapped !== AG && !handleOk(swapped)),
+  const AG = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8'), DHs = fs.readFileSync(path.join(REPO, 'src/agentd/dir-handle.js'), 'utf8');
+  const handleOk = (ag, dh) => { const body = (dh.match(/function call\(op, payload\) \{([\s\S]*?)\n {2}\}\n/) || [])[1] || '';
+    return body.includes('const pool = poolOf();') && body.includes('{ idleOnly: true }') && !/workerPool|runFs\(/.test(body)
+      && /const DIR_POOL_SIZE = 1, DIR_POOL_WEDGE_MAX = 0;/.test(ag) && /size: DIR_POOL_SIZE, maxWedged: DIR_POOL_WEDGE_MAX,/.test(ag)
+      && /createDirHandle\(\{ poolOf: dirPoolOf, /.test(ag) && /call: \(op, payload\) => dirHandleOf\(\)\.call\(op, payload\),/.test(ag)
+      && /dirMounts\.p = dirHandleOf\(\)\.turn\(\(\) => pool\.run\('mountRows'/.test(ag); };
+  const swapped = AG.replace('createDirHandle({ poolOf: dirPoolOf, ', 'createDirHandle({ poolOf: () => workerPool, ');
+  ok(!!(handleOk(AG, DHs) && swapped !== AG && !handleOk(swapped, DHs)),
     "the agent's handle for the collector: every read in its turn (dirOne: one out), idle-only, on the collector's OWN pool of one worker with no replacement while a stuck read is out — never the person's pool (its workers and its replacements are never the field's) — RED: the same handle on the person's pool is refused by this pin");
   // RED, today's shape, in process: the collector on the PERSON's pool (two workers; idle-only only takes an idle one) — the same dead
   // folders take both workers over the keystrokes and the person's act waits behind them

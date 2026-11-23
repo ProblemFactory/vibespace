@@ -98,7 +98,7 @@ const gateRefusal = (e) => stageMark(e, 'gate');
 /** THE ERROR OF AN AGENT'S ERROR REPLY (`_request` rejects with it): its words, a lost link's code, an op refused by the
  *  device's own allow flags (code / flag / remedy), and the reason an op named for itself (`refused`, B-5e0d's quota-refresh). */
 function replyError(m) {
-  return Object.assign(new Error(m.error), typeof m.code === 'string' && /^discovery-/.test(m.code) ? { code: m.code } : {}, m.code === 'answer-too-large' ? { code: m.code, bytes: m.bytes, cap: m.cap, op: m.op, params: { op: m.op, size: AC.sizeOf(m.bytes), cap: AC.sizeOf(m.cap) } } : {}, m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
+  return Object.assign(new Error(m.error), typeof m.code === 'string' && /^discovery-/.test(m.code) ? { code: m.code } : {}, m.code === 'collector-stuck' ? { code: m.code, ...(m.state && typeof m.state === 'object' ? { state: m.state } : {}) } : {} /* r2974: the folder collector's refusal by name — the hub takes the release's road */, m.code === 'answer-too-large' ? { code: m.code, bytes: m.bytes, cap: m.cap, op: m.op, params: { op: m.op, size: AC.sizeOf(m.bytes), cap: AC.sizeOf(m.cap) } } : {}, m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {}, typeof m.refused === 'string' ? { refused: m.refused } : {});
 }
 /** B-5e0d: the quota-refresh op's own reason, by name (a reply or the error of one) — 'long-lived' | 'no-valid-login' | null */
 const quotaReasonOf = (x) => (x && (x.refused === 'long-lived' || x.refused === 'no-valid-login') ? x.refused : null);
@@ -1471,10 +1471,20 @@ class DeviceManager {
       signal.addEventListener('abort', end, { once: true });
       asked.then((v) => { signal.removeEventListener('abort', end); resolve(v); }, (e) => { signal.removeEventListener('abort', end); reject(e); });
     }) : asked);
-    if (r.error) throw new Error(r.error);
+    // r2974: the machine's refusal keeps its NAME (`collector-stuck`: its collector cannot serve — the hub takes the release's road)
+    if (r.error) throw Object.assign(new Error(r.error), typeof r.code === 'string' ? { code: r.code } : {}, r.state && typeof r.state === 'object' ? { state: r.state } : {});
     // r2752 (b): a reply with no facts is refused BY NAME (never a TypeError further on)
     if (!r.facts || typeof r.facts !== 'object') throw Object.assign(new Error('the machine answered the folder ask with no facts'), { code: 'collect-no-facts' });
     return r.facts;
+  }
+  /** r2974: can this machine's folder-field collector serve now? (asked by the hub behind its answers while it serves the machine by
+   *  the release's road) → { live: true } | { live: false, why } — no read is made there for it */
+  async dirCollectState({ timeoutMs = 3000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('dir-collect')) throw Object.assign(new Error('daemon lacks dir-collect (capabilities gate)'), { code: 'no-capability' });
+    const r = await this._request({ op: 'dir-collect', state: true, timeoutMs });
+    if (r.error) throw Object.assign(new Error(r.error), typeof r.code === 'string' ? { code: r.code } : {});
+    return r.state && typeof r.state === 'object' ? r.state : { live: false, why: 'unsaid' };
   }
 
   async sysinfo() {

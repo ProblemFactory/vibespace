@@ -29,7 +29,8 @@ const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js')
 // B-99b9: the path field's two asks on another machine (hosts.dirSlice): the hub's own wait, the run's bound, the marks and holds
 const DIR_SLICE_WAIT_MS = 2000;      // the hub stops WAITING on its asks here and replies (its own race, never the run's timeout)
 const SLICE_TYPED_CAP = 4;          // typed folders one text asks at once (the bases' order): each is ONE shell there; past it, named unread
-const SLICE_RUN_MS = 6000;           // a run's own bound there (the device's runCmd / the ssh rung)
+const SLICE_RUN_MS = 6000;
+const COLLECT_STUCK_ASK_MS = 10000;   // r2974: a machine whose collector said it cannot serve is asked again whether it can, behind the answers, at most this often           // a run's own bound there (the device's runCmd / the ssh rung)
 const SLICE_DEADLINE_MS = 20000;     // a run that has not SETTLED by now never will (a shell stuck in the kernel): missed / hung — past the longest road
                                     // (the device's connect 4 s + the hub's own bound 7.5 s, then the ssh rung's 6 s), so a slow healthy landing is kept (r949)
 const SLICE_HUNG_MS = 30e3;          // a typed folder that never landed: marked this long (the hub rung's PROBE_LATE_MS)
@@ -1778,8 +1779,13 @@ class HostManager {
     // collects the facts THERE over this hub's plan, and this hub shapes them with ITS OWN shaper (src/server/dir-slice.js — the very
     // function of its own answer). An older agent (no capability: never asked an unknown op), a Windows machine and an ssh-only one
     // keep the sh road below, as before.
+    // r2974 — THE LAW: A MACHINE's LISTING IS NEVER WORSE THAN THE RELEASE's. The collector serves only while it can: an ask it cannot
+    // serve (its agent said its collector is stuck, a refusal, its bound, a reply with no facts, no capability) is served by the
+    // release's road below — a child a call, which touches neither of that machine's pools; a machine whose agent said its collector is
+    // stuck stays on that road until the agent says it has a live worker again (asked behind the answers). «Still looking» is then said
+    // only while an answer can still come
     const road = this.collectRoadOf(id);
-    if (road) return this._dirCollected(id, road, { text, bases, probe, q, kind, press, late }, { signal, by });
+    if (road && !this._collectHeld(id, road)) { const r = await this._dirCollected(id, road, { text, bases, probe, q, kind, press, late }, { signal, by }); if (r) return r; }
     const h = this.get(id);
     if (h && h.transport !== 'dial') await this.refuseUnreachable(id); // BY NAME, before any spawn (lane hub-dies-dead-ssh-host)
     const PC = require('./path-candidates.js');
@@ -1916,6 +1922,29 @@ class HostManager {
     return out;
   }
 
+  /** r2974: is this machine held on the release's road (its agent said its collector cannot serve)? While held, the agent is asked
+   *  whether it can again — behind the answers, at most every COLLECT_STUCK_ASK_MS; its «live» ends the hold. A new link to it (another
+   *  agent, a restart) ends the hold too */
+  _collectHeld(id, { dm }) {
+    const m = this._collectStuck && this._collectStuck.get(id);
+    if (!m) return false;
+    if (m.dm !== dm) { this._collectStuck.delete(id); return false; }
+    const every = Number(this._collectStuckAskMs) >= 0 && this._collectStuckAskMs !== null ? Number(this._collectStuckAskMs) : COLLECT_STUCK_ASK_MS;   // (a suite's shorter one: its seam)
+    if (!m.asking && Date.now() - m.askedAt >= every && typeof dm.dirCollectState === 'function') {
+      m.asking = true; m.askedAt = Date.now();
+      Promise.resolve().then(() => dm.dirCollectState()).then((s) => {
+        if (s && s.live === true && this._collectStuck.get(id) === m) { this._collectStuck.delete(id); try { console.warn(`[hosts] the folder field on ${id}: its collector says it has a live worker again — asked there again`); } catch { } }
+      }, () => { }).finally(() => { m.asking = false; });
+    }
+    return true;
+  }
+  _collectStuckMark(id, dm, e) {
+    const S = (this._collectStuck = this._collectStuck || new Map());
+    if (S.has(id) && S.get(id).dm === dm) return;
+    S.set(id, { dm, at: Date.now(), askedAt: Date.now(), asking: false });
+    try { console.warn(`[hosts] the folder field on ${id} is served by the release's road: ${String((e && e.message) || e).slice(0, 160)} — until its agent says it has a live worker again`); } catch { }
+  }
+
   /** r1636: the collector road to this machine, or null (the sh road): its agent CONNECTED now (a list never starts a connect), its hello
    *  saying `dir-collect`, its home absolute, not Windows (the plan is in posix paths). → { dm, info } | null */
   collectRoadOf(id) {
@@ -1940,14 +1969,16 @@ class HostManager {
     // r2752 (c): a copy CUT at the cap is named too, by the version of the whole index it was cut from — the machine answers «the same»
     // (still cut, the rows say so) and never sends it again at every keystroke; a new walk is a new version, sent whole or cut again
     const have = {}; for (const r of P.wire.roots) { const e = c.index.get(r); if (e) have[r] = e.v; }
-    // r2752 (a): a collect REFUSED, LATE or FAILED (the agent's bound, its error, a reply with no facts) is shaped «still looking» —
-    // never an error line where the release showed a listing (the field asks again, bounded); the person's newer ask (abort) passes on
+    // r2974 (the law above): a collect REFUSED, LATE or FAILED (the agent's bound, its error, a reply with no facts, no capability) is
+    // NOT shaped here — null: the release's road answers THIS ask (dirSlice). An agent that said its collector has NO usable worker
+    // (`collector-stuck`, gone) puts this machine on that road until it says it has a live worker again; one whose read is out past this
+    // ask's budget (held) sends only this ask there. The person's newer ask (abort) passes on
     let F;
     try { F = await dm.dirCollect({ ...P.wire, ...(P.wire.roots.length ? { index: { have } } : {}) }, { signal, timeoutMs: 2400 }); }
     catch (e) {
       if (e && e.code === 'aborted') throw e;
-      const late = { late: true };
-      F = { home: info.home, at: Date.now(), me: { home: info.home, roots: [] }, answers: P.wire.cands.map((x) => ({ path: x.c, answer: 'late', at: x.a })), rows: P.wire.rows.map(() => late), probes: P.wire.probes.map(() => late), index: P.wire.roots.map(() => late), listed: [], listedTyped: 0, mounts: [] };
+      if (e && e.code === 'collector-stuck' && !(e.state && e.state.why === 'held')) this._collectStuckMark(id, dm, e);   // `held` (one read out past this ask's budget): this ask only
+      return null;
     }
     const got = Date.now(), shift = got - (Number(F && F.at) || got);
     for (const a of (F && F.answers) || []) if (a && Number.isFinite(a.until)) a.until += shift;   // THAT machine's clock → this hub's
