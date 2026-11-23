@@ -927,6 +927,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     const staleDefault = !!cur && Array.isArray(membership) && membership.length > 0 && !membership.includes(cur);
     // a LAPSED default is never where a conversation starts (verify r2 ①): the member usable soonest that is not lapsed,
     // or null — the store then re-points the default off it, or refuses the placement by name ('all_lapsed')
+    if (verdictOnly && (!fam || (!staleDefault && memberServeLapsed(cur)))) return null;   // (r3319 MUST) the move back's verdict FAILS CLOSED: no family (a guess) or a lapsed default (its stand-in) is no verdict — the two returns below would pass by the exclusions
     if (!staleDefault && memberServeLapsed(cur)) return fallbackDefaultTarget(poolId, cur);
     if (!fam && !staleDefault) return cur; // no identity → the pool's default target
     // decidePoolSwitch FROM the default target under the projected view: if
@@ -7692,7 +7693,7 @@ function applyCrossMove(poolId, sid, s2, fromId, d, now = Date.now(), { why = 'c
   if (bsid) _crossLinesOwed.set(String(bsid), { text, i18n: { key: LINE, params }, at: now, fromSid: sid });
   for (const M of [_crossPlacementOwed, _crossLinesOwed]) for (const [k, v] of M) if (now - v.at > CROSS_CARRY_MS) M.delete(k); // a resume that never came carries nothing and is owed nothing (swept at each move)
   if (bsid) _crossPlacementOwed.set(String(bsid), { poolId, to: d.to, at: now, fromSid: sid, ...(record ? { record } : {}), ...(x.back ? { back: now } : {}) }); // the RESUME starts on d.to (poolChooserForModel)
-  if (bsid && x.back) _fbDwell.set(String(bsid), now);   // (F3a) NO FLAP: the pool does not move it onto the fallback again for one DWELL
+  if (bsid && x.back) { _fbDwell.set(String(bsid), now); for (const [k, at] of _fbDwell) if (now - at > FALLBACK_DWELL_MS || at > now) _fbDwell.delete(k); }   // (F3a) NO FLAP: the pool does not move it onto the fallback again for one DWELL; (r3319 (3)) the map swept by age at each move back
   if (!quiet) serverNotice(`pool-cross-${poolId}-${sid}-${now}`, fill(NOTE) + ' Restarting the conversation to apply it.', { level: 1, i18n: { key: NOTE, params, then: { key: PIN_RESTART_KEY } } });
   console.log(`[pool] cross-provider switch ${poolId}/${sid}: ${fromId || '?'} (${x.fromId}) → ${d.to} (${x.toId}), model ${x.model || '?'} → ${x.toModel} (${why})`);
   sendColdRestart(poolId, [{ serverId: sid, backend: convBackend(s2), backendSessionId: bsid, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null, model: x.toModel }], now);
@@ -7969,12 +7970,13 @@ const FB_GONE_STUCK_LINE = '{provider} was removed — this conversation cannot 
 const FB_NO_RECORD_LINE = '{provider} has no record of the model this conversation came from — the pool does not move it back by itself';
 /** The member a conversation on the fallback can come back to NOW — the new-conversation verdict of its first model, then the
  *  member's own judgement under every bucket — or null. */
-function fallbackBackTarget(poolId, record, now = Date.now()) {
+function fallbackBackTarget(poolId, record, now = Date.now(), s2 = null, sid = null) {
+  if (!record || !record.fromModel) return null;   // (r3319 MUST) no first model: no verdict — the target is never a guess
   // `hinted`: no PROVING placement (a member read as reset but unconfirmed is the guess a new conversation would test — never where
   // a conversation is moved back) and no spare-lane placing; the claim check is verdictOnly's own
   const to = poolChooserForModel(poolId, { model: (record && record.fromModel) || null, hinted: true, verdictOnly: true });
   if (!to || /^pv-/.test(String(to))) return null;
-  return memberCanServe(poolId, to, null, null, now, null) ? to : null;
+  return memberCanServe(poolId, to, s2, sid, now, null) ? to : null;   // (r3319 (6)) the conversation's OWN walls since it moved are asked too (its walls on the member it LEFT are the old server id's: a member that refused it just before the move costs one restart and a dwell at most — said in the kb)
 }
 /** After a pass over `poolId`: every conversation of it held by a provider — judged for coming back (above). */
 function judgeFallbackReturns(poolId, a, only = null, now = Date.now()) {
@@ -7984,10 +7986,10 @@ function judgeFallbackReturns(poolId, a, only = null, now = Date.now()) {
     if (s2._accountId !== poolId || s2.host || (only && sid !== only)) continue;
     let held = null; try { held = heldPoolMemberFor(s2, poolId); } catch { }
     if (!held || !/^pv-/.test(String(held))) continue;
-    const rec = s2._poolFallback && s2._poolFallback.provider === held ? s2._poolFallback : null;
+    const rec = s2._poolFallback && s2._poolFallback.provider === held && s2._poolFallback.fromModel ? s2._poolFallback : null;   // (r3319 MUST) a record with no first model IS no record on the pool's road (the no-record line, once; a person's press only)
     const removed = !listed.has(held);
     if (!rec) { sayOnce(s2, sid, 'no-record', fillWith(FB_NO_RECORD_LINE, { provider: nameOf(held) })); continue; }
-    const to = fallbackBackTarget(poolId, rec, now);
+    const to = fallbackBackTarget(poolId, rec, now, s2, sid);
     if (!to) { endFallbackEpisode(sid, 'can-return'); endFallbackEpisode(sid, 'gone-return'); if (removed) sayOnce(s2, sid, 'gone-stuck', fillWith(FB_GONE_STUCK_LINE, { provider: nameOf(held) })); continue; }   // (the next episode says itself again)
     endFallbackEpisode(sid, 'gone-stuck');
     const memberProvider = providerLabel(poolProviderOf(a)(to));
@@ -8005,11 +8007,12 @@ async function executeFallbackBack(e, now = Date.now()) {
   let held = null; try { held = heldPoolMemberFor(s2, e.poolId); } catch { }
   const rec = s2._poolFallback && held && s2._poolFallback.provider === held ? s2._poolFallback : null;
   if (!held || !/^pv-/.test(String(held)) || !rec) return { moved: false, why: 'not-on-fallback' };
+  if (!rec.fromModel) { console.log(`[pool] fallback back ${e.poolId}/${e.sid}: not moved — its first model is unknown (the target would be a guess)`); return { moved: false, why: 'no-first-model' }; }   // (r3319 MUST) the pool's road and a press alike: no model to restore is no move back
   // (the F2 cures' laws, here too) a POOL-MADE move back is judged against the pool's setting AT THE MOVE (a press is its own authority);
   // a conversation with no backend id has nothing to resume on the member: refused before anything
   if (e.by !== 'person' && crossProviderMode(a.crossProvider) !== 'allow') return { moved: false, why: 'setting' };
   if (!(s2.claudeSessionId || s2.backendSessionId)) { console.log(`[pool] fallback back ${e.poolId}/${e.sid}: not moved — the conversation has no backend id to resume`); return { moved: false, why: 'no-resume-id' }; }
-  const to = fallbackBackTarget(e.poolId, rec, now);
+  const to = fallbackBackTarget(e.poolId, rec, now, s2, e.sid);
   if (!to || (e.to && to !== e.to && e.by !== 'person')) return { moved: false, why: 'no-member' };
   const removed = !(poolFallbackSet(a) || new Set()).has(held);
   const back = { ...rec, back: { to, at: now, by: e.by } };
@@ -8017,13 +8020,17 @@ async function executeFallbackBack(e, now = Date.now()) {
   if (!saved) { try { feedPeerCard(s2, { fromName: 'VibeSpace', kind: 'notification', text: FALLBACK_UNSAVED_LINE.replace('{provider}', nameOf(to)) }); } catch { } return { moved: false, why: 'record-unsaved' }; }
   const s3 = activeSessions.get(e.sid);
   // JUDGED AGAIN AFTER THE WRITE LANDED (a held write can land minutes later: the setting, the member, the list may have moved)
-  const a2 = accounts.get(e.poolId), to2 = s3 ? fallbackBackTarget(e.poolId, rec, Date.now()) : null;
-  if (!s3 || !a2 || (e.by !== 'person' && crossProviderMode(a2.crossProvider) !== 'allow') || !to2 || to2 !== to) { if (s3) { try { await writeFallbackRecord(s3, rec); } catch { } } console.log(`[pool] fallback back ${e.poolId}/${e.sid}: judged again after its record landed — not moved`); return { moved: false, why: !s3 ? 'gone' : 'judged-again' }; }   // the record as it was (no `back` left)
-  if (inTurnOf(s3)) { _fbInFlight.delete(e.sid); queueFallbackMove(e.poolId, e.sid, to, e.by, now); return { moved: false, why: 'in-turn' }; }   // the in-flight mark goes first, or the entry would be the one in flight (never queued again)
+  const a2 = accounts.get(e.poolId), to2 = s3 ? fallbackBackTarget(e.poolId, rec, Date.now(), s3, e.sid) : null;
+  // (r3319 (1)) «removed» READ AGAIN after the write: listed again meanwhile ⇒ the dwell applies (never the «was removed» road)
+  const removed2 = !!a2 && !(poolFallbackSet(a2) || new Set()).has(held);
+  const dwellOwed = removed && !removed2 && e.by !== 'person' && Date.now() - (Number(rec.at) || 0) < FALLBACK_DWELL_MS;
+  if (!s3 || !a2 || (e.by !== 'person' && crossProviderMode(a2.crossProvider) !== 'allow') || !to2 || to2 !== to || dwellOwed) { if (s3) { try { await writeFallbackRecord(s3, rec); } catch { } } console.log(`[pool] fallback back ${e.poolId}/${e.sid}: judged again after its record landed — not moved`); return { moved: false, why: !s3 ? 'gone' : 'judged-again' }; }   // the record as it was (no `back` left)
+  if (inTurnOf(s3)) { try { await writeFallbackRecord(s3, rec); } catch { } _fbInFlight.delete(e.sid); queueFallbackMove(e.poolId, e.sid, to, e.by, now); return { moved: false, why: 'in-turn' }; }   // (r3319 (2)) the record as it was FIRST (no `back` left), then the re-queue   // the in-flight mark goes first, or the entry would be the one in flight (never queued again)
   s3._poolFallback = back;
   const pv = poolProviderOf(a);
-  const d = { to, cross: { from: providerLabel(pv(held)), fromId: held, to: providerLabel(pv(to)), toId: providerKey(pv(to)), model: rec.toModel || null, toModel: rec.fromModel || null, fallbackOnly: false, back: true, removed } };
+  const d = { to, cross: { from: providerLabel(pv(held)), fromId: held, to: providerLabel(pv(to)), toId: providerKey(pv(to)), model: rec.toModel || null, toModel: rec.fromModel || null, fallbackOnly: false, back: true, removed: removed2 } };
   const r = applyCrossMove(e.poolId, e.sid, s3, held, d, Date.now(), { why: 'fallback-back', quiet: true });
+  if (!r.moved) { s3._poolFallback = rec; try { await writeFallbackRecord(s3, rec); } catch { } }   // a restart that could not be made (no page open): the record as it was — never half-moved
   if (r.moved && e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid);   // a press's slot waits for the LANDING (its resumed conversation is seen)
   return r;
 }
@@ -8032,17 +8039,20 @@ async function executeFallbackBack(e, now = Date.now()) {
 function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
   const a = accounts.get(poolId);
   if (!a) return { queued: 0 };
-  let n = 0;
+  let n = 0, noModel = 0;
   for (const [sid, s2] of activeSessions) {
     if (s2._accountId !== poolId || s2.host || (Array.isArray(sids) && !sids.includes(sid))) continue;
     let held = null; try { held = heldPoolMemberFor(s2, poolId); } catch { }
     if (!held || !/^pv-/.test(String(held))) continue;
-    const to = fallbackBackTarget(poolId, s2._poolFallback, now);
+    const rec = s2._poolFallback && s2._poolFallback.provider === held ? s2._poolFallback : null;   // (r3319 (5)) the record of THIS fallback only
+    if (!rec) continue;
+    if (!rec.fromModel) { noModel++; continue; }   // its first model is unknown: a press cannot restore it either — counted, said in the reply
+    const to = fallbackBackTarget(poolId, rec, now, s2, sid);
     if (!to) continue;
     queueFallbackMove(poolId, sid, to, 'person', now); n++;
   }
   if (n) pumpFallbackMoves(now);
-  return { queued: n };
+  return { queued: n, noModel };
 }
 /** The pool row's count (the page, unit F3b): per provider, how many conversations run on it and how many could come back now. */
 function fallbackStatus(poolId, now = Date.now()) {
@@ -8053,7 +8063,7 @@ function fallbackStatus(poolId, now = Date.now()) {
     if (!held || !/^pv-/.test(String(held))) continue;
     const r = out.get(held) || { provider: held, label: nameOf(held), running: 0, canReturn: 0, waiting: 0 };
     r.running++;
-    if (s2._poolFallback && fallbackBackTarget(poolId, s2._poolFallback, now)) r.canReturn++;
+    if (s2._poolFallback && s2._poolFallback.provider === held && fallbackBackTarget(poolId, s2._poolFallback, now, s2, sid)) r.canReturn++;
     out.set(held, r);
   }
   for (const e of _fbQueue.values()) if (e.poolId === poolId && /^pv-/.test(String(e.to))) { const r = out.get(e.to) || { provider: e.to, label: nameOf(e.to), running: 0, canReturn: 0, waiting: 0 }; r.waiting++; out.set(e.to, r); }
@@ -8072,6 +8082,7 @@ function writeFallbackRecord(s2, record) {
 }
 /** (F3a) the resumed conversation after a move back keeps the dwell's start (memory + its meta, paced: a lost write only shortens a hold). */
 function stampFallbackDwell(s2, at) {
+  at = Math.min(Date.now(), Number(at) || 0);   // (r3319 (7)) never a stamp in the future
   s2._poolFallbackDwell = at;
   try {
     if (!s2.sockName || typeof sessionMetaStore.writeSessionMeta !== 'function') return;
@@ -9137,7 +9148,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       // (q-053 P0b) a move to ANOTHER provider is COLD whatever the pool's hot rule (the model re-resolved, the conversation
       // restarted, one line in it) — the pool's 'allow', or the owner's pin; never a re-point the running CLI follows
       // (B-d578 F2) onto the pool's FALLBACK PROVIDER: through the hub's ONE queue (paced, idle first, the record first)
-      if (ds.cross && ds.cross.fallbackOnly && /^pv-/.test(String(ds.to))) { const dw = Number(s2._poolFallbackDwell) || _fbDwell.get(String(s2.claudeSessionId || s2.backendSessionId || '')) || 0; if (!restartInFlight(s2, now) && now - dw >= FALLBACK_DWELL_MS) queueFallbackMove(poolId, sid, ds.to, 'pool', now); continue; }   // (F3a) NO FLAP: moved back inside the DWELL ⇒ held
+      if (ds.cross && ds.cross.fallbackOnly && /^pv-/.test(String(ds.to))) { const dw = Math.min(now, Number(s2._poolFallbackDwell) || _fbDwell.get(String(s2.claudeSessionId || s2.backendSessionId || '')) || 0);   /* (r3319 (7)) a stamp in the future holds no longer than now */ if (!restartInFlight(s2, now) && now - dw >= FALLBACK_DWELL_MS) queueFallbackMove(poolId, sid, ds.to, 'pool', now); continue; }   // (F3a) NO FLAP: moved back inside the DWELL ⇒ held
       if (_fbSaid.has(sid) || _fbBackoff.has(sid)) endFallbackEpisode(sid);   // (r3041 (c)) a member takes it: the fallback episode is over
       if (ds.cross && !sameProvider(poolProviderOf(a)(curFor), poolProviderOf(a)(ds.to))) { applyCrossMove(poolId, sid, s2, curFor, ds, now); continue; }
       const dwellKey = poolId + ':' + sid;

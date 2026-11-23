@@ -762,14 +762,102 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     && w16.restarts().length === 0 && w16.cards.some((c) => c.sid === 'x1' && c.text === 'DeepSeek has no record of the model this conversation came from — the pool does not move it back by itself'),
     'scene 7, never: told it can move back to Member A (nothing moves); no member can serve ⇒ told it cannot continue there and waits; a conversation with NO record of its first model is never moved back by the pool (said once)',
     { w14: w14.cards.map((c) => c.text), w15: w15.cards.map((c) => c.text), w16: w16.cards.map((c) => c.text) });
+  // ── THE CURE of round wyvftjajr (r3319) ──
+  const until = async (w, fact, k = 40) => { for (let i = 0; i < k && !fact(); i++) await w.settle(); return fact(); };   // a wait on a FACT, bounded (never a fixed settle)
+  const onFbRec = (w, sid, rec) => w.mk(sid, w.P, { claudeSessionId: 'cid-' + sid, _heldPoolMember: ds.id, _lastPtyDataAt: Date.now(), _poolFallback: { poolId: w.P, provider: ds.id, fromMember: w.A, toModel: 'deepseek-chat', at: Date.now() - 16 * 60e3, by: 'pool', ...rec } });
+  // THE MUST: a record whose FIRST MODEL is unknown is no record on the pool's road — nothing moved, the no-record line said; the
+  // press counts it apart (it cannot restore a model either); the verdict-only ask fails closed with no family
+  const wNm = world({ cross: 'allow' });
+  wNm.client(); heal(wNm); onFbRec(wNm, 'nm1', { fromModel: null });
+  await wNm.pass(); await wNm.pass();
+  const pressNm = wNm.eng.fallbackMoveBack(wNm.P);
+  await wNm.settle();
+  const askNoFam = wNm.eng.poolChooserForModel(wNm.P, { model: null, hinted: true, verdictOnly: true });
+  ok(wNm.restarts().length === 0 && !wNm.eng._fbQueue.has('nm1') && wNm.cards.filter((c) => c.sid === 'nm1' && c.text === 'DeepSeek has no record of the model this conversation came from — the pool does not move it back by itself').length === 1
+    && pressNm.queued === 0 && pressNm.noModel === 1 && askNoFam === null,
+    '(r3319 MUST) a record with NO first model: the pool moves nothing back (no guess), its no-record line ONCE; a press counts it apart (noModel 1, nothing queued); the verdict-only ask with no family answers null', { restarts: wNm.restarts(), pressNm, askNoFam, cards: wNm.cards.map((c) => c.text) });
+  // (1) «removed» READ AGAIN after the write: the provider listed again while the record's write was held ⇒ the dwell applies
+  const wRl = world({ cross: 'allow' });
+  wRl.client(); heal(wRl); onFbRec(wRl, 'rl1', { fromModel: 'sonnet', at: Date.now() - 60e3 });
+  wRl.am.updatePool(wRl.P, { fallbackProviders: [] });
+  wRl.meta.mode = 'hold';
+  await wRl.pass();
+  const heldRl = await until(wRl, () => wRl.meta.held.length > 0);
+  wRl.am.updatePool(wRl.P, { fallbackProviders: [ds.id] });   // listed again during the write
+  wRl.meta.mode = 'ok'; wRl.meta.held.splice(0).forEach((go) => go());
+  await until(wRl, () => !wRl.eng._fbInFlight.has('rl1'));
+  ok(heldRl && wRl.restarts().length === 0 && !((wRl.metas.get('cw-rl1') || {}).poolFallback || {}).back,
+    '(r3319 (1)) the provider listed AGAIN while the move back\'s record was being written ⇒ not moved («removed» read again: the dwell applies), the record as it was (no `back`)', { restarts: wRl.restarts(), rec: (wRl.metas.get('cw-rl1') || {}).poolFallback });
+  // (r3319 (8)) THE SETTING TURNED TO NEVER between the judgement and the record's landing ⇒ judged again: not moved, the record put back
+  const wSn = world({ cross: 'allow' });
+  wSn.client(); heal(wSn); onFbRec(wSn, 'sn1', { fromModel: 'sonnet' });
+  wSn.meta.mode = 'hold';
+  await wSn.pass();
+  await until(wSn, () => wSn.meta.held.length > 0);
+  wSn.am.updatePool(wSn.P, { crossProvider: 'never' });
+  wSn.meta.mode = 'ok'; wSn.meta.held.splice(0).forEach((go) => go());
+  await until(wSn, () => !wSn.eng._fbInFlight.has('sn1'));
+  ok(wSn.restarts().length === 0 && !((wSn.metas.get('cw-sn1') || {}).poolFallback || {}).back,
+    '(r3319 (8)) the pool turned back to never while the move back\'s record was being written ⇒ judged again after it landed: not moved, the record put back as it was', { restarts: wSn.restarts(), rec: (wSn.metas.get('cw-sn1') || {}).poolFallback });
+  // (2) A TURN BEGAN during the record's write ⇒ the record is written back as it was FIRST, then the conversation queued again
+  const wIt = world({ cross: 'allow' });
+  wIt.client(); heal(wIt); const itC = onFbRec(wIt, 'it1', { fromModel: 'sonnet' });
+  wIt.meta.mode = 'hold';
+  await wIt.pass();
+  await until(wIt, () => wIt.meta.held.length > 0);
+  itC._isStreaming = true; itC._turnState = 'running';
+  wIt.meta.mode = 'ok'; wIt.meta.held.splice(0).forEach((go) => go());
+  await until(wIt, () => !wIt.eng._fbInFlight.has('it1'));
+  ok(wIt.restarts().length === 0 && !((wIt.metas.get('cw-it1') || {}).poolFallback || {}).back && wIt.eng._fbQueue.has('it1'),
+    '(r3319 (2)) a turn began while the move back\'s record was written ⇒ not moved, the record written back WITHOUT `back` first, then queued again (it waits for the stop)', { rec: (wIt.metas.get('cw-it1') || {}).poolFallback, queued: wIt.eng._fbQueue.has('it1') });
+  // A FAILED RESTART (no page open): nothing moved and the record as it was — never half-moved
+  const wNc = world({ cross: 'allow' });
+  heal(wNc); const nc1 = onFbRec(wNc, 'nc1', { fromModel: 'sonnet' });
+  const saidNc = [], logNc = console.log; console.log = (m) => { saidNc.push(String(m)); };
+  try { await wNc.pass(); await until(wNc, () => saidNc.some((m) => /no connected client/.test(m)) && !wNc.eng._fbInFlight.has('nc1')); } finally { console.log = logNc; }
+  ok(saidNc.some((m) => /nc1: .*waits — no connected client/.test(m)) && wNc.restarts().length === 0 && !((wNc.metas.get('cw-nc1') || {}).poolFallback || {}).back && nc1._heldPoolMember === ds.id && !(nc1._poolFallback || {}).back,
+    'a move back whose restart cannot be made (no page open) moves nothing and leaves the record as it was (no `back`) — never half-moved', { rec: (wNc.metas.get('cw-nc1') || {}).poolFallback });
+  // TWENTY that may come back in one pass go through the hub queue at its pace (≤ FALLBACK_MOVES_PER_MIN a minute, pool-made)
+  const wTw = world({ cross: 'allow' });
+  wTw.client(); heal(wTw); for (let i = 0; i < 20; i++) onFbRec(wTw, 'tw' + i, { fromModel: 'sonnet' });
+  await wTw.pass();
+  await until(wTw, () => wTw.restarts().length >= wTw.eng.FALLBACK_MOVES_PER_MIN);
+  await wTw.settle();
+  ok(wTw.restarts().length === wTw.eng.FALLBACK_MOVES_PER_MIN && wTw.eng._fbQueue.size === 20 - wTw.eng.FALLBACK_MOVES_PER_MIN,
+    'twenty conversations that may come back in ONE pass: the hub queue moves ' + wTw.eng.FALLBACK_MOVES_PER_MIN + ' this minute (its pace), the rest wait their turn', { restarts: wTw.restarts().length, queued: wTw.eng._fbQueue.size });
+  // (7) a stamp in the future is clamped to now (the dwell never outlives its length), and (3) the no-flap map is swept by age
+  const ENGc = read('src/server/usage-pool-engine.js');
+  ok(ENGc.includes('at = Math.min(Date.now(), Number(at) || 0);   // (r3319 (7)) never a stamp in the future') && ENGc.includes('const dw = Math.min(now, Number(s2._poolFallbackDwell)')
+    && ENGc.includes('for (const [k, at] of _fbDwell) if (now - at > FALLBACK_DWELL_MS || at > now) _fbDwell.delete(k);'),
+    '(r3319 (3) (7)) a dwell stamp is never in the future (written and read clamped to now); the no-flap map is swept by age at each move back');
   // RED CONTROLS of §5
   const DWELL = "    if (!removed && now - (Number(rec.at) || 0) < FALLBACK_DWELL_MS) continue;   // the DWELL: the pool moves nobody back inside it";
   const wDw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, DWELL, '', 'no dwell'), 'eng-no-dwell') });
   wDw.client(); heal(wDw); onFb(wDw, 'dd1', { ago: 5 * 60e3 });
   await wDw.pass();
   ok(wDw.restarts().length === 1, 'CONTROL: a copy without the dwell moves it back at 5 minutes ⇒ the dwell leg goes RED', wDw.restarts());
-  const FIRST_MODEL = "toModel: rec.fromModel || null, fallbackOnly: false, back: true, removed } };";
-  const wF = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FIRST_MODEL, "toModel: rec.toModel || null, fallbackOnly: false, back: true, removed } };", 'the provider\'s model kept on the way back'), 'eng-no-first-model') });
+  // (r3319) RED: the MUST's three guards cut — the pool moves a record with no first model back, with NO model
+  const NM1 = "  if (!record || !record.fromModel) return null;   // (r3319 MUST) no first model: no verdict — the target is never a guess";
+  const NM2 = " && s2._poolFallback.fromModel ? s2._poolFallback : null;   // (r3319 MUST)";
+  const NM3 = "  if (!rec.fromModel) { console.log(`[pool] fallback back ${e.poolId}/${e.sid}: not moved — its first model is unknown (the target would be a guess)`); return { moved: false, why: 'no-first-model' }; }";
+  const NM4 = "    if (verdictOnly && (!fam || (!staleDefault && memberServeLapsed(cur)))) return null;";
+  const cutNm = anchored(anchored(anchored(anchored(ENG, NM1, '', 'no first-model guard'), NM2, ' ? s2._poolFallback : null;   // (cut)', 'the judge takes any record'), NM3, '', 'the move back takes any record'), NM4, '', 'the verdict-only ask passes by the early returns');
+  const wNmR = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', cutNm, 'eng-no-first-model') });
+  wNmR.client(); heal(wNmR); onFbRec(wNmR, 'nm1', { fromModel: null });
+  await wNmR.pass(); await until(wNmR, () => wNmR.restarts().length > 0, 12);
+  ok(wNmR.restarts().length === 1 && !wNmR.restarts()[0].model, 'CONTROL: a copy without the MUST\'s guards moves a record with no first model back — with NO model (the saved configuration\'s guess) ⇒ the MUST\'s leg goes RED', wNmR.restarts());
+  // (r3319 (8)) RED for NO FLAP: the dwell gate in the per-session pass cut ⇒ a conversation moved back is put on the fallback again inside its dwell
+  const GATE = "if (!restartInFlight(s2, now) && now - dw >= FALLBACK_DWELL_MS) queueFallbackMove(poolId, sid, ds.to, 'pool', now);";
+  const wNf = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, GATE, "if (!restartInFlight(s2, now)) queueFallbackMove(poolId, sid, ds.to, 'pool', now);", 'no dwell gate'), 'eng-no-flap-gate') });
+  wNf.client(); heal(wNf); onFb(wNf, 'b1');
+  await wNf.pass();
+  const b1rN = wNf.mk('b1r', wNf.P, { claudeSessionId: 'cid-b1', _lastPtyDataAt: Date.now() });
+  await wNf.pass();
+  wall(wNf);
+  await wNf.pass();
+  ok(wNf.eng._fbQueue.has('b1r') || wNf.restarts().some((t) => t.serverId === 'b1r'), 'CONTROL: a copy without the dwell gate puts the conversation the pool just moved back onto the fallback again ⇒ the NO FLAP leg goes RED', { queue: [...wNf.eng._fbQueue.keys()], dwell: b1rN._poolFallbackDwell });
+  const FIRST_MODEL = "toModel: rec.fromModel || null, fallbackOnly: false, back: true, removed: removed2 } };";
+  const wF = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FIRST_MODEL, "toModel: rec.toModel || null, fallbackOnly: false, back: true, removed: removed2 } };", 'the provider\'s model kept on the way back'), 'eng-no-first-model') });
   wF.client(); heal(wF); onFb(wF, 'ff1');
   await wF.pass();
   ok(wF.restarts().length === 1 && wF.restarts()[0].model === 'deepseek-chat', 'CONTROL: a copy that keeps the provider\'s model on the way back restarts on deepseek-chat ⇒ the first-model leg goes RED', wF.restarts());

@@ -1,4 +1,4 @@
-# KB: Features reference
+ THE CURE (round wyvftjajr, r3319): a record whose FIRST MODEL is unknown is NO record on the pool's road (said once by the no-record line; a press counts it apart in its reply and moves nothing — no model to restore); the verdict-only ask FAILS CLOSED with no family or a lapsed default (never the pool's default as a guess); «removed» is read again after the move back's record landed (listed again ⇒ the dwell applies); a turn begun meanwhile, a setting turned to never, a member gone or a restart that cannot be made put the record back as it was (no `back`); the no-flap map is swept by age; a dwell stamp is never in the future; the spawn's chooser never places a conversation on a fallback (only the pass's queue, behind the dwell gate), so NO FLAP holds across a respawn; a member that refused THIS conversation just before it moved is not yet excluded (its walls are the old server id's) — the cost is one restart and a dwell at most.# KB: Features reference
 
 Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
