@@ -14,10 +14,11 @@ src/handed-records.js (NEW — B-5a4d root, unit 1) — the hub's read of a conv
 scripts/test-channel-store-heap.mjs (NEW, fast — B-360d r2542) — the channel store keeps no start-read text: a stand-in index of 8 000 rows (a title outside Latin-1), the store in a child (--expose-gc), its settled heap a row under twice the file's bytes a row; RED: the takeText line removed
 scripts/fixtures/channel-store-heap-child.cjs (NEW — B-360d r2542) — test-channel-store-heap's child: one store over a stand-in, its settled heap after the open's layout warm-up landed
 src/server/subagent-transcript.js (NEW — 主开发 r2374) — a finished agent's transcript found (kept place, cwd's folder first, async walk) and read by the transcript pool's pages, whole, one read at a time; the sub-agent attach + GET /api/subagent-messages; a pool refusal said ⇒ kb-file-structure
-scripts/test-subagent-transcript.mjs (NEW, fast) — the sub-agent viewer's attach and route off the loop: zero sync listings / whole reads counted, the place kept, ten windows at once, the pool refusing, 37 MB whole; a red copy each
+scripts/test-subagent-transcript.mjs (NEW, fast) — the sub-agent viewer's attach and route off the loop: zero sync listings / whole reads counted, the place kept, ten windows at once, the pool refusing, the aimed read, the cut, the bound; a red copy each; §T the heavy twin
 scripts/test-ci-heavy-verdict-real.mjs (NEW, heavy — B-7e49) — test-ci-heavy-verdict's legs whose scene is a real child, moved verbatim: B-737b's planted-suite runs + their control, §6's CLI children, §7d the differential on real git; the pure legs stay fast + a §T pin
 scripts/test-pronoun-census.mjs (NEW, fast — r2517) — the pronoun rule as a ratchet: per tracked file of src, scripts, docs, data/bin and the root's *.md, the lines carrying a gendered pronoun (whole word, any case) against its table; above its row = red by name, below = a note ⇒ kb-file-structure
 scripts/fixtures/pronoun-census.json (NEW — r2517) — the pronoun census's table: per file, the lines carrying one of the eight words at the last restate (git grep -c -I -i -w over the same scope); a file not in it stands at zero; restated in one sweep, never per pick
+scripts/test-subagent-transcript-heavy.mjs (NEW, heavy — 主开发 r3142) — the fast suite's two legs that read big or walk slow, moved verbatim: ⑥ a 37 MB agent whole (CONTROL: the bounded read), ⑩b the bound's true words on a slow home and its kept answer; each with its red
 scripts/test-channels-agent-cli-verbs.mjs (NEW, heavy — B-7e49) — test-channels-agent-cli's legs that run the shipped CLI as a child moved verbatim with the stub: the verbs, the attachment verb, ⑳–㉔; the table (CLI presence, refused-set census) stays fast + a pin
 scripts/test-app-system-chain-helper.mjs (NEW, heavy — B-7e49) — test-app-system-chain's legs that wait on real children moved verbatim: §2 the helper's refusals, §3 a patched helper per rule, §4 the real keeper (stay probes, killed sleepers); §1 (the chain's law) and §5 stay fast + a pin
 
@@ -2443,7 +2444,7 @@ The owner's Mac (2.369.358, 2026-10-26): «leg up» at the offer, 45 s black, `c
   - The attach says it as `loadRefused`. The viewer words it: «This agent's log could not be read here: {why}» (zh / ja).
   - The route answers 503 `{ error, refused }`.
 - **The conversion:** the attach kept user / assistant / result records and converts with `convertHistoryAsync`, as it did. The route now converts with `convertHistoryAsync` too (paced 25 ms slices), never one hold.
-- **Gated by** scripts/test-subagent-transcript.mjs (fast), each leg with a red copy:
+- **Gated by** scripts/test-subagent-transcript.mjs (fast), each leg with a red copy, and its HEAVY TWIN scripts/test-subagent-transcript-heavy.mjs (主开发 r3142: ⑥ the 37 MB whole read and ⑩b the placed slow walks, moved verbatim; the fast file's §T pins that the twin holds them and reads the helper):
   - ① zero synchronous listings and whole reads on the loop, counted, against the release's cards;
   - ② the place kept;
   - ③ ten windows at once;

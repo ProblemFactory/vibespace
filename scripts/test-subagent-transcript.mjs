@@ -23,9 +23,6 @@
 //   ⑩ THE FIND'S BOUND (主开发 r2881): the projects folder's listing STALLED by placement — the route and the attach answer BY NAME
 //      at the bound, the next ask while it is out starts no second look (refused by name at once), the first ask after it returned
 //      is served; RED: today's finder (no bound, no count of its looks)
-//   ⑩b THE BOUND'S WORDS (r2991 (a)): a large healthy projects folder on a slow home (every look 1 ms, the agent's folder listed last)
-//      — «the walk … did not finish», nothing marked, the walk goes on and its answer is KEPT (a place: the next ask served; a miss:
-//      answered «none» as the release did in the end); RED: the bound that ends every walk (the next ask refused again)
 //   ⑪ A PROJECT FOLDER THAT IS ITSELF A LINK (r2991, the round's must): its own sub-agent shows on the route, the attach, the walked
 //      road and the live watcher; a link inside its subagents folder that points out, and another conversation's file reached
 //      through the linked folder's parent, answer as missing; RED: the judge against the real projects root (05d3d860d), and a copy
@@ -33,9 +30,9 @@
 //      an aimed conversation id with a remote parent asks no remote pull (RED: the pull unguarded)
 //   ⑫ THE REFUSALS' WORDS (r3103 (4)): every code the hub sends has its row in the page's table (src/lib/chat-view.js
 //      SUBAGENT_REFUSED), every row's words have zh and ja; the attach and the route send the code beside the words; CONTROL: a
-//      code planted in the hub with no row is caught by name. And (r3103 (1), in ⑩b) a kept miss never hides a file written at the
-//      exact place since; RED: the kept miss asked first
-//   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
+//      code planted in the hub with no row is caught by name
+//   §T THE HEAVY TWIN (主开发 r3142): ⑥ (the 37 MB whole read) and ⑩b (the placed slow walks, with r3103 (1)'s kept miss) moved
+//      VERBATIM to scripts/test-subagent-transcript-heavy.mjs — the pin that it holds them, once each, and reads the helper
 //   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
 //      conversation or out of the projects folder, and a conversation id with a parent step, are refused by name before any file
 //      call; an aimed ask tells nothing of whether a file exists; a link that leads out answers as a missing agent; a linked meta is
@@ -476,53 +473,6 @@ console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that 
   } finally { if (gate) gate.release(); fs.promises.readdir = hooked; T._resetForTest(); }
 }
 
-console.log('⑩b THE BOUND\'S WORDS (主开发 r2991 (a)) — a large healthy projects folder on a slow home: «did not finish», the walk goes on, its answer kept');
-{
-  const realRp = fs.promises.realpath, realRd = fs.promises.readdir;
-  const LAST = cwdToProjectDir(OTHER_CWD);   // BW's folder, listed LAST (a placement: the walk reaches it past the bound)
-  const slow = () => new Promise((r) => setTimeout(r, 1));   // ~600 looks a walk: well past the 0.2 s bound, no look near half of it
-  fs.promises.realpath = async function (p, ...a) { if (typeof p === 'string' && p.startsWith(PROJ)) await slow(); return realRp.call(fs.promises, p, ...a); };
-  fs.promises.readdir = async function (p, ...a) { if (typeof p === 'string' && p.startsWith(PROJ)) await slow(); const names = await realRd.call(fs.promises, p, ...a); return p === PROJ ? [...names.filter((n) => n !== LAST), ...names.filter((n) => n === LAST)] : names; };
-  const settle = async (M) => { for (let i = 0; i < 1000 && M.stats().walking > 0; i++) await sleep(10); };   // (a count: until the walk that went on has ended)
-  try {
-    T._resetForTest(); T._setFindBoundForTest(200);
-    const r1 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
-    const marked1 = T.stats().marked;
-    await settle(T);
-    const k0 = T.stats().kept;
-    const r2 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
-    ok(r1.code === 503 && /the walk of the projects folder did not finish within 0\.2 s/.test(r1.body.refused || '') && marked1 === 0, `a walk past the bound with every look answering is said as a walk that did not finish, never as a folder that did not answer; nothing marked («${r1.body.refused}», marked ${marked1})`);
-    ok(r2.code === 200 && (r2.body.messages || []).length > 0 && T.stats().kept === k0 + 1, `…it went on, and the next ask is served from the place it kept (${r2.code}, ${(r2.body.messages || []).length} cards)`);
-    const NONE = 'e0000000000000ee';
-    const r3 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
-    await settle(T);
-    const r4 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
-    ok(/did not finish/.test(r3.body.refused || '') && r4.code === 200 && (r4.body.messages || []).length === 0 && !r4.body.refused, `…an agent that is nowhere: the walk past the bound ends finding nothing, and the next ask is answered «none», as the release answered in the end (${r4.code}${r4.body.refused ? ', «' + r4.body.refused + '»' : ''})`);
-    // r3103 (1): the kept miss is asked only AFTER the kept and exact places — the agent's file written at the exact place since is found at once
-    agent(SUB, NONE, 0.02);
-    const r5 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: NONE });
-    ok(r5.code === 200 && (r5.body.messages || []).length > 0, `…and once its file is written at the conversation's own folder, the next ask finds it at once — the kept miss never hides it (${r5.code}, ${(r5.body.messages || []).length} cards)`);
-    // RED: the bound as it was (05d3d860d) — any look out at the bound ends the walk and names its folder; the next ask walks again
-    const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
-    const cut = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, '  const stalled = !!out && Date.now() - out.at >= findBoundMs / 2;\n', '  const stalled = !!out;\n', 'the bound\'s words'), 'bound-cuts');
-    cut._setFindBoundForTest(200);
-    const c1 = await cut.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
-    for (let i = 0; i < 300 && cut.stats().marked > 0; i++) await sleep(10);
-    const c2 = await cut.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
-    ok(/did not answer/.test(c1.refused || '') && !!c2.refused && !c2.records, `RED CONTROL: the bound that ends every walk names a folder that answered («${c1.refused}») and refuses the next ask again («${c2.refused}») — the legs above would be RED`);
-    // RED (r3103 (1)): the kept miss asked FIRST (before the kept and exact places), planted in a copy — the file written since stays hidden
-    const missFirst = MUT.load('src/server/subagent-transcript.js', anchored(anchored(HSRC,
-      '  const missedAt = _missedPast.get(ctx.ask);\n  if (missedAt !== undefined) { if (Date.now() - missedAt < MISS_KEPT_MS) return { fp: null }; _missedPast.delete(ctx.ask); }\n', '', 'the kept miss after the exact place'),
-      '  let walk = _walks.get(ask);\n', '  const missedAt = _missedPast.get(ask);\n  if (missedAt !== undefined && Date.now() - missedAt < MISS_KEPT_MS) return { fp: null };\n  let walk = _walks.get(ask);\n', 'the kept miss asked first'), 'miss-first');
-    missFirst._setFindBoundForTest(200);
-    const NONE2 = 'e0000000000000ed', mopts = { claudeSessionId: SID, agentId: NONE2, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ };
-    await missFirst.agentTranscript(mopts); await settle(missFirst);
-    agent(SUB, NONE2, 0.02);
-    const mf = await missFirst.agentTranscript(mopts);
-    ok(!mf.fp, `RED CONTROL: a copy that asks the kept miss first answers «none» for a file written at the exact place since (found ${mf.fp}) — the leg above would be RED`);
-  } finally { fs.promises.realpath = realRp; fs.promises.readdir = realRd; T._resetForTest(); }
-}
-
 console.log('⑫ THE REFUSALS\' WORDS (主开发 r3103 (4)) — every code the hub sends is worded by the page, with zh and ja');
 {
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
@@ -552,15 +502,16 @@ console.log('⑫ THE REFUSALS\' WORDS (主开发 r3103 (4)) — every code the h
     `the attach sends the code beside the words (${codeOf(aimedA).code}, ${codeOf(otherA).code} ${J(codeOf(otherA).vars)}, ${codeOf(noneA).code}); the route too (${J(aimedR.body.refusedCode)})`);
 }
 
-console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 MiB + 32 MiB) comes back entire');
+console.log('§T THE HEAVY TWIN HOLDS ⑥ AND ⑩b (主开发 r3142) — the 37 MB whole read and the placed slow walks, moved verbatim');
 {
-  T._resetForTest();
-  const big = agent(SUB, 'd00000000000000d', 37, 400);   // 37 MB > 2 MiB + 32 MiB = 35.65 MB, the bound
-  const got = await T.agentTranscript({ claudeSessionId: SID, agentId: 'd00000000000000d', exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
-  ok(got.records && got.records.length === big.lines && got.records[0].uuid === 'u-0' && got.records[big.lines - 1].uuid === rec(big.lines - 1, 1).uuid, `every one of its ${big.lines} records, the first and the last (${(got.records || []).length})`);
-  const bounded = await CX.readJsonlBoundedParsedPagedAsync(big.fp, { tailOnly: false, slot: 'subagent' });
-  ok(Array.isArray(bounded) && bounded.length < big.lines, `CONTROL: the histories' bounded read of the same file keeps ${(bounded || []).length} of its ${big.lines} records — without \`whole\` the viewer would hide its middle`);
-  fs.rmSync(big.fp, { force: true });
+  const twinRel = 'scripts/test-subagent-transcript-heavy.mjs';
+  const twin = fs.existsSync(path.join(REPO, twinRel)) ? fs.readFileSync(path.join(REPO, twinRel), 'utf-8') : '';
+  const here = fs.readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+  const MOVED = ["console.log('⑥ WHOLE", "console.log('⑩b THE BOUND"];
+  ok(MOVED.every((h) => twin.split(h).length === 2) && MOVED.every((h) => here.split(h).length === 2), `§T the heavy twin holds the ${MOVED.length} moved legs (⑥, ⑩b), once each, and this file runs neither`);
+  const ciSrc = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
+  ok(twin.includes("require(path.join(REPO, 'src/server/subagent-transcript.js'))") && twin.includes("require(path.join(REPO, 'src/routes/sessions.js'))") && /\{ name: 'test-subagent-transcript-heavy', tier: 'heavy'/.test(ciSrc),
+    '§T the twin reads the helper and the route (its heavy row in scripts/ci.mjs, selected by the helper\'s file and its own)');
 }
 
 console.log('⑧ THE READ CANNOT BE AIMED (主开发 r2865) — whatever a caller sends, only a transcript inside that conversation\'s own subagents folder');
