@@ -11439,10 +11439,14 @@ export default {
   "Nothing moved — that member cannot take it now": "移していません — そのメンバーは今は引き受けられません",
   "Switched from {from} ({fromProvider}) to {to} ({toProvider}) — model {model} → {toModel}": "{from}（{fromProvider}）から {to}（{toProvider}）へ切り替えました — モデル {model} → {toModel}",
   "Switched from {from} ({fromProvider}) to {to} — model {model} → {toModel}": "{from}（{fromProvider}）から {to} へ切り替えました — モデル {model} → {toModel}", // lane lg-providers B-d578 fallback F2
-  "{provider} cannot take this conversation: {why} — nothing moved": "{provider} はこの会話を引き受けられません：{why} — 何も移していません", // lane lg-providers B-d578 fallback F2 cure
+  "1 conversation is queued to move to the fallback — it restarts there when its turn is over; a refusal is said in its own line": "1 件の会話をフォールバックへ移す順番に入れました — 今のターンが終わるとそこで再起動します。断られた場合はその会話の中で伝えます", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
+  "{n} conversations are queued to move to the fallback — each restarts there when its turn is over; a refusal is said in its own line": "{n} 件の会話をフォールバックへ移す順番に入れました — それぞれ今のターンが終わるとそこで再起動します。断られた場合はその会話の中で伝えます", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
+  "This pool now moves a conversation to its fallback by itself — none waits right now": "このプールは今後、会話を自分でフォールバックへ移します — 今待っている会話はありません", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
+  "{provider} cannot take this conversation: it does not serve the model {model} — nothing moved": "{provider} はこの会話を引き受けられません：モデル {model} を提供していません — 何も移動していません", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
+  "{provider} cannot take this conversation: this machine's managed Claude settings keep a provider's key out — nothing moved": "{provider} はこの会話を引き受けられません：このマシンの管理された Claude 設定がプロバイダーのキーを締め出しています — 何も移動していません", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
+  "{provider} cannot take this conversation now: its refusals could not be checked — nothing moved; the pool asks again later": "{provider} は今この会話を引き受けられません：断る条件を確かめられませんでした — 何も移動していません。プールはあとでもう一度確かめます", // lane lg-providers B-d578 fallback F2 cure 2 (r3041)
   "{provider} could take this conversation while every member is out, but the vault is locked — For you names what waits on it; Unlock… there and the pool can move it": "どのメンバーも使えない間は {provider} がこの会話を引き受けられますが、保管庫がロックされています — 「あなた宛て」に待っているものが並んでいます。そこでロックを解除するとプールが移せます", // lane lg-providers B-d578 fallback F2 cure (r2939 (7))
   "Always — to any fallback this pool lists": "常に — このプールが挙げるどの代替プロバイダーへも", // lane lg-providers B-d578 fallback F2 cure
-  "Moving {n} conversations to the fallback — each restarts there when its turn is over": "{n} 件の会話を代替プロバイダーに移しています — 各会話は今のターンが終わるとそこで再起動します", // lane lg-providers B-d578 fallback F2 cure
   "Nothing moved — no conversation waits any more": "何も移していません — もう待っている会話はありません", // lane lg-providers B-d578 fallback F2 cure
   "Pool \"{pool}\": 1 conversation moved to {provider} — every member is out.": "プール「{pool}」：会話 1 件を {provider} に移しました — どのメンバーも使えません。", // lane lg-providers B-d578 fallback F2
   "Pool \"{pool}\": {n} conversations moved to {provider} — every member is out.": "プール「{pool}」：会話 {n} 件を {provider} に移しました — どのメンバーも使えません。", // lane lg-providers B-d578 fallback F2

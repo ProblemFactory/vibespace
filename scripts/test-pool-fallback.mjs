@@ -285,7 +285,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const nowS = () => Math.floor(Date.now() / 1000);
   const cacheOf = (u5) => JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand', fiveHour: { utilization: u5, resetsAt: nowS() + 7200 }, sevenDay: { utilization: 0.4, resetsAt: nowS() + 3 * 86400 } });
   const EMPTY_MANAGED = path.join(scratchDir('pool-fallback-managed-none'), 'none');   // the machine's managed Claude settings folder, stood in EMPTY (never the test machine's own)
-  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED } = {}) => {
+  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED, landingMs = 90e3 } = {}) => {
     const dir = scratchDir('pool-fallback-eng'), root = fs.mkdtempSync(path.join(dir, 'w-')), dataDir = path.join(root, 'data');
     const wam = wireAm(AccountManager, dataDir);
     wam.setProviderRows(() => MP.rosterRowsOf(store.thirdParty(), { usable: (p) => vault.state() === 'unlocked' && store.hasKey(p.id) }));
@@ -322,7 +322,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { sent.push({ type: 'FIRE' }); } }),
-      getQuotaProbe: () => null, getSessionMetaStore: () => metaStore, getUserTodos: () => todos, managedClaudeDir: managedDir, vaultState: () => vault.state(),
+      getQuotaProbe: () => null, getSessionMetaStore: () => metaStore, getUserTodos: () => todos, managedClaudeDir: managedDir, vaultState: () => vault.state(), fallbackLandingMs: landingMs,
     });
     eng.usageEstimator.burnFor = () => ({});
     eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });
@@ -372,7 +372,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const ans = w1.eng.answerCrossProviderAsk(fbItems(w1)[0].action.askId, { answer: 'once' });
   await w1.settle();
   const r1 = w1.restarts();
-  ok(ans.ok && ans.state === 'allowed' && ans.moving === 3 && r1.length === 3 && r1.every((t) => t.model === 'deepseek-chat' && !('message' in t) && !('prompt' in t) && !('text' in t))
+  ok(ans.ok && ans.state === 'allowed' && ans.queued === 3 && r1.length === 3 && r1.every((t) => t.model === 'deepseek-chat' && !('message' in t) && !('prompt' in t) && !('text' in t))
     && ['s1', 's2', 's3'].every((sid) => { const m = w1.metas.get('cw-' + sid); return m && m.poolFallback && m.poolFallback.provider === ds.id && m.poolFallback.fromMember === w1.A && m.poolFallback.fromModel === 'sonnet' && m.poolFallback.toModel === 'deepseek-chat' && m.poolFallback.by === 'person'; })
     && w1.eng._fbMovedAt.length === 0 && fbItems(w1)[0].status === 'done' && !w1.sent.some((m) => m.type === 'FIRE'),
     'Allow once: the three move AT ONCE (a press: never counted by the pace), each restart asks for deepseek-chat and carries NO prompt (the move starts no turn); each record — pool, provider, member and model it came from — was written first; the item settled',
@@ -383,8 +383,13 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const pick = w1.eng.poolChooserForModel(w1.P, { model: 'deepseek-chat', resumeOf: 'cid-s1' });
   const sp = w1.am.resolveForSpawn(w1.P, 'claude', { sessionKey: 'claude:s1b', chooseMember: () => pick });
   const s1b = w1.mk('s1b', w1.P, { claudeSessionId: 'cid-s1', _heldPoolMember: ds.id, _lastPtyDataAt: Date.now() });
+  w1.metas.set('cw-s1b', { ...w1.metas.get('cw-s1b'), heldPoolMember: ds.id });   // the create's origin write names where it is held (ws-create)
   await w1.pass();
   const restored = BR.poolFallbackOf(w1.metas.get('cw-s1b'));
+  // (r3041 (d)) the reader checks the record against where the conversation is HELD: a record left in the meta of a conversation
+  // still held on its member (the hub died between the send and the kill) is no record
+  const notMoved = BR.poolFallbackOf({ ...w1.metas.get('cw-s1b'), heldPoolMember: w1.A }), noHold = BR.poolFallbackOf({ poolFallback: (w1.metas.get('cw-s1b') || {}).poolFallback });
+  ok(notMoved === null && noHold === null && !!restored, '(d) boot-restore takes the record only on a conversation held ON its provider: the same record on one held on its member A — or on none — is no record (it never moved)', { notMoved, noHold });
   const swept = w1.mute(() => w1.eng.sweepNonMemberLinks());
   ok(pick === ds.id && sp.kind === 'provider' && sp.poolTarget === ds.id && !!s1b._poolFallback && s1b._poolFallback.fromModel === 'sonnet' && !!restored && restored.provider === ds.id && restored.fromMember === w1.A && restored.fromModel === 'sonnet'
     && w1.cards.some((c) => c.sid === 's1b' && c.text === `Switched from Member A (${w1.am.memberProviderOf(w1.A).label}) to DeepSeek — model sonnet → deepseek-chat`) && !swept.some((x) => x && x.removed && x.removed.includes(ds.id)),
@@ -498,19 +503,66 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const wM = world({ cross: 'allow', managedDir: mdir });
   wM.client(); wM.mk('m2');
   await wM.pass();
-  ok(wM.restarts().length === 0 && !(wM.metas.get('cw-m2') || {}).poolFallback && wM.cards.some((c) => c.sid === 'm2' && /^DeepSeek cannot take this conversation: .+ — nothing moved$/.test(c.text)),
+  ok(wM.restarts().length === 0 && !(wM.metas.get('cw-m2') || {}).poolFallback && wM.cards.some((c) => c.sid === 'm2' && c.text === 'DeepSeek cannot take this conversation: this machine\'s managed Claude settings keep a provider\'s key out — nothing moved'),
     '(4) the managed settings refuse the provider ⇒ asked BEFORE the kill: nothing restarted (the conversation never left stopped by the pool), no record, its line says why', wM.cards.map((c) => c.text));
-  // (5) A PERSON's PRESS, PACED FOR THE BOX: at the head, uncounted, FOUR restarts at a time
+  // (5) A PERSON's PRESS, PACED FOR THE BOX (r3041 MUST): at the head, uncounted, FOUR restarts OUT at a time — a slot is held until
+  // that conversation's restart LANDS (its create asks the carry), never freed at the send
+  const land = (w, t) => w.eng.poolChooserForModel(w.P, { model: t.model, resumeOf: t.backendSessionId, carryRecord: true });
+  const pressTen = async (w) => { w.client(); for (let i = 0; i < 10; i++) w.mk('pb' + i); await w.pass(); const a = w.mute(() => w.eng.answerCrossProviderAsk(fbItems(w)[0].action.askId, { answer: 'once' })); await w.settle(); await w.settle(); return a; };
+  const settleUntil = async (w, n, k = 8) => { for (let i = 0; i < k && w.restarts().length < n; i++) await w.settle(); };
   const wB = world();
-  wB.client(); for (let i = 0; i < 10; i++) wB.mk('pb' + i);
-  await wB.pass();
-  wB.meta.mode = 'hold';
-  const ansB = wB.eng.answerCrossProviderAsk(fbItems(wB)[0].action.askId, { answer: 'once' });
-  await wB.settle();
-  const atOnce = wB.meta.held.length;
-  let rounds = 0; while (wB.meta.held.length && rounds++ < 6) { wB.meta.held.splice(0).forEach((go) => go()); await wB.settle(); }
-  ok(ansB.moving === 10 && atOnce === wB.eng.PRESS_MOVES_AT_ONCE && wB.eng.PRESS_MOVES_AT_ONCE === 4 && wB.restarts().length === 10 && wB.eng._fbMovedAt.length === 0,
-    '(5) Allow once on 10 waiting conversations: the answer counts 10; FOUR start at a time (the next as these end), all ten restarted in the end, none counted by the pool\'s pace', { moving: ansB.moving, atOnce, restarts: wB.restarts().length, rounds });
+  const ansB = await pressTen(wB);
+  const atOnce = wB.restarts().length;
+  let landed = 0, maxOut = atOnce, rounds = 0, recs = 0;
+  while (landed < wB.restarts().length && rounds++ < 30) { if (land(wB, wB.restarts()[landed])) recs++; landed++; await wB.settle(); await wB.settle(); maxOut = Math.max(maxOut, wB.restarts().length - landed); }
+  ok(ansB.queued === 10 && ansB.moved === false && atOnce === 4 && maxOut === 4 && wB.restarts().length === 10 && recs === 10 && wB.eng._fbLanding.size === 0 && wB.eng._fbMovedAt.length === 0 && wB.eng.PRESS_MOVES_AT_ONCE === 4,
+    '(5) Allow once on 10 waiting conversations: the answer says 10 QUEUED; FOUR restarts out at a time — the next goes only as one LANDS (its create asks the carry), never at the send; all ten in the end, none counted by the pool\'s pace', { queued: ansB.queued, atOnce, maxOut, restarts: wB.restarts().length, recs, rounds });
+  const wL = world({ landingMs: 250 });
+  wL.client(); for (let i = 0; i < 6; i++) wL.mk('pl' + i);
+  await wL.pass();
+  wL.mute(() => wL.eng.answerCrossProviderAsk(fbItems(wL)[0].action.askId, { answer: 'once' }));
+  await wL.settle();
+  const firstL = wL.restarts().length;
+  const saidL = [], logL = console.log; console.log = (m) => { saidL.push(String(m)); };
+  try { await new Promise((r) => setTimeout(r, 700)); await settleUntil(wL, 6); } finally { console.log = logL; }
+  ok(firstL === 4 && wL.restarts().length === 6 && saidL.filter((m) => /was not seen landing within/.test(m)).length >= 4,
+    '(5) …a restart never seen landing holds its slot only to the bound: then the slot is freed AND SAID (the journal), and the next ones go', { firstL, after: wL.restarts().length, said: saidL.filter((m) => /landing/.test(m)).length });
+  // (a) THE PRESS's WORDS (r3041): the answer counts what is QUEUED (the hub says each move as it is made, a refused one in its own
+  // line); a singular; «Always» with nothing waiting says the pool now moves by itself
+  const UTA = read('src/lib/user-todos-actions.js');
+  ok(UTA.includes("n === 1 ? t('1 conversation is queued to move to the fallback — it restarts there when its turn is over; a refusal is said in its own line')")
+    && UTA.includes("t('{n} conversations are queued to move to the fallback — each restarts there when its turn is over; a refusal is said in its own line', { n })")
+    && UTA.includes("r.state === 'always' ? t('This pool now moves a conversation to its fallback by itself — none waits right now')") && !UTA.includes('Moving {n} conversations'),
+    '(a) the press\'s toast says QUEUED (never «moving»), one conversation in the singular, and «Always» with none waiting says the pool now moves by itself');
+  // (b) THE REFUSAL CHECK FAILS CLOSED (r3041): a check that throws refuses — nothing killed, said in the line in its own sentence; and
+  // it asks with the conversation's OWN backend and the model its restart carries
+  const MAN = require(path.join(REPO, 'src/managed-claude-settings.js')), realMH = MAN.managedHelperFact;
+  const wX = world({ cross: 'allow' });
+  wX.client(); wX.mk('x1');
+  MAN.managedHelperFact = async () => { throw new Error('a placed throw'); };
+  try { await wX.pass(); await wX.settle(); } finally { MAN.managedHelperFact = realMH; }
+  ok(wX.restarts().length === 0 && !(wX.metas.get('cw-x1') || {}).poolFallback && wX.cards.some((c) => c.sid === 'x1' && c.text === 'DeepSeek cannot take this conversation now: its refusals could not be checked — nothing moved; the pool asks again later'),
+    '(b) the provider\'s refusal check THROWS ⇒ refused (fails closed): nothing restarted, no record, the line says the check could not be made', wX.cards.map((c) => c.text));
+  const wY = world({ cross: 'allow' });
+  wY.client(); wY.mk('y1');
+  const askedY = [], realPMF = wY.am.providerModelFor.bind(wY.am);
+  wY.am.providerModelFor = (id, be, m) => { askedY.push({ id, be, m }); return realPMF(id, be, m); };
+  await wY.pass(); await wY.settle();
+  wY.am.providerModelFor = realPMF;
+  const yR = wY.restarts().find((t) => t.serverId === 'y1');
+  ok(!!yR && askedY.some((q) => q.id === ds.id && q.be === wY.sessions.get('y1').backend && q.m === yR.model),
+    '(b) …the check asks the provider with the conversation\'s OWN backend and the model its restart carries (as the create will)', { askedY, restart: yR && yR.model });
+  // (c) A REFUSED MOVE IS BACKED OFF (r3041): the pool does not queue it again (nor spend a slot, nor ask the check again) before its
+  // time; a member serving it again ends the episode (the backoff and the said-once line cleared)
+  let checksK = 0;
+  const wK = world({ cross: 'allow', managedDir: mdir });
+  wK.client(); wK.mk('k1');
+  MAN.managedHelperFact = async (o) => { checksK++; return realMH(o); };
+  try { await wK.pass(); await wK.settle(); const c1 = checksK; await wK.pass(); await wK.settle(); await wK.pass(); await wK.settle(); var kAfter = { c1, c3: checksK, queued: wK.eng._fbQueue.has('k1'), off: wK.eng._fbBackoff.has('k1') }; } finally { MAN.managedHelperFact = realMH; }
+  fs.writeFileSync(path.join(wK.cacheDir, wK.B + '.json'), cacheOf(0.1));
+  await wK.pass(); await wK.settle();
+  ok(kAfter.c1 === 1 && kAfter.c3 === 1 && !kAfter.queued && kAfter.off && wK.cards.filter((c) => c.sid === 'k1' && /keep a provider's key out/.test(c.text)).length === 1 && !wK.eng._fbBackoff.has('k1'),
+    '(c) refused once ⇒ backed off: two more passes queue nothing and ask the check NO more (one check, one line); B serving again ends the episode (the backoff cleared)', kAfter);
   // (6) THE BUTTON's WORDS: «Always» on the fallback item says it reaches ANY fallback this pool lists; its detail too
   ok(read('src/lib/user-todos-row.js').includes("act && act.fallback ? t('Always — to any fallback this pool lists') : t('Always for this pool')") && /to ANY fallback this pool lists/.test(fbItems(wB)[0].detail || ''),
     '(6) the fallback item\'s «Always» says it plainly — always, to ANY fallback this pool lists (the pool\'s one setting) — in its button and its detail');
@@ -541,6 +593,11 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await vault.unlock('correct horse battery staple');
   ok(wV.cards.filter((c) => c.sid === 'v1' && c.text === 'DeepSeek could take this conversation while every member is out, but the vault is locked — For you names what waits on it; Unlock… there and the pool can move it').length === 1 && wV.restarts().length === 0 && peekLocked === null,
     '(7) the vault LOCKED: nothing moves and the conversation\'s own line says ONCE that DeepSeek waits for the vault (its press: the vault\'s item in For you); the peek names nothing', wV.cards.map((c) => c.text));
+  // (r3041 (c)) …ONCE AN EPISODE: the vault opened ends it; locked again, the line is said again (once)
+  await wV.pass();
+  await vault.lock('test', { quiet: true });
+  try { await wV.pass(); await wV.pass(); } finally { await vault.unlock('correct horse battery staple'); }
+  ok(wV.cards.filter((c) => c.sid === 'v1' && /but the vault is locked/.test(c.text)).length === 2, '(7) …once an EPISODE: the vault opened ends it; locked again, the line is said again — once', wV.cards.map((c) => c.text));
   // (8) THE MEMBER ABOUT TO RETURN: held near its login\'s end, near its limit, unknown ⇒ the pool\'s own member, never the provider; a wall a minute from its reset: the shape has no wait (F3a\'s dwell brings it back)
   const near = (w, how) => {
     if (how === 'unknown') fs.writeFileSync(path.join(w.cacheDir, w.B + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand' }));   // a reading that states no bucket: B is UNKNOWN, never «out»
@@ -549,14 +606,33 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   };
   const eight = {};
   for (const how of ['unknown', 'soft', 'login']) { const w = world({ cross: 'allow' }); w.client(); near(w, how); w.mk('e-' + how); await w.pass(); eight[how] = { on: w.am.poolCurrentFor(w.P, 'e-' + how) === w.B, fb: w.restarts().some((t) => t.model === 'deepseek-chat') || w.eng._fbQueue.size > 0 }; }
+  // (r3041 (e)) A MEMBER MERELY HELD: B refused by the vendor (a 403 — the engine's 10-minute mark, tried again after it), A at its wall:
+  // the settled shape holds B out of the candidates while its mark stands ⇒ the provider IS chosen (F3a's dwell brings it back)
+  const wE = world({ cross: 'allow', bHealthy: true });
+  wE.client(); const eb = wE.mk('e-onb'); wE.am.ensureSessionPoolLink(wE.P, 'e-onb', wE.B, { why: 'spawn' });
+  wE.mute(() => wE.eng.notePoolAuthFailure(eb, 'e-onb', { status: 403, message: 'permission_error' }));
+  wE.mk('e-held');
+  await wE.pass();
+  eight.held = { fb: wE.restarts().some((t) => t.serverId === 'e-held' && t.model === 'deepseek-chat') || wE.eng._fbQueue.has('e-held') };
   const wR = world({ cross: 'allow' });
   wR.client(); fs.writeFileSync(path.join(wR.cacheDir, wR.A + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand', fiveHour: { utilization: 1, resetsAt: nowS() + 60 }, sevenDay: { utilization: 0.4, resetsAt: nowS() + 3 * 86400 } }));
   wR.mk('r60');
   await wR.pass();
-  ok(Object.values(eight).every((x) => x.on && !x.fb) && wR.restarts().some((t) => t.serverId === 'r60' && t.model === 'deepseek-chat'),
-    '(8) B unknown, B near its limit, B\'s login near its end ⇒ the pool\'s OWN member takes it, never the provider; A a minute from its reset with B spent ⇒ the provider IS chosen (the settled shape has no reset wait — F3a\'s dwell brings it back)', { eight, r60: wR.restarts().map((t) => t.model) });
+  const heldE = eight.held; delete eight.held;
+  ok(Object.values(eight).every((x) => x.on && !x.fb) && heldE.fb && wR.restarts().some((t) => t.serverId === 'r60' && t.model === 'deepseek-chat'),
+    '(8) B unknown, B near its limit, B\'s login near its end ⇒ the pool\'s OWN member takes it, never the provider; B merely HELD (the vendor\'s 10-minute mark) or A a minute from its reset with B spent ⇒ the provider IS chosen (the settled shape holds no wait — F3a\'s dwell brings it back)', { eight, heldE, r60: wR.restarts().map((t) => t.model) });
   // RED CONTROLS
   const ENG = read('src/server/usage-pool-engine.js');
+  const FREE_AT_LANDING = "if (x.r && x.r.landing) x.r.landing.then(free, free); else free(); return x; }));";
+  const wFS = world({ engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FREE_AT_LANDING, 'free(); return x; }));', 'the slot freed at the send'), 'eng-free-at-send') });
+  await pressTen(wFS); await settleUntil(wFS, 10);
+  ok(wFS.restarts().length === 10, 'CONTROL: a copy that frees the press\'s slot at the SEND (not the landing) has all ten restarts out at once ⇒ (5) goes RED', wFS.restarts().length);
+  const OPEN = "  } catch (err) { return { key: FALLBACK_REFUSED_UNCHECKED, params: {}, why: `its refusals could not be checked (${(err && err.message) || err})` }; }";
+  const wXo = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, OPEN, '  } catch (err) { }', 'the check fails open'), 'eng-fails-open') });
+  wXo.client(); wXo.mk('x1');
+  MAN.managedHelperFact = async () => { throw new Error('a placed throw'); };
+  try { await wXo.pass(); await wXo.settle(); } finally { MAN.managedHelperFact = realMH; }
+  ok(wXo.restarts().length === 1, 'CONTROL: a copy whose refusal check fails OPEN on a throw kills the conversation for a create that refuses ⇒ (b) goes RED', wXo.restarts().length);
   const PACE = "    if (e.by !== 'person' && _fbMovedAt.length >= FALLBACK_MOVES_PER_MIN) continue;";
   const wPace = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, PACE, '', 'no pace'), 'eng-no-pace') });
   wPace.client(); for (let i = 0; i < 8; i++) wPace.mk('p' + i);

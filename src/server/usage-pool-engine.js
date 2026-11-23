@@ -36,7 +36,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   getUserTodos = () => null,
   // (B-d578 F2 cure) the machine's managed Claude settings folder a fallback move is judged against BEFORE it kills the conversation
   // (null: the platform's own folder) and the vault's state (null: the data folder's vault) — a suite hands stand-ins
-  managedClaudeDir = null, vaultState = null,
+  managedClaudeDir = null, vaultState = null, fallbackLandingMs = 90e3,
   // lane reset-path: how long a written reset-credit verb waits for its "sent" (src/reset-credit.js
   // RESET_CREDIT_ACK_MS, 90 s) — a SUITE shortens it to drive the never-sent settle without a sleep
   resetCreditAckMs = null,
@@ -892,7 +892,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     const readCache = (id) => projectCacheForFamily(base(id), fam); // (a null family projects nothing — every bucket counts)
     const fallbackOnly = !!(arguments[1] && arguments[1].fallbackOnly); // (B-d578 F2) the store's PEEK — read off the options, the signature as the suites anchor it
     // (F2 cure, r2939 (1)) THE CREATE's question: the record a move onto a fallback left in its carry, for the create's FIRST meta write
-    if (arguments[1] && arguments[1].carryRecord) { const k = String(resumeOf || ''), c = k ? _crossPlacementOwed.get(k) : null; return c && c.poolId === poolId && c.record && /^pv-/.test(String(c.to)) && c.record.provider === c.to ? c.record : null; }
+    if (arguments[1] && arguments[1].carryRecord) { const k = String(resumeOf || ''), c = k ? _crossPlacementOwed.get(k) : null; const rec = c && c.poolId === poolId && c.record && /^pv-/.test(String(c.to)) && c.record.provider === c.to ? c.record : null; if (rec) noteFallbackLanded(k); return rec; }   // (F2 cure 2, r3041) the create asked: the move LANDED — a press's slot is free
     // THE COLD MOVE LANDS (row B-d578, the pool's fallback unit (a), ruling r1516): a conversation applyCrossMove moved is RESUMED
     // under a NEW server id — its resume (`resumeOf`: the backend id it resumes) starts on the member it was moved to while the
     // carry lives (crossCarryFor) AND the member can still serve (memberCanServe — the pin's own judgement: signed in, not at its
@@ -7750,15 +7750,34 @@ function dropCrossCarry(poolId, bsid, to) {
 //   WORDS (7)  the line in the resumed conversation names the provider by its label; ONE toast a batch with its count.
 // Under 'never' nothing moves by itself: ONE For-you item a (pool, provider) counts the conversations that wait (scene 1).
 const FALLBACK_MOVES_PER_MIN = 6;
-const PRESS_MOVES_AT_ONCE = 4;   // (F2 cure, r2939 (5)) a person's press: at the head and never counted, but its restarts run FOUR at a time (the client restarts each one)
+const PRESS_MOVES_AT_ONCE = 4;   // (F2 cure, r2939 (5)) a person's press: at the head and never counted, but FOUR restarts out at a time — a slot is held until that restart LANDS (F2 cure 2, r3041: the moved conversation's create asks the carry) or `fallbackLandingMs`, then freed and said
 const _fbQueue = new Map();   // server id → {poolId, sid, to, by: 'pool'|'person', at}
 const _fbInFlight = new Map(); // server id → its entry, from the move's start to its end (r2939 (3): never queued nor executed twice across the record's wait)
 const _fbMovedAt = [];        // the instants of the pool-made moves started in the rolling minute (the pace)
+const _fbLanding = new Map();  // (F2 cure 2, r3041 MUST) backend id → the press slot that waits for that restart to LAND
+const _fbBackoff = new Map();  // (F2 cure 2, r3041 (c)) server id → {to, n, until}: a move the provider refused is not queued by the pool again before `until`
+const FALLBACK_REFUSED_BACKOFF_MS = 5 * 60e3, FALLBACK_REFUSED_BACKOFF_MAX_MS = 60 * 60e3;   // 5 min doubling to an hour; the episode's end clears it
+/** a press's slot waits for the moved conversation's restart to LAND — its create asks the carry (poolChooserForModel's
+ *  `carryRecord`) — at most `fallbackLandingMs`; then the slot is freed and said in the journal → 'landed' | 'unseen' */
+function awaitFallbackLanding(bsid, sid) {
+  const k = String(bsid || '');
+  if (!k) return Promise.resolve('unseen');
+  return new Promise((resolve) => {
+    const prev = _fbLanding.get(k); if (prev) prev.done('replaced');
+    const w = { sid, at: Date.now(), done: null };
+    const t = setTimeout(() => { if (_fbLanding.get(k) === w) _fbLanding.delete(k); console.log(`[pool] fallback ${sid}: its restart was not seen landing within ${Math.round(fallbackLandingMs / 1000)} s — the press's slot is freed for the next one`); resolve('unseen'); }, fallbackLandingMs);
+    if (t && typeof t.unref === 'function') t.unref();
+    w.done = (how) => { clearTimeout(t); if (_fbLanding.get(k) === w) _fbLanding.delete(k); resolve(how); };
+    _fbLanding.set(k, w);
+  });
+}
+function noteFallbackLanded(bsid) { const w = _fbLanding.get(String(bsid || '')); if (w) w.done('landed'); }
 let _fbPumpTimer = null;
 const inTurnOf = (s) => conversationInTurn({ isStreaming: s && s._isStreaming, turnState: s && s._turnState });
 /** Queue a move of conversation `sid` onto fallback `to` (`by` 'person' = a press: at the head, outside the pace). */
 function queueFallbackMove(poolId, sid, to, by = 'pool', now = Date.now()) {
   if (_fbInFlight.has(sid)) return _fbInFlight.get(sid);
+  if (by !== 'person') { const b = _fbBackoff.get(sid); if (b && b.to === to && b.until > now) return null; }   // (r3041 (c)) refused: backed off (a press is its own authority)
   const q = _fbQueue.get(sid);
   if (q && q.to === to && (q.by === 'person' || by === 'pool')) return q;
   const e = { poolId, sid, to, by, at: q && q.to === to ? q.at : now };
@@ -7784,7 +7803,7 @@ function pumpFallbackMoves(now = Date.now()) {
     _fbQueue.delete(e.sid);
     _fbInFlight.set(e.sid, e);
     if (e.by !== 'person') _fbMovedAt.push(now); else pressing++;
-    started.push(Promise.resolve().then(() => executeFallbackMove(e, now)).then((r) => ({ e, r }), () => ({ e, r: { moved: false, why: 'failed' } })).then((x) => { _fbInFlight.delete(e.sid); if (e.by === 'person' && [..._fbQueue.values()].some((q) => q.by === 'person')) { try { pumpFallbackMoves(); } catch { } } return x; }));
+    started.push(Promise.resolve().then(() => executeFallbackMove(e, now)).then((r) => ({ e, r }), () => ({ e, r: { moved: false, why: 'failed' } })).then((x) => { const free = () => { if (_fbInFlight.get(e.sid) === e) _fbInFlight.delete(e.sid); if (e.by === 'person' && [..._fbQueue.values()].some((q) => q.by === 'person')) { try { pumpFallbackMoves(); } catch { } } }; if (x.r && x.r.landing) x.r.landing.then(free, free); else free(); return x; }));   // (r3041 MUST) a press's slot: freed when its restart LANDS, never at the send
   }
   const waiting = [..._fbQueue.values()].some((e) => e.by !== 'person');
   if (waiting && !_fbPumpTimer && _fbMovedAt.length) {
@@ -7825,10 +7844,12 @@ async function executeFallbackMove(e, now = Date.now()) {
   const x = j.d.cross;
   // (r2939 (4)) THE PROVIDER's REFUSALS BEFORE THE KILL — the ones the create would meet after it (the provider's model rule; the
   // machine's managed Claude settings): refused ⇒ not moved, said in the conversation's own line
-  const refused = await fallbackRefusal(e.to, x.toModel);
+  const refused = await fallbackRefusal(e.to, x.toModel, (j.s2 && j.s2.backend) || (accounts.get(e.poolId) || {}).backend || 'claude');   // (r3041 (b)) the conversation's OWN backend and the model its create gets
   if (refused) {
-    sayOnce(j.s2, e.sid, 'refused:' + e.to, fillWith(FALLBACK_REFUSED_LINE, { provider: nameOf(e.to), why: refused }));
-    console.log(`[pool] fallback ${e.poolId}/${e.sid}: ${e.to} refuses it before the move — ${refused}`);
+    const b = _fbBackoff.get(e.sid), n = b && b.to === e.to ? b.n + 1 : 1, wait = Math.min(FALLBACK_REFUSED_BACKOFF_MAX_MS, FALLBACK_REFUSED_BACKOFF_MS * 2 ** (n - 1));
+    _fbBackoff.set(e.sid, { to: e.to, n, until: Date.now() + wait });   // (r3041 (c)) not queued by the pool again before then (a pool slot is not spent on it each pass)
+    sayOnce(j.s2, e.sid, 'refused:' + e.to, fillWith(refused.key, { provider: nameOf(e.to), ...refused.params }));
+    console.log(`[pool] fallback ${e.poolId}/${e.sid}: ${e.to} refuses it before the move — ${refused.why} (the pool asks again in ${Math.round(wait / 60e3)} min)`);
     return { moved: false, why: 'refused' };
   }
   const record = { poolId: e.poolId, provider: e.to, fromMember: j.curFor || null, fromModel: x.model || null, toModel: x.toModel || null, at: now, by: e.by };
@@ -7846,24 +7867,28 @@ async function executeFallbackMove(e, now = Date.now()) {
   if (inTurnOf(s3)) { clearFallbackRecord(s3); _fbInFlight.delete(e.sid); queueFallbackMove(e.poolId, e.sid, e.to, e.by, now); return { moved: false, why: 'in-turn' }; }   // a turn began meanwhile: it waits for the stop
   const r = applyCrossMove(e.poolId, e.sid, s3, j2.curFor, j2.d, Date.now(), { why: 'fallback', record, quiet: true });
   if (!r.moved) clearFallbackRecord(s3);   // (r2939 (1)) no record left on a conversation that did not move (no client)
+  else { endFallbackEpisode(e.sid); if (e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid); }   // (r3041 MUST) a press's slot waits for the LANDING
   return r;
 }
-const FALLBACK_REFUSED_LINE = i18nKey('{provider} cannot take this conversation: {why} — nothing moved');
+const FALLBACK_REFUSED_MODEL = i18nKey('{provider} cannot take this conversation: it does not serve the model {model} — nothing moved');
+const FALLBACK_REFUSED_MANAGED = i18nKey('{provider} cannot take this conversation: this machine\'s managed Claude settings keep a provider\'s key out — nothing moved');
+const FALLBACK_REFUSED_UNCHECKED = i18nKey('{provider} cannot take this conversation now: its refusals could not be checked — nothing moved; the pool asks again later');
 /** The provider's own refusals a create would meet AFTER the kill (r2939 (4)) — the model rule and the managed settings — asked before
- *  the move: → null | the refusal's words. */
-async function fallbackRefusal(pv, toModel) {
+ *  the move with the conversation's OWN backend and the model its create gets (r3041 (b)); a check that THROWS refuses (fails closed:
+ *  never killed for a create that refuses) → null | {key, params, why} — the line a whole sentence in the page's language (r3041 (f)),
+ *  the hub's own detail in the journal */
+async function fallbackRefusal(pv, toModel, backend = 'claude') {
+  const be = String(backend || 'claude');
   try {
-    const pm = typeof accounts.providerModelFor === 'function' ? accounts.providerModelFor(pv, 'claude', toModel || null) : null;
-    if (pm && pm.ok === false) return String(pm.message || pm.code || 'its model is refused');
-  } catch { }
-  try {
-    const h = require('../harnesses').get('claude');
+    const pm = typeof accounts.providerModelFor === 'function' ? accounts.providerModelFor(pv, be, toModel || null) : null;
+    if (pm && pm.ok === false) return { key: FALLBACK_REFUSED_MODEL, params: { model: toModel || '—' }, why: String(pm.message || pm.code || 'its model is refused') };
+    const h = require('../harnesses').get(be);
     if (h && h.creds && h.creds.keyHelper) {
       const MANAGED = require('../managed-claude-settings.js');
       const mh = await MANAGED.managedHelperFact({ dir: typeof managedClaudeDir === 'string' ? managedClaudeDir : null });
-      if (mh.named !== false) return String(MANAGED.refusalOf(mh, nameOf(pv)).message || 'the machine\'s managed Claude settings refuse it');
+      if (mh.named !== false) return { key: FALLBACK_REFUSED_MANAGED, params: {}, why: String(MANAGED.refusalOf(mh, nameOf(pv)).message || 'the machine\'s managed Claude settings refuse it') };
     }
-  } catch { }
+  } catch (err) { return { key: FALLBACK_REFUSED_UNCHECKED, params: {}, why: `its refusals could not be checked (${(err && err.message) || err})` }; }
   return null;
 }
 /** The record left on a conversation that did not move goes (a reader also checks it against where the conversation is held). */
@@ -7875,14 +7900,21 @@ function clearFallbackRecord(s2) {
     sessionMetaStore.writeSessionMeta(s2.sockName, { ...prev, poolFallback: undefined }, { prev });   // spread: the create's origin write is the ONE that rebuilds a record
   } catch { }
 }
-const _fbSaid = new Map();      // `${sid}:${what}` → at — a conversation's own line, once an episode
+const _fbSaid = new Map();      // server id → Map(what → at) — a conversation's own line, once an EPISODE (endFallbackEpisode ends it)
 function sayOnce(s2, sid, what, text) {
-  const k = sid + ':' + what;
-  if (_fbSaid.has(k)) return false;
-  _fbSaid.set(k, Date.now());
+  let m = _fbSaid.get(sid);
+  if (m && m.has(what)) return false;
+  if (!m) { m = new Map(); _fbSaid.set(sid, m); }
+  m.set(what, Date.now());
   while (_fbSaid.size > 4096) _fbSaid.delete(_fbSaid.keys().next().value);
   try { feedPeerCard(s2, { fromName: 'VibeSpace', kind: 'notification', text }); } catch { }
   return true;
+}
+/** (r3041 (c)) THE EPISODE ENDS — the conversation no longer waits at every wall (served, moved, gone) or, for `what` 'vault', the
+ *  vault no longer keeps the fallback out: its said-once lines may be said again in the next one; a whole end clears the backoff */
+function endFallbackEpisode(sid, what = null) {
+  if (what === null) { _fbSaid.delete(sid); _fbBackoff.delete(sid); return; }
+  const m = _fbSaid.get(sid); if (m) m.delete(what);
 }
 const fillWith = (tpl, params) => tpl.replace(/\{(\w+)\}/g, (m0, k) => (params[k] !== undefined ? String(params[k]) : m0));
 /** (r2939 MUST) a change of the pool's setting empties that pool's POOL-MADE entries at once (the PATCH route calls it); a person's
@@ -7978,7 +8010,7 @@ function answerFallbackAsk(q, answer, now = Date.now()) {
   for (const sid of sids) queueFallbackMove(q.poolId, sid, q.pv, 'person', now);
   settle(answer === 'always' ? 'always' : 'allowed');
   pumpFallbackMoves(now);
-  return { ok: true, state: answer === 'always' ? 'always' : 'allowed', moved: sids.length > 0, moving: sids.length, ...(sids.length ? {} : { why: 'gone' }) };
+  return { ok: true, state: answer === 'always' ? 'always' : 'allowed', moved: false, queued: sids.length, ...(sids.length ? {} : { why: 'gone' }) };   // (r3041 (a)) QUEUED, not moved: each move is said by the hub's own count when it is made (a refused one in its own line)
 }
 // THE OWNER'S CARD (decision ①, 2026-10-20 — 「切到 X 需要你同意」). Under the pool's crossProvider 'never' a conversation
 // whose member cannot serve any more and that only ANOTHER provider could take is never moved by itself: ONE For-you item
@@ -8945,6 +8977,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         if (noWay) try { getAutoResume()?.noteNoPoolTarget?.(sid, rejected.length, ds.reason); } catch { }
         // (r2939 (7)) A LOCKED VAULT keeps the pool's fallback out of the decision: the conversation's own line says so, once, and where its press is
         if (noWay && !fbRows.length && fallbackWaitsForVault(a)) sayOnce(s2, sid, 'vault', fillWith(FALLBACK_VAULT_LINE, { provider: fallbackWaitsForVault(a) }));
+        else if (_fbSaid.has(sid)) endFallbackEpisode(sid, noWay ? 'vault' : null);   // (r3041 (c)) the vault opened, or the conversation no longer waits: the episode ends
         if (ds && ds.reason === 'all-rejected' && now - (_noTargetLogAt.get(sid) || 0) > 10 * 60e3) {
           _noTargetLogAt.set(sid, now);
           console.log(`[pool] per-session ${poolId}/${sid}: nowhere to go — ${rejected.length} member(s) already rejected this conversation`);
@@ -8961,6 +8994,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       // restarted, one line in it) — the pool's 'allow', or the owner's pin; never a re-point the running CLI follows
       // (B-d578 F2) onto the pool's FALLBACK PROVIDER: through the hub's ONE queue (paced, idle first, the record first)
       if (ds.cross && ds.cross.fallbackOnly && /^pv-/.test(String(ds.to))) { if (!restartInFlight(s2, now)) queueFallbackMove(poolId, sid, ds.to, 'pool', now); continue; }
+      if (_fbSaid.has(sid) || _fbBackoff.has(sid)) endFallbackEpisode(sid);   // (r3041 (c)) a member takes it: the fallback episode is over
       if (ds.cross && !sameProvider(poolProviderOf(a)(curFor), poolProviderOf(a)(ds.to))) { applyCrossMove(poolId, sid, s2, curFor, ds, now); continue; }
       const dwellKey = poolId + ':' + sid;
       const lastS = _poolSwitchAt.get(dwellKey) || 0;
@@ -9238,7 +9272,7 @@ function maybeStopOnFallback(session, id, from, to) {
     requestSlotFor, // law 1's ONE answer to «which account» (lane readings-attribution-2): {key, slotOk, reqAt, movedAt?} or null = unknown
     providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, dropCrossCarry, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     queueFallbackMove, pumpFallbackMoves, fallbackJudge, fallbackRows, syncFallbackAsks, answerFallbackAsk, _fbQueue, _fbMovedAt, _fbAsks, FALLBACK_MOVES_PER_MIN,
-    purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, // F2 cure (r2939) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
+    purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, _fbLanding, _fbBackoff, noteFallbackLanded, endFallbackEpisode, // F2 cure (r2939) + cure 2 (r3041) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)

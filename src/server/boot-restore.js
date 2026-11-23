@@ -58,10 +58,12 @@ function heldOriginOf(meta) {
 }
 /** Persist the 'no-start' marker the first time a restore infers it (r5). */
 /** (B-d578 F2) the record of a move onto a pool's FALLBACK PROVIDER, as the session meta keeps it — `{poolId, provider, fromMember,
- *  fromModel, toModel, at, by}` — or null (a record that does not read as one is no record: nothing is guessed). */
+ *  fromModel, toModel, at, by}` — or null (a record that does not read as one is no record: nothing is guessed; a record on a
+ *  conversation the meta holds on another member — or on none — is no record either: F2 cure 2, r3041 (d)). */
 function poolFallbackOf(meta) {
   const r = meta && meta.poolFallback;
   if (!r || typeof r !== 'object' || typeof r.poolId !== 'string' || typeof r.provider !== 'string' || !/^pv-/.test(r.provider)) return null;
+  if (meta.heldPoolMember !== r.provider) return null;   // (F2 cure 2, r3041 (d)) the reader checks it against where the conversation is HELD: a record written before a kill the hub never made (it died between the send and the kill) describes a move that never happened
   const str = (v) => (typeof v === 'string' && v ? v.slice(0, 200) : null);
   return { poolId: r.poolId, provider: r.provider, fromMember: str(r.fromMember), fromModel: str(r.fromModel), toModel: str(r.toModel), at: Number(r.at) || null, by: r.by === 'person' ? 'person' : 'pool' };
 }
