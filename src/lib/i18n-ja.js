@@ -9582,6 +9582,8 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "添付がなくなりました",
   "A link in an item was not found": "項目内のリンクが見つかりません",
+  "VibeSpace cannot read its list of published pages right now — nothing was changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace は公開ページの一覧をいま読めません — 何も変更していません。数分後にもう一度お試しください（自動でもう一度読みます）。",
+  "VibeSpace cannot read its list of published pages right now, so this file may already be published. Nothing is lost: every link given out stays, and publishing waits until the list reads (it tries again every few minutes).": "VibeSpace は公開ページの一覧をいま読めないため、このファイルはすでに公開されているかもしれません。失われたものはありません：渡したリンクはすべて残り、公開は一覧が読めるまで待ちます（数分ごとに再試行します）。",
   "The folder of an attachment did not answer": "添付のフォルダーが応答しませんでした",
   "The folder of a link in an item did not answer": "項目内のリンクのフォルダーが応答しませんでした",
   "Not found: {path}": "見つかりません: {path}",

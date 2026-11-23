@@ -9583,6 +9583,8 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
+  "VibeSpace cannot read its list of published pages right now — nothing was changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到已发布页面的列表 — 没有更改任何东西。几分钟后再试（它会自己再读一次）。",
+  "VibeSpace cannot read its list of published pages right now, so this file may already be published. Nothing is lost: every link given out stays, and publishing waits until the list reads (it tries again every few minutes).": "VibeSpace 暂时读不到已发布页面的列表，所以这个文件可能已经发布过了。没有丢失：发出去的每个链接都还在，发布要等到列表读到为止（每隔几分钟会再试一次）。",
   "The folder of an attachment did not answer": "一个附件所在的文件夹没有响应",
   "The folder of a link in an item did not answer": "条目里一个链接所在的文件夹没有响应",
   "Not found: {path}": "找不到：{path}",

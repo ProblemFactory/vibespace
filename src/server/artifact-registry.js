@@ -445,6 +445,7 @@ async function judgeAsk({ session = null, items = [], fsCall = null, remote = nu
       const store = deps.pages && deps.pages();
       let hit = null;
       try { hit = store && typeof store.byId === 'function' ? store.byId(pm[1]) : null; } catch { hit = null; }
+      if (hit && hit.held) { bad.push({ item, why: 'pages-unread', error: `${item}: ${hit.held}` }); continue; }   // r3005: the pages list is held — never «no such page»
       if (!hit) { bad.push({ item, why: 'no-page', error: `${item}: no such page on this server — publish the file first (vibespace-page publish <file>) and attach the /p/<id> it prints` }); continue; }
       if (!hit.page) { bad.push({ item, why: 'unpublished', error: `${item}: not published (it was taken down) — publish it again first (vibespace-page publish <file>)` }); continue; }
       artifacts.push({ kind: 'page', host: '', page: pm[1], name: String(hit.page.name || pm[1]).slice(0, 200), url: '/p/' + pm[1] });
@@ -617,6 +618,7 @@ function tellChanged(session) {
  *  page (its session id or conversation id) drops out; the publisher's name = its live session's. */
 function presentedResolved(s, sessionId, rows) {
   const store = (() => { try { return deps.pages && deps.pages(); } catch { return null; } })();
+  if (store && typeof store.heldWords === 'function' && store.heldWords()) return { ...(rows || {}) };   // r3005: the pages list is held — every presented row keeps what it last knew (never «Unpublished» on an unread list)
   const cid = conversationOf(s);
   const live = [...sessions()];
   const nameOf = (p) => { const hit = (p.sessionId && sessions().get(p.sessionId)) || (p.conversationId && (live.find(([, x]) => x && conversationOf(x) === p.conversationId) || [])[1]); return (hit && hit.name) || ''; };

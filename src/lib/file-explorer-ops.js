@@ -1,4 +1,4 @@
-import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared, hostsHeldWords } from './utils.js';
+import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared, hostsHeldWords, heldWordsOf, pagesHeldWords } from './utils.js';
 import { t, resolveLang } from './i18n.js';
 import { wordsFor as mountWords } from '../mount-error-words.js'; // B-02f6: a pull folder's hold worded by its code (the row's own words)
 import { agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» on a refusal for an old agent
@@ -641,7 +641,9 @@ export function installExplorerOps(FileExplorer) {
   // already published (stable URL upsert), lock toggle mirrors the 2.359.0
   // path-mount semantics (default private = login-only; public = anyone).
   async _publishPageDialog(fullPath, name) {
-    const existing = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
+    const pr = await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null);
+    const existing = pr?.page || null;
+    const pagesHeld = !!pr && pr.code === 'pages_unread';   // 主开发 r3005: the list of published pages is held (it could not be read) — never «not published yet»
     // not the subject: name — the file's own name (the last part of fullPath, the key)
     const { body, close, raised } = createModalShell({ id: 'publish-page-dialog', key: fullPath, beside: true, title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
@@ -653,6 +655,7 @@ export function installExplorerOps(FileExplorer) {
       <label style="display:block;margin-bottom:8px">${t('Page name')}<input class="dialog-input" id="pp-name" value="${esc(existing?.name || name.replace(/\.html?$/i, ''))}"></label>
       <label class="dialog-check-row" style="margin-bottom:10px"><input type="checkbox" id="pp-public" ${existing?.public ? 'checked' : ''}> ${t('Public — anyone with the link can view (no login)')}</label>
       ${existing ? `<div class="pp-url" style="font-size:12px;margin-bottom:10px;word-break:break-all;opacity:.8">${esc(absUrl(existing.url))}</div>` : ''}
+      ${pagesHeld ? `<div class="empty-hint empty-hint-inline pp-held" style="margin-bottom:10px">${esc(t('VibeSpace cannot read its list of published pages right now, so this file may already be published. Nothing is lost: every link given out stays, and publishing waits until the list reads (it tries again every few minutes).'))}</div>` : ''}
       <div class="dialog-footer" style="display:flex;gap:8px;justify-content:flex-end">
         ${existing ? `<button class="btn-cancel" id="pp-unpub">${t('Unpublish')}</button><button class="btn-cancel" id="pp-copy">${t('Copy link')}</button><button class="btn-cancel" id="pp-open">${t('Open')}</button>` : ''}
         <button class="btn-create" id="pp-go">${existing ? t('Republish') : t('Publish')}</button>
@@ -667,7 +670,7 @@ export function installExplorerOps(FileExplorer) {
         if (await changed()) return;
         const r = await fetch(`/api/pages/${existing.id}`, { method: 'DELETE' }).then((x) => x.json()).catch(() => null);
         if (r?.ok) { showToast(t('Page unpublished')); close(); }
-        else showToast(t('Unpublish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' });
+        else showToast(t('Unpublish failed: {err}', { err: heldWordsOf(r) || r?.error || t('server unreachable') }), { type: 'error' });
       };
     }
     /** RE-READ at the answer (lane dialog-yield r2): the form stays open beside the work — published or unpublished elsewhere
@@ -677,6 +680,7 @@ export function installExplorerOps(FileExplorer) {
     const changed = async () => {
       const read = await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (!read || typeof read !== 'object' || !('page' in read)) { showToast(t('Could not re-check this page — try again'), { type: 'error', duration: 6000 }); return true; }
+      if (read.code === 'pages_unread') { showToast(pagesHeldWords(), { type: 'error', duration: 6000 }); return true; }   // held: no news about the page, the press stays the person's to repeat
       const now = read.page || null;
       if ((now?.id || null) === (existing?.id || null)) return false;
       showToast(now ? t('This file was published elsewhere while the dialog was open — it shows as it is now') : t('This page was unpublished elsewhere while the dialog was open — it shows as it is now'), { type: 'warn', duration: 6000 });
@@ -691,7 +695,7 @@ export function installExplorerOps(FileExplorer) {
       if (!r?.page && existing && /file not found/.test(r?.error || '')) {
         r = await fetch(`/api/pages/${existing.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ public: payload.public, name: payload.name }) }).then((x) => x.json()).catch(() => null);
       }
-      if (!r?.page) { showToast(t('Publish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' }); return; }
+      if (!r?.page) { showToast(t('Publish failed: {err}', { err: heldWordsOf(r) || r?.error || t('server unreachable') }), { type: 'error' }); return; }
       close();
       const { body: b2, close: c2, raised } = createModalShell({ id: 'page-published-dialog', key: freshKey('published'), beside: true, title: t('Page published'), escapeToClose: true, minWidth: '420px', kind: 'form' });
       if (raised) return;   // raised: the same subject's form, as it was

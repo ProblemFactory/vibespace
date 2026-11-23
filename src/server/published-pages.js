@@ -20,6 +20,12 @@
 const fs = require('fs');
 const path = require('path');
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): published-pages.json under the store-read law
+const PAGES_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.pages === undefined || Array.isArray(v.pages)) && (v.gone === undefined || Array.isArray(v.gone));
+const HELD_CODE = 'pages_unread';
+/** a visitor of a share link while the list is held: never «not found» / «unpublished» — the page may well be there */
+const HELD_VISIT = 'This page cannot be shown right now: the server cannot read its list of published pages. Nothing is lost — try the link again in a few minutes.';
 
 const ID_RE = /^pg[a-z0-9]{10}$/;
 // B-f694 verify r1: the Pages list's routes are the USER's (any page, no ask) — an agent token (vsst_ / jbt_) is refused
@@ -109,16 +115,37 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   const pagesDir = path.join(dataDir, 'published-pages');
   let store = { pages: [] };
   let shimCache = { key: null, buf: null }; // one transformed copy per snapshot
-  try { store = JSON.parse(fs.readFileSync(storeFile, 'utf-8')) || { pages: [] }; } catch { }
-  if (!Array.isArray(store.pages)) store.pages = [];
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no page
+  // published» and the next publish, rename, flag or removal wrote over the file: every share link a person gave out answered
+  // 404 (a republish mints a new id). HELD: every change is refused by name (503 pages_unread), nothing is written over it, a
+  // share link answers 503 «cannot be shown right now» (never 404 / 410), the Publish dialog says why, and the file is read
+  // again off the loop; torn bytes are kept aside once per content, then it starts empty. A restart while held reads the same
+  // file again. NO REMOVER reads its silence: the snapshots under published-pages/ are deleted only by remove() and a
+  // re-publish of the same record — never by a sweep of what the list does not name.
+  const hold = HOLD.create({
+    file: storeFile, valid: PAGES_SHAPE, code: HELD_CODE, aside: (mark) => storeFile + '.corrupt-' + mark,
+    words: (h) => `published-pages.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No page is lost: nothing is written over it, every share link answers «cannot be shown right now», and publishing waits until it reads`,
+    log: (s) => log('[pages] ' + s),
+    onLift: (v) => { store = normalize(v || { pages: [] }); },
+  });
+  function normalize(s) {
+    const st = s && typeof s === 'object' ? s : { pages: [] };
+    if (!Array.isArray(st.pages)) st.pages = [];
+    if (!Array.isArray(st.gone)) st.gone = [];
+    for (const p of st.pages) if (p && !p.srcKey && p.srcPath) p.srcKey = 'local:' + p.srcPath;
+    return st;
+  }
+  { let read; try { read = { text: fs.readFileSync(storeFile, 'utf-8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: PAGES_SHAPE });
+    if (hold.start(a0) === 'data') store = a0.value || { pages: [] }; }
+  store = normalize(store);
+  const heldAnswer = () => ({ error: hold.words(), code: HELD_CODE, status: 503 });   // a change refused by name while held
   // B-f694: the ids of UNPUBLISHED pages (id + when, nothing else — a private page's name never reaches an anonymous
   // viewer), so a link someone still holds answers 410 "unpublished" instead of a bare 404. Newest GONE_MAX kept.
-  if (!Array.isArray(store.gone)) store.gone = [];
   // srcKey (2.366.0): the upsert identity. File publishes are `local:<abs>`;
   // agent uploads are `<host|local>:<abs path on that machine>` — the same
   // design re-published from the same working file keeps its URL anywhere.
-  for (const p of store.pages) if (!p.srcKey && p.srcPath) p.srcKey = 'local:' + p.srcPath;
-  const save = () => { try { writeJsonAtomic(storeFile, store); } catch (e) { log('[pages] store save failed:', e.message); } };
+  const save = () => { if (!hold.writable('a page change')) return; try { writeJsonAtomic(storeFile, store); } catch (e) { log('[pages] store save failed:', e.message); } };   // held: nothing written over it
   const mintId = () => 'pg' + Array.from({ length: 10 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
   // An absolute share URL needs an origin the server does NOT know by itself.
   // Exactly two sources are legitimate:
@@ -150,6 +177,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   /** Copy-in publish; upserts by srcPath so a re-published design keeps its
    *  share URL. Returns the public record or {error}. */
   function publish({ srcPath, name, makePublic, req }) {
+    if (hold.held()) return heldAnswer();
     const abs = path.resolve(String(srcPath || ''));
     if (DOOR.blocked(abs)) return { error: DOOR.sentenceFor(abs) };   // B-afc4: a file on a storage that is not answering
     let st;
@@ -186,6 +214,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
    *  stay two pages) says what the source file actually was, instead of
    *  letting the prefix-strip below invent `<conv>:/abs/path`. */
   function publishContent({ html, name, srcKey, srcPath = '', makePublic, sessionId = null, conversationId = null, req = null, mediaType = '' }) {
+    if (hold.held()) return heldAnswer();
     const buf = Buffer.isBuffer(html) ? html : Buffer.from(String(html || ''), 'utf8');
     if (!buf.length) return { error: 'empty page body' };
     if (buf.length > MAX_BYTES) return { error: `page too large (${Math.round(buf.length / 1024 / 1024)}MB > ${MAX_BYTES / 1024 / 1024}MB)` };
@@ -220,6 +249,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   }
 
   function setFlags(id, { makePublic, name, req }) {
+    if (hold.held()) return heldAnswer();
     const rec = store.pages.find((p) => p.id === id);
     if (!rec) return { error: 'no such page' };
     if (makePublic !== undefined) rec.public = !!makePublic;
@@ -231,6 +261,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   }
 
   function remove(id) {
+    if (hold.held()) return heldAnswer();
     const i = store.pages.findIndex((p) => p.id === id);
     if (i < 0) return { error: 'no such page' };
     const [rec] = store.pages.splice(i, 1);
@@ -247,7 +278,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     .filter((p) => (!sessionId && !conversationId) || (sessionId && p.sessionId === sessionId) || (conversationId && p.conversationId === conversationId))
     .map((p) => pub(p, req));
   // lane pages-chip-groups: one id's fate for the artifact registry's presented rows — {page} live, {gone} unpublished (B-f694), null never here
-  const byId = (id, req) => { const rec = store.pages.find((p) => p.id === id); if (rec) return { page: pub(rec, req) }; return store.gone.some((g) => g && g.id === id) ? { gone: true } : null; };
+  const byId = (id, req) => { if (hold.held()) return { held: hold.words(), code: HELD_CODE }; const rec = store.pages.find((p) => p.id === id); if (rec) return { page: pub(rec, req) }; return store.gone.some((g) => g && g.id === id) ? { gone: true } : null; };   // held: the id's fate is UNKNOWN, never «never here»
   // by LOCAL path = srcKey 'local:<abs>' — a remote host's page for the same absolute path is a different page (review-caught: identical home layouts across hosts)
   const bySrcPath = (p, req) => { const key = 'local:' + path.resolve(String(p || '')); const rec = store.pages.find((r) => r.srcKey === key); return rec ? pub(rec, req) : null; };
 
@@ -255,6 +286,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   function gate(req, res) {
     const id = String(req.params.id || '');
     if (!ID_RE.test(id)) { res.status(404).send('not found'); return null; }
+    if (hold.held()) { res.setHeader('Retry-After', '120'); res.setHeader('Cache-Control', 'no-store'); res.status(503).type('text/plain').send(HELD_VISIT); return null; }   // held: never 404 / 410 for a link given out
     const rec = store.pages.find((p) => p.id === id);
     if (!rec && store.gone.some((g) => g.id === id)) { res.status(410).type('text/plain').send('This page was unpublished — whoever published it took it down, so this link no longer shows anything.'); return null; }
     if (!rec) { res.status(404).send('not found'); return null; }
@@ -448,31 +480,32 @@ self.addEventListener('fetch', (e) => {
     app.get('/p/sw.js', (req, res) => { res.type('application/javascript'); res.setHeader('Cache-Control', 'no-cache'); res.send(PAGES_SW); });
     app.get('/p/:id', serve);
     app.get('/p/:id/raw', serveRaw);
-    app.get('/api/pages', (req, res) => (res.json({ pages: list({ sessionId: req.query.sessionId ? String(req.query.sessionId) : undefined, conversationId: req.query.conversationId ? String(req.query.conversationId) : undefined, req }) })));
-    app.get('/api/pages/by-path', (req, res) => res.json({ page: bySrcPath(String(req.query.path || ''), req) }));
+    const heldOf = () => (hold.held() ? { unread: hold.words(), code: HELD_CODE } : {});   // held: a list read as «none» says so
+    app.get('/api/pages', (req, res) => (res.json({ pages: list({ sessionId: req.query.sessionId ? String(req.query.sessionId) : undefined, conversationId: req.query.conversationId ? String(req.query.conversationId) : undefined, req }), ...heldOf() })));
+    app.get('/api/pages/by-path', (req, res) => res.json({ page: bySrcPath(String(req.query.path || ''), req), ...heldOf() }));
     app.post('/api/pages/publish', (req, res) => {
       if (isAgentBearer(req)) return res.status(403).json({ error: 'publishing a file from the Pages dialog is the user\'s act — an agent token cannot; publish with `vibespace-page publish <file>` (it asks the user)', code: 'agent_forbidden' });
       const b = req.body || {};
       const r = publish({ srcPath: b.path, name: b.name, makePublic: b.public, req });
-      if (r.error) return res.status(400).json(r);
+      if (r.error) return res.status(r.status === 503 ? 503 : 400).json(r);
       res.json(r);
     });
     app.post('/api/pages/:id', (req, res) => {
       if (isAgentBearer(req)) return res.status(403).json({ error: PAGE_LIST_IS_USERS, code: 'agent_forbidden' });
       const b = req.body || {};
       const r = setFlags(String(req.params.id), { makePublic: b.public, name: b.name, req });
-      if (r.error) return res.status(404).json(r);
+      if (r.error) return res.status(r.status === 503 ? 503 : 404).json(r);
       res.json(r);
     });
     app.delete('/api/pages/:id', (req, res) => {
       if (isAgentBearer(req)) return res.status(403).json({ error: PAGE_LIST_IS_USERS, code: 'agent_forbidden' });
       const r = remove(String(req.params.id));
-      if (r.error) return res.status(404).json(r);
+      if (r.error) return res.status(r.status === 503 ? 503 : 404).json(r);
       res.json(r);
     });
   }
 
-  return { publish, publishContent, setFlags, remove, list, byId, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim };
+  return { publish, publishContent, setFlags, remove, list, byId, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim, heldWords: () => hold.words(), _hold: hold };
 }
 
 module.exports = { create, injectShim, COMPAT_PRELUDE, STORAGE_SHIM, CSP }; // CSP: the design preview's header too (lane design-ask)
