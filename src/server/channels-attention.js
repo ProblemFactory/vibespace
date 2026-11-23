@@ -44,6 +44,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const M = require('../decision-model.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): decision-examples.json under the store-read law
+const EX_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.examples === undefined || Array.isArray(v.examples));
 const FO = require('../channel-focus.js');
 const RL = require('../rule-learning.js');   // lane rule-learning: the block drafter's input + its proposal (PURE)
 
@@ -62,6 +65,17 @@ const hash16 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
 function create({ dataDir, decision = null, serverSetting = () => undefined, now = () => Date.now(), tailOf = () => [], notify = () => { },
   accountNever = () => false, viewNow = null, log = console, policy = () => null, facts = () => () => ({}), rowState = () => null } = {}) {
   const FILE = path.join(dataDir, 'decision-examples.json');
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no label» and the
+  // person's next Needs / Not wrote over the file: every label taught to the attention judge gone. HELD: a label is refused by name
+  // (labels_unread), the hourly implicit pass and the rule draft wait, the judge runs with no examples (as on a first day) — nothing
+  // is written over the file, it is read again off the loop. Torn bytes are kept aside once per content, then it starts empty. NO
+  // REMOVER reads its silence: an example leaves only by the EXAMPLES_KEPT bound inside this store.
+  const hold = HOLD.create({
+    file: FILE, valid: EX_SHAPE, code: 'labels_unread', aside: (mark) => FILE + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read the labels you taught right now (${h.code}); it reads them again by itself every few minutes. No label is lost: nothing is written over them, and a new Needs / Not label waits until it reads`,
+    log: (s) => { try { log.warn('[attention] ' + s); } catch { } },
+    onLift: (v) => { examples = fromDoc(v); },
+  });
   let examples = readExamples();
   const verdicts = new Map();   // row key → {p, clauses, rubricV, lastAt, source, mk}
   const queue = new Map();      // row key → the rowView it was queued with
@@ -76,13 +90,14 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   // lane attention-policy: a fact whose rule the owner switched off claims nothing — the judge may see that row
   const pol = () => { try { return policy() || null; } catch { return null; } };
 
+  function fromDoc(j) { return (Array.isArray(j && j.examples) ? j.examples : []).filter((x) => x && typeof x.key === 'string' && M.VERDICTS.includes(x.verdict)).slice(0, M.EXAMPLES_KEPT); }
   function readExamples() {
-    try {
-      const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      return (Array.isArray(j && j.examples) ? j.examples : []).filter((x) => x && typeof x.key === 'string' && M.VERDICTS.includes(x.verdict)).slice(0, M.EXAMPLES_KEPT);
-    } catch { return []; }
+    let read; try { read = { text: fs.readFileSync(FILE, 'utf8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: EX_SHAPE });
+    return hold.start(a0) === 'data' ? fromDoc(a0.value) : [];
   }
   function save() {
+    if (!hold.writable('a label')) return;   // held: nothing written over it
     const tmp = `${FILE}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ v: 1, examples }), { mode: 0o600 });
     fs.renameSync(tmp, FILE);
@@ -206,6 +221,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
 
   /** "Needs" / "Not" on a judged row: a labeled example (the ONE write), the row re-drawn at once. */
   function label(key, lastAt, verdict, view) {
+    if (hold.held()) return { ok: false, code: 'labels_unread', error: hold.words(), status: 503 };   // r3005: held — refused by name
     if (!M.VERDICTS.includes(verdict)) return { ok: false, code: 'bad-request', error: 'label must be needs or not' };
     if (!view) return { ok: false, code: 'not-found', error: 'no such conversation' };
     const at = Number(lastAt) || Number(view.lastAt) || 0;
@@ -222,6 +238,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   /** IMPLICIT LABELS (the switch, off by default): at most once an hour, every kept verdict asked `M.implicitLabel`
    *  against the row as it is now (`rowState`: readAt, selfAt) — one example per verdict, the person's own label wins. */
   function learn(t = now()) {
+    if (hold.held()) return 0;   // r3005: held — no implicit label into an unread list
     if (setting('decision.implicitLabels') !== true || t - learnedAt < LEARN_EVERY_MS) return 0;
     learnedAt = t;
     let n = 0;
@@ -276,6 +293,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   /** 「从我的判定起草」 (lane rule-learning): the text model PROPOSES the block from the person's verdicts — the input is ONLY
    *  what the judge already saw (the examples' digests + the block, never a body); NEVER written here. */
   async function learnDraft() {
+    if (hold.held()) return { ok: false, code: 'labels_unread', why: 'labels-unread', error: hold.words() };   // r3005: the examples are unread
     const av = learnAvailable();
     if (!av.exists) return { ok: false, code: 'not-found', why: av.why };
     const sent = M.examplesForInput(examples, RL.LEARN.examplesMax, { clauses: true });
@@ -294,7 +312,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   }
 
   const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold(), today: { ...todayNow() } });
-  return { note, viewOf, judgedFor, judgedKeys, walk, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
+  return { heldWords: () => hold.words(), _hold: hold, note, viewOf, judgedFor, judgedKeys, walk, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
 }
 
 module.exports = { create, CONCURRENCY, PER_HOUR, STOP, LEARN_EVERY_MS };

@@ -15,6 +15,8 @@
 //   AP  channels/api-proposals.json — the pending proposals, the decided history, the always-allow shapes (its derived cards:
 //       api-cards.json alone was KEPT at the candidate — the For-you store folds a re-filed card; their sync is AP's remover)
 //   XP  app-proposals.json — the pending app installs
+//   DS  designs.json — the design list, the names given by Rename, the agents' unanswered questions
+//   DX  decision-examples.json — every Needs / Not label the person taught the attention judge
 // Run: node scripts/test-content-store-reads.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -477,6 +479,78 @@ console.log('XP [app-proposals.json] the pending app installs');
   const roads = (r) => r.includes(L1) && r.indexOf(L1) < r.indexOf("if (b.proposalId && !engine.get(String(b.proposalId))) return fail(res, { code: 'not-found'") && r.includes(L2) && r.indexOf(L2) < r.indexOf("if (!p) return fail(res, { code: 'not-found', message: `no proposal ${id}` });") && r.includes(L3);
   ok(roads(R), 'XP6 by their source lines: the Install of a proposal and the agent\'s proposal wait ask the hold BEFORE «no proposal» (503 apps_unread, the routes\' table); the agent\'s apps list carries proposalsUnread', null);
   ok(!roads(anchored(R, L2 + '   // r3104 (a): held — the agent\'s wait hears why, never «no proposal»\n', '', 'xp6-wait-today')), 'XP6 RED: the agent\'s wait with today\'s line (no hold asked) fails the leg', null);
+}
+
+// ══ DS designs.json ══
+console.log('DS [designs.json] the design list, the names given by Rename, the agents\' unanswered questions');
+{
+  const DE = require(path.join(REPO, 'src/server/design-engine.js'));
+  const timers = { setInterval: () => ({ unref() { } }), clearInterval: () => { }, setTimeout: () => ({ unref() { } }) };
+  const mk = (d) => DE.create({ dataDir: d, timers, log: () => { } });
+  const dir = (n) => `/scratch-made-up/design-${n}`;
+  await storeLegs({
+    tag: 'DS', mk, code: 'designs_unread', torn: '{"designs": [{"id": "d-madeup", "dir": "/scr',
+    seed: async (d) => {
+      const e = mk(d);
+      e.register({ dir: dir(1), title: 'One' }); e.register({ dir: dir(2), title: 'Two' });
+      e.rename({ dir: dir(2), title: 'The name the person gave' });
+      await e.flush();
+      return { F: path.join(d, 'designs.json'), ids: [dir(1), dir(2)] };
+    },
+    next: (e, n) => e.register({ dir: dir(n), title: `Design ${n}` }),
+    passed: (r) => !!r && r.ok === true,
+    settle: (e) => e.flush(),
+    onDisk: (doc) => ((doc && doc.designs) || []).map((r) => r.dir),
+    listed: (e) => e.list({}).map((r) => r.dir),
+    held2: async (e, { codeOf }) => {
+      const r = [e.rename({ dir: dir(1), title: 'x' }), e.unlist({ dir: dir(1) }), e.ask({ dir: dir(1), questions: [{ q: 'made-up?' }] })];
+      ok(r.every((x) => codeOf(x) === 'designs_unread' && x.status === 503) && /cannot read /.test(e.heldWords() || ''), 'DS2 a Rename, a Remove from the list and an agent\'s ask are refused by name (503 designs_unread); the Designs home\'s list carries the words', r.map(codeOf));
+    },
+    afterHeld: async (e) => {
+      await quietly(() => e._hold.again());
+      const two = e.list({}).find((r) => r.dir === dir(2));
+      ok(!!two && two.title === 'The name the person gave', 'DS4 the lift brings back the name the person gave by Rename', two);
+    },
+  });
+}
+
+// ══ DX decision-examples.json ══
+console.log('DX [decision-examples.json] every Needs / Not label the person taught the attention judge');
+{
+  const AT = require(path.join(REPO, 'src/server/channels-attention.js'));
+  const quiet = { log() { }, info() { }, warn() { }, error() { } };
+  const mk = (d) => AT.create({ dataDir: d, log: quiet });
+  const view = (n) => ({ title: `made-up chat ${n}`, lastText: `a made-up line ${n}`, lastAt: 1000 * n });
+  const key = (n) => `lark-1:oc_madeup${n}`;
+  await storeLegs({
+    tag: 'DX', mk, code: 'labels_unread', torn: '{"v": 1, "examples": [{"key": "lark-1:oc_ma',
+    seed: async (d) => { const a = mk(d); a.label(key(1), 1000, 'needs', view(1)); a.label(key(2), 2000, 'not', view(2)); return { F: path.join(d, 'decision-examples.json'), ids: [key(1), key(2)] }; },
+    next: (a, n) => a.label(key(n), 1000 * n, 'needs', view(n)),
+    passed: (r) => !!r && r.ok === true,
+    onDisk: (doc) => ((doc && doc.examples) || []).map((x) => x.key),
+    listed: (a) => a.examples().map((x) => x.key),
+    held2: async (a, { codeOf }) => {
+      const l = a.learn(Date.now() + 7200e3), dr = await a.learnDraft();
+      ok(l === 0 && codeOf(dr) === 'labels_unread', 'DX2 the hourly implicit pass adds nothing and the rule draft waits (labels_unread) — the judge runs with no examples, as on a first day', { learn: l, draft: dr });
+    },
+  });
+}
+
+// ══ DS6 r3104 (a) the design roads that look a design up while held ══
+{
+  const DE = require(path.join(REPO, 'src/server/design-engine.js'));
+  const timers = { setInterval: () => ({ unref() { } }), clearInterval: () => { }, setTimeout: () => ({ unref() { } }) };
+  const d = world('ds6');
+  const e1 = DE.create({ dataDir: d, timers, log: () => { } }); e1.register({ dir: '/scratch-made-up/design-6', title: 'Six' }); await e1.flush();
+  const F = path.join(d, 'designs.json'), pr = placeReads(F, 1);
+  let e2 = null;
+  try { await quietly(() => { e2 = DE.create({ dataDir: d, timers, log: () => { } }); }); } finally { pr.restore(); }
+  const dir = '/scratch-made-up/design-6';
+  const r = [await e2.readDesign(null, dir), e2.pendingAsk(null, dir), await e2.tweaks(null, dir), await e2.setTweaks({ dir, values: {} }), e2.answer({ dir, askId: 'a-madeup', skip: true })];
+  ok(r.every((x) => x && x.code === 'designs_unread' && x.status === 503), 'DS6 a design\'s read, its pending ask, its tweaks (read and set) and an answer while held: 503 designs_unread with the words — never «not a registered design»', r.map((x) => x && x.code));
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/design-engine.js'), 'utf8');
+  ok(!/fail\('not_registered', /.test(SRC.replace("const unregistered = (msg) => (hold.held() ? heldFail() : fail('not_registered', msg));", '')), 'DS6 every «not registered» answer of the engine goes through the held-first helper (no bare fail(\'not_registered\') left)', null);
+  e2._hold.stop();
 }
 
 report();

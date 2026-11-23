@@ -9584,6 +9584,7 @@ export default {
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
   "VibeSpace cannot read its list of published pages right now, so it is not known whether this design was published. Nothing is lost: every link given out stays, and publishing waits until the list reads (it tries again every few minutes).": "VibeSpace 暂时读不到已发布页面的列表，所以不知道这个设计是否发布过。没有丢失：发出去的每个链接都还在，发布要等到列表读到为止（每隔几分钟会再试一次）。",
+  "the labels you taught could not be read — nothing was lost; try again in a few minutes (it reads them again by itself)": "你教过的标签暂时读不到 — 没有丢失；几分钟后再试（它会自己再读一次）",
   "VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, and the list comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到已发布页面的列表，所以这里一个也没显示。没有丢失：发出去的每个链接都还在，列表会自己回来（每隔几分钟会再试一次）。",
   "VibeSpace cannot read its list of published pages right now, so no design shows as published. Nothing is lost: every link given out stays (it tries again every few minutes).": "VibeSpace 暂时读不到已发布页面的列表，所以没有设计显示为已发布。没有丢失：发出去的每个链接都还在（每隔几分钟会再试一次）。",
   "VibeSpace cannot read the conversations’ statuses right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到各对话的状态 — 没有更改任何东西。几分钟后再试（它会自己再读一次）。",

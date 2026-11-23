@@ -65,6 +65,9 @@
  * Gate: scripts/test-design-routes.mjs (fast).
  */
 const fs = require('fs');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // 主开发 r3005 (the content stores): designs.json under the store-read law
+const DESIGNS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.designs === undefined || Array.isArray(v.designs));
 const path = require('path');
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const crypto = require('crypto');
@@ -98,7 +101,7 @@ const PREVIEW_TICKETS = 64;
 const STATUS = Object.freeze({
   bad_dir: 400, not_registered: 404, not_found: 404, not_a_dir: 400, too_big: 413, read_failed: 502, host_unreachable: 502,
   no_remote: 503, not_publishable: 409, empty: 400, too_long: 400, too_many: 400, bad_change: 400, no_change: 400, bad_files: 400, no_conversation: 409, rewind_out: 409, input_rejected: 400,
-  too_large: 400, send_failed: 500, publish_failed: 500, no_pages: 503, page_not_found: 404, page_forbidden: 403, pages_unread: 503,   // r3139 (a): the held list's refusal answers 503 on the wire
+  too_large: 400, send_failed: 500, publish_failed: 500, no_pages: 503, page_not_found: 404, page_forbidden: 403, pages_unread: 503, designs_unread: 503,   // r3139 (a): the held list's refusal answers 503 on the wire
   watch_limit: 429, agent_forbidden: 403, no_session: 409,
   not_yours: 403, bad_questions: 400, no_questions: 409, stale: 409, bad_file: 400, not_previewable: 409, unauthorized: 401,
   bad_tweaks: 400, unknown_tweak: 400, bad_tweak: 400, not_tweakable: 409, user_not_file: 409, write_failed: 500,
@@ -223,11 +226,29 @@ function create({
   const fsp = fs.promises;
   const storeFile = path.join(dataDir, 'designs.json');
   let store = { designs: [] };
-  try { store = JSON.parse(fs.readFileSync(storeFile, 'utf8')) || { designs: [] }; } catch { /* first boot */ }
-  if (!Array.isArray(store.designs)) store.designs = [];
-  store.designs = store.designs.filter((r) => r && typeof r === 'object' && dirOf(r.dir));
+  // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no design» and the
+  // next design opened wrote over the file: the design list, the names the person gave by Rename and the agents' unanswered
+  // questions gone. HELD: an open (register), a Rename, a Remove from the list, an agent's ask and its answer are refused by name
+  // (503 designs_unread), the Designs home says it, nothing is written over the file, it is read again off the loop. Torn bytes are
+  // kept aside once per content, then it starts empty. NO REMOVER reads its silence: a row leaves only by its Remove from the list
+  // and the REGISTRY_MAX bound — and the design folders and their files stay on disk either way.
+  const clean = (s0) => { const st = s0 && typeof s0 === 'object' ? s0 : { designs: [] }; if (!Array.isArray(st.designs)) st.designs = []; st.designs = st.designs.filter((r) => r && typeof r === 'object' && dirOf(r.dir)); return st; };
+  const hold = HOLD.create({
+    file: storeFile, valid: DESIGNS_SHAPE, code: 'designs_unread', aside: (mark) => storeFile + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read its list of designs right now (${h.code}); it reads it again by itself every few minutes. No design is lost: nothing is written over the list, the design folders stay as they are, and opening, renaming or removing a design waits until it reads`,
+    log: (s) => log('[design] ' + s),
+    onLift: (v) => { store = clean(v || { designs: [] }); },
+  });
+  { let read; try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: DESIGNS_SHAPE });
+    if (hold.start(a0) === 'data') store = a0.value; }
+  store = clean(store);
+  const heldFail = () => fail('designs_unread', hold.words(), { status: 503 });   // a change refused by name while held
+  /** r3104 (a): a design looked up in the list — while held its absence is UNREAD: the hold's words, never «not a registered design» */
+  const unregistered = (msg) => (hold.held() ? heldFail() : fail('not_registered', msg));
   let saving = Promise.resolve();
   const save = () => {
+    if (!hold.writable('a design list change')) return;   // held: nothing written over it
     const snap = { designs: store.designs.map((r) => ({ ...r })) };
     saving = saving.then(() => writeJsonAtomic(storeFile, snap)).catch((e) => log('[design] registry save failed:', e.message));
     return saving;
@@ -242,6 +263,7 @@ function create({
 
   // ── registry ──
   function register({ host = null, dir, title = '', sessionId = null, conversationId = null, kind = null, via = null } = {}) {
+    if (hold.held()) return heldFail();
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path (vibespace-design new prints it)');
     const h = hostOf(host);
@@ -383,7 +405,7 @@ function create({
   async function readDesign(host, dir) {
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
-    if (!find(hostOf(host), d)) return fail('not_registered', `${d} is not a registered design — vibespace-design new (or open <dir>) registers it`);
+    if (!find(hostOf(host), d)) return unregistered(`${d} is not a registered design — vibespace-design new (or open <dir>) registers it`);
     return read(host, d);
   }
 
@@ -448,9 +470,10 @@ function create({
   }
   /** The home's Rename: the user's name for a design (kept over the agent's title from then on). */
   function rename({ host = null, dir, title } = {}) {
+    if (hold.held()) return heldFail();
     const d = dirOf(dir);
     const row = d ? find(hostOf(host), d) : null;
-    if (!row) return fail('not_registered', 'that design is not in the list');
+    if (!row) return unregistered('that design is not in the list');
     const t = cleanTitle(title);
     if (!t) return fail('empty', 'a design needs a name');
     row.title = t; row.named = true;
@@ -460,9 +483,10 @@ function create({
   }
   /** The home's "Remove from the list": the registry row leaves — the folder and every file in it stay as they are. */
   function unlist({ host = null, dir } = {}) {
+    if (hold.held()) return heldFail();
     const d = dirOf(dir);
     const row = d ? find(hostOf(host), d) : null;
-    if (!row) return fail('not_registered', 'that design is not in the list');
+    if (!row) return unregistered('that design is not in the list');
     store.designs = store.designs.filter((r) => r !== row);
     save();
     notify(row, { removed: true });
@@ -482,7 +506,7 @@ function create({
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const h = hostOf(host);
-    if (!find(h, d)) return fail('not_registered', `${d} is not a registered design`);
+    if (!find(h, d)) return unregistered(`${d} is not a registered design`);
     const key = keyOf(h, d);
     const mine = bySocket.get(ws) || new Set();
     if (!mine.has(key)) {
@@ -585,7 +609,7 @@ function create({
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const h = hostOf(host);
-    if (!find(h, d)) return fail('not_registered', `${d} is not a registered design — vibespace-design open ${d} registers it`);
+    if (!find(h, d)) return unregistered(`${d} is not a registered design — vibespace-design open ${d} registers it`);
     const list = Array.isArray(files) ? files : [];
     if (list.length > M.LIMITS.artboards + 20 || list.some((f) => !isWatchable(f))) return fail('bad_files', 'files must be the design folder\'s own artboards, images or design.json, by name (at most 60)');
     const names = list.length ? [...new Set(list)] : [M.MANIFEST_FILE];
@@ -670,10 +694,11 @@ function create({
   const askPush = (row) => { try { broadcastAll({ type: 'design-ask', host: row.host || null, dir: row.dir, ask: askPub(askOf(row)) }); } catch (e) { log('[design] design-ask broadcast failed:', e.message); } };
   /** The agent's questions → pending on ITS design (the caller's session or conversation registered it). → {ok, ask, design}. */
   function ask({ host = null, dir, sessionId = null, conversationId = null, questions } = {}) {
+    if (hold.held()) return heldFail();
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const row = find(hostOf(host), d);
-    if (!row) return fail('not_registered', `${d} is not a registered design — vibespace-design new (or open <dir>) registers it`);
+    if (!row) return unregistered(`${d} is not a registered design — vibespace-design new (or open <dir>) registers it`);
     const mine = (sessionId && row.sessionId === sessionId) || (conversationId && row.conversationId === conversationId);
     if (!mine) return fail('not_yours', 'this design belongs to another conversation — ask on a design of your own (vibespace-design list)');
     const v = M.validateQuestions(questions);
@@ -688,16 +713,17 @@ function create({
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const row = find(hostOf(host), d);
-    if (!row) return fail('not_registered', `${d} is not a registered design`);
+    if (!row) return unregistered(`${d} is not a registered design`);
     return { ok: true, ask: askPub(askOf(row)) };
   }
   /** The owner's answers → ONE line through the comment's own sender, to the conversation that asked; delivered ⇒ the
    *  questions are cleared on every client. A refused send keeps them (the sheet stays, the words are not lost). */
   function answer({ host = null, dir, askId, skip = false, answers } = {}) {
+    if (hold.held()) return heldFail();
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const row = find(hostOf(host), d);
-    if (!row) return fail('not_registered', `${d} is not a registered design`);
+    if (!row) return unregistered(`${d} is not a registered design`);
     const a = askOf(row);
     if (!a) return fail('no_questions', 'no questions wait on this design — they were answered already');
     if (askId !== a.id) return fail('stale', 'the agent asked new questions meanwhile — the sheet shows them now');
@@ -780,7 +806,7 @@ function create({
     const d = dirOf(dir);
     if (!d) return fail('bad_dir', 'name the design folder by its absolute path');
     const h = hostOf(host);
-    if (!find(h, d)) return fail('not_registered', `${d} is not a registered design`);
+    if (!find(h, d)) return unregistered(`${d} is not a registered design`);
     const r = await readMeta(h, d);
     if (!r.ok) return r;
     return { ok: true, host: h, dir: d, tweaks: r.manifest.tweaks || [], values: r.values, set: r.set, refusals: r.refusals, warnings: r.warnings };
@@ -793,7 +819,7 @@ function create({
     const d = dirOf(dir);
     if (!d) return Promise.resolve(fail('bad_dir', 'name the design folder by its absolute path'));
     const h = hostOf(host);
-    if (!find(h, d)) return Promise.resolve(fail('not_registered', `${d} is not a registered design`));
+    if (!find(h, d)) return Promise.resolve(unregistered(`${d} is not a registered design`));
     if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).length > M.TWEAK_LIMITS.tweakCount) return Promise.resolve(fail('bad_tweaks', `values must be an object {"<tweak id>": value | null} of at most ${M.TWEAK_LIMITS.tweakCount}`));
     const k = keyOf(h, d);
     const run = (userWrites.get(k) || Promise.resolve()).then(() => writeTweaks(h, d, values, reset === true));
@@ -944,7 +970,7 @@ function create({
     ask, pendingAsk, answer, preview, previewLink, previewByTicket,
     tweaks, setTweaks, requestTweaks,
     systems, defaultSystem, systemTokens, rename, unlist, agentSystems, agentSystemTokens,   // lane design-systems-home
-    flush: () => saving, _watches: watches, STATUS,
+    flush: () => saving, _watches: watches, STATUS, heldWords: () => hold.words(), _hold: hold,
     pagesHeldWords: () => { const p = getPublishedPages(); return p && typeof p.heldWords === 'function' ? p.heldWords() : null; },   // r3107: a design's page fact is unread while the pages list is held
   };
 }

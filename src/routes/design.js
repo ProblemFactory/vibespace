@@ -99,7 +99,7 @@ function registerDesignRoutes(app, { design, activeSessions, getJobs = () => nul
     // sessionId and / or conversationId (a resume mints a new session id; the chip passes both — /api/pages' rule): either matches
     const sid = req.query.sessionId ? String(req.query.sessionId) : null;
     const cid = req.query.conversationId ? String(req.query.conversationId) : null;
-    res.json({ designs: design.list({ sessionId: sid, conversationId: cid }).map((d) => ({ ...d, page: design.pageOf(d.host, d.dir) })), ...(design.pagesHeldWords && design.pagesHeldWords() ? { pagesUnread: 'pages_unread' } : {}) });   // r3107: «not published» is unread while the pages list is held — said
+    res.json({ designs: design.list({ sessionId: sid, conversationId: cid }).map((d) => ({ ...d, page: design.pageOf(d.host, d.dir) })), ...(design.pagesHeldWords && design.pagesHeldWords() ? { pagesUnread: 'pages_unread' } : {}), ...(design.heldWords && design.heldWords() ? { unread: design.heldWords(), code: 'designs_unread' } : {}) });   // r3107: «not published» is unread while the pages list is held — said   // r3005: held — an empty list says why
   });
   app.post('/api/design/comment', (req, res) => {
     if (!ownerOnly(req, res)) return;
