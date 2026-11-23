@@ -112,6 +112,7 @@ const NOT_HELD = {
 // step leaves it, so that door's words stand (classed so in ①b too)
 const OWN_DOOR = {
   extract_journal_unread: 'r3333 unit 2: the files page words it by its own code (src/lib/file-explorer-ops.js fsErrorText, zh / ja) — an extraction refused while the journal is held',
+  'signin-id-held': 'the data folder\'s own id file (src/auth.js, 主开发 r3336): no route refuses with it — the sign-in page and its 503 word the hold (src/signin-table.js signin-held-id-unread); the family\'s notice names the file by its plain name',
   auto_resume_unread: 'its own door words it BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words',
 };
 function census(codes, table) {
@@ -151,7 +152,7 @@ const LEFT_ALONE = [
   // r3314: the units picked into the hotfix's trial after the chain
   ['own', 'a spend guard refusal\'s why (an unattended turn waits on an account whose usage reading cannot be read): the guard words it in its OWN table (src/spend-authorizer.js REFUSAL_WORDS, the owning lane\'s) — no page refusal code', ['reading-unread']],
   ['not', 'a door\'s or a decision\'s own why word — the webhook door\'s held `why` (its words ride `reason`), a pool switch\'s `reason` — no code a route answers', ['callers-unread', 'held-unread']],
-  ['own', 'another store whose own door words its hold (its lane gives it a row of the table when its cure lands)', ['desktop_apps_unread', 'registry_unread', 'store-unreadable', 'store_unreadable', 'records-unreadable', 'kept-unreadable', 'signin-held-unread', 'template_unread', 'version-unread']],
+  ['own', 'another store whose own door words its hold (its lane gives it a row of the table when its cure lands)', ['desktop_apps_unread', 'registry_unread', 'store-unreadable', 'store_unreadable', 'records-unreadable', 'kept-unreadable', 'signin-held-unread', 'signin-held-id-unread', 'template_unread', 'version-unread']],
   ['not', 'a state or fact word, not a list\'s refusal code (store-read\'s own states, a row\'s field)', ['unread', 'unreadable']],
   ['not', 'a key, a credential or a vault entry (the vault and its key files word it — a locked vault is never an unreadable list)', ['key-unreadable', 'key_unreadable', 'oat-unreadable', 'proxy_credential_unreadable', 'vault-reveal-unreadable', 'entry_unreadable', 'job_secrets_unreadable', 'job_secrets_record_unreadable', 'host-key-known-unreadable', 'table_unreadable', 'command_unreadable']],
   ['not', 'a machine\'s, a browser\'s or the system\'s own file or answer — not a list VibeSpace keeps', ['file_unreadable', 'folder_unreadable', 'mp_unreadable', 'realpath_unreadable', 'status-unreadable', 'strace-old-unread', 'own-file-unread', 'browser-project-config-unreadable', 'kernel_plan_unread', 'exit_answer_unreadable', 'reach_unreadable', 'window_list_unreadable', 'ref_unreadable', 'tabs_unreadable', 'current_tab_unreadable' /* B-21cc (lines 520 + 595): the vault fill's current tab, refused by its own words — a browser's answer, not a list */, 'builds_unreadable', 'browser_engine_environment_unread', 'relay_unreadable', 'members-unreadable', 'jump-unread', 'windows-unread', 'windows-policy-unread', 'harness_unread']],

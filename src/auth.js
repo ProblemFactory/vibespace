@@ -47,6 +47,7 @@ const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, OWN_RULE
   heldJournal, HELD_UPGRADE, hashSync, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, rateCheck, rateFail } = require('./signin-table.js');
 const { loginHtml } = require('./login-page.js');   // the sign-in page, one for both holders
 const SW = require('./signin-witness.js');   // B-dc3f (1): the data folder's own id inside it, the witness outside it (the plain form)
+const SRH = require('./store-read-hold.js');   // 主开发 r3336: the id file under the store-read law — held while unread, read again off the loop
 /** B-dc3f (1), 主开发 r2780 (2) H1 + r2869: the network home's look — its bound, its re-ask (one look out at a time) and its read size */
 const NET_BOUND_MS = 5000, NET_REASK_MS = 30000, NET_REASK_MAX_MS = 8 * 60 * 1000, NET_ENDING_MAX = 2, NET_MAX_BYTES = 4096;
 
@@ -85,8 +86,46 @@ class Auth {
   _startFacts() {
     if (!this._witnessCfg) return null;
     if (this._facts) return this._facts;
-    try { this._facts = SW.startFactsSync({ dataDir: this._dataDir, ...this._witnessCfg }); } catch (e) { this._sayOnce('facts', `[auth] the data folder's sign-in facts could not be read (${(e && e.message) || e}) — a folder that is not the one reads as before`); this._facts = null; }
+    try { this._facts = SW.startFactsSync({ dataDir: this._dataDir, ...this._witnessCfg }); this._idHoldStart(this._facts); } catch (e) { this._sayOnce('facts', `[auth] the data folder's sign-in facts could not be read (${(e && e.message) || e}) — a folder that is not the one reads as before`); this._facts = null; }
     return this._facts;
+  }
+  /** 主开发 r3336: THE ID FILE UNDER THE STORE-READ LAW — an unread or torn instance.json is HELD (src/store-read-hold.js): nothing is
+   *  minted over it, it is read again OFF the loop (the helper's ladder), its torn bytes are kept aside ONCE, and its lift judges the
+   *  start again with no restart (`_idLift`). The hold is made once, beside the start's facts */
+  _idHoldStart(f) {
+    const a = f && f.instanceAnswer;
+    if (!a || a.state === 'data' || a.state === 'missing' || this._idHold) return;
+    const file = path.join(this._dataDir, SW.INSTANCE_FILE);
+    this._idHold = SRH.create({
+      file, valid: SW.instanceValid, aside: (mark) => SW.idAsideOf(file, mark), code: 'signin-id-held',
+      words: () => String((loginWords('en') || {})['signin-held-id-unread'] || '').replace('{dir}', this._dataDir).replace('{idfile}', file),   // the sign-in's own words (src/login-words.js)
+      log: (line) => { try { console.warn(`[auth] ${line}`); } catch { } },
+      onLift: (value, facts) => this._idLift(value, facts),
+    });
+    f.idUnread = { file, code: a.state === 'corrupt' ? 'torn bytes' : (a.code || 'unreadable') };
+    this._idHold.start(a);
+  }
+  _idHeld() { return !!(this._idHold && this._idHold.held()); }
+  /** the id file READ AGAIN (data, or gone): the start judged again with the id now known — a start held by the id's silence opens or
+   *  holds by the folder's own rule; a start that opened does what it skipped (the id written if it is gone, the witness written). Torn
+   *  bytes lift as «no id» (their copy kept aside): a witness of any id then still holds the start — nothing is minted while it stands */
+  _idLift(value) {
+    const f = this._facts;
+    if (!f) return;
+    f.instance = value && SW.instanceValid(value) ? { id: value.id, createdAt: Number(value.createdAt) || null } : null;
+    f.idUnread = null; f.instanceAnswer = { state: f.instance ? 'data' : 'missing' };
+    if (this._held && this._held.idUnread) {
+      const was = this._idWas || { auth: 'missing', table: null };
+      const v = SW.verdictOf({ auth: was.auth, dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir });
+      this._held = null;
+      if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule, now that the id is known
+      this._state = was.auth === 'off' ? was.table : null;
+      try { console.warn(`[auth] the data folder's own id file reads again (${f.instance ? f.instance.id : 'none'}): no sign-in witness names another folder — the instance opens as it would have`); } catch { }
+      this._afterLoad();
+      if (this._idEnsure) { const opts = this._idEnsure; this._idEnsure = null; this.ensurePassword(opts); }   // the boot's own password road, replayed
+      return;
+    }
+    if (!this._held) this._afterLoad();   // the start opened: what it skipped while the id was unknown
   }
   _sayOnce(k, line) { if (this._said.has(k)) return; this._said.add(k); try { console.warn(line); } catch { } }
   /** B-dc3f (1): after the load — the folder's id written ONCE (never while held), then the witness learned */
@@ -102,8 +141,12 @@ class Auth {
       for (const w of (f.found || [])) if (!w.net) { try { SW.removeWitness({ file: w.file }); } catch { } }
       f.found = (f.found || []).filter((w) => w.net); f.witness = null;
       this._sayOnce('start-new', `[auth] ${path.join(this._dataDir, SW.START_NEW)} was there: this start did not wait for the home folder ${f.netHome} and read none of it; every sign-in witness copy is removed (the home folder's off the loop), then the file`);
-      try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id could not be written (${(e && e.message) || e})`); }
+      if (!this._idHeld()) { try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id could not be written (${(e && e.message) || e})`); } }   // r3336: never minted over an unread id file
       this._netStartNew();
+      return;
+    }
+    if (this._idHeld()) {   // 主开发 r3336: THE ID FILE UNREAD — nothing is minted over it and no witness is written (no id is known); both at the lift
+      this._sayOnce('id-held', `[auth] the data folder's own id file ${path.join(this._dataDir, SW.INSTANCE_FILE)} cannot be read now: no id is written over it and no sign-in witness is written until it reads again (off the main loop, by itself)`);
       return;
     }
     try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id (${path.join(this._dataDir, SW.INSTANCE_FILE)}) could not be written (${(e && e.message) || e}) — no witness is kept until it is`); return; }
@@ -263,7 +306,7 @@ class Auth {
     const past = !!this._held && this._held.kind !== 'checking';   // r3030 (f): said only when the look went past its bound
     n.done = true; n.answer = a; if (n.timer) { clearTimeout(n.timer); n.timer = null; }
     if (a.found) f.found = [...(f.found || []), a.found];   // MARKED net (SW.netAnswerOf): the local writer never takes it
-    const v = SW.verdictOf({ auth: n.was, dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir });
+    const v = SW.verdictOf({ auth: n.was, dataLink: f.dataLink, instance: f.instance, idUnread: f.idUnread, found: f.found, dataDir: this._dataDir });
     this._held = null;
     if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule (r2869 (3))
     this._state = n.was === 'off' ? n.table : null;
@@ -311,7 +354,8 @@ class Auth {
       // truly missing: nothing at the path — a new instance, UNLESS the folder is not the one (B-dc3f (1)): a link to nowhere,
       // or a witness whose id this folder does not hold; a folder that moved WITH its id file is the same folder
       const f = this._startFacts();
-      const v = f ? SW.verdictOf({ auth: 'missing', dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir }) : { hold: null };
+      this._idWas = { auth: 'missing', table: null };   // r3336: what a lift of the id file judges again
+      const v = f ? SW.verdictOf({ auth: 'missing', dataLink: f.dataLink, instance: f.instance, idUnread: f.idUnread, found: f.found, dataDir: this._dataDir }) : { hold: null };
       if (v.hold) return this._hold(v.hold.why, v.hold.kind, v.hold);
       if (f && f.netHome) { if (!f.startNew) return this._checkHome('missing', null); this._startNewUsed = true; }   // H1: the network home's copy is read first, off the loop — unless the person's start-new file decides
       this._state = null; return;
@@ -322,7 +366,8 @@ class Auth {
     // the same folder turned off by the person through the product opens, as before (its witness was removed with the act)
     if (!this._state.passwordHash) {
       const f = this._startFacts();
-      const v = f ? SW.verdictOf({ auth: 'off', instance: f.instance, found: f.found, dataDir: this._dataDir }) : { hold: null };
+      this._idWas = { auth: 'off', table: this._state };   // r3336: what a lift of the id file judges again
+      const v = f ? SW.verdictOf({ auth: 'off', instance: f.instance, idUnread: f.idUnread, found: f.found, dataDir: this._dataDir }) : { hold: null };
       if (v.hold) return this._hold(v.hold.why, v.hold.kind, v.hold);   // H2: held — its own file says off, the witness names another folder
       if (f && f.netHome) { if (!f.startNew) return this._checkHome('off', this._state); this._startNewUsed = true; }   // H1: …and the network home's copy is read first (or the start-new file decides)
     }
@@ -343,6 +388,7 @@ class Auth {
     const files = verdict && Array.isArray(verdict.files) ? verdict.files : [];   // B-dc3f (1): every witness file there (both places)
     this._held = { why, kind, ...(kind !== 'file' ? { dir: this._dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };
     if (verdict && verdict.home) this._held.home = verdict.home;   // H1: the network home the look reads
+    if (verdict && verdict.idUnread) { this._held.idUnread = true; this._held.idFile = verdict.idFile; }   // r3336: the id file unread — its own words
     if (verdict && verdict.net) this._held.net = true;   // r3030 (d): an unreadable NETWORK copy — its act names the start-new file
     if (kind === 'checking') return;   // r3030 (f): an open instance's look is said only past its bound (warn), never as a held error at every start
     try { console.error(`[auth] ${heldJournal(this._file, why, sso, this._held)}`); } catch { }   // the table's shared words (src/signin-table.js): a folder / link / declared hold says its own act
@@ -465,6 +511,7 @@ class Auth {
    */
   ensurePassword(opts = {}) {
     if (this._net && !this._net.done) { this._netEnsure = opts; return {}; }   // H1: the boot's password road waits for the home's answer
+    if (this._held && this._held.idUnread) { this._idEnsure = opts; return {}; }   // r3336: …and for the id file's read, replayed at its lift
     const r = this._ensurePassword(opts);
     // B-dc3f (1): THE DECLARATION (opt-in, set nowhere by default) — required, and no password and no single sign-on ⇒ held
     if (!this._held && this._declaredNow() && !(this._state && this._state.passwordHash) && !this._clerk?.enabled) this._hold(`${SW.DECLARE_ENV}=required is set and no password is set`, 'declared');

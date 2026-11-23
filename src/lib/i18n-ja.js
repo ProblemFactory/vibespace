@@ -4584,6 +4584,7 @@ export default {
   "the storage list": "ストレージの一覧",
   "the folder links": "フォルダーのリンク",
   "the plugins’ settings": "プラグインの設定",
+  "this VibeSpace’s own id": "この VibeSpace 自身の ID",
   "the Task Groups": "タスクグループ",
   "the paired machines": "ペアリングしたマシン",
   "Lists unreadable · {n}": "読めない一覧 · {n}",

@@ -26,6 +26,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const LI = require('./local-index.js');
+const SR = require('./store-read.js');   // 主开发 r3336: the id file's one read, answered by the store-read law
 const { replaceShredding } = require('./secret-file.js');
 
 const V = 1;
@@ -41,6 +42,10 @@ const digestOf = (root) => crypto.createHash('sha256').update(String(root || '')
 const witnessFileOf = (root) => `signin-${digestOf(root)}.json`;
 const isAbs = (p) => typeof p === 'string' && p.startsWith('/');
 
+/** the id file's SHAPE (store-read's `valid`): an object whose id is an instance id */
+const instanceValid = (o) => !!o && typeof o === 'object' && !Array.isArray(o) && ID_RE.test(o.id);
+/** where the id file's torn bytes are kept aside (the store-read hold's `aside`): instance.json.corrupt-<mark>, beside it */
+const idAsideOf = (file, mark) => `${file}.corrupt-${mark}`;
 /** data/instance.json's text → {id, createdAt} | null (a damaged or foreign file is no id) */
 function instanceOf(text) {
   let o = null;
@@ -146,7 +151,7 @@ function netAnswerOf({ result = null, error = null } = {}, { root, dataDir } = {
  * ALL (主开发 r2152: a link hold with a witness is left by deleting the witness too). Only a truly missing sign-in file can be
  * held here: a file that is there decides by itself.
  */
-function verdictOf({ auth = 'present', dataLink = null, instance = null, witness = null, found = null, dataDir = '' } = {}) {
+function verdictOf({ auth = 'present', dataLink = null, instance = null, idUnread = null, witness = null, found = null, dataDir = '' } = {}) {
   // 主开发 r2780 (2) H2: a sign-in file that is THERE and says «off» (no password record) is judged too — a folder that is not
   // the one the witness saw never opens the instance by saying «off»; a file that holds a password decides by itself
   if (auth !== 'missing' && auth !== 'off') return { hold: null };
@@ -154,6 +159,9 @@ function verdictOf({ auth = 'present', dataLink = null, instance = null, witness
   const files = all.map((w) => w.file).filter(Boolean);
   if (auth === 'missing' && dataLink === 'dangling') return { hold: { kind: 'link', why: `the data folder ${dataDir} is a link to a place that is not there`, files } };
   const off = auth === 'off' ? '; its own sign-in file says sign-in is off' : '';
+  // 主开发 r3336: THE FOLDER's OWN ID FILE UNREAD (any failed read but ENOENT, or torn bytes not yet kept aside) with a witness of ANY id
+  // anywhere ⇒ HELD by that name — never «holds no id», whose act (deleting the witness) would open it; with no witness the id decides nothing
+  if (idUnread && all.length) return { hold: { kind: 'folder', idUnread: true, idFile: idUnread.file, why: `the data folder's own id file ${idUnread.file} cannot be read (${idUnread.code}), so it cannot be known whether the data folder ${dataDir} is the one its sign-in was set in${off}`, files } };
   const unread = all.find((w) => w.unread);
   if (unread) return { hold: { kind: 'folder', unread: true, ...(unread.net ? { net: true } : {}), why: `the sign-in witness ${unread.file} is there but ${unread.unread}, so it cannot be known whether the data folder ${dataDir} is the one its sign-in was set in${off}`, files } };
   const other = all.find((w) => w.doc && (!instance || instance.id !== w.doc.id));
@@ -176,8 +184,12 @@ const declaredOf = (env) => !!env && String(env[DECLARE_ENV] || '').trim().toLow
 function startFactsSync({ dataDir, root = path.dirname(dataDir), home = os.homedir(), uid = typeof process.getuid === 'function' ? process.getuid() : null, env = process.env, mountinfo = null, xdgRuntimeDir = env.XDG_RUNTIME_DIR || '', varTmp = undefined, throwaway = 'unsaid' } = {}) {
   let dataLink = null;
   try { if (fs.lstatSync(dataDir).isSymbolicLink()) { try { fs.statSync(dataDir); } catch (e) { if (e && e.code === 'ENOENT') dataLink = 'dangling'; } } } catch { }
-  let instance = null;
-  try { instance = instanceOf(fs.readFileSync(path.join(dataDir, INSTANCE_FILE), 'utf-8')); } catch { instance = null; }
+  // 主开发 r3336: THE ID FILE UNDER THE STORE-READ LAW — its ONE read answered by src/store-read.js: data | missing (ENOENT) | unreadable
+  // (any other failed read) | corrupt (torn bytes). Only «data» is an id; «missing» is no id; the other two are NO ANSWER (src/auth.js holds it)
+  let instance = null, read;
+  try { read = { text: fs.readFileSync(path.join(dataDir, INSTANCE_FILE), 'utf-8') }; } catch (e) { read = { error: e || Object.assign(new Error('an error'), { code: 'an error' }) }; }
+  const instanceAnswer = SR.storeAnswer(read, { valid: instanceValid });
+  if (instanceAnswer.state === 'data') instance = { id: instanceAnswer.value.id, createdAt: Number(instanceAnswer.value.createdAt) || null };
   const tw = throwaway;
   const mi = mountinfo != null ? mountinfo : (() => { try { return fs.readFileSync('/proc/self/mountinfo', 'utf-8'); } catch { return ''; } })();
   const lstat = (p) => { try { return { symlink: fs.lstatSync(p).isSymbolicLink() }; } catch (e) { if (e && e.code === 'ENOENT') return null; throw e; } };
@@ -193,7 +205,7 @@ function startFactsSync({ dataDir, root = path.dirname(dataDir), home = os.homed
   // 主开发 r2780 (2) H1: the network home (its copy is the worker's to read) and the person's start-new file (r2869 (2))
   const netHome = netHomeOf(ask);   // its copy is named and touched by the witness worker alone (src/signin-witness-worker.js)
   const startNew = facts(path.join(dataDir, START_NEW)).exists === true;
-  return { root, dataDir, dataLink, instance, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid, netHome, startNew };
+  return { root, dataDir, dataLink, instance, instanceAnswer, idUnread: null, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid, netHome, startNew };
 }
 
 /** data/instance.json, written ONCE (a start that finds none and is not held) → the id */
@@ -218,4 +230,4 @@ function removeWitness({ file }) {
   try { fs.unlinkSync(file); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
-module.exports = { V, INSTANCE_FILE, ID_RE, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };
+module.exports = { V, INSTANCE_FILE, ID_RE, instanceValid, idAsideOf, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };

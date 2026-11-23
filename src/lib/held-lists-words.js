@@ -7,6 +7,7 @@ const NAMES = Object.freeze({
   'user-todos': i18nKey('For you'), 'task-groups': i18nKey('the Task Groups'), hosts: i18nKey('the paired machines'),
   // the stores that joined the helper on the hotfix's tip (r3224 / r3233 — the family's rows): each list's plain name
   'accounts.json': i18nKey('your accounts list'),
+  'instance.json': i18nKey('this VibeSpace’s own id'),   // 主开发 r3336 (src/auth.js): the sign-in's id file (a notice never names the folder)
   'app-proposals.json': i18nKey('the app proposals'),
   'auto-resume.json': i18nKey('the record of waiting continues'),
   'browser-forgotten.json': i18nKey('the browsers you set aside'),
