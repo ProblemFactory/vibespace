@@ -31,6 +31,10 @@
 //   ⑫ THE REFUSALS' WORDS (r3103 (4)): every code the hub sends has its row in the page's table (src/lib/chat-view.js
 //      SUBAGENT_REFUSED), every row's words have zh and ja; the attach and the route send the code beside the words; CONTROL: a
 //      code planted in the hub with no row is caught by name
+//   ⑬ THE CONVERSATION → PROJECT FOLDER INDEX (主开发 r2446 / r2736): a workflow's sibling agents in another project folder — the first
+//      found by the walk, the next by the index with no listing; the hub's workflow look notes every conversation folder it lists
+//      anyway, so a sibling never asked is found at the one known place; a stale entry costs one look, the walk follows and corrects
+//      it; RED: a copy that never asks the index walks again
 //   §T THE HEAVY TWIN (主开发 r3142): ⑥ (the 37 MB whole read) and ⑩b (the placed slow walks, with r3103 (1)'s kept miss) moved
 //      VERBATIM to scripts/test-subagent-transcript-heavy.mjs — the pin that it holds them, once each, and reads the helper
 //   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
@@ -180,7 +184,8 @@ console.log('② THE PLACE KEPT — found by the walk once, asked next with no l
   const third = await counted(() => attachOf(H, BW));
   ok(third.frame && J(third.frame.messages) === J(first.frame.messages) && T.keptPlace(SID, BW) === to && ASYNC.filter(([f]) => f === 'readdir').length >= 1, `a kept place whose file is gone: the next ask walks again and keeps the new place (${path.relative(PROJ, T.keptPlace(SID, BW) || '')})`);
   fs.renameSync(to, from); fs.renameSync(to.replace('.jsonl', '.meta.json'), from.replace('.jsonl', '.meta.json'));
-  const noKeep = MUT.load('src/server/subagent-transcript.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8'), 'const keep = (key, fp) => { _places.delete(key); _places.set(key, fp);', 'const keep = (key, fp) => { _places.delete(key);', 'the place kept'), 'no-keep');
+  // (the copy keeps no place AND no conversation's folder — r2446's index would otherwise find the agent with no walk either)
+  const noKeep = MUT.load('src/server/subagent-transcript.js', anchored(anchored(fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8'), 'const keep = (key, fp) => { _places.delete(key); _places.set(key, fp);', 'const keep = (key, fp) => { _places.delete(key);', 'the place kept'), '  const known = _convFolders.get(sid);\n', '  const known = null;\n', 'the index asked'), 'no-keep');
   const look = async () => counted(() => noKeep.findAgentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ }));
   await look(); const lookAgain = await look(); const twice = ASYNC.filter(([f]) => f === 'readdir').length;
   ok(lookAgain.fp && twice >= 1, `RED CONTROL: a copy that keeps nothing walks again at the next ask (${twice} listings) — the leg above would be RED`);
@@ -500,6 +505,55 @@ console.log('⑫ THE REFUSALS\' WORDS (主开发 r3103 (4)) — every code the h
   const aimedR = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: '/../../x' });
   ok(codeOf(aimedA).code === 'agent-shape' && codeOf(otherA).code === 'other-harness' && (codeOf(otherA).vars || {}).harness === 'Codex' && codeOf(noneA).code === 'no-conversation' && (aimedR.body.refusedCode || {}).code === 'agent-shape',
     `the attach sends the code beside the words (${codeOf(aimedA).code}, ${codeOf(otherA).code} ${J(codeOf(otherA).vars)}, ${codeOf(noneA).code}); the route too (${J(aimedR.body.refusedCode)})`);
+}
+
+console.log('⑬ THE CONVERSATION → PROJECT FOLDER INDEX (主开发 r2446 / r2736) — one known place before any walk: the look\'s by-product and the finds\' own');
+{
+  T._resetForTest();
+  const realRd = fs.promises.readdir;
+  let rootLists = 0;
+  fs.promises.readdir = function (p, ...a) { if (p === PROJ) rootLists++; return realRd.call(fs.promises, p, ...a); };
+  try {
+    // a workflow's sibling agents in ANOTHER project folder (the conversation began elsewhere; the viewer names the cwd's folder)
+    const SID_W = '0b5e7c1a-5555-4666-8777-988899990000', WFOLDER = cwdToProjectDir('/home/userL/work/wf-elsewhere');
+    const WRUN = path.join(PROJ, WFOLDER, SID_W, 'subagents', 'workflows', 'wf_run9');
+    fs.mkdirSync(WRUN, { recursive: true });
+    const SIB = ['a00000000000aa01', 'a00000000000aa02', 'a00000000000aa03', 'a00000000000aa04'];
+    for (const id of SIB) agent(WRUN, id, 0.02);
+    const served = (r) => r && r.code === 200 && (r.body.messages || []).length > 0;
+    const first = await ASK(ROUTE, { claudeSessionId: SID_W, cwd: CWD, agentId: SIB[0] });
+    const l1 = rootLists;
+    const second = await ASK(ROUTE, { claudeSessionId: SID_W, cwd: CWD, agentId: SIB[1] });
+    const l2 = rootLists - l1;
+    ok(served(first) && l1 === 1 && served(second) && l2 === 0 && T.stats().indexHit === 1 && T.conversationFolderOf(SID_W) === WFOLDER,
+      `a workflow's sibling agents in another project folder: the first found by the walk (${l1} listing of the projects root), the next at the ONE known place the index kept (${l2} listings)`);
+    // RED: a copy that never asks the index walks the projects root again for the next sibling
+    const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
+    const noIndex = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, '  const known = _convFolders.get(sid);\n', '  const known = null;\n', 'the index asked'), 'no-index');
+    const nopts = (id) => ({ claudeSessionId: SID_W, agentId: id, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ });
+    await noIndex.agentTranscript(nopts(SIB[0]));
+    const n0 = rootLists;
+    await noIndex.agentTranscript(nopts(SIB[1]));
+    ok(rootLists - n0 >= 1, `RED CONTROL: a copy that never asks the index walks the projects root again for the next sibling (${rootLists - n0}) — the leg above would be RED`);
+    // the hub's workflow look notes every conversation folder it lists anyway (a poll of a run it cannot place starts it)
+    T._resetForTest();
+    const Smod = require(path.join(REPO, 'src/routes/sessions.js'));
+    const wfLayer = Smod.router.stack.find((x) => x.route && x.route.path === '/api/workflow');
+    const WF = wfLayer.route.stack[0].handle;
+    await ASK(WF, { runId: 'wf_nowhere13', claudeSessionId: SID, cwd: CWD });
+    for (let i = 0; i < 300 && T.conversationFolderOf(SID_W) === null; i++) await sleep(10);   // (a count: until the look has listed the project folders)
+    const learned = T.conversationFolderOf(SID_W), indexed = T.stats().conversations;
+    rootLists = 0;
+    const third = await ASK(ROUTE, { claudeSessionId: SID_W, cwd: CWD, agentId: SIB[2] });
+    ok(learned === WFOLDER && indexed >= 1 && served(third) && rootLists === 0,
+      `the hub's workflow look notes the conversation folders it lists anyway (${indexed} known, ${SID_W.slice(0, 8)}… in ${learned}), so a sibling never asked before is found at the one known place (${rootLists} listings of the projects root)`);
+    // a STALE entry costs that one look: the walk follows, finds it, and corrects the index
+    T.noteConversationFolder(SID_W, '-home-userL-proj-0007');
+    const m0 = T.stats().indexMiss;
+    const fourth = await ASK(ROUTE, { claudeSessionId: SID_W, cwd: CWD, agentId: SIB[3] });
+    ok(served(fourth) && T.stats().indexMiss === m0 + 1 && T.conversationFolderOf(SID_W) === WFOLDER, `a stale entry costs one look: the walk follows, finds the agent (${fourth.code}) and corrects the index (${T.conversationFolderOf(SID_W)})`);
+    ok(!T.noteConversationFolder('not-a-uuid', WFOLDER) && !T.noteConversationFolder(SID_W, '../x') && T.conversationFolderOf(SID_W) === WFOLDER, 'the index takes only a conversation id of the CLI\'s shape and one folder name');
+  } finally { fs.promises.readdir = realRd; T._resetForTest(); }
 }
 
 console.log('§T THE HEAVY TWIN HOLDS ⑥ AND ⑩b (主开发 r3142) — the 37 MB whole read and the placed slow walks, moved verbatim');

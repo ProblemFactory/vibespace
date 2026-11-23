@@ -51,8 +51,8 @@ const idsRefusal = (claudeSessionId, agentId) => { const r = idsRefusalOf(claude
 
 const PLACE_MAX = 256;
 const _places = new Map();   // `${conversation}\0${agent}` → the transcript's path, kept (the newest last, the oldest dropped)
-const _stats = { finds: 0, aimed: 0, outside: 0, unanswered: 0, unfinished: 0, skipped: 0, first: 0, kept: 0, exact: 0, walked: 0, listings: 0, listingsShared: 0, missed: 0, reads: 0, shared: 0, refused: 0, inFlight: 0, maxInFlight: 0, waiting: 0, maxWaiting: 0 };
-const stats = () => ({ ..._stats, places: _places.size, marked: _unanswered.size, walking: _walks.size });
+const _stats = { finds: 0, aimed: 0, outside: 0, unanswered: 0, unfinished: 0, skipped: 0, indexed: 0, indexHit: 0, indexMiss: 0, first: 0, kept: 0, exact: 0, walked: 0, listings: 0, listingsShared: 0, missed: 0, reads: 0, shared: 0, refused: 0, inFlight: 0, maxInFlight: 0, waiting: 0, maxWaiting: 0 };
+const stats = () => ({ ..._stats, places: _places.size, marked: _unanswered.size, walking: _walks.size, conversations: _convFolders.size });
 
 const projectsRoot = () => path.join(os.homedir(), '.claude', 'projects');
 // THE HUB'S ONE LISTING of the projects root for the live watchers' finder (commit 2, 主开发 r2374): asynchronous, shared, at most
@@ -166,6 +166,24 @@ async function pulledOf(p, want, L) {
   if (typeof p !== 'string' || path.basename(p) !== want) return null;
   try { const real = await L(p, () => fsp.realpath(p)); return path.basename(real) === want && (await L(p, () => fsp.stat(real))).isFile() ? judged(real) : null; } catch (e) { if (isStop(e)) throw e; return null; }
 }
+// THE CONVERSATION → PROJECT FOLDER INDEX (主开发 r2446 / r2736, settled with lane report-mark-on-ack): which project folder
+// holds a conversation's own folder. Fed by the hub's workflow look as a BY-PRODUCT of the project folders' listings it makes
+// anyway (src/routes/sessions.js — no read of its own), and by this helper's own finds; asked after the kept and exact places and
+// before any walk: ONE known place instead of a walk of every project folder (a workflow's agents in another project folder: the
+// first one's walk teaches the folder to the rest). A stale entry costs that one look, then the walk follows and corrects it.
+// Bounded (CONV_INDEX_MAX, the least recent leaves first); a conversation id of the CLI's shape and one folder name only.
+const CONV_INDEX_MAX = 4096;
+const _convFolders = new Map();   // conversation id → its project folder's name (the newest last)
+function noteConversationFolder(claudeSessionId, folder) {
+  if (typeof claudeSessionId !== 'string' || !SID_SHAPE.test(claudeSessionId)) return false;
+  if (typeof folder !== 'string' || !folder || folder === '.' || folder === '..' || folder.includes('/') || folder.includes(path.sep)) return false;
+  _convFolders.delete(claudeSessionId); _convFolders.set(claudeSessionId, folder);
+  if (_convFolders.size > CONV_INDEX_MAX) _convFolders.delete(_convFolders.keys().next().value);
+  _stats.indexed++;
+  return true;
+}
+/** the project folder the index knows for this conversation, or null */
+const conversationFolderOf = (claudeSessionId) => _convFolders.get(claudeSessionId) || null;
 const keep = (key, fp) => { _places.delete(key); _places.set(key, fp); if (_places.size > PLACE_MAX) _places.delete(_places.keys().next().value); return fp; };
 
 /** `<subDir>/workflows/<run>/agent-<id>.jsonl`, in the listing's order — { fp: its real path, cand: the place asked } or null */
@@ -233,9 +251,21 @@ async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, firs
   const exactSub = exactDir ? path.join(exactDir, sid, 'subagents') : null;
   if (exactSub) {
     const cand = path.join(exactSub, want), direct = await place(cand);
-    if (direct) { _stats.exact++; keep(key, cand); return { fp: direct, how: 'exact' }; }
+    if (direct) { _stats.exact++; keep(key, cand); noteConversationFolder(sid, path.basename(exactDir)); return { fp: direct, how: 'exact' }; }
     const wf = workflows ? await inWorkflows(exactSub, want, place, L) : null;
-    if (wf) { _stats.exact++; keep(key, wf.cand); return { fp: wf.fp, how: 'exact' }; }
+    if (wf) { _stats.exact++; keep(key, wf.cand); noteConversationFolder(sid, path.basename(exactDir)); return { fp: wf.fp, how: 'exact' }; }
+  }
+  // THE INDEX (r2446): the one project folder the look, or a find, saw this conversation in — asked before any walk
+  const known = _convFolders.get(sid);
+  if (known) {
+    const sub = path.join(root, known, sid, 'subagents');
+    if (sub !== exactSub) {
+      const cand = path.join(sub, want), direct = await place(cand);
+      if (direct) { _stats.indexHit++; keep(key, cand); return { fp: direct, how: 'indexed' }; }
+      const wf = workflows ? await inWorkflows(sub, want, place, L) : null;
+      if (wf) { _stats.indexHit++; keep(key, wf.cand); return { fp: wf.fp, how: 'indexed' }; }
+      _stats.indexMiss++;   // stale, or this agent is not there: the walk follows
+    }
   }
   // r3103 (1): the kept MISS is asked only AFTER the kept and exact places — a file written there since is found at once
   const missedAt = _missedPast.get(ctx.ask);
@@ -247,9 +277,9 @@ async function findWithin({ claudeSessionId: sid, agentId, exactDir = null, firs
     const sub = path.join(root, d, sid, 'subagents');
     if (sub === exactSub) continue;
     const cand = path.join(sub, want), direct = await place(cand);
-    if (direct) { _stats.walked++; keep(key, cand); return { fp: direct, how: 'walked' }; }
+    if (direct) { _stats.walked++; keep(key, cand); noteConversationFolder(sid, d); return { fp: direct, how: 'walked' }; }
     const wf = workflows ? await inWorkflows(sub, want, place, L) : null;
-    if (wf) { _stats.walked++; keep(key, wf.cand); return { fp: wf.fp, how: 'walked' }; }
+    if (wf) { _stats.walked++; keep(key, wf.cand); noteConversationFolder(sid, d); return { fp: wf.fp, how: 'walked' }; }
   }
   _stats.missed++;
   // a folder skipped as marked may hold it: the ask is refused by THAT folder's name, never answered as missing
@@ -317,8 +347,8 @@ async function agentTranscript(opts = {}) {
 /** the place kept for this conversation and agent (the one asked, judged again at each ask), or null */
 const keptPlace = (claudeSessionId, agentId) => _places.get(`${claudeSessionId}\0${agentId}`) || null;
 
-function _resetForTest() { _places.clear(); _judged.clear(); _unanswered.clear(); _tail.clear(); _walks.clear(); _missedPast.clear(); findBoundMs = FIND_BOUND_MS; _sharing.clear(); _chain = Promise.resolve(); _listing = null; listingMaxAgeMs = LISTING_MAX_AGE_MS; for (const k of Object.keys(_stats)) _stats[k] = 0; }
+function _resetForTest() { _places.clear(); _judged.clear(); _convFolders.clear(); _unanswered.clear(); _tail.clear(); _walks.clear(); _missedPast.clear(); findBoundMs = FIND_BOUND_MS; _sharing.clear(); _chain = Promise.resolve(); _listing = null; listingMaxAgeMs = LISTING_MAX_AGE_MS; for (const k of Object.keys(_stats)) _stats[k] = 0; }
 const _setListingMaxAgeForTest = (ms) => { listingMaxAgeMs = ms; };
 const _setFindBoundForTest = (ms) => { findBoundMs = ms; };
 
-module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, idsRefusalOf, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, FIND_BOUND_MS, MISS_KEPT_MS, _resetForTest, _setListingMaxAgeForTest, _setFindBoundForTest };
+module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, idsRefusalOf, noteConversationFolder, conversationFolderOf, CONV_INDEX_MAX, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, FIND_BOUND_MS, MISS_KEPT_MS, _resetForTest, _setListingMaxAgeForTest, _setFindBoundForTest };

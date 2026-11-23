@@ -317,7 +317,10 @@ function setup(ctx) {
       const work = (async () => {
         const projects = (await read(root, 'root')) || [];
         const convs = [];
-        for (const dir of projects) { const names = (await read(path.join(root, dir), 'project')) || []; for (const sid of names) if (!sid.endsWith('.jsonl')) convs.push([dir, sid]); }
+        // lane lg-recovery (主开发 r2446 / r2736): each conversation folder this look lists anyway is NOTED in the sub-agent helper's
+        // conversation → project folder index (a by-product of these counted reads, no read of its own; the helper checks the shape)
+        const noteFolder = require('../server/subagent-transcript').noteConversationFolder;
+        for (const dir of projects) { const names = (await read(path.join(root, dir), 'project')) || []; for (const sid of names) if (!sid.endsWith('.jsonl')) { convs.push([dir, sid]); noteFolder(sid, dir); } }
         let next = 0;
         const lane = async () => {
           while (!ended && next < convs.length) {
