@@ -402,7 +402,7 @@ class HostManager {
   /** a PERSON's removal of machine `id` (remove()) — the newest 200 kept in the store itself; a machine added again leaves the list */
   _noteRemoved(id) { const was = Array.isArray(this._state.removedIds) ? this._state.removedIds : []; this._state.removedIds = [...was.filter((x) => x !== id), String(id)].slice(-200); }
   _noteAdded(id) { if (Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id))) this._state.removedIds = this._state.removedIds.filter((x) => x !== String(id)); }
-  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, '') })); }
+  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, ''), log: (m) => console.warn(m), omit: ['removedIds'] })); }   // (round wjgchwl6a (7): the removed list is no id)
   _load() {
     let read;
     try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
@@ -1317,6 +1317,9 @@ class HostManager {
     }
     const before = Array.isArray(this._state.hosts) ? this._state.hosts : [];
     this._state.hosts = hosts;
+    // round wjgchwl6a (2): a machine the import DROPS is a person's removal by another door (the verdict below) — written into the removed
+    // list WITH the list, before the exit lists are judged again, so no kept copy keeps its rows; a machine the import brings leaves it
+    { const now = new Set(hosts.map((r) => r && String(r.id))); for (const old of before) if (old && !now.has(String(old.id))) this._noteRemoved(old.id); for (const id of now) this._noteAdded(id); }
     this._save();
     this._reachChanged('import'); // verify-r3 A-r3a: an import can narrow a machine's lists or drop the machine — on the line after the save (test-exit-proxy A-r3a); the pin files and the items below follow it
     for (const r of hosts) { try { HK.writePinFile(this._sshDir, r); } catch (e) { warnings.push(`${r.name || r.id}: its host-key pin file was not written (${e.message})`); } } // lane lg-remote-hardening

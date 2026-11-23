@@ -554,6 +554,16 @@ console.log('— ⑥ a job\'s own working directory is a write root of its brows
   // run's end makes) — the keeper never keeps it because a kept copy of torn jobs.json still names the job
   { const n0 = ended.filter((x) => x === inWd.j.id).length; const rr = jm.rm(jm.jobs.get(inWd.j.id) || inWd.j);
     ok(!!rr && !rr.error && ended.filter((x) => x === inWd.j.id).length === n0 + 1 && !jm.jobs.has(inWd.j.id), 'a PERSON\'s removal of a job releases its browser handle by id (the run-end release, once more) — no kept copy keeps it', { rr, n: ended.filter((x) => x === inWd.j.id).length - n0 }); }
+  // round wjgchwl6a (8): ITS RED CONTROL — the same removal on a copy of src/jobs.js whose release line is cut: nothing is released
+  { const JSRCR = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8'), MR = mutantCopies('jobs-browser-rm', REPO);
+    const { JobManager: JR } = MR.load('src/jobs.js', editAnchor(JSRCR, '    try { this.d.onRunEnded?.(job, null); } catch { }', '    { }', 'src/jobs.js'), 'rm-unreleased');
+    const DR = path.join(D, 'rm-control'); fs.mkdirSync(DR, { recursive: true });
+    const endedR = [], jr = new JR({ dataDir: DR, broadcast() { }, notifyUser() { }, log() { }, apiBase: 'http://127.0.0.1:9', onRunEnded: (job) => endedR.push(job.id) });
+    jr.init();
+    const rec = JSON.parse(JSON.stringify(crash.j)); rec.id = 'jb-0000c0de'; jr.jobs.set(rec.id, rec);   // a finished job's record (its run ended)
+    const rx = jr.rm(jr.jobs.get(rec.id));
+    ok(!!rx && !rx.error && endedR.filter((x) => x === rec.id).length === 0 && !jr.jobs.has(rec.id), 'RED CONTROL — the removal\'s release cut (in a copy): the person\'s removal of a job releases nothing — the leg above names its red', { rx, released: endedR.length });
+    try { jr.shutdown(); } catch { } }
   try { jm.shutdown(); } catch { }
 }
 

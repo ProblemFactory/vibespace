@@ -546,6 +546,70 @@ try {
     const stx = await staleRun(mutant('src/hosts.js', [["ok = true; this._copies().invalidate(); } catch {", "ok = true; } catch {"]]), 'stale-copies-ctl');
     ok(st1.lifted && st1.named === true && st1.namedRead === true, 'THE COPIES\' ANSWER IS NEVER OLDER THAN THE NEWEST COPY MADE: a tear found by a read again in a running process — the first remover is told NAMED, and the copies read again name it', st1);
     ok(stx.lifted && stx.named === false, 'RED CONTROL — the store\'s own copy not followed by the invalidation (in a copy): the first remover reads the stale «not named» and would remove it', stx);
+    // ── round wjgchwl6a's follow (r3274) ──
+    const H8 = require('../src/store-read-hold.js');
+    // (1) THE GENERATION: a read already in flight when the invalidation comes (it listed the folder BEFORE the new copy) sets NOTHING, and
+    // the awaited read settles after the follow-up. RED CONTROL: the generation checks cut (in a copy) — the old answer comes back
+    const genRun = async (HM, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'made.json');
+      fs.writeFileSync(f + '.corrupt-1700000000001', '{"items": [{"id": "made-old-01"}]}');
+      const C = HM.copiesOf({ file: f, prefix: 'made.json.corrupt-' });
+      await C.refresh();
+      const rd = fs.promises.readdir, held = [];
+      fs.promises.readdir = function (p, ...a) { const got = rd.call(fs.promises, p, ...a); return path.resolve(String(p)) !== d ? got : got.then((list) => new Promise((res) => held.push(() => res(list)))); };
+      try {
+        const first = C.refresh(); let settled = false; first.then(() => { settled = true; }, () => { settled = true; });   // read A: its listing taken, its answer held open
+        await until(() => held.length === 1);
+        fs.writeFileSync(f + '.corrupt-1700000000002', '{"items": [{"id": "made-new-02"}]}');   // the store's own copy, then its invalidation
+        C.invalidate();
+        held.shift()();   // A ends after the invalidation
+        await until(() => held.length === 1);   // the follow-up read B is in flight (its answer held open)
+        const during = C.names('made-new-02'), early = settled;
+        held.shift()(); await first;
+        return { during, early, after: C.names('made-new-02') };
+      } finally { fs.promises.readdir = rd; }
+    };
+    const g1 = await genRun(H8, 'copies-gen');
+    const gx = await genRun(mutant('src/store-read-hold.js', [["        if (g !== gen) return;   // invalidated meanwhile: the follow-up reads\n", ''], ["        if (g !== gen) return;   // the generation check: an old read never puts its answer back over an invalidation\n", '']]), 'copies-gen-ctl');
+    ok(g1.during === true && g1.early === false && g1.after === true, 'THE GENERATION (round wjgchwl6a (1)): a read in flight across the invalidation sets nothing — the new copy\'s id is NAMED while the follow-up reads, and the awaited read settles only after it', g1);
+    ok(gx.during === false, 'RED CONTROL — the generation checks cut (in a copy): the read that listed before the new copy puts its old answer back («not named»)', gx);
+    // (3) + (7) THE SCAN: a string of ANY length is read whole (a long one never shifts the quotes' pairing in a one-line copy), and a key's
+    // own list is left out (hosts' removed list). RED CONTROL: the old bounded match (in a copy) loses the id after the long string
+    const oneLine = JSON.stringify({ hosts: [{ id: 'host-made-a', note: 'x'.repeat(300) }, { id: 'host-made-b' }], removedIds: ['host-made-gone'] });
+    const sc = H8._idsOfText(oneLine, ['removedIds']);
+    const scx = mutant('src/store-read-hold.js', [[String.raw`re = /"((?:[^"\\\n]|\\.)*)"/g`, String.raw`re = /"((?:[^"\\\n]|\\.){1,240})"/g`]])._idsOfText(oneLine, ['removedIds']);
+    ok(sc.has('host-made-a') && sc.has('host-made-b') && !sc.has('x'.repeat(300)) && !sc.has('host-made-gone'), 'THE SCAN (round wjgchwl6a (3), (7)): a one-line copy\'s ids after a 300-character string are read; the long string and the removed list are no ids', [...sc]);
+    ok(!scx.has('host-made-b'), 'RED CONTROL — the old bounded match (in a copy): after the long string the pairing shifts and the id is lost', [...scx]);
+    // (2) AN IMPORT THAT DROPS A MACHINE is a person's removal: written into the removed list, so its exit lists go though a copy names it.
+    // RED CONTROL: the import's note cut (in a copy) — the copy keeps the dropped machine's exit lists
+    const importRun = async (MOD, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));
+      fs.writeFileSync(f + '.corrupt-1700000000000', '{"hosts": [{"id": "host-dial-made03", "transport": "dial", "name": "made-up"');
+      const Hm = new MOD.HostManager({ dataDir: d });
+      const id = Hm.add({ name: 'made-up', transport: 'dial', deviceId: 'made03' });
+      await Hm._copies().refresh();
+      const before = Hm.namedByCopy(id), r = Hm.importBundle({ hosts: [] });
+      const set = [], me = Object.create(EPb.ExitProxyManager.prototype);
+      Object.assign(me, { _grants: () => ({ rowsOfDoor: () => [{ resource: id + ':use', except: [] }, { resource: id + ':run', except: [] }], setMany: (rows) => { set.push(...rows.map((x) => x.resource)); return { ok: true }; } }), hosts: Hm, _hosts: () => Hm.list(), log() { } });
+      me.pruneLists();
+      return { id, before, listed: Hm.list().length, pruned: set.sort().join(), skipped: !!(r && r.skipped) };
+    };
+    const im1 = await importRun(HMb, 'import-drops');
+    const imx = await importRun(mutant('src/hosts.js', [["    { const now = new Set(hosts.map((r) => r && String(r.id))); for (const old of before) if (old && !now.has(String(old.id))) this._noteRemoved(old.id); for (const id of now) this._noteAdded(id); }\n", '']]), 'import-drops-ctl');
+    ok(im1.before === true && im1.listed === 0 && !im1.skipped && im1.pruned === `${im1.id}:run,${im1.id}:use`, 'AN IMPORT THAT DROPS A MACHINE (round wjgchwl6a (2)) is a person\'s removal: a machine a kept copy names, dropped by the import, loses both exit lists', im1);
+    ok(imx.pruned === '', 'RED CONTROL — the import\'s note cut (in a copy): the copy keeps the dropped machine\'s exit lists', imx);
+    // (9) THE SCAN's TIME, measured on the machine that runs this (said, never judged by a clock here): a made-up jobs list of about 4 MiB,
+    // written as src/jobs.js writes it (indent 1)
+    { const big = JSON.stringify(Array.from({ length: 9000 }, (_, i) => ({ id: 'jb-' + String(i).padStart(8, '0'), kind: 'task', name: 'made-up job ' + i, cmd: { argv: ['sh', '-c', 'echo made-up '.repeat(20)] }, state: 'done', owner: { conversation: { backend: 'claude', id: 'conv-made-' + i } }, runs: [{ at: 1700000000000 + i, exit: 0 }] })), null, 1);
+      const t0 = process.hrtime.bigint(), got = H8._idsOfText(big), ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      const turns = H8._turnsOf(big), union = new Set(); let longest = 0;
+      for (const p of turns) { const t1 = process.hrtime.bigint(); for (const x of H8._idsOfText(p)) union.add(x); longest = Math.max(longest, Number(process.hrtime.bigint() - t1) / 1e6); }
+      console.log(`    (the ids' scan: ${(big.length / 1048576).toFixed(2)} MiB, ${got.size} strings, ${ms.toFixed(1)} ms here in one turn; in ${turns.length} turns the longest ${longest.toFixed(1)} ms)`);
+      ok(turns.length >= 4 && turns.slice(0, -1).every((p) => p.endsWith('\n')) && turns.join('') === big && union.size === got.size && [...got].every((x) => union.has(x)), 'THE SCAN IN TURNS (round wjgchwl6a (9)): a copy of about 5 MiB is scanned in turns of whole lines, the loop given back between them — the same ids as one scan', { turns: turns.length });
+      const HT = mutant('src/store-read-hold.js', [['const SCAN_TURN = 1024 * 1024;', 'const SCAN_TURN = 64 * 1024 * 1024;']]);
+      ok(HT._turnsOf(big).length === 1, 'RED CONTROL — the turn at the copy\'s size (in a copy): the whole copy is scanned in one loop turn');
+      ok(fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8').includes('if (k + 1 < turns.length) await new Promise((r) => setImmediate(r)); }   // the loop is given back between turns'), 'THE SCAN IN TURNS (pin): the copies\' read gives the loop back between turns');
+      ok(got.has('jb-00008999') && got.has('conv-made-8999'), 'THE SCAN reads a made-up jobs list of about 4 MiB whole (round wjgchwl6a (9): its time is said in the line above)', { size: got.size, bytes: big.length }); }
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));

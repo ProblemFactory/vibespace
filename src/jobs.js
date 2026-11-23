@@ -297,8 +297,8 @@ class JobManager {
    *  copies are read at the FIRST ask (not at the start: the engine's start reads nothing more — until they are read, every id is named) */
   namedByCopy(id) { return this._copies().names(String(id)); }
   /** read the kept copies now (off the loop) — the vault-job door asks it when it files a card, so the person's press is judged by them */
-  readCopies() { this._copies().warm(); }   // (round wxzvih2as: read once if never read — the door asks it at each card, the press is judged by it)
-  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this.file, prefix: path.basename(asideOf(this.file)).replace(/\d+$/, '') })); }
+  readCopies() { return this._copies().warm(); }   // (round wxzvih2as: read once if never read; round wjgchwl6a (4): a promise again, settled once the read in flight ends)
+  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this.file, prefix: path.basename(asideOf(this.file)).replace(/\d+$/, ''), log: (m) => { try { this.d.log(m); } catch { } } })); }
   init() {
     try {
       fs.mkdirSync(this.logsDir, { recursive: true });

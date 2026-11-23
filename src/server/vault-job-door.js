@@ -476,6 +476,8 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     index();
     const q = asks.get(id);
     if (!q) return named(settled.has(id) ? 'ask_settled' : 'ask_unknown');
+    // round wjgchwl6a (5): the press WARMS the copies too (never awaited — a press before they are read keeps every id: it only over-keeps)
+    try { if (jm && typeof jm.readCopies === 'function') jm.readCopies(); } catch { /* the keep names every id the copies are not read for */ }
     const it = userTodos && typeof userTodos.get === 'function' ? userTodos.get(q.todoId) : null;
     if (!it || it.status !== 'open' || !it.action || it.action.type !== VJ.ASK_TYPE || it.action.askId !== id) { forget(q); return named('ask_settled'); }   // the belt: still open, still this card's
     if (a !== 'allow' && a !== 'deny') return named('bad_job_answer');

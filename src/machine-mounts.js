@@ -1266,7 +1266,7 @@ class MachineMounts {
 
   /** Boot: heal every recorded mount whose machine is reachable. */
   /** the kept copies of this store's torn bytes (src/store-read-hold.js copiesOf) — their prefix is this store's own set-aside name */
-  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, '') })); }
+  _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, ''), log: (m) => this.log(m) })); }
   async restore() {
     try { await Promise.race([this._copies().refresh(), new Promise((r) => { const t = setTimeout(r, 20000); t.unref?.(); })]); } catch { }   // B-f276 family unit 2 commit 3: the sweep below answers from memory — read first (off the loop); BOUNDED (a folder that hangs: the sweep keeps every id it cannot judge)
     this.gcOrphanTokens();

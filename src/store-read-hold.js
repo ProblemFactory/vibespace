@@ -181,35 +181,73 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
 const COPIES = new Map();
 const RELIST_MS = 60e3;
 const COPY_MAX = 8 * 1024 * 1024;   // a copy bigger than this is not read whole — its store's every id is NAMED (unknown keeps)
+// round wjgchwl6a (9): the scan's TURN — about 1 MiB of whole lines; the loop is given back between turns (measured alone on the test
+// machine: a made-up jobs list of 4.97 MiB took 120–135 ms in ONE turn — at the 8 MiB bound that nears the 250 ms law)
+const SCAN_TURN = 1024 * 1024;
+/** a copy's text → its turns: pieces of about SCAN_TURN that end at a line's end (a JSON string never spans a line, so the scan's
+ *  pairing holds across turns) — ONE turn for a small copy, or for a copy written on one long line. (A key's list that `omit` leaves
+ *  out and that spans two turns stays in: unknown keeps — hosts' copies are kilobytes, one turn) */
+function turnsOf(text) {
+  const out = [];
+  let at = 0;
+  while (at < text.length) {
+    let end = Math.min(text.length, at + SCAN_TURN);
+    if (end < text.length) { const nl = text.indexOf('\n', end); end = nl < 0 ? text.length : nl + 1; }
+    out.push(text.slice(at, end)); at = end;
+  }
+  return out.length ? out : [''];
+}
 /** the ids a copy holds — every JSON string in its bytes, read ONCE at the copy's read (round wxzvih2as: an ask is then a Set lookup,
  *  never a search of every copy's text on the loop) */
-function idsOfText(text) {
-  const out = new Set(), re = /"((?:[^"\\\n]|\\.){1,240})"/g;
-  let m; while ((m = re.exec(text))) { try { out.add(JSON.parse('"' + m[1] + '"')); } catch { out.add(m[1]); } }
+function idsOfText(text, omit = []) {
+  // round wjgchwl6a (7): a key's own list of strings (hosts' removed list) is left out — a machine a person removed long ago is never
+  // «named» again by a later tear's copy (a cut list, its closing bracket torn off, stays in: unknown keeps)
+  let t = text;
+  for (const k of omit) t = t.split(new RegExp('"' + k + '"\\s*:\\s*\\[[^\\]]*\\]')).join('""');
+  // round wjgchwl6a (3): a string of ANY length is matched whole and only the short ones (≤ 240) are kept — a long one never shifts the
+  // quotes' pairing for the rest of a one-line copy
+  const out = new Set(), re = /"((?:[^"\\\n]|\\.)*)"/g;
+  let m; while ((m = re.exec(t))) { const s = m[1]; if (s.length > 240) continue; try { out.add(JSON.parse('"' + s + '"')); } catch { out.add(s); } }
   return out;
 }
-function copiesOf({ file, prefix } = {}) {
+/** copiesOf({ file, prefix, log, omit }): `log` (optional) hears ONE line when the copies cannot be read (said again only after a read
+ *  that answered); `omit` = keys whose list of strings is no id (hosts: removedIds). A read that FAILS keeps every id NAMED; a read
+ *  that HANGS keeps its turn for good (every later ask joins it) — every id then stays named, the safe side, said by the bound of
+ *  the caller that awaits it (machine-mounts' restore races it against 20 s) */
+function copiesOf({ file, prefix, log = null, omit = [] } = {}) {
   if (!file || !prefix) throw new Error('store-read-hold: copiesOf needs the file and its copies\' prefix');
   const keyOf = file + '\n' + prefix;
   if (COPIES.has(keyOf)) return COPIES.get(keyOf);
   const dir = path.dirname(file);
-  let ids = null, failed = false, listedAt = 0, listed = null, inflight = null, againAfter = false;
-  async function refresh() {
+  let ids = null, failed = false, listedAt = 0, listed = null, inflight = null, againAfter = false, gen = 0, saidFail = false;
+  const sayFail = (e) => {
+    if (saidFail || typeof log !== 'function') return;
+    saidFail = true;
+    try { log(`[store-read-hold] the kept copies of ${path.basename(file)} could not be read (${(e && (e.code || e.message)) || e}) — every id stays named (kept) until they are read`); } catch { }
+  };
+  /** one read of the copies — the promise settles after the FOLLOW-UP read when one was asked meanwhile (an awaiting caller judges by
+   *  the newest answer); round wjgchwl6a (1): a read that ends under an OLDER generation (an invalidation came meanwhile) sets nothing */
+  function refresh() {
     if (inflight) { againAfter = true; return inflight; }   // a read asked while one is in flight (a copy made meanwhile): one more after it
-    inflight = (async () => {
+    const g = gen;
+    const one = (async () => {
       try {
         const all = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(prefix)).sort().slice(-COPY_LOOK);
+        if (g !== gen) return;   // invalidated meanwhile: the follow-up reads
         listedAt = Date.now();
         if (ids && !failed && listed && listed.join('\n') === all.join('\n')) return;   // the same copies: the answer stands
         const set = new Set();
         for (const n of all) {
           const p = path.join(dir, n);
           if ((await fs.promises.stat(p)).size > COPY_MAX) throw new Error(`${n} is over the copies' bound`);   // unknown keeps
-          for (const x of idsOfText(await fs.promises.readFile(p, 'utf8'))) set.add(x);
+          const turns = turnsOf(await fs.promises.readFile(p, 'utf8'));
+          for (let k = 0; k < turns.length; k++) { for (const x of idsOfText(turns[k], omit)) set.add(x); if (k + 1 < turns.length) await new Promise((r) => setImmediate(r)); }   // the loop is given back between turns
         }
-        ids = set; listed = all; failed = false;
-      } catch { failed = true; listedAt = Date.now(); }
-    })().finally(() => { inflight = null; if (againAfter) { againAfter = false; refresh().catch(() => { }); } });
+        if (g !== gen) return;   // the generation check: an old read never puts its answer back over an invalidation
+        ids = set; listed = all; failed = false; saidFail = false;
+      } catch (e) { if (g !== gen) return; failed = true; listedAt = Date.now(); sayFail(e); }
+    })();
+    inflight = one.then(() => { inflight = null; if (againAfter) { againAfter = false; return refresh(); } return undefined; });
     return inflight;
   }
   const C = {
@@ -224,9 +262,10 @@ function copiesOf({ file, prefix } = {}) {
     refresh,
     /** round wxzvih2as's MUST: THE ANSWER IS NEVER OLDER THAN THE NEWEST COPY THIS PROCESS MADE — a store that makes its own copy of
      *  torn bytes calls this right after: every id is NAMED until the copies are read again (off the loop) */
-    invalidate() { ids = null; listed = null; listedAt = 0; refresh().catch(() => { }); },
-    /** read the copies if they were never read (one listing at most — a caller that asks often never re-lists by itself) */
-    warm() { if (!ids && !inflight) refresh().catch(() => { }); },
+    invalidate() { gen++; ids = null; listed = null; listedAt = 0; refresh().catch(() => { }); },
+    /** read the copies if they were never read (one listing at most — a caller that asks often never re-lists by itself) → a promise
+     *  that settles once the read in flight (if any) has ended */
+    warm() { if (!ids && !inflight) refresh().catch(() => { }); return inflight ? inflight.catch(() => { }) : Promise.resolve(); },
   };
   COPIES.set(keyOf, C);
   return C;
@@ -244,4 +283,4 @@ async function readAgainOf(which) {
   return named.length === 1 ? named[0].again() : false;
 }
 
-module.exports = { create, holds, readAgainOf, onHoldsChange, copiesOf, CEILING };
+module.exports = { create, holds, readAgainOf, onHoldsChange, copiesOf, CEILING, _idsOfText: idsOfText, _turnsOf: turnsOf };   // _idsOfText, _turnsOf: a suite's measure of the scan
