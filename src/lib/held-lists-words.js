@@ -25,6 +25,7 @@ const NAMES = Object.freeze({
   'pair-pending.json': i18nKey('the pending pairing codes'),
   'vault-grants.json': i18nKey('who may receive your two-step codes'),
   'usage-reset-claims.json': i18nKey('the reset marks'),
+  'vault-grant-ends.json': i18nKey('the list of approvals that ended'),   // lg-vault-env's own plain name (r3377)
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

@@ -4570,6 +4570,8 @@ export default {
   "who may receive your two-step codes": "2段階コードを受け取れる相手",
   "the reset marks": "リセットの記録",
   "a conversation’s saved details": "会話の保存された情報",
+  "VibeSpace cannot read the list of approvals that ended right now — nothing was changed. It reads it again by itself; until then the list may miss an approval that ended earlier.": "VibeSpace は今、終了した許可の一覧を読み取れません——何も変更していません。自動で読み直されます。それまでは、前に終了した許可が一覧にない場合があります。",
+  "the list of approvals that ended": "終了した許可の一覧",
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace は API の提案をいま読めません — 何も決定・実行していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace はアプリの提案をいま読めません — 何もインストール・変更していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace はデザインの一覧をいま読めません — 何も変更しておらず、デザインのフォルダーもそのままです。数分後にもう一度押してください（自動でもう一度読みます）。",

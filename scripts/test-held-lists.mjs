@@ -169,6 +169,7 @@ const CALLERS = { 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tok
   'src/server/published-pages.js': ['published-pages.json'], 'src/server/setting-holds.js': ['setting-holds.json'], 'src/server/vault-use-grants.js': ['vault-use-marks.json'], 'src/session-status.js': ['session-status.json'],
   // r3314: the units picked into the hotfix's trial after the chain
   'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],
+  'src/server/vault-run-door.js': ['vault-grant-ends.json'],   // r3377: lg-vault-env's grant ends
   // A STORE MADE PER THING from ONE create site (r3314): { sites, stores } — `sites` the file's create sites, `stores` the names the hub lists them
   // by (a shape's example where each thing has its own file), checked against the notice's names, not against the file's literals
   'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } };

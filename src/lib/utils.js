@@ -2009,6 +2009,7 @@ const HELD_WORDS = Object.freeze({
   'session-meta-unread': () => t('VibeSpace cannot read this conversation\'s saved details right now. Nothing has been changed: what you do meanwhile is kept and saved as soon as they read again.'),   // bl-chat-c (line 663: a conversation's record in data/session-meta) — the lane's words
   webhook_callers_unread: () => t('VibeSpace cannot read its webhook callers right now — nothing was changed, and each caller is told to try again later. It reads them again by itself in a few minutes.'),   // bl-ci (the webhook callers, callers.json) — the lane's words; its page (webhook-view.js heldWords) shows the answer's words, these now
   webhook_pairing_unread: () => t('VibeSpace cannot read its pending pairing codes right now — no code was made or used. It reads them again by itself in a few minutes.'),   // bl-ci (pair-pending.json) — the lane's words
+  vault_grant_ends_unread: () => t('VibeSpace cannot read the list of approvals that ended right now — nothing was changed. It reads it again by itself; until then the list may miss an approval that ended earlier.'),   // lg-vault-env (unit (d): vault-grant-ends.json, the chain on f98e315a9 — 主开发 r3377) — the lane's words; no route refuses by it (an end is news only)
 });
 const HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;   // THE STATED PATTERN the census finds held-looking codes by — never what the step words by (r3123)
 // 主开发 r3123 (a must of this unit, found by its own read): the pattern also matches codes that are NO list hold (a vault's unreadable key,
