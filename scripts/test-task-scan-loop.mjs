@@ -378,9 +378,10 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         `the kept paths are bounded (4096; a copy scaled to 2): ${cg.kept} kept, the oldest answered by the index again (${cg.walked} walks); RED (no drop): ${cr.kept} kept`);
       // (8) THE SYNCHRONOUS ROAD ASKED IN A LOOP (主开发 r1465: it keeps nothing on «not known yet» — what bounds it?): a reader
       // asked chatStatus() 200 times while the index's ONE walk hangs asks the index no more (it reads again only once the index
-      // has MOVED — a walk ended: rolloutIndexEpoch), asks no second walk, lists nothing on this thread; the walk released, its
-      // next ask reads the rollout with no press. RED: a copy of the store without the epoch rule ⇒ an ask of the index a call
-      const EPOCH = '    if (this._all && (!this._partial || this._partialEpoch === rolloutIndexEpoch())) return;\n';
+      // has MOVED — a walk ended: rolloutIndexEpoch), asks no second walk, lists nothing on this thread; the walk released, the ASYNC
+      // road reads the rollout (r2743 (1): the synchronous road never re-reads) and the next ask sees it with no press. RED: a copy of the
+      // store that re-reads a partial reader on every synchronous ask ⇒ an ask of the index a call
+      const EPOCH = '    if (this._all) return;\n';
       const loopRoad = async (CSm) => {
         AD._resetRolloutIndexForTests();
         const realRd = fs.promises.readdir; let release = () => { }; const gate = new Promise((r) => { release = r; });
@@ -392,13 +393,13 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
           n = await listing(async () => { for (let i = 0; i < 200; i++) rd.chatStatus(); });
           asks1 = AD.rolloutIndexStats().asks; walks = AD.rolloutIndexStats().walks;
           release(); await AD.warmCodexRolloutIndex();
-          st = rd.chatStatus();
+          await rd.rawAsync(); st = rd.chatStatus();   // r2743 (1): the async road re-reads, the sync accessor reads what it filled
         } finally { fs.promises.readdir = realRd; release(); }
         return { n, loopAsks: asks1 - asks0, walks, model: st && st.model };
       };
       const lg = await loopRoad(CS), lr = await loopRoad(mutantCopies('a60e-no-epoch', REPO).load('src/codex-session-store.js', anchored(csSrcA, EPOCH, '    if (this._all && !this._partial) return;\n', 'a60e-no-epoch'), 'no-epoch'));
       ok(lg.loopAsks === 0 && lg.walks === 1 && lg.n === 0 && lg.model === 'gpt-stand-in-a60e' && lr.loopAsks >= 200,
-        `chatStatus() 200 times while the one walk hangs: ${lg.loopAsks} asks of the index, ${lg.walks} walk, ${lg.n} synchronous listings; the walk ended, the next ask reads the rollout (model «${lg.model}»); RED (no epoch rule): ${lr.loopAsks} asks`);
+        `chatStatus() 200 times while the one walk hangs: ${lg.loopAsks} asks of the index, ${lg.walks} walk, ${lg.n} synchronous listings; the walk ended, the async road read the rollout and the next ask sees it (model «${lg.model}»); RED (no epoch rule): ${lr.loopAsks} asks`);
       // ── THE ROUND wdxrfw5q7's CURE (主开发 r1638): each leg on the real modules, each RED in an anchored copy ──
       const withReaddir = async (pick, fn) => {   // a listing this leg refuses (EACCES) or holds (a promise): fs.promises, as the walk reads it
         const real = fs.promises.readdir;
@@ -445,21 +446,21 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         `one folder below the root cannot be listed (${path.relative(csess, String(g10.failed))}): the walk went on — ${g10.found} of 30 found, ${g10.unknown} «not known yet», ${g10.none} «none»; RED (the walk stops there): ${r10.found} found`);   // stale-pins: kept (a printed word, no pin)
       // (11) MUST 3 — THE FLAG TRAVELS, FOLDED INTO LINE 411's DOOR (主开发 r2439): the service's status and page (the paired machine's
       // transcript ops ARE these) of a conversation whose rollout's folder cannot be listed say line 411's «not loaded» with the cause
-      // «not known yet» (`notKnownYet`); the page words that cause in its own sentence on line 411's line and its toast, and both HTTP
-      // roads hand the cause on. RED: the status reply without it
+      // «not known yet» (`notKnownYet`) on its page (r2743 (4): the status carries nothing new — no road read it); the page words that
+      // cause in its own sentence on line 411's line and its toast, and both HTTP roads hand the cause on. RED: the page without it
       const travel = async (TSm) => withReaddir((p0) => (p0 === rdir ? 'fail' : null), async () => {
         AD._resetRolloutIndexForTests();
         const svc = TSm.createTranscriptService({ activeSessions: new Map(), createSessionMessages: (s0) => new CS.CodexSessionMessages(s0, undefined, { buffersDir: path.join(os.homedir(), 'buf') }), hosts: null });
         const st = await svc.status(cref2), pg = await svc.page(cref2);
-        return { st: !!(st.notLoaded && st.notKnownYet), pg: !!(pg.notLoaded && pg.notKnownYet) };
+        return { st: !!(st.notLoaded || st.notKnownYet), pg: !!(pg.notLoaded && pg.notKnownYet) };
       });
-      const FLAG = "    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };";
-      const g11 = await travel({ createTranscriptService }), r11 = await travel(mutantCopies('a60e-no-flag', REPO).load('src/transcript-service.js', anchored(tsSrc, FLAG, '    return { chatStatus, taskState: sm.taskState?.() || null };', 'a60e-no-flag'), 'no-flag'));   // stale-pins: kept (the red control: the status without the cause)
+      const CAUSE = '...(v.notLoadedInfo.notKnownYet ? { notKnownYet: true } : {}), ';
+      const g11 = await travel({ createTranscriptService }), r11 = await travel(mutantCopies('a60e-no-flag', REPO).load('src/transcript-service.js', anchored(tsSrc, CAUSE, '', 'a60e-no-cause'), 'no-flag'));
       const PAGE_SRC = ['src/lib/chat-view.js', 'src/lib/session-lifecycle.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
       const said = PAGE_SRC.split("t('Its saved history is not known yet — it fills in here by itself.')").length - 1;
       const handed = PAGE_SRC.split('notKnownYet: !!data.notKnownYet').length - 1;
-      ok(g11.st && g11.pg && !r11.st && said === 2 && handed === 2,
-        `a rollout «not known yet»: the service's status says line 411's cause (${g11.st}), its page says it (${g11.pg}); the page words it in its own sentence (${said}: line 411's line, its toast); the HTTP roads hand the cause on (${handed}: the history pill's fetch, the resume's first page); RED (status without the cause): ${r11.st}`);
+      ok(!g11.st && g11.pg && !r11.pg && said === 2 && handed === 2,
+        `a rollout «not known yet»: the service's status says nothing new (${!g11.st}), its page says the cause (${g11.pg}); the page words it in its own sentence (${said}: line 411's line, its toast); the HTTP roads hand the cause on (${handed}: the history pill's fetch, the resume's first page); RED (the page without the cause): ${r11.pg}`);
       AD._resetRolloutIndexForTests();
       // (12) «none» NEVER STANDS OVER A COPY A FETCH WROTE: one exact look before «none» (the host folders the walk listed), and the
       // fetch's note (a host folder the walk never listed). RED: neither (the walk's minute-long «none»)
@@ -659,7 +660,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         `r2439 (2) it ends: found — loaded (${!g21.f1.notLoaded}), the page told ${g21.toldF} time(s); absent — loaded with its final word (notFound ${g21.a1.notFound}; the page's decision: the final word ${HR.endsNotFound({ historyNotFound: g21.a1.notFound }, true)}, its re-ask ${stop.act}); RED (absent kept «not known yet»): still «not loaded» (${!!r21.a1.notLoaded})`);
       // (22) CONDITION 3 — THE WORDS: «not known yet: it fills in here by itself» in en, zh and ja, told apart from line 411's own causes
       // (a storage that hangs, the reader gone, the reader restarting), its final word «not found» in its own sentence; the unit's old
-      // sentence (a person sent to open the conversation again) is gone from the page and the dictionaries; the cause is read FIRST
+      // sentence (a person sent to open the conversation again) is gone from the page and the dictionaries; the storage's cause comes first
       const ZHS = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JAS = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8'), CVS = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
       const NKY = 'Its saved history is not known yet — it fills in here by itself.', NFW = 'Its saved history was not found.';
       const valOf = (src, k) => { const l = src.split('\n').find((x) => x.startsWith('  ' + JSON.stringify(k) + ':')); if (!l) return null; const v = l.slice(l.indexOf('": ') + 3).trim(); return JSON.parse(v.endsWith(',') ? v.slice(0, -1) : v); };
@@ -667,10 +668,80 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const words = [NKY, NFW].flatMap((k) => [valOf(ZHS, k), valOf(JAS, k)]);
       const apart = [ZHS, JAS].every((src) => OTHER.every((k) => valOf(src, k) !== valOf(src, NKY)));
       const body = CVS.slice(CVS.indexOf('  _sayHistoryNotLoaded(code, '), CVS.indexOf('  _historyLoadedNow(msg = null) {'));
-      const first = body.indexOf('if (info && info.notKnownYet)') > 0 && body.indexOf('if (info && info.notKnownYet)') < body.indexOf('else if (info && info.storageHung)');
+      const first = body.indexOf('if (info && info.storageHung) words') > 0 && body.indexOf('if (info && info.storageHung) words') < body.indexOf('else if (info && info.notKnownYet)') && body.indexOf('else if (info && info.notKnownYet)') < body.indexOf('else if (info && info.readerGone)');   // r2743: the storage's cause first (it carries a time)
       const oldGone = !['src/lib/chat-view.js', 'src/lib/session-lifecycle.js', 'src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].some((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes('it is read again the next time this conversation opens'));   // stale-pins: kept (the absence check: the unit's old sentence is gone)
       ok(words.every((w) => typeof w === 'string' && w.length > 4) && apart && first && oldGone && CVS.includes("t('" + NFW + "')"),
-        `r2439 (3) the words: «not known yet» and «not found» in zh and ja (${words.join(' · ')}), apart from line 411's three causes (${apart}), the cause read first at the door (${first}); the old sentence gone (${oldGone})`);
+        `r2439 (3) the words: «not known yet» and «not found» in zh and ja (${words.join(' · ')}), apart from line 411's three causes (${apart}), the storage's cause first, then this one, then line 411's others (${first}); the old sentence gone (${oldGone})`);
+      // ── 主开发 r2743: LINE 513's REQUIRED SMALL
+      // (23) (1) THE SYNCHRONOUS ROAD NEVER RE-READS what the async road filled: a reader partial («not known yet»: tid2's folder refused),
+      // the index then MOVED (the folder lists, a walk ended), a synchronous accessor asked: zero reads of the rollout on the loop.
+      // RED: the moved form's guard (a partial reader re-read synchronously once the epoch moved)
+      const GUARD = csSrcF.split('\n').find((l) => l.startsWith('    if (this._all) return;')) + '\n';
+      const syncRoad = async (CSm) => {
+        AD._resetRolloutIndexForTests(); AD._setRolloutTimingForTests({ retryMs: 0 }); let failing = true;
+        try {
+          return await withReaddir((p0) => (failing && p0 === rdir ? 'fail' : null), async () => {
+            const rd = rdOf(CSm, tid2); await rd.rawAsync(); const partial0 = !!rd.notLoadedNotKnown;
+            failing = false; await AD.refreshCodexRolloutIndex();
+            let reads = 0; const realOpen = fs.openSync, realRead = fs.readFileSync;
+            fs.openSync = function (p0, ...a) { if (String(p0) === rfile) reads++; return realOpen.call(this, p0, ...a); };
+            fs.readFileSync = function (p0, ...a) { if (String(p0) === rfile) reads++; return realRead.call(this, p0, ...a); };
+            try { rd.raw(); rd.chatStatus(); } finally { fs.openSync = realOpen; fs.readFileSync = realRead; }
+            return { partial0, reads };
+          });
+        } finally { AD._setRolloutTimingForTests({}); AD._resetRolloutIndexForTests(); }
+      };
+      const g23 = await syncRoad(CS), r23 = await syncRoad(mutantCopies('a60e-sync-reread', REPO).load('src/codex-session-store.js', anchored(csSrcF, GUARD, '    if (this._all && (!this._partial || this._partialEpoch === rolloutIndexEpoch())) return;\n', 'a60e-sync-reread'), 'sync-reread'));   // stale-pins: kept (the red control: the moved form's guard)
+      ok(g23.partial0 && g23.reads === 0 && r23.partial0 && r23.reads > 0,
+        `r2743 (1) a partial reader, the epoch moved, a synchronous accessor: ${g23.reads} reads of the rollout on the loop; RED (the moved form's guard): ${r23.reads}`);
+      // (24) (2) THE LOADED MARK's PAIRS, one reader each. (a) NEVER LOADED WHILE THE STORAGE STILL REFUSES: a read «not known yet» (our
+      // cause), then the index finds the rollout and the re-read meets line 411's storage refusal — «not loaded» with the storage's cause,
+      // ours cleared. (b) NEVER «NOT LOADED» OVER A HISTORY THAT CAME IN: a read line 411's door refused (the pool's heap bound: its «not
+      // loaded»), the reader partial (as a read whose chain held a rollout «not known yet» leaves it), the pool answers again — the re-read
+      // loads it, nothing «not loaded». Each on a rollout of its own (a storage refusal stays in the adapter's memory for that file). RED: a re-read that does not
+      // start from nothing (the moved form's _markRead)
+      const T0P = new Date(Date.UTC(2026, 6, 3)).toISOString(), mkRoll = (dir, id, model) => { fs.mkdirSync(dir, { recursive: true }); const f = path.join(dir, `rollout-2026-07-03T00-00-00-${id}.jsonl`); fs.writeFileSync(f, [{ timestamp: T0P, type: 'session_meta', payload: { id } }, { timestamp: T0P, type: 'turn_context', payload: { model } }].map((x) => JSON.stringify(x)).join('\n') + '\n'); return f; };
+      const refusingPool = { call() { return Promise.reject(Object.assign(new Error('a stand-in deadline'), { status: 503, safeFsTimeout: true, deadline: true })); } };
+      const boundPool = { call() { return Promise.reject(Object.assign(new Error('a stand-in heap bound'), { code: 'heap_bound' })); } };   // line 411's «not loaded» that the next read gets past (no storage memory of the file)
+      const OLD_MARK = "    if (partial.unknown) { if (!this.notLoaded) { this.notLoaded = NOT_LOADED; this._notLoadedByIndex = true; } this.notLoadedNotKnown = true; }\n    else if (this.notLoadedNotKnown) { this.notLoadedNotKnown = false; if (this._notLoadedByIndex) { this.notLoaded = null; this._notLoadedByIndex = false; } }\n";   // stale-pins: kept (the red control: the moved form's mark, set and cleared without a fresh start)
+      const NEW_MARK = csSrcF.split('\n').find((l) => l.startsWith('    if (partial.unknown) { if (!this.notLoaded) this.notLoaded = NOT_LOADED; this.notLoadedNotKnown = true; }')) + '\n';
+      const RESET = csSrcF.split('\n').find((l) => l.startsWith('      this._resetNotLoaded();')) + '\n';
+      const csPairsRed = mutantCopies('a60e-pairs-red', REPO).load('src/codex-session-store.js', anchored(anchored(csSrcF, NEW_MARK, OLD_MARK, 'a60e-old-mark'), RESET, '', 'a60e-no-reset'), 'pairs-red');
+      const pairRoad = async (CSm, tag) => {
+        const tP = 'eeeeeeee-0000-4000-8000-00000a60f7' + tag, tB = 'eeeeeeee-0000-4000-8000-00000a60f8' + tag;
+        const rdirP = path.join(csess, '2026', '07', '03' + tag), rdirB = path.join(csess, '2026', '07', '04' + tag);
+        mkRoll(rdirP, tP, 'gpt-stand-in-pair-a'); mkRoll(rdirB, tB, 'gpt-stand-in-pair-b');
+        const pool0 = AD.transcriptPool(); let failing = true;
+        AD._resetRolloutIndexForTests(); AD._setRolloutTimingForTests({ retryMs: 0 });
+        try {
+          const a = await withReaddir((p0) => (failing && p0 === rdirP ? 'fail' : null), async () => {
+            const rd = rdOf(CSm, tP); await rd.rawAsync(); const r1 = { nl: !!rd.notLoaded, nk: !!rd.notLoadedNotKnown };
+            failing = false; await AD.refreshCodexRolloutIndex();
+            AD._setTranscriptPoolForTest(refusingPool); try { await rd.rawAsync(); } finally { AD._setTranscriptPoolForTest(pool0); }
+            return { r1, r2: { nl: !!rd.notLoaded, storage: !!rd.notLoadedStorage, nk: !!rd.notLoadedNotKnown } };
+          });
+          await AD.refreshCodexRolloutIndex();
+          const rdB = rdOf(CSm, tB);
+          AD._setTranscriptPoolForTest(boundPool); try { await rdB.rawAsync(); } finally { AD._setTranscriptPoolForTest(pool0); }
+          const b1 = { nl: !!rdB.notLoaded, storage: !!rdB.notLoadedStorage };
+          rdB._partial = true; rdB._partialEpoch = -1;   // as a read whose chain held a rollout «not known yet» leaves it: the next read is a re-read
+          await rdB.rawAsync();   // the real pool answers
+          return { a, b: { b1, b2: { nl: !!rdB.notLoaded } } };
+        } finally { AD._setRolloutTimingForTests({}); AD._resetRolloutIndexForTests(); }
+      };
+      const g24 = await pairRoad(CS, 'a1'), r24 = await pairRoad(csPairsRed, 'b2');   // hex tags: the ids stay UUID-shaped (the index reads a rollout's id from its name)
+      ok(g24.a.r1.nl && g24.a.r1.nk && g24.a.r2.nl && g24.a.r2.storage && !g24.a.r2.nk && g24.b.b1.nl && !g24.b.b1.storage && !g24.b.b2.nl
+        && (!r24.a.r2.nl || r24.b.b2.nl),
+        `r2743 (2) the loaded mark's pairs: (a) «not known yet», then the storage refuses the re-read — still «not loaded» with the storage's cause (${g24.a.r2.nl}, ${g24.a.r2.storage}), ours cleared (${!g24.a.r2.nk}); (b) the pool refused (line 411's «not loaded»), then the history came in — «not loaded» gone (${!g24.b.b2.nl}); RED (no fresh start): (a) loaded while the storage refused ${!r24.a.r2.nl}, (b) «not loaded» over the history ${r24.b.b2.nl}`);
+      // (25) (3) THE FINAL WORD IS NEVER SAID OF A CONVERSATION THAT IS RUNNING: the live attach's payload carries no historyNotFound (while
+      // it runs: «not known yet» and the re-ask; a new conversation may be asked before its file is written); the VIEW reply carries it (a
+      // conversation that is not running, or a live window whose session ended). RED: the moved form's attach line
+      const WSH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+      const liveLine = WSH.split('\n').find((l) => l.includes("const livePayload = { type: 'attached'")) || '';
+      const viewHas = WSH.includes('viewOnly: true, ...(sm.notFound ? { historyNotFound: true } : {}), historyNotLoaded:');
+      const OLD_LIVE = "              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', ...(sm && sm.notFound ? { historyNotFound: true } : {}), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader";   // stale-pins: kept (the red control: the moved form's attach line)
+      const silent = (l) => l.length > 50 && !l.includes('historyNotFound');
+      ok(silent(liveLine) && viewHas && !silent(OLD_LIVE), `r2743 (3) the live attach says no final word (${silent(liveLine)}); the view reply carries it (${viewHas}); RED (the moved form's attach line): ${silent(OLD_LIVE)}`);
       AD._resetRolloutIndexForTests();
       fs.rmSync(rfile, { force: true });
     }

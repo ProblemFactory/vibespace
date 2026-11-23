@@ -818,9 +818,10 @@ class CodexSessionMessages {
 
   _ensureParsed() {
     // B-a60e remainder: this road never walks — a rollout the index does not know YET gives what is known (the live buffer at
-    // least), and that read is never final: it is read again once the index has MOVED (a walk ended since — rolloutIndexEpoch),
-    // so it corrects itself with no press, and a caller asking in a loop meanwhile does no work and asks no walk
-    if (this._all && (!this._partial || this._partialEpoch === rolloutIndexEpoch())) return;
+    // least). r2743 (1): THE SYNCHRONOUS ROAD NEVER RE-READS what any road filled — a partial read is read again on the ASYNC road
+    // alone (rawAsync, once the index has MOVED: rolloutIndexEpoch), never a tail of a file and a merge on the hub's loop; a caller
+    // asking in a loop meanwhile does no work and asks no walk
+    if (this._all) return;
     const threadId0 = getCodexHistorySessionId(this._session), partial = { unknown: false, absent: false };
     const fpOf = (id) => { const got = codexRolloutLookup(id); if (!got.known) partial.unknown = true; else if (id === threadId && !got.fp) partial.absent = true; return got.fp; };
     const threadId = threadId0;
@@ -854,10 +855,13 @@ class CodexSessionMessages {
   _markRead(partial, threadId) {
     this._partial = !!partial.unknown; this._partialEpoch = rolloutIndexEpoch();
     this.notFound = !partial.unknown && !!partial.absent;
-    if (partial.unknown) { if (!this.notLoaded) { this.notLoaded = NOT_LOADED; this._notLoadedByIndex = true; } this.notLoadedNotKnown = true; }
-    else if (this.notLoadedNotKnown) { this.notLoadedNotKnown = false; if (this._notLoadedByIndex) { this.notLoaded = null; this._notLoadedByIndex = false; } }
+    if (partial.unknown) { if (!this.notLoaded) this.notLoaded = NOT_LOADED; this.notLoadedNotKnown = true; }   // r2743 (2): a re-read began from nothing (_resetNotLoaded): what it marks is this read's alone
     noteHistoryMark(this.notLoaded ? 'noteAwaiting' : 'noteReadable', threadId);   // any cause (line 411's own or this one) waits; none ⇒ readable
   }
+
+  /** r2743 (2): THE LOADED MARK's PAIRS — a re-read starts from nothing, so ONE reader never says loaded while line 411's storage still
+   *  refuses (its cause set by this read, ours cleared), nor «not loaded» over a history that came in (an earlier read's cause kept) */
+  _resetNotLoaded() { this.notLoaded = null; this.notLoadedStorage = false; this.notLoadedRetryAt = null; this.notLoadedReaderGone = false; this.notLoadedNotKnown = false; this.notFound = false; }
 
   /** The attach's records off the loop — kb-file-structure «src/codex-session-store.js» (lane resume-all-paced L2). */
   rawAsync({ bulk = false, wanted = null } = {}) {
@@ -881,6 +885,7 @@ class CodexSessionMessages {
       const ancestry = await resolveCodexForkAncestryAsync(threadId, this._session?.forkedFrom || [], { partial });
       if (threadId) { const got = await codexRolloutLookupAsync(threadId); if (!got.known) partial.unknown = true; else if (!got.fp) partial.absent = true; }
       if (this._all && this._partial && partial.unknown && this._partialEpoch === rolloutIndexEpoch()) return this._all;   // nothing moved since the last «not known yet» read: the same answer, no second read
+      this._resetNotLoaded();   // r2743 (2): a read that runs starts from nothing — every cause below is THIS read's
       // B-f3f9: THE WHOLE READ IN THE WORKER — every file of the ancestry and the thread's own read, parsed, cut, tagged and merged,
       // then the live buffer merged, in the transcript worker's history lane; only the FINAL records cross (in pages), each re-tagged
       // here with its file's thread. A file it cannot name (a missing rollout: the thread/read copy), a pool that is down, or a refusal

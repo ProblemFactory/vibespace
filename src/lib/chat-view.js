@@ -3751,7 +3751,7 @@ class ChatView {
    *  reader's listing promises no time: none said) */
   _readerAskWords(info, now = Date.now()) {
     const at = retryAtOf(info, now);
-    if (info && info.notKnownYet) return t('Its saved history is not known yet — it fills in here by itself.');   // B-a60e (r2439 (3)): its own cause, its own words (before the reader's table, r3077)
+    if (info && info.notKnownYet && !info.storageHung) return t('Its saved history is not known yet — it fills in here by itself.');   // B-a60e (r2439 (3)): its own cause, its own words (before the reader's table, r3077); r2743: the storage's cause first — the table says it
     return readerAskWords(info, readerKindOf(info) === 'gone' && !at ? null : this._clockOf(at));
   }
   /** the page's own clock (src/lib/page-time.js — the page's language and zone) */
@@ -3766,7 +3766,7 @@ class ChatView {
     if (this._readOnly) this._listenHistoryReady();   // a view: the hub tells it too (its view waits on that history — r1461 (2))
     const at = this._reaskEvent({ type: 'not-loaded', code, info }).due;   // the time the page REALLY asks again (the back-off, an earlier ask kept)
     let words;
-    if (info && info.notKnownYet) { words = t('Its saved history is not known yet — it fills in here by itself.'); this._notKnownYetSaid = true; }   // B-a60e (主开发 r2439 (3)): the rollout index has not found it YET — one more cause at this door, its own words
+    if (info && info.notKnownYet && !info.storageHung) { words = t('Its saved history is not known yet — it fills in here by itself.'); this._notKnownYetSaid = true; }   // B-a60e (主开发 r2439 (3)): the rollout index has not found it YET — one more cause at this door, its own words; r2743: the storage's cause FIRST when both hold (the table says it, with its time)
     else words = readerLineWords(info, this._clockOf(at));   // r3077: in the words of the cause it has; the page asks again by itself
     const el = this._historyNotLoadedEl, inner = el && el.isConnected ? el.querySelector('.chat-system') : null;
     if (inner) { inner.textContent = words; return; }   // the line stands: only its words change (no row added, none moved)

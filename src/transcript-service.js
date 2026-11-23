@@ -315,7 +315,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
       chatStatus.permissionMode = session._permissionMode;
     }
-    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };   // B-a60e (r1638, folded r2439): «not known yet» travels as line 411's cause
+    return { chatStatus, taskState: sm.taskState?.() || null };
   }
 
   async function taskState(ref) {

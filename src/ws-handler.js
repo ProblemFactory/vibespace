@@ -1933,8 +1933,10 @@ function registerWsHandler(wss, ctx) {
               // ONE builder for every live fact; the slab (messages + turnMap) is
               // the only thing the held rung leaves out.
               // B-a60e (主开发 r2439): a rollout «not known yet» is line 411's «not loaded» with its own cause (the rebuild keeps the history
-              // unloaded); a rollout a whole walk found ABSENT is said as the final word where that line stood (`historyNotFound`)
-              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', ...(sm && sm.notFound ? { historyNotFound: true } : {}), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
+              // unloaded). r2743 (3): the final word («not found») is NEVER said of a conversation that is running — a new one may be asked
+              // before its file is written: the live attach carries no `historyNotFound`; while it runs it keeps «not known yet» and the
+              // re-ask; a VIEW (a conversation that is not running, or a live window whose session ended) carries it
+              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
                 totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), pendingPermissions: pendingPerms,
                 // The input queue as the normalizer knows it (the wrapper's
                 // queue_changed replays through the buffer on a rebuild) —

@@ -324,7 +324,7 @@ try {
     const tip = anchored(anchored(anchored(anchored(tsSrc10,
       'const reply = (out) => { if (!(r.gone && r.gone()) && !said(out)) BULK.replied(live()); return out; };', 'const reply = (out) => out;', 'tip-no-door'),
       '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n', '    await gateRun(r, () => mm.convertHistoryAsync(sm.raw()));   // a paired machine\'s transcript read here: the device road\'s gate\n    BULK.replied(session);\n', 'tip-view'),
-      '    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.notLoadedNotKnown ? { notLoaded: sm.notLoaded, notKnownYet: true } : {}) };', 'tip-status'),   // the status reply as B-a60e has it (its «not known yet», line 411's cause since r2439)
+      '    return { chatStatus, taskState: sm.taskState?.() || null };', '    BULK.replied(session);\n    return { chatStatus, taskState: sm.taskState?.() || null };', 'tip-status'),
       '    const st = sm.taskState() || {};\n', '    const st = sm.taskState() || {};\n    BULK.replied(live);\n', 'tip-todos');
     const red = await table(require(M.write('src/transcript-service.js', tip, 'ts-tip-shape')));
     const redDev = red.out.filter((x) => x.source === 'device'), redLocal = red.out.filter((x) => x.source === 'local' && x.line);
