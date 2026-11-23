@@ -93,7 +93,7 @@ export async function openResetCreditDialog(app, { accountKey, sessionId = null,
       }
       // verify r1: an `unsettled` refusal names WHEN the unanswered request went out (the cooldown's `until` slot carries it)
       const until = r && r.code === 'unsettled' ? (r.unsettled && r.unsettled.sinceSec ? fmtInstant(r.unsettled.sinceSec) : null) : (r && r.cooldownUntilSec ? fmtInstant(r.cooldownUntilSec) : null);
-      const why = r && r.code ? words(refusalLine(r.code, { until, why: r.error, member: r.restartPending ? (r.restartPending.name || r.restartPending.id || null) : null })) : (r && r.error) || t('server unreachable');
+      const why = r && r.code ? words(refusalLine(r.code, { until, why: r.error, member: r.restartPending ? (r.restartPending.name || r.restartPending.id || null) : null, appeared: !!r.appeared })) : (r && r.error) || t('server unreachable');
       showToast(t('Reset credit not used — {reason}', { reason: why }), { type: 'error' });
       settle('failed'); close();
     };

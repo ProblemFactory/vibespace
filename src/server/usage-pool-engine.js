@@ -4194,19 +4194,32 @@ function persistResetCreditTries() {
     }
     const tmp = RESET_CREDIT_TRIES_FILE + '.tmp';
     fs.mkdirSync(path.dirname(RESET_CREDIT_TRIES_FILE), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: now, tries }));
+    const body = JSON.stringify({ v: 1, at: now, tries });
+    fs.writeFileSync(tmp, body, { flush: true });   // r3154 (4): MONEY RIDES THE WRITE — the copy is synced before it takes the name (link, exclusive create or rename)
     // THE HOTFIX (主开发 r2899) and its follow (r2973's should): A SAVE NEVER WRITES OVER A FILE THAT WAS NOT READ — after «not there»
     // the write only CREATES the file: a hard link of the written copy (EEXIST over one that appeared since — a late mount, a folder
     // that flapped — never a look then a rename); a folder without hard links: an exclusive create of the file itself. A file that
     // appeared HOLDS the store («appeared»): nothing is written, and it is read at the next press / pass
     if (_resetCreditTriesUnseen) {
       let made = false;
-      try { fs.linkSync(tmp, RESET_CREDIT_TRIES_FILE); made = true; }
-      catch (e) {
-        if (!e || (e.code !== 'EEXIST' && !TRIES_LINKLESS.includes(e.code))) throw e;
-        if (e.code !== 'EEXIST') { try { fs.writeFileSync(RESET_CREDIT_TRIES_FILE, JSON.stringify({ v: 1, at: now, tries }), { flag: 'wx' }); made = true; } catch (e2) { if (!e2 || e2.code !== 'EEXIST') throw e2; } }
-      }
-      try { fs.unlinkSync(tmp); } catch { }
+      try {
+        try { fs.linkSync(tmp, RESET_CREDIT_TRIES_FILE); made = true; }
+        catch (e) {
+          if (!e || (e.code !== 'EEXIST' && !TRIES_LINKLESS.includes(e.code))) throw e;
+          if (e.code !== 'EEXIST') {
+            // a folder without hard links (r3154 (4)): an EXCLUSIVE create of the name, written whole and synced; a write that fails
+            // after the create removes what it made — never a half file at the name
+            let fd = null;
+            try { fd = fs.openSync(RESET_CREDIT_TRIES_FILE, 'wx', 0o600); } catch (e2) { if (!e2 || e2.code !== 'EEXIST') throw e2; }
+            if (fd != null) {
+              let wErr = null;
+              try { fs.writeSync(fd, body); fs.fsyncSync(fd); made = true; } catch (e3) { wErr = e3; }
+              try { fs.closeSync(fd); } catch (e4) { console.warn('[reset-credit] the attempts file\'s descriptor could not be closed:', e4 && e4.message); }   // ONE close, on every road
+              if (wErr) { made = false; try { fs.unlinkSync(RESET_CREDIT_TRIES_FILE); } catch (e5) { console.warn('[reset-credit] the half-written attempts file could not be removed:', e5 && e5.message); } throw wErr; }
+            }
+          }
+        }
+      } finally { try { fs.unlinkSync(tmp); } catch { } }   // r3154 (5): the written copy goes on EVERY road (linked in, not needed, or a failure)
       if (!made) { holdResetCreditTries({ code: 'appeared', why: 'it appeared after it was read «not there» — it is read before anything is written' }); return false; }
       _resetCreditTriesUnseen = false;   // the store's own file now
       return true;
@@ -4268,7 +4281,7 @@ const RESET_CREDIT_TRIES_LASTING_TEXT = 'The reset-credit attempt records cannot
 const RESET_CREDIT_TRIES_LASTING = new Set(['EACCES', 'EPERM', 'EISDIR', 'ENOTDIR', 'ELOOP', 'set-aside failed']);
 /** the held file's words for a refusal (the writers, the preview) */
 function resetCreditTriesHeldWords(H) {
-  if (H.code === 'appeared') return 'the reset-credit attempt records appeared after they were found missing — nothing is sent until they are read; they are read at the next press (try again in a moment)';   // r2973's should: the door named
+  if (H.code === 'appeared') return 'the reset-credit attempt records appeared after they had been read as not there — nothing is sent until they are read; they are read at the next press (try again in a moment)';   // r2973's should: the door named
   return H.lasting
     ? `the reset-credit attempt records cannot be read (${H.code}) — no reset credit is used until the file can be read: check the reset-credit attempts file in VibeSpace’s data folder (reset-credit-tries.json) and its access (its owner and permissions)`
     : `the reset-credit attempt records could not be read (${H.code}) — no reset credit is used until they read again (they are read again at the next press and at the pool's next pass; a passing fault heals by itself)`;
@@ -4330,7 +4343,7 @@ function resetCreditTriesRefusal({ press = false } = {}) {
   // there», a file that appeared since HOLDS the store («appeared») and the press is refused by name: it is read first (the next press)
   if (press && !_resetCreditTriesHeld && _resetCreditTriesUnseen && fs.existsSync(RESET_CREDIT_TRIES_FILE)) holdResetCreditTries({ code: 'appeared', why: 'it appeared after it was read «not there» — it is read before anything is sent' });
   const H = _resetCreditTriesHeld;
-  return H ? { ok: false, code: 'attempts_unread', why: resetCreditTriesHeldWords(H), detail: null } : null;
+  return H ? { ok: false, code: 'attempts_unread', why: resetCreditTriesHeldWords(H), detail: null, ...(H.code === 'appeared' ? { appeared: true } : {}) } : null;   // r3154 (2): the dialog draws the «appeared» line by this mark
 }
 function loadResetCreditTries() {
   let read;
@@ -5409,7 +5422,7 @@ function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now(), 
   // verify r8 T0: a person's press READS FIRST through the conversation's own wrapper (`readFirst` on the verb) — unless the
   // route just read the account for an unsettled prior (`afterRead`: one read per press, never two)
   const wr = writeResetCredit(session, { resetsAtSec: p.resetsAtSec || 0, lane: null, origin: 'user', now, key: p.key, readFirst: !afterRead });
-  if (!wr.ok) return { ok: false, code: wr.code || 'spend_refused', error: wr.why ? `${wr.why}${wr.detail ? ': ' + wr.detail : ''}` : 'the spend authorizer failed', preview: p };   // line 429's follow: the writer's own code (attempts_unread) passed through
+  if (!wr.ok) return { ok: false, code: wr.code || 'spend_refused', error: wr.why ? `${wr.why}${wr.detail ? ': ' + wr.detail : ''}` : 'the spend authorizer failed', preview: p, ...(wr.appeared ? { appeared: true } : {}) };   // line 429's follow: the writer's own code (attempts_unread) passed through
   console.log(`[reset-credit] ${session._webuiId}: a person asked for a reset credit on ${nameOf(p.key)} (credits=${p.creditsLeft ?? '?'}${wr.readFirst ? ', the wrapper reads the account first' : ''})`);
   global.__vsEvent?.('codex-reset-credit-user', session._accountId || 'global');
   return { ok: true, sessionId: session._webuiId, via: 'session', preview: p };
@@ -5774,11 +5787,15 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
       wallCard('this conversation\'s codex wrapper predates the reset-credit fix (Terminate + Resume it, or use the button)');
       return 'skipped';
     }
+    if (session._resetCreditUnwrittenFor === `${key}|${R || '?'}`) { if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (attempts-unwritten — this limit event's try could not be written; the next limit event tries again)`); return 'skipped'; }   // r3154 (1)
     // AUTO — through the ONE writer the manual button uses too (writeResetCredit).
     const wr = writeResetCredit(session, { resetsAtSec: R, lane, origin: 'auto', now, key });
     // the card NAMES the account the ceiling refused (r3 — the code alone said
     // "hour-cap" and only the journal said whose hour it was)
-    if (!wr.ok) { if (wr.code === 'attempts_unread') { wallCard(wr.why, wr.code); return 'skipped'; } if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
+    // r3154 (1): an attempt whose save did not land is named as ITSELF (never the ceiling's words), and the road waits that limit
+    // event out — ONE try a limit event, not one at every wall signal while the write keeps failing
+    if (!wr.ok && wr.code === 'attempts_unwritten') session._resetCreditUnwrittenFor = `${key}|${R || '?'}`;
+    if (!wr.ok) { if (wr.code === 'attempts_unread' || wr.code === 'attempts_unwritten') { wallCard(wr.why, wr.code); return 'skipped'; } if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
     const saved = v.waitSavedSec ? ` — saves a wait of ${resetCredit.fmtWait(v.waitSavedSec)}` : '';
     const leftTxt = creditsLeft > 0 ? `; ${creditsLeft - 1} left after this one` : '';
     serverNotice(`codex-reset-${session._webuiId}-${now}`, `Usage limit hit on ${nameOf(key)} — using a stored reset credit${saved}${leftTxt} (${warmth.inTurn || warmth.warm ? 'warm conversation: before switching accounts' : 'no pool member can take it'}).`, { i18n: { key: warmth.inTurn || warmth.warm ? i18nKey('Usage limit hit on {account} — using a stored reset credit (warm conversation: before switching accounts).') : i18nKey('Usage limit hit on {account} — using a stored reset credit (no pool member can take it).'), params: { account: nameOf(key) }, ...(v.waitSavedSec ? { then: { key: i18nKey('Saves a wait of {wait}.'), params: { wait: resetCredit.fmtWait(v.waitSavedSec) } } } : creditsLeft > 0 ? { then: creditsLeft - 1 === 1 ? { key: i18nKey('1 reset credit left after this one.'), params: {} } : { key: i18nKey('{n} reset credits left after this one.'), params: { n: creditsLeft - 1 } } } : {}) } });

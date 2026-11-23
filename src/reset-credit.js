@@ -264,13 +264,16 @@ function resetCreditCardView(rc, { fmtTime = isoMinute } = {}) {
 //   {key, name, vendor, creditsLeft, resetsAtSec, periodSec, remainingPct,
 //    sessionId, cooldownUntilSec, code?}
 // `code` = the refusal the POST would answer, BY NAME (REFUSAL_CODES).
-const REFUSAL_CODES = Object.freeze(['not_supported', 'attempts_unread', 'no_live_session', 'no_credits', 'in_flight', 'cooldown', 'unsettled', 'spend_refused', 'restart_pending']);
+const REFUSAL_CODES = Object.freeze(['not_supported', 'attempts_unread', 'attempts_unwritten', 'no_live_session', 'no_credits', 'in_flight', 'cooldown', 'unsettled', 'spend_refused', 'restart_pending']);
 /** The refusal in words, as structure `{key, params}` (the client runs t()). */
-function refusalLine(code, { until = null, why = null, member = null } = {}) {
+function refusalLine(code, { until = null, why = null, member = null, appeared = false } = {}) {
   switch (code) {
+    // r3154 (2): an attempt whose save did not land — nothing sent, nothing used
+    case 'attempts_unwritten': return { key: i18nKey('The reset-credit attempt could not be written to disk — nothing was sent and no credit was used. Try again in a moment; if it stays, check that VibeSpace’s data folder can be written.'), params: {} };
     case 'not_supported': return { key: i18nKey('This agent offers no reset-credit interface VibeSpace can use.'), params: {} };
     // B-f276's remainder (主开发 r1694): data/reset-credit-tries.json could not be read — held, read again; no credit until it reads
-    case 'attempts_unread': return { key: i18nKey('The reset-credit attempt records could not be read — no reset credit is used until the file can be read: a request made before the restart may have gone out, and a second one could spend a second credit. It is read again at each press; if this stays, check the reset-credit attempts file in VibeSpace’s data folder and its access.'), params: {} };
+    case 'attempts_unread': if (appeared) return { key: i18nKey('The reset-credit attempt records appeared after they had been read as not there — nothing is sent until they are read. They are read at the next press: try again in a moment.'), params: {} };   // r3154 (2): the «appeared» hold's own line
+      return { key: i18nKey('The reset-credit attempt records could not be read — no reset credit is used until the file can be read: a request made before the restart may have gone out, and a second one could spend a second credit. It is read again at each press; if this stays, check the reset-credit attempts file in VibeSpace’s data folder and its access.'), params: {} };
     case 'no_live_session': return { key: i18nKey('Needs a running chat session on this account — the credit is spent through that session’s own CLI. Start one, then try again.'), params: {} };
     case 'no_credits': return { key: i18nKey('This account has no stored reset credits.'), params: {} };
     // lane reset-path: a request was handed to codex and has not been SENT yet (≤ RESET_CREDIT_ACK_MS) —

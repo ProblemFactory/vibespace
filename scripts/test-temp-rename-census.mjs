@@ -295,7 +295,7 @@ const ROWS = [
   ["src/server/sync-fs-witness-worker.js", "unsynced", "store", "", "finishCapture"],
   ["src/server/tailnet-door.js", "unsynced", "store", "", "create > keep"],
   ["src/server/tls.js", "unsynced", "store", "", "create > saveState"],
-  ["src/server/usage-pool-engine.js", "unsynced", "store", "", "create > persistResetCreditTries"],
+  ["src/server/usage-pool-engine.js", "synced", "self-synced", "", "create > persistResetCreditTries"],   // r3154 (4): the reset-credit attempts' copy is written synced (flush) before the link or the rename
   ["src/server/usage-pool-engine.js", "move", "move", "", "create > applyResetCreditTriesRead"],
   ["src/server/usage-pool-engine.js", "move", "move", "", "create > asideTornTriesAsync"],
   ["src/server/usage-probe-log.js", "move", "move", "", "appendProbeLog"],
@@ -335,7 +335,7 @@ const ROWS = [
   ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
   ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
 ];
-const OWED_MAX = 146;   // B-360d part 3 U2 (lane lg-group-parents): 147 → 146 — data/usage-cache.json through the store writer (writeUsageCache's own temp + rename gone). Before: the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+const OWED_MAX = 145;   // lane bl-windows (r3154 (4)): 146 → 145 — the reset-credit attempts' save syncs its copy before the rename (self-synced). B-360d part 3 U2 (lane lg-group-parents): 147 → 146 — data/usage-cache.json through the store writer (writeUsageCache's own temp + rename gone). Before: the live-tip census cure (lane lg-store-writes, r1790): 147 stays, each step by name — −1 the layouts and settings (src/routes/persistence.js writeJsonAtomic: the store writer's since B-0248 step 2), +1 the layouts' owed mark (setup > writeMark: new, unsynced, B-574d owes it); the remover's count is the old site renamed (orphaned → countWrite). Before: row B-360d (lane hub-loop-stalls, its move onto the .416 root): 148 → 147 — the OTel stash's trim rename (otel-ingest's replayEnd) is the store writer's REWRITE job now (src/store-writer-worker.js rewriteJob: fsync'd, renamed on the writer's thread). B-ddf3 unit 1 (lane bl-scratch): 150 → 148 — the Gmail copy and the rescued transcript synced. The sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
 // THE RATCHET (round wl2wglpsq): OWED_MAX is an EQUALITY with the census (a cure lowers it in the cure's own commit). A commit
 // could raise it and stay green here, so a rise above the KEPT baseline is red by name unless RISES names it with its row
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)

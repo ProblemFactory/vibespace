@@ -21,7 +21,8 @@
 //   after a failed read is read once more; H2 only two in a row lift; H3 a file that appeared after «not there» refuses the press
 //   BEFORE anything is sent (the sends counted, the file's record already charged); H4 a read that keeps an attempt of this life
 //   writes it at once and the merge keeps every record (a restart reads them back); H5 the helper road's look; H6 nothing is sent
-//   after a save that did not land (the save only creates: a hard link).
+//   after a save that did not land (the save only creates: a hard link). r3154's small: H7 a save that FAILS — the rung names it and
+//   tries once a limit event, the dialog's own line; H8 the helper road's back-out; H9 the copy synced and removed on every road.
 // In-process: the real engine over a scratch data/, a stub conversation whose wrapper takes the verb (nothing reaches a vendor).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,7 +49,7 @@ const MUT = mutantCopies('rct-held', REPO);
 let wn = 0;
 /** one world: a codex account, the real engine over its data/, the reset-credit routes; `session` = a conversation on that account whose
  *  (stub) wrapper advertises the keyed verb — the carrier a press goes through (its verbs are collected, nothing is sent anywhere) */
-function world({ engine = engMod, root: root0 = null, todos = null, session = false, mode = 'off', warm = false, cards = null } = {}) {
+function world({ engine = engMod, root: root0 = null, todos = null, session = false, mode = 'off', warm = false, cards = null, helper = null } = {}) {
   const root = root0 || path.join(ROOT, `w${++wn}`);
   fs.mkdirSync(path.join(root, 'data'), { recursive: true });
   const prevHome = process.env.CODEX_HOME;
@@ -70,7 +71,7 @@ function world({ engine = engMod, root: root0 = null, todos = null, session = fa
     serverSetting: (k) => settings[k], getAccounts: () => wam, getHosts: () => null, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
     getAutoResume: () => ({ armIfEnabled() { }, noteRecovered() { }, noteFireOutcome() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
-    getQuotaProbe: () => null, getUserTodos: () => todos,
+    getQuotaProbe: () => null, getUserTodos: () => todos, ...(helper ? { resetCreditHelper: helper } : {}),
   }));
   const routes = {};
   registerResetCreditRoutes({ get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; } }, { engine: eng });
@@ -79,7 +80,7 @@ function world({ engine = engMod, root: root0 = null, todos = null, session = fa
     Promise.resolve(routes[`${method} /api/accounts/:id/reset-credit`]({ params: { id: A }, body, query: {}, headers: {} }, res)).catch((e) => resolve({ code: 'threw', body: { error: e && e.message } }));
   }));
   const verbs = () => wrote.filter((x) => /"codex-reset-credit"/.test(x)).length;
-  return { root, A, eng, call, verbs, session: sessions.get('cx1') || null, file: path.resolve(path.join(root, 'data', 'reset-credit-tries.json')) };
+  return { root, A, eng, call, verbs, wam, session: sessions.get('cx1') || null, file: path.resolve(path.join(root, 'data', 'reset-credit-tries.json')) };
 }
 /** an attempt that WENT OUT and got no answer before the stop (the money case: it may have landed) */
 const TRIES = (A) => JSON.stringify({ v: 1, at: Date.now(), tries: [{ key: A, at: Date.now() - 60e3, sentAt: Date.now() - 59e3, sid: 'cx1', via: 'session', origin: 'user', idempotencyKey: 'k-held-1', identity: { key: A, name: 'Cx Held' }, charged: false }] });
@@ -324,7 +325,7 @@ const appearRun = async (engine) => {
   const bytes = fs.readFileSync(w.file, 'utf8');
   const p1 = await w.call('POST', { sessionId: 'cx1' });   // the press: nothing is held yet, nothing known
   const h1 = heldOf(w);
-  const first = { post: p1.body && p1.body.code, verbs: w.verbs(), held: h1 && h1.code, same: fs.readFileSync(w.file, 'utf8') === bytes, words: /appeared after they were found missing/.test(JSON.stringify(p1.body || {})), mem: w.eng._resetCreditTries.size };
+  const first = { post: p1.body && p1.body.code, verbs: w.verbs(), held: h1 && h1.code, same: fs.readFileSync(w.file, 'utf8') === bytes, words: /appeared after they had been read as not there/.test(JSON.stringify(p1.body || {})), mem: w.eng._resetCreditTries.size };
   const p2 = await w.call('POST', { sessionId: 'cx1' }); await settle(w);   // refused while held; its read again reads the file
   const t = w.eng._resetCreditTries.get(w.A);
   const g3 = await w.call('GET');   // the dialog after the lift: the file's attempt is the floor now
@@ -394,5 +395,80 @@ const wnx = await windowRun(MUT.load('src/server/usage-pool-engine.js', anchored
 ok(wnx.verbs > 0, 'RED CONTROL (the save\'s answer not asked, as at 029124e08): the request GOES OUT after a save that did not land — red', wnx);
 const wnl = await windowRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '    if (_resetCreditTriesUnseen) {\n      let made = false;\n', '    if (false) {\n      let made = false;\n', 'the rename over whatever is there'), 'rct-hf-link'));
 ok(!wnl.same, 'RED CONTROL (the rename over whatever is there, no create-only write): the file nobody read is WRITTEN OVER — red', wnl);
+
+console.log('H7 (r3154 (1)(2)): an attempt whose save FAILS — the automatic rung names it as itself and tries ONCE a limit event; the dialog\'s code');
+const unwRun = async (engine) => {
+  const cards = [];
+  const w = world({ engine, session: true, mode: 'auto', warm: true, cards });
+  const s = w.session, nowS = Math.floor(Date.now() / 1000);
+  const realW = fs.writeFileSync;
+  let tries = 0;
+  fs.writeFileSync = function (p, ...a) { if (String(p).startsWith(w.file + '.tmp')) { tries++; throw Object.assign(new Error('EIO: i/o error, write'), { code: 'EIO' }); } return realW.call(this, p, ...a); };   // PLACED: the attempts' save fails (the data folder refuses the write)
+  let post = null;
+  try {
+    quiet(() => w.eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', onDemand: true, resetCredits: { availableCount: 2 }, rateLimits: { primary: { used_percent: 50, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null } }));
+    { const t0 = Date.now(); while (Date.now() < t0 + 2) { } }   // the wall comes LATER than the read
+    quiet(() => w.eng.recordCodexQuotaSignal(s, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: nowS + 7200 }));
+    await tick();
+    quiet(() => w.eng.recordCodexQuotaSignal(s, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: nowS + 7200 }));   // the SAME limit event, signalled again
+    await tick();
+    const autoTries = tries;
+    const p = await w.call('POST', { sessionId: 'cx1' });   // a person's press meets the same failing write
+    post = { code: p.code, as: p.body && p.body.code, autoTries };
+  } finally { fs.writeFileSync = realW; }
+  const card = cards.find((c) => c && c.resetCredit) || null;
+  return { post, verbs: w.verbs(), refused: card ? card.resetCredit.refused || null : null, ceiling: cards.some((c) => /unattended-spend ceiling/.test(String((c && c.text) || ''))) };
+};
+const u7 = await unwRun(engMod);
+console.log(`    facts: ${JSON.stringify(u7)}`);
+ok(u7.refused === 'attempts_unwritten' && !u7.ceiling && u7.post.autoTries === 1 && u7.verbs === 0, 'the automatic rung meets a save that fails: NOTHING sent, its wall card names the failed write (attempts_unwritten — never the spend ceiling\'s words), and the same limit event signalled again is NOT tried again (one try a limit event)', u7);
+ok(u7.post.code === 409 && u7.post.as === 'attempts_unwritten' && RC.REFUSAL_CODES.includes('attempts_unwritten') && RC.refusalLine('attempts_unwritten').key !== RC.refusalLine('zzz').key && /could not be written to disk — nothing was sent/.test(RC.refusalLine('attempts_unwritten').key), 'a person\'s press: 409 attempts_unwritten, and the dialog draws its OWN line (nothing was sent, no credit used) — never the default sentence with the hub\'s English inside', u7.post);
+ok(/appeared after they had been read as not there/.test(RC.refusalLine('attempts_unread', { appeared: true }).key) && RC.refusalLine('attempts_unread', { appeared: true }).key !== RC.refusalLine('attempts_unread').key, 'the «appeared» hold has its OWN line in the dialog (the reply marks `appeared`)');
+const u7x = await unwRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, "    if (!wr.ok) { if (wr.code === 'attempts_unread' || wr.code === 'attempts_unwritten') { wallCard(wr.why, wr.code); return 'skipped'; }", "    if (!wr.ok) { if (wr.code === 'attempts_unread') { wallCard(wr.why, wr.code); return 'skipped'; }", 'the card branch before r3154'), 'rct-sm-card'));   // stale-pins: kept (the red control's mutant puts the card branch before r3154 back)
+ok(u7x.ceiling || u7x.refused !== 'attempts_unwritten', 'RED CONTROL (the card branch before r3154): the failed write is told as «the unattended-spend ceiling refused it» — red', u7x);
+const u7w = await unwRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, "    if (!wr.ok && wr.code === 'attempts_unwritten') session._resetCreditUnwrittenFor = `${key}|${R || '?'}`;\n", '', 'no wait after a back-out'), 'rct-sm-wait'));
+ok(u7w.post.autoTries > 1, 'RED CONTROL (no wait after a back-out): the automatic road tries again at every wall signal while the write keeps failing — red', u7w.post);
+
+console.log('H8 (r3154 (3)): the HELPER road\'s back-out — nothing spawned after a save that did not land');
+const helperBelt = async (engine) => {
+  const w0 = world({ engine });
+  const w = world({ engine, root: w0.root, helper: { codexCmd: '/opt/stub/codex' } });   // «not there»; a helper that would carry the press
+  w.wam._readAuthFor = () => ({ loggedIn: true });   // PLACED: the account's own login is there (the helper's condition)
+  fs.writeFileSync(w.file, TRIES_CHARGED(w.A));
+  const bytes = fs.readFileSync(w.file, 'utf8');
+  const CRH = require(path.join(REPO, 'src/codex-reset-helper.js'));
+  const real = CRH.consumeResetCreditViaAppServer;
+  let spawned = 0;
+  CRH.consumeResetCreditViaAppServer = async () => { spawned++; return { ok: false, skipped: true, why: 'stand-in' }; };   // never a real CLI
+  const realE = fs.existsSync;
+  fs.existsSync = function (p, ...x) { return path.resolve(String(p)) === w.file ? false : realE.call(this, p, ...x); };   // PLACED: the press's look misses it
+  let r;
+  try { r = quiet(() => w.eng._writeResetCreditViaHelper(w.A, {})); } finally { fs.existsSync = realE; CRH.consumeResetCreditViaAppServer = real; }
+  await tick();
+  return { code: r && r.code, appeared: !!(r && r.appeared), spawned, mem: w.eng._resetCreditTries.size, same: fs.readFileSync(w.file, 'utf8') === bytes };
+};
+const h8 = await helperBelt(engMod);
+ok(h8.code === 'attempts_unread' && h8.appeared && h8.spawned === 0 && h8.mem === 0 && h8.same, 'the helper road: the save creates only (EEXIST over the file that appeared) — the attempt backed out, NO helper spawned, refused by name (attempts_unread, «appeared»), the file untouched', h8);
+const h8x = await helperBelt(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, '  if (!persistResetCreditTries()) {\n', '  if (!persistResetCreditTries() && false) {\n', 'the save\'s answer not asked'), 'rct-sm-helper'));
+ok(h8x.spawned > 0, 'RED CONTROL (the save\'s answer not asked): the helper is SPAWNED after a save that did not land — red', h8x);
+
+console.log('H9 (r3154 (4)(5)): the written copy — synced before it takes the name, removed on every road');
+const copyRun = async (engine, linkErr) => {
+  const w = world({ engine, session: true });   // «not there»: the save links
+  const realL = fs.linkSync;
+  fs.linkSync = function (a, b) { if (path.resolve(String(b)) === w.file) throw Object.assign(new Error(linkErr + ': stand-in'), { code: linkErr }); return realL.call(this, a, b); };
+  let p1;
+  try { p1 = await w.call('POST', { sessionId: 'cx1' }); } finally { fs.linkSync = realL; }
+  const left = fs.readdirSync(path.dirname(w.file)).filter((n) => n.startsWith(path.basename(w.file) + '.tmp')).length;
+  let whole = false; try { whole = Array.isArray(JSON.parse(fs.readFileSync(w.file, 'utf8')).tries); } catch { whole = false; }
+  return { code: p1.code, as: p1.body && p1.body.code, verbs: w.verbs(), left, exists: fs.existsSync(w.file), whole };
+};
+const c9a = await copyRun(engMod, 'EPERM');
+ok(c9a.exists && c9a.whole && c9a.left === 0 && c9a.verbs === 1, 'a folder without hard links (EPERM): the exclusive create writes the file WHOLE (it parses), the copy is gone, the press goes', c9a);
+const c9b = await copyRun(engMod, 'EACCES');
+ok(c9b.as === 'attempts_unwritten' && c9b.verbs === 0 && c9b.left === 0 && !c9b.exists, 'a link that fails for ANOTHER reason (EACCES): the save fails — nothing sent (attempts_unwritten), no file made, and the written copy is REMOVED', c9b);
+const c9x = await copyRun(MUT.load('src/server/usage-pool-engine.js', anchored(ESRC, "      } finally { try { fs.unlinkSync(tmp); } catch { } }   // r3154 (5)", '      } finally { }   // r3154 (5)', 'the copy left behind'), 'rct-sm-copy'), 'EACCES');
+ok(c9x.left > 0, 'RED CONTROL (the copy\'s removal only on the good roads): a failed link leaves the written copy beside the store — red', c9x);
+ok(/fs\.writeFileSync\(tmp, body, \{ flush: true \}\)/.test(ESRC) && /fs\.writeSync\(fd, body\); fs\.fsyncSync\(fd\);/.test(ESRC), 'MONEY RIDES THE WRITE: the copy is written synced (flush) before the link or the rename; the exclusive create is written whole and synced before the attempt can go out');
 
 report();
