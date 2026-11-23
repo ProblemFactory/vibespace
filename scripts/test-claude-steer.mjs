@@ -397,22 +397,29 @@ await guard('§8', async () => {
   const run = async (wrapperPath, label, env, { secondStop = false, stall = null, oldWait = false } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-late-' + label + '-'));
     const dlv = path.join(dir, 'delivered.jsonl');
-    const w = spawn(process.execPath, [...(stall ? ['-r', STALL] : []), wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env, ...(stall ? { STOP_LATE_STALL_TEXT: stall.text, STOP_LATE_STALL_AT: String(stall.at), STOP_LATE_STALL_RELEASE: path.join(dir, 'release'), STOP_LATE_STALL_MARK: path.join(dir, 'held') } : {}) } });
+    const w = spawn(process.execPath, [...(stall ? ['-r', STALL] : []), wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: '5000', STAND_IN_RELEASE_FILE: path.join(dir, 'tool-never-released'), VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env, ...(stall ? { STOP_LATE_STALL_TEXT: stall.text, STOP_LATE_STALL_AT: String(stall.at), STOP_LATE_STALL_RELEASE: path.join(dir, 'release'), STOP_LATE_STALL_MARK: path.join(dir, 'held') } : {}) } });
     const recs = []; let lb = '';
     w.stdout.setEncoding('utf8');
     w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
     const log = () => { try { return fs.readFileSync(path.join(dir, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } };
+    // EVERY STEP ENDS ON ITS FACT (主开发 r3297, B-3dbd): each wait below is for the state the next step needs, bounded at 30 s; the
+    // first that does not come is NAMED in the result (`missed`, red in the BY ORDER leg) — the release gave them 3–6 s and went on
+    // regardless, so on the loaded pod a late step changed the scene (the Stop after the tool had ended) and the run judged THAT
+    let missed = null;
+    const step = async (name, fn, ms = 30000) => { if (missed) return false; const got = await until(fn, ms); if (!got) missed = name; return got; };
     try {
-      await until(() => fs.existsSync(path.join(dir, 's.json')));
-      w.stdin.write(ad.formatChatInput('TOOL-A run a slow command', 'm-a').stdinPayload + '\n');
-      await until(() => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
+      await step('the wrapper wrote its session file', () => fs.existsSync(path.join(dir, 's.json')));
+      // the tool runs until the Stop's interrupt ends the turn (LONGER- + a release file nobody writes): the Stop lands while it runs on
+      // every run, whatever the load — the release's tool ran 5 s, the window the Stop had to fall into
+      w.stdin.write(ad.formatChatInput('TOOL-A LONGER- run a slow command', 'm-a').stdinPayload + '\n');
+      await step('the tool_use record', () => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
       w.stdin.write(ad.formatChatInput('MARK-B handed while the tool runs', 'm-b', { steer: true }).stdinPayload + '\n');
-      await until(() => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'), 3000);
+      await step('the handover (handed)', () => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'));
       const n0 = recs.length;   // what was said before the Stop: the settle's own line is read after it
       w.stdin.write(ad.formatInterrupt() + '\n');
       // a SECOND Stop pressed while the follow-up runs (its init came, its result not yet): the window is rebuilt around it
-      if (secondStop && await until(() => recs.filter((r) => r.type === 'system' && r.subtype === 'init').length >= 2, 3000)) w.stdin.write(ad.formatInterrupt() + '\n');
-      await until(() => /stop settled/.test(log()), 6000);
+      if (secondStop && await step('the follow-up\'s init (the second Stop\'s moment)', () => recs.filter((r) => r.type === 'system' && r.subtype === 'init').length >= 2)) w.stdin.write(ad.formatInterrupt() + '\n');
+      await step('the log\'s «stop settled»', () => /stop settled/.test(log()));
       // BY ORDER (r2323), never a clock: after «stop late» in the log, the result record that carries the late mark; else the
       // line the window SETTLED at (the CLI's idle word, said after the follow-up's result; a result where the CLI says no state
       // word). The deadline only names a failure (byOrder 'DEADLINE'). `oldWait` is the release's 20 ms — the RED controls
@@ -431,7 +438,7 @@ await guard('§8', async () => {
       }
       const lg = log(), d1 = lg.indexOf('interrupt: dropped'), d2 = d1 < 0 ? -1 : lg.indexOf('interrupt: dropped', d1 + 1);
       const endAt = lg.indexOf('stop late: ') >= 0 ? lg.indexOf('stop late: ') : lg.indexOf('stop settled');   // the result's judgement, else the settle after it
-      return { byOrder, results: recs.filter((r) => r.type === 'result').length, ...(stall ? { held: fs.existsSync(path.join(dir, 'held')) } : {}), recs: recs.filter((r) => r.type !== '_stdin_ack'), late: recs.filter((r) => r.type === 'result' && r.webui_stop_late).map((r) => r.webui_stop_late), requests: lines(dlv).filter((d) => d.how === 'request').length, settled: /stop settled/.test(lg), lateLines: (lg.match(/stop late: /g) || []).length, secondBeforeResult: d2 >= 0 && endAt >= 0 && d2 < endAt };
+      return { byOrder: missed ? `MISSED ${missed}` : byOrder, results: recs.filter((r) => r.type === 'result').length, ...(stall ? { held: fs.existsSync(path.join(dir, 'held')) } : {}), recs: recs.filter((r) => r.type !== '_stdin_ack'), late: recs.filter((r) => r.type === 'result' && r.webui_stop_late).map((r) => r.webui_stop_late), requests: lines(dlv).filter((d) => d.how === 'request').length, settled: /stop settled/.test(lg), lateLines: (lg.match(/stop late: /g) || []).length, secondBeforeResult: d2 >= 0 && endAt >= 0 && d2 < endAt };
     } finally { try { w.kill('SIGKILL'); } catch { } fs.rmSync(dir, { recursive: true, force: true }); }
   };
   // RED CONTROLS: wrapper copies — one that NEVER LOOKS (the release's: the follow-up is not marked), one whose rebuilt window on a
@@ -479,8 +486,9 @@ await guard('§8', async () => {
   } finally { for (const d of ctlDirs) fs.rmSync(d, { recursive: true, force: true }); }
   const rowsOf = (recs, live) => { const mm = createMessageManager('claude', 'stop-late'); if (live) { for (const r of recs) mm.processLive(r); } else mm.convertHistory(recs); return mm.messages.filter((m) => m.content?.[0]?.stopLate).map((m) => ({ status: m.status, text: m.content[0].text, late: m.content[0].stopLate })); };
   const S8 = (x) => ({ late: x.late, requests: x.requests, settled: x.settled, lateLines: x.lateLines, results: x.results, byOrder: x.byOrder, ...(x.held !== undefined ? { held: x.held } : {}) });
-  const offOrder = Object.entries({ L, A, E, O, C, T2, M2, V, G, GS, K2, K4 }).filter(([, x]) => x.byOrder !== 'read').map(([k, x]) => k + ': ' + x.byOrder);
-  ok(offOrder.length === 0, '§8 BY ORDER (r2323): every run read the record it waits for — the result carrying the late mark, else the line the window settled at (none met the deadline)', offOrder);
+  // (the two RED controls read the release's way, byOrder 'off' by design; a step they MISSED is named here like every run's)
+  const offOrder = Object.entries({ L, A, E, O, C, T2, M2, V, G, GS, K2, K4, K1, K3 }).filter(([k, x]) => x.byOrder !== (k === 'K1' || k === 'K3' ? 'off' : 'read')).map(([k, x]) => k + ': ' + x.byOrder);
+  ok(offOrder.length === 0, '§8 BY ORDER (r2323): every step of every run came (r3297: each waited on its fact, none named missed) and every run read the record it waits for — the result carrying the late mark, else the line the window settled at (none met the deadline)', offOrder);
   ok(K2.held === true && K2.settled && K2.lateLines === 1 && K2.late.length === 1 && K2.late[0].how === 'billed', '§8 THE RECORD BY ORDER (r2320): the SAY of the record that carries the late fact HELD (a stall placed between the logged fact and the said record) — the run still reads the fact off the record', S8(K2));
   ok(K1.held === true && K1.settled && K1.lateLines === 1 && K1.late.length === 0, '§8 RED CONTROL: the same stall read the release\'s way (20 ms after the log\'s settle) misses the record — «late: [] · lateLines: 1», the hosted gates\' symptom made at will', S8(K1));
   ok(K4.held === true && K4.settled && K4.lateLines === 0 && K4.late.length === 0 && K4.results >= 2, '§8 THE SETTLE\'S LINE BY ORDER (r2323): nothing late, the SAY of the follow-up\'s result HELD — the run reads past it (the CLI\'s idle word comes after it) before «nothing late» is judged', S8(K4));
