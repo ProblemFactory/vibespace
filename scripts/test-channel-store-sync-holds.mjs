@@ -189,7 +189,29 @@ async function attLeg(mod, tag) {
   ok(pg.purged && pg.ans === null && !pg.remade, `⑤ a purge during the async question's ledger read: answer ${JSON.stringify(pg.ans)}; the purged account's attachments folder made again: ${pg.remade}`, pg);
   const PM = M.load('src/channel-store.js', anchored(anchored(SRC, "    if ((purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): the account was purged during the read", "    void 0;   // 主开发 r2557 (2): the account was purged during the read", 'the ledger put back'), "    if (!l || (purgeSeq.get(adapterId) || 0) !== ep) return null;   // 主开发 r2557 (2): purged during the wait", "    if (!l) return null;   // 主开发 r2557 (2): purged during the wait", 'the answer across a purge'), 'purge-blind');
   const pgr = await purgeLeg(PM, 'purge-red');
-  ok(pgr.purged && pgr.remade, `⑤ RED CONTROL: the async road blind to a purge during its wait — the purged account's folder made again (${pgr.remade}) — the leg above would go red`, pgr);
+  // B-92fc: the ledger's save refuses for a gone account now (a second defence), so this red judges what ITS cut does: the
+  // question ANSWERS a purged account (the write's own defence is ⑥'s)
+  ok(pgr.purged && pgr.ans !== null, `⑤ RED CONTROL: the async road blind to a purge during its wait — it answered the purged account (${pgr.ans ? 'a body' : 'nothing'}; its folder made again: ${pgr.remade}) — the leg above would go red`, pgr);
+  // 主开发 r2819 (line 510's small): THE ROAD — ingest's held-bodies pass reads the async question's «nothing» as «not kept yet» and
+  // asks attachmentPut next: for an account purged meanwhile that write refuses — no folder, no body, no ledger come back
+  const roadLeg = async (mod, tag) => {
+    const dir = tmp(tag);
+    { const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+      await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('body'), mime: 'text/plain' }); try { st.close(); } catch { } try { w.stop(); } catch { } }
+    const w = SW.create({ log: quiet }), st = mod.createChannelStore({ dir, log: quiet, writer: w });
+    const r0 = fs.promises.readFile; let purged = false;
+    fs.promises.readFile = async function (f, ...x) { const out = await r0.call(this, f, ...x); if (!purged && path.basename(String(f)) === 'lru.json') { purged = true; st.purgeAccount('gmail'); } return out; };
+    let asked = 'unasked', put = 'unasked';
+    try { asked = await st.attachmentGetAsync('gmail', 'thr_1', 'part:1', 'm1'); } finally { fs.promises.readFile = r0; }
+    if (!asked) put = await st.attachmentPut('gmail', 'thr_1', 'part:1', { msg: 'm1', data: Buffer.from('body'), mime: 'text/plain' });   // the engine's next step (persistHeldBodies)
+    try { st.close(); } catch { } try { w.stop(); } catch { }
+    return { purged, asked, put: put && put.file ? 'written' : put, back: fs.existsSync(path.join(dir, 'attachments', 'gmail')) };
+  };
+  const rd = await roadLeg(CS, 'road');
+  ok(rd.purged && rd.asked === null && rd.put === null && !rd.back, `⑥ the held-bodies road across a purge: the question answered ${JSON.stringify(rd.asked)}, the write that follows refused (${JSON.stringify(rd.put)}); the purged account's attachments folder back: ${rd.back}`, rd);
+  const RB = M.load('src/channel-store.js', anchored(anchored(SRC, "    if (goneAccounts.has(adapterId)) return null;\n    const buf = Buffer.isBuffer(data)", "    const buf = Buffer.isBuffer(data)", 'the write blind to a gone account at its start'), "const gone = async () => { if (!goneAccounts.has(adapterId)) return false;", "const gone = async () => { if (true) return false;", 'the write blind to a gone account after its waits'), 'put-blind');
+  const rdr = await roadLeg(RB, 'road-red');
+  ok(rdr.purged && rdr.back, `⑥ RED CONTROL: a write blind to a gone account — the purged account's folder and the body back (${rdr.put}) — the leg above would go red`, rdr);
   const i = ENGSRC.indexOf('  async function persistHeldBodies('), body = i < 0 ? '' : ENGSRC.slice(i, ENGSRC.indexOf('\n  }\n', i));
   ok(body.includes('await store.attachmentGetAsync(rec.id, convId, a.id, r.vendorId)') && !body.includes('store.attachmentGet('), '④ the engine\'s held-bodies road (persistHeldBodies, at ingest) asks attachmentGetAsync, never the synchronous attachmentGet');
 }

@@ -2308,6 +2308,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const attDir = (adapterId, convId) => path.join(attRoot, safeSeg(adapterId), safeSeg(convId));
   const lruFile = (adapterId) => path.join(attRoot, safeSeg(adapterId), 'lru.json');
   const lruCache = new Map();   // adapterId -> ledger (read once, written atomically)
+  // 主开发 r2819: the accounts purged in THIS process — every late write of theirs refuses (an ask, a fetch or a pass that began
+  // before the purge and lands after it makes nothing again); cleared when an adapter record with that id is written again
+  const goneAccounts = new Set();
   const purgeSeq = new Map();   // adapterId -> how many times its local copy was purged (主开发 r2557 (2): an async read across a purge answers nothing)
   function lruOf(adapterId) {
     let l = lruCache.get(adapterId);
@@ -2319,6 +2322,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function lruSave(adapterId) {
     lruDirty.delete(adapterId);
+    if (goneAccounts.has(adapterId)) return;   // 主开发 r2819: a purged account's ledger is never written again
     fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
     writeJsonAtomic(lruFile(adapterId), lruOf(adapterId), { mode: 0o600 });
   }
@@ -2503,15 +2507,23 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  fetches of the same attachment never write into one temp file. */
   let attSeq = 0;
   async function attachmentPut(adapterId, convId, attId, { data, name = null, mime = null, msg = null } = {}, { budgetBytes = 5120 * 1024 * 1024 } = {}) {
+    // 主开发 r2819 (line 510's small): A PURGED ACCOUNT's write refuses — at its start and after each wait (a purge that lands
+    // inside it): what it made is taken away again, and it answers null (ingest's held-bodies road reads «nothing» as «not
+    // kept yet» and asks this write next: it writes nothing back)
+    const gone = async () => { if (!goneAccounts.has(adapterId)) return false; try { await fs.promises.rm(path.join(attRoot, safeSeg(adapterId)), { recursive: true, force: true }); } catch { } return true; };
+    if (goneAccounts.has(adapterId)) return null;
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
     const d = attDir(adapterId, convId);
     await fs.promises.mkdir(d, { recursive: true, mode: 0o700 });
+    if (await gone()) return null;
     const h = attSlot(attId, msg);
     const file = path.join(d, h);
     const tmp = `${file}.tmp-${process.pid}-${++attSeq}`;
     await fs.promises.writeFile(tmp, buf, { mode: 0o600 });
     try { await fs.promises.chmod(tmp, 0o600); } catch {}
+    if (await gone()) return null;
     await fs.promises.rename(tmp, file);
+    if (await gone()) return null;
     const meta = { id: String(attId), ...(msg ? { msg: String(msg).slice(0, 512) } : {}), name: name ? String(name).slice(0, 256) : null, mime: mime ? String(mime).slice(0, 128) : null, bytes: buf.length, at: now() };
     writeJsonAtomic(file + '.json', meta, { mode: 0o600 });
     const l = lruOf(adapterId);
@@ -2531,6 +2543,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         evicted.push(k);
       }
     }
+    if (await gone()) return null;   // a purge during the evictions' waits: the meta written above goes with the folder
     lruSave(adapterId);
     return { file, meta, evicted, totalBytes: total };
   }
@@ -2639,7 +2652,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (adLoad.blocked) return Promise.reject(blockedError(adLoad.blocked));
     // 0600 (2.369.165): the records carry sealed tokens AND an account's own
     // client secret (`credential.appSecretEnc`) — owner-only like the key file.
-    const run = adChain.then(() => fn(ad)).then((r) => { owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); return r; });
+    const run = adChain.then(() => fn(ad)).then((r) => { for (const a of (ad && ad.adapters) || []) if (a && goneAccounts.has(a.id)) goneAccounts.delete(a.id); owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); return r; });
     adChain = run.then(() => {}, () => {});
     return paced ? run : run.then((r) => landed(adaptersFile).then(() => r));
   }
@@ -2946,6 +2959,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
     purgeSeq.set(adapterId, (purgeSeq.get(adapterId) || 0) + 1);
+    goneAccounts.add(adapterId);
     const gone = (p) => { const had = fs.existsSync(p); try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* reported below */ } return had && !fs.existsSync(p); };
     return { logs: gone(path.join(msgsDir, seg)), files: gone(path.join(attRoot, seg)) };
   }
