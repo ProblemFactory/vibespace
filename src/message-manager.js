@@ -2061,12 +2061,14 @@ class MessageManager extends MessageWindow {
   /** `input_handover` (2.369.361, lane claude-steer-inject) — the wrapper wrote these frames to the CLI while a turn ran
    *  (the person's Enter, or the ⚡ on a held row), and says what became of them: 'handed' (written — the agent reads it at
    *  its next tool call), 'landed' (it rode a tool result into the turn and the model answered — «Steered», where it sits),
-   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip). What Stop
+   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip), 'stopped' (row
+   *  B-5a4d's root: the NEXT wrapper's start found the frame a dead wrapper handed nowhere in the transcript — it never reached
+   *  the agent; its 'landed' says the CLI recorded it — data/bin/chat-wrapper.js settleDeadHandovers). What Stop
    *  meant for each one is said by Stop's ONE `queue_dropped` (`keptIds` → 'kept', `landedIds` → 'steered' — message-
    *  window `_processQueueDropped`); a 'kept' state here is still read (a record of an earlier build). No bubble ⇒ nothing to mark:
    *  the frame reached the agent, which is never a silence worth a card. */
   _processInputHandover(raw, emit) {
-    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept' }[raw.state];
+    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept', stopped: 'stopped' }[raw.state];
     if (state === undefined) return;
     for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) {
       // every state here means the frame was WRITTEN to the CLI — a batch's last witness, in the order said (r9)

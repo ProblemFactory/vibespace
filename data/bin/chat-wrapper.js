@@ -236,6 +236,39 @@ const MAX_BUFFER = 500000; // 500KB — JSON lines are larger than raw PTY
 let writeTimer = null;
 let lineBufB = Buffer.alloc(0); // accumulator for partial lines (Buffer — byte-exact offsets)
 
+// THE DEAD ONE'S HAND-OVERS ARE SETTLED AT THIS START (row B-5a4d, its root — 主开发 r2852). A wrapper that died mid-turn wrote no
+// settle for a frame it had HANDED to the CLI (finalize records none), and this file was ITS file until our first write replaces it
+// (the boot's queue baseline: persistBuffer's tmp + rename) — so its copy and its 'handed' record stayed OWED in the hub's ring for
+// the life of the conversation object (src/chat-ring.js carries them; the page drew the message afloat with «read at its next tool
+// call» for good). Read ONCE here, before anything of ours is written (the said journal opens this file only at its first append):
+// each frame the dead one handed with no settle after (a later hand-over word, or Stop's queue_dropped naming it), by its copy's
+// stamp (cliUuid). Then ONE bounded read of the transcript's tail, off this process's input path (settleDeadHandovers, after the
+// baseline): the frames the CLI recorded ⇒ ONE `input_handover {state:'landed'}`; the frames it provably never recorded (the read
+// holds the whole file, or reaches back past the frame's send) ⇒ ONE {state:'stopped'} — it never reached the agent. A frame with
+// no stamp (an older build's copy), or one the window cannot prove either way, is left as it was; the log says how many.
+const DEAD_FILE_MAX = 8 * 1024 * 1024;   // the last wrapper's file: its ring (MAX_BUFFER) + what its journal appended since a rewrite
+const DEAD_TAIL_MAX = 4 * 1024 * 1024;   // the transcript's tail read for the stamps (one read a start, only when a frame is owed)
+/** The frames a buffer's records say were HANDED with no settle after → [{ msgId, cliUuid (null: an older build's copy), at (the
+ *  copy's send time, ms; 0 = unknown) }]. Only the lines that can say it are parsed. */
+function deadHandovers(text) {
+  const copies = new Map(), open = new Map();
+  for (const line of String(text || '').split('\n')) {
+    if (!line.includes('"webui_copy":true') && !line.includes('"type":"input_handover"') && !line.includes('"type":"queue_dropped"')) continue;
+    let r = null; try { r = JSON.parse(line); } catch { continue; }
+    if (!r || typeof r !== 'object') continue;
+    if (r.webui_copy && r._fromWebui && r.msgId) copies.set(String(r.msgId), { cliUuid: typeof r.cliUuid === 'string' && r.cliUuid ? r.cliUuid : null, at: Date.parse(r.timestamp) || 0 });
+    else if (r.type === 'input_handover') { for (const id of Array.isArray(r.msg_ids) ? r.msg_ids : []) if (id) open.set(String(id), r.state === 'handed'); }
+    else if (r.type === 'queue_dropped') { for (const id of [...(Array.isArray(r.keptIds) ? r.keptIds : []), ...(Array.isArray(r.landedIds) ? r.landedIds : []), ...(Array.isArray(r.items) ? r.items : []).map((it) => it && it.msgId)]) if (id) open.set(String(id), false); }
+  }
+  return [...open].filter(([, still]) => still).map(([msgId]) => ({ msgId, ...(copies.get(msgId) || { cliUuid: null, at: 0 }) }));
+}
+let DEAD = [];
+try {
+  const size = fs.statSync(bufferFile).size;
+  if (size > DEAD_FILE_MAX) log(`dead hand-overs: the last wrapper's file is ${size} bytes (past ${DEAD_FILE_MAX}) — not read`);
+  else { const text = fs.readFileSync(bufferFile, 'utf8'); if (text.includes('"type":"input_handover"')) DEAD = deadHandovers(text); }
+} catch (e) { if (e && e.code !== 'ENOENT') log(`dead hand-overs: the last wrapper's file was not read (${e.code || e.message})`); }
+
 function persistBuffer() {
   writeTimer = null;
   // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
@@ -417,6 +450,37 @@ function isProductHook(command) {
   return !!(own && m && /^node(?:js)?(?:\.exe)?$/.test(path.basename(m[1] || m[2])) && m[3] === own);
 }
 /** A settings value the CLI takes from its arguments: inline JSON or a file (relative to the CLI's cwd). */
+/** THE SETTLE (the block at the buffer's start says why): one bounded read of the conversation's transcript tail, then at most two
+ *  records — said like every hand-over word (written through, then on stdout: the hub's ring reads them and nothing is owed). */
+async function settleDeadHandovers(dead) {
+  if (!dead.length) return;
+  const sid = argSettings(args, '--resume')[0] || '';
+  const landed = [], stopped = [], left = dead.filter((d) => !d.cliUuid).map((d) => d.msgId);
+  let why = left.length ? `${left.length} with no stamp (an older build's copy)` : '';
+  const stamped = dead.filter((d) => d.cliUuid);
+  if (stamped.length && (REMOTE_SID || OFFSET_MODE)) { left.push(...stamped.map((d) => d.msgId)); why = 'a remote conversation (its transcript is on its machine)'; }
+  else if (stamped.length && !sid) { left.push(...stamped.map((d) => d.msgId)); why = 'no --resume id in the arguments'; }
+  else if (stamped.length) {
+    const file = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects', process.cwd().replace(/[/._]/g, '-'), sid + '.jsonl');
+    try {
+      const size = (await fs.promises.stat(file)).size, from = Math.max(0, size - DEAD_TAIL_MAX);
+      let tail = size ? await new Promise((resolve, reject) => { const parts = []; const s = fs.createReadStream(file, { start: from, end: size - 1 }); s.on('data', (c) => parts.push(c)); s.on('error', reject); s.on('end', () => resolve(Buffer.concat(parts).toString('utf8'))); }) : '';
+      if (from > 0) tail = tail.slice(tail.indexOf('\n') + 1);
+      // proof of absence: the read holds the whole file, or its first dated record is older than the frame's send
+      const first = from === 0 ? 0 : (Date.parse((/"timestamp":"([^"]+)"/.exec(tail) || [])[1]) || Infinity);
+      let unproven = 0;
+      for (const d of stamped) {
+        if (tail.includes(d.cliUuid)) landed.push(d.msgId);
+        else if (from === 0 || (d.at && first < d.at)) stopped.push(d.msgId);
+        else { left.push(d.msgId); unproven++; }
+      }
+      if (unproven) why = [why, `${unproven} the last ${DEAD_TAIL_MAX} bytes of the transcript cannot prove either way`].filter(Boolean).join('; ');
+    } catch (e) { left.push(...stamped.map((d) => d.msgId)); why = `the transcript was not read (${(e && e.code) || (e && e.message)})`; }
+  }
+  if (landed.length) record('input_handover', { state: 'landed', msg_ids: landed, via: 'successor' });
+  if (stopped.length) record('input_handover', { state: 'stopped', msg_ids: stopped, via: 'successor' });
+  log(`dead hand-overs: ${dead.length} frame(s) the last wrapper handed with no settle — ${landed.length} landed, ${stopped.length} stopped, ${left.length} left as they were${why ? ` (${why})` : ''}`);
+}
 function argSettings(argv, flag) {
   const out = [];
   for (let i = 0; i < argv.length; i++) {
@@ -1601,5 +1665,6 @@ try {
 
 startChild();
 publishQueue();   // the BASELINE (an empty queue, said once at boot — the acp wrapper's rule)
+settleDeadHandovers(DEAD).catch((e) => log(`dead hand-overs: not settled (${e && e.message})`));   // B-5a4d's root: after the baseline, off the input path
 
 process.on('uncaughtException', (err) => { log(`Uncaught: ${err.message}\n${err.stack}`); });
