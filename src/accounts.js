@@ -2326,7 +2326,7 @@ class AccountManager {
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name, provider: this._providerBrief(this.memberProviderOf(x.id)) }));
   }
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
-  setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; }
+  setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
   /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
   providersChanged() { this.pruneFallbackProviders(); this._notify(); }
   /** THE POOL'S FALLBACK PROVIDERS (row B-d578, the fallback member — ruling r1516 / the scene page r2733): third-party providers
@@ -2384,6 +2384,13 @@ class AccountManager {
   setProviderSpawn(fn, modelFor = null) { this._providerSpawn = typeof fn === 'function' ? fn : null; this._providerModel = typeof modelFor === 'function' ? modelFor : null; }
   /** (lane lg-providers U2 r1) a provider record by its id (the badge's name and tail) — null for anything else */
   providerRecordOf(id) { try { return /^pv-/.test(String(id || '')) && !builtInProviderOf(String(id)) && this._providerLookup ? this._providerLookup({ id: String(id) }) : null; } catch { return null; } }
+  /** (B-d578, the fallback member F2) may a conversation start on this third-party provider NOW — its key readable (the vault
+   *  open, its entry there)? The roster rows' own flag (setProviderRows); no rows wired ⇒ false (nothing would start there). */
+  providerReady(id, be = 'claude') {
+    let rows = []; try { rows = this._providerRows ? this._providerRows() || [] : []; } catch { rows = []; }
+    const r = rows.find((x) => x && x.id === id && x.backend === be);
+    return !!(r && r.loggedIn);
+  }
   /** (lane lg-providers U2 r1) the model a `pv-` account's session starts with — null when the id is no provider's */
   providerModelFor(id, backend, model) {
     if (!/^pv-[a-z0-9][a-z0-9-]{0,63}$/.test(String(id || '')) || builtInProviderOf(String(id)) || !this._providerModel) return null;
@@ -2933,8 +2940,14 @@ class AccountManager {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
     // (B-d578) a third-party provider is never a MEMBER — it is a fallback (below); judged before anything is written
-    if (Array.isArray(members) && members.some((m) => /^pv-/.test(String(m || '')))) throw new Error('a provider is never a pool member — list it as a fallback provider');
+    // (a provider id ALREADY on the record — a save an older hub took — is dropped by this save, never refused: the member's own «Exclude
+    // from pool» re-sends the list as it stands; round wokm0ktwv)
+    if (Array.isArray(members) && members.some((m) => /^pv-/.test(String(m || '')) && !(Array.isArray(a.members) && a.members.includes(m)))) throw new Error('a provider is never a pool member — list it as a fallback provider');
     const fallbackList = fallbackProviders !== undefined ? this._fallbackListOf(a, fallbackProviders) : undefined;
+    // A REFUSED WRITE CHANGES NOTHING (B-d578 F2, round wokm0ktwv): the record as it was is kept and put back whole when any check below
+    // refuses — a write refused for its priority used to leave the list and the older fields on the live record for the next save
+    const was = JSON.parse(JSON.stringify(a));
+    try {
     // (q-053 P0b) the owner's per-pool rule for a move to ANOTHER provider: 'never' (the default — a card asks first) or
     // 'allow' (a cold switch + one line in the conversation); anything else is refused by name
     if (crossProvider !== undefined) {
@@ -2943,7 +2956,7 @@ class AccountManager {
     }
     // (B-d578) the pool's FALLBACK PROVIDERS — used only when every member is out (poolFallbacksOf); absent = none
     if (fallbackList !== undefined) { if (fallbackList) a.fallbackProviders = fallbackList; else delete a.fallbackProviders; }
-    if (members !== undefined) a.members = Array.isArray(members) && members.length ? members.slice(0, 40) : null;
+    if (members !== undefined) { const ms = Array.isArray(members) ? members.filter((m) => !/^pv-/.test(String(m || ''))) : null; a.members = ms && ms.length ? ms.slice(0, 40) : null; }
     if (auto === false && !AccountManager._autoOffSaid) { AccountManager._autoOffSaid = true; console.log('[pool] auto:false ignored — a pool is placed automatically or by its manual priority (the whole-pool manual switch is retired, 2026-09-28)'); }
     a.auto = true;
     if (hot !== undefined) a.hot = !!hot;
@@ -2960,6 +2973,7 @@ class AccountManager {
     }
     // a narrowed membership prunes the order (a removed member has no place in it)
     if (Array.isArray(a.priority) && a.priority.length) { const m = this.poolMembership(id); a.priority = a.priority.filter((x) => m.includes(x)); }
+    } catch (e) { for (const k of Object.keys(a)) delete a[k]; Object.assign(a, was); throw e; }
     this._save();
     const cur = this.poolCurrent(id);
     // (a LAPSED member is no default either — verify r2 ①, the signed-out twin: every listed member lapsed ⇒ the default stays put)
@@ -3027,15 +3041,15 @@ class AccountManager {
     if (!a) throw new Error('unknown account: ' + id);
     if (this._credsOf(this._acctBackend(a)).spawnForm !== 'securestorage') throw new Error('not a Claude account: ' + a.name);
     if (this._acctType(a) === 'pooled') {
-      // THE CONVERSATION'S MEMBER, asked ONCE (B-d578): the fallback road below and the per-session link further down read the same answer
-      let chosen; const chooseOnce = () => { if (chosen === undefined) { chosen = null; try { chosen = opts.chooseMember?.(id) ?? null; } catch { chosen = null; } } return chosen; };
       // THE FALLBACK PROVIDER (row B-d578, the fallback member): the chooser placed this conversation on a third-party provider
       // the pool lists as its fallback (poolFallbacksOf) — its own road (the provider's key from the vault, its own empty home;
       // refused by name like any provider spawn), the pool's id kept: billed to the pool, attributed to the provider (ws-create
       // stamps poolTarget as the held member). Asked BEFORE the self-heal below: a fallback is used when every member is out,
-      // signed out included — the heal would refuse that pool before the conversation's placement was read.
+      // signed out included — the heal would refuse that pool before the conversation's placement was read. The question asked here is
+      // a PEEK (`fallbackOnly`: the chooser names a fallback the conversation was moved to, or nothing — no proving mark, no line, no
+      // dropped carry: round wokm0ktwv's (3)); the conversation's ordinary ask stays below, after the heal, where it always was.
       if (opts.sessionKey && this._providerSpawn && this.poolFallbacksOf(id).length) {
-        const fb = chooseOnce();
+        let fb = null; try { fb = opts.chooseMember?.(id, { fallbackOnly: true }) ?? null; } catch { fb = null; }
         if (fb && this.poolFallbacksOf(id).includes(fb)) return { ...this._providerSpawn(String(fb), backend, opts), id: a.id, name: a.name, pooled: true, poolTarget: String(fb), kind: 'provider' };
       }
       RR.forget(this._poolLinkDir(a)); // B-403e: the spawn's self-heal looks again before it re-points the pool default
@@ -3120,7 +3134,8 @@ class AccountManager {
       // usage caches, which this store deliberately doesn't); default = the
       // pool's current target, i.e. exactly the legacy behaviour.
       if (opts.sessionKey) {
-        let member = chooseOnce(); // the pool THIS spawn bills — the caller never re-derives it (verify r2); asked once (B-d578)
+        let member = null;
+        try { member = opts.chooseMember?.(id); } catch { } // the pool THIS spawn bills — the caller never re-derives it (verify r2)
         // The chooser ranks by QUOTA (it reads the usage caches); credentials
         // are this store's authority. A member that is signed out is not a
         // candidate no matter how much quota it shows — same outage, second

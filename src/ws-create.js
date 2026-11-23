@@ -905,7 +905,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // (`forDefault`: the store is placing the POOL's default, not this conversation — no proving spawn there, lane reset-unproven r3)
                 // (`resumeOf`, B-d578 pool unit (a): a RESUME names the backend id it resumes — a conversation the pool moved to another
                 // provider starts on the member it was moved to, not where the rules under 'never' would put it back; a fork never)
-                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, forDefault: !!how.forDefault, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}), ...(data.resumeId && !data.fork ? { resumeOf: String(data.resumeId) } : {}) }),
+                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, forDefault: !!how.forDefault, ...(how.fallbackOnly ? { fallbackOnly: true } : {}), ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}), ...(data.resumeId && !data.fork ? { resumeOf: String(data.resumeId) } : {}) }),
                 pinned: !!data._poolPin, // a codex pool spawns straight onto the chooser's answer only for a pinned conversation
               });
             }
@@ -2046,6 +2046,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // restored conversation's readings are never guessed to be the login's (src/server/usage-pool-engine.js readingRoad)
             billingHow: session._billingHow || undefined, oatRoad: session._oatRoad || undefined, oatGen: session._oatGen || undefined,
             heldPoolMember: session._heldPoolMember || undefined, // the member a non-hot pool process holds — survives a server restart with the process it describes
+            poolFallback: session._poolFallback || undefined, // B-d578 F2: the record of a move onto the pool's fallback provider (the engine stamps it on the resumed conversation)
             poolPin: session._poolPin || undefined, // THE CONVERSATION'S PIN (2026-09-28) — survives a server restart (boot-restore's three sites read it back)
             authAtSpawn: session._authAtSpawn || null,
             createdAt: session.createdAt,

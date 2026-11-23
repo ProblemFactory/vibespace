@@ -774,6 +774,8 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     ['src/server/stdout/codex-events.js', 'create > attach', 1, 0, 'a codex thread id — a binding'],
     ['src/server/usage-pool-engine.js', 'create > noteServedModel > writeSessionMeta', 0, 1, 'the served fact handed to model-ask (its persist, paced — above)'],
     ['src/server/usage-pool-engine.js', 'create > persistFallbackStamp', 0, 1, 'derived — the next served record retires it'], ['src/server/usage-pool-engine.js', 'create > persistHeldStamp', 0, 1, 'a held-member stamp the ledger re-derives'],
+    ['src/server/usage-pool-engine.js', 'create > writeFallbackRecord', 1, 0, 'B-d578 F2: the record of a move onto the pool\'s fallback provider — on disk BEFORE the restart (the move waits for it; a failed write moves nothing)'],
+    ['src/server/usage-pool-engine.js', 'create > stampFallbackRecord', 1, 0, 'B-d578 F2: the same record in the RESUMED conversation\'s meta — the first member and model the move back restores (nothing re-derives it)'],
     ['src/server/usage-pool-engine.js', 'create > persistStoppedBy', 0, 1, 'why a session stopped (lg-recovery U1 + cures) — through the store\'s patch (its owed keys ride the next patch); the next turn end restates or clears it'],
     ['src/server/usage-pool-engine.js', 'create > persistPoolPin', 0, 1, 'the owner\'s pin — lane lg-group-parents B-526c unit 2: its DURABLE half is its own record (src/pool-pin-record.js, synchronous, before the answer); this meta copy is paced, the boot takes the newer'], ['src/server/usage-pool-engine.js', 'create > persistRequestStamp', 0, 1, 'request stamps'],
     ['src/ws-create.js', 'createWsCreateHandler > createBody > onAdopt', 1, 0, 'the claude conversation id after new / fork — a binding'], ['src/ws-create.js', 'createWsCreateHandler > createBody > tryCapture', 1, 0, 'a codex thread id — a binding'],
@@ -879,6 +881,8 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     'src/server/conversation-ops.js|renameSession': [0, 'the person\'s rename — shown at once, NOT waited for (a failed write is said by writeSessionMeta\'s own warning, never to the person — named, not hidden)'],
     'src/ws-create.js|createWsCreateHandler > createBody > onAdopt': [0, 'a binding — no one waits'], 'src/ws-create.js|createWsCreateHandler > createBody > tryCapture': [0, 'a binding — no one waits'],
     'src/server/stdout/acp-events.js|create > attach': [0, 'an ACP session id — a binding'], 'src/server/stdout/codex-events.js|create > attach': [0, 'a codex thread id — a binding'],
+    'src/server/usage-pool-engine.js|create > writeFallbackRecord': [1, 'B-d578 F2: the move onto the fallback waits for its record on disk (a failed write moves nothing — said in the conversation)'],
+    'src/server/usage-pool-engine.js|create > stampFallbackRecord': [0, 'B-d578 F2: the resumed conversation\'s copy of that record — a binding no one waits for'],
   };
   const chainBad = [];
   for (const [k, [want]] of Object.entries(CHAIN)) { const g = chainNow.get(k); if (!g) chainBad.push(`DEAD: ${k}`); else if (g[0] !== want) chainBad.push(`${k}: ${g[0]} consumed, the table says ${want}`); }

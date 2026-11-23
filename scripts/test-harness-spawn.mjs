@@ -555,7 +555,8 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   // POOL UNIT (d) (row B-d578, ruling r1516): a POOLED create the store places on a third-party PROVIDER member is judged against
   // THAT provider — the create named the pool (no provider), so before (d) both checks met nothing: its model is re-resolved against
   // the provider's own rows and the managed settings' helper refuses it by name, nothing spawned. The store's pooled road onto a
-  // provider member is the fallback member itself (after this unit): here a stand-in store answers the pool with that placement.
+  // provider member is the fallback member itself (after this unit): here a stand-in store answers the pool with that placement (the
+  // store's own answer — B-d578's fallback F1 — follows below the control: THE REAL ROAD).
   const POOLID = 'pool-' + 'd'.repeat(12);
   const amPool = new Proxy(am, { get(t, k) {
     if (k === 'resolveForSpawn') return (id, be, opts) => (id === POOLID ? { ...t.resolveForSpawn(ds.id, be, opts), id: POOLID, pooled: true, kind: 'provider', poolTarget: ds.id } : t.resolveForSpawn(id, be, opts));
@@ -573,6 +574,19 @@ console.log('— ⑤ a third-party provider account through the real ws-create h
   ok(pRef.x.spawned.length === 0 && pRef.err && pRef.err.code === 'provider-managed-helper' && pRef.err.i18n && pRef.err.i18n.params.provider === 'DeepSeek', 'POOL UNIT (d): …and when the managed settings name a key helper that pooled start is REFUSED BY NAME (provider-managed-helper, DeepSeek), nothing spawns', pRef.err);
   const pCut = await pstart(mdir({ 'managed-settings.json': HELPER }), M.load('src/ws-create.js', anchored(src, '            if (pooledPv) {', '            if (false) {', 'the create before pool unit (d)'), 'pool-d-cut'));
   ok(pCut.x.spawned.length === 1 && !pCut.err, 'CONTROL: the create before pool unit (d) spawns that pooled DeepSeek start under the managed helper (the organisation\'s credential toward the provider\'s address): the refusal leg goes RED', pCut.err);
+  // THE REAL ROAD (B-d578, the fallback member F1 + F2 — 主开发 r2858: bl-keys-misc's not-kept legs as the acceptance): the stand-in
+  // store above is now the store's OWN answer — a real pool that lists DeepSeek as its FALLBACK, the conversation's chooser naming it
+  // (the engine names it from F2, through the carry of a conversation it moved): the start LANDS on DeepSeek (its address in the env),
+  // is STAMPED as it (the held member — billed to the provider, unit (c)) and the provider's model rule ran first (unit (d)).
+  const realSub = am.createSubscription({ name: 'Real member' }).id;
+  fs.writeFileSync(path.join(am.subDir(realSub), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, subscriptionType: 'max' } }), { mode: 0o600 });
+  const realPool = am.createPool({ name: 'Real pool', members: [realSub] }).id;
+  am.updatePool(realPool, { fallbackProviders: [ds.id] });
+  const pReal = await drive(wsCreate, { ...INST, accountId: realPool }, { accounts: am, managedClaudeDir: path.join(scratchDir('hspawn-pool-real'), 'no-managed'), poolChooser: () => ds.id });
+  const pRealEnv = (pReal.spawned[0] || {}).env || {};
+  ok(pReal.spawned.length === 1 && pModel(pReal) === 'deepseek-chat' && !!pReal.session && pReal.session._accountId === realPool && pReal.session._heldPoolMember === ds.id && pRealEnv.ANTHROPIC_BASE_URL === 'https://api.deepseek.com/anthropic',
+    'THE REAL ROAD (r2858\'s acceptance): a real pool listing DeepSeek as its FALLBACK, the chooser naming it ⇒ the pooled start LANDS on DeepSeek, is STAMPED as it (the held member: billed to the provider) and ran the provider\'s model rule (deepseek-chat, never «opus»)',
+    { spawned: pReal.spawned.length, model: pModel(pReal), held: pReal.session && pReal.session._heldPoolMember, acct: pReal.session && pReal.session._accountId, base: pRealEnv.ANTHROPIC_BASE_URL, err: (pReal.sent || []).filter((m) => m.type === 'error').map((m) => m.message) });
   // THE MANAGED ENV BLOCK (its reader's MUST): the CLI copies a managed `env` over the spawn's own — an Anthropic credential there
   // goes to the provider, an address there sends the provider's key to the organisation: both refuse like a helper
   const ORG_TOKEN = ['org', 'bearer', 'from', 'policy'].join('-');

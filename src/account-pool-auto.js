@@ -374,7 +374,9 @@ function spareLaneRemaining(cache, nowSec) { const l = spareLaneOf(cache, nowSec
 //      For-you card; under `'allow'` it is the cold move itself (`cross`, `switchMode: 'cold'`).
 //   3. The conversation's model is re-resolved against the new provider's list (`cross.toModel`); no match ⇒ rule 1.
 // A provider WITHOUT readings (`fallbackOnly: true`, a third-party API row) never takes a voluntary move either: it is
-// chosen only under `'allow'`, after every member that has readings (a same-provider one included).
+// chosen only under `'allow'`, after every member that has readings (a same-provider one included). Its model (rule 3): the
+// conversation's re-resolved in its list, else ITS default model (B-d578 F2, the pool's fallback member — a third party's models
+// are its own); neither ⇒ rule 1.
 // SEAM (P0a, lane provider-record): `resolveModel` follows design q-053 §1's record shape ({id, kind, label, models:[{id}],
 // aliases, defaultModel, modelsSource}); once src/model-providers.js lands, these two delegate to its servesModel / resolveModel.
 const CROSS_PROVIDER_MODES = Object.freeze(['never', 'allow']);
@@ -777,7 +779,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     if (provOf) {
       const p = provOf(m.id);
       const other = !sameProvider(curProv, p);
-      const toModel = other ? resolveModel(p, conversationModel) : null;
+      // (B-d578 F2) a FALLBACK provider serves with its OWN models: the conversation's model re-resolved there, else the provider's
+      // default model (the scene page: «model sonnet → router-1»); a provider with neither is no candidate (rule 1, unchanged)
+      const toModel = other ? (resolveModel(p, conversationModel) ?? (fallbackOnlyOf(p) ? resolveModel(p, '') : null)) : null;
       if (other && toModel == null) { modelBlocked.push({ id: m.id, name: m.name, provider: providerLabel(p), providerId: providerKey(p), model: conversationModel || null }); continue; }
       if (other || fallbackOnlyOf(p)) xRow = { cross: other, provider: providerLabel(p), providerId: providerKey(p), toModel, fallbackOnly: fallbackOnlyOf(p) };
     }

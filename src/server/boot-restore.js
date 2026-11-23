@@ -57,6 +57,14 @@ function heldOriginOf(meta) {
   return meta.createdAt ? null : 'no-start';
 }
 /** Persist the 'no-start' marker the first time a restore infers it (r5). */
+/** (B-d578 F2) the record of a move onto a pool's FALLBACK PROVIDER, as the session meta keeps it — `{poolId, provider, fromMember,
+ *  fromModel, toModel, at, by}` — or null (a record that does not read as one is no record: nothing is guessed). */
+function poolFallbackOf(meta) {
+  const r = meta && meta.poolFallback;
+  if (!r || typeof r !== 'object' || typeof r.poolId !== 'string' || typeof r.provider !== 'string' || !/^pv-/.test(r.provider)) return null;
+  const str = (v) => (typeof v === 'string' && v ? v.slice(0, 200) : null);
+  return { poolId: r.poolId, provider: r.provider, fromMember: str(r.fromMember), fromModel: str(r.fromModel), toModel: str(r.toModel), at: Number(r.at) || null, by: r.by === 'person' ? 'person' : 'pool' };
+}
 function persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }) {
   try {
     if (!meta || !meta.accountId || heldOriginOf(meta) !== 'no-start' || meta.heldPoolOrigin === 'no-start') return false; // only a session billed to an account can hold a pool member
@@ -944,6 +952,7 @@ function restoreSessions() {
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _initialGroupIds: spawnGroupIds(meta), // lane new-session-form: every group it was spawned into (meta `taskIds`; an older meta's one `taskId`)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
+      _poolFallback: poolFallbackOf(meta), // B-d578 F2: the record of a move onto the pool's fallback provider (its first member and model) — the surviving process stays on the fallback
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       _authAtSpawn: meta.authAtSpawn || null,
       _apiKeySource: meta.apiKeySource || null, // CLI-confirmed auth (init record); backfilled from the buffer below when absent
@@ -1182,6 +1191,7 @@ function restoreAgentdPipeSessions() {
       name: meta.name || 'Session', sockName: sockFile,
       buffer: '', taskId: meta.taskId || null,
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // design-reset-credits r2: the member the surviving pipe process holds
+      _poolFallback: poolFallbackOf(meta), // B-d578 F2: the record of a move onto the pool's fallback provider
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
       _forkRequested: restoredForkPending(meta), // a pending fork re-opened by the daemon still adopts its own id (parser or lock capture) — round 3
@@ -1404,4 +1414,4 @@ function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
 // B-cd4b: the LAST billing source a buffer holds (the restore's backfill reads the copy the restore already holds) — PURE
 const API_KEY_SOURCE = 'apiKeySource":"';
 function lastApiKeySource(text) { const k = text.lastIndexOf(API_KEY_SOURCE); if (k < 0) return null; const m = /^apiKeySource":"([^"]*)"/.exec(text.slice(k, k + 200)); return m ? m[1] : null; }
-module.exports = { create, lastApiKeySource, restoreBufOf, restoreCatchUp, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, poolPinFromMeta, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, lastApiKeySource, restoreBufOf, restoreCatchUp, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, poolPinFromMeta, poolFallbackOf, STOP_DEAD_SOCKET, STOP_ENDED }; // r5; poolFallbackOf (B-d578 F2): the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

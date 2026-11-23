@@ -61,7 +61,7 @@ export const ROWS = Object.freeze([
   ['wallSlotFor', 'src/server/usage-pool-engine.js', 'requestSlotFor', 'pile', 3],
   ['poolCurrentFor', 'src/accounts.js', 'ensureSessionPoolLink', 'pool', 1],
   ['poolCurrentFor', 'src/accounts.js', 'setPoolTarget', 'pool', 1],
-  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'crossMoveNow', 'pool', 1],
+  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'crossVerdictNow', 'pool', 1],   // B-d578 F2: crossMoveNow's verdict, shared with the fallback queue's re-judgement
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'gatherPlan', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'linkMemberOf', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'refreshCodexForPerson', 'readings', 1],
@@ -72,7 +72,7 @@ export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'memberRemoved', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'sweepNonMemberLinks', 'pool', 1],
   ['poolMemberOfSession', 'src/server/usage-pool-engine.js', 'poolMemberOfSessionFor', 'pool', 1],
-  ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'crossMoveNow', 'pool', 1],
+  ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'crossVerdictNow', 'pool', 1],   // B-d578 F2: crossMoveNow's verdict, shared with the fallback queue's re-judgement
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'gatherPlan', 'pool', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'maybePoolAutoSwitchForPool', 'pool', 2],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'quotaVerdictFor', 'spend', 1],   // the verdict that authorises a billed continue (its own comment: «authorises money»)
@@ -248,7 +248,7 @@ export const ROWS = Object.freeze([
   ['writeSnap@src/server/usage-pool-engine.js', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 2],
   // ── the census cure 3 (主开发 2026-11-19 09:12Z): the chooser handed on, its received names' calls ──
   ['poolChooser@src/ws-create.js', 'src/ws-create.js', 'chooseMember', 'pile', 1],   // ws-create's chooseMember arrow calls the engine's chooser it received
-  ['chooseMember@src/accounts.js', 'src/accounts.js', 'resolveForSpawn', 'pile', 3],   // the member a new pooled start bills
+  ['chooseMember@src/accounts.js', 'src/accounts.js', 'resolveForSpawn', 'pile', 4],   // the member a new pooled start bills (+1, B-d578 F2: the PEEK before the self-heal — the fallback a conversation was moved to, nothing else)
   ['chooseMember@src/accounts.js', 'src/accounts.js', '_resolveHomeSpawn', 'pile', 1],
   ['chooseMember@src/accounts.js', 'src/accounts.js', 'activeAlt', 'pile', 1],   // resolveForSpawn's own closure (INNER)
   ['chooseMember@src/accounts.js', 'src/accounts.js', 'updatePool', 'pool', 1],   // the pool's default pointed at the chooser's pick
@@ -546,7 +546,7 @@ export const CONSUMERS = Object.freeze({
   "cliDoor": {"file": "src/routes/provider-models.js", "fields": null, "why": "Builds the CLI-models door handler; cliTarget's account keys the listing request inside it, and the factory hands back only the handler.", "gap": "Returns an Express request handler (a closure); its outcome is an HTTP response, not a value any caller reads."},
   "consumeResetCreditFor": {"file": "src/server/usage-pool-engine.js", "fields": ["preview"], "why": "The manual reset-credit use: spends via writeResetCredit on resetCreditPreview's key inside; its return echoes that preview for the route."},
   "createBody": {"file": "src/ws-create.js", "fields": [], "why": "The create path spawns on resolveForSpawn's account and stamps the held member on the session; the async body returns nothing."},
-  "crossMoveNow": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Decides one cross-provider move; sessionBillingMember/poolCurrentFor give its currentId, and it returns only {moved, why}."},
+  "crossVerdictNow": {"file": "src/server/usage-pool-engine.js", "fields": ["curFor"], "why": "B-d578 F2: the ONE re-judgement under allow of a conversation (the cross card's answer through crossMoveNow, the fallback queue's move through fallbackJudge): sessionBillingMember/poolCurrentFor give its currentId, returned as curFor beside the verdict so the caller moves FROM that member."},
   "deliver": {"file": "src/server/auto-resume.js", "fields": [], "why": "attemptFire's post-gate closure: re-resolves identityFor, authorizes and charges the continue inside; returns only a boolean delivered."},
   "deliverToConversation": {"file": "src/server/conversation-deliver.js", "fields": ["identity"], "why": "delivers a message after the spend check; a refusal's object echoes the verdict's identity for the refusal's words and the stash"},
   "dispatch": {"file": "src/server/worker-dispatch.js", "fields": [], "why": "the worker dispatch's spend check before it sends; returns {ok, code, error} — no account in its return"},
