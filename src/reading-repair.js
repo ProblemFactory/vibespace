@@ -1419,7 +1419,9 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
         next.emptiedReason = `no anchor of ${nameOf(key)} agrees with its API-derived window ${windowFingerprint(apiWindow)} — nothing here claims to be a reading until the account produces one`;
         row.cache = 'emptied'; report.counts.emptied++;
       }
-      next.repairedBy = id;
+      // r3016: the repair's own instant on the file — a start judges the hub's copy (data/usage-cache.json) against it: a copy
+      // reading fetched at or before it is one this verdict took away (usage-routes judgeCopy)
+      next.repairedBy = id; next.repairedAt = now;
       archived.push({ migration: id, at: now, store: 'usage-cache', key, action: row.cache,
         reason: `snapshot weekly window ${windowFingerprint(snap)} (phase ${weeklyPhase(snap.sevenDay)}) contradicts ${nameOf(key)}'s API-derived window ${windowFingerprint(apiWindow)} (phase ${ev.top.phase}; ${ev.top.n} of ${ev.total} slot-verified rate-limit readings) — the /usage panel that wrote it answered for another account`,
         entry: cur });
@@ -1432,7 +1434,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
           entry: cur });
         next = { ...cur, scopedWeekly: cur.scopedWeekly.filter((s) => !bad.includes(s)) };
         if (!next.scopedWeekly.length) delete next.scopedFetchedAt;
-        next.repairedBy = id; row.cache = 'stripped'; report.counts.stripped += bad.length;
+        next.repairedBy = id; next.repairedAt = now; row.cache = 'stripped'; report.counts.stripped += bad.length;   // r3016: its instant (above)
       }
     }
     if (next) { delete next.ownWindow; _writeCacheAtomic(cacheDir, key, next, ownTomb); }

@@ -142,7 +142,7 @@ async function untilHeld(h, read, boundMs = 10000) {
   const ref = await counted(w3.cacheDir, () => quiet(() => folder.refresh()));
   const req = await counted(w3.cacheDir, () => R.get());
   ok(!!(ref.lists === 0 && ref.jsonReads === 0 && req.lists === 0 && req.jsonReads === 0), `① a refresh's ingestion and a GET /api/usage list nothing and read no reading file on the loop (refresh ${ref.calls.length} calls, request ${req.calls.length}: ${[...new Set(req.calls)].join(', ') || 'none'})`, { ref: ref.calls, req: req.calls });
-  const RelR = M.load('src/usage-routes.js', every(R_SRC, ', { via: usageFolder.via })', ')', 9, 'the routes'), 'release-routes');
+  const RelR = M.load('src/usage-routes.js', every(R_SRC, ', { via: usageFolder.via })', ')', 10, 'the routes')   /* r3016: + the start's judge of the copy (judgedAway) */, 'release-routes');
   const w4 = world(); await quiet(() => engineOf(ENG, w4));
   const R4 = await routesOf(RelR, w4);
   const req4 = await counted(w4.cacheDir, () => R4.get());

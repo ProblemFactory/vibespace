@@ -22,6 +22,15 @@
 //     (the same-account merge put the judged reading on its row): replaced, emptied and stripped — the judged reading on neither
 //     row and not in the copy, nor after a restart from that copy. RED: today's reload (the linked row kept: the merge puts it back).
 //     PIN: the three callers hand their report.
+//  ⑧ r3016: A VERDICT IS NEVER LOST — (a) the folder's reader HELD (its next refresh refused by a placed EIO) with a kept reply:
+//     replaced and emptied are applied from that reply; (b) NO reply at all (the first read refused): the verdict is kept and
+//     applied ONCE at the first reply (a later reply's older file is not taken). RED: today's guard (a0a7ce7d9: the verdict only
+//     while the reader is not held). (c) AT A START THE COPY IS JUDGED: a copy holding the judged reading (a kill before its write
+//     landed) beside the folder's file the repair stamped (repairedAt) is not taken — replaced, emptied, and with no reply at the
+//     start (the first reply judges it); a copy reading fetched after the stamp is taken as before. RED: the start without its
+//     judge. PIN: the identity repair stamps its instant. (d) THE LINKED ROW ITSELF: an OLDER judged reading under another time
+//     (left there by a pass that could not decide the link) leaves at the verdict. RED: the drop by an equal time alone.
+//     The copy lands through the store writer (no synchronous flush at a verdict: the census row left with it).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -150,7 +159,7 @@ const judge = (mod, w) => mod.repairGlobalFile({ dataDir: w.dd, cacheDir: w.cach
 // ═══ ⑤ the reload keeps memory while a write of the copy is owed (r2335) ═══
 console.log('\n— ⑤ the reload keeps memory while a write of the copy is owed');
 const UCF = require(path.join(REPO, 'src/usage-cache-folder.js'));
-const RELOAD_CURE = "  let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage();\n";
+const RELOAD_CURE = "  let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) seedFromCopy(readUsageCache()); ingestPassiveUsage();\n";
 const RELOAD_REL = "  _rateLimitCache = readUsageCache(); ingestPassiveUsage();\n";   // stale-pins: kept (the release reload)
 // the folder's reader answers in microtasks (its fsp hook): its fresh read lands before the store writer's next turn, the write stays owed
 const nowFsp = { readdir: async (d) => fs.readdirSync(d), readFile: async (f, e) => fs.readFileSync(f, e) };
@@ -181,7 +190,7 @@ const which = (at) => (at === T ? 'the newer reading' : at === T - 36e5 ? 'the O
 // ═══ ⑥ a repair's verdict outranks memory (r2430) ═══
 console.log('\n— ⑥ a repair\'s verdict for the machine login\'s reading outranks memory');
 const UW = require(path.join(REPO, 'src/usage-cache-write.js'));
-const VERDICT = "  if (repairedGlobal(rep) && !held) {\n";
+const VERDICT = "  if (repairedGlobal(rep)) {\n";
 const S0 = Math.floor(T / 1000);
 const REPAIRED = { fetchedAt: T - 72e5, source: 'statusline', fiveHour: { utilization: 0.07, resetsAt: S0 + 1800 }, sevenDay: { utilization: 0.04, resetsAt: S0 + 5 * 86400 }, repairedBy: 'identity-repair:manual' };
 const EMPTIED = { orgUuid: 'org-own', emptiedReason: 'no anchor of the machine login agrees with its API-derived window', repairedBy: 'identity-repair:manual' };
@@ -251,7 +260,7 @@ const linkedWorld = async (routesMod, cache) => {
     ok(!!(r.before.login && r.before.linked), `⑦ ${cache.toUpperCase()} — the scene is real: before the repair the judged reading is on the machine login's row AND, through the same-account merge, on the linked account's (${JSON.stringify(r.before)})`, r);
     ok(!!(!r.after.login && !r.after.linked && !r.copy && !r.restart.login && !r.restart.linked), `⑦ ${cache.toUpperCase()}: after the reload the judged reading is on NEITHER row and not in the copy — nor after a restart from that copy (${JSON.stringify({ after: r.after, copy: r.copy, restart: r.restart })})`, r);
   }
-  const TodayReload = M.load('src/usage-routes.js', anchored(ROUTES_SRC, '    dropJudged(rep, judged);\n', '', 'today\'s reload (the linked rows kept)'), 'today-reload');
+  const TodayReload = M.load('src/usage-routes.js', anchored(ROUTES_SRC, '  dropJudged(rep, judged);\n', '', 'today\'s reload (the linked rows kept)'), 'today-reload');
   const red = await linkedWorld(TodayReload, 'replaced');
   ok(!!(red.after.linked && red.after.login && red.copy), `⑦ RED CONTROL today's reload (1de87eff9): the linked row keeps the judged reading and the same-account merge puts it back on the machine login's row and in the copy (${JSON.stringify(red)})`, red);
 }
@@ -259,5 +268,133 @@ const linkedWorld = async (routesMod, cache) => {
   // the three callers hand the reload their report (r2933 lens 3: the hourly and the person's road had no pin)
   const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   ok(!!(SV.includes("const rep = repairIdentityAnchors('boot', { since: settled && settled.since }); usage.reloadRateLimitCache?.(rep);") && SV.includes('if (rep && rep.changed) usage.reloadRateLimitCache?.(rep);') && ROUTES_SRC.includes('  try { reloadRateLimitCache(rep); } catch { }')), 'PIN: the boot\'s, the hourly and the person\'s identity repair each hand their report to the reload');
+}
+// ═══ ⑧ r3016: A VERDICT IS NEVER LOST; at a start the copy is judged; the linked row itself ═══
+console.log('\n— ⑧ a verdict is never lost (held with a kept reply; no reply yet), a start judges the copy, the linked row itself leaves');
+const TODAY_GUARD = ['  if (repairedGlobal(rep)) {\n', '  if (repairedGlobal(rep) && !usageFolder.state().held) {\n'];   // stale-pins: kept (a0a7ce7d9's guard — the red control's line)
+// THE PLACED REFUSAL: the folder reader's fs.promises readdir answers EIO while `fail.on` (never a mount, never a mode change)
+const failingFsp = () => { const fail = { on: false }; return { fail, fsp: { readdir: async (d) => { if (fail.on) throw Object.assign(new Error(`EIO: i/o error, scandir '${d}'`), { code: 'EIO' }); return fs.readdirSync(d); }, readFile: async (f, e) => fs.readFileSync(f, e) } }; };
+const readCopy = (w) => { storeWriter().flushSync([w.file]); try { return JSON.parse(fs.readFileSync(w.file, 'utf8')); } catch { return null; } };
+const foreign = (x) => /"alien(-old)?"/.test(JSON.stringify(x || null));
+const rows = (b) => ({ login: foreign(b.rateLimit), linked: foreign(b.accounts && b.accounts[X.id]) });
+const repairWrites = (g, obj) => { const text = JSON.stringify(obj); fs.writeFileSync(g, text); UW.noteWritten(g, text, { replace: true }); };   // the repair's own road: the file, then the write path's notice (replace)
+const heldWorld = async (routesMod, cache) => {
+  const w = usageWorld(), g = path.join(w.cacheDir, '__global__.json');
+  fs.writeFileSync(g, JSON.stringify(JUDGED));
+  const { fail, fsp } = failingFsp();
+  const reader = UCF.forDir(w.cacheDir, { fsp });   // the one reader setupUsage asks for — its first fill reads the folder
+  const h = {};
+  const api = await setup(routesMod, w, { more: LINKED, handlers: h });
+  const before = rows(await getUsage(h));
+  storeWriter().flushSync([w.file]);
+  fail.on = true; await quiet(() => reader.fresh({ waitMs: 0 }));   // the next refresh is refused: the reader is HELD, its reply kept
+  const held = !!(reader.state().held && reader.reply());
+  repairWrites(g, VERDICTS[cache]);   // no stamp on it here: the verdict alone carries it (⑧c judges a stamped one)
+  await quiet(() => api.reloadRateLimitCache({ identities: [{ key: '__global__', cache }] }));
+  const after = rows(await getUsage(h));
+  return { held, before, after, copy: foreign(readCopy(w)) };
+};
+const noReplyWorld = async (routesMod) => {
+  const w = usageWorld(), g = path.join(w.cacheDir, '__global__.json');
+  fs.writeFileSync(g, JSON.stringify(JUDGED));
+  fs.writeFileSync(w.file, JSON.stringify({ claude: JUDGED }, null, 2));   // the copy, the boot's seed: the judged reading
+  const { fail, fsp } = failingFsp();
+  fail.on = true;
+  const reader = UCF.forDir(w.cacheDir, { fsp, fillSync: false });
+  await quiet(() => reader.fresh({ waitMs: 0 }));   // the first read is refused: NO reply at all
+  const none = !reader.reply() && !!reader.state().held;
+  const h = {};
+  const api = await setup(routesMod, w, { more: LINKED, handlers: h });
+  const before = rows(await getUsage(h));
+  repairWrites(g, REPAIRED);
+  await quiet(() => api.reloadRateLimitCache({ identities: [{ key: '__global__', cache: 'replaced' }] }));
+  const waiting = rows(await getUsage(h));   // still no reply: nothing is read as «none» — the rows stand until the folder answers
+  fail.on = false; await quiet(() => reader.fresh({ waitMs: 0 }));   // the folder answers: its FIRST reply
+  const after = rows(await getUsage(h));
+  const copy1 = readCopy(w);
+  fs.writeFileSync(g, JSON.stringify({ fetchedAt: T - 1e8, source: 'statusline', fiveHour: { utilization: 0.5, resetsAt: S0 + 600 } }));   // an OLDER reading written after it
+  await quiet(() => reader.fresh({ waitMs: 0 }));   // a later reply: the plain ingestion
+  const copy2 = readCopy(w);
+  return { none, before, waiting, after, copy: foreign(copy1), at2: copy2 && copy2.claude ? copy2.claude.fetchedAt : null };
+};
+{
+  const ROUTES = require(path.join(REPO, 'src/usage-routes.js'));
+  for (const cache of ['replaced', 'emptied']) {
+    const r = await heldWorld(ROUTES, cache);
+    ok(!!(r.held && r.before.login && r.before.linked), `⑧a ${cache.toUpperCase()} — the scene is real: the reader is held (a refused refresh) with a reply kept, and the judged reading is on both rows (${JSON.stringify(r)})`, r);
+    ok(!!(!r.after.login && !r.after.linked && !r.copy), `⑧a ${cache.toUpperCase()}: WHILE THE READER IS HELD the verdict is applied from the kept reply — the judged reading on neither row and not in the copy (${JSON.stringify({ after: r.after, copy: r.copy })})`, r);
+  }
+  const r = await noReplyWorld(ROUTES);
+  ok(!!(r.none && r.before.login && r.before.linked && r.waiting.login), `⑧b the scene is real: no reply at all (the first read refused), the judged reading on both rows; the verdict waits while none comes (${JSON.stringify({ none: r.none, before: r.before, waiting: r.waiting })})`, r);
+  ok(!!(!r.after.login && !r.after.linked && !r.copy), `⑧b NO REPLY YET: the verdict is kept and applied at the FIRST reply — the judged reading on neither row and not in the copy (${JSON.stringify({ after: r.after, copy: r.copy })})`, r);
+  ok(r.at2 === T - 72e5, `⑧b …ONCE: a later reply runs the plain ingestion — an older file written after it is not taken (the copy holds ${r.at2 === T - 72e5 ? 'the repaired reading' : String(r.at2)})`, r);
+}
+{
+  const Today = M.load('src/usage-routes.js', anchored(ROUTES_SRC, TODAY_GUARD[0], TODAY_GUARD[1], 'today\'s guard'), 'today-guard');
+  const a = await heldWorld(Today, 'replaced');
+  ok(!!(a.held && a.after.login && a.after.linked && a.copy), `⑧a RED CONTROL today's guard: while the reader is held the verdict is thrown away — the judged reading stays on both rows and in the copy (${JSON.stringify(a)})`, a);
+  const b = await noReplyWorld(Today);
+  ok(!!(b.none && b.after.login && b.after.linked && b.copy), `⑧b RED CONTROL today's guard: with no reply the verdict is thrown away — the first reply changes nothing (${JSON.stringify({ after: b.after, copy: b.copy })})`, b);
+}
+// ⑧c AT A START THE COPY IS JUDGED against the folder's own state (the repair's stamp)
+const STAMP = T + 60e3;   // the repair ran a minute after the judged reading was fetched
+const LATER = { fetchedAt: STAMP + 30e3, source: 'statusline', fiveHour: { utilization: 0.21, resetsAt: S0 + 3600 }, sevenDay: { utilization: 0.08, resetsAt: S0 + 5 * 86400 } };
+const startWorld = async (routesMod, folderFile, { copy = JUDGED, replyAtStart = true } = {}) => {
+  const w = usageWorld(), g = path.join(w.cacheDir, '__global__.json');
+  fs.writeFileSync(g, JSON.stringify(folderFile));   // the file the repair wrote, its instant on it
+  fs.writeFileSync(w.file, JSON.stringify({ claude: copy }, null, 2));   // the copy a kill left behind (the verdict's write never landed)
+  let f = null;
+  if (!replyAtStart) { f = failingFsp(); f.fail.on = true; f.reader = UCF.forDir(w.cacheDir, { fsp: f.fsp, fillSync: false }); await quiet(() => f.reader.fresh({ waitMs: 0 })); }
+  const h = {};
+  await setup(routesMod, w, { more: LINKED, handlers: h });   // A START over that data folder
+  if (f) { f.fail.on = false; await quiet(() => f.reader.fresh({ waitMs: 0 })); }
+  const seen = rows(await getUsage(h));
+  const c = readCopy(w);
+  return { ...seen, copy: foreign(c), none: !!(c && c.claude === null), at: c && c.claude ? c.claude.fetchedAt : null };
+};
+{
+  const ROUTES = require(path.join(REPO, 'src/usage-routes.js'));
+  const a = await startWorld(ROUTES, { ...REPAIRED, repairedAt: STAMP });
+  ok(!!(!a.login && !a.linked && !a.copy && a.at === T - 72e5), `⑧c REPLACED: a start does not take a copy reading fetched before the folder's repair stamp — memory, both rows and the copy hold the repaired reading (${JSON.stringify(a)})`, a);
+  const b = await startWorld(ROUTES, { ...EMPTIED, repairedAt: STAMP });
+  ok(!!(!b.login && !b.linked && b.none), `⑧c EMPTIED: … memory states none and the copy says none (${JSON.stringify(b)})`, b);
+  const c = await startWorld(ROUTES, { ...REPAIRED, repairedAt: STAMP }, { replyAtStart: false });
+  ok(!!(!c.login && !c.linked && !c.copy && c.at === T - 72e5), `⑧c NO REPLY AT THE START: the first reply judges the copy (${JSON.stringify(c)})`, c);
+  const d = await startWorld(ROUTES, { ...REPAIRED, repairedAt: STAMP }, { copy: LATER });
+  ok(d.at === STAMP + 30e3, `⑧c a copy reading fetched AFTER the stamp came later: it is taken as before (the copy holds ${d.at === STAMP + 30e3 ? 'that reading' : String(d.at)})`, d);
+  ok((RR_SRC.split('next.repairedAt = now;').length - 1) === 2, 'PIN: the identity repair stamps its instant on the file it repaired (replaced or emptied, and stripped)');
+}
+{
+  const NoJudge = M.load('src/usage-routes.js', anchored(ROUTES_SRC, '  if (judgedAway(copy)) takeFolderState(null, copy);\n', '', 'the start without its judge'), 'no-judge');
+  const r = await startWorld(NoJudge, { ...REPAIRED, repairedAt: STAMP });
+  ok(!!(r.login && r.linked && r.copy), `⑧c RED CONTROL the start without its judge: the copy seeds the judged reading back on both rows (${JSON.stringify(r)})`, r);
+}
+// ⑧d THE LINKED ROW ITSELF: an OLDER judged reading under another time, left on it by a pass that could not decide the link
+const olderLinkedWorld = async (routesMod) => {
+  const w = usageWorld(), g = path.join(w.cacheDir, '__global__.json');
+  const F0 = { ...JUDGED, fetchedAt: T - 6e5, scopedWeekly: [OWN, { ...ALIEN, name: 'alien-old' }] };
+  fs.writeFileSync(g, JSON.stringify(F0));
+  let unsure = false;
+  const more = { ...LINKED, decisionList: () => ({ accounts: [unsure ? { ...X, email: null, facts: { state: 'reading' } } : X] }) };   // the sign-in facts not confirmed: no address on the decision road
+  const h = {};
+  const api = await setup(routesMod, w, { more, handlers: h });
+  const first = await getUsage(h);   // linked: the merge puts F0 on X's row
+  unsure = true;
+  repairWrites(g, JUDGED);   // the machine login's NEWER judged reading arrives
+  const mid = await getUsage(h);   // a pass that cannot decide the link: no merge — X keeps F0 under its older time
+  unsure = false;
+  storeWriter().flushSync([w.file]);
+  repairWrites(g, REPAIRED);
+  await quiet(() => api.reloadRateLimitCache({ identities: [{ key: '__global__', cache: 'replaced' }] }));
+  const after = rows(await getUsage(h));
+  const scene = JSON.stringify(first.accounts && first.accounts[X.id] || null).includes('"alien-old"') && JSON.stringify(mid.accounts && mid.accounts[X.id] || null).includes('"alien-old"') && alien(mid.rateLimit) && !JSON.stringify(mid.rateLimit || null).includes('"alien-old"');
+  return { scene, after, copy: foreign(readCopy(w)) };
+};
+{
+  const r = await olderLinkedWorld(require(path.join(REPO, 'src/usage-routes.js')));
+  ok(!!(r.scene && !r.after.login && !r.after.linked && !r.copy), `⑧d the linked row holding an OLDER judged reading under another time leaves at the verdict: neither row nor the copy holds either judged reading (${JSON.stringify(r)})`, r);
+  const TimeOnly = M.load('src/usage-routes.js', anchored(ROUTES_SRC, '  if (_usageGlobalLink && _usageGlobalLink.accountId) delete _accountUsage[_usageGlobalLink.accountId];\n  for (const id of _mergedRows) delete _accountUsage[id];\n', '', 'the drop by an equal time alone'), 'time-only');
+  const red = await olderLinkedWorld(TimeOnly);
+  ok(!!(red.scene && red.after.login && red.after.linked), `⑧d RED CONTROL the drop by an equal time alone: the older judged reading stays on the linked row and the merge puts it back on the machine login's (${JSON.stringify(red)})`, red);
 }
 report();

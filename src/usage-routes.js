@@ -373,31 +373,60 @@ let _codexLinkUndecided = false;   // B-360d (round wldn7whag): this pass could 
  *  in the ingestion moves. */
 const REPAIR_VERDICTS = new Set(['replaced', 'emptied', 'stripped']);
 const repairedGlobal = (rep) => { const row = rep && Array.isArray(rep.identities) ? rep.identities.find((r) => r && r.key === '__global__') : null; return !!(row && REPAIR_VERDICTS.has(row.cache)); };
-/** r2933 — AFTER A VERDICT NO READER OF THAT MEMORY HOLDS THE JUDGED READING: an account the repair's report gives a verdict, and any
- *  named account's row that holds the judged machine-login reading (the same-account merge put it there — a linked account with no
- *  dated file of its own keeps it, and the merge would take it back as «the newest»), leave memory; the ingestion then takes each
- *  from its OWN dated folder file, or none, and the merge can no longer bring the judged reading back to either row or the copy. */
+/** r2933 / r3016 — AFTER A VERDICT NO READER OF THAT MEMORY HOLDS THE JUDGED READING: an account the repair's report gives a
+ *  verdict, every row the same-account merge put a reading on since that row's own dated file last spoke (the row the link names —
+ *  also one holding an OLDER judged reading under another time, left there by a pass that could not decide the link, r3016), and
+ *  any named account's row that holds the judged reading itself leave memory; the ingestion then takes each from its OWN dated
+ *  folder file, or none, and the merge can no longer bring the judged reading back to either row or the copy. */
+const _mergedRows = new Set();   // r3016: the rows the same-account merge wrote since their own file last spoke (ingestPassiveUsage)
 function dropJudged(rep, judged) {
   for (const r of (rep && Array.isArray(rep.identities) ? rep.identities : [])) if (r && r.key && r.key !== '__global__' && REPAIR_VERDICTS.has(r.cache)) delete _accountUsage[r.key];
+  if (_usageGlobalLink && _usageGlobalLink.accountId) delete _accountUsage[_usageGlobalLink.accountId];
+  for (const id of _mergedRows) delete _accountUsage[id];
+  _mergedRows.clear();
   const t = judged ? Number(judged.fetchedAt) : 0;
   if (t) for (const [id, row] of Object.entries(_accountUsage)) if (row && Number(row.fetchedAt) === t) delete _accountUsage[id];
 }
+/** memory takes the folder's OWN state for the machine login — the repaired reading, or none — read through its kept reply; the
+ *  judged reading's readers leave memory (above); the copy follows through the store writer as every write of it does (r3016:
+ *  nothing synchronous on the loop — a start judges the copy, judgedAway below) */
+function takeFolderState(rep, judged) {
+  let u = null; try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { u = null; }
+  _rateLimitCache = u && typeof u.fetchedAt === 'number' ? u : null;
+  dropJudged(rep, judged);
+  writeUsageCache({ evenNone: true });
+}
+/** r3016 — AT A START THE COPY IS JUDGED AGAINST THE FOLDER'S OWN STATE. The identity repair stamps its instant on the file it
+ *  repaired (`repairedAt`, src/reading-repair.js); a copy reading fetched at or before it that does not carry that stamp is one
+ *  the repair's verdict took away (a kill before the copy's write landed leaves it on disk): it is not taken — memory takes the
+ *  folder's state. A copy reading fetched after it came later and is taken as before. No reply yet: nothing to judge by — the
+ *  first reply judges it (onReply below). */
+let _copyUnjudged = false;
+function judgedAway(reading) {
+  if (!reading || !usageFolder.reply()) return false;
+  let g = null; try { g = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { return false; }
+  const at = g ? Number(g.repairedAt) : 0;
+  return at > 0 && Number(reading.fetchedAt) <= at && Number(reading.repairedAt) !== at;
+}
+function seedFromCopy(copy) {
+  _rateLimitCache = copy;
+  if (copy && !usageFolder.reply()) { _copyUnjudged = true; return; }
+  if (judgedAway(copy)) takeFolderState(null, copy);
+}
+/** r3016 — A VERDICT IS NEVER LOST. It reads the folder's own state through the KEPT reply, held or not (a failed or hung refresh
+ *  keeps the reply, and the repair's own write is already in it — the write path's notice, replace); only with NO reply at all
+ *  (the boot's first fill failed) it is KEPT, and applied ONCE at the first reply (onReply below) — never a false «none». */
+let _pendingVerdict = null;
 function reloadRateLimitCache(rep = null) {
-  // r2933 (b): the folder's own state is read through its KEPT REPLY — while the reader is held (no reply), the verdict cannot read
-  // it (a failed read is never «none»): this reload keeps the rule below; the folder's next reply brings the repaired file
-  const held = (() => { try { const st = usageFolder.state(); return !!(st && st.held); } catch { return true; } })();
-  if (repairedGlobal(rep) && !held) {
-    const judged = _rateLimitCache;
-    let u = null; try { u = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, '__global__.json'), { via: usageFolder.via }); } catch { u = null; }
-    _rateLimitCache = u && typeof u.fetchedAt === 'number' ? u : null;
-    dropJudged(rep, judged);
-    writeUsageCache({ evenNone: true });
-    // r2933 (c): the copy LANDS now — a kill inside the writer's delay would leave the judged reading as the next start's seed
-    try { require('./store-writer.js').storeWriter().flushSync([USAGE_CACHE_FILE], { waitedBy: 'the repair verdict (usage-cache.json)' }); } catch { }
+  if (repairedGlobal(rep)) {
+    const all = _pendingVerdict ? { identities: [...(_pendingVerdict.identities || []), ...rep.identities] } : rep;
+    if (!usageFolder.reply()) { _pendingVerdict = all; return; }
+    _pendingVerdict = null;
+    takeFolderState(all, _rateLimitCache);
     ingestPassiveUsage();
     return;
   }
-  let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) _rateLimitCache = readUsageCache(); ingestPassiveUsage();
+  let owed = false; try { owed = require('./store-writer.js').storeWriter().pending(USAGE_CACHE_FILE); } catch { } if (!owed) seedFromCopy(readUsageCache()); ingestPassiveUsage();
 }
 function ingestPassiveUsage() {
   const allAccts = accounts.list().accounts || [];
@@ -446,7 +475,7 @@ function ingestPassiveUsage() {
       if (!_rateLimitCache || (u.fetchedAt > (_rateLimitCache.fetchedAt || 0))) { _rateLimitCache = u; writeUsageCache(); }
     } else if (subIds.has(key)) {
       const meta = roster.find((x) => x.id === key) || {};
-      _accountUsage[key] = { ...u, name: meta.name, email: meta.email };
+      _accountUsage[key] = { ...u, name: meta.name, email: meta.email }; _mergedRows.delete(key);   // its own file spoke (r3016)
     }
   }
   // Which NAMED claude subscription IS the machine's own ~/.claude login?
@@ -494,7 +523,7 @@ function ingestPassiveUsage() {
         const { name, email, ...usage } = newest;
         _rateLimitCache = quotaModel.withOwnAbsence(usage, g); writeUsageCache();
       }
-      _accountUsage[gid] = { ...quotaModel.withOwnAbsence(newest, a), name: meta.name, email: meta.email };
+      _accountUsage[gid] = { ...quotaModel.withOwnAbsence(newest, a), name: meta.name, email: meta.email }; _mergedRows.add(gid);
     }
   }
 }
@@ -511,7 +540,14 @@ function ingestPassiveModels(fn) {
                   .map((m) => ({ id: m.id, label: m.label || m.id }));
   if (add.length) AVAILABLE_MODELS.claude = [...(AVAILABLE_MODELS.claude || []), ...add];
 }
+seedFromCopy(_rateLimitCache);   // r3016: the copy read at the module's start, judged against the folder's own state
 ingestPassiveUsage();   // the boot's ingestion, over the folder's first fill (the boot's one synchronous pass)
+// r3016: the first reply after none — a verdict kept for it is applied ONCE, a copy taken unjudged is judged; registered BEFORE
+// the ingestion's listener (the reader calls its listeners in the order they were added), so that reply's ingestion follows it
+usageFolder.onReply(() => {
+  if (_pendingVerdict) { const rep = _pendingVerdict; _pendingVerdict = null; _copyUnjudged = false; takeFolderState(rep, _rateLimitCache); }
+  else if (_copyUnjudged) { _copyUnjudged = false; if (judgedAway(_rateLimitCache)) takeFolderState(null, _rateLimitCache); }
+});
 usageFolder.onReply(() => ingestPassiveUsage());   // ONE CLOCK (B-360d U3): every reply a refresh brings runs the ingestion
 // B-360d: the timer pass decides the machine login's link on sign-in facts confirmed OFF the loop first (awaited, bounded) —
 // then the folder's refresh (fs.promises, at most one in flight; a read not replying past its period is said held), whose reply
