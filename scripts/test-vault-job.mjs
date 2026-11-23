@@ -73,8 +73,12 @@ fs.writeFileSync(gotF + '.tmp', JSON.stringify({ v, again, fd3, pid: process.pid
 if (process.env.PIPES) {   // 主开发 r2773 (1): a value across the two pipes — split between them (a, b), or whole on one with the other's bytes between its pieces (c, d)
   const h = Math.floor(v.length / 2), nl = String.fromCharCode(10), still = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms), k = process.env.PIPES;
   const steps = { a: [[1, 'a1 ' + v.slice(0, h)], [2, v.slice(h) + ' a2' + nl]], b: [[2, 'b1 ' + v.slice(0, h)], [1, v.slice(h) + ' b2' + nl]],
-    c: [[1, 'c1 ' + v.slice(0, h)], [2, '[the other pipe]' + nl], [1, v.slice(h) + ' c2' + nl]], d: [[2, 'd1 ' + v.slice(0, h)], [1, '[the other pipe]' + nl], [2, v.slice(h) + ' d2' + nl]] }[k];
-  for (const [p, s] of steps) { fs.writeSync(p, s); still(150); }
+    c: [[1, 'c1 ' + v.slice(0, h)], [2, '[the other pipe]' + nl], [1, v.slice(h) + ' c2' + nl]], d: [[2, 'd1 ' + v.slice(0, h)], [1, '[the other pipe]' + nl], [2, v.slice(h) + ' d2' + nl]],
+    // round w3aprsv38 (a): a QUIET (900 ms, past the 400 ms settle) between the value's halves — on one pipe (e); with the other pipe's
+    // line written during that quiet (f); the value split between the pipes across the quiet (g)
+    e: [[1, 'e1 ' + v.slice(0, h), 900], [1, v.slice(h) + ' e2' + nl]], f: [[1, 'f1 ' + v.slice(0, h), 900], [2, '[the other pipe]' + nl, 900], [1, v.slice(h) + ' f2' + nl]],
+    g: [[1, 'g1 ' + v.slice(0, h), 900], [2, v.slice(h) + ' g2' + nl]] }[k];
+  for (const [p, s, ms] of steps) { fs.writeSync(p, s); still(ms || 150); }
   still(700);
   process.exit(0);
 }
@@ -84,6 +88,13 @@ if (process.env.QUIETSPLIT) {   // round wtlm3ig4w: a marker written in TWO piec
   process.stdout.write(process.env.QUIETREST + String.fromCharCode(10));
   for (let i = 0; i < 600 && !fs.existsSync(path.join(out, 'release')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
   process.exit(0);
+}
+if (process.env.CRONMARK) {   // round w3aprsv38's MUST: a scheduled task's two runs — run 1 prints its marker on an UNTERMINATED line; run 2 works first, its marker only when the leg says
+  const nl = String.fromCharCode(10), cnt = path.join(out, 'cron-runs'), hold = (f) => { for (let i = 0; i < 600 && !fs.existsSync(path.join(out, f)); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15); };
+  let n = 0; try { n = Number(fs.readFileSync(cnt, 'utf8')) || 0; } catch { n = 0; }
+  fs.writeFileSync(cnt, String(n + 1));
+  if (n === 0) { process.stdout.write('run one ' + process.env.CRONMARK); hold('go1'); process.exit(0); }
+  process.stdout.write('run two working' + nl); hold('mark2'); process.stdout.write(process.env.CRONMARK + nl); hold('go2'); process.exit(0);
 }
 if (process.env.QUIETLINE) {   // r2600's MUST: ONE short line (a service's «listening on …», a task's until-marker), then a quiet — round wtlm3ig4w: unterminated (QUIETNL=0), or ending in the value's own first character (QUIETHEAD)
   process.stdout.write(process.env.QUIETLINE + (process.env.QUIETHEAD ? v[0] : '') + (process.env.QUIETNL === '0' ? '' : String.fromCharCode(10)));
@@ -343,23 +354,57 @@ async function legPiecesEncoded(wrap = null) {
 // 主开发 r2773 (1): THE MASKER MAY HIDE A VALUE; IT NEVER LOSES A BYTE OF THE JOB'S OWN WORDS — every scene of the settle through
 // the REAL wrapper: what the job wrote, with only the value replaced, comes out — every byte counted (the log's job text, its
 // placeholders taken out, against the job's own words), every word in its pipe's order. RED: a settle that drops the run it keeps
+// round w3aprsv38's MUST (主开发 r2890): THE UNTIL SCAN'S CARRY ENDS WITH ITS RUN — a scheduled task's run that hit its marker on an
+// UNTERMINATED line left the marker in the carry, and the next fire's first read joined it in front: that run was «completing» at its
+// first output. RED: the fire's fresh-run reset without the carry's clear
+async function legCronCarry({ jobs = null } = {}) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(jobs ? 'ccarrym' : 'ccarry', { jobs });
+  const task = { cmd: { argv: [process.execPath, path.join(W.root, 'prog.js'), path.join(W.root, 'out')], cwd: W.root, env: { CRONMARK: 'CRON-RUN-MARK' } }, untilOutput: 'CRON-RUN-MARK' };
+  const r = W.jm.create({ kind: 'cron', name: 'cron-mark', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task }, owner: { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] } }, { conversationId: 'conv-a', groups: new Set(), isUser: true });
+  const cron = W.jm.jobs.get(r.job && r.job.id);
+  const kid = () => [...W.jm.jobs.values()].find((j) => j.cronParent === (cron && cron.id));
+  const logOf = (j) => { try { return fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { return ''; } };
+  if (cron) W.jm._fireCron(cron, 'test');
+  const hit1 = await W.untilMs(() => !!kid() && kid()._untilHit === true, 8000);
+  const carried = !!kid() && String(kid()._untilCarry || '').includes('CRON-RUN-MARK');   // the scene: run 1 hit on its UNTERMINATED line (its marker in the carry)
+  fs.writeFileSync(path.join(W.root, 'out', 'go1'), '1');
+  const end1 = await W.untilMs(() => !!kid() && !['up', 'starting'].includes(kid().state), 8000);
+  const k = kid(), n1 = k ? k.runs.length : 0;
+  if (cron) W.jm._fireCron(cron, 'test');
+  const working = await W.untilMs(() => !!k && k.runs.length > n1 && logOf(k).includes('run two working'), 8000);
+  for (let i = 0; i < 4; i++) { try { await W.jm._sweep(); } catch { } await nap(15); }   // the scan has read the second run's first line
+  const early = !!k && k._untilHit === true;
+  fs.writeFileSync(path.join(W.root, 'out', 'mark2'), '1');
+  const hit2 = await W.untilMs(() => !!k && k._untilHit === true, 8000);
+  Object.assign(rows, { scene: hit1.ok && carried && end1.ok && working.ok, early });
+  fs.writeFileSync(path.join(W.root, 'out', 'go2'), '1');
+  if (jobs) { W.end(); return rows; }
+  row(hit1.ok && carried && end1.ok && working.ok && !early && hit2.ok, 'round w3aprsv38 MUST — a scheduled task whose run hit its marker on an UNTERMINATED line (the marker in the carry): its NEXT run is not «completing» at its first output, and hits only when it prints the marker itself', { hit1: hit1.ok, carried, end1: end1.ok, working: working.ok, early, hit2: hit2.ok, state: k && k.state });
+  W.end();
+  return rows;
+}
 async function legBytes({ srcMut = null } = {}) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world(srcMut ? 'bytesm' : 'bytes', { srcMut }), S = SENT('bytes'), h = Math.floor(S.length / 2);
   W.put(S);
-  const own = { a: ['a1 ', ' a2\n'], b: ['b1 ', ' b2\n'], c: ['c1 ', '[the other pipe]\n', ' c2\n'], d: ['d1 ', '[the other pipe]\n', ' d2\n'] };
+  // each scene's own words BY PIPE, in the order the pipe wrote them (1 stdout, 2 stderr)
+  const own = { a: [[1, 'a1 '], [2, ' a2\n']], b: [[2, 'b1 '], [1, ' b2\n']], c: [[1, 'c1 '], [2, '[the other pipe]\n'], [1, ' c2\n']], d: [[2, 'd1 '], [1, '[the other pipe]\n'], [2, ' d2\n']],
+    e: [[1, 'e1 '], [1, ' e2\n']], f: [[1, 'f1 '], [2, '[the other pipe]\n'], [1, ' f2\n']], g: [[1, 'g1 '], [2, ' g2\n']] };
+  // a pipe's own ORDER, by position: each of its words found after the one before it (the other pipe's words may fall between)
+  const inOrder = (t, ws) => [1, 2].every((p) => { let at = 0; for (const [q, w] of ws) { if (q !== p) continue; const x = w.trimEnd(), i = t.indexOf(x, at); if (i < 0) return false; at = i + x.length; } return true; });
   const jobs = Object.fromEntries(Object.keys(own).map((k) => [k, W.jm.jobs.get(W.create({ name: 'pipes-' + k, env: { PIPES: k } }).job.id)]));
   const ended = await W.untilMs(() => Object.values(jobs).every((j) => ['done', 'failed', 'interrupted'].includes(j.state)), 15000);
   const textOf = (j) => { let t = ''; try { t = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return t.split('\n').filter((l) => !l.startsWith('[job-wrapper]')).join('\n'); };
   const out = {};
   for (const [k, j] of Object.entries(jobs)) {
     const t = textOf(j), bare = t.replace(/\[vault:[^\]]*\]/g, '');
-    const want = own[k].join('');
-    out[k] = { words: own[k].every((w) => t.includes(w.trimEnd())), bytes: Buffer.byteLength(bare.replace(/\n+$/, '')) === Buffer.byteLength(want.replace(/\n+$/, '')), noValue: !t.includes(S.slice(0, h)) || !t.includes(S.slice(h)), log: t.replace(S.slice(0, h), '<H1>').replace(S.slice(h), '<H2>').slice(0, 200) };
+    const want = own[k].map(([, w]) => w).join('');
+    out[k] = { words: inOrder(t, own[k]), bytes: Buffer.byteLength(bare.replace(/\n+$/, '')) === Buffer.byteLength(want.replace(/\n+$/, '')), noValue: !t.includes(S.slice(0, h)) && !t.includes(S.slice(h)), log: t.replace(S.slice(0, h), '<H1>').replace(S.slice(h), '<H2>').slice(0, 200) };
   }
   rows.scenes = out;
   if (srcMut) { W.end(); return rows; }
-  row(ended.ok && Object.values(out).every((x) => x.words && x.bytes && x.noValue), 'r2773 (1) — NO BYTE OF THE JOB\'S OWN WORDS IS LOST: a value split between the pipes (a, b) and whole on one with the other\'s bytes between its pieces (c, d) — every word in the log, every byte counted, only the value replaced', out);
+  row(ended.ok && Object.values(out).every((x) => x.words && x.bytes && x.noValue), 'r2773 (1) — NO BYTE OF THE JOB\'S OWN WORDS IS LOST: a value split between the pipes (a, b), whole on one with the other\'s bytes between its pieces (c, d), a QUIET between its halves (e), the other pipe\'s line written during that quiet (f), split between the pipes across a quiet (g) — each pipe\'s words in its own order, every byte counted, neither half of the value in the log', out);
   W.end();
   return rows;
 }
@@ -1610,6 +1655,12 @@ const scrubMut = (from, to) => ({ 'vault-scrubber.js': swap(VS_SRC, from, to), '
 const SETTLE_OLD = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", '    const lastLine = (x) => cutTailStart(x);'); } catch { return null; } })();
 const UNTIL_NOCARRY = (() => { try { return swap(JOBS_SRC, "      const lines = ((job._untilCarry || '') + buf.toString('utf-8')).split('\\n');", "      const lines = buf.toString('utf-8').split('\\n');"); } catch { return null; } })();
 // r2773 (1)'s control: a settle that DROPS the run it keeps (its kept tails forgotten) — a copy of src/vault-run.js
+// round w3aprsv38 (c): each settle cure's OWN red over ①e's three lines — MUST ONE cut alone (the last line still searched alone,
+// every view's first trigger an end: a and b) · MUST TWO cut alone (the whole held text searched, the unfinished-piece rule kept: c) ·
+// the MUST: the fire's reset without the clear
+const SETTLE_NOFLAG = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", "    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln)); };"); } catch { return null; } })();
+const SETTLE_NOLINE = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", '    const lastLine = (x) => cutTailStart(x, { unfinished: true });'); } catch { return null; } })();
+const CRON_NOCLEAR = (() => { try { return swap(JOBS_SRC, '      delete child._untilCursor; delete child._untilHit; delete child._untilCarry; // fresh run', '      delete child._untilCursor; delete child._untilHit; // fresh run'); } catch { return null; } })();   // stale-pins: kept (the release's own reset, put back by the control)
 const SETTLE_DROPS = (() => { try { return scrubMut('    held = kept;   // the uncertain tails stay held — the masker lives on', '    held = [];   // (the control: the kept run dropped)'); } catch { return null; } })();
 const QUIET_NONE = (() => { try { return swap(WRAP_SRC, '  try { o = vmask.settle(); } catch { o = null; }', '  o = null;'); } catch { return null; } })();
 const MUTANTS = [
@@ -1685,13 +1736,14 @@ const offRuns = [legFactsOffLoop(null, stOff), MUT_NOBOUND ? legFactsOffLoop(MUT
 let tBegan = null;
 await Promise.race([Promise.all([stOff.began, MUT_NOBOUND ? stNoBound.began : null]), new Promise((r) => { tBegan = setTimeout(r, 3000); })]);
 clearTimeout(tBegan);
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut, noFlagMut, noLineMut, carryRows, carryMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
   legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
   legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {},
   legQuietLine(), QUIET_NONE ? legQuietLine(QUIET_NONE) : {},
   legSettleLines(), SETTLE_OLD ? legSettleLines({ srcMut: SETTLE_OLD }) : {}, UNTIL_NOCARRY ? legSettleLines({ jobs: UNTIL_NOCARRY }) : {}, legPiecesEncoded(), QUIET_FLUSH ? legPiecesEncoded(QUIET_FLUSH) : {},
-  legBytes(), SETTLE_DROPS ? legBytes({ srcMut: SETTLE_DROPS }) : {}, SETTLE_OLD ? legBytes({ srcMut: SETTLE_OLD }) : {}]);
+  legBytes(), SETTLE_DROPS ? legBytes({ srcMut: SETTLE_DROPS }) : {}, SETTLE_OLD ? legBytes({ srcMut: SETTLE_OLD }) : {},
+  SETTLE_NOFLAG ? legSettleLines({ srcMut: SETTLE_NOFLAG }) : {}, SETTLE_NOLINE ? legSettleLines({ srcMut: SETTLE_NOLINE }) : {}, legCronCarry(), CRON_NOCLEAR ? legCronCarry({ jobs: CRON_NOCLEAR }) : {}]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1712,6 +1764,10 @@ ok(!!QUIET_FLUSH && pieces64Mut.masked === false, 'CONTROL — the release\'s qu
 print('①f NO BYTE OF THE JOB\'S OWN WORDS IS LOST (主开发 r2773 (1))', bytesRows);
 ok(!!SETTLE_DROPS && !!bytesMut.scenes && Object.values(bytesMut.scenes).some((x) => !x.words || !x.bytes), 'CONTROL — a settle that DROPS the run it keeps: a job\'s own words go missing from its log — RED on the copy', SETTLE_DROPS ? bytesMut.scenes : 'the copy could not be built (its anchor is missing)');
 console.log(`      7e1674a83's settle (a copy) over the same scenes: ${JSON.stringify(SETTLE_OLD ? Object.fromEntries(Object.entries(bytesOldMut.scenes || {}).map(([k, x]) => [k, { words: x.words, bytes: x.bytes, log: x.log }])) : 'no copy')}`);
+ok(!!SETTLE_NOFLAG && noFlagMut.a === false && noFlagMut.b === false && noFlagMut.c === true, 'CONTROL — MUST ONE cut ALONE (the last line still searched alone, every view\'s first trigger an end): the coloured and the ampersand last lines are NOT whole in the log in time, the completed line still is — RED on the copy', SETTLE_NOFLAG ? { a: noFlagMut.a, b: noFlagMut.b, c: noFlagMut.c } : 'the copy could not be built (its anchor is missing)');
+ok(!!SETTLE_NOLINE && noLineMut.a === true && noLineMut.b === true && noLineMut.c === false, 'CONTROL — MUST TWO cut ALONE (the whole held text searched, the unfinished-piece rule kept): the line that ENDS in the value\'s own first character is NOT whole in the log in time, the coloured and the ampersand lines still are — RED on the copy', SETTLE_NOLINE ? { a: noLineMut.a, b: noLineMut.b, c: noLineMut.c } : 'the copy could not be built (its anchor is missing)');
+print('①h THE UNTIL SCAN\'S CARRY ENDS WITH ITS RUN (round w3aprsv38\'s MUST)', carryRows);
+ok(!!CRON_NOCLEAR && carryMut.scene === true && carryMut.early === true, 'CONTROL — the fire\'s fresh-run reset WITHOUT the carry\'s clear: the next run is «completing» at its first output — RED on the copy', CRON_NOCLEAR ? { scene: carryMut.scene, early: carryMut.early } : 'the copy could not be built (its anchor is missing)');
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');

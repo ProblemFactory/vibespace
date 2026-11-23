@@ -4397,7 +4397,7 @@ class JobManager {
       child.notifyUser = M.notifyUserOf(job);
       // B-3992: the run's token reads what its CRON was given at create (the parent's grant, handed at every fire like notifyUser)
       if (M.mayReadOf(job)) child.mayRead = M.mayReadOf(job); else delete child.mayRead;
-      delete child._untilCursor; delete child._untilHit; // fresh run, fresh scan
+      delete child._untilCursor; delete child._untilHit; delete child._untilCarry; // fresh run, fresh scan — its carry too (round w3aprsv38's MUST: a marker carried from the last run's unterminated line ended the next at its first output)
       try { this._spawn(child, trigger); delete job._budgetSkips; }
       catch (e) {
         if (!(e && e.code === 'memory-budget')) throw e;
