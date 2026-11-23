@@ -36,6 +36,13 @@ export async function endReveal() { const p = pageSecret; forgetReveal(); if (p)
 onVaultFacts((f) => { if (!f || f.state !== 'unlocked') forgetReveal(); });
 
 /** A reveal door's refusal in the person's words (the vault's own codes first). */
+/** 主开发 r3147 (4): a PRESS refused while the run store is held (a For-you card's Allow, «Always», «Allow for 1 hour») — the
+ *  hold's sentence (a cause said by revealWords: a link, too large, not a file), and the card stays open to press again */
+export function heldPressWords(r) {
+  const c = r && r.cause;
+  if (c === 'link' || c === 'too_large' || c === 'not_a_file') return `${revealWords(r)} ${t('Your answer did not land; the card stays open — press it again once this is fixed')}`;
+  return t('Your answer did not land: the vault\'s run settings could not be read just now, so nothing was changed. The card stays open — press it again in a few minutes');
+}
 export function revealWords(r) {
   const c = r && r.code;
   if (c === 'reveal_needs_password') return t('Enter the second password again to see stored values');

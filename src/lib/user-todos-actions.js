@@ -35,7 +35,7 @@ import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane 
 import { pressInternalLink } from './internal-link-door.js'; // lane login-request-card piece 1: THE press of a link of the scheme (the page's door)
 import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
-import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
+import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal, heldPressWords } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
 import { replyBoxView } from '../inbox-reply.js'; // PURE (lane inbox-reply-dead-session): THE reply box both surfaces draw — never disabled
 import { grantUseBody, grantReplyText } from '../ask-grant.js'; // PURE (lane controls-that-lie): an ask that names a grant — the PATCH it plans, the answer the agent reads
 import { openTakeover } from './browser-takeover-queue.js'; // lane browser-takeover-queue: a takeover request's item opens its live view
@@ -626,7 +626,7 @@ export function inboxModel(app) {
       if (r && r.ok) { showToast(r.outcome === 'window' ? t('Allowed this conversation for 1 hour — each use shows a notice; take it back in the Vault window') : r.outcome === 'always' && r.command ? t('A standing approval for this command — the Vault window lists it; a changed program or script asks again') : r.outcome === 'always' ? t('A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it') : r.outcome === 'allowed' ? t('allowed') : r.outcome === 'late-allowed' ? t('let through once · waiting for it to run again') : r.outcome === 'denied' ? t('denied') : `${t('outcome unknown')} · ${String(r.outcome || '')}`); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer) — lane vault-use-grants: «Always» = a vault-use grant — r8: a LATE Allow (r20b's 'late-allowed') is never read as «denied»; an outcome these words do not know is said as one
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
-      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
+      showToast(code === 'store_held' ? heldPressWords(r) : code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
         : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : code === 'ask_redrawn' ? t('What this card writes changed since you saw it — read it again and answer again') : (r && r.error) || t('server unreachable'), { type: 'error' });   // lane vault-standing-request r4 (B): the card is drawn again in place
       return false;
     }
@@ -666,7 +666,7 @@ export function inboxModel(app) {
       if (r && r.ok) { const f = r.grantedFor || (r.outcome === 'granted-once' ? 'once' : r.outcome === 'granted' ? '8h' : null); showToast(f === 'standing' ? t('Allowed until you take it back — its row in the Vault window lists it') : f === '8h' ? t('Granted for 8 hours — a lock ends it') : f === 'once' ? t('Granted for its next run') : t('denied')); return true; }   // lane vault-standing-request: + a standing Allow   // r6: `grantedFor` (additive; an answer without it reads its `outcome` as the production client does)   // `outcome` (the vault door lays its facts' `state` over an answer)
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
-      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')
+      showToast(code === 'store_held' ? heldPressWords(r) : code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')
         : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : code === 'ask_redrawn' ? t('What this card writes changed since you saw it — read it again and answer again') : (r && r.error) || t('server unreachable'), { type: 'error' });   // r4 (B)
       return false;
     }

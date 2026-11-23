@@ -44,7 +44,7 @@ const STATUS = Object.freeze({
   bad_args: 400, not_granted: 403, not_running: 409, failed: 500,
   // lane vault-run-door: the switch and the run card's answer (people's doors)
   entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, 'todos-unread': 503 /* B-44f3: For you held unread — the answer doors name it, try once it reads */, ask_expired: 410, ask_changed: 409, bad_answer: 400,
-  ask_redrawn: 409, restore_failed: 500,   // lane vault-standing-request r4: the card drawn again at the press · a partial write not put back (by name)
+  ask_redrawn: 409, restore_failed: 500, store_held: 503,   // 主开发 r3147 (4): store_held = the run store HELD (a press refused by name, the card left open) · lane vault-standing-request r4: the card drawn again at the press · a partial write not put back (by name)
   always_not_offered: 400, conversation_gone: 410,
   window_not_offered: 400, window_card_only: 400, window_end_required: 400, window_too_long: 400, window_excepted: 409,   // lane vault-standing-request r7: «Allow for 1 hour» (r8: + the writer's cap, 除了)
   hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
@@ -103,6 +103,7 @@ const WORDS = Object.freeze({
   ask_changed: 'the request changed after it was shown — nothing ran', bad_answer: 'the answer is once, always or deny (always: 8h, 30d or forever)',
   ask_redrawn: 'what this card writes changed since it was shown — nothing was written; it is drawn again with the new words: read it and answer again',   // lane vault-standing-request r4 (B)
   restore_failed: 'the write failed partway and what it had written could not be put back on every entry — check «Who may use it…» on its row',   // r4 (C)
+  store_held: 'the vault\'s run settings could not be read just now, so nothing was changed; the card stays open — press it again in a few minutes',   // 主开发 r3147 (4)
   always_not_offered: '«always» is not offered for this command', conversation_gone: 'the conversation that asked has ended — nothing to run it for',
   window_not_offered: '«Allow for 1 hour» is not offered on this card (it has an «Always», or it is late)',   // r7
   window_card_only: 'a 1-hour approval is given from a run card only («Allow for 1 hour») — Save keeps one as it is and never makes or moves one',   // r7 (= vault-use-grants WORDS)
@@ -186,7 +187,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
-    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
+    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || (code === 'too_many_jobs' && r && r.words) || (code === 'store_held' && r && r.cause && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence · stage L3's F1: a full row's recipe names its entry
   };
   /** The request's password field(s), taken OFF the request (no later reader sees them). */
   const take = (req, ...names) => {

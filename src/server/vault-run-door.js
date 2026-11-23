@@ -657,9 +657,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const STORE_VALID = (d) => !!d && typeof d === 'object' && !Array.isArray(d);
   let storeHeld = null, heldTimer = null;
   let heldBefore = false, missingSeen = 0;   // a read failed since the last DATA read · how many «missing» answers came after it
+  let carryOwed = false;   // a load's migration carries not yet run (owed by the owner's Save's door, run at the next load)
   let tornAside = null;   // the torn bytes' copy in flight — every owner write waits for it (refused by name): until it lands, the file is their only copy
   const TORN_UNKEPT = 'its bytes did not parse and could not be kept aside, so the file is their only copy';   // the law (src/store-read.js afterSetAside): never written over
-  const COPY_LOOK = 20;   // 主开发 r3040 (a), the family's way (src/store-read-hold.js): the newest copies of torn bytes compared at a keep
+  const COPY_LOOK = 20, PART_AGE_MS = 24 * 3600e3;   // 主开发 r3040 (a), the family's way (src/store-read-hold.js): the newest copies of torn bytes compared at a keep
   // 主开发 r3040 (c): A HOLD THAT CANNOT MEND BY ITSELF says its cause and what to do (never «try again in a minute» for ever); the read
   // again goes on, so the person's fix lifts it
   const HELD_CAUSE = Object.freeze({
@@ -672,11 +673,18 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function heldNow() {
     if (storeHeld) {
       const c = HELD_CAUSE[storeHeld.code];
-      return named('store_held', c ? { why: storeHeld.why, cause: c.cause, words: `the vault's run store (data/${STORE_FILE}) ${c.said}, so it is HELD: nothing was changed and nothing is written over it — ${c.fix}; it is read again by itself` } : { why: storeHeld.why });
+      return named('store_held', c ? { why: storeHeld.why, cause: c.cause, words: `the vault's run store (${STORE_FILE}) ${c.said}, so it is HELD: nothing was changed and nothing is written over it — ${c.fix}; it is read again by itself` } : { why: storeHeld.why });
     }
     if (tornAside) return named('store_held', { why: 'its bytes did not parse and are being kept aside first' });
     return null;
   }
+  /** 主开发 r3147 (1) — THE ONE DOOR: every owner door and every press road starts HERE. The store is LOADED first (a load can SET the
+   *  hold: a read that fails, torn bytes whose copy starts), THEN the hold is asked — never the other order. → { d } (the store; null
+   *  while locked) or { held } (the refusal by name). No door calls load() or heldNow() before it (test-vault-run ⑥c 10 reads the source) */
+  function ownerLoad({ carry = true } = {}) { const d = load({ carry }); const h = heldNow(); return h ? { held: h } : { d }; }
+  /** 主开发 r3147 (2): an answer that carries the hold — its code OR its cause → the held refusal: the card or the request stays OPEN,
+   *  no «failed restore», nothing «put back» (nothing was written); else null. ONE helper for the three press callers and the legacy save */
+  function heldIn(r) { if (!r || r.ok || (r.code !== 'store_held' && r.cause !== 'store_held')) return null; return r.code === 'store_held' ? r : (heldNow() || named('store_held', { why: 'held' })); }
   /** ONE law for every read of the store (the load's and the read again's) → 'held', or the answer to apply. Only the LOAD's own read
    *  (`applied`) of data clears the hold's memory: a read again that answered lifts the hold, and the load that follows is judged too */
   function lawOf(a, { applied = true } = {}) {
@@ -724,8 +732,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   async function keepTornAside(buf) {
     const bytes = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf == null ? '' : buf), 'utf8');
     const prefix = `${STORE_FILE}.corrupt-`;
-    let names = [];
-    try { names = (await fs.promises.readdir(dataDir)).filter((n) => n.startsWith(prefix) && !n.includes('.part-')).sort().slice(-COPY_LOOK); } catch { names = []; }
+    let all = [];
+    try { all = (await fs.promises.readdir(dataDir)).filter((n) => n.startsWith(prefix)); } catch { all = []; }
+    for (const n of all.filter((x) => x.includes('.part-'))) {   // 主开发 r3147 (5): a .part- left by a crash mid-copy is never a copy — reaped by the keep once it is a day old
+      try { const p = path.join(dataDir, n); const st = await fs.promises.lstat(p); if (st.isFile() && now() - st.mtimeMs > PART_AGE_MS) await fs.promises.unlink(p); } catch { /* gone, or not ours to judge */ }
+    }
+    const names = all.filter((n) => !n.includes('.part-')).sort().slice(-COPY_LOOK);
     for (const n of names.reverse()) {
       try { const p = path.join(dataDir, n); const st = await fs.promises.lstat(p); if (st.isFile() && st.size === bytes.length && (await fs.promises.readFile(p)).equals(bytes)) return true; } catch { /* not this one */ }
     }
@@ -784,7 +796,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   if (rawSetRow && !SETROW_RAW.has(useGrants)) {
     SETROW_RAW.set(useGrants, rawSetRow);
     useGrants.setRow = (id, row, opts = {}) => {
-      if (opts && opts.reauthed === true) { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b): an owner's Save while held — its resume reads the unread store's marks: refused by name, nothing written
+      if (opts && opts.reauthed === true) { const o = ownerLoad({ carry: false }); if (o.held) return o.held; }   // 主开发 r3147 (1): THE ONE DOOR — its carries owed to the resume's load below (the Save writes first, as always)   // 主开发 r3040 (b): an owner's Save while held — its resume reads the unread store's marks: refused by name, nothing written
       let before = new Set();
       try { const p = useGrants.publicFor(id); before = new Set(((p && p.to) || []).map((m) => m && m.grant).filter(Boolean)); } catch { }   // the row's members BEFORE this write — so only the ones this Save ADDS are born resumed
       const r = rawSetRow(id, row, opts);
@@ -845,9 +857,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     } catch (e) { log(`the eviction notice could not be filed (${e.message})`); }
   }
   /** The store as the vault vouches for it — null unless unlocked. Read once per unlock (the epoch), kept in memory. */
-  function load() {
+  /** `carry: false` (the owner's Save's door only, 主开发 r3147): the store is read and its hold judged, but the migration carries
+   *  (carryAlways / carryWild) stay OWED to the next load — the Save's own write comes before them, as it always did */
+  function load({ carry = true } = {}) {
     if (vaultState() !== 'unlocked') return null;
-    if (db && dbEpoch === vault.epoch()) return db;
+    if (db && dbEpoch === vault.epoch()) { if (carry && carryOwed) runCarries(); return db; }
     let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {}, policyHours: {}, opened: {}, touched: {} };
     // THE STORE READ (主开发 r2920, the store-read law's own for this store): a READ that failed is no state — the store is HELD (the
     // door stays closed for runs, every owner switch refused by name, nothing written over the file) and read again OFF THE LOOP until it
@@ -862,7 +876,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     else if (a.state === 'corrupt') {   // bytes that were READ and are no store: kept aside once, the door fails closed (below); a copy that fails HOLDS the store
       why = `unreadable (${a.code})`;
       const k = keepTornAside(read.buf);
-      tornAside = k; k.then((kept) => { if (tornAside === k) tornAside = null; if (!kept) hold('not set aside', null, TORN_UNKEPT); });
+      tornAside = k; k.then((kept) => { if (tornAside === k) tornAside = null; if (!kept) hold('not set aside', null, TORN_UNKEPT); }, () => { if (tornAside === k) tornAside = null; hold('not set aside', null, TORN_UNKEPT); });   // a keep that threw: held, read again
     }
     if (raw && !why) {
       try {
@@ -884,10 +898,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       noteRefused(why);
     }
     db = next; dbEpoch = vault.epoch();
-    if (useGrants && !db.refused && db.always.length) carryAlways();
-    if (useGrants && !db.refused) carryWild();
+    carryOwed = true;
+    if (carry) runCarries();
     return db;
   }
+  function runCarries() { carryOwed = false; if (useGrants && db && !db.refused && db.always.length) carryAlways(); if (useGrants && db && !db.refused) carryWild(); }
   /** lane vault-use-grants: THE CARRY — the verified store's «always» rows (command shapes) become vault-use members (each
    *  entry × the conversation × the shape's hosts × its end), then the store keeps none; ONE audit line says how many. */
   function carryAlways() {
@@ -1022,7 +1037,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function setRunnable({ id, on, reauthed = false, by = 'user', keepPaused = false, quietEvict = false } = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
-    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b): held ⇒ refused before anything is taken back or touched
+    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — loaded, then the hold asked, before anything is taken back or touched
     const key = String(id || ''), ref = VI.parseRef(key);   // `<store>:<entry>#<field>` (src/vault-inventory.js — the row's id)
     if (!ref) return named('entry_unknown');
     const row = rowOf(ref);
@@ -1030,7 +1045,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (on && !c.runnable) return named('entry_has_its_own_door', { door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` });
     if (on && !row) return named('entry_unknown');
     if (on && !reauthed) return { ok: false, code: 'reveal_needs_password' };
-    const d = load();
+    const d = o.d;
     const wasRun = d.runnable.has(key), wasSusp = d.suspended.has(key);
     if (!!on === wasRun && !on === wasSusp && !(on && !keepPaused && pressOpened(d, key))) return { ok: true, id: key, open: wasRun, already: true };   // a MANUAL ON of a press-opened entry still runs (it converts it to owner-opened)
     const runnable = new Set(d.runnable), suspended = new Set(d.suspended);
@@ -1066,7 +1081,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function resumeGrant({ id, principal, reauthed = false, by = 'user' } = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
-    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b)
+    { const o = ownerLoad(); if (o.held) return o.held; }   // 主开发 r3147 (1): THE ONE DOOR
     const key = String(id || ''), ref = VI.parseRef(key);
     if (!ref) return named('entry_unknown');
     if (!reauthed) return { ok: false, code: 'reveal_needs_password' };
@@ -1083,7 +1098,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function setPolicy({ id, text = '', reauthed = false, by = 'user' } = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
-    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b)
+    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR
     const key = String(id || ''), ref = VI.parseRef(key);
     if (!ref) return named('entry_unknown');
     const row = rowOf(ref), c = classOf(ref, row);
@@ -1091,7 +1106,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!c.runnable || c.cls === 'agent-entry') return named('entry_has_its_own_door', { door: c.door || 'its own conversation only', words: `${VR.WORDS.entry_has_its_own_door}: ${c.door || 'its own conversation only'}` });
     const t = DM.vaultPolicyText(text);
     if (t && !reauthed) return { ok: false, code: 'reveal_needs_password' };
-    const d = load();
+    const d = o.d;
     const policies = { ...d.policies };
     if (t) policies[key] = { text: t, at: now(), by: String(by).slice(0, 40) }; else delete policies[key];
     const r = save({ runnable: d.runnable, always: d.always, policies });
@@ -1104,8 +1119,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  conversation × shape pairs go into the marked store); the For-you records of those approvals are closed. */
   function revokeApprovals({ id, by = 'user' } = {}) {
     if (vaultState() !== 'unlocked') return named('vault_locked');
-    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b): never «done, 0» over approvals the unread file still holds
-    const key = String(id || ''), d = load(), ap = d && d.policyApproved ? d.policyApproved[key] : null;
+    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — never «done, 0» over approvals the unread file still holds
+    const key = String(id || ''), d = o.d, ap = d && d.policyApproved ? d.policyApproved[key] : null;
     if (!ap) return { ok: true, revoked: 0 };
     // round 3 (MAJOR item 3): a Revoke is the owner's word over the whole SHAPE (not the exact command) — so EVERY variant of
     // a revoked shape draws the card. The revoke list keys on the coarse shape key (`x.shape`, the one recordApproval stored),
@@ -1255,8 +1270,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  | { ok: false, code } (a write failed — everything restored). */
   function standOpen(ids, principal, grant, by) {
     for (const id of ids) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) return { ok: false, why: 'entry_unknown', judged: c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown') }; }
-    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (THE MUST): a person's press while held is refused BY NAME before any write — never a «could not be put back» over nothing written
-    const d0 = load();
+    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — the press's own load may SET the hold (torn bytes met again after a lift): loaded, THEN asked, before any snapshot or write
+    const d0 = o.d;
     const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {}, touched: { ...(d0.touched || {}) } };   // B-be21: the toggle stamps too
     // r4 (C — the acceptance P4: the restore went through setRow, judged against the row the partial write had left, so a
     // replaced legacy wildcard could not be put back and its {ok:false} was never read — a REFUSED press left a no-end grant
@@ -1280,6 +1295,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this member — the owner's OTHER paused grants on this entry stay paused
       } catch (e) { failCode = 'not_written'; log(`[vault-run] a press's write for ${id} threw (${String(e && e.message || e).slice(0, 160)}) — what it wrote is put back`); break; }
     }
+    if (failCode === 'store_held' && touched.length === 1 && !made.length) return heldIn({ ok: false, cause: 'store_held' });   // 主开发 r3147 (2): nothing was written — nothing to put back
     if (failCode) {
       const failed = [];
       for (const id of touched) { let r = null; try { r = useGrants.restoreRow(id, rowSnap.get(id), { by: String(by).slice(0, 40) }); } catch (e) { r = { ok: false, code: 'not_written', error: e.message }; } if (!r || !r.ok) failed.push({ entry: id, code: (r && r.code) || 'not_written' }); }   // every row back to what it WAS, raw (never resumes a member)
@@ -1368,7 +1384,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (q.plan && q.plan.sig != null) { const nowChanges = changesOf(q.conv, q.entries, write); if (changeSigOf(nowChanges) !== q.plan.sig) return redrawRun(q, { always: nowChanges, ms: byCommand ? null : ms == null ? null : ms }); }
       const so = standOpen(q.entries, { kind: 'conversation', key: q.conv, name: q.who }, write, by);   // r4: each scope it names is added, or replaced when held with another end / ended (the card said so) — no other scope moves
       if (!so.ok && so.judged) { settle(q, 'denied', so.why); return so.judged; }
-      if (!so.ok && so.code === 'store_held') return so;   // 主开发 r3040: held ⇒ the card stays open to press again after the lift (never «denied»)
+      { const h = heldIn(so); if (h) return h; }   // 主开发 r3147 (2): the hold, by code or cause ⇒ the card stays open to press again (never «denied»)
       if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       const madeGrants = so.grants;
       held = { until, principal: GM.principalKey(GM.bareOf({ kind: 'conversation', key: q.conv })), entries: q.entries.slice(), ...(byCommand ? { scopeCmd: (() => { try { const c = GM.commandListOf([q.command]); return c && c[0] ? GM.commandKeyOf(c[0]) : null; } catch { return null; } })() } : { scopeHosts: (GM.hostListOf(q.hosts) || q.hosts).slice() }) };   // (r1834) the row's own until — ONE value, never a second now() — its member, the entries it WROTE and its own scopes (the store's own spelling)
@@ -1379,10 +1395,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // r6: the «always» row remembers its card's record (`todoId`) — its END is written there (a switch OFF, a lock, its time)
       if (ttl === '8h') { const g = { until, entries: q.entries, todoId: q.todoId || null }; shortAlways.set(q.pair, g); armGrantEnd(`always\n${q.pair}`, g, () => { if (shortAlways.get(q.pair) === g) shortAlways.delete(q.pair); }); }
       else {
-        const d = load();
+        const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — held ⇒ the card stays open
+        const d = o.d;
         if (!d) { settle(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
         const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40), ...(q.templateHash ? { templateHash: q.templateHash, templateBytes: q.templateBytes } : {}), ...(q.todoId ? { todoId: q.todoId } : {}) }] });
-        if (!r.ok && r.code === 'store_held') return r;   // 主开发 r3040: held ⇒ the card stays open
+        { const h = heldIn(r); if (h) return h; }   // 主开发 r3147 (2): held ⇒ the card stays open
         if (!r.ok) { settle(q, 'denied', r.code); return r; }
       }
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until });
@@ -1424,7 +1441,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (q.plan && q.plan.wsig != null) { const nowChanges = changesOf(q.conv, q.entries, write); if (changeSigOf(nowChanges) !== q.plan.wsig) return redrawRun(q, { window: nowChanges }); }
     const so = standOpen(q.entries, { kind: 'conversation', key: q.conv, name: q.who }, write, by);
     if (!so.ok && so.judged) { settle(q, 'denied', so.why); return so.judged; }
-    if (!so.ok && so.code === 'store_held') return so;   // 主开发 r3040: held ⇒ the card stays open to press again after the lift (never «denied»)
+    { const h = heldIn(so); if (h) return h; }   // 主开发 r3147 (2): the hold, by code or cause ⇒ the card stays open to press again (never «denied»)
     if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
     audit('vault-run-window', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), until, grants: so.grants, changes: auditChangesOf(so.changes) });
     // r8 (MAJOR 1): NO `seen` mark — every later run of this very command inside the hour is a window use (one notice), and
@@ -2077,7 +2094,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (changeSigOf(nowChanges) !== q.changeSig) return redrawRequest(q, nowChanges);
       const so = standOpen([q.id], { kind: 'conversation', key: q.conv, name: q.who }, grant, said.by);
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
-      if (!so.ok && so.code === 'store_held') return so;   // 主开发 r3040 (THE MUST): held ⇒ the request stays open to press again after the lift (the agent is never told «denied»)
+      { const h = heldIn(so); if (h) return h; }   // 主开发 r3147 (2): held, by code or cause ⇒ the request stays open to press again after the lift (the agent is never told «denied»)
       if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       try { alwaysTakenBack(String(q.id), 'revoked', GM.principalKey(GM.bareOf({ kind: 'conversation', key: q.conv }))); } catch { }   // (r1834's third read) a standing Allow may move a card's end on its hosts: that card says «replaced»
       audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess

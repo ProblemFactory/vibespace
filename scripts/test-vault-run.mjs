@@ -1296,6 +1296,11 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
 {
   // the failed reads are PLACED (never a real mount): the store's open fails as the test says, then the file reads as it is
   const fileOf = (w) => path.join(w.dataDir, DOOR.STORE_FILE);
+  // the red controls' edits (each anchor counted once in the door): a door with no hold asked, today's order (r3147: asked, then loaded)
+  const NO_HOLD_SWITCH = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — loaded, then the hold asked, before anything is taken back or touched", "    const o = { d: load() };"], ["    { const h = heldNow(); if (h) return h; }   // 主开发 r2920: the store is HELD (or its torn bytes' copy in flight) — refused BY NAME, nothing written over the unread file", '']];
+  const NO_HOLD_PRESS = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — the press's own load may SET the hold (torn bytes met again after a lift): loaded, THEN asked, before any snapshot or write", "    const o = { d: load() };"], ["    if (failCode === 'store_held' && touched.length === 1 && !made.length) return heldIn({ ok: false, cause: 'store_held' });", ''], ["  function heldIn(r) { if (!r || r.ok || (r.code !== 'store_held' && r.cause !== 'store_held')) return null; return r.code === 'store_held' ? r : (heldNow() || named('store_held', { why: 'held' })); }", "  function heldIn(r) { return r && !r.ok && r.code === 'store_held' ? r : null; }"]];
+  const NO_HOLD_REVOKE = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — never «done, 0» over approvals the unread file still holds", "    const o = { d: load() };"]];
+  const TODAY_ORDER = [["  function ownerLoad({ carry = true } = {}) { const d = load({ carry }); const h = heldNow(); return h ? { held: h } : { d }; }", "  function ownerLoad({ carry = true } = {}) { const h = heldNow(); if (h) return { held: h }; return { d: load({ carry }) }; }"], ["    if (failCode === 'store_held' && touched.length === 1 && !made.length) return heldIn({ ok: false, cause: 'store_held' });", ''], ["  function heldIn(r) { if (!r || r.ok || (r.code !== 'store_held' && r.cause !== 'store_held')) return null; return r.code === 'store_held' ? r : (heldNow() || named('store_held', { why: 'held' })); }", "  function heldIn(r) { return r && !r.ok && r.code === 'store_held' ? r : null; }"]];
   const placeSync = (file, codes) => { const real = fs.openSync; let k = 0; fs.openSync = function (p, ...x) { if (typeof p === 'string' && path.resolve(p) === path.resolve(file) && k < codes.length) { const code = codes[k++]; throw Object.assign(new Error(`placed ${code}`), { code }); } return real.call(this, p, ...x); }; return () => { fs.openSync = real; }; };
   const placeAsync = (file, codes) => { const real = fs.promises.open; let k = 0; fs.promises.open = function (p, ...x) { if (typeof p === 'string' && path.resolve(p) === path.resolve(file) && k < codes.length) { const code = codes[k++]; return Promise.reject(Object.assign(new Error(`placed ${code}`), { code })); } return real.call(this, p, ...x); }; return () => { fs.promises.open = real; }; };
   const suspendedOf = (w) => { try { return JSON.parse(fs.readFileSync(fileOf(w), 'utf8')).suspended || []; } catch { return null; } };
@@ -1323,11 +1328,11 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     try { d = w.mk(doorMod, SLOW); off = d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }); on = d.setRunnable({ id: 'mounts:m2#secretKey', on: false }); } finally { undo(); }
     return { codes: [off && off.code, on && on.code], kept: bothOff(suspendedOf(w)) };
   };
-  const r1 = await refusedLeg(DOOR), r0 = await refusedLeg(doorCopy("    { const h = heldNow(); if (h) return h; }   // 主开发 r2920: the store is HELD (or its torn bytes' copy in flight) — refused BY NAME, nothing written over the unread file", '', 'the save with no hold check'));
+  const r1 = await refusedLeg(DOOR), r0 = await refusedLeg(doorCopy(NO_HOLD_SWITCH, null, 'a switch with no hold asked'));
   const winWords = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8'), ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const KEY = "The vault's run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute";
   ok(r1.codes.every((c) => c === 'store_held') && r1.kept && !r0.kept && winWords.includes("if (c === 'store_held') return t(") && ZH.includes(JSON.stringify(KEY).slice(0, 60)) && JA.includes(JSON.stringify(KEY).slice(0, 60)),
-    'r2920 A SWITCH REFUSED WHILE HELD: an ON and an OFF are each refused by name (store_held), nothing written; the Vault window words the code (src/lib/vault-reveal.js, with zh / ja); red control: «the save with no hold check» writes over the file', { r1, r0 });
+    'r2920 A SWITCH REFUSED WHILE HELD: an ON and an OFF are each refused by name (store_held), nothing written; the Vault window words the code (src/lib/vault-reveal.js, with zh / ja); red control: «a switch with no hold asked» (neither its door nor the save asks) writes over the file', { r1, r0 });
   // (3) THE LIFT WITHOUT A RESTART: the load's read fails, the first read again (off the loop) fails too, the next one reads — the hold
   // is lifted by itself, the owner's next switch lands, and every switch made before stands; red control: a read again that never lifts
   const liftLeg = async (doorMod) => {
@@ -1455,7 +1460,7 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     const second = open1 ? d.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true }) : null;
     return { asked: !!(sq && sq.askId), first: first && first.code, open1, unchanged, putBack, lifted, second: !!(second && second.ok), sq: sq && (sq.code || null) };
   };
-  const p1 = await pressLeg(DOOR), p0 = await pressLeg(doorCopy("    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (THE MUST): a person's press while held is refused BY NAME before any write — never a «could not be put back» over nothing written", '', 'a press road with no hold check'));
+  const p1 = await pressLeg(DOOR), p0 = await pressLeg(doorCopy(NO_HOLD_PRESS, null, 'a press road with no hold check'));
   ok(p1.asked && p1.first === 'store_held' && p1.open1 && p1.unchanged && !p1.putBack && p1.lifted && p1.second && !p0.open1,
     `r3040 THE MUST — A PERSON'S PRESS WHILE HELD IS ATTENDED: a standing request's Allow while held is refused by name (store_held), the request stays open, nothing is «put back», the file is unchanged; pressed again after the lift it lands; red control: «a press road with no hold check» answers ${p0.first} and settles the request`, { p1, p0 });
   // (9) 主开发 r3040 (b) + (c) — THE HOLD IS ASKED FIRST at every owner door (a Revoke, a policy, a resume: refused by name, never «done»);
@@ -1469,10 +1474,81 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     const rv = d.revokeApprovals({ id: 'mounts:m1#secretKey' }), pol = d.setPolicy({ id: 'mounts:m1#secretKey', text: '', reauthed: true }), rs = d.resumeGrant({ id: 'mounts:m1#secretKey', principal: 'conversation:c-1', reauthed: true });
     return { sw: sw && sw.code, cause: sw && sw.cause, words: String(sw && sw.words), rv: rv && (rv.code || (rv.ok ? 'ok' : '?')), pol: pol && pol.code, rs: rs && rs.code };
   };
-  const g1 = await firstLeg(DOOR), g0 = await firstLeg(doorCopy("    { const h = heldNow(); if (h) return h; }   // 主开发 r3040 (b): never «done, 0» over approvals the unread file still holds", '', 'a Revoke with no hold check'));
+  const g1 = await firstLeg(DOOR), g0 = await firstLeg(doorCopy(NO_HOLD_REVOKE, null, 'a Revoke with no hold check'));
   const winW = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
   ok(g1.sw === 'store_held' && g1.cause === 'link' && /is a link/.test(g1.words) && !/try again in a minute/.test(g1.words) && g1.rv === 'store_held' && g1.pol === 'store_held' && g1.rs === 'store_held' && g0.rv === 'ok' && winW.includes("if (c === 'store_held' && r.cause === 'link') return t("),
     `r3040 (b) + (c): THE HOLD IS ASKED FIRST — a Revoke, a policy and a resume while held are refused by name (never «done»); a store that is a link says so and what to do (cause «${g1.cause}», never «try again in a minute»), worded in the window; red control: «a Revoke with no hold check» answers ${g0.rv}`, { g1, g0 });
+  // (10) 主开发 r3147 (1) + (2) + (4) — THE ONE DOOR, read in the source: every owner door and press road starts at ownerLoad() (loaded,
+  // then the hold asked): no door asks heldNow() itself, none loads before it; the three press callers and the legacy save ask heldIn()
+  // before any settle; the two For-you card handlers and the route word store_held; red control: a planted door that asks the hold itself
+  const doorCensus = (t) => {
+    const strip = (x) => x.replace(/\/\/[^\n]*/g, '');
+    const bad = [];
+    for (const name of ['setRunnable', 'resumeGrant', 'setPolicy', 'revokeApprovals', 'standOpen']) {
+      const a = t.indexOf(`  function ${name}(`); if (a < 0) { bad.push(`${name}: not found`); continue; }
+      const c = strip(t.slice(a, t.indexOf('\n  }\n', a)));
+      const own = c.indexOf('ownerLoad()'), ld = c.search(/[^\w.]load\(\)/);
+      if (own < 0) bad.push(`${name}: no ownerLoad()`);
+      if (/\bheldNow\(/.test(c)) bad.push(`${name}: asks heldNow() itself`);
+      if (ld >= 0 && (own < 0 || ld < own)) bad.push(`${name}: loads before ownerLoad()`);
+    }
+    const w0 = t.indexOf('    useGrants.setRow = (id, row, opts = {}) => {'), wrap = strip(t.slice(w0, t.indexOf('      return r;\n    };', w0)));
+    if (!/opts\.reauthed === true\) \{ const o = ownerLoad\(\{ carry: false \}\); if \(o\.held\) return o\.held; \}/.test(wrap) || /\bheldNow\(/.test(wrap)) bad.push('the owner\'s Save: not through ownerLoad()');
+    const l0 = t.indexOf("    } else if (a === 'always') {"), legacy = strip(t.slice(l0, t.indexOf("      audit('vault-run-always',", l0)));
+    if (!/const o = ownerLoad\(\); if \(o\.held\) return o\.held;/.test(legacy) || /[^\w.]load\(\)/.test(legacy.slice(0, legacy.indexOf('ownerLoad()')))) bad.push('the legacy «always» save: not through ownerLoad()');
+    return { bad, settles: (t.match(/\{ const h = heldIn\((so|r)\); if \(h\) return h; \}/g) || []).length };
+  };
+  const dc = doorCensus(SRCD), dcp = doorCensus(SRCD.replace(NO_HOLD_REVOKE[0][0], "    { const h = heldNow(); if (h) return h; } const o = { d: load() };"));
+  const UTA = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8'), RV = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8'), VRV = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
+  const worded = UTA.split("showToast(code === 'store_held' ? heldPressWords(r) : code === 'ask_settled'").length - 1;
+  ok(!dc.bad.length && dc.settles === 4 && dcp.bad.some((b) => /revokeApprovals: asks heldNow\(\) itself/.test(b)) && worded === 2 && /store_held: 503/.test(RV) && /\n  store_held: 'the vault\\'s run settings could not be read just now/.test(RV) && /export function heldPressWords\(r\)/.test(VRV),
+    `r3147 (1) + (2) + (4) THE ONE DOOR: the five owner doors, the owner's Save and the legacy «always» save start at ownerLoad() (loaded, then the hold asked) and none asks the hold or loads before it; ${dc.settles} press callers ask heldIn() before any settle; both For-you card handlers word store_held (${worded}), the route says it (503 and its words); red control: a planted door that asks the hold itself is named (${dcp.bad.join('; ')})`, { dc, dcp, worded });
+  // (11) 主开发 r3147 THE MUST — THE HOLD IS ASKED AFTER THE LOAD THAT CAN SET IT: torn bytes whose copy fails (placed: the copy's open
+  // refused, the disk full) ⇒ held; a standing request filed while held; space back: the read again keeps the copy and lifts; the
+  // person presses Allow — the press's own load meets the torn bytes again (their compare in flight): refused BY NAME, the request
+  // still OPEN, nothing «put back»; once the compare has answered, a second Allow lands; red control: today's order (asked, then loaded)
+  const tornPressLeg = async (doorMod) => {
+    const VUGs = R('src/server/vault-use-grants.js'), GSs = R('src/server/grants-store.js');
+    const w = await world({ doorMod }); twoOff(w);
+    const gss = GSs.create({ memory: true });
+    const ugs = VUGs.create({ grants: () => gss, vault: w.vault, dataDir: w.dataDir, log: (m) => w.logs.push(String(m)) });
+    const torn = '{"suspended": ["mounts:m1#secretKey"], "ru';
+    fs.writeFileSync(fileOf(w), torn);
+    const { again, ex } = manualRetry();
+    const real = fs.promises.open; let fails = 1;
+    fs.promises.open = function (p, ...x) { if (typeof p === 'string' && path.basename(p).startsWith(DOOR.STORE_FILE + '.corrupt-') && fails > 0) { fails--; return Promise.reject(Object.assign(new Error('placed ENOSPC'), { code: 'ENOSPC' })); } return real.call(this, p, ...x); };
+    let d, held = false, sq = null, lifted = false, first = null, open1 = false, second = null, putBack = false;
+    try {
+      d = w.mk(doorMod, { ...ex, useGrants: ugs, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) });
+      d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the load: torn bytes, their copy refused ⇒ HELD
+      await sleep(60);
+      held = !!d._storeHeld();
+      sq = await d.request({ caller: w.caller, entry: 'vault://mounts/m1/secretKey', purpose: 'a standing approval across a torn lift', standing: true, hosts: ['api.example.com'], cwd: w.work });
+      if (again.length) again.shift()();   // space back: the read again keeps the copy whole and lifts
+      lifted = await waitLift(d, 1500);
+      const logs0 = w.logs.length;
+      first = sq && sq.askId ? d.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true }) : null;   // the press's own load: the torn bytes again
+      open1 = !!(sq && sq.askId && d._requests.has(sq.askId));
+      putBack = w.logs.slice(logs0).some((l) => /could not be put back/.test(l));
+      await sleep(80);   // the compare answered: the copy is there
+      second = open1 ? d.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true }) : null;
+    } finally { fs.promises.open = real; }
+    return { held, asked: !!(sq && sq.askId), lifted, first: first && first.code, open1, putBack, second: !!(second && second.ok) };
+  };
+  const t1 = await tornPressLeg(DOOR), t0 = await tornPressLeg(doorCopy(TODAY_ORDER, null, 'today\'s order: the hold asked, then loaded'));
+  ok(t1.held && t1.asked && t1.lifted && t1.first === 'store_held' && t1.open1 && !t1.putBack && t1.second && !t0.open1,
+    `r3147 THE MUST — THE HOLD IS ASKED AFTER THE LOAD THAT CAN SET IT: across a torn lift the press's own load meets the torn bytes again; its Allow is refused by name, the request stays open, nothing is «put back»; once the compare has answered the second Allow lands; red control: «today's order» answers ${t0.first} and settles the request`, { t1, t0 });
+  // (12) 主开发 r3147 (5): a .part- left by a crash mid-copy is never a copy — the keep reaps it once it is a day old; a fresh one stays
+  {
+    const w = await world(); const torn = '{"suspended": ["mounts:m1#secretKey"], "ru';
+    fs.writeFileSync(fileOf(w), torn);
+    const oldPart = path.join(w.dataDir, DOOR.STORE_FILE + '.corrupt-2026-01-01T00-00-00-000Z.part-1-aaaaaaaa'), freshPart = path.join(w.dataDir, DOOR.STORE_FILE + '.corrupt-2026-01-02T00-00-00-000Z.part-2-bbbbbbbb');
+    fs.writeFileSync(oldPart, 'x'); fs.writeFileSync(freshPart, 'y');
+    const t2 = (Date.now() - 2 * 86400e3) / 1000; fs.utimesSync(oldPart, t2, t2);
+    const d = w.mk(DOOR, SLOW); d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the load: torn bytes — the keep runs
+    await sleep(80);
+    ok(!fs.existsSync(oldPart) && fs.existsSync(freshPart), 'r3147 (5): the keep reaps a .part- file once it is a day old (a crash mid-copy, never a copy); a fresh one stays', { old: fs.existsSync(oldPart), fresh: fs.existsSync(freshPart) });
+  }
 }
 
 console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');
