@@ -889,7 +889,10 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   };
   const d1 = await dl();
   ok(d1.q.ok === false && d1.q.code === 'answering' && !!d1.before && d1.before.code === 'answering', 'ONE DEADLINE FOR THE WHOLE CALL: the re-entry after a press that started in the list read keeps the first deadline — BUSY by name at the limit, answered BEFORE the press was released (the press still running)', { q: d1.q, before: d1.before });
-  const d1r = await dl((src) => src.replace("propose({ targets, why }, { caller, reach }, depth + 1, deadline);", "propose({ targets, why }, { caller, reach }, depth + 1);").replace("proposeWakeGrant(caller, { rows: given, why }, depth + 1, deadline, true);", "proposeWakeGrant(caller, { rows: given, why }, depth + 1, 0, true);"));   // stale-pins: kept — a red control whose mutant REBUILDS the old re-entry (its own deadline)
+  // r2988 (two UTC sightings under a whole gate's load): the mutant's re-entry started a FRESH 300 ms deadline, so after the press was
+  // released the press's own tail raced that timer — a loaded run let the timer win and the mutant answered BUSY instead of filing.
+  // The mutant's own deadline is now far (60 s): it waits on the HELD press alone (a promise), never on a timer a load can beat
+  const d1r = await dl((src) => src.replace("propose({ targets, why }, { caller, reach }, depth + 1, deadline);", "propose({ targets, why }, { caller, reach }, depth + 1, Date.now() + 60000);").replace("proposeWakeGrant(caller, { rows: given, why }, depth + 1, deadline, true);", "proposeWakeGrant(caller, { rows: given, why }, depth + 1, Date.now() + 60000, true);"));   // stale-pins: kept — a red control whose mutant REBUILDS the old re-entry (its own deadline)
   ok(d1r.q.ok === true && d1r.before === null, 'RED CONTROL: a re-entry that starts its own deadline waits past the limit and FILES after the command gave up (still waiting when the press was released) — the leg above would read it', { q: d1r.q, before: d1r.before });
   // a press that STARTS AND ENDS inside the list read is seen (the proposer's presses counted before and after) — here it granted
   // the very job proposed: «already granted», no card drawing it «not granted»

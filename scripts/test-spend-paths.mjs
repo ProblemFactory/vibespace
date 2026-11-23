@@ -2645,7 +2645,7 @@ console.log('\n§4 the real auto-resume: the ceiling refuses what the loop break
 /** The world: one pooled member, one conversation, real symlinks, real engine
  *  (which constructs the real guard), real auto-resume wired exactly as
  *  server.js wires it. */
-function mkWorld({ settings = {}, send = null, resumeVerb = null, arModule = arMod } = {}) {
+function mkWorld({ settings = {}, send = null, resumeVerb = null, arModule = arMod, gateHold = null } = {}) {
   const root = tmpdir('vs-spend-world-');
   const dataDir = path.join(root, 'data');
   const am = new AccountManager({ dataDir });
@@ -2684,7 +2684,7 @@ function mkWorld({ settings = {}, send = null, resumeVerb = null, arModule = arM
     notify: (id, s2, text) => notes.push({ id, text }),
     sendToSession: (id, s2, text) => { if (send && !send(id, s2, text)) return false; fired.push({ id, text }); return true; },
     ...(resumeVerb ? { resumeVerb } : {}),
-    beforeFire: (id, s2) => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return false; } },
+    beforeFire: (id, s2) => { try { const g = eng.beforeAutoResumeFire(id, s2); return gateHold ? gateHold.then(() => g) : g; } catch { return false; } },   // `gateHold` (r2988): the gate held on a promise
     fireIdentity: (id, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } },
     // MIRRORS server.js, including r5's probe flag and release half — a harness
     // that drops `hold` makes the pre-gate probe reserve the slot the charging
@@ -2693,18 +2693,21 @@ function mkWorld({ settings = {}, send = null, resumeVerb = null, arModule = arM
     noteSpend: (id, s2, identity, hold) => eng.spendGuard.note({ reason: 'auto-resume', session: s2, identity, hold }),
     releaseSpend: (id, s2, hold) => eng.spendGuard.release({ hold }),
   });
+  // r2988: THE FIRE'S OWN STATE — `_arFiring` is set while a continue's pre-fire gate (a promise) is in flight and cleared once
+  // its delivery ran: a wait on it, bounded, never a fixed sleep a loaded whole gate outlasts
+  const settled = async (boundMs = 10000) => { for (const t0 = Date.now(); [...sessions.values()].some((x) => x && x._arFiring) && Date.now() - t0 < boundMs;) await tick(5); };
   const mkSession = (sid) => {
     const s = { backend: 'claude', mode: 'chat', _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, _autoResume: true, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: sid };
     sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, M1); return s;
   };
   return {
     root, dataDir, am, eng, ar, sessions, P, M1, M2, notices, noticeKeys, notes, fired, inbox, writeCache, healthy, cacheDir,
-    mkSession,
+    mkSession, settled,
     // An arm needs a reset in the FUTURE (armIfEnabled refuses a past one), and
     // the tick is driven with an explicit `now` past reset + GRACE_MS instead
     // of sleeping 15s.
     arm: (s) => ar.armIfEnabled(s._webuiId, s, Date.now() + 60_000, 'usage limit'),
-    fireDue: async () => { ar.tick(Date.now() + 120_000); await tick(80); },
+    fireDue: async () => { ar.tick(Date.now() + 120_000); await tick(80); await settled(); },   // r2988: then until no gate is in flight
   };
 }
 const probe = mkWorld();
@@ -2719,6 +2722,20 @@ if (!probe) {
   // fire #1 — allowed
   w.arm(s); await w.fireDue();
   ok('§4 the first continue is delivered', w.fired.length === 1, JSON.stringify(w.fired.map((f) => f.id)));
+  // r2988 (one UTC sighting in a whole gate, green alone: the leg above read [] — the continue was delivered and charged once, LATER
+  // than the old fixed 80 ms; the ceiling then refused the second as it should): THE WAIT IS THE FIRE'S OWN STATE. RED by a HELD
+  // promise, never by load: a second world whose pre-fire gate is held past those 80 ms — the fixed sleep reads no continue while
+  // the gate is in flight; the wait on the fire's state reads it delivered once, the gate done
+  {
+    let open = null; const hold = new Promise((r) => { open = r; });
+    const wh = mkWorld({ settings: { 'spend.unattendedPerIdentityHour': 1 }, gateHold: hold });
+    const sh = wh.mkSession('sess-h-1');
+    wh.arm(sh); wh.ar.tick(Date.now() + 120_000); await tick(80);
+    const atSleep = wh.fired.length, firing = !!sh._arFiring;
+    open(); await wh.settled();
+    ok('§4 r2988 THE WAIT IS THE FIRE\'S OWN STATE: a pre-fire gate held past the old fixed 80 ms — that sleep reads NO continue while the gate is in flight (the whole gate\'s sighting, made by a held promise); the wait on the fire\'s state reads it delivered ONCE',
+      atSleep === 0 && firing && wh.fired.length === 1 && !sh._arFiring, { atSleep, firing, fired: wh.fired.map((f) => f.id) });
+  }
   // the loop breaker itself would allow a TIMED fire for a different arm, so
   // this next one is refused by the CEILING and by nothing else
   const s2 = w.mkSession('sess-2-2');

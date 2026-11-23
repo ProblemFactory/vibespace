@@ -53,6 +53,7 @@ const now = () => clock;
 // ── the fake provider (OpenAI dialect): a record whose own part says URGENT needs you (0.86) ──
 const got = [];
 let inflight = 0, maxIn = 0;
+let holdAt = 0, holdP = null;   // r2988: the call numbered `holdAt` is HELD on `holdP` (a promise) — its flight a state, never a 40 ms window
 const recordPart = (input) => String(input).split('———').pop();
 // the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
 const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
@@ -60,6 +61,7 @@ async function fakeFetch(url, opts) {
   inflight++; maxIn = Math.max(maxIn, inflight);
   const raw = await bodyText(opts), body = JSON.parse(raw);
   got.push({ url, body, raw, auth: opts.headers.authorization });
+  if (holdP && got.length === holdAt) await holdP;
   await sleep(40);
   inflight--;
   const hot = /URGENT/.test(recordPart(body.input));
@@ -121,16 +123,22 @@ console.log('① the scan: the first read never waits; 4 untagged rows ⇒ 4 cal
 const W = world();
 const A = await engines('main', W);
 A.events.length = 0;
+let openLast = null; holdAt = got.length + 4; holdP = new Promise((r) => { openLast = r; });   // r2988: the LAST row's call held
 const t0 = Date.now();
 const d0 = A.eng.digest();
 const firstMs = Date.now() - t0;
 ok(got.length === 0 && (d0.conversations || []).length === 6 && d0.judging === true, `the first read answered with all 6 rows BEFORE any judgment (0 calls at its return, ${firstMs} ms) and says judging: true`, { got: got.length, n: (d0.conversations || []).length, judging: d0.judging });
 ok(FACT.every((id) => (tagOf(d0, id) || {}).code === 'assigned'), 'FIXTURE: the two handed-over rows wear the FACT tag (assigned)');
-for (let i = 0; i < 400 && !(got.length === 4 && inflight > 0); i++) await sleep(1);
+// r2988 (one UTC sighting in a whole gate, green alone): the poll in 1 ms sleeps had to land inside the last call's 40 ms flight, and
+// a loaded run's timers overshot it. The call is HELD now: the wait is on its state (bounded), and the reads' effect is read from
+// the queue's own size, at once
+for (const tw = Date.now(); !(got.length === 4 && inflight > 0) && Date.now() - tw < 10000;) await sleep(2);
 const midFlight = got.length === 4 && inflight > 0;
 A.eng.digest(); A.eng.digest();   // reads while the LAST row's call is in flight (dequeued, no verdict yet)
+const queuedAfter = A.eng.attention.status().queued;
+holdP = null; openLast();
 ok(await idle(A.eng), 'the queue drains');
-ok(midFlight && got.length === 4, `two reads while a row's call is in flight queue it NOT again — one call per row (${got.length} calls; the heavy leg's reload caught the double call)`);
+ok(midFlight && queuedAfter === 0 && got.length === 4, `two reads while a row's call is in flight queue it NOT again — one call per row (${got.length} calls, ${queuedAfter} queued by the reads; the heavy leg's reload caught the double call)`);
 ok(got.length === 4 && got.every((g) => g.body.questions.length === 8 && (String(g.body.input).match(/\[record\]/g) || []).length === 1 && /\/v1\/decisions$/.test(g.url)), 'exactly 4 calls — ONE record each, every one of the 8 rubric questions (needs_now + 7 clauses) in that call', got.map((g) => [g.body.questions.length, (String(g.body.input).match(/\[record\]/g) || []).length]));
 ok(maxIn === 3, `the queue keeps ≤ 3 calls in flight (measured ${maxIn})`);
 ok(got.every((g) => /^\n\n\[record\]\nfacts: addressed: no mention of the reader; kind: a group; 0 messages since the reader last read, \d+ min ago\ntitle: /.test(recordPart(g.body.input))) && A.eng.attention.status().scans === 1, 'lane decision-attention-facts: each record opens with its facts line (the backlog of a first walk is read by construction: 0 since the read line); the scan\'s facts built ONCE for the 4 rows', recordPart(got[0].body.input).slice(0, 200));
@@ -243,6 +251,24 @@ const C2 = await engines('control-stale', world(), engMut2);
 C2.eng.digest();
 await idle(C2.eng);
 ok(factNamed(got.slice(n)).length >= 1, `CONTROL: judging the QUEUED snapshot (no re-read before the call) sends the rows handed over after they were queued (${factNamed(got.slice(n)).length}) — the race leg ② caught`);
+// r2988: the RED of ①'s in-flight leg, made by a HELD promise (never by load): the scan with the in-flight guard removed in a copy —
+// the last row's call held, two reads queue that very row again (the queue's own size, read at once)
+const anchor3 = 'queue.has(v.key) || flying.has(v.key) ||';
+const attMut3 = MUT.write('src/server/channels-attention.js', editAnchor(attSrc, anchor3, 'queue.has(v.key) ||', "src/server/channels-attention.js"), 'no-flying');
+const engMut3 = MUT.load('src/server/channels-engine.js', editAnchor(engSrc, "require('./channels-attention.js')", `require(${JSON.stringify(attMut3)})`, "src/server/channels-engine.js"), 'mut-flying');
+{
+  const C3 = await engines('control-flying', world(), engMut3);
+  let open3 = null; holdAt = got.length + 4; holdP = new Promise((r) => { open3 = r; });
+  const g0 = got.length;
+  C3.eng.digest();
+  for (const tw = Date.now(); !(got.length === g0 + 4 && inflight > 0) && Date.now() - tw < 10000;) await sleep(2);
+  const held3 = got.length === g0 + 4 && inflight > 0;
+  C3.eng.digest(); C3.eng.digest();
+  const queued3 = C3.eng.attention.status().queued;
+  holdP = null; open3();
+  await idle(C3.eng);
+  ok(held3 && queued3 >= 1, `RED CONTROL (r2988: the in-flight guard removed, in a copy): with the last row's call HELD, two reads queue it AGAIN (${queued3} queued) — ①'s leg would read it`, { held3, queued3 });
+}
 for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
 
 console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention-facts): @ / reply / DM / unread since the read line / one mail in 2 inboxes / an automated sender / mail trimmed — never a name');
