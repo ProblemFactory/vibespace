@@ -122,7 +122,7 @@ const jwt = (claims) => `h.${Buffer.from(JSON.stringify(claims)).toString('base6
 const codexLogin = (dir, { email = 'c1@example.invalid', user = 'user-acid1', ws = 'ws-acid1', userKey = 'chatgpt_user_id', idToken = true } = {}) => {
   fs.mkdirSync(dir, { recursive: true });
   const claims = { email, 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro', ...(user !== null ? { [userKey]: user } : {}), ...(ws !== null ? { chatgpt_account_id: ws } : {}) } };
-  fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({ tokens: { access_token: 'a-acid', ...(idToken ? { id_token: jwt(claims) } : {}) } }));
+  fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'a-acid', ...(idToken ? { id_token: jwt(claims) } : {}), ...(ws !== null ? { account_id: ws } : {}) }, last_refresh: '2026-11-22T00:00:00Z' }));   // as the codex CLI writes it (the workspace beside the tokens)
   return dir;
 };
 const rd = { facts: (p) => { const st = fs.statSync(p); return { text: fs.readFileSync(p, 'utf8'), mtimeMs: st.mtimeMs, size: st.size }; }, readText: (p) => fs.readFileSync(p, 'utf8') };   // a plain reader (run-reads' shape)
@@ -208,6 +208,21 @@ ok(typeof CL.folderIdentityOf === 'function' && typeof CX.folderIdentityOf === '
   let threw = null, none = 'unset';
   try { none = am.identityRecordOf(); } catch (e) { threw = e.message; }
   ok(r('no-such-row') === null && !threw && none === null && r(a1.id, { since: Date.now() + 60e3 }) === null, 'no claim (null, never a throw) for nothing handed, a gone row, or facts not confirmed within the decider\'s bound (the decision road)', threw);
+  // THE RECORD NEVER NAMES A SEAT BY A CONFIG IT CANNOT TIE TO THE CREDENTIALS BESIDE IT (主开发 r2779): a /login inside one of the row's
+  // sessions writes another account's credentials beside the config of the login before (sessions relocate only the secret store)
+  { const rt = am.createSubscription({}).id, d = am.subDir(rt), tok = (k, rte) => JSON.stringify({ claudeAiOauth: { accessToken: 'at-' + k, refreshToken: 'rt-' + k, expiresAt: Date.now() + 3600e3, ...(rte ? { refreshTokenExpiresAt: rte } : {}), scopes: ['user:inference'] } });
+    claudeLogin(d); fs.writeFileSync(path.join(d, '.credentials.json'), tok('first', 1e15)); am.finalizeSubscription(rt);   // the product's own sign-in: tied
+    await am.signinFactsSettled([rt], { withinMs: 0 });
+    const r0 = am.identityRecordOf(rt);
+    fs.writeFileSync(path.join(d, '.credentials.json'), tok('refreshed', 1e15)); await am.displayRefresh(rt);   // a refresh: the deadline kept
+    const r1 = am.identityRecordOf(rt, { withinMs: 0 }) || am.identityRecordOf(rt);
+    fs.writeFileSync(path.join(d, '.credentials.json'), tok('switched', 2e15)); await am.displayRefresh(rt);    // a /login inside a session: a new deadline, the config untouched
+    const r2 = am.identityRecordOf(rt);
+    ok(r0 && r0.seat === PERSON && r1 && r1.seat === PERSON && r2 && r2.seat === null && r2.org === null && sameAccount(r0, r2) !== 'same',
+      'r2779 (A): a config is tied to the credentials by the login session the product\'s sign-in saw — a refresh (its deadline kept, the refresh token rotated) keeps the seat; another login beside the old config (a new deadline) names NO seat and NO organisation, never «same» as the login before', JSON.stringify([r0 && r0.seat, r1 && r1.seat, r2 && r2.seat]));
+    fs.writeFileSync(path.join(d, '.credentials.json'), tok('nodeadline-b', null)); am.finalizeSubscription(rt); fs.writeFileSync(path.join(d, '.credentials.json'), tok('nodeadline-c', null)); await am.displayRefresh(rt);
+    const r3 = am.identityRecordOf(rt);
+    ok(r3 && r3.seat === null, '…credentials with no deadline: the refresh token the sign-in saw ties them; another refresh token unties them (no seat)', r3 && r3.seat); }
   // THE IDS STAY IN MEMORY (r1477's standing word): nothing the product shows or sends carries a seat's or an organisation's id
   await am.displaySettled();
   const shown = [JSON.stringify(am.list()), JSON.stringify(am.decisionList({ withinMs: 60e3 })), JSON.stringify(am.rowOf(a1.id)), JSON.stringify(am.rowOf(cx)), JSON.stringify(am.signinFacts(a1.id, { withinMs: 60e3 })), JSON.stringify(am.signinFacts(cx, { withinMs: 60e3 })),
@@ -216,6 +231,8 @@ ok(typeof CL.folderIdentityOf === 'function' && typeof CX.folderIdentityOf === '
   ok(JSON.stringify(r(a1.id)).includes(PERSON) && JSON.stringify(r(a3.id)).includes(ORG2) && JSON.stringify(r(cx)).includes('ws-AcId9'), 'premise: the records themselves hold the ids (the search below would see them)');
   ok(!ids.some((v) => shown.includes(v)), `THE IDS STAY IN MEMORY: no list row, decision row, signinFacts answer, finalize answer (claude and codex), kept-facts answer or accounts push (${pushes.length}) carries a seat or organisation id`, ids.filter((v) => shown.includes(v)));
   ok(!('identity' in am._display.get(am._acctDir('claude', a1.id))), 'the keeper\'s get() answer has no identity field (identityOf is its own accessor)');
+  { const rdx = am.displayReaderOf(cx); let kept = null; try { kept = rdx && rdx.readText(path.join(am._acctDir('codex', cx), 'auth.json')); } catch { kept = null; }
+    ok(!!kept && kept.includes('auth_mode') && !kept.includes('ws-AcId9') && !kept.includes('user-AcId9') && !kept.includes('last_refresh'), 'r2779 (B): a codex row\'s kept text keeps its SHAPE only (its mode, the masked token fields) — never the workspace id (tokens.account_id) the CLI writes beside the tokens, nor the user id', kept && kept.slice(0, 160)); }
   am.close(); }
 
 // PURE: the module imports nothing and opens nothing

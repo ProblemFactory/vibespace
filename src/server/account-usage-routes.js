@@ -757,16 +757,20 @@ app.post('/api/accounts/:id/relogin', (req, res) => {
     }
     const dir = accounts.subDir(a.id);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // THE BEFORE (row B-87fd identity unit 3): what this row's folder names at the press, kept in memory for the resolve, with the
+    // press's ATTEMPT id the login command carries — a row that is ASKING refuses the press by name (r2734 MUST 2)
+    let begun = null;
+    try { begun = accounts.reloginBegin(a.id); } catch { begun = null; }
+    if (begun === 'ask-open') return res.status(409).json({ error: 'answer the question on this row first — its two presses are right there', code: 'relogin_ask_open' });
     const loginCmd = buildClaudeSubscriptionLoginCommand({
       nodeCmd: NODE_CMD,
       helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER,
       claudeCmd: claudeBin(),
       configDir: dir,
+      attempt: begun && begun.attempt,
     });
     let baselineAttempt = null;
     try { baselineAttempt = accounts._subscriptionLoginStatus?.(a.id)?.attempt || null; } catch { }
-    // THE BEFORE (row B-87fd identity unit 3): what this row's folder names at the press, kept in memory for the resolve
-    try { accounts.reloginBegin(a.id); } catch { }
     res.json({ success: true, id: a.id, loginCmd, baselineAttempt });
   } catch (e) { failAcct(res, e); }
 });
@@ -818,6 +822,7 @@ app.post('/api/accounts/:id/relogin-finalize', (req, res) => {
 // question says so by name ('none' / 'gone'). A captured sign-in sweeps and wakes as the finalize's does.
 app.post('/api/accounts/:id/relogin-answer', (req, res) => {
   try {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });   // the person's question: never an agent's or a job's sign-in (r2734)
     const r = accounts.reloginAnswer(req.params.id, req.body && req.body.answer);
     if (r?.account?.loggedIn) {
       sweepOnLoginTransition(req.params.id, r, 're-login');

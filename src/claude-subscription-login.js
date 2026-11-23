@@ -11,7 +11,9 @@ function shellQuote(value) {
   return `'${text.replace(/'/g, `'"'"'`)}'`;
 }
 
-function buildClaudeSubscriptionLoginCommand({ nodeCmd, helperPath, claudeCmd, configDir }) {
+// `attempt` (optional, row B-87fd identity unit 3's cure): the press's own attempt id — the helper writes it beside its running /
+// success states, so the relogin's resolve judges only the sign-in THIS press started
+function buildClaudeSubscriptionLoginCommand({ nodeCmd, helperPath, claudeCmd, configDir, attempt = null }) {
   const values = [nodeCmd, helperPath, configDir, claudeCmd];
   if (values.some((v) => typeof v !== 'string' || !v)) {
     throw new Error('missing Claude subscription login command path');
@@ -23,6 +25,7 @@ function buildClaudeSubscriptionLoginCommand({ nodeCmd, helperPath, claudeCmd, c
     configDir,
     '--claude',
     claudeCmd,
+    ...(typeof attempt === 'string' && /^[a-zA-Z0-9._-]{8,80}$/.test(attempt) ? ['--attempt', attempt] : []),
   ].map(shellQuote).join(' ');
 }
 

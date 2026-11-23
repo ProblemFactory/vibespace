@@ -202,6 +202,7 @@ function oatFileRefusedText(reason, code = '', { choose = true } = {}) {
  *  DEAD state (the same rule oatTag uses: an expiry warning about this
  *  machine's creds dir would be noise while looking at a host). */
 export function loginExpiryChipHtml(a, { local = true } = {}) {
+  if (a && a.reloginAsk) return '';   // a row that asks offers no sign-in press beside its question (row B-87fd identity unit 3, r2734)
   const ls = a && a.loginState;
   if (!ls || typeof ls !== 'object') return '';
   // OAT-ONLY (2026-10-13, owner: "都绑定长期token了，怎么还提示过期"): the OAuth login ended but the
@@ -407,10 +408,11 @@ export function sayHostFoldUnjudged(hostId, r) {
 /** THE HELD SIGN-IN's QUESTION (row B-87fd identity unit 3, 主开发 r2533): a sign-in into this row that the facts could not prove is
  *  HELD, not adopted — the row asks in one plain sentence, with two presses named by what they do; answerable here, no dialog, no
  *  greyed control, no clock. A question kept across a restart (its «before» lost) says so. '' when nothing is asked */
+const reloginAnswering = new Set();   // the rows whose answer is out (one press at a time)
 export function reloginAskHtml(a) {
   const q = a && a.reloginAsk;
   if (!q) return '';
-  const said = q.lost ? t('A sign-in finished across a restart — is it the same account as this row?') : t('Is the new sign-in the same account as this row?');
+  const said = q.lost ? t('This sign-in could not be compared with what this row had — is it the same account as this row?') : t('Is the new sign-in the same account as this row?');
   const press = (answer, words) => `<button type="button" class="btn-create acct-relogin-answer" data-relogin-answer="${answer}" data-relogin-ask="${escHtml(a.id)}">${escHtml(words)}</button>`;
   return `<span class="acct-relogin-ask"><span class="ob-warn">${escHtml(said)}</span> ${press('same', t('The same account: keep this row'))} ${press('another', t('Another account: make a new row'))}</span>`;
 }
@@ -3887,6 +3889,8 @@ export function installManageAgents(App, ctx = {}) {
       const askBtn = e.target.closest?.('[data-relogin-answer]');
       if (askBtn) {
         const target = askBtn.dataset.reloginAsk || id, answer = askBtn.dataset.reloginAnswer;
+        if (reloginAnswering.has(target)) return;   // ONE press at a time: a second press while the first is out does nothing (r2734 (e))
+        reloginAnswering.add(target);
         fetchJson(`/api/accounts/${encodeURIComponent(target)}/relogin-answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) })
           .catch(() => null)
           .then((r) => {
@@ -3895,7 +3899,8 @@ export function installManageAgents(App, ctx = {}) {
             else if (r && r.success) showToast(t('Nothing is waiting on “{name}” any more.', { name: a?.name || '' }));
             else showToast(r?.error || t('Could not save the answer'), { type: 'error' });
             refresh();
-          });
+          })
+          .finally(() => reloginAnswering.delete(target));
         return;
       }
       const chip = e.target.closest?.('.acct-login-chip');
@@ -3946,7 +3951,7 @@ export function installManageAgents(App, ctx = {}) {
         // Re-login on THIS machine (2.332.0): most useful when the row shows
         // signed-out (idle refresh-token expiry, external revocation) — but
         // also offered while logged in, for rotating to a different login.
-        if (isSub && !a?.pooled && !selectedHost) {
+        if (isSub && !a?.pooled && !selectedHost && !a?.reloginAsk) {   // a row that asks: its question first (r2734)
           items.splice(1, 0, { label: a?.loggedIn ? t('Re-login on this machine…') : t('Log in on this machine…'), action: () => this._reloginSubscription(id, a, refresh) });
         }
         if (isSub && !a?.pooled && a?.oat) items.push({ label: t('Subscription type…'), title: t('Which subscription this long-lived token belongs to — stated by a sign-in, or chosen here'), action: () => openOatShapeDialog({ id, name: a?.name || '', onSignIn: () => this._reloginSubscription(id, a, refresh), refresh }) }); // lane oat-add-door

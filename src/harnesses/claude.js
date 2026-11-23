@@ -90,8 +90,14 @@ function parseClaudeAuth(dir, rd = RR) {   // rd: the reader — run-reads (the 
  *    from it (else a token of one account beside an old login of another reads «same» as the old one: the false merge this
  *    row ends); and a config whose address differs from the credentials' own names none either (a stale record).
  *  - Malformed files or ids (not JSON, not strings) name nothing: null, never a throw.
+ *  - THE RECORD NEVER NAMES A SEAT BY A CONFIG IT CANNOT TIE TO THE CREDENTIALS BESIDE IT (主开发 r2779): a /login inside one of the
+ *    row's sessions writes the new account's credentials here while the config keeps the login before (sessions relocate only the
+ *    secret store). A caller that knows the row passes `tied(claudeAiOauth) → boolean` (AccountManager: the login session the
+ *    product's own sign-in saw — its deadline, refreshTokenExpiresAt, which a refresh keeps and a new sign-in replaces, or the
+ *    refresh token it saw, by a hash in memory); untied ⇒ NO seat and NO organisation (the config's address alone stays: one
+ *    address never makes «same» without an organisation on both rows). Without `tied` (a caller with no row) the config counts.
  *  Never part of parseAuth's answer (finalize sends that to the person's page); the ids stay in memory */
-function claudeFolderIdentity(dir, rd) {
+function claudeFolderIdentity(dir, rd, { tied = null } = {}) {
   if (!rd || typeof rd.facts !== 'function') return null;
   try {
     const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -107,6 +113,7 @@ function claudeFolderIdentity(dir, rd) {
     try { const sp = path.join(dir, '.claude.json'); const c = parse(sp, () => rd.readText(sp)); acct = c && typeof c === 'object' && c.oauthAccount && typeof c.oauthAccount === 'object' ? c.oauthAccount : null; } catch { }
     const cfgEmail = s(acct && acct.emailAddress);
     if (own && cfgEmail && own.toLowerCase() !== cfgEmail.toLowerCase()) return named({ email: own, seat: null, orgId: null });   // another login's record
+    if (typeof tied === 'function' && !tied(o)) return named({ email: own || cfgEmail, seat: null, orgId: null });   // a config not tied to these credentials
     return named({ email: own || cfgEmail, seat: s(acct && acct.accountUuid), orgId: s(acct && acct.organizationUuid) });
   } catch { return null; }
 }
@@ -119,7 +126,7 @@ function claudeFolderIdentity(dir, rd) {
  *  of ours. A long-lived token, a live sign-in, a missing or malformed file are NOT it ⇒ null. No default reader (round wvjd20mpa).
  *  UNPROVEN, said: whether the vendor's sign-out also clears the config's account block — the door is right either way (it falls
  *  to the row's own word) */
-function claudeFolderLastLogin(dir, rd) {
+function claudeFolderLastLogin(dir, rd, { tied = null } = {}) {
   if (!rd || typeof rd.facts !== 'function') return null;
   try {
     const s = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -134,7 +141,8 @@ function claudeFolderLastLogin(dir, rd) {
     let acct = null;
     try { const sp = path.join(dir, '.claude.json'); const c = parse(sp, () => rd.readText(sp)); acct = c && typeof c === 'object' && c.oauthAccount && typeof c.oauthAccount === 'object' ? c.oauthAccount : null; } catch { }
     if (!acct) return null;
-    const out = { email: s(acct.emailAddress), seat: s(acct.accountUuid), orgId: s(acct.organizationUuid) };
+    const untied = typeof tied === 'function' && !tied(o);   // the residue keeps its login's deadline: tied to the row's last sign-in by it (r2779)
+    const out = { email: s(acct.emailAddress), seat: untied ? null : s(acct.accountUuid), orgId: untied ? null : s(acct.organizationUuid) };
     return out.email || out.seat || out.orgId ? out : null;
   } catch { return null; }
 }

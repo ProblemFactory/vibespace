@@ -1633,7 +1633,7 @@ export default {
   "✓ “{name}” signed in again": "✓ “{name}” 已重新登录",
   "The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.": "这次登录属于另一个账号（{email}）——已另存为新条目“{new}”。“{name}”保持登出状态。",
   "Is the new sign-in the same account as this row?": "新登录和这一行是同一个账号吗？",
-  "A sign-in finished across a restart — is it the same account as this row?": "这次登录在重启前后才完成——它和这一行是同一个账号吗？",
+  "This sign-in could not be compared with what this row had — is it the same account as this row?": "这次登录无法和这一行原有的账号比较——它和这一行是同一个账号吗？",
   "The same account: keep this row": "同一个账号：保留这一行",
   "Another account: make a new row": "另一个账号：新建一行",
   "The new sign-in could not be matched to “{name}” — answer on its row whether it is the same account.": "新登录无法确认属于“{name}”——请在它那一行回答是不是同一个账号。",

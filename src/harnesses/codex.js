@@ -270,6 +270,9 @@ module.exports = {
     parseAuth: parseCodexAuth,
     parseAuthFile: parseCodexAuthFile,
     displayFiles: (dir) => [path.join(dir, 'auth.json')],   // the file parseAuth opens — read OFF the loop for the accounts list (B-360d)
+    // …and what the list KEEPS of it after the parse (row B-87fd, r2779 (B)): its shape only — the mode and the token fields (masked by the
+    // scrub) — never the workspace id (tokens.account_id) nor anything else of the file: no list-time reader reads more
+    displayKeep: () => (o) => (o && typeof o === 'object' ? { auth_mode: o.auth_mode, ...(o.tokens && typeof o.tokens === 'object' ? { tokens: { access_token: o.tokens.access_token, id_token: o.tokens.id_token, refresh_token: o.tokens.refresh_token } } : {}), ...(o.OPENAI_API_KEY !== undefined ? { OPENAI_API_KEY: o.OPENAI_API_KEY } : {}) } : null),
     folderIdentityOf: codexFolderIdentity,   // WHO the folder is signed in as, read in the same landing, kept in memory only (row B-87fd unit 2)
   },
   // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08) — see the claude

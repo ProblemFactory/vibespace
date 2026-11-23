@@ -97,8 +97,10 @@ DOORS.reloginResolve = async (p) => {
   if (!p.x.signedIn) return 'unreachable';   // a real sign-in always writes its address: a login with none is no person's
   const am = new AccountManager({ dataDir: tmpdir('vs-idc-relogin-'), onChange: () => { } });
   const id = makeRow(am, p.y);
-  am.reloginBegin(id);
+  const begun = am.reloginBegin(id);
   writeLogin(am.subDir(id), p.x.acct);
+  // the sign-in helper's own success for THIS press (written after the vendor's program wrote both files): the resolve judges only it
+  fs.writeFileSync(path.join(am.subDir(id), '.vibespace-login-status.json'), JSON.stringify({ version: 1, state: 'success', attempt: begun && begun.attempt, updatedAt: Date.now() }));
   try { const r = am.reloginResolve(id); return r.outcome === 'same' ? 'same' : r.outcome === 'split' || r.outcome === 'moved' ? 'different' : 'unproven'; }
   finally { await closeAm(am); }
 };
@@ -274,7 +276,7 @@ const DOOR_MARKS = {
   evaluateOnHost: { 'evaluateOnHost(': { 'src/accounts.js': 1, 'src/ws-create.js': 2, 'src/routes/account-tails.js': 1, 'src/server/account-usage-routes.js': 1 } },
   _usageGlobalLink: { '_usageGlobalLink = ': { 'src/usage-routes.js': 4 } },
   usageIdentityGroups: { 'usageIdentityGroups(': { 'src/server/usage-pool-engine.js': 3 }, 'groupKeyOf(': { 'src/server/usage-pool-engine.js': 3 } },
-  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 6 } },
+  sameAccount: { 'sameAccount(': { 'src/account-identity.js': 2, 'src/accounts.js': 1 }, 'identityRecordOf(': { 'src/account-identity.js': 1, 'src/accounts.js': 5 } },
   'usage-anchors identityKeyFor (alone)': { 'identityKeyFor(': { 'src/reading-repair.js': 1, 'src/usage-anchors.js': 1, 'src/server/usage-pool-engine.js': 1 } },
   // two of identityVerdict's four are a NAMESAKE: the mac helper's code-signing verdict (agentd), not an account door
   'oat-mint-model identityVerdict': { 'identityVerdict(': { 'src/oat-mint-model.js': 1, 'src/server/oat-mint.js': 1, 'src/mac-helper-identity.js': 1, 'src/agentd/stream-mac.js': 1 } },

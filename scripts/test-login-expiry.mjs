@@ -974,6 +974,8 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
   // B-87fd identity unit 3: the relogin decides on the ONE comparison — BEFORE is what the row's folder named at the «sign in again»
   // press (reloginBegin), so each scene signs the row in first, presses, then signs in as the scene's account; «moved» needs the other
   // row's own kept facts (its folder signed in, settled)
+  // …and the sign-in helper's own «success» for THAT press's attempt (the resolve judges only a sign-in new since the press, r2734)
+  const helperDone = (dir, id, begun) => fs.writeFileSync(path.join(dir, 'subs', id, '.vibespace-login-status.json'), JSON.stringify({ version: 1, state: 'success', attempt: begun && begun.attempt, updatedAt: Date.now() }));
   const realResolve = async (kind, { at = Date.now() } = {}) => {
     const me = { id: 'sub-1', name: 'Fish Max', type: 'subscription', backend: 'claude', email: 'fish@example.com' };
     if (kind === 'pending') { const { am } = mkStore([me]); return am.reloginResolve('sub-1'); }
@@ -983,14 +985,16 @@ console.log('— §5b the immediate sweep after a login (real routes factory)');
       subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: 'fish@example.com', at });
       subCreds(dir, 'sub-2', { exp: at + 29 * 24 * RH, email: 'other@example.com', at });
       await am.signinFactsSettled(null, { withinMs: 0 });
-      am.reloginBegin('sub-1');
+      const begun = am.reloginBegin('sub-1');
       subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: 'other@example.com', at });
+      helperDone(dir, 'sub-1', begun);
       return am.reloginResolve('sub-1');
     }
     const { dir, am } = mkStore([me]);
     subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: 'fish@example.com', at });
-    am.reloginBegin('sub-1');
+    const begun = am.reloginBegin('sub-1');
     subCreds(dir, 'sub-1', { exp: at + 29 * 24 * RH, email: kind === 'split' ? 'stranger@example.com' : 'fish@example.com', at });
+    helperDone(dir, 'sub-1', begun);
     return am.reloginResolve('sub-1');
   };
   const REAL = { same: await realResolve('same'), moved: await realResolve('moved'), split: await realResolve('split'), pending: await realResolve('pending') };

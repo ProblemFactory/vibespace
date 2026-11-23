@@ -1632,7 +1632,7 @@ export default {
   "✓ “{name}” signed in again": "✓ 「{name}」が再ログインしました",
   "The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.": "このログインは別のアカウント（{email}）のものです——新しいエントリ「{new}」として保存しました。「{name}」はログアウトのままです。",
   "Is the new sign-in the same account as this row?": "新しいサインインはこの行と同じアカウントですか？",
-  "A sign-in finished across a restart — is it the same account as this row?": "再起動をまたいでサインインが完了しました——この行と同じアカウントですか？",
+  "This sign-in could not be compared with what this row had — is it the same account as this row?": "このサインインはこの行にあったものと比べられません——この行と同じアカウントですか？",
   "The same account: keep this row": "同じアカウント：この行を使う",
   "Another account: make a new row": "別のアカウント：新しい行を作る",
   "The new sign-in could not be matched to “{name}” — answer on its row whether it is the same account.": "新しいサインインが「{name}」のものか確認できません——その行で同じアカウントかどうか答えてください。",

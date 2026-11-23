@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { AccountManager } = require('../src/accounts.js');
@@ -39,18 +41,23 @@ try {
   const EXP = Date.now() + 29 * 86400e3, ORG = 'org-made-up-1';
   const personOf = (email) => 'p-' + email.split('@')[0] + '-made-up';
   const credsAt = (dir) => path.join(dir, '.credentials.json'), cfgAt = (dir) => path.join(dir, '.claude.json');
+  let rteN = 0;   // each sign-in its own login session deadline (refreshTokenExpiresAt): a refresh keeps it, a new sign-in replaces it
   const live = (dir, email, { cfg = true, org = ORG } = {}) => {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: 'at-' + email, refreshToken: 'rt-' + email, expiresAt: Date.now() + 3600e3, refreshTokenExpiresAt: EXP, scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' } }));
+    fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: 'at-' + email, refreshToken: 'rt-' + email, expiresAt: Date.now() + 3600e3, refreshTokenExpiresAt: EXP + (++rteN), scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' } }));
     if (cfg) fs.writeFileSync(cfgAt(dir), JSON.stringify({ oauthAccount: { emailAddress: email, accountUuid: personOf(email), organizationUuid: org, organizationName: 'Org' } }));
     else fs.rmSync(cfgAt(dir), { force: true });
   };
   const expired = (dir) => { const c = JSON.parse(fs.readFileSync(credsAt(dir), 'utf8')); c.claudeAiOauth.accessToken = 'at-old'; c.claudeAiOauth.refreshToken = 'rt-old'; c.claudeAiOauth.expiresAt = Date.now() - 3600e3; fs.writeFileSync(credsAt(dir), JSON.stringify(c)); };
   // THE CLI's OWN BLANKED RESIDUE (src/login-state.js, src/login-expiry.js): blank tokens, expiresAt 0, the deadline and scopes kept
-  const blank = (dir, o = {}) => fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: EXP - 1000, scopes: ['user:inference', 'user:profile'], ...o } }));
+  const rteOf = (dir) => { try { return JSON.parse(fs.readFileSync(credsAt(dir), 'utf8')).claudeAiOauth.refreshTokenExpiresAt; } catch { return EXP - 1000; } };
+  const blank = (dir, o = {}) => fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: rteOf(dir), scopes: ['user:inference', 'user:profile'], ...o } }));   // the CLI keeps its login's deadline
   const ours = (dir) => fs.writeFileSync(credsAt(dir), JSON.stringify({ claudeAiOauth: { accessToken: ['made-up', 'long-lived'].join('-'), expiresAt: Date.now() + 300 * 86400e3, scopes: ['user:inference'], subscriptionType: 'max' }, vibespaceOat: { id: 'made-up' } }));
   const row = (email) => { const id = am2.createSubscription({}).id; if (email) { live(am2.subDir(id), email); am2.finalizeSubscription(id); } return id; };
-  const relogin = (id, as, opts) => { am2.reloginBegin(id); if (as) live(am2.subDir(id), as, opts); return am2.reloginResolve(id); };
+  // THE SIGN-IN HELPER's OWN STATUS (data/bin/vibespace-claude-subscription-login.mjs): «running» at its start, «success» after the vendor's
+  // program wrote both files — each with the press's attempt id the login command carries
+  const helper = (dir, state, attempt) => fs.writeFileSync(path.join(dir, '.vibespace-login-status.json'), JSON.stringify({ version: 1, state, ...(attempt ? { attempt } : {}), updatedAt: Date.now() }));
+  const relogin = (id, as, opts, M = am2) => { const b = M.reloginBegin(id); if (as) { live(M.subDir(id), as, opts); helper(M.subDir(id), 'success', b && b.attempt); } return M.reloginResolve(id); };
   const n0 = () => am2.list().accounts.length;
   const held = (id) => fs.existsSync(path.join(am2.subDir(id), '.vibespace-relogin-held', '.credentials.json'));
   // 1. a refreshable sign-in that only EXPIRED (its tokens and config still there)
@@ -93,16 +100,84 @@ try {
   // MOVED: the sign-in is another row's — its record (read facts) is «same»
   { const o = row('m1@example.invalid'), s = row('a13@example.invalid'); const r = relogin(s, 'm1@example.invalid');
     ok(r.outcome === 'moved' && r.movedTo && r.movedTo.id === o && am2.readSubCreds(o).loggedIn && !am2.readSubCreds(s).loggedIn, 'another row whose record is «same» ⇒ MOVED into it (its read facts, never a word)', JSON.stringify(r)); }
+  // ── r2734 MUST 1: THE RESOLVE JUDGES ONLY A SIGN-IN NEW SINCE THE PRESS — the page polls from the press ──
+  const firstPolls = (M) => {
+    const s = M.createSubscription({}).id; live(M.subDir(s), 'a30@example.invalid'); M.finalizeSubscription(s); expired(M.subDir(s));   // scene 1, the commonest
+    const b = M.reloginBegin(s);
+    const r0 = M.reloginResolve(s);                                                              // the first poll: nobody signed in yet
+    const kept0 = !!(M._reloginBefore && M._reloginBefore.get(s));
+    helper(M.subDir(s), 'running', b.attempt);
+    fs.writeFileSync(credsAt(M.subDir(s)), JSON.stringify({ claudeAiOauth: { accessToken: 'at-b30', refreshToken: 'rt-b30', expiresAt: Date.now() + 3600e3, refreshTokenExpiresAt: EXP, scopes: ['user:inference'] } }));
+    const r1 = M.reloginResolve(s);                                                              // between the two writes: new credentials, the old config
+    live(M.subDir(s), 'b30@example.invalid'); helper(M.subDir(s), 'success', b.attempt);
+    const r2 = M.reloginResolve(s);                                                              // the helper's success for THIS press
+    return { s, r0: r0.outcome, kept0, r1: r1.outcome, r2: r2.outcome, signedIn: M.readSubCreds(s).loggedIn };
+  };
+  { const f = firstPolls(am2);
+    ok(f.r0 === 'pending' && f.kept0 && f.r1 === 'pending' && f.r2 === 'split' && !f.signedIn, 'MUST 1 (scene 1, the page polls from the press): the first poll before any sign-in ⇒ PENDING, BEFORE kept; a poll between the credentials\' write and the config\'s ⇒ PENDING; the helper\'s success for this press with ANOTHER account ⇒ DIFFERENT (a new row) — never in place', JSON.stringify(f));
+    const s = row('a31@example.invalid'); expired(am2.subDir(s)); const b = am2.reloginBegin(s);
+    const p0 = am2.reloginResolve(s).outcome; live(am2.subDir(s), 'a31@example.invalid'); helper(am2.subDir(s), 'success', b.attempt); const p1 = am2.reloginResolve(s).outcome;
+    ok(p0 === 'pending' && p1 === 'same', '…the same person back: PENDING until the helper\'s success, then SAME (in place, no question)', JSON.stringify([p0, p1]));
+    const s2 = row('a32@example.invalid'); expired(am2.subDir(s2)); am2.reloginBegin(s2); live(am2.subDir(s2), 'b32@example.invalid'); helper(am2.subDir(s2), 'success', 'rl-an-older-attempt');
+    ok(am2.reloginResolve(s2).outcome === 'pending', '…a helper success of ANOTHER attempt (an earlier press) is not this press\'s ⇒ PENDING'); }
+  const MUT = mutantCopies('relogin-door', REPO);
+  const accSrc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const copyAM = (from, to, why) => { try { return require(MUT.write('src/accounts.js', anchored(accSrc, from, to, why))).AccountManager; } catch (e) { return { err: e.message }; } };
+  { const Old = copyAM("    if (!lost ? !(st && st.state === 'success' && st.attempt === kept.attempt) : !!(st && st.state === 'running')) return { outcome: 'pending' };\n", '', 'the release\'s resolve: no new-since-the-press gate (RED)'); // stale-pins: kept — the RED takes the gate out
+    ok(!Old.err, 'RED CONTROL built: the resolve without the new-since-the-press gate', Old.err || '');
+    if (!Old.err) { const f = firstPolls(new Old({ dataDir: path.join(tmp, 'red-gate') })); ok(f.r0 === 'same' && !f.kept0, 'RED: in that copy the FIRST poll judges the untouched folder «same» and spends BEFORE — the other account then lands with no question', JSON.stringify(f)); } }
+  // ── r2734 MUST 2: A ROW THAT ASKS HAS ONE OPEN QUESTION AND NOTHING ELSE MOVES ON IT ──
+  const asking = (M) => {
+    const s = M.createSubscription({ name: 'Work' }).id; live(M.subDir(s), 'a33@example.invalid'); M.finalizeSubscription(s); M.rename(s, 'Work');   // no word
+    blank(M.subDir(s)); fs.rmSync(cfgAt(M.subDir(s)));                                         // nothing to compare ⇒ …
+    const b0 = M.reloginBegin(s); live(M.subDir(s), 'b33@example.invalid'); helper(M.subDir(s), 'success', b0.attempt);
+    M._reloginBefore.get(s).at = 0;                                                             // a lost before ⇒ ASK (held)
+    const r0 = M.reloginResolve(s);
+    const again = M.reloginBegin(s);                                                            // the person presses «sign in again» on the asking row
+    live(M.subDir(s), 'c33@example.invalid'); helper(M.subDir(s), 'success', again && again.attempt);   // …and signs in as C anyway
+    const r1 = M.reloginResolve(s);
+    const heldAt = path.join(M.subDir(s), '.vibespace-relogin-held', '.credentials.json'), heldNow = fs.existsSync(heldAt);
+    const heldIs = heldNow ? JSON.parse(fs.readFileSync(heldAt, 'utf8')).claudeAiOauth.accessToken : null;   // whose sign-in the question holds
+    return { s, r0: r0.outcome, again: typeof again === 'string' ? again : again && 'kept', r1: r1.outcome, asks: !!(M.list().accounts.find((x) => x.id === s) || {}).reloginAsk, heldNow, heldIs };
+  };
+  { const g = asking(am2);
+    ok(g.r0 === 'ask' && g.again === 'ask-open' && g.r1 === 'ask' && g.asks && g.heldIs === 'at-b33@example.invalid', 'MUST 2: on an asking row a sign-in press is REFUSED by name (ask-open), a resolve answers the SAME question and moves nothing — C is not adopted, the mark and the held sign-in stay', JSON.stringify(g));
+    const ans = am2.reloginAnswer(g.s, 'same'), held = path.join(am2.subDir(g.s), '.vibespace-relogin-held', '.credentials.json');
+    ok(ans.outcome === 'same' && !fs.existsSync(held), '…every road that clears the mark gives the held sign-in back (or a new row takes it): no held sign-in outlives its question', ans.outcome); }
+  { const Old = copyAM("    if (a.reloginAsk) return { outcome: 'ask', keptName: a.name, ...(a.reloginAsk.lost ? { lost: true } : {}) };\n", '', 'an asking row whose resolve moves on (RED)'); // stale-pins: kept — the RED takes the one-open-question check out
+    const Old2 = !Old.err ? copyAM("    if (a.reloginAsk) return 'ask-open';\n", '', 'an asking row whose press is taken (RED)') : Old; // stale-pins: kept
+    ok(!Old.err && !Old2.err, 'RED CONTROLS built: no ask check in the resolve; no ask check at the press', (Old.err || Old2.err) || '');
+    if (!Old.err) { const g = asking(new Old({ dataDir: path.join(tmp, 'red-ask') })); ok(g.heldIs !== 'at-b33@example.invalid', 'RED: without the resolve\'s check the asking row moves on — the question\'s own sign-in is replaced by C\'s', JSON.stringify(g)); }
+    if (!Old2.err) { const g = asking(new Old2({ dataDir: path.join(tmp, 'red-press') })); ok(g.again === 'kept', 'RED: without the press\'s check a new BEFORE is taken on an asking row', JSON.stringify(g)); } }
+  // ── r2734's REQUIRED LINE and smalls ──
+  { const R = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
+    const ans = R.slice(R.indexOf("app.post('/api/accounts/:id/relogin-answer'"), R.indexOf("app.post('/api/accounts/:id/relogin-answer'") + 400), start = R.slice(R.indexOf("app.post('/api/accounts/:id/relogin',"), R.indexOf("app.post('/api/accounts/:id/relogin-finalize'"));
+    ok(/^app\.post\('\/api\/accounts\/:id\/relogin-answer', \(req, res\) => \{\n\s*try \{\n\s*if \(isAgentBearer\(req\)\) return res\.status\(403\)\.json\(\{ error: 'human-triggered only', code: 'agent_forbidden' \}\);/.test(ans), 'REQUIRED LINE: the answer route refuses an agent\'s or a job\'s own sign-in by name, first, as its sibling routes do');
+    ok(start.includes("if (begun === 'ask-open') return res.status(409).json({ error: 'answer the question on this row first — its two presses are right there', code: 'relogin_ask_open' });") && start.includes('attempt: begun && begun.attempt'), 'the press route refuses an asking row by name (the door named) and hands the login command the press\'s attempt'); }
+  { const s = row('a34@example.invalid'); blank(am2.subDir(s)); fs.rmSync(cfgAt(am2.subDir(s))); const b = am2.reloginBegin(s);
+    fs.writeFileSync(path.join(am2.subDir(s), '.vibespace-relogin-held'), 'a file where the hold would go');   // the move into the hold cannot happen
+    live(am2.subDir(s), 'b34@example.invalid'); helper(am2.subDir(s), 'success', b.attempt);
+    let refused = null; try { am2.reloginResolve(s); } catch (e) { refused = e.message; }
+    ok(/could not be set aside/.test(refused || '') && !am2.list().accounts.find((x) => x.id === s).reloginAsk, '(a) a sign-in that could not be moved into the hold: refused by name, the row NOT asking (never a live sign-in in a row that asks)', refused); }
+  { const src = path.join(tmp, 'mv2-src'), dst = path.join(tmp, 'mv2-dst'); live(src, 'a35@example.invalid', { cfg: false }); fs.mkdirSync(cfgAt(src)); live(dst, 'old@example.invalid');
+    const n = am2._moveLogin(src, dst);
+    ok(n === 1 && fs.existsSync(credsAt(dst)) && !fs.existsSync(cfgAt(dst)), '(b) the config\'s rename FAILS (not ENOENT) after the credentials moved ⇒ the destination\'s old config is removed — never new credentials beside an old record', n); }
+  { const body = accSrc.slice(accSrc.indexOf('  reloginResolve(id) {'), accSrc.indexOf('  reloginAnswer(id, answer) {'));
+    const mark = body.indexOf("a.reloginAsk = { at: Date.now()"), save = body.indexOf('this._save();', mark), move = body.indexOf("this._moveLogin(src, path.join(src, RELOGIN_HELD))");
+    ok(mark > 0 && save > mark && move > save, '(c) the mark is on disk BEFORE the move into the hold (a crash between leaves a question that can be answered)', { mark, save, move }); }
+  { const MAsrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+    ok(MAsrc.includes('if (reloginAnswering.has(target)) return;') && MAsrc.includes('.finally(() => reloginAnswering.delete(target));'), '(e) the two presses take one press at a time: a second press while the first is out does nothing'); }
   // A LOST BEFORE: a restart between the press and the resolve (a new store on the same data), and a before past its time
   { const d = path.join(tmp, 'restart'), A = new AccountManager({ dataDir: d });
-    const mk = (email, name) => { const id = A.createSubscription({}).id; live(A.subDir(id), email); A.finalizeSubscription(id); if (name) A.rename(id, name); A.reloginBegin(id); return id; };
+    const att = {};
+    const mk = (email, name) => { const id = A.createSubscription({}).id; live(A.subDir(id), email); A.finalizeSubscription(id); if (name) A.rename(id, name); att[id] = A.reloginBegin(id).attempt; return id; };
     const sWord = mk('a14@example.invalid'), sNone = mk('a15@example.invalid', 'Work laptop'), sEq = mk('a16@example.invalid');
-    live(A.subDir(sWord), 'b14@example.invalid'); live(A.subDir(sNone), 'b15@example.invalid'); live(A.subDir(sEq), 'a16@example.invalid');
+    for (const [id, as] of [[sWord, 'b14@example.invalid'], [sNone, 'b15@example.invalid'], [sEq, 'a16@example.invalid']]) { live(A.subDir(id), as); helper(A.subDir(id), 'success', att[id]); }
     const B = new AccountManager({ dataDir: d });   // the hub restarted: the kept BEFOREs are gone
     const rW = B.reloginResolve(sWord), rN = B.reloginResolve(sNone), rE = B.reloginResolve(sEq);
-    ok(rW.outcome === 'ask' && rW.lost === true && rN.outcome === 'ask' && rN.lost === true && rE.outcome === 'same', 'a LOST before (a restart): the row\'s own word checks the read (equal ⇒ SAME, else ASK); no word ⇒ ASK — and the question SAYS it was lost', JSON.stringify([rW, rN, rE].map((x) => [x.outcome, x.lost])));
+    ok(rW.outcome === 'ask' && rW.lost === true && rN.outcome === 'ask' && rN.lost === true && rE.outcome === 'same', 'a LOST before (a restart; the helper\'s success landed): the row\'s own word checks the read (equal ⇒ SAME, else ASK); no word ⇒ ASK — and the question SAYS it could not be compared', JSON.stringify([rW, rN, rE].map((x) => [x.outcome, x.lost])));
     ok(B.list().accounts.find((x) => x.id === sWord).reloginAsk.lost === true, '…the row\'s question carries «lost» (its words say the sign-in finished across a restart)');
-    const s = row('a17@example.invalid'); am2.reloginBegin(s); am2._reloginBefore.get(s).at = 0; live(am2.subDir(s), 'b17@example.invalid');
+    const s = row('a17@example.invalid'); const b17 = am2.reloginBegin(s); am2._reloginBefore.get(s).at = 0; live(am2.subDir(s), 'b17@example.invalid'); helper(am2.subDir(s), 'success', b17.attempt);
     const rT = am2.reloginResolve(s);
     ok(rT.outcome === 'ask' && rT.lost === true, 'a before kept past its time (30 min) counts as LOST', JSON.stringify(rT)); }
   // THE ANSWER's edges: nothing held any more ⇒ «gone»; an answer that is neither ⇒ refused by name
@@ -155,7 +230,8 @@ try {
     else {
       const h = MA.reloginAskHtml({ id: 'sub-made-up', reloginAsk: { at: 1 } }), hl = MA.reloginAskHtml({ id: 'sub-made-up', reloginAsk: { at: 1, lost: true } });
       ok(h.includes('Is the new sign-in the same account as this row?') && h.includes('data-relogin-answer="same"') && h.includes('data-relogin-answer="another"') && h.includes('The same account: keep this row') && h.includes('Another account: make a new row') && !/disabled/.test(h), 'the row asks in ONE sentence with TWO presses named by what they do — no greyed control', h);
-      ok(hl.includes('A sign-in finished across a restart') && MA.reloginAskHtml({ id: 'x' }) === '', 'a lost before says so; nothing asked ⇒ nothing rendered');
+      ok(hl.includes('This sign-in could not be compared with what this row had') && MA.reloginAskHtml({ id: 'x' }) === '', '(d) a lost before — a restart or its thirty minutes — says it could not be compared with what this row had; nothing asked ⇒ nothing rendered');
+      ok(MA.loginExpiryChipHtml({ id: 'sub-made-up', type: 'subscription', reloginAsk: { at: 1 }, loginState: { state: 'logged-out' } }) === '', 'MUST 2: a row that asks offers NO sign-in press beside its question (the chip is not drawn)');
       ok(MA.subIdentHtml({ id: 'sub-made-up', loggedIn: false, facts: { state: 'read' }, reloginAsk: { at: 1 } }, {}).startsWith('<span class="acct-relogin-ask">'), 'the row\'s identity line shows the question first');
     } }
 } finally {
