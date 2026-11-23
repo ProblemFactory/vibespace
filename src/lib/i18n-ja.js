@@ -10678,6 +10678,7 @@ export default {
   "Newest": "新しい順", // lane vault-contents-window
   "No stored value matches “{q}”": "「{q}」に一致する保存値はありません", // lane vault-contents-window
   "Nothing stored here": "ここには何も保存されていません", // lane vault-contents-window
+  "Automation keys could not be read ({file}) — they stay on file and nothing is written over them. Mend that file by hand and restart VibeSpace; until then no key works": "自動化キーを読み取れませんでした（{file}）— ファイルには残っており、上書きされません。そのファイルを手で直してから VibeSpace を再起動してください。それまでは、どのキーも使えません", // r3074 / r3104 (lane login-request-card)
   "Parameter": "パラメーター", // lane vault-contents-window
   "Passkeys": "パスキー", // lane vault-contents-window
   "Recently used": "最近使った順", // lane vault-contents-window

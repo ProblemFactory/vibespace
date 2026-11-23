@@ -151,7 +151,10 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   app.get('/api/agent/automation/keys', (req, res) => {
     res.set('Cache-Control', 'no-store');
     const caller = callerFrom(req, res);
-    if (caller) res.json({ ok: true, keys: engine.keysFor(caller), verbs: A.SCOPES.map((s) => ({ verb: s.verb, billed: s.billed })) });
+    if (!caller) return;
+    const keys = engine.keysFor(caller), h = typeof engine.held === 'function' ? engine.held() : null;   // r3104 (a): while held, the hold's words — never an empty key list
+    if (h) answer(res, { ok: false, code: 'failed', why: h.why });
+    else res.json({ ok: true, keys, verbs: A.SCOPES.map((s) => ({ verb: s.verb, billed: s.billed })) });
   });
   app.get('/api/agent/automation/audit', (req, res) => {
     res.set('Cache-Control', 'no-store');

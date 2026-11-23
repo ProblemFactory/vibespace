@@ -505,7 +505,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const want = [];
     const filtered = !!(st.q || st.prov.size || st.revealOnly);
     for (const g of v.groups) {
-      if (!g.rows.length && (st.purpose === 'all' || filtered)) continue;
+      const heldAuto = g.id === 'automation' && !!(st.auto && st.auto.held);   // r3074 (2): the keys could not be read — said, never «nothing stored»
+      if (!g.rows.length && !heldAuto && (st.purpose === 'all' || filtered)) continue;
       const h = headFor(g.id);
       h.n.textContent = String(g.rows.length);
       // design q-046: 铸造… on the «Automation keys» head — the vault unlocked only (a key's value is sealed at once)
@@ -516,7 +517,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       if (g.id === 'web-logins' && st.logins && !h.wide) { h.wide = wideHeaderDoors(() => st.logins, { refresh }); h.el.append(h.wide.el); }
       if (h.wide) { h.wide.el.hidden = !st.logins || d.state !== 'unlocked'; if (st.logins) h.wide.update(); }
       want.push(h.el);
-      if (!g.rows.length) { want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }
+      if (!g.rows.length) { want.push(emptyEl(heldAuto ? t('Automation keys could not be read ({file}) — they stay on file and nothing is written over them. Mend that file by hand and restart VibeSpace; until then no key works', { file: st.auto.held.file || 'data/automation-keys.json' }) : t('Nothing stored here'), `empty-${g.id}`)); continue; }
       for (const r of g.rows) { const x = rowEls.get(r.id); if (x) want.push(x.el); }
     }
     if (!v.rows.length && filtered) want.push(st.q ? noMatchEl(v) : emptyEl(t('No stored value matches these filters'), 'empty-match'));

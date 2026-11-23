@@ -825,12 +825,102 @@ const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: 
   // stamp and the opened note write the failed read's EMPTY list over the file (the census's race, made by a held promise)
   const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
   let src = editAnchor(ESRC, "    if (db && db.bad) throw Object.assign(new Error(STORE_UNREAD), { code: 'store_unread' });\n", '', 'src/server/automation-engine.js');
-  src = editAnchor(src, "    if (db.bad) db = read();   // r3001: another use's re-read failed meanwhile — the row is written from a GOOD read, never from that one\n    if (db.bad) { log(`the opened row of ${keyId} is not recorded: ${STORE_UNREAD}`); return; }\n", '', 'src/server/automation-engine.js');
-  src = editAnchor(src, "    db = read();\n    if (db.bad) return done({ ...named('failed', `${STORE_UNREAD} — nothing ran`), args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });\n", '', 'src/server/automation-engine.js');
+  src = editAnchor(src, "    if (db.bad) db = read();   // r3001: another use's re-read failed meanwhile — the row is written from a GOOD read, never from that one\n    if (db.bad) { log(`the opened row of ${keyId} is not recorded: ${unreadWords()}`); return; }\n", '', 'src/server/automation-engine.js');
+  const STAMP_READ = "    if (db.bad) db = read();\n    if (db.bad) return done({ ...named('failed', `${unreadWords()} — nothing ran${held ? '; the once-grant this call reserved stays spent — grant it again' : ''}`), args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });\n";
+  src = editAnchor(src, STAMP_READ, '', 'src/server/automation-engine.js');
   const MXR = M.load('src/server/automation-engine.js', src, 'r3001-written-over');
   const SX = await storeRace(MXR, 'stamp'), OX = await storeRace(MXR, 'opened');
   ok(SX.placed === 1 && !survived(SX) && OX.placed === 1 && !survived(OX),
     'RED CONTROL (r3001, the release\'s writers in a copy): the stamp and the opened note write the failed read\'s empty list over the file — the legs above can fail', { stamp: shown(SX), opened: shown(OX) });
+  // r3074 (4) THE ONE WRITER's GUARD ALONE: a copy with the stamp's and the opened note's reads taken out, the guard kept — the
+  // stamp from the failed read's empty record THROWS at the writer (a named failure, nothing ran) and the file's entries survive
+  let srcB = editAnchor(ESRC, STAMP_READ, '', 'src/server/automation-engine.js');
+  srcB = editAnchor(srcB, "    if (db.bad) db = read();   // r3001: another use's re-read failed meanwhile — the row is written from a GOOD read, never from that one\n    if (db.bad) { log(`the opened row of ${keyId} is not recorded: ${unreadWords()}`); return; }\n", '', 'src/server/automation-engine.js');
+  const MXB = M.load('src/server/automation-engine.js', srcB, 'r3074-belt-alone');
+  const SB = await storeRace(MXB, 'stamp'), OB = await storeRace(MXB, 'opened');
+  ok(SB.placed === 1 && survived(SB) && SB.r1.ok === false && SB.r1.code === 'failed' && /store_unread/.test(String(SB.r1.why)) && OB.placed === 1 && survived(OB),
+    'r3074 THE ONE WRITER\'s GUARD ALONE (the reads taken out, in a copy): the stamp from the empty record is refused AT THE WRITER (store_unread, nothing ran) and the opened note writes nothing — the file\'s entries survive', { stamp: shown(SB), opened: shown(OB) });
+  // r3074 (0) NO READ IS ADDED ON THE LOOP: the reads of automation-keys.json a granted use makes — the release's count (one, at
+  // the use's start); the stamp reads again only when the record is marked bad
+  {
+    const w0 = await mkWorld('store-reads-' + Math.random().toString(36).slice(2, 8));
+    const e0 = ENG.create({ dataDir: w0.dir, vault: w0.vault, userTodos: w0.userTodos, now: w0.now, verbs: { 'conversations.rename': () => ({ ok: true, name: 'x' }), 'conversations.open': async () => ({ ok: true, sessionId: 'w-r', claudeSessionId: 'c-r' }) }, openFacts: {} });
+    const k0 = e0.mint({ name: 'counted', scopes: ['conversations.open', 'conversations.rename'], limits: LIM_OPEN });
+    e0.grant(k0.key.id, ['session:conv-1']);
+    const realR = fs.readFileSync; let n0 = 0;
+    fs.readFileSync = function (p0, ...a) { if (typeof p0 === 'string' && path.resolve(p0) === path.resolve(STORE_OF(w0))) n0++; return realR.call(this, p0, ...a); };
+    let ra = null, ro = null, na = 0, no = 0;
+    try { ra = await e0.use({ caller: caller(), verb: 'conversations.rename', args: { name: 'x' } }); na = n0; n0 = 0; ro = await e0.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN } }); no = n0; } finally { fs.readFileSync = realR; }
+    ok(ra && ra.ok && ro && ro.ok && na === 1 && no === 1, `r3074 NO READ IS ADDED ON THE LOOP: a granted rename and a granted open each read automation-keys.json ONCE (the release's count; measured ${na} and ${no})`, { ra: ra && ra.ok, ro: ro && ro.ok, na, no });
+  }
+  // r3074 (1) ANOTHER STORE's UNREAD FILE: a key and its grant on file; a hub start whose grants file read meets a PLACED refusal
+  // — the automation record is held (never «no grants»), a mint is refused by name, and automation-keys.json stays BYTE FOR BYTE
+  const GS = R('src/server/grants-store.js');
+  const grantsHeldWorld = async (mod) => {
+    const w1 = await mkWorld('grants-held-' + Math.random().toString(36).slice(2, 8));
+    const e1 = ENG.create({ dataDir: w1.dir, vault: w1.vault, userTodos: w1.userTodos, now: w1.now, verbs: { 'conversations.rename': () => ({ ok: true }) } });
+    const k1 = e1.mint({ name: 'kept', scopes: ['conversations.rename'] });
+    e1.grant(k1.key.id, ['session:conv-1']);
+    const bytes0 = fs.readFileSync(STORE_OF(w1));
+    const pl = placeOnce(path.join(w1.dir, 'grants.json'));
+    let gsBad = null; try { gsBad = GS.create({ dataDir: w1.dir }); } finally { pl.undo(); }
+    const e2 = mod.create({ dataDir: w1.dir, vault: w1.vault, userTodos: w1.userTodos, now: w1.now, verbs: { 'conversations.rename': () => ({ ok: true }) }, grants: gsBad });
+    const m2 = e2.mint({ name: 'second', scopes: ['conversations.rename'] });
+    const l2 = e2.list();
+    const grantId = (JSON.parse(bytes0.toString('utf8')).grants[0] || {}).id;
+    const rv = e2.revoke(k1.key.id), ug = e2.ungrant(grantId);
+    const au = e2.auditOfKey(k1.key.id), mu = e2.mayUseFor({ conversationKeys: ['conv-1'] });
+    e2.keysFor(caller()); const kf = typeof e2.held === 'function' ? e2.held() : null;
+    let rvl = null; try { e2.vaultReveal('apikey:' + k1.key.id); rvl = 'answered'; } catch (e) { rvl = e && e.code; }
+    return { placed: pl.used(), readable: gsBad && gsBad.health().readable, m2, l2, rv, ug, au, mu, kf, rvl, same: fs.readFileSync(STORE_OF(w1)).equals(bytes0), digest: JSON.parse(bytes0.toString('utf8')).keys[0].digest };
+  };
+  const GH = await grantsHeldWorld(ENG);
+  const noDigest = (x) => !JSON.stringify([x.m2, x.l2, x.rv, x.ug]).includes(String(x.digest));
+  ok(GH.placed === 1 && GH.readable === false && GH.m2.ok === false && GH.m2.code === 'failed' && /grants\.json could not be read/.test(String(GH.m2.why)) && GH.same && noDigest(GH),
+    'r3074 ANOTHER STORE\'s UNREAD FILE: the grants file\'s read refused (placed) at a start — the automation record is HELD, a mint is refused naming grants.json, and automation-keys.json stays byte for byte (its grant records kept)', { m2: GH.m2, same: GH.same });
+  ok(GH.l2 && GH.l2.ok === true && GH.l2.keys.length === 0 && GH.l2.held && GH.l2.held.code === 'automation_unread' && /grants\.json could not be read/.test(GH.l2.held.why),
+    'r3074 THE LIST SAYS «COULD NOT BE READ»: the keys\' list carries the mark (automation_unread, the file named) — never an empty list as a fact', GH.l2);
+  ok(GH.rv.code === 'failed' && /could not be read/.test(String(GH.rv.why)) && GH.ug.code === 'failed' && /could not be read/.test(String(GH.ug.why)),
+    'r3074 TRUE REASONS: a revoke and a take-back while the record is held name the unread file — never «not found»', { rv: GH.rv, ug: GH.ug });
+  ok(GH.l2.held.file === 'data/grants.json' && GH.au && GH.au.code === 'failed' && /grants\.json could not be read/.test(String(GH.au.why)) && Array.isArray(GH.mu) && GH.mu.length === 1 && GH.mu[0].ok === false && GH.mu[0].code === 'unknown_shape' && GH.kf && GH.kf.code === 'automation_unread' && GH.rvl === 'automation_unread',
+    'r3104 (a) THE SECOND ROADS SAY THE HOLD: the list names the file to mend; a key\'s audit, the «may use» section (could not be read), the agent\'s key list (the hold, not an empty list) and a reveal answer the hold — never «not found», «no keys» or «nothing to reveal»', { file: GH.l2.held.file, au: GH.au, mu: GH.mu, kf: GH.kf, rvl: GH.rvl });
+  const MXG = M.load('src/server/automation-engine.js', editAnchor(ESRC, '    if (gh && gh.readable === false) {', '    if (false) {', 'src/server/automation-engine.js'), 'r3074-grants-unread');
+  const GHX = await grantsHeldWorld(MXG);
+  ok(GHX.placed === 1 && !GHX.same && GHX.m2.ok === true,
+    'RED CONTROL (r3074 (1), the release\'s read in a copy): the grants file unread drops every grant from the record and the mint writes automation-keys.json WITHOUT the kept key\'s grant record — the leg above can fail', { m2ok: GHX.m2.ok, same: GHX.same });
+  // r3074 (3) REACH INSIDE AN ACT reads its OWN snapshot: the key opened a worker; a rename of it waits inside its act while
+  // another use's re-read FAILS — the reach to the worker the key opened is still judged on the stamp's good record
+  const reachWorld = async (mod) => {
+    const w3 = await mkWorld('reach-snap-' + Math.random().toString(36).slice(2, 8));
+    let gate = null; const held3 = new Promise((r) => { gate = r; }); let inAct = false, reached = null;
+    const verbs = {
+      'conversations.open': async () => ({ ok: true, sessionId: 'w-opened', claudeSessionId: 'c-opened' }),
+      'conversations.rename': async (args, ctx) => { inAct = true; await held3; reached = ctx.reach({ conversationId: 'c-opened', webuiId: 'w-opened' }); return { ok: true }; },
+    };
+    const e3 = mod.create({ dataDir: w3.dir, vault: w3.vault, userTodos: w3.userTodos, now: w3.now, verbs, openFacts: {} });
+    const k3 = e3.mint({ name: 'opener', scopes: ['conversations.open', 'conversations.rename'], limits: LIM_OPEN });
+    e3.grant(k3.key.id, ['session:conv-1']);
+    const o3 = await e3.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN } });
+    const p3 = e3.use({ caller: caller(), verb: 'conversations.rename', args: { name: 'worker' } });
+    for (const t0 = Date.now(); !inAct && Date.now() - t0 < 10000;) await new Promise((r) => setTimeout(r, 5));
+    const pl = placeOnce(STORE_OF(w3));
+    try { e3.list(); } finally { pl.undo(); }   // another reader's read FAILS while the act waits — the shared record is emptied
+    gate(); await p3;
+    return { opened: o3 && o3.ok, inAct, placed: pl.used(), reached };
+  };
+  const RS = await reachWorld(ENG);
+  ok(RS.opened && RS.inAct && RS.placed === 1 && !!RS.reached && RS.reached.ok === true && RS.reached.by === 'opener',
+    'r3074 REACH INSIDE AN ACT: another reader\'s failed read while a rename waits — its reach to the worker the key OPENED is judged on the stamp\'s good record (by opener), never refused as out of reach', RS);
+  const MXS = M.load('src/server/automation-engine.js', editAnchor(ESRC, 'opened: openedAtStamp, reach: verdict.reach', 'opened: db.opened, reach: verdict.reach', 'src/server/automation-engine.js'), 'r3074-reach-shared');   // stale-pins: kept (the red control puts the shared record back)
+  const RSX = await reachWorld(MXS);
+  ok(RSX.placed === 1 && !!RSX.reached && RSX.reached.ok === false,
+    'RED CONTROL (r3074 (3), the shared record in a copy): the reach to the opened worker is refused once another read emptied the record — the leg above can fail', RSX);
+  // r3074 (2) THE PAGE says it: the Vault window draws the held words for the automation group (from the list's mark), never
+  // «Nothing stored here», and shows that group even in the «all» view (the page's own text)
+  const VW = fs.readFileSync(path.join(ROOT, 'src/lib/vault-window.js'), 'utf8');
+  const HELD_LINE = "const heldAuto = g.id === 'automation' && !!(st.auto && st.auto.held);";
+  ok(VW.includes(HELD_LINE) && VW.includes("if (!g.rows.length && !heldAuto && (st.purpose === 'all' || filtered)) continue;") && /heldAuto \? t\('Automation keys could not be read \(\{file\}\) — they stay on file and nothing is written over them\. Mend that file by hand and restart VibeSpace/.test(VW),
+    'r3074 THE PAGE SAYS IT: the automation group is drawn while its list is held (even in the «all» view) and says the keys could not be read, names the file and what the person can do (mend it by hand, restart) — never «Nothing stored here», never «restore a copy»');
 }
 console.log('⑫c MUTANT — the config read BEFORE the folder judge');
 {
@@ -2035,7 +2125,7 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
   // (5) a spent once-grant decides nothing — in the excepted branch as in the unreadable one
   const spentEx = A.useVerdict({ key: K(), grants: [G({ subject: 'group:T-1', mode: 'once', spentAt: NOW, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'group', id: 'T-1' }], except: [{ kind: 'conversation', key: 'conv-x' }] } })], subject: 'session:conv-x', subjectGroups: ['T-1'], verb: 'conversations.rename', vaultState: 'unlocked' });
   ok(spentEx.ok === false && spentEx.code === 'not_granted', 'follow-up (5): a SPENT once-grant that would except the caller decides nothing (not_granted, the first-use road) — as a spent undecided one', spentEx);
-  ok(/const v = A\.reachVerdict\(\{ keyId: key\.id, caller: caller\.conversationId, target, opened: db\.opened, reach: verdict\.reach, reachRows: verdict\.reachRows \}\)/.test(ENGS)
+  ok(/const v = A\.reachVerdict\(\{ keyId: key\.id, caller: caller\.conversationId, target, opened: openedAtStamp, reach: verdict\.reach, reachRows: verdict\.reachRows \}\)/.test(ENGS)
     && /call again in a moment\$\{pick\.works \? `, or call with --key \$\{pick\.works\.id\} \(«\$\{pick\.works\.name\}», granted to this conversation now\)` : ''\}` : null/.test(ENGS)
     && (fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8').match(/code: 'not_granted', reach: 'member', callerMistake: true, why: 'the calling conversation is not in that Task Group'/g) || []).length === 2
     && /const lg = liveGrants\(\);/.test(ENGS) && /const gs = lg\.filter\(\(g\) => g\.keyId === k\.id/.test(ENGS)

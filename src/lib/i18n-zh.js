@@ -10679,6 +10679,7 @@ export default {
   "Newest": "最新", // lane vault-contents-window
   "No stored value matches “{q}”": "没有与「{q}」匹配的存储值", // lane vault-contents-window
   "Nothing stored here": "这里没有存储内容", // lane vault-contents-window
+  "Automation keys could not be read ({file}) — they stay on file and nothing is written over them. Mend that file by hand and restart VibeSpace; until then no key works": "自动化密钥读不出来（{file}）—— 它们仍留在文件里，不会被覆盖。请手工修好那个文件，然后重启 VibeSpace；在那之前没有哪个密钥能用", // r3074 / r3104 (lane login-request-card)
   "Parameter": "参数", // lane vault-contents-window
   "Passkeys": "通行密钥", // lane vault-contents-window
   "Recently used": "最近使用", // lane vault-contents-window

@@ -364,7 +364,7 @@ console.log('⑦ THE AUTOMATION KEYS (design q-046) — a key\'s value never rea
     return bad;
   };
   ok(routes && engine && cli && census(routes, engine, cli).length === 0, 'THE CENSUS: the agent doors and vibespace-api never reach a value; the engine reads `apikey:<id>` ONLY in vaultReveal (the Vault window\'s people-only reveal)', census(routes, engine, cli));
-  const plant = routes.replace("res.json({ ok: true, keys: engine.keysFor(caller),", "res.json({ ok: true, value: engine.vaultReveal(caller.want), keys: engine.keysFor(caller),");
+  const plant = routes.replace("else res.json({ ok: true, keys, verbs:", "else res.json({ ok: true, value: engine.vaultReveal(caller.want), keys, verbs:");   // the route's answer line since r3104 (lane login-request-card): the hold answered first
   ok(plant !== routes && census(plant, engine, cli).includes('an agent door reads a value'), 'MUTANT RED: an agent door that answers a key\'s value (vaultReveal in /api/agent/automation/keys) is caught by the census');
   const plant2 = engine.replace("return { ok: true, key: A.publicKey(plan.record) };", "return { ok: true, key: A.publicKey(plan.record), value: plan.value };");
   ok(plant2 !== engine && census(routes, plant2, cli).includes('an engine answer carries a value'), 'MUTANT RED: a mint that answers its value is caught by the census');

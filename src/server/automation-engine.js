@@ -117,9 +117,19 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   const settled = new Map();   // askId → 'settled' | 'expired' (a second answer says which)
 
   // ── THE STORE ──
+  let grantsHeldSaid = false;   // r3074 (1): the grants file's hold said ONCE (a use reads at every call)
   function read() {
     let raw = null;
     try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) log(`automation-keys.json could not be read (${e.code || e.message}) — no key is usable until it is fixed`); return { keys: [], grants: [], opened: [], bad: !(e && e.code === 'ENOENT') }; }
+    // r3074 (1): ANOTHER STORE's UNREAD FILE — while the grants store cannot read its file, every grant row answers «unreadable»
+    // and the mapping below would DROP every grant; the next write would put this file back without them. Marked bad instead:
+    // its keys and grants unknown, nothing written, every use and door refused by name, until both files read
+    const gs0 = grantsOf(), gh = gs0 && typeof gs0.health === 'function' ? gs0.health() : null;
+    if (gh && gh.readable === false) {
+      if (!grantsHeldSaid) { grantsHeldSaid = true; log(`automation-keys.json is held: data/grants.json could not be read — its grants cannot be told apart, so nothing is written over automation-keys.json until both files read`); }
+      return { keys: [], grants: [], opened: [], bad: true, badWhy: 'data/grants.json could not be read', badFile: 'data/grants.json' };
+    }
+    grantsHeldSaid = false;
     const keys = (raw && Array.isArray(raw.keys) ? raw.keys : []).map(A.keyOf).filter(Boolean);
     // lane grants-unify: each grant HYDRATED from the store — its use row (a conversation / a Task Group grant with no row is no
     // grant: nobody), its reach row (none = 'opened'); an `external` grant (an outside caller, no conversation) keeps its mark
@@ -151,6 +161,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   // re-read that fails leaves `db` empty and marked bad; a write computed from it would put an empty list over the file (every key,
   // grant and opened row gone). The ONE writer refuses it (the belt); the use's own writers re-read and check the mark first
   const STORE_UNREAD = 'data/automation-keys.json could not be read — nothing is written over it';
+  /** the words of a refusal while the record is marked bad — the file that could not be read, by name (r3074) */
+  const unreadWords = () => `${(db && db.badWhy) || 'data/automation-keys.json could not be read'} — nothing is written over data/automation-keys.json`;
+  const heldError = () => Object.assign(new Error(unreadWords()), { code: 'automation_unread' });   // r3104 (a): a road that throws its refusals
   function write(next) {
     if (db && db.bad) throw Object.assign(new Error(STORE_UNREAD), { code: 'store_unread' });
     const opened = Array.isArray(next.opened) ? next.opened : db.opened || [];
@@ -171,7 +184,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   function noteOpened({ keyId, webuiId = null, conversationId = null }) {
     if (!keyId || (!webuiId && !conversationId)) return;
     if (db.bad) db = read();   // r3001: another use's re-read failed meanwhile — the row is written from a GOOD read, never from that one
-    if (db.bad) { log(`the opened row of ${keyId} is not recorded: ${STORE_UNREAD}`); return; }
+    if (db.bad) { log(`the opened row of ${keyId} is not recorded: ${unreadWords()}`); return; }
     const had = db.opened.find((o) => o.keyId === keyId && webuiId && o.webuiId === webuiId);
     if (had && (had.conversationId || !conversationId)) return;   // known already
     const next = had ? db.opened.map((o) => (o === had ? { ...o, conversationId } : o)) : [...db.opened, { keyId, webuiId, conversationId, at: now() }].slice(-OPENED_MAX);
@@ -188,7 +201,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** Mint a key: the value sealed as `apikey:<id>`, the record (digest only) written; the value is forgotten here. */
   function mint({ name, scopes, limits, by = 'user' } = {}) {
     if (vaultState() !== 'unlocked') return named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
-    if (db.bad) return named('failed', 'data/automation-keys.json could not be read — nothing is written over it');
+    if (db.bad) return named('failed', unreadWords());
     const plan = A.mintPlan({ name, scopes, limits, by, now: now(), randomBytes, sha256 });
     if (!plan.ok) return plan;
     if (db.keys.some((k) => !k.revokedAt && k.name === plan.record.name)) return named('bad_args', `a key named "${plan.record.name}" exists — names tell keys apart`);
@@ -203,6 +216,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** Revoke: the record keeps its history (revokedAt), the VALUE leaves the vault, every grant of it stops working, a
    *  card up for it settles refused. Works locked too (forgetting needs no DEK). */
   function revoke(keyId, { by = 'user' } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3): the true reason while the record is held, never «not found»
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return { ok: true, already: true, key: A.publicKey(k) };
@@ -220,7 +234,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  key-grant-everyone: every conversation here, the ones started later included) — `always` unless a card's once (a once
    *  grant to All agents is spent by the FIRST use, whoever makes it: one use, not one per conversation).
    *  `reach` (lane key-instance-scope): 'opened' (the default) | 'instance' | {taskGroups: [ids]} — PURE reachOf, refused by name. */
-  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened', except = [], only = [] } = {}) {   // the chain's cure (C): + only (the Task Group subjects marked «仅本组»)
+  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened', except = [], only = [] } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3)   // the chain's cure (C): + only (the Task Group subjects marked «仅本组»)
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return named('key_revoked');
@@ -267,7 +282,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   function edit(keyId, { scopes, limits } = {}, { by = 'user' } = {}) {
     if (vaultState() !== 'unlocked') return named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
     db = read();
-    if (db.bad) return named('failed', 'data/automation-keys.json could not be read — nothing is written over it');
+    if (db.bad) return named('failed', unreadWords());
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return named('key_revoked');
@@ -283,6 +298,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** THE REACH OF A GRANT, changed (lane key-instance-scope — the Vault window's reach chip on a 授权给 chip): the same store
    *  write the first-use card makes, on an existing row; audited `key.reach`. → { ok, grant } | a named refusal. */
   function setReach(grantId, reach, { by = 'user' } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3)
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
     const k = keyById(g.keyId);
@@ -309,6 +325,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** the chain's cure (C, U5c): the «仅本组» switch of a Task Group grant (the key's «Grant … to» dialog) — on narrows it to the group
    *  itself, off includes its child groups again (said explicitly, only:false — the ONE writer widens only then). */
   function setOnly(grantId, on, { by = 'user' } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3)
     if (typeof on !== 'boolean') return named('bad_args', '«this group only» is true or false — nothing was changed');   // its read: never a missing flag read as «off»
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
@@ -327,6 +344,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, grant: { id: g.id, subject: g.subject, only: on === true } };
   }
   function setExcept(grantId, { except, reachExcept, removeExcept = [], reachRemoveExcept = [] } = {}, { by = 'user' } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3)
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
     const k = keyById(g.keyId);
@@ -357,6 +375,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   const setLimits = (keyId, limits, opts = {}) => edit(keyId, { limits: limits === undefined ? null : limits }, opts);
   /** Take a grant back (the window's ✕ on a 授权给 chip). */
   function ungrant(grantId, { by = 'user' } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3)
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
     { const w = dropRows([g], by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }   // lane grants-unify: nobody, at once
@@ -369,6 +388,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  press — a grant to a conversation that is gone can never be used) — ONE store write and ONE audit line naming what
    *  went (`key.prune`, its note). → { ok, removed: [subjects] } (none ended ⇒ removed: []). */
   function pruneEnded(keyId, live, { by = 'user' } = {}) {
+    if (db.bad) return named('failed', unreadWords());   // r3074 (3)
     const k = keyById(keyId);
     if (!k) return named('not_found');
     const gone = db.grants.filter((g) => g.keyId === k.id && A.grantEnded(g, live));
@@ -381,6 +401,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** The window's list: every key (public fields) with its grants (never a value, never a digest). */
   function list() {
     db = read();
+    // r3074 (2): «could not be read», never an empty list as a fact — the reply carries the mark (the page says it)
+    if (db.bad) return { ok: true, state: vaultState(), keys: [], held: { code: 'automation_unread', why: unreadWords(), file: db.badFile || 'data/automation-keys.json' } };
     // lane grants-unify: + each grant's exceptions (the members its Task Group grant / its reach leaves out), as the store keeps them
     const exceptOf = (row) => { const n = row ? GM.normRow(row) : null; return n && n.ok ? n.row.except : []; };
     const onlyOf = (row) => { const n = row ? GM.normRow(row) : null; return !!(n && n.ok && n.row.to.some((e) => e.kind === 'group' && e.only === true)); };   // the chain's cure (C)
@@ -392,6 +414,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return db.keys.filter((k) => !k.revokedAt).map((k) => ({ entry: A.entryOf(k.id), field: 'key', kind: 'api-key', label: k.name, detail: 'Only to hand to an outside party', createdAt: k.createdAt, bytes: 48 }));
   }
   function vaultReveal(entry) {
+    if (db.bad) throw heldError();   // r3104 (a): the hold, never «nothing to reveal»
     const id = A.keyIdOfEntry(entry);
     const k = id ? keyById(id) : null;
     if (!k || k.revokedAt) return null;
@@ -607,7 +630,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (typeof impl !== 'function') return done(named('verb_not_wired', `${verb} is in the table but not wired yet (L2)`, { args: v0.args }), null, { args: v0.args });
     if (vaultState() !== 'unlocked') return done(named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked', null, { args: v0.args }));
     db = read();
-    if (db.bad) return done({ ...named('failed', `${STORE_UNREAD} — nothing ran`), args: v0.args });   // r3001: refused by name, never judged on an empty list
+    if (db.bad) return done({ ...named('failed', `${unreadWords()} — nothing ran`), args: v0.args });   // r3001: refused by name, never judged on an empty list
     const groups = Array.isArray(caller.groups) ? caller.groups : [];
     const inherited = lineageIn(caller.inherited);   // lane lg-group-parents U3d: the caller's lineage (the wiring's ONE reader)
     // lane key-grant-everyone r2: the caller's Task Groups could not be read (the wiring says so) ⇒ a group «除了» is never
@@ -630,7 +653,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (r.outcome === 'unfiled') return done({ ...named('ask_unfiled', 'the question could not be filed in For you'), args: v0.args }, key.id, { ask: 'unfiled' });
       if (r.outcome !== 'allowed' && r.outcome !== 'always') return done({ ...named(r.outcome === 'expired' ? 'ask_expired' : 'ask_denied'), args: v0.args }, key.id, { ask: r.outcome });
       db = read();
-      if (db.bad) return done({ ...named('failed', `${STORE_UNREAD} — nothing ran`), args: v0.args }, key.id, { ask: asked });   // r3001
+      if (db.bad) return done({ ...named('failed', `${unreadWords()} — nothing ran`), args: v0.args }, key.id, { ask: asked });   // r3001
       verdict = A.useVerdict({ key: keyById(key.id), grants: liveGrants(), subject, subjectGroups: groups, subjectGroupsUnreadable: groupsUnreadable, subjectInherited: inherited, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
       // once: the grant the answer wrote — spent by THIS call (a joined call finds it spent and asks again)
     }
@@ -664,20 +687,22 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       runArgs = lim.args;
     }
     // THE KEY IS STAMPED BEFORE THE ACT (lastUsedAt; a once-grant was spent at its verdict — the reservation above)
-    // r3001: from a GOOD read — the limits' await above may have seen another use's re-read fail (the shared record then empty):
-    // read again and check the mark, as mint and edit do; still unreadable ⇒ refused by name, nothing ran
-    db = read();
-    if (db.bad) return done({ ...named('failed', `${STORE_UNREAD} — nothing ran`), args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });
+    // r3001: from a GOOD read — the limits' await above may have seen another use's re-read fail (the shared record then empty).
+    // r3074 (0): read again ONLY when the record is marked bad — an unmarked record IS the last good read (every writer refreshes
+    // it), so no read is added on the loop (a use makes the release's reads); still unreadable ⇒ refused by name, nothing ran
+    if (db.bad) db = read();
+    if (db.bad) return done({ ...named('failed', `${unreadWords()} — nothing ran${held ? '; the once-grant this call reserved stays spent — grant it again' : ''}`), args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });
     try {
       const t = now();
       write({ keys: db.keys.map((k) => (k.id === key.id ? { ...k, lastUsedAt: t } : k)), grants: db.grants });
     } catch (e) { return done({ ...named('failed', `the key list could not be written (${e.code || e.message}) — nothing ran`), args: v0.args }, key.id); }
+    const openedAtStamp = db.opened;   // r3074 (3): the act's reach judges ITS snapshot (the stamp's good record), never a later failed read's empty one
     let result;
     // REACH (lane conversations-archive-verb): a verb that names ANOTHER conversation may touch it by ONE PURE rule — the key
     // OPENED it (the store's rows) or it is the caller itself (A.reachVerdict; B-3190: a grant NAMING the target is no reach of
     // its own) — the key's own opens and the grant's reach bound what it reaches, never the caller's say-so
     // + the GRANT'S REACH this use rides (lane key-instance-scope: the widest of the caller's always-grants, else the once-grant's — useVerdict)
-    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, opened: db.opened, reach: verdict.reach, reachRows: verdict.reachRows }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
+    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, opened: openedAtStamp, reach: verdict.reach, reachRows: verdict.reachRows }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
     try { result = await impl(runArgs, { caller, keyId: key.id, scopes: Array.isArray(key.scopes) ? key.scopes.slice() : [], identity: A.identityOf(key.id), grant: verdict.grant, reach }); }   // scopes: lane login-request-card (a refusal teaches only a verb the key holds)
     catch (e) { return done({ ...named('failed', String((e && e.message) || e).slice(0, 200)), args: v0.args }, key.id, asked ? { ask: asked } : {}); }
     // THE OPENER'S ROW: a successful open is remembered by the key that made it (the webui id now, the conversation id when known)
@@ -737,6 +762,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  value; the refusals a person must see (a 「除了」, Task Groups that could not be read, a row this release cannot read). */
   function mayUseFor(facts = {}) {
     db = read();
+    if (db.bad) return [{ door: 'automation-key-use', resource: '*', name: '', ok: false, code: 'unknown_shape' }];   // r3104 (a): could not be read (the section's own word for a door it cannot read), never «no keys»
     const F = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), inheritedGroupIds: (facts.inheritedGroupIds || []).map(String), groupsUnreadable: !!facts.groupsUnreadable };
     const out = [];
     for (const k of db.keys) {
@@ -770,6 +796,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  names and ids only (a refused open with its code among them). */
   function auditOfKey(keyId, { limit = 50 } = {}) {
     db = read();
+    if (db.bad) return named('failed', unreadWords());   // r3104 (a): the hold's words, never «not found»
     if (!keyById(keyId)) return named('not_found');
     let text = '';
     try { text = fs.readFileSync(AUDIT, 'utf8'); } catch { return { ok: true, lines: [] }; }
@@ -779,7 +806,10 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
 
   /** a key's name from the store this engine holds in memory (no file read — the end record names the key that ended a conversation) */
   const keyNameOf = (id) => { const k = db && Array.isArray(db.keys) ? db.keys.find((x) => x && x.id === id) : null; return k && typeof k.name === 'string' ? k.name : null; };
-  return { list, keyNameOf, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, setOnly, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  /** the store's hold (r3104 (a)): { code, why, file } while the record is marked bad, else null — for a road that reads the
+   *  list without asking it (the agent's keys route) */
+  const held = () => (db && db.bad ? { code: 'automation_unread', why: unreadWords(), file: db.badFile || 'data/automation-keys.json' } : null);
+  return { held, list, keyNameOf, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, setOnly, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, mayUseFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };
