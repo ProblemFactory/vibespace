@@ -22,6 +22,9 @@ const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear');
 const TD = require('./task-delta.js'); // PURE (lane task-group-fanout): a broadcast carries the changed keys, never the store
+const SR = require('./store-read.js');
+const HOLD = require('./store-read-hold.js');   // 主开发 r3005 (the content stores): session-status.json under the store-read law
+const STATUS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && !!v.statuses && typeof v.statuses === 'object' && !Array.isArray(v.statuses);
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a status reason / detail a reader sees never carries a credential in the clear // PURE: "Clear content…" (2026-09-28) — this store holds the door (clearHistory)
 
 // A Task (= a session) has one of these states; `done` = this piece of work is
@@ -41,11 +44,27 @@ class SessionStatusManager {
     // not exactly at `base` re-fetches GET /api/session-status (which answers syncMark()), never a stale mirror
     this._epoch = Date.now(); this._seq = 0; this._pruned = null;
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
-    try {
-      this._state = timedSync('session-status.read', () => JSON.parse(fs.readFileSync(this._file, 'utf-8')));
-      if (!this._state || typeof this._state.statuses !== 'object') this._state = { statuses: {} };
-      this._lastWritten = JSON.stringify(this._state, null, 2); // avoid a redundant first write
-    } catch { /* fresh */ }
+    // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no status» and
+    // the next status of any agent wrote over the file within seconds: every task's state, urgency and reason, the history and the
+    // pending override notices gone. HELD: an agent's status, the person's override or clear and a «Clear content…» of an entry are
+    // refused by name (503 status_unread); the server's own bookkeeping (a rekey, a queued notice, an event) waits — nothing is
+    // written over the file; the board says it once; it is read again off the loop. Torn bytes are kept aside once per content,
+    // then it starts empty. A restart while held reads the same file again. NO REMOVER reads its silence: an entry leaves only by
+    // its own clear, «Clear content…» and the 500-entry bound — all inside this store, none by a sweep of what it does not name.
+    this._hold = HOLD.create({
+      file: this._file, valid: STATUS_SHAPE, code: 'status_unread', aside: (mark) => this._file + '.corrupt-' + mark,
+      words: (h) => `VibeSpace cannot read the conversations' statuses right now (${h.code}); it reads them again by itself every few minutes. No status is lost: nothing is written over them, and every status change waits until it reads`,
+      log: (s) => console.warn('[session-status] ' + s),
+      onLift: (v) => this._lifted(v),
+    });
+    let read; try { read = { text: timedSync('session-status.read', () => fs.readFileSync(this._file, 'utf-8')) }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: STATUS_SHAPE });
+    if (this._hold.start(a0) === 'data') { this._state = a0.value; this._lastWritten = JSON.stringify(this._state, null, 2); } // (avoid a redundant first write)
+    this._normalize();
+  }
+
+  /** the old single pendingNotice → the list (at a start, and at a lift) */
+  _normalize() {
     // THE NOTICE SLOT IS A QUEUE (agent browser P1, design §3.8 layer ②): a
     // file an older build wrote carries ONE fixed-shape `pendingNotice`; it is
     // lifted into `pendingNotices: [{kind:'status-override', …}]` once, here,
@@ -57,12 +76,23 @@ class SessionStatusManager {
       delete rec.pendingNotice;
     }
   }
+  /** the hold lifted (the file read again): its records back — or, torn bytes kept aside, empty — and every board told */
+  _lifted(v) {
+    this._state = v && typeof v === 'object' && v.statuses && typeof v.statuses === 'object' ? v : { statuses: {} };
+    this._normalize();
+    this._lastWritten = v ? JSON.stringify(this._state, null, 2) : null;
+    this._notify(Object.keys(this._state.statuses));
+  }
+  /** held (session-status.json could not be read): the words a person reads, null when it reads */
+  heldWords() { return this._hold.words(); }
+  isHeldUnread() { return !!this._hold.held(); }
 
   // In-memory state + broadcast are updated synchronously by the callers; disk
   // persistence is DEBOUNCED (single process → no cross-process race) and
   // content-compared, so a burst of status updates coalesces into one write
   // instead of a synchronous full-file writeFileSync per update. Flushed on exit.
   _save() {
+    if (!this._hold.writable('a status change')) return;   // held: nothing written over it
     const keys = Object.keys(this._state.statuses);
     if (keys.length > MAX_ENTRIES) {
       keys.sort((a, b) => (this._state.statuses[a].at || 0) - (this._state.statuses[b].at || 0));
@@ -143,6 +173,7 @@ class SessionStatusManager {
    *  (the effective status is untouched, no pendingNotice, no broadcast — the
    *  active-sessions push that carries the fact re-renders the panel). */
   noteEvent(key, entry) {
+    if (this._hold.held()) return;   // held: the event waits for nothing — it is the store's own bookkeeping
     if (!key || !entry || typeof entry !== 'object' || typeof entry.event !== 'string') return;
     if (!this._state.history || typeof this._state.history !== 'object') this._state.history = {};
     const arr = this._state.history[key] || (this._state.history[key] = []);
@@ -165,6 +196,7 @@ class SessionStatusManager {
   }
 
   setByAgent(key, fields) {
+    this._hold.refuse('setting this status');
     const v = this._validate(fields);
     const _dd = path.dirname(this._file);   // agent-output-sinks: belt the AGENT's own notice only (never setByUser, never a system NOTICE_RENDERERS queue item)
     if (v.reason) v.reason = belt.maskForSink(v.reason, { dataDir: _dd, message: true });
@@ -182,6 +214,7 @@ class SessionStatusManager {
   }
 
   setByUser(key, fields) {
+    this._hold.refuse('changing this status');
     const v = this._validate(fields);
     const prev = this._state.statuses[key];
     const overriding = prev && prev.setBy === 'agent'
@@ -200,6 +233,7 @@ class SessionStatusManager {
   }
 
   clear(key, by) {
+    this._hold.refuse('clearing this status');
     const prev = this._state.statuses[key];
     if (!prev) return null;
     if (by === 'user' && prev.setBy === 'agent') {
@@ -236,6 +270,7 @@ class SessionStatusManager {
    * unknown: [ats], refused: [{at, code, why, status}]}.
    */
   clearHistory(key, ats, { by = 'owner', at = Date.now(), allow = null } = {}) {
+    if (this._hold.held()) return { cleared: [], already: [], unknown: [], refused: [].concat(ats || []).map((a) => ({ at: a, code: 'status_unread', why: this._hold.words(), status: 503 })) };   // held: nothing cleared, said
     const out = { cleared: [], already: [], unknown: [], refused: [] };
     const arr = (this._state.history && this._state.history[key]) || [];
     const rec = this._state.statuses[key] || null;
@@ -272,6 +307,7 @@ class SessionStatusManager {
 
   // Move a webui:<id> placeholder record onto the real sessionKey once known.
   rekey(fromKey, toKey) {
+    if (this._hold.held()) return;   // held: the agent's next status rekeys again
     if (fromKey === toKey || !this._state.statuses[fromKey]) return;
     if (!this._state.statuses[toKey]) this._state.statuses[toKey] = this._state.statuses[fromKey];
     delete this._state.statuses[fromKey];
@@ -298,6 +334,7 @@ class SessionStatusManager {
   // state (a page dialog) keeps ONE pending notice per key — a page answered ten times in the live view queued ten
   // stale `browser-dialog` notices and the bound evicted the takeover notice the agent was owed (reproduced).
   pushNotice(key, notice, { replaceKind = false } = {}) {
+    if (this._hold.held()) return 0;   // held: a notice is never queued into an unread record (nothing written over it)
     const n = notice && typeof notice === 'object' ? notice : null;
     if (!n || !NOTICE_RENDERERS[n.kind]) throw new Error(`pushNotice: unknown notice kind ${JSON.stringify(n && n.kind)} (one of ${Object.keys(NOTICE_RENDERERS).join('/')})`);
     const rec = this._state.statuses[key] || (this._state.statuses[key] = { state: null, urgency: null, reason: null, setBy: null, at: Date.now(), pendingNotices: [] });
@@ -318,6 +355,7 @@ class SessionStatusManager {
   /** Withdraw the pending notices `pred` names (a notice about a state that ended before the agent's turn — a page dialog
    *  answered in the live view: its next verb says so instead). → how many went. */
   dropNotices(key, pred) {
+    if (this._hold.held()) return 0;
     const rec = this._state.statuses[key];
     if (!rec || !Array.isArray(rec.pendingNotices) || !rec.pendingNotices.length || typeof pred !== 'function') return 0;
     const keep = rec.pendingNotices.filter((x) => { try { return !pred(x); } catch { return true; } });
@@ -337,6 +375,7 @@ class SessionStatusManager {
   // `count` (channel-jump verify r7): consume only the OLDEST `count` — the injection takes the prefix that fits
   // whole under its cap and leaves the rest queued, so a notice is consumed exactly when it rides.
   consumeNotices(key, count = null) {
+    if (this._hold.held()) return [];
     const rec = this._state.statuses[key];
     if (!rec || !Array.isArray(rec.pendingNotices) || !rec.pendingNotices.length) return [];
     const n = count == null ? rec.pendingNotices.length : Math.max(0, Math.min(rec.pendingNotices.length, Math.floor(Number(count)) || 0));

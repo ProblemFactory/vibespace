@@ -112,7 +112,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
   } catch (e) { res.status(e && e.code === 'todos-unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'todos-unread' ? { code: e.code } : {}) }); }
 });
-app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot(), ...(typeof sessionStatus.syncMark === 'function' ? sessionStatus.syncMark() : {}) }));   // lane task-group-fanout: + {epoch, seq} — where this answer sits in the broadcast order
+app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot(), ...(typeof sessionStatus.syncMark === 'function' ? sessionStatus.syncMark() : {}), ...(typeof sessionStatus.heldWords === 'function' && sessionStatus.heldWords() ? { unread: sessionStatus.heldWords(), code: 'status_unread' } : {}) }));   // r3005: held — an empty board says why   // lane task-group-fanout: + {epoch, seq} — where this answer sits in the broadcast order
 // User set/override/clear from the UI (cookie-authed like every route)
 app.post('/api/session-status', (req, res) => {
   const { sessionKey, state, urgency, reason, clear } = req.body || {};
@@ -121,7 +121,7 @@ app.post('/api/session-status', (req, res) => {
     const rec = clear ? sessionStatus.clear(sessionKey, 'user') : sessionStatus.setByUser(sessionKey, { state, urgency, reason });
     // round 2 (law B): the person's override / clear is on disk before the answer (the loop never waits for it)
     Promise.resolve(typeof sessionStatus.persisted === 'function' ? sessionStatus.persisted() : true).then((ok) => (ok === false ? res.status(503).json({ error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', code: 'not-durable', status: rec }) : res.json({ success: true, status: rec })), () => res.json({ success: true, status: rec }));
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e && e.code === 'status_unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'status_unread' ? { code: e.code } : {}) }); }   // r3005: held — refused by name
 });
 // Agent endpoint — authenticated ONLY by the per-session token spawned into
 // the agent's env (VIBESPACE_SESSION_TOKEN); exempt from cookie auth in
@@ -136,6 +136,8 @@ app.post('/api/agent/session-status', (req, res) => {
   const key = sessionStatusKey(found, foundId);
   // migrate an early webui:<id> record once the real backend id exists
   if (!key.startsWith('webui:')) sessionStatus.rekey(`webui:${foundId}`, key);
+  // r3104 (a): held — `--show` reads no «no status» and a waiting state hears no «needs --reason»: every verb answers the hold's words
+  if (typeof sessionStatus.isHeldUnread === 'function' && sessionStatus.isHeldUnread()) return res.status(503).json({ error: sessionStatus.heldWords(), code: 'status_unread' });
   const { state, urgency, reason, detail, clear, show } = req.body || {};
   // Waiting states are USELESS on the board without a reason the user can act
   // on — reject them (the error text teaches the fix at the point of use).
@@ -157,7 +159,7 @@ app.post('/api/agent/session-status', (req, res) => {
     if (!show) bookkept(found);
     // round 2 (law B): the agent's own report is on disk before the answer
     Promise.resolve(!show && typeof sessionStatus.persisted === 'function' ? sessionStatus.persisted() : true).then((ok) => (ok === false ? res.status(503).json({ error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', code: 'not-durable', sessionKey: key, status: rec }) : res.json({ success: true, sessionKey: key, status: rec })), () => res.json({ success: true, sessionKey: key, status: rec }));
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e && e.code === 'status_unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'status_unread' ? { code: e.code } : {}) }); }   // r3005: held — refused by name
 });
 // Status-change history for the expanded card's timeline. Accepts a comma
 // list of keys (backend:id + webui:<serverId> placeholder) — first hit wins;
@@ -165,6 +167,7 @@ app.post('/api/agent/session-status', (req, res) => {
 // the entry by that key and its `at`).
 app.get('/api/session-status/history', (req, res) => {
   const keys = String(req.query.sessionKey || '').split(',').filter(Boolean);
+  if (typeof sessionStatus.isHeldUnread === 'function' && sessionStatus.isHeldUnread()) return res.json({ history: [], key: keys[0] || null, unread: sessionStatus.heldWords(), code: 'status_unread' });   // r3104 (a): an empty timeline is UNREAD, said
   for (const k of keys) {
     const h = sessionStatus.history(k);
     if (h.length) return res.json({ history: h, key: k });

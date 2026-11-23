@@ -11,6 +11,7 @@
 //      the store's remover question answered on the leg (who deletes by this store's silence)
 // Stand-ins only: a scratch data folder of this suite's own, made-up rows, no vendor call.
 //   PP  published-pages.json — the share links a person gave out
+//   SS  session-status.json — every task's state, urgency and reason, the history, the pending notices
 // Run: node scripts/test-content-store-reads.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -214,6 +215,111 @@ console.log('PP [published-pages.json] the share links a person gave out');
     ok(copiesOf(F).length === 1, 'PP5 a second start on the SAME torn bytes makes no second copy (kept aside once per content)', copiesOf(F));
     const after = p2.publish({ srcPath: html('pp5-new'), name: 'New' });
     ok(!!idOf(after) && s0.every((n) => snaps().includes(n)) && snaps().length === s0.length + 1, 'PP5 NO REMOVER reads its silence: the snapshots of the pages the empty list no longer names stay on disk after the start and the next publish (removed only by an unpublish of its record)', { before: s0, after: snaps() });
+  }
+}
+
+// ══ SS session-status.json ══
+console.log('SS [session-status.json] every task\'s state, urgency and reason, the history, the pending notices');
+{
+  const { SessionStatusManager } = require(path.join(REPO, 'src/session-status.js'));
+  const STR = require(path.join(REPO, 'src/agent-routes/status.js'));
+  const mk = (d) => new SessionStatusManager({ dataDir: d });
+  const twoStatuses = (name) => {
+    const d = world(name), m = mk(d);
+    m.setByAgent('claude:aaaa0001', { state: 'blocked', reason: 'waiting on the made-up review', detail: 'a made-up detail' });
+    m.setByUser('claude:aaaa0002', { state: 'review', reason: 'a made-up override' });
+    m.flush();
+    return { d, F: path.join(d, 'session-status.json') };
+  };
+  const codeOf = (fn) => { try { fn(); return null; } catch (e) { return (e && e.code) || 'thrown'; } };
+  // ① KEPT
+  {
+    const { d, F } = twoStatuses('ss1');
+    ok(Object.keys((json(F) || {}).statuses || {}).length === 2, 'SS1 setup: two statuses on disk', json(F));
+    const before = disk(F), pr = placeReads(F, 1);
+    let m2 = null, next = null;
+    try { await quietly(() => { m2 = mk(d); next = codeOf(() => m2.setByAgent('claude:aaaa0003', { state: 'working' })); m2.flush(); }); } finally { pr.restore(); }
+    ok(pr.seen.n === 1, 'SS1 setup: the placed refusal met the store\'s read once', pr.seen);
+    ok(disk(F) === before && next === 'status_unread', 'SS1 KEPT — a read that failed once is never written over by the next agent\'s status: it is refused by name (status_unread) and the file stays byte for byte (the stop\'s flush included)', { next });
+    m2._hold.stop();
+  }
+  // ② HELD: the doors, the server's own bookkeeping, the board's words
+  {
+    const { d, F } = twoStatuses('ss2');
+    const before = disk(F), pr = placeReads(F, 1);
+    let m2 = null;
+    try { await quietly(() => { m2 = mk(d); }); } finally { pr.restore(); }
+    const codes = [codeOf(() => m2.setByUser('claude:aaaa0001', { state: 'done' })), codeOf(() => m2.clear('claude:aaaa0002', 'user'))];
+    const ch = m2.clearHistory('claude:aaaa0001', [1]);
+    ok(codes.every((c) => c === 'status_unread') && ch.cleared.length === 0 && ch.refused.length === 1 && ch.refused[0].code === 'status_unread', 'SS2 the person\'s override, a clear and a «Clear content…» of an entry are refused by name (status_unread), nothing cleared', { codes, ch });
+    const quietOnes = [m2.pushNotice('claude:aaaa0001', { kind: 'status-override', text: 'x' }), m2.dropNotices('claude:aaaa0001', () => true), m2.consumeNotices('claude:aaaa0001').length];
+    m2.rekey('webui:madeup', 'claude:aaaa0009'); m2.noteEvent('claude:aaaa0001', { event: 'vcs', at: 1 }); m2.flush();
+    ok(quietOnes.every((n) => n === 0) && disk(F) === before, 'SS2 the server\'s own bookkeeping while held (a queued notice, a rekey, an event, the flush) writes NOTHING over the file and throws into no caller (a chat send that consumes notices goes on)', { quietOnes });
+    const routes = {}, app = { get: (u, f) => { routes['GET ' + u] = f; }, post: (u, f) => { routes['POST ' + u] = f; } };
+    const sessions = new Map([['srv-madeup', { agentToken: 'vsst_s1' }]]);
+    STR.register(app, { activeSessions: sessions, sessionStatus: m2, userTodos: {}, sessionStatusKey: () => 'claude:aaaa0003', clearAsAgent: () => { }, agentSession: () => null, toolOn: () => true, toolDisabled: () => { }, bookkept: () => { }, handoverItems: () => [] });
+    const g = resStub(); routes['GET /api/session-status']({ query: {}, headers: {} }, g);
+    const u = resStub(); routes['POST /api/session-status']({ body: { sessionKey: 'claude:aaaa0001', state: 'done' }, headers: {} }, u);
+    const a = resStub(); routes['POST /api/agent/session-status']({ body: { state: 'working' }, headers: { authorization: 'Bearer vsst_s1' } }, a);
+    ok(!!g.body && g.body.code === 'status_unread' && /cannot read /.test(g.body.unread || ''), 'SS2 the board\'s read carries unread + status_unread (the board says it once, zh / ja)', g.body);
+    ok(u.code === 503 && u.body.code === 'status_unread' && a.code === 503 && a.body.code === 'status_unread' && /cannot read /.test(a.body.error || ''), 'SS2 the person\'s override and an agent\'s vibespace-status answer 503 status_unread with the words (the CLI prints them)', { user: u.body, agent: a.body });
+    ok(disk(F) === before, 'SS2 nothing was written over the file while held', null);
+    m2._hold.stop();
+  }
+  // ⑥ r3104 (a) THE ROADS THAT LOOK A STATUS UP while held — the hold's words, never «no status» / «needs --reason» / «no changes»
+  {
+    const { d, F } = twoStatuses('ss6');
+    const pr = placeReads(F, 1);
+    let m2 = null;
+    try { await quietly(() => { m2 = mk(d); }); } finally { pr.restore(); }
+    const routes = {}, app = { get: (u, f) => { routes['GET ' + u] = f; }, post: (u, f) => { routes['POST ' + u] = f; } };
+    STR.register(app, { activeSessions: new Map([['srv-madeup', { agentToken: 'vsst_s1' }]]), sessionStatus: m2, userTodos: {}, sessionStatusKey: () => 'claude:aaaa0001', clearAsAgent: () => { }, agentSession: () => null, toolOn: () => true, toolDisabled: () => { }, bookkept: () => { }, handoverItems: () => [] });
+    const agent = (body) => { const r = resStub(); routes['POST /api/agent/session-status']({ body, headers: { authorization: 'Bearer vsst_s1' } }, r); return r; };
+    const show = agent({ show: true }), waiting = agent({ state: 'blocked', urgency: 'high' });
+    ok(show.code === 503 && show.body.code === 'status_unread' && waiting.code === 503 && waiting.body.code === 'status_unread' && !/needs BOTH/.test(waiting.body.error || ''), 'SS6 the agent\'s `vibespace-status --show` and a waiting state with no words while held: 503 with the hold\'s words — never «no status» nor «needs --reason AND --detail»', { show: show.body, waiting: waiting.body });
+    const h = resStub(); routes['GET /api/session-status/history']({ query: { sessionKey: 'claude:aaaa0001' }, headers: {} }, h);
+    ok(!!h.body && h.body.code === 'status_unread' && /cannot read /.test(h.body.unread || '') && Array.isArray(h.body.history), 'SS6 the Properties timeline\'s read while held carries unread + status_unread (the timeline words it, never «No status changes recorded yet»)', h.body);
+    const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+    const AR = src('src/agent-routes.js'), SP = src('src/lib/session-props.js');
+    const NUDGE = "    if (typeof sessionStatus.isHeldUnread === 'function' && sessionStatus.isHeldUnread()) return res.json({ block: false, why: 'status-unread' });";
+    const nudge = (ar) => ar.includes(NUDGE) && ar.indexOf(NUDGE) > ar.indexOf("app.get('/api/agent/stop-check'") && ar.indexOf(NUDGE) < ar.indexOf('const rec = sessionStatus.get(key) || sessionStatus.get(`webui:${id}`);');
+    const props = (sp) => sp.includes("d?.code === 'status_unread' ? statusListHeldWords() : t('No status changes recorded yet')");
+    ok(nudge(AR) && props(SP), 'SS6 the stop-check asks the hold before it reads «never reported» (no billed nudge for a status the store refuses); the Properties timeline words a held read', null);
+    ok(!nudge(anchored(AR, NUDGE + '   // r3104 (a)', '', 'ss6-nudge-today')) && !props(anchored(SP, "d?.code === 'status_unread' ? statusListHeldWords() : t('No status changes recorded yet')", "t('No status changes recorded yet')", 'ss6-props-today')), 'SS6 RED: the stop-check and the timeline with today\'s lines fail the legs', null);   // stale-pins: kept
+    m2._hold.stop();
+  }
+  // ③ a RESTART while held
+  {
+    const { d, F } = twoStatuses('ss3');
+    const before = disk(F), pr = placeReads(F, 2);
+    let b = null;
+    try { await quietly(() => { const a = mk(d); a._hold.stop(); b = mk(d); }); } finally { pr.restore(); }
+    ok(pr.seen.n === 2 && b.isHeldUnread() && codeOf(() => b.setByAgent('claude:aaaa0003', { state: 'working' })) === 'status_unread' && disk(F) === before, 'SS3 a restart while held reads the same file again and is held again: refused, nothing written', { placed: pr.seen.n });
+    b._hold.stop();
+  }
+  // ④ THE LIFT
+  {
+    const { d, F } = twoStatuses('ss4');
+    const pr = placeReads(F, 1);
+    let m2 = null, told = [];
+    try { await quietly(() => { m2 = new SessionStatusManager({ dataDir: d, onChange: (st) => { told.push(Object.keys(st || {}).length); } }); }); } finally { pr.restore(); }
+    const lifted = await quietly(() => m2._hold.again());
+    m2.setByAgent('claude:aaaa0003', { state: 'working' }); m2.flush();
+    const keys = Object.keys((json(F) || {}).statuses || {});
+    ok(lifted === true && !m2.isHeldUnread() && !!m2.get('claude:aaaa0001') && told.length >= 1, 'SS4 the file reads again ⇒ the hold lifts, the statuses are back and every board is told (one broadcast)', { lifted, told });
+    ok(keys.length === 3 && keys.includes('claude:aaaa0001') && keys.includes('claude:aaaa0002'), 'SS4 after the lift the next status goes through and keeps both earlier ones on disk', keys);
+  }
+  // ⑤ TORN BYTES, kept aside once; no remover
+  {
+    const { d, F } = twoStatuses('ss5');
+    const torn = '{"statuses": {"claude:aaaa0001": {"state": "blo';
+    fs.writeFileSync(F, torn);
+    const m2 = await quietly(async () => { const m = mk(d); await m._hold.again(); return m; });
+    const c1 = copiesOf(F);
+    ok(c1.length === 1 && disk(path.join(d, c1[0])) === torn && !m2.isHeldUnread() && Object.keys(m2.snapshot()).length === 0, 'SS5 torn bytes: kept aside beside the store (byte for byte), then it starts empty', { copies: c1 });
+    fs.writeFileSync(F, torn);
+    await quietly(async () => { const m = mk(d); await m._hold.again(); });
+    ok(copiesOf(F).length === 1, 'SS5 a second start on the SAME torn bytes makes no second copy (kept aside once per content)', copiesOf(F));
   }
 }
 

@@ -1262,6 +1262,7 @@ app.get('/api/agent/stop-check', (req, res) => {
     const staleMin = clamp0(Number(serverSetting('agents.stopNudgeStaleMinutes')), 1, 240, 10);
     const cooldownMin = clamp0(Number(serverSetting('agents.stopNudgeCooldownMinutes')), 2, 720, 30);
     const key = sessionStatusKey(s, id);
+    if (typeof sessionStatus.isHeldUnread === 'function' && sessionStatus.isHeldUnread()) return res.json({ block: false, why: 'status-unread' });   // r3104 (a): the statuses are UNREAD — never «never reported» (a billed nudge for a status the store refuses)
     // THE COOLDOWN IS PERSISTED (D8, design §1.4). `s._lastStopNudge` lives on
     // the live session object, so every release restart handed the largest
     // measured automatic spender a fresh cooldown — and this instance restarts

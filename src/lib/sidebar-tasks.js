@@ -1,4 +1,4 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel, fetchJson, sayNotOnDisk } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel, fetchJson, sayNotOnDisk, heldWordsOf } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
@@ -164,6 +164,8 @@ export function installSidebarTasks(SidebarClass) {
       // lane task-group-fanout: the answer says where it sits in the hub's order ({epoch, seq}) — dropped only when a
       // broadcast NEWER than it landed meanwhile; the frames held while it was in flight are replayed after it
       if (!d?.statuses || ((this._statusGen || 0) !== gen && fetchVerdict(this._statusMark, d) === 'drop')) return;
+      // r3005: session-status.json held (it could not be read) — the board is empty because it is UNREAD: said once a hold
+      if (d.code === 'status_unread') { if (!this._statusHeldSaid) { this._statusHeldSaid = true; showToast(tr('VibeSpace cannot read the conversations’ statuses right now, so none is shown. Nothing is lost: they come back when they read (it tries again every few minutes); status changes wait until then.'), { type: 'error', duration: 9000 }); } } else this._statusHeldSaid = false;
       this._statusGen = (this._statusGen || 0) + 1;
       this._sessionStatuses = d.statuses;
       this._statusSig = null;
@@ -208,7 +210,7 @@ export function installSidebarTasks(SidebarClass) {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        showToast(d.error || tr('Failed to set status'), { type: 'error' });
+        showToast(heldWordsOf(d) || d.error || tr('Failed to set status'), { type: 'error' });
       }
     } catch { showToast(tr('Failed to set status — server unreachable'), { type: 'error' }); }
   };

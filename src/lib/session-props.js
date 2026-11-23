@@ -1,5 +1,5 @@
 import { UI_ICONS } from './icons.js';
-import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu } from './utils.js';
+import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu, statusListHeldWords } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a status entry's menu + the cleared sentence
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
@@ -162,7 +162,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       histList.style.minHeight = '';
       const hist = (d?.history || []).slice(-20).reverse();
       const histKey = d?.key || refKey; // the key the entries sit under — a "Clear content…" addresses an entry by it + its time
-      histList.innerHTML = hist.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t('No status changes recorded yet'))}</div>`;
+      histList.innerHTML = hist.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(d?.code === 'status_unread' ? statusListHeldWords() : t('No status changes recorded yet'))}</div>`;   // r3104 (a): held — never «no changes recorded»
       // a row's menu (right-click / long-press): Clear content… — the one confirm dialog; the store's
       // broadcast (session-status-updated) re-renders this window, which refetches the history
       // …and the row's ⋯ (verify r2: the verb had no visible door) opens the same menu under it

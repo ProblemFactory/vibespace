@@ -1977,7 +1977,11 @@ export function pluginsHeldWords() { return t('VibeSpace cannot read its plugins
 /** …the same list read as «none» (the chat status bar's pages chip): what is not shown, and why */
 export function pagesListHeldWords() { return t('VibeSpace cannot read its list of published pages right now, so none is shown here. Nothing is lost: every link given out stays, and the list comes back by itself (it tries again every few minutes).'); }
 export function pagesHeldWords() { return t('VibeSpace cannot read its list of published pages right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'); }
-export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d && d.code === 'plugins_unread' ? pluginsHeldWords() : d && d.code === 'providers_unread' ? providersHeldWords() : d && d.code === 'pages_unread' ? pagesHeldWords() : null; }
+export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : d && d.code === 'plugins_unread' ? pluginsHeldWords() : d && d.code === 'providers_unread' ? providersHeldWords() : d && d.code === 'pages_unread' ? pagesHeldWords() : d && d.code === 'status_unread' ? statusHeldWords() : null; }
+/** …and session-status.json (503 `status_unread`, 主开发 r3005): an override, a clear refused */
+/** …the same store read as «none» (a status timeline, the board): what is not shown, and why */
+export function statusListHeldWords() { return t('VibeSpace cannot read the conversations’ statuses right now, so none is shown. Nothing is lost: they come back when they read (it tries again every few minutes); status changes wait until then.'); }
+export function statusHeldWords() { return t('VibeSpace cannot read the conversations’ statuses right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
 /** B-225b (lane lg-store-writes, the persistence holds): a persistence store the hub's START could not read is HELD — 503 `store_unread`
  *  with `held` {file, kind, code, since, rung}. ONE sentence by its file and its kind, in the page's words (the hub's are English). */
 export function storeWhatOf(file) {
