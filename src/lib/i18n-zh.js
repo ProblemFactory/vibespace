@@ -10756,6 +10756,8 @@ export default {
   "Set a second password first — stored values are shown only behind it": "请先设置第二密码——存储的值只在它之后显示", // lane vault-contents-window
   "That stored value could not be opened": "该存储值无法打开", // lane vault-contents-window
   "The vault's run settings could not be read just now, so nothing was changed. VibeSpace reads them again by itself: try again in a minute": "保险库的运行设置暂时读不出来，所以没有做任何改动。VibeSpace 会自己再读一次：过一分钟再试", // lane lg-vault-file (主开发 r2920)
+  "The card stays open — press it again in a few minutes": "这张卡片仍然开着——过几分钟再按一次", // lane lg-vault-file (主开发 r3255)
+  "The vault's run settings cannot be read right now, so every entry is closed for runs. VibeSpace reads them again by itself": "保险库的运行设置现在读不出来，所以每个条目都暂不允许运行。VibeSpace 会自己再读一次", // lane lg-vault-file (主开发 r3255)
   "Your answer did not land: the vault's run settings could not be read just now, so nothing was changed. The card stays open — press it again in a few minutes": "你的回答没有生效：保险库的运行设置暂时读不出来，所以没有做任何改动。这张卡片仍然开着——过几分钟再按一次", // lane lg-vault-file (主开发 r3147 (4))
   "Your answer did not land; the card stays open — press it again once this is fixed": "你的回答没有生效；这张卡片仍然开着——解决之后再按一次", // lane lg-vault-file (主开发 r3147 (4))
   "The vault's run settings file is a link, which VibeSpace never follows, so nothing was changed. Put the real file in its place; VibeSpace reads it again by itself": "保险库的运行设置文件是一个链接，VibeSpace 从不跟随链接，所以没有做任何改动。请把真正的文件放回原处；VibeSpace 会自己再读一次", // lane lg-vault-file (主开发 r3040 (c))

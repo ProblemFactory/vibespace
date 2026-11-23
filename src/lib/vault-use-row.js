@@ -26,7 +26,7 @@ import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-butt
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { rowToPick, pickToRow, principalOfEntry } from './principal-picker-model.js';
-import { revealLeftMs, revealHeaders, forgetReveal, askRevealPassword, revealWords } from './vault-reveal.js';
+import { revealLeftMs, revealHeaders, forgetReveal, askRevealPassword, revealWords, heldRowWords } from './vault-reveal.js';
 import { landingOf, fieldsDiffer, sameField } from './landing-merge.js'; // B-f212: THE LANDING LAW — a landing never takes a person's unsaved pick
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -156,7 +156,7 @@ function nameOf(m, app) {
   return (s && s.name) || m.name || String(m.key || '').slice(0, 8);
 }
 /** The row's «Who may use it» facts signature (the window patches the box in place when it moves). */
-export const useSigOf = (row) => JSON.stringify([(row && row.run && row.run.use) || null, !!(row && row.run && row.run.paused)]);   // round 2 MAJOR: whether the entry is suspended is part of the signature — turning it OFF/ON greys / restores the grant chips
+export const useSigOf = (row) => JSON.stringify([(row && row.run && row.run.use) || null, !!(row && row.run && row.run.paused), (row && row.run && row.run.held) ? (row.run.heldCause || 'held') : null]);   // 主开发 r3255 (3): a hold that begins or lifts redraws the row   // round 2 MAJOR: whether the entry is suspended is part of the signature — turning it OFF/ON greys / restores the grant chips
 
 /** r8 (主开发's acceptance of r7, MINOR 4 — «nothing ends just the window early»: the member's ✕ took every scope with it): the
  *  WINDOW's own ✕ — POST /api/vault/use-grants/revoke {scope: 'window'} (a narrowing, a click): only the window goes, the
@@ -185,6 +185,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     const u = (r && r.run && r.run.use) || null;
     if (u && u.own) useB.title = ownTitle;
     useB.hidden = false;   // lane vault-standing-request r2 (MAJOR 3): an agent's OWN entry shows the standing grants it holds (chips + ✕); B-bc3b: and «Who may use it…» — the owner shares it with another conversation or a Task Group (the run door admits them only as the row says)
+    if (r && r.run && r.run.held) host.append(el('div', 'vw-use-bad', heldRowWords(r.run)));   // 主开发 r3255 (3): the run store held — said in place
     if (!u) return;
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);

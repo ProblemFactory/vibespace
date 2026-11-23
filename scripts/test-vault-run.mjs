@@ -1298,9 +1298,10 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
   const fileOf = (w) => path.join(w.dataDir, DOOR.STORE_FILE);
   // the red controls' edits (each anchor counted once in the door): a door with no hold asked, today's order (r3147: asked, then loaded)
   const NO_HOLD_SWITCH = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — loaded, then the hold asked, before anything is taken back or touched", "    const o = { d: load() };"], ["    { const h = heldNow(); if (h) return h; }   // 主开发 r2920: the store is HELD (or its torn bytes' copy in flight) — refused BY NAME, nothing written over the unread file", '']];
-  const NO_HOLD_PRESS = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — the press's own load may SET the hold (torn bytes met again after a lift): loaded, THEN asked, before any snapshot or write", "    const o = { d: load() };"], ["    if (failCode === 'store_held' && touched.length === 1 && !made.length) return heldIn({ ok: false, cause: 'store_held' });", ''], ["  function heldIn(r) { if (!r || r.ok || (r.code !== 'store_held' && r.cause !== 'store_held')) return null; return r.code === 'store_held' ? r : (heldNow() || named('store_held', { why: 'held' })); }", "  function heldIn(r) { return r && !r.ok && r.code === 'store_held' ? r : null; }"]];
+  const NO_HOLD_PRESS = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — the press's own load may SET the hold (torn bytes met again after a lift): loaded, THEN asked, before any snapshot or write", "    const o = { d: load() };"], ["    if (failCode === 'store_held' && touched.length === 1 && !made.length) return named('store_held', { why: storeHeld ? storeHeld.why : 'held' });   // 主开发 r3147 (2) / r3267 (2): the ONE early return — nothing was written, nothing to put back", '']];
+  const NO_MARKS_ASKED = [["    { const m = marksHeldOf(); if (m) return m; }   // 主开发 r3255: the grants' marks held ⇒ refused by name beside the one door, before any snapshot or write (addMember would refuse AFTER this store's switch was written)", '']];
   const NO_HOLD_REVOKE = [["    const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — never «done, 0» over approvals the unread file still holds", "    const o = { d: load() };"]];
-  const TODAY_ORDER = [["  function ownerLoad({ carry = true } = {}) { const d = load({ carry }); const h = heldNow(); return h ? { held: h } : { d }; }", "  function ownerLoad({ carry = true } = {}) { const h = heldNow(); if (h) return { held: h }; return { d: load({ carry }) }; }"], ["    if (failCode === 'store_held' && touched.length === 1 && !made.length) return heldIn({ ok: false, cause: 'store_held' });", ''], ["  function heldIn(r) { if (!r || r.ok || (r.code !== 'store_held' && r.cause !== 'store_held')) return null; return r.code === 'store_held' ? r : (heldNow() || named('store_held', { why: 'held' })); }", "  function heldIn(r) { return r && !r.ok && r.code === 'store_held' ? r : null; }"]];
+  const TODAY_ORDER = [["  function ownerLoad({ carry = true } = {}) { const d = load({ carry }); const h = heldNow(); return h ? { held: h } : { d }; }", "  function ownerLoad({ carry = true } = {}) { const h = heldNow(); if (h) return { held: h }; return { d: load({ carry }) }; }"], ["    if (failCode === 'store_held' && touched.length === 1 && !made.length) return named('store_held', { why: storeHeld ? storeHeld.why : 'held' });   // 主开发 r3147 (2) / r3267 (2): the ONE early return — nothing was written, nothing to put back", '']];
   const placeSync = (file, codes) => { const real = fs.openSync; let k = 0; fs.openSync = function (p, ...x) { if (typeof p === 'string' && path.resolve(p) === path.resolve(file) && k < codes.length) { const code = codes[k++]; throw Object.assign(new Error(`placed ${code}`), { code }); } return real.call(this, p, ...x); }; return () => { fs.openSync = real; }; };
   const placeAsync = (file, codes) => { const real = fs.promises.open; let k = 0; fs.promises.open = function (p, ...x) { if (typeof p === 'string' && path.resolve(p) === path.resolve(file) && k < codes.length) { const code = codes[k++]; return Promise.reject(Object.assign(new Error(`placed ${code}`), { code })); } return real.call(this, p, ...x); }; return () => { fs.promises.open = real; }; };
   const suspendedOf = (w) => { try { return JSON.parse(fs.readFileSync(fileOf(w), 'utf8')).suspended || []; } catch { return null; } };
@@ -1481,28 +1482,43 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
   // (10) 主开发 r3147 (1) + (2) + (4) — THE ONE DOOR, read in the source: every owner door and press road starts at ownerLoad() (loaded,
   // then the hold asked): no door asks heldNow() itself, none loads before it; the three press callers and the legacy save ask heldIn()
   // before any settle; the two For-you card handlers and the route word store_held; red control: a planted door that asks the hold itself
-  const doorCensus = (t) => {
+  const doorCensus = (t) => {   // 主开发 r3267 (1): EVERY body that saves or writes the grants store, a load matched with any argument
     const strip = (x) => x.replace(/\/\/[^\n]*/g, '');
-    const bad = [];
-    for (const name of ['setRunnable', 'resumeGrant', 'setPolicy', 'revokeApprovals', 'standOpen']) {
-      const a = t.indexOf(`  function ${name}(`); if (a < 0) { bad.push(`${name}: not found`); continue; }
-      const c = strip(t.slice(a, t.indexOf('\n  }\n', a)));
-      const own = c.indexOf('ownerLoad()'), ld = c.search(/[^\w.]load\(\)/);
+    const heads = [];   // spans read on the RAW text (a `//` inside a string never cuts a line short); each body's comments stripped after
+    const spanOf = (m) => { const le = t.indexOf('\n', m.index + 1); if (le < 0) return t.length; const k = t.slice(le).search(/\n  \S/); return k < 0 ? t.length : le + k; };   // a body ends where the next statement at create()'s own level begins
+    for (const m of t.matchAll(/\n  (?:async )?function ([A-Za-z_]\w*)\(/g)) heads.push([m.index, spanOf(m), m[1]]);
+    for (const m of t.matchAll(/\n  const ([A-Za-z_]\w*) = (?:async )?\([^)]*\) => /g)) heads.push([m.index, spanOf(m), m[1]]);
+    const WRITES_GRANTS = /useGrants\.(?:setRow|addMember|restoreRow|revoke|revokeWindow|drop|carry|carryWildcards|pruneWindows)\(/;
+    const EXEMPT = {
+      save: 'the writer itself — it asks the hold before it writes', carryAlways: 'a migration carry, run by load on a store that reads', carryWild: 'a migration carry, run by load on a store that reads',
+      reserveHour: 'the policy judge\'s hour booking — its road is gated on a store that reads', releaseHour: 'the policy judge\'s hour booking', recordApproval: 'the policy judge\'s memo — gated on a store that reads',
+      resumeMember: 'an inner step: its callers (resumeGrant, standOpen, the owner\'s Save) are doors', answerWindow: 'its press writes through standOpen (the one door); its pruneWindows is the window\'s end timer, in the grants\' own store',
+      takeBack: 'the ✕ — a narrowing in the grants\' own store (its own hold); nothing of this store', saveRow: 'its write is the setRow wrapper, which asks ownerLoad({ carry: false }) for an owner\'s 验证是你 Save',
+    };
+    const bad = [], doors = [], seen = new Set();
+    for (const [p, e, name] of heads) {
+      const body = strip(t.slice(p, e));
+      if (!/[^\w.]save\(/.test(body) && !WRITES_GRANTS.test(body)) continue;
+      seen.add(name);
+      if (EXEMPT[name]) continue;
+      doors.push(name);
+      const own = body.indexOf('ownerLoad('), ld = body.search(/[^\w.]load\(/);
       if (own < 0) bad.push(`${name}: no ownerLoad()`);
-      if (/\bheldNow\(/.test(c)) bad.push(`${name}: asks heldNow() itself`);
+      if (/\bheldNow\(/.test(body)) bad.push(`${name}: asks heldNow() itself`);
       if (ld >= 0 && (own < 0 || ld < own)) bad.push(`${name}: loads before ownerLoad()`);
     }
+    for (const n of Object.keys(EXEMPT)) if (!seen.has(n)) bad.push(`${n}: an exempt row with no body that saves (a dead row)`);
     const w0 = t.indexOf('    useGrants.setRow = (id, row, opts = {}) => {'), wrap = strip(t.slice(w0, t.indexOf('      return r;\n    };', w0)));
     if (!/opts\.reauthed === true\) \{ const o = ownerLoad\(\{ carry: false \}\); if \(o\.held\) return o\.held; \}/.test(wrap) || /\bheldNow\(/.test(wrap)) bad.push('the owner\'s Save: not through ownerLoad()');
-    const l0 = t.indexOf("    } else if (a === 'always') {"), legacy = strip(t.slice(l0, t.indexOf("      audit('vault-run-always',", l0)));
-    if (!/const o = ownerLoad\(\); if \(o\.held\) return o\.held;/.test(legacy) || /[^\w.]load\(\)/.test(legacy.slice(0, legacy.indexOf('ownerLoad()')))) bad.push('the legacy «always» save: not through ownerLoad()');
-    return { bad, settles: (t.match(/\{ const h = heldIn\((so|r)\); if \(h\) return h; \}/g) || []).length };
+    return { bad, doors, settles: (t.match(/\{ const h = heldIn\((so|r)\); if \(h\) return h; \}/g) || []).length };
   };
   const dc = doorCensus(SRCD), dcp = doorCensus(SRCD.replace(NO_HOLD_REVOKE[0][0], "    { const h = heldNow(); if (h) return h; } const o = { d: load() };"));
+  const dcNew = doorCensus(SRCD.replace('  function setPolicy(', "  function zzNewDoor({ id } = {}) {\n    const d = load({ carry: true });\n    return save({ runnable: d.runnable, always: d.always });\n  }\n  function setPolicy("));
+  const dcArg = doorCensus(SRCD.replace(NO_HOLD_SWITCH[0][0], "    load({ carry: true }); const o = ownerLoad(); if (o.held) return o.held;"));
   const UTA = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8'), RV = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8'), VRV = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
-  const worded = UTA.split("showToast(code === 'store_held' ? heldPressWords(r) : code === 'ask_settled'").length - 1;
-  ok(!dc.bad.length && dc.settles === 4 && dcp.bad.some((b) => /revokeApprovals: asks heldNow\(\) itself/.test(b)) && worded === 2 && /store_held: 503/.test(RV) && /\n  store_held: 'the vault\\'s run settings could not be read just now/.test(RV) && /export function heldPressWords\(r\)/.test(VRV),
-    `r3147 (1) + (2) + (4) THE ONE DOOR: the five owner doors, the owner's Save and the legacy «always» save start at ownerLoad() (loaded, then the hold asked) and none asks the hold or loads before it; ${dc.settles} press callers ask heldIn() before any settle; both For-you card handlers word store_held (${worded}), the route says it (503 and its words); red control: a planted door that asks the hold itself is named (${dcp.bad.join('; ')})`, { dc, dcp, worded });
+  const worded = UTA.split("showToast(code === 'store_held' || code === 'vault_use_marks_unread' ? heldPressWords(r) : code === 'ask_settled'").length - 1;   // r3255: the grants' marks worded too
+  ok(!dc.bad.length && ['setRunnable', 'setPolicy', 'revokeApprovals', 'standOpen', 'answer'].every((n) => dc.doors.includes(n)) && dc.settles === 4 && dcp.bad.some((b) => /revokeApprovals: asks heldNow\(\) itself/.test(b)) && dcNew.bad.some((b) => /zzNewDoor: no ownerLoad/.test(b)) && dcArg.bad.some((b) => /setRunnable: loads before ownerLoad/.test(b)) && worded === 2 && /store_held: 503/.test(RV) && /\n  store_held: 'the vault\\'s run settings could not be read just now/.test(RV) && /export function heldPressWords\(r\)/.test(VRV),
+    `r3147 (1) + (2) + (4) + r3267 (1) THE ONE DOOR: EVERY body that saves or writes the grants store (${dc.doors.join(', ')}; the rest named exempt with their reasons) starts at ownerLoad() — none asks the hold or loads (with any argument) before it, the owner's Save through ownerLoad({ carry: false }); ${dc.settles} press callers ask heldIn() before any settle; both For-you card handlers word store_held (${worded}), the route says it (503 and its words); red controls: a planted door that asks the hold itself (${dcp.bad.join('; ')}), a NEW door under another name, and a door that loads with an argument first are each named`, { dc, dcp, dcNew: dcNew.bad, dcArg: dcArg.bad, worded });
   // (11) 主开发 r3147 THE MUST — THE HOLD IS ASKED AFTER THE LOAD THAT CAN SET IT: torn bytes whose copy fails (placed: the copy's open
   // refused, the disk full) ⇒ held; a standing request filed while held; space back: the read again keeps the copy and lifts; the
   // person presses Allow — the press's own load meets the torn bytes again (their compare in flight): refused BY NAME, the request
@@ -1548,6 +1564,48 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
     const d = w.mk(DOOR, SLOW); d.setRunnable({ id: 'mounts:m2#secretKey', on: false });   // the load: torn bytes — the keep runs
     await sleep(80);
     ok(!fs.existsSync(oldPart) && fs.existsSync(freshPart), 'r3147 (5): the keep reaps a .part- file once it is a day old (a crash mid-copy, never a copy); a fresh one stays', { old: fs.existsSync(oldPart), fresh: fs.existsSync(freshPart) });
+  }
+  // (13) 主开发 r3255 — THE GRANTS' MARKS HELD (vault-use-marks.json under the store-read law, src/server/vault-use-grants.js): a
+  // standing request's Allow while the MARKS are held is refused BY NAME (vault_use_marks_unread) before ANY write — this store's file
+  // untouched, the request OPEN, nothing «put back» — and once the marks read again (src/store-read-hold.js readAgainOf) the same
+  // Allow lands. The fact is asked through the name the PRODUCTION object carries: the REAL module's marksUnread, and the wiring that
+  // hands that module to this door is pinned below; red control: a press road that asks no marks' fact
+  const SRH = R('src/store-read-hold.js');
+  const marksLeg = async (doorMod) => {
+    const VUGs = R('src/server/vault-use-grants.js'), GSs = R('src/server/grants-store.js');
+    const w = await world({ doorMod }); twoOff(w);
+    const gss = GSs.create({ memory: true });
+    const ugs = VUGs.create({ grants: () => gss, vault: w.vault, dataDir: w.dataDir, log: (m) => w.logs.push(String(m)) });
+    const d = w.mk(doorMod, { useGrants: ugs, useFacts: (c) => ({ conversationKeys: [c.conversationId], groupIds: [] }) });
+    const sq = await d.request({ caller: w.caller, entry: 'vault://mounts/m1/secretKey', purpose: 'a standing approval, then the vault-use marks held', standing: true, hosts: ['api.example.com'], cwd: w.work });   // filed while the marks read
+    ugs._marksHold.start({ state: 'unreadable', code: 'EIO' });   // the marks HELD after the filing — a PLACED failed read on the production module's own hold (as a lift whose re-read fails)
+    const held = !!ugs.marksUnread();
+    const before = fs.readFileSync(fileOf(w), 'utf8'), logs0 = w.logs.length;
+    const press = () => d.answerRequest(sq.askId, { answer: 'standing', reauthed: true, person: true });
+    let first = null; if (sq && sq.askId) for (let k = 0; k < 3; k++) { first = press(); if (!first || first.code !== 'ask_redrawn') break; }   // a redraw (the card's changes read again while held) keeps it open
+    const open1 = !!(sq && sq.askId && d._requests.has(sq.askId));
+    const unchanged = fs.readFileSync(fileOf(w), 'utf8') === before, putBack = w.logs.slice(logs0).some((l) => /could not be put back/.test(l));
+    for (let k = 0; k < 4 && ugs.marksUnread(); k++) await SRH.readAgainOf('vault-use-marks.json');   // the marks read again (a missing file: its second look, then lifted)
+    const lifted = !ugs.marksUnread();
+    let second = null; if (open1) for (let k = 0; k < 3; k++) { second = press(); if (!second || second.code !== 'ask_redrawn') break; }
+    return { held, asked: !!(sq && sq.askId), sq: sq && (sq.code || null), first: first && first.code, open1, unchanged, putBack, lifted, second: !!(second && second.ok) };
+  };
+  const k1 = await marksLeg(DOOR), k0 = await marksLeg(doorCopy(NO_MARKS_ASKED, null, 'a press road that asks no marks\' fact'));
+  const WIRE = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const runCreate = (WIRE.match(/const vaultRun = require\('\.\/vault-run-door\.js'\)\.create\(\{((?:(?!\}\);)[\s\S])*)\}\);/) || [])[1] || '';   // the door's ONE create call, to its close
+  const wired = /const vaultUseGrants = require\('\.\/vault-use-grants\.js'\)\.create\(/.test(WIRE) && /\buseGrants: vaultUseGrants\b/.test(runCreate);
+  ok(k1.held && k1.asked && k1.first === 'vault_use_marks_unread' && k1.open1 && k1.unchanged && !k1.putBack && k1.lifted && k1.second && wired && (!k0.unchanged || k0.putBack),
+    `r3255 THE GRANTS' MARKS HELD: a standing request's Allow is refused by name (${k1.first}) before any write — this store untouched, the request open, nothing «put back»; the marks read again, the same Allow lands; asked through the REAL module's marksUnread, and the wiring hands that module to the door (src/server/mounts-plugins-wiring.js: useGrants: vaultUseGrants — ${wired ? 'pinned' : 'NOT FOUND'}); red control: «a press road that asks no marks' fact» writes this store and puts it back`, { k1, k0, wired });
+  // (14) 主开发 r3255 (3): the Vault window's row says the hold in place — rowFacts carries `held` (and its cause) while the store is
+  // held, and the row draws the hold's sentence (src/lib/vault-use-row.js heldRowWords, zh / ja); it redraws when the hold lifts
+  {
+    const w = await world(); twoOff(w);
+    const undo = placeSync(fileOf(w), ['EIO']);
+    let d, f;
+    try { d = w.mk(DOOR, SLOW); d.setRunnable({ id: 'mounts:m1#secretKey', on: false }); f = d.rowFacts({ id: 'mounts:m1#secretKey' }); } finally { undo(); }
+    const UR = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8'), VR2 = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
+    ok(!!(f && f.held === true && f.paused) && /if \(r && r\.run && r\.run\.held\) host\.append\(el\('div', 'vw-use-bad', heldRowWords\(r\.run\)\)\);/.test(UR) && /row\.run\.held\) \? \(row\.run\.heldCause \|\| 'held'\) : null\]/.test(UR) && /export function heldRowWords\(run\)/.test(VR2),
+      'r3255 (3): while held the row facts say so (held, paused) and the Vault window draws the hold\'s sentence in its place (heldRowWords; the row redraws when the hold lifts)', f);
   }
 }
 

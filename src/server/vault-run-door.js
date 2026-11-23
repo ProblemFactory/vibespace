@@ -682,9 +682,18 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  hold: a read that fails, torn bytes whose copy starts), THEN the hold is asked — never the other order. → { d } (the store; null
    *  while locked) or { held } (the refusal by name). No door calls load() or heldNow() before it (test-vault-run ⑥c 10 reads the source) */
   function ownerLoad({ carry = true } = {}) { const d = load({ carry }); const h = heldNow(); return h ? { held: h } : { d }; }
-  /** 主开发 r3147 (2): an answer that carries the hold — its code OR its cause → the held refusal: the card or the request stays OPEN,
-   *  no «failed restore», nothing «put back» (nothing was written); else null. ONE helper for the three press callers and the legacy save */
-  function heldIn(r) { if (!r || r.ok || (r.code !== 'store_held' && r.cause !== 'store_held')) return null; return r.code === 'store_held' ? r : (heldNow() || named('store_held', { why: 'held' })); }
+  /** 主开发 r3147 (2), narrowed by r3267 (2): an answer that IS the hold (its code: this store's or the grants' marks') → itself: the card
+   *  or the request stays OPEN; else null. ONE helper for the three press callers and the legacy save */
+  /** 主开发 r3255: THE GRANTS' OWN MARKS held (vault-use-marks.json under the store-read law) — asked through the name the PRODUCTION
+   *  object carries: src/server/vault-use-grants.js `marksUnread()` (its words, or null), the module the wiring hands this door
+   *  (src/server/mounts-plugins-wiring.js: `useGrants: vaultUseGrants`). → the marks' refusal by name, or null */
+  function marksHeldOf() {
+    if (!useGrants || typeof useGrants.marksUnread !== 'function') return null;
+    let w = null; try { w = useGrants.marksUnread(); } catch { w = null; }
+    return w ? { ok: false, code: MARKS_HELD, words: String(w), why: 'the vault-use marks are held' } : null;
+  }
+  const MARKS_HELD = 'vault_use_marks_unread', HOLD_CODES = new Set(['store_held', MARKS_HELD]);   // the holds a press waits out (this store's, the grants' marks)
+  function heldIn(r) { return r && !r.ok && HOLD_CODES.has(r.code) ? r : null; }   // 主开发 r3267 (2): the held code only — a «restore failed» (rows maybe not put back, its audit filed) is never taken for «nothing changed»
   /** ONE law for every read of the store (the load's and the read again's) → 'held', or the answer to apply. Only the LOAD's own read
    *  (`applied`) of data clears the hold's memory: a read again that answered lifts the hold, and the load that follows is judged too */
   function lawOf(a, { applied = true } = {}) {
@@ -1027,7 +1036,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (use && !use.unknown) { const pol = d && d.policies && d.policies[row.id]; const ap = d && d.policyApproved && d.policyApproved[row.id]; let on = false; try { on = !!policyOn(); } catch { on = false; } use.policy = pol ? { text: pol.text, at: pol.at } : null; use.judge = on ? 'on' : 'off'; use.approved = ap ? { n: ap.n, lastAt: ap.lastAt } : null; }
     const onNow = !!(c.runnable && d && !d.refused && d.runnable.has(row.id));
     const hasGrant = !!(use && !use.unknown && Array.isArray(use.to) && use.to.length);   // round 4 (A7): an entry with a grant that is not switched ON is PAUSED (held) — one state, one note
-    return { can: c.runnable, open: onNow, paused: !!(c.runnable && d && !onNow && (d.refused || (d.suspended && d.suspended.has(row.id)) || hasGrant)), ...(grantable ? { use } : {}) };   // round 2 MAJOR: `paused` = turned OFF; round 3: or the whole store is refused; round 4 (A7): or a grant exists but the switch is not ON (the window greys the chips)
+    const hf = c.runnable && storeHeld ? { held: true, ...(HELD_CAUSE[storeHeld.code] ? { heldCause: HELD_CAUSE[storeHeld.code].cause } : {}) } : null;   // 主开发 r3255 (3): the window says the hold in place of a bare «paused»
+    return { can: c.runnable, open: onNow, paused: !!(c.runnable && d && !onNow && (d.refused || (d.suspended && d.suspended.has(row.id)) || hasGrant)), ...(grantable ? { use } : {}), ...(hf || {}) };   // round 2 MAJOR: `paused` = turned OFF; round 3: or the whole store is refused; round 4 (A7): or a grant exists but the switch is not ON (the window greys the chips)
   }
   /** A PERSON's switch (src/routes/vault.js: people only; ON needs this page's 验证是你 window — `reauthed`). round 7 (MAJOR
    *  item 2): the model is INVERTED. An OFF ends any press-open session and holds EVERY member (it enumerates nothing, so a
@@ -1272,6 +1282,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function standOpen(ids, principal, grant, by) {
     for (const id of ids) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) return { ok: false, why: 'entry_unknown', judged: c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown') }; }
     const o = ownerLoad(); if (o.held) return o.held;   // 主开发 r3147 (1): THE ONE DOOR — the press's own load may SET the hold (torn bytes met again after a lift): loaded, THEN asked, before any snapshot or write
+    { const m = marksHeldOf(); if (m) return m; }   // 主开发 r3255: the grants' marks held ⇒ refused by name beside the one door, before any snapshot or write (addMember would refuse AFTER this store's switch was written)
     const d0 = o.d;
     const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {}, touched: { ...(d0.touched || {}) } };   // B-be21: the toggle stamps too
     // r4 (C — the acceptance P4: the restore went through setRow, judged against the row the partial write had left, so a
@@ -1296,7 +1307,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this member — the owner's OTHER paused grants on this entry stay paused
       } catch (e) { failCode = 'not_written'; log(`[vault-run] a press's write for ${id} threw (${String(e && e.message || e).slice(0, 160)}) — what it wrote is put back`); break; }
     }
-    if (failCode === 'store_held' && touched.length === 1 && !made.length) return heldIn({ ok: false, cause: 'store_held' });   // 主开发 r3147 (2): nothing was written — nothing to put back
+    if (failCode === 'store_held' && touched.length === 1 && !made.length) return named('store_held', { why: storeHeld ? storeHeld.why : 'held' });   // 主开发 r3147 (2) / r3267 (2): the ONE early return — nothing was written, nothing to put back   // 主开发 r3147 (2): nothing was written — nothing to put back
     if (failCode) {
       const failed = [];
       for (const id of touched) { let r = null; try { r = useGrants.restoreRow(id, rowSnap.get(id), { by: String(by).slice(0, 40) }); } catch (e) { r = { ok: false, code: 'not_written', error: e.message }; } if (!r || !r.ok) failed.push({ entry: id, code: (r && r.code) || 'not_written' }); }   // every row back to what it WAS, raw (never resumes a member)
