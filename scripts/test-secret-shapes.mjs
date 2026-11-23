@@ -185,7 +185,9 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
     WORD_RUN_RE: /\bWORD_RUN_NAME_RE = NAME_BLANKS\(WORD_RUN_RE\)/.test(ssrc) && bV.includes('nameWord(text, WORD_RUN_NAME_RE,') ? bV : '',
     redactQuery: bV.includes('row(nameQuery(text))') && body('nameQuery').includes('QUERY_HEAD_RE') && body('nameQuery').includes('holderName(m[2])') ? bV : '',
     // B-da2d: R9 is the very same call at a name (a password by its place — no word test)
-    redactUserinfo: bS.includes('text = redactUserinfo(text, (head) =>') && bV.includes('text = redactUserinfo(text, () =>') ? bV : '' };
+    redactUserinfo: bS.includes('text = redactUserinfo(text, (head) =>') && bV.includes('text = redactUserinfo(text, () =>') ? bV : '',
+    // B-829f: the escaped-JSON reader is the very same row at a name (LAST in both)
+    redactEscapedPairs: bS.includes('const esc = redactEscapedPairs(text, say);') && bV.includes('row(redactEscapedPairs(text));') ? bV : '' };
   const sRows = [...new Set([...bS.matchAll(/\b(redact[A-Z]\w*|[A-Z][A-Z_]*_RE)\b/g)].map((m) => m[1]))].filter((k) => k !== 'redactSecrets');
   const MAPPED = new Set(['redactKv', 'redactContinuations', 'RUN_RE', 'WORD_NEXT_RE', 'WORD_RUN_RE', 'HTTP_RE', 'redactQuery']);   // answered by the name's own row
   const unanswered = sRows.filter((k) => !(k in ANSWER) || !ANSWER[k] || (!MAPPED.has(k) && !bV.includes(k)));
@@ -594,7 +596,7 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
     return [L('pin', 'auth_pin', ': ', pin()), ['pins', 'SIM_AUTH_PINS=' + p1 + ',' + pin(), p1], L('helper', 'apiKeyHelper', ': echo ', vs[0]), L('args', 'auth_args', ': ', vs[1], ' --verbose'),
       L('options', 'session-options', ': ', vs[2], ' --fast'), L('reset', 'password-reset', ': ', vs[3]), L('local', 'DB_PASSWORD_LOCAL', '=', vs[4]), L('pre', 'API_KEY_PRE', '=', vs[5]),
       L('info', 'AUTH_INFO', '=', vs[6]), L('set', 'keptKeySet', ': ', vs[7]), L('box', 'secret-box', ': ', vs[8]), L('store', 'session-store', ': ', vs[9]),
-      L('json', 'GOOGLE_CREDENTIALS_JSON', '=', vs[10]), L('json', 'GCP_SA_KEY_JSON', '=', vs[20]), L('json', 'GCP_SA_KEY_JSON', '=', B), ['json', 'GOOGLE_CREDENTIALS_JSON=' + escJson(vs[11]), vs[11]],
+      L('json', 'GOOGLE_CREDENTIALS_JSON', '=', vs[10]), L('json', 'GCP_SA_KEY_JSON', '=', vs[20]), L('json', 'GCP_SA_KEY_JSON', '=', B), ['json', 'GOOGLE_CREDENTIALS_JSON=' + escJson(vs[11]), vs[11], 'escaped'],
       L('json', 'data:\n  key.json', ': ', B), L('json', 'data:\n  credentials.json', ': ', B),
       L('only', 'DB_PASSWORD_READ_ONLY', '=', vs[12]), L('check', 'password_check', '=', vs[13]), ['check', '{"user":"ann","passwordCheck":"' + vs[14] + '"}', vs[14]],
       L('build', 'NPM_TOKEN_BUILD', '=', vs[15]), L('build', 'NPM_TOKEN_BUILD', '=', B), L('dns', 'CF_API_TOKEN_DNS', '=', vs[16]), L('ui', 'ADMIN_PASSWORD_UI', '=', vs[17]), L('real', 'PASSWORD_REAL', '=', vs[18]), L('re', 'password_re', '=', vs[19])]; };
@@ -627,13 +629,16 @@ console.log('lane mask-value-shape B-4f7f: A HEAD WHOSE LAST WORD IS AN ACT OR A
   ok(publicBad(TODAY).length >= 10 && priceOf(TODAY).every((x) => !x[3]), `RED CONTROL (the verdict that does not read the table, d458fc27d's): ${publicBad(TODAY).length} heads still hold and every price line is hidden — legs (1) and (a) go red`);
   const OPEN = M.load('src/secret-shapes.js', editAnchor(SRC, LAST, '  return false;', 'src/secret-shapes.js'), 'b4f7f-open');
   const openExpect = STILL.filter((n) => !SS.SECRET_WORDS.has(lastOf(n)) && !SS.CONTAINER_HEADS.has(lastOf(n))).length;   // the STILL names whose last word is no credential's or container's
-  ok(openExpect > 0 && stillBad(OPEN).length >= openExpect && offBad(OPEN).length === OFF_LINES().length && flagBad(OPEN), `RED CONTROL (FAIL OPEN: every last word that is no credential's name is public): ${stillBad(OPEN).length} names go public and all ${offBad(OPEN).length} made-up values show — legs (b) and (c) go red`);
+  const plainL = OFF_LINES().filter((x) => !x[3]).length;   // B-829f: the escaped line's inner pair is judged by the escaped reader too, whatever its head
+  ok(openExpect > 0 && stillBad(OPEN).length >= openExpect && offBad(OPEN).length === plainL && flagBad(OPEN), `RED CONTROL (FAIL OPEN: every last word that is no credential's name is public): ${stillBad(OPEN).length} names go public and all ${offBad(OPEN).length} made-up values show — legs (b) and (c) go red`);
   const ANY = M.load('src/secret-shapes.js', editAnchor(SRC, '  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;', '  if (words.some((w) => NOT_CREDENTIAL_HEADS.has(w))) return false;\n  if (SECRET_WORDS.has(head) || CONTAINER_HEADS.has(head)) return true;', 'src/secret-shapes.js'), 'b4f7f-any');
   ok(stillBad(ANY).filter((n) => TWINS.includes(n) || n === 'scan_secret').length >= 20, `RED CONTROL (the table read on ANY word, not the last): ${stillBad(ANY).length} names go public (scan_secret, the twins) — leg (c) goes red`);
   const TBL = 'const NOT_CREDENTIAL_HEADS = new Set([';
   const OFFON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + OFF.map((w) => J(w)).join(', ') + ', ', 'src/secret-shapes.js'), 'b4f7f-off-on');
-  { const lines = OFF_LINES(), shownL = lines.filter(([, line, secret]) => [MSG(OFFON, line), LINE(OFFON, line)].every((o) => shows(o, secret))), hiddenL = lines.filter((x) => !shownL.includes(x));   // r3083 (2): keyed by LINE, both modes
+  { const lines = OFF_LINES().filter((x) => !x[3]), shownL = lines.filter(([, line, secret]) => [MSG(OFFON, line), LINE(OFFON, line)].every((o) => shows(o, secret))), hiddenL = lines.filter((x) => !shownL.includes(x));   // r3083 (2): keyed by LINE, both modes
     ok(shownL.length === lines.length && OFF.every((w) => shownL.some(([x]) => x === w)) && overlapBad(OFFON).length === OFF.length && kindsBad(OFFON).length === OFF.length, `RED CONTROL (the ${OFF.length} words left off put ON the table): EVERY ONE of the ${lines.length} lines shows its value in both modes — the base64 entries too, so each is hidden by its head and by nothing else — and the table legs (3) and (4) name the words${hiddenL.length ? ' — still hidden by another rule: ' + J(hiddenL.map(([w, l]) => w + ' ' + l.split(/[:=]/)[0].trim())) : ''}`); }
+  { const esc = OFF_LINES().filter((x) => x[3]);   // B-829f (主开发 r3116): an escaped-JSON value is judged as plain JSON is — by the escaped reader, whatever its outer head
+    ok(esc.length > 0 && esc.every(([, line, secret]) => [OFFON, OPEN].every((S) => [MSG(S, line), LINE(S, line)].every((o) => !shows(o, secret)))), `B-829f: the escaped-JSON line (${esc.map(([w, l]) => l.split('=')[0]).join(', ')}) stays HIDDEN even with its word on the table or the verdict failing open — its inner client_secret is judged by the escaped reader`); }
   const CREDON = M.load('src/secret-shapes.js', editAnchor(SRC, TBL, TBL + "'token', ", 'src/secret-shapes.js'), 'b4f7f-cred');
   ok(overlapBad(CREDON).includes('token') && kindsBad(CREDON).includes('token'), 'RED CONTROL (a credential word on the table): leg (3) names «token», leg (4) finds it without a leg of its kind — red');
 }
@@ -1449,6 +1454,74 @@ console.log('r1554 → r2209 (主开发\'s law, restated; beside line 246\'s str
   const E06 = mutantCopies('r2209-rows-e06c', REPO).load('src/secret-shapes.js', r7Plant(SRC, 'e06'), 'rows-e06c');
   const e06Bad = ROWS.filter((row) => !hides(E06, row));
   ok(e06Bad.length >= 8, `RED CONTROL (r2209, the round's tip e06c2a0e9 planted): ${e06Bad.length} of ${ROWS.length} rows show a holder's value in part or whole — ${J(e06Bad.slice(0, 3).map((row) => outs(E06, row[1], row[3])[0]))}`);
+}
+
+console.log('lane mask-value-shape B-829f: A VALUE THAT IS ITSELF ESCAPED JSON is judged as plain JSON already is — both modes, both entry functions');
+{
+  // 主开发 r3101 / r3116: the page b4f7f/b829f-page.md; the reader redactEscapedPairs runs LAST in redactSecrets and redactByValue
+  const SS = r('src/secret-shapes.js'), J = JSON.stringify;
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('b829f', REPO);
+  const SRC = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  // made-up values only, built at runtime; esc(obj) is the object written as ONE escaped string's inside ({\"a\":\"b\"})
+  const val = () => ['maple', 'river', 'copper', 'lantern', 'harbor'][crypto.randomInt(5)] + crypto.randomInt(100, 999);
+  const esc = (obj) => JSON.stringify(JSON.stringify(obj)).slice(1, -1);
+  const MODES = [['message', (S, t, said) => S.redactSecrets(t, { message: true, said }).text], ['line', (S, t, said) => S.redactSecrets(t, { said }).text], ['a job name', (S, t) => S.redactByValue(t).text]];
+  const TODAY = M.load('src/secret-shapes.js', editAnchor(editAnchor(SRC, '    const esc = redactEscapedPairs(text, say); text = esc.text; n += esc.n;', '', 'src/secret-shapes.js'), '    row(redactEscapedPairs(text));', '', 'src/secret-shapes.js'), 'b829f-today');
+  // which characters of the input a mask covers (the output is the input with some stretches replaced by the mark)
+  const covered = (t, o) => { const cov = new Uint8Array(t.length), parts = o.split(REDACTED); let at = 0;
+    for (let k = 0; k < parts.length; k++) { const pc = parts[k]; const x = k === 0 ? 0 : (k === parts.length - 1 && pc === '' ? t.length : t.indexOf(pc, at)); if (x < 0) { cov.fill(1, at); return cov; } if (k > 0) cov.fill(1, at, x); at = x + pc.length; }
+    return cov; };
+  const onlyAdds = (t, mode) => { const a = covered(t, mode(TODAY, t)), b = covered(t, mode(SS, t)); for (let x = 0; x < t.length; x++) if (a[x] && !b[x]) return false; return true; };
+  // (a) THE HOLE CLOSED: the two scenes of the page, every mode, the inner name said
+  const v1 = val(), v2 = val();
+  const SCENES = [['a service-account JSON as ONE escaped string under a name with no credential word', 'FIREBASE_SERVICE_ACCOUNT_JSON="' + esc({ type: ['service', 'account'].join('_'), client_secret: v1 }) + '"', v1, 'client_secret', null],
+    ['a structured log line carrying an escaped request body', J({ body: J({ user: 'ann', password: v2 }) }), v2, 'password', 'ann']];
+  for (const [what, t, v, name, keep] of SCENES) {
+    const res = MODES.map(([m, f]) => { const said = []; const o = f(SS, t, said); return [m, o, said]; });
+    ok(res.every(([, o]) => !o.includes(v) && o.includes(REDACTED) && (!keep || o.includes(keep))) && res.filter(([m]) => m !== 'a job name').every(([, , said]) => said.includes(name)),
+      `B-829f (a) THE HOLE CLOSED — ${what}: the inner value is hidden in the message mode, the line mode and a job name, «${name}» is said, the rest kept (${J(res[0][1])})`);
+    ok(MODES.every(([, f]) => f(TODAY, t).includes(v)), `RED CONTROL (the reader removed, 7b4cd5120's belt): ${what} — the inner value shows in every mode`);
+  }
+  // (i) an escaped quote INSIDE the value does not end it (a backslash run of 3 is a quote of the value; a run of 1 closes)
+  { const a = val(), b = val(), t = 'log: "{' + '\\"password\\":\\"' + a + '\\\\\\"' + b + '\\"}"';
+    ok(MODES.every(([, f]) => { const o = f(SS, t); return !o.includes(a) && !o.includes(b); }), `B-829f an escaped quote inside the value does not end it: both pieces hidden (${J(MODES[1][1](SS, t))})`);
+    const FIRST = M.load('src/secret-shapes.js', editAnchor(SRC, '      if ((r - b + 1) % 4 === 1) { ve = r; break; }', '      { ve = r; break; }', 'src/secret-shapes.js'), 'b829f-first');
+    ok(MODES.some(([, f]) => f(FIRST, t).includes(b)), 'RED CONTROL (the value ended at the first escaped quote): the piece after the inner quote shows'); }
+  // (e) THE PRICE: what plain JSON already masks that is no credential is masked inside escaped JSON too — one leg a kind
+  { const fx = "the leg sends '{" + '\\"password\\":\\"x\\"' + "}' and expects a 401", fxPlain = "the leg sends '{\"password\":\"x\"}' and expects a 401";
+    ok(MODES.slice(0, 2).every(([, f]) => !f(SS, fx).includes('\\"x\\"') && !f(SS, fxPlain).includes('"x"')), `B-829f (e) THE PRICE — a fixture value quoted in prose about code is masked inside escaped JSON, as plain JSON's is today (${J(MODES[0][1](SS, fx))})`);
+    const se = 'cfg: "{' + '\\"session\\":\\"main\\"' + '}"', sePlain = 'cfg: {"session":"main"}';
+    ok(MODES.slice(0, 2).every(([, f]) => !f(SS, se).includes('main') && !f(SS, sePlain).includes('main')), `B-829f (e) THE PRICE — a plain session name is masked inside escaped JSON, as plain JSON's is today (the grammar holds «session»): ${J(MODES[0][1](SS, se))}`);
+    const prose = ['he wrote \\"hello\\" and \\"bye\\"', 'the flag \\"--fast\\" stays', 'a \\"name\\" field and a \\"type\\" field'];
+    ok(prose.every((t) => MODES.every(([, f]) => f(SS, t) === t)), 'B-829f (e) prose that merely QUOTES with escaped quotes is untouched (no colon after the quoted word, no string value)'); }
+  // (g) a descriptor stays, and a number, a boolean or null after the colon is no string: left alone
+  { const t = 'out: "{' + '\\"token_type\\":\\"Bearer\\",\\"expires_in\\":3600,\\"token\\":3600,\\"auth\\":true,\\"key\\":null' + '}"';
+    ok(MODES.every(([, f]) => f(SS, t) === t), `B-829f a descriptor (token_type) stays, and a number, a boolean and null under a holder are left alone (${J(t)})`); }
+  // (c) BOUNDED: one level; a value escaped TWICE is left as today; a value past ESC_VALUE_MAX and a name past ESC_NAME_MAX are left to the
+  // older rules; and the belt never throws on a torn or odd escape
+  { const v = val(), twice = 'cfg: "' + JSON.stringify(JSON.stringify(JSON.stringify({ password: v }))).slice(1, -1) + '"';
+    ok(MODES.every(([, f]) => f(SS, twice) === f(TODAY, twice)), `B-829f (c) a value escaped TWICE (\\\\\\"name\\\\\\":) is LEFT AS TODAY: the reader reads one level, so its inner pair is judged by no rule, as before this row (${J(MODES[1][1](SS, twice).slice(0, 60))}…)`);
+    const big = 'log: "{' + '\\"password\\":\\"' + 'a'.repeat((SS.ESC_VALUE_MAX || 8192) + 10) + '\\"}"', longName = 'log: "{' + '\\"' + 'n'.repeat((SS.ESC_NAME_MAX || 80) + 1) + '_password\\":\\"' + v + '\\"}"';
+    ok(SS.ESC_VALUE_MAX > 0 && SS.ESC_NAME_MAX > 0 && MODES.every(([, f]) => f(SS, big) === f(TODAY, big) && f(SS, longName) === f(TODAY, longName)), `B-829f (c) a value longer than ESC_VALUE_MAX (${SS.ESC_VALUE_MAX}) and a name longer than ESC_NAME_MAX (${SS.ESC_NAME_MAX}) are left to the older rules, as today`);
+    const TORN = ['\\"', '\\"\\"', '\\"a\\":', '\\"a\\":\\"', '\\"password\\":\\"abc', 'x\\', '\\\\\\"', '\\"password\\" : \\"' + v + '\\"', '\\"\uD800\\":\\"v\\"', '\\"password\\":\\"' + '\\\\\\"'.repeat(3000), '\\"pw\\":\\"\n\\"', '\\'.repeat(5000) + '"'];
+    const seeded = (seed) => () => { seed = (seed + 0x6D2B79F5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+    const rnd = seeded(829), AL = ['\\', '"', ':', ' ', 'a', 'password', 'token_type', '\n', '{', '}', ',', 'x', '«redacted»'];
+    const FUZZ = Array.from({ length: 2000 }, () => Array.from({ length: 1 + Math.floor(rnd() * 40) }, () => AL[Math.floor(rnd() * AL.length)]).join(''));
+    let threw = 0, lost = 0; for (const t of [...TORN, ...FUZZ]) for (const [, f] of MODES) { try { f(SS, t); } catch { threw++; } }
+    for (const t of [...TORN, ...FUZZ, ...SCENES.map((x) => x[1])]) for (const [, f] of MODES.slice(0, 2)) if (!onlyAdds(t, f)) lost++;
+    ok(threw === 0, `B-829f (c) the belt NEVER THROWS on ${TORN.length} torn or odd escapes and ${FUZZ.length} generated ones, in every mode${threw ? ' — threw ' + threw : ''}`);
+    ok(lost === 0, `B-829f (1) IT ONLY ADDS MASKS: on the same ${TORN.length + FUZZ.length + SCENES.length} texts, every character 7b4cd5120's belt masked is still masked, in both modes${lost ? ' — unmasked on ' + lost : ''}`);
+    const idem = [...SCENES.map((x) => x[1]), ...FUZZ.slice(0, 300)].every((t) => MODES.slice(0, 2).every(([m, f]) => { const o = f(SS, t); return f(SS, o) === o; }));
+    ok(idem, 'B-829f a second pass over the belt\'s own output changes nothing (both modes; the scenes and 300 generated texts)'); }
+  // (d) THE TIME BOUND, by a STEP COUNT (no clock in this suite: a slow machine is never red, a regression of ten times is): the reader's
+  // steps on five made-up 64 KiB worst shapes stay under 4 per character
+  { const ST = M.load('src/secret-shapes.js', editAnchor(SRC, '/*esc-step*/', 'globalThis.__escSteps = (globalThis.__escSteps || 0) + 1;', 'src/secret-shapes.js', 'join'), 'b829f-steps');
+    const N = SS.INPUT_MAX || 65536, fill = (u) => u.repeat(Math.ceil(N / u.length)).slice(0, N);
+    const W = [['name starts that never close', fill('\\"a')], ['holder pairs back to back', fill('\\"token\\":\\"v\\",')], ['one value 64 KiB long', '\\"token\\":\\"' + 'v'.repeat(N - 20) + '\\"'],
+      ['backslash runs before every quote', fill('\\\\\\"')], ['an unclosed value on one long line', '\\"token\\":\\"' + fill('\\\\\\"x').slice(20)]];
+    const steps = W.map(([w, t]) => { globalThis.__escSteps = 0; ST.redactSecrets(t); return [w, globalThis.__escSteps, t.length]; });
+    ok(steps.every(([, s, n]) => s <= 4 * n), `B-829f (d) THE BOUND: the reader is linear — ${steps.map(([w, s, n]) => `${w} ${s} steps / ${n} characters`).join(' · ')} (the ceiling: 4 a character)`); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

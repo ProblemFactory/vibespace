@@ -759,6 +759,50 @@ function maskedLink(url) {
   return shape || vault.length ? { shape, vault } : null;
 }
 const JOINER_IN_WORD_RE = /(?<=[A-Za-z0-9_.\-])[\u200C\u200D]+(?=[A-Za-z0-9_.\-])/g;
+// row B-829f (主开发 r3101 / r3116; lane mask-value-shape): A VALUE THAT IS ITSELF ESCAPED JSON is judged as plain JSON already
+// is. A value written as ONE escaped string (every quote written \") is never read as JSON by the pair rule: its inner names carry a
+// backslash before their closing quote, which KV_HEAD cannot open. So under ANY non-holder outer name (a service-account JSON's
+// name, a structured log's "body") an inner credential passed in clear on every road. This reader takes each inner pair
+// \"name\":\"value\" (ONE level) and masks the value when the name HOLDS by the name grammar (holderName: the found table, the
+// descriptors, fail closed). THE LAWS (r3116): (1) it only ADDS masks — it runs LAST, over the text every older rule has judged, and
+// a value it cannot read (torn, unclosed, past a bound) is left exactly as they left it; (2) BOUNDED — one level (a value escaped
+// TWICE, \\\"name\\\":, is left as today), a name of at most ESC_NAME_MAX characters, a value of at most ESC_VALUE_MAX characters
+// and never past its line's end (a longer one is left to the older rules); linear: one forward walk, each backslash run read once;
+// (3) it never throws; a number, a boolean, an object or null after the colon is no string and is left alone
+const ESC_NAME_MAX = 80, ESC_VALUE_MAX = 8192;
+const escNameCode = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 46 || c === 45;
+function redactEscapedPairs(text, say) {
+  if (text.indexOf('\\"') < 0) return { text, n: 0 };
+  const L = text.length; let out = '', last = 0, n = 0, i = 0;
+  while ((i = text.indexOf('\\"', i)) >= 0) {
+    /*esc-step*/
+    if (i > 0 && text.charCodeAt(i - 1) === 92) { i += 2; continue; }   // a longer backslash run: a second level, left as today
+    const n0 = i + 2; let p = n0;
+    while (p < L && p - n0 < ESC_NAME_MAX && escNameCode(text.charCodeAt(p))) { /*esc-step*/ p++; }
+    if (p === n0 || text.charCodeAt(p) !== 92 || text.charCodeAt(p + 1) !== 34) { i += 2; continue; }   // no name, or one past the bound
+    let q = p + 2;
+    while (q < L && (text.charCodeAt(q) === 32 || text.charCodeAt(q) === 9)) { /*esc-step*/ q++; }
+    if (text.charCodeAt(q) !== 58) { i = p; continue; }   // no colon: prose that quotes a word; the \" at p may open the next name
+    q++;
+    while (q < L && (text.charCodeAt(q) === 32 || text.charCodeAt(q) === 9)) { /*esc-step*/ q++; }
+    if (text.charCodeAt(q) !== 92 || text.charCodeAt(q + 1) !== 34) { i = q; continue; }   // not a string value: left alone
+    const vs = q + 2, nl = text.indexOf('\n', vs), end = Math.min(nl < 0 ? L : nl, vs + ESC_VALUE_MAX + 1);
+    let r = vs, ve = -1;
+    // the value ends at the next \" whose backslash run CLOSES in the once-unescaped JSON (a run of 1, 5, 9 … backslashes; a run of 3
+    // is an escaped quote inside the value)
+    while ((r = text.indexOf('\\"', r)) >= 0 && r < end) {
+      /*esc-step*/
+      let b = r; while (b > vs && text.charCodeAt(b - 1) === 92) { /*esc-step*/ b--; }
+      if ((r - b + 1) % 4 === 1) { ve = r; break; }
+      r += 2;
+    }
+    if (ve < 0) { i = vs; continue; }   // unclosed on its line or past ESC_VALUE_MAX: left to the older rules
+    const v = text.slice(vs, ve);
+    if (v && v !== REDACTED && holderName(text.slice(n0, p))) { out += text.slice(last, vs) + REDACTED; last = ve; n++; if (say) say(text.slice(n0, p)); }
+    i = ve + 2;
+  }
+  return { text: last ? out + text.slice(last) : text, n };
+}
 function redactSecrets(raw, { runs = false, message = false, said = null, mentions = null } = {}) {
   let text = String(raw == null ? '' : raw);
   if (text.length > INPUT_MAX) text = text.slice(0, INPUT_MAX);
@@ -780,6 +824,7 @@ function redactSecrets(raw, { runs = false, message = false, said = null, mentio
     text = redactUserinfo(text, (head) => { n++; if (say) say(head); });   // R9 (B-da2d): a URL's password standing on its own — only it goes; BEFORE R7: R7's value cut must never split a pass-phrase
     text = redactQuery(text, (head) => { n++; if (say) say(head); });   // R7 — lane mask-value-shape r3: ONE linear walk (THE NAME GRAMMAR; a public name's value walked on)
     if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; if (say) say('a key-material run'); return REDACTED; });
+    const esc = redactEscapedPairs(text, say); text = esc.text; n += esc.n;   // row B-829f: LAST — an escaped-JSON value's inner pairs, judged as plain JSON's are
   } catch { if (message) return redactSecrets(raw, { runs, said });   /* the cure r5: a message mode that fails is the line rule, never a partial text */ /* a text that cannot be judged is returned as far as it got — the caller's belt still runs */ }
   return { text, redacted: n };
 }
@@ -994,6 +1039,7 @@ function redactByValue(raw, { typed = false } = {}) {
     row(nameQuery(text));   // r10 (B-a3fe, on 2.369.413): R7 at a name — the release's linear walk and its name grammar
     // (a) the run row — the name as typed, never a slug
     if (typed) text = text.replace(NAME_RUN_RE, (m) => { const g = versionGlued(m); if (g !== null) { n++; return g; } if (!randomRun(m)) return m; n++; const core = coreOf(m), at = m.indexOf(core); return m.slice(0, at) + REDACTED + m.slice(at + core.length); });   // r10: the punctuation around a hidden run stays
+    row(redactEscapedPairs(text));   // row B-829f: LAST — an escaped-JSON value's inner pairs, judged as plain JSON's are (both entry functions)
   } catch {
     // r10 (B-a3fe): a name this rule cannot judge is judged by the OUTPUT belt (redactSecrets — its word rows hide the rest of a
     // value's line) AND the name's own run row (the output belt keeps a random run standing alone: its R8 is key MATERIAL only) —
@@ -1008,4 +1054,4 @@ function redactByValue(raw, { typed = false } = {}) {
   return { text, redacted: n };
 }
 
-module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, NOT_CREDENTIAL_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape, redactByValue, wordValue, randomRun };
+module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, ESC_NAME_MAX, ESC_VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, NOT_CREDENTIAL_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape, redactByValue, wordValue, randomRun };
