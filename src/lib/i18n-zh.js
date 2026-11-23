@@ -14730,6 +14730,7 @@ export default {
   "Its proxy login could not be read from the vault ({code}).": "无法从保险库读取它的代理登录（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
   "Its proxy address carries its password, which is never used — move it to the vault first.": "它的代理地址里带着密码，这个密码从不使用——请先把它移入保险库。",
   "The proxy password is in the vault now — the profile keeps the address alone": "代理密码已存入保险库——配置里只留地址",
+  "Could not open the browser": "无法打开浏览器",
   "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "它的代理是 socks4，无法传递网站的名称——请在「代理…」里填写 http、https 或 socks5 代理。", // B-8b87 cure: a proxy's refusals in the page's words
   "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "这个配置连接的是一个不由 VibeSpace 启动的浏览器——那个浏览器保留它自己的代理设置。", // B-8b87 cure: a proxy's refusals in the page's words
   "The browser's proxy could not be put in its config — the browser was not started without it.": "无法把代理写进浏览器的配置——浏览器没有在不走代理的情况下启动。", // B-8b87 cure: a proxy's refusals in the page's words

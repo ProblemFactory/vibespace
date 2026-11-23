@@ -61,9 +61,8 @@ import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCel
 import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
 import { barLayout, chipLineLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-queue.js'; // lane browser-takeover-queue: «Waiting for you» — the takeover requests, above Profiles
-import { openProxyDialog } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
-import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words
-import { showUnlock, showSetup } from './vault-unlock.js';
+import { openProxyDialog, sayProxyRefusal } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
+import { PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words (B-7aef: said by browser-proxy-dialog.js's sayProxyRefusal)
 import { openExitDialog } from './browser-exit-dialog.js'; // the exit check (the owner 2026-11-17)
 import { registerBrowserProfileCommands } from './browser-profile-commands.js'; // B-acb9: a plugin's window opens this card's «Proxy…» / «Check the exit…»
 import { techFold } from './plain-words.js';   // r3104: where a damaged list's bytes are kept — in the fold, never on the face
@@ -770,28 +769,13 @@ export function usersOf(row) { return (Array.isArray(row && row.usedBy) ? row.us
 async function act(url, init, what, wordsOf = null) {
   const r = await fetchJson(url, init);
   if (!r || r.error) {
-    if (PROXY_REFUSALS.includes(r && r.code)) { sayRefusal(r, what, 'start'); return null; }   // B-8b87 cure: a proxy's refusal in the page's words, with the vault's press
+    if (PROXY_REFUSALS.includes(r && r.code)) { sayProxyRefusal(r, what); return null; }   // B-8b87 cure: a proxy's refusal in the page's words, with its press (B-7aef: the profile's own move, aimed at the id the hub's answer names)
     showToast(t('{what} — {reason}', { what, reason: (r && r.error && typeof wordsOf === 'function' && wordsOf(r)) || (r && r.error) || t('server unreachable') }), { type: 'error', duration: 9000 }); return null;
   }
   return r;
 }
 /** B-53df: a profile row's Restart refusal in the device's words (PURE restartRefusalWords by its code). */
 const restartWordsOf = (row) => (r) => restartRefusalWords(r, { label: String((row && (row.label || row.id)) || ''), human: humanRefusalText }, t);
-/** A refusal's toast — B-8b87 cure: a proxy's refusal (`act` = the act it refused) in the page's words, with the vault's press
- *  (Unlock… / Set up the vault…) when it needs one; any other refusal as before. */
-/** B-7aef (主开发 r2686): the profile's own «Move the password to the vault» as a refusal's door — the HUB moves the word (it never
- *  crosses the page, an address or a log); a locked vault refuses by name with its press (sayRefusal 'move'). */
-async function moveProxyDoor(profileId) {
-  const res = await fetchJson('/api/vault/proxy-logins/move', jsonInit('POST', { profileId }));
-  if (!res || res.error || res.ok === false) { sayRefusal(res, t('Could not move the password'), 'move'); return; }
-  showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
-}
-function sayRefusal(r, what, act) {
-  const door = act ? proxyDoor(r && r.code, r && r.word) : null;
-  const moveId = door === 'move' && r && typeof r.profileId === 'string' && r.profileId ? r.profileId : '';   // the refusal names its profile (an id)
-  const reason = act ? proxyWords(r && r.code, t, '', { act, word: r && r.word }) : (r && r.error) || t('server unreachable');
-  showToast(t('{what} — {reason}', { what, reason }), { type: 'error', duration: 9000, ...(door === 'move' ? (moveId ? { action: { label: t('Move the password to the vault'), run: () => moveProxyDoor(moveId) } } : {}) : door ? { action: { label: door === 'setup' ? t('Set up the vault…') : t('Unlock…'), run: () => { try { (door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } } } } : {}) });
-}
 const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
 export function openBrowserProfilesWindow(app, { syncId, focus = null, open = null } = {}) {
@@ -1013,7 +997,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     'exit-check': (r) => openExitDialog(app, r, { onDone: () => load() }),
     'proxy-move': async (r) => {
       const res = await fetchJson('/api/vault/proxy-logins/move', jsonInit('POST', { profileId: r.id }));
-      if (!res || res.error || res.ok === false) { sayRefusal(res, t('Could not move the password'), 'move'); load(); return; }   // B-8b87 cure: the move's own words + press
+      if (!res || res.error || res.ok === false) { sayProxyRefusal(res && { ...res, profileId: r.id }, t('Could not move the password'), { act: 'move' }); load(); return; }   // B-8b87 cure: the move's own words + press
       if (res) showToast(t('{label}\'s proxy password is in the vault now — the profile keeps the address alone', { label: String(r.label || r.id) }), { duration: 6000 });
       load();
     },

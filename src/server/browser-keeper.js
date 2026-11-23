@@ -7585,7 +7585,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!url.value) return { ok: false, code: 'exit_url_unset', error: 'no exit check address is set — give one (an https address you trust) and check again, or type the exit by hand' };
     // the launch's own verdict on the stored proxy (a password in the address, socks4, a paired machine, a login saved for another proxy)
     const v = B.proxyLaunchVerdict(p);
-    if (!v.ok) return { ok: false, code: v.code, error: v.error };
+    if (!v.ok) return { ok: false, code: v.code, error: v.error, ...(v.code === 'proxy_password_in_profile' && v.profileId ? { profileId: v.profileId } : {}) };   // B-7aef: the profile's id, as the launch's refusal carries it
     const px0 = v.proxy;
     const k0 = String(p.id), have = egressProxies.get(k0), rec = reg.browsers[k0];
     // 主开发 17:04Z: a RUNNING browser is measured only through the road it runs on — its own forwarder is THIS proxy WITH THIS login;
@@ -7664,7 +7664,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  nothing under ⇒ the launch is refused with the vault's own word — never a direct connection) → the forwarder's `of`, or null. */
   async function profileProxyFor(p, { why = null, browserKey = null, starts = true } = {}) {
     const v = B.proxyLaunchVerdict(p);
-    if (!v.ok) throw namedError(v.code, v.error);
+    // B-7aef (主开发 r2863): the verdict's profile id rides the refusal (a password still in the address: the page's press is that
+    // profile's own move) — the id alone, the code's own; the route hands it to a person's page only (routes/browser.js fail)
+    if (!v.ok) throw namedError(v.code, v.error, v.code === 'proxy_password_in_profile' && v.profileId ? { profileId: v.profileId } : {});
     if (v.proxy && !starts) throw namedError('proxy_external_browser', `"${p.label}" attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings; clear this profile's proxy, or set it in that browser`);
     if (!v.proxy) { proxyCreds.delete(String(p.id)); return null; }
     if (v.proxy.credential) {

@@ -158,6 +158,8 @@ import { claimKeyboard, releaseKeyboard, keyboardOwner, keyboardOwned, keyboardC
 import { onKeyboardChange } from './keyboard-owner.js'; // lane takeover-keyboard verify r2 (H1): another view's claim moving is a transition of this one too
 import { createKeyboardYield, isEditable, sinkBlurVerdict } from './keyboard-yield.js'; // lane takeover-keyboard (userW inc-mum339id-1zsb): YOUR press on a text box outside the view gets the keys; a script's focus never does
 import { dialogFocusTarget } from './keyboard-yield.js'; // lane dialog-keys: where a dialog that took the keys gets them when it focuses nothing itself
+import { PROXY_REFUSALS } from './browser-proxy-model.js'; // B-7aef (主开发 r2863): a launch's proxy refusal on this view's roads (Browse yourself, Resume, Restart)
+import { sayProxyRefusal } from './browser-proxy-dialog.js'; // … said with ITS press (the profile's own move, aimed at the id the hub's answer names)
 import { createTraceTimeline } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the Actions pane
 import { shortModeBadge } from './live-bar-layout.js'; // lane I: the bar's never-fold badge words (the full sentence is its tooltip)
 import { createBarFold } from './bar-fold.js'; // lane I: the bar folds into ⋯ by priority — never wraps, never overlaps
@@ -336,6 +338,7 @@ export async function browseYourself(app, profileId, { label = null } = {}) {
     // lane remote-profile-start: the profile's machine has no browser to run — said by name with ITS one command (Copy)
     const sw = r && r.step ? machineStepWords(r.step, { t }) : null;
     if (sw) { if (await showConfirmDialog({ title: sw.title, message: sw.note + '\n\n' + sw.command, confirmText: t('Copy') })) { copyText(sw.command); showToast(t('Copied'), { duration: 2000 }); } return null; }
+    if (PROXY_REFUSALS.includes(code)) { sayProxyRefusal(r, t('Could not open the browser')); return null; }   // B-7aef: its press, never the card's path
     const words = code && !LAUNCH_CODES.includes(code) ? humanRefusalText(code, { label: label || profileId, pid: r && r.holderPid, machine: r && r.machine, n: r && r.n }, t) : '';
     showToast(words || (r && r.error) || t('server unreachable'), { type: 'error', duration: 8000 });
     return null;
@@ -853,7 +856,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: curRef() || EPHEMERAL_REF }) });
     st.resuming = false;
     if (st.closed) return;
-    if (!r || r.error) { renderResume(); showToast(t('Could not resume the browser: {why}', { why: resumeWhy(r) }), { type: 'error', duration: 7000 }); return; }
+    if (!r || r.error) { renderResume(); if (r && PROXY_REFUSALS.includes(r.code)) { sayProxyRefusal(r, t('Could not resume the browser')); return; } showToast(t('Could not resume the browser: {why}', { why: resumeWhy(r) }), { type: 'error', duration: 7000 }); return; }   // B-7aef: a proxy's refusal with its press
     st.resumedHere = !r.already; st.handedBack = false;
     const n = Number(r.restored) || 0;
     showToast(r.already ? t('The browser is running — reconnecting') : n ? t('Resumed — {n} tab(s) reopened', { n }) : t('Resumed — the browser runs again'), { duration: 4000 });
@@ -1395,7 +1398,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     st.restarting = true; renderDialog();
     const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/restart`, { method: 'POST', body: JSON.stringify({ ref }), headers: { 'Content-Type': 'application/json' } });
     st.restarting = false; renderDialog();
-    if (r?.error) showToast(t('Could not restart the browser: {why}', { why: restartRefusalWords(r, { label: String((st.target && st.target.label) || ''), human: humanRefusalText }, t) || String(r.error) }), { type: 'error' });
+    if (r?.error && PROXY_REFUSALS.includes(r.code)) sayProxyRefusal(r, t('Could not restart the browser'));   // B-7aef: a proxy's refusal with its press
+    else if (r?.error) showToast(t('Could not restart the browser: {why}', { why: restartRefusalWords(r, { label: String((st.target && st.target.label) || ''), human: humanRefusalText }, t) || String(r.error) }), { type: 'error' });
     else showToast(r && r.restarted ? t('The browser was restarted — its tabs open fresh') : t('The browser was stopped — the agent’s next browser command starts it fresh'), { duration: 4000 });
   }
   const renderViewers = () => { viewersEl.textContent = t('{n} viewer(s)', { n: st.viewers || 1 }); viewersEl.title = t('Windows watching this browser right now (on every client)'); };

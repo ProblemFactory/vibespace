@@ -14729,6 +14729,7 @@ export default {
   "Its proxy login could not be read from the vault ({code}).": "保管庫からプロキシのログインを読み取れませんでした（{code}）。", // B-8b87 cure: a proxy's refusals in the page's words
   "Its proxy address carries its password, which is never used — move it to the vault first.": "プロキシのアドレスにパスワードが含まれており、そのパスワードは使われません——先に保管庫へ移してください。",
   "The proxy password is in the vault now — the profile keeps the address alone": "プロキシのパスワードは保管庫に入りました——プロファイルにはアドレスだけが残ります",
+  "Could not open the browser": "ブラウザを開けませんでした",
   "Its proxy is socks4, which cannot carry a site's name — give an http, https or socks5 proxy in Proxy….": "プロキシが socks4 で、サイトの名前を渡せません——「プロキシ…」で http、https または socks5 のプロキシを指定してください。", // B-8b87 cure: a proxy's refusals in the page's words
   "This profile attaches to a browser VibeSpace does not start — that browser keeps its own proxy settings.": "このプロファイルは VibeSpace が起動しないブラウザに接続します——そのブラウザは自身のプロキシ設定を使います。", // B-8b87 cure: a proxy's refusals in the page's words
   "The browser's proxy could not be put in its config — the browser was not started without it.": "ブラウザの設定にプロキシを書き込めませんでした——プロキシなしでブラウザを起動することはしていません。", // B-8b87 cure: a proxy's refusals in the page's words

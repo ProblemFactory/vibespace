@@ -41,6 +41,8 @@ import { grantUseBody, grantReplyText } from '../ask-grant.js'; // PURE (lane co
 import { openTakeover } from './browser-takeover-queue.js'; // lane browser-takeover-queue: a takeover request's item opens its live view
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the browser-restart item's refusal by its code (PURE words)
+import { PROXY_REFUSALS } from './browser-proxy-model.js'; // B-7aef (主开发 r2863): the restart's proxy refusal …
+import { sayProxyRefusal } from './browser-proxy-dialog.js'; // … said with ITS press (the profile's own move, aimed at the id the hub's answer names)
 import { humanRefusalText } from '../browser-human.js'; // B-53df: … the person's own browsing words first (PURE)
 import { heldRefusalText } from './channel-api-card-view.js'; // the follow-owed read: an unknown Task Group refusal in the page's words
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
@@ -538,6 +540,7 @@ export function inboxModel(app) {
       // tells every conversation on it and resolves this item)
       const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(rec.action.profileId)}/restart`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       if (r && r.browser) { showToast(t('Restarted {label}', { label: String(r.browser.label || rec.action.profileId) })); return true; }
+      if (r && PROXY_REFUSALS.includes(r.code)) { sayProxyRefusal(r, t('Could not restart the browser')); return false; }   // B-7aef: its press, never the card's path
       showToast((r && r.error && restartRefusalWords(r, { label: String((((app._browserProfiles && app._browserProfiles.profiles) || []).find((x) => x && x.id === rec.action.profileId) || {}).label || ''), human: humanRefusalText }, t)) || (r && r.error) || t('Could not restart the browser'), { type: 'error' });
       return false;
     }

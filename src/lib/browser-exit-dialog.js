@@ -6,7 +6,8 @@ import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { exitSay, exitAgeText, exitWords } from './browser-exit-words.js';
-import { proxyWords } from './browser-proxy-model.js';   // B-7aef: the move's own refusal words (a locked vault: unlock, then move again)
+import { proxyWords, proxyDoor } from './browser-proxy-model.js';   // B-7aef: the move's own refusal words and press (a locked vault: unlock, then move again)
+import { showUnlock, showSetup } from './vault-unlock.js';   // B-7aef (主开发 r2863): the vault's own press, the proxy dialog's door
 
 const KEY = 'browser.exitCheckUrl';
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -49,18 +50,36 @@ export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });
   refusal.style.display = 'none';
   // B-7aef (主开发 r2686): «Move the password to the vault» beside the refusal that names it — this profile's own move (the hub moves the
-  // word: it never crosses the page); a refused move says why and what to do; a done one takes the refusal away
+  // word: it never crosses the page); a refused move says why and what to do; a done one takes the refusal away. r2863: a move a locked
+  // (or never set up) vault refused takes THE SAME DOOR as the proxy dialog — Unlock… / Set up the vault… — with Move after it
+  const vaultDoor = btn('', () => { try { (vaultDoor.dataset.door === 'setup' ? showSetup : showUnlock)(); } catch { /* the vault's own window */ } }, 'bexit-vault');
+  vaultDoor.style.display = 'none';
   const moveDoor = btn(t('Move the password to the vault'), () => doMove(), 'bexit-door');
   moveDoor.style.display = 'none';
-  const notes = el('div', 'bwho-notes'); notes.append(refusal, moveDoor);
-  const say = (text, door = null) => { noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none'; moveDoor.style.display = text && door === 'move' ? '' : 'none'; };
+  const notes = el('div', 'bwho-notes'); notes.append(refusal, vaultDoor, moveDoor);
+  const say = (text, door = null) => {
+    noteText(refusal, text || ''); refusal.style.display = text ? '' : 'none';
+    const vault = door === 'unlock' || door === 'setup';
+    vaultDoor.dataset.door = vault ? door : ''; vaultDoor.textContent = door === 'setup' ? t('Set up the vault…') : t('Unlock…');
+    vaultDoor.style.display = text && vault ? '' : 'none';
+    moveDoor.style.display = text && (door === 'move' || vault) ? '' : 'none';
+  };
+  let moving = false;   // one move at a time: a second press while the first is out asks nothing (the press stays live — never greyed)
   async function doMove() {
-    const res = await post('/api/vault/proxy-logins/move', { profileId: r.id });
-    // a locked (or never set up) vault refuses by name and says what to do (unlock, then move again) — the press stays, live (主开发 r2686 law 2)
-    const again = !!res && (res.code === 'vault_locked' || res.code === 'vault_not_set_up' || /vault_locked|vault_not_set_up/.test(String(res.word || '')));
-    if (!res || res.error || res.ok === false) { say(proxyWords(res && res.code, t, '', { act: 'move', word: res && res.word }), again ? 'move' : null); return; }
-    say('');
-    showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
+    if (moving) return;
+    moving = true;
+    try {
+      const res = await post('/api/vault/proxy-logins/move', { profileId: r.id });
+      if (!res || res.error || res.ok === false) {
+        // a locked (or never set up) vault refuses by name and says what to do (unlock, then move again) — its press first, Move after it
+        // (主开发 r2686 law 2); a write that did not land keeps Move alone (the vault holds the login, the profile is as it was: press again)
+        const door = res && res.code === 'not_written' ? 'move' : proxyDoor(res && res.code, res && res.word);
+        say(proxyWords(res && res.code, t, '', { act: 'move', word: res && res.word }), door);
+        return;
+      }
+      say('');
+      showToast(t('The proxy password is in the vault now — the profile keeps the address alone'), { duration: 6000 });
+    } finally { moving = false; }
   }
   const footer = el('div', 'dialog-footer bwho-footer');
   const cancel = btn(t('Cancel'), () => shell.close(), 'bnew-cancel');

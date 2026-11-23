@@ -321,6 +321,9 @@ function fail(res, e) {
     ...(typeof e?.source === 'string' ? { source: e.source } : {}), ...(Number.isFinite(e?.bytes) ? { bytes: e.bytes } : {}), ...(e?.fsCode ? { fsCode: e.fsCode } : {}),
     // B-9584 (round wyx4vuerd 2): a mismatched engine echo names WHICH of the three settings differ — the page's sentence names them
     ...(e?.code === 'browser_engine_environment_mismatch' && Array.isArray(e?.settings) ? { settings: e.settings.filter((k) => ['timezone', 'language', 'location'].includes(k)) } : {}),
+    // B-7aef (主开发 r2863): a password still in a profile's proxy address names THAT profile (an id, never the word) — its press on the
+    // person's page is the profile's own move; an agent's route never carries it (the press is the owner's page only: r2686 law 1)
+    ...(!agentRoad && e?.code === 'proxy_password_in_profile' && typeof e?.profileId === 'string' && ID_RE.test(e.profileId) ? { profileId: e.profileId } : {}),
     ...(e?.failed && typeof e.failed === 'object' ? { failed: agentRoad ? agentFailed(e.failed) : e.failed } : {}), // B-a470: an engine plugin's OWN error (its code, message, what Node denied it) — every door quotes it; an agent's, without the hub's path
     ...rulingExtras(e), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) });
 }

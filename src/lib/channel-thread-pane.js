@@ -189,7 +189,7 @@ export function createThreadPane(host, ctx) {
     const r = prepend
       ? await fetchJson(`${ctx.base}/thread/${encodeURIComponent(cur.root || cur.key)}/older`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ before: oldest ? oldest.at : null, beforeId: oldest ? oldest.vendorId : null, limit: PANE_PAGE }) })
       : await fetchJson(`${ctx.base}/thread/${encodeURIComponent(cur.root || cur.key)}?${q}`);
-    if (!r || r.error) { if (r && r.error && !prepend) { const note = el('div', 'chanwin-empty', routeErrorText(r)); const d = accountEnableDoor(r, { after: () => load() }); if (d) note.appendChild(needDoorButton(d)); list.appendChild(note); } return 0; }
+    if (!r || r.error) { if (r && r.error && !prepend) { const note = el('div', 'chanwin-empty', routeErrorText(r)); const d = accountEnableDoor(r, { after: () => { note.remove(); load(); } }); if (d) note.appendChild(needDoorButton(d)); list.appendChild(note); } return 0; }
     // verify r3: a REFUSED older page (the per-thread floor, the budget) is not the thread's start — it is asked again
     // on the next input; a walk that stopped at the channel's own bound says so at the top of the replies
     if (prepend && (r.exhausted || r.vendorHasNoOlder) && !(r.records || []).length && !r.refused) {
@@ -239,7 +239,7 @@ export function createThreadPane(host, ctx) {
     if (r && r.error && r.code !== 'thread-floor') {
       // the refusal's sentence, never a spinner forever (§6.5): the local replies stay drawn
       const note = el('div', 'chanthread-note', routeErrorText(r));
-      const d = accountEnableDoor(r);   // B-7aef: a disabled account's Enable door beside the words
+      const d = accountEnableDoor(r, { after: () => { note.remove(); walk().catch(() => {}); } });   // B-7aef: a disabled account's Enable door beside the words; enabled, the stale note goes and the walk asks again
       if (d) note.appendChild(needDoorButton(d));
       list.appendChild(note);
     }
