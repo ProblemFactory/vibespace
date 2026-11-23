@@ -1112,7 +1112,7 @@ class SettingsUI {
           if (!list.isConnected) return;
           if (!rs || rs.error) { addLine({ tone: 'bad', text: `⚠ ${h.name}: ${t('could not be checked')}${rs && rs.error ? ' — ' + rs.error : ''}` }); return; }
           const all = rs.cliConfig || [];
-          const r = all.find((x) => x.harness === schema.harness && x.key === key) || all.find((x) => x.state === 'unknown') || { state: 'unknown' };
+          const r = all.find((x) => x.harness === schema.harness && x.key === key) || all.find((x) => x && !x.harness && !x.key) || { state: 'unknown' };   // r3064: any WHOLE-RUN line (an older helper, no node, the helper's own failure) — the card's words
           addLine(receiptLine(r, { t, where: h.name, remote: true }));
         }));
         btn.remove();

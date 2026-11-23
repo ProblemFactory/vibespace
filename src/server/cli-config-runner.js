@@ -38,6 +38,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   let inFlight = null;          // the run in flight: Promise<landing>
   const queue = [];             // the requests waiting, IN THE ORDER ASKED: { kind, planOf, reason, uninstall, before, resolvers }
   let last = null;              // the newest landing: { at, reason, ok, receipts, created, parts, why }
+  let warnedWhy = null;         // r3064: the failure the journal last said — a file left broken is journalled once per cause, not at every start
   const watchers = new Set();   // landedWithin's waiters: (landing) => void
 
   const filesOf = (planB64) => { const plan = decodePlan(planB64); return plan && Array.isArray(plan.files) ? plan.files.filter((f) => Array.isArray(f.rel)).map((f) => ({ rel: f.rel.join('/'), file: path.join(home || require('os').homedir(), ...f.rel), harness: f.harness })) : []; };
@@ -69,14 +70,15 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const receipts = parseReceiptLines(r.stdout || '');
     const whole = receipts.find((x) => x.harness === null && x.state !== 'unknown');
     if (r.code !== 0) return failed(`the helper exited ${r.code}${r.stderr ? `: ${String(r.stderr).trim().split('\n').pop().slice(0, 200)}` : ''}`);
-    if (whole) return { ...failed(`the helper refused the plan: ${String(whole.reason || whole.state).slice(0, 200)}`), receipts };
+    if (whole) return { ...failed(whole.state === 'refused' ? `the helper refused the plan: ${String(whole.reason || whole.state).slice(0, 200)}` : `the helper failed: ${String(whole.reason || whole.state).slice(0, 200)} — nothing is known to have landed`), receipts };   // r3064: a crash inside the helper by its own words
     const la = await look();
     if (!la.value) return { ...failed(la.held ? heldWhy('what landed is not known') : `the plan's files under the home could not be read within ${timeoutMs} ms after the helper ran (a home that does not answer) — what landed is not known`), receipts };
     const after = la.value;
     const created = files.filter((f, k) => !before[k] && after[k]);
     const bad = receipts.filter((x) => x.state === 'error' || x.state === 'refused');
     // r2844: our hook entries are a part of the plan with a receipt of their own (a refused hooks part is a `refused` receipt, judged
-    // above). An OLDER helper (a machine not updated yet) prints none: whether they landed is NOT KNOWN, said so — never «landed»
+    // above). A helper that prints none leaves whether they landed NOT KNOWN, said so — never «landed». The runner runs the hub's
+    // own helper, regenerated at every start, so on this road that is only a GUARD (the suite's planted older helper meets it)
     const silent = status ? [] : hooksHarnessesOf(planB64, uninstall).filter((h) => !receipts.some((x) => x.harness === h && x.key === 'hooks'));
     // the failed PARTS, each ONCE ({ harness, key, why }): a reader that says one part (a CLI's hooks answer) leaves it out of the rest
     const parts = [...bad.map((x) => ({ harness: x.harness, key: x.key, why: `${x.key}: ${x.reason || x.state}` })), ...silent.map((h) => ({ harness: h, key: 'hooks', why: 'hooks: not known — the helper printed no word of our hook entries (an older helper)' }))];
@@ -161,7 +163,8 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
         landing.kind = job.kind;
         last = landing;
         if (landing.ok) for (const c of landing.created) journal(`[cli-config] created ~/${c.rel} (the CLI had never written one) (${job.reason})`);
-        else warn(`[cli-config] not applied on this machine (${job.reason}): ${landing.why}`);
+        else if (landing.why !== warnedWhy) warn(`[cli-config] not applied on this machine (${job.reason}): ${landing.why}`);
+        warnedWhy = landing.ok ? null : landing.why;
         for (const res of job.resolvers) res(landing);
         return landing;
       })

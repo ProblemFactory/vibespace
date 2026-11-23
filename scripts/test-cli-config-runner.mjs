@@ -21,7 +21,7 @@ import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { checker } from './lib/check.mjs';
 import { scratch, anchored } from './scratch.mjs';
@@ -117,12 +117,12 @@ async function gateLegs(Sync) {
   ok(g.nothingAsked === null && g.landed === null, 'landed → the start goes on (null); nothing asked (a refused or skipped server) → no wait (null)', g);
   ok(!!g.late && g.late.late === true && /did not land within 60 ms/.test(g.late.why), 'a run past the bound → the start is told «late» at the bound, never refused', g);
   ok(!!g.failed && g.failed.failed === true && /exited 1/.test(g.failed.why) && g.asked === 2, 'a FAILED last landing is asked again by the start, and said failed by name', g);
-  const M = require(MC.write(SYNC_REL, anchored(src(SYNC_REL), 'return cliRunner.landedWithin(cliRunner.BOUND_MS).then((g) => (g.landed ? null : g));', 'return Promise.resolve(null);', 'a gate that never waits'), 'no-wait'));
+  const M = require(MC.write(SYNC_REL, anchored(src(SYNC_REL), "return cliRunner.landedWithin(cliRunner.BOUND_MS).then((g) => (g.landed ? null : { ...g, cause: g.why || (g.late ? 'late' : 'failed'), spell: landedSpell }));", 'return Promise.resolve(null);', 'a gate that never waits'), 'no-wait'));
   const gm = await gateLegs(M);
   ok(gm.late === null, 'RED (a gate that never waits): the late start is never told', gm);
   const wc = src('src/ws-create.js'), sfw = src('src/settings-file-words.js');
   const gateAt = wc.indexOf('const cliLate = '), buildAt = wc.indexOf('const sessionSpec = adapter.buildSessionArgs({');
-  ok(gateAt > 0 && gateAt < buildAt && /await Promise\.resolve\(cliConfigGate\(\)\)/.test(wc) && /serverNotice\?\.\(`cli-config-late-\$\{id\}`, w\.replace/.test(wc) && /CLI_CONFIG_LATE_WORDS/.test(wc),
+  ok(gateAt > 0 && gateAt < buildAt && /await Promise\.resolve\(cliConfigGate\(\)\)/.test(wc) && /serverNotice\?\.\(`cli-config-late-\$\{cliLate\.spell \|\| 0\}-\$\{causeKey\}`, w\.replace/.test(wc) && /CLI_CONFIG_LATE_WORDS/.test(wc),
     'WIRING: a local start awaits the gate BEFORE its args are built, and a late / failed gate is said once, by name (cli-config-late-<id>)');
   const words = require(path.join(REPO, 'src/settings-file-words.js')).CLI_CONFIG_LATE_WORDS;
   ok(/\{name\}/.test(words) && /\{why\}/.test(words) && src('src/lib/i18n-zh.js').includes(JSON.stringify(words)) && src('src/lib/i18n-ja.js').includes(JSON.stringify(words)) && sfw.includes('CLI_CONFIG_LATE_WORDS'), 'the words name the conversation and the why, in zh and ja');
@@ -530,10 +530,11 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
         const restore = plant ? PLANTS[plant]() : () => {};
         let l = null, gate = null, untouched = null;
         try {
-          const planted = (() => { try { return fs.lstatSync(sfH).isSymbolicLink() ? 'link' : fs.readFileSync(sfH, 'utf8'); } catch { return 'unread'; } })();
+          const sig = () => { try { const st = fs.lstatSync(sfH); return st.isSymbolicLink() ? `link → ${fs.readlinkSync(sfH)}` : `${st.ino}:${st.mtimeMs}:${st.size}`; } catch { return 'gone'; } };
+          const planted = sig();
           l = await Rn.apply(() => PLAN_H, 'hooks', { kind: 'apply+hooks' });
           gate = await Rn.landedWithin(50);
-          untouched = (() => { try { return (fs.lstatSync(sfH).isSymbolicLink() ? 'link' : fs.readFileSync(sfH, 'utf8')) === planted; } catch { return planted === 'unread'; } })();
+          untouched = sig() === planted && planted !== 'gone' && !fs.existsSync(path.join(home, '.claude', 'nowhere.json'));
         } finally { restore(); }
         return { ok: l && l.ok, why: l && l.why, hooks: ((l && l.receipts) || []).filter((x) => x.key === 'hooks').map((x) => `${x.harness}:${x.state}`).join(), gate: gate && (gate.failed ? 'failed' : gate.late ? 'late' : 'landed'), untouched, before: !!before };
       };
@@ -547,7 +548,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const runnerWith = (Rm, helperPath) => Rm.createCliConfigRunner({ starter, helperPath, home, journal: () => {}, warn: () => {} });
       const SNEW = runnerWith(R, HELPER), STODAY = runnerWith(RUNNER_TODAY, OLD_HELPER), SOLD = runnerWith(R, OLD_HELPER);
       for (const plant of ['hand-broken', 'unreadable', 'dangling']) {
-        if (plant === 'unreadable' && isRootR) { ok(true, `r2844: ${plant} — not read as root (root reads a mode-000 file); read where the suite runs unprivileged`); continue; }
+        if (plant === 'unreadable' && isRootR) { console.log(`  SKIP r2844: ${plant} — not read as root (root reads a mode-000 file); read where the suite runs unprivileged`); continue; }
         const h = await hooksRun(SNEW, plant);
         ok(!!(h.ok === false && /claude\.hooks: /.test(h.why || '') && /claude:(refused|error)/.test(h.hooks) && h.gate === 'failed' && h.untouched),
           `r2844: a ${plant} settings file — untouched, and the run is NOT landed, by name («claude.hooks: …»), the spawn gate told «failed»`, h);
@@ -585,6 +586,97 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
           "        ...((cfg && cfg.receipts) || []).filter((x) => (x.state === 'error' || x.state === 'refused') && x.key !== 'hooks').map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`),\n        ...(cfg && cfg.error ? [cfg.error] : []),", 'the error beside its parts'), 'apply-beside'));
         const apb = await press(HL_BESIDE);
         ok(!!(apb.ok === false && apb.said === 2 && apb.twice.length > 0), 'RED (the settings answer\'s error said beside its receipts): the hooks part is said twice and a refused row twice', apb);
+      }
+      // r3064 (round w9xxaxn8a's smalls and the remote road) — a STAND-IN starter hands the helper's lines back at once (no run)
+      {
+        const GEN_R = 'src/server/agent-tool-generators.js', HC_R = 'src/harness-config.js', HL_R = 'src/server/hooks-late.js', HOSTS_R = 'src/hosts.js';
+        const fakeStarter = (out) => ({ run: async () => ({ started: true, code: 0, stdout: typeof out === 'function' ? out() : out, stderr: '' }) });
+        const enc = (v) => encodeURIComponent(JSON.stringify(v));
+        const line = (h, k, st, why) => `CFG|${h}|${k}|${st}|${enc(null)}|${enc(null)}|${enc(why || '')}`;
+        const syncWith = (Smod, st) => Smod.create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: HELPER, starter: st, hooksWanted: () => true, log: () => {}, warn: () => {} });
+        // (a) A CRASH INSIDE THE HELPER is said by its own words: the whole-run line keeps its state and its message
+        const CRASH = `CFG|*|*|error|${enc('a planted crash inside the helper')}\n`;
+        const pc = HCJ.parseReceiptLines(CRASH)[0];
+        const lc = await R.createCliConfigRunner({ starter: fakeStarter(CRASH), helperPath: HELPER, home, journal: () => {}, warn: () => {} }).apply(() => PLAN_H, 'hooks', { kind: 'apply+hooks' });
+        ok(!!(pc && pc.state === 'error' && pc.reason === 'a planted crash inside the helper' && lc && lc.ok === false && /^the helper failed: a planted crash inside the helper/.test(lc.why || '') && !/not known/.test(lc.why || '')),
+          'r3064: a crash inside the helper is said by its own words («the helper failed: …»), never «an older helper»', { pc, why: lc && lc.why });
+        const HC_OLDW = require(MC.write(HC_R, anchored(src(HC_R), "    if (p[1] === '*') { const st = p[3] !== 'unknown' && RECEIPT_STATES.includes(p[3]) ? p[3] : 'unknown'; out.push({ harness: null, key: null, state: st, reason: p[3] === 'unknown' ? 'helper predates --status' : st === 'unknown' ? p[3] : (dec(p[4] || '') || p[3]) }); continue; }", "    if (p[1] === '*') { out.push({ harness: null, key: null, state: 'unknown', reason: p[3] === 'unknown' ? 'helper predates --status' : p[3] }); continue; }", 'the whole-run line read «unknown»'), 'hc-old-whole'));   // stale-pins: kept (the OLD parse, planted in a copy for the red)
+        const po = HC_OLDW.parseReceiptLines(CRASH)[0];
+        ok(!!(po && po.state === 'unknown' && po.reason === 'error'), 'RED (the old parse): the crash reads «unknown» and its message is thrown away', po);
+        const CH = await import(pathToFileURL(path.join(REPO, 'src/lib/cli-config-chips.js')).href), tt = (x, p) => String(x).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : `{${k}}`));
+        const chipCrash = CH.receiptLine(pc, { t: tt, where: 'm' }).text, chipLink = CH.receiptLine({ harness: 'claude', key: 'k', rel: '.claude/settings.json', state: 'unreadable', reason: 'a link to nowhere' }, { t: tt, where: 'm' }).text;
+        ok(/the helper failed — a planted crash inside the helper/.test(chipCrash) && /settings\.json is a link to nowhere — not touched/.test(chipLink) && /all\.find\(\(x\) => x && !x\.harness && !x\.key\)/.test(src('src/lib/settings-ui.js')),
+          'r3064: the chips word the helper\'s own failure (a read or a write alike) and a link to nowhere for what they are; «Check machines…» takes any whole-run line', { chipCrash, chipLink });
+        // (b) THE REMOTE ROAD (r3064 (4)): the real helper's own lines on a hand-broken file — a paired machine's install (our hooks + the
+        //     managed keys) is NOT landed, one cause said once with its keys; a good file: nothing; no receipt of a planned hooks part:
+        //     «not known»; the root verdict's refusal: said
+        const HM = require(path.join(REPO, HOSTS_R)).HostManager;
+        const helperLines = async () => { const r = await starter.run(process.execPath, [HELPER], { envAdd: { VIBESPACE_CLI_CONFIG: HCJ.encodePlan(SYNC.cliConfigPlan()), HOME: home } }); return HCJ.parseReceiptLines((r && r.stdout) || ''); };
+        await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+        const goodL = await helperLines();
+        const restoreB = PLANTS['hand-broken']();
+        let brokenL = null; try { brokenL = await helperLines(); } finally { restoreB(); }
+        const hk = HM.hooksOfPlan(HCJ.encodePlan(SYNC.cliConfigPlan()));
+        const nlG = HM.installNotLanded(goodL, { hooks: hk }), nlB = HM.installNotLanded(brokenL, { hooks: hk }), nlR = HM.installNotLanded(brokenL, { refused: { kind: 'worktree', line: 'a planted refusal' } });
+        const nlSilent = HM.installNotLanded([], { hooks: hk }), nlCrash = HM.installNotLanded([pc], { hooks: hk });
+        ok(!!(hk.includes('claude') && nlG.length === 0 && nlB.length === 1 && /^claude \((?=[^)]*hooks)(?=[^)]*transcriptRetentionDays)[^)]*\): .*not valid JSON/.test(nlB[0]) && nlR.length === 1 && /not registered there: a planted refusal/.test(nlR[0]) && nlSilent.length === hk.length && nlSilent.every((w) => /\(hooks\): not known/.test(w)) && nlCrash.length === 1 && /^the helper: a planted crash/.test(nlCrash[0])),
+          'r3064 (4): a paired machine\'s install says what did not land there — one cause once, with its keys; nothing printed of a planned hooks part: «not known»; the helper\'s crash; the root verdict\'s refusal', { nlG, nlB, nlR, nlSilent, nlCrash });
+        ok(/const r = await hosts\.installAgentTools\(req\.params\.id, AGENT_BIN_DIR\), bad = \(r && r\.notLanded\) \|\| \[\]; res\.json\(\{ success: !bad\.length,/.test(src('src/server/exit-routes.js')) && /notLanded: HostManager\.installNotLanded\(cliConfig, \{ refused, hooks: HostManager\.hooksOfPlan\(this\._cliConfigPlanB64\(\)\) \}\)/.test(src(HOSTS_R)) && /t\('Not everything landed on \{host\}: \{what\}'/.test(src('src/lib/manage-agents.js')),
+          'PIN r3064 (4): the install route answers success only when nothing failed (else what did not land, by name), and the machine card\'s toast says it', {});
+        // the Remove road (the round's read): a strip that did not land keeps the tools — the entries left in the file still find their program
+        const unOf = async (Hmod, out) => { const calls = []; const H = Object.create(Hmod.HostManager.prototype); H.get = () => ({ id: 'h-0001' }); H._ssh = async (h, cmd) => { calls.push(/--uninstall/.test(cmd) ? 'strip' : /rm -f/.test(cmd) ? 'rm' : 'other'); return /--uninstall/.test(cmd) ? out : 'VS-REMOVED'; }; const r = await H.uninstallAgentTools('h-0001'); return { ok: r.ok, notLanded: r.notLanded || [], calls }; };
+        const STRIP_BAD = line('claude', 'hooks', 'refused', 'settings.json exists but is not valid JSON — not touching it') + '\nVS-STRIPPED\n', STRIP_OK = line('claude', 'hooks', 'applied') + '\nVS-STRIPPED\n';
+        const unB = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_BAD), unG = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_OK);
+        ok(!!(unB.ok === false && unB.notLanded.length === 1 && JSON.stringify(unB.calls) === '["strip"]' && unG.ok === true && JSON.stringify(unG.calls) === '["strip","rm"]' && /success: !\(r && r\.ok === false\)/.test(src('src/server/exit-routes.js'))),
+          'r3064: a paired machine\'s Remove — a refused strip answers NOT removed by name and keeps the tools (no rm); a strip that landed removes them', { unB, unG });
+        const unX = await unOf(require(MC.write(HOSTS_R, anchored(src(HOSTS_R), '      if (stripped.length) return { ok: false, notLanded: stripped, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${stripped.join(\'; \')}` };\n', '', 'the tools removed whatever the strip said'), 'hosts-rm-anyway')), STRIP_BAD);
+        ok(!!(unX.ok === true && JSON.stringify(unX.calls) === '["strip","rm"]'), 'RED (the tools removed whatever the strip said): «removed», and the entries left call a program that is gone', unX);
+        // (c) ONCE PER CAUSE (r3064): a file left broken re-runs the helper at each start; the gate names the cause and the spell, the start
+        //     keys its notice on both (serverNotice burns a key only when a page took it), and a landing on any road starts a new spell
+        const REFUSED = line('claude', 'hooks', 'refused', 'settings.json exists but is not valid JSON — not touching it') + '\n' + line('codex', 'hooks', 'missing', '~/.codex not found') + '\n';
+        const GOOD = line('claude', 'hooks', 'unchanged') + '\n' + line('codex', 'hooks', 'missing', '~/.codex not found') + '\n';
+        let outNow = REFUSED;
+        const spells = async (Smod) => { outNow = REFUSED; const S4 = syncWith(Smod, fakeStarter(() => outNow)); await S4.syncCliConfig({ reason: 'boot' }); const g1 = await S4.startGate(), g2 = await S4.startGate(); outNow = GOOD; await S4.syncCliConfig({ reason: 'a fix' }); outNow = REFUSED; await S4.syncCliConfig({ reason: 'broken again' }); const g3 = await S4.startGate(); return { c1: g1 && g1.cause, c2: g2 && g2.cause, s1: g1 && g1.spell, s2: g2 && g2.spell, s3: g3 && g3.spell }; };
+        const sp = await spells(require(path.join(REPO, SYNC_REL)));
+        ok(!!(sp.c1 && sp.c1 === sp.c2 && /claude\.hooks: /.test(sp.c1) && sp.s1 === sp.s2 && sp.s3 === sp.s1 + 1), 'r3064: a file left broken — two starts name ONE cause in one spell (one notice); after a landing, the same cause is a new spell (said again)', sp);
+        const spr = await spells(require(MC.write(SYNC_REL, anchored(src(SYNC_REL), '.then((l) => { if (l && l.ok) landedSpell++; return l; })', '', 'no spell from a landing'), 'sync-no-spell')));
+        ok(!!(spr.s3 === spr.s1), 'RED (no spell from a landing): fixed and broken again the same way, the start is never told again', spr);
+        ok(/const causeKey = crypto\.createHash\('sha1'\)\.update\(String\(cliLate\.cause \|\| why\)\)/.test(src('src/ws-create.js')) && /serverNotice\?\.\(`cli-config-late-\$\{cliLate\.spell \|\| 0\}-\$\{causeKey\}`/.test(src('src/ws-create.js')), 'PIN r3064: the start keys the late notice on the spell and the cause', {});
+        const warnTimes = async (Rm) => { const said = []; const Rw = Rm.createCliConfigRunner({ starter: fakeStarter(REFUSED), helperPath: HELPER, home, journal: () => {}, warn: (m) => said.push(String(m)) }); await Rw.apply(() => PLAN_H, 'hooks', { kind: 'apply+hooks' }); await Rw.apply(() => PLAN_H, 'hooks', { kind: 'apply+hooks' }); return said.length; };
+        const w1 = await warnTimes(R);
+        ok(w1 === 1, 'r3064: the journal says a cause once — two runs of the same refusal, one line', { w1 });
+        const w2 = await warnTimes(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), 'else if (landing.why !== warnedWhy) warn(', 'else warn(', 'the journal at every run'), 'runner-warn-every')));
+        ok(w2 === 2, 'RED (no memo of the cause): a journal line at every run', { w2 });
+        // (d) A PATH THAT IS THERE BUT CANNOT BE READ (round w9xxaxn8a): a link to nowhere — the hooks status and each managed row's chip —
+        //     and a folder in the file's place read «there, unreadable», never «will be created — or press Apply»
+        const GEN_NOLSTAT = require(MC.write(GEN_R, anchored(src(GEN_R), "    if (code === 'ENOENT') { try { if ((await fs.promises.lstat(file)).isSymbolicLink()) code = 'EDANGLING'; } catch { } }\n", '', 'the status without the lstat'), 'gen-no-lstat'));
+        const HC_NOLINK = require(MC.write(HC_R, anchored(src(HC_R), "    if (text == null && code === 'ENOENT') { try { if (fs.lstatSync(file).isSymbolicLink()) code = 'EDANGLING'; } catch { } }\n", '', 'the chip without the link check'), 'hc-no-link'));
+        const HC_NOCODE = require(MC.write(HC_R, anchored(src(HC_R), "    if (text == null && code !== 'ENOENT' && code !== 'ENOTDIR') { for (const s of sets) receipts.push(receipt(f, s, 'unreadable', { reason: code === 'EDANGLING' ? 'a link to nowhere' : `could not be read (${code})` })); continue; }\n", '', 'every unread path missing'), 'hc-no-code'));
+        const rowsOf = (Hm) => Hm.readConfigPlan(SYNC.cliConfigPlan(), { home }).filter((x) => x.harness === 'claude').map((x) => `${x.state}:${x.missing || x.reason}`);
+        const restoreD = PLANTS.dangling();
+        let dl = null;
+        try {
+          const st = (await GEN.agentHooksStatus()).claude;
+          const stO = (await GEN_NOLSTAT.create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) }).agentHooksStatus()).claude;
+          dl = { st: st && { parseError: st.parseError, creatable: st.creatable }, rows: rowsOf(HCJ), stO: stO && { creatable: stO.creatable }, rowsO: rowsOf(HC_NOLINK) };
+        } finally { restoreD(); }
+        fs.renameSync(sfH, sfH + '.kept'); fs.mkdirSync(sfH);
+        let dir = null; try { dir = { rows: rowsOf(HCJ), rowsO: rowsOf(HC_NOCODE) }; } finally { fs.rmdirSync(sfH); fs.renameSync(sfH + '.kept', sfH); }
+        ok(!!(dl.st && dl.st.parseError === true && dl.st.creatable === false && dl.rows.length && dl.rows.every((x) => x === 'unreadable:a link to nowhere') && dir.rows.length && dir.rows.every((x) => /^unreadable:could not be read \(EISDIR\)$/.test(x))),
+          'r3064: a link to nowhere — the hooks status reads «config unreadable», each managed row «a link to nowhere»; a folder in the file\'s place «could not be read (EISDIR)»; never «will be created»', { dl, dir });
+        ok(!!(dl.stO && dl.stO.creatable === true && dl.rowsO.every((x) => x === 'missing:will-create') && dir.rowsO.every((x) => x === 'missing:will-create')), 'RED (no lstat, no read code): «will be created — or press Apply» on a link to nowhere and on a folder', { dl, dir });
+        // (e) THE INSTALL PRESS NAMES A REFUSED ROW (r3064 (7)): our hooks landed, a managed row of the same run did not, codex has no folder
+        const RW = line('claude', 'hooks', 'unchanged') + '\n' + line('claude', 'transcriptRetentionDays', 'refused', 'a planted refusal of the row') + '\n' + line('codex', 'hooks', 'missing', '~/.codex not found') + '\n';
+        const pressWith = (Gmod) => { let S5 = null; const G5 = Gmod.create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => S5.applyThisMachine(o), homeRead: (fn) => S5.homeRead(fn) }); S5 = syncWith(require(path.join(REPO, SYNC_REL)), fakeStarter(RW)); return G5.ensureAgentHooks({ auto: true }); };
+        const hlOf = (Hm) => Hm.create({ activeSessions: new Map(), getSessionStatus: () => null, getUserTodos: () => null, sessionStatusKey: () => null, harnesses: { list: () => [] }, log: () => { }, warn: () => { } });
+        const ip = await pressWith(require(path.join(REPO, GEN_R)));
+        const ans = hlOf(require(path.join(REPO, HL_R))).installAnswer(ip);
+        ok(!!(ip && ip.claude && ip.claude.ok === true && ans.success === true && !ans.error && Array.isArray(ans.rowsNotLanded) && ans.rowsNotLanded.some((w) => /^claude\.transcriptRetentionDays: a planted refusal of the row/.test(w))),
+          'r3064 (7): the Install press — our hooks landed (codex\'s missing folder no failure, r1518) and the refused row of the same run is named in its answer', { ans, claude: ip && ip.claude });
+        const ipO = await pressWith(require(MC.write(GEN_R, anchored(src(GEN_R), 'if (rows.length && results[key]) results[key].rows = rows;', '', 'the answer without the rows'), 'gen-no-rows')));
+        const ansO = hlOf(require(MC.write(HL_R, anchored(src(HL_R), "const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir');", "const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false);", 'a missing folder a failure'), 'hl-old-install'))).installAnswer(ipO);
+        ok(!!(ansO.success === false && /^codex: /.test(ansO.error || '') && !ansO.rowsNotLanded), 'RED (today\'s press: a missing folder a failure, no rows): the toast says only «codex: … not found», the refused row nowhere', ansO);
+        ok(/res\.json\(\{ \.\.\.hooksLate\.installAnswer\(results\), results, status: await agentHooksStatus\(\) \}\);/.test(src('server.js')) && /t\('a setting did not land: \{what\}'/.test(src('src/lib/manage-agents.js')), 'PIN r3064 (7): the Install route answers by the one verdict and its toast names a refused row', {});
       }
     } finally { console.warn = warn0; console.log = log0b; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
     // r1813 (3): a removal the refusal door stopped (this suite's own env refuses: VIBESPACE_SKIP_AGENT_HOOKS) is ANSWERED as a refusal

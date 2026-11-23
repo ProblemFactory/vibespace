@@ -57,6 +57,15 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
   /** Boot: the live-session set is final (right after restoreSessions). */
   function ready() { isReady = true; return flush(); }
 
+  /** r3064 (7): THE INSTALL PRESS's ANSWER (POST /api/agent-hooks/install) from ensureAgentHooks' results: success unless a CLI's
+   *  hooks failed (a missing CLI folder is no failure, r1518), its error by name; a managed ROW of the same run that did not land
+   *  rides it as `rowsNotLanded` (the toast names it) */
+  function installAnswer(results) {
+    const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir');
+    const rows = Object.entries(results && typeof results === 'object' ? results : {}).flatMap(([k, v]) => (v && Array.isArray(v.rows) ? v.rows : []).map((w) => `${k}.${w}`));
+    return { success: !bad.length, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), ...(rows.length ? { rowsNotLanded: rows } : {}) };
+  }
+
   /** POST /api/cli-config/apply — the "Apply" a missing-file chip offers (human-triggered). */
   function registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow = null }) {
     app.post('/api/cli-config/apply', async (req, res) => { try {   // B-1425: an async route answers a throw (500), never hangs
@@ -84,7 +93,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
     } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
   }
 
-  return { noteCreated, ready, registerApplyRoute, _pending: () => pending.slice(), _told: () => [...told] };
+  return { noteCreated, ready, registerApplyRoute, installAnswer, _pending: () => pending.slice(), _told: () => [...told] };
 }
 
 module.exports = { create };

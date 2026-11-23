@@ -963,7 +963,7 @@ app.post('/api/agent-hooks/install', async (req, res) => { try {   // B-1425: an
   const results = await ensureAgentHooks({ auto: false }); // explicit → clears any opt-out (B-ddf3 u2 line 1: through the shipped helper, answered at its landing)
   // A worktree / temp server refuses BY NAME (src/server-root.js) — never "installed"
   if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: await agentHooksStatus() }); if (results.skipped && results.settingsHeld) return res.status(503).json({ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: { file: 'settings.json', kind: results.settingsHeld.kind, code: results.settingsHeld.code || null, since: null, rung: 'said' } });
-  const bad = Object.entries(results || {}).filter(([, v]) => v && v.ok === false); res.json({ success: !bad.length, results, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), status: await agentHooksStatus() });
+  res.json({ ...hooksLate.installAnswer(results), results, status: await agentHooksStatus() });   // r3064 (7): one verdict — a missing CLI folder is no failure (r1518); a refused row of the same run named
 } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
 hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
 app.post('/api/agent-hooks/uninstall', async (req, res) => { try {

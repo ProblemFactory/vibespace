@@ -462,11 +462,13 @@ app.post('/api/hosts/:id/agent-tools/install', async (req, res) => {
   // Same master-switch guard as the local /api/agent-hooks/install — the
   // remote twin must not silently contradict a pristine-CLI state either.
   if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
-  try { res.json({ success: true, ...(await hosts.installAgentTools(req.params.id, AGENT_BIN_DIR)) }); }
+  // r3064 (4): success = no refused or error receipt; else what did not land, by name
+  try { const r = await hosts.installAgentTools(req.params.id, AGENT_BIN_DIR), bad = (r && r.notLanded) || []; res.json({ success: !bad.length, ...r, ...(bad.length ? { error: `not everything landed on that machine: ${bad.join('; ')}` } : {}) }); }
   catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name
 });
 app.post('/api/hosts/:id/agent-tools/uninstall', async (req, res) => {
-  try { res.json({ success: true, ...(await hosts.uninstallAgentTools(req.params.id)) }); }
+  // r3064: a strip that did not land answers so, by name (the tools are kept on that machine)
+  try { const r = await hosts.uninstallAgentTools(req.params.id); res.json({ success: !(r && r.ok === false), ...r }); }
   catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name
 });
 app.get('/api/hosts/:id/recent-cwds', async (req, res) => {

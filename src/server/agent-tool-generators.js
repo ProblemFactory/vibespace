@@ -324,7 +324,8 @@ setTimeout(() => { say('the hook stopped at its 8 s limit (the CLI did not take 
   // a function body with its own `module`/`exports`. Self-locating hook cmd
   // (`node <its own dir>/vibespace-hook.mjs`).
   //   (default)     apply the plan: our hook entries + managed keys; prints
-  //                 one CFG| receipt line per managed key
+  //                 one CFG| receipt line per managed key, and one for our hook
+  //                 entries per file whose plan touches them (r2844)
   //   --status      READ-ONLY: prints the receipts (hosts.agentToolsStatus —
   //                 grep-gated on this very env name so an older helper, which
   //                 would treat --status as an ordinary REGISTRATION RUN, is
@@ -766,6 +767,8 @@ function ensureAgentHooks({ auto = false } = {}) {
         }
       } else results[key] = { ok: true };
     }
+    // r3064 (7): a managed ROW of the same run that did not land rides its CLI's answer (`rows`): the Install press says it by name
+    for (const key of Object.keys(results)) { const rows = ((landing && landing.parts) || []).filter((p) => p.harness === key && p.key !== 'hooks').map((p) => p.why); if (rows.length && results[key]) results[key].rows = rows; }
     // verify r2 ①: registered AFTER an earlier unknown verdict (a read error at boot) — remembered once, said once by server.js
     if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
     return results;

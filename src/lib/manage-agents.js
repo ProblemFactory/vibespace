@@ -2947,9 +2947,10 @@ export function installManageAgents(App, ctx = {}) {
                   else showToast(t('CLI config applied on this machine'));
                 } else {
                   const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
-                  const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
-                  if (!r || typeof r.error === 'string') showToast(r ? r.error : t('Install failed'), { type: 'error' });   // B-225b r552: a refusal by name (the HELD settings in the hold's words, fetchJson's store_unread mapping; the switch off; a refused write) — never «installed»
-                  else if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
+                  // r3064 (7): a setting of the same run that did not land is said at the press, by name, in whichever toast it shows
+                  const rowsSaid = Array.isArray(r?.rowsNotLanded) && r.rowsNotLanded.length ? t('a setting did not land: {what}', { what: r.rowsNotLanded.join('; ') }) : '';
+                  if (!r || typeof r.error === 'string') showToast([r ? r.error : t('Install failed'), rowsSaid].filter(Boolean).join(' — '), { type: 'error' });   // B-225b r552: a refusal by name (the HELD settings in the hold's words, fetchJson's store_unread mapping; the switch off; a refused write) — never «installed»
+                  else if (rowsSaid) showToast(`${t('Task Group context hook installed')} — ${rowsSaid}`, { type: 'error' });
                   else showToast(t('Task Group context hook installed'));
                 }
               } catch { showToast(t('Install failed'), { type: 'error' }); }
@@ -3052,6 +3053,7 @@ export function installManageAgents(App, ctx = {}) {
               try {
                 const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/install`, { method: 'POST' });
                 if (r?.success) showToast(t('Integration installed on {host}', { host: hostName }));
+                else if (Array.isArray(r?.notLanded) && r.notLanded.length) showToast(t('Not everything landed on {host}: {what}', { host: hostName, what: r.notLanded.join('; ') }), { type: 'error' });   // r3064 (4): what did not land there, by name
                 else showToast(r?.error || t('Install failed'), { type: 'error' });
               } catch { showToast(t('Install failed'), { type: 'error' }); }
               refresh();

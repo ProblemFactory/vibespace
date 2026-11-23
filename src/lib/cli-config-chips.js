@@ -44,8 +44,13 @@ export function receiptLine(r, { t, where, lastWriteAt = null, now = Date.now(),
     }
     case 'unreadable':
     case 'refused':
+      // r3064: a link to nowhere, or a path that cannot be read (its mode, a folder), is said for what it is
+      if (/^a link to nowhere/.test(String(r.reason || ''))) return { tone: 'bad', text: `⚠ ${where}: ${file} ${t('is a link to nowhere — not touched')}` };
+      if (/^could not be read/.test(String(r.reason || ''))) return { tone: 'bad', text: `⚠ ${where}: ${file} ${t('cannot be read — not touched')} (${r.reason})` };
       return { tone: 'bad', text: `⚠ ${where}: ${file} ${t('is not valid after a hand edit — not touched')}${r.reason ? ` (${r.reason})` : ''}` };
     case 'error':
+      // r3064: a WHOLE-RUN line (no key) is the helper's own failure — the same words for a read (--status) and a write
+      if (r && !r.key && !r.harness) return { tone: 'bad', text: `⚠ ${where}: ${t('the helper failed')}${r.reason ? ` — ${r.reason}` : ''}` };
       return { tone: 'bad', text: `⚠ ${where}: ${t('could not be written')}${r.reason ? ` — ${r.reason}` : ''}` };
     case 'unknown':
     default:

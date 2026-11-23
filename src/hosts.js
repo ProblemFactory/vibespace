@@ -38,7 +38,7 @@ const SLICE_HOLD_MS = 30e3;          // a rest that did not land holds the machi
 const SLICE_HOLD_MAX_MS = 600e3;     // …up to this
 const LIST_FRESH_REMOTE_MS = 2000;   // a landed rest older than this is said LATE while a new one is out (the rung's LIST_FRESH_MS)
 const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };
-const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
+const { parseReceiptLines, decodePlan } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6); the plan codec (r3064)
 const AC = require('./agentd/answer-caps.js'); // B-5278: a usage walk's dropped events said once; the device walk's harvest bound
 const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
 const { execFile } = require('child_process');
@@ -2133,6 +2133,29 @@ class HostManager {
     try { return typeof this.ownerWriteRefusal === 'function' ? this.ownerWriteRefusal() : null; } catch { return null; }
   }
 
+  /** r3064 (4): what a run's receipts say did NOT land on that machine, said once per cause — the refused or failed receipts of a
+   *  CLI by their reason with their keys, a whole-run failure (the helper's own crash) by its words, a plan's hooks part the helper
+   *  printed nothing of (no node there, or it stopped before its first receipt) as «not known», and the root verdict's refusal (no
+   *  helper ran there). [] = every part landed. PURE. */
+  static installNotLanded(receipts, { refused = null, hooks = [] } = {}) {
+    if (refused) return [`the hooks and CLI settings were not registered there: ${refused.line || refused.why || 'this server never writes a machine\'s CLI config'}`];
+    const rs = Array.isArray(receipts) ? receipts : [], by = new Map();
+    for (const x of rs) {
+      if (!x || (x.state !== 'error' && x.state !== 'refused')) continue;
+      const k = `${x.harness || '*'}|${x.reason || x.state}`;
+      if (!by.has(k)) by.set(k, { harness: x.harness, why: x.reason || x.state, keys: [] });
+      if (x.key) by.get(k).keys.push(x.key);
+    }
+    const out = [...by.values()].map((g) => (g.harness ? `${g.harness} (${g.keys.join(', ')}): ${g.why}` : `the helper: ${g.why}`));
+    if (!rs.some((x) => x && !x.harness && x.state !== 'unknown')) for (const h of hooks) if (!rs.some((x) => x && x.harness === h && x.key === 'hooks')) out.push(`${h} (hooks): not known — the helper printed nothing of them (no node on that machine, or it stopped before its first receipt)`);
+    return out;
+  }
+  /** the harnesses whose hook entries a plan touches (the runner's own rule): a JSON file with hook events (a strip: with hooks named) */
+  static hooksOfPlan(planB64, { uninstall = false } = {}) {
+    const plan = decodePlan(planB64);
+    return plan && Array.isArray(plan.files) ? [...new Set(plan.files.filter((f) => f && f.format === 'json' && f.hooks && (uninstall || Array.isArray(f.hooks.events))).map((f) => f.harness))] : [];
+  }
+
   async installAgentTools(id, toolDir) {
     if (typeof this.rootFactsNow === 'function') await this.rootFactsNow();   // B-1425: the verdict on the root's true facts (server.js sets hosts.rootFactsNow)
     const refused = this._ownerWriteRefusal();
@@ -2151,13 +2174,15 @@ class HostManager {
         // VIBESPACE_CLI_CONFIG (design-harness-settings §6): the base64 CLI-config
         // plan (claude cleanupPeriodDays, codex [history] persistence, …) rides
         // the register helper — the helper prints one CFG| receipt per managed
-        // key, returned with the install result. Shell-safe bare (base64).
+        // key and one for our hook entries per file (r2844), returned with the
+        // install result and judged by installNotLanded. Shell-safe bare (base64).
         + (refused ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `)
         + 'echo VS-INSTALLED'],
         { env: this.sshEnv(), timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
-          resolve({ installed: present, cliConfig: parseReceiptLines(String(stdout)), ...(refused ? { refused } : {}) });
+          const cliConfig = parseReceiptLines(String(stdout));
+          resolve({ installed: present, cliConfig, notLanded: HostManager.installNotLanded(cliConfig, { refused, hooks: HostManager.hooksOfPlan(this._cliConfigPlanB64()) }), ...(refused ? { refused } : {}) });
         });
       const fed = feedStdin(child, tar);
     });
@@ -2405,9 +2430,16 @@ class HostManager {
     const rms = HostManager.agentTools().map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
     // plugin shims of plugins disabled/uninstalled since the last ship are not
     // in the live list any more — the glob sweeps every generated shim
-    const cmd = REMOTE_PRELUDE
-      + (this._ownerWriteRefusal() ? '' : nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; ')
-      + `rm -f ${rms} "$HOME"/.vibespace/bin/vibespace-tool-* 2>/dev/null; echo VS-REMOVED`;
+    // r3064: THE STRIP FIRST, judged by its receipts; the tools are removed only when it landed — a refused strip (a hand-broken
+    // settings file) keeps the register helper and the hook script, so the entries left in the file still find their program
+    let stripped = [];
+    if (!this._ownerWriteRefusal()) {
+      const sOut = String(await this._ssh(h, REMOTE_PRELUDE + nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; echo VS-STRIPPED', { timeoutMs: 15000 }));
+      if (!sOut.includes('VS-STRIPPED')) throw new Error('unexpected response');
+      stripped = HostManager.installNotLanded(parseReceiptLines(sOut));
+      if (stripped.length) return { ok: false, notLanded: stripped, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${stripped.join('; ')}` };
+    }
+    const cmd = REMOTE_PRELUDE + `rm -f ${rms} "$HOME"/.vibespace/bin/vibespace-tool-* 2>/dev/null; echo VS-REMOVED`;
     const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
     if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');
     return { ok: true };

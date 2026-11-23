@@ -58,9 +58,10 @@ const __applier = (() => { const module = { exports: {} }; const exports = modul
 // rewrite (r2844) — on our write, as on Claude Code's own rewrite of
 // settings.json: an integer past 2^53 rounds to the nearest double, and so
 // does a decimal past about 17 significant digits; a number past the
-// double's range (1e400) becomes Infinity and is written null; -0 becomes 0;
-// a key written twice keeps its last value; 1.50 → 1.5 and the like keep
-// their meaning.
+// double's range (1e400) becomes Infinity and is written null, and one too
+// small for it (1e-400) becomes 0; -0 becomes 0; a key written twice keeps
+// its last value; a lone surrogate in a string is written back as an escape;
+// 1.50 → 1.5 and the like keep their meaning.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -658,8 +659,12 @@ function readConfigPlan(plan, { home = null } = {}) {
     const badRel = checkRel(f.rel);
     if (badRel) { for (const s of sets) receipts.push(receipt(f, s, 'refused', { reason: badRel })); continue; }
     const file = path.join(base, ...f.rel);
-    let text = null;
-    try { text = fs.readFileSync(file, 'utf-8'); } catch { }
+    let text = null, code = null;
+    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { code = (e && e.code) || 'EIO'; }
+    // r3064: only a file that is NOT THERE is missing. A link to nowhere, or a path that cannot be read (its mode, a folder in its
+    // place), is there and unreadable — both writers refuse it by name — never «will be created» on its chip
+    if (text == null && code === 'ENOENT') { try { if (fs.lstatSync(file).isSymbolicLink()) code = 'EDANGLING'; } catch { } }
+    if (text == null && code !== 'ENOENT' && code !== 'ENOTDIR') { for (const s of sets) receipts.push(receipt(f, s, 'unreadable', { reason: code === 'EDANGLING' ? 'a link to nowhere' : `could not be read (${code})` })); continue; }
     // WHY it is missing rides as the receipt's reason — one code the chips word ('will-create' | 'no-dir' | 'not-ours'),
     // the only free field a remote helper's CFG line carries
     if (text == null) { const kind = missingKind(file, f.createIfMissing); for (const s of sets) receipts.push(receipt(f, s, 'missing', { reason: kind, missing: kind })); continue; }
@@ -695,7 +700,9 @@ function parseReceiptLines(text) {
   for (const line of String(text || '').split('\n')) {
     const p = line.trim().split('|');
     if (p[0] !== 'CFG' || p.length < 4) continue;
-    if (p[1] === '*') { out.push({ harness: null, key: null, state: 'unknown', reason: p[3] === 'unknown' ? 'helper predates --status' : p[3] }); continue; }
+    // a WHOLE-RUN line (`*`): `unknown` = a helper that predates --status, `no-node` = no interpreter (both read «unknown», as
+    // before); any other receipt state keeps that state and its message — the helper's own crash prints `error` (r3064)
+    if (p[1] === '*') { const st = p[3] !== 'unknown' && RECEIPT_STATES.includes(p[3]) ? p[3] : 'unknown'; out.push({ harness: null, key: null, state: st, reason: p[3] === 'unknown' ? 'helper predates --status' : st === 'unknown' ? p[3] : (dec(p[4] || '') || p[3]) }); continue; }
     out.push({ harness: p[1], key: p[2], state: RECEIPT_STATES.includes(p[3]) ? p[3] : 'unknown', current: dec(p[4] || ''), want: dec(p[5] || ''), reason: dec(p[6] || '') });
   }
   return out;

@@ -146,7 +146,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     if (!cliRunner) return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server (no helper path given): nothing written' });
     // a STRIP keeps the plan's hook rows: the applier's --uninstall strips only the files whose plan names our hooks (never a managed key)
     const kind = strip ? (when ? 'strip-if-still-asked' : 'strip') : hooks ? 'apply+hooks' : 'apply';   // r1813: a conditional removal is its own kind (never joins a pressed one)
-    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip, kind, before, after, when });
+    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip, kind, before, after, when }).then((l) => { if (l && l.ok) landedSpell++; return l; });
   }
   /** r2224 (1): a read under this machine's home made OUTSIDE a job (the opted-out start's look at our hook rows) — through the
    *  runner's guard (bounded, counted, refused while an earlier read is out; `ms`: the reader's own bound, r2345; `opts.cls`: its
@@ -161,8 +161,12 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     const last = cliRunner.last();
     if (!last && !cliRunner.busy()) return Promise.resolve(null);
     if (last && !last.ok && !cliRunner.busy()) syncCliConfig({ reason: 'a start asks again' });
-    return cliRunner.landedWithin(cliRunner.BOUND_MS).then((g) => (g.landed ? null : g));
+    // r3064: ONE late notice per CAUSE — a file left broken runs the helper again at each start (r1407: the next start asks
+    // again); the gate names the cause and the SPELL (landings so far) and the start keys its notice on both, so it is said once
+    // per cause until a landing — on any road — starts a new spell
+    return cliRunner.landedWithin(cliRunner.BOUND_MS).then((g) => (g.landed ? null : { ...g, cause: g.why || (g.late ? 'late' : 'failed'), spell: landedSpell }));
   }
+  let landedSpell = 0;   // r3064: every landing of this machine's one write road starts a new spell of the late notice
   let heldSkipped = false;
   function syncCliConfig({ reason = 'boot' } = {}) {
     // B-225b (round wyzvr7567's MUST 2 — a WRITE TO A PERSON'S OWN FILE takes its strict side): while the SETTINGS are held no
