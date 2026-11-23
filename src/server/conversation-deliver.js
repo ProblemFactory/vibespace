@@ -722,6 +722,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // at the park's own roads (a new park, a turn end) — NO timer of its own
   let retryReading = null, retryReads = 0, retryReadAt = 0, retryAsiding = false;
   const endedSettledHeld = new Map();   // line 494's follow (r2695 (1)): cid → the outcome of its ended wake that SETTLED while the park was held — until the lift
+  /** line 529's small (r2795): THE RECORD IS STICKY AND COMPLETE — once a wake for the conversation was delivered or is running while
+   *  the file is held it says so until the lift, whatever outcome comes after, and by every road (the line's answer, its late road) */
+  function noteSettledHeld(cid, outcome) {
+    if (!retryHeld || !cid) return;
+    const was = endedSettledHeld.get(cid);
+    if (was === 'delivered' || was === 'running') return;   // sticky: a later failure never writes over a delivery
+    endedSettledHeld.set(cid, outcome || 'ended');
+  }
   const RETRY_REREAD_BOUND_MS = 30_000, RETRY_REREADS_MAX = 2;
   function rereadRetry() {
     const H = retryHeld;
@@ -745,7 +753,6 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const a = retryAnswer(read);
     if (a.state === 'unreadable') { holdRetry(a); return null; }
     if (a.state === 'corrupt') {
-      if (retryAsiding) return null;
       retryAsiding = true;
       const aside = retryAsideName();
       return fs.promises.rename(retryFile, aside).then(() => true, (e) => { log(`[deliver] data/msg-retry.json could not be read (${retryWhy(a)}) and could not be set aside (${e && e.message}) — still HELD, never written over`); return false; })
@@ -784,6 +791,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           if (isEnded(e) && (live || settled === 'delivered' || settled === 'running')) {
             if (live) { for (const x of e.senders || []) if (!live.senders.includes(x)) live.senders.push(x); live.producers = mergeProducers(live, e); live.metas = [...metasOf(e), ...metasOf(live)].slice(-ENDED_METAS); live.deliveries = (Number(live.deliveries) || 1) + (Number(e.deliveries) || 1); }
             log(`[deliver] ${cid}: the held file's wake owed to the ended conversation (${e.id}) folds into ${live ? `${live.id}, in the resume line now` : `the resume made while the file was held (${settled})`} — one wake per conversation, never a second resume for the same words`);
+            if (!live) emitRetry('wake', cid, e, { outcome: settled, why: 'its words rode the resume made while the park\'s file was held (folded at the lift)', code: null, until: null, sessionId: null, attempts: Array.isArray(e.attempts) ? e.attempts.length : 0 });   // r2795 small: its producers keep an answer for the folded entry
             continue;
           }
           keep.push(e);
@@ -1266,6 +1274,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  `e` = the owed entry the park handed to the line (its producers and metas). → true when said. */
   function noteLateWake(cid, e, r = {}) {
     if (!cid || !e || !r) return false;
+    if (r.outcome === 'delivered' || r.outcome === 'running') noteSettledHeld(cid, r.outcome);   // line 529's small (r2795 (a)): a resume whose rest delivered AFTER the line's bound is a delivery for the record too
     if (r.outcome === 'refused' || r.outcome === 'failed') endedAnswers.set(cid, { outcome: r.outcome, code: r.code || null, why: r.why || null, until: r.until || null, at: clock.now() });
     else endedAnswers.delete(cid);
     log(`[deliver] ${cid}: the wake owed to the ended conversation (${e.id}) — its start answered after the line's bound, and then: ${r.outcome || 'ended'}${r.why ? ': ' + r.why : ''}`);
@@ -1279,7 +1288,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function stashCids() { return Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].length > 0); }
   function endEnded(e, r = {}) {
     if (!retry[e.cid] || !retry[e.cid].includes(e)) return;
-    if (retryHeld) endedSettledHeld.set(e.cid, r.outcome || 'ended');   // line 494's follow (r2695 (1)): the file's older wake for this conversation folds into this settle at the lift
+    noteSettledHeld(e.cid, r.outcome);   // line 494's follow (r2695 (1)) + line 529's small (r2795): the file's older wake for this conversation folds into this settle at the lift
     if (r.outcome === 'refused' || r.outcome === 'failed') endedAnswers.set(e.cid, { outcome: r.outcome, code: r.code || null, why: r.why || null, until: r.until || null, at: clock.now() });
     else endedAnswers.delete(e.cid);
     removeRetry(e);

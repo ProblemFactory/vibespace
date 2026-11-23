@@ -109,7 +109,7 @@ const tornAgainRun = async (DL) => {
 };
 const t3 = await tornAgainRun(DELIVER0);
 ok(!t3.held && t3.sync === 0 && t3.keptAside, 'torn bytes found by the read again: set aside by an ASYNC rename (no synchronous rename after the start), their bytes kept, the hold lifted', t3);
-const t3x = await tornAgainRun(cut(DSRC, "    if (a.state === 'corrupt') {\n      if (retryAsiding) return null;\n", "    if (false) {\n      if (retryAsiding) return null;\n", 'the read again takes torn bytes for «not there»', 'mr-torn-over'));
+const t3x = await tornAgainRun(cut(DSRC, "    if (a.state === 'corrupt') {\n      retryAsiding = true;\n", "    if (false) {\n      retryAsiding = true;\n", 'the read again takes torn bytes for «not there»', 'mr-torn-over'));
 ok(t3x.asides === 0, 'RED CONTROL (the read again takes torn bytes for «not there»): the park writes over them — nothing set aside — red', t3x);
 
 console.log('④ never sooner than the store read\'s gap');
@@ -211,7 +211,38 @@ ok(tw.firstA === tw.fileOwed && tw.postsA === 1, 'the same paced wake in the fil
 const twx = await twinsRun(cut(DSRC, '          if (isEnded(e) && (live || settled === \'delivered\' || settled === \'running\')) {\n', '          if (false) {\n', 'the file\'s ended wake handed to the line again', 'mr-fold-cut'));
 ok(twx.resumes === 2, 'RED CONTROL (the lift appends the file\'s ended wake unfolded, as before): C is resumed a SECOND time — red', twx);
 const two = await twinsRun(cut(DSRC, '        retry[cid] = [...keep, ...mem];', '        retry[cid] = [...mem, ...keep];', 'memory\'s first', 'mr-order-mem'));
-ok(two.firstA !== two.fileOwed, 'RED CONTROL (memory\'s entries first, as before): the newer twin leads — the older wake\'s first miss is lost — red', two);
+ok(two.firstA !== two.fileOwed && two.postsA === 1, 'RED CONTROL (memory\'s entries first, as before): still ONE frame, but the newer twin leads — the older wake\'s first miss is lost — red', two);
+
+console.log('⑨b line 529\'s small (r2795): THE RECORD IS STICKY AND COMPLETE — a delivery while held is said until the lift, by every road');
+// (a) the line answers that its bound passed (failed), and its late road then reports DELIVERED; (b) a delivery, then a later wake for the
+// same conversation fails — either way the file's older wake for C folds at the lift: ONE resume
+const recordRun = async (DL, mode) => {
+  const w1 = world(DL, { dead: [C] });
+  w1.d.parkEndedWake(C, { producer: 'test-ended', spendReason: 'peer-message', kind: 'peer', fromName: 'Stand-in', sender: 'S1', reason: 'a job ended' });
+  w1.d.closeRetries();
+  const resumes = [];
+  let handed = null, answers = mode === 'late' ? ['failed'] : ['delivered', 'failed'];
+  const w = world(DL, { dir: w1.dataDir, failBoot: 'EIO', dead: [C] });
+  w.d.registerEndedWake((cid, e) => { handed = e; resumes.push({ cid, id: e.id }); const o = answers.shift() || 'delivered'; return Promise.resolve(o === 'failed' ? { outcome: 'failed', why: mode === 'late' ? 'the line\'s bound passed' : 'the account is at its limit' } : { outcome: o }); });
+  w.d.parkEndedWake(C, { producer: 'test-ended', spendReason: 'peer-message', kind: 'peer', fromName: 'Stand-in', sender: 'S1', reason: 'a peer message' });
+  await w.advanceTo(T0 + 5_000);   // memory's wake goes to the line while held
+  if (mode === 'late') w.d.noteLateWake(C, handed, { outcome: 'delivered' });   // (a) its rest delivered after the bound
+  else { w.d.parkEndedWake(C, { producer: 'test-ended', spendReason: 'peer-message', kind: 'peer', fromName: 'Stand-in', sender: 'S1', reason: 'another message' }); await w.advanceTo(T0 + 10_000); }   // (b) a later one fails
+  const during = resumes.length;
+  w.c.now = T0 + 31_000;
+  w.d.parkOwedWake(B, { producer: 'test-held', key: 'k-trig', retryInMs: 60_000, sender: 'S2', text: 'a wake held for the pace', meta: { k: 'k-trig' } });   // the park's road reads the file again
+  await w.settle();
+  await w.advanceTo(T0 + 600_000);
+  return { during, held: !!w.d.retryHeldState(), resumes: resumes.length };
+};
+const ra = await recordRun(DELIVER0, 'late');
+ok(ra.during === 1 && !ra.held && ra.resumes === 1, '(a) the line answers its bound passed, then its late road reports DELIVERED: the record says delivered — the file\'s older wake folds, ONE resume', ra);
+const rax = await recordRun(cut(DSRC, '    if (r.outcome === \'delivered\' || r.outcome === \'running\') noteSettledHeld(cid, r.outcome);   // line 529\'s small (r2795 (a)): a resume whose rest delivered AFTER the line\'s bound is a delivery for the record too\n', '', 'the late road writes no record', 'mr-late-norecord'), 'late');
+ok(rax.resumes === 2, 'RED CONTROL (today\'s record: the late road writes nothing): the file\'s wake resumes C a SECOND time — red', rax);
+const rb = await recordRun(DELIVER0, 'later');
+ok(rb.during === 2 && !rb.held && rb.resumes === 2, '(b) a delivery, then a later wake for C fails: the record stays «delivered» — the file\'s older wake folds (two resumes made while held, none more)', rb);
+const rbx = await recordRun(cut(DSRC, '    if (was === \'delivered\' || was === \'running\') return;   // sticky: a later failure never writes over a delivery\n', '', 'a later outcome writes over the delivery', 'mr-not-sticky'), 'later');
+ok(rbx.resumes === 3, 'RED CONTROL (not sticky: the later failure writes over «delivered»): the file\'s wake resumes C once more — red', rbx);
 
 console.log('⑩ line 494\'s follow (r2695 (2)): a stop while held says what memory alone held');
 const stopRun = (DL) => { const w = world(DL, { text: OLD, failBoot: 'EIO' }); w.park(B, 'k-s'); w.d.closeRetries(); return { said: w.logs.some((l) => /stops HELD .*1 delivery parked during the hold lived in memory only/.test(l)), kept: w.onDisk() === OLD }; };
