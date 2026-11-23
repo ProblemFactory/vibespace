@@ -301,7 +301,16 @@ const ENV_DATA = path.join(ROOT, 'env-data'); fs.mkdirSync(ENV_DATA, { recursive
   fs.writeFileSync(path.join(ENV_DATA, KB.KEPT_FILE), JSON.stringify({ version: 1, entries: { 'bk-0000e005': { fenced: true, tabs: [{ url: 'https://e.test/' }] } } }));
   ok(be.keyNamed('bk-0000e005') === true && be.keyNamed('bk-0000e006') === false, 'the fresh-key rule sees a tabs-only kept key (no directory to find) — a new conversation never lands on it');
   fs.writeFileSync(path.join(ENV_DATA, KB.KEPT_FILE), '{ not json');
-  ok(be.keyNamed('bk-0000e006') === true, '…and an unreadable store names every key (fail closed)');
+  // r3023 (the coordinator's ruling; the follow 06f95c443): with a kept file that does NOT PARSE — (a) the fresh-key rule names NOTHING
+  // for a key no other store names (a mint never exhausts its tries); (b) a kept browser WITH a folder is still named, by its folder;
+  // (c) the boot sweep still spares every key-named folder (the leg above, unchanged)
+  ok(be.keyNamed('bk-0000e006') === false && fs.existsSync(kd(KEY_A)) && be.keyNamed(KEY_A) === true, '…and an unreadable store names NO key no other store names (a mint never exhausts) — while a kept browser WITH a folder is still named, by its folder (r3023)');
+  {
+    const envSrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+    const BEo = mutantCopies('browser-kept-r3023', REPO).load('src/server/browser-env.js', anchored(envSrc0, '    const ks = keptKeySet(); if (ks && ks.has(K)) return true;\n', '    const ks = keptKeySet(); if (!ks || ks.has(K)) return true;\n', 'the fresh-key line before r3023'), 'r3023-old');
+    const beO = BEo.create({ dataDir: ENV_DATA, homeDir: HOME, serverSetting: (k) => settings[k], log: envLog, socketDirBase: path.join(ROOT, 'sock') });
+    ok(beO.keyNamed('bk-0000e006') === true, 'RED CONTROL (the line before r3023: an unknown store names every key): a key nobody names is NAMED — every mint over a store that cannot be read exhausts its tries — red');
+  }
   fs.rmSync(path.join(ENV_DATA, KB.KEPT_FILE), { force: true });
 }
 
