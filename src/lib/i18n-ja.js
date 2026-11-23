@@ -11705,6 +11705,10 @@ export default {
   "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持では {at} に {back} へ戻る予定でした。設定ファイルを書き込めませんでした（{why}）— 1 分おきに {n} 回試しました。VibeSpace の次回起動時にもう一度試します。その行で変更してください：{link}", // lane setting-doors pick 2 (the check)
   "{label} is back to {value} — the hold ended: {link}": "{label}が {value} に戻りました — 保持は終了しました：{link}", // lane setting-doors pick 2 (the check)
   "{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}": "{label} は「なし」に戻りました — 保留は終わりました：数値を設定するまで、誰も入力していないターンはすべて保留されます：{link}",
+  "the holds of raised ceilings could not be read — no timed raise is taken until they read": "引き上げた上限の保持を読み込めませんでした — 読み込めるまで、期限付きの引き上げは受け付けません", // r3004 (lane bl-loop-b)
+  "While it cannot be read no timed raise is taken and nothing is written over it; VibeSpace reads it again every few minutes. Above their default now: {rows}": "読み込めない間は、期限付きの引き上げを受け付けず、ファイルを上書きしません。VibeSpace は数分ごとに読み直します。現在既定値を上回っている上限：{rows}", // r3004 (lane bl-loop-b)
+  "The setting holds did not parse": "設定の保持を解析できませんでした", // r3004 (lane bl-loop-b)
+  "data/setting-holds.json did not parse; its bytes are kept aside as {copy}. A raised ceiling may not go back by itself — check the three ceilings: {links}": "data/setting-holds.json を解析できませんでした。その内容は {copy} として別に保存されています。引き上げた上限が自動で戻らない可能性があります — 3 つの上限を確認してください：{links}", // r3004 (lane bl-loop-b)
   "The setting holds could not be read": "設定の保持を読み込めませんでした", // lane setting-doors pick 2 (the check)
   "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "data/setting-holds.json を読み込めませんでした（{why}）。引き上げた上限が自動で戻らない可能性があります — 3 つの上限を確認してください：{links}", // lane setting-doors pick 2 (the check)
   "{label} may not go back by itself": "{label}が自動で戻らない可能性があります", // lane setting-doors pick 2 (the check)

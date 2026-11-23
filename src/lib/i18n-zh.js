@@ -11706,6 +11706,10 @@ export default {
   "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持原本会在 {at} 回到 {back}；设置文件无法写入（{why}）——已每隔一分钟试了 {n} 次。VibeSpace 下次启动时会再试。请到那一行修改：{link}", // lane setting-doors pick 2 (the check)
   "{label} is back to {value} — the hold ended: {link}": "{label}已回到 {value}——保持已结束：{link}", // lane setting-doors pick 2 (the check)
   "{label} is back to none — the hold ended: every turn nobody typed is held until a number is set: {link}": "{label} 已恢复为「无」— 保留结束：在设置一个数字之前，所有无人输入的轮次都会被暂扣：{link}",
+  "the holds of raised ceilings could not be read — no timed raise is taken until they read": "无法读取被调高上限的保持记录——在读取成功之前，不接受任何限时调高", // r3004 (lane bl-loop-b)
+  "While it cannot be read no timed raise is taken and nothing is written over it; VibeSpace reads it again every few minutes. Above their default now: {rows}": "在无法读取期间，不接受限时调高，也不会覆盖该文件；VibeSpace 每隔几分钟会重新读取。目前高于默认值的上限：{rows}", // r3004 (lane bl-loop-b)
+  "The setting holds did not parse": "设置的保持记录无法解析", // r3004 (lane bl-loop-b)
+  "data/setting-holds.json did not parse; its bytes are kept aside as {copy}. A raised ceiling may not go back by itself — check the three ceilings: {links}": "data/setting-holds.json 无法解析；其内容已另存为 {copy}。被调高的上限可能不会自动改回——请检查这三个上限：{links}", // r3004 (lane bl-loop-b)
   "The setting holds could not be read": "无法读取设置的保持记录", // lane setting-doors pick 2 (the check)
   "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "无法读取 data/setting-holds.json（{why}）。被调高的上限可能不会自动改回——请检查这三个上限：{links}", // lane setting-doors pick 2 (the check)
   "{label} may not go back by itself": "{label}可能不会自动改回", // lane setting-doors pick 2 (the check)

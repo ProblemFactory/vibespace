@@ -460,6 +460,7 @@ export function inboxModel(app) {
         'raise-needs-until': () => t('A raise needs its «until» — change it on the row'),
         'raise-over-hold': () => t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value: card.value, back: r.lastingNone ? t('none') : num(r.lasting) }),
         'not-durable': () => t('the hold could not be written to disk, so nothing changed'),
+        setting_holds_unread: () => t('the holds of raised ceilings could not be read — no timed raise is taken until they read'),   // r3004: the holds' file is held — no timed raise is taken until it reads
         'write-failed': () => t('the setting could not be written, so nothing changed'),
         spend_row_owner_only: () => t('only your own page can change it — nothing changed'),
       };

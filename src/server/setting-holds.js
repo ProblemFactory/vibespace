@@ -25,6 +25,9 @@
 const fs = require('fs');
 const path = require('path');
 const AS = require('../ask-setting.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3004 (lane bl-loop-b): data/setting-holds.json under the store-read law
+const HOLDS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.holds === undefined || (!!v.holds && typeof v.holds === 'object' && !Array.isArray(v.holds)));
 
 const STORE_NAME = 'setting-holds.write';
 // a return the settings file refused is tried again a minute later, RETRIES more times, before it is left to the next start
@@ -58,8 +61,17 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
    *  owner's language from its `i18n` lines, the row named by its label with its link. The only items this store files. */
   const notifyOwner = ({ text, detail, i18n }) => { try { if (userTodos) userTodos.add('accounts', { origin: 'spend', text: String(text).slice(0, 300), detail, urgency: 'high', by: 'agent', sessionName: 'Spending', kind: 'notice', ...(i18n ? { i18n } : {}) }); } catch (e) { log(`[setting-holds] the owner's notice could not be filed: ${e && e.message}`); } };
   const produce = () => JSON.stringify({ v: 1, holds });
-  /** the holds on disk — the store writer's own act; false = not durable (the caller refuses the press) */
-  async function save() { try { W().dirty(file, { name: 'setting-holds.write', produce, allowEmpty: true }); return (await W().durable(file)) !== false; } catch { return false; } }
+  // r3004 (lane bl-loop-b): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of this file as «no hold» and the
+  // owner's next timed raise saved only itself: every EARLIER raised ceiling lost its way back and stayed raised for good. HELD: no
+  // hold is known, so no timed raise (and no «End now») is taken — refused by name; nothing is written over the file; it is read
+  // again off the loop, and the owner is told which ceilings stand above their default now. Torn bytes are kept aside once per
+  // content, then it starts empty — said to the owner (a raised ceiling may then stay: check the three). A restart while held reads
+  // the same file again. Nothing removes by this store's silence (no sweep, no bound, no migration reads its names)
+  const hold = HOLD.create({ file, valid: HOLDS_SHAPE, code: 'setting_holds_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `data/setting-holds.json could not be read (${h.code}) — while it cannot be read a raised ceiling cannot go back by itself and no timed raise is taken; VibeSpace reads it again every few minutes and writes nothing over it`,
+    log: (m) => log('[setting-holds] ' + m), onLift: (v, f) => { lifted(v, f).catch((e) => log(`[setting-holds] the lift failed: ${(e && e.message) || e}`)); } });
+  /** the holds on disk — the store writer's own act; false = not durable (the caller refuses the press); held: nothing is written */
+  async function save() { if (!hold.writable('a hold change')) return false; try { W().dirty(file, { name: 'setting-holds.write', produce, allowEmpty: true }); return (await W().durable(file)) !== false; } catch { return false; } }
   const saveLater = (what) => { save().then((ok) => { if (!ok) log(`[setting-holds] ${what} is not on disk yet — the next start reads the row and ends what it no longer holds`); }); };
   // B-0a33 cure (主开发 04:23Z): a ceiling the row holds with NO NUMBER (blank, a stored null, a text, a negative) is «no limit is set»
   // — refused, read 0 (as budgetLimits reads it), never the default; its «before» is BLANK, so a return writes it back as it was. null
@@ -99,6 +111,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
 
   /** THE RETURN (the moment, or «End now»): back to «before» — only a LIVE hold; one the hand moved has already ended. */
   async function returnHold(key, why) {
+    if (hold.held()) return { ok: false, status: 503, code: 'setting_holds_unread', error: hold.words() };   // r3004: no hold is known — never «no hold»
     const h = holds[key]; if (!h) return { ok: true, none: true };
     if (isHeld()) { owed.add(key); disarm(key); log(`[setting-holds] return ${key} → ${h.before} is OWED: the settings could not be read — it lands when they read`); return { ok: false, code: 'settings-unread', owed: true, value: null }; }
     const cur = presentOf(key), raw = rawOf(readSettings() || {}, key);
@@ -137,6 +150,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   async function take({ key, value, untilRel = null, untilAt = null, shown }) {
     if (!AS.isProposable(key)) return { ok: false, status: 400, code: 'not-proposable', error: `${key} is not a row a press may change; ${AS.LINK(key)}` };
     if (isHeld()) return { ok: false, status: 503, code: 'store_unread', error: 'the settings could not be read — nothing was changed; press again once they read' };   // B-225b: never judged against the defaults
+    if (hold.held()) return { ok: false, status: 503, code: 'setting_holds_unread', error: hold.words() };   // r3004: the earlier holds are unread — a press would write them away
     const present = presentOf(key);
     const presentNone = noNumber(rawOf(readSettings() || {}, key)) && rawOf(readSettings() || {}, key) !== undefined;   // cure 2: «none», never 0, in what the press answers
     if (NUM(Number(shown)) == null || Number(shown) !== present) return { ok: false, status: 409, code: 'moved', present, ...(presentNone ? { presentNone } : {}), error: `it is ${presentNone ? 'none' : present} now` };
@@ -169,15 +183,34 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   /** the boot: the holds read back; a hold the row no longer holds ends (law B, the journal); a hold that cannot be kept is said; the
    *  rest re-armed — a moment already passed returns at once. Unreadable ⇒ the owner is told. */
   async function start() {
-    const unread = (why) => {
-      notifyOwner({ text: 'The setting holds could not be read', detail: `data/setting-holds.json could not be read (${why}). A raised ceiling may not go back by itself — check the three ceilings: ${Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ')}`,
-        i18n: { text: { key: 'The setting holds could not be read' }, detail: [{ key: 'data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}', params: { why: String(why), links: Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ') } }] } });
-      log(`[setting-holds] unreadable: ${why}`);
-    };
-    let raw = null;
-    try { raw = await fs.promises.readFile(file, 'utf8'); } catch (e) { if (e && e.code !== 'ENOENT') unread(e.message); return list(); }
-    try { const j = JSON.parse(raw); holds = j && j.holds && typeof j.holds === 'object' ? j.holds : {}; }
-    catch (e) { unread(`not whole: ${e.message}`); holds = {}; return list(); }
+    let read; try { read = { text: await fs.promises.readFile(file, 'utf8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: HOLDS_SHAPE });
+    if (hold.start(a0) === 'held') { unread(hold.held().code); return list(); }   // r3004: held — nothing known, nothing written
+    holds = a0.state === 'data' && a0.value.holds ? a0.value.holds : {};
+    return adopt();
+  }
+  /** the owner told ONCE a hold: the file could not be read — which ceilings stand above their default NOW (they may be raised) */
+  function unread(why) {
+    const links = Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ');
+    const above = Object.keys(AS.PROPOSABLE).filter((k) => { const v = presentOf(k); return Number.isFinite(v) && v > AS.PROPOSABLE[k].def; }).map(AS.LINK).join(' · ') || '—';
+    notifyOwner({ text: 'The setting holds could not be read', detail: `data/setting-holds.json could not be read (${why}). A raised ceiling may not go back by itself — check the three ceilings: ${links}. While it cannot be read no timed raise is taken and nothing is written over it; VibeSpace reads it again every few minutes. Above their default now: ${above}`,
+      i18n: { text: { key: 'The setting holds could not be read' }, detail: [{ key: 'data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}', params: { why: String(why), links } },
+        { key: 'While it cannot be read no timed raise is taken and nothing is written over it; VibeSpace reads it again every few minutes. Above their default now: {rows}', params: { rows: above } }] } });
+    log(`[setting-holds] unreadable: ${why}`);
+  }
+  /** r3004: THE HOLD LIFTED — the holds read (null: empty after torn bytes were kept aside, said); what the start skipped runs now */
+  async function lifted(v, f) {
+    holds = v && v.holds ? v.holds : {};
+    if (f && f.setAside) {
+      const links = Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ');
+      notifyOwner({ text: 'The setting holds did not parse', detail: `data/setting-holds.json did not parse; its bytes are kept aside as ${f.setAside}. A raised ceiling may not go back by itself — check the three ceilings: ${links}`,
+        i18n: { text: { key: 'The setting holds did not parse' }, detail: [{ key: 'data/setting-holds.json did not parse; its bytes are kept aside as {copy}. A raised ceiling may not go back by itself — check the three ceilings: {links}', params: { copy: String(f.setAside), links } }] } });
+    }
+    await adopt();
+    tell();
+  }
+  /** the holds as read: a hold the row no longer holds ends (law B), a hold that cannot be kept is said, the rest re-armed */
+  async function adopt() {
     let changed = false;
     for (const k of Object.keys(holds)) {
       const h = holds[k], why = !h || typeof h !== 'object' ? CANNOT_KEEP.whole : !AS.isProposable(k) ? CANNOT_KEEP.list : NUM(h.untilAt) == null ? CANNOT_KEEP.moment : null;
@@ -198,7 +231,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
     return list();
   }
   const end = (key) => returnHold(key, 'end');
-  const stop = () => { for (const k of [...timers.keys()]) disarm(k); };
+  const stop = () => { for (const k of [...timers.keys()]) disarm(k); hold.stop(); };
   /** B-225b R11: THE SETTINGS READ AGAIN (their hold lifted) — what the start could not judge is judged now (a press that never
    *  landed, a row the hand moved), then every OWED return lands (synchronously: patchSettings is), before anything unattended spends */
   function atLift() {
@@ -214,7 +247,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
     if (changed) tell();
     return due.length;
   }
-  return { start, take, end, list, returnHold, noteSettingsWrite, holdOf, stop, file, atLift };
+  return { start, take, end, list, returnHold, noteSettingsWrite, holdOf, stop, file, atLift, unreadWords: () => hold.words(), _hold: hold };   // _hold: the suites' seam (its read again)
 }
 
 module.exports = { create, STORE_NAME, RETRY_MS, RETRIES };

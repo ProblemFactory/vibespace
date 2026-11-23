@@ -452,5 +452,68 @@ console.log('⑧ THE CARD\'S WORDS against what the press sends — the REAL row
   ok(/const setBtn = e\.target\.closest\('\.ut-action-setting'\);\n\s+if \(setBtn\) \{\n(?:\s+\/\/[^\n]*\n)*\s+armExitButtons\(\);\n\s+const pv = pressVerdict\(\{ since: setBtn\._armSince \?\? null, now: performance\.now\(\) \}\);\n\s+if \(!pv\.ok\) \{ showToast\(/.test(panel) && /\.ut-action-grant, \.ut-action-setting'\)\)/.test(panel), 'the tray\'s setting button is armed (in armExitButtons) and its press asks pressVerdict first — a button that appeared or moved within ARM_MS is not pressed');
 }
 
+console.log('⑨ r3004 THE STORE-READ LAW — a failed read HOLDS the holds: no timed raise taken over unread holds, nothing written over them, read again (src/store-read-hold.js)');
+{
+  const Module = require('node:module');
+  // a copy of the store with text replaced (the RED controls) — null when an anchor is missing
+  const mutantSH = (reps) => { const f = path.join(REPO, 'src/server/setting-holds.js'); let src = read('src/server/setting-holds.js'); for (const [a, b] of reps) { if (!src.includes(a)) return null; src = src.replace(a, b); } const m = new Module(f, null); m.filename = f; m.paths = Module._nodeModulePaths(path.dirname(f)); m._compile(src, f); return m.exports; };
+  const IDAY = 'spend.unattendedPerIdentityDay', H = 3600e3;
+  const turns = async (n = 200, until = () => false) => { for (let i = 0; i < n && !until(); i++) await new Promise((r) => setImmediate(r)); };
+  // the store writer stood in by one that WRITES what the store produces (what the real writer lands) — the file is read back
+  const mk9 = (M = SH, { bytes = null } = {}) => {
+    const dir = dirOf(), file = path.join(dir, 'setting-holds.json');
+    const earlier = { v: 1, holds: { [DAY]: { key: DAY, value: 1600, before: 800, untilAt: NOW + 6 * H, at: NOW - H }, [HOUR]: { key: HOUR, value: 60, before: 30, untilAt: NOW + 4 * H, at: NOW - H } } };
+    fs.writeFileSync(file, bytes != null ? bytes : JSON.stringify(earlier));
+    const st = { [DAY]: 1600, [HOUR]: 60, [IDAY]: 200 }, owner = [], logs = [];
+    const writer = { dirty: (f, o) => { fs.writeFileSync(f, o.produce()); }, durable: async () => true };
+    const S = M.create({ dataDir: dir, readSettings: () => st, patchSettings: (pt) => { for (const [k, v] of Object.entries(pt)) { if (v === null) delete st[k]; else st[k] = v; } },
+      userTodos: { add: (key, n) => { owner.push(n); return { id: 'n' }; } }, log: (m) => logs.push(m), now: () => NOW, writer, setTimer: () => ({}), clearTimer: () => { } });
+    return { S, dir, file, st, owner, logs, before: fs.readFileSync(file) };
+  };
+  // the PLACED refusal of the store's own read (its one readFile of this file answers EIO; no mount, no mode change)
+  const refused = async (k, fn) => { const rf0 = fs.promises.readFile; fs.promises.readFile = async function (f, ...a) { if (String(f) === k.file) throw Object.assign(new Error('EIO: a placed refusal'), { code: 'EIO' }); return rf0.call(this, f, ...a); }; try { return await fn(); } finally { fs.promises.readFile = rf0; } };
+  const raise = (k) => k.S.take({ key: IDAY, value: 400, untilRel: 2 * H, shown: 200 });
+  {
+    const k = mk9();
+    await refused(k, () => k.S.start());
+    const r = await raise(k), e = await k.S.end(DAY);
+    const same = fs.readFileSync(k.file).equals(k.before);
+    const n = k.owner[0] || {}, lines = (n.i18n && n.i18n.detail) || [];
+    ok(!r.ok && r.status === 503 && r.code === 'setting_holds_unread' && /could not be read \(EIO\)/.test(r.error) && !e.ok && e.code === 'setting_holds_unread' && same && k.st[IDAY] === 200 && k.st[DAY] === 1600 && k.S.list().length === 0,
+      'r3004: the holds\' read REFUSED (EIO) — the next timed raise is REFUSED by name (setting_holds_unread), «End now» too; NOTHING is written over the file (its bytes as they were); no ceiling moved', { r, e, same });
+    ok(k.owner.length === 1 && n.text === 'The setting holds could not be read' && lines.length === 2 && lines[1].params.rows.includes(`vibespace://settings/${DAY}`) && lines[1].params.rows.includes(`vibespace://settings/${HOUR}`) && !lines[1].params.rows.includes(`vibespace://settings/${IDAY}`),
+      'the owner is told ONCE: the file could not be read, no timed raise is taken, and WHICH ceilings stand above their default now (the two raised; not the one at its default)', n);   // stale-pins: kept — the scheme's link text as this suite's input
+    const lifted = await k.S._hold.again();   // the read again, off the loop — the file reads now
+    const r2 = await raise(k), after = JSON.parse(fs.readFileSync(k.file, 'utf8'));
+    ok(lifted && k.S._hold.held() === null && r2.ok && after.holds[DAY] && after.holds[HOUR] && after.holds[IDAY] && after.holds[DAY].before === 800 && after.holds[HOUR].before === 30,
+      'the file READS AGAIN — the hold lifts, the two earlier holds are back with their way back (800, 30), and the next timed raise keeps all three', Object.keys(after.holds));
+    const mR = mutantSH([["    if (hold.held()) return { ok: false, status: 503, code: 'setting_holds_unread', error: hold.words() };   // r3004: the earlier holds are unread — a press would write them away\n", ''], ["if (!hold.writable('a hold change')) return false; ", '']]);
+    const kx = mR ? mk9(mR) : null;
+    if (kx) await refused(kx, () => kx.S.start());
+    const rx = kx ? await raise(kx) : null, ax = kx ? JSON.parse(fs.readFileSync(kx.file, 'utf8')) : null;
+    ok(!!rx && rx.ok && !ax.holds[DAY] && !ax.holds[HOUR], 'RED control (the press and the save not held — the release): the timed raise is taken and the file then holds ONLY the new hold — the earlier ceilings lose their way back (red)', ax && Object.keys(ax.holds));
+  }
+  {   // A RESTART while held reads the same file again: nothing was written, so the holds come back whole
+    const k = mk9();
+    await refused(k, () => k.S.start()); k.S.stop();
+    const k2 = { ...k, owner: [] };
+    const S2 = SH.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: () => { }, userTodos: { add: (key, n) => { k2.owner.push(n); return { id: 'n' }; } }, now: () => NOW, writer: { dirty: (f, o) => fs.writeFileSync(f, o.produce()), durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
+    await S2.start();
+    ok(S2.list().length === 2 && S2._hold.held() === null && k2.owner.length === 0, 'a RESTART while held reads the same file again — the two holds whole, nothing said (nothing was lost)', S2.list().map((h) => h.key));
+    S2.stop();
+  }
+  {   // TORN BYTES: held while kept aside ONCE (byte for byte), then it starts empty — said, the three ceilings named
+    const torn = '{"v":1,"holds":{"' + DAY + '":{"key":';
+    const k = mk9(SH, { bytes: torn });
+    await k.S.start();
+    await turns(400, () => k.S._hold.held() === null);
+    const copies = fs.readdirSync(k.dir).filter((f) => f.startsWith('setting-holds.json.corrupt-'));
+    const said = k.owner.find((n) => n.text === 'The setting holds did not parse');
+    ok(k.S._hold.held() === null && copies.length === 1 && fs.readFileSync(path.join(k.dir, copies[0]), 'utf8') === torn && !!said && said.i18n.detail[0].params.copy === copies[0] && Object.keys(AS.PROPOSABLE).every((key) => said.detail.includes(`vibespace://settings/${key}`)),
+      'TORN BYTES: kept aside once as their own copy (byte for byte), THEN it starts empty — the owner told where the bytes are and that a raised ceiling may not go back (the three ceilings)', { copies, said: said && said.text });   // stale-pins: kept — the scheme's link text as this suite's input
+    k.S.stop();
+  }
+}
+
 console.log(fail ? `✗ test-setting-holds: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
