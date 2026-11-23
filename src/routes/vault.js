@@ -35,6 +35,7 @@ const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-r
 const STATUS = Object.freeze({
   ...UGC.STATUS,
   vault_grants_unread: 503,   // r3002 (c)
+  record_unreadable: 503,   // r3002 (b): a read of data/vault.json that failed — held and read again, never «damaged»
   wrong_password: 403, corrupt: 500, paced: 429, code_paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
   password_too_short: 400, password_too_long: 400, password_not_text: 400, same_as_sign_in: 400, same_password: 400, bad_hours: 400,
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
@@ -65,6 +66,7 @@ const STATUS = Object.freeze({
 const WORDS = Object.freeze({
   ...UGC.WORDS,
   vault_grants_unread: 'the grants of the two-step codes (data/vault-grants.json) could not be read — nothing was changed; VibeSpace reads them again by itself',   // r3002 (c)
+  record_unreadable: 'the vault record (data/vault.json) could not be read — nothing is lost; VibeSpace reads it again by itself, then unlock again',   // r3002 (b)
   wrong_password: 'that is not the second password',
   corrupt: 'the vault record (data/vault.json) is damaged — nothing can be opened; restore it from a backup',
   paced: 'too many wrong passwords — wait a minute, then try again',
@@ -238,7 +240,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     for (const s of activeSessions.values()) if (s && sameToken(token, s.agentToken)) return true;
     return false;
   };
-  const agentFacts = () => { const f = vault.facts(); return { state: f.state, setUpAt: f.setUpAt, lockedSince: f.lockedSince, keys: f.keys, ...(f.lockedSince ? { when: { lockedSince: OF.when(f.lockedSince) } } : {}), ...(f.state === 'locked' ? { tray: OF.tray().name } : {}) }; };   // B-7960: vibespace-vault prints these words, never a time or a tray of its own
+  const agentFacts = () => { const f = vault.facts(); return { state: f.state, setUpAt: f.setUpAt, lockedSince: f.lockedSince, keys: f.keys, ...(f.lockedSince ? { when: { lockedSince: OF.when(f.lockedSince) } } : {}), ...(f.state === 'locked' ? { tray: OF.tray().name } : {}), ...(f.unreadable ? { unreadable: true, unreadableWords: f.unreadableWords } : {}) }; };   // r3230's reader table (r3002 (b)): the record held — said to the agent, never a bare «locked»   // B-7960: vibespace-vault prints these words, never a time or a tray of its own
 
   // ── people ──
   app.get('/api/vault/state', (req, res) => res.json(vault.facts()));

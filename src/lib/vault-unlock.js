@@ -18,7 +18,7 @@
 // screen — the dialog (once per lock in a tab), the ⚙ button's red mark (a press unlocks first, then the menu) — is ONE table,
 // PURE src/vault-loud.js `vaultLoudState`, asked here and only here; the hub's urgent For-you item asks the same table.
 import { t } from './i18n.js';
-import { createModalShell, fetchJson, showToast } from './utils.js';
+import { createModalShell, fetchJson, showToast, familyHeldWords } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { replayOpenSpec } from './window-types.js'; // the door (vs-vault-door) opens the Vault window while unlocked (src/lib/vault-window.js registers it)
@@ -40,6 +40,7 @@ export function vaultWords(r) {
   if (c === 'wrong_password') return t('That is not the second password');
   if (c === 'paced') return t('Too many wrong passwords — try again in {n} s', { n: Math.max(1, Math.ceil((Number(r.retryInMs) || 60e3) / 1000)) });
   if (c === 'corrupt') return t('The vault record is damaged — nothing can be opened; restore data/vault.json from a backup');
+  if (c === 'record_unreadable') return familyHeldWords(c);   // r3002 (b): a read that failed is not a damaged record
   if (c === 'password_too_short') return t('At least 8 characters');
   if (c === 'same_as_sign_in') return t('The second password must not be the sign-in password');
   if (c === 'same_password') return t('The new second password is the old one');

@@ -730,6 +730,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       icon.append(glyph('lock', 28));
       const txt = vwEl('div', 'vw-locked-text');
       txt.append(vwEl('div', null, t('The vault is locked — Unlock… shows what it holds (For you names what is waiting on it).')), vwEl('div', null, t('While it is locked every use answers «locked» — nothing fails in another way.')));
+      if (d && d.unreadable) txt.append(vwEl('div', 'vw-locked-unread', t('The vault record could not be read just now — nothing is lost; VibeSpace reads it again every few minutes, and Unlock… opens it once it reads.')));   // r3230's reader table (r3002 (b)): the record held, said in the locked box
       const u = btnEl(t('Unlock…'), 'vw-unlock vw-primary');
       u.onclick = () => showUnlock();
       box.append(icon, txt, u);
@@ -756,7 +757,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     // the rail between the two drew the purpose with no row and a 铸造… with no choices (test-automation-keys-chrome ⑨b, 2/3)
     const auto = r.state === 'unlocked' ? await (autoEarly || loadAutomation()) : null;
     if (st.closed) return;
-    st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [] };
+    st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [], ...(r.unreadable ? { unreadable: true } : {}) };   // r3230's reader table (r3002 (b)): the record held
     st.auto = auto;
     st.totp = r.state === 'unlocked' && st.data.rows.some(isTotp) ? await loadTotp() : null;   // design q-047 L1: the codes' grants + the picker's subjects (never a value)
     st.logins = r.state === 'unlocked' && st.data.rows.some(isLogin) ? await loadLogins() : null;   // lane browser-login: the logins' grants + the picker's subjects (never a password)

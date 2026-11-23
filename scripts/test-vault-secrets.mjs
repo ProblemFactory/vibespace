@@ -940,7 +940,7 @@ console.log('⑪ THE DOOR\'S PRESS (B-6f65) — the vault\'s door is heard from 
   const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
   const STUBS = {
     'i18n.js': 'export const t = (s) => s;',
-    'utils.js': 'export const createModalShell = (o) => globalThis.__vd.shell(o); export const fetchJson = (u) => globalThis.__vd.fetch(u); export const showToast = () => {};',
+    'utils.js': 'export const createModalShell = (o) => globalThis.__vd.shell(o); export const fetchJson = (u) => globalThis.__vd.fetch(u); export const showToast = () => {}; export const familyHeldWords = () => null;',   // r3002 (b): the unlock page reads its held code\'s words from the one table (r3428 law 2: the stand-in carried)
     'icons.js': 'export const UI_ICONS = {};',
     'chat-enter-keys.js': 'export const enterSubmits = () => {};',
     'window-types.js': 'export const replayOpenSpec = (app, spec) => globalThis.__vd.open(spec);',

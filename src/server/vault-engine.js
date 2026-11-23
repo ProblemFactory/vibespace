@@ -44,6 +44,8 @@ const crypto = require('crypto');
 const V = require('../vault.js');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3002 (b): the vault record's failed read under the store-read law
 const { runMigrations, ledgerFileOf } = require('../migration-runner.js');
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped, this lock epoch (lane vault-locked-refusal-notice)
 const VU = require('../vault-use.js');   // PURE: the use's ONE shape, its audit line, the daily failure count (lane vault-use-law)
@@ -153,12 +155,36 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const blockedList = VB.createBlocked();   // lane vault-locked-refusal-notice: who a refusal stopped this lock epoch (memory only)
   const blockedHooks = [];  // … and who is told: the wiring's one For-you item
 
+  // r3002 (b) — THE RECORD's FAILED READ UNDER THE STORE-READ LAW (src/store-read-hold.js). The release LOCKED a record it could not
+  // read for the whole life (a brief EIO needed a restart) and said it as DAMAGED («restore data/vault.json from a backup»). Now a
+  // READ that failed is HELD: nothing is written over it, it is read again off the loop on the law's ladder (an unlock press asks one
+  // read again now), and it answers its own code (record_unreadable: «could not be read», never «damaged») until a read proves
+  // which. Bytes that were READ and are not a record stay DAMAGED for the life (corrupt) and never lift as «not set up». WHO REMOVES
+  // BY THIS STORE's SILENCE: the setup door (a NEW record over the sealed stores) and the key-file law (a data folder with no record
+  // reads its stores' legacy key files) read «not set up» — so neither a failed read nor torn bytes ever read as «not set up» (a
+  // setup is refused already_set_up while either holds; the hold's re-read that meets torn bytes says them damaged, never empty)
+  const recordHold = HOLD.create({
+    file: FILE, valid: (v) => !!v && V.recordShapeOk(v), code: 'record_unreadable', aside: (m) => `${FILE}.corrupt-${m}`,
+    words: (h) => `vault.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. Nothing is lost and nothing is written over it — the vault stays locked until it reads`,
+    log: (m) => log.warn ? log.warn('[vault] ' + m) : log.log('[vault] ' + m),
+    onLift: (v, f) => {
+      masks = null;
+      if (v && V.recordShapeOk(v)) { record = v; recordBad = null; }
+      else if (f && f.setAside) { record = null; recordBad = 'not-a-record'; }   // torn bytes met on the re-read: damaged, never «not set up»
+      else { record = null; recordBad = null; }   // the file is gone (ENOENT twice): as a start that finds no record
+      announce();
+    },
+  });
+  const recordHeld = () => !!recordHold.held();
+  const badCode = () => (recordHeld() ? 'record_unreadable' : 'corrupt');   // r3002 (b): «could not be read» is not «damaged»
   function load() {
     masks = null;   // lane vault-masker-once: a record read from disk is a new vault state
     let text;
     try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) {
       if (e && e.code === 'ENOENT') { record = null; recordBad = null; return; }
-      record = null; recordBad = `unreadable:${KF.errnoOf(e)}`; return;
+      record = null; recordBad = `unreadable:${KF.errnoOf(e)}`;
+      recordHold.start(SR.storeAnswer({ error: e }));   // r3002 (b): HELD — read again off the loop; never «not set up», never «damaged»
+      return;
     }
     let rec = null;
     try { rec = JSON.parse(text); } catch { rec = null; }
@@ -204,7 +230,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       failedTries,
       pacedForMs: pacedUntil > t ? pacedUntil - t : 0,
       idleLockHours: record ? Number(record.idleLockHours) || 0 : 0,
-      corrupt: !!recordBad,
+      corrupt: !!recordBad && !recordHeld(),
+      ...(recordHeld() ? { unreadable: true, unreadableWords: recordHold.words() } : {}),   // r3002 (b): «could not be read», its own words
       keys: record ? Object.keys(record.entries).filter((n) => !isSecretName(n)).length : 0,
       secrets: record ? Object.keys(record.entries).filter(isSecretName).length : 0,   // r2: the device link tokens + the frp token
       blocked: st === 'locked' ? blockedList.count() : 0,   // lane vault-locked-refusal-notice: how many callers the lock stopped (the strip's count)
@@ -716,12 +743,13 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
 
   async function unlock(password, { ip = null } = {}) {
     if (!setUp()) load();
+    if (recordHeld()) { try { await recordHold.again(); } catch { } }   // r3002 (b): a person's press asks ONE read again now (off the loop)
     if (!setUp()) return { ok: false, code: 'vault_not_set_up' };
     if (dek) return { ok: true, already: true };
     const t = now();
     if (pacedUntil > t || failedTries % PACE_AFTER + inFlight >= PACE_AFTER) return { ok: false, code: 'paced', retryInMs: Math.max(pacedUntil - t, 0) || PACE_MS, failedTries };
     if (typeof password !== 'string' || !password) return { ok: false, code: 'password_not_text' };
-    if (recordBad) { audit('vault-unlock-failed', { ip, code: 'corrupt' }); return { ok: false, code: 'corrupt' }; }
+    if (recordBad) { audit('vault-unlock-failed', { ip, code: badCode() }); return { ok: false, code: badCode(), ...(recordHeld() ? { error: recordHold.words() } : {}) }; }
     const pw = Buffer.from(password, 'utf8');
     let r;
     inFlight++;
@@ -755,7 +783,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     const t = now();
     if (pacedUntil > t || failedTries % PACE_AFTER + inFlight >= PACE_AFTER) return { ok: false, code: 'paced', retryInMs: Math.max(pacedUntil - t, 0) || PACE_MS, failedTries };
     if (typeof password !== 'string' || !password) return { ok: false, code: 'password_not_text' };
-    if (recordBad) return { ok: false, code: 'corrupt' };
+    if (recordBad) return { ok: false, code: badCode() };
     const pw = Buffer.from(password, 'utf8');
     let r;
     inFlight++;
@@ -786,7 +814,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
 
   async function change(oldPassword, newPassword, { ip = null } = {}) {
     if (!setUp()) return { ok: false, code: 'vault_not_set_up' };
-    if (recordBad) return { ok: false, code: 'corrupt' };
+    if (recordBad) return { ok: false, code: badCode() };
     const t = now();
     if (pacedUntil > t || failedTries % PACE_AFTER + inFlight >= PACE_AFTER) return { ok: false, code: 'paced', retryInMs: Math.max(pacedUntil - t, 0) || PACE_MS, failedTries };
     if (typeof oldPassword !== 'string' || !oldPassword) return { ok: false, code: 'password_not_text' };

@@ -13076,8 +13076,11 @@ export default {
   "The grants of the two-step codes could not be read — nothing was changed; VibeSpace reads them again by itself": "两步验证码的授权读不出来——没有做任何改动；VibeSpace 会自动再读", // r3104 (c)
   "The grants list is damaged — its bytes are kept beside it once, then it starts empty; grant the codes again then. Until then no grant gives a code.": "授权列表损坏了——它的内容会在旁边保存一次，然后从空开始；之后请重新授权这些验证码。在此之前，任何授权都不会给出验证码。", // r3275
   "Saved «{name}», but its code was not given — give it in Vault ▸ Two-step codes ▸ Use for…": "已保存「{name}」，但没有授予验证码 — 请在「保险库 ▸ 两步验证 ▸ 用于…」中授予", // r3275
+  "The vault record could not be read just now — nothing is lost; VibeSpace reads it again every few minutes, and Unlock… opens it once it reads.": "保险库记录暂时读不出来——没有丢失任何东西；VibeSpace 每隔几分钟会再读一次，读出后「解锁…」即可打开。", // r3002 (b), r3230
   "The grants list was damaged and started empty — its damaged bytes are kept beside it as {name} (not a copy to restore); grant the codes again, or mend the file by hand and restart.": "授权列表损坏了，已从空开始——损坏的内容保存在旁边，名为 {name}（不是可以用来恢复的副本）；请重新授权这些验证码，或者手动修好文件后重启。", // r3104 (c)
   "The grants of the two-step codes could not be read — nothing is lost; they show again once they read.": "两步验证码的授权读不出来——没有丢失任何东西；读出之后会再显示。", // r3002 (c)
+  "VibeSpace cannot read your vault right now — nothing is lost and nothing was changed. It reads it again by itself; wait a few minutes, then unlock again.": "VibeSpace 暂时读不出你的保险库——没有丢失任何东西，也没有做任何改动。它会自动再读；请等几分钟，然后再解锁。", // r3002 (b): the vault record's row in the one table
+  "your vault": "你的保险库", // r3002 (b): the vault record's plain name
   "Unverified: the vault-use marks could not be read — not in use until they read; nothing is lost.": "无法验证：保险库的使用标记读不出来——在读出之前不生效；没有丢失任何东西。", // r3002 (a)
   "Unverified: this row's marks were damaged — save the row as you want it (验证是你): that decides it; not in use until then.": "无法验证：这一行的标记已损坏——按你想要的样子保存这一行（验证是你）即可决定它；在此之前不生效。", // r3002 (a); r3205
   "unknown — this entry's vault-use marks were damaged; save «Who may use it» on it to decide (nothing is lost)": "未知——这个条目的保险库使用标记已损坏；在它的「谁可以用」里保存一次即可决定（没有丢失任何东西）", // r3205 (2)

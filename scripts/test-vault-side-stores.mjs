@@ -6,6 +6,7 @@
 //   (a) vault-use-marks.json — src/server/vault-use-grants.js (the marks held; a row UNDECIDED when its marks are lost)
 //   (c) vault-grants.json — src/server/vault-totp.js (held; a later layout kept aside once; a row it cannot read CARRIED)
 //   (d) vault-grant-ends.json — src/server/vault-run-door.js (held; the ends made meanwhile kept beside it, folded in at the lift)
+//   (b) vault.json — src/server/vault-engine.js (a failed read held and read again, said «could not be read»; torn bytes stay damaged)
 // Every value here is made up at run time; no value, no sealed thing is printed.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,6 +40,14 @@ const jsonOr = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } c
 
 // A PLACED REFUSAL: the store's read of `file` answers EIO (readFileSync and openSync of that path) while it is on
 const EIO = () => Object.assign(new Error('EIO: i/o error, placed by the suite'), { code: 'EIO', errno: -5 });
+function placeRefusalTimes(file, times) {
+  const want = path.resolve(file), r0 = fs.readFileSync, o0 = fs.openSync;
+  let n = 0;
+  const hit = (p) => typeof p === 'string' && path.resolve(p) === want && n < times;
+  fs.readFileSync = function (p, ...a) { if (hit(p)) { n++; throw EIO(); } return r0.call(this, p, ...a); };
+  fs.openSync = function (p, ...a) { if (hit(p)) { n++; throw EIO(); } return o0.call(this, p, ...a); };
+  return { refused: () => n, lift: () => { fs.readFileSync = r0; fs.openSync = o0; } };
+}
 function placeRefusal(file) {
   const want = path.resolve(file), r0 = fs.readFileSync, o0 = fs.openSync, a0 = fs.promises.readFile;
   let n = 0;
@@ -656,6 +665,53 @@ async function main() {
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
     const r = await endsScene(M.load('src/server/vault-run-door.js', anchored(SRC, 'if (v && Array.isArray(v.ends)) mergeEnds(v.ends); ', '', 'lift-forgets-file'), 'lift-forgets-file'));
     ok(!r.knowsA, '(d) CONTROL (a lift that does not fold the file\'s ends in): the file\'s own end is lost at the lift — red', { a: r.knowsA });
+  }
+  console.log('(b) vault.json');
+  async function recordScene(veMod = VE, { times = 1 } = {}) {
+    const dataDir = freshDir('record');
+    const mk = () => veMod.create({ dataDir, kdf: KDF, log: quiet, idleTimer: false, register: false, bcast: () => { } });
+    const v0 = mk(); await v0.setup(PW);
+    const FILE = path.join(dataDir, 'vault.json'), bytes = fs.readFileSync(FILE, 'utf8');
+    return { dataDir, mk, FILE, bytes };
+  }
+  {
+    const w = await recordScene();
+    const pr = placeRefusalTimes(w.FILE, 1);   // ONE read fails (a slow disk once), then the file reads
+    let v1; try { v1 = w.mk(); } finally { pr.lift(); }
+    const f1 = v1.facts();
+    const u = await v1.unlock(PW);
+    ok(fs.readFileSync(w.FILE, 'utf8') === w.bytes && f1.unreadable === true && f1.corrupt === false, '(b) a read that failed once at the start writes nothing over the record and is said «could not be read», never «damaged»', { unreadable: f1.unreadable, corrupt: f1.corrupt });
+    ok(!!u && u.ok === true, '(b) …and the record is READ AGAIN in the same life: the unlock press asks one read again now, and the right password opens it', u && (u.ok ? 'ok' : u.code));
+  }
+  {
+    const w = await recordScene();
+    const pr = placeRefusal(w.FILE);   // the read keeps failing
+    let u = null, su = null;
+    let v1;
+    try { v1 = w.mk(); u = await v1.unlock(PW); su = await v1.setup('another made-up password ' + crypto.randomBytes(3).toString('hex')); } finally { pr.lift(); }
+    ok(!!u && !u.ok && u.code === 'record_unreadable' && /could not be read/.test(u.error || ''), '(b) …a read that keeps failing answers its own code (record_unreadable: «could not be read»), the vault locked', u && u.code);
+    ok(!!su && !su.ok && fs.readFileSync(w.FILE, 'utf8') === w.bytes, '(b) …and the REMOVER removes ZERO: a setup is refused while the record is held — no new record over the sealed stores', su && su.code);
+    const lifted = await v1.unlock(PW);
+    ok(!!lifted && lifted.ok === true, '(b) …once it reads, the next unlock opens it (same life)', lifted && (lifted.ok ? 'ok' : lifted.code));
+  }
+  {
+    const w = await recordScene();
+    fs.writeFileSync(w.FILE, '{"v":1,"entries":{"a');   // torn bytes
+    const torn = fs.readFileSync(w.FILE, 'utf8');
+    const v1 = w.mk();
+    const f1 = v1.facts(), u = await v1.unlock(PW), su = await v1.setup('another made-up password ' + crypto.randomBytes(3).toString('hex'));
+    ok(f1.corrupt === true && !f1.unreadable && !!u && u.code === 'corrupt' && !!su && !su.ok && fs.readFileSync(w.FILE, 'utf8') === torn, '(b) TORN bytes stay DAMAGED for the life (never «not set up»): the unlock says damaged, a setup is refused, nothing written over them', { corrupt: f1.corrupt, unlock: u && u.code, setup: su && su.code });
+  }
+  {
+    const M = mutantCopies('vault-side-stores-b', REPO);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
+    const cut = "    if (recordHeld()) { try { await recordHold.again(); } catch { } }";
+    ok(SRC.split(cut).length === 2, '(b) the unlock\'s read again is there once (the control below takes it out)');
+    const w = await recordScene(M.load('src/server/vault-engine.js', anchored(anchored(SRC, cut, '', 'no-reread'), 'recordHold.start(SR.storeAnswer({ error: e }));', '', 'no-reread-start'), 'no-reread'));
+    const pr = placeRefusalTimes(w.FILE, 1);
+    let v1; try { v1 = w.mk(); } finally { pr.lift(); }
+    const u = await v1.unlock(PW);
+    ok(!!u && !u.ok, '(b) CONTROL (the release\'s load — never read again in the life): the right password is refused after the disk reads again — red', u && (u.ok ? 'ok' : u.code));
   }
 }
 

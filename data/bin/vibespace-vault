@@ -170,6 +170,7 @@ function print(d) {
   const say = SAYS[d.state];
   console.log('vault: ' + (typeof say === 'function' ? say(d) : say || d.state));
   if (d.state === 'locked' && d.lockedSince) console.log('  locked since ' + when(d));
+  if (d.unreadable && d.unreadableWords) console.log('  ' + d.unreadableWords);   // r3230's reader table (r3002 (b)): the record held — its own words
 }
 
 /** A call whose refusal says its code too (request / uses) — exit 1 on a refusal, the code in parentheses. */
