@@ -332,7 +332,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const w = confirmWords(d.confirm, row, app);
     if (!(await showConfirmDialog({ title: w.title, message: w.message, confirmText: w.confirm, danger: true }))) return;
     const r = await fetchJson(d.path, { method: d.method, headers: { 'Content-Type': 'application/json' }, ...(d.method === 'POST' ? { body: '{}' } : {}) });
-    if (!r || r.error || r.ok === false) { showToast(t('Could not delete — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
+    if (!r || r.error || r.ok === false) { showToast(t('Could not delete — {reason}', { reason: r && r.code === 'providers_torn_named' ? t('A damaged copy of the provider list that VibeSpace kept aside still names this key\'s provider — nothing was removed. Restore that copy in VibeSpace\'s data folder, or remove it there, first.') : (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
     showToast(t('Deleted'));
     refresh();
   }

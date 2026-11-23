@@ -15190,4 +15190,7 @@ export default {
   "The history is not loaded yet, or not all of it — the transcript reader is not running. Trying again at {time}.": "履歴はまだ読み込まれていないか、一部だけです。記録の読み取りが動いていません。{time} に再試行します。",
   "The transcript reader is not running — trying again at {time}.": "記録の読み取りが動いていません。{time} に再試行します。",
   "The transcript reader is not running.": "記録の読み取りが動いていません。",
+  "VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.": "VibeSpace は今、モデルプロバイダーの一覧を読めません — どのプロバイダーも失われず、上書きもせず、別のプロバイダーで会話を始めることもありません。数分後に自分でもう一度読みます。", // lane lg-providers B-f276 family (providers.json held)
+  "VibeSpace cannot read its list of model providers right now — nothing was changed. Try again in a few minutes (it reads the list again by itself).": "VibeSpace は今、モデルプロバイダーの一覧を読めません — 何も変えていません。数分後にもう一度お試しください（一覧は自分でもう一度読みます）。", // lane lg-providers B-f276 family (providers.json held)
+  "A damaged copy of the provider list that VibeSpace kept aside still names this key's provider — nothing was removed. Restore that copy in VibeSpace's data folder, or remove it there, first.": "VibeSpace が取っておいた壊れたプロバイダー一覧のコピーが、まだこのキーのプロバイダーを名指ししています — 何も削除していません。先に VibeSpace のデータフォルダーでそのコピーを戻すか、そこで削除してください。", // lane lg-providers B-f276 family (the Vault row's Remove of a key a kept torn copy names)
 };

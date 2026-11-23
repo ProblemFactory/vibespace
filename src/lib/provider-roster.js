@@ -78,6 +78,8 @@ export async function renderProviderRows(body, backend, { refresh = () => { }, s
   sec.hidden = true;
   body.appendChild(sec);
   const r = await fetchJson('/api/providers/list', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });   // a person's read (U1 cure (B))
+  // (B-f276 family) providers.json HELD — the list is UNREAD, never «no provider»: said where the person meets it
+  if (r && r.unread && sec.isConnected) { sec.hidden = false; sec.append(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline acct-providers-held', textContent: t('VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.') })); return; }
   const rows = (r && Array.isArray(r.providers) ? r.providers : []).filter((p) => p.fits && p.fits[backend] && p.fits[backend].ok);
   if (!rows.length || !sec.isConnected) { sec.remove(); return; }   // no provider serves this harness: no section (the add door is the roster's own)
   const head = document.createElement('div'); head.className = 'acct-providers-head';

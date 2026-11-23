@@ -59,6 +59,7 @@ function create({ providers, harnessOf = (id) => require('../harnesses').get(id)
   /** ONE press → { ok: true, harness, verdict, detail, at } | { ok: false, code } (refused before anything spawned) */
   async function runProviderTest(id, harness, { by = null } = {}) {
     if (by !== 'human') return { ok: false, code: 'human_only' };
+    if (typeof providers.unread === 'function' && providers.unread()) return { ok: false, code: 'providers_unread' };   // (B-f276 family) held: nothing is tested, nothing written
     const p = providers.thirdParty().find((r) => r.id === String(id || '')) || null;
     const a = PT.addressVerdict(p);
     if (!a.ok) return { ok: false, code: a.code };

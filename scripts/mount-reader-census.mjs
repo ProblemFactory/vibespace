@@ -185,7 +185,7 @@ export const ROWS = [
   ['src/server/fd-gauge.js', 'own-tree', 4, null, PROC],
   ['src/server/feedback-store.js', 'own-tree', 1, null, `${DATA}; lane agent-feedback: data/feedback.json read once at create`],
   ['src/server/feedback-forward.js', 'own-tree', 1, null, `${DATA}; lane feedback-forward: data/feedback-outbox.json read once at create`],
-  ['src/server/provider-store.js', 'own-tree', 1, null, `${DATA}; lane provider-record (q-053 P0a): data/providers.json read once at create`],
+  ['src/server/provider-store.js', 'own-tree', 3, null, `${DATA}; lane provider-record (q-053 P0a): data/providers.json read once at create; lane lg-providers (B-f276 family): + the orphaned-key remover lists and reads the kept torn copies (data/providers.json.corrupt-*, the newest 20, async) for the key's id`],
   ['src/server/provider-spawn.js', 'own-tree', 1, null, `${DATA}; lane lg-providers U2: a provider home's sessions entry (data/provider-homes/<id>/<harness>/sessions) looked at once per spawn — seeded only when absent`],
   ['src/server/fs-canary-worker.js', 'exempt', 1, null, 'the canary probes the server’s own tree in its own worker'],
   ['src/server/goal-sync.js', 'own-tree', 3, null, CLI],

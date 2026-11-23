@@ -32,6 +32,7 @@ export async function openProviderWizard({ backend, onDone = null } = {}) {   //
   const list = await post('/api/providers/list');   // a person's read, through the person verdict (U1 cure (B))
   if (!live()) return;
   if (!list || list.error || !Array.isArray(list.shipped)) { body.textContent = t('Could not read the providers — {reason}', { reason: (list && list.error) || t('server unreachable') }); return; }
+  if (list.unread) body.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline pw-held', textContent: t('VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.') }));   // (B-f276 family) held: an add is refused by name until it reads
   const fitsHere = (s) => !!(s.fits && s.fits[backend] && s.fits[backend].ok);
   const cards = [...list.shipped].sort((a, b) => Number(fitsHere(b)) - Number(fitsHere(a)));   // the ones the opening agent can use first
   const st = { step: 'pick', preset: null, region: 'global', provider: null, tests: {}, testedModel: null, busy: false, error: '', draft: {} };

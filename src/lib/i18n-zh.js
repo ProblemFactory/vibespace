@@ -15191,4 +15191,7 @@ export default {
   "The history is not loaded yet, or not all of it — the transcript reader is not running. Trying again at {time}.": "历史记录尚未加载，或只加载了一部分——转录读取器没有在运行。将在 {time} 再试。",
   "The transcript reader is not running — trying again at {time}.": "转录读取器没有在运行——将在 {time} 再试。",
   "The transcript reader is not running.": "转录读取器没有在运行。",
+  "VibeSpace cannot read its list of model providers right now — no provider is lost, nothing is written over it and no conversation is started on another one. It reads the list again by itself in a few minutes.": "VibeSpace 现在读不了它的模型提供方列表——没有任何提供方丢失，不会覆盖写入，也不会在别的提供方上启动对话。几分钟后它会自己再读一次。", // lane lg-providers B-f276 family (providers.json held)
+  "VibeSpace cannot read its list of model providers right now — nothing was changed. Try again in a few minutes (it reads the list again by itself).": "VibeSpace 现在读不了它的模型提供方列表——什么都没有改。几分钟后再试（它会自己再读一次列表）。", // lane lg-providers B-f276 family (providers.json held)
+  "A damaged copy of the provider list that VibeSpace kept aside still names this key's provider — nothing was removed. Restore that copy in VibeSpace's data folder, or remove it there, first.": "VibeSpace 留存的一份损坏的提供方列表副本里仍写着这个密钥的提供方——什么都没有删除。请先在 VibeSpace 的数据文件夹里恢复那份副本，或把它删除。", // lane lg-providers B-f276 family (the Vault row's Remove of a key a kept torn copy names)
 };

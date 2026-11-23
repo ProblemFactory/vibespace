@@ -30,12 +30,13 @@ const MP = require('../model-providers.js');
 const { personVerdict } = require('./vault.js');
 
 const PT = require('../provider-test-model.js');
-const STATUS = Object.freeze({ invalid: 400, unknown: 404, 'built-in': 409, vault_locked: 423, vault_not_set_up: 409, 'key-unreadable': 409, 'write-failed': 500,
+const STATUS = Object.freeze({ invalid: 400, unknown: 404, 'built-in': 409, vault_locked: 423, vault_not_set_up: 409, 'key-unreadable': 409, 'write-failed': 500, providers_unread: 503, providers_torn_named: 409,
   'no-address': 409, 'vendor-own': 409, unfit: 409, 'in-flight': 409, 'no-key': 409, failed: 500 });
 const WORDS = Object.freeze({
   invalid: 'some fields are not valid', unknown: 'unknown provider', 'built-in': 'a built-in provider is not changed here',
   vault_locked: 'Unlock the vault first — the provider’s key is kept there', vault_not_set_up: 'Set up the vault first — the provider’s key is kept there',   // the dictionary's own keys (the page words them)
   'key-unreadable': 'the vault could not keep the key', 'write-failed': 'the provider list could not be written',
+  providers_unread: 'VibeSpace cannot read its list of model providers right now — nothing was changed. Try again in a few minutes (it reads the list again by itself).',   // (B-f276 family; the dictionary's own key — the page words it)
 });
 /** the variable each harness it serves reads the key from — its descriptor's own plan, asked with no key (the wizard's
  *  technical details; lane lg-providers U5) */
@@ -56,7 +57,7 @@ const shippedPub = (s) => ({ ...s, fits: shippedFits(s) });
 
 function registerProviderRoutes(app, { providers, tester = null, onChange = () => { } }) {
   const pub = pubOf(providers);
-  const refuse = (res, r) => res.status(STATUS[r.code] || 400).json({ ok: false, code: r.code, error: WORDS[r.code] || r.code, ...(r.errors ? { errors: r.errors } : {}) });
+  const refuse = (res, r) => res.status(STATUS[r.code] || 400).json({ ok: false, code: r.code, error: WORDS[r.code] || r.error || r.code, ...(r.errors ? { errors: r.errors } : {}), ...(r.copy ? { copy: r.copy } : {}) });   // (B-f276 family) a held list / a torn copy's key: the store's own words
   const person = (req, res) => {
     const who = personVerdict(req);
     if (who.ok) return true;
@@ -69,7 +70,7 @@ function registerProviderRoutes(app, { providers, tester = null, onChange = () =
   app.use('/api/providers', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   app.post('/api/providers/list', (req, res) => {
     if (!person(req, res)) return;
-    res.json({ shipped: MP.SHIPPED.map(shippedPub), shippedAt: MP.SHIPPED_AT, providers: providers.thirdParty().map(pub) });
+    res.json({ shipped: MP.SHIPPED.map(shippedPub), shippedAt: MP.SHIPPED_AT, providers: providers.thirdParty().map(pub), ...(typeof providers.unread === 'function' && providers.unread() ? { unread: true } : {}) });   // (B-f276 family) held: the list is UNREAD — the page says so, never «no provider»
   });
   app.post('/api/providers', door(async (req, res) => {
     if (!person(req, res)) return;

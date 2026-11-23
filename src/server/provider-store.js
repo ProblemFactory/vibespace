@@ -14,6 +14,9 @@ const path = require('path');
 const crypto = require('crypto');
 const MP = require('../model-providers.js');
 const SB = require('../secret-box.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // B-f276 family (主开发 r3000 / r3019): providers.json under the store-read law
+const PROVIDERS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.providers === undefined || Array.isArray(v.providers));
 
 const STORES = new Map();   // data dir → its store (the Vault window's row names a provider key by its record's label)
 const forDir = (dataDir) => STORES.get(path.resolve(String(dataDir || ''))) || null;
@@ -26,20 +29,41 @@ const vaultCode = (code) => (/vault_locked/.test(String(code || '')) ? 'vault_lo
 // verdict) is DURABLE before its answer — `await durable()` — and when the writer answers that the write FAILED, memory is put
 // back to what the file holds and the act is refused `write-failed`. Train 1's put / setModels / setListed mark the file and
 // return; their callers await `durable()` before they answer.
-function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m), vault = () => SB.vaultForDir(dataDir), now = () => Date.now(), writer = null } = {}) {
+function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m), vault = () => SB.vaultForDir(dataDir), now = () => Date.now(), writer = null, onLift = null } = {}) {
   const file = path.join(dataDir, 'providers.json');
-  let records = [];
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  /** a read value's records — each normalized and validated (a record that fails is skipped BY NAME, never half-read) */
+  const load = (raw) => {
+    const out = [];
     for (const r of Array.isArray(raw && raw.providers) ? raw.providers : []) {
       const p = MP.normalizeProvider(r);
       const errors = MP.presetOf(p.id) ? [{ code: 'built-in-id' }] : MP.validateProvider(r);
       if (errors.length) { log(`[providers] skipped record ${JSON.stringify(String(p.id).slice(0, 80))}: ${errors.map((e) => e.code).join(', ')}`); continue; }
-      records.push(p);
+      out.push(p);
     }
-  } catch (e) { if (e && e.code !== 'ENOENT') log(`[providers] ${file} unreadable (${e.code || e.message}) — no third-party providers`); }
+    return out;
+  };
+  // THE STORE-READ LAW (B-f276 family, 主开发 r3000 / r3019 — src/store-read-hold.js). The release read ANY failure of this read as
+  // «no third-party provider» and the person's next add wrote ONLY the new record over the file: every other provider's name,
+  // address, interface, models, aliases, default and test verdicts gone, their sealed keys left in the vault named by nothing.
+  // HELD: the list answers UNREAD (never «none»), every change is refused by name, nothing is written over it, a conversation that
+  // names a provider is refused by name (never started on another one, nor on no provider's settings), and it is read again off the
+  // loop; a restart while held reads the same file again. Torn bytes are kept aside once per content, then it starts empty — and
+  // since a key the torn list named would then read as named by nothing, the ONE remover by this store's silence (the Vault row's
+  // Remove of an «orphaned» key) refuses a key a kept copy still names (remove, below).
+  let records = [];
+  const hold = HOLD.create({
+    file, valid: PROVIDERS_SHAPE, code: 'providers_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `providers.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No model provider is lost: nothing is written over it, a conversation that names a provider waits, and adding or changing a provider is refused until it reads.`,
+    log: (m) => log('[providers] ' + m),
+    onLift: (v) => { records = load(v); try { onLift?.(); } catch { } },
+  });
+  let read0; try { read0 = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read0 = { error }; }
+  const a0 = SR.storeAnswer(read0, { valid: PROVIDERS_SHAPE });
+  if (hold.start(a0) === 'data') records = load(a0.value);
+  /** a door's refusal while held → { ok: false, code, error } | null (it reads) */
+  const heldNo = (what) => (hold.held() ? { ok: false, code: 'providers_unread', error: hold.refusal(what).message } : null);
   const W = () => writer || require('../store-writer.js').storeWriter();
-  function save() { W().dirty(file, { name: 'providers.write', produce: () => JSON.stringify({ v: 1, providers: records }), mode: 0o600, rank: 0 }); }   // store-timing's row (src/timed-sync.js)
+  function save() { if (!hold.writable('a provider change')) return; W().dirty(file, { name: 'providers.write', produce: () => JSON.stringify({ v: 1, providers: records }), mode: 0o600, rank: 0 }); }   // store-timing's row (src/timed-sync.js); held: nothing written over the file
   /** the file as memory holds it, on disk — true when written, false when the writer's write failed (it stays owed) */
   const durable = async () => { try { return !!(await W().durable(file)); } catch { return false; } };
   // a harness-listed record's rows = that harness's catalog NOW (the built-ins; never stored)
@@ -91,12 +115,27 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     log(`[providers] ${id}: the old key could not be put back — the record keeps the new one (its write is owed)`);
   };
   const thirdParty = (id) => records.find((r) => r.id === id) || null;
+  /** the kept copy of a torn providers.json (`providers.json.corrupt-*`, the hold's own aside) that names `id` → its basename | null —
+   *  read off the loop, the newest twenty */
+  async function keptCopyNaming(id) {
+    const dir = path.dirname(file), head = path.basename(file) + '.corrupt-';
+    let names = [];
+    try { names = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(head)).sort().slice(-20); } catch { return null; }
+    for (const n of names.reverse()) { try { if ((await fs.promises.readFile(path.join(dir, n), 'utf8')).includes(JSON.stringify(String(id)))) return n; } catch { } }
+    return null;
+  }
   const store = {
     file,
     durable,
     /** does the VAULT hold this record's key (its names, no key read — a locked vault answers too) */
     /** the record's key generation (the Test captures it at its start) */
     generationOf: (id) => gen.get(id) || 0,
+    /** (B-f276 family) the words a person reads while providers.json is held — null when it reads */
+    unread: () => hold.words(),
+    /** the hold's facts — {file, code, since} | null */
+    held: () => hold.held(),
+    /** (the start's read) a refused read or a re-read in flight: no caller may take the empty list for «no provider» */
+    readClean: () => !hold.held(),
     hasKey(id) { try { const v = vault(); if (!v) return false; if (typeof v.hasEntry === 'function') return !!v.hasEntry(MP.keyEntryOf(id)); return typeof v.secretNames === 'function' && v.secretNames().some((n) => n.name === MP.keyEntryOf(id)); } catch { return false; } },   // the entry asked by name (no list built per row)
     list: () => [...MP.PRESETS, ...records].map(filled),
     /** the third-party records only (the wizard's roster) */
@@ -108,6 +147,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     editable: (id) => { const p = records.find((r) => r.id === id); return !!p && p.modelsSource !== 'listed'; },
     /** create / replace a third-party record (Train 2's wizard; the suites) — refused whole, by code, on any error */
     put(raw) {
+      const h = heldNo('saving a model provider'); if (h) return h;
       const p = MP.normalizeProvider({ ...raw, id: raw && raw.id ? raw.id : `pv-${crypto.randomBytes(6).toString('hex')}` });
       const errors = MP.presetOf(p.id) ? [{ field: 'id', code: 'built-in-id' }] : MP.validateProvider({ ...raw, id: p.id });
       if (errors.length) return { ok: false, code: 'invalid', errors };
@@ -118,6 +158,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     /** THE ACCOUNT DIALOG'S SAVE: the configured rows (+ aliases, default) — a listed record refuses (its lister owns the
      *  rows); zero rows ⇒ the record says `none` (never an empty `configured`) */
     setModels(id, input) {
+      const h = heldNo('saving a provider\'s models'); if (h) return h;
       const p = records.find((r) => r.id === id);
       if (!p) return { ok: false, code: MP.presetOf(id) ? 'listed' : 'unknown' };
       if (p.modelsSource === 'listed') return { ok: false, code: 'listed' };
@@ -132,6 +173,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
      *  own /models answered + when — only on a record its provider lists. An alias whose row left the list is dropped (and
      *  named), a default that left it is cleared; the record is validated whole, like put, before the file is written. */
     setListed(id, rows, at) {
+      const h = heldNo('saving a provider\'s listed models'); if (h) return h;
       const p = records.find((r) => r.id === id);
       if (!p) return { ok: false, code: MP.presetOf(id) ? 'not-listed' : 'unknown' };
       if (!(p.modelsSource === 'listed' && p.listedBy === 'provider-api')) return { ok: false, code: 'not-listed' };
@@ -152,6 +194,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
      *  an unknown preset, a bad key (an Anthropic subscription login by name), a preset that needs an address and has none,
      *  any record error; a locked / absent vault ⇒ its code, nothing written. */
     add(input = {}) { return one(async () => {
+      const h = heldNo('adding a model provider'); if (h) return h;
       const i = input && typeof input === 'object' ? input : {};
       const shipped = MP.shippedOf(i.preset);
       if (!shipped) return { ok: false, code: 'invalid', errors: [{ field: 'preset', code: 'preset-unknown' }] };
@@ -173,6 +216,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     }); },
     /** a new key for a kept record (the roster's 换钥匙): sealed over the old one, the tail rewritten */
     rekey(id, key) { return one(async () => {
+      const h = heldNo('a new key for a model provider'); if (h) return h;
       const p = thirdParty(id);
       if (!p) return { ok: false, code: MP.presetOf(id) ? 'built-in' : 'unknown' };
       const errors = MP.validateKey(key);
@@ -190,6 +234,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
      *  A new address sends the sealed key somewhere new: it is taken only WITH the key pasted again (`key` — the person
      *  shows they hold it, as an add does), and only where the preset lets the person name an address (adversarial read r1). */
     patch(id, change = {}) { return one(async () => {
+      const h = heldNo('changing a model provider'); if (h) return h;
       const p = thirdParty(id);
       if (!p) return { ok: false, code: MP.presetOf(id) ? 'built-in' : 'unknown' };
       const c = change && typeof change === 'object' ? change : {};
@@ -211,12 +256,17 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     }); },
     /** the record, then its sealed key (a locked vault forgets too — secretDrop needs no key) */
     remove(id) { return one(async () => {
+      const h = heldNo('removing a model provider'); if (h) return h;   // held: no record is known — never «an orphaned key»
       const p = thirdParty(id);
       if (MP.presetOf(id)) return { ok: false, code: 'built-in' };
       const v0 = vault();
       // an ORPHANED key (its record gone: a crash between the seal and the write, a record skipped at load) — the Vault row's
       // Remove is this door, so it must still drop the entry (adversarial read r1)
       if (!p) {
+        // THE REMOVER BY THIS STORE's SILENCE (r3019): torn bytes start the list empty — a key the torn list named reads as named by
+        // nothing. A key a kept copy of the torn list still names is never removed as an orphan: refused by name, the copy named
+        const kept = await keptCopyNaming(id);
+        if (kept) { log(`[providers] ${id}: not removed — its key is named in ${kept}, the copy of a torn providers.json kept aside`); return { ok: false, code: 'providers_torn_named', copy: kept, error: "A damaged copy of the provider list that VibeSpace kept aside still names this key's provider — nothing was removed. Restore that copy in VibeSpace's data folder, or remove it there, first." }; }
         let had = false;
         try { had = !!v0 && typeof v0.secretNames === 'function' && v0.secretNames().some((n) => n.name === MP.keyEntryOf(id)); } catch { had = false; }
         if (!had) return { ok: false, code: 'unknown' };
@@ -235,6 +285,7 @@ function create({ dataDir, catalogOf = () => null, log = (m) => console.warn(m),
     }); },
     /** THE TEST'S RESULT (lane lg-providers U4, src/server/provider-test.js): the verdict per harness + lastTestAt */
     noteTested(id, harness, verdict, at, generation = null) { return one(async () => {
+      const h = heldNo('a provider test\'s verdict'); if (h) return h;
       const p = thirdParty(id);
       if (!p) return { ok: false, code: 'unknown' };
       if (generation !== null && generation !== (gen.get(id) || 0)) return { ok: false, code: 'changed' };   // a new key / address since the Test began
