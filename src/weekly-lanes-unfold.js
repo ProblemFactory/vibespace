@@ -80,7 +80,7 @@ function tailLines(file, bytes) {
 function slotKeyForSession(dataDir, sid) {
   const tail = String(sid).replace(/^sess-/, '');
   let meta = null;
-  try { meta = JSON.parse(fs.readFileSync(path.join(dataDir, 'session-meta', 'cw-' + tail + '.json'), 'utf8')); } catch (e) { MR.absentOr(e, 'session-meta'); return { key: null, why: 'no session-meta' }; }
+  try { meta = JSON.parse(fs.readFileSync(path.join(dataDir, 'session-meta', 'cw-' + tail + '.json'), 'utf8')); } catch (e) { MR.absentOr(e, path.join(dataDir, 'session-meta', 'cw-' + tail + '.json')); return { key: null, why: 'no session-meta' }; }
   if (!meta || typeof meta !== 'object') return { key: null, why: 'unreadable session-meta' };
   if ((meta.backend || 'claude') !== 'claude') return { key: null, why: 'not a claude session' };
   if (meta.host) return { key: null, why: 'remote session (host-keyed caches are out of scope)' };

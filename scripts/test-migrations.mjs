@@ -3756,7 +3756,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     process.on('unhandledRejection', onUn);
     fs.readFileSync = function (p0, ...a) { if (String(p0) === f) throw Object.assign(new Error(`EIO: a placed refusal of the read, '${p0}'`), { code: 'EIO' }); return real.call(this, p0, ...a); };
     release();
-    setTimeout(() => { fs.readFileSync = real; process.off('unhandledRejection', onUn); done({ res, warned, late, unhandled, bytes: real.call(fs, f, 'utf8') }); }, 50);
+    const t0 = Date.now(), settle = () => { if (!(late.length || unhandled.length) && Date.now() - t0 < 2000) return setImmediate(settle); setImmediate(() => { fs.readFileSync = real; process.off('unhandledRejection', onUn); done({ res, warned, late, unhandled, bytes: real.call(fs, f, 'utf8') }); }); };   // r3244 (a reader's small): the late answer awaited, bounded — never a fixed sleep
+    setImmediate(settle);
   });
   const fe = world('r2999-step', LEDGER), e = await stepped(require('../src/migration-runner.js'), fe);
   ok(e.res[0] && e.res[0].status === 'started' && e.bytes === LEDGER && e.late.length === 1 && e.late[0].status === 'failed' && e.late[0].code === 'ledger-unread' && e.unhandled.length === 0 && e.warned.some((m) => /r2999-step ended but is not recorded/.test(m)),
@@ -3765,14 +3766,56 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   const NoGuard = mutantCopies('migrations-ledger-late', REPO_R).load('src/migration-runner.js', anchored(runSrc2, LATE_GUARD, '', 'the late record without its guard'), 'late-no-guard');
   const fe2 = world('r2999-step-red', LEDGER), e2 = await stepped(NoGuard, fe2);
   ok(e2.late.length === 0 && e2.unhandled.length === 1, 'r2999 RED the late record without its guard: the step\'s settle throws (an unhandled rejection) and nobody says the migration', { late: e2.late, unhandled: e2.unhandled });
-  // THE HUB: one notice, never one an id
+  // THE SHAPES THAT HOLD NO LEDGER (r3244): an object with no `applied` map (none, a string, a list) is TORN — never «nothing applied»
+  for (const [tag, text] of [['no-applied', JSON.stringify({ reports: {} })], ['applied-string', JSON.stringify({ applied: 'x' })], ['applied-list', JSON.stringify({ applied: ['r2999-a'] })]]) {
+    const fs1 = world('r2999-shape-' + tag, text), s1 = runWith(require('../src/migration-runner.js'), fs1, null);
+    ok(s1.ran.length === 0 && s1.bytes === text && s1.res.every((r) => r.code === 'ledger-unread') && /holds no list of what ran/.test(s1.res.ledgerUnread || ''), `r3244 a ledger whose bytes hold no list of what ran (${tag}) is TORN: nothing runs, its bytes stay`, { ran: s1.ran, res: s1.res });
+  }
+  // THE ONE FOR-YOU ITEM (r3244): the boot's notice reaches no page — the runner files ONE item with a fixed key through the failed
+  // migration's road: the file by its plain name and the person's way out; the first start whose ledger reads closes it
+  const forYou = () => { const items = []; return { items, add(key, it) { const x = { id: 't' + (items.length + 1), key, ...it, status: 'open' }; const old = items.find((y) => y.itemKey === it.itemKey && y.status === 'open'); if (old) { Object.assign(old, it); return old; } items.push(x); return x; }, idsWhere(fn) { return items.filter((i) => fn({ ...i, sessionKey: i.key })).map((i) => i.id); }, setStatus(id, st) { const i = items.find((y) => y.id === id); if (i) i.status = st; } }; };
+  const RUN = require('../src/migration-runner.js');
+  const itemRun = (R, f, code, todos) => { const go = () => R.runMigrations({ ledgerPath: f, migrations: probe([]), log: () => { }, warn: () => { }, todos }); return code ? refused(f, code, go) : go(); };
+  {
+    const T1 = forYou(), fe1 = world('r3244-item-eio', LEDGER);
+    itemRun(RUN, fe1, 'EIO', T1); itemRun(RUN, fe1, 'EIO', T1);   // two starts, the read still refused: still ONE item
+    const it = T1.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM);
+    ok(it.length === 1 && it[0].status === 'open' && /data migrations did not run at startup: r3244-item-eio\/migrations\.json could not be read/i.test(it[0].text) && /Reading it failed \(EIO\); it is read again at the next start\./.test(it[0].detail) && /closes by itself/.test(it[0].detail) && !it[0].text.includes(tmp),
+      'r3244 THE LEDGER UNREAD (EIO), twice: ONE For-you item with its fixed key — the file by its plain name, «read again at the next start», never an absolute path', T1.items);
+    itemRun(RUN, fe1, null, T1);   // the read answers
+    ok(T1.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM && i.status === 'open').length === 0, 'r3244 …the first start whose ledger reads CLOSES it', T1.items);
+    const T2 = forYou(), fe2 = world('r3244-item-torn', LEDGER.slice(0, 15));
+    itemRun(RUN, fe2, null, T2);
+    const it2 = T2.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM);
+    ok(it2.length === 1 && /does not mend by itself: restore it from a copy, or move it aside/.test(it2[0].detail), 'r3244 A TORN LEDGER: its item says the way out (restore it from a copy, or move it aside) — it does not mend by itself', it2);
+    const NoItem = mutantCopies('migrations-ledger-item', REPO_R).load('src/migration-runner.js', anchored(runSrc2, '    sayLedgerUnread(todos, ledgerPath, ledger, warn);', '    // (r3244 red: no item)', 'the unread ledger without its item'), 'no-ledger-item');
+    const T3 = forYou(); itemRun(NoItem, world('r3244-item-red', LEDGER), 'EIO', T3);
+    ok(T3.items.length === 0, 'r3244 RED without the item (today): the unread ledger is a journal line only — nothing in For you', T3.items);
+  }
+  // THE HUB: one notice, never one an id — and the For-you item rides the hub's own store (the registry hands it)
   const rootH = path.join(tmp, 'r2999-hub'); fs.mkdirSync(path.join(rootH, 'data'), { recursive: true });
   const ledH = path.join(rootH, 'data', 'migrations.json'); fs.writeFileSync(ledH, LEDGER);
-  const notices = [];
-  const mmH = create({ rootDir: rootH, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k) });
-  refused(ledH, 'EIO', () => mmH.runLocalMigrations());
-  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER,
-    'r2999 THE HUB: its boot\'s migrations over an unreadable ledger — ONE notice (migrations-ledger-unread), no notice an id, the ledger untouched', notices);
+  const notices = [], TH = forYou();
+  const mmH = create({ rootDir: rootH, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k), userTodos: TH });
+  refused(ledH, 'EIO', () => mmH.runLocalMigrations({ only: ['2026-10-vault-always-to-grants'] }));
+  ok(notices.filter((k) => k === 'migrations-ledger-unread').length === 1 && !notices.some((k) => /^migration-failed:/.test(k)) && fs.readFileSync(ledH, 'utf8') === LEDGER && TH.items.filter((i) => i.itemKey === RUN.LEDGER_ITEM).length === 1 && /data\/migrations\.json could not be read/.test(TH.items[0].text),
+    'r2999 THE HUB: its boot\'s migrations over an unreadable ledger — ONE notice (migrations-ledger-unread), no notice an id, the ledger untouched, and ONE For-you item naming data/migrations.json (r3244)', { notices, items: TH.items });
+  {
+    const MIG_SRC2 = fs.readFileSync(path.join(REPO_R, 'src/server/migrations.js'), 'utf8');
+    const EARLY = "    if (results && results.ledgerUnread) { try { serverNotice?.('migrations-ledger-unread', `Data migrations did not run at this start: ${results.ledgerUnread}.`, { level: 'warn' }); } catch { } return; }\n";
+    const PerId = mutantCopies('migrations-hub-notice', REPO_R).load('src/server/migrations.js', anchored(MIG_SRC2, EARLY, '', 'the hub without its one notice'), 'hub-per-id');
+    const rootR = path.join(tmp, 'r2999-hub-red'); fs.mkdirSync(path.join(rootR, 'data'), { recursive: true });
+    const ledR = path.join(rootR, 'data', 'migrations.json'); fs.writeFileSync(ledR, LEDGER);
+    const nR = [];
+    refused(ledR, 'EIO', () => PerId.create({ rootDir: rootR, homeDir: scratchHomeDir, serverNotice: (k) => nR.push(k) }).runLocalMigrations({ only: ['2026-10-vault-always-to-grants'] }));
+    ok(nR.some((k) => /^migration-failed:/.test(k)) && !nR.includes('migrations-ledger-unread'), 'r3244 RED the hub without its one notice (a reader\'s point): one notice an id, never the cause once', nR);
+  }
+  // THE VAULT's SETUP over an unread ledger names THAT cause (r3244's should) — pinned: the setup needs a vault world (its suite runs it)
+  {
+    const VE = fs.readFileSync(path.join(REPO_R, 'src/server/vault-engine.js'), 'utf8');
+    ok(VE.includes("if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `data/migrations.json could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };") && /unread: ledger\.unread \}\)\);/.test(runSrc2),
+      'r3244 PIN: the vault\'s setup over an unread ledger refuses with THAT cause (data/migrations.json could not be read), never «a key file could not be sealed»; the runner hands the cause on each held row');
+  }
   // THE DEVICE: its registry goes through the same runner (src/agentd/agentd.js) — its own journal line, nothing rewritten
   const AG = fs.readFileSync(path.join(REPO_R, 'src/agentd/agentd.js'), 'utf8');
   const fd = world('r2999-device', LEDGER), lines = [];
@@ -3810,10 +3853,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ID = '2026-08-archive-dormant-task-plans', DOC = JSON.stringify({ tasks: { t1: { plan: ['a', 'b'] } } });
     const a = world('own-eio'), fa = path.join(a.d, 'task-groups.json'); fs.writeFileSync(fa, DOC);
     const ra = refusing(['readFileSync'], fa, () => runOne(MIG, a.r, ID));
-    ok(notRun(ra) && fs.readFileSync(fa, 'utf8') === DOC, 'MG1 ① its OWN read of a store refused (EIO): NOT RUN — failed by that cause, not recorded, the store untouched (the next start tries again)', ra.res);
+    ok(notRun(ra) && fs.readFileSync(fa, 'utf8') === DOC && /^task-groups\.json is there and could not be read \(EIO\) — not run: the next start tries again/.test(ra.res.error) && !ra.res.error.includes(tmp), 'MG1 ① its OWN read of a store refused (EIO): NOT RUN — failed by that cause, not recorded, the store untouched; the notice names the file plainly and says the next start tries again', ra.res);
     const b = world('own-torn'), fb = path.join(b.d, 'task-groups.json'); fs.writeFileSync(fb, DOC.slice(0, 15));
     const rb = runOne(MIG, b.r, ID);
-    ok(notRun(rb) && /do not parse/.test(rb.res.error), 'MG1 ① …its bytes there and TORN: not run (never «no store»)', rb.res);
+    ok(notRun(rb) && /its bytes do not parse — not run: it does not mend by itself; move it aside \(or restore it\)/.test(rb.res.error), 'MG1 ① …its bytes there and TORN: not run (never «no store»), and the notice says the way out — it does not mend by itself: move it aside or restore it (r3246)', rb.res);
     const c = world('own-none'), rc = runOne(MIG, c.r, ID);
     ok(rc.res && rc.res.status === 'ran' && rc.recorded, 'MG1 ① …NOT THERE: nothing to do — recorded as before', rc.res);
     const Today = today("        const doc = MR.readJson(f, 'task-groups.json'); if (!doc) return; // no store yet = nothing to do; MG1: unread or torn = not run\n",
@@ -3832,6 +3875,17 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.writeFileSync(fe2, DOC); fs.writeFileSync(arch2, ARCH);
     const re2 = refusing(['readFileSync'], arch2, () => runOne(TodayA, e2.r, ID));
     ok(re2.recorded && !JSON.parse(fs.readFileSync(arch2, 'utf8')).t0, 'MG1 ⑨ RED today\'s read: the earlier archive is written over with this run\'s plans alone (its entry lost)', re2.res);
+  }
+  // r3246 (1): A REFUSAL NAMES A FILE PLAINLY — under the run's data folder «data/<its place>», anywhere else its last name alone,
+  // never an absolute path (a helper's own catch hands its whole path)
+  {
+    const MRD = require('../src/migration-reads.js'), D = path.join(tmp, 'mg1-names', 'data'), eio = () => Object.assign(new Error('EIO'), { code: 'EIO' });
+    const said = (fn) => { try { fn(); return null; } catch (e) { return e && e.message; } };
+    const inData = said(() => MRD.during(() => MRD.absentOr(eio(), path.join(D, 'session-meta', 'cw-a.json')), D));
+    const elsewhere = said(() => MRD.during(() => MRD.absentOr(eio(), path.join(scratchHomeDir, '.agent-browser', 'config.json')), D));
+    const outside = said(() => MRD.absentOr(eio(), path.join(D, 'session-meta', 'cw-a.json')));
+    ok(/^data\/session-meta\/cw-a\.json is there and could not be read \(EIO\)/.test(inData || '') && /^config\.json is there/.test(elsewhere || '') && !String(inData).includes(tmp) && !String(elsewhere).includes(tmp) && outside === null,
+      'MG1 r3246 (1): a refusal names a file under the data folder as data/<its place> and any other by its last name — never an absolute path; outside a migration the helper keeps its answer', { inData, elsewhere, outside });
   }
   // ② ITS OWN LISTING (2026-10-usage-ledger-dedup, data/usage-history)
   {

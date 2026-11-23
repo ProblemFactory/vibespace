@@ -13464,6 +13464,10 @@ export default {
   // lane job-secrets-retire r3: both names present (2026-10-job-secrets-retired) + a failed boot migration's ONE For-you item (src/migration-runner.js)
   "Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.": "有两个文件存着后台工作任务的密钥，什么都没有移动：{from} 和 {to}。把其中一个移出 data/（或删除它），然后重启——VibeSpace 绝不替你在这两个文件之间做选择。",
   "A data migration failed at startup: {id}": "一项数据迁移在启动时失败：{id}",
+  "Data migrations did not run at startup: {file} could not be read": "数据迁移在启动时没有运行：读不出 {file}",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "Its bytes do not hold a migration ledger, and it does not mend by itself: restore it from a copy, or move it aside — every migration then runs again at the next start.": "它的内容不是迁移记录，也不会自行修复：请从备份恢复它，或把它移到别处——下次启动时所有迁移会重新运行。",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "Reading it failed ({error}); it is read again at the next start.": "读取它失败（{error}）；下次启动时会再读一次。",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "This notice closes by itself at the first start whose ledger reads.": "迁移记录能读出的第一次启动时，这条通知会自行关闭。",   // lane lg-group-parents r3244: the unread ledger's For-you item
   "Its error: {error}": "它的错误：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "没有记录任何内容——下次启动时会重试；服务器日志里有完整的一行。",
   "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)

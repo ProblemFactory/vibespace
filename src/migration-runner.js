@@ -19,6 +19,9 @@
 //     error's first line — `failedLine`: the secret-shapes belt over the WHOLE line, THEN the cut, r4) and the run that
 //     succeeds resolves it. A migration that said its failure in its own For-you words throws with `told: true` — no second
 //     item. A notice that cannot be filed is a warn line. The hub's `migration-failed:` toast carries the same `failedLine`
+//   · THE LEDGER UNREAD (r2999 / r3244): nothing runs at that start, nothing is rewritten, and it is said ONCE — on the hub as ONE
+//     For-you item with a fixed key (`migrations-ledger`: its words name the file and the person's way out), closed by the first
+//     start whose ledger reads; on a device as its journal line
 //   · a STEPPED migration (lane ledger-dedup-law, 2026-10-27 — a 23.8 GiB
 //     ledger shard cannot be rewritten inside one boot tick): its run()
 //     returns a PROMISE; the boot goes on at once (results say `started`),
@@ -39,6 +42,17 @@ const FAILED_WORDS = Object.freeze({
   retry: i18nKey('Nothing was recorded — it retries at the next start; the server log has the whole line.'),
   source: i18nKey('Migrations'), // the tray group's name (zh / ja)
 });
+// r3244 — THE LEDGER UNREAD IS SAID WHERE THE OWNER LOOKS: ONE For-you item, a FIXED key (one item across boots), through the
+// same road as a failed migration; its words name the file and say what a person can do; the first start whose ledger reads
+// closes it
+const LEDGER_ITEM = 'migrations-ledger';
+const LEDGER_WORDS = Object.freeze({
+  text: i18nKey('Data migrations did not run at startup: {file} could not be read'),
+  torn: i18nKey('Its bytes do not hold a migration ledger, and it does not mend by itself: restore it from a copy, or move it aside — every migration then runs again at the next start.'),
+  read: i18nKey('Reading it failed ({error}); it is read again at the next start.'),
+  closes: i18nKey('This notice closes by itself at the first start whose ledger reads.'),
+});
+const fillWords = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
 // an error's FIRST line as a screen may carry it (the For-you item, the hub's toast): the belt sees the WHOLE line, THEN the
 // cut (r4, review R3-F1: a token cut at 300 first is no longer a shape the belt knows — secret-shapes: never cut inside a value)
 function failedLine(e) { return redactSecrets(String((e && e.message) || e).split('\n')[0], { runs: true }).text.slice(0, 300); }
@@ -49,9 +63,19 @@ function sayFailed(todos, id, e, warn) {
   try {
     const error = failedLine(e);
     const head = { key: FAILED_WORDS.text, params: { id } }, lines = [{ key: FAILED_WORDS.error, params: { error } }, { key: FAILED_WORDS.retry }];
-    const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
-    store.add(FAILED_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Migrations', itemKey: id, text: fill(head), detail: lines.map(fill).join('\n'), i18n: { text: head, detail: lines, source: { key: FAILED_WORDS.source } } });
+    store.add(FAILED_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Migrations', itemKey: id, text: fillWords(head), detail: lines.map(fillWords).join('\n'), i18n: { text: head, detail: lines, source: { key: FAILED_WORDS.source } } });
   } catch (x) { warn(`[migrate] ${id}: its For-you notice was not filed — ${(x && x.message) || x}`); }
+}
+/** r3244: the ledger there and unread → its ONE For-you item (the fixed key): the file by its plain name and what a person can do */
+function sayLedgerUnread(todos, ledgerPath, ledger, warn) {
+  const store = inboxOf(todos);
+  if (!store) return;
+  try {
+    const file = path.join(path.basename(path.dirname(ledgerPath)), path.basename(ledgerPath));   // «data/migrations.json» — never the whole path
+    const head = { key: LEDGER_WORDS.text, params: { file } };
+    const lines = [ledger.torn ? { key: LEDGER_WORDS.torn } : { key: LEDGER_WORDS.read, params: { error: String(ledger.unread) } }, { key: LEDGER_WORDS.closes }];
+    store.add(FAILED_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Migrations', itemKey: LEDGER_ITEM, text: fillWords(head), detail: lines.map(fillWords).join('\n'), i18n: { text: head, detail: lines, source: { key: FAILED_WORDS.source } } });
+  } catch (x) { warn(`[migrate] the unread ledger's For-you notice was not filed — ${(x && x.message) || x}`); }
 }
 function sayRan(todos, id) {
   const store = inboxOf(todos);
@@ -65,11 +89,13 @@ function sayRan(todos, id) {
  *  again (before: «nothing was ever applied», every migration ran again and the ledger was rewritten). */
 function readLedger(ledgerPath) {
   let text;
-  try { text = fs.readFileSync(ledgerPath, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { applied: {} }; return { unread: (e && e.code) || 'error' }; }
+  try { text = fs.readFileSync(ledgerPath, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { applied: {} }; return { unread: (e && e.code) || 'error', torn: false }; }
   let ledger;
-  try { ledger = JSON.parse(text); } catch { return { unread: 'its bytes do not parse' }; }
-  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) return { unread: 'it holds no ledger' };
-  if (!ledger.applied || typeof ledger.applied !== 'object') ledger.applied = {};
+  try { ledger = JSON.parse(text); } catch { return { unread: 'its bytes do not parse', torn: true }; }
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) return { unread: 'it holds no ledger', torn: true };
+  // r3244: an object with no usable list of what ran (none, a string, a list) is TORN too — never «nothing applied» (the writer
+  // always writes `applied` as a map; any other shape is bytes this release did not write)
+  if (!ledger.applied || typeof ledger.applied !== 'object' || Array.isArray(ledger.applied)) return { unread: 'it holds no list of what ran', torn: true };
   return ledger;
 }
 function writeLedger(ledgerPath, ledger, warn) {
@@ -95,12 +121,14 @@ function noteReport(ledger, id, report) {
 function runMigrations({ ledgerPath, migrations, log = console.log, warn = console.warn, onLate = null, todos = null, landStores = null }) {
   const ledger = readLedger(ledgerPath);
   if (ledger.unread) {   // r2999: a ledger there and unread — nothing runs, nothing is rewritten, said ONCE (each migration answers failed by that one cause)
-    const why = `${require('path').basename(ledgerPath)} is there and could not be read (${ledger.unread}) — no migration ran at this start and the ledger was not rewritten; the next start reads it again`;
+    const why = `${path.basename(ledgerPath)} is there and could not be read (${ledger.unread}) — no migration ran and the ledger was not rewritten; ${ledger.torn ? 'it does not mend by itself: restore it from a copy or move it aside' : 'the next start reads it again'}`;
     warn(`[migrate] ${why}`);
-    const held = migrations.filter((m) => m && m.id).map((m) => ({ id: m.id, status: 'failed', error: why, code: 'ledger-unread' }));
+    sayLedgerUnread(todos, ledgerPath, ledger, warn);   // r3244: the ONE For-you item (the boot's notice reaches no page: none is connected yet)
+    const held = migrations.filter((m) => m && m.id).map((m) => ({ id: m.id, status: 'failed', error: why, code: 'ledger-unread', unread: ledger.unread }));
     held.ledgerUnread = why;
     return held;
   }
+  sayRan(todos, LEDGER_ITEM);   // r3244: a ledger that reads closes the unread ledger's item (none open: nothing)
   const results = [];
   const ranNow = [];
   // THE ORDER LAW (lane lg-store-writes U5b cure's readers): a migration that threw EVSNOTONDISK left a store reshaped in memory
@@ -121,7 +149,7 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
         report.then((rep) => {
           const late = readLedger(ledgerPath);
           if (late.unread) {   // r2999: the ledger there and unread when the step ENDS — not recorded, not rewritten: it runs again next start
-            const why = `${require('path').basename(ledgerPath)} is there and could not be read (${late.unread}) — ${m.id} ended but is not recorded and the ledger was not rewritten; it runs again at the next start`;
+            const why = `${path.basename(ledgerPath)} is there and could not be read (${late.unread}) — ${m.id} ended but is not recorded and the ledger was not rewritten; it runs again at the next start`;
             warn(`[migrate] ${why}`);
             sayFailed(todos, m.id, Object.assign(new Error(why), { code: 'ledger-unread' }), warn);
             try { onLate?.({ id: m.id, status: 'failed', error: why, code: 'ledger-unread' }); } catch { }
@@ -176,4 +204,4 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
   return results;
 }
 
-module.exports = { runMigrations, failedLine, FAILED_INBOX_KEY, FAILED_WORDS };
+module.exports = { runMigrations, failedLine, FAILED_INBOX_KEY, FAILED_WORDS, LEDGER_ITEM, LEDGER_WORDS };

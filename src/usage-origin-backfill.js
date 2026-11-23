@@ -98,12 +98,12 @@ function buildRidOrigins({ projectsDir, onProgress = null }) {
   const projectCwdFor = makeProjectCwdReader();
   let bytes = 0;
   let projDirs = [];
-  try { projDirs = fs.readdirSync(projectsDir); } catch (e) { MR.absentOr(e, 'projects'); }
+  try { projDirs = fs.readdirSync(projectsDir); } catch (e) { MR.absentOr(e, '~/.claude/projects'); }
   for (const pd of projDirs.sort()) {
     if (isFixtureProjectDir(pd)) continue;
     const pdAbs = path.join(projectsDir, pd);
     let entries = [];
-    try { entries = fs.readdirSync(pdAbs); } catch (e) { MR.absentOr(e, pdAbs); continue; }
+    try { entries = fs.readdirSync(pdAbs); } catch (e) { MR.absentOr(e, 'a project folder under ~/.claude/projects');   /* r3246 (1): its encoded name spells the home's path */ continue; }
     const found = [];             // {fp, sid, origin, wf?, agent?}
     const mains = [];
     for (const fn of entries.sort()) {

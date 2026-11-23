@@ -695,6 +695,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
         const lost = restore(items); V.zero(made.dek);
         if (lost.length) load(); else try { fs.unlinkSync(FILE); } catch { }   // a file NOT put back lives in the record alone (read back, every key proven): the vault stays set up, LOCKED — the next unlock resumes its seal
         audit('vault-setup-refused', { ip, code: 'migration_failed', why: (res && res.error) || 'seal', ...(lost.length ? { kept: lost } : {}) });
+        // r3244: a migration ledger that could not be read ran nothing — the refusal says THAT, never «a key file could not be sealed»
+        if (res && res.code === 'ledger-unread' && !lost.length) return { ok: false, code: 'migration_failed', why: `data/migrations.json could not be read (${res.unread || 'unread'}) — no key file was sealed, every file is as it was` };
         return { ok: false, code: 'migration_failed', why: lost.length ? `a key file could not be sealed and ${lost.join(', ')} could not be put back — the vault record holds every key: unlock it to finish the seal` : 'a key file could not be sealed — every file was put back, nothing changed' };
       }
       const { sealing, ...done } = back;

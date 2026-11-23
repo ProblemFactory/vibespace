@@ -402,7 +402,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         let dir = B.configNamesProfile(cfg) ? String(cfg.profile) : path.join(homeDir, '.agent-browser', 'default-profile');
         if (dir.startsWith('~/')) dir = path.join(homeDir, dir.slice(2));
         if (!path.isAbsolute(dir)) dir = path.join(homeDir, '.agent-browser', dir);
-        let dst = null; try { dst = fs.statSync(dir); } catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) throw MR.unread(dir, e); }   // MG1: not there = nothing to adopt; any other failed stat = not run
+        let dst = null; try { dst = fs.statSync(dir); } catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) throw MR.unread(`the legacy browser profile folder (${path.basename(dir)})`, e); }   // MG1: not there = nothing to adopt; any other failed stat = not run (r3246 (1): never the whole path)
         const isDir = !!(dst && dst.isDirectory());
         if (!isDir) { console.log(`[migrate] legacy browser profile: nothing to adopt (${dir} is not a directory)`); return; }
         // A keeper built HERE only touches the registry file (no broadcast, no
@@ -1663,7 +1663,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   }
 
   // MG1 (r2929): every run with the shared helpers' reads strict (src/migration-reads.js `during` — its synchronous part)
-  const strictRun = (m) => ({ ...m, run: () => MR.during(() => m.run()) });
+  const strictRun = (m) => ({ ...m, run: () => MR.during(() => m.run(), dataDir) });   // r3246 (1): its notices name files under data/ by their place there
   function runLocalMigrations({ only = null } = {}) {   // `only` = ids (a suite's one boot of one migration)
     // lane hub-loop-stalls commit 2: the live ledger's cursors are written by the store writer — an owed write is settled
     // before any migration reads or rewrites _cursors.json (never an older state landing after a migration's own)

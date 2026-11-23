@@ -13463,6 +13463,10 @@ export default {
   // lane job-secrets-retire r3: both names present (2026-10-job-secrets-retired) + a failed boot migration's ONE For-you item (src/migration-runner.js)
   "Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.": "バックグラウンド作業の秘密を保存したファイルが 2 つあり、何も移動していません：{from} と {to}。どちらか一方を data/ の外へ移動（または削除）してから再起動してください——VibeSpace があなたのファイルのどちらかを選ぶことはありません。",
   "A data migration failed at startup: {id}": "データ移行が起動時に失敗しました：{id}",
+  "Data migrations did not run at startup: {file} could not be read": "起動時にデータ移行が実行されませんでした：{file} を読めませんでした",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "Its bytes do not hold a migration ledger, and it does not mend by itself: restore it from a copy, or move it aside — every migration then runs again at the next start.": "中身が移行記録になっておらず、自然には直りません：コピーから戻すか、別の場所へ移してください——次の起動ですべての移行がもう一度実行されます。",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "Reading it failed ({error}); it is read again at the next start.": "読み取りに失敗しました（{error}）；次の起動でもう一度読みます。",   // lane lg-group-parents r3244: the unread ledger's For-you item
+  "This notice closes by itself at the first start whose ledger reads.": "移行記録が読める最初の起動で、この通知は自動で閉じます。",   // lane lg-group-parents r3244: the unread ledger's For-you item
   "Its error: {error}": "エラー：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "何も記録していません——次回の起動時に再試行します。サーバーログに行全体があります。",
   "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)

@@ -20,30 +20,45 @@ const path = require('path');
 const CODE = 'migration-input-unread';
 // «not there»: ENOENT, and ENOTDIR (a path whose folder is a file — the same answer)
 const absent = (e) => !!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'));
-let depth = 0;
+let depth = 0, root = null;
 
-/** fn() with the shared helpers' reads strict (a migration's run) */
-function during(fn) { depth++; try { return fn(); } finally { depth--; } }
+/** fn() with the shared helpers' reads strict (a migration's run); `dataRoot` = the data folder its notices name files under */
+function during(fn, dataRoot = null) {
+  depth++; const was = root; if (dataRoot) root = path.resolve(String(dataRoot));
+  try { return fn(); } finally { depth--; root = was; }
+}
 const inMigration = () => depth > 0;
-const nameOf = (p) => { const s = String(p || ''); return path.basename(s) || s; };
+/** r3246 (1): a refusal names a file by its PLAIN name, never an absolute path: under the data folder «data/<its path there>» (a
+ *  person can find it), anywhere else its last name alone; a name the caller wrote (not a path) is kept as it is */
+const nameOf = (p) => {
+  const s = String(p || '');
+  if (!path.isAbsolute(s)) return s;
+  if (root && (s === root || s.startsWith(root + path.sep))) return path.join('data', path.relative(root, s));
+  return path.basename(s) || s;
+};
+/** r3246 (2): bytes that do not parse never mend by themselves — the refusal says the person's way out (move the file aside or
+ *  restore it); a read that failed is tried again at the next start */
 function unread(what, e) {
-  const why = e instanceof SyntaxError ? 'its bytes do not parse' : ((e && e.code) || 'an error');
-  return Object.assign(new Error(`${what} is there and could not be read (${why}) — not run: the next start tries again`), { code: CODE });
+  const name = nameOf(what);
+  const msg = e instanceof SyntaxError
+    ? `${name} is there and its bytes do not parse — not run: it does not mend by itself; move it aside (or restore it) and the next start runs it again`
+    : `${name} is there and could not be read (${(e && e.code) || 'an error'}) — not run: the next start tries again`;
+  return Object.assign(new Error(msg), { code: CODE });
 }
 /** in a shared helper's catch of a READ: «not there» and every caller outside a migration keep the helper's answer */
 function absentOr(e, what) {
   if (e && e.code === CODE) throw e;   // an inner read's refusal, carried as it is (never wrapped twice)
   if (absent(e) || !inMigration()) return;
-  throw unread(nameOf(what), e);
+  throw unread(what, e);
 }
-const orNone = (fn, what) => { try { return fn(); } catch (e) { if (absent(e)) return null; throw unread(nameOf(what), e); } };
+const orNone = (fn, what) => { try { return fn(); } catch (e) { if (absent(e)) return null; throw unread(what, e); } };
 /** the text, or null when the file is not there */
 const readText = (file, what = file) => orNone(() => fs.readFileSync(file, 'utf-8'), what);
 /** the parsed JSON, or null when the file is not there; bytes there that do not parse throw */
 function readJson(file, what = file) {
   const t = readText(file, what);
   if (t === null) return null;
-  try { return JSON.parse(t); } catch (e) { throw unread(nameOf(what), e); }
+  try { return JSON.parse(t); } catch (e) { throw unread(what, e); }
 }
 /** a folder's names, or null when it is not there */
 const list = (dir, what = dir, opts) => orNone(() => (opts ? fs.readdirSync(dir, opts) : fs.readdirSync(dir)), what);
