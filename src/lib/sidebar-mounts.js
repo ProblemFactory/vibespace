@@ -400,6 +400,7 @@ export function installSidebarMounts(Sidebar) {
       overlayLastRuns(hd && hd.hosts, this._lastRunSeen); // B-a31a: a run pushed while this list was on its way stays shown
       d.mountTokens = mt?.tokens || [];
       d.mountTokensUnread = !!(mt && mt.unread);   // B-f276 family unit 1: mount-tokens.json held — why no link is listed
+      d.mountTokensTorn = (mt && typeof mt.torn === 'string' && mt.torn) || null;   // …and a lift from torn bytes: where the old bytes are
       this._machineMountsData = mm?.mounts || []; // push AND pull mounts, keyed by hostId (B-f3e8)
       this._mountsData = d;
       // B-54b7 (the B-f276 remainder's cure, 主开发 23:20Z): a list that arrives with the HOLD's mark (`unread`: hosts.json /
@@ -515,6 +516,7 @@ export function installSidebarMounts(Sidebar) {
       // is a connected place — S3, Drive, WebDAV, SFTP, a shared folder, etc.
       const list = document.createElement('div');
       list.className = 'mounts-list';
+      if (typeof d.torn === 'string' && d.torn) list.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its storage list (the file was damaged), so it started empty. The old bytes are kept beside it as {name}.', { name: d.torn }) }));   // round wom600meg (4)
       if (d.unread) list.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint', textContent: tr('VibeSpace cannot read its storage list right now, so none is listed. Nothing is lost: it comes back here when it reads (it tries again every few minutes); changes to storage wait until then.') }));   // B-f276 family unit 1: mounts.json held
       else if (!d.mounts.length) {
         list.innerHTML = `<div class="mounts-empty">${escHtml(tr('Nothing connected yet. Click “Connect storage” below to add a cloud folder (S3, Google Drive, Nextcloud, SFTP…), or “Import share link” to open a folder someone shared with you.'))}</div>`;
@@ -585,10 +587,11 @@ export function installSidebarMounts(Sidebar) {
       );
       root.appendChild(foot);
       // Bridge tokens I minted (revocable)
-      if ((d.mountTokens || []).length || d.mountTokensUnread) {
+      if ((d.mountTokens || []).length || d.mountTokensUnread || d.mountTokensTorn) {
         const bt = document.createElement('div');
         bt.className = 'mounts-shares';
         bt.innerHTML = `<div class="mounts-sec-head">${escHtml(tr('Bridge tokens'))}</div>`;
+        if (d.mountTokensTorn) bt.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its folder links (the file was damaged), so they started empty: each machine’s push mount must be pushed again. The old bytes are kept beside it as {name}.', { name: d.mountTokensTorn }) }));   // round wom600meg (4)
         if (d.mountTokensUnread) bt.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint', textContent: tr('VibeSpace cannot read its folder links right now, so none is listed and links into this computer are refused. Nothing is lost: they come back here when they read (it tries again every few minutes); new links wait until then.') }));   // B-f276 family unit 1: mount-tokens.json held
         for (const t of d.mountTokens) {
           const row = document.createElement('div');
@@ -1311,7 +1314,7 @@ export function installSidebarMounts(Sidebar) {
           // verify-r6 U1: a refused / failed removal is SAID (the api() throw was unguarded — the click did nothing, silently)
           if (ok) {
             try { await api(`/api/hosts/${h.id}`, { method: 'DELETE' }); if (isDial) showToast(tr('Unpaired')); }
-            catch (e) { showToast(tr('Could not remove "{name}" — {why}', { name: h.name, why: e && e.code === 'hosts-unread' ? hostsHeldWords() : (e && e.message) || tr('server unreachable') }), { type: 'error' }); }   // 主开发 01:20Z (5)
+            catch (e) { showToast(tr('Could not remove "{name}" — {why}', { name: h.name, why: e && e.code === 'hosts-unread' ? hostsHeldWords() : e && e.code === 'tokens_unread' ? thrownText(e) : (e && e.message) || tr('server unreachable') }), { type: 'error' }); }   // 主开发 01:20Z (5); B-f276 family unit 1: the folder links held, worded by code
           }
         }, 'mounts-icon-danger'),
       );

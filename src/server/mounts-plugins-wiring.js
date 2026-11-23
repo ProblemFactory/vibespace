@@ -820,7 +820,7 @@ app.get('/vibespace-node/:version/:file', async (req, res) => {
 /** a plugin door's refusal: a HELD plugins.json (B-f276 family unit 1) answers 503 with its code — the page words it by code */
 const pluginRefusal = (res, e) => res.status(e && e.code === 'plugins_unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'plugins_unread' ? { code: e.code } : {}) });
 app.get('/api/plugins', (req, res) => {
-  try { res.json({ plugins: plugins.list(), ...(plugins.unreadWords() ? { unread: plugins.unreadWords() } : {}) }); plugins.refreshAll(); } catch (e) { res.status(500).json({ error: e.message }); }   // B-f276 family unit 1: why every plugin reads as off
+  try { res.json({ plugins: plugins.list(), ...(plugins.unreadWords() ? { unread: plugins.unreadWords() } : {}), ...(plugins.tornCopy() ? { torn: plugins.tornCopy() } : {}) }); plugins.refreshAll(); } catch (e) { res.status(500).json({ error: e.message }); }   // B-f276 family unit 1: why every plugin reads as off
 });
 app.get('/api/plugins/:id/status', async (req, res) => {
   try { const st = await plugins.refreshStatus(req.params.id); res.json(plugins.unreadWords() && st && typeof st === 'object' ? { ...st, unread: plugins.unreadWords() } : st); } catch (e) { pluginRefusal(res, e); }   // B-f276 family unit 1: a held plugins.json is said (the first-use offer asks nothing then)
@@ -942,6 +942,7 @@ app.get('/api/mounts', async (req, res) => {
   res.json({
     mounts: mounts.list(),
     ...(mounts.unreadWords() ? { unread: mounts.unreadWords() } : {}),   // B-f276 family unit 1: mounts.json held — why the list is empty
+    ...(mounts.tornCopy() ? { torn: mounts.tornCopy() } : {}),   // …and a lift from torn bytes in this run: where the old bytes are
     providers: mounts.providers(),   // the storage providers' client cells (lane dc-mount-client)
     shares: mounts.listShares(),
     env: cfg ? { endpoint: cfg.endpoint, bucket: cfg.bucket, prefix: cfg.prefix, accessKey: cfg.accessKey, configured: cfg.configured, importedFromEnv: cfg.importedFromEnv } : null,
@@ -999,7 +1000,7 @@ app.post('/api/mounts/:id/ceph-share', async (req, res) => {
 });
 
 // Mount tokens (WebDAV bridge): mint returns the link ONCE; stored hashed
-app.get('/api/mount-tokens', (req, res) => res.json({ tokens: mountTokens.list(), ...(mountTokens.unreadWords() ? { unread: mountTokens.unreadWords() } : {}) }));   // B-f276 family unit 1: why the list is empty
+app.get('/api/mount-tokens', (req, res) => res.json({ tokens: mountTokens.list(), ...(mountTokens.unreadWords() ? { unread: mountTokens.unreadWords() } : {}), ...(mountTokens.tornCopy() ? { torn: mountTokens.tornCopy() } : {}) }));   // B-f276 family unit 1: why the list is empty
 app.post('/api/mount-tokens', (req, res) => {
   try {
     const { name, root, mode } = req.body || {};

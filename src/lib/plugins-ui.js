@@ -196,6 +196,7 @@ export function installPluginsUI(App) {
       }
       body.innerHTML = '';
       // B-f276 family unit 1: plugins.json HELD (it could not be read) — every row below reads as off because its record is unread
+      if (typeof r.torn === 'string' && r.torn) body.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline plugins-torn-hint', textContent: t('VibeSpace could not use its plugins’ settings (the file was damaged), so every plugin started off. The old bytes are kept beside it as {name}.', { name: r.torn }) }));   // round wom600meg (4)
       if (r.unread) body.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline plugins-held-hint', textContent: t('VibeSpace cannot read its plugins’ settings right now, so every plugin shows as off. Nothing is lost: VibeSpace starts none of them and changes wait until the settings read (it tries again every few minutes).') }));
       const list = document.createElement('div'); list.className = 'plugin-list';
       body.appendChild(list);

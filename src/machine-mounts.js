@@ -857,6 +857,10 @@ class MachineMounts {
     // that machine cannot be reached, and the remote unmount was swallowed while the token was revoked and the record dropped (a dead
     // mount left on the machine, nothing said): refused by name, nothing changed
     if (rec.dir !== 'pull' && this.hosts.held?.()) throw Object.assign(new Error(`removing a mount on a machine: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 });
+    // B-f276 family unit 1 (round wom600meg's MUST): a push mount's removal REVOKES its token — while mount-tokens.json is HELD that
+    // revoke cannot be made (it refuses by name), and the release's swallow would drop the record while the token opens the folder
+    // again at the lift: refused by name BEFORE anything moves (the record and the token both kept)
+    { const w = this._revokeHeldWords(rec); if (w) throw Object.assign(new Error(`removing a mount on a machine: ${w}`), { code: 'tokens_unread', status: 503 }); }
     if (rec.dir === 'pull') {
       const live = this._live.get(id);
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
@@ -1286,6 +1290,18 @@ class MachineMounts {
 
   /** The machine is being removed/unpaired — drop its mounts (records + live
    *  chains + tokens). Remote-side unmounts are best-effort. */
+  /** B-f276 family unit 1: the words while a removal of `rec` cannot revoke its token (mount-tokens.json held) — null when it can */
+  _revokeHeldWords(rec) {
+    if (!rec || rec.dir === 'pull' || !rec.tokenId || !this.mountTokens || typeof this.mountTokens.unreadWords !== 'function') return null;
+    return this.mountTokens.unreadWords() || null;
+  }
+  /** …the same question for a machine about to be removed: one of its push mounts would keep its token (the un-pairing asks it
+   *  BEFORE any side effect — its own unmounts run inside a swallow) → the words, or null */
+  revokeHeldFor(hostId) {
+    for (const rec of this._state.mounts) if (rec.hostId === hostId) { const w = this._revokeHeldWords(rec); if (w) return w; }
+    return null;
+  }
+
   async onMachineUnpaired(hostId) {
     if (!hostId) return;
     for (const rec of [...this._state.mounts.filter((m) => m.hostId === hostId)]) {

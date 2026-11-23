@@ -95,7 +95,7 @@ class PluginManager {
       file: this._file, valid: PLUGINS_SHAPE, code: 'plugins_unread', aside: (mark) => this._file + '.corrupt-' + mark,
       words: (h) => `plugins.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No plugin setting is lost: nothing is written over it, no plugin is started by VibeSpace, and changes to plugins wait until it reads.`,
       log: (s) => console.warn('[plugins] ' + s),
-      onLift: (v) => this._lifted(v),
+      onLift: (v, facts) => this._lifted(v, facts),
     });
     let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: PLUGINS_SHAPE });
@@ -229,11 +229,15 @@ class PluginManager {
 
   /** the words a person reads while plugins.json is held (the plugins list, a refused change) — null when it reads */
   unreadWords() { return this._hold.words(); }
+  /** a lift from torn bytes in this run: the copy's base name (the panel says where the old bytes are) — null when none */
+  tornCopy() { const t = this._hold.torn(); return t ? t.copy : null; }
   /** the hold LIFTED (src/store-read-hold.js): the records read (null: empty); what the start skipped runs now — the boot replay
-   *  and the vault's seal when they were asked — and every card is told */
-  _lifted(v) {
+   *  and the vault's seal when they were asked — and every card is told. Round wom600meg (4): a lift from TORN bytes saves the empty
+   *  shape ONCE (plugins.json has no remover: the next starts would hold again, and the two one-time moves throw at every start) */
+  _lifted(v, facts) {
     this._state = v || { plugins: {} };
     if (!this._state.plugins) this._state.plugins = {};
+    if (!v && facts && facts.setAside) this._save();
     this._notify();
     if (this._replayAsked) { this._replayAsked = false; this.bootReplay(); }
     if (this._sealAsked) { this._sealAsked = false; this.sealSecrets(); }

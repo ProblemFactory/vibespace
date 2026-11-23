@@ -554,6 +554,8 @@ class MountManager {
   }
   /** the words a person reads while mounts.json is held (the storage list, a refused change) — null when it reads */
   unreadWords() { return this._hold.words(); }
+  /** a lift from torn bytes in this run: the copy's base name (the Storage section says where the old bytes are) — null when none */
+  tornCopy() { const t = this._hold.torn(); return t ? t.copy : null; }
 
   _save() {
     if (!this._hold.writable('a storage change')) return;   // held: nothing is written over the file

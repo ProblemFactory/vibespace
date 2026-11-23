@@ -16,6 +16,13 @@
 //      the SAME token resolves after the lift (nothing re-minted); plugins — the boot replay starts nothing (replayed at the lift),
 //      the service state says unread (the page's first-use offer asks nothing then: its pins); THE SECRET LENS — no token, no hash,
 //      no sealed field in any word, journal line or refusal.
+//   ⑤ ROUND wom600meg (主开发 r3029): THE MUST — a push mount removed while mount-tokens.json is held is REFUSED BY NAME (the record
+//      and the token kept; after the lift the removal revokes; RED CONTROL: the guard cut drops the record while the token lives);
+//      the machine's removal asks first (pin). THE HELPER: one in flight is the read AND its copy; the family's CEILING (24 held stores
+//      over reads that never answer hold four); the live holds as a list + readAgainOf; a torn lift says so (the copy named; plugins.json
+//      saves its empty shape once). THE SHOULDS TAKEN: every store's _save refuses on its own (RED: that line alone cut); ③'s red
+//      control (`|| timer` cut ⇒ a timer a try); the helper's own legs (the missing two-step, stop, a throwing lift, no place for a copy);
+//      the remount's auth words never match a held refusal (a mount refused while held reconnects after the lift).
 import './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -71,6 +78,7 @@ const STORES = [
 ];
 const tryCode = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 const stopOf = (s) => { try { s && s._hold && s._hold.stop(); } catch { } };
+const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 10)); return !!fn(); };
 const lifted = async (s, ms = 3000) => { const t0 = Date.now(); while (s._hold.held() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20)); return !s._hold.held(); };
 
 try {
@@ -165,7 +173,7 @@ try {
     ok(calls.length === 0 && s._restoreAsked === true && onDisk(f) === bytes, 'held: the health sweep and the boot restore mount, unmount and kill NOTHING (a live mount keeps serving), nothing is written; the restore is noted', { calls });
     const words = [s.unreadWords(), refused && refused.message, ...said].join('\n');
     ok(!!refused && !words.includes(SEALED), 'THE SECRET LENS: no sealed field of a mount in the list\'s words, the refusal or any journal line', said);
-    await s._hold.again(); await new Promise((r) => setTimeout(r, 50));
+    await s._hold.again(); await until(() => calls.includes('mount mnt-live0001'));   // (polled: the restore is fired at the lift)
     ok(calls.includes('mount mnt-live0001') && !s._restoreAsked, 'at the lift the boot restore runs (the mount desired up is connected then)', calls);
     stopOf(s);
   }
@@ -211,6 +219,138 @@ try {
     const UI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8'), SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
     const g = UI.indexOf('if (st.unread) { if (needsService) showToast(pluginsHeldWords()'), dlg = UI.indexOf('const accepted = await this._harnessServiceDialog(meta, st);');
     ok(g > 0 && dlg > g && SB.includes('if (!svc || svc.unread || !svc.installed'), 'THE PAGE (pins): the first-use offer returns before its dialog while held (a «Not now» is never re-asked), and the sidebar\'s service hint is not drawn');
+  }
+  {
+    console.log('⑤ round wom600meg MUST: a push mount removed while mount-tokens.json is held');
+    const crypto = require('node:crypto'), sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
+    const MMmod = require('../src/machine-mounts.js');
+    const mk = (MM, tokens, rec, calls) => { const S = Object.create(MM.prototype); Object.assign(S, { _unread: null, _state: { mounts: [rec] }, hosts: { held: () => false, unreadWords: () => null }, mountTokens: tokens, _run: async (...a) => { calls.push('run ' + a[1]); }, _save: () => { calls.push('save'); }, _notify: () => { }, _pushTunnelOwned: new Map(), _pushRetryAt: new Map(), _pushDown: new Map(), _live: new Map() }); return S; };
+    const plantT = (tag) => { const d = dirOf(tag), f = path.join(d, 'mount-tokens.json'), RAW = ['vs', 'mt_'].join('') + 'c'.repeat(48); const bytes = JSON.stringify({ tokens: [{ id: 'mtk-push0001', name: 'host:h-made', kind: 'reverse-mount', owner: 'h-made', tokenHash: sha(RAW), root: d, mode: 'ro', createdAt: 1, lastUsedAt: null }] }, null, 2); fs.writeFileSync(f, bytes); const un = refuse(f); let T = null; try { T = new MountTokens({ dataDir: d, log: quiet }); } finally { un(); } return { d, f, RAW, bytes, T }; };
+    const rec = { id: 'mm-push0001', dir: 'push', hostId: 'h-made', folder: '/made/up/share', mode: 'ro', mountpoint: '/made/up/mp', method: 'rclone-webdav', tokenId: 'mtk-push0001', createdAt: 1 };
+    const A = plantT('push-held'), calls = [], S = mk(MMmod.MachineMounts, A.T, { ...rec }, calls);
+    const e = await S.unmount('mm-push0001').then(() => null, (x) => x);
+    ok(!!e && e.code === 'tokens_unread' && e.status === 503 && calls.length === 0 && S._state.mounts.length === 1 && onDisk(A.f) === A.bytes, 'held: removing a push mount is REFUSED BY NAME before anything moves (no remote unmount, no save) — the record and the token both kept', { code: e && e.code, calls });
+    ok(!!S.revokeHeldFor('h-made') && S.revokeHeldFor('h-other') === null, 'the machine\'s removal asks the same question (revokeHeldFor names the hold for a machine with a push mount, none for another)');
+    await A.T._hold.again();
+    const e2 = await S.unmount('mm-push0001').then(() => null, (x) => x);
+    ok(!e2 && S._state.mounts.length === 0 && A.T.resolve(A.RAW) === null && !onDisk(A.f).includes('mtk-push0001'), 'after the lift the removal REVOKES: the token resolves no more and leaves the file; the record goes', e2 && e2.message);
+    const B = plantT('push-held-ctl');
+    const X = mutant('src/machine-mounts.js', [["    { const w = this._revokeHeldWords(rec); if (w) throw Object.assign(new Error(`removing a mount on a machine: ${w}`), { code: 'tokens_unread', status: 503 }); }", '']]);
+    const S3 = mk(X.MachineMounts, B.T, { ...rec }, []);
+    await S3.unmount('mm-push0001').catch(() => { });
+    await B.T._hold.again();
+    ok(S3._state.mounts.length === 0 && !!B.T.resolve(B.RAW), 'RED CONTROL — the guard cut (the release\'s road): the record is dropped while its token opens the folder again at the lift');
+    stopOf(A.T); stopOf(B.T);
+    const DP = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8'), ask = DP.indexOf('machineMounts.revokeHeldFor(hosts.findByDeviceId(deviceId)?.id)'), unm = DP.indexOf('await machineMounts.onMachineUnpaired(');
+    ok(ask > 0 && unm > ask, 'THE MACHINE\'S REMOVAL (pin): unpairDialDevice asks revokeHeldFor BEFORE any side effect — its unmounts run inside a swallow');
+  }
+  const H = require('../src/store-read-hold.js');
+  {
+    console.log('⑤ the helper: one in flight is the read AND its copy');
+    const d = dirOf('busy'), f = path.join(d, 'z.json'); fs.writeFileSync(f, 'torn {');
+    const rd = fs.promises.readdir, rf = fs.promises.readFile; let reads = 0, release = null;
+    fs.promises.readdir = function (p, ...a) { if (String(p) === d && !release) return new Promise((r) => { release = () => r(rd.call(fs.promises, p, ...a)); }); return rd.call(fs.promises, p, ...a); };
+    fs.promises.readFile = function (p, ...a) { if (String(p) === f) reads++; return rf.call(fs.promises, p, ...a); };
+    let h = null, during = -1, up = false;
+    try {
+      h = H.create({ file: f, code: 'z', aside: (m) => f + '.corrupt-' + m, words: () => 'z' });
+      h.start({ state: 'corrupt', why: 'did not parse' });
+      await until(() => !!release);   // the copy's folder listing hangs
+      await h.again(); await h.again();
+      during = reads;
+      release(); up = await until(() => !h.held());
+    } finally { fs.promises.readdir = rd; fs.promises.readFile = rf; if (h) h.stop(); }
+    ok(during === 1 && up && fs.readdirSync(d).filter((n) => n.startsWith('z.json.corrupt-')).length === 1, 'while the copy\'s listing hangs, two more tries start NO second read (one pool thread a store, one copy of one content)', { during, up });
+  }
+  {
+    console.log('⑤ the helper: the family\'s ceiling on the shared pool');
+    const d = dirOf('ceiling'), files = Array.from({ length: 24 }, (_, i) => path.join(d, `s${i}.json`)); files.forEach((x) => fs.writeFileSync(x, '{}'));
+    const rf = fs.promises.readFile, pend = []; let started = 0, first = -1, second = -1;
+    fs.promises.readFile = function (p, ...a) { if (files.includes(String(p))) { started++; return new Promise((_, no) => pend.push(() => no(Object.assign(new Error('EIO (placed)'), { code: 'EIO' })))); } return rf.call(fs.promises, p, ...a); };
+    const hs = [];
+    try {
+      for (const x of files) { const h = H.create({ file: x, code: 'c', aside: (m) => x + '.corrupt-' + m, words: () => 'c' }); h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' }); hs.push(h); }
+      const ps = hs.map((h) => h.again()); first = started;
+      pend.splice(0).forEach((no) => no()); await Promise.all(ps);
+      const ps2 = hs.slice(4, 12).map((h) => h.again()); second = started - first;
+      pend.splice(0).forEach((no) => no()); await Promise.all(ps2);
+    } finally { fs.promises.readFile = rf; pend.splice(0).forEach((no) => no()); hs.forEach((h) => h.stop()); }
+    ok(H.CEILING === 4 && first === 4 && second === 4, 'twenty-four held stores over reads that never answer hold FOUR reads; the others wait their turn, ladders armed — and the ceiling frees with its reads (the next tries read four again)', { first, second });
+  }
+  {
+    console.log('⑤ the helper: the live holds as a list; readAgainOf; a torn lift says so');
+    const d = dirOf('list'), f = path.join(d, 'l.json'); fs.writeFileSync(f, '{"made": 1}');
+    const h = H.create({ file: f, code: 'l', aside: (m) => f + '.corrupt-' + m, words: () => 'l' }); h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
+    const L1 = H.holds(), row = L1.find((x) => x.file === 'l.json');
+    ok(!!row && row.held === true && row.code === 'EIO' && row.torn === false && row.copy === null && typeof row.since === 'number' && Object.isFrozen(L1) && Object.isFrozen(row), 'a held store is ONE frozen row of the list (file, code, since, torn, copy, held)', row);
+    const back = await H.readAgainOf('l.json');
+    ok(back === true && !H.holds().some((x) => x.file === 'l.json'), 'readAgainOf(file) reads that one store again: lifted with its records, it leaves the list');
+    h.stop();
+    const d2 = dirOf('list-torn'), f2 = path.join(d2, 'm.json'); fs.writeFileSync(f2, 'torn {');
+    const h2 = H.create({ file: f2, code: 'm', aside: (k) => f2 + '.corrupt-' + k, words: () => 'm' }); h2.start({ state: 'corrupt', why: 'did not parse' });
+    await until(() => !h2.held());
+    const r2 = H.holds().find((x) => x.file === 'm.json');
+    ok(!!r2 && r2.held === false && r2.torn === true && /^m\.json\.corrupt-\d+/.test(String(r2.copy)) && !!h2.torn() && h2.torn().copy === r2.copy, 'a lift from TORN bytes stays listed (held false) with its copy\'s name, and torn() says it to its store', r2);
+    h2.stop();
+    ok(!H.holds().some((x) => x.file === 'm.json'), 'a stopped hold leaves the list');
+    const dt = dirOf('tokens-torn-words'), ft = path.join(dt, 'mount-tokens.json'); fs.writeFileSync(ft, '{"tokens": [ torn');
+    const st = new MountTokens({ dataDir: dt, log: quiet }); await lifted(st);
+    ok(/^mount-tokens\.json\.corrupt-\d+/.test(String(st.tornCopy())), 'a TORN lift of the folder links names its copy for that run (GET /api/mount-tokens answers it; the Bridge tokens section says each push mount must be pushed again)', st.tornCopy());
+    stopOf(st);
+    const dp = dirOf('plugins-torn-save'), fp = path.join(dp, 'plugins.json'); fs.writeFileSync(fp, '{"plugins": { torn');
+    const p1 = new PluginManager({ dataDir: dp, broadcast: quiet }); await lifted(p1);
+    let saved = null; try { saved = JSON.parse(onDisk(fp)); } catch { }
+    const p2 = new PluginManager({ dataDir: dp, broadcast: quiet });
+    ok(!!saved && !!saved.plugins && Object.keys(saved.plugins).length === 0 && !p2._hold.held() && /^plugins\.json\.corrupt-\d+/.test(String(p1.tornCopy())), 'plugins.json (no remover): a lift from torn bytes SAVES its empty shape once — the next start reads it (no hold again; the one-time moves run)', saved);
+    stopOf(p1); stopOf(p2);
+  }
+  for (const S of STORES) {
+    console.log(`⑤ should taken: ${S.name}'s own _save refuses while held (no door in front)`);
+    const run = (X) => { const d = dirOf(S.name + '-save'), f = path.join(d, S.name); const bytes = JSON.stringify(S.plant(d), null, 2); fs.writeFileSync(f, bytes); const un = refuse(f); let s = null; try { s = S.make(d, X); } finally { un(); } try { s._save(); } catch { } stopOf(s); return onDisk(f) === bytes; };
+    ok(run(undefined), `${S.name}: its _save called while held writes NOTHING (the guard of every save road with no door: a plugin's own record, the tokens' debounced save, a later migration)`);
+    ok(!run(mutant(S.rel, [S.cut[0]])), `${S.name}: RED CONTROL — that one line cut, the same _save writes over the file`);
+  }
+  {
+    console.log('⑤ should taken: ③\'s red control; the helper\'s own paths');
+    const d = dirOf('storm-ctl'), f = path.join(d, 'y.json'); fs.writeFileSync(f, '{}');
+    const HX = mutant('src/store-read-hold.js', [['    if (stopped || !held || timer) return;', '    if (stopped || !held) return;']]);
+    const st = globalThis.setTimeout, armed = [];
+    globalThis.setTimeout = function (fn, ms, ...a) { const tm = st(fn, ms, ...a); if (String(fn).includes('again().catch(onErr)')) armed.push(ms); return tm; };
+    const un = refuse(f); let h = null;
+    try { h = HX.create({ file: f, code: 'y', aside: (m) => f + '.corrupt-' + m, words: () => 'y' }); h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' }); for (let i = 0; i < 3; i++) await h.again(); }
+    finally { un(); globalThis.setTimeout = st; if (h) h.stop(); }
+    ok(armed.length > 1, 'RED CONTROL for ③ — `|| timer` cut: every try arms a timer of its own (the storm ③ refuses)', armed);
+    // the missing two-step: a «missing» right after a failed read is read once more
+    const dm = dirOf('missing'), fm = path.join(dm, 'gone.json');
+    const hm = H.create({ file: fm, code: 'g', aside: (m) => fm + '.corrupt-' + m, words: () => 'g' }); hm.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
+    const m1 = await hm.again(), still = !!hm.held(), m2 = await hm.again();
+    ok(m1 === false && still && m2 === true && !hm.held(), 'a file GONE right after a failed read is read once more before the hold lifts as empty (a storage coming back answers ENOENT first)', { m1, still, m2 });
+    hm.stop();
+    // stop(): nothing armed, nothing read
+    const ds = dirOf('stopped'), fs1 = path.join(ds, 's.json'); fs.writeFileSync(fs1, '{}');
+    const hs = H.create({ file: fs1, code: 's', aside: (m) => fs1 + '.corrupt-' + m, words: () => 's' }); hs.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' }); hs.stop();
+    ok((await hs.again()) === false && !!hs.held() && !H.holds().some((x) => x.file === 's.json'), 'a stopped hold reads nothing more and leaves the list');
+    // a lift whose hooks throw is said, and the hold is lifted all the same
+    const dl = dirOf('lift-throws'), fl = path.join(dl, 't.json'); fs.writeFileSync(fl, '{}'); const said = [];
+    const hl = H.create({ file: fl, code: 't', aside: (m) => fl + '.corrupt-' + m, words: () => 't', log: (l) => said.push(l), onLift: () => { throw new Error('a made-up hook failure'); } }); hl.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
+    ok((await hl.again()) === true && !hl.held() && said.some((l) => /its lift's hooks failed: a made-up hook failure/.test(l)), 'a lift whose hooks throw is SAID in the journal, and the store is lifted all the same', said);
+    hl.stop();
+    // no place for the copy: the hold stands (the live file is the torn bytes' only copy)
+    const dn = dirOf('no-place'), fn = path.join(dn, 'n.json'); fs.writeFileSync(fn, 'torn {');
+    const hn = H.create({ file: fn, code: 'n', aside: (m) => path.join(dn, 'no-such-folder', 'n.json.corrupt-' + m), words: () => 'n' }); hn.start({ state: 'corrupt', why: 'did not parse' });
+    await new Promise((r) => setTimeout(r, 100));
+    const rn = H.holds().find((x) => x.file === 'n.json');
+    ok(!!hn.held() && !!rn && rn.code === 'torn bytes, not copied' && rn.torn === true && fs.readFileSync(fn, 'utf8') === 'torn {', 'NO PLACE for the copy: the hold stands, said as torn bytes not copied — the live file is their only copy, untouched', rn);
+    hn.stop();
+    // the preMount should: a mount refused while the tokens are held reconnects after the lift — the sweep's remount waits for the
+    // PERSON only on auth words, and a held refusal carries none
+    const MSRC = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8'), m = MSRC.match(/if \(!mpOwn && \/([^\n]+?)\/i\.test\(err\)\) return;/);
+    const AUTH = m ? new RegExp(m[1], 'i') : null, MW = require('../src/mount-error-words.js');
+    const dw = dirOf('premount'), fw = path.join(dw, 'mount-tokens.json'); fs.writeFileSync(fw, '{"tokens": []}');
+    const unw = refuse(fw); let tw = null; try { tw = new MountTokens({ dataDir: dw, log: quiet }); } finally { unw(); }
+    const words = [tw.refusal ? '' : '', (() => { try { tw.has(['vs', 'mt_'].join('') + 'd'.repeat(48)); return ''; } catch (x) { return x.message; } })(), MW.wordsFor('tokens_unread', {}, { t: (s) => s, lang: 'en' }) || ''];
+    ok(!!AUTH && words[1].length > 0 && !words.some((w) => w && AUTH.test(w)), 'THE preMount SHOULD (a reading made a leg): a held refusal\'s words match none of the remount\'s auth words — the sweep reconnects that mount after the lift, never left waiting for a press', words);
+    stopOf(tw);
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));

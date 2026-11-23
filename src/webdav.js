@@ -54,6 +54,9 @@ class MountTokens {
   }
   /** the words a person reads while mount-tokens.json is held (the tokens list, a refused change) — null when it reads */
   unreadWords() { return this._hold.words(); }
+  /** a lift from torn bytes in this run: the copy's base name (every machine's push mount needs its push again — the Bridge tokens
+   *  section says so and where the old bytes are) — null when none */
+  tornCopy() { const t = this._hold.torn(); return t ? t.copy : null; }
   /** a caller's guard over the tokens (the hub's rename guard): throws the refusal by name while held */
   refuseIfHeld(what) { this._hold.refuse(what); }
 

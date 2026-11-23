@@ -406,6 +406,9 @@ async function unpairDialDevice(deviceId) {
   // the B-f276 remainder, machine-mounts.json's read r1 (M3): while the mounts store is HELD its records are unknown — removing the
   // machine now would revoke none of its push tokens (a /dav credential outliving its machine): refused BEFORE any side effect
   if (machineMounts.unreadWords && machineMounts.unreadWords()) throw Object.assign(new Error(`removing a machine: ${machineMounts.unreadWords()}`), { code: 'mounts-unread', status: 503 });
+  // B-f276 family unit 1 (round wom600meg): …and while mount-tokens.json is HELD a push mount of it could not revoke its token (its
+  // unmount below refuses inside a swallow — the machine gone, its folder link alive at the lift): refused BEFORE any side effect
+  { const w = machineMounts.revokeHeldFor && machineMounts.revokeHeldFor(hosts.findByDeviceId(deviceId)?.id); if (w) throw Object.assign(new Error(`removing a machine: ${w}`), { code: 'tokens_unread', status: 503 }); }
   // B-4d71: its token's TOMBSTONE — the device's next dial (at once for a device dialed in now: its link ends below; an offline
   // one whenever it comes back) is told «retired» with the proof, and its own agent removes its start and ends
   // (the HOST token's hash keys the proof: read before dropHostToken below. A vault locked now is never asked — that would file
