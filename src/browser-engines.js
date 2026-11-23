@@ -363,7 +363,8 @@ function majorOfVersion(v) { const m = /(\d{2,4})\.\d{1,6}\.\d{1,6}(?:\.\d{1,6})
 function engineChoiceVerdict({ choice = null, engine = null, machine = 'this computer' } = {}) {
   const id = choice && typeof choice.id === 'string' ? choice.id : '';
   if (!engine || typeof engine !== 'object') return missingOf({ id, machine });
-  if (engine.code) return { ok: false, code: ENGINE_CODES.includes(engine.code) ? engine.code : 'browser_engine_protocol', error: String(engine.error || engine.code), ...(isObj(engine.failed) ? { failed: engine.failed } : {}) }; // B-a470: the plugin's own error rides the refusal
+  // B-f276 (主开发 r3305 (a)): the plugin registry HELD is no engine's fault — refused by the registry's own code, never «another protocol»
+  if (engine.code) return { ok: false, code: ENGINE_CODES.includes(engine.code) || engine.code === 'plugin_registry_unread' ? engine.code : 'browser_engine_protocol', error: String(engine.error || engine.code), ...(isObj(engine.failed) ? { failed: engine.failed } : {}) }; // B-a470: the plugin's own error rides the refusal
   const who = engineWords({ id, label: engine.label });
   // lane engine-spi-egress L1b: the OWNER's program, judged by the core (the fact carries the verdict) — said by its own words
   if (engine.source === 'user' && isObj(engine.userBinary)) return { ok: false, code: ENGINE_CODES.includes(engine.userBinary.code) ? engine.userBinary.code : 'browser_engine_not_executable', error: String(engine.userBinary.error || engine.userBinary.code) };

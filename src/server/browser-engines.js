@@ -92,6 +92,9 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
     catch (e) { return { ok: false, code: 'browser_engine_protocol', error: `${BE.engineWords(row)} failed its ${verb} (${String(e && e.message).slice(0, 160)})` }; }
     return BE.engineAnswerVerdict(verb, { status: body && body.status ? body.status : 200, body: body && body.status ? body.body : body }, { id: row.id, label: row.label });
   }
+  // B-f276 (主开发 r3305 (a)): while the plugin registry is HELD no manifest engine is listed — an engine id this table cannot find is then
+  // answered by the registry's OWN refusal (plugin_registry_unread), never «missing» and its For-you line; never Chrome in its place
+  const heldOf = (id) => { const l = L(); let f = null; try { f = l && typeof l.held === 'function' ? l.held() : null; } catch { f = null; } if (!f) return null; let w = ''; try { w = l.heldWords(); } catch { w = ''; } return { ok: false, code: 'plugin_registry_unread', error: `${String(id || '')}: ${w || 'the plugin registry could not be read'}` }; };
   function providerFor(id) {
     const row = tableRows().find((r) => r.id === String(id || ''));
     if (!row) return null;
@@ -103,7 +106,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
   /** lane engine-spi-egress L1b: the kernel's SOURCE — the program row in the manifest, kernel.json in the package. */
   async function sourceOf(id) {
     const row = tableRows().find((r) => r.id === String(id || ''));
-    if (!row) return BE.missingOf({ id });
+    if (!row) return heldOf(id) || BE.missingOf({ id });
     let kernelJson = false;
     if (dataDir && row.family === 'manifest') { try { await fsp.access(path.join(dataDir, 'plugins', row.id, 'kernel.json')); kernelJson = true; } catch { kernelJson = false; } }
     const v = BE.engineSourceOf({ row: BE.binaryRowOf(row.settings), kernelJson, id: row.id, label: row.label });
@@ -132,7 +135,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
   }
   async function probe(id) {
     const pv = providerFor(id);
-    if (!pv) return BE.missingOf({ id });
+    if (!pv) return heldOf(id) || BE.missingOf({ id });
     const src = await sourceOf(id);
     if (!src.ok) return src;
     if (src.source === 'user') {
@@ -154,13 +157,16 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
   }
   async function launchOptions(id, input = {}) {
     const pv = providerFor(id);
-    if (!pv) return BE.missingOf({ id });
+    if (!pv) return heldOf(id) || BE.missingOf({ id });
     const lo = await pv.launchOptions({ platform: BE.platformOf(platform), ...input });
     // lane engine-spi-egress L1b (both sources): the program VibeSpace resolved is the one started — never another the plugin names
     if (lo.ok && input.binaryPath && lo.launch.executablePath !== input.binaryPath) return { ok: false, code: 'browser_engine_protocol', error: `${BE.engineWords(pv)} answered its launch with another program than the one VibeSpace resolved for it — it must start the path it is handed` };
     return lo;
   }
-  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag, statesEnvironment };
+  /** B-f276 (主开发 r3305 (a)): the plugin registry HELD → { file, code, since, words } (the table above lists no manifest engine then:
+   *  which plugins are on is unknown — never «none») | null */
+  const held = () => { const l = L(); let f = null; try { f = l && typeof l.held === 'function' ? l.held() : null; } catch { f = null; } if (!f) return null; let w = ''; try { w = l.heldWords(); } catch { w = ''; } return { ...f, words: w || 'the plugin registry could not be read' }; };
+  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag, statesEnvironment, held };
 }
 /** A GET's query values are strings (express parses them so) — the probe input as one. */
 function stringQuery(o) { const q = {}; for (const [k, v] of Object.entries(o || {})) if (v != null && v !== '') q[k] = String(v); return q; }

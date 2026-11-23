@@ -210,7 +210,11 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   /** lane fleet-plugin-catalog r2 (N1, D2 whole): the package is TRUSTED now — a person's consent, or the cluster's pin at that very
    *  sha (the loader's verdict, asked at each use) → true | false | null (no loader to ask). Untrusted ⇒ its kernel.json is never
    *  read, its kernel never fetched, run or landed. */
-  const trustOf = (sid) => { try { const l = L(); if (l && typeof l.isTrusted === 'function') return !!l.isTrusted(sid); const p = l && typeof l.list === 'function' ? l.list().find((x) => x.id === sid) : null; return p && typeof p.trusted === 'boolean' ? p.trusted : null; } catch { return null; } };
+  let fleetHeldSaid = false, fleetLiftAsked = false; // B-f276 (r3305): the fleet run's «registry held» said once a hold; its lift asked once
+  /** B-f276 (主开发 r3305): the plugin registry HELD (the loader's `held`) ⇒ trust is UNKNOWN (null), never «untrusted»; its words */
+  const registryHeld = () => { try { const l = L(); return !!(l && typeof l.held === 'function' && l.held()); } catch { return false; } };
+  const registryWords = () => { try { const l = L(); return (l && typeof l.heldWords === 'function' && l.heldWords()) || 'the plugin registry could not be read'; } catch { return 'the plugin registry could not be read'; } };
+  const trustOf = (sid) => { try { const l = L(); if (registryHeld()) return null; if (l && typeof l.isTrusted === 'function') { const t = l.isTrusted(sid); return t == null ? null : !!t; } const p = l && typeof l.list === 'function' ? l.list().find((x) => x.id === sid) : null; return p && typeof p.trusted === 'boolean' ? p.trusted : null; } catch { return null; } };
   /** …and the CLUSTER trusts it now (the fleet's kernel step runs for no other): fleet.json names this id at a full commit sha, the
    *  package is installed from git at that sha, and the loader's trust check is green (D2: id + sha + contentHash — the cluster's
    *  pre-trust, or the owner's consent to that very package). */
@@ -392,6 +396,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const sid = String(id || '');
     if (!BE.ID_RE.test(sid)) throw named('browser_engine_missing', `"${clip(sid, 80)}" is not a browser engine plugin id`);
     if (userSourced(sid)) throw named('engine_source_user', `${who(sid)} runs the program you name in its settings (⚙ → Plugins → Program file) — VibeSpace downloads no kernel for it`); // lane engine-spi-egress L1b
+    if (registryHeld()) throw named('plugin_registry_unread', `${who(sid)}'s kernel is not fetched now — ${registryWords()}`); // B-f276 (r3305): never «waiting for your consent» on a registry that did not read
     if (trustOf(sid) === false) throw named('engine_untrusted', `${who(sid)} is waiting for your consent (⚙ → Plugins) — its kernel is not fetched until you trust it`); // lane fleet-plugin-catalog r2 (N1): D2 whole — nothing read, nothing recorded
     const plan = planOf(sid);
     if (running.has(sid)) { const r0 = running.get(sid); throw named('install_running', `${who(sid)}'s kernel is already downloading (${r0.total ? Math.floor((100 * r0.bytes) / r0.total) + ' %' : r0.step}) — one at a time`); }
@@ -981,6 +986,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const sid = String(id || '');
     const rec = record.engines[sid];
     if (!rec || !rec.kernel || !rec.kernel.sha256 || userSourced(sid)) return { due: false };
+    if (registryHeld()) return { due: false, held: true }; // B-f276 (r3305): unknown — never «untrusted»
     if (trustOf(sid) !== true) return { due: false, untrusted: true };
     let p; try { p = await plannedKernel(sid); } catch { return { due: false }; }
     if (rec.next && rec.next.sha256 !== p.sha256 && !gateOf(sid).writers && !running.has(sid)) {
@@ -1234,6 +1240,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const p = (async () => {
       // r4 (N1): the measure RUNS the kernel (`--version` — a re-exec): never for a package not trusted NOW (D2's letter) — asked in
       // the same turn as the spawn; said once until one runs
+      if (registryHeld()) return { ok: false, cached: false, code: 'plugin_registry_unread', error: `${who(sid)}'s kernel is not run for its version now — ${registryWords()}` }; // B-f276 (r3305)
       if (trustOf(sid) !== true) {
         if (!untrustedRunSaid.has(sid)) { untrustedRunSaid.add(sid); log.warn?.(`[browser] ${who(sid)}'s kernel is not run for its version — its package is not trusted now`); }
         return { ok: false, cached: false, code: 'engine_untrusted', error: `${who(sid)} is waiting for your consent (⚙ → Plugins) — its kernel is not run until you trust it` };
@@ -1375,6 +1382,11 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     }
     const l = L();
     if (!l || typeof l.install !== 'function') { fleetLast.outcome = 'none'; return { ok: false, skipped: 'no plugin loader', restored }; }
+    // B-f276 (主开发 r3305 (c)): the plugin registry HELD ⇒ its install record is unknown (never «not installed»): the cluster's
+    // install waits — nothing installed over the held file, no failure notice; said once a hold, run again BY ITSELF when the registry
+    // reads (the loader's onLift — never only at the next restart), and at the next change or start
+    if (registryHeld()) { Object.assign(fleetLast, { outcome: 'held', code: 'plugin_registry_unread', error: registryWords() }); if (!fleetHeldSaid) { fleetHeldSaid = true; log.warn?.(`[plugins] fleet plugin: ${fe.plugin} is not checked now — ${registryWords()}`); } if (!fleetLiftAsked && typeof l.onLift === 'function') { fleetLiftAsked = true; l.onLift(() => { fleetLiftAsked = false; if (!stopped) syncFleet('change').catch(() => {}); }); } return { ok: false, skipped: 'the plugin registry is held', restored }; }
+    fleetHeldSaid = false;
     const id = fe.plugin, ref = String(fe.source.ref || '');
     const pinned = /^[0-9a-f]{40}$/.test(ref);
     const inst = typeof l.installRecord === 'function' ? l.installRecord(id) : null;

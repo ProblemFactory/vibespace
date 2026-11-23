@@ -361,7 +361,7 @@ export function installPluginsUI(App) {
     const enablePlugin = async (p, { trusted = false } = {}) => {
       const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: true, trusted }) });
       if (rr?.consentRequired && !trusted) { const okc = await this._pluginConsentDialog(p, rr.capabilities); if (okc) return enablePlugin(p, { trusted: true }); return; }
-      if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+      if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); return; }
       showToast(trusted ? t('Plugin enabled (trusted)') : t('Plugin enabled'));
       this.pluginClient?.refresh?.();
       render();
@@ -380,7 +380,7 @@ export function installPluginsUI(App) {
       installBtn.onclick = () => this._pluginInstallDialog(() => { this.pluginClient?.refresh?.(); render(); });
       const reload = document.createElement('button');
       reload.className = 'mounts-btn'; reload.textContent = t('Rescan');
-      reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(rr.error, { type: 'error' }); this.pluginClient?.refresh?.(); render(); };
+      reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); this.pluginClient?.refresh?.(); render(); };
       head.append(installBtn, reload);
       sec.appendChild(head);
       // lane engine-distribution: the CLUSTER's plugin (fleet.json browserEngine) whose install failed — said here, by name; lane
@@ -392,6 +392,9 @@ export function installPluginsUI(App) {
         fw.textContent = fleetLine;
         sec.appendChild(fw);
       }
+      // B-f276 (主开发 r3305): plugin-registry.json HELD — said above the rows in the family's ONE table's words (r3310; the hub's until
+      // its row is in); the switches stay live (a press is answered by the hub, refused by name)
+      if (r?.held) sec.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline plugins-held-hint', textContent: heldWordsOf(r) || String(r.held) }));
       if (!list.length) {
         const empty = document.createElement('div');
         empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Press Install plugin… — it takes a folder, a git URL, a .vsp file or a GitHub release.');
@@ -401,7 +404,7 @@ export function installPluginsUI(App) {
       sec.appendChild(rows);
       for (const p of list) {
         const clientErr = this.pluginClient?.errors?.get?.(p.id) || null;
-        const chip = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes') }[p.state] || p.state || '') : t('enabled');
+        const chip = !p.valid ? t('invalid') : p.held ? t('unknown') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes') }[p.state] || p.state || '') : t('enabled');
         const tone = !p.valid ? 'err' : p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '';
         const why = [...(p.errors || []), p.lastError, p.notice, clientErr ? t('Client module error: {error}', { error: clientErr }) : ''].filter(Boolean).join(' · ');
         // the chip opens what the plugin offers (its windows, what it may do) — actions, never settings; Update… / Uninstall… are rows of
@@ -420,7 +423,7 @@ export function installPluginsUI(App) {
             return enablePlugin(p);
           }
           const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: false }) });
-          if (rr?.error) { showToast(rr.error, { type: 'error' }); cb.checked = true; return; }
+          if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); cb.checked = true; return; }
           showToast(t('Plugin disabled'));
           this.pluginClient?.refresh?.();
           render();
@@ -431,7 +434,7 @@ export function installPluginsUI(App) {
           const okd = await showConfirmDialog({ title: t('Uninstall plugin'), message: t('Uninstall "{name}"? Its folder and data move to data/plugins-trash (nothing is deleted).', { name: p.label || p.id }), confirmText: t('Uninstall'), danger: true });
           if (!okd) return;
           const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
-          if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+          if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); return; }
           showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
           this.pluginClient?.refresh?.(); render();
         };
@@ -453,7 +456,7 @@ export function installPluginsUI(App) {
             upd.title = t('Updating {id}…', { id: p.id });   // B-db5d: an in-flight Update… is an OFF row of the «⋯» that says why (rail-row reads the title)
             showToast(t('Updating {id}…', { id: p.id }));
             const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/update`, { method: 'POST' });
-            if (rr?.error) { upd.disabled = false; upd.title = ''; showToast(rr.error, { type: 'error' }); return; }
+            if (rr?.error) { upd.disabled = false; upd.title = ''; showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); return; }
             const version = rr.plugin?.version || '';
             showToast(rr.unchanged ? t('{id} is already up to date ({version})', { id: p.id, version }) : t('Updated {id} to {version}', { id: p.id, version }));
             this.pluginClient?.refresh?.(); render();
@@ -739,7 +742,7 @@ export function installPluginsUI(App) {
     const meta = BACKEND_META[backend];
     if (!meta?.servicePlugin) return false;
     const post = (tail, body) => fetchJson(`/api/plugins/${encodeURIComponent(meta.servicePlugin)}/${tail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
-      .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.error); return x; });
+      .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(heldWordsOf(x) || x.error); return x; });
     try {
       await post('enabled', { enabled: true });
       await post('start');

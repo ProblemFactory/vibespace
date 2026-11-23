@@ -32,6 +32,7 @@ const NAMES = Object.freeze({
   'people.json': i18nKey('a channel account’s list of people'),   // bl-mail (line 698, 主开发 r3608): a channels account's people memo — one hold an account, each listed by this name
   'agent-door.json': i18nKey('the port remote conversations reach their tools by'),   // r3333 unit 1 (lane lg-group-parents): the agent door's record
   'opencode-serve.json': i18nKey('the record of the OpenCode background service'),   // bl-chat-b's own plain name (r3334 unit 1)
+  'plugin-registry.json': i18nKey('which plugins are on and trusted'),
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

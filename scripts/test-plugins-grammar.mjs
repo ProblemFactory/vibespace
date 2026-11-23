@@ -349,7 +349,7 @@ console.log('⑦ a plugin that can update has «Update…» in its row\'s «⋯�
   };
   await runRed('the checkpoint row', " actions.dataset.railFold = 'always';", '', ['updatable', 'zip', 'hand', 'gearInline', 'unchanged']);
   await runRed('an in-flight Update with no why', "            upd.title = t('Updating {id}…', { id: p.id });", '', ['inFlight']);
-  await runRed('a refusal keeping the in-flight why', "if (rr?.error) { upd.disabled = false; upd.title = ''; showToast(rr.error, { type: 'error' }); return; }", "if (rr?.error) { upd.disabled = false; showToast(rr.error, { type: 'error' }); return; }", ['refused']);
+  await runRed('a refusal keeping the in-flight why', "if (rr?.error) { upd.disabled = false; upd.title = ''; showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); return; }", "if (rr?.error) { upd.disabled = false; showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); return; }", ['refused']);
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

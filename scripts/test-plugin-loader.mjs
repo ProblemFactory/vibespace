@@ -364,5 +364,159 @@ ok(rowFnL.length > 100 && !/innerHTML/.test(rowFnL) && /\.\.\.\(p\.errors \|\| \
 for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(['Installed plugins', 'Rescan', 'Plugin enabled', 'parked after repeated crashes'].every((k) => read(dict).includes(JSON.stringify(k) + ':')), `${dict} carries the new panel strings`);
 ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /res\.status\(401\)/.test(read('src/server/plugin-loader.js')), 'the tool route lives under the cookie-exempt /api/agent/ prefix and enforces the bearer itself');
 
+// ── ⑪ B-f276 (主开发 r3305; the store census's «37 more stores judged», item 3): plugin-registry.json UNDER THE STORE-READ LAW ──
+// The release read ANY failure of data/plugin-registry.json as EMPTY: every plugin OFF and UNTRUSTED, the next enable / install /
+// update / uninstall wrote the file over (which plugins were on, their consents, their install sources lost), and the start's shim sync
+// removed every agent tool's shim. The failure PLACED on the very read (the loader's one sync read refused EIO — never a mount, never a
+// mode change), then TORN bytes. RED: the release's bare catch.
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const HOLD = require(path.join(REPO, 'src/store-read-hold.js'));
+  const { capabilitiesHash: capHash } = require(path.join(REPO, 'src/plugin-manifest.js'));
+  const quietR = { log() {}, warn() {} };
+  const PID = 'example.hello';
+  const scene = async (PLm, how) => {
+    const R = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plugreg-'));
+    const pd = path.join(R, 'data', 'plugins', PID);
+    fs.cpSync(path.join(REPO, 'docs/examples/hello-plugin'), pd, { recursive: true });
+    const man = validateManifest(JSON.parse(fs.readFileSync(path.join(pd, 'vibespace-plugin.json'), 'utf8')), { hostVersion: '2.369.24', folderName: PID }).manifest;
+    // the person's registry: the plugin ON, its consent recorded, its install source
+    const REG = { enabled: { [PID]: true }, trust: { [PID]: { trusted: true, trustedAt: 1, capabilitiesHash: capHash(man) } }, installs: { [PID]: { source: 'folder', value: '/srv/plugins/hello', contentHash: null, installedAt: 1 } } };
+    const regFile = path.resolve(path.join(R, 'data', 'plugin-registry.json'));
+    const bytes = how === 'torn' ? JSON.stringify(REG).slice(0, 40) : JSON.stringify(REG);
+    fs.writeFileSync(regFile, bytes);
+    const binDir = path.join(R, 'bin'); fs.mkdirSync(binDir, { recursive: true });
+    const shim = path.join(binDir, `vibespace-tool-${PID}-hello`); fs.writeFileSync(shim, '#!/bin/sh\n');   // the last run's agent tool
+    const realRead = fs.readFileSync;
+    let refused = 0;
+    if (how === 'refused') fs.readFileSync = function (f, ...a) { if (path.resolve(String(f)) === regFile) { refused++; throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); } return realRead.call(this, f, ...a); };
+    let L;
+    try { L = PLm.create({ rootDir: R, app: null, autoStart: true, hostVersion: '2.369.24', log: quietR, binDir, agentEnv: () => ({ PATH: process.env.PATH }) }); }
+    finally { fs.readFileSync = realRead; }
+    await sleep(50);   // torn: the copy and the lift run off the loop
+    const tryIt = async (fn) => { try { await fn(); return { ok: true }; } catch (e) { return { status: e.status || null, code: (e.payload && e.payload.code) || e.code || null, msg: String(e.message || '') }; } };
+    const held = typeof L.held === 'function' ? L.held() : null;
+    const row = (L.list() || []).find((x) => x.id === PID) || null;
+    const before = { shimKept: fs.existsSync(shim), dirKept: fs.existsSync(pd), same: realRead(regFile, 'utf8') === bytes };   // what the START did, before any press
+    const tries = how === 'torn' ? {} : {
+      enable: await tryIt(() => L.setEnabled(PID, true, { trusted: true })),
+      off: await tryIt(() => L.setEnabled(PID, false)),
+      uninstall: await tryIt(() => L.uninstall(PID)),
+      update: await tryIt(() => L.update(PID)),
+      install: await tryIt(() => L.install({ source: 'folder', value: pd })),
+    };
+    const res = {
+      how, refused, held: !!held, rowEnabled: row ? row.enabled : 'none', rowTrusted: row ? row.trusted : 'none', rowHeld: !!(row && row.held), trust: L.isTrusted(PID),
+      before, tries, same: realRead(regFile, 'utf8') === bytes, shimKept: fs.existsSync(shim), dirKept: fs.existsSync(pd),
+      copies: fs.readdirSync(path.dirname(regFile)).filter((n) => n.startsWith('plugin-registry.json.corrupt-')).map((n) => realRead(path.join(path.dirname(regFile), n), 'utf8') === bytes),
+    };
+    if (how === 'refused' && held) {   // THE LIFT: the file reads again (its next try, asked now) — what the start skipped runs
+      const hrow = HOLD.holds().find((h) => h.file === 'plugin-registry.json' && h.held);   // the list's row (its opaque key — r3315's helper)
+      res.lifted = hrow ? await HOLD.readAgainOf(hrow) : 'no row';
+      const r2 = (L.list() || []).find((x) => x.id === PID) || null;
+      res.afterLift = { held: !!L.held(), enabled: r2 ? r2.enabled : 'none', trusted: r2 ? r2.trusted : 'none', same: realRead(regFile, 'utf8') === bytes, shimKept: fs.existsSync(shim) };
+    }
+    try { L.shutdown(); } catch { /* its own */ }
+    try { fs.rmSync(R, { recursive: true, force: true }); } catch { /* gone */ }
+    return res;
+  };
+  const refusedBy = (t) => t && t.status === 503 && t.code === 'plugin_registry_unread' && /plugin-registry\.json/.test(t.msg);
+  const PLr = require(path.join(REPO, 'src/server/plugin-loader.js'));
+  const a = await scene(PLr, 'refused');
+  console.log(`    facts (refused read): ${JSON.stringify(a)}`);
+  ok(a.refused >= 1 && a.held && a.rowEnabled === null && a.rowTrusted === null && a.rowHeld && a.trust === null,
+    'B-f276 (r3305 (a)): a REFUSED read of plugin-registry.json HOLDS the registry — the plugin the file names ON and TRUSTED reads «unknown» (enabled null, trusted null, held), never «off» or «untrusted»', a);
+  ok(['enable', 'off', 'uninstall', 'update', 'install'].every((k) => refusedBy(a.tries[k])) && a.same && a.dirKept,
+    'B-f276 (r3305 (b)(c)): while held EVERY writer is refused BY NAME (503 plugin_registry_unread, its words name the file) before any side effect — enable with consent, switch off, uninstall, update, install — and the file stays byte for byte, the plugin\'s folder in place', a.tries);
+  ok(a.before.shimKept && a.shimKept, 'B-f276 (r3305 (c)): the start\'s shim sync removes NO agent tool\'s shim by the registry\'s silence', a);
+  ok(!!(a.lifted && a.afterLift && !a.afterLift.held && a.afterLift.enabled === true && a.afterLift.trusted === true && a.afterLift.same && a.afterLift.shimKept),
+    'B-f276: THE LIFT — the file read again: the plugin is ON and TRUSTED again as the file says (what the start skipped runs), nothing was written over it', a.afterLift);
+  const t = await scene(PLr, 'torn');
+  console.log(`    facts (torn bytes): ${JSON.stringify(t)}`);
+  ok(t.copies.length === 1 && t.copies[0] === true && t.before.dirKept && t.rowEnabled === false && !t.held,
+    'B-f276: TORN bytes are kept aside ONCE (a copy byte for byte beside the file), then the registry starts empty — the plugin\'s folder stays where it is', t);
+  // RED: the release's bare catch (any failure = empty)
+  const LS0 = fs.readFileSync(path.join(REPO, 'src/server/plugin-loader.js'), 'utf8');
+  const relSrc = editAnchor(LS0, "  { let read; try { read = { text: fs.readFileSync(registryFile, 'utf-8') }; } catch (error) { read = { error }; } const a0 = SR.storeAnswer(read, { valid: REGISTRY_SHAPE }); if (hold.start(a0) === 'data') registry = normalize(a0.value); }",
+    "  try { registry = normalize(JSON.parse(fs.readFileSync(registryFile, 'utf-8'))); } catch { } // the release: any failure = empty", 'src/server/plugin-loader.js');
+  const PLx = mutantCopies('plugin-registry-bare-catch', REPO).load('src/server/plugin-loader.js', relSrc, 'bare-catch');
+  const x = await scene(PLx, 'refused');
+  console.log(`    facts (red): ${JSON.stringify(x)}`);
+  ok(!x.held && x.rowEnabled === false && x.trust === false && !x.before.shimKept && !x.same,
+    'RED CONTROL (B-f276, the release\'s bare catch): the refused read reads EMPTY — the plugin OFF and untrusted, its agent tool\'s shim REMOVED, and an enable WRITES the file over (the other consents and install sources lost)', x);
+  // (a)(b)(c) THE ENGINE READERS while held (r3305: «for a browser engine plugin, never Chrome in its place»): a loader HELD as the real
+  // one answers (its facts and words, its rows unknown, isTrusted null, the lift's waiters) — the engine table, the kernel's download
+  // and version measure, the cluster's fleet run; then THE LIFT: the fleet run goes again by itself. RED: the release's readers
+  const EIDh = 'vibespace.custom-browser';
+  const engineScene = async (EDm, BEm) => {
+    const R = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plugreg-eng-'));
+    fs.mkdirSync(path.join(R, 'data'), { recursive: true });
+    let heldNow = true, installs = 0; const lifts = [], todosH = [];
+    const SL = {
+      held: () => (heldNow ? { file: 'plugin-registry.json', code: 'EIO', since: 1 } : null),
+      heldWords: () => (heldNow ? 'plugin-registry.json in VibeSpace\'s data folder could not be read (EIO)' : ''),
+      list: () => [{ id: EIDh, valid: true, enabled: heldNow ? null : true, trusted: heldNow ? null : true, ...(heldNow ? { held: true } : {}), state: 'stopped', contributes: { browserEngine: true } }],
+      isTrusted: () => (heldNow ? null : true), installRecord: () => null,
+      install: async () => { installs++; throw Object.assign(new Error('the scene installs nothing'), { code: 'scene_no_install' }); },
+      onLift: (fn) => { if (heldNow) lifts.push(fn); },
+    };
+    const BEx = BEm.create({ loader: SL, dataDir: path.join(R, 'data') });
+    const fleetH = { plugin: EIDh, default: false, preinstall: false, source: { git: 'https://git.example.invalid/engine.git', ref: 'a'.repeat(40) }, kernel: { url: '', sha256: '' } };
+    const EDx = EDm.create({ dataDir: path.join(R, 'data'), engines: BEx, loader: SL, fleetFacts: () => ({ browserEngine: fleetH }), userTodos: { add: (k, item) => { todosH.push(item); return 'u' + todosH.length; } }, log: quietR });
+    const kp = BEx.kernelPath(EIDh); fs.mkdirSync(path.dirname(kp), { recursive: true }); fs.writeFileSync(kp, '#!/bin/sh\necho "Chromium 150.0.0.0 scene"\n', { mode: 0o755 });   // a kernel in its place
+    const res = { probe: (await BEx.probe(EIDh)).code, table: BEx.rows().length, heldFact: typeof BEx.held === 'function' ? !!BEx.held() : 'no held()' };
+    const fr = await EDx.bootFleet();
+    res.fleet = { skipped: (fr && fr.skipped) || null, outcome: EDx.fleetView().outcome, installs, todos: todosH.length };
+    try { await EDx.installKernel(EIDh); res.install = { ok: true }; } catch (e) { res.install = { code: e.code || null, consent: /consent/.test(String(e.message)) }; }
+    const ms = await EDx.measure(EIDh);
+    res.measure = { code: (ms && ms.code) || null, consent: /consent/.test(String(ms && ms.error)) };
+    res.todosHeld = todosH.length;
+    heldNow = false; const i0 = installs;   // THE LIFT — no restart, the cluster's facts unchanged
+    for (const fn of lifts.splice(0)) fn();
+    await sleep(50); await EDx.fleetSettled();
+    res.afterLift = installs - i0;
+    try { fs.rmSync(R, { recursive: true, force: true }); } catch { /* gone */ }
+    return res;
+  };
+  const g = await engineScene(require(path.join(REPO, 'src/server/engine-distribution.js')), require(path.join(REPO, 'src/server/browser-engines.js')));
+  console.log(`    facts (engines, held): ${JSON.stringify(g)}`);
+  ok(g.probe === 'plugin_registry_unread' && g.table === 0 && g.heldFact === true,
+    'B-f276 (r3305 (a)): while held the engine table lists no manifest engine and the probe of the engine plugin the file names answers the REGISTRY\'s own refusal (plugin_registry_unread) — never «not installed», never Chrome in its place', g);
+  ok(g.fleet.skipped && g.fleet.outcome === 'held' && g.fleet.installs === 0 && g.fleet.todos === 0,
+    'B-f276 (r3305 (c)): the cluster\'s fleet run steps aside BY NAME (outcome held) — nothing installed over the held file, no failure notice', g.fleet);
+  ok(g.install.code === 'plugin_registry_unread' && !g.install.consent && g.measure.code === 'plugin_registry_unread' && !g.measure.consent && g.todosHeld === 0,
+    'B-f276 (r3305 (a)(b)): the kernel\'s download and its version measure are refused by the registry\'s name — never «waiting for your consent» (no consent asked again over the held file), nothing filed', g);
+  ok(g.afterLift === 1, 'B-f276: THE LIFT — the registry reads and the fleet run goes again BY ITSELF (the loader\'s onLift), no restart', g);
+  const MCe = mutantCopies('plugin-registry-engines', REPO);
+  const EDs0 = fs.readFileSync(path.join(REPO, 'src/server/engine-distribution.js'), 'utf8');
+  const rhLine = EDs0.split('\n').find((l) => l.startsWith('  const registryHeld = () => {')) || '(the registryHeld line)';
+  const EDsRel = editAnchor(editAnchor(EDs0, rhLine, '  const registryHeld = () => false; // the release: no hold to ask', 'src/server/engine-distribution.js'),
+    'const t = l.isTrusted(sid); return t == null ? null : !!t;', 'return !!l.isTrusted(sid);', 'src/server/engine-distribution.js'); // stale-pins: kept (the RED's plant: the release's text)
+  const BEsRel = editAnchor(fs.readFileSync(path.join(REPO, 'src/server/browser-engines.js'), 'utf8'), '    if (!pv) return heldOf(id) || BE.missingOf({ id });\n    const src = await sourceOf(id);',
+    '    if (!pv) return BE.missingOf({ id });\n    const src = await sourceOf(id);', 'src/server/browser-engines.js'); // stale-pins: kept (the RED's plant: the release's text)
+  const gx = await engineScene(MCe.load('src/server/engine-distribution.js', EDsRel, 'release-trust'), MCe.load('src/server/browser-engines.js', BEsRel, 'release-missing'));
+  console.log(`    facts (engines, red): ${JSON.stringify(gx)}`);
+  ok(gx.probe === 'browser_engine_missing' && gx.fleet.installs >= 1 && gx.install.code === 'engine_untrusted' && gx.install.consent && gx.measure.code === 'engine_untrusted',
+    'RED CONTROL (B-f276 engines, the release\'s readers): the held registry reads as EMPTY — the engine «not installed», the fleet run INSTALLS over the held file, the download and the measure «waiting for your consent»', gx);
+  // (c) THE PAGE's plugin client: a HELD list tears nothing down (a plugin theme dropped would reset the person's theme to dark and save
+  // it). RED: the release's apply — the held rows read as «all off»
+  const { pathToFileURL } = await import('node:url');
+  const pageScene = async (url) => {
+    const { PluginClient } = await import(url);
+    const dropped = [], deact = [];
+    const pc = Object.create(PluginClient.prototype);
+    Object.assign(pc, { app: { themeManager: { unregisterPluginTheme: (k) => dropped.push(k) }, _refreshThemeDropdown() {} }, manifests: [], errors: new Map(), _applying: null, _settings: new Set(),
+      _modules: new Map([[PID, { mod: { deactivate: () => { deact.push(PID); } }, ctl: new AbortController(), version: '1' }]]), _themes: new Map([[PID, new Set([`plugin-${PID}-dusk`])]]) });
+    await pc.apply([{ id: PID, valid: true, enabled: null, trusted: null, held: true }]);
+    return { dropped, deact, kept: pc._modules.has(PID) && pc._themes.has(PID) };
+  };
+  const pg = await pageScene(pathToFileURL(path.join(REPO, 'src/lib/plugin-client.js')).href);
+  ok(pg.kept && !pg.dropped.length && !pg.deact.length, 'B-f276 (r3305 (c)): the page\'s plugin client keeps what it applied while the list is HELD — no plugin theme dropped (the person\'s theme never reset), no module deactivated', pg);
+  const PCs0 = fs.readFileSync(path.join(REPO, 'src/lib/plugin-client.js'), 'utf8');
+  const pcRel = editAnchor(PCs0, '    if (Array.isArray(list) && list.some((m) => m && m.held)) return this._applying || Promise.resolve();\n', '', 'src/lib/plugin-client.js');
+  const pgx = await pageScene(pathToFileURL(MCe.write('src/lib/plugin-client.js', pcRel, 'held-as-off')).href);
+  ok(!pgx.kept && pgx.dropped.length === 1 && pgx.deact.length === 1, 'RED CONTROL (B-f276, the release\'s apply): the held list reads as «all off» — the plugin\'s theme DROPPED and its module deactivated', pgx);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

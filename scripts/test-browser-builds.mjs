@@ -1140,6 +1140,38 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   await ke.start(pe.id, { why: 'test' });
   ok(!ke.profile(pe.id).buildMissing, '…and the profile starts again');
   await ke.stop(pe.id, { why: 'user' });
+  // B-f276 (主开发 r3305 (a)): the PLUGIN REGISTRY HELD (plugin-registry.json could not be read) — whether the engine's plugin is on and
+  // trusted is UNKNOWN. The profile's start is refused BY THE REGISTRY's NAME: nothing launched, never Chrome in its place, NO mark and
+  // NO For-you item of a missing build; a create naming the engine is refused by that name too (never «another engine protocol»).
+  // RED: the release's start — the held answer read as a broken engine: the profile MARKED and a For-you item filed
+  {
+    const HWd = 'plugin-registry.json in VibeSpace\'s data folder could not be read (EIO)';
+    const LDRH = { ...LDR, list: () => LDR.list().map((r) => ({ ...r, enabled: null, trusted: null, held: true })), held: () => ({ file: 'plugin-registry.json', code: 'EIO', since: 1 }), heldWords: () => HWd, isTrusted: () => null };
+    const ENGRH = require('../src/server/browser-engines.js').create({ loader: LDRH, dataDir: path.join(EROOT, 'data'), timeoutMs: 400 });
+    const heldStart = async (Kmod, dir) => {
+      let eng = ENGR;
+      const kh = mkKeeper(path.join(ROOT, dir), { engines: () => eng, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, Kmod);
+      const ph = kh.createProfile({ label: 'Held engine', browser: { kind: 'plugin', id: EID } }, { engine: await kh.engineFactOf(EID) });
+      eng = ENGRH;   // the hub's next start: the registry did not read
+      const n0 = fake.launches().length, t0 = todos.length;
+      const e = await thr(() => kh.start(ph.id, { why: 'test' }));
+      const cr = await thr(async () => kh.createProfile({ label: 'Held create', browser: { kind: 'plugin', id: EID } }, { engine: await kh.engineFactOf(EID) }));
+      const out = { code: e && e.code, chrome: /never starts Chrome in its place/.test(String(e && e.message)), launched: fake.launches().length - n0, filed: todos.length - t0,
+        filedText: todos.length > t0 ? String(todos.at(-1).text) : null, marked: !!kh.profile(ph.id).buildMissing, create: cr && cr.code, table: ENGRH.rows().length };
+      try { kh.shutdown(); } catch { /* its own */ }
+      return out;
+    };
+    const hs = await heldStart(K, 'data-eng-held');
+    ok(hs.code === 'plugin_registry_unread' && hs.chrome && hs.launched === 0 && hs.filed === 0 && !hs.marked && hs.create === 'plugin_registry_unread' && hs.table === 0,
+      'B-f276 (r3305 (a)): the plugin registry HELD ⇒ an engine profile\'s start is refused BY THE REGISTRY\'s NAME (plugin_registry_unread) — nothing launched, never Chrome in its place, no mark and no For-you item of a missing build; a create naming the engine is refused by that name too', hs);
+    const kSrcH = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const hLine = kSrcH.split('\n').find((l) => l.startsWith("    if (engine && engine.code === 'plugin_registry_unread') throw namedError("));
+    if (!hLine) throw new Error('the anchor of the control «B-f276: the held registry at an engine start» is not in the source');
+    const Kh = mutantCopies('browser-builds-plugreg-held', REPO).load('src/server/browser-keeper.js', editAnchor(kSrcH, hLine + '\n', '', 'src/server/browser-keeper.js'), 'held-as-broken');
+    const hx = await heldStart(Kh, 'data-eng-held-red');
+    ok(hx.filed === 1 && hx.marked && !hx.chrome && hx.launched === 0,
+      'RED CONTROL (B-f276, the release\'s start): the held answer reads as a broken engine — the profile MARKED and a For-you item filed («cannot start…»), though nothing about the engine is wrong', hx);
+  }
   // CHANGE BUILD… to the engine: a running Chrome profile restarts on the kernel; the dialog's facts never carry a path
   const pc = ke.createProfile({ label: 'Switches' });
   await ke.start(pc.id, { why: 'test' });

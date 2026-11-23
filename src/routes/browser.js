@@ -200,6 +200,7 @@ function refuseHost(req, res) {
 const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // B-8b87 cure: a profile proxy's refusals by name (a person's page words them by code — never a 500 for a refusal)
   store_unread: 503,   // the B-f276 remainder: the profile registry is held (unread)
+  plugin_registry_unread: 503,   // B-f276 (r3305): the plugin registry is held — an engine profile's start, create or Change build refused by its name
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
@@ -523,6 +524,9 @@ router.get('/api/browser/engines', async (req, res) => {
   if (refuseAgentBearer(req, res, ENGINES_ARE_USERS)) return;
   const k = keeperOr503(res); if (!k) return;
   if (typeof k.engineRowsView !== 'function') return res.status(503).json({ error: 'this keeper has no browser engines', code: 'unavailable' });
+  // B-f276 (主开发 r3305 (a)): the plugin registry HELD — which engines are on is unknown: answered BY NAME (the Settings row's failed
+  // answer: «could not be read», the stored value kept as itself), never an engine list that says «none is enabled»
+  { const h = typeof k.enginesHeld === 'function' ? k.enginesHeld() : null; if (h) return res.status(503).json({ error: h.words, code: 'plugin_registry_unread' }); }
   try { res.json({ engines: await k.engineRowsView(), defaultEngine: k.defaultEngineNow() }); } catch (e) { fail(res, e); }
 });
 /** lane engine-distribution: «Download kernel» — a PERSON's act (cookie-only): the engine's kernel downloaded into its place

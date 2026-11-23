@@ -175,6 +175,7 @@ const CALLERS = { 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tok
   // 主开发 r3336 (lane lg-text-legs-3): the data folder's own id file, held by the sign-in's start
   'src/auth.js': { sites: 1, stores: ['instance.json'] },   // (it names the file through SW.INSTANCE_FILE)
   'src/opencode-serve.js': ['opencode-serve.json'],   // r3334 unit 1 (lane bl-chat-b): the OpenCode serve's record
+  'src/server/plugin-loader.js': ['plugin-registry.json'],   // bl-browser-a (主开发 r3305): which plugins are on and trusted
   // A STORE MADE PER THING from ONE create site (r3314): { sites, stores } — `sites` the file's create sites, `stores` the names the hub lists them
   // by (a shape's example where each thing has its own file), checked against the notice's names, not against the file's literals
   'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] },

@@ -62,6 +62,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { fork } = require('child_process');
+const HOLD = require('../store-read-hold.js');   // B-f276 (主开发 r3305): plugin-registry.json under the store-read law
+const SR = require('../store-read.js');
+/** The code of every refusal while plugin-registry.json is held (the family's `…_unread`, the client's words by it). */
+const HELD_CODE = 'plugin_registry_unread';
 const { validateManifest, needsConsent, capabilitySummary, capabilitiesHash } = require('../plugin-manifest');
 
 const SANDBOX_CSP = "sandbox allow-scripts allow-popups allow-downloads allow-modals allow-forms";
@@ -140,10 +144,37 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
   const forbiddenRoots = [{ path: path.resolve(rootDir), label: 'the VibeSpace install dir' }, { path: path.join(path.resolve(rootDir), 'data'), label: 'the VibeSpace data dir' }];
   const installer = require('./plugin-install.js').create({ rootDir, hostVersion, forbiddenRoots, log, integrations, gitBin, gitTimeoutMs });
   const plugins = new Map(); // id → { id, dir, manifest, errors, warnings, enabled, child, state, crashes:[], pending:Map, nextId, themes:{}, notice, errTail }
-  let registry = { enabled: {}, trust: {}, installs: {} };
-  try { registry = { ...registry, ...(JSON.parse(fs.readFileSync(registryFile, 'utf-8')) || {}) }; } catch { }
-  for (const k of ['enabled', 'trust', 'installs']) if (!registry[k] || typeof registry[k] !== 'object') registry[k] = {};
-  const saveRegistry = () => { try { fs.mkdirSync(path.dirname(registryFile), { recursive: true }); writeJsonAtomic(registryFile, registry); } catch (e) { log.warn?.('[plugins] registry write failed:', e.message); } };
+  // B-f276 family (主开发 r3305; the store census's «37 more stores judged», item 3): THE STORE-READ LAW for data/plugin-registry.json
+  // (src/store-read-hold.js). The release read ANY failure — a read that failed, bytes that do not parse — as EMPTY: every plugin read
+  // OFF and UNTRUSTED, and the next enable, install, update, uninstall or consent-drift write wrote the file over: which plugins were
+  // on, their consent records and their install sources were lost. HELD: nothing is written over it; every writer is refused BY NAME
+  // before any side effect (503 plugin_registry_unread); no plugin is started, no consent asked or recorded, no shim removed, no
+  // kernel fetched or run by the engines; «off» and «untrusted» are never told as facts (`held`); it is read again off the loop; torn
+  // bytes are kept aside once, then it starts empty. LIFTED: what the start skipped runs — the folders rescanned, the enabled plugins
+  // started, the shims synced, every client told
+  const emptyRegistry = () => ({ enabled: {}, trust: {}, installs: {} });
+  const normalize = (v) => { const r = { ...emptyRegistry(), ...(v && typeof v === 'object' ? v : {}) }; for (const k of ['enabled', 'trust', 'installs']) if (!r[k] || typeof r[k] !== 'object') r[k] = {}; return r; };
+  const REGISTRY_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const hold = HOLD.create({
+    file: registryFile, valid: REGISTRY_SHAPE, code: HELD_CODE, aside: (mark) => registryFile + '.corrupt-' + mark,
+    words: (h) => `plugin-registry.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. Nothing about your plugins is lost: nothing is written over it, and no plugin is started, enabled, trusted, installed, updated or removed until it reads`,
+    log: (s) => log.warn?.('[plugins] ' + s),
+    onLift: (v, facts) => lifted(v, facts),
+  });
+  let registry = emptyRegistry();
+  { let read; try { read = { text: fs.readFileSync(registryFile, 'utf-8') }; } catch (error) { read = { error }; } const a0 = SR.storeAnswer(read, { valid: REGISTRY_SHAPE }); if (hold.start(a0) === 'data') registry = normalize(a0.value); }
+  /** a writer's guard: refused BY NAME (503 plugin_registry_unread) while the registry is held — before any side effect */
+  const heldRefuse = (what) => { const f = hold.held(); if (f) throw httpErr(503, `${what}: ${hold.words()}`, { code: HELD_CODE, held: { file: f.file, code: f.code, since: f.since } }); };
+  const saveRegistry = () => { if (!hold.writable('a plugin registry write')) return; try { fs.mkdirSync(path.dirname(registryFile), { recursive: true }); writeJsonAtomic(registryFile, registry); } catch (e) { log.warn?.('[plugins] registry write failed:', e.message); } };
+  /** the hold LIFTED: the registry read (null: «not there» twice, or torn bytes kept aside — empty); what the start skipped runs now */
+  // B-f276 (主开发 r3305 (c)): who waits for the lift (the fleet run of engine-distribution) — told ONCE after the reload, then forgotten
+  const liftWaiters = new Set();
+  function lifted(v, facts) {
+    registry = normalize(v);
+    if (!v && facts && facts.setAside) saveRegistry();   // torn bytes kept aside: the empty shape written ONCE (nothing else rebuilds it)
+    reload();
+    for (const fn of [...liftWaiters]) { liftWaiters.delete(fn); try { fn(); } catch { /* the waiter's own */ } }
+  }
   const notify = () => { try { broadcast({ type: 'plugins-manifests-updated', plugins: list() }); } catch { } };
   // B-3b8e (4b): a git install / update / uninstall moves what the Plugin Git credential's Test waits for (a repository known on
   // its host) — the store pushes that card again, so an open Integrations window follows without a reopen
@@ -157,7 +188,7 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
     const f = fleetNamed(), inst = registry.installs[id];
     return !!(f && f.plugin === id && /^[0-9a-f]{40}$/.test(f.ref) && inst && inst.source === 'git' && inst.sha === f.ref && t.sha === f.ref && !!t.contentHash && inst.contentHash === t.contentHash);
   };
-  const isTrusted = (rec) => { const t = registry.trust[rec.id]; return !!(t && t.trusted && rec.manifest && t.capabilitiesHash === hashOf(rec) && (t.by !== 'fleet' || fleetTrustHolds(rec.id, t))); };
+  const isTrusted = (rec) => { if (hold.held()) return false; const t = registry.trust[rec.id]; return !!(t && t.trusted && rec.manifest && t.capabilitiesHash === hashOf(rec) && (t.by !== 'fleet' || fleetTrustHolds(rec.id, t))); };
 
   // ── discovery ──
   function discover() {
@@ -311,6 +342,7 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
   function shimNames() { return [...wantedShims().keys()]; }
   function bakedInstanceUrl() { try { return String(instanceUrl?.url?.() || '').replace(/\/+$/, ''); } catch { return ''; } }
   function syncShims() {
+    if (hold.held()) return;   // r3305 (c): while the registry is held no plugin reads «enabled» — no shim is removed, none written
     try { fs.mkdirSync(shimDir, { recursive: true }); } catch { }
     const wanted = wantedShims();
     let existing = [];
@@ -362,15 +394,16 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
         contributes: m ? { ...m.contributes, themes: (m.contributes.themes || []).map((t) => ({ ...t, ...(r.themes?.[t.id] || {}) })) } : { windows: [], agentTools: [], routes: false, settings: [], themes: [] },
         capabilities: m?.capabilities || { server: { fs: { read: [], write: [] }, childProcess: false, net: [] } },
         capabilitySummary: m ? capabilitySummary(m) : [], capabilitiesHash: hashOf(r),
-        needsConsent: needsConsent(m), trusted: isTrusted(r), consentRequired: needsConsent(m) && !isTrusted(r), trustedAt: registry.trust[r.id]?.trustedAt || null,
+        needsConsent: needsConsent(m), trusted: hold.held() ? null : isTrusted(r), consentRequired: hold.held() ? null : needsConsent(m) && !isTrusted(r), trustedAt: registry.trust[r.id]?.trustedAt || null,
         trustedBy: isTrusted(r) ? (registry.trust[r.id].by === 'fleet' ? 'fleet' : 'user') : null, // lane engine-distribution (D2): «Installed and trusted by the cluster»
         install: inst ? { source: inst.source, value: inst.value, installedAt: inst.installedAt, updatedAt: inst.updatedAt || null, ref: inst.ref || null, sha: inst.sha || null, credential: inst.credential || null, by: inst.by || 'user', prevSha: inst.prevSha || null } : null, // lane fleet-plugin-catalog: prevSha = the cluster's previous pin
-        enabled: !!r.enabled, valid: !!m, errors: r.errors || [], warnings: r.warnings || [], notice: r.notice || null,
+        enabled: hold.held() ? null : !!r.enabled, valid: !!m, errors: r.errors || [], warnings: r.warnings || [], notice: r.notice || null, ...(hold.held() ? { held: true } : {}), // r3305 (a): held ⇒ «on» / «trusted» are unknown, never «off»
         state: m?.server ? r.state : (r.enabled ? 'running' : 'stopped'), lastError: r.lastError || null,
       };
     });
   }
   function setEnabled(id, on, { trusted = false } = {}) {
+    heldRefuse(on ? (trusted ? 'enabling (and trusting) a plugin' : 'enabling a plugin') : 'switching a plugin off');   // r3305 (b): no consent asked or recorded over it
     const rec = plugins.get(id);
     if (!rec) throw httpErr(404, `unknown plugin "${id}"`);
     if (on && !rec.manifest) throw httpErr(400, `plugin "${id}" is invalid: ${rec.errors.join('; ')}`);
@@ -397,6 +430,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   function get(id) { return plugins.get(id) || null; }
 
   async function install({ source, value, file, ref = null, credential = null, by = 'user' } = {}) {
+    heldRefuse('installing a plugin');   // before the installer writes a file
     const r = await installer.install({ source, value, file, ref, credential });
     const prevInst = registry.installs[r.id] || null;
     // CONSENT DOES NOT TRANSFER TO NEW CODE (2.369.43): `enabled` and `trust`
@@ -446,6 +480,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     return { plugin, replaced: r.replaced, previous: r.previous, warnings: r.warnings, disabled: reconsent && !fleetTrust, consentRequired: reconsent && !fleetTrust && !!plugin?.needsConsent, notice: reconsent && !fleetTrust ? rec?.notice || null : null, ref: r.ref || null, sha: r.sha || null, trustedBy: fleetTrust ? 'fleet' : null };
   }
   function uninstall(id) {
+    heldRefuse('removing a plugin');   // r3305 (c): nothing is moved to the trash by the registry's silence
     const rec = plugins.get(id);
     if (!rec) throw httpErr(404, `unknown plugin "${id}"`);
     stopChild(rec);
@@ -460,6 +495,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     return { ok: true, id, trash: trashPath };
   }
   async function update(id) {
+    heldRefuse('updating a plugin');
     const rec = plugins.get(id);
     if (!rec) throw httpErr(404, `unknown plugin "${id}"`);
     const inst = registry.installs[id];
@@ -487,7 +523,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   // ── routes ──
   if (app) {
     const sendErr = (res, e) => res.status(e.status || 500).json({ error: e.message, ...(e.payload || {}) });
-    app.get('/api/plugins/manifests', (req, res) => { let fleet = null; try { fleet = fleetStatus() || null; } catch { fleet = null; } res.json({ plugins: list(), hostVersion, ...(fleet ? { fleet } : {}) }); });
+    app.get('/api/plugins/manifests', (req, res) => { let fleet = null; try { fleet = fleetStatus() || null; } catch { fleet = null; } res.json({ plugins: list(), hostVersion, ...(fleet ? { fleet } : {}), ...(hold.held() ? { held: hold.words(), code: HELD_CODE } : {}) }); });
     app.post('/api/plugins/manifests/reload', (req, res) => res.json({ plugins: reload() }));
     app.post('/api/plugins/manifests/:id/enabled', (req, res) => {
       try { res.json({ plugin: setEnabled(String(req.params.id), !!req.body?.enabled, { trusted: req.body?.trusted === true }) }); }
@@ -496,7 +532,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     app.get('/api/plugins/manifests/:id/capabilities', (req, res) => {
       const rec = plugins.get(String(req.params.id));
       if (!rec) return res.status(404).json({ error: 'unknown plugin' });
-      res.json({ id: rec.id, valid: !!rec.manifest, needsConsent: needsConsent(rec.manifest), trusted: isTrusted(rec), trust: registry.trust[rec.id] || null, capabilitiesHash: hashOf(rec), capabilities: rec.manifest?.capabilities || null, summary: rec.manifest ? capabilitySummary(rec.manifest) : [] });
+      res.json({ id: rec.id, valid: !!rec.manifest, needsConsent: needsConsent(rec.manifest), trusted: hold.held() ? null : isTrusted(rec), trust: hold.held() ? null : registry.trust[rec.id] || null, ...(hold.held() ? { held: hold.words(), code: HELD_CODE } : {}), capabilitiesHash: hashOf(rec), capabilities: rec.manifest?.capabilities || null, summary: rec.manifest ? capabilitySummary(rec.manifest) : [] });
     });
     // INSTALL: JSON { source, value } or multipart (source=zip, field "file" = the .vsp)
     let uploadMw = (req, res, next) => next();
@@ -581,6 +617,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     // agent tool calls: under /api/agent/ (cookie-exempt like every agent
     // endpoint) — the route REQUIRES the session's vsst_ bearer (agentAuth)
     app.post('/api/agent/plugin-tool/:id/:name', async (req, res) => {
+      if (hold.held()) return res.status(503).json({ ok: false, code: HELD_CODE, error: hold.words() });   // r3305: the agent is told why, never «not found»
       const rec = plugins.get(String(req.params.id));
       const tool = rec?.manifest?.contributes?.agentTools?.find((t) => t.name === String(req.params.name));
       if (!rec || !rec.enabled || !tool) return res.status(404).json({ ok: false, error: 'plugin tool not found' });
@@ -622,7 +659,8 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   } catch (e) { log.warn?.(`[plugins] the Plugin Git credential's Test is not registered (${e && e.message})`); }
   /** The install record of an id (the boot job compares it — source, value, ref — and never re-pulls the same). */
   const installRecord = (id) => (registry.installs[id] ? { ...registry.installs[id] } : null);
-  return { list, get, setEnabled, reload, shutdown, discover, syncShims, shimNames, install, uninstall, update, askRoute, installRecord, isTrusted: (id) => { const r = plugins.get(id); return !!r && isTrusted(r); }, SANDBOX_CSP, pluginsDir, shimDir, trashDir: installer.trashDir };
+  return { list, get, setEnabled, reload, shutdown, discover, syncShims, shimNames, install, uninstall, update, askRoute, installRecord, isTrusted: (id) => { if (hold.held()) return null; const r = plugins.get(id); return !!r && isTrusted(r); },
+    held: () => hold.held(), heldWords: () => hold.words(), onLift: (fn) => { if (typeof fn === 'function' && hold.held()) liftWaiters.add(fn); }, SANDBOX_CSP, pluginsDir, shimDir, trashDir: installer.trashDir };
 }
 
 module.exports = { create, SANDBOX_CSP, readThemeFile, classifyExit, deniedWords };

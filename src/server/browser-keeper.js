@@ -1808,6 +1808,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         // never spawned beside it; any other answer: no hold — the in-use check alone; asked again at the next start
         if (e && e.code === 'engine_kernel_landing') throw namedError(e.code, e.message, { engine: c.id }); } } }
     let engine = await engineFactOf(c.id, { host: p.host || null });
+    // B-f276 (主开发 r3305 (a)): the plugin registry HELD — whether this engine's plugin is on and trusted is UNKNOWN: the start is refused
+    // BY THE REGISTRY's NAME — nothing started, never Chrome in its place, NO mark and NO For-you item of a missing build (the family's
+    // one notice says the hold); started again by the person once the list reads (nothing about the profile changed)
+    if (engine && engine.code === 'plugin_registry_unread') throw namedError(engine.code, `"${p.label}" does not start now — it runs ${engLabel}, and VibeSpace cannot tell yet whether that plugin is on and trusted (${engine.error}); it never starts Chrome in its place — start it again once the plugin list reads`, { engine: c.id });
     // lane engine-distribution: the kernel's version MEASURED once before its first launch (cached per receipt — 5 s at most);
     // a kernel not there yet is downloaded on this FIRST USE (in the background — the launch is refused by name meanwhile)
     const d = p.host ? null : eds();
@@ -9307,6 +9311,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     agentRoadFor: (id, { host = null, provider = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, ...roadFactsOf({ provider: provider || null, host: host || null }, null), agent: true })),
     list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
+    enginesHeld: () => { const r = engs(); try { return r && typeof r.held === 'function' ? r.held() : null; } catch { return null; } }, // B-f276 (r3305 (a)): the engine table's registry held
     engineFactOf, engineRowsView, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
     installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)

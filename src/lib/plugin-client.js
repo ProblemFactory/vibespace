@@ -75,6 +75,10 @@ export class PluginClient {
   /** Idempotent: registers what is enabled, tears down what is not. Serialized so
    *  a burst of broadcasts cannot interleave activate/deactivate of one plugin. */
   apply(list) {
+    // B-f276 (主开发 r3305 (c)): the hub's plugin registry HELD (its rows `held`) — which plugins are on is UNKNOWN: this page keeps what
+    // it applied (no module deactivated, no plugin theme dropped — the person's theme is never reset to dark by the silence); applied
+    // again when the list reads (the lift's broadcast)
+    if (Array.isArray(list) && list.some((m) => m && m.held)) return this._applying || Promise.resolve();
     this.manifests = Array.isArray(list) ? list : [];
     const run = async () => {
       for (const w of this.contributedWindows()) this._register(w);
