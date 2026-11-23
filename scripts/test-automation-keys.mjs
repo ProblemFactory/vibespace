@@ -777,6 +777,51 @@ const grantsOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE
   const r10 = await e0.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN }, want: k.key.id });
   ok(r10.ok, 'no resolver wired ⇒ `default` = the harness\'s own (the old behaviour; the hub wires one)', r10.ok || r10);
 }
+console.log('⑫b r3001 THE STORE IS NEVER WRITTEN OVER FROM A FAILED READ (lane bl-machines-b\'s census of the stores, item 3)');
+// Two uses of one key: the first (an open its key may make) waits — at its limits' permission read (before the key's stamp), or
+// inside its act (before its opened row) — HELD on a promise; the second's re-read of the store meets a PLACED refusal (EIO, that
+// read only). Then the first goes on. The file's entries survive (the key, its grant, the opened row), and the use that met the
+// failed read is refused by name, nothing in its words of the key's entry (no digest)
+const STORE_OF = (w) => path.join(w.dir, A.STORE_FILE);
+const readStore = (w) => JSON.parse(fs.readFileSync(STORE_OF(w), 'utf8'));
+const placeOnce = (file) => {
+  const real = fs.readFileSync; let n = 0;
+  fs.readFileSync = function (p0, ...a) { if (!n && typeof p0 === 'string' && path.resolve(p0) === path.resolve(file)) { n++; fs.readFileSync = real; throw Object.assign(new Error('a placed refusal'), { code: 'EIO' }); } return real.call(this, p0, ...a); };
+  return { used: () => n, undo: () => { fs.readFileSync = real; } };
+};
+const storeRace = async (mod, where) => {
+  const w = await mkWorld('store-race-' + where + '-' + Math.random().toString(36).slice(2, 8));
+  let gate = null; const held = new Promise((r) => { gate = r; });
+  let inAwait = false;
+  const openFacts = where === 'stamp' ? { permissionDefault: async () => { inAwait = true; await held; return { ok: true, mode: 'default', layer: null, disabledBy: null }; } } : {};
+  const verbs = {
+    'conversations.open': async () => { if (where === 'opened') { inAwait = true; await held; } return { ok: true, sessionId: 'w-race', claudeSessionId: 'c-race' }; },
+    'conversations.rename': () => ({ ok: true, name: 'renamed' }),
+  };
+  const e = mod.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs, openFacts });
+  const k = e.mint({ name: 'racer', scopes: ['conversations.open', 'conversations.rename'], limits: LIM_OPEN });
+  e.grant(k.key.id, ['session:conv-1']);
+  const before = readStore(w);
+  const p1 = e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN } });
+  for (const t0 = Date.now(); !inAwait && Date.now() - t0 < 10000;) await new Promise((r) => setTimeout(r, 5));
+  const pl = placeOnce(STORE_OF(w));
+  let r2 = null;
+  try { r2 = await e.use({ caller: caller(), verb: 'conversations.rename', args: { name: 'renamed' } }); } finally { pl.undo(); }
+  gate();
+  const r1 = await p1;
+  return { inAwait, placed: pl.used(), r1, r2, before, after: readStore(w), keyId: k.key.id };
+};
+const survived = (x) => x.after.keys.length === x.before.keys.length && x.after.keys.some((k) => k.id === x.keyId) && x.after.grants.length === x.before.grants.length;
+const refusedByName = (x) => !!x.r2 && x.r2.ok === false && x.r2.code === 'failed' && /automation-keys\.json could not be read/.test(String(x.r2.why)) && !JSON.stringify(x.r2).includes(String(x.before.keys[0].digest));
+const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: x.r1.ok, code: x.r1.code }, r2: x.r2 && { ok: x.r2.ok, code: x.r2.code, why: x.r2.why }, keys: [x.before.keys.length, x.after.keys.length], grants: [x.before.grants.length, x.after.grants.length], opened: x.after.opened && x.after.opened.length });
+{
+  const S = await storeRace(ENG, 'stamp');
+  ok(S.inAwait && S.placed === 1 && survived(S) && refusedByName(S) && S.r1.ok === true && S.after.keys.find((k) => k.id === S.keyId).lastUsedAt != null,
+    'r3001 THE KEY\'S STAMP: a use waiting at its limits\' permission read while another use\'s re-read FAILS — the stamp is written from a GOOD read (the key, its grant survive), the use that met the failed read refused by name (no part of the key\'s entry in its words)', shown(S));
+  const O = await storeRace(ENG, 'opened');
+  ok(O.inAwait && O.placed === 1 && survived(O) && refusedByName(O) && O.r1.ok === true && Array.isArray(O.after.opened) && O.after.opened.some((o) => o.keyId === O.keyId && o.webuiId === 'w-race'),
+    'r3001 THE OPENED ROW: a use waiting inside its open while another use\'s re-read FAILS — the opened row is written from a GOOD read (the key, its grant and the row all on file), the failed read\'s use refused by name', shown(O));
+}
 console.log('⑫c MUTANT — the config read BEFORE the folder judge');
 {
   const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
