@@ -13,9 +13,9 @@
 //     the history reads' head + tail bound would hide a long agent's middle): the worker reads and parses, the main thread takes the
 //     records a page at a time from a line offset, the loop free between pages. A pool that refuses (none on this process, its
 //     heap bound, its lane busy, its workers down) is a REFUSAL by name — never a read on the loop.
-//   THE LIVE WATCHER'S FINDER (src/server/stdout/claude-stream-json.js startSubagentWatcher, the unit's commit 2): the kept place and
-//     the cwd's folder by one stat each, as the release's first candidate; a file elsewhere (or not there yet) through `shared`:
-//     the hub's ONE listing of the projects root, asynchronous, at most once a second, every watcher's retries sharing it.
+//   THE LIVE WATCHER'S FINDER (src/server/stdout/claude-stream-json.js startSubagentWatcher, the unit's commit 2; wholly here since
+//     r2874 (2), no existence check on the loop): the kept place and the cwd's folder first, then through `shared`: the hub's ONE
+//     listing of the projects root, asynchronous, at most once a second, every watcher's retries sharing it.
 //   THE RE-ATTACH STORM: ONE read at a time (the history lane is one worker; one snapshot slot), in the order asked, and asks of
 //     the SAME file while its read waits or runs share that read — so a reconnect with N agent windows open makes one queue of
 //     at most N distinct reads, each window acked at once (attach-ack) and keeping what it shows until its own answer.
@@ -187,10 +187,8 @@ async function agentTranscript(opts = {}) {
 
 /** the place kept for this conversation and agent (the live watcher asks it before its one stat of the cwd's folder), or null */
 const keptPlace = (claudeSessionId, agentId) => _places.get(`${claudeSessionId}\0${agentId}`) || null;
-/** keep a place a caller found itself (the live watcher's one stat of the cwd's folder) */
-const keepPlace = (claudeSessionId, agentId, fp) => (idsRefusal(claudeSessionId, agentId) ? null : keep(`${claudeSessionId}\0${agentId}`, fp));
 
 function _resetForTest() { _places.clear(); _judged.clear(); _sharing.clear(); _chain = Promise.resolve(); _listing = null; listingMaxAgeMs = LISTING_MAX_AGE_MS; for (const k of Object.keys(_stats)) _stats[k] = 0; }
 const _setListingMaxAgeForTest = (ms) => { listingMaxAgeMs = ms; };
 
-module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, keptPlace, keepPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, _resetForTest, _setListingMaxAgeForTest };
+module.exports = { findAgentTranscript, readAgentTranscript, agentTranscript, idsRefusal, keptPlace, stats, PLACE_MAX, LISTING_MAX_AGE_MS, META_BOUND_MS, _resetForTest, _setListingMaxAgeForTest };

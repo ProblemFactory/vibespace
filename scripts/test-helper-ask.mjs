@@ -1971,6 +1971,8 @@ async function jsonlLeg(consumer) {
   try {
     attach(s, id, h, helpers);
     s._startSubagentWatcher(tu, agentId);
+    // the watcher finds and reads OFF THE LOOP since r2874 (2): its first read is waited for (a count: until a line is told)
+    for (let k = 0; k < 300 && !got().length; k++) await new Promise((res) => setTimeout(res, 10));
     const first = got().map((m) => m.uuid);
     fs.appendFileSync(jlFile, Buffer.concat([two.subarray(cut), three]));   // the rest of the line, then a whole third
     for (let k = 0; k < 300 && !got().some((m) => m.uuid === 'jl-3'); k++) await new Promise((res) => setTimeout(res, 10));   // (a count: until the third line is read)
@@ -2054,7 +2056,9 @@ async function jsonlNextLeg(consumer, { lateWait = 100, refuseWatch = false } = 
     fs.appendFileSync(jnFile, line(recOf(6, 'the last words')));
     global.setTimeout = (f, ms, ...a) => { const tm = st0(f, ms, ...a); if (tm && tm.unref) tm.unref(); if (ms >= 1000 && ms < 60000) graceFns.push(f); return tm; };   // (the end's grace timers never hold the suite; the grace's close kept to run at once)
     try { h.data(JSON.stringify({ type: 'system', subtype: 'task_notification', task_id: agentId, tool_use_id: tu, status: 'completed', summary: 'done' }) + '\n'); } finally { global.setTimeout = st0; }
-    r.atEnd = said('jn-6'); r.watching = !!(s.subagentWatchers && s.subagentWatchers.has(tu));
+    r.watching = !!(s.subagentWatchers && s.subagentWatchers.has(tu));
+    await until(() => said('jn-6'), 30);   // the end's last read goes off the loop since r2874 (2): waited for, bounded (0.3 s)
+    r.atEnd = said('jn-6');
     await new Promise((res) => setTimeout(res, 80));
     r.after = said('jn-6');
     fs.appendFileSync(jnFile, line(recOf(7, 'written a moment after the end')));   // (f) the transcript a moment after the end was told

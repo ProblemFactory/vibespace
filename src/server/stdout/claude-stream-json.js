@@ -39,6 +39,7 @@ const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'co
 // a sub-agent record's uuid that names THAT record — never the stdout PLACEHOLDER (…-000000000001, src/message-manager.js recordKey's
 // rule: many stdout records carry it while their JSONL copies carry the real one); only such a uuid is asked or marked as told
 const toldUuid = (u) => typeof u === 'string' && u !== '' && !/-0{11,}1?$/.test(u);
+const SUBAGENT_TAIL_BYTES = 64;   // r2874 (1): the bytes just before a watcher's offset, kept to know the file is still the one read
 const SUBAGENT_LAST_READ_MS = 3000;   // after a helper's end is told: the watch stays this long (a transcript written a moment later), then one more read
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
@@ -300,31 +301,28 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       const T = require('../subagent-transcript');
       let watchFile = found || null;
       if (found === undefined && session.claudeSessionId) {
+        // r2874 (2): NO existence check on the loop — the kept place, the cwd's folder and the rest all through the helper's one road
+        // (fs.promises; the hub's ONE shared listing only when the first two miss; every place judged by its real path, r2865)
         const exactDir = path.join(projectsDir, cwdToProjectDir(session.cwd || ''));
-        const exact = path.join(exactDir, session.claudeSessionId, 'subagents', `agent-${agentId}.jsonl`);
-        watchFile = [T.keptPlace(session.claudeSessionId, agentId), exact].find((f) => { try { return !!f && fs.existsSync(f); } catch { return false; } }) || null;
-        if (watchFile) T.keepPlace(session.claudeSessionId, agentId, watchFile);
-        else {
-          const looking = { watcher: null, retry: null, looking: true, lastActivity: Date.now() };
-          session.subagentWatchers.set(toolUseId, looking);
-          T.findAgentTranscript({ claudeSessionId: session.claudeSessionId, agentId, exactDir, root: projectsDir, workflows: false, shared: true })
-            .then((r) => r.fp, () => null)
-            .then((fp) => {
-              try {
-                if (session.subagentWatchers.get(toolUseId) !== looking) {
-                  // r2594 (1): a STOP that landed while it looked (the helper ended inside the look) — the release read the file before
-                  // the stop; here the one last read when the look returns: the watch armed and stopped at once (the stop's own last
-                  // read and its short last watch). Replaced by another start meanwhile: nothing (that watch is its own)
-                  if (looking.stopped && fp && !session.subagentWatchers.has(toolUseId) && activeSessions.has(id)) { startSubagentWatcher(toolUseId, agentId, attempt, fp); stopSubagentWatcher(toolUseId); }
-                  return;
-                }
-                session.subagentWatchers.delete(toolUseId);
-                if (!activeSessions.has(id)) return;
-                startSubagentWatcher(toolUseId, agentId, attempt, fp || null);
-              } catch (e) { console.warn(`[stream] a helper's transcript finder failed (${toolUseId}): ${(e && e.message) || e}`); }
-            });
-          return;
-        }
+        const looking = { watcher: null, retry: null, looking: true, lastActivity: Date.now() };
+        session.subagentWatchers.set(toolUseId, looking);
+        T.findAgentTranscript({ claudeSessionId: session.claudeSessionId, agentId, exactDir, root: projectsDir, workflows: false, shared: true })
+          .then((r) => r.fp, () => null)
+          .then((fp) => {
+            try {
+              if (session.subagentWatchers.get(toolUseId) !== looking) {
+                // r2594 (1): a STOP that landed while it looked (the helper ended inside the look) — the release read the file before
+                // the stop; here the one last read when the look returns: the watch armed and stopped at once (the stop's own last
+                // read and its short last watch). Replaced by another start meanwhile: nothing (that watch is its own)
+                if (looking.stopped && fp && !session.subagentWatchers.has(toolUseId) && activeSessions.has(id)) { startSubagentWatcher(toolUseId, agentId, attempt, fp); stopSubagentWatcher(toolUseId); }
+                return;
+              }
+              session.subagentWatchers.delete(toolUseId);
+              if (!activeSessions.has(id)) return;
+              startSubagentWatcher(toolUseId, agentId, attempt, fp || null);
+            } catch (e) { console.warn(`[stream] a helper's transcript finder failed (${toolUseId}): ${(e && e.message) || e}`); }
+          });
+        return;
       }
       if (!watchFile) {
         // File doesn't exist yet — retry with backoff, capped: an agent that
@@ -343,16 +341,45 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       if (!session.subagentEmittedUuids.has(toolUseId)) session.subagentEmittedUuids.set(toolUseId, new Set());
       const emitted = session.subagentEmittedUuids.get(toolUseId);
       let offset = 0, held = [], heldLen = 0;   // held: the bytes of a line still being written — read ONCE and kept until its newline
-      // Read existing content first
-      const readNewLines = () => {
+      // OFF THE LOOP (主开发 r2874 (2)): every read of new lines goes through fs.promises — the helper's transcript is the CLI's file in
+      // the home, and a home on a mount that hangs must not hold the hub. ONE read at a time a watcher: a change while it reads asks once more.
+      // THE CUT (r2874 (1)): a read never starts from an offset the file no longer has. The file is known by its inode and by the
+      // SUBAGENT_TAIL_BYTES just before the offset: a file shorter than the offset, another file under the name, or other bytes there (cut
+      // and written again past the old size) START OVER from its beginning — once, said in the journal. The records already told are
+      // passed over by their uuids (`emitted`): nothing is doubled, and nothing written after the cut is lost.
+      let ino = null, tail = Buffer.alloc(0), reading = null, again = false;
+      const cutUnder = async (fh, stat) => {
+        const from = offset + heldLen;
+        if ((ino !== null && stat.ino !== ino) || stat.size < from) return true;
+        if (!tail.length) return false;
+        const probe = Buffer.allocUnsafe(tail.length);
+        const { bytesRead } = await fh.read(probe, 0, tail.length, from - tail.length);
+        return bytesRead !== tail.length || !probe.equals(tail);
+      };
+      // another file under the name: the watch followed the old one — armed again on the name (only while this watcher still holds its entry)
+      const rearm = () => {
+        const e = session.subagentWatchers.get(toolUseId);
+        if (!e || e.read !== readNewLines) return;
+        try { if (e.watcher) e.watcher.close(); } catch { }
+        e.watcher = WD.watch(watchFile, () => { const x = session.subagentWatchers.get(toolUseId); if (x) x.lastActivity = Date.now(); readNewLines(); });
+      };
+      const readOnce = async () => {
+        let fh = null;
         try {
-          const stat = fs.statSync(watchFile);
+          fh = await fs.promises.open(watchFile, 'r');
+          const stat = await fh.stat();
+          const replaced = ino !== null && stat.ino !== ino;
+          if (await cutUnder(fh, stat)) {
+            console.warn(`[stream] a helper's transcript was cut or replaced under its watch (${toolUseId}): read again from its start; what was told stays, nothing twice`);
+            offset = 0; held = []; heldLen = 0; tail = Buffer.alloc(0);
+            if (replaced) rearm();
+          }
+          ino = stat.ino;
           const from = offset + heldLen;
           if (stat.size <= from) return;
           const buf = Buffer.allocUnsafe(stat.size - from);
-          const fd = fs.openSync(watchFile, 'r');
-          let got = 0;
-          try { got = fs.readSync(fd, buf, 0, buf.length, from); } finally { fs.closeSync(fd); }
+          const got = (await fh.read(buf, 0, buf.length, from)).bytesRead;
+          tail = Buffer.from(got >= SUBAGENT_TAIL_BYTES ? buf.subarray(got - SUBAGENT_TAIL_BYTES, got) : Buffer.concat([tail, buf.subarray(0, got)]).subarray(-SUBAGENT_TAIL_BYTES));
           // ONLY WHOLE LINES (B-b968's edge): a line the CLI is still writing is HELD until its newline — it was dropped whole
           // before (the offset moved past it and its rest never parsed). Each byte is read once (a long line written in many
           // chunks is held, never read again) and only the new bytes are searched. A newline byte never sits inside a UTF-8
@@ -386,7 +413,12 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               } else session._subNormalizers.get(toolUseId).processLive(msg);
             } catch {}
           }
-        } catch {}
+        } catch {} finally { if (fh) await fh.close().catch(() => { }); }
+      };
+      const readNewLines = () => {
+        if (reading) { again = true; return reading; }
+        reading = (async () => { try { do { again = false; await readOnce(); } while (again); } catch { } finally { reading = null; } })();
+        return reading;
       };
       readNewLines(); // read any existing content
       // THE ONE DOOR (src/watch-door.js): a watch the system refuses (ENOSPC — the machine's limit of watches) is followed by a

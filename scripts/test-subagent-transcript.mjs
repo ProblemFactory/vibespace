@@ -17,6 +17,9 @@
 //      folder is found with ZERO synchronous listings of the projects root (the kept place and the cwd's folder one stat each),
 //      the watcher armed when the walk answers; five watchers whose files are not written yet share ONE listing; a file at the
 //      cwd's folder still starts its watch at once (its first read synchronous, as before); RED: a copy of the release's finder
+//   ⑨ THE CUT (主开发 r2874 (1)): a transcript cut and written again (placed between two looks), another file renamed over the
+//      name, and a cut grown past the old size before the next look — every record told ONCE, in order, all off the loop, the
+//      watch armed again on the replaced file; RED: the release's read (synchronous, from the old offset)
 //   ⑥ WHOLE: an agent past the histories' head + tail bound (2 MiB + 32 MiB) comes back entire; CONTROL: the bounded read hides its middle
 //   ⑧ THE READ CANNOT BE AIMED (主开发 r2865, lane bl-machines-a's find): on the route and the attach, an id climbing into another
 //      conversation or out of the projects folder, and a conversation id with a parent step, are refused by name before any file
@@ -288,7 +291,8 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
     const session = (k) => { const id = `sess-w${k}`; const s = { mode: 'chat', backend: 'claude', name: 'w', cwd: CWD, host: null, claudeSessionId: SID, backendSessionId: SID, sockName: `cw-w${k}`, buffer: '', createdAt: Date.now(), _webuiId: id, _taskRecords: {} }; s._normalizer = new MessageManager(id); activeSessions.set(id, s); const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} }; quiet(); try { attach(s, id, h, helpers); } finally { loud(); } s.__feed = (rec) => { quiet(); try { h.data(JSON.stringify(rec) + '\n'); } finally { loud(); } }; return s; };
     const told = (agentId) => bcast.filter((m) => m.type === 'subagent-message' && m.parentToolUseId === `tu-${agentId}`).length;
     const close = () => { for (const s of activeSessions.values()) for (const w of (s.subagentWatchers || new Map()).values()) { try { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } catch { } } activeSessions.clear(); };
-    return { session, told, close };
+    const said = (agentId) => bcast.filter((m) => m.type === 'subagent-message' && m.parentToolUseId === `tu-${agentId}`).map((m) => m.message && m.message.uuid);
+    return { session, told, said, close };
   };
   const EW = 'e0000000000000e1';
   agent(SUB_OTHER, EW, 0.05);
@@ -296,7 +300,7 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
   const H = harness(require(CS_PATH));
   const s1 = H.session(1);
   await counted(async () => { s1._startSubagentWatcher(`tu-${EW}`, EW); for (let i = 0; i < 200 && !H.told(EW); i++) await sleep(10); });
-  ok(H.told(EW) > 0 && syncOf('readdirSync') === 0 && syncOf('existsSync') <= 2 && T.stats().listings === 1, `a helper's file in another project folder: watched (${H.told(EW)} records told) with ZERO synchronous listings of the projects root (${syncOf('readdirSync')}), ${syncOf('existsSync')} stat(s) on the loop (the kept place, the cwd's folder), the root listed once off the loop`);
+  ok(H.told(EW) > 0 && SYNC.length === 0 && T.stats().listings === 1, `a helper's file in another project folder: watched (${H.told(EW)} records told) with ZERO synchronous file calls under the projects root (${SYNC.length}: r2874 (2) — no existence check, no stat, no open, no read on the loop), ${syncOf('existsSync')} existence checks (the kept place, the cwd's folder), the root listed once off the loop`);
   // five watchers of five helpers whose files are not written yet, started in the same moment: ONE listing for the hub
   T._resetForTest();
   const WAIT = Array.from({ length: 5 }, (_, k) => `f00000000000000${k}`);
@@ -304,11 +308,11 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
   await counted(async () => { for (const id of WAIT) s2._startSubagentWatcher(`tu-${id}`, id); await sleep(150); });
   const st = T.stats();
   ok(st.listings === 1 && st.listingsShared === WAIT.length - 1 && syncOf('readdirSync') === 0, `five watchers whose files are not there yet: the hub listed the projects root ONCE (${st.listings}, ${st.listingsShared} shared), nothing synchronous (${syncOf('readdirSync')})`);
-  // a file at the cwd's folder: the watch starts at once, its first read synchronous (the release's contract, test-helper-ask ㉒)
+  // a file at the cwd's folder: found by the helper's one look (the exact place, no listing) and read OFF THE LOOP (r2874 (2))
   const AW = 'a00000000000000e'; agent(SUB, AW, 0.05);
-  const s3 = H.session(3);
-  s3._startSubagentWatcher(`tu-${AW}`, AW);
-  ok(H.told(AW) > 0 && s3.subagentWatchers.get(`tu-${AW}`) && s3.subagentWatchers.get(`tu-${AW}`).watcher, `a file at the cwd's folder is read at once — ${H.told(AW)} records told before the start returned`);
+  const s3 = H.session(3), exact0 = T.stats().exact;
+  await counted(async () => { s3._startSubagentWatcher(`tu-${AW}`, AW); for (let i = 0; i < 200 && !H.told(AW); i++) await sleep(10); });
+  ok(H.told(AW) > 0 && SYNC.length === 0 && T.stats().exact > exact0 && s3.subagentWatchers.get(`tu-${AW}`) && s3.subagentWatchers.get(`tu-${AW}`).watcher, `a file at the cwd's folder: found at its exact place by the helper's look and read off the loop — ${H.told(AW)} records told, ${SYNC.length} synchronous file calls`);
   // r2594 (1): the helper ends INSIDE the look (its task notification lands before the walk answers) — its lines are still told once
   const EL = 'e0000000000000e2'; agent(SUB_OTHER, EL, 0.05);
   const stopInLook = async (HH, k) => { const s = HH.session(k); s._startSubagentWatcher(`tu-${EL}`, EL); s.__feed({ type: 'system', subtype: 'task_notification', task_id: EL, tool_use_id: `tu-${EL}`, status: 'completed', summary: 'x' }); for (let i = 0; i < 150 && !HH.told(EL); i++) await sleep(10); return s; };
@@ -334,9 +338,9 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
       const watchFile = candidates.find((f) => { try { return fs.existsSync(f); } catch { return false; } });
 `;
   const red = MUT.load('src/server/stdout/claude-stream-json.js', anchored(CS, NEW_FINDER, OLD_FINDER, 'the watcher\'s finder'), 'release-finder');
-  const la = CS.indexOf('                if (session.subagentWatchers.get(toolUseId) !== looking) {\n'), lb = CS.indexOf('                  return;\n                }\n', la);
-  const LAST_READ = la >= 0 && lb > la ? CS.slice(la, lb + '                  return;\n                }\n'.length) : 'THE LAST READ';
-  const dropped = MUT.load('src/server/stdout/claude-stream-json.js', anchored(CS, LAST_READ, '                if (session.subagentWatchers.get(toolUseId) !== looking) return;\n', 'the last read after a stop in the look'), 'no-last-read');
+  const la = CS.indexOf('              if (session.subagentWatchers.get(toolUseId) !== looking) {\n'), lb = CS.indexOf('                return;\n              }\n', la);
+  const LAST_READ = la >= 0 && lb > la ? CS.slice(la, lb + '                return;\n              }\n'.length) : 'THE LAST READ';
+  const dropped = MUT.load('src/server/stdout/claude-stream-json.js', anchored(CS, LAST_READ, '              if (session.subagentWatchers.get(toolUseId) !== looking) return;\n', 'the last read after a stop in the look'), 'no-last-read');
   const HD = harness(dropped);
   T._resetForTest();
   const sd = HD.session(7); sd._startSubagentWatcher(`tu-${EL}`, EL); sd.__feed({ type: 'system', subtype: 'task_notification', task_id: EL, tool_use_id: `tu-${EL}`, status: 'completed', summary: 'x' });
@@ -348,6 +352,68 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
   await counted(async () => { r1._startSubagentWatcher(`tu-${EW}`, EW); for (let i = 0; i < 100 && !HR.told(EW); i++) await sleep(10); });
   ok(HR.told(EW) > 0 && syncOf('readdirSync') === 1 && syncOf('existsSync') >= 2, `RED CONTROL: the release's finder watches the same file after ${syncOf('readdirSync')} synchronous listing of the projects root and ${syncOf('existsSync')} stats on the loop — the leg above would be RED`);
   HR.close();
+}
+
+console.log('⑨ THE CUT (主开发 r2874 (1)) — a transcript cut and written again, or replaced, is read again from its start: every record once, in order, off the loop');
+{
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const CS_PATH = path.join(REPO, 'src/server/stdout/claude-stream-json.js');
+  const CS = fs.readFileSync(CS_PATH, 'utf-8');
+  const harness = (consumer) => {
+    const engine = { _vsuPending: new Map(), resolveUsageKey: () => '__global__', usageEstimator: { noteLive() {} }, modelsMatch: () => false, servedDefinesModel: () => false, rerouteAnnouncedBy: () => null };
+    for (const part of (/const \{([^}]*)\} = engine;/.exec(CS) || ['', ''])[1].split(',')) { const name = part.split(':')[0].replace(/\/\/.*$/, '').trim(); if (/^[A-Za-z_$][\w$]*$/.test(name) && !(name in engine)) engine[name] = () => {}; }
+    const activeSessions = new Map(), bcast = [];
+    const { attach } = consumer.create({ activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), USAGE_SCANNER_PATH: path.join(HOME, 'none'), checkClaudeGoalStatus() {}, noteModelSeen() {}, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null } });
+    const helpers = { feedLive: N.feedLive, broadcastToSession: (x, id, m) => bcast.push(m), broadcastActiveSessions() {}, readSessionMeta: () => ({}), writeSessionMeta() {}, updateSessionTodos() {}, applyTaskToolUpdate() {}, emitTaskListTodos() {} };
+    const s = { mode: 'chat', backend: 'claude', name: 'cut', cwd: CWD, host: null, claudeSessionId: SID, backendSessionId: SID, sockName: 'cw-cut', buffer: '', createdAt: Date.now(), _webuiId: 'sess-cut', _taskRecords: {} };
+    s._normalizer = new MessageManager('sess-cut'); activeSessions.set('sess-cut', s);
+    const h = { data: null, onData(cb) { h.data = cb; }, onExit() {} };
+    quiet(); try { attach(s, 'sess-cut', h, helpers); } finally { loud(); }
+    const said = () => bcast.filter((m) => m.type === 'subagent-message').map((m) => m.message && m.message.uuid);
+    const close = () => { for (const w of (s.subagentWatchers || new Map()).values()) { try { if (w && w.retry) clearTimeout(w.retry); if (w && w.watcher && w.watcher.close) w.watcher.close(); } catch { } } activeSessions.clear(); };
+    return { s, said, close };
+  };
+  const CUT = 'c1000000000000c1', fp = path.join(SUB, `agent-${CUT}.jsonl`);
+  const w = (a, b, word = 'record') => Array.from({ length: b - a + 1 }, (_, k) => J({ type: 'assistant', uuid: `w-${String(a + k).padStart(2, '0')}`, message: { role: 'assistant', content: [{ type: 'text', text: `${word} ${a + k} `.repeat(6) }] } }) + '\n').join('');
+  const want = (n) => Array.from({ length: n }, (_, k) => `w-${String(k + 1).padStart(2, '0')}`);
+  // one look = the watcher's own read, asked by hand (a cut PLACED between two looks), then the count waited for (bounded)
+  const scene = async (HH, maxMs) => {
+    const look = async (n) => { const e = HH.s.subagentWatchers.get(`tu-${CUT}`); if (e && e.read) await e.read(); for (let i = 0; i * 10 < maxMs && HH.said().length < n; i++) await sleep(10); };
+    fs.writeFileSync(fp, w(1, 3));
+    quiet(); try { HH.s._startSubagentWatcher(`tu-${CUT}`, CUT); } finally { loud(); }
+    for (let i = 0; i * 10 < maxMs && !(HH.s.subagentWatchers.get(`tu-${CUT}`) || {}).read; i++) await sleep(10);
+    quiet();
+    try {
+      await look(3);
+      fs.appendFileSync(fp, w(4, 6)); await look(6);
+      fs.writeFileSync(fp, w(7, 8)); await look(8);                                   // CUT and written again: shorter than what was read
+      fs.appendFileSync(fp, w(9, 20)); await look(20);
+      const tmp = fp + '.next'; fs.writeFileSync(tmp, w(1, 20, 'a longer record') + w(21, 23)); fs.renameSync(tmp, fp); await look(23);   // REPLACED: another file renamed over the name
+      fs.appendFileSync(fp, w(24, 24));                                                // …written after: told by the watch armed again on the new file (no hand look)
+      for (let i = 0; i * 10 < maxMs && HH.said().length < 24; i++) await sleep(10);
+      const byWatch = HH.said().includes('w-24');
+      fs.writeFileSync(fp, w(25, 90)); await look(90);                                 // CUT AND GROWN PAST the old size before the next look
+      return { said: HH.said(), byWatch };
+    } finally { loud(); }
+  };
+  T._resetForTest();
+  const H = harness(require(CS_PATH));
+  let r;
+  try { r = await counted(() => scene(H, 2000)); } finally { H.close(); }
+  const firstGap = want(90).find((u, k) => r.said[k] !== u) || 'none';
+  ok(J(r.said) === J(want(90)) && SYNC.length === 0, `every record ONCE, in order, across a cut (placed between two looks), a file renamed over the name and a cut grown past the old size — ${r.said.length} told of 90 (first gap: ${firstGap}), ${SYNC.length} synchronous file calls`);
+  ok(r.byWatch, 'a record written after the replacement is told by the watch armed again on the new file (no look by hand)');
+  // RED: the release's read — synchronous, and from the old offset whatever the file became — planted in a copy
+  const red = MUT.load('src/server/stdout/claude-stream-json.js', anchored(anchored(CS,
+    "          fh = await fs.promises.open(watchFile, 'r');\n",
+    "          fh = { stat: async () => fs.statSync(watchFile), read: async (b, o, l, p) => { const fd = fs.openSync(watchFile, 'r'); try { return { bytesRead: fs.readSync(fd, b, o, l, p) }; } finally { fs.closeSync(fd); } }, close: async () => { } };\n",   // stale-pins: kept — the release's synchronous read, planted as ⑨'s RED control
+    'the read off the loop'),
+    '          if (await cutUnder(fh, stat)) {\n', '          if (false) {\n', 'the cut'), 'release-read');
+  fs.rmSync(fp, { force: true });
+  const HR = harness(red);
+  let rr;
+  try { rr = await counted(() => scene(HR, 250)); } finally { HR.close(); }
+  ok(rr.said.length < 90 && syncOf('statSync') + syncOf('openSync') > 0, `RED CONTROL: the release's read tells ${rr.said.length} of 90 (from the old offset after the cut) with ${syncOf('statSync') + syncOf('openSync')} synchronous calls on the loop — the legs above would be RED`);
 }
 
 console.log('⑥ WHOLE — an agent past the histories\' head + tail bound (2 MiB + 32 MiB) comes back entire');

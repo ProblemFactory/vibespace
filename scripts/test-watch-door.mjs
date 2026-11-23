@@ -559,6 +559,11 @@ async function parserRoad(consumer, { control = false } = {}) {
      "        const retry = setTimeout(() => { session.subagentWatchers.delete(toolUseId); if (!activeSessions.has(id)) return; startSubagentWatcher(toolUseId, agentId, attempt + 1); }, delay);\n"],   // stale-pins: kept — the release's own line, put back by the control
     ["      const watcher = WD.watch(watchFile, () => {", "      const watcher = fs.watch(watchFile, () => {"],   // stale-pins: kept — the release's own line, put back by the control
   ];
+  // …and the release's finder (r2874 (2) moved the find off the loop: the start no longer runs inside the retry timer, so the
+  // release's road needs its synchronous exact-place check back to throw where it threw)
+  { const fa = SRC.indexOf('      let watchFile = found || null;\n'), fb = SRC.indexOf('      if (!watchFile) {', fa);
+    ANCHORS.push([fa >= 0 && fb > fa ? SRC.slice(fa, fb) : 'THE FINDER',
+      "      const watchFile = (() => { const f = path.join(projectsDir, cwdToProjectDir(session.cwd || ''), session.claudeSessionId || '', 'subagents', `agent-${agentId}.jsonl`); try { return fs.existsSync(f) ? f : null; } catch { return null; } })();\n"]); }   // stale-pins: kept — the release's synchronous finder (its exact candidate), put back by the control
   const missing = ANCHORS.filter(([from]) => SRC.split(from).length !== 2).map(([from]) => from.trim().slice(0, 60));
   ok(!missing.length, `the control's anchors are in the source, once each${missing.length ? ' — MISSING: ' + missing.join(' | ') : ''}`);
   let mut = null;
