@@ -24,5 +24,20 @@ const anyUnreadable = () => { for (const f of unread.values()) if (!f.torn) retu
 const namedByTorn = (id) => { const s = String(id || ''); if (!s) return false; for (const f of unread.values()) if (f.torn && typeof f.text === 'string' && f.text.includes(s)) return true; return false; };
 /** the sweeps' ONE question (r3137 (2), r3141): keep `id`? — yes while any record could not be read at all (it may name anything),
  *  or when a kept torn record's bytes name it */
-const keeps = (id) => anyUnreadable() || namedByTorn(id);
-module.exports = { UNREAD, unreadMeta, isUnread, mark, clear, isMarked, factsOf, anyUnreadable, namedByTorn, keeps };
+// r3199: the ids of records that read again THIS run — a conversation left un-adopted at its start (its record unread then) keeps its
+// attach config and its wrapper files from the aged sweeps for the rest of the run
+const liftedIds = new Set();
+function liftedId(sock, id) { if (id) liftedIds.add(String(id)); if (liftedIds.size > 4096) liftedIds.delete(liftedIds.values().next().value); }
+const keeps = (id) => anyUnreadable() || namedByTorn(id) || liftedIds.has(String(id || ''));
+/** r3199: the family's ONE notice reads these rows — the record's file by its base name and the conversation's NAME where it is known
+ *  (its live session, else its torn bytes), never a path, never content */
+function rows() {
+  const out = [];
+  for (const [sock, f] of unread) {
+    let name = f.name || null;
+    if (!name && f.torn && typeof f.text === 'string') { const m = /"name"\s*:\s*"([^"\\]{1,120})"/.exec(f.text); if (m) name = m[1]; }
+    out.push(Object.freeze({ file: sock + '.json', name, code: f.code || null, since: f.since, torn: !!f.torn, copy: f.copy || null }));
+  }
+  return Object.freeze(out);
+}
+module.exports = { UNREAD, unreadMeta, isUnread, mark, clear, isMarked, factsOf, anyUnreadable, namedByTorn, keeps, liftedId, rows };

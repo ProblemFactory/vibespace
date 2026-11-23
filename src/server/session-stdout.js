@@ -560,15 +560,19 @@ function readSessionMeta(sockName) {
   let read;
   try { read = { text: timedSync('session-meta.read', () => fs.readFileSync(fp, 'utf-8')) }; } catch (error) { read = { error }; }
   const a = require('../store-read.js').storeAnswer(read, { valid: metaValid });
-  if (a.state === 'data') { if (SMV.isMarked(sockName)) liftMeta(sockName, a.value); return a.value; }
+  // r3199 (the must): a lift on THIS read hands its caller the record WITH the changes that waited (the caller's own write builds on it)
+  if (a.state === 'data') return SMV.isMarked(sockName) ? liftMeta(sockName, a.value) : a.value;
   if (a.state === 'missing' && !SMV.isMarked(sockName)) return {};
+  // r3199: a torn record whose copy is kept and whose file is now gone (the person removed it) is «not there» again
+  if (a.state === 'missing' && (SMV.factsOf(sockName) || {}).torn && (SMV.factsOf(sockName) || {}).copy) return liftMeta(sockName, {});
   if (a.state !== 'missing') holdMeta(sockName, fp, a, read);   // (a «missing» right after a failed read: the helper reads it once more)
   return SMV.unreadMeta(SMV.factsOf(sockName) || { code: a.code || 'unreadable' });
 }
 /** r3137: the record could not be read — marked UNREAD, its helper made (once) and started on this read's own answer */
 function holdMeta(sockName, fp, a, read = null) {
   if (SMV.isMarked(sockName) && metaHolds.has(sockName)) return;
-  SMV.mark(sockName, { code: String(a.code || a.state), torn: a.state === 'corrupt', ...(a.state === 'corrupt' && read && typeof read.text === 'string' ? { text: read.text.slice(0, 1 << 20) } : {}) });
+  let liveName = null; try { for (const s of (activeSessions && typeof activeSessions.values === 'function' ? activeSessions.values() : [])) if (s && s.sockName === sockName) { liveName = s.name || null; break; } } catch { }   // r3199: the notice names the conversation where it is known
+  SMV.mark(sockName, { code: String(a.code || a.state), torn: a.state === 'corrupt', ...(liveName ? { name: String(liveName).slice(0, 120) } : {}), ...(a.state === 'corrupt' && read && typeof read.text === 'string' ? { text: read.text.slice(0, 1 << 20) } : {}) });
   let h = metaHolds.get(sockName);
   if (!h) {
     h = require('../store-read-hold.js').create({ file: fp, valid: metaValid, aside: (mark) => fp + '.corrupt-' + mark, code: 'session-meta-unread',
@@ -584,13 +588,31 @@ function holdMeta(sockName, fp, a, read = null) {
 /** r3137: the record READ again (a sync read that answered, or its helper's lift: `value` null = lifted empty after torn bytes kept
  *  aside) — the changes that waited are saved ONCE, merged over it */
 function liftMeta(sockName, value) {
-  if (!SMV.isMarked(sockName)) return;
+  if (!SMV.isMarked(sockName)) return value || {};
   SMV.clear(sockName);
   const h = metaHolds.get(sockName);
   if (h) { metaHolds.delete(sockName); try { h.stop(); } catch { } }
   const fp = path.join(META_DIR, sockName + '.json'), w = waitingMeta.get(fp);
   waitingMeta.delete(fp);
-  if (w && Object.keys(w).length) writeSessionMeta(sockName, { ...(value || {}), ...w }, { durable: true });
+  // r3199: a removal asked while the record could not be read (a person's delete, a teardown) is done NOW, at its read
+  if (metaDeleteOwed.delete(sockName)) { deleteSessionMetaNow(sockName); return {}; }
+  if (value && value.webuiSessionId) SMV.liftedId(sockName, value.webuiSessionId);   // (a conversation left un-adopted at its start: its id kept by the sweeps this run)
+  const merged = { ...(value || {}), ...(w || {}) };
+  if (w && Object.keys(w).length) writeSessionMeta(sockName, { ...merged }, { durable: true });   // (the record as read, the changes that waited on it)
+  return merged;   // r3199 (the must): every road of the lift hands on the MERGED record
+}
+const metaDeleteOwed = new Set();   // r3199: sockNames whose removal waits for their record's read
+/** r3199: what the LIVE conversation holds that the five whole writers do not list (they leaned on the spread): its account, its
+ *  machine, its group, its lock, its token, its pool — so a torn record restated whole resumes on its own account. The same names the
+ *  record's first write gives them (ws-create); only what the session has */
+function liveExtrasOf(sockName) {
+  let s = null; try { for (const x of (activeSessions && typeof activeSessions.values === 'function' ? activeSessions.values() : [])) if (x && x.sockName === sockName) { s = x; break; } } catch { }
+  if (!s) return {};
+  const pick = { host: s.host, hostName: s.hostName, keeperSid: s.keeperSid, dialDeviceId: s._dialDeviceId, bridgePort: s._bridgePort, dialReversePort: s._dialReversePort,
+    modelLocked: s._modelLocked || undefined, lockedModel: s._lockedModel, lockedContext: s._lockedContext, spawnContext: s._spawnContext, agentToken: s.agentToken,
+    taskId: s._initialGroupId, taskIds: s._initialGroupIds && s._initialGroupIds.length ? s._initialGroupIds : undefined, accountId: s._accountId,
+    billingHow: s._billingHow, oatRoad: s._oatRoad, oatGen: s._oatGen, heldPoolMember: s._heldPoolMember, poolPin: s._poolPin, worktree: s._worktree, worktreePath: s._worktreePath };
+  return Object.fromEntries(Object.entries(pick).filter(([, v]) => v !== undefined && v !== null && v !== ''));
 }
 // Tombstones (2.89.1): teardown deletes the meta, but debounced/straggler
 // writers (status flush, todo coalesce, attribution) can fire AFTER the delete
@@ -640,19 +662,19 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
   // r3141: a WHOLE record from the live conversation (`whole`: the five writers that restate every key the session holds) restates a
   // TORN record — the mark ends, the changes that waited ride under it; keys the live conversation does not list come from nowhere
   // (said once: the torn bytes stay in their copy)
-  if (whole && SMV.isMarked(sockName) && (SMV.factsOf(sockName) || {}).torn) {
+  if (whole && SMV.isMarked(sockName) && (SMV.factsOf(sockName) || {}).torn && (SMV.factsOf(sockName) || {}).copy) {   // r3199: the copy FIRST, always
     const f = SMV.factsOf(sockName), fpw = path.join(META_DIR, sockName + '.json'), w = waitingMeta.get(fpw);
     SMV.clear(sockName); waitingMeta.delete(fpw);
     const h = metaHolds.get(sockName); if (h) { metaHolds.delete(sockName); try { h.stop(); } catch { } }
     console.warn(`[session] ${sockName}: its torn record (kept aside${f && f.copy ? ' as ' + f.copy : ''}) is restated whole from the live conversation — keys it does not list are only in that copy`);
-    return writeSessionMeta(sockName, { ...(w || {}), ...Object.fromEntries(Object.entries(meta || {})) }, { durable, sync, flagOnly });
+    return writeSessionMeta(sockName, { ...(w || {}), ...liveExtrasOf(sockName), ...Object.fromEntries(Object.entries(meta || {})) }, { durable, sync, flagOnly });
   }
   // r3137 (1): NO WRITER SAVES OVER A RECORD IT COULD NOT READ — the change WAITS for the record (its fields, the newest per field;
   // the unread mark is a symbol and is not one of them) and is saved merged over it the moment it reads
   if (SMV.isMarked(sockName) || SMV.isUnread(meta)) {
     const fpw = path.join(META_DIR, sockName + '.json');
     waitingMeta.set(fpw, { ...(waitingMeta.get(fpw) || {}), ...Object.fromEntries(Object.entries(meta || {})) });
-    if (!SMV.isMarked(sockName)) { const now = readSessionMeta(sockName); if (!SMV.isUnread(now)) { const w = waitingMeta.get(fpw); waitingMeta.delete(fpw); return writeSessionMeta(sockName, { ...now, ...w }, { durable, sync, flagOnly }); } }   // (it read meanwhile: merged now)
+    if (!SMV.isMarked(sockName)) { const w = waitingMeta.get(fpw); waitingMeta.delete(fpw); return patchSessionMeta(sockName, w || {}); }   // r3199: it read meanwhile — the change is PATCHED off the loop (no second synchronous read)
     return Promise.resolve(false);
   }
   sessionMetaOwnerConflict(sockName, meta, prev);
@@ -713,7 +735,11 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
 }
 function deleteSessionMeta(sockName) {
   // r3137 (2): NO REMOVER REMOVES BY AN UNREAD RECORD — the one delete road (a dead socket's retire, a teardown) keeps it
-  if (SMV.isMarked(sockName)) { console.warn(`[session] ${sockName}: its record could not be read — kept (never removed on a failed read)`); return false; }
+  // r3199: a person's delete or a teardown asked meanwhile is REMEMBERED (no write lands meanwhile: the tombstone) and done at the read
+  if (SMV.isMarked(sockName)) { metaDeleteOwed.add(sockName); _metaTombstones.set(sockName, Date.now()); console.warn(`[session] ${sockName}: its record could not be read — kept now; its removal is done when it reads`); return false; }
+  return deleteSessionMetaNow(sockName);
+}
+function deleteSessionMetaNow(sockName) {
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   const fp = path.join(META_DIR, sockName + '.json');

@@ -135,7 +135,8 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   ok(/browserBindings\(\)/.test(wsm) && /require\('\.\/browser-bindings\.js'\)\.create\(\{ dataDir: path\.dirname\(META_DIR\) \}\)/.test(ss), 'lazily, against the same data dir');
   // .396 seam (lane hub-loop-stalls, commit 2 — the store writer): the body grew past any fixed length (it names the file
   // once, drops the pending copies, has the writer FORGET the file, then unlinks it) — sliced by its END, not by 400 chars
-  const dAt = ss.indexOf('function deleteSessionMeta(');
+  // r3199 (lane bl-chat-c): deleteSessionMeta remembers a removal while the record is unread and hands the rest to deleteSessionMetaNow, which unlinks
+  const dAt = ss.includes('function deleteSessionMetaNow(') ? ss.indexOf('function deleteSessionMetaNow(') : ss.indexOf('function deleteSessionMeta(');
   const dEnd = dAt < 0 ? -1 : ss.indexOf('\n}\n', dAt);
   const del = dAt >= 0 && dEnd > dAt ? ss.slice(dAt, dEnd + 2) : '';
   const fpName = (/const (\w+) = path\.join\(META_DIR, sockName \+ '\.json'\);/.exec(del) || [])[1] || null;

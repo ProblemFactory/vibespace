@@ -752,7 +752,7 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     ['server.js', 'persistAskedAt', 0, 2, 'first-seen stamps of an ask (the inbox clock)'], ['server.js', 'persistSessionMeta', 0, 1, 'browser facts — the binding itself is written synchronously to browser-bindings; the meta is its copy'],
     ['server.js', 'persistFlag', 0, 1, 'the per-session auto-continue choice (lane auto-resume-bulk) — its restart copy, through the store\'s patch (lg-recovery U2 cure); the page writes the same choice into its resume carrier in the same act'],
     ['src/server/session-stdout.js', 'create > liftMeta', 1, 0, 'r3137: the changes that waited for a record that could not be read, saved ONCE merged over it at its read (a person\'s act among them)'],
-    ['src/server/session-stdout.js', 'create > writeSessionMeta', 0, 2, 'r3137 / r3141: the write door\'s own re-entries — a change merged at once (its record read meanwhile) and a torn record restated whole; each passes its caller\'s own options on'],
+    ['src/server/session-stdout.js', 'create > writeSessionMeta', 0, 2, 'r3141 / r3199: the write door\'s own re-entries — a torn record restated whole (after its copy), passing its caller\'s own options on, and a change whose record read meanwhile, patched off the loop (patchSessionMeta)'],
     ['src/server/session-stdout.js', 'create > patchMetaOnce', 0, 2, 'ONE field patched (lg-recovery U1 + U2 cures — the stop fact and the per-session auto-continue choice): its pending copy, else the file read OFF the loop; one chain per file, a give-up\'s keys ride the next patch — paced'],
     ['server.js', 'rebindSessionMeta', 0, 1, 're-runs the binding hook (the bindings store is synchronous)'], ['server.js', 'route:POST /api/sessions/:id/msg-reachability', 1, 0, 'the person\'s reach level — answered after the disk'],
     ['src/agent-routes.js', 'setupAgentRoutes > persistSeenMarks', 0, 1, 'a seen mark — lost, one injection is sent again'],
@@ -1405,6 +1405,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           ["src/server/window-targets-engine.js", "{ sessionKeys: [], groupIds: [] }", 1, "narrows"],
           ["src/server/window-targets-engine.js", "{ sessionKeys: keysOf(s, id), conversationKeys: ke", 1, "narrows"],
           ["src/window-reach.js", "{ everyone: { checked: !!allRow, by: allRow ? allR", 1, "answer"],
+          ["src/server/session-stdout.js", "{ host: s.host, hostName: s.hostName, keeperSid: s", 1, "record"],   // r3199 (lane bl-chat-c): a torn record restated whole carries the LIVE conversation's own groups (its session's, never read from the held store)
           ["src/ws-create.js", "{ groupId: spawnGroups[0], groupIds: spawnGroups.s", 1, "record"],
           ["src/ws-create.js", "{ name: session.name, nameExplicit: session._nameE", 1, "record"],
         ];

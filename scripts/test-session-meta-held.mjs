@@ -36,7 +36,8 @@ fs.readFileSync = function (p, ...a) { if (typeof p === 'string' && REFUSE.has(p
 fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && REFUSE.has(path.resolve(p))) return Promise.reject(placed()); return realRead.call(fs.promises, p, ...a); };
 const onDisk = (sock) => { try { return JSON.parse(realReadSync.call(fs, path.join(META_DIR, sock + '.json'), 'utf8')); } catch (e) { return e.code === 'ENOENT' ? 'gone' : 'torn'; } };
 
-const SS = require(path.join(REPO, 'src/server/session-stdout.js')).create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: new Map(), engine: {}, getHosts: () => null });
+const ACTIVE = new Map();   // the live conversations this suite stands in for (a name the notice may say)
+const SS = require(path.join(REPO, 'src/server/session-stdout.js')).create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null });
 const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
 const land = (sock) => { try { SW.flushSync([path.join(META_DIR, sock + '.json')]); } catch { } };
 const HOLD = require(path.join(REPO, 'src/store-read-hold.js'));
@@ -134,6 +135,65 @@ console.log('⑤ THE PERSON — the family\'s live list names each unread record
   const mine = rows.filter((r) => r && r.file === e + '.json' && r.held);
   ok(!!(mine.length === 1 && !JSON.stringify(rows).includes(TMP)), `the family's live list (the one notice reads it) names the unread record by its file's base name, no path (${mine.length} row)`);
   REFUSE.delete(fe); await readAgain(e);
+}
+
+
+console.log('⑥ r3199 THE MUST — a lift on the SYNCHRONOUS read hands on the waiting changes (the caller\'s own write keeps them)');
+{
+  const s = born(6), f = path.join(META_DIR, s + '.json');
+  REFUSE.add(f);
+  SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), lockedModel: 'the-person-locked-it' });   // a person's act, waiting
+  REFUSE.delete(f);
+  SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), costKept: { usd: 1 } });   // the cost keeper: read one (its read LIFTS), change a field, save
+  land(s); await sleep(50); land(s);
+  const d = onDisk(s);
+  ok(!!(d && d.lockedModel === 'the-person-locked-it' && d.costKept && d.name === RECORD(6).name),
+    `a record that reads again on a SYNCHRONOUS read hands its caller the record WITH the change that waited: the class-A write after it keeps the person's lock (${d && d.lockedModel}) — RED: the lift returned the disk's bytes and the caller's write erased the lock`, d);
+}
+
+console.log('⑦ r3199 — a writer that builds a FRESH object, and a whole write over a FAILED read: both wait');
+{
+  const s = born(7), f = path.join(META_DIR, s + '.json');
+  REFUSE.add(f); SS.readSessionMeta(s);
+  SS.writeSessionMeta(s, { name: 'a fresh object with no spread' });
+  SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the live conversation', cwd: '/made/up/live' }, { durable: true, whole: true });
+  land(s);
+  const during = onDisk(s);
+  REFUSE.delete(f); await readAgain(s); land(s); await sleep(50); land(s);
+  const after = onDisk(s);
+  ok(!!(during && during.name === RECORD(7).name && after && after.name === 'the live conversation' && after.accountId === RECORD(7).accountId),
+    `a fresh-object writer and a WHOLE write over a record whose read FAILED (not torn) write nothing meanwhile (on disk «${during && during.name}»); at its read they land merged over the record (its account kept: ${after && after.accountId})`, { during, after });
+}
+
+console.log('⑧ r3199 — a person\'s delete of a conversation whose record is unread is done at its read');
+{
+  const s = born(8), f = path.join(META_DIR, s + '.json');
+  REFUSE.add(f); SS.readSessionMeta(s);
+  SS.deleteSessionMeta(s);
+  const keptNow = onDisk(s);
+  SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), seenMarks: ['a-straggler'] });   // a straggler writer after the delete
+  REFUSE.delete(f); await readAgain(s); land(s); await sleep(50); land(s);
+  const after = onDisk(s);
+  ok(!!(keptNow && keptNow.name === RECORD(8).name && after === 'gone'), `a person's delete over an unread record keeps it NOW (never removed on a failed read) and is DONE at its read — no straggler brings it back (${after})`);
+}
+
+console.log('⑨ r3199 — a torn record the person removes is «not there» again; the notice names the conversation');
+{
+  const s = 'vs-smheld-sock-torn-2', f = path.join(META_DIR, s + '.json');
+  fs.writeFileSync(f, '{"name":"the torn conversation","cwd":"/made/up');
+  SS.readSessionMeta(s);
+  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')); i++) await sleep(25);
+  const rows = SMV && typeof SMV.rows === 'function' ? SMV.rows() : [];
+  const named = rows.find((r) => r.file === s + '.json');
+  fs.unlinkSync(f);
+  const gone = SS.readSessionMeta(s);
+  const live = born(9), lf = path.join(META_DIR, live + '.json');
+  ACTIVE.set('sess-made-up-9', { sockName: live, name: 'a made-up live conversation' });
+  REFUSE.add(lf); SS.readSessionMeta(live);
+  const liveRow = (SMV && typeof SMV.rows === 'function' ? SMV.rows() : []).find((r) => r.file === live + '.json');
+  REFUSE.delete(lf); await readAgain(live); ACTIVE.delete('sess-made-up-9');
+  ok(!!(named && named.name === 'the torn conversation' && !unread(gone) && gone && !Object.keys(gone).length && liveRow && liveRow.name === 'a made-up live conversation'),
+    `the notice's rows name the conversation (from its torn bytes: «${named && named.name}»; from its live session: «${liveRow && liveRow.name}»), never a path; a torn record the person REMOVED after its copy is «not there» again (an empty record, not unread)`);
 }
 
 clearInterval(KEEP);
