@@ -32,7 +32,10 @@ const V = 1;
 const INSTANCE_FILE = 'instance.json';
 const ID_RE = /^vi-[0-9a-f]{12}$/;
 const { DECLARE_ENV } = require('./signin-table.js');   // the declaration's name — ONE spelling, in the table's shared law
-const KINDS = Object.freeze(['folder', 'link', 'declared']);
+const KINDS = Object.freeze(['folder', 'link', 'declared', 'checking', 'home', 'unchecked']);
+/** 主开发 r2869 (2): the act a person at the machine takes to decide NOW while the network home is read or does not answer — an
+ *  empty file of this name put in the data folder: that start reads no network home and goes on; the start removes the file */
+const START_NEW = 'signin-start-new';
 /** the CLI index's own digest of a root (src/server/local-index.js digestOf): one witness per installed root */
 const digestOf = (root) => crypto.createHash('sha256').update(String(root || '')).digest('hex').slice(0, 12);
 const witnessFileOf = (root) => `signin-${digestOf(root)}.json`;
@@ -94,6 +97,32 @@ function witnessAt(file, { root, dataDir }) {
 }
 
 /**
+ * THE NETWORK HOME (主开发 r2780 (2) H1, r2869): the home rung's folder when the ladder refused it because it LANDS ON A NETWORK
+ * MOUNT — where the home outlives a restart, so does the witness: its copy there is read and written ONLY through a worker thread
+ * (the hub's SafeFs pool, a deadline an ask), never on the loop. Judged by the mount table before any lstat (landedPathOf): nothing
+ * under the mount is touched here. A throwaway hub has none. → dir | null
+ */
+function netHomeOf({ home = '', uid = null, mountinfo = '', varTmp = undefined, throwaway = false, lstat = null, readlink = null, facts = null } = {}) {
+  if (throwaway || !String(home).startsWith('/')) return null;
+  const p = LI.indexPlaceOf({ home, uid, mountinfo, xdgRuntimeDir: '', varTmp, own: null, lstat, readlink, facts });
+  const t = (p.tried || []).find((x) => x.via === 'home');
+  return t && LI.landedPathOf(t.dir, { lstat, readlink, mountinfo }).blocked ? t.dir : null;
+}
+/** THE NETWORK HOME's ANSWER (PURE), from a worker's read — {text} or {error}: nothing there (ENOENT / ENOTDIR) ⇒ answered, none;
+ *  an fs error the read itself answered (EACCES, EIO…) or a text that is not this folder's witness ⇒ answered, unread (it holds);
+ *  a deadline, a refused or a dead pool (no fs code of its own, or a status) ⇒ NOT answered */
+function netAnswerOf({ text = null, error = null } = {}, { root, dataDir, file = null } = {}) {
+  if (error) {
+    const code = String((error && error.code) || '');
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { answered: true, found: null };
+    if (/^E[A-Z]+$/.test(code) && !error.status) return { answered: true, found: { file, unread: `it cannot be read (${code})` } };
+    return { answered: false, why: String((error && error.message) || error).slice(0, 200) };
+  }
+  const doc = witnessOf(text, { root, dataDir });
+  return { answered: true, found: doc ? { file, doc } : { file, unread: 'its text is not this folder\'s witness' } };
+}
+
+/**
  * THE VERDICT (PURE). `auth` = 'present' | 'missing' (truly: nothing at the path) | 'held' (the shipped hold);
  * `dataLink` = 'dangling' | null; `instance` = {id} | null; `found` = the witness files read ([{file, doc} | {file, unread}],
  * both places) — or, for a PURE ask, `witness` = this root's doc | null.
@@ -102,18 +131,24 @@ function witnessAt(file, { root, dataDir }) {
  * held here: a file that is there decides by itself.
  */
 function verdictOf({ auth = 'present', dataLink = null, instance = null, witness = null, found = null, dataDir = '' } = {}) {
-  if (auth !== 'missing') return { hold: null };
+  // 主开发 r2780 (2) H2: a sign-in file that is THERE and says «off» (no password record) is judged too — a folder that is not
+  // the one the witness saw never opens the instance by saying «off»; a file that holds a password decides by itself
+  if (auth !== 'missing' && auth !== 'off') return { hold: null };
   const all = Array.isArray(found) ? found : (witness ? [{ file: null, doc: witness }] : []);
   const files = all.map((w) => w.file).filter(Boolean);
-  if (dataLink === 'dangling') return { hold: { kind: 'link', why: `the data folder ${dataDir} is a link to a place that is not there`, files } };
+  if (auth === 'missing' && dataLink === 'dangling') return { hold: { kind: 'link', why: `the data folder ${dataDir} is a link to a place that is not there`, files } };
+  const off = auth === 'off' ? '; its own sign-in file says sign-in is off' : '';
   const unread = all.find((w) => w.unread);
-  if (unread) return { hold: { kind: 'folder', unread: true, why: `the sign-in witness ${unread.file} is there but ${unread.unread}, so it cannot be known whether the data folder ${dataDir} is the one its sign-in was set in`, files } };
+  if (unread) return { hold: { kind: 'folder', unread: true, why: `the sign-in witness ${unread.file} is there but ${unread.unread}, so it cannot be known whether the data folder ${dataDir} is the one its sign-in was set in${off}`, files } };
   const other = all.find((w) => w.doc && (!instance || instance.id !== w.doc.id));
   if (other) {
-    return { hold: { kind: 'folder', why: `the data folder ${dataDir} is not the one this instance's sign-in was set in (${instance ? `it holds the id ${instance.id}, the sign-in was set in ${other.doc.id}` : `it holds no id; the sign-in was set in ${other.doc.id}`})`, files } };
+    return { hold: { kind: 'folder', why: `the data folder ${dataDir} is not the one this instance's sign-in was set in (${instance ? `it holds the id ${instance.id}, the sign-in was set in ${other.doc.id}` : `it holds no id; the sign-in was set in ${other.doc.id}`})${off}`, files } };
   }
   return { hold: null };
 }
+/** 主开发 r2780 (2) H2: does a copy found name ANOTHER folder (or none can be read, or this folder held no id at the start)? —
+ *  then no START writes or removes a witness copy (a person's act in the product still does) */
+const foreignAt = (found, startId) => (found || []).some((w) => !w.doc || !startId || w.doc.id !== startId);
 /** THE DECLARATION (opt-in): `VIBESPACE_SIGNIN=required` and no password, no env password, no single sign-on ⇒ held */
 const declaredOf = (env) => !!env && String(env[DECLARE_ENV] || '').trim().toLowerCase() === 'required';
 
@@ -139,7 +174,10 @@ function startFactsSync({ dataDir, root = path.dirname(dataDir), home = os.homed
   const found = readPlacesOf(ask).map((d) => witnessAt(path.join(d, witnessFileOf(root)), { root, dataDir })).filter(Boolean)
     .map((w) => ({ ...w, writable: LI.rungFolderOf(facts(path.dirname(w.file)), { uid, dir: path.dirname(w.file) }).ok }));
   const own = found.find((w) => w.file === file && w.doc) || found.find((w) => w.doc);
-  return { root, dataDir, dataLink, instance, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid };
+  // 主开发 r2780 (2) H1: the network home (its copy is the worker's to read) and the person's start-new file (r2869 (2))
+  const netHome = netHomeOf(ask), netFile = netHome ? path.join(netHome, witnessFileOf(root)) : null;
+  const startNew = facts(path.join(dataDir, START_NEW)).exists === true;
+  return { root, dataDir, dataLink, instance, throwaway: tw, place, file, witness: own ? own.doc : null, found, declared: declaredOf(env), uid, netHome, netFile, startNew };
 }
 
 /** data/instance.json, written ONCE (a start that finds none and is not held) → the id */
@@ -164,4 +202,4 @@ function removeWitness({ file }) {
   try { fs.unlinkSync(file); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
-module.exports = { V, INSTANCE_FILE, ID_RE, DECLARE_ENV, KINDS, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };
+module.exports = { V, INSTANCE_FILE, ID_RE, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };

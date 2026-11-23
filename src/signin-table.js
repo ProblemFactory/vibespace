@@ -36,7 +36,7 @@ function heldWords(lang, sso, held = null) {
   const files = Array.isArray(held.witnesses) && held.witnesses.length ? held.witnesses : (held.witness ? [held.witness] : []);
   const named = files.length < 2 ? files.join('') : `${files.slice(0, -1).join(', ')} ${w['signin-held-and']} ${files[files.length - 1]}`;
   const root = held.dir ? String(held.dir).replace(/\/+[^/]+\/*$/, '') || '/' : '';   // the install the data folder sits in
-  const fill = (t) => String(t || '').replace(/\{dir\}/g, held.dir || '').replace(/\{root\}/g, root).replace(/\{witness\}/g, named).replace(/\{env\}/g, DECLARE_ENV);
+  const fill = (t) => String(t || '').replace(/\{dir\}/g, held.dir || '').replace(/\{root\}/g, root).replace(/\{home\}/g, held.home || '').replace(/\{witness\}/g, named).replace(/\{env\}/g, DECLARE_ENV);
   const whyKey = kind === 'folder' && held.unread ? 'signin-held-unread' : `signin-held-${kind}`;
   const fixKey = kind === 'link' && held.witness ? 'signin-held-link-witness-fix' : `${whyKey}-fix`;
   return { title: w.title, why: fill(w[whyKey]) + (sso ? ' ' + w['signin-held-sso-still'] : ''), fix: fill(w[fixKey]) };
@@ -89,7 +89,7 @@ function heldJournal(file, why, sso, held = null) {
     : `THE SIGN-IN FILE IS HELD: ${file} is there but ${why} — every page and API is refused (the sign-in page says so); ${fix} to start with no sign-in; nothing is written over it`;
 }
 /** the held state's cause for the boot line (B-dc3f (1)): the data folder not the one / a link to nowhere / the declaration */
-const heldCause = (held) => ({ folder: held && held.unread ? 'the sign-in witness outside the data folder cannot be read' : 'the data folder is not the one its sign-in was set in', link: 'the data folder is a link to a place that is not there', declared: `${DECLARE_ENV}=required is set and no password is set` }[held && held.kind] || 'the sign-in file cannot be read');
+const heldCause = (held) => ({ folder: held && held.unread ? 'the sign-in witness outside the data folder cannot be read' : 'the data folder is not the one its sign-in was set in', link: 'the data folder is a link to a place that is not there', declared: `${DECLARE_ENV}=required is set and no password is set`, checking: 'the sign-in witness on the home folder (a network mount) is read before it opens', home: 'the home folder that keeps the sign-in witness has not answered', unchecked: 'the check of the home folder for the sign-in witness could not be started' }[held && held.kind] || 'the sign-in file cannot be read');
 /** a held instance's refusal of an upgrade (every one but a paired machine's dial-in): 503 by name, nothing proxied */
 const HELD_UPGRADE = 'HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"signin-held"}';
 /** THE PASSWORD'S HASH: scrypt, 32 bytes, over the stored salt (hex) — `hashSync` the plain form's hub, `hash` the interface's

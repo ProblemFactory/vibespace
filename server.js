@@ -523,6 +523,7 @@ try {
     poolSize: parseInt(process.env.VIBESPACE_SAFEFS_POOL || '', 10) || 4,
   });
   console.log(`[safe-fs] worker pool up (${app.locals.safeFs.poolSize} workers)`);
+  auth.attachWitnessPool(app.locals.safeFs);   // B-dc3f (1) H1: the network home's sign-in witness, read and written off the loop
 } catch (e) {
   console.error('[safe-fs] pool init failed — the file routes refuse every file op by name until a restart (B-3b03: never run on the main thread):', e.message);
 }

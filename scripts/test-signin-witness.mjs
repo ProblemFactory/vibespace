@@ -12,6 +12,9 @@
 //   written again at each start  ⑭ a witness there and unreadable holds;
 //   ⑧ a sign-in turned off from the page, then the declaration; explicit REDs for the declaration's check, the remove guard,
 //   the witness's removal; ⑧ the route's refusal through its handler; ⑪ zh / ja through the server's own fill
+//   主开发 r2780 (2): ⑮ H2 — a folder that is not the one the witness saw never opens by saying «off», and no start deletes or
+//   writes over another folder's witness; ⑯ H1 (r2869) — a network home's copy, read and written only through the worker pool:
+//   held «checking» / «home» meanwhile, one look at a time, its answer decides, the start-new file decides NOW, no sync read
 //   主开发 r2341 (the moved form onto the separation's B3b-1): the held words / reason / journal / cause are the table's shared
 //   law (src/signin-table.js); the witness is the plain form's — server.js hands it to the plain Auth only (⑦ pins it)
 import fs from 'node:fs';
@@ -62,6 +65,14 @@ const actOf = (fix, it) => {
   for (const f of [witnessFile(it), varWitness(it)]) if (fix.includes(f) && fs.existsSync(f)) fs.unlinkSync(f);
   if (fix.includes(it.data)) { fs.unlinkSync(it.data); if (/empty folder/.test(fix)) fs.mkdirSync(it.data); }
 };
+// H1 (主开发 r2780 (2), r2869): a stand-in worker pool — each ask recorded; `mode` answers it: 'stall' (never answers: a look stalled
+// BY PLACEMENT, never by load), {error, code} (rejected), {text} (read), else ok
+const standIn = (mode) => { const calls = []; return { calls, call(op, payload = {}) { calls.push({ op, path: payload.path || payload.newPath }); const m = typeof mode === 'function' ? mode(op, payload) : mode; if (m === 'stall') return new Promise(() => { }); if (m && m.error) return Promise.reject(Object.assign(new Error(m.error), { code: m.code })); if (m && m.text != null) return Promise.resolve({ content: m.text }); return Promise.resolve({ success: true }); } }; };
+const NONE = (op) => (op === 'readText' ? { error: 'not there', code: 'ENOENT' } : 'ok');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (fn, ms = 3000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(10); } return !!(await fn()); };
+const nfsOf = (it) => `25 1 0:50 / ${it.home} rw,relatime shared:1 - nfs4 server:/home rw\n`;   // the install's home as a NETWORK mount
+const pageOf = (a) => { const res = res0(); a.middleware()({ method: 'GET', path: '/login', url: '/login', headers: { accept: 'text/html' }, cookies: {} }, res, () => { res.code = 200; }); return res; };
 const AUTH_SRC = fs.readFileSync(path.join(REPO, 'src/auth.js'), 'utf-8'), SW_SRC = fs.readFileSync(path.join(REPO, 'src/signin-witness.js'), 'utf-8');
 const authCut = (from, to, label) => MUT.load('src/auth.js', anchored(AUTH_SRC, from, to, label), `auth-${label}`).Auth;
 const swCut = (from, to, label) => MUT.load('src/signin-witness.js', anchored(SW_SRC, from, to, label), `sw-${label}`);
@@ -334,20 +345,22 @@ console.log('⑬ both persistent places read (r2152 (b)): a witness written in o
 
 console.log('⑬b a home on a network mount, LATE at one start (r2269 (1)): the copy the next start finds is never removed');
 {
-  const nfsLate = (name, A = Auth) => {
-    const it = install(name), NFSH = `25 1 0:50 / ${it.home} rw,relatime shared:1 - nfs4 server:/home rw\n`;
-    quiet(() => start(it, { mountinfo: NFSH }).v.setPassword('pw-nfs-0001', { userSet: true }));   // the home a network mount: var-tmp
+  const nfsLate = async (name, A = Auth) => {
+    const it = install(name), NFSH = nfsOf(it);
+    const first = start(it, { mountinfo: NFSH, pool: standIn(NONE) }).v;   // H1: the network home's look answers «no witness» — it opens
+    await until(() => !first.held);
+    quiet(() => first.setPassword('pw-nfs-0001', { userSet: true }));   // the home a network mount: var-tmp
     const was = fs.existsSync(varWitness(it)) && !fs.existsSync(witnessFile(it));
     start(it, {}, A);   // the mount LATE at this start: the ladder lands in the folder underneath the mount point
     const both = fs.existsSync(witnessFile(it)) && fs.existsSync(varWitness(it));
     fs.renameSync(it.data, it.data + '.real'); fs.mkdirSync(it.data);
     return { it, was, both, next: start(it, { mountinfo: NFSH }).v };   // the mount back (hiding the copy underneath), the data folder missing
   };
-  const g = nfsLate('nfs-late');
+  const g = await nfsLate('nfs-late');
   ok(g.was && g.both, 'the home a network mount: the witness on var-tmp; at a start where the mount is late, a copy written underneath AND the var-tmp copy kept');
   ok(!!g.next.held && g.next.held.kind === 'folder' && g.next.held.witness === varWitness(g.it), '…the mount back and the data folder missing: the var-tmp copy names it — HELD, never open', g.next.held);
-  const r = nfsLate('nfs-late-red', authCut("      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => w.writable !== false).map((w) => w.file)])];   // the ladder's place + every copy found whose folder takes a write (r2436 (3))\n", "      const files = f.place && f.place.dir ? [f.file] : []; for (const w of found) if (w.file !== f.file) SW.removeWitness({ file: w.file });\n", 'remove-the-other-copy'));
-  ok(!r.both && !r.next.held && !r.next.passwordEnabled, 'RED CONTROL: the other place\'s copy removed once one is written (the first form) — the next start comes up OPEN');
+  const r = await nfsLate('nfs-late-red', authCut("      const files = [...new Set([...(f.place && f.place.dir ? [f.file] : []), ...found.filter((w) => w.writable !== false).map((w) => w.file)])];   // the ladder's place + every copy found whose folder takes a write (r2436 (3))\n", "      const files = f.place && f.place.dir ? [f.file] : []; for (const w of found) if (w.file !== f.file) SW.removeWitness({ file: w.file });\n", 'remove-the-other-copy'));
+  ok(!r.both && !!r.next.held && r.next.held.kind === 'checking', 'RED CONTROL: the other place\'s copy removed once one is written (the first form) — the var-tmp copy is gone: the next start can only wait on the network home (H1), never held by the copy', r.next.held);
 }
 
 console.log('⑬c a copy in a folder the read allows and the write refuses (r2436 (3)): kept as it is, never rewritten nor warned about at each start');
@@ -395,6 +408,154 @@ console.log('⑭ a witness THERE and unreadable holds (r2152 (a)): a missing one
   actOf(b.fix, it);
   const u3 = start(it).v;
   ok(!fs.existsSync(witnessFile(it)) && !u3.held && !u3.passwordEnabled, 'THE ACT its words name (the witness deleted): a new instance');
+}
+
+console.log('⑮ H2 (主开发 r2780 (2)): a folder that is not the one the witness saw never opens the instance by saying «off»; no start deletes another folder\'s witness');
+{
+  const offFolder = (dir, id = null) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'auth.json'), J({ userSet: true, tokens: {} })); if (id) fs.writeFileSync(path.join(dir, SW.INSTANCE_FILE), J({ v: 1, id, createdAt: 1 })); };
+  const copies = (it) => [witnessFile(it), varWitness(it)].filter((f) => fs.existsSync(f)).length;
+  const H2_CHECK = '    if (!this._state.passwordHash) {\n', FOREIGN = "    if (atStart && !set && SW.foreignAt(found, startId)) {";
+  const authCut2 = (pairs, label) => MUT.load('src/auth.js', pairs.reduce((t, [from, to, l]) => anchored(t, from, to, l), AUTH_SRC), `auth-${label}`).Auth;
+  // (a) another folder in its place whose OWN sign-in file says off — with no id, then with another id
+  const it = install('h2-off');
+  quiet(() => start(it).v.setPassword('pw-h2-0001', { userSet: true }));
+  fs.renameSync(it.data, it.data + '.real'); offFolder(it.data);
+  const h1 = start(it).v;
+  ok(!!h1.held && h1.held.kind === 'folder' && h1.held.witness === witnessFile(it) && copies(it) === 1 && !fs.existsSync(path.join(it.data, SW.INSTANCE_FILE)), 'a replaced folder whose own sign-in file says off (it holds no id): HELD by the folder reason, the witness named and KEPT, no id written into it', h1.held);
+  fs.rmSync(it.data, { recursive: true, force: true }); offFolder(it.data, 'vi-bbbbbbbbbbbb');
+  const h2 = start(it).v;
+  ok(!!h2.held && h2.held.kind === 'folder' && copies(it) === 1, '…and one holding ANOTHER id: HELD, the witness kept', h2.held);
+  ok(/its own sign-in file says sign-in is off/.test(h2.held.why) && /delete/.test(api(h2).body.fix), 'its why says the folder\'s own file says off; its act is the folder hold\'s (delete the witness named)');
+  fs.rmSync(it.data, { recursive: true, force: true }); offFolder(it.data);
+  const r1 = start(it, {}, authCut2([[H2_CHECK, '    if (false) {\n', 'h2-cut']], 'h2-off-opens')).v;
+  ok(!r1.held && !r1.passwordEnabled, 'RED CONTROL: the off file decides by itself (line 438\'s reading) — the same start OPENS');
+  ok(copies(it) === 1, 'and even then (the hold cut), that start DELETES no witness: the second lock — no start whose folder held another id or none removes one');
+  fs.rmSync(it.data, { recursive: true, force: true }); offFolder(it.data);
+  const r2 = start(it, {}, authCut2([[H2_CHECK, '    if (false) {\n', 'h2-cut'], [FOREIGN, '    if (false) {', 'foreign-cut']], 'h2-release')).v;
+  ok(!r2.held && copies(it) === 0, 'RED CONTROL: line 438 whole (both cut) — it opens AND deletes every witness copy: the evidence for the real folder gone');
+  // (b) the SAME folder turned off by the person through the product still opens
+  const it4 = install('h2-same');
+  const s4 = start(it4).v; quiet(() => s4.setPassword('pw-h2-0005', { userSet: true })); quiet(() => s4.removePassword());
+  const o4 = start(it4).v;
+  ok(!o4.held && !o4.passwordEnabled && !fs.existsSync(witnessFile(it4)), 'the SAME folder turned off by the person through the product still opens (its witness went with the act)');
+  fs.mkdirSync(path.dirname(witnessFile(it4)), { recursive: true, mode: 0o700 }); fs.writeFileSync(witnessFile(it4), J(SW.witnessDoc({ root: it4.root, dataDir: it4.data, id: idOf(it4) })), { mode: 0o600 });
+  const o5 = start(it4).v;
+  ok(!o5.held && !o5.passwordEnabled && !fs.existsSync(witnessFile(it4)), '…and a copy left of the SAME id (its removal had failed): it opens, and this start removes the copy');
+  // (c) a folder with its OWN password and another id: guarded by it, and the other folder's witness never written over at a start
+  const it3 = install('h2-own');
+  quiet(() => start(it3).v.setPassword('pw-h2-0003', { userSet: true }));
+  const wid = JSON.parse(fs.readFileSync(witnessFile(it3), 'utf-8')).id;
+  const own = (A) => { fs.rmSync(it3.data, { recursive: true, force: true }); fs.mkdirSync(it3.data); quiet(() => new Auth(it3.data).setPassword('pw-other-0004', { userSet: true })); fs.writeFileSync(path.join(it3.data, SW.INSTANCE_FILE), J({ v: 1, id: 'vi-cccccccccccc', createdAt: 1 })); return start(it3, {}, A); };
+  fs.renameSync(it3.data, it3.data + '.real');
+  const g = own(Auth);
+  ok(!g.v.held && g.v.verifyPassword('pw-other-0004') && JSON.parse(fs.readFileSync(witnessFile(it3), 'utf-8')).id === 'vi-cccccccccccc', 'a folder GUARDED by its own password and another id (a restore): never held, and the witness FOLLOWS it (its file decides when the other folder returns)', g.lines);
+  fs.writeFileSync(witnessFile(it3), J(SW.witnessDoc({ root: it3.root, dataDir: it3.data, id: wid })), { mode: 0o600 });   // the real folder's witness again (the leg above made it follow)
+  own(authCut2([[FOREIGN, '    if (atStart && SW.foreignAt(found, startId)) {', 'foreign-also-set']], 'h2-no-follow'));
+  ok(JSON.parse(fs.readFileSync(witnessFile(it3), 'utf-8')).id === wid, 'RED CONTROL: the lock widened to a guarded start (the first form of this cure) — the witness does not follow the restore');
+}
+
+console.log('⑯ H1 (主开发 r2780 (2), r2869): a network home keeps a copy too, read and written ONLY through the worker pool; a start that would open is HELD until it answers');
+{
+  const authCut2 = (pairs, label) => MUT.load('src/auth.js', pairs.reduce((t, [from, to, l]) => anchored(t, from, to, l), AUTH_SRC), `auth-${label}`).Auth;
+  // the data folder missing, the witness only on the network home: the var-tmp copy gone (its system cleared it), the real folder away
+  const netIt = async (name) => {
+    const it = install(name), mi = nfsOf(it), a = start(it, { mountinfo: mi, pool: standIn(NONE) }).v;
+    await until(() => !a.held); quiet(() => a.setPassword('pw-net-0001', { userSet: true }));
+    const id = idOf(it); fs.rmSync(varWitness(it), { force: true }); fs.renameSync(it.data, it.data + '.real'); fs.mkdirSync(it.data);
+    return { it, mi, id, netFile: witnessFile(it), home: path.dirname(witnessFile(it)) };
+  };
+  const quick = { netBoundMs: 30, netReaskMs: 60 };
+  // (1) A STALLED look: held at once and still answering; past its bound HELD «home»; re-asks never stack; nothing written there
+  const A = await netIt('h1-stall'), pa = standIn('stall');
+  const a1 = start(A.it, { mountinfo: A.mi, pool: pa, ...quick }).v;
+  ok(!!a1.held && a1.held.kind === 'checking' && a1.held.home === A.home && pa.calls.length === 1 && pa.calls[0].op === 'readText' && pa.calls[0].path === A.netFile, 'the data folder missing, its witness only on the network home: HELD «checking» at once — ONE look, through the worker pool (never the loop)', { held: a1.held, calls: pa.calls });
+  await until(() => a1.held && a1.held.kind === 'home');
+  const b = api(a1).body;
+  ok(a1.held.kind === 'home' && b.reason === 'home' && b.why.includes(A.home) && b.fix.includes(SW.START_NEW) && b.fix.includes(A.it.data) && pageOf(a1).code === 200, 'past its bound: HELD «home» — the 503 says the reason by name, that it asks again by itself, and the act to decide NOW (the start-new file in the data folder); the sign-in page still answers', b);
+  for (const lang of ['zh', 'ja']) { const bl = api(a1, lang).body; ok(bl.why === LW.loginWords(lang)['signin-held-home'].replace('{home}', A.home).replace('{dir}', A.it.data) && bl.fix.includes(SW.START_NEW), `${lang}: the «home» words through the server's own fill`); }
+  await sleep(250);
+  ok(pa.calls.length === 1 && pa.calls.every((c) => c.op === 'readText') && a1.held.kind === 'home', `a look that has not answered starts no second one (${pa.calls.length} ask over four re-asks' time), and nothing is written to the network home`, pa.calls);
+  const RA = authCut2([['    if (!n || n.done || n.pending || !this._pool) return;   // ONE look at a time (r2869 (1))\n', '    if (!n || n.done || !this._pool) return;\n', 'one-look'], ['if (n.pending) { again(); return; } this._netLook();', 'this._netLook();', 'reask-pending']], 'looks-stack');
+  const A2 = await netIt('h1-stall-red'), pr = standIn('stall');
+  start(A2.it, { mountinfo: A2.mi, pool: pr, ...quick }, RA); await sleep(250);
+  ok(pr.calls.length > 1, `RED CONTROL: no «one look at a time» — asks pile on a home that hangs (${pr.calls.length})`);
+  // (2) the home answers «no witness there»: it OPENS as a new install does
+  const B = await netIt('h1-none'), pb = standIn(NONE);
+  const b1 = start(B.it, { mountinfo: B.mi, pool: pb, ...quick }).v;
+  await until(() => !b1.held);
+  ok(!b1.held && !b1.passwordEnabled && SW.ID_RE.test(String(idOf(B.it))), 'the home answers «no witness there»: it OPENS as a new install does (the folder takes its own id)');
+  const RB = authCut('        const a = SW.netAnswerOf(res, { root: f.root, dataDir: f.dataDir, file: f.netFile });\n', "        const a = { answered: false, why: 'the answer cut' };\n", 'none-unheard');
+  const B2 = await netIt('h1-none-red');
+  const b2 = start(B2.it, { mountinfo: B2.mi, pool: standIn(NONE), ...quick }, RB).v; await sleep(150);
+  ok(!!b2.held && b2.held.kind === 'home', 'RED CONTROL: the answer not heard — it stays held (the «opens» leg can fail)');
+  // (3) the home answers with the witness (the real folder's id): HELD by the folder's own rule, the network copy named
+  const C = await netIt('h1-witness'), doc = J(SW.witnessDoc({ root: C.it.root, dataDir: C.it.data, id: C.id }));
+  const pc = standIn((op) => (op === 'readText' ? { text: doc } : 'ok'));
+  const c1 = start(C.it, { mountinfo: C.mi, pool: pc, ...quick }).v;
+  await until(() => c1.held && c1.held.kind !== 'checking');
+  ok(!!c1.held && c1.held.kind === 'folder' && c1.held.witness === C.netFile && pc.calls.every((x) => x.op === 'readText'), 'the home answers with the witness (the real folder\'s id): HELD by the folder\'s own rule, the network copy named; nothing written there', c1.held);
+  const RC = authCut('    if (a.found) f.found = [...(f.found || []), a.found];\n', '', 'net-found-dropped');
+  const C2 = await netIt('h1-witness-red'), doc2 = J(SW.witnessDoc({ root: C2.it.root, dataDir: C2.it.data, id: C2.id }));
+  const c2 = start(C2.it, { mountinfo: C2.mi, pool: standIn((op) => (op === 'readText' ? { text: doc2 } : 'ok')), ...quick }, RC).v;
+  await until(() => !c2.held || c2.held.kind !== 'checking');
+  ok(!c2.held, 'RED CONTROL: the network copy not heard — the same start OPENS');
+  // (4) the act a person at the machine takes NOW: an empty signin-start-new in the data folder — that start READS none of the home;
+  // as the person's act every copy is removed (the home's off the loop) and the file stays until that copy is gone (r2926 (1))
+  const homeCopy = (doc) => { let there = true; return standIn((op) => (op === 'unlink' ? ((there = false), 'ok') : op === 'readText' ? (there ? { text: doc } : { error: 'gone', code: 'ENOENT' }) : 'ok')); };
+  const D = await netIt('h1-start-new'), mD = path.join(D.it.data, SW.START_NEW); fs.writeFileSync(mD, '');
+  const pd = homeCopy(J(SW.witnessDoc({ root: D.it.root, dataDir: D.it.data, id: D.id })));
+  const ds = start(D.it, { mountinfo: D.mi, pool: pd, ...quick }), d1 = ds.v; await d1._netWrites;
+  ok(!d1.held && !pd.calls.some((c) => c.op === 'readText') && pd.calls.filter((c) => c.op === 'unlink' && c.path === D.netFile).length === 1 && !fs.existsSync(mD) && ds.lines.some((l) => /read none of it/.test(l)), 'the act to decide NOW (the start-new file): that start opens and READS none of the home — the person\'s act removes the home\'s copy off the loop, then the file (the journal says just that)', { calls: pd.calls, lines: ds.lines });
+  const dn = start(D.it, { mountinfo: D.mi, pool: pd, ...quick }).v;
+  await until(() => !dn.held || dn.held.kind !== 'checking');
+  ok(!dn.held, '…and the decision LASTS: the next start reads the home, finds no witness, and opens');
+  const RD = authCut("      if (f && f.netHome) { if (!f.startNew) return this._checkHome('missing', null); this._startNewUsed = true; }", "      if (f && f.netHome) return this._checkHome('missing', null);", 'start-new-ignored');
+  const D2 = await netIt('h1-start-new-red'); fs.writeFileSync(path.join(D2.it.data, SW.START_NEW), '');
+  const d2 = start(D2.it, { mountinfo: D2.mi, pool: standIn('stall'), ...quick }, RD).v;
+  ok(!!d2.held && d2.held.kind === 'checking', 'RED CONTROL: the start-new file not read — held «checking»');
+  const RD2 = authCut('      this._netStartNew();\n      return;\n', "      try { SW.removeWitness({ file: path.join(this._dataDir, SW.START_NEW) }); } catch { }\n      return;\n", 'start-new-once');
+  const D3 = await netIt('h1-start-new-once'); fs.writeFileSync(path.join(D3.it.data, SW.START_NEW), '');
+  const p3 = homeCopy(J(SW.witnessDoc({ root: D3.it.root, dataDir: D3.it.data, id: D3.id })));
+  start(D3.it, { mountinfo: D3.mi, pool: p3, ...quick }, RD2);
+  const d3 = start(D3.it, { mountinfo: D3.mi, pool: p3, ...quick }).v;
+  await until(() => d3.held && d3.held.kind !== 'checking');
+  ok(!!d3.held && d3.held.kind === 'folder', 'RED CONTROL: the file removed at once and the home\'s copy kept (the first form) — the next start is HELD again: the decision did not last', d3.held);
+  const D4 = await netIt('h1-start-new-stall'), m4 = path.join(D4.it.data, SW.START_NEW); fs.writeFileSync(m4, '');
+  const d4 = start(D4.it, { mountinfo: D4.mi, pool: standIn('stall'), ...quick }).v;
+  ok(!d4.held && fs.existsSync(m4), '…the home does not answer the removal: the start opens and the file STAYS — the next start acts again');
+  // (7) r2901: a start NEVER HANDED A POOL (it could not be built; an embedding forgets it) never sits held and silent
+  const G = await netIt('h1-no-pool');
+  const g1 = start(G.it, { mountinfo: G.mi, ...quick }).v;
+  await until(() => g1.held && g1.held.kind !== 'checking', 1000);
+  const gb = api(g1).body;
+  ok(g1.held.kind === 'unchecked' && gb.reason === 'unchecked' && gb.why.includes(G.home) && /could not start its check/.test(gb.why) && gb.fix.includes(SW.START_NEW), 'a start NEVER handed a pool: past the bound HELD «unchecked» — the check could not be started, said by name, with the act to decide now', gb);
+  const RG = authCut('    const unstarted = setTimeout(() => {\n', '    const unstarted = false && setTimeout(() => {\n', 'no-pool-silent');
+  const G2 = await netIt('h1-no-pool-red');
+  const g2 = start(G2.it, { mountinfo: G2.mi, ...quick }, RG).v; await sleep(150);
+  ok(!!g2.held && g2.held.kind === 'checking', 'RED CONTROL: no word for a pool that never came — held «checking» for ever, silent');
+  // (5) NO synchronous read of the network home at a start: every sync fs call is watched while the start runs
+  const E = await netIt('h1-sync'), seen = [];
+  const NAMES = ['readFileSync', 'statSync', 'lstatSync', 'existsSync', 'readdirSync', 'openSync', 'readlinkSync', 'accessSync', 'realpathSync'];
+  const watch = (fn) => { const keep = NAMES.map((n) => [n, fs[n]]); for (const [n, f0] of keep) fs[n] = function (p, ...r) { if (typeof p === 'string' && (p === E.it.home || p.startsWith(E.it.home + '/'))) seen.push(`${n} ${p}`); return f0.call(this, p, ...r); }; try { return fn(); } finally { for (const [n, f0] of keep) fs[n] = f0; } };
+  watch(() => start(E.it, { mountinfo: E.mi, pool: standIn('stall'), ...quick }));
+  ok(seen.length === 0, `NO synchronous call reaches the network home at a start (every sync fs call watched): ${seen.length}`, seen);
+  const ME = swCut("  if (h.dir && h.via === 'home') out.push(h.dir);\n", "  out.push(String(home).replace(/\\/+$/, '') + '/.vibespace/local');\n", 'net-home-read-sync');
+  seen.length = 0; watch(() => ME.startFactsSync({ dataDir: E.it.data, ...cfgOf(E.it, { mountinfo: E.mi }) }));
+  ok(seen.length > 0, `RED CONTROL: the home rung read like a local one — a synchronous read of the network home (${seen.length})`);
+  // (6) THE REAL WORKER POOL over a scratch home: the copy written off the loop after the sign-in file, read at the next start
+  const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
+  const pool = new SafeFs({ poolSize: 1, name: 'dc3f-witness-net' });
+  try {
+    const F = install('h1-real'), mi = nfsOf(F);
+    const f0 = start(F, { mountinfo: mi, pool }).v;
+    await until(() => !f0.held, 8000);
+    quiet(() => f0.setPassword('pw-real-0001', { userSet: true })); await f0._netWrites;
+    ok(!f0.held && fs.existsSync(witnessFile(F)) && JSON.parse(fs.readFileSync(witnessFile(F), 'utf-8')).id === idOf(F), 'THE REAL worker pool: the network home\'s copy written off the loop after the sign-in file (this folder\'s id)');
+    fs.rmSync(varWitness(F), { force: true }); fs.renameSync(F.data, F.data + '.real'); fs.mkdirSync(F.data);
+    const f1 = start(F, { mountinfo: mi, pool }).v;
+    await until(() => f1.held && f1.held.kind !== 'checking', 8000);
+    ok(!!f1.held && f1.held.kind === 'folder' && f1.held.witness === witnessFile(F), '…and read through the worker at the next start: the data folder missing ⇒ HELD by the network copy', f1.held);
+  } finally { pool.close(); }
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
