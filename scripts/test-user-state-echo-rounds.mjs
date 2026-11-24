@@ -13,12 +13,13 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
+import { checker, verdictOf } from './lib/check.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const UO = require(path.join(REPO, 'src/user-state-ops.js'));
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+const CHK = checker();   // B-7e49 r3655 (3): a twin takes the shared checker (scripts/lib/check.mjs), never an inline helper of its own
+const ok = (c, n, d) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped`); return CHK.ok(c === true || (c !== false && verdictOf(c)), n, d); };   // the condition coerced as the shared guard does (a promise or a function is red by name)
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -2015,5 +2016,4 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
     `ROUND 15 — EXACTLY ONCE WHEN A CLOSED TAB'S REQUESTS LAND AFTER A NEWER PAGE'S: X archived and Y starred once (${once}), Z kept; ${UO.revOf(st) - rev0} writes, ${w.dup - dup0} held (P's first act, carried twice); the new page shows all three (${qSees})`, { revs: UO.revOf(st) - rev0, dup: w.dup - dup0, qSees });
 }
 
-console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+CHK.report();

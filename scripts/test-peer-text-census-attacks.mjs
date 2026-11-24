@@ -19,6 +19,7 @@ import { bestMs } from './cost-ratio.mjs';
 import { startWorkMeter, linear, BACKTRACK_FLAGS } from './work-meter.mjs';
 import { scratch } from './scratch.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+import { checker, verdictOf } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // V3's child (costInChild, §3): `--cost <spec>` counts each site's WORK on the hostile shapes with the work meter —
@@ -43,8 +44,8 @@ const SFm = require(path.join(REPO, 'src/browser-surfaces.js')); // lane browser
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
 const EX = require(path.join(REPO, 'src/exit-reach.js'));
 
-let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+const CHK = checker();   // B-7e49 r3655 (3): a twin takes the shared checker (scripts/lib/check.mjs), never an inline helper of its own
+const ok = (c, n, d) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped`); return CHK.ok(c === true || (c !== false && verdictOf(c)), n, d); };   // the condition coerced as the shared guard does (a promise or a function is red by name)
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -432,36 +433,8 @@ const DECLARED_ALIASES = {
 // them (r3 F5: a module a CLI requires is a file this census reads); it prints nothing, its sentences are returned and
 // each CLI's print of one is a row below.
 const PRINT_CLIS = ['data/bin/vibespace-msg', 'data/bin/vibespace-channels', 'data/bin/vibespace-job', 'data/bin/vibespace-task', 'src/agent-cli-text.js', 'src/cli-call.js', 'src/fd-close.js'];   // lane lg-store-writes (B-15ac): THE ONE CLOSE of a written file the channels CLI requires (it prints nothing; its sentence is handed to the caller)   // lane cli-call-timeouts: THE ONE CALL every agent CLI requires (it prints the expiry line) is walked beside them
-// verify r4 F2 (lane peer-census): THE ROSTER IS DERIVED, NEVER A HAND LIST. PRINT_CLIS was three names, so the fourth agent
-// CLI that prints another session's words (vibespace-task — F1) was invisible to the print census, and a NEW file under
-// data/bin printing a peer field would have been too (planted: green, no list edit needed). Every tracked data/bin file
-// that talks to the agent API (the session / job token, the API address) is an AGENT CLI: it is WALKED (PRINT_CLIS) or
-// DECLARED here with the reason its prints carry no peer text this census owes — a new one is red by name until it is one
-// or the other; a declaration whose file no longer talks to the API is dead (red); a walked file is never declared too.
-const AGENT_CLI_RE = /VIBESPACE_SESSION_TOKEN|VIBESPACE_API\b|\bvsst_|\bjbt_/;
-const DECLARED_CLIS = {
-  'data/bin/vibespace-hook.mjs': 'the hook TRANSPORTS agent-routes\' composed payload verbatim (its table row: every peer part judged by its producer row)',
-  'data/bin/vibespace-browser': 'prints src/browser-stuck.js\'s sentences (their table rows: the page\'s words judged there; a parent Task Group\'s name in a profile\'s «used by» line through src/task-groups.js lineageNameOf, one line piece of the belt — the chain\'s cure (B)), relays the agent-browser binary\'s own output — the browser lane\'s door (design-agent-browser-v2), not this census\'s — and the REGISTRY\'s labels / notes / handles (`profiles` / `status` / `pin` / `new`): a label is another conversation\'s words once an agent names a profile, so THE store\'s one cleaner is the belt (browser-profiles cleanLabel, re-judged at load — verify r5 F3, §3 leg + §5 pins); a handle is a slug (ALIAS_RE)',
-  'data/bin/vibespace-docs': 'prints the static manuals served from the checkout (docs/agent/*-manual.md) — no live data (r2 H5)',
-  'data/bin/vibespace-design': 'prints the hub\'s design answers — every string a design folder\'s file wrote (a title, a page name, a note, a verdict sentence naming a key or a file) is belted at the hub (src/server/design-engine.js agentView / agentRow — the design-folder store row) — the path the hub minted for a publish, the folder it was given, fixed sentences; lane design-ask: `ask` prints back the calling agent\'s OWN questions as the hub validated them, `preview` the address the hub minted',
-  'data/bin/vibespace-page': 'prints the path / url the server minted for the agent\'s OWN published file, fixed sentences — and `list` prints each page\'s NAME, which the route belts (pageAnswer: a republished path keeps the FIRST publisher\'s title — verify r6 F3)',
-  'data/bin/vibespace-feedback': 'prints this conversation\'s OWN feedback reports (feedback-store mine — the agent\'s own words, filed or repeated by it; another session\'s report is never listed), the ids the server minted and fixed sentences (lane agent-feedback); lane fleet-feedback-marks: with the MAINTAINER key (no session — the maintainers\' shell) `list --open` prints the instance\'s open reports as feedback.list answers them (other agents\' words, belted by the instance: automationVerbs agentRow) and `handled` its own fixed line',
-  'data/bin/vibespace-vault': 'prints the vault\'s state words (unlocked / locked / not set up) and a locked-since time from GET /api/agent/vault/state — server facts, never a peer\'s text (lane vault-e2e-password); lane vault-entry-description: `list` / `uses` print an entry\'s name and description — another agent\'s or the owner\'s words, belted at the hub (the run door\'s wordsOfRow → src/vault-paste.js agentEntryWords, its table rows) — and `describe` echoes the words this agent itself sent',
-  'data/bin/vibespace-api': 'prints the automation keys THIS conversation may use (their names — the owner\'s own words in the Vault window — their verbs and grant subjects; a parent Task Group\'s name through src/task-groups.js lineageNameOf, one line piece of the belt — the chain\'s cure (B)), this conversation\'s OWN audit lines (names and ids the hub summarized: argsSummary — never a text body) and a verb\'s answer (a code, a rename\'s new name the agent itself sent) — server facts (design q-046); lane feedback-handled-verb: `call feedback.list` prints OTHER agents\' feedback reports (a text, its about, the reporting conversation\'s and its Task Group\'s names) — each piece belted at the hub (src/server/feedback-store.js automationVerbs: toAgentText — the §6 «agent feedback reports» row), with the ids the store minted; `call feedback.handled` echoes the id, the release and the calling conversation\'s OWN name; the manager design\'s piece 4: `conversations resume` answers the conversation\'s key, its link and the DESKTOP of its row — the desktop\'s NAME is a person\'s words (the desktop bar), belted at the hub (the §6 «desktop names» row)',
-  'data/bin/vibespace-ask': 'lists this session\'s OWN For-you items (userTodos.forSession — the agent\'s own words) and the USER\'s reply to one (`the user replied:`)',
-  'data/bin/vibespace-exit': 'the agent\'s OWN command\'s stdout on a paired machine it was allowed to use, the machines\' names the user gave and our own reach words (a parent Task Group\'s name in them through src/task-groups.js lineageNameOf — one line piece of the belt; the chain\'s cure (B)); `runs` prints its OWN runs\' stored heads, judged at the ONE audit writer (src/exit-reach.js :: outputHeads( row)',
-  'data/bin/vibespace-remote': 'prints this conversation\'s OWN acts on machines (lane device-act-audit): the hub\'s audit rows, every machine-written byte (an argv head, a path, a machine name, an output head) judged at the route (src/server/exit-routes.js /api/agent/remote/audit: device-acts rowOf — bounded, redacted, folded — then toAgentText) and folded again here; another subject\'s rows are never answered (human_only)',
-  'data/bin/vibespace-window': 'HELD (r4 H1): the accessibility snapshot prints every node\'s NAME and text as JSON-quoted words of a window the user shared — the window-targets lane\'s door (design §5.1.1), where the page-text rule (JSON-quoted AND frame-inert) is owed; not judged by this census',
-  'data/bin/vibespace-app': 'prints package names (Debian\'s name rule), apt\'s own summaries / a .desktop Name / apt\'s error line (package-written — the agent routes belt each through toAgentText, src/routes/apps.js `pkgWords`), the agent\'s OWN proposals and their outcome (apps-engine `outcomeText`, its pieces belted — its stash row here), fixed sentences; never another conversation\'s words (an entry another agent proposed prints `[proposed by an agent]` — no name, no why)',
-  'data/bin/codex-chat-wrapper.js': 'a harness WRAPPER: its stdout is the server\'s stream-json feed, never an agent\'s Bash result',
-  'data/bin/acp-wrapper.js': 'the same for an ACP harness',
-  'data/bin/vibespace': 'THE PERSON\'S CLI (lane human-cli) — it never talks to the agent API: the session / job token env is only TESTED for presence and EVERY verb refuses inside an agent session (so the index rows it prints — session names, folders — never reach an agent)',
-  'data/bin/agy-wrapper.js': 'the same for the Antigravity harness (agy\'s stream-json written as the ACP journal)',
-};
-function cliRoster(readFile, files) {
-  const agentClis = files.filter((f) => f.startsWith('data/bin/') && AGENT_CLI_RE.test(readFile(f)));
-  return { agentClis, unwalked: agentClis.filter((f) => !PRINT_CLIS.includes(f) && !DECLARED_CLIS[f]), deadDeclared: Object.keys(DECLARED_CLIS).filter((f) => !agentClis.includes(f)), untracked: PRINT_CLIS.filter((f) => !files.includes(f)), bothWays: PRINT_CLIS.filter((f) => DECLARED_CLIS[f]) };
-}
+// (r3655, the reader's should: the AGENT CLIs' roster — DECLARED_CLIS and cliRoster — is the fast file's census; this twin walks
+// PRINT_CLIS only, and the fast file's §T pins that its PRINT_CLIS line is this one, byte for byte)
 // verify r3 F1 (lane peer-census): THE PRINT HEADS ARE EVERYTHING THAT WRITES A STREAM. r2's set was two spellings
 // (console.log / console.error, process.stdout / stderr .write), so console.info / warn / debug / trace / dir / table /
 // group / assert (the same two streams), `fs.writeSync(1, …)`, a THROWN value (`throw new Error(…)`, `throw x` — node
@@ -2182,5 +2155,4 @@ const splitForms = (s) => { const sp = [...'system-reminder'].join(s); return [`
 
 console.log('\nthe attack table');
 for (const [i, a] of attacks.entries()) console.log(`  ${String(i + 1).padStart(2)} · ${a.site.padEnd(28)} · ${a.vector.padEnd(38)} · ${a.verdict}`);
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+CHK.report();

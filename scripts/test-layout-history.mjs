@@ -8,7 +8,7 @@
 import './scratch.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { createRequire } from 'node:module';
-import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census ⑭'s)
+import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census-scenes ⑭'s)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass=0, fail=0; const ok=(c,n,e)=>{if(c){pass++;console.log('  ✓ '+n);}else{fail++;console.error('  ✗ '+n+(e?'\n    '+e:''));}};

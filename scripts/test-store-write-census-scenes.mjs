@@ -13,11 +13,12 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { checker, verdictOf } from './lib/check.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
-let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, process.env.CENSUS_ALL ? 1e9 : 1500) : '')); } };
+const CHK = checker();   // B-7e49 r3655 (3): a twin takes the shared checker (scripts/lib/check.mjs), never an inline helper of its own
+const ok = (c, n, d) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped`); return CHK.ok(c === true || (c !== false && verdictOf(c)), n, d); };   // the condition coerced as the shared guard does (a promise or a function is red by name)
 
 // ── ⑩ THE MEASURED HOLDS AFTER 2.369.412 (主开发 2026-11-20 03:10Z — the owner's hub, the first hour of the new build: 23 holds of
 // 1–3 s, the main thread asleep on the storage in a temp + rename): each site off the loop through the store writer, with what the
@@ -43,7 +44,7 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
       const PROD_G = "const storeBytes = () => { if (held) throw";
       const HOLD_G = "    holdStore(a);   // unreadable, or bytes that are not the store: HELD (never started empty over it)\n";
       ok([SAVE_G, PROD_G, HOLD_G].every((x) => DSRC.split(x).length === 2), 'control setup: the record file\'s save guard, producer guard and hold are found once each in desktop-serve.js');
-      const display0 = { ...DD, hostFacts: async () => ({ hostId: null, bins: {}, xpra: null, browsers: {}, office: { exec: null, path: null, program: null, confinement: null, modules: null }, at: Date.now() }) };   // no host probe
+      const display0 = { ...DD, hostFacts: async () => ({ hostId: null, bins: {}, browsers: {}, office: { exec: null, path: null, program: null, confinement: null, modules: null }, at: Date.now() }) };   // no host probe (r3655 should 1: its display-server fact is left out, not written null — the product reads it only as `f.<it> && f.<it>.www`, so absent IS null; a literal naming the program made the host class derive «desktop» for a suite that runs no display)
       const install = (Mod, d, W) => Mod.install({ dataDir: d, env: () => ({ HOME: d, PATH: process.env.PATH }), display: display0, registryRows: [], log: quietDs, now: Date.now, tickMs: 3600e3, apps: noApps, writer: W, unreadRetry: { firstMs: 15, maxMs: 30 } });
       const scene = async (Mod, name, { lift = true } = {}) => {
         const d = scratchDir('ds-held-' + name); roots.push(d); const F = path.join(d, 'desktop-apps.json'); fs.writeFileSync(F, SEED);
@@ -1986,5 +1987,4 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
-process.exit(fail ? 1 : 0);
+CHK.report();

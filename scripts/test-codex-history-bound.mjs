@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-codex-history-bound.mjs — lane resume-all-paced L3 cure (主开发 2026-11-16 23:16Z, P3 + P4 + the limit's scope): THE HISTORY
 // WORKER'S HEAP BOUND IS A BOUND UNDER EVERY START OF THE HUB. A Worker's resourceLimits are a HARD limit that a parent
-// --max-old-space-size REPLACES (the runtime's rule; usage-cold-worker.js and test-cache-bounds §14 measured it for the usage fold), so
+// --max-old-space-size REPLACES (the runtime's rule; usage-cold-worker.js and test-cache-bounds-walks §14 measured it for the usage fold), so
 // the codex history read's worker (SafeFs's `history` lane, src/adapters/codex.js) checks its own heap at each page and refuses past
 // its bound by name. Each leg runs in a CHILD process started as a hub may be started, over a small stand-in rollout built at run
 // time in this run's scratch dir — never a real transcript; no load, no real CLI, no billed turn.

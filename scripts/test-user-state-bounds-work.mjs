@@ -16,6 +16,7 @@ import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 import { spawnSync } from 'node:child_process';
+import { checker, verdictOf } from './lib/check.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -23,8 +24,8 @@ const UO = require(path.join(REPO, 'src/user-state-ops.js'));
 const express = require('express');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ueb-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { } });
-let pass = 0, fail = 0;
-const ok = (c, name, extra) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
+const CHK = checker();   // B-7e49 r3655 (3): a twin takes the shared checker (scripts/lib/check.mjs), never an inline helper of its own
+const ok = (c, n, d) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped`); return CHK.ok(c === true || (c !== false && verdictOf(c)), n, d); };   // the condition coerced as the shared guard does (a promise or a function is red by name)
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -541,5 +542,4 @@ console.log('§W B-518e — WORK, NEVER THE CLOCK: what each request above DID (
   } else ok(false, 'CONTROL: listDiff\'s head is not in src/user-state-ops.js — the controls cannot be made', null);
 }
 
-console.log(`\n${fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`}`);
-process.exit(fail ? 1 : 0);
+CHK.report();

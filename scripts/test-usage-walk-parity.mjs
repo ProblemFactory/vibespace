@@ -24,7 +24,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory: LedgerOf } = require(path.join(REPO, 'src/usage-history.js'));
 // B-9428: the walkers' parity reads the fixed-date fixture rows as the resident array — an unbounded window here
-// (the window's own parity against the unbounded cache: test-cache-bounds §2)
+// (the window's own parity against the unbounded cache: test-cache-bounds-walks §2)
 class UsageHistory extends LedgerOf { constructor(o) { super(o); this.ledgerWindowMs = this.ledgerHotMaxBytes = 1e15; } }
 
 let pass = 0, fail = 0;

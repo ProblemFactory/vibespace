@@ -43,7 +43,7 @@ import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census ⑭'s)
+import { landingWriter } from './scratch.mjs';   // B-0248 (a)+(b): the route's stores land at the call here (the release's timing; the off-loop road is test-store-write-census-scenes ⑭'s)
 const require = createRequire(import.meta.url);
 const member = (w, tabs) => ({ ...w, tabChain: { tabs: [...tabs], active: 0, layout: 'tabs', order: [...tabs] }, isTabGuest: tabs[0] !== w.winId });
 let pass = 0, fail = 0, CUR = null; const STRAY = [];   // r2342: CUR = the section running (a leg outside every section is STRAY)

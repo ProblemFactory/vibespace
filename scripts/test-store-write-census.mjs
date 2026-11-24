@@ -368,7 +368,9 @@ const TREE_AST = new Map();   // file → { src, ast } of this tree, filled by s
 // r2522 (B-7e49, lane bl-tests-e): A PARSE ONLY WHERE A SITE CAN BE. A file whose text names none of the census's write calls
 // (PERSIST, the four known helpers) holds no site, so derives no helper (a derived helper is the function around a site): it is
 // read, never parsed — about three quarters of the scope's bytes. A SCOPED file is always parsed (its helper calls are read on its
-// tree). The census's answers are unchanged: the marks, by the forced-red probe.
+// tree). The census's answers are unchanged: the marks, by the forced-red probe. Its ONE new blind spot (r3655, the reader's
+// should): a write call spelled wholly through a unicode escape in its identifier (`fs.\u0077riteFileSync`) names no PERSIST word
+// in the text, so it is not parsed — before this cut the parse decoded it; a deliberate shape, never a mistake.
 function scan(repo) {
   const out = [], files = censusFiles(repo), parsed = new Map(), helperDefs = new Map(), words = [...PERSIST, ...KNOWN_HELPERS];
   for (const f of files) {

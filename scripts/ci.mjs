@@ -3164,6 +3164,7 @@ export const SERIAL = [
   { name: 'test-store-writer', why: 'a CLOCK witness (lane hub-loop-stalls commit 2): the main loop\'s largest gap < 100 ms and an fs.promises.stat < 50 ms while 20 stores are written by a slow stand-in thread — beside other lanes those milliseconds are theirs' },
   { name: 'test-boot-loop-hold', why: 'a CLOCK witness: its law is a loop gap < 250 ms over a real boot of 625 MB of stores — alone on the hub it reads 148–151 ms, beside three other lanes on a 32-cpu box 352 / 373 ms (int266, 2026-10-13), so it runs alone like the load its budget was measured under' },
   { name: 'test-boot-resume-shape', why: 'a CLOCK witness: its law is a loop gap < 250 ms and the sign-in page within 1 s over real boots with 80 conversations (~240 processes) — beside other lanes those milliseconds are theirs, and its own load is theirs' },
+  { name: 'test-peer-text-census-attacks', why: 'a CLOCK judge (B-7e49 r3655, lane bl-tests-e: it came with §3 from test-peer-text-census, whose FAST_SERIAL row it was): the line belt\'s best-of-3 CPU-time ratio, 64 KiB of openers ≤ 40 × plain lines (scripts/cost-ratio.mjs bestMs) — beside other lanes that ratio is theirs; every site\'s hostile shapes stay a work-meter COUNT in its own --cost child' },
   { name: 'test-opencode-s9', why: 'a REAL `opencode serve` with its sqlite store, inotify watches, /proc runaway guard and store-watch lane — measured against a box with ONE serve, and the uid-wide inotify instance limit is what turned it into two 900 s timeouts on 2026-09-14' },
   // NOT here, measured (2026-09-15): test-writer-sweep (its scans are narrowed
   // to its own pids, and its ONE whole-box positive control only finds a holder
@@ -5024,7 +5025,6 @@ function removeScratchWorktree(wt) {
 // test-fixture-isolation is LAST: it sweeps for the litter any suite left.
 export const FAST_MAX_LANES = 4;
 export const FAST_SERIAL = [
-  { name: 'test-peer-text-census', why: 'clock: CPU-time ratios against in-run controls (the line belt, the engine — scripts/cost-ratio.mjs); every site\'s hostile shapes are a work-meter COUNT in a child since lane mirror-316-peer-text-ratio' },
   { name: 'test-fs-canary', why: 'clock: the canary\'s OWN stat and loop ms are judged against each other — a blocked loop: fs × 4 < loop; a busy pool: loop × 4 < fs — and the hold ≥ 1200 (lane wall-clock-ratchet-down: no literal bound left), over real threads and the shared pool' },
   { name: 'test-mail-frame', why: 'clock: the hostile shapes at MAX_HTML_BYTES are judged ≤ 5 × a benign mail\'s CPU time, the old loops in children' },
   { name: 'test-channel-blocks', why: 'clock: ⑬ ⑯ judge every hostile shape ≤ 150 × the rung\'s benign walk (CPU) and its controls past it; ⑱ a 1 MB post ≤ 8 × the post at the bound (its linear pin + control are WORK since .209)' },

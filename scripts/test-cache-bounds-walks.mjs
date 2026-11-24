@@ -18,6 +18,7 @@ import { spawnSync, execFile } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { mutantCopies } from './mutant-copy.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
+import { checker, verdictOf } from './lib/check.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -32,8 +33,8 @@ armWatchdog();
 // r4: a walk's answer carries asOf (its instant) — the parity legs compare the rest; _asOf keeps it for §31
 const rawAA = UsageHistory.prototype.aggregateAsync;
 UsageHistory.prototype.aggregateAsync = function (...a) { return rawAA.apply(this, a).then((x) => { if (!x || !('asOf' in x)) return x; const { asOf, ...r } = x; Object.defineProperty(r, '_asOf', { value: asOf }); return r; }); };
-let pass = 0, fail = 0;
-const ok = (c, m) => { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
+const CHK = checker();   // B-7e49 r3655 (3): a twin takes the shared checker (scripts/lib/check.mjs), never an inline helper of its own
+const ok = (c, n, d) => { if (typeof n !== 'string') throw new TypeError(`ok(cond, name): the name is a ${typeof n} — the arguments are swapped`); return CHK.ok(c === true || (c !== false && verdictOf(c)), n, d); };   // the condition coerced as the shared guard does (a promise or a function is red by name)
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -642,5 +643,4 @@ console.log('§L11 every structure the ledger holds is a census row with a ceili
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 
-console.log(fail ? `✗ ${fail} failed, ${pass} passed` : `ALL PASS ${pass} passed`);
-process.exit(fail ? 1 : 0);
+CHK.report();

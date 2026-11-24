@@ -458,7 +458,7 @@ try {
       const rp = ['-3', 'abc', '1e12', '5000', String(CPm.RATE_CEILING), '999.99', '0', '2.5', '.5', ''].map((v) => [v, W2.rateProblem(v)]);
       ok(JSON.stringify(rp) === JSON.stringify([['-3', 'negative'], ['abc', 'not-a-number'], ['1e12', 'not-a-number'], ['5000', 'over-ceiling'], ['1000', 'over-ceiling'], ['999.99', null], ['0', null], ['2.5', null], ['.5', null], ['', 'not-a-number']]), 'the page asks the SAME rule first (rateProblem; its ceiling is the route\'s RATE_CEILING): a negative, a word, 1e12, over the ceiling refused; 0 (a free model) and a plain rate pass', rp);
     }
-    // THE RULE LOADS model-providers ONLY WHEN A pv- ID IS MET (the fold worker's heap — test-cache-bounds §30)
+    // THE RULE LOADS model-providers ONLY WHEN A pv- ID IS MET (the fold worker's heap — test-cache-bounds-walks §30)
     {
       const { execFileSync } = await import('node:child_process');
       const probe = `const p=require(${JSON.stringify(path.join(ROOT, 'src/usage-history.js'))});const has=()=>Object.keys(require.cache).some(k=>k.endsWith('/src/model-providers.js'));const a=has();const {isThirdPartyAccount}=require(${JSON.stringify(path.join(ROOT, 'src/provider-ids.js'))});const v=isThirdPartyAccount('sub-1');const b=has();const w=isThirdPartyAccount('pv-example');console.log(JSON.stringify({a,b,c:has(),v,w}))`;
