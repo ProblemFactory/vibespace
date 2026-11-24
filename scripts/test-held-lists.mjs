@@ -114,7 +114,7 @@ console.log('② THE WORDS — PURE src/lib/held-lists-words.js');
 const W = await import(pathToFileURL(path.join(REPO, 'src/lib/held-lists-words.js')).href);
 const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p && p[n] !== undefined ? String(p[n]) : m));
 const NAMES = Object.fromEntries(W.HELD_NAMED.map((k) => [k, W.heldListName(k, tt)]));
-ok(NAMES['mounts.json'] === 'the storage list' && NAMES['mount-tokens.json'] === 'the folder links' && NAMES['plugins.json'] === 'the plugins’ settings' && NAMES['user-todos'] === 'For you' && NAMES['task-groups'] === 'the Task Groups' && NAMES['hosts.json'] === 'the paired machines' && W.heldListName('frobs.json', tt) === 'a saved list',
+ok(NAMES['mounts.json'] === 'the storage list' && NAMES['mount-tokens.json'] === 'the folder links' && NAMES['plugins.json'] === 'the plugins’ settings' && NAMES['user-todos'] === 'For you' && NAMES['task-groups'] === 'the Task Groups' && NAMES['hosts.json'] === 'the paired machines' && NAMES['machine-mounts.json'] === 'the mounts of your paired machines' && W.heldListName('frobs.json', tt) === 'a saved list',
   'a plain name for every list the hub can name (the helper\'s stores, the older holds); «a saved list» for one not named yet — never its file', NAMES);
 ok(W.heldChipWords(3, tt) === 'Lists unreadable · 3' && W.heldRowWords({ what: 'plugins.json' }, tt, { since: '09:12', next: '09:13' }) === 'the plugins’ settings — since 09:12, next try 09:13' && W.heldRowWords({ what: 'hosts' }, tt, { since: '09:12' }) === 'the paired machines — since 09:12' && W.heldRowWords({ what: 'task-groups' }, tt) === 'the Task Groups',
   'the chip says how many; a row says its plain name, since when and the next try (each only when known)');
@@ -164,7 +164,7 @@ console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain
 // helper on the hotfix's tip): a caller the tree has and this map does not is red by name (name its store, then its plain name in the words)
 // r3284: EVERY store a file holds (a list a file): the count of the helper's holds in each file (its `<name>.create(`) must equal its row's —
 // a SECOND held store in an already-mapped file is red by name, as an unmapped caller is
-const CALLERS = { 'src/hosts.js': ['hosts.json'] /* 2b */, 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tokens.json'], 'src/plugins.js': ['plugins.json'], 'src/accounts.js': ['accounts.json'], 'src/server/apps-engine.js': ['app-proposals.json'],
+const CALLERS = { 'src/hosts.js': ['hosts.json'], 'src/machine-mounts.js': ['machine-mounts.json'] /* 2b */, 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tokens.json'], 'src/plugins.js': ['plugins.json'], 'src/accounts.js': ['accounts.json'], 'src/server/apps-engine.js': ['app-proposals.json'],
   'src/routes/files.js': ['extract-journal.json'],   // r3333 unit 2: the archive extraction journal
   'src/server/auto-resume.js': ['auto-resume.json'], 'src/server/browser-trace.js': ['browser-forgotten.json'], 'src/server/channel-api.js': ['api-proposals.json'], 'src/server/channels-attention.js': ['decision-examples.json'],
   'src/server/design-engine.js': ['designs.json'], 'src/server/feedback-forward.js': ['feedback-outbox.json'], 'src/server/doc-engine.js': ['doc-owners.json'], 'src/server/feedback-store.js': ['feedback.json'], 'src/server/provider-store.js': ['providers.json'],

@@ -141,9 +141,18 @@ class MachineMounts {
     this.log = log || (() => {});
     this._doors = new Map();   // B-7f0b: a push mount's id → the PROMISE of its own door (src/server/push-mount-door.js; r1317 (2): kept while it opens, so two re-owns share one)
     this._file = path.join(dataDir, 'machine-mounts.json');
+    // 2b commit 3 (主开发 r3648 / r3790): the hold is the FAMILY HELPER's (src/store-read-hold.js) — torn bytes at a start HOLD while
+    // they are copied aside off the loop (once a content), then the list starts empty (its time cut marked at the lift); a failed read
+    // holds, read again off the loop (past the helper's bound, said); the one-time legacy ingest is the boot's road only — after a
+    // torn boot it waits for the next start
+    this._hold = HOLD.create({
+      file: this._file, valid: STORE_SHAPE, code: 'mounts-unread', aside: (mark) => this._asideName(mark),
+      words: (f) => this._heldWords(f), log: (m) => this.log(m), onLift: (value, info) => this._lifted(value, info),
+    });
     let read;
     try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
-    this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));
+    const a0 = SR.storeAnswer(read, { valid: STORE_SHAPE });
+    if (this._hold.start(a0) !== 'held') this._loadAnswer(a0); else this._state = { mounts: [] };   // held: no mount listed until the lift
     // one-time hygiene: strip trailing slashes off legacy pull remotePaths —
     // slashed records predate the 2.168.0 intake normalization, never
     // dedup-match a re-added clean path (duplicate records on one mountpoint
@@ -225,77 +234,41 @@ class MachineMounts {
    *  HELD: no mount is listed, NOTHING is written over the file (_save refuses; the legacy ingest — which saves — never runs),
    *  the orphan-token sweep revokes nothing (every push token would read as an orphan), a person's mount / unmount / remount is
    *  refused by name, and the file is read again off the loop; read, the boot's restore runs then */
-  _loadAnswer(a, { atLift = false } = {}) {
-    if (a.state === 'unreadable') return this._unreadHold(a);
-    let aside = null;
-    if (a.state === 'corrupt') {
-      try { aside = this._asideName(); fs.copyFileSync(this._file, aside, fs.constants.COPYFILE_EXCL); } catch { aside = null; }
-      const b = SR.afterSetAside(a, aside);
-      if (b.state !== 'missing') return this._unreadHold(b);   // its only copy: never written over
-      this.log(`machine-mounts.json did not parse (${a.why}) — its bytes are kept in ${path.basename(aside)}; the mounts list starts empty`);
-    }
+  _loadAnswer(a, { atLift = false } = {}) {   // data | missing — the start's answer, or a lift's (torn bytes kept: missing + setAside)
     this._state = a.state === 'data' ? a.value : { mounts: [] };
     if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
     // B-f276 family unit 2 (主开发 r3081): TORN BYTES NEVER LIFT AS AN EMPTY LIST BY THEMSELVES — the orphan token sweep (restore's
     // first step) would revoke every machine's reverse-mount token over it. The lift is MARKED, and the mark saved at once: a token
     // minted before it is UNKNOWN to the sweep, which revokes none of them until the list reads (the copy put back: no mark) or a
     // person decides (a machine removed revokes its own — onMachineUnpaired)
-    const tornCopy = a.state === 'corrupt' ? (aside && path.basename(aside)) : a.state === 'missing' && a.setAside ? a.setAside : null;
+    const tornCopy = a.state === 'missing' && a.setAside ? a.setAside : null;   // 2b: torn bytes lift through the helper (kept aside, then empty)
     if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save(); }
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
     else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores is not run mid-life (a legacy store still there is ingested by a start that finds no machine-mounts.json)');
   }
-  _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
-  _unreadHold(a) {
-    this._unread = { code: a.code, why: a.why, at: (this._unread && this._unread.at) || Date.now() };
-    this._state = { mounts: [] };
-    if (!this._unreadSaid) { this._unreadSaid = true; this.log(`machine-mounts.json could not be read (${a.code}: ${a.why}) — held: nothing is written over it, no token is swept, and it is read again off the main loop`); }
-    this._unreadRetrySoon();
+  _asideName(mark = Date.now()) { return this._file + '.corrupt-' + mark; }   // ONE set-aside name: the helper's keep and the copies' prefix (the census counts the names)
+  /** 2b: the hold is the helper's — every guard of this file asks it by its old name: { code, at } while held, else null */
+  get _unread() { const f = this._hold ? this._hold.held() : null; return f ? { code: f.code, at: f.since } : null; }
+  /** a read again now (the held store's own road — the notice's press reads it through the helper) → true when it lifted */
+  readAgain() { return this._hold ? this._hold.again() : Promise.resolve(false); }
+  /** the hold LIFTED (the helper's onLift): `value` the records READ, or null (torn bytes kept aside as `setAside` — the time cut is
+   *  marked — or the file gone): no legacy ingest mid-life; the boot's restore, which met an empty list while held, runs now */
+  _lifted(value, { setAside = null } = {}) {
+    this._loadAnswer(value ? { state: 'data', value } : { state: 'missing', setAside }, { atLift: true });
+    this._notify();
+    this.restore().catch(() => { });
   }
   /** the words a person reads while machine-mounts.json is held (the mounts list, a refused change) */
-  unreadWords() {
-    return this._unread ? `machine-mounts.json in VibeSpace's data folder could not be read (${this._unread.code}); VibeSpace reads it again every few minutes. No mount is lost: nothing is written over it, and changes to mounts wait until it reads.` : null;
-  }
+  unreadWords() { return this._hold ? this._hold.words() : null; }
+  /** the held words from the hold's facts (`f`: its code, and `waiting` while a read is past the helper's bound) */
+  _heldWords(f) { return `machine-mounts.json in VibeSpace's data folder could not be read (${f.code}); ${f.waiting ? 'a read of it is still waiting for the storage to answer, and its answer is used the moment it comes' : 'VibeSpace reads it again every few minutes'}. No mount is lost: nothing is written over it, and changes to mounts wait until it reads.`; }
   _refuseIfUnread(what) {
     if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'mounts-unread', status: 503 });
   }
-  _unreadRetrySoon() {
-    if (this._unreadT || this._unreadStopped) return;
-    const n = this._unreadTries = (this._unreadTries || 0) + 1;
-    const t = this._unreadT = setTimeout(() => { this._unreadT = null; this._unreadRetry().catch((e) => { this.log('machine-mounts.json read again failed: ' + (e && e.message)); this._unreadRetrySoon(); }); }, SR.retryDelay(n));
-    t.unref?.();
-  }
-  /** one read again, off this thread; ONE in flight; a «missing» answer right after an unreadable one is read once more */
-  async _unreadRetry() {
-    if (!this._unread) return;
-    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js's order) — a try that meets one in flight, or a read that fails, never ends the tries
-    if (this._unreadP) return;
-    const mine = this._unreadSeq = (this._unreadSeq || 0) + 1;   // its read r2 (X2): only the NEWEST try may lift the hold — r3 (Y3): counted once a try READS
-    const p = this._unreadP = fs.promises.readFile(this._file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
-    const read = await p; this._unreadP = null;
-    if (!this._unread) return;
-    let a = SR.storeAnswer(read, { valid: STORE_SHAPE });
-    if (a.state === 'unreadable') { this._unread.code = a.code; this._unreadMissingAt = 0; return; }
-    if (a.state === 'missing' && !this._unreadMissingAt) { this._unreadMissingAt = Date.now(); return; }
-    if (a.state === 'corrupt') {   // its read r1 (N1): torn bytes now are copied aside OFF the loop first — no place for them, the hold stands
-      const aside = this._asideName();
-      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; this._copies().invalidate(); } catch { }
-      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
-      a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
-      if (a.state === 'unreadable') { this._unread.code = a.code; return; }
-    }
-    const was = this._unread; this._unread = null; this._unreadMissingAt = 0; this._unreadTries = 0; this._unreadSaid = false; this._unreadSaveSaid = false;
-    if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
-    this._loadAnswer(a, { atLift: true });
-    this.log(`machine-mounts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.mounts.length} mount(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the mounts list starts empty` : 'the file is GONE — the mounts list starts empty'}`);
-    this._notify();
-    this.restore().catch(() => { });   // the boot's heal, which met an empty list while held
-  }
-
   _save() {
-    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; this.log('a machine-mounts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }
+    if (!this._hold.writable('a machine-mounts.json write')) return;   // (said once a hold, by the helper)
     try { const t = this._file + '.tmp'; fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 }); fs.renameSync(t, this._file); } catch { }
   }
   _notify() { this.broadcast({ type: 'machine-mounts-updated', mounts: this.list() }); }

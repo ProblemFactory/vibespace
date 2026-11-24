@@ -4598,6 +4598,7 @@ export default {
   "this VibeSpace’s own id": "这个 VibeSpace 自己的标识",
   "the Task Groups": "任务组",
   "the paired machines": "已配对的机器",
+  "the mounts of your paired machines": "你配对的机器上的挂载",
   "Lists unreadable · {n}": "列表读不到 · {n}",
   "Some of VibeSpace’s lists cannot be read right now — the system panel names them": "VibeSpace 暂时读不到它的一些列表 — 系统面板列出了它们",
   "Lists that could not be read": "读不到的列表",

@@ -391,8 +391,8 @@ console.log('§1b a removal on disk before it is said or torn down: the graduate
 console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of a paired machine, each push record\'s token id');
 {
   const MSRC = fs.readFileSync(path.join(ROOT, 'src/machine-mounts.js'), 'utf8');
-  const LOAD = '    this._loadAnswer(SR.storeAnswer(read, { valid: STORE_SHAPE }));\n';
-  ok(MSRC.split(LOAD).length === 2, 'control setup: the anchor of the control «the release\'s load» is in machine-mounts.js (one storeAnswer call in the constructor)');
+  const LOAD = "    if (this._hold.start(a0) !== 'held') this._loadAnswer(a0); else this._state = { mounts: [] };   // held: no mount listed until the lift\n";   // 2b commit 3: the start through the family helper
+  ok(MSRC.split(LOAD).length === 2, 'control setup: the anchor of the control «the release\'s load» is in machine-mounts.js (its hold started once in the constructor)');
   const RELEASE = MJ.load('src/machine-mounts.js', anchored(MSRC, LOAD, "    try { this._state = JSON.parse(read.text); } catch { try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { } this._state = { mounts: [] }; this._migrateLegacy(); }   /* MUTANT: the release — any failure starts EMPTY and ingests the legacy stores */\n", 'srl-480a'), 'release-mounts');
   // ONE push record (a push mount is only re-owned at restore, never released on this machine — the scene runs nothing outside)
   const rec = { id: 'mm-0001', dir: 'push', hostId: 'h-0001', folder: '/srv/share', mode: 'ro', mountpoint: '/mnt/share', tokenId: 'tok-0001', createdAt: 1 };
@@ -414,7 +414,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
     if (!asRoot) fs.chmodSync(F, 0o000);
     unplant(F, body);   // the storage answers again
-    if (M._unreadRetry) await M._unreadRetry();
+    if (M.readAgain) await M.readAgain();
     await new Promise((r) => setImmediate(r));
     return { held, listedWhileHeld, revokedWhileHeld, refused: refused ? { code: refused.code, msg: String(refused.message) } : null, legacyKept, kept, back: M.list().map((m) => m.id).join(), words: M.unreadWords ? M.unreadWords() : null, revokedAfter: revoked.slice() };
   };
@@ -425,14 +425,20 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   const rx = await scene(RELEASE, 'mounts-release');
   ok(!rx.held && rx.revokedWhileHeld.includes('tok-0001') && !(rx.refused && rx.refused.code === 'mounts-unread'), 'CONTROL (the release\'s load, in a copy): a failed read starts EMPTY — the sweep REVOKES the push mount\'s token', rx);
   if (asRoot) rootSkip('CONTROL machine-mounts.json: the release\'s legacy ingest writes over the held file'); else ok(!rx.legacyKept && !rx.kept, 'CONTROL (the release\'s load, in a copy): the legacy ingest WRITES OVER machine-mounts.json', rx);
-  // torn bytes: kept aside (a copy), the list starts empty and the one-time ingest runs — as the release did, now through the law
+  // torn bytes (2b commit 3, 主开发 r3790 decision 1): HELD while they are copied aside OFF the loop by the helper's keep (once a content),
+  // then the list starts empty — no synchronous copy at the start; the one-time legacy ingest (the boot's road only) waits for the next
+  // start, said
   {
     const d = path.join(D, 'mounts-torn'); fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, 'machine-mounts.json'), '{"mounts": [');
-    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], []));
+    const logs = [];
+    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], logs));
     clearInterval(M._sweep);
-    const asides = fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+$/.test(n));
-    ok(!M.unreadWords() && M.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"mounts": [', 'torn bytes are KEPT aside (a copy) and the mounts list starts empty — never a hold');
+    const atStart = { held: !!M.unreadWords(), copies: fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+/.test(n)).length };
+    for (let k = 0; k < 5000 && M.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // (turns, never a clock: the copy lands off the loop)
+    const asides = fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+/.test(n));
+    ok(atStart.held && atStart.copies === 0 && !M.unreadWords() && M.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"mounts": [' && logs.some((l) => /the one-time ingest of the legacy mount stores is not run mid-life/.test(l)), 'torn bytes (2b, decision 1): HELD while copied aside off the loop — no synchronous copy at the start — then KEPT once and the mounts list starts empty; the one-time legacy ingest waits for the next start (said)', { atStart, asides });
+    M._hold.stop();
   }
   // B-f276 family unit 2 (主开发 r3081 — the law of r3019): TORN BYTES NEVER LIFT AS AN EMPTY LIST BY THEMSELVES. The lift is MARKED
   // (tornAt, saved at once); the REAL restore's first step, the orphan token sweep, revokes NOTHING minted before it (each push record
@@ -443,6 +449,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
       fs.writeFileSync(path.join(d, 'machine-mounts.json'), '{"mounts": [ {"id": "mm-0001", "dir": "push", "hostId": "h-0001", "tokenId": "tok-0001"');   // torn: a push record cut mid-write
       const revoked = [], logs = [];
       const M = new Mod.MachineMounts(deps(d, revoked, logs)); clearInterval(M._sweep);
+      for (let k = 0; k < 5000 && M.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // 2b: HELD while its bytes are copied aside off the loop — the mark is the lift's
       const tornAt = M._state.tornAt;
       let saved = null; try { saved = JSON.parse(fs.readFileSync(path.join(d, 'machine-mounts.json'), 'utf8')); } catch { }
       try { await M.restore(); } catch { }
@@ -471,18 +478,8 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const rx = await run(MJ.load('src/machine-mounts.js', CUT2, 'torn-sweep-unasked'), 'mounts-torn-sweep-ctl');
     ok(rx.revoked.includes('tok-0001'), 'RED CONTROL — neither the mark nor the kept copy asked (the release\'s road, in a copy): the same restore revokes the machine\'s token over the empty list', rx.revoked);
   }
-  // «missing» right after an unreadable answer: read once more before anything is written there
-  {
-    const d = path.join(D, 'mounts-gone'); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
-    const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], []));
-    clearInterval(M._sweep);
-    if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true });
-    await M._unreadRetry();
-    const heldAfterOne = !!M.unreadWords();
-    await M._unreadRetry();
-    ok(heldAfterOne && !M.unreadWords() && M.list().length === 0, 'a «missing» answer right after an unreadable one is READ ONCE MORE (the hold stands); missing again, the list starts empty', { heldAfterOne });
-  }
+  // 2b commit 3: «missing» right after «unreadable» read once more is the FAMILY HELPER's law now (test-store-read-three ⑤ «a file
+  // GONE right after a failed read is read once more») — retired here
   // 主开发 23:21Z (the read of the cure): the lift's legacy ingest never reads the data folder SYNCHRONOUSLY on the loop — a lift with no
   // mounts (the file gone) leaves the legacy stores for the next start; the boot's road ingests them as before
   const liftIngest = async (Mod, name) => {
@@ -491,13 +488,14 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
     if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true });
     fs.writeFileSync(LEG, JSON.stringify({ mounts: [{ id: 'old-0002', hostId: 'h-0003', folder: '/x', mountpoint: '/y' }] }));
-    await M._unreadRetry(); await M._unreadRetry();   // «missing» read once more, then the lift
+    await M.readAgain(); await M.readAgain();   // «missing» read once more, then the lift
+    M._hold.stop();
     return { lifted: !M.unreadWords(), legacyKept: fs.existsSync(LEG) && !fs.existsSync(LEG + '.migrated'), listed: M.list().length };
   };
   const li = await liftIngest(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-lift-ingest');
-  const LIFTA = '    this._loadAnswer(a, { atLift: true });\n';
+  const LIFTA = "    this._loadAnswer(value ? { state: 'data', value } : { state: 'missing', setAside }, { atLift: true });\n";   // 2b: the lift is the helper's onLift
   ok(MSRC.split(LIFTA).length === 2, 'control setup: the anchor of the control «the lift ingests nothing» is in machine-mounts.js');
-  const lix = await liftIngest(MJ.load('src/machine-mounts.js', anchored(MSRC, LIFTA, '    this._loadAnswer(a);   /* MUTANT: the lift ingests */\n', 'srl-546a'), 'lift-ingests'), 'mounts-lift-ingest-mut');
+  const lix = await liftIngest(MJ.load('src/machine-mounts.js', anchored(MSRC, LIFTA, "    this._loadAnswer(value ? { state: 'data', value } : { state: 'missing', setAside });   /* MUTANT: the lift ingests */\n", 'srl-546a'), 'lift-ingests'), 'mounts-lift-ingest-mut');
   ok(li.lifted && li.legacyKept && li.listed === 0 && lix.lifted && !lix.legacyKept, 'a lift with no mounts leaves the legacy stores for the next start (no synchronous read of the data folder on the loop); CONTROL (the lift ingests, in a copy): it reads and renames them there', { li, lix });
   // the SAVE's guard has its own red control (it is what covers the timers' saves and every road that reaches _save)
   const saveScene = async (Mod, name) => {
@@ -507,10 +505,10 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     M._state.mounts.push({ id: 'mm-x', dir: 'push', hostId: 'h-x', folder: '/z', mountpoint: '/w', tokenId: 'tok-x' });
     M._save();
     const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
-    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
+    M._hold.stop(); if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
     return { kept };
   };
-  const SAVEG = "    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; this.log('a machine-mounts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return; }\n";
+  const SAVEG = "    if (!this._hold.writable('a machine-mounts.json write')) return;   // (said once a hold, by the helper)\n";   // 2b: the guard asks the helper's hold
   ok(MSRC.split(SAVEG).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in machine-mounts.js');
   const sv = await saveScene(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-save-guard');
   const svx = await saveScene(MJ.load('src/machine-mounts.js', anchored(MSRC, SAVEG, '    /* MUTANT: no save guard */\n', 'srl-562a'), 'no-save-guard'), 'mounts-save-guard-mut');
@@ -525,7 +523,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const three = async (Mod) => {
       const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
       const got = [await codeOf(() => M.mountPush('h-0001', { folder: path.join(d, 'no-such-folder') })), await codeOf(() => M.mountPull('h-0001', { remotePath: '/r' })), await codeOf(() => M.remount('mm-0001'))];
-      clearTimeout(M._unreadT); M._unreadT = null;
+      M._hold.stop();
       return got;
     };
     const got = await three(require(path.join(ROOT, 'src/machine-mounts.js')));
@@ -543,79 +541,9 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
   const SVM = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   ok((SVM.match(/catch \(e\) \{ res\.status\(e && e\.status === 503 \? 503 : 400\)\.json\(\{ \.\.\.require\('\.\/src\/mount-error-words\.js'\)\.errorBody\(e\), \.\.\.\(e && e\.status === 503 && e\.code \? \{ code: e\.code \} : \{\}\) \}\); \}/g) || []).length === 3,
     'WIRING (主开发 23:21Z; its read S2): the mount, unmount and remount routes keep a hold\'s status (503) and its name — machine-mounts.json\'s (mounts-unread) AND hosts.json\'s (hosts-unread, a machine looked up while the paired machines are held)');
-  // its read r1 (M2): the next try armed FIRST — a try that meets a read in flight arms the next, and the read that then fails leaves it
-  const armM = async (Mod, name) => {
-    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
-    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
-    const prf = fs.promises.readFile; let release = null, armedMeeting = false, armedAfter = false, armedAfterFail = false;
-    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return new Promise((res, rej) => { release = () => rej(Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' })); }); return prf.call(this, f, ...a); };
-    try {
-      const first = M._unreadRetry();
-      clearTimeout(M._unreadT); M._unreadT = null;   // the timer that fires the next try clears itself first
-      await M._unreadRetry(); armedMeeting = !!M._unreadT;
-      if (release) release(); await first; armedAfter = !!M._unreadT;
-      clearTimeout(M._unreadT); M._unreadT = null;   // its read r2 (X5): a try whose own read fails at once arms the next too
-      fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); return prf.call(this, f, ...a); };
-      await M._unreadRetry(); armedAfterFail = !!M._unreadT;
-    } finally { fs.promises.readFile = prf; }
-    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) fs.chmodSync(F, 0o644);
-    return { armedMeeting, armedAfter, armedAfterFail, held: !!M.unreadWords() };
-  };
-  const am = await armM(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-arm');
-  ok(am.held && am.armedMeeting && am.armedAfter && am.armedAfterFail, 'its read r1 (M2) / r2 (X5): a try that meets a read in flight arms the next, so does the read that then fails, and so does a try whose own read fails at once — the tries never end while held', am);
-  const ARMM = '    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js\'s order) — a try that meets one in flight, or a read that fails, never ends the tries\n    if (this._unreadP) return;\n';
-  ok(MSRC.split(ARMM).length === 2, 'control setup: the anchor of the control «the next try armed first» is in machine-mounts.js');
-  const amx = await armM(MJ.load('src/machine-mounts.js', anchored(MSRC, ARMM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n', 'srl-615a'), 'arm-order-mounts'), 'mounts-arm-mut');
-  ok(amx.held && !amx.armedMeeting, 'CONTROL (the first cut\'s order, in a copy): the try that meets a read in flight arms NOTHING', amx);
-  const amy = await armM(MJ.load('src/machine-mounts.js', anchored(MSRC, ARMM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n', 'srl-617a'), 'arm-meeting-only-mounts'), 'mounts-arm-mut2');
-  ok(amy.held && amy.armedMeeting && !amy.armedAfterFail, 'CONTROL (r2 X5 — armed only on a meeting, in a copy): a try whose own read fails arms NOTHING', amy);
-  // its read r2 (X2): an OLDER try whose torn-bytes copy lands after a NEWER try lifted the hold never loads the mounts EMPTY
-  const raceM = async (Mod, name) => {
-    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
-    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
-    const prf = fs.promises.readFile, pcf = fs.promises.copyFile; let land = null, after = null, olderErr = null;
-    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.resolve('{"mounts": ['); return prf.call(this, f, ...a); };
-    fs.promises.copyFile = function (src, ...a) { if (String(src) === F) return new Promise((res) => { land = res; }); return pcf.call(this, src, ...a); };
-    try {
-      const older = M._unreadRetry().catch((e) => { olderErr = String(e && e.message); });
-      await new Promise((r) => setImmediate(r));
-      fs.promises.readFile = prf; unplant(F, body);
-      await M._unreadRetry();
-      const lifted = M.list().map((m) => m.id).join();
-      if (land) land(); await older;
-      after = { lifted, list: M.list().map((m) => m.id).join(), held: !!M.unreadWords(), olderErr };
-    } finally { fs.promises.readFile = prf; fs.promises.copyFile = pcf; }
-    clearTimeout(M._unreadT); M._unreadT = null; return after;
-  };
-  const raceMHeld = async (Mod, name) => {   // its read r3 (Y4): the NEWER try reads EIO — the hold stands — then the older's copy lands
-    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'machine-mounts.json'); plant(F, body);
-    const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
-    const prf = fs.promises.readFile, pcf = fs.promises.copyFile; let land = null, out = null;
-    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.resolve('{"mounts": ['); return prf.call(this, f, ...a); };
-    fs.promises.copyFile = function (src, ...a) { if (String(src) === F) return new Promise((res) => { land = res; }); return pcf.call(this, src, ...a); };
-    try {
-      const older = M._unreadRetry().catch(() => { });
-      await new Promise((r) => setImmediate(r));
-      fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); return prf.call(this, f, ...a); };
-      await M._unreadRetry();
-      if (land) land(); await older;
-      out = { held: !!M.unreadWords(), listed: M.list().length };
-    } finally { fs.promises.readFile = prf; fs.promises.copyFile = pcf; }
-    clearTimeout(M._unreadT); M._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } } return out;
-  };
-  const rmh = await raceMHeld(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-race-held');
-  const SEQM = '      if (!this._unread || mine !== this._unreadSeq) return;';
-  const rmhx = await raceMHeld(MJ.load('src/machine-mounts.js', anchored(MSRC, SEQM, '      if (!this._unread) return;   /* MUTANT: the seq half cut */', 'srl-657a'), 'race-seq-half-mounts'), 'mounts-race-held-mut');
-  ok(!!rmh && rmh.held && !!rmhx && !rmhx.held, 'its read r3 (Y4): the newer try read EIO (the hold stands) and the older try\'s copy lands — the hold STANDS; CONTROL (the seq half cut, in a copy): the older try lifts it as EMPTY', { rmh, rmhx });
-  const rm2 = await raceM(require(path.join(ROOT, 'src/machine-mounts.js')), 'mounts-race');
-  ok(!!rm2 && rm2.lifted === 'mm-0001' && rm2.list === 'mm-0001' && !rm2.held && !rm2.olderErr, 'its read r2 (X2): an older try whose copy of torn bytes lands AFTER a newer try lifted the hold changes nothing — the mount stays loaded', rm2);
-  const RACEM = '      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands\n';
-  ok(MSRC.split(RACEM).length === 2, 'control setup: the anchor of the control «only the newest try lifts» is in machine-mounts.js');
-  const rmx = await raceM(MJ.load('src/machine-mounts.js', anchored(MSRC, RACEM, '      /* MUTANT: no re-check after the copy */\n', 'srl-663a'), 'no-race-check-mounts'), 'mounts-race-mut');
-  ok(!!rmx && (rmx.list === '' || !!rmx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the mounts EMPTY over the lifted list (or throws on a hold already gone)', rmx);
+  // 2b commit 3: the next try armed FIRST (its read r1, M2 / r2, X5) and only the newest try lifting (its read r2, X2 / r3, Y4) are the
+  // FAMILY HELPER's laws now, proved there with their reds (test-store-read-three ⑤ «the next try is armed FIRST», «one in flight is the
+  // read AND its copy») — retired here
   const DPM = fs.readFileSync(path.join(ROOT, 'src/server/dial-pairing.js'), 'utf8'), ERM = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
   ok(/async function unpairDialDevice\(deviceId\) \{\n(?:  if \(hosts\.held && hosts\.held\(\)\) throw [^\n]*\n)?(?:  \/\/[^\n]*\n)*  if \(machineMounts\.unreadWords && machineMounts\.unreadWords\(\)\) throw /.test(DPM) && /res\.status\(e && e\.status === 503 \? 503 : 400\)/.test(ERM),
     'WIRING (its read r1, M3): removing a dial machine while machine-mounts.json is held is refused BEFORE any side effect (its push tokens would never be revoked) — 503 with the words (the meeting with hosts.json\'s cure: its own belt, the held machines, may stand first)');

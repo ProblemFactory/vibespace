@@ -4597,6 +4597,7 @@ export default {
   "this VibeSpace’s own id": "この VibeSpace 自身の ID",
   "the Task Groups": "タスクグループ",
   "the paired machines": "ペアリングしたマシン",
+  "the mounts of your paired machines": "ペアリングしたマシンのマウント",
   "Lists unreadable · {n}": "読めない一覧 · {n}",
   "Some of VibeSpace’s lists cannot be read right now — the system panel names them": "VibeSpace はいま一部の一覧を読み込めません — システムパネルに一覧があります",
   "Lists that could not be read": "読み込めなかった一覧",
