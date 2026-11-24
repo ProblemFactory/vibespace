@@ -205,7 +205,6 @@ const ROWS = [
   ["src/host-keys.js", "unsynced", "store", "", "writePinFile"],
   ["src/hosts.js", "unsynced", "store", "", "HostManager._persistDiscovery"],
   ["src/hosts.js", "move", "move", "", "HostManager.migrateDialTokenFile > later", "HostManager.migrateDialTokenFile", "HostManager._migrateDialTokensAtRead > later"],
-  ["src/hosts.js", "unsynced", "derived", "a cache of a remote file, fetched again", "HostManager._fetchRemoteByFindOnce", "HostManager._fetchRemoteByFindOnce"],
   ["src/job-logs-sweep-worker.js", "unsynced", "store", "the remover child's count of what it removed (B-323e), read by the hub", "countWrite"],
   ["src/job-logs-sweep-worker.js", "move", "move", "", "stateOf"],
   ["src/job-logs-sweep.js", "unsynced", "derived", "a batch's request file (B-323e), handed to its child by name at once and swept by the next pass: a torn one is never read again", "createRemover > writeRequest"],

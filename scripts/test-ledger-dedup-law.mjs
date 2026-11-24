@@ -141,7 +141,7 @@ await leg('②', async () => {
   ok(dev.calls.scans[0].events === 40 && h1.res.appended === 40, `② run 1: the device walks from its own cursor (none yet) — 40 events, all appended`, { scans: dev.calls.scans, res: h1.res });
   ok(dev.calls.scans[1].events === 0 && dev.calls.scans[1].useHub === true && s2 === s1, `② run 2 with the device commit REFUSED: the hub's cursor was walked from — ${dev.calls.scans[1].events} events, the shard ${s1} → ${s2} B (the base re-read the whole window and appended it again)`, { scans: dev.calls.scans, s1, s2 });
   ok(dev.calls.fsWrite === 0 && dev.calls.fsRename === 0 && !fs.existsSync(dev.deviceCursor), `② no device-side cursor write at all — nothing went to the hub-act gate (fsWrite ${dev.calls.fsWrite}, fsRename ${dev.calls.fsRename})`);
-  const hc = w.uh.hostCursorOf?.(w.hid);
+  const hc = w.uh.hostCursorOf?.(w.hid); await w.uh.whenHostCursorWritten(w.hid);   // B-0248 unit 4: the cursor file is the store writer's — on disk once its write lands
   ok(hc && hc.v === 1 && hc.cursors && Object.keys(hc.cursors).length === 1 && fs.existsSync(path.join(w.d, 'usage-history', '_host-cursors', w.hid + '.json')), '② the hub keeps the cursor beside the ledger (_host-cursors/<host>.json — the walker\'s own cursor map + the newest ts / rid)', hc && { since: hc.since, lastTs: hc.lastTs });
   H.add(3);
   const h3 = await w.harvest();

@@ -281,10 +281,11 @@ console.log('④ L3 one event\'s strings: an over-long id dropped AND counted, n
   ok(kept && JSON.stringify(kept.cursors) === JSON.stringify(curs) && read('src/hosts.js').includes("const r = (text || cursors) ? ledger.ingestRemoteEvents(id, (h && h.name) || id, text || '', { cursors, since })"),
     'an event-less walk (stopped on its bound with none, or every record dropped) moves the hub\'s kept cursor — the ingest runs for its cursors alone, never the same place re-read at every harvest', { kept: kept && kept.cursors, ing });
   // (r557 (3)) the hub's kept cursor is written only when it MOVED: an acked harvest that found nothing rewrites no file
+  await led.whenHostCursorWritten('host-e');   // B-0248 unit 4: the cursor file is the store writer's — on disk once its write lands
   const cfE = led._hostCursorFile('host-e'), inoE = fs.statSync(cfE).ino;
-  await led.ingestRemoteEvents('host-e', 'box-e', '', { cursors: curs, since: 'hub' });
+  await led.ingestRemoteEvents('host-e', 'box-e', '', { cursors: curs, since: 'hub' }); await led.whenHostCursorWritten('host-e');
   const sameE = fs.statSync(cfE).ino === inoE;
-  await led.ingestRemoteEvents('host-e', 'box-e', '', { cursors: { '/p/a.jsonl': { offset: 99, lastRid: 'r9' } }, since: 'hub' });
+  await led.ingestRemoteEvents('host-e', 'box-e', '', { cursors: { '/p/a.jsonl': { offset: 99, lastRid: 'r9' } }, since: 'hub' }); await led.whenHostCursorWritten('host-e');
   ok(sameE && fs.statSync(cfE).ino !== inoE && led.hostCursorOf('host-e').cursors['/p/a.jsonl'].offset === 99, 'the hub\'s kept cursor file is written only when the cursor moved — the same cursors again rewrite nothing (the same inode), a moved one is written', { same: sameE });
   const onDisk = JSON.parse(fs.readFileSync(cfE, 'utf8')), dig = led._hostCursorDigest && led._hostCursorDigest.get('host-e');
   ok(!led._hostCursorJson && typeof dig === 'string' && dig.length === 44 && onDisk.cursorsDigest === dig && onDisk.cursors['/p/a.jsonl'].offset === 99 && onDisk.v === 1,
@@ -296,12 +297,12 @@ console.log('④ L3 one event\'s strings: an over-long id dropped AND counted, n
   const R1 = new UH2({ dataDir: dirR, homeDir: noHome }); R1.codexSessionsDir = path.join(noHome, '.codex', 'sessions');
   fs.mkdirSync(R1.hostCursorsDir, { recursive: true }); const cfR = R1._hostCursorFile('host-r'); fs.writeFileSync(cfR, JSON.stringify(legacy));
   const inoL = fs.statSync(cfR).ino;
-  await R1.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 5, lastRid: 'q' } }, since: 'hub' });
+  await R1.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 5, lastRid: 'q' } }, since: 'hub' }); await R1.whenHostCursorWritten('host-r');
   const legacySame = fs.statSync(cfR).ino === inoL;
-  await R1.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 6, lastRid: 'q' } }, since: 'hub' });   // moved: written, its digest in it
+  await R1.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 6, lastRid: 'q' } }, since: 'hub' }); await R1.whenHostCursorWritten('host-r');   // moved: written, its digest in it
   const inoM = fs.statSync(cfR).ino;
   const R2 = new UH2({ dataDir: dirR, homeDir: noHome }); R2.codexSessionsDir = R1.codexSessionsDir;   // the restart
-  await R2.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 6, lastRid: 'q' } }, since: 'hub' });
+  await R2.ingestRemoteEvents('host-r', 'box-r', '', { cursors: { '/p/x.jsonl': { offset: 6, lastRid: 'q' } }, since: 'hub' }); await R2.whenHostCursorWritten('host-r');
   ok(legacySame && inoM !== inoL && fs.statSync(cfR).ino === inoM && typeof JSON.parse(fs.readFileSync(cfR, 'utf8')).cursorsDigest === 'string',
     'after a restart the same cursors write nothing on both roads: a record an older hub wrote (no digest — computed once from its map) and one this hub wrote (its digest read back); a moved cursor is written', { legacySame, moved: inoM !== inoL, restartSame: fs.statSync(cfR).ino === inoM });
   // (r557 (2)) no bound named (an OLDER hub keeps no cursor of an event-less walk): the default bound fires only once an event went
@@ -366,6 +367,39 @@ console.log('⑥ B-5278 (b): ONE usage record over the line can no longer stall 
   const stx = { seq: 0, pendingCursors: new Map() };
   const ax = pushOnce(NoCap, stx, {}), bx = pushOnce(NoCap, stx, ax.committed || {});
   ok(!ax.sent && !ax.committed && !bx.sent && !bx.committed && bx.events === 3, 'CONTROL (the producer\'s name cap cut, in a copy): the event rides its 9 KB model, its batch is refused at EVERY walk and the cursor never moves — the stall, for good (red)', { first: ax, second: bx });
+}
+
+// ── B-0248 step 2, unit 4 (lane bl-loop-b, 主开发 r3320 / r3883): THE HOST CURSOR IS WRITTEN BY THE STORE WRITER ───────────────
+// The release wrote _host-cursors/<host>.json by a temp + rename on the loop at every harvest that moved a machine's cursor
+// (~60 an hour per paired machine): a rename's whole delay on slow storage. A placed 400 ms stall in every main-thread write under
+// the cursors' folder (scripts/fixtures/fs-stall.cjs; the writer's thread loads its own fs): three ingests that move the cursor
+console.log('⑦ B-0248 unit 4: the hub\'s kept cursor is the store writer\'s — the loop never waits for its write');
+{
+  const STALL = require('../scripts/fixtures/fs-stall.cjs');
+  const STALL_MS = 400, TICK_MS = 10;
+  const lateMeter = () => { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last - TICK_MS); last = n; }, TICK_MS); return { stop() { clearInterval(t); return Math.round(worst); } }; };
+  const { UsageHistory: UHS } = require('../src/usage-history.js');
+  const SWs = require('../src/store-writer.js').storeWriter();
+  let nS = 0;
+  const cursorScene = async ({ releaseWrite = false } = {}) => {
+    const led = new UHS({ dataDir: path.join(tmp, 'ledger-b0248-' + (++nS)), homeDir: path.join(tmp, 'nohome') }); led.codexSessionsDir = path.join(tmp, 'nohome', '.codex', 'sessions');
+    fs.mkdirSync(led.hostCursorsDir, { recursive: true });
+    // the RED copy: the process writer's hand-off of a cursor file written at the call instead (the release's temp + rename)
+    const realDirty = SWs.dirty;
+    if (releaseWrite) SWs.dirty = function (file, o) { if (String(file).startsWith(led.hostCursorsDir)) { const b = o.produce(); fs.writeFileSync(file + '.tmp', b); fs.renameSync(file + '.tmp', file); return; } return realDirty.call(this, file, o); };
+    const S = STALL.install({ under: led.hostCursorsDir, ms: STALL_MS }), meter = lateMeter();
+    let late = null;
+    try {
+      for (let i = 1; i <= 3; i++) { await led.ingestRemoteEvents('host-s', 'box-s', '', { cursors: { '/p/s.jsonl': { offset: 100 * i, lastRid: 'r' + i } }, since: 'hub' }); await new Promise((r) => setTimeout(r, 120)); }
+      await led.whenHostCursorWritten('host-s');
+    } finally { late = meter.stop(); S.restore(); SWs.dirty = realDirty; }
+    let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(led._hostCursorFile('host-s'), 'utf8')); } catch { }
+    return { late, stalled: S.calls.filter((c) => c.kind === 'write' && c.stalled).length, offset: onDisk && onDisk.cursors && onDisk.cursors['/p/s.jsonl'] && onDisk.cursors['/p/s.jsonl'].offset, mem: led.hostCursorOf('host-s').cursors['/p/s.jsonl'].offset };
+  };
+  const C6 = await cursorScene();
+  ok(C6.late < STALL_MS && C6.stalled === 0 && C6.offset === 300 && C6.mem === 300, `⑦ THE PLACED STALL (${STALL_MS} ms in every main-thread write under _host-cursors/): three moved cursors, the loop's worst lateness ${C6.late} ms < one stall, NO main-thread write stalled, the newest cursor on disk (memory answers it at once)`, C6);
+  const C6x = await cursorScene({ releaseWrite: true });
+  ok(C6x.late >= STALL_MS && C6x.stalled > 0, `⑦ RED control (the cursor written at the call, the release's temp + rename on the loop): the loop is held a stall's length or more (${C6x.late} ms; ${C6x.stalled} main-thread writes stalled) (red)`, C6x);
 }
 
 report();

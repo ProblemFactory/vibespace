@@ -307,7 +307,9 @@ parentPort.on('message', (m) => {
     // (i) THE SNAPSHOT IS NEVER WRITTEN INTO (r1328 (1)): every producer that hands a list BY REFERENCE is a row here, with the
     // reason its buffers are never written into after the hand-over (a store's chunks REPLACED, never written into); a new
     // caller of byRef( without its row is red by name. A producer that cannot promise it hands a plain list (copied, as before).
-    const BYREF_PRODUCERS = [];   // [file, why] — none yet: lane bl-mail's channels index (B-360d unit 1) brings the first, with its promise
+    const BYREF_PRODUCERS = [   // [file, why]
+      ['src/hosts.js', 'B-0248 unit 4 (lane bl-loop-b): _landCacheWhole hands a remote transcript\'s fetched buffer — the fetch\'s own, never written into after the hand-over (its copy goes to disk, the buffer is dropped)'],
+    ];
     const { trackedFiles } = await import('./tracked-files.mjs');
     // a call ON THE WRITER (a member call `….byRef(`), never a bare name anywhere: src/lib's own byRef functions are not the writer's
     const byRefCallers = (texts) => Object.entries(texts).filter(([f, t]) => f !== 'src/store-writer.js' && /\.byRef\(/.test(t)).map(([f]) => f).sort();

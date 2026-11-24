@@ -324,6 +324,9 @@ const RETIRED_MAX = 512, RETIRED_DAYS = 180;   // B-4d71: the unpaired dial toke
 /** lane lg-remote-hardening (主开发 00:36Z small 7): a key refusal's code is a DEVICE's word too (hub-key-*) — bounded before it is
  *  stored: letters, digits, - and _ only, 48 at most; anything else is the generic refusal. */
 const codeOf = (c) => { const x = String(c || ''); return /^[A-Za-z0-9_-]{1,48}$/.test(x) ? x : /^hub[-_]/.test(x) ? 'hub-key-mismatch' : 'device-key-mismatch'; }; // 主开发 01:11Z small (5): a hub-side word stays hub-side
+// B-0248 unit 4: a cached remote copy's landing waits at most this long (the fetch's own ssh bound is 120 s)
+const CACHE_LAND_MS = 120000;
+
 class HostManager {
   constructor({ dataDir }) {
     this._seatFp = new Map(); // lane lg-remote-hardening (主开发 00:36Z small 2): `${id}|${road}|${code}` → the fingerprint that refusal was said with
@@ -3363,7 +3366,7 @@ class HostManager {
         // from the SAME remote file (see the cache-slot note above)
         const usable = cacheUsable(remotePath, size);   // ONE verdict per poll AND per rung: the whole-file scan behind it is memoized against the bytes it judged (round 7)
         if (meta && meta.size === size && meta.mtime === mtime && usable && (() => { try { return fs.statSync(cachePath).size === size; } catch { return false; } })()) { stampVerified(remotePath, size, mtime); return cachePath; }
-        fs.mkdirSync(dir, { recursive: true });
+          // B-0248 unit 4: no mkdir here (a round trip on the loop each fetch): the whole copy's folder is made by the store writer (makeDir); a delta and the heal paths write only into a copy that is there
         let localSize = 0;
         try { localSize = fs.statSync(cachePath).size; } catch { }
         // …and BEFORE the delta legality test, the one-time over-stamp heal
@@ -3421,12 +3424,10 @@ class HostManager {
           // no/invalid prefix (or remote rotated smaller) — full streamed fetch
           const whole = await dm.fsReadRange(remotePath, 0, size);
           if (whole.data.length !== size) throw new Error(`short read-range: ${whole.data.length} of ${size}`);
-          const tmp2 = cachePath + '.tmp';
-          fs.writeFileSync(tmp2, whole.data);
-          fs.renameSync(tmp2, cachePath);
+          await this._landCacheWhole(cachePath, whole.data);   // B-0248 unit 4: the store writer's thread writes it (landed before its record)
           dropScanMemo();
         }
-        fs.writeFileSync(metaPath, JSON.stringify(nextMeta({ size, mtime, slab: true, remotePath }, { whole: !grewSlab })));
+        await this._landCacheMeta(metaPath, JSON.stringify(nextMeta({ size, mtime, slab: true, remotePath }, { whole: !grewSlab })));
         return cachePath;
       } catch (e2) {
         // A CACHE VERDICT IS NOT A TRANSPORT FAILURE (round 5): the moved-slot
@@ -3491,7 +3492,7 @@ class HostManager {
     const canDeltaSsh = usableSsh && !this._slotMovedEarlier(observed) && !isZstPath(remotePath) && !cacheIsCompressed() && localSizeSsh > 0 && localSizeSsh <= size && !!meta && heldStampedBytes(localSizeSsh);
     const fetchBytesSsh = canDeltaSsh ? size - localSizeSsh : size;
     if (fetchBytesSsh > maxBytes) throw tooLarge(fetchBytesSsh, cacheFault(localSizeSsh, usableSsh));
-    fs.mkdirSync(dir, { recursive: true });
+      // B-0248 unit 4: no mkdir here (a round trip on the loop each fetch): the whole copy's folder is made by the store writer (makeDir); a delta and the heal paths write only into a copy that is there
     let stampSize = size;
     let grewSsh = false;
     if (canDeltaSsh) {
@@ -3530,9 +3531,7 @@ class HostManager {
     }
     if (!grewSsh) {
       const buf = await this._ssh(h, `cat ${JSON.stringify(remotePath)}`, { timeoutMs: 120000, maxBuffer: maxBytes + 1024, encoding: 'buffer' });
-      const tmp = cachePath + '.tmp';
-      fs.writeFileSync(tmp, buf);
-      fs.renameSync(tmp, cachePath);
+      await this._landCacheWhole(cachePath, buf);   // B-0248 unit 4: the store writer's thread writes it (landed before its record)
       dropScanMemo();
       // STAMP WHAT THE FILE ACTUALLY HOLDS (round 5) — the rule the tail branch
       // above already follows. `cat` runs after the probe stat, so a live
@@ -3544,8 +3543,27 @@ class HostManager {
       // so it has no such gap.
       stampSize = buf.length;
     }
-    fs.writeFileSync(metaPath, JSON.stringify(nextMeta({ size: stampSize, mtime, remotePath }, { whole: !grewSsh })));
+    await this._landCacheMeta(metaPath, JSON.stringify(nextMeta({ size: stampSize, mtime, remotePath }, { whole: !grewSsh })));
     return cachePath;
+  }
+
+  /** B-0248 step 2, unit 4 (lane bl-loop-b, 主开发 r3320 / r3883): a remote transcript's WHOLE copy goes through THE STORE WRITER — its
+   *  temp, write and rename on the writer's thread. The release wrote it (up to the 64 MB fetch cap) by writeFileSync + rename ON THE
+   *  LOOP: 239 ms at local speed for 64 MB, and a rename's whole delay on slow storage (the page bl-loop-b/b0248-page.md, row 7). The
+   *  fetched buffer is handed BY REFERENCE (byRef: the writer copies it 4 MB a turn, so nothing holds one turn — the buffer is never
+   *  written into after), urgent (its fetch waits), and answered only once ON DISK: the record (meta) is written after it, so a
+   *  reader never meets a record that names bytes the copy does not hold. A write that cannot land THROWS by name, as the release's
+   *  failed write did (the fetch's own road says it). The delta APPENDS (_appendDeltaAt) stay where they are: a small tail a poll */
+  async _landCacheWhole(file, data) {
+    const SW = require('./store-writer.js'), W = SW.storeWriter();
+    W.dirty(file, { name: 'remote-jsonl.write', urgent: true, makeDir: true, produce: () => SW.byRef(data) });
+    if (!(await W.durable(file, { timeoutMs: CACHE_LAND_MS }))) throw Object.assign(new Error(`the cached copy ${path.basename(file)} could not be written (the store writer did not land it)`), { code: 'ECACHEWRITE' });
+  }
+  /** B-0248 unit 4: the copy's record (its .meta) through the same writer, answered once on disk — after the bytes it names */
+  async _landCacheMeta(file, text) {
+    const W = require('./store-writer.js').storeWriter();
+    W.dirty(file, { name: 'remote-jsonl-meta.write', urgent: true, makeDir: true, produce: () => text });
+    if (!(await W.durable(file, { timeoutMs: CACHE_LAND_MS }))) throw Object.assign(new Error(`the cached copy's record ${path.basename(file)} could not be written (the store writer did not land it)`), { code: 'ECACHEWRITE' });
   }
 
   // Remote WORKFLOW state (2.191.0, remote View Workflow): one read-only

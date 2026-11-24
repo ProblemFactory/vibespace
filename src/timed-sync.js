@@ -88,6 +88,8 @@ const STORES = Object.freeze({
   'setting-holds.write': row('write', 'setting-holds', 'src/server/setting-holds.js', ['save']),   // through the store writer (lane setting-doors pick 2: a one-press change's hold, DURABLE before the value changes)
   'chat-attachments-link.write': row('write', 'chat-attachments/<conversation>/conversation', 'src/server/chat-attachments.js', ['writeLink']),   // through the store writer (lane chat-attachments-persist: which conversation a dropped file's folder belongs to)
   'usage-host-cursors.write': row('write', 'usage-history/_host-cursors/<host>', 'src/usage-hold-road.js', ['_writeHostCursor']), // lane ledger-dedup-law F2: the hub keeps each machine's usage cursor (r11: the hold road's file)
+  'remote-jsonl.write': row('write', 'remote-jsonl/<host>/<transcript>', 'src/hosts.js', ['_landCacheWhole']),   // B-0248 unit 4 (lane bl-loop-b, r3320 / r3883): a remote transcript's whole cached copy, through the store writer (byRef, landed before its record)
+  'remote-jsonl-meta.write': row('write', 'remote-jsonl/<host>/<transcript>.meta', 'src/hosts.js', ['_landCacheMeta']),   // B-0248 unit 4: its record (the .meta), after the bytes it names
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js
   // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)
   'otel-truth.write': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),   // row B-360d: the stash's TRIM — a rewrite job on the store writer's thread, in order with its appends (was a renameSync on the loop)

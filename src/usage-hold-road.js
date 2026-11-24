@@ -1573,6 +1573,8 @@ class UsageHoldRoad {
     this._hostCursors.set(hostId, rec);
     return rec;
   }
+  /** B-0248 unit 4: true once this host's kept cursor is on disk (nothing owed ⇒ true at once); false when its write failed */
+  whenHostCursorWritten(hostId) { return require('./store-writer.js').storeWriter().durable(this._hostCursorFile(hostId)); }
   _writeHostCursor(hostId, { cursors, since, lastTs, lastRid, events }) {
     const prev = this.hostCursorOf(hostId);
     // B-5278 (the coordinator's r557 (3)): written only when the cursor MOVED — an acked harvest that found nothing hands its
@@ -1588,7 +1590,17 @@ class UsageHoldRoad {
     if (prev && prev.since === since && was === digest) { this._hostCursorDigest.set(hostId, digest); return prev; }
     const head = { v: 1, host: String(hostId), since, lastTs: lastTs || (prev && prev.lastTs) || null, lastRid: lastRid || (prev && prev.lastRid) || null, events, at: Date.now(), cursorsDigest: digest };
     const text = JSON.stringify(head).slice(0, -1) + ',"cursors":' + json + '}';
-    timedSync('usage-host-cursors.write', () => { fs.mkdirSync(this.hostCursorsDir, { recursive: true }); this._writeAtomic(this._hostCursorFile(hostId), text); });
+    // B-0248 step 2, unit 4 (lane bl-loop-b, 主开发 r3320 / r3883): THE STORE WRITER writes it — its temp, write and rename on the
+    // writer's thread (the release's temp + rename held the loop for the rename's whole delay at each harvest that moved the cursor,
+    // ~60 an hour per paired machine). Readers ask memory first (set below, before the landing). A crash before the landing leaves
+    // the file's older cursor: the machine's next harvest re-sends from it and the ledger's dedup keeps every row once. The bytes
+    // are the newest record of this host at the write's moment; the exit's flush writes what is owed
+    if (!this._hostCursorText) this._hostCursorText = new Map();
+    this._hostCursorText.set(hostId, text);
+    const file = this._hostCursorFile(hostId);
+    require('./store-writer.js').storeWriter().dirty(file, { name: 'usage-host-cursors.write', makeDir: true,
+      produce: () => (this._hostCursorText.has(hostId) ? this._hostCursorText.get(hostId) : null),
+      onWritten: (ok, e) => { if (!ok) { try { console.warn(`[usage] ${path.basename(file)}: the host cursor could not be written (${(e && (e.code || e.message)) || e}) — kept in memory, written again by the writer`); } catch { } } } });
     const rec = { ...head, cursors };
     this._hostCursors.set(hostId, rec);
     this._hostCursorDigest.set(hostId, digest);
