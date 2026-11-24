@@ -4,7 +4,7 @@ import {
   CategoryScale, LinearScale, Tooltip, Legend, Filler,
 } from 'chart.js';
 Chart.register(LineController, BarController, DoughnutController, LineElement, PointElement, BarElement, ArcElement, CategoryScale, LinearScale, Tooltip, Legend, Filler);
-import { escHtml, createPopover, showContextMenu } from './utils.js';
+import { escHtml, createPopover, showContextMenu, heldWordsOf } from './utils.js';
 import { t } from './i18n.js';
 import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { costWords, unpricedOf, sumParts, keepUnpriced } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
@@ -172,7 +172,8 @@ const fmtTok = (v) => {
 };
 const fmtPct = (v) => ((Number(v) || 0) * 100).toFixed(1) + '%';
 // a ROW's cost in words (B-d578 P1-b): «$12.30 + unknown» / «price unknown» where a provider's model has no price row
-const rowCost = (r) => costWords(r, t, fmtCost, fmtTok).text;
+let PRICES_HELD = false;   // r3145 unit 2: the answer says the person's prices are held — every cost reads «prices not known»
+const rowCost = (r) => costWords(r, t, fmtCost, fmtTok, { pricesHeld: PRICES_HELD }).text;
 
 const PALETTE = ['var(--accent)', 'var(--green, #3fb950)', 'var(--yellow, #e5c07b)', 'var(--red, #e55)', 'var(--blue, #61afef)', 'var(--magenta, #c678dd)', 'var(--cyan, #56b6c2)', 'var(--text-dim)'];
 
@@ -571,6 +572,10 @@ function renderPanel(grid, data, panels, panel, idx, onChange, pivotHere) {
   body.className = 'udash-panel-body';
   card.append(head, body);
   grid.appendChild(card); // must be IN the document before charts resolve theme colors
+  // r3145 unit 2: a COST panel while the person's prices are held draws no figure and no bar (each would be a default price read as
+  // theirs): the hold's words in its place
+  PRICES_HELD = !!(data && data.prices && data.prices.held);
+  if (PRICES_HELD && mlist.some((m) => m.key === 'cost')) { const n = document.createElement('div'); n.className = 'usage-note usage-prices-held'; n.textContent = heldWordsOf({ code: 'prices_unread' }); body.appendChild(n); return; }
   // Split-series route: line/bars with a splitBy render from the 2-D pivot.
   // Other chart types ignore the split (a donut/table of a cross isn't a thing).
   if (panel.splitBy && panel.splitBy !== panel.dim && panel.dim !== 'total' && (panel.chart === 'line' || panel.chart === 'bars')) {

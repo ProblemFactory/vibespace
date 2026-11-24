@@ -16,7 +16,10 @@ export function unpricedOf(r) {
 /** A row's cost in words. `text` = the figure where a figure stands («$12.30», «$12.30 + unknown», «price unknown»);
  *  `short` = a few words for a tile's second line; `note` = the sentence that says what is left out and where a price is
  *  added (null when nothing is left out); `unknown` = whether any part is unknown; `all` = whether every request is. */
-export function costWords(r, t, fmtCost, fmtNum) {
+export function costWords(r, t, fmtCost, fmtNum, { pricesHeld = false } = {}) {
+  // B-f276's family (主开发 r3145 unit 2): the person's prices HELD — every cost reads «prices not known»: a figure now would be priced at
+  // VibeSpace's defaults and read as the person's (the estimate still uses the defaults; it is never shown as a cost)
+  if (pricesHeld) return { text: t("prices not known"), short: null, note: null, unknown: true, all: true };
   const u = unpricedOf(r);
   const cost = Number(r && r.cost) || 0;
   if (!u) return { text: fmtCost(cost), short: null, note: null, unknown: false, all: false };
@@ -31,6 +34,10 @@ export function costWords(r, t, fmtCost, fmtNum) {
     unknown: true, all,
   };
 }
+
+/** r3145 unit 2: the prices started again from VibeSpace's defaults after TORN bytes (the usage answer's `prices.torn` {copy}): where the
+ *  damaged bytes are kept and what a person can do — never «restore that copy» (they are the damaged bytes) */
+export function pricesTornWords(torn, t) { return torn && torn.copy ? t("Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.", { copy: String(torn.copy) }) : null; }
 
 /** Several rows' figures added — a slice that folds rows together («Other»): its priced cost and its unknown part. */
 export function sumParts(rows) {

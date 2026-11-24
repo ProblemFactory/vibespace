@@ -15690,4 +15690,8 @@ export default {
   "the record of the OpenCode background service": "OpenCode バックグラウンドサービスの記録",   // lane bl-chat-b r3334 unit 1: the held list's plain name
   "The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch off and on again starts a new one.": "OpenCode バックグラウンドサービスの記録が壊れているため、VibeSpace は自分では serve を起動しません——以前のものがまだ動いている可能性があります。動いていれば手動で止めてください。スイッチを一度オフにしてからオンにすると新しいものを起動します。", // lane bl-chat-b r3675 (line 812's cure)
   "The record of the OpenCode background service was damaged, and its bytes could not be compared with their kept copy — one from before may still be running. Remove that damaged record from VibeSpace's data folder by hand to start fresh.": "OpenCode バックグラウンドサービスの記録が壊れていて、そのバイトを保存したコピーと比べられませんでした——以前の serve がまだ動いている可能性があります。最初からやり直すには、VibeSpace のデータフォルダからその壊れた記録を手動で削除してください。",
+  "VibeSpace cannot read your edited prices right now — nothing was changed and nothing is written over them, and costs are not shown as yours until they read. It reads them again by itself in a few minutes.": "VibeSpace はいま編集された価格を読み込めません — 何も変更されておらず、上書きもされません。読み込めるまで費用はあなたの価格として表示されません。数分のうちに自動で再読み込みします。",
+  "prices not known": "価格不明",
+  "your edited prices": "編集した価格",
+  "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "価格ファイルが壊れていて読み込めませんでした。そのバイトは VibeSpace のデータフォルダ内で隣に {copy} として保存され、VibeSpace の既定の価格に戻りました。「価格…」で価格を設定し直すか、ファイルを手で直して VibeSpace を再起動してください。",
 };

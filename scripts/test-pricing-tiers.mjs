@@ -511,7 +511,7 @@ try {
       const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
       const UW = src('src/lib/usage-window.js'), UD = src('src/lib/usage-dashboard.js'), CSB = src('src/lib/chat-status-bar.js'), SRV = src('server.js'), UH = src('src/usage-history.js'), UIM = src('src/usage-index-model.js');
       const wires = {
-        'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem } from './usage-cost-words.js';"),
+        'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords } from './usage-cost-words.js';"),   // + pricesTornWords (r3145 unit 2: the prices' torn lift said at the window's head)
         'the cost tile': UW.includes("tile(t('Est. API-equivalent cost'), escHtml(fmtRowCost(T)),"),
         'every bar row': UW.includes("const valStr = metric === 'cost' ? escHtml(fmtRowCost(r)) : fmtNum(r.totalTokens);"),
         'the trend note': UW.includes("const cw = metricKey === 'cost' ? costOfRow(d.totals || {}) : null;"),

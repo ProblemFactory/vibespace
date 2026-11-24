@@ -242,6 +242,9 @@ app.get('/api/usage-stats', async (req, res) => {
     // a state the answer carries, never only a console line
     const paused = usageHistory.ingestPaused?.() || [];
     if (paused.length) answer = { ...answer, ingestPaused: paused };
+    // r3145 unit 2: the prices' state rides the answer — held: every cost reads «prices not known» on the page (they were priced at the
+    // defaults for the estimate, never shown as the person's); torn / lifted: said once in place
+    { const pf = usageHistory.pricesFacts ? usageHistory.pricesFacts() : null; if (pf) answer = { ...answer, prices: pf }; }
     res.json(onlyPivots ? pivotsOnly(answer) : answer);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -266,8 +269,12 @@ app.get('/api/usage-stats/rid-info', async (req, res) => {
     res.json({ found: true, acct: ev.acct || null, aname: ev.aname ? require('../accounts').maskDefaultKeyName(ev.aname) : null,   /* B-ba7d: an event under the old default name never answers the tail */ atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null, hostName, be: ev.be || 'claude', model: ev.model || null, effort: ev.effort || null });
   } catch (e) { if (e && e.code === 'LOADING') return res.json({ found: false, loading: true }); res.status(500).json({ error: e.message }); } // lane ledger-boot-load: a first load that failed is «still loading», never «not in the ledger yet»
 });
-app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() })); // the editor: the effective table + its sources (lane cli-update-needs-nothing)
+// B-f276's family (主开发 r3145 unit 2, lane bl-ci): the person's prices HELD (pricing.json could not be read) — the editor's read and its
+// save are refused BY NAME (503 prices_unread, the hold's words): never the defaults shown as theirs, never a save written over the file
+const pricesHeldRefused = (res) => { const h = usageHistory.pricesHeld ? usageHistory.pricesHeld() : null; if (!h) return false; res.set('Cache-Control', 'no-store'); res.status(503).json({ error: usageHistory.pricesWords(), code: 'prices_unread', held: h }); return true; };
+app.get('/api/usage-stats/pricing', (req, res) => { if (pricesHeldRefused(res)) return; res.json({ pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable(), ...(usageHistory.pricesTorn && usageHistory.pricesTorn() ? { torn: usageHistory.pricesTorn() } : {}) }); }); // the editor: the effective table + its sources (lane cli-update-needs-nothing)
 app.post('/api/usage-stats/pricing', (req, res) => {
+  if (pricesHeldRefused(res)) return;
   try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() }); }
   catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-d578 P1-b follow: a refused rate says which (code rate-invalid)
 });

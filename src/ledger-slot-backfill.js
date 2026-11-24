@@ -514,10 +514,14 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
       const { UsageHistory } = require('./usage-history.js');
       const { UsageEstimator } = require('./usage-estimator.js');
       const uh = new UsageHistory({ dataDir, homeDir: path.join(dataDir, '.no-home') });
+      // B-f276's family (r3145 unit 2 + r3181 (1)): the re-learn writes rates.json from ledger COSTS — while the person's prices are held
+      // those would be the defaults' and kept for good: the migration throws (its runner tries it again at the next start), nothing written
+      if (uh.pricesHeld && uh.pricesHeld()) { try { uh._pricingHold.stop(); } catch { } throw new Error('the person\'s prices (usage-history/pricing.json) could not be read — the re-learn waits for them: nothing was written, it runs again at the next start'); }
       const est = new UsageEstimator({ anchorsDir, usageHistory: uh, resolveIdentity: () => null, lagS: 0, priorsFor: require('./usage-predict.js').priorsForIdentity });   // each source's own prior (usage-predict pick 3)
       for (const k of idents) { try { est.learnNow(k); report.relearned++; } catch (e) { throw new Error(`re-learning ${k} failed: ${e.message}`); } } // the migration's own synchronous road (usage-relearn-stepped: ratesFor folds a slice a turn)
       est.flushRates();   // on disk BEFORE the pass completes (the estimator writes through the store writer)
       est.close(); // usage-relearn-stepped round 2 (small 4): this estimator is let go — it folds and persists nothing more
+      try { uh._pricingHold && uh._pricingHold.stop(); } catch { }   // r3145 unit 2: its prices' hold leaves the live list with it
     }
   }
   report.total = { rekeyed: sumMax(tot.rekeyed), archived: sumMax(tot.archived), corrective: sumMax(tot.corrective) };

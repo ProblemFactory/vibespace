@@ -1472,9 +1472,13 @@ function anchorGroupFresh({ identityKey, group, anchors }) {
   const fresh = !!cache?.fetchedAt && (!prev || Number(cache.fetchedAt) > (Number(prev.fetchedAt) || 0));
   return { fresh, cache, prev };
 }
-function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween, darkHosts, metric }) {
+function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween, darkHosts, metric, pricesHeld = () => false }) {
   const { fresh, cache, prev } = anchorGroupFresh({ identityKey, group, anchors });
   if (!fresh) return { fresh: false, recorded: false, metrics: [] };
+  // B-f276's family (主开发 r3145 unit 2 + r3181 (1), lane bl-ci): the person's prices HELD — an anchor stores its cost since the last
+  // reading in DOLLARS, and that cost would be priced at the defaults and kept for good: NO new anchor (the clock's sweep is what this
+  // stops; the anchors it has stand; the next sweep after the lift records the reading against the person's prices)
+  if (pricesHeld()) return { fresh: true, recorded: false, held: true, metrics: [] };
   const allIds = estimator.accountIdsFor(identityKey, group.accountIds);
   const costSince = prev ? costBetween(allIds, prev.fetchedAt, cache.fetchedAt) : null;
   // calibration: what the CURRENT rates would have predicted for this new

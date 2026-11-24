@@ -2087,6 +2087,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         bookmarks: heldOf.has('bookmarks') ? unread('bookmarks') : { count: (bookmarks || []).length },
         tasks: { count: (getTasks?.()?.list?.() || []).length, ...(getTasks?.()?.unreadState?.() ? { unread: true } : {}) },   // THE STORE HELD UNREAD (lane bl-windows): never «0 groups» for a store that cannot be read
         pricing: (() => {
+          if (getUsageHistory?.()?.pricesHeld?.()) return { unread: true };   // r3145 unit 2: the person's prices HELD — never «0 prices»
           const p = getUsageHistory?.()?.pricingTable?.() || {};
           return { count: Object.keys(p.tiers || {}).length + Object.keys(p.accounts || {}).length };
         })(),
@@ -2116,6 +2117,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (storageHeld) return res.status(503).json({ error: `the export asks for the storage: ${storageHeld}`, code: 'storage_unread' });
     // B-225b R8: every named section's hold asked FIRST — a held store refuses the export WHOLE by name (a backup that leaves it out,
     // or carries its defaults, would read as an empty one and be imported over the person's)
+    // B-f276's family (主开发 r3145 unit 2): the person's prices HELD — an export naming them is refused WHOLE by name (a backup carrying
+    // the defaults would read as the person's prices and be imported over them)
+    if (Array.isArray(sections) && sections.includes('pricing') && getUsageHistory?.()?.pricesHeld?.()) return res.status(503).json({ error: `the export asks for the prices: ${getUsageHistory().pricesWords()}`, code: 'prices_unread' });
     { const hs = heldSections(Array.isArray(sections) ? sections : []); if (hs.length) return res.status(503).json({ error: `the export was refused: ${hs.map((h) => h.file).join(', ')} could not be read — nothing was exported`, code: 'store_unread', held: hs }); }
     const file = {
       app: 'vibespace-config', version: 1,
@@ -2206,6 +2210,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // the import WHOLE by name; a DAMAGED one is the person's whole replace: its bytes set aside under a dated name, then the section
     // lands as the store's first write
     const setAsideSaid = []; asideOf.set(req, setAsideSaid);   // (a later throw names them — the wrapper below)
+    // r3145 unit 2: an import naming the prices while they are HELD is refused WHOLE before anything is written (no half import; the save
+    // would be refused at its turn anyway)
+    if ([].concat(sections).includes('pricing') && file.sections.pricing !== undefined && getUsageHistory?.()?.pricesHeld?.()) return res.status(503).json({ error: `the import was refused: ${getUsageHistory().pricesWords()} — nothing was imported`, code: 'prices_unread' });
     { const hs = heldSections([].concat(sections).filter((n) => file.sections[n] !== undefined)), later = hs.filter((h) => h.kind !== 'damaged');   // ([].concat: the list as read, whatever its shape — a copy that reads it two ways still fails by ITS law)
       if (later.length) return res.status(503).json({ error: `the import was refused: ${later.map((h) => h.file).join(', ')} could not be read — nothing was imported`, code: 'store_unread', held: later });
       for (const h of hs) { if (!damagedReplace(req, res, h.section)) return; setAsideSaid.push(h.file); } }

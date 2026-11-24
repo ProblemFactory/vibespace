@@ -6,12 +6,12 @@ import { t } from './i18n.js';
 import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { renderDashboard, PRESETS, destroyCharts, panelPivots, ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META } from './usage-dashboard.js';
 import { showContextMenu } from './utils.js';
-import { escHtml, fetchJson, showToast, copyText } from './utils.js';
+import { escHtml, fetchJson, showToast, copyText, heldWordsOf } from './utils.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
 import { tailOf } from './account-tails.js'; // B-ba7d: a usage row carries no key tail — the person's read does
-import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
+import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -71,7 +71,8 @@ const fmtNum = (n) => {
 };
 const fmtCost = (n) => '$' + num(n || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // a ROW's cost (B-d578 P1-b): the priced part, and «+ unknown» / «price unknown» where a provider's model has no price row — never «$0.00»
-const costOfRow = (r) => costWords(r, t, fmtCost, fmtNum);
+let PRICES_HELD = false;   // r3145 unit 2: set at each paint from the answer's `prices.held` — every cost reads «prices not known»
+const costOfRow = (r) => costWords(r, t, fmtCost, fmtNum, { pricesHeld: PRICES_HELD });
 const fmtRowCost = (r) => costOfRow(r).text;
 const fmtPct = (r) => (Math.round((r || 0) * 1000) / 10) + '%';
 
@@ -253,6 +254,11 @@ export function openUsageWindow(app, opts = {}) {
         .join(' · ');
       root.appendChild(warn);
     }
+    // r3145 unit 2: the person's prices HELD (the costs say «prices not known») or started again from the defaults after torn bytes —
+    // said once, in place, at the window's head (the editor's view too)
+    PRICES_HELD = !!(state.data && state.data.prices && state.data.prices.held);
+    { const pf = state.data && state.data.prices; const said = pf && pf.held ? heldWordsOf({ code: 'prices_unread' }) : pf && pf.torn ? pricesTornWords(pf.torn, t) : null;
+      if (said) { const w = document.createElement('div'); w.className = 'usage-warn usage-prices-held'; w.textContent = said; root.appendChild(w); } }
     const body = document.createElement('div'); body.className = 'usage-body';
     root.appendChild(body);
     if (keepTop) queueMicrotask(() => { body.scrollTop = keepTop; }); // once this paint has filled it

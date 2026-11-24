@@ -27,6 +27,18 @@ const { coldRows, readLineAt, readLineAtSync, verified: verifiedRow } = require(
 const { Worker, isMainThread } = require('worker_threads');
 const v8 = require('v8');
 const { trackWorker } = require('./worker-memory.js');
+const SR = require('./store-read.js');
+const HOLD = require('./store-read-hold.js');   // B-f276's family (主开发 r3145 unit 2 + r3181, lane bl-ci): pricing.json under the store-read law
+// THE PERSON'S EDITED PRICES HOLD (code 503 prices_unread): the release read ANY failure of pricing.json as «none» and the START
+// wrote the defaults back over the file — the person's edited tier prices, discounts and tier overrides gone. Held, nothing is
+// written over it, a save is refused by name, the export's table and a price row a person is SHOWN are null (never the defaults
+// passed off as theirs), and the roads no person reads as theirs (the live estimate, the pool, the anchors' sums) keep pricing at
+// VibeSpace's defaults (r3181 (a)) while the anchors record no NEW anchor (their stored cost would be a default dollar figure).
+// Read again off the loop on the helper's ladder; the lift prices at the person's table at once. Torn bytes: kept aside once, then
+// the defaults are written as on a first start (r3181: never held until the person sets prices) and the page says where they are.
+const PRICES_UNREAD = 'prices_unread';
+const PRICING_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const pricesWords = (h) => `VibeSpace cannot read your edited prices right now (${(h && h.code) || 'unreadable'}) — nothing is written over them, and costs are not shown as yours until they read. VibeSpace reads them again by itself every few minutes.`;
 const { isThirdPartyAccount } = require('./provider-ids.js'); // PURE (B-d578 P1-b): a `pv-` id that names a third-party provider's record
 // ONE SPELLING of a row's (or a cell's) billing bucket and its machine login's name — aggregate's keyOf and the cells' fold
 // (B-360d unit 1: the cells must give the row fold's labels; test-architecture §78 counts the harness branches)
@@ -165,7 +177,7 @@ function setCatalogPricing(layer) {
   for (const ref of [...PRICED]) {
     const h = ref.deref();
     if (!h) { PRICED.delete(ref); continue; }
-    h._pricing = h._withCatalog(h._pricingFile || h._pricing);
+    h._pricing = h._withCatalog(h._pricingFile || h._heldDefaults || h._pricing);   // r3145 unit 2: while held, the defaults (never the person's file)
     if (said === null) said = h._priceDisagreements || [];
   }
   return said || [];
@@ -380,7 +392,7 @@ class UsageHistory {
     // runLocalMigrations, exactly like reloadCursors.
     this.reloadEvents = () => { this._rebuildInWorker('a reload after a repair'); }; // …and the index re-checks its shard marks (B-748f: rebuilt in the worker, the old cache serving until the swap)
     this._pricing = this._loadPricing();
-    this._pricingFile = this._pricing; this._pricing = this._withCatalog(this._pricingFile); PRICED.add(new WeakRef(this)); // the effective table (lane cli-update-needs-nothing)
+    this._pricingFile = this._heldDefaults ? null : this._pricing; this._pricing = this._withCatalog(this._pricingFile || this._heldDefaults); PRICED.add(new WeakRef(this)); // the effective table (lane cli-update-needs-nothing) — r3145 unit 2: held, no file table (the defaults price the deciding roads)
     this._scanning = false;
     this._lastScan = 0;
     // lane ledger-dedup-law: F1's per-shard rid index, F4's sampled shapes + paused shards (r4: host × month), the dedup jobs
@@ -522,7 +534,18 @@ class UsageHistory {
   // accounts can carry a per-account DISCOUNT (negotiated rate) or a full tier
   // override — because different keys really do bill at different rates.
   _loadPricing() {
-    let p = this._loadJson(this.pricingFile, null);
+    // r3145 unit 2: the ONE sync read at the start (as before), through the store-read law — «not there» is a first start (the
+    // defaults written), a failed read HOLDS (nothing written), torn bytes are kept aside first
+    if (!this._pricingHold) this._pricingHold = HOLD.create({ file: this.pricingFile, valid: PRICING_SHAPE, code: PRICES_UNREAD, aside: (mark) => `${this.pricingFile}.corrupt-${mark}`, words: pricesWords, log: (s) => console.warn('[usage] ' + s), onLift: (v, facts) => this._pricesLifted(v, facts) });
+    let read; try { read = { text: fs.readFileSync(this.pricingFile, 'utf-8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: PRICING_SHAPE });
+    const st = this._pricingHold.start(a0);
+    if (st === 'held') { this._heldDefaults = { version: 2, tiers: { ...DEFAULT_PRICING }, accounts: {} }; return this._heldDefaults; }
+    this._heldDefaults = null;
+    return this._shapePricing(st === 'data' ? a0.value : null);
+  }
+  /** the prices the read gave (null: none — a first start writes the defaults), shaped to v2 with the newly shipped tiers filled in */
+  _shapePricing(p) {
     if (!p) {
       p = { version: 2, tiers: DEFAULT_PRICING, accounts: {} };
       // atomic like every other pricing write — a crash mid-write tears the
@@ -545,6 +568,22 @@ class UsageHistory {
     }
     return p;
   }
+  /** r3145 unit 2: THE LIFT — the read again answered: the person's table (null: gone or torn, kept aside — the defaults, written as on a
+   *  first start) prices everything computed from now on */
+  _pricesLifted(v, facts) {
+    this._heldDefaults = null;
+    const p = this._shapePricing(v || null);
+    this._pricingFile = p; this._pricing = this._withCatalog(p);
+    this._pricesLift = { since: facts && facts.was ? facts.was.since : null, at: Date.now(), torn: facts && facts.setAside ? String(facts.setAside) : null };
+  }
+  /** the prices' hold: {file, code, since} while pricing.json could not be read — null when it reads (or in a fold worker's copy) */
+  pricesHeld() { return this._pricingHold ? this._pricingHold.held() : null; }
+  /** the words a person reads while held (null: not held) */
+  pricesWords() { return this._pricingHold ? this._pricingHold.words() : null; }
+  /** a lift from TORN bytes in this run: {copy, since} (the copy's base name) — null when none */
+  pricesTorn() { const t = this._pricingHold && this._pricingHold.torn(); return t ? { copy: t.copy, since: t.since } : null; }
+  /** what the usage answer carries about the prices: { held, torn, lifted } — the page says them in place */
+  pricesFacts() { const held = this.pricesHeld(), torn = this.pricesTorn(); return held || torn || this._pricesLift ? { held: held || null, torn: torn || null, lifted: !held && this._pricesLift ? { since: this._pricesLift.since, at: this._pricesLift.at } : null } : null; }
   _writeAtomic(f, data) { const t = f + '.tmp'; fs.writeFileSync(t, data); fs.renameSync(t, f); }
   _shardFor(ts) { const d = new Date(ts); return path.join(this.dir, `events-${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}.ndjson`); }
 
@@ -1111,6 +1150,7 @@ class UsageHistory {
    *  cold reads with THIS table and THIS match — never a second one). `{label, input, output, cacheWrite5m,
    *  cacheWrite1h, cacheRead}` USD per million; `label` = the tier key the model matched ('_default' when none did). */
   priceRowFor(model, { acct = null, ts = Date.now(), prompt = 0 } = {}) {
+    if (this.pricesHeld()) return null;   // r3145 unit 2: a price a person is SHOWN is never a default as theirs while held («not priced»)
     const tier = this._tier(model);
     if (this.priceUnknown(model, acct, tier)) return null;   // B-d578 P1-b: a provider's model with no row HAS no price row (the bulk resume says «not priced»)
     return { label: tier, ...this._rateFor(acct, tier, ts, prompt, model) };
@@ -2623,7 +2663,7 @@ class UsageHistory {
   // names + session names it knows).
   // THE TABLE AS A PERSON KEEPS IT (B3, acceptance r2): the disk rows only — shipped + what a person entered — as before the
   // catalog lane; the config export and its summary read this. The editor reads pricingView() (with the catalog + sources).
-  pricingTable() { return this._pricingFile || this._pricing; }
+  pricingTable() { if (this.pricesHeld()) return null; return this._pricingFile || this._pricing; }   // r3145 unit 2: held — no table (the export refuses by name)
   pricingView() { return this._pricing; }
   lastCatalogSkips() { return (this._lastCatalogSkips || []).slice(); }
   // the table on disk ⊕ the installed Claude Code's catalog layer (`sources` per key: shipped / catalog / you)
@@ -2644,6 +2684,7 @@ class UsageHistory {
   // Accept a full v2 object OR a partial patch ({tiers?, accounts?}). Merges so a
   // UI editor can PATCH just one account's discount without resending everything.
   setPricing(patch) {
+    if (this._pricingHold) this._pricingHold.refuse('saving the prices');   // r3145 unit 2: held — refused BY NAME (503 prices_unread) before anything is written
     if (!patch || typeof patch !== 'object') return this._pricing;
     // B-d578 P1-b follow (r1131 item 1): a rate that is not a plain number at or above 0 and under the ceiling is REFUSED BY NAME — nothing written
     const bad = CP.rateErrors(patch);

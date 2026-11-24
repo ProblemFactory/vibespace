@@ -567,6 +567,7 @@ function sweepGroups(groups) {
         costBetween: (ids, from, to) => costBetweenMulti(usageHistory, ids, from, to),
         darkHosts: (allIds) => { const t = darkTaintedAccounts(); return allIds.some((a) => t[a]) ? darkSources().map((d) => d.host) : []; },
         metric: (name, value, detail) => global.__vsMetric?.(name, value, detail),
+        pricesHeld: () => !!(usageHistory && typeof usageHistory.pricesHeld === 'function' && usageHistory.pricesHeld()),   // r3145 unit 2: no new anchor while the prices are held
       });
     } catch { }
   };

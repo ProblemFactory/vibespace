@@ -15691,4 +15691,8 @@ export default {
   "the record of the OpenCode background service": "OpenCode 后台服务的记录",   // lane bl-chat-b r3334 unit 1: the held list's plain name
   "The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch off and on again starts a new one.": "OpenCode 后台服务的记录已损坏，所以 VibeSpace 不会自行启动 serve——之前的那个可能仍在运行。如果它在运行，请手动停止；把开关关掉再打开会启动一个新的。", // lane bl-chat-b r3675 (line 812's cure)
   "The record of the OpenCode background service was damaged, and its bytes could not be compared with their kept copy — one from before may still be running. Remove that damaged record from VibeSpace's data folder by hand to start fresh.": "OpenCode 后台服务的记录已损坏，而且它的字节无法与另存的副本比对——之前的 serve 可能仍在运行。请手动从 VibeSpace 的数据文件夹里删除这份损坏的记录，以便重新开始。",
+  "VibeSpace cannot read your edited prices right now — nothing was changed and nothing is written over them, and costs are not shown as yours until they read. It reads them again by itself in a few minutes.": "VibeSpace 暂时读不到你编辑过的价格 — 没有更改任何东西，也不会覆盖它们；在读到之前不会把费用当作你的价格显示。它会在几分钟内自己再读一次。",
+  "prices not known": "价格未知",
+  "your edited prices": "你编辑过的价格",
+  "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "你的价格文件已损坏，无法读取。它的原始字节保存在 VibeSpace 数据文件夹中旁边的 {copy}，VibeSpace 的默认价格已恢复：请在「价格…」中重新设置你的价格，或手动修好该文件后重启 VibeSpace。",
 };
