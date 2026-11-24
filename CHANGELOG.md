@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a paired machine's shared browser profile, each conversation now sees and drives only its own tabs, as on this computer.
 - The New profile dialog no longer says each conversation gets its own tab for a browser VibeSpace only connects to — there, they all share every tab.
 - After you change a desktop app's scale, its window opens at its new size at once, instead of opening at the old size and jumping.
+- A VibeSpace started inside another one no longer keeps the outer one's telemetry address or task id, nor passes what it was handed to the programs it starts.
 
 ## 2.369.417 — 2026-11-23
 
