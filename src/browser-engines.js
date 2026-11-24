@@ -449,7 +449,25 @@ function defaultEngineOf({ own = undefined, fleet = null } = {}) {
   return { value: 'default', source: 'default' };
 }
 
-module.exports = { ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
+/** B-9584, the owner's decision (主开发 r2911 / r2916 / r3795): MAY A PROFILE's PAGE SAY «CANNOT LEAK»? Only when what STARTS next and
+ *  what RUNS now (when its browser runs) are both a kernel whose own probe stated geolocationIsolated — r3795's law: the sentence
+ *  speaks of what runs, never only of what is installed. Inputs (facts, read by the caller): `choice` the profile's build choice,
+ *  `host` / `ephemeral` (no engine runs on a paired machine; a conversation's own browser is not a named profile), `row` its engine's
+ *  row of the engines table (a FRESH probe: installed, executable, geolocationIsolated, `kernel` the record's {state, next, landing}),
+ *  `running` the live browser's recorded choice (null = not running), `kernelLive` the keeper's mark (its running kernel answered
+ *  otherwise than its probe). Anything else, and anything not known: false — the weaker sentence, true of every case. */
+function placeIsolatedVerdict({ choice = null, host = null, ephemeral = false, row = null, running = null, kernelLive = null } = {}) {
+  if (!choice || choice.kind !== 'plugin' || !choice.id || host || ephemeral) return false;
+  // what STARTS next: this engine's kernel, in place and runnable, its own probe stating it
+  if (!row || row.id !== choice.id || row.code || row.installed !== true || row.executable !== true || row.geolocationIsolated !== true) return false;
+  // …and no other kernel to take its place at the next start (one waiting beside it, one landing, one downloading)
+  { const k = row.kernel || null; if (k && (k.next || k.landing || k.state === 'downloading')) return false; }
+  // what RUNS now: launched from this engine with that same fact, its live answer never otherwise than its probe
+  if (running && !(running.kind === 'plugin' && running.id === choice.id && running.geolocationIsolated === true && !kernelLive)) return false;
+  return true;
+}
+
+module.exports = { placeIsolatedVerdict, ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
   ENVIRONMENT_WORD, APPLIED_ECHO, APPLIED_LOCATIONS, statesEnvironment, appliedEchoOf, echoMismatch,   // B-9584 U2a
   platformOf, engineWords, engineAnswerVerdict, kernelLiveVerdict, KERNEL_FEATURES, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs, PROXY_UDP_ARG, PROXY_UDP_RE,

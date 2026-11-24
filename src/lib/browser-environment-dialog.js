@@ -7,7 +7,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
-import { fieldsOf, bodyOf, checkOf, autoSaidOf, changedFrom, placeIsolatedOf, SITES_LIMIT } from './browser-environment-form.js';
+import { fieldsOf, bodyOf, checkOf, autoSaidOf, changedFrom, leakWatch, SITES_LIMIT } from './browser-environment-form.js';
 import { envWords, autoWords, placeLeakWords } from './browser-environment-words.js';
 
 const SAVED = new WeakSet();   // as the proxy dialog (B-acb9): a second open RAISES the live form; 'done' only after ITS own save
@@ -29,8 +29,9 @@ export function openEnvironmentDialog(app, r, { onDone = null, onClose = null } 
   const label = String((r && (r.label || r.id)) || '');
   const f0 = fieldsOf(r), auto = autoSaidOf(r);
   let read = () => f0;
+  let watch = null;   // B-9584 r3795: the place sentence's watch (started once the form opens, stopped when it closes)
   const shell = createModalShell({ id: 'browser-env-dialog', key: String(r.id), opener: 'person', title: t('Environment of {label}', { label }), dialogClass: 'bwho-dialog benv-dialog',
-    onClose: () => { try { onClose?.(sh && SAVED.has(sh.overlay) ? 'done' : 'cancelled'); } catch { /* the caller's own */ } },
+    onClose: () => { try { if (watch) watch.stop(); } catch { /* none */ } try { onClose?.(sh && SAVED.has(sh.overlay) ? 'done' : 'cancelled'); } catch { /* the caller's own */ } },
     unsaved: { isDirty: () => changedFrom(r, read()), save: () => doSave() }, kind: 'form' });
   sh = shell;
   if (shell.raised) return shell;
@@ -68,14 +69,13 @@ export function openEnvironmentDialog(app, r, { onDone = null, onClose = null } 
   const blocked = el('div', 'bnew-hint benv-blocked', t('Every site is denied the location.'));
   const lshow = () => { place.style.display = lsel.value === 'value' ? '' : 'none'; blocked.style.display = lsel.value === 'block' ? '' : 'none'; };
   lsel.addEventListener('change', lshow); lshow();
-  // B-9584, the owner's decision (r2911 / r2916): ONE plain sentence on whether this browser can give a site this machine's real place —
-  // a fact said once, never a greyed control or a refusal. An engine profile asks the engines table once (its kernel's probe fact);
-  // anything else is stock Chrome and says its sentence at once; a table not read says the stock sentence (absent = false); the ask
-  // waits for the form to OPEN (test-architecture §103 r4: a queued form waits behind the open one's ask)
-  const leak = el('div', 'bnew-hint benv-leak', '');
-  const sayLeak = (engines) => { leak.textContent = placeLeakWords(placeIsolatedOf(r, engines), t); };
-  if (r && r.browser && r.browser.kind === 'plugin') shell.ready.then((s) => { if (s) Promise.resolve(fetchJson('/api/browser/engines')).then((x) => sayLeak(x && Array.isArray(x.engines) ? x.engines : null), () => sayLeak(null)); });   // once it opens (r4: a queued form waits behind the open one's ask)
-  else sayLeak(null);
+  // B-9584, the owner's decision (r2911 / r2916 / r3795): ONE plain sentence on whether this browser can give a site this machine's real
+  // place — a fact said once, never a greyed control or a refusal. «Cannot leak» only on the SERVER's verdict for this profile (what
+  // runs now and what starts next); the weaker sentence until it answers and on any failure; asked again on every broadcast that can
+  // move it while the form is open (Change build…, a start, a stop); the first ask waits for the form to OPEN (§103 r4)
+  const leak = el('div', 'bnew-hint benv-leak', placeLeakWords(false, t));
+  watch = leakWatch({ ask: () => fetchJson(`/api/browser/engines?profile=${encodeURIComponent(r.id)}`), say: (iso) => { leak.textContent = placeLeakWords(iso, t); }, on: (h) => app.ws?.onGlobal?.(h), off: (h) => app.ws?.offGlobal?.(h) });
+  shell.ready.then((s) => { if (s) watch.start(); });   // once it opens (r4: a queued form waits behind the open one's ask)
   lrow.append(lsel, place, blocked, leak);
   body.appendChild(lrow);
   read = () => ({ timezone: readTz(), language: readLang(), location: { mode: lsel.value, latitude: lat.value, longitude: lng.value, accuracy: acc.value, sites: sites.value } });

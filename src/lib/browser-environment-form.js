@@ -6,14 +6,35 @@
 import { resolveEnvironment, environmentVerdict, keptExitOf, SITES_MAX } from '../browser-environment.js';
 
 export const ENV_KEYS = Object.freeze(['timezone', 'language', 'location']);
-/** B-9584, the owner's decision (主开发 r2911 / r2916): does this profile's browser have NO source of this machine's real place? Only an
- *  engine profile whose kernel's probe says so (`geolocationIsolated`, its row of GET /api/browser/engines). Stock Chrome, a Chrome
- *  build or file, a kernel without the patch, an older plugin, an engine not listed, the table not read: false (absent = false). */
-export function placeIsolatedOf(r, engines) {
-  const b = r && r.browser;
-  if (!b || b.kind !== 'plugin' || !b.id) return false;
-  const row = Array.isArray(engines) ? engines.find((e) => e && e.id === b.id) : null;
-  return !!(row && row.geolocationIsolated === true);
+/** B-9584, the owner's decision (主开发 r2911 / r2916 / r3795): may the page say «cannot leak»? ONLY the server's own verdict for this
+ *  profile says so (GET /api/browser/engines?profile=<id> → `placeIsolated`: what runs now and what starts next both a kernel whose
+ *  probe stated it — the keeper's placeIsolatedFor). A missing answer, an error, any other value: false (the weaker sentence). */
+export function placeIsolatedOf(answer) {
+  return !!(answer && !answer.error && answer.placeIsolated === true);
+}
+/** r3795 (3): THE OPEN FORM FOLLOWS THE PROFILE — the broadcasts that can move the verdict (its record: Change build…; its browser's
+ *  state: a start, a stop, a kernel landing at a start) ask the server again while the form is open. */
+export const LEAK_MOVES = Object.freeze(['browser-profiles-updated', 'browser-housekeeping-updated']);
+/** The sentence's watch (no DOM, node-tested): `ask()` → the server's answer, `say(isolated)`, `on(fn)` / `off(fn)` the app's
+ *  broadcasts. start() says the weaker sentence at once, then asks; ONE ask in flight — a move meanwhile asks once more after it;
+ *  stop() (the form closed) says nothing more. → { start, stop }. */
+export function leakWatch({ ask, say, on = null, off = null }) {
+  let live = false, inFlight = false, again = false;
+  const once = async () => {
+    if (!live) return;
+    if (inFlight) { again = true; return; }
+    inFlight = true;
+    let isolated = false;
+    try { isolated = placeIsolatedOf(await ask()); } catch { isolated = false; }
+    inFlight = false;
+    if (live) say(isolated);
+    if (again && live) { again = false; await once(); }
+  };
+  const onMove = (m) => { if (live && m && LEAK_MOVES.includes(m.type)) once(); };
+  return {
+    start() { if (live) return Promise.resolve(); live = true; say(false); if (on) on(onMove); return once(); },
+    stop() { live = false; if (off) off(onMove); },
+  };
 }
 export const SITES_LIMIT = SITES_MAX;
 const modeOf = (c) => (c && typeof c === 'object' && typeof c.mode === 'string' ? c.mode : 'machine');

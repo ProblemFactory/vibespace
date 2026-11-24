@@ -1562,9 +1562,20 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
         declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null,
         // lane engine-spi-egress L1b: the kernel's SOURCE ('download' | 'user'), and the core's verdict on the owner's program (never its path)
-        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed, geolocationIsolated: f.geolocationIsolated === true, live: liveOfEngine(row.id) }) });   // B-9584 r2916: the kernel's place fact (the Environment dialog's sentence)
+        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed, geolocationIsolated: f.geolocationIsolated === true && !!f.installed && !!f.executable, live: liveOfEngine(row.id) }) });   // B-9584 r2916 / r3795: the kernel's place fact, said only of a kernel that can run
     }
     return out;
+  }
+  /** B-9584 r3795: may THIS profile's page say «cannot leak» now? The PURE verdict (ENG.placeIsolatedVerdict) over its record, its
+   *  engine's row of the table just read (`rows`, a fresh probe), its live browser's recorded choice and its kernelLive mark. */
+  function placeIsolatedFor(profileId, rows = []) {
+    let p = null; try { p = profile(String(profileId || '')); } catch { p = null; }
+    if (!p) return false;
+    const c = p.browser ? BB.choiceView(p.browser) : null;
+    const row = c && c.kind === 'plugin' ? (Array.isArray(rows) ? rows : []).find((r) => r && r.id === c.id) || null : null;
+    const rg = reg.browsers[p.id];
+    const running = rg && B.isLiveBrowser(rg) ? (rg.browserChoice || { kind: 'default' }) : null;
+    return ENG.placeIsolatedVerdict({ choice: c, host: p.host || null, ephemeral: isEph(p), row, running, kernelLive: p.kernelLive || null });
   }
   /** THE DEFAULT POLICY now — `browser.defaultEngine`: the user's own stored value › the fleet's (fleet.json `browserEngine`) ›
    *  'default' → `{value, source, fleet: {plugin, default} | null}`. */
@@ -1890,7 +1901,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null }, ...(environment ? { environment } : {}) };
   }
   /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
-  const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version } : {}) } : { kind: 'default' });
+  const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version, geolocationIsolated: be.engine.geolocationIsolated === true } : {}) } : { kind: 'default' });   // B-9584 r3795: what the launched program's probe said of its place (what RUNS)
   /** ONE mark + ONE For-you item per (profile, choice) until it is resolved (the build is back, or the user picks another). */
   function noteBuildMissing(p, c, v, engine = null) {
     const what = c.kind === 'build' ? c.version : c.kind === 'plugin' ? c.id : c.path;
@@ -9415,7 +9426,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     enginesHeld: () => { const r = engs(); try { return r && typeof r.held === 'function' ? r.held() : null; } catch { return null; } }, // B-f276 (r3305 (a)): the engine table's registry held
-    engineFactOf, engineRowsView, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
+    engineFactOf, engineRowsView, placeIsolatedFor, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
     installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
     cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _cliNow: () => cliNow() /* B-7a30: the launch's bounded stamp (the gate places a stall in it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
