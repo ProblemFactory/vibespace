@@ -25,8 +25,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePort, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, anchored } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (p) => require(path.join(REPO, p));
@@ -1614,9 +1615,25 @@ console.log('— §10 login × long-lived token (oat-only)');
 
   // SPAWN: a dead dir login + a valid token spawns ON THE TOKEN (the chip's promise is true)
   const spawnFake = { ...fake, _state: {}, _credsOf: () => ({ longLivedToken: true, spawnForm: 'securestorage', spawnEnvVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR', loginState: (dir, t) => loginState(files[dir], t) }),
-    readSubCreds: () => ({ loggedIn: true }), getOat: () => 'oat-value-fixture', _remoteCreds: () => null, loginStateOf: AM.loginStateOf };
+    readSubCreds: () => ({ loggedIn: true }), getOat: () => 'oat-value-fixture', _remoteCreds: () => null, loginStateOf: AM.loginStateOf,
+    // the accounts list's held fact (主开发 r3043; asked by the spawn door since the accounts unit's follow): the PRODUCT's own held() and
+    // refusal over the two fields they read — `_torn` (torn bytes kept aside) and `_hold` (src/store-read-hold.js): none held here
+    held: AM.held, _heldRefusal: AM._heldRefusal, _tornWords: AM._tornWords, _torn: null, _hold: null };
   const sp = AM.resolveForSpawn.call(spawnFake, 'sub-o');
   ck('resolveForSpawn: expired dir login (still parses loggedIn) + valid oat ⇒ oatOnly on the token', sp && sp.oatOnly === true && sp.localEnv.CLAUDE_CODE_OAUTH_TOKEN === 'oat-value-fixture');
+  // THE ACCOUNTS LIST HELD (主开发 r2947 / r3043): while the list could not be read, a start that names an account is refused BY NAME
+  // (accounts_unread, the hold's words) before any road — the token is never handed for a list nobody read; the person's own «this
+  // machine's login» stays theirs. The hold below is shaped as the helper's public face (held() → {file, code, since}, words())
+  let oatAsked = 0;
+  const heldFake = { ...spawnFake, getOat: () => { oatAsked++; return 'oat-value-fixture'; },
+    _hold: { held: () => ({ file: 'accounts.json', code: 'EIO', since: Date.now() }), words: () => 'the accounts could not be read (EIO) — nothing was changed and nothing starts on another login until they read; VibeSpace reads them again by itself' } };
+  const heldTry = (P) => { oatAsked = 0; try { return { r: P.resolveForSpawn.call(heldFake, 'sub-o'), oat: oatAsked }; } catch (e) { return { code: (e && e.code) || null, msg: String((e && e.message) || ''), oat: oatAsked }; } };
+  const hs = heldTry(AM);
+  ck('the accounts list HELD: a start on an account is refused by name (accounts_unread, the hold\'s words) — the token is never handed', hs.code === 'accounts_unread' && /could not be read \(EIO\)/.test(hs.msg) && hs.oat === 0);
+  ck('...and the person\'s own «this machine\'s login» stays theirs while held: no refusal, the CLI\'s global login', AM.resolveForSpawn.call(heldFake, 'subscription') === null);
+  const MUT = mutantCopies('login-expiry', REPO);
+  const hx = heldTry(MUT.load('src/accounts.js', anchored(src('src/accounts.js'), "    if (requested !== 'subscription' && this.held()) throw this._heldRefusal('starting a conversation on an account');\n", '', 'the spawn door does not ask the held list'), 'le-held').AccountManager.prototype);
+  ck('RED CONTROL (the spawn door does not ask the held list, as the release): the held start goes ON THE TOKEN — red', !hx.code && !!(hx.r && hx.r.oatOnly === true) && hx.oat > 0);
   files['sub-o'] = creds({ ...LIVE, refreshTokenExpiresAt: Date.now() + 9 * D }); // resolveForSpawn reads the REAL clock
   const sp2 = AM.resolveForSpawn.call(spawnFake, 'sub-o');
   ck('...a LIVE dir login keeps the dir (hot-swap + full capability), the token only as the remote secret', sp2 && !sp2.oatOnly && sp2.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR === 'sub-o' && sp2.secret?.value === 'oat-value-fixture');
