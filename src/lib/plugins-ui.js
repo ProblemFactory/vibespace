@@ -129,6 +129,8 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
 function serveRecordWords(p) {
   if (!p) return '';
   if (p.parkedKind === 'held') return t('VibeSpace cannot read the record of its OpenCode background service right now, so nothing was started or stopped — a serve from before may still be running. It reads the record again by itself; press again in a few minutes, or read it again from For you.');
+  if (p.parkedKind === 'torn' && p.recordNotice && p.recordNotice.undecidable) return t('The record of the OpenCode background service was damaged, and its bytes could not be compared with their kept copy — one from before may still be running. Remove that damaged record from VibeSpace\'s data folder by hand to start fresh.');   // r3675: the true way out
+  if (p.parkedKind === 'torn' && p.enabled) return t('The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch off and on again starts a new one.');   // r3675: the switch already shows on
   if (p.parkedKind === 'torn') return t('The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch on starts a new one.');
   if (p.parkedKind === 'torn-start') return t('The new serve ended before it answered. The serve from before the damaged record may still be running: stop it by hand, then turn the switch on again.');
   return '';

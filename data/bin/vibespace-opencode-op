@@ -123,13 +123,14 @@ function readRecord() {
   let buf;
   try { buf = fs.readFileSync(RECORD); } catch (e) {
     if (e && e.code === 'ENOENT') return null;
-    throw new Error(`the record of the OpenCode serve on this machine (${RECORD}) could not be read (${(e && (e.code || e.name)) || 'unreadable'}) — nothing was started or stopped, and a serve from before may still be running. Try again in a few minutes`);
+    throw new Error(`the record of the OpenCode serve on this machine (~/.vibespace/opencode-serve.json) could not be read (${(e && (e.code || e.name)) || 'unreadable'}) — nothing was started or stopped, and the serve from before may still be running. Try again in a few minutes`);
   }
   let r = null;
   try { r = JSON.parse(buf.toString('utf8')); } catch { r = null; }
   if (r && r.port > 0) return r;
   const kept = keepTorn(buf);
-  throw new Error(`the record of the OpenCode serve on this machine (${RECORD}) was damaged${kept ? ` (its bytes are kept beside it as ${kept})` : ''} — a serve from before may still be running, so none is started over it. Stop any \`opencode serve\` on that machine by hand, then remove the record to start fresh`);
+  // r3675: words an agent may read never say «stop any serve» (a person's own serve could be hit): the serve from before the damaged record, and the one way out that works here
+  throw new Error(`the record of the OpenCode serve on this machine (~/.vibespace/opencode-serve.json) was damaged${kept ? ` (its bytes are kept beside it as ${kept})` : ''} — the serve from before the damaged record may still be running, and a damaged record cannot name it, so none is started over it. Remove that record to start fresh`);
 }
 function deleteRecord() { try { fs.unlinkSync(RECORD); } catch { } }
 function writeRecord(r) {

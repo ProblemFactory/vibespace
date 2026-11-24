@@ -15575,4 +15575,6 @@ export default {
   "A serve from before the damaged record may still be running — VibeSpace could not stop it. Its damaged bytes are kept beside the record as {copy}. Stop the serve by hand if it runs.": "损坏记录之前的 serve 可能仍在运行——VibeSpace 无法停止它。损坏的字节另存在记录旁边，名为 {copy}。如果那个 serve 在运行，请手动停止。",
   "A serve from before the damaged record may still be running — VibeSpace could not stop it. Stop the serve by hand if it runs.": "损坏记录之前的 serve 可能仍在运行——VibeSpace 无法停止它。如果那个 serve 在运行，请手动停止。",
   "the record of the OpenCode background service": "OpenCode 后台服务的记录",   // lane bl-chat-b r3334 unit 1: the held list's plain name
+  "The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch off and on again starts a new one.": "OpenCode 后台服务的记录已损坏，所以 VibeSpace 不会自行启动 serve——之前的那个可能仍在运行。如果它在运行，请手动停止；把开关关掉再打开会启动一个新的。", // lane bl-chat-b r3675 (line 812's cure)
+  "The record of the OpenCode background service was damaged, and its bytes could not be compared with their kept copy — one from before may still be running. Remove that damaged record from VibeSpace's data folder by hand to start fresh.": "OpenCode 后台服务的记录已损坏，而且它的字节无法与另存的副本比对——之前的 serve 可能仍在运行。请手动从 VibeSpace 的数据文件夹里删除这份损坏的记录，以便重新开始。",
 };

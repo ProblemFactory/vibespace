@@ -2857,6 +2857,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                 // there is no plugin panel here, and an op that could never
                 // start the serve would make every remote action a dead end
                 autostart: true,
+                // r3675: no person's Start on this machine — a damaged record's words name what works here (remove the record)
+                personStart: false,
               });
             }
             const r = await runOpencodeOp(ocFacts, String(msg.action || ''), msg.params || {});

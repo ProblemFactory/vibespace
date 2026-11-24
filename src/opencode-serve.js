@@ -858,6 +858,9 @@ function createServeLocator({
   // terminal and every turn the serve runs inherits it — never a renice after the fork). The device agent passes NONE: its
   // serve's argv is the release's, byte for byte.
   startPrefix = null,
+  // r3675 (round wf_2d351a7c-4b1's must): a locator with NO person's Start on its machine (the device agent installs this module with
+  // its autostart on, and no op starts the serve on a person's behalf): its words name only what works there (no Start, no For you)
+  personStart = true,
 } = {}) {
   if (!dataDir) throw new Error('createServeLocator: dataDir is required (the record lives at data/opencode-serve.json)');
   const recordPath = path.join(dataDir, 'opencode-serve.json');
@@ -889,8 +892,17 @@ function createServeLocator({
   const REC_SHAPE = (r) => !!r && typeof r === 'object' && !Array.isArray(r) && Number.isInteger(r.port) && r.port > 0;
   let torn = null;   // torn bytes of THIS life: { copy, at, bytes, decided, notice } — their copy's base name and the person's decision
   const afterTornKids = new WeakSet();   // the serve a person's Start after torn bytes began, until it answers
-  const recWords = (h) => `the record of the OpenCode background service (opencode-serve.json in VibeSpace's data folder) could not be read (${(h && h.code) || 'unreadable'}) — nothing was started or stopped, and a serve from before may still be running. VibeSpace reads it again by itself every few minutes (or read it again from For you)`;
-  const tornWords = () => `the record of the OpenCode background service (opencode-serve.json) was damaged${torn && torn.copy ? ` (its bytes are kept as ${torn.copy})` : ''} — a serve from before may still be running, so VibeSpace starts none by itself. Stop it by hand if it runs; your own Start begins a new one`;
+  const recWords = (h) => (personStart
+    ? `the record of the OpenCode background service (opencode-serve.json in VibeSpace's data folder) could not be read (${(h && h.code) || 'unreadable'}) — nothing was started or stopped, and a serve from before may still be running. VibeSpace reads it again by itself every few minutes (or read it again from For you)`
+    : `the record of the OpenCode serve on this machine (opencode-serve.json in its .vibespace folder) could not be read (${(h && h.code) || 'unreadable'}) — nothing was started or stopped, and the serve from before may still be running. It is read again by itself every few minutes`);
+  // r3675: the true way out — a damaged record a person's Start cannot decide on (its bytes neither kept nor compared with their copy), and
+  // a machine with no person's Start: remove the record (it is read again at the next use); words to an agent never say «stop any serve»
+  const tornWords = () => {
+    const kept = torn && torn.copy ? ` (its bytes are kept as ${torn.copy})` : '';
+    if (!personStart) return `the record of the OpenCode serve on this machine (opencode-serve.json in its .vibespace folder) was damaged${kept} — the serve from before the damaged record may still be running, and a damaged record cannot name it, so none is started over it. Remove that record to start fresh: it is read again at the next use`;
+    if (torn && torn.undecidable) return `the record of the OpenCode background service (opencode-serve.json) was damaged${kept}, and its bytes could not be compared with their kept copy — the serve from before may still be running. Remove opencode-serve.json from VibeSpace's data folder by hand to start fresh: it is read again at the next use`;
+    return `the record of the OpenCode background service (opencode-serve.json) was damaged${kept} — a serve from before may still be running, so VibeSpace starts none by itself. Stop it by hand if it runs; your own Start (the switch, off and on again if it is on) begins a new one — or remove the record by hand`;
+  };
   const recHold = HOLD.create({
     file: recordPath, valid: REC_SHAPE, code: 'serve_record_unread', aside: (mark) => recordPath + '.corrupt-' + mark, words: recWords, now,
     log: (s) => log?.warn?.(`[opencode-serve] ${s}`),
@@ -900,23 +912,33 @@ function createServeLocator({
   const recordHeld = () => !!recHold.held() || !!(torn && !torn.decided);
   /** THE RECORD's ONE READ (r3334) → the record, or null when there is none — null too while it is withheld (ask recordHeld()) */
   function readRecord() {
-    if (recordHeld()) return null;
+    if (recHold.held()) return null;   // r3675: only a HOLD short-circuits — damaged bytes no person decided on are READ again (a record mended or removed by hand is seen at once)
     let read; try { const buf = fs.readFileSync(recordPath); read = { text: buf.toString('utf8'), buf }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: REC_SHAPE });
-    if (a.state === 'data') return a.value;
-    if (a.state === 'missing') return null;
-    // torn bytes the PERSON decided on (their Start, these same bytes) read as no record: the spawn writes a fresh one (their copy stays)
-    if (a.state === 'corrupt' && torn && torn.decided && torn.bytes && read.buf.equals(torn.bytes)) return null;
-    if (a.state === 'corrupt') torn = { copy: null, at: now(), bytes: read.buf.length <= TORN_KEEP_BYTES ? Buffer.from(read.buf) : null, decided: false, notice: true };
+    if (a.state === 'data' || a.state === 'missing') {
+      if (torn && !torn.decided) { torn = null; unparkRecord(); }   // r3675: mended or removed by hand — the person's decision; the ladder goes on as today
+      return a.state === 'data' ? a.value : null;
+    }
+    if (a.state === 'corrupt' && torn) {
+      // the SAME damaged bytes (compared whole when kept, by their size when too large to keep): the person's decision reads them as no record; an undecided park stands
+      const same = torn.bytes ? read.buf.equals(torn.bytes) : (Number.isInteger(torn.size) && torn.size === read.buf.length);
+      if (same && torn.decided) return null;
+      if (same) { if (!torn.bytes && read.buf.length <= TORN_KEEP_BYTES) torn.bytes = Buffer.from(read.buf); torn.size = read.buf.length; parkOnRecord(); return null; }
+    }
+    if (a.state === 'corrupt') torn = { copy: null, at: now(), bytes: read.buf.length <= TORN_KEEP_BYTES ? Buffer.from(read.buf) : null, size: read.buf.length, decided: false, notice: true, undecidable: !!(torn && torn.undecidable) };
     recHold.start(a);   // unread: held, read again on the ladder; torn: their copy at once (off the loop), then the 'torn' park
     parkOnRecord();
     return null;
   }
+
   /** the ladder PARKED on the record (r3334): 'torn' (damaged bytes, the person decides) or 'held' (a read that failed) — no deadline:
    *  the helper's lift, or the person's Start after torn bytes, is what moves it */
   function parkOnRecord() {
     if (state.parked && state.parkedKind !== 'held' && state.parkedKind !== 'torn') return;   // a runaway / blocked / crash park keeps its own words and deadline
-    const kind = torn && !torn.decided ? 'torn' : 'held';
+    // r3675 (should): never a park over a serve that IS running (a failed read inside an abandon's clear while a child lives): its runaway
+    // guard stays on and its chip stays true; the hold still refuses the record's writes and removals
+    if (state.client || state.child) return;
+    const kind = recHold.held() ? 'held' : (torn && !torn.decided ? 'torn' : 'held');   // r3675: the hold first (a copy that failed holds; every press is refused)
     const why = kind === 'torn' ? tornWords() : recWords(recHold.held());
     if (state.parked && state.parkedKind === kind && state.lastError === why) return;
     state.parked = true; state.parkedKind = kind; state.retryAfter = 0; state.lastError = why;
@@ -932,17 +954,24 @@ function createServeLocator({
       parkOnRecord(); return;
     }
     if (torn && !torn.decided) torn = null;   // the file reads again (mended or removed by hand): nothing is withheld any more
+    unparkRecord();
+    if (!state.stopping && autostartOn()) ensure().catch(() => { });
+  }
+  /** the record's park lifted (the helper's lift, or a record mended or removed by hand) */
+  function unparkRecord() {
     if (state.parked && (state.parkedKind === 'held' || state.parkedKind === 'torn')) { state.parked = false; state.parkedKind = null; state.lastError = null; state.retryAfter = 0; }
     notify();
-    if (!state.stopping && autostartOn()) ensure().catch(() => { });
   }
   /** a person's Start after torn bytes: THEIR decision on those bytes (the card said a serve from before may still run) */
   function decideTorn() { if (torn && !torn.decided) { torn.decided = true; torn.started = false; } }
   /** …the bytes it is about, when the helper's read (not ours) met them: their kept copy, read OFF the loop before the ladder's read */
   async function tornBytesOfCopy() {
     if (!torn || !torn.decided || torn.bytes || !torn.copy) return;
-    const b = await fs.promises.readFile(path.join(path.dirname(recordPath), torn.copy)).catch(() => null);   // undecidable: the bytes are judged again
-    if (b && torn && !torn.bytes && b.length <= TORN_KEEP_BYTES) torn.bytes = b;
+    const b = await fs.promises.readFile(path.join(path.dirname(recordPath), torn.copy)).catch(() => null);
+    if (!torn || torn.bytes) return;
+    if (b && b.length <= TORN_KEEP_BYTES) torn.bytes = b;
+    else if (b) torn.size = b.length;   // r3675: too large to keep — the decision is by its size
+    else { torn.decided = false; torn.undecidable = true; }   // r3675: its copy could not be read — the decision cannot be tied to the bytes: said (remove the record by hand)
   }
   function writeRecord(r) { try { writeJsonAtomic(recordPath, r); } catch (e) { log?.warn?.(`[opencode-serve] record write failed: ${e.message}`); } }
   /** THE SERVE SIGNAL (B-5ee1) — every signal to a serve pid this process holds no handle for (a runaway park of an
@@ -1299,7 +1328,8 @@ function createServeLocator({
     // ladder starting — so the Enable after a Disable cannot be served by the
     // run the Disable killed, and two ladders can never both reach adopt().
     const epoch = ++state.stopEpoch;
-    if (state.parked) {
+    // r3675: a 'torn' park READS AGAIN at each ladder (a record mended or removed by hand lifts it, no restart); every other park as before
+    if (state.parked && state.parkedKind !== 'torn') {
       // a runaway — and a 'blocked' record (round 10) — earns exactly one retry
       // per cooldown; a crash park stays terminal until an explicit start().
       // `retryAfter` is the ONE gate so a new retryable park cannot be added
@@ -1312,7 +1342,7 @@ function createServeLocator({
     if (Date.now() < state.backoffUntil) return null;
     const cmd = commandOf();
     // 1) reuse a recorded instance (a previous VibeSpace's child that outlived a SIGKILL restart)
-    if (torn && torn.decided && !torn.bytes && torn.copy) { await tornBytesOfCopy(); if (cancelled(epoch)) return null; }   // r3334: only after a person's Start on torn bytes
+    if (torn && torn.decided && !torn.bytes && !Number.isInteger(torn.size) && torn.copy) { await tornBytesOfCopy(); if (cancelled(epoch)) return null; }   // r3334: only after a person's Start on torn bytes
     const rec = readRecord();
     if (!rec && recordHeld()) { parkOnRecord(); return null; }   // r3334: WITHHELD — no serve is started by the record's silence
     // the serve's OWN empty directory (see ensureServeCwd): resolved before the
@@ -1481,7 +1511,8 @@ function createServeLocator({
    *  deliberate retry a crash/runaway park waits for — then runs the ladder.
    *  Returns the ensure() promise so the caller can report the outcome. */
   function start({ byPerson = false } = {}) {
-    if (byPerson && torn && !torn.decided && !recHold.held()) decideTorn();   // r3334: a PERSON's Start after torn bytes is their decision (never a boot replay's)
+    if (byPerson && torn && !torn.decided && !recHold.held()) decideTorn();
+    if (byPerson && torn && torn.decided && state.parkedKind === 'torn-start') torn.started = false;   // r3675: the next serve of a person's Start is said by name too   // r3334: a PERSON's Start after torn bytes is their decision (never a boot replay's)
     state.stopping = false;
     state.parked = false; state.parkedKind = null; state.crashes = 0;
     state.backoffUntil = 0; state.runawayUntil = 0; state.retryAfter = 0; state.lastError = null;
@@ -1557,7 +1588,7 @@ function createServeLocator({
     notify();
   }
   function snapshot() {
-    return { port: state.port, pid: state.pid, cpuNice: state.pid ? (state.cpuNice || null) : null, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client, recordNotice: torn && torn.notice ? { copy: torn.copy || null, at: torn.at } : null };
+    return { port: state.port, pid: state.pid, cpuNice: state.pid ? (state.cpuNice || null) : null, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client, recordNotice: torn && torn.notice ? { copy: torn.copy || null, at: torn.at, ...(torn.undecidable ? { undecidable: true } : {}) } : null };
   }
   if (stopOnExit) process.once('exit', () => { try { stop(); } catch { } });
   /** r3334: a person's Start / Disable while the record is HELD (a read that failed) → the refusal BY NAME (503 serve_record_unread),
