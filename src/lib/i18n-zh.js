@@ -599,6 +599,7 @@ export default {
   "Automatic continue OFF for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue ON.": "“{name}”的「自动继续：关」还没有存到磁盘——它的存储没有响应。如果 VibeSpace 在写入前重启，这个对话会恢复为「自动继续：开」。", // r3749: the session record's words (a listed unread conversation, an owed change)
   "Automatic continue ON for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue OFF.": "“{name}”的「自动继续：开」还没有存到磁盘——它的存储没有响应。如果 VibeSpace 在写入前重启，这个对话会恢复为「自动继续：关」。", // r3749: the session record's words (a listed unread conversation, an owed change)
   "A change to “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the change is lost.": "对“{name}”的更改还没有存到磁盘——它的存储没有响应。如果 VibeSpace 在写入前重启，这个更改会丢失。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "“{name}”: its record could not be read — this change is refused, because it would be lost at the next start. Stop ends the conversation.": "“{name}”：它的记录无法读取——这个更改被拒绝，因为下次启动时会丢失。「停止」会结束这个对话。", // r3920: a refused act on a listed conversation whose record could not be read
   "host unreachable": "主机不可达",
   "The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.": "这个会话所在的机器当前不可达 — 连接会自动重试；你发送的消息会排队，机器恢复后送达。",
   "Host": "远程主机",

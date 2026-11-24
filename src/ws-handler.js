@@ -465,6 +465,7 @@ function registerWsHandler(wss, ctx) {
   // or permission switch, a pool's cold restart), a setup flow's own terminal and the automation end verb keep it, as the release did
   const META_UNREAD_STOP = i18nKey('“{name}” was stopped here, but its record could not be read — if it ran on another machine, its side there may still be running.');   // r3749: its Stop ends the side here; with its record unread the hub cannot know a machine's side (i18n rows: zh / ja)
   const sayUnreadStop = (s) => { const nm = s._metaUnread.sock, k = META_UNREAD_STOP; try { ctx.serverNotice?.(`meta-unread-stop:${nm}`, k.replace('{name}', nm), { level: 2, i18n: { key: k, params: { name: nm } } }); } catch { } };   // r3245 (1) / r3749: a LISTED conversation whose record could not be read — its Stop alone names its socket (its process ended) and its record (the removal remembered for its read), and tells the person what may still run elsewhere
+  const META_UNREAD_ACT = i18nKey('“{name}”: its record could not be read — this change is refused, because it would be lost at the next start. Stop ends the conversation.');   // r3920: the words the asking page shows for a refused act (zh / ja rows)
   const META_UNREAD_PASSES = new Set(['attach', 'kill', 'view-close', 'resize', 'size-override']);   // r3749: what a listed unread conversation takes (the attach refuses by name itself) — ws message types, not a signal's argv (listed so the pid census never reads one as an argv)
   const endSessionBody = async (data, { reply, actBy, endTree = false } = {}) => {
     // Stale-serverId robustness (2.179.0): after a server restart the
@@ -967,9 +968,12 @@ function registerWsHandler(wss, ctx) {
 
     // r3749: a LISTED conversation whose record could not be read — the person's acts other than Stop are refused BY NAME (each would change memory only)
     function refusedUnread(data) {
-      const s = data && typeof data.sessionId === 'string' && activeSessions ? activeSessions.get(data.sessionId) : null;
+      const id = data && (typeof data.sessionId === 'string' ? data.sessionId : typeof data.webuiId === 'string' ? data.webuiId : null);   // (r3920: a rename names its row by webuiId)
+      const s = id && activeSessions ? activeSessions.get(id) : null;
       if (!s || !s._metaUnread || META_UNREAD_PASSES.has(data.type)) return false;
-      try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, reqId: data.reqId, code: 'session-meta-unread', message: `${s._metaUnread.sock}: its record could not be read — ${String(data.type).slice(0, 40)} is refused (it would change memory only); Stop ends it` })); } catch { }
+      const nm = s._metaUnread.sock;
+      try { ws.send(JSON.stringify({ type: 'error', sessionId: id, reqId: data.reqId, code: 'session-meta-unread', message: `${nm}: its record could not be read — ${String(data.type).slice(0, 40)} is refused (it would change memory only); Stop ends it` })); } catch { }
+      try { ws.send(JSON.stringify({ type: 'server-notice', key: `meta-unread-act:${nm}:${Date.now()}`, text: META_UNREAD_ACT.replace('{name}', nm), level: 2, i18n: { key: META_UNREAD_ACT, params: { name: nm } } })); } catch { }   // r3920: the asking page SHOWS it (a bare error has no page handler)
       return true;
     }
     async function handleMessage(data) {

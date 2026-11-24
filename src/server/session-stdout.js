@@ -531,14 +531,30 @@ const OWED_WORDS = {   // r3749: THE PERSON IS TOLD when an owed change's own tr
   on: i18nKey('Automatic continue ON for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue OFF.'),
   any: i18nKey('A change to “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the change is lost.'),
 };
-function tellOwed(sockName, fp) {
-  if (typeof serverNotice !== 'function') return;
-  const owed = owedPatch.get(fp) || {}; let name = sockName;
+const OWED_TELL_AGAIN_MS = (patchClock && patchClock.tellAgainMs) || 30000;   // r3920 (1): no page open when it was said ⇒ said again when one is (the hub's own page list, asked no oftener)
+const owedTold = new Map();   // fp → { sig, n, timer }: the person-facing change a page has been told of
+/** r3749 / r3920: the person is told of an owed change of THEIR OWN (the engine's stop fact is not theirs), ONCE per change and only when a
+ *  page received it — else it is said again when a page is there (a later moment, the next try's end); at a stop, to the pages connected
+ *  before the exit. → the count of pages that got it (0: not yet) */
+function tellOwed(sockName, fp, { atStop = false } = {}) {
+  if (typeof serverNotice !== 'function') return 0;
+  const owed = owedPatch.get(fp) || {};
+  const theirs = Object.fromEntries(Object.entries(owed).filter(([k]) => k !== 'stoppedBy'));
+  if (!Object.keys(theirs).length) return 0;
+  const sig = JSON.stringify(theirs), t0 = owedTold.get(fp) || {};
+  if (t0.sig === sig) return t0.n;   // this change was told: a page got it
+  let name = sockName;
   try { for (const x of activeSessions.values()) if (x && x.sockName === sockName) { name = x.name || sockName; break; } } catch { }
   const key = owed.autoResume === false ? OWED_WORDS.off : owed.autoResume === true ? OWED_WORDS.on : OWED_WORDS.any;
-  try { serverNotice(`meta-owed:${sockName}:${Date.now()}`, key.replace('{name}', name), { level: 2, i18n: { key, params: { name } } }); } catch { }
+  let n = 0; try { n = Number(serverNotice(`meta-owed:${sockName}:${Date.now()}`, key.replace('{name}', name), { level: 2, i18n: { key, params: { name } } })) || 0; } catch { n = 0; }
+  if (n > 0) { if (t0.timer) clearTimeout(t0.timer); owedTold.set(fp, { sig, n, timer: null }); return n; }
+  if (!atStop && !t0.timer) {   // r3920 (1): SAID MEANS A PAGE GOT IT — none did: said again while the change is still owed
+    const tm = setTimeout(() => { const x = owedTold.get(fp); if (x) x.timer = null; if (owedPatch.has(fp)) tellOwed(sockName, fp); }, OWED_TELL_AGAIN_MS);
+    if (tm.unref) tm.unref(); owedTold.set(fp, { ...t0, timer: tm });
+  }
+  return 0;
 }
-function doneOwing(fp) { const o = owedTries.get(fp); if (o && o.timer) clearTimeout(o.timer); owedTries.delete(fp); owedOwner.delete(fp); }
+function doneOwing(fp) { const o = owedTries.get(fp); if (o && o.timer) clearTimeout(o.timer); owedTries.delete(fp); owedOwner.delete(fp); const w = owedTold.get(fp); if (w && w.timer) clearTimeout(w.timer); owedTold.delete(fp); }
 function oweAgain(sockName, fp, owner, fresh = false) {
   if (owner) owedOwner.set(fp, owner);
   try { storeWriter().dirty(fp, { name: 'session-meta.write', debounceMs: META_DEBOUNCE_MS, rank: 0, produce: (o) => metaBytes(fp, o), onWritten: (ok) => metaWritten(fp, ok) }); } catch { }
@@ -546,7 +562,8 @@ function oweAgain(sockName, fp, owner, fresh = false) {
   if (fresh) { o.n = 0; o.said = false; }   // r3749: a NEW press joining the owed change gets tries of its own (and its own word at their end)
   if (o.timer) return;
   if (o.n >= PATCH_AGAIN_MS.length) {
-    if (!o.said) { o.said = true; console.warn(`[session] ${sockName}: a change of its record (${Object.keys(owedPatch.get(fp) || {}).join(', ')}) could not be written in ${o.n} tries of its own — it is kept and written with the next write of that record, or at the hub's stop`); tellOwed(sockName, fp); }   // r3749: the person is told, once, when the tries end — never while a try is still owed
+    if (!o.said) { o.said = true; console.warn(`[session] ${sockName}: a change of its record (${Object.keys(owedPatch.get(fp) || {}).join(', ')}) could not be written in ${o.n} tries of its own — it is kept and written with the next write of that record, or at the hub's stop`); }
+    tellOwed(sockName, fp);   // r3749 / r3920: the person is told when the tries end (never while a try is owed); once per change, when a page got it
     return;
   }
   o.timer = setTimeout(() => { o.timer = null; o.n++; patchSessionMeta(sockName, {}, { owner: owedOwner.get(fp) || owner }); }, PATCH_AGAIN_MS[o.n]);
@@ -565,8 +582,8 @@ function metaBytes(fp, o) {
   let base = null;
   if (t !== undefined) { try { base = JSON.parse(t); } catch { base = null; } }
   else if (o && o.sync) {   // the stop's flush (sync by nature) — r3749: never on a record whose last read off the loop never answered (a storage that may hang the exit)
-    if (stalledMeta.has(fp)) { console.warn(`[session] ${sock}: the stop's flush does not read its record (its last read off the loop gave no answer in its bound) — the owed change (${keys}) is NOT written`); return plain(); }
-    try { base = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { console.warn(`[session] ${sock}: the stop's flush could not read its record (${(e && (e.code || e.message)) || e}) — the owed change (${keys}) is NOT written`); return plain(); }
+    if (stalledMeta.has(fp)) { console.warn(`[session] ${sock}: the stop's flush does not read its record (its last read off the loop gave no answer in its bound) — the owed change (${keys}) is NOT written`); tellOwed(sock, fp, { atStop: true }); return plain(); }   // r3920 (2): the pages connected are told before the exit
+    try { base = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { console.warn(`[session] ${sock}: the stop's flush could not read its record (${(e && (e.code || e.message)) || e}) — the owed change (${keys}) is NOT written`); tellOwed(sock, fp, { atStop: true }); return plain(); }
   }
   else return STORE_LATER;
   const who = owedOwner.get(fp) || null;
@@ -615,7 +632,7 @@ function patchMetaOnce(sockName, fp, patch, tries, owner, tok = null) {
   const owed = pendingMeta.get(fp);
   if (owed !== undefined) { let m = null; try { m = JSON.parse(owed); } catch { m = null; } return m && typeof m === 'object' && mine(m) ? writeSessionMeta(sockName, { ...m, ...patch }, { prev: m, flagOnly }) : Promise.resolve(false); }
   const seq0 = metaSeq.get(fp) || 0;
-  return fs.promises.readFile(fp, 'utf-8').then((t) => { stalledMeta.delete(fp); try { return JSON.parse(t); } catch { return null; } }, () => { stalledMeta.delete(fp); return null; }).then((m) => {   // (r3749: a read that answers, even with an error, ends the stall)
+  return fs.promises.readFile(fp, 'utf-8').then((t) => { stalledMeta.delete(fp); try { return JSON.parse(t); } catch { return null; } }, (e) => { stalledMeta.delete(fp); if (tok && e && e.code === 'ENOENT') tok.never = true; return null; }).then((m) => {   // (r3920: a MISSING record never lands by trying again — no tries, never «its storage did not answer»)   // (r3749: a read that answers, even with an error, ends the stall)
     if (tok && tok.dead) return false;
     if (pendingMeta.has(fp)) return patchMetaOnce(sockName, fp, patch, tries, owner, tok);   // a newer copy in memory: patch IT (never «gave up» while one is there)
     if ((metaSeq.get(fp) || 0) !== seq0) return tries > 0 ? patchMetaOnce(sockName, fp, patch, tries - 1, owner, tok) : false;
@@ -816,7 +833,7 @@ function deleteSessionMetaNow(sockName) {
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   const fp = path.join(META_DIR, sockName + '.json');
-  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp); owedPatch.delete(fp); doneOwing(fp);   // (the patch's counter, owed keys and own tries go with the file)
+  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp); owedPatch.delete(fp); doneOwing(fp); stalledMeta.delete(fp);   // (the patch's counter, owed keys, own tries, word and stall fact go with the file)
   try { storeWriter().forget(fp); } catch {}   // its pending write dropped; one in flight lands BEFORE the unlink, never after
   try { fs.unlinkSync(fp); } catch {}
 }
