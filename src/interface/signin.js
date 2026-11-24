@@ -25,6 +25,7 @@
 //     its logins (as the plain form).
 const fsp = require('fs').promises;
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const T = require('../signin-table.js');
 const { loginHtml } = require('../login-page.js');
@@ -108,8 +109,11 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
   function factsNow() {
     if (!witness) { sayOnce('no-folder', 'the start line names no data folder (signin.folder): the sign-in table is read as before — a missing table is a new instance (an older supervisor)'); return null; }
     if (facts) return facts;
-    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, home: witness.home, uid: witness.uid, env: witness.declared ? { [SW.DECLARE_ENV]: 'required' } : {}, throwaway: witness.throwaway ? 'throwaway' : false, ...(witness.varTmp ? { varTmp: witness.varTmp } : {}) }); }   // varTmp: a suite's scratch rung only (no start-line field)
+    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, home: witness.home, uid: witness.uid, env: {}, throwaway: witness.throwaway ? 'throwaway' : false, ...(witness.varTmp ? { varTmp: witness.varTmp } : {}) }); }   // varTmp: a suite's scratch rung only (no start-line field)
     catch (e) { sayOnce('facts', `the data folder's sign-in facts could not be read (${(e && e.code) || 'error'}) — the table is read as before`); facts = null; }
+    // 主开发 r3788 (the round's shoulds): what the start TOOK is said once — a defaulted home or uid (a short line), and a throwaway start
+    if (facts && (witness.home === undefined || witness.uid === undefined)) sayOnce('defaulted', `the start line names no ${[witness.home === undefined ? 'home' : '', witness.uid === undefined ? 'uid' : ''].filter(Boolean).join(' and ')} (signin.home / signin.uid): this process's own are read — the home ${os.homedir()}, the uid ${facts.uid}`);
+    if (facts && witness.throwaway) sayOnce('throwaway', 'a throwaway start (signin.throwaway): no sign-in witness is read or written — a lost or replaced table opens as a new instance');
     if (facts && facts.netHome) sayOnce('net-home', `the home folder ${facts.netHome} is a network mount: the piped form does not read its sign-in witness (a limit) — only the persistent local places`);
     return facts;
   }

@@ -14,9 +14,13 @@
 //   ⑧ 主开发 r3629 (round w43tjwjp5): a line naming the folder but not the home or uid gets the plain form's defaults (held, never «no
 //     place») — RED the old «no place»; the declaration's cell is the plain form's own (SW.declaredCell): the page's «off» gives way to
 //     the line's password, the page's turn-off refused 409 — RED each call cut; the turn-off removes the witness at once — RED cut
+//   ⑨ 主开发 r3788 (round w80b4230f's must): THE START LINE's WALK — every field by four states (absent, empty, of the wrong kind, of the
+//     wrong value): only ABSENT is defaulted, every named value that is not this process's own is refused by name — RED each check cut
+//     (the wrong uid's red OPENS against a witness); what the start took is said once (a defaulted home / uid, a throwaway start)
 import fs from 'node:fs';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -149,7 +153,7 @@ console.log('⑥ the declaration: named in the start line — never read from th
 console.log('⑦ the start line\'s named fields, judged by name (src/interface/main.js), additive');
 {
   const it = install('line'), base = { file: it.table };
-  const bad = await M.signinWhy({ ...base, folder: 'relative/data' }, UID), badUid = await M.signinWhy({ ...base, folder: it.data, uid: 'x' }, UID), good = await M.signinWhy({ ...base, folder: it.data, root: it.root, home: it.home, uid: UID, throwaway: false, declared: false }, UID), older = await M.signinWhy(base, UID);
+  const bad = await M.signinWhy({ ...base, folder: 'relative/data' }, UID), badUid = await M.signinWhy({ ...base, folder: it.data, uid: 'x' }, UID), good = await M.signinWhy({ ...base, folder: it.data, root: it.root, home: os.homedir(), uid: UID, throwaway: false, declared: false }, UID), older = await M.signinWhy(base, UID);
   const ill = [{ folder: '' }, { folder: null }, { folder: it.data, root: 'rel/root' }, { folder: it.data, home: 'rel/home' }, { folder: it.data, throwaway: 'yes' }, { folder: it.data, declared: 1 }];
   const illWhy = []; for (const f of ill) illWhy.push(await M.signinWhy({ ...base, ...f }, UID));
   ok(illWhy.every((w) => typeof w === 'string' && /signin\.|data folder/.test(w)), 'every other ill-named field — an empty or null folder, a relative root or home, a throwaway or declared that is not true or false: a bad start BY NAME', illWhy);
@@ -228,6 +232,70 @@ console.log('⑧ 主开发 r3629 (round w43tjwjp5): the plain form\'s defaults f
   // ONE IMPLEMENTATION (r3629 must 5): the interface asks the shared cell and writes nothing of its rule
   const calls = SIGNIN_SRC.split('SW.declaredCell(').length - 1;
   ok(calls === 1 && !SIGNIN_SRC.includes('=required is set') && !SIGNIN_SRC.includes("'signin-required'"), `src/interface/signin.js asks SW.declaredCell (${calls} call) and holds none of the declaration's words or codes`);   // stale-pins: kept — a deliberate absence check (the words live in the shared cell)
+}
+
+console.log('⑨ 主开发 r3788: the start line\'s walk — only an ABSENT value is defaulted; a named value that is not this process\'s own is refused by name');
+{
+  const MAIN_SRC = fs.readFileSync(path.join(REPO, 'src/interface/main.js'), 'utf-8');
+  const it = install('walk'), base = { file: it.table, folder: it.data }, other = install('walk-other');
+  const OTHER_UID = UID === null ? 4242 : UID + 1;
+  // [field, state, the line's fields, the expected word] — 'refused' ⇒ a bad start BY NAME (its why names the field); otherwise the cell is accepted
+  const CELLS = [
+    ['folder', 'absent (no field named)', { file: it.table }, 'today'],
+    ['folder', 'absent (other fields named)', { file: it.table, root: it.root, uid: UID }, 'refused'],
+    ['folder', 'empty', { file: it.table, folder: '' }, 'refused'], ['folder', 'wrong kind', { file: it.table, folder: 5 }, 'refused'],
+    ['folder', 'wrong value (not the table\'s folder)', { file: it.table, folder: other.data }, 'refused'],
+    ['root', 'absent', base, 'default'], ['root', 'empty', { ...base, root: '' }, 'refused'], ['root', 'wrong kind', { ...base, root: 5 }, 'refused'],
+    ['root', 'wrong value (not the folder\'s parent)', { ...base, root: other.root }, 'refused'],
+    ['home', 'absent', base, 'default'], ['home', 'empty', { ...base, home: '' }, 'refused'], ['home', 'wrong kind', { ...base, home: 5 }, 'refused'],
+    ['home', 'wrong value (not this account\'s home)', { ...base, home: it.home }, 'refused'],
+    ['uid', 'absent', base, 'default'], ['uid', 'empty (null)', { ...base, uid: null }, 'refused'], ['uid', 'wrong kind', { ...base, uid: '1000' }, 'refused'],
+    ['uid', 'wrong value (another account\'s)', { ...base, uid: OTHER_UID }, 'refused'], ['uid', 'wrong value (negative)', { ...base, uid: -1 }, 'refused'],
+    ...(UID !== 0 ? [['uid', 'wrong value (0)', { ...base, uid: 0 }, 'refused']] : []),
+    ['throwaway', 'absent', base, 'default'], ['throwaway', 'empty', { ...base, throwaway: '' }, 'refused'], ['throwaway', 'wrong kind', { ...base, throwaway: 'yes' }, 'refused'],
+    ['declared', 'absent', base, 'default'], ['declared', 'empty', { ...base, declared: '' }, 'refused'], ['declared', 'wrong kind', { ...base, declared: 1 }, 'refused'],
+  ];
+  const wrong = [];
+  for (const [field, state, line, want] of CELLS) {
+    const why = await M.signinWhy(line, UID), w = M.witnessOf(line);
+    const okCell = want === 'refused' ? typeof why === 'string' && why.includes(`signin.${field}`)
+      : want === 'today' ? why === null && w === null
+      : why === null && !!w && (field === 'root' ? w.root === it.root : field === 'home' || field === 'uid' ? w[field] === undefined : w[field] === false);
+    if (!okCell) wrong.push({ field, state, want, why, w });
+  }
+  ok(wrong.length === 0, `the walk's ${CELLS.length} cells: an absent root / home / uid / throwaway / declared is DEFAULTED (the folder's parent, this process's home and uid, false); every empty, ill-kinded or wrong value is refused BY NAME (exit 2); a line naming no field keeps today's reading`, wrong);
+  // THE MUST's SCENE: a start line naming ANOTHER account's uid — refused; RED the check cut: the line is taken and the table OPENS against a witness
+  const mustLine = { ...base, uid: OTHER_UID };
+  const why = await M.signinWhy(mustLine, UID);
+  ok(typeof why === 'string' && why.includes(`${OTHER_UID}`) && why.includes('not this process'), `another account's uid in the start line: a bad start BY NAME («${why}»)`);
+  const cut = (from, to, label) => MUT.load('src/interface/main.js', anchored(MAIN_SRC, from, to, label), `main-${label}`);
+  const Mu = cut("    if (signin.uid !== undefined && signin.uid !== own) return", "    if (false) return", 'uid-own-cut');
+  const mu = install('walk-uid-red'); plantId(mu, 'vi-0a1b2c3d4e5f');
+  const uhome = path.join(mu.base, 'process-home'), uw = path.join(uhome, '.vibespace', 'local', SW.witnessFileOf(mu.root));
+  fs.mkdirSync(path.dirname(uw), { recursive: true, mode: 0o700 }); fs.writeFileSync(uw, J(SW.witnessDoc({ root: mu.root, dataDir: mu.data, id: 'vi-5f4e3d2c1b0a' })));
+  const muLine = { file: mu.table, folder: mu.data, uid: OTHER_UID };
+  const taken = await Mu.signinWhy(muLine, UID);
+  const was = process.env.HOME; process.env.HOME = uhome;
+  let tu; try { tu = tableOf(mu, { witness: { ...Mu.witnessOf(muLine), varTmp: path.join(mu.base, 'vartmp') } }); await tu.load(); } finally { process.env.HOME = was; }
+  ok(taken === null && !tu.held, 'RED CONTROL: the uid check cut — the line is TAKEN and the table OPENS though this account\'s home holds a witness of another folder (the round\'s scene)');
+  const reds = [
+    ['home-own-cut', "    if (signin.home !== undefined && !(await sameFolder(signin.home, os.homedir()))) return", "    if (false) return", { ...base, home: it.home }],
+    ['root-own-cut', "    if (signin.root !== undefined && path.resolve(signin.root) !== path.dirname(folder)) return", "    if (false) return", { ...base, root: other.root }],
+    ['folder-own-cut', "    if (folder !== path.dirname(path.resolve(signin.file))) return", "    if (false) return", { file: it.table, folder: other.data }],
+    ['stray-cut', "    if (stray.length) return", "    if (false) return", { file: it.table, root: it.root, uid: UID }],
+  ];
+  const acceptedCut = [];
+  for (const [label, from, to, line] of reds) if ((await cut(from, to, label).signinWhy(line, UID)) === null) acceptedCut.push(label);
+  ok(acceptedCut.length === reds.length, `RED CONTROL: each check cut, its wrong value is TAKEN (${acceptedCut.join(', ')})`);
+  // what the start TOOK is said once — a defaulted home and uid, a throwaway start
+  const said = (re) => lines.filter((l) => re.test(l)).length;
+  const sd = install('walk-said'); plantId(sd, 'vi-0c1d2e3f4a5b'); lines.length = 0;
+  const td = tableOf(sd, { witness: { ...M.witnessOf({ file: sd.table, folder: sd.data }), varTmp: path.join(sd.base, 'vartmp') } }); await td.load(); await td.ensure({});
+  const st = install('walk-throwaway'); plantId(st, 'vi-0d1e2f3a4b5c');
+  const tt = tableOf(st, { witness: witnessCfg(st, { throwaway: true }) }); await tt.load();
+  ok(said(/names no home and uid \(signin\.home \/ signin\.uid\): this process's own are read/) === 1 && said(/a throwaway start \(signin\.throwaway\): no sign-in witness is read or written/) === 1,
+    'what the start took is SAID ONCE in the journal: the home and the uid defaulted (which ones it read), and a throwaway start (no witness read)', lines.slice(-4));
+  ok(!SIGNIN_SRC.includes("'required'"), 'src/interface/signin.js spells no value of the declaration (the stand-in environment is gone; the cell is the shared module\'s)');   // stale-pins: kept — a deliberate absence check
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -34,6 +34,7 @@
 // Once it listens it makes no synchronous disk call (scripts/test-interface-process.mjs holds it as a law, with the graph).
 const net = require('net');
 const path = require('path');
+const os = require('os');
 const fsp = require('fs').promises;
 const { create } = require('./index.js');
 const signinTable = require('./signin.js');
@@ -53,6 +54,11 @@ async function ownFolderWhy(dir, what, uid = typeof process.getuid === 'function
 }
 /** the link's folder judged → null (this account's alone) | the words of why not. `uid` = this process's account. */
 const linkFolderWhy = (link, uid) => ownFolderWhy(path.dirname(path.resolve(link)), "the link's folder", uid);
+/** two paths name the same folder: equal resolved, else equal real paths (a link to the home is the home); one that cannot be read is not */
+async function sameFolder(a, b) {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  try { return (await fsp.realpath(a)) === (await fsp.realpath(b)); } catch { return false; }
+}
 /** the start line's sign-in table judged → null | the words of why it is no start (piece B3b-1) */
 async function signinWhy(signin, uid) {
   if (!signin || typeof signin !== 'object' || Array.isArray(signin)) return 'the start line names no sign-in table (signin.file) — the interface holds the table and never guesses its path';
@@ -60,11 +66,24 @@ async function signinWhy(signin, uid) {
   if (!path.isAbsolute(signin.file)) return `the sign-in table's path is not absolute (${JSON.stringify(signin.file.slice(0, 120))})`;
   const c = signin.clerk;
   if (c != null && (typeof c !== 'object' || Array.isArray(c) || typeof c.publishableKey !== 'string' || !(c.allowedEmails == null || typeof c.allowedEmails === 'string' || Array.isArray(c.allowedEmails)))) return 'the start line\'s single sign-on settings are not { publishableKey, allowedEmails }';
-  // B-dc3f (1) (主开发 r3433 Q1): THE NAMED FIELDS of the same verdict — ADDITIVE: a line without `folder` keeps today's reading by name
-  if (signin.folder !== undefined) {
+  // B-dc3f (1) (主开发 r3433 Q1): THE NAMED FIELDS of the same verdict — ADDITIVE: a line that names none of them keeps today's reading by name.
+  // 主开发 r3788 (round w80b4230f's must): A NAMED VALUE THAT IS NOT THIS PROCESS's OWN IS REFUSED BY NAME (a bad start, exit 2 — the
+  // supervisor's fault, said) — never read as a place with no witness; only an ABSENT value is defaulted (to this process's own, as the
+  // plain form). The folder is the table's own folder, the root its parent, the home and the uid this process's.
+  const WITNESS_FIELDS = ['root', 'home', 'uid', 'throwaway', 'declared'];
+  if (signin.folder === undefined) {
+    const stray = WITNESS_FIELDS.filter((k) => signin[k] !== undefined);
+    if (stray.length) return `the start line names ${stray.map((k) => `signin.${k}`).join(', ')} but no data folder (signin.folder) — a misspelled or lost folder is no start`;
+  } else {
     if (typeof signin.folder !== 'string' || !path.isAbsolute(signin.folder)) return `the sign-in table's data folder (signin.folder) is not an absolute path (${JSON.stringify(String(signin.folder).slice(0, 120))})`;
+    const folder = path.resolve(signin.folder);
+    if (folder !== path.dirname(path.resolve(signin.file))) return `the sign-in table's data folder (signin.folder) ${folder} is not the folder of its table ${signin.file}`;
     for (const k of ['root', 'home']) if (signin[k] !== undefined && (typeof signin[k] !== 'string' || !path.isAbsolute(signin[k]))) return `the sign-in table's ${k} (signin.${k}) is not an absolute path`;
-    if (signin.uid !== undefined && signin.uid !== null && !Number.isInteger(signin.uid)) return 'the sign-in table\'s uid (signin.uid) is not a whole number';
+    if (signin.root !== undefined && path.resolve(signin.root) !== path.dirname(folder)) return `the sign-in table's root (signin.root) ${signin.root} is not its data folder's own (${path.dirname(folder)})`;
+    if (signin.home !== undefined && !(await sameFolder(signin.home, os.homedir()))) return `the sign-in table's home (signin.home) ${signin.home} is not this account's home (${os.homedir()})`;
+    const own = uid !== undefined ? uid : (typeof process.getuid === 'function' ? process.getuid() : null);
+    if (signin.uid !== undefined && !Number.isInteger(signin.uid)) return 'the sign-in table\'s uid (signin.uid) is not a whole number';
+    if (signin.uid !== undefined && signin.uid !== own) return `the sign-in table's uid (signin.uid) ${signin.uid} is not this process's own (${own})`;
     for (const k of ['throwaway', 'declared']) if (signin[k] !== undefined && typeof signin[k] !== 'boolean') return `the sign-in table's ${k} (signin.${k}) is not true or false`;
   }
   return ownFolderWhy(path.dirname(signin.file), "the sign-in table's folder", uid);
