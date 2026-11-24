@@ -139,8 +139,8 @@ export class MobileNav {
     });
     // THE SEARCH'S HOME (lane mask-value-shape, the strip's step two — page §4 «search → the window's title bar»; the design's
     // author 2026-11-17: search lives where the conversation's NAME lives, never on the strip): a ≥ 36 px magnifier at the bar's
-    // right end, before the ⋯ — shown while the window on show is a conversation with a search bar; it never folds (no row of
-    // NAV_FOLD_ORDER), the title gives up its room first
+    // right end, before the ⋯ — shown while the window on show is a conversation with a search bar; the compact class never folds
+    // it (no row of NAV_FOLD_ORDER), the title gives up its room first; the regular class's ladder folds it into ⋯ once the head yields
     const searchBtn = document.getElementById('mobile-nav-search');
     if (searchBtn) { searchBtn.innerHTML = UI_ICONS.search; searchBtn.title = t('Search this conversation'); searchBtn.setAttribute('aria-label', searchBtn.title); searchBtn.onclick = (e) => { e.stopPropagation(); this._shownChat()?._search?.open?.(); }; }
     this._setupGestures();
@@ -655,9 +655,14 @@ export class MobileNav {
     // as the base drew them (lane phone-titlebar-title's fold gives the title the room there)
     // lane phone-six r2: a PATH-shaped name (a files window's folder) is its last segment, the whole title in the title attribute
     this._head = { win, count };
+    // THE SEARCH's DOOR IS SET BEFORE THE HEAD IS PAINTED (row 381, 主开发 r3875 — the phone-six restack's cure, its product half): the
+    // head's ladder measures the bar AS DRAWN, so the magnifier must already stand in it. In the regular class it is a 44 px door that
+    // FOLDS into ⋯ once the head yields (style.css: data-yield with ⋯ shown hides it); set after the paint, a head measured at the
+    // FIRST rung without it (a very short name, under 44 px to spare) took the door's 44 px when it appeared: the bar's last button
+    // stood past its right edge until the next change (box row 716 at 735 × 867: 770.3 of 735; at 669 no first rung has room at all)
+    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }
     this._paintHead();
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
-    { const sb = document.getElementById('mobile-nav-search'); if (sb) sb.classList.toggle('on', !this.app.phoneHome?.shown?.() && !!this._shownChat()?._search); }
     this.bar?.update?.();
     this.updateDesktopsDoor();
     this.split?.apply(); // lane phone-six: the side by side follows every window change (a pane gone, another window shown)

@@ -369,6 +369,76 @@ try {
     const N = await evalJs(NUMS);
     await shot('tray-nav-669.png', { x: 0, y: 0, width: 669, height: 48 });
     check(`③ 669 × 867 beside the list: the For-you numbers yield to the name — ONE number (the honest count, 3, urgent), the name ${N.nameW} px${N.whole ? ', whole' : ''} («${N.name}», ladder step «${N.yield}»)`, N.vc === 'regular' && ['badges', 'gear'].includes(N.yield) && N.nums.length === 1 && N.nums[0].n === '3' && N.nums[0].seg === 'urgent' && (N.whole || N.nameW >= 100), N); // drawn WHOLE, or ≥ 100 px (claim 2: «Session 1» is whole at 79 px)
+    // ③b THE SEARCH's DOOR BEFORE THE HEAD (row 381, 主开发 r3875 / r3887 — the phone-six restack's cure, its product half in
+    // mobile-nav.js updateTitle): the head's ladder measures the bar AS DRAWN, so the magnifier is set before the paint. THE SCENE the
+    // first measure (box row 702) did not reach, BUILT BY MEASURE: the same conversation's door turned off; a one-glyph name painted
+    // and R read — the room the title has at the ladder's FIRST rung (its box plus the bar's free space); the name then set by width to
+    // R − 22 px in ONE paint (a run of measured glyphs), so it sits at the first rung with about 22 px to spare; the more control and the
+    // state word unchanged. Only if even one glyph yields at 669 is the regular portrait widened, by the shortfall. If no regular
+    // portrait width gives the first rung any room, the leg SAYS so and stays green (case (1) by measure). RED CONTROL, the same run:
+    // TODAY's order as the release had it (the head painted, THEN the door) — what a person sees printed; then the cure's order.
+    const BUILD3B = (W) => `(async () => {
+      const mn = app._mobileNav, nav = document.getElementById('mobile-nav'), el = mn && mn._titleEl, sb = document.getElementById('mobile-nav-search');
+      const chat = mn && mn._shownChat && mn._shownChat(), win = mn && mn._titleWin && mn._titleWin();
+      const vc = app.viewportClass && app.viewportClass(), column = !!nav && getComputedStyle(nav).flexDirection === 'column';
+      if (!mn || !nav || !el || !sb || !chat || !chat._search || !win) return { W: ${W}, vc, column, missing: { mn: !!mn, nav: !!nav, el: !!el, sb: !!sb, chat: !!chat, win: !!win } };
+      if (vc !== 'regular' || column) return { W: ${W}, vc, column, scene: false };
+      const search = chat._search, title0 = win.title, frames = (n) => new Promise((r) => { const go = (k) => (k ? requestAnimationFrame(() => go(k - 1)) : r()); go(n); });
+      const shown = (x) => !!x && x.offsetWidth > 0, r1 = (x) => Math.round(x * 10) / 10;
+      const width = (text) => { const p = document.createElement('span'); p.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit'; p.textContent = text; el.appendChild(p); const w = p.getBoundingClientRect().width; p.remove(); return w; };
+      const head = () => {
+        const name = (win.title || '').trim(), min = name.length > 12 ? name.slice(0, 12).trimEnd() + '…' : name;   // the release's readable minimum (twelve Latin glyphs + «…»)
+        const full = width(name), need = Math.min(full, width(min)), got = el.getBoundingClientRect().width;
+        const last = Math.max(0, ...[...nav.children].filter(shown).map((b) => b.getBoundingClientRect().right)), navR = nav.getBoundingClientRect().right;
+        return { rung: nav.dataset.yield || 'first', name, got: r1(got), full: r1(full), need: r1(need), free: r1(navR - last), door: shown(sb), more: shown(document.getElementById('mobile-nav-more')), state: (mn.bar && mn.bar.state && (mn.bar.state.textContent || '').trim()) || '', last: r1(last), navR: r1(navR), nameOk: got + 0.5 >= need, barOk: last <= navR + 1 };
+      };
+      const off = async (title) => { chat._search = null; app.wm.setTitle(win.id, title); mn.updateTitle(); await frames(2); return head(); };
+      try {
+        const one = await off('N');
+        if (one.rung !== 'first' || !one.nameOk || !one.barOk) {
+          // even one glyph yields here: the room the title would have at the first rung is read with the rung forced, and the shortfall said
+          delete nav.dataset.yield; await frames(1);
+          const forced = head(), R0 = forced.got + Math.max(0, forced.free), pad = one.got - one.full;
+          return { W: ${W}, vc, column, scene: false, noRoom: r1(Math.max(1, one.full + pad + 22 - R0)), one, forced };
+        }
+        const pad = one.got - one.full, R = one.got + Math.max(0, one.free);   // the title's box at the first rung + the bar's free space
+        const target = R - pad - 22;                                            // the name's own width: R − 22 px, its box's padding kept
+        const wN = width('N'), wn = width('n'), k = Math.max(0, Math.floor((target - wN) / wn));
+        const name = 'N' + 'n'.repeat(k);
+        const pick = await off(name);
+        pick.R = r1(R); pick.spare = r1(R - (pick.full + pad)); pick.W = ${W};
+        if (pick.rung !== 'first' || !pick.nameOk || !pick.barOk || !(pick.spare >= 0 && pick.spare < 44)) return { W: ${W}, vc, column, scene: false, one, pick };
+        // TODAY's ORDER (the RED control): the door's conversation again, the head painted FIRST, the door set after
+        chat._search = search; mn._paintHead(); sb.classList.toggle('on', !app.phoneHome?.shown?.() && !!mn._shownChat()?._search); await frames(2);
+        const today = head(); await frames(30); const todayLater = head();
+        // the CURE's ORDER (the product's own updateTitle at this tip), from the same scene (the door off again first)
+        await off(name); chat._search = search; mn.updateTitle(); await frames(2);
+        const cure = head();
+        return { W: ${W}, vc, column, scene: true, pick, today, todayLater, cure };
+      } finally { chat._search = search; app.wm.setTitle(win.id, title0); mn.updateTitle(); }
+    })()`;
+    let DOOR = null, W3B = 669;
+    for (let tries = 0; tries < 4; tries++) {
+      if (tries) { await phone(W3B, 867); await load(); await settled('regular'); await windowArea(); await sleep(800); }
+      DOOR = await evalJs(BUILD3B(W3B));
+      if (DOOR.scene || DOOR.noRoom == null || DOOR.missing) break;
+      W3B = Math.ceil(W3B + DOOR.noRoom);   // widen by the shortfall: the title's room grows px for px with the width at the same rung
+    }
+    // r3887 (1): THE SCENE PRINTED BEFORE IT IS JUDGED — R, the name's width, the spare, the rung, the door, the viewport it ended on
+    const P3B = DOOR && DOOR.pick;
+    console.log(`    ③b SCENE: viewport ${DOOR && DOOR.W} × 867 (${DOOR && DOOR.vc}${DOOR && DOOR.column ? ', a column' : ''}) · R ${P3B ? P3B.R : '—'} px · the name «${P3B ? P3B.name : '—'}» ${P3B ? P3B.full : '—'} px · spare ${P3B ? P3B.spare : '—'} px · rung ${P3B ? P3B.rung : '—'} · door ${P3B ? (P3B.door ? 'shown' : 'off') : '—'} · scene ${DOOR && DOOR.scene ? 'BUILT' : 'NOT BUILT'} — ${JSON.stringify(DOOR)}`);
+    if (DOOR && DOOR.scene) {
+      const same = (a, b) => a.more === b.more && a.state === b.state;
+      // r3887 (2): what a person sees in TODAY's order — the name's width against its need once the door appears, and still so later
+      console.log(`    ③b TODAY's ORDER (what a person sees): the door ${DOOR.today.door ? 'appears' : 'does not appear'}; the name «${DOOR.today.name}» ${DOOR.today.got} px of the ${DOOR.today.need} it needs, the last button at ${DOOR.today.last} of ${DOOR.today.navR} — after 30 frames ${DOOR.todayLater.got} px, last ${DOOR.todayLater.last} (nothing paints it again until the next change)`);
+      check(`③b ${DOOR.W} × 867, the regular portrait bar: the scene stands — «${P3B.name}» at the ladder's first rung without the search door, ${P3B.spare} px to spare (< 44), the more control and the state word unchanged`, P3B.rung === 'first' && P3B.spare >= 0 && P3B.spare < 44, DOOR);
+      check(`③b RED CONTROL: TODAY's order (the head painted, then the door) leaves the name under its readable minimum or a button out of the bar (${DOOR.today.got} px of ${DOOR.today.need}, last ${DOOR.today.last} of ${DOOR.today.navR}) — still so after 30 frames`, DOOR.today.door && same(DOOR.today, P3B) && (!DOOR.today.nameOk || !DOOR.today.barOk) && (!DOOR.todayLater.nameOk || !DOOR.todayLater.barOk), DOOR);
+      check(`③b THE CURE's order (updateTitle: the door set, then the head painted): the name keeps its readable minimum and every button stays in the bar (${DOOR.cure.got} px of ${DOOR.cure.need}, last ${DOOR.cure.last} of ${DOOR.cure.navR}, the ladder at its ${DOOR.cure.rung} rung)`, same(DOOR.cure, P3B) && DOOR.cure.nameOk && DOOR.cure.barOk, DOOR);
+    } else {
+      // case (1) by measure: no regular portrait width this suite reached gives the first rung any room — the road is not a road here
+      check(`③b NO SCENE (case (1) by measure): no regular portrait width tried (ended at ${DOOR && DOOR.W} × 867, ${DOOR && DOOR.vc}${DOOR && DOOR.column ? ', a column' : ''}) gives the ladder's first rung room for even one glyph — the state the door's order matters in does not exist in this page`, !!DOOR && !DOOR.missing && (DOOR.vc !== 'regular' || DOOR.column || DOOR.noRoom != null), DOOR);
+    }
+    if (W3B !== 669) { await phone(669, 867); await load(); await settled('regular'); await windowArea(); await sleep(800); }
     await phone(844, 390); await load(); await settled('regular'); await sleep(800);
     const L3 = await evalJs(NUMS);
     check(`③ 844 × 390 (the landscape column, no name in the bar): the five numbers stay (lane phone-titlebar-title's — ${L3.nums.map((x) => x.n).join(' · ')})`, L3.vc === 'regular' && !L3.yield && L3.nums.length >= 3 && !L3.nums.some((x) => /mnav-one/.test(x.cls)), L3);
