@@ -211,8 +211,12 @@ await leg(122, async () => { // P22 + P23: parked while it could fire, a drafter
   ok(R.owed(B).length === 1, 'P23: the receipt\'s wake parks while the drafter is reachable');
   R.goUnreachable('terminal');
   await R.advanceTo(T0 + 30000);
-  await sleep(25);
-  const it = R.todos.snapshot().open.find((i) => /was not woken/.test(String(i.text)));
+  // the item is filed only once the outbox's write is on disk (src/channel-store.js: an update resolves when its bytes have
+  // landed), while the card reads the record at once: wait for the item itself, bounded. A fixed 25 ms lost that race on a
+  // loaded test machine (the hotfix trial 83d286175, its UTC copy): the item was not there yet, the card was
+  const itemOf = () => R.todos.snapshot().open.find((i) => /was not woken/.test(String(i.text)));
+  for (let w = 0; w < 400 && !itemOf(); w++) await sleep(5);
+  const it = itemOf();
   ok(it && /running in a terminal/.test(it.text) && !/not running/.test(it.text), 'THE LAW P23: the receipt road\'s item says what it is', it && it.text);
   ok(it && it.i18n.text.key === '{agent} was not woken about {title}: {why}' && it.i18n.text.params.why.key === G.FALL_WHY.terminal && zh12.includes(JSON.stringify(it.i18n.text.key) + ':') && ja12.includes(JSON.stringify(it.i18n.text.key) + ':'), 'P23: …in zh + ja, by its key', it && it.i18n);
   ok(/running in a terminal/.test(R.card()) && !/not running/.test(R.card()), 'THE LAW P23: the receipt\'s card too', R.card());
