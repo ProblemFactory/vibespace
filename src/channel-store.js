@@ -1888,12 +1888,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       try { side = trimSide(adapterId, convId, { liveIds: new Set() }); } catch { }
       return { removed: 0, kept: 0, side };
     }
-    const t = now();
-    const byDays = t - days * 86400e3;
-    // "whichever is smaller" = the LATER cutoff of the two bounds…
-    const byCount = lines.length > maxRecords ? recAt(lines[lines.length - maxRecords]) : -Infinity;
-    // …and the floor then pulls it back: nothing newer than `floorDays` is ever dropped.
-    const cutoff = Math.min(Math.max(byDays, byCount), t - floorDays * 86400e3);
+    const cutoff = retentionCutoff(lines, { days, maxRecords, floorDays });
     const kept = lines.filter((l) => recAt(l) >= cutoff);
     // lane lark-threads (A1): THE PLACE PATCHES ARE FOLDED INTO THE LINES the trim keeps (the rewrite this trim may do
     // anyway) — the message line then carries the place itself and its side line goes (after the rename, never before:
@@ -1921,6 +1916,38 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const side = sideTrim();
     wrote(adapterId, convId, { kind: 'trim' });
     return { removed: lines.length - keep.length, kept: keep.length, side, folded: folded.size };
+  }
+  /** the retention cutoff over a log's lines: a record older than it is dropped */
+  function retentionCutoff(lines, { days, maxRecords, floorDays }) {
+    const t = now();
+    const byDays = t - days * 86400e3;
+    // "whichever is smaller" = the LATER cutoff of the two bounds…
+    const byCount = lines.length > maxRecords ? recAt(lines[lines.length - maxRecords]) : -Infinity;
+    // …and the floor then pulls it back: nothing newer than `floorDays` is ever dropped.
+    return Math.min(Math.max(byDays, byCount), t - floorDays * 86400e3);
+  }
+  /** B-0248 row 8 (主开发 r3322): THE TRIM's READ OFF THE LOOP — the engine's two roads (the poll's ingest, the push batch) ask
+   *  this one. The message log is read on the thread pool. Under both bounds with no place patch to fold, nothing is dropped and
+   *  the log is not rewritten: only the side log's compaction runs (its bounded tail window), every message's lines kept (a
+   *  message appended after the read may already have its reactions there). Past a bound, or with a patch to fold, the rewrite is
+   *  `trim`'s (it reads the log again under the loop, so what was appended meanwhile is kept), at most once every TRIM_EVERY_MS a
+   *  conversation by the engine's gate. A read that fails trims nothing and is said; a missing log is `trim`'s own case. */
+  async function trimAsync(adapterId, convId, { days = RETENTION_DAYS, maxRecords = RETENTION_MAX_RECORDS, floorDays = RETENTION_FLOOR_DAYS } = {}) {
+    const fp = logPath(adapterId, convId);
+    let text;
+    try { text = await fs.promises.readFile(fp, 'utf-8'); } catch (e) {
+      if (e && e.code === 'ENOENT') return closed ? { removed: 0, kept: 0, side: null } : trim(adapterId, convId, { days, maxRecords, floorDays });
+      warn(`[channels] ${adapterId}/${convId}: its message log could not be read off the loop (${(e && e.code) || (e && e.message)}) — not trimmed now, its side log kept`);   // its own words: trim's sentence is the store census's anchor (once)
+      return { removed: 0, kept: 0, side: null, unread: true };
+    }
+    if (closed) return { removed: 0, kept: 0, side: null };
+    const lines = text.split('\n').filter(Boolean);
+    const cutoff = retentionCutoff(lines, { days, maxRecords, floorDays });
+    if (placesOf(adapterId, convId).size || lines.some((l) => recAt(l) < cutoff)) return trim(adapterId, convId, { days, maxRecords, floorDays });
+    let side = null;
+    try { side = trimSide(adapterId, convId, { liveIds: null }); } catch (e) { warn('[channels] side-log trim failed:', (e && e.message) || e); }
+    if (side && side.removed) wrote(adapterId, convId, { kind: 'trim' });
+    return { removed: 0, kept: lines.length, side, folded: 0 };
   }
   function recVendorId(line) { try { const v = JSON.parse(line).vendorId; return v ? String(v) : null; } catch { return null; } }
   function recAt(line) { try { const n = Number(JSON.parse(line).at); return Number.isFinite(n) ? n : 0; } catch { return 0; } }
@@ -3376,7 +3403,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     feedMissRead, feedMissWrite, feedMissDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
-    findRecord, rewriteRecords, lruFlush,
+    findRecord, rewriteRecords, lruFlush, trimAsync,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message
     appendSide, readSide, trimSide, sidePath, locateMessage,
     // lane lark-threads (A1): THE PLACE DOOR (widen-only) + the folded patches a reader applies

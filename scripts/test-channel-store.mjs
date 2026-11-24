@@ -740,10 +740,10 @@ function rebuildUnderFault(PS, name, code) {
 // ── ⑧b RETENTION HAS A CALLER — a policy nobody enforces is not a policy ──
 {
   const eng = engineSource(REPO).replace(/^\s*\/\/.*$/gm, '');
-  ok(/store\.trim\(/.test(eng), 'the ingest engine CALLS store.trim — the retention bounds above are enforced by something, not just implemented');
+  ok(/store\.trimAsync\(/.test(eng), 'the ingest engine CALLS store.trimAsync (B-0248 row 8: the trim\'s read off the loop; the rewrite still trim\'s) — the retention bounds above are enforced by something, not just implemented');
   // 2026-09-26: at most every TRIM_EVERY_MS per conversation (the trim rewrites the log) — still
   // only after a pass that APPENDED, still on the ONE conversation that grew
-  ok(/if \(trimNow\)[^\n]*store\.trim\(rec\.id, convId\)/.test(eng) && /if \(appended && \(!en\.trimmedAt \|\| now\(\) - en\.trimmedAt >= TRIM_EVERY_MS\)\) \{ en\.trimmedAt = now\(\); trimNow = true; \}/.test(eng), '…right after a pass that actually appended, on the ONE conversation that grew, at most every TRIM_EVERY_MS (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim|trimNow = true/.test(l)).join(' | '));
+  ok(/if \(trimNow\)[^\n]*store\.trimAsync\(rec\.id, convId\)/.test(eng) && /if \(appended && \(!en\.trimmedAt \|\| now\(\) - en\.trimmedAt >= TRIM_EVERY_MS\)\) \{ en\.trimmedAt = now\(\); trimNow = true; \}/.test(eng), '…right after a pass that actually appended, on the ONE conversation that grew, at most every TRIM_EVERY_MS (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim|trimNow = true/.test(l)).join(' | '));
 }
 
 // (⑨ the tier + hygiene pins — MOVED to the fast scripts/test-channel-store-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1034,9 +1034,10 @@ console.log('\n⑫ the side-log cost census — bounded reads, append-only write
     readSide: 'sideTail (the window, ≥ 64 KiB, default SIDE_READ_BYTES)',
     trimSide: 'sideWindow + a temp write ≤ SIDE_KEEP_BYTES + rename',
     trim: 'trimSide (inside the message trim — its own reads and writes are the MESSAGE log\'s, bounded by retention)',
+    trimAsync: 'trimSide (B-0248 row 8: the message trim\'s read off the loop — its own whole read is the MESSAGE log\'s; the side log only through trimSide, or trim)',
     placesOf: 'lane lark-threads (A1): sideLines (the window) — the place patches folded ONCE per conversation, cached (PLACE_CACHE_MAX)',
   };
-  const VIA_ONLY = new Set(['trim']);   // touches a side file only through a listed function
+  const VIA_ONLY = new Set(['trim', 'trimAsync']);   // touches a side file only through a listed function
   const code = strip(srcS);
   // each function's body = its declaration to its own closing brace at the factory's indent (a one-line arrow: its line)
   const bodies = new Map();

@@ -3200,7 +3200,7 @@ function create(deps = {}) {
     // appended, on the ONE conversation that grew, at most every
     // TRIM_EVERY_MS (it rewrites the log). The bounds and the 7-day floor are
     // the store's.
-    if (trimNow) { try { store.trim(rec.id, convId); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }
+    if (trimNow) { try { await store.trimAsync(rec.id, convId); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }   // B-0248 row 8: its read off the loop
     // lane channels-list-polish: the account's own id resolved once (a sign-in that never named it), and this
     // conversation's authors handed to the people warm-up (the adapter's bounds; never awaited by the pass)
     // r3279 (1), r3188 (i) WITHDRAWN: asked while the people memo is held too, as the release did — ONE vendor call (the adapter's own
@@ -5164,7 +5164,7 @@ function create(deps = {}) {
   async function flushPushBatch(rec, e) {
     const batch = e.pushBatch; e.pushBatch = null;
     if (!batch || !batch.size) return;
-    const changed = [];
+    const changed = [], trims = [];
     await store.index.update(() => {
       for (const [convId, b] of batch) {
         const en = store.index.entry(rec.id, convId, { create: false });
@@ -5177,10 +5177,13 @@ function create(deps = {}) {
         if (b.atYouAts && b.atYouAts.length) { en.atYouAts = FO.keepAtYou([...(en.atYouAts || []), ...b.atYouAts], []); if (b.atYouLast && !(Number(en.atYouLast && en.atYouLast.at) >= b.atYouLast.at)) en.atYouLast = b.atYouLast; }   // lane attention-rule-at-you
         en.lane = { ...(en.lane || {}), via: 'push', lastPushAt: now(), firstSeenTotal: ((en.lane && en.lane.firstSeenTotal) || 0) + b.appended };
         changed.push(`${rec.id}/${convId}`);
+        // B-0248 row 8 (主开发 r3322): the push road's retention GATED as the poll road's — after a batch that APPENDED, at most
+        // every TRIM_EVERY_MS a conversation (it trimmed at EVERY batch: a whole read of the log on the loop each time)
+        if (b.appended && (!en.trimmedAt || now() - en.trimmedAt >= TRIM_EVERY_MS)) { en.trimmedAt = now(); trims.push(convId); }
       }
     });
-    for (const k of changed) { try { store.trim(rec.id, k.slice(rec.id.length + 1)); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }
     if (!stopped) notify(changed);
+    for (const c of trims) { if (stopped) break; try { await store.trimAsync(rec.id, c); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }   // one read at a time, off the loop
   }
   /** A cursor kick: wake the SLEEP, not just a fetch — one kick-origin pass
    *  at most every KICK_MIN_INTERVAL_MS per adapter (a burst is one pass),
