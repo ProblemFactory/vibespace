@@ -862,21 +862,30 @@ const searchScene = async (tail, stopFirst = false) => {
   // MUST 2 (a): search opens while the watch lives, tail runs folded above the reading line
   // each depth twice: with the watch (the scene) and with the watch stopped just before the press (the browser's own world,
   // printed beside it): «exactly once» = the watch adds nothing to what the runs pass and the browser do there
-  const scenes = [], alone = [];
-  for (const tail of ['tail1', 'tail2', 'tail3']) { scenes.push(await searchScene(tail)); alone.push(await searchScene(tail, true)); }
   // A depth is COMPARABLE when both pages stood alike before the press (the same scrollTop, the same kind of card at the reading
   // line, the slab in both); there «exactly once» = the card moves as in the browser's own world (the runs pass's own restore
   // can move it there: measured 314 px at one depth in both worlds — the release's, not the watch's) — never by the watch's
   // second answer (at the first cure: −4 337 px, or off the page)
-  const held = scenes.map((x, i) => [x, alone[i]]).filter(([x, y]) => x.ok && x.alive && x.gap > 0 && x.headersAbove > 0 && y && y.ok && y.gap > 0 && y.st0 === x.st0 && y.card === x.card);
+  const alike = (x, y) => !!x && !!y && x.ok && x.alive && x.gap > 0 && x.headersAbove > 0 && y.ok && y.gap > 0 && y.st0 === x.st0 && y.card === x.card;
+  // EACH DEPTH IS READ AGAIN (both pages) WHILE THE TWO DID NOT STAND ALIKE, at most SEARCH_TRIES times (r3638; the find of
+  // row 764's gates: on the kit under load, and twice on the hosted runner, a twin stood 84–110 px off with a system row at
+  // the reading line, or one of the two dropped its slab at tail3 — every distance still 0 / 0; three depths, none comparable).
+  // The bar is unchanged: ≥ 1 comparable depth and «exactly once» at each; none after the tries is said BY NAME, red.
+  const SEARCH_TRIES = 3, scenes = [], alone = [], tries = [], everyPage = [];
+  for (const tail of ['tail1', 'tail2', 'tail3']) {
+    let x = null, y = null, k = 0;
+    while (k < SEARCH_TRIES) { k++; x = await searchScene(tail); y = await searchScene(tail, true); everyPage.push(x, y); if (alike(x, y)) break; }
+    scenes.push(x); alone.push(y); tries.push(k);
+  }
+  const held = scenes.map((x, i) => [x, alone[i]]).filter(([x, y]) => alike(x, y));
   const once = ([x, y]) => x.open != null && y.open != null && Math.abs(x.open - y.open) <= NOTCH_TOL_PX && x.closed != null && y.closed != null && Math.abs(x.closed - y.closed) <= NOTCH_TOL_PX;
-  check(`§4h ONE AUTHORITY, SEARCH OPENS: at ${held.length} of ${scenes.length} depths the scene held (the watch alive, the slab in the page, run headers folded above the reading line) beside a twin page in the browser's own world, and the card at the reading line moved exactly as there (open / closed — the watch: ${held.map(([x]) => x.open + ' / ' + x.closed).join(', ') || '-'}; the browser alone: ${held.map(([, y]) => y.open + ' / ' + y.closed).join(', ') || '-'} px; ± ${NOTCH_TOL_PX})`, held.length >= 1 && held.every(once), JSON.stringify({ scenes, alone }));
+  check(`§4h ONE AUTHORITY, SEARCH OPENS: ${held.length ? '' : 'PRECONDITION NOT MET (no depth stood alike in both worlds in ' + SEARCH_TRIES + ' tries each) — '}at ${held.length} of ${scenes.length} depths (tries ${tries.join(' / ')}) the scene held (the watch alive, the slab in the page, run headers folded above the reading line) beside a twin page in the browser's own world, and the card at the reading line moved exactly as there (open / closed — the watch: ${held.map(([x]) => x.open + ' / ' + x.closed).join(', ') || '-'}; the browser alone: ${held.map(([, y]) => y.open + ' / ' + y.closed).join(', ') || '-'} px; ± ${NOTCH_TOL_PX})`, held.length >= 1 && held.every(once), JSON.stringify({ scenes, alone }));
   // B-3e8b's search unit (主开发 r3257): THE RUNS PASS's OWN PUT-BACK keeps the card at the reading line when search UNFOLDS
   // the runs above it and when it FOLDS them again — by distance, in both worlds (at 11f016e6c: 314 / 314 px one notch into
   // the tail, the same with the watch stopped: the search bar above the list shifted every row's offsetTop by its height,
   // so the pass anchored on a card already out of sight)
   const stays = (x) => x.open != null && Math.abs(x.open) <= NOTCH_TOL_PX && x.closed != null && Math.abs(x.closed) <= NOTCH_TOL_PX;
-  const kept = scenes.concat(alone).filter((x) => x.ok && x.gap > 0 && x.headersAbove > 0);
+  const kept = everyPage.filter((x) => x && x.ok && x.gap > 0 && x.headersAbove > 0);   // every page read, the re-read ones too
   check(`§4h SEARCH OPENS AND CLOSES WITH RUNS FOLDED ABOVE THE READING LINE: the card at the reading line stays where it was — on open and on close, with the watch and in the browser's own world (${kept.length} scenes: ${kept.map((x) => x.tail + (x.browserAlone ? '·alone' : '') + ' ' + x.open + ' / ' + x.closed).join(', ')} px; ± ${NOTCH_TOL_PX})`, kept.length >= 2 && kept.every(stays), JSON.stringify(kept));
   // (c): a carry in the task of a pending change, and its control (the watch's flush blinded for that carry)
   const ct = await firstHold('a carry with a pending change', null, { after: CARRY_SAME_TASK(false) }), cc = await firstHold('a carry with a pending change, control', null, { after: CARRY_SAME_TASK(true) });
