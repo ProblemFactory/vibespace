@@ -2469,14 +2469,26 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   // r3188: never saved while it is rebuilt (its landing saves once) — but at the store's CLOSE a ledger still being rebuilt is
   // saved UNFINISHED (no `v: 2`): what was admitted meanwhile is kept, and the next first use rebuilds it again (never taken as the truth)
+  // B-0248 row 5 (主开发 r3322; lane bl-loop-b's page): THE LEDGER IS OWED TO THE STORE WRITER — it was a rewrite through a rename on
+  // the main thread at each mail with an HTML body and 5 s after a picture was shown. Now its thread makes the account's folder (0700)
+  // and writes the ledger (0600, temp + rename) off the loop; a failed write is the writer's (said, retried, never a throw here); the
+  // store's close writes what is owed at once (owe's writeNow). The BYTES are made when the writer takes them: the ledger as it is
+  // then, its «unfinished» mark (no `v: 2`) read at that moment; a forgotten account's answers nothing (its write forgotten too)
   function lruSave(adapterId) {
-    const l = lruOf(adapterId);
+    lruOf(adapterId);
     if (lruRebuilding.has(adapterId) && !closed) { lruDirty.add(adapterId); return; }
     lruDirty.delete(adapterId);
     if (goneAccounts.has(adapterId)) return;   // 主开发 r2819: a purged account's ledger is never written again
-    fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
+    const file = lruFile(adapterId);
+    owe(file, { name: 'channels-lru.write', produce: () => lruBytes(adapterId), mode: 0o600, makeDir: true });
+  }
+  /** the ledger's bytes for ONE write (the writer's `produce`, on the main thread): null = nothing to write (a forgotten account) */
+  function lruBytes(adapterId) {
+    if (goneAccounts.has(adapterId)) return null;
+    const l = lruCache.get(adapterId);
+    if (!l) return null;
     l.v = lruUnfinished.has(adapterId) ? 1 : LRU_V;   // UNFINISHED (a rebuild in flight at a close, a walk that failed): saved without its mark
-    writeJsonAtomic(lruFile(adapterId), l, { mode: 0o600 });
+    return JSON.stringify(l, RUNTIME_KEYS, 1);   // writeJsonAtomic's own bytes
   }
   /** A cache HIT only moves a recency stamp (R3 §23): the ledger is written
    *  COALESCED — once per LRU_TOUCH_MS per account, and on close — never once
@@ -3305,6 +3317,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     peopleCache.delete(adapterId);
     memoForget(searchMemoFile(adapterId)); memoForget(feedMissFile(adapterId));
     try { W().forget(peopleFile(adapterId)); } catch { }
+    try { W().forget(lruFile(adapterId)); } catch { }   // B-0248 row 5: the ledger's owed write too
     // off the loop (B-92fc: nothing synchronous). 主开发 r2878: each folder says ONE OF THREE — removed, was not there, or COULD NOT
     // BE REMOVED (its error's code) — never a swallowed error
     // r2943 (L5): THREE-WAY AT THE LOOK TOO — not there (or not a folder on its way) is absent, found is present; ANY other code leaves

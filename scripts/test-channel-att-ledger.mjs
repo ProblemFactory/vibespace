@@ -21,6 +21,11 @@
 //   ⑧ A CLOSE DURING A REBUILD saves it unfinished; the next store rebuilds it and counts every file. RED: a close that saves it as the
 //      truth (its missed files orphaned).
 //   ② also: an earlier version's ledger with an entry whose file is gone — a whole walk is the truth, the entry leaves. RED: kept.
+//   ⑩ (B-0248 row 5, 主开发 r3322) THE SAVE OFF THE LOOP: a hit and the ledger's coalesced flush under a placed slow rename on the
+//      main thread (the tree's hold, src/loop-hold.js HOLD_MS): no synchronous write call there, the loop keeps turning, and the
+//      ledger lands on disk through the store writer's thread. RED: the release's save (its folder and write on the main thread).
+//   ⑪ A STOP's FLUSH WRITES WHAT IS OWED: a hit's stamp (owed to the 5 s coalesced flush) and the store closed at once — on disk.
+//      RED: a close that does not flush the ledger.
 //   ⑨ «FORGET ITS DATA» DURING A REBUILD, then the account ADDED AGAIN (B-92fc: a forgotten account writes nothing until then): the
 //      next put rebuilds at once and whole, the forgotten walk still held (and it lands nothing). RED: a forget that leaves the
 //      rebuild in flight (the next put waits on the forgotten walk).
@@ -59,6 +64,14 @@ const ledgerOf = (dir) => path.join(dir, 'attachments', ACC, 'lru.json');
 const filesOf = (dir) => { try { return fs.readdirSync(path.join(dir, 'attachments', ACC, CONV)).filter((x) => !x.endsWith('.json') && !x.includes('.tmp-')); } catch { return []; } };
 // each store's clock: the seed's files are older than anything a later store admits (the eviction's order is the files' age)
 const open = (mod, dir, warns = [], start = 2e12) => { let t = start; const w = SW.create({ log: quiet }); return { w, st: mod.createChannelStore({ dir, now: () => (t += 1000), log: { log() {}, info() {}, warn: (x) => warns.push(String(x)), error() {} }, writer: w }) }; };
+const LH = require(path.join(REPO, 'src/loop-hold.js'));   // ⑩: the tree's own hold (HOLD_MS) — placed, and judged against
+// the loop's turns while `fn` runs: the longest gap between two 5 ms ticks (test-jobs-gc-off-loop's probe)
+async function loopGap(fn) {
+  let last = Date.now(), max = 0;
+  const t = setInterval(() => { const x = Date.now(); max = Math.max(max, x - last); last = x; }, 5);
+  try { await fn(); } finally { clearInterval(t); }
+  return Math.max(max, Date.now() - last);
+}
 const blob = (att, msg) => crypto.createHash('sha1').update(`${msg}\n${att}`).digest('hex');   // a cached file's name (the store's attSlot)
 const shut = (o) => { try { o.st.close(); } catch { } try { o.w.stop(); } catch { } };
 const redOf = (from, run) => (SRC.includes(from) ? run() : (ok(false, `RED CONTROL: its anchor is not in this tree (${from.slice(0, 60)}…)`), null));
@@ -86,6 +99,7 @@ async function refusedLeg(mod, tag) {
   const o = open(mod, dir);
   let u;
   try { o.st.attachmentUsage(ACC); u = await settled(o.st); o.st.lruFlush(); } finally { restore(); }   // the landing's save rides the ledger's coalesced flush
+  await o.w.durable(lf);   // B-0248 row 5: owed to the store writer — on disk once it landed
   let led = null; try { led = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
   shut(o);
   return { before: before.length, files: u.files, bytes: u.bytes, after: filesOf(dir).length, saved: !!(led && Object.keys(led.items || {}).length === N) };
@@ -149,10 +163,12 @@ async function duringLeg(mod, tag) {
     await o.st.attachmentPut(ACC, CONV, 'new-1', { data: Buffer.alloc(SIZE, 120), mime: 'image/png', msg: 'n1' }, { budgetBytes: budget });
     await o.st.attachmentPut(ACC, CONV, 'new-2', { data: Buffer.alloc(SIZE, 121), mime: 'image/png', msg: 'n2' }, { budgetBytes: budget });
     const mid = o.st.attachmentUsage(ACC);
+    await o.w.durable(lf);   // a save owed meanwhile would have landed by now (B-0248 row 5: the writer's thread writes it)
     const during = { counted: mid.files, ledger: fs.existsSync(lf), onDisk: filesOf(dir).length };
     release();
     const u = await settled(o.st);
     o.st.lruFlush();   // the landing's save (the ledger's coalesced flush)
+    await o.w.durable(lf);
     let led = null; try { led = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
     const landed = { files: u.files, saved: led ? Object.keys(led.items || {}).length : 0 };
     // ④ THE EVICTION AFTER IT: a put past a bound of three files evicts the least recently used down to it (the folder's files included):
@@ -228,12 +244,12 @@ async function listLeg(mod, tag, which) {
     st.attachmentUsage(ACC); const u1 = await settled(st);
     for (let k = 0; k < 5; k++) st.attachmentUsage(ACC);   // later uses before its wait: no new walk
     await st.attachmentPut(ACC, CONV, 'over', { data: Buffer.alloc(SIZE, 99), mime: 'image/png', msg: 'o' }, { budgetBytes: SIZE + 100 });   // past a one-file bound
-    st.lruFlush();
+    st.lruFlush(); await w.durable(lf);
     let led = null; try { led = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
     const both = () => filesOf(dir).length + fs.readdirSync(path.join(dir, 'attachments', ACC, 'c2')).filter((x) => !x.endsWith('.json') && !x.includes('.tmp-')).length;   // the two conversations' cached files
     const mid = { counted: u1.files, lists, onDisk: both(), v: led ? led.v : null, said: warns.filter((l) => /could not be rebuilt whole/.test(l)).length };
     failing = false; clock.t += 31e3;   // the storage answers again, and the wait has passed
-    st.attachmentUsage(ACC); const u2 = await settled(st); st.lruFlush();
+    st.attachmentUsage(ACC); const u2 = await settled(st); st.lruFlush(); await w.durable(lf);
     let led2 = null; try { led2 = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
     r = { mid, whole: u2.files, v2: led2 ? led2.v : null, saidAfter: warns.filter((l) => /could not be rebuilt whole/.test(l)).length };
   } finally { fs.promises.readdir = D0; try { st.close(); } catch { } try { w.stop(); } catch { } }
@@ -453,6 +469,63 @@ async function allGoneLeg(mod, tag) {
   await redOf(DIRTY, async () => {
     const rn = await allGoneLeg(M.load('src/channel-store.js', anchored(SRC, DIRTY, '      if (Object.keys(l.items).length) { lruDirty.add(adapterId); lruTouch(adapterId); }', 'a landing that saves only a ledger with entries'), 'save-nonempty'), 'all-gone-red');   // stale-pins: kept (the red control restores the commit's condition)
     ok(rn.v === 1 && rn.kept === N, `②b RED CONTROL: a landing that saves only a ledger with entries — the dead v ${rn.v} ledger stays with its ${rn.kept} entries, walked again at every start — the leg above would go red`, rn);
+  });
+}
+
+
+// ═══ ⑩ THE SAVE OFF THE LOOP ═══
+console.log('⑩ the ledger\'s save under a placed slow rename: no synchronous write on the loop, the ledger on disk through the writer');
+async function offLoopLeg(mod, tag) {
+  const dir = tmp(tag);
+  await seed(dir);
+  const lf = ledgerOf(dir), under = path.join(dir, 'attachments');
+  const o = open(mod, dir);
+  const SYNCW = ['renameSync', 'writeFileSync', 'mkdirSync', 'chmodSync'], orig = {}, seen = [];
+  const I = new Int32Array(new SharedArrayBuffer(4));
+  let r;
+  try {
+    o.st.attachmentUsage(ACC); await settled(o.st);
+    for (const k of SYNCW) { orig[k] = fs[k]; fs[k] = function (...a) { const p = path.resolve(String(a[0] || '')); if (p.startsWith(under)) { seen.push(`${k}(${path.basename(p)})`); if (k === 'renameSync') Atomics.wait(I, 0, 0, LH.HOLD_MS); } return orig[k].apply(this, a); }; }
+    let gap;
+    try { gap = await loopGap(async () => { o.st.attachmentGet(ACC, CONV, 'att-1', 'm1'); o.st.lruFlush(); await o.w.durable(lf); }); } finally { for (const k of SYNCW) fs[k] = orig[k]; }
+    let led = null; try { led = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
+    const hit = led && led.items ? led.items[`${CONV}/${blob('att-1', 'm1')}`] : null;
+    r = { gap, seen, v: led ? led.v : null, hitAt: hit ? hit.usedAt : 0 };
+  } finally { shut(o); }
+  return r;
+}
+{
+  const r = await offLoopLeg(CS, 'offloop');
+  ok(r.seen.length === 0 && r.gap < LH.HOLD_MS && r.v === 2 && r.hitAt > 0, `⑩ a hit and the ledger's flush under a placed slow rename (the tree's hold, ${LH.HOLD_MS} ms): ${r.seen.length} synchronous write calls on the loop${r.seen.length ? ' (' + r.seen.join(' ') + ')' : ''}, its longest gap ${r.gap} ms, under the hold; the ledger on disk through the writer (v ${r.v}, the hit's stamp ${r.hitAt > 0})`, r);
+  const OWE = "    owe(file, { name: 'channels-lru.write', produce: () => lruBytes(adapterId), mode: 0o600, makeDir: true });";
+  await redOf(OWE, async () => {
+    const rn = await offLoopLeg(M.load('src/channel-store.js', anchored(SRC, OWE, "    fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });\n    const l0 = lruCache.get(adapterId); l0.v = lruUnfinished.has(adapterId) ? 1 : LRU_V;\n    writeJsonAtomic(lruFile(adapterId), l0, { mode: 0o600 });", 'the release\'s save on the loop'), 'save-on-loop'), 'offloop-red');
+    ok(rn.seen.some((x) => /^renameSync/.test(x)) && rn.gap >= LH.HOLD_MS * 0.8, `⑩ RED CONTROL: the release's save — ${rn.seen.length} synchronous write calls on the loop (${rn.seen.join(' ')}), the loop held ${rn.gap} ms by the placed rename — the leg above would go red`, rn);
+  });
+}
+
+// ═══ ⑪ A STOP's FLUSH ═══
+console.log('⑪ a hit\'s stamp owed to the coalesced flush, the store closed at once: the ledger on disk holds it');
+async function stopLeg(mod, tag) {
+  const dir = tmp(tag);
+  await seed(dir);
+  const lf = ledgerOf(dir), key = `${CONV}/${blob('att-1', 'm1')}`;
+  const o = open(mod, dir);
+  o.st.attachmentUsage(ACC); await settled(o.st);
+  const before = JSON.parse(R0.call(fs, lf, 'utf8')).items[key].usedAt;
+  o.st.attachmentGet(ACC, CONV, 'att-1', 'm1');   // a hit: its stamp owed to the 5 s coalesced flush, not written yet
+  const owed = JSON.parse(R0.call(fs, lf, 'utf8')).items[key].usedAt === before;
+  shut(o);   // THE STOP at once
+  let after = before; try { after = JSON.parse(R0.call(fs, lf, 'utf8')).items[key].usedAt; } catch { }
+  return { owed, moved: after > before };
+}
+{
+  const r = await stopLeg(CS, 'stop');
+  ok(r.owed && r.moved, `⑪ a hit's stamp owed to the coalesced flush (not on disk yet: ${r.owed}), the store closed at once: the ledger on disk holds it (${r.moved})`, r);
+  const CLOSEF = '    lruFlush();\n';
+  await redOf(CLOSEF, async () => {
+    const rn = await stopLeg(M.load('src/channel-store.js', anchored(SRC, CLOSEF, '', 'a close that does not flush the ledger'), 'close-noflush'), 'stop-red');
+    ok(!rn.moved, `⑪ RED CONTROL: a close that does not flush the ledger — the owed stamp is lost (on disk moved: ${rn.moved}) — the leg above would go red`, rn);
   });
 }
 

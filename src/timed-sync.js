@@ -63,6 +63,7 @@ const STORES = Object.freeze({
   'channels-purge-pending.write': row('write', 'channels/purge-pending', 'src/channel-store.js', ['pendingWrite']),   // 主开发 r2878: the purges begun and not finished, through the store writer (an act)
   'channels-search-memo.write': row('write', 'channels/<account>/search-memo', 'src/channel-store.js', ['searchMemoWrite']),   // B-360d r1360: the vendor-search memo, through the store writer (its thread makes the account's directory)
   'channels-feed-miss.write': row('write', 'channels/<account>/feed-misses', 'src/channel-store.js', ['feedMissWrite']),   // B-360d r1360: the change feed's miss memo, the same road
+  'channels-lru.write': row('write', 'channels/attachments/<account>/lru', 'src/channel-store.js', ['lruSave']),   // B-0248 row 5 (r3322): the attachment ledger, through the store writer (its thread makes the account's folder)
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
   'decision-memo.write': row('write', 'decision-memo', 'src/server/decision-engine.js', ['saveMemo']),   // through the store writer (lane lg-store-writes, B-0248 U1: the judge's memo — paced, the hub's own cache)
   'decision-usage.write': row('write', 'decision-usage', 'src/server/decision-engine.js', ['saveUsage']),   // through the store writer (lane lg-store-writes, B-0248 U1: the day's counter — money, an act)

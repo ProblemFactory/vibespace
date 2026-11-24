@@ -68,6 +68,7 @@ const atGate = (W, id) => W.calls.attach.filter((x) => x === id).length;
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
 const REC = require(path.join(REPO, 'src/channel-record.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+const SWR = require(path.join(REPO, 'src/store-writer.js'));   // B-0248 row 5: the ledger is owed to the hub's store writer — a leg waits for its write to land
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const express = require('express');
@@ -276,11 +277,13 @@ async function rig(name, { engineMod = ENG, budgetDefault = 100, more = null } =
   await R2.eng.setEnabled('pics', true);
   // THE LRU LEDGER: a hit no longer rewrites it
   const lruPath = path.join(R.dataDir, 'channels', 'attachments', 'pics', 'lru.json');
+  await SWR.storeWriter().durable(lruPath);   // the puts' owed ledger landed (the store writer's thread writes it)
   const ino0 = lruPath ? fs.statSync(lruPath).ino : null;
   for (let k = 0; k < 10; k++) await R.get('pic-0');
   const ino1 = lruPath ? fs.statSync(lruPath).ino : null;
   ok(lruPath && ino0 === ino1, 'COALESCED: ten cache hits in a row write the LRU ledger ZERO times (it was one sync atomic write per thumbnail)', String(lruPath));
   R.eng.store.lruFlush();
+  await SWR.storeWriter().durable(lruPath);   // the coalesced flush owes it to the writer: on disk once it landed
   const led = JSON.parse(fs.readFileSync(lruPath, 'utf-8'));
   ok(fs.statSync(lruPath).ino !== ino0 && Object.values(led.items).some((x) => x.usedAt === clock), '…and the recency the hits moved is on disk after the coalesced flush');
   // a picture older than the newest 5000 records
@@ -588,9 +591,10 @@ console.log('④ negative controls (patched copies in this run\'s scratch dir)')
   await C.get('pic-0');
   const dir = path.join(C.dataDir, 'channels', 'attachments', 'pics');
   const lp = path.join(dir, 'lru.json');
+  await SWR.storeWriter().durable(lp);
   const i0 = fs.statSync(lp).ino;
   let changes = 0;
-  for (let k = 0; k < 5; k++) { await C.get('pic-0'); const ik = fs.statSync(lp).ino; if (ik !== i0) changes++; }
+  for (let k = 0; k < 5; k++) { await C.get('pic-0'); await SWR.storeWriter().durable(lp); const ik = fs.statSync(lp).ino; if (ik !== i0) changes++; }
   ok(changes >= 1, `CONTROL: the pre-R3 store rewrites the ledger on the hits (${changes} of 5 changed its inode) — the coalesced leg reddens on it`);
   C.server.close(); C.eng.stop();
   // (d) a thumbnail verdict with no retry limit
