@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - A disabled channel account's refusal now offers Enable this account, and a proxy password left in its address offers Move the password to the vault.
+- Signing an account in again as an account VibeSpace cannot confirm now asks on its row: keep the sign-in there, or make a new row.
 
 ### Fixed
 - A browser profile on a paired machine that several conversations share no longer stops one of them for 30 seconds while another opens and closes tabs.
