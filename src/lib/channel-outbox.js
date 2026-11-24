@@ -1196,6 +1196,8 @@ export function outboxNodes(app, list, ob, { view = null, open = new Set(), onTo
       nodes.push(apiSection.el);
     }
   }
+  // r3232 (2): the API proposals HELD beside message proposals (no API section in the view): the section is drawn to say so
+  if (apiUnread && apiSection && census.total && !vw.sections.some((s) => s.key === 'api')) { apiSection.draw(null); nodes.push(apiSection.el); }
   return { nodes, view: vw.view, census, awaiting: msgs.waitingItems, proposals: msgs.items };
 }
 
@@ -1536,7 +1538,7 @@ export function openChannelOutbox(app, opts = {}) {
     summary.textContent = r.census.total ? t('{a} awaiting your approval · {n} proposals', { a: r.census.waiting, n: r.census.total }) : apiCardsUnread() ? t('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here. Nothing is lost: it comes back when they read (it tries again every few minutes).') : t('No proposals yet');   // r3193
     if (filter) {
       ftext.textContent = t('drafted by {who}', { who: filter.name || t('this conversation') });
-      if (!r.census.total && r.nodes[0]) r.nodes[0].textContent = t('This conversation has no proposal in the Outbox list.');
+      if (!r.census.total && r.nodes[0] && !apiCardsUnread()) r.nodes[0].textContent = t('This conversation has no proposal in the Outbox list.');   // r3232 (2): held — the held line stays
     }
     const nodes = filter ? [fbar, ...r.nodes] : r.nodes;
     placeArmed(list, nodes);

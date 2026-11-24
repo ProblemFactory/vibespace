@@ -145,11 +145,16 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     file, valid: APPS_SHAPE, code: 'apps_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `VibeSpace cannot read its app proposals right now (${h.code}); it reads them again by itself every few minutes. No app proposal is lost: nothing is written over them, and app proposals, their decisions and helpers wait until it reads`,
     log: (s) => log.warn?.('[apps] ' + s),
-    onLift: (v) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; bump('local');
+    onLift: (v, facts) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; bump('local');
+      if (facts && facts.setAside) tornKept = facts.setAside;   // r3232 (1): TORN bytes kept aside — the proposals they held may come back with that copy
       for (const h of [...owedListen]) { owedListen.delete(h); afterListen({ host: h }).catch((e) => log.warn?.(`[apps] the replay owed since the start failed at the lift: ${e && e.message}`)); } },   // r3193: the start's replay, now on the list as read
   }) : null;
   const isHeld = () => !!(hold && hold.held());
   const owedListen = new Set();   // r3193: the start's replay asked while held — it runs at the lift (never an unstage from an unread list)
+  // r3232 (1): after a TORN lift (the list started empty, its bytes kept aside as `tornKept`) the start's replay skips its keep-sweep: the
+  // staged installers of the proposals only that copy holds stay until a start whose list reads (its sweep takes what no proposal keeps).
+  // It stops ONLY the replay's sweep (the machine's pass at a start); a person's decline / withdraw still deletes its own proposal's files.
+  let tornKept = null;
   if (file) {
     let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: APPS_SHAPE });
@@ -630,7 +635,8 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     for (const p of store.proposals.slice()) if (p.state === 'installing') setState(p, 'failed', { result: { code: 'install_interrupted', error: 'VibeSpace restarted while this was installing — press Try again to finish it', step: 'install' } }, { tell: true });
     sweep();
     const keep = store.proposals.filter((p) => !TERMINAL.has(p.state) && p.host === (host || 'local')).flatMap((p) => [p.request && p.request.staged, p.card && p.card.app && p.card.app.icon]).filter(Boolean);
-    access.call(host, 'app-unstage', { keep }).catch(() => { }); // a crash mid-install / a hub restarted: what no open proposal keeps goes
+    if (tornKept) log.warn?.(`[apps] boot: ${STORE_FILE} started empty from torn bytes (kept aside as ${tornKept}) — the staged files' sweep waits for a start whose list reads (the copy may name them)`);
+    else access.call(host, 'app-unstage', { keep }).catch(() => { }); // a crash mid-install / a hub restarted: what no open proposal keeps goes
     let st;
     try { st = await status(host); } catch (e) { log.warn?.(`[apps] boot: the apps status could not be read (${e.message})`); return { ran: false, error: e.message }; }
     const d = st.replay && st.replay.decision;

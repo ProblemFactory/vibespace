@@ -299,7 +299,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     return api;
   };
   Object.assign(api, { isHeldUnread: () => !!hold.held(), _hold: hold });   // r3005: the hold's state (the suite reaches the helper)
-  api.stop = () => { hold.stop(); stopped = true; if (timer) clearT(timer); if (marksTimer) clearT(marksTimer); timer = marksTimer = null; };
+  api.stop = () => { hold.stop(); stopped = true; if (timer) clearT(timer); if (marksTimer) clearT(marksTimer); if (marksRetry) clearT(marksRetry); timer = marksTimer = marksRetry = null; };
   /** lane feedback-forward-404: an answer the TELEMETRY forward got (src/telemetry.js onForwardAnswer) — the same target's
    *  VERSION_HEADER. A paused outbox asks again at once when the version moved (a hub updated to a build with the door
    *  catches up the same hour); a collector that names no version changes nothing. → true when the version moved */

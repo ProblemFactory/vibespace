@@ -67,7 +67,7 @@ const WORDS = Object.freeze({
   automation_unread: 'the automation keys could not be read',   // r3285 (9): the list's hold by its own code (the family's 503)
   unauthorized: 'missing or unknown session token', not_found: 'not found', not_ready: 'the server is still starting — try again in a moment', failed: 'it failed',
 });
-const STATUS = Object.freeze({ ...A.CODES, automation_unread: 503, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409, 'todos-unread': 503 });
+const STATUS = Object.freeze({ ...A.CODES, automation_unread: 503, feedback_unread: 503, vault_not_set_up: 409, ask_unknown: 404, ask_settled: 409, human_only: 403, cross_site: 403, not_ready: 503, except_unnamed: 409, 'todos-unread': 503 });
 
 /**
  * @param {object} o

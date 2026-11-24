@@ -189,6 +189,7 @@ function operatorRefresh() {
     lines.push(`Apps installed through VibeSpace on ${j.host}:`);
     if (!(j.entries || []).length) lines.push('  (none)');
     for (const e of j.entries || []) lines.push(...entryLines(e));
+    if (j.proposalsUnread) lines.push(`Your proposals: not known right now — ${j.proposalsUnread}`);   // r3232 (4): the list is held — never «no proposals»
     if ((j.proposals || []).length) { lines.push('Your proposals:'); for (const p of j.proposals) lines.push(`  ${p.id}  ${p.state}  ${p.kind} ${p.label}`); }
     if (j.drift && j.drift.added.length) lines.push(`Installed OUTSIDE VibeSpace (lost at the next rebuild unless the user adopts them): ${j.drift.added.join(' ')}`);
     if (j.updates) lines.push(`${j.updates} update(s) available — the user's Refresh in Desktop apps`);

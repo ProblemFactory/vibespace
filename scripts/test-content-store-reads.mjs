@@ -513,16 +513,29 @@ console.log('XP7 [app-proposals.json] the start\'s replay while held: nothing un
   const L1 = "  if (typeof engine.isHeldUnread === 'function' && engine.isHeldUnread()) return fail(res, { code: 'apps_unread', message: engine.heldWords() });   // r3193: held — nothing dropped, said (never ok)\n";
   const del = (r) => r.includes(L1) && r.indexOf(L1) > r.indexOf("router.delete('/api/apps/helpers/:sessionId'");
   ok(del(RA) && !del(anchored(RA, L1, '', 'xp8-del-today')), 'XP8 a helper\'s end while held answers the hold (503 apps_unread), never { ok: true } over nothing dropped (RED: the route as it was)', null);
+  // r3232 (5): the late-hooks note DRIVEN — the real announce over a statuses stand-in whose pushNotice queues nothing (held); its red the module as it was
+  const Mod = require('node:module');
+  const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
+  const lateRun = (mod) => {
+    const filed = [];
+    const hl = mod.create({ activeSessions: new Map([['w-late1', { backend: 'claude', name: 'Made-up late' }]]), getSessionStatus: () => ({ pushNotice: () => 0 }), getUserTodos: () => ({ add: (...a) => { filed.push(a); } }), sessionStatusKey: (x, id) => 'claude:' + id, harnesses: { get: () => ({ label: 'Made-up CLI', inject: { hookFile: '.made-up/hooks.json', kind: 'settings' } }) }, log: () => { }, warn: () => { } });
+    hl.ready();
+    const out = hl.noteCreated({ harness: 'claude', file: '/scratch-made-up/.made-up/hooks.json', rel: '.made-up/hooks.json', at: Date.now() });
+    return { r: Array.isArray(out) ? out[0] : null, filed: filed.length };
+  };
   const L2 = 'if (k) { told.add(id); n++; } else warn(';
-  ok(HLs.includes(L2) && !HLs.includes('{ replaceKind: true }); told.add(id); n++; }'), 'XP8 the late-hooks note is counted as told only when the statuses queued it (pushNotice answers 0 while held)', null);   // stale-pins: kept
+  const lateNow = lateRun(require(path.join(REPO, 'src/server/hooks-late.js')));
+  const lateOld = HLs.includes(L2) ? lateRun(asModule('src/server/hooks-late.js', anchored(HLs, L2, '{ told.add(id); n++; } if (!k) warn(', 'xp8-late-today'))) : null;
+  ok(!!lateNow.r && lateNow.r.told === 0 && lateNow.filed === 0 && !!lateOld && lateOld.r.told === 1 && lateOld.filed === 1, 'XP8 the late-hooks note while the statuses are held (pushNotice queues nothing): no session counted as told, no For-you line says it was — RED: the module as it was counts it told and files the line', { now: lateNow, old: lateOld });
   const L3 = "  if (st && typeof st.isHeldUnread === 'function' && st.isHeldUnread()) return null;";
-  ok(MPW.includes(L3) && MPW.indexOf(L3) > MPW.indexOf('const inboxBoard = () => {') && MPW.indexOf(L3) < MPW.indexOf('const progressAt = new Map();'), 'XP8 the For-you judge\'s board while the statuses are held: no board (unknown), never null status and [] history as facts', null);
+  const board = (x) => x.includes(L3) && x.indexOf(L3) > x.indexOf('const inboxBoard = () => {') && x.indexOf(L3) < x.indexOf('const progressAt = new Map();');
+  ok(board(MPW) && !board(anchored(MPW, L3, '', 'xp8-board-today')), 'XP8 the For-you judge\'s board while the statuses are held: no board (unknown), never null status and [] history as facts (RED: the wiring as it was; the board lives in the wiring, which no suite runs)', null);
   const L4 = "const apiHeld = !!view && view.code === 'api_unread';";
   const dlg = (x) => x.includes(L4) && (x.match(/apiHeld \? t\('VibeSpace cannot read its API proposals right now, so none is shown here\./g) || []).length === 2;
   ok(dlg(DLG) && !dlg(anchored(DLG, L4, "const apiHeld = false;", 'xp8-dialog-today')), 'XP8 the owner\'s API access dialog while held says why both lists are empty (the always-allowed shapes, the cards waiting), never «none» (RED: the dialog as it was, the mark unread)', null);
   const CV2 = src('src/lib/channel-api-card-view.js'), OB = src('src/lib/channel-outbox.js'), AID = src('src/lib/app-install-dialog.js');
-  const outbox = (cv, ob) => cv.includes("apiUnread = !!r && r.code === 'api_unread';") && ob.includes("const apiUnread = apiCardsUnread();") && (ob.match(/t\('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here\./g) || []).length === 2;
-  ok(outbox(CV2, OB) && !outbox(anchored(CV2, "apiUnread = !!r && r.code === 'api_unread';", 'apiUnread = false;', 'xp8-outbox-today'), OB), 'XP8 the Outbox while the API proposals are held: its card view keeps the mark, its empty section and its summary say why — never «Nothing is waiting for your approval» / «No proposals yet» (RED: the card view as it was, the mark dropped)', null);
+  const outbox = (cv, ob) => cv.includes("if (r && r.code === 'api_unread') apiUnread = true; else if (r && Array.isArray(r.cards)) apiUnread = false;") && ob.includes("const apiUnread = apiCardsUnread();") && (ob.match(/t\('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here\./g) || []).length === 2;
+  ok(outbox(CV2, OB) && !outbox(anchored(CV2, "if (r && r.code === 'api_unread') apiUnread = true; else if (r && Array.isArray(r.cards)) apiUnread = false;", 'apiUnread = false;', 'xp8-outbox-today'), OB), 'XP8 the Outbox while the API proposals are held: its card view keeps the mark, its empty section and its summary say why — never «Nothing is waiting for your approval» / «No proposals yet» (RED: the card view as it was, the mark dropped)', null);
   const apps = (x) => x.includes("if (st.proposalsUnread) props.appendChild(el('div', 'app-sec-row empty-hint app-sec-proposals-held',");
   ok(apps(AID) && !apps(anchored(AID, "if (st.proposalsUnread) props", 'if (false) props', 'xp8-apps-today')), 'XP8 the Apps window while app-proposals is held draws the held line above the agents\' proposals (RED: the window as it was)', null);
 }
@@ -811,6 +824,59 @@ console.log('FB7–FB9 / DS7 / DX7 [the second half] the readers of a held list'
     const ho = (x) => x.includes("why: 'designs-unread'") && x.indexOf("why: 'designs-unread'") < x.indexOf('const op = AF.handoverOp(row, { from: fromRef, at });');
     ok(ho(AR) && !ho(anchored(AR, "why: 'designs-unread'", "why: 'designs-unread-today'", 'ho-today')), 'DS7 a design hand-over while the designs list is held is REFUSED, said — never noted, registered nowhere and marked handed (RED: the hand-over as it was)', null);
   }
+}
+
+// ══ r3232: the round's smalls on the first half (round w0dobhfp1) ══
+console.log('XP9 / XP10 [app-proposals.json, the API proposals] a torn lift keeps the staged installers; the Outbox\'s API section says the hold');
+{
+  // XP9 (1): TORN bytes — the list starts empty, its bytes kept aside; the start's replay deletes no staged installer (the copy may name them)
+  const AE = require(path.join(REPO, 'src/server/apps-engine.js'));
+  const Mod = require('node:module');
+  const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
+  const tornRun = async (mod, name) => {
+    const d = world(name), F = path.join(d, mod.STORE_FILE);
+    fs.writeFileSync(F, '{"proposals": [{"id": "ap-torn1", "host": "local", "state": "proposed", "request": {"staged": "0123456789abcdef.deb"');
+    const calls = [];
+    const access = { call: async (host, verb, args) => { calls.push({ verb, args }); if (verb === 'app-status') return { status: { entries: [], replay: { decision: { run: false, why: 'made-up: nothing to put back' } } } }; return {}; } };
+    let e = null;
+    await quietly(async () => { e = mod.create({ access, dataDir: d, log: { log() { }, warn() { } } }); for (let i = 0; i < 200 && e._hold.held(); i++) await new Promise((r) => setTimeout(r, 10)); await e.afterListen(); });
+    e._hold.stop();
+    return { held: e._hold.held(), copies: copiesOf(F).length, unstaged: calls.filter((c) => c.verb === 'app-unstage').length };
+  };
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/apps-engine.js'), 'utf8');
+  const TL = '      if (facts && facts.setAside) tornKept = facts.setAside;';
+  const now = await tornRun(AE, 'xp9'), old = SRC.includes(TL) ? await tornRun(asModule('src/server/apps-engine.js', anchored(SRC, TL, '', 'xp9-today')), 'xp9-old') : null;
+  ok(!now.held && now.copies === 1 && now.unstaged === 0 && !!old && old.copies === 1 && old.unstaged === 1, 'XP9 a TORN app-proposals.json (kept aside, the list started empty): the start\'s replay asks the machine to unstage NOTHING — the staged installers of the proposals only the kept copy holds stay for a start whose list reads (RED: the engine as it was sweeps them with an empty keep list)', { now, old });
+  // XP10 (2) (3): the Outbox's API section says the hold itself; a failed read keeps the last mark (each by its line, with a red copy)
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const CV = src('src/lib/channel-api-card-view.js'), OB = src('src/lib/channel-outbox.js');
+  const A1 = "    root.hidden = !S.total && !apiUnread;\n    held.hidden = !apiUnread;\n";
+  const sec = (x) => x.includes(A1) && x.includes("root.append(head, held, list);");
+  ok(sec(CV) && !sec(anchored(CV, A1, '    root.hidden = !S.total;\n', 'xp10-sec-today')), 'XP10 the Outbox\'s API section while the API proposals are held: drawn with the held words in it, its «0 awaiting you · 0» head hidden (RED: the section as it was hides itself when empty)', null);   // stale-pins: kept (the red copy writes the line as it was)
+  const A2 = "  if (apiUnread && apiSection && census.total && !vw.sections.some((s) => s.key === 'api')) { apiSection.draw(null); nodes.push(apiSection.el); }\n";
+  const beside = (x) => x.includes(A2) && x.indexOf(A2) < x.indexOf('  return { nodes, view: vw.view, census, awaiting: msgs.waitingItems, proposals: msgs.items };');
+  ok(beside(OB) && !beside(anchored(OB, A2, '', 'xp10-beside-today')), 'XP10 in the «all» view (and «awaiting») with message proposals present, a held API list is drawn as its section with the held words — never nothing (RED: the Outbox as it was)', null);
+  const A3 = "if (!r.census.total && r.nodes[0] && !apiCardsUnread()) r.nodes[0].textContent = t('This conversation has no proposal in the Outbox list.');";
+  ok(OB.includes(A3) && !anchored(OB, A3, "if (!r.census.total && r.nodes[0]) r.nodes[0].textContent = t('This conversation has no proposal in the Outbox list.');", 'xp10-filter-today').includes(A3), 'XP10 under a conversation filter the held line is never written over with «This conversation has no proposal in the Outbox list.» (RED: the filter as it was)', null);   // stale-pins: kept (the red copy writes the line as it was)
+  const A4 = "if (r && r.code === 'api_unread') apiUnread = true; else if (r && Array.isArray(r.cards)) apiUnread = false;";
+  ok(CV.includes(A4) && !CV.includes("apiUnread = !!r && r.code === 'api_unread';"), 'XP10 a read that FAILS after a held read keeps the held mark (only an answer sets it: the hold, or a list) — never «Nothing is waiting» again over a hold that may stand', null);   // stale-pins: kept (the red copy writes the line as it was)
+  // XP10 (4): the agent's app list prints the hold
+  const APP = src('data/bin/vibespace-app'), A5 = "    if (j.proposalsUnread) lines.push(`Your proposals: not known right now — ${j.proposalsUnread}`);";
+  const says = (x) => x.includes(A5) && x.indexOf(A5) > x.indexOf("if (verb === 'list') {") && x.indexOf(A5) < x.indexOf("lines.push('Open an app: vibespace-window open <catalog id>');");
+  ok(says(APP) && !says(anchored(APP, A5, '', 'xp10-cli-today')), 'XP10 vibespace-app list while the app proposals are held prints one line: the agent\'s proposals are not known right now, with the words (RED: the CLI as it was prints nothing of it)', null);
+}
+console.log('FB13 [feedback.json, the outbox] the held list through the automation verbs answers 503; a stopped forward pulls no more');
+{
+  const AU = fs.readFileSync(path.join(REPO, 'src/routes/automation.js'), 'utf8');
+  ok(/automation_unread: 503, feedback_unread: 503,/.test(AU), 'FB13 the automation routes\' status table has the held feedback list\'s row: vibespace-feedback list --open (the feedback.list verb) reads 503 try-later, never 400 (a usage error)', null);
+  const FFW = require(path.join(REPO, 'src/server/feedback-forward.js'));
+  const timers = new Set();
+  const page = { marks: [{ id: 'fb-madeup13', status: 'handled', version: '0' }], next: 5, more: false };
+  const o = FFW.create({ dataDir: world('fb13'), target: () => ({ url: 'https://hub.example.test', token: 'made-up-token' }), instance: () => ({ name: 'made-up', version: '0' }), applyMarks: () => ({ ok: false, applied: 0, code: 'feedback_unread' }), backlog: () => [], fetch: async () => ({ status: 200, headers: { get: () => null }, json: async () => page }), setTimeout: (fn) => { const h = { fn, unref() { } }; timers.add(h); return h; }, clearTimeout: (h) => { timers.delete(h); }, log: () => { } });
+  await quietly(() => o.pullMarks());
+  const asked = timers.size;
+  o.stop();
+  ok(asked === 1 && timers.size === 0, 'FB13 a mark page the held feedback list refused schedules ONE pull again (the «asks again» half of the law), and stop() clears it — a stopped forward fires no pull', { asked, left: timers.size });
 }
 
 report();

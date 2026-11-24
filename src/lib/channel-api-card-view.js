@@ -164,7 +164,7 @@ const listeners = new Set();
 export function refreshApiCards({ changed = false } = {}) {
   if (inflight) { if (changed) again = true; return inflight; }
   const seq = ++started;
-  inflight = fetchJson('/api/channels/api').then((r) => { apiUnread = !!r && r.code === 'api_unread'; records = (r && r.cards) || []; if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; } for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
+  inflight = fetchJson('/api/channels/api').then((r) => { if (r && r.code === 'api_unread') apiUnread = true; else if (r && Array.isArray(r.cards)) apiUnread = false; records = (r && r.cards) || []; if (r && Array.isArray(r.cards)) { good = r.cards; goodSeq = seq; lookup = null; } for (const fn of listeners) { try { fn(records); } catch {} } }).catch(() => {}).finally(() => { inflight = null; if (again) { again = false; refreshApiCards(); } });
   return inflight;
 }
 /** B-d3d3: the good read's records by id → `{fate, status}` (the Outbox row's short status — C.fateOf / C.statusOf); the
@@ -255,12 +255,16 @@ export function apiOutboxSection(app, { onRecords = null, onAll = null } = {}) {
   root.dataset.sec = 'api';
   const head = outboxSecHead('api');
   const list = el('div', 'chan-api-outbox-list');
-  root.append(head, list);
+  // r3232 (2): the API proposals HELD — the section itself says so (in the «all» view beside message proposals, under a conversation filter)
+  const held = el('div', 'empty-hint chan-api-outbox-held', t('VibeSpace cannot read its API proposals right now, so a call waiting for your approval may not be shown here. Nothing is lost: it comes back when they read (it tries again every few minutes).'));
+  root.append(head, held, list);
   const open = new Set(), seen = new Set();
   let last = null;
   const draw = (sec) => {
     const S = last = sec || { key: 'api', total: 0, waiting: 0, folded: false, items: [] };
-    root.hidden = !S.total;
+    root.hidden = !S.total && !apiUnread;
+    held.hidden = !apiUnread;
+    head.hidden = apiUnread && !S.total;   // never «0 awaiting you · 0» over a held list
     paintSecHead(head, S, t('API calls · {a} awaiting you · {n}', { a: S.waiting, n: S.total }), onAll);
     const now = Date.now();
     const runs = S.folded ? [] : runsOf(S.items, (r) => C.rowModel(r, { now }).runKey);
