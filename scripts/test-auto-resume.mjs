@@ -2702,6 +2702,38 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
+console.log('\n16. B-9a24 (主开发 r3434 (8)): a restart whose conversation comes back LATE keeps its arm — «not live» is «gone» only once the restore settled');
+{
+  // the hub was down across the reset: the arm on disk is DUE at the first tick, and the conversation (a remote orphan re-adopted
+  // after hosts.json read, a pipe re-opened) is not live yet — then it comes back
+  const AR_ON = (k) => (k === 'claude.autoResumeOnLimit' ? true : undefined);   // the feature on, every other setting its default
+  const late = (mod) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-'));
+    const s1 = new Map([['w1', sess()]]);
+    const a1 = mod.create({ dataDir: d, activeSessions: s1, serverSetting: AR_ON, sendToSession: () => true, log: () => { } });
+    a1.armIfEnabled('w1', s1.get('w1'), Date.now() + 60000, '5h');   // armed before the restart, persisted
+    a1.stop();
+    let settled = false;
+    const sent = [], s2 = new Map();
+    const a2 = mod.create({ dataDir: d, activeSessions: s2, serverSetting: AR_ON, sendToSession: (id) => { sent.push(id); return true; }, log: () => { }, restoreSettled: () => settled });
+    const due = Date.now() + 60000 + GRACE_MS + 1000;
+    a2.tick(due);   // the first tick after the boot: due, and the conversation is not back yet
+    const keptBefore = a2._armed.has('w1');
+    s2.set('w1', sess()); settled = true;   // the re-adoption lands it, the restore has settled
+    a2.tick(due + 30000);
+    const out = { keptBefore, sent: sent.slice(), armedAfter: a2._armed.has('w1') };
+    a2.stop();
+    return out;
+  };
+  const AR_MOD = require(path.join(REPO, 'src/server/auto-resume.js'));
+  const k = late(AR_MOD);
+  ok('16a. a due arm whose conversation is not live yet is KEPT while the restore has not settled; once it is back the tick continues it (one continue, the arm spent)', k.keptBefore && k.sent.join() === 'w1' && !k.armedAfter, JSON.stringify(k));
+  const kx = late(MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC0, '      if (!session) { let settled = true; try { settled = restoreSettled() !== false; } catch { } if (!settled) continue; armed.delete(id); save(); continue; }   // gone: nothing to continue\n', '      if (!session) { armed.delete(id); save(); continue; }          // gone: nothing to continue\n', 'src/server/auto-resume.js')));
+  ok('16b. RED CONTROL (the release\'s tick: not live = gone): the first tick deletes the arm before the conversation is back — it is never continued — red', !kx.keptBefore && kx.sent.length === 0, JSON.stringify(kx));
+  const ks = (() => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')); const m = new Map([['w9', sess()]]); const a = AR_MOD.create({ dataDir: d, activeSessions: m, serverSetting: AR_ON, sendToSession: () => true, log: () => { } }); a.armIfEnabled('w9', m.get('w9'), Date.now() + 60000, '5h'); m.delete('w9'); a.tick(Date.now() + 60000 + GRACE_MS + 1000); const r = a._armed.has('w9'); a.stop(); return r; })();
+  ok('16c. …and with no restore pending (the default: every boot that settled, a suite\'s own world) a conversation that is gone still drops its arm, as the release', ks === false);
+}
+
 console.log('\n15. the patched copies never touch the tree');
 for (const r of copiesCensus(MUTX.files, MUTX.dir, REPO, { minCopies: 6 })) ok('15. ' + r.name, r.pass, r.detail);
 

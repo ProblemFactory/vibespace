@@ -424,7 +424,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, restoreSettled = () => true, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   // r3004 (lane bl-loop-b): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of this file as «nothing armed,
   // nothing refused» and the next save wrote it over: a promised continue AND the loop-breaker's memory (its quarantines, the edges
@@ -1711,7 +1711,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     }
     for (const [id, a] of due(now)) {
       const session = activeSessions.get(id);
-      if (!session) { armed.delete(id); save(); continue; }          // gone: nothing to continue
+      // B-9a24 (主开发 r3434 (8)): «not live» is «gone» only once the boot's restore has SETTLED — a conversation restored LATE (a
+      // remote orphan re-adopted after hosts.json read, a pipe re-opened) whose reset passed while the hub was down is due at the
+      // first tick, before it is back: its arm is KEPT (not continuing yet is the safe mistake) and fires once it is live again
+      if (!session) { let settled = true; try { settled = restoreSettled() !== false; } catch { } if (!settled) continue; armed.delete(id); save(); continue; }   // gone: nothing to continue
       // the feature was turned off under a live arm: drop the wait, KEEP the
       // breaker (worked:false) — nothing was produced, and a toggle off/on
       // must not hand the loop a fresh budget any more than a deploy may
