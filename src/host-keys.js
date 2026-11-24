@@ -172,10 +172,15 @@ function hostKeyRefusal(h, stderr) {
   const w = hostKeyWords(stderr);
   if (!w) return null;
   const name = (h && (h.name || h.id)) || 'the machine';
+  // r3688 (its round's should): under a PINNED check, ssh's «No … host key is known for <alias>» means the pin FILE holds no line for
+  // it (removed or emptied by hand) — never that the host showed another key: said as that (pinLine 'none'), the same door
+  const noLine = /^No \S+ host key is known for/i.test(w.said);
   // r3431: the key ssh refused was the JUMP HOST's (the line names the hop, never the machine) — said as the hop's, its door the same
   const hop = hopAliasOf(h);
   if (hop && hop !== aliasOf(h) && nameOfSaid(w.said) === hop) {
     const hp = hopPinned(h), jh = hopOf(h).host;
+    if (hp && noLine) return Object.assign(new Error(`${name}'s jump host ${jh}: the file that holds the key pinned for it has no line for it, so ssh had no key to check — VibeSpace did not connect. A start of VibeSpace writes it again from the record; or pin it again in ${doorOf(name)}`),
+      { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: null, sshLine: w.said, pinned: true, pinLine: 'none', jump: jh, params: { host: name, fp: '', jump: jh, pinLine: 'none' } });
     return Object.assign(new Error(`${name}'s jump host ${jh} showed an ssh host key that is not ${hp ? 'the key pinned for it' : 'the key this VibeSpace saw before'} — VibeSpace did not connect${w.fp ? ` (it showed ${w.fp})` : ''}. If the jump host's key really changed, compare it on the jump host and ${hp ? 'pin it again' : 'pin the key it shows now'} in ${doorOf(name)}`),
       { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: w.fp, sshLine: w.said, pinned: hp, jump: jh, params: { host: name, fp: w.fp || '', jump: jh } });
   }
@@ -183,13 +188,16 @@ function hostKeyRefusal(h, stderr) {
   const whose = pin ? 'the key pinned for it' : 'the key this VibeSpace saw before';
   // a machine never pinned is not told to pin it «again» (主开发's verdict of 2026-11-18); the door is THE phrase (DOOR)
   const act = pin ? 'pin it again' : 'pin the key it shows now';
+  if (pin && noLine) return Object.assign(new Error(`${name}: the file that holds the key pinned for it has no line for it, so ssh had no key to check — VibeSpace did not connect. A start of VibeSpace writes it again from the record; or pin it again in ${doorOf(name)}`), { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: null, sshLine: w.said, pinned: true, pinLine: 'none', params: { host: name, fp: '', pinLine: 'none' } });
   return Object.assign(new Error(`${name} showed an ssh host key that is not ${whose} — VibeSpace did not connect${w.fp ? ` (it showed ${w.fp})` : ''}. If the machine's key really changed, compare it on the machine and ${act} in ${doorOf(name)}`), { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: w.fp, sshLine: w.said, pinned: pin, params: { host: name, fp: w.fp || '' } });
 }
 
 /** The page's view of a record's pin (no key text: the fingerprints say it). */
 const pinView = (h) => ({ ...pinViewOwn(h), ...hopView(h) });
 /** r3431: the hop's part of the view — its host, and its pinned keys' fingerprints (null: the jump host's key is not pinned) */
-const hopView = (h) => { const p = hopOf(h); return !p ? {} : { jump: { host: p.host, port: p.port || null, hostKeys: hopPinned(h) ? hopKeysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })) : null, hostKeysAt: hopPinned(h) ? (h.jumpHostKeysAt || null) : null } }; };
+// r3688 (line 814's round, must 1): the hop's view rides under a NAME OF ITS OWN (jumpPin) — a record's own fields are never replaced by
+// a view's: hosts.list() spreads this view last, and a row's `jump` stays the record's string (a list row dials as its record does)
+const hopView = (h) => { const p = hopOf(h); return !p ? {} : { jumpPin: { host: p.host, port: p.port || null, hostKeys: hopPinned(h) ? hopKeysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })) : null, hostKeysAt: hopPinned(h) ? (h.jumpHostKeysAt || null) : null, ...(hopUnusable(h) ? { hostKeysUnusable: true } : {}) } }; };
 const pinViewOwn = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })), hostKeysAt: h.hostKeysAt || null } : pinUnusable(h) ? { hostKeys: null, hostKeysUnusable: true } : { hostKeys: null });   // r1602: a REFUSED pin is not «not pinned» (no one-press for it)
 
 /** B-7f0b (the coordinator's r1220 (2)): THE KEYS THIS HUB ALREADY TRUSTS for a record — the hub user's own known_hosts lines

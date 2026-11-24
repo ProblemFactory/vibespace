@@ -54,6 +54,10 @@ function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed 
   if (e && e.code === 'hosts-unread') return hostsHeldWords(); // the meeting with bl-jobs' held store (B-f276 §8): worded by its code
   if (e && e.code === 'host-key-name') return tr('{name}: its host-key pin cannot be used — its address is not one plain host name, so VibeSpace does not connect to it. Remove it and add it again with its plain address (Remote → {name} → Remove host, then Remote → Add machine)', { name });
   // B-7f0b (r1602): the one-press pin's own refusals, worded by code (never the hub's English, never a path)
+  // r3688 (its round's shoulds): the HOP's own refusals of a press — its configuration name, its silence at the press
+  const ep = e && e.body && e.body.params && typeof e.body.params === 'object' ? e.body.params : {};
+  if (e && e.code === 'host-key-via-config' && typeof ep.jump === 'string' && ep.jump) return tr('{name}\'s jump host {jump} takes its address or port from this hub\'s ssh configuration, so its key cannot be named from the record — check the key it shows now.', { name, jump: ep.jump });
+  if (e && e.code === 'host-key-jump-no-answer') return tr('The jump host {jump} did not answer, so its key could not be read now.', { jump: typeof ep.jump === 'string' ? ep.jump : '' });
   if (e && e.code === 'host-key-via-config') return tr('{name} takes its address or port from this hub\'s ssh configuration, so its key cannot be named from the record — check the key it shows now.', { name });
   if (e && e.code === 'host-key-known-too-big') return tr('This hub\'s known_hosts file is over 4 MiB, so it is not read for a pin — check the key {name} shows now.', { name });
   if (e && e.code === 'host-key-known-unreadable') return tr('This hub\'s known_hosts file could not be read — check the key {name} shows now.', { name });
@@ -62,10 +66,12 @@ function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed 
   const fp = typeof b.fp === 'string' && b.fp ? b.fp : '?';
   if (typeof b.jump === 'string' && b.jump) {   // r3431 (B-7f0b's remainder): the key refused was the machine's JUMP HOST's
     const jump = b.jump;
+    if (b.pinLine === 'none') return tr('{name}\'s jump host {jump}: the file that holds its pinned key has no line for it, so VibeSpace did not connect. A start of VibeSpace writes it again; or pin it again in Remote → {name} → Host key…', { name, jump });   // r3688
     return b.pinned === true
       ? tr('{name}\'s jump host {jump} showed an ssh host key that is not the key pinned for it ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the jump host and pin it again in Remote → {name} → Host key…', { name, jump, fp })
       : tr('{name}\'s jump host {jump} showed an ssh host key that is not the key this VibeSpace saw before ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the jump host and pin the key it shows now in Remote → {name} → Host key…', { name, jump, fp });
   }
+  if (b.pinLine === 'none') return tr('{name}: the file that holds its pinned key has no line for it, so VibeSpace did not connect. A start of VibeSpace writes it again; or pin it again in Remote → {name} → Host key…', { name });   // r3688
   return b.pinned === true
     ? tr('{name} showed an ssh host key that is not the key pinned for it ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the machine and pin it again in Remote → {name} → Host key…', { name, fp })
     : tr('{name} showed an ssh host key that is not the key this VibeSpace saw before ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the machine and pin the key it shows now in Remote → {name} → Host key…', { name, fp });
@@ -1252,7 +1258,7 @@ export function installSidebarMounts(Sidebar) {
         pb.title = tr('Pin the key this hub already trusts for {name}', { name: h.name });
         pb.onclick = async (ev) => { ev.stopPropagation(); pb.disabled = true; try { await this._pinKnown(h, { one: true }); } finally { pb.disabled = false; } };
         top.appendChild(pb);
-      } else if (!isDial && h.jump && !(h.jumpHostKeys && h.jumpHostKeys.length) && !h.hostKeysUnusable && !(st && /^host-key-/.test(st.code || ''))) {
+      } else if (!isDial && h.jumpPin && !h.jumpPin.hostKeys && !h.jumpPin.hostKeysUnusable && !h.hostKeysUnusable && !(st && /^host-key-/.test(st.code || ''))) {   // r3688: the hop's pin from its own view (jumpPin)
         // r3431 (B-7f0b's remainder): a machine pinned behind a JUMP HOST whose key is not pinned SAYS so (nothing pins the hop by itself
         // at an update); the same one press pins the hop by the key this hub already trusts for it — never a greyed control
         top.appendChild(pinChip('stale', { text: tr('jump host not pinned'), title: tr('VibeSpace trusts the key {name}\'s jump host showed the first time it connected. One press pins it: a different key is refused from then on.', { name: h.name }) }));
@@ -2791,7 +2797,7 @@ export function installSidebarMounts(Sidebar) {
           { const f = techFold([tr('On the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')], { mono: true }); if (f) body.append(f); }
         }
         // r3431 (B-7f0b's remainder): the machine's JUMP HOST — its pin, what it shows now; ONE press pins both shown keys
-        const j = v.jump || null;
+        const j = v.jumpPin || null;   // r3688: the hop's view under its own name (the record's `jump` stays its string)
         const jPinned = !!(j && j.hostKeys && j.hostKeys.length);
         const jIsPinned = (k) => jPinned && j.hostKeys.some((p) => p.fp === k.fp);
         if (v.seenWhy) { body.append(el('p', 'agents-note host-key-diff', tr('{name} did not answer, so its own key could not be read now.', { name: h.name }))); const f = techFold([v.seenWhy], { mono: true }); if (f) body.append(f); }

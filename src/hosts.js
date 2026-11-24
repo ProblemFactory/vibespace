@@ -2583,13 +2583,21 @@ class HostManager {
     // 主开发's verdict of 2026-11-18: an address no pin line can name is refused BEFORE anything is scanned or written
     const bad = HK.nameWhy(h0);
     if (bad) throw HK.pinRefusal(h0, bad);
-    const seen = await this.hostKeyScan(id);
-    const keep = seen.filter((k) => want.has(k.fp));
-    const seenHop = HK.hopOf(h0) ? await this.hopKeyScan(id).catch(() => []) : [];   // a record with a jump host: its hop is asked again too
-    const keepHop = seenHop.filter((k) => want.has(k.fp));
-    if (keepHop.length) return this._pinTheseKeys(id, keep.length ? keep : null, keepHop);
-    if (!keep.length) throw Object.assign(new Error(`${h0.name} does not show the key you chose any more (it shows ${seen.map((k) => k.fp).join(', ')}) — look again before pinning`), { code: 'host-key-not-seen', hostId: h0.id });
-    return this._pinTheseKeys(id, keep);
+    // r3688 (line 814's round, must 2): A DOOR A REFUSAL NAMES CAN BE COMPLETED. A record with a jump host asks its HOP first (a fresh
+    // scan into a scratch file: a changed hop key is SEEN, never refused), then the machine THROUGH the hop. A changed hop key stops that
+    // machine scan (strict over the old pin file, or the hub's stale line when unpinned), so its failure is tolerated here as the dialog's
+    // GET tolerates it, and the hop's chosen key is pinned alone. Every chosen key must be shown now by one of them, else NOTHING is pinned
+    // and the words say whose answer is missing: the hop's own failure, the machine scan's own error, or what each shows (no half pin)
+    const hop = HK.hopOf(h0);
+    let hopErr = null, scanErr = null;
+    const seenHop = hop ? await this.hopKeyScan(id).catch((e) => { hopErr = e; return []; }) : [];
+    const seen = await this.hostKeyScan(id).catch((e) => { if (!hop) throw e; scanErr = e; return []; });
+    const keep = seen.filter((k) => want.has(k.fp)), keepHop = seenHop.filter((k) => want.has(k.fp));
+    const shown = new Set([...keep, ...keepHop].map((k) => k.fp));
+    if ([...want].every((fp) => shown.has(fp))) return this._pinTheseKeys(id, keep.length ? keep : null, keepHop.length ? keepHop : null);
+    if (hopErr) throw Object.assign(new Error(`${h0.name}'s jump host ${hop.host} did not answer, so its key could not be read now — nothing was pinned (${String((hopErr && hopErr.message) || 'no answer').slice(0, 200)})`), { code: 'host-key-jump-no-answer', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
+    if (scanErr) throw scanErr;
+    throw Object.assign(new Error(`${h0.name} does not show the key you chose any more (it shows ${seen.map((k) => k.fp).join(', ') || 'none'}${hop ? `; its jump host ${hop.host} shows ${seenHop.map((k) => k.fp).join(', ') || 'none'}` : ''}) — look again before pinning; nothing was pinned`), { code: 'host-key-not-seen', hostId: h0.id });
   }
 
   /** ONE pin's tail (a confirmed scan's keys, or the keys this hub already trusts): the record, landed or undone, then its pin file
@@ -2622,7 +2630,7 @@ class HostManager {
     if (h0.transport === 'dial') throw Object.assign(new Error(`${h0.name} dials out — it has no ssh host key to pin`), { code: 'host-key-no-ssh', hostId: h0.id });
     const hop = HK.hopOf(h0), needHop = !!hop && !HK.hopPinned(h0);   // r3431: ONE press pins both — the hop by its own known line
     if (HK.pinned(h0) && !needHop) return HK.pinView(h0);
-    if (HK.pinned(h0)) return this._pinKnownHop(h0, hop, file, null);
+    if (HK.pinned(h0)) { const hu = HK.hopUnusable(h0); if (hu) throw HK.pinRefusal(h0, hu); return this._pinKnownHop(h0, hop, file, null); }   // r3688: a hop pin that cannot be used is refused by its own words (r1602), never re-pinned from the file
     const unusable = HK.pinUnusable(h0);
     if (unusable) throw HK.pinRefusal(h0, unusable);
     const bad = HK.nameWhy(h0);
@@ -2638,6 +2646,11 @@ class HostManager {
    *  name ssh looked the hop up by); none and nothing else to pin ⇒ host-key-not-known (the dialog's scan-and-confirm is its road);
    *  none but the machine's own keys ⇒ the machine is pinned and its row keeps saying the jump host's key is not pinned */
   async _pinKnownHop(h0, hop, file, keys) {
+    // r3688 (its round's should): r1602's certainty rule for the HOP as for the machine — a jump host that is a name of this hub's ssh
+    // configuration (another HostName, its Port when none was typed, or a hop of its own) has its known line filed under a name the
+    // record does not hold: refused by name; its Host key… dialog's scan (the hop asked itself) is its road
+    const a = await this.resolveAlias(hop.host);
+    if (a && (a.alias || a.proxied || (!hop.port && a.port != null && a.port !== 22))) throw Object.assign(new Error(`${h0.name}'s jump host ${hop.host} takes its address or port from this hub's ssh configuration, so the key ssh trusted for it is filed under a name the record does not hold — open its Host key… to check the key it shows now`), { code: 'host-key-via-config', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
     let hk;
     try { hk = await HK.knownKeysOf({ host: hop.host, port: hop.port }, { file: file || this._knownHostsFile() }); }
     catch (e) { throw Object.assign(new Error(`${h0.name}'s jump host: ${e.message} — open its Host key… to check the key it shows now`), { code: e.code || 'host-key-known-unreadable', hostId: h0.id, params: { name: h0.name } }); }
