@@ -21,7 +21,10 @@ function heldThrows(am) {
   let h = null; try { h = typeof am.held === 'function' ? am.held() : null; } catch { h = { code: 'held-unknown' }; }
   if (h) throw new Error(`the accounts list could not be read (${h.code || 'unread'}) — not run; tried again at the next start`);
 }
-const accountsUnread = (e) => new Error(`data/accounts.json could not be read (${(e && e.code) || 'unparsable'}) — not run; tried again at the next start`);
+// r3615 (the should, r3246 (2)'s words): bytes that do not parse never mend by themselves — the refusal says the person's way out
+const accountsUnread = (e) => new Error(e instanceof SyntaxError || !(e && e.code)
+  ? 'data/accounts.json is there and its bytes do not parse — not run: it does not mend by itself; move it aside (or restore it) and the next start runs it again'
+  : `data/accounts.json could not be read (${e.code}) — not run; tried again at the next start`);
 /** 2026-09-runaway-parks-void: the old guard's sentence and what replaces it. */
 const OLD_RUNAWAY_PREFIX = 'stopped as a runaway: RSS ';
 const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS sum — retired in 2.369.171)';
@@ -722,6 +725,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           return [];
         }
         heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start
+        accountsReadItsFile(am);   // r3615 (MG1, r2944): a start whose read said «not there» while the file IS there — the list is empty and unheld
         const rep = am.migrateManualPools();
         console.log('[migrate] pool-manual-priority:', JSON.stringify(rep.map((r) => ({ id: r.id, priority: r.priority.length }))));
         return rep;
@@ -1101,6 +1105,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           return [];
         }
         heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start
+        accountsReadItsFile(am);   // r3615 (MG1, r2944): a start whose read said «not there» while the file IS there — the list is empty and unheld
         const rep = am.renameDefaultKeyNames();
         console.log('[migrate] default-key-names:', JSON.stringify({ renamed: rep.length }));
         return rep;
@@ -1126,6 +1131,16 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
   ];
+  /** MG1 (r2944) on the train (r3615): THE LIVE LIST STARTED OVER A FILE IT NEVER READ. The accounts list's own hold (heldThrows)
+   *  covers a read that failed and torn bytes; it does not cover a start whose read answered «not there» while the file IS there by
+   *  the migration step (a network folder that answers so once, a file put back during the boot): the list starts fresh, EMPTY and
+   *  unheld. So after heldThrows the migration reads the file itself (unread or torn ⇒ not run) and refuses when it holds an id the
+   *  live store did not load ⇒ not run, nothing recorded, the next start tries again. */
+  function accountsReadItsFile(am) {
+    const doc = MR.readJson(path.join(dataDir, 'accounts.json'), 'accounts.json');
+    const ids = (doc && Array.isArray(doc.accounts) ? doc.accounts : []).map((a) => a && a.id).filter(Boolean);
+    if (typeof am.get === 'function' && ids.some((id) => !am.get(id))) throw Object.assign(new Error('accounts.json holds records the live account store did not load at this start — not run: the next start tries again'), { code: MR.CODE });
+  }
   const pluginsUnloaded = () => Object.assign(new Error('plugins.json holds records the live plugin manager did not load at this start — not run: the next start tries again'), { code: MR.CODE });
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`

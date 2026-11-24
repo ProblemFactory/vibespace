@@ -3935,19 +3935,35 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
   {
     const ID = '2026-09-pool-manual-priority';
     const DOC = JSON.stringify({ accounts: [{ id: 'pool-m', type: 'pooled', name: 'Pool', auto: false, members: [] }] }, null, 2);
+    const failedUnrecorded = (x) => !!(x.res && x.res.status === 'failed' && !x.recorded);   // the train's refusals (heldThrows, accountsUnread) carry no MG1 code
     const { AccountManager } = require('../src/accounts.js');
     const mk = (name) => { const w = world(name), f = path.join(w.d, 'accounts.json'); fs.writeFileSync(f, DOC); const am = quietly(() => refusing(['readFileSync'], f, () => new AccountManager({ dataDir: w.d }))); return { ...w, f, am }; };
     const a = mk('acct-loaded-empty');
     ok(!a.am.get('pool-m') && !!(typeof a.am.held === 'function' && a.am.held()), 'MG1 ⑤ the scene is real: the live store\'s load was refused (EIO), it holds nothing, and its hold says so');
     const ra = runOne(MIG, a.r, ID, { accounts: a.am });
-    ok(notRun(ra) && /could not be read/.test(ra.res.error) && fs.readFileSync(a.f, 'utf8') === DOC, 'MG1 ⑤ the file reads now but the live store is still held (its read again not yet landed): not run — the file as it was', ra.res);
+    ok(failedUnrecorded(ra) && /could not be read/.test(ra.res.error) && fs.readFileSync(a.f, 'utf8') === DOC, 'MG1 ⑤ the file reads now but the live store is still held (its read again not yet landed): not run — the file as it was', ra.res);
     const b = mk('acct-still-eio');
     const rb = refusing(['readFileSync'], b.f, () => runOne(MIG, b.r, ID, { accounts: b.am }));
-    ok(notRun(rb) && /could not be read/.test(rb.res.error), 'MG1 ⑤ …the file still refused (EIO): not run', rb.res);
-    const Today = today('        heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start\n        const rep = am.migrateManualPools();\n', '        const rep = am.migrateManualPools();\n', 'mg1-acct-today');
+    ok(failedUnrecorded(rb) && /could not be read/.test(rb.res.error), 'MG1 ⑤ …the file still refused (EIO): not run', rb.res);
+    const Today = today('        heldThrows(am);   // r3044 (3): never «ran» over an unread list — the runner tries again at the next start\n        accountsReadItsFile(am);   // r3615 (MG1, r2944): a start whose read said «not there» while the file IS there — the list is empty and unheld\n        const rep = am.migrateManualPools();\n', '        const rep = am.migrateManualPools();\n', 'mg1-acct-today');
     const c = mk('acct-red');
     const rc = runOne(Today, c.r, ID, { accounts: c.am });
-    ok(!!(rc.recorded && JSON.parse(fs.readFileSync(c.f, 'utf8')).accounts[0].auto === false), 'MG1 ⑤ RED without the guard (today): the empty store reshapes nothing — recorded, the manual pool never reshaped', rc.res);
+    ok(!!(rc.recorded && JSON.parse(fs.readFileSync(c.f, 'utf8')).accounts[0].auto === false), 'MG1 ⑤ RED without both guards (the hold asked and the file read): the empty store reshapes nothing — recorded, the manual pool never reshaped', rc.res);    // r3615 (the verifier's re-read of line 784): a start whose read of accounts.json answered «NOT THERE» while the file IS there by
+    // the step — the list starts fresh, EMPTY and UNHELD (heldThrows passes): the migration's own file-ids check refuses it
+    const notThere = (file, fn) => { const real = fs.readFileSync; fs.readFileSync = function (p0, ...rest) { if (String(p0) === file) throw Object.assign(new Error(`ENOENT: a placed «not there», '${p0}'`), { code: 'ENOENT' }); return real.call(this, p0, ...rest); }; try { return fn(); } finally { fs.readFileSync = real; } };
+    const mkNt = (name) => { const w = world(name), f = path.join(w.d, 'accounts.json'); fs.writeFileSync(f, DOC); const am = quietly(() => notThere(f, () => new AccountManager({ dataDir: w.d }))); return { ...w, f, am }; };
+    const d = mkNt('acct-not-there');
+    ok(!d.am.get('pool-m') && !(typeof d.am.held === 'function' && d.am.held()) && fs.readFileSync(d.f, 'utf8') === DOC, 'r3615 the scene is real: the store\'s read was answered «not there» (ENOENT, placed): it holds nothing and is NOT held, while the file is there');
+    const rd = runOne(MIG, d.r, ID, { accounts: d.am });
+    ok(notRun(rd) && /did not load/.test(rd.res.error) && fs.readFileSync(d.f, 'utf8') === DOC, 'r3615 the file there at the step holds a record the live store never loaded: not run, nothing recorded — the file as it was', rd.res);
+    const TodayNt = today('        accountsReadItsFile(am);   // r3615 (MG1, r2944): a start whose read said «not there» while the file IS there — the list is empty and unheld\n        const rep = am.migrateManualPools();\n', '        const rep = am.migrateManualPools();\n', 'mg1-acc-not-there');
+    const e = mkNt('acct-not-there-red');
+    const re = runOne(TodayNt, e.r, ID, { accounts: e.am });
+    ok(!!(re.recorded && JSON.parse(fs.readFileSync(e.f, 'utf8')).accounts[0].auto === false), 'r3615 RED without the file-ids check (heldThrows alone): the empty unheld list runs — RECORDED applied over a manual pool it never saw', re.res);
+    // r3615's should (r3246 (2)'s words): TORN bytes in the store-less road say they never mend by themselves, and the way out
+    const t = world('acct-torn-words'); fs.writeFileSync(path.join(t.d, 'accounts.json'), '{"accounts": [');
+    const rt = runOne(MIG, t.r, ID);
+    ok(failedUnrecorded(rt) && /does not mend by itself/.test(rt.res.error) && /move it aside \(or restore it\)/.test(rt.res.error), 'r3615 torn bytes in accounts.json (no live store): not run, and the words say it does not mend by itself and the way out', rt.res);
   }
   // ⑥ A KEEPER'S STORE (2026-09-runaway-parks-void, data/desktop-apps.json): never recorded «via none» over an unread file
   const OLD_RUNAWAY = 'stopped as a runaway: RSS 9 GB over the limit';
