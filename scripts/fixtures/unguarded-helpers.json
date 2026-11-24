@@ -709,6 +709,7 @@
   "test-peer-messaging.mjs": 1,
   "test-peer-msg-card.mjs": 1,
   "test-peer-parsers.mjs": 1,
+  "test-peer-text-census-attacks.mjs": 1,
   "test-peer-text-census.mjs": 1,
   "test-permission-mode-ack.mjs": 1,
   "test-permission-rules.mjs": 1,
