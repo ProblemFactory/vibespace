@@ -99,7 +99,7 @@ const TEST_KINDS = Object.freeze(['credential-exchange', 'shape-only', 'reachabi
 const REDIRECT_KEYS = Object.freeze(['console', 'refusal', 'create', 'clientTypes', 'loopback', 'also', 'selfRegisters', 'vendor']);
 const REDIRECT_ALSO = Object.freeze(['drive']);
 /** lane dropline-connect-door: a `connect` block's words and its `connectWhy` codes — closed sets (checkRow) */
-const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected', 'shadowed']);
+const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected', 'shadowed', 'unread', 'damaged']);   // r3334: unread / damaged — the sign-in's file could not be read
 const CONNECT_WHYS = Object.freeze(['self-hosted', 'operator', 'preset-no-relay']);
 /** design 012: how an account of a bindsPerAccount row signs in when it is not the row's OAuth client. */
 const SIGNIN_KINDS = Object.freeze(['paste']);
@@ -372,6 +372,8 @@ const ROWS = Object.freeze([
         done: i18nKey('Dropline connected'),
         disconnected: i18nKey('Disconnected here — Fish Audio keeps the permission until you remove it at fish.audio'),
         shadowed: i18nKey('A Fish Audio client id saved here (by an earlier Connect, or typed) hides this cluster\'s Dropline settings'),
+        unread: i18nKey('Your voice sign-in cannot be read right now — nothing was changed. VibeSpace reads it again by itself; try again in a few minutes.'),   // r3334 unit 2: the sign-in HELD — no Connect (it would be refused: nothing is written over)
+        damaged: i18nKey('Your voice sign-in could not be read (the saved file was damaged; its bytes are kept beside it as {copy}) — connect again to sign in.'),   // r3334 unit 2: torn bytes kept aside — Connect is the way out
       },
       whys: {
         'self-hosted': i18nKey('Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key'),

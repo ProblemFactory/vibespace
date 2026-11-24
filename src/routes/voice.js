@@ -67,6 +67,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
       const st = status();
       if (!st.enabled) return res.status(409).json({ error: 'plugin-off' });
       if (!st.connected && st.vaultLocked) return res.status(423).json({ error: 'vault-locked' });   // lane vault-e2e-password-fix-r2
+      if (!st.connected && st.account && st.account.state === 'unread') return res.status(503).json({ error: 'voice_signin_unread', code: 'voice_signin_unread' });   // r3334: the sign-in HELD — never «not connected»
       if (!st.connected) return res.status(409).json({ error: 'not-connected' });
       const f = req.file;
       if (!f || !f.buffer || !f.buffer.length) return res.status(400).json({ error: 'audio-invalid' });

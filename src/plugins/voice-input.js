@@ -16,9 +16,13 @@ module.exports = {
       try { const r = st && st.resolveIntegration('dropline'); if (r && r.values && r.values.apiKey) return true; } catch { }
       try { return typeof h.opts.droplineConnected === 'function' && !!h.opts.droplineConnected(); } catch { return false; } // P1: the OAuth tier
     };
+    /** r3334 unit 2: the OAuth sign-in's state when it is no pair: 'unread' (held) | 'damaged' (torn bytes kept aside) | null */
+    const signin = () => { try { const s = typeof h.opts.droplineSignin === 'function' ? h.opts.droplineSignin() : null; return s === 'unread' || s === 'damaged' ? s : null; } catch { return null; } };
     const verbs = {
       install() { throw new Error('nothing to install — paste your Dropline key below, then turn voice input on'); },
       start() {
+        // r3334 unit 2: the sign-in HELD — said by name (never «connect your account first»); nothing is saved
+        if (!keyed() && signin() === 'unread') throw Object.assign(new Error('the voice sign-in could not be read right now — nothing was changed; VibeSpace reads it again by itself'), { code: 'voice_signin_unread', status: 503 });
         if (!keyed()) throw new Error('connect your Fish Audio account or paste your Dropline key first (dropline.fish.audio/app → API keys)');
         const rec = h.rec(); rec.enabled = true; h.save(); h.notify();
         return { started: true };
@@ -43,6 +47,7 @@ module.exports = {
           // lane vault-e2e-password-fix-r2: a sign-in the LOCKED vault keeps closed — the card says 「保险库已锁定」, never "connect"
           vaultLocked: !hasKey && (() => { try { return typeof h.opts.droplineLocked === 'function' && !!h.opts.droplineLocked(); } catch { return false; } })(),
           language: VM.languageOf(h.setting('language')), integration: 'dropline',
+          signin: !hasKey ? signin() : null,   // r3334: the card says «could not be read», never «connect» (damaged: Connect is the way out)
         };
       },
     };

@@ -15747,4 +15747,11 @@ export default {
   "What you typed in the editor was not saved — set your prices again once they read.": "エディターで入力した内容は保存されていません — 価格を読み込めるようになったら設定し直してください。",
   "Your edited prices cannot be read right now, so this backup leaves them out — the Usage window says why": "編集した価格をいま読み込めないため、このバックアップには含めません — 理由は使用量ウィンドウに表示されます",
   "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "価格ファイルが壊れていて読み込めませんでした。そのバイトは VibeSpace のデータフォルダ内で隣に {copy} として保存され、VibeSpace の既定の価格に戻りました。「価格…」で価格を設定し直すか、ファイルを手で直して VibeSpace を再起動してください。",
+  "VibeSpace cannot read your voice sign-in right now — nothing was changed and no sign-in is lost. It reads it again by itself; try again in a few minutes, or read it again from For you.": "VibeSpace は今、音声のサインインを読み取れません——何も変更しておらず、サインインは失われていません。自動で読み直します。数分後にもう一度試すか、「あなた宛て」から読み直してください。", // lane bl-chat-b r3334 unit 2 (the voice sign-in's file)
+  "Your voice sign-in cannot be read right now — nothing was changed. VibeSpace reads it again by itself; try again in a few minutes.": "音声のサインインを今は読み取れません——何も変更していません。VibeSpace が自動で読み直します。数分後にもう一度試してください。",
+  "Your voice sign-in could not be read (the saved file was damaged) — connect again to sign in.": "音声のサインインを読み取れませんでした（保存したファイルが壊れています）——もう一度接続してサインインしてください。",
+  "Your voice sign-in could not be read (the saved file was damaged; its bytes are kept beside it as {copy}) — connect again to sign in.": "音声のサインインを読み取れませんでした（保存したファイルが壊れています。壊れたバイトは横に {copy} として保存してあります）——もう一度接続してサインインしてください。",
+  "The voice sign-in cannot be read right now": "音声のサインインを今は読み取れません",
+  "The voice sign-in could not be read — connect again": "音声のサインインを読み取れません——もう一度接続してください",
+  "your voice sign-in": "あなたの音声サインイン",   // lane bl-chat-b r3334 unit 2: the held list's plain name
 };

@@ -63,6 +63,12 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   const pairNow = () => { try { const p = (tokens && tokens.read()) || null; pairLocked = false; return p; } catch (e) { pairLocked = !!(e && e.code === 'vault_locked'); return null; } };
   /** the vault keeps this instance's Dropline closed: the sealed pair, or the person's key in the locked integrations store */
   const vaultLocked = () => { const p = pairNow(); if (p) return false; const c = credentialOf(); return !c.key && (pairLocked || /the vault is locked/.test(String(c.why || ''))); };
+  // r3334 unit 2 (lane bl-chat-b): THE SIGN-IN HELD — a read of the sealed file that FAILED (src/server/sealed-json.js `held`): no
+  // pair is known, so nothing reads it as «not connected»: a Connect, a Disconnect, a refresh and a reconnect mark are refused BY NAME
+  // (503 voice_signin_unread) before any vendor call and before any write; torn bytes kept aside (`torn`) read as no pair, said damaged
+  const heldNow = () => { try { return !!(tokens && typeof tokens.held === 'function' && tokens.held()); } catch { return false; } };
+  const heldError = (what = 'the voice sign-in') => { const r = tokens && typeof tokens.heldRefusal === 'function' ? tokens.heldRefusal(what) : null; return new DroplineError((r && r.code) || 'voice_signin_unread', (r && r.message) || 'the voice sign-in could not be read — nothing was changed', { status: 503 }); };
+  const tornNow = () => { try { return tokens && typeof tokens.torn === 'function' ? tokens.torn() : null; } catch { return null; } };
   const lockedError = () => new DroplineError('vault-locked', 'the vault is locked — the Dropline sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)', { status: 423 });
   const livePair = () => { const p = pairNow(); return p && p.access && p.state !== 'reconnect' ? p : null; };
   function pairOf(j, clientId, prev = null) {
@@ -73,6 +79,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   const form = (o) => ({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o).toString() });
   async function markReconnect(why) {
     const p = pairNow();
+    if (!p && heldNow()) return heldError('marking the voice sign-in for a reconnect');   // r3334: HELD — never «ended, connect again», nothing written
     if (p && p.state !== 'reconnect') { try { tokens.write({ ...p, state: 'reconnect' }); } catch (e) { log.warn?.(`[voice] the reconnect mark was not written: ${e && e.message}`); } }
     log.warn?.(`[voice] Dropline sign-in needs a reconnect (${why})`);
     return new DroplineError('reconnect', 'the Dropline sign-in has ended — connect again', { status: 401 });
@@ -82,6 +89,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     if (refreshing) return refreshing;
     refreshing = (async () => {
       const p = pairNow();
+      if (!p && heldNow()) throw heldError('refreshing the voice sign-in');   // r3334: HELD — no refresh, no mark written over
       if (!p || !p.refresh || p.state === 'reconnect' || (p.refreshExp && p.refreshExp <= now())) throw await markReconnect('no live refresh token');
       let res;
       // POST https://api.fish.audio/oauth/token (grant_type=refresh_token; a public client: no secret)
@@ -100,7 +108,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     const cred = credentialOf();
     if (cred.key) return { token: cred.key, tier: 'key' };
     const p = livePair();
-    if (!p) { if (vaultLocked()) throw lockedError(); return null; }
+    if (!p) { if (vaultLocked()) throw lockedError(); if (heldNow()) throw heldError('using the voice sign-in'); return null; }   // r3334: HELD — said by name, never «not connected»
     if (p.accessExp && p.accessExp - ACCESS_SKEW_MS <= now()) return { token: (await refreshPair()).access, tier: 'oauth' };
     return { token: p.access, tier: 'oauth' };
   }
@@ -209,6 +217,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     // B-1e9a cure 3 (the read): a vendor call whose result cannot be kept is not made — a lock that landed between Connect and
     // this landing refuses BEFORE the code is exchanged (the pair could not be written); the code stays unspent
     if (typeof tokens.writable === 'function' && !tokens.writable()) throw lockedError();
+    pairNow(); if (heldNow()) throw heldError('connecting the voice sign-in');   // r3334: HELD — refused BY NAME before the code is exchanged (the vendor call), nothing written over
     let res;
     // POST https://api.fish.audio/oauth/token (grant_type=authorization_code + the PKCE verifier; no secret)
     try { res = await fetch(`${oauthBase}/oauth/token`, form({ grant_type: 'authorization_code', code, client_id: clientId, redirect_uri: redirectUri, code_verifier: verifier })); } catch (e) { throw new DroplineError('failed', `Fish Audio unreachable: ${e && e.message}`, { status: 502 }); }
@@ -227,6 +236,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   function disconnect() {
     if (!tokens) return { ok: true };
     const p = pairNow() || {};
+    if (heldNow()) throw heldError('disconnecting the voice sign-in');   // r3334: HELD — the unread file is not cleared
     if (pairLocked) throw lockedError();   // B-1e9a cure: a LOCKED vault refuses by name — never the sealed file cleared blind (the kept registration with it)
     if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();
     return { ok: true };
@@ -234,7 +244,9 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   function account() {
     if (credentialOf().key) return { tier: 'key', state: 'connected', name: null, team: null };
     const p = pairNow();
+    if (!p && heldNow()) return { tier: 'oauth', state: 'unread', name: null, team: null };   // r3334: HELD — «could not be read», never «connect»
     if (!p && vaultLocked()) return { tier: 'oauth', state: 'vault-locked', name: null, team: null };   // r2: the door, never "connect"
+    { const tn = !p ? tornNow() : null; if (tn) return { tier: 'oauth', state: 'damaged', copy: tn.copy, name: null, team: null }; }   // r3334: torn bytes kept aside — «could not be read», Connect the way out
     if (!p || !p.access) return { tier: null, state: null, name: null, team: null };
     return { tier: 'oauth', state: p.state === 'reconnect' ? 'reconnect' : 'connected', name: p.name || '', team: p.team || '' };
   }
@@ -276,7 +288,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     return { ok: true, request_id: (j && j.request_id) || null };
   }
 
-  return { dictate, me, credentialOf, testRunner, connected: () => !!credentialOf().key || !!livePair(), locked: vaultLocked, account, register, authorizeUrl, connectWith, refreshPair, disconnect, vocabulary, terms, context };
+  return { dictate, me, credentialOf, testRunner, connected: () => !!credentialOf().key || !!livePair(), locked: vaultLocked, held: () => { pairNow(); return heldNow(); }, account, register, authorizeUrl, connectWith, refreshPair, disconnect, vocabulary, terms, context };
 }
 
 module.exports = { create, DroplineError, DROPLINE_BASE, OAUTH_BASE, AUTHORIZE_URL, OAUTH_SCOPE, skipOf };

@@ -44,6 +44,7 @@ const NAMES = Object.freeze({
   // lg-recovery: the synced stores (src/sync-store.js, one create site, a store per file — r3489: the rows in the unit)
   'drafts.json': i18nKey('your saved drafts'), 'stage-sync.json': i18nKey('the Stage layout'), 'uploads-sync.json': i18nKey('the list of recent uploads'), 'settings-sync.json': i18nKey('the synced settings'),
   'browser-takeovers.json': i18nKey('the requests waiting for you to take over'),   // r3261 (bl-browser-b): the takeover requests joined the helper
+  'dropline-oauth.json': i18nKey('your voice sign-in'),   // bl-chat-b's own plain name (r3334 unit 2)
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

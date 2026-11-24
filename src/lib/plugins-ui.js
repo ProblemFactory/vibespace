@@ -255,6 +255,7 @@ export function installPluginsUI(App) {
           // verb, like Tailscale's 「Log in…」, never a status sentence nobody guesses opens a sign-in; the sheet it opens is the same
           // lane vault-e2e-password-fix-r2: a sign-in the LOCKED vault keeps closed — the vault's door, never "connect"
           chip = p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
+          if (!p.vaultLocked && p.signin === 'unread') chip = t('The voice sign-in cannot be read right now'); else if (!p.vaultLocked && p.signin === 'damaged') chip = t('The voice sign-in could not be read — connect again');   // r3334 unit 2: the voice sign-in's file could not be read — never «Connect with Fish Audio» while it is held
           tone = p.vaultLocked ? 'warn' : !p.configured ? 'primary' : waiting ? 'warn' : p.running ? 'ok' : '';
           if (!p.configured && !p.vaultLocked) chipTitle = t('or paste a Dropline key in Integrations');
           onChip = p.vaultLocked ? () => window.dispatchEvent(new CustomEvent('vs-vault-door')) : () => this._voiceSheet(p, render);

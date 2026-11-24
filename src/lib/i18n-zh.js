@@ -15748,4 +15748,11 @@ export default {
   "What you typed in the editor was not saved — set your prices again once they read.": "你在编辑器里输入的内容没有保存 — 等价格能读到后请重新设置。",
   "Your edited prices cannot be read right now, so this backup leaves them out — the Usage window says why": "暂时读不到你编辑过的价格，所以这次备份不包含它们 — 用量窗口会说明原因",
   "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "你的价格文件已损坏，无法读取。它的原始字节保存在 VibeSpace 数据文件夹中旁边的 {copy}，VibeSpace 的默认价格已恢复：请在「价格…」中重新设置你的价格，或手动修好该文件后重启 VibeSpace。",
+  "VibeSpace cannot read your voice sign-in right now — nothing was changed and no sign-in is lost. It reads it again by itself; try again in a few minutes, or read it again from For you.": "VibeSpace 暂时读不出你的语音登录——没有做任何改动，登录也没有丢失。它会自动再读；请过几分钟再试，或在「待你处理」里重新读取。", // lane bl-chat-b r3334 unit 2 (the voice sign-in's file)
+  "Your voice sign-in cannot be read right now — nothing was changed. VibeSpace reads it again by itself; try again in a few minutes.": "暂时读不出你的语音登录——没有做任何改动。VibeSpace 会自动再读；请过几分钟再试。",
+  "Your voice sign-in could not be read (the saved file was damaged) — connect again to sign in.": "读不出你的语音登录（保存的文件已损坏）——请重新连接来登录。",
+  "Your voice sign-in could not be read (the saved file was damaged; its bytes are kept beside it as {copy}) — connect again to sign in.": "读不出你的语音登录（保存的文件已损坏；损坏的字节另存在它旁边，名为 {copy}）——请重新连接来登录。",
+  "The voice sign-in cannot be read right now": "暂时读不出语音登录",
+  "The voice sign-in could not be read — connect again": "读不出语音登录——请重新连接",
+  "your voice sign-in": "你的语音登录",   // lane bl-chat-b r3334 unit 2: the held list's plain name
 };

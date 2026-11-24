@@ -159,6 +159,9 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     // the sealed file's writer (with no file a locked read gives nothing, and a registration would be thrown away at the write);
     // the guards around the read and the write stay the second line. A store with no writable() (a stand-in) answers as before.
     if (tokens && typeof tokens.writable === 'function' && !tokens.writable()) return LOCKED;
+    // r3334 unit 2 (lane bl-chat-b): the sign-in HELD (a read that failed) — refused BY NAME (503 voice_signin_unread) before any
+    // registration (a vendor call) and before any write; the read below starts the hold when it is the first to fail
+    { const no = tokens && typeof tokens.heldRefusal === 'function' ? tokens.heldRefusal('connecting the voice sign-in') : null; if (no) throw no; }
     let rec;
     try { rec = tokens.read() || {}; } catch (e) { if (locked(e)) return LOCKED; throw e; }
     let clientId = plan.clientId;

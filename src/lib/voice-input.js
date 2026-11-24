@@ -270,6 +270,7 @@ export function attachDictation(textarea, { getFacts = () => ({}), getCwd = () =
     lastStatus = st;
     if (!st) { state = 'idle'; say('offline'); return; }
     if (!st.connected && st.vaultLocked) { state = 'idle'; say('vault-locked', {}, { sticky: true }); return; }   // r2: the sealed sign-in — the door, never "connect"
+    if (!st.connected && st.account && (st.account.state === 'unread' || st.account.state === 'damaged')) { state = 'idle'; say(st.account.state === 'unread' ? 'voice-signin-held' : 'signin-damaged', {}, { sticky: true }); return; }   // r3334: never «connect your Dropline first»
     if (!st.connected || !st.enabled) { state = 'idle'; say(st.connected ? 'plugin-off' : 'not-connected', {}, { sticky: true }); return; }
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) {
       state = 'idle'; release();

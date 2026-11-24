@@ -401,7 +401,7 @@ const plugins = new PluginManager({
   // lane plugin-settings-p0: THE settings store — every plugin configuration row is read / written here (one truth)
   settings: { read: () => (persistenceRouter && persistenceRouter.readSettings ? persistenceRouter.readSettings() : {}), patch: (p) => persistenceRouter.patchSettings(p) },
   forYou: () => userTodos,   // lane relay-token-per-instance: frp files ONE For-you item per public name the relay refused (it declares 'reminders')
-  voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), droplineLocked: () => !!(dropline && dropline.locked && dropline.locked()), decisionEngine,
+  voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), droplineLocked: () => !!(dropline && dropline.locked && dropline.locked()), droplineSignin: () => { try { const a = dropline && dropline.account ? dropline.account() : null; return a && (a.state === 'unread' || a.state === 'damaged') ? a.state : null; } catch { return null; } }, decisionEngine,
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -421,7 +421,10 @@ require('./tailnet-door.js').follow(plugins, { dataDir: path.join(rootDir, 'data
 // P1 (lane voice-p1-oauth-teach): the OAuth tier (a `public` consent flow; the pair in data/dropline-oauth.json, 0600;
 // its landing door on /api/channels/oauth/cb/dropline) + the teach engine (proposals / per-project tier / context preview)
 const droplineOAuthMod = require('./dropline-oauth.js');
-const droplineTokens = require('./sealed-json.js').sealedJson(path.join(rootDir, 'data', 'dropline-oauth.json'), { dataDir: path.join(rootDir, 'data') });   // lane vault-e2e-password-fix-r2: SEALED through the vault (the hourly refresh writes sealed; LOCKED ⇒ the voice card says 「保险库已锁定」)
+const droplineTokens = require('./sealed-json.js').sealedJson(path.join(rootDir, 'data', 'dropline-oauth.json'), { dataDir: path.join(rootDir, 'data'),
+  // r3334 unit 2 (lane bl-chat-b): the voice sign-in under the store-read law — a read that failed HELD (a Connect, a Disconnect and a
+  // refresh refused by name, nothing written over), torn bytes kept aside once (0600) and read as absent with the damage said
+  hold: { code: 'voice_signin_unread', log: (l) => console.warn(`[voice] ${l}`), words: (h) => `the voice sign-in (dropline-oauth.json in VibeSpace's data folder) could not be read (${(h && h.code) || 'unreadable'}) — nothing was changed and no sign-in is lost; VibeSpace reads it again by itself every few minutes` } });   // lane vault-e2e-password-fix-r2: SEALED through the vault (the hourly refresh writes sealed; LOCKED ⇒ the voice card says 「保险库已锁定」)
 let droplineTeach = null;
 var dropline = require('./dropline-client.js').create({ integrations: () => integrations, pluginOn: () => !!voicePlugin.peek().enabled, tokens: droplineTokens, teachCap: (k) => !!droplineTeach && droplineTeach.capOk(k) });
 try { integrations?.registerTest('dropline', dropline.testRunner); } catch (e) { console.warn('[voice] the dropline Test runner was not registered:', e.message); }

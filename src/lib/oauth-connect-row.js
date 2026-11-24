@@ -5,7 +5,7 @@
 // so this file names no vendor and no row. The status answer (`decl.status`) says {account, connectVia, connectWhy}:
 // connected by OAuth ⇒ who + Disconnect; a key saved ⇒ nothing (the key outranks; its field says so); else the Connect
 // button — never dead: without a way to sign in here it says why, in the sentence the SERVER picked (connectWhy).
-import { fetchJson, showToast } from './utils.js';
+import { fetchJson, showToast, familyHeldWords } from './utils.js';   // r3334: a held code worded from the family's ONE table
 import { t } from './i18n.js';
 import { needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (plugins-integrations-13): a why with its door
 
@@ -80,8 +80,16 @@ export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
     box.appendChild(row);
     return 'vault-locked';
   }
+  // r3334 unit 2: the sign-in's file could not be read and is HELD — said, with no Connect (a Connect would be refused: nothing is
+  // written over it); it is read again by itself
+  if (a.state === 'unread' && W.unread) {
+    words.classList.add('plugin-cfg-warn'); words.textContent = t(W.unread);
+    box.appendChild(words);
+    return 'unread';
+  }
   const go = el('button', 'mounts-btn mounts-btn-primary oauth-connect-btn', t(decl.label));
   if (a.state === 'reconnect') { words.classList.add('plugin-cfg-warn'); words.textContent = t(W.expired); }
+  if (a.state === 'damaged' && W.damaged) { words.classList.add('plugin-cfg-warn'); words.textContent = t(W.damaged, { copy: a.copy || '' }); }   // r3334: torn bytes kept aside — Connect is the way out
   const whys = decl.whys || {};
   const why = () => t(whys[st && st.connectWhy] || Object.values(whys)[0] || '');
   const sayWhy = () => {
@@ -110,7 +118,7 @@ export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
       words.className = 'plugin-detail plugin-cfg-warn oauth-connect-words';
       if (e.code === 'needs-https' || e.code === 'preset-no-relay') sayWhy();   // B-1e9a cure: the relay-less fleet client is a why of its own
       else if (e.code === 'vault-locked') words.textContent = t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');
-      else words.textContent = e.message;
+      else words.textContent = familyHeldWords(e.code) || e.message;   // r3334: a held code in the page's own words
       go.disabled = false;
     }
   };
