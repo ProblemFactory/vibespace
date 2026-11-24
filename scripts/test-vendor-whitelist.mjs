@@ -1074,7 +1074,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   ok(V.CLI_PIN_RECORD.registryHost === 'registry.npmjs.org' && V.cliInstallVerdict({}).spec === `${V.CLI_PACKAGE}@${V.TABLE_VERSION}` && V.cliInstallVerdict({ version: 'https://evil.example/x.tgz' }).ok === false, '§8 the CLI spec is the package at a dotted version (never a URL / a tarball / another package); the measured record names the ONE host');
   // CONTROLS
   const MUT = mutantCopies('vendor-whitelist-slot', REPO);
-  const mut = (label, rel, src, from, to) => { ok(src.includes(from), `§8 CONTROL ${label}: the edit's anchor is in ${rel}`); const f = MUT.write(rel, src.replace(from, to), label); return fs.readFileSync(f, 'utf-8'); };
+  const mut = (label, rel, src, from, to) => { ok(src.includes(from), `§8 CONTROL ${label}: the edit's anchor is in ${rel}`); const f = MUT.write(rel, editAnchor(src, from, to, "the text handed to mut()"), label); return fs.readFileSync(f, 'utf-8'); };
   const scripts = mut('scripts-run', keeperRel, keeperSrc, "    const argv = [...SW.installArgv({ spec: v0.spec, prefix }), '--ignore-scripts'];", '    const argv = [...SW.installArgv({ spec: v0.spec, prefix })];');
   ok(reds(slotCensus(scripts, routesSrc, { ...serverTexts, [keeperRel]: scripts })).some((n) => /REGISTRY|ONE SPAWN/.test(n)), '§8 CONTROL: a CLI install that lets the package\'s scripts run is RED');
   const timer = mut('timer', keeperRel, keeperSrc, '  const reattached = installs.reattach();', '  const reattached = installs.reattach(); setInterval(() => { try { api.installCli({}); } catch { /* none */ } }, 3600e3);');

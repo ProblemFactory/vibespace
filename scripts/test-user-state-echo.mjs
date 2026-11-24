@@ -106,14 +106,15 @@ const domFree = (s) => {
     ["import { showToast, showInputDialog } from './utils.js';", 'const showInputDialog = async (o) => (globalThis.__UEO_DIALOG ? globalThis.__UEO_DIALOG(o) : null);'],   // (round 13: a leg may answer the dialog and name a harness's caps)
     ["import { t as tr } from './i18n.js';", "const tr = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));"],
   ];
-  for (const [a, b] of reps) { if (!s.includes(a)) throw new Error('domFree anchor gone: ' + a); s = s.replace(a, b); }
+  for (const [a, b] of reps) { if (!s.includes(a)) throw new Error('domFree anchor gone: ' + a); s = editAnchor(s, a, b, "the text handed to domFree()"); }
   s = s.replace(/^import \{ reportOwnerPage \} from '\.\/owner-facts\.js';.*$/m, 'const reportOwnerPage = () => null;')
     .replace(/^import \{ sessionRowOf, placeOf, settingsPolicy \} from '\.\.\/attention-model\.js';.*$/m, 'const sessionRowOf = () => null, placeOf = () => 0, settingsPolicy = () => null;');
   const n0 = (s.match(/fetch\('\/api\/user-state'/g) || []).length, n1 = (s.match(/localStorage\./g) || []).length, n2 = (s.match(/showToast\(/g) || []).length;
   if (!n0 || !n1) throw new Error('domFree doors gone');   // (no createSync = the pre-lane page: the harness still drives it — its reds are the point)
   void n2;
-  return s.replace(/fetch\('\/api\/user-state(\/batches)?'/g, "this.__fetch('/api/user-state$1'").replace(/localStorage\./g, 'this.__ls.').replace(/sessionStorage\./g, 'this.__ss.').replace(/showToast\(/g, 'this.__toast(')
-    .replace('const sync = createSync({', 'const sync = createSync({ ...(this.__doors || {}),');   // the page's timers on the virtual clock (the only seam)
+  // (B-0d3e slice 9: no sessionStorage step — the page holds none (see d2's note below), so it edited nothing in any text handed here)
+  return editAnchor(editAnchor(editAnchor(editAnchor(s, /fetch\('\/api\/user-state(\/batches)?'/g, "this.__fetch('/api/user-state$1'", "the text handed to domFree()"), /localStorage\./g, 'this.__ls.', "the text handed to domFree()"), /showToast\(/g, 'this.__toast(', "the text handed to domFree()"),
+    'const sync = createSync({', 'const sync = createSync({ ...(this.__doors || {}),', "the text handed to domFree()");   // the page's timers on the virtual clock (the only seam)
 };
 const wbDomFree = (s) => {
   const reps = [
@@ -122,7 +123,7 @@ const wbDomFree = (s) => {
     ["import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';", 'const agoText = () => "", escHtml = (x) => String(x), hostStateChip = () => "", showConfirmDialog = async () => true, showToast = () => {}, stripCwdHostLabel = (x) => x, sessionMatchesFilter = () => true;'],
     ["import { passesAgentKindFilter } from './agent-meta.js';", 'const passesAgentKindFilter = () => true;'],
   ];
-  for (const [a, b] of reps) { if (!s.includes(a)) throw new Error('wbDomFree anchor gone: ' + a); s = s.replace(a, b); }
+  for (const [a, b] of reps) { if (!s.includes(a)) throw new Error('wbDomFree anchor gone: ' + a); s = editAnchor(s, a, b, "the text handed to wbDomFree()"); }
   return s;
 };
 let copyN = 0;

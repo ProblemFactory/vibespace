@@ -703,7 +703,7 @@ console.log('lane bl-msg B-3e61: A MESSAGE ARRIVES WHOLE — the message mode (o
   ok(KF && fl.every((f) => f.keep.includes('--password-store=basic') && !f.keep.includes(f.K) && !f.odd.includes(PW) && f.q === '--password-store="kwallet5" x' && !f.dot.includes(PW) && f.end === 'use --password-store=basic.'),
     `A KNOWN FLAG: --password-store=basic stays in both modes and the scan walks on past it (the next --api-key is masked); --password-store=<other> is masked (${fl.map((f) => J(f.keep)).join(' · ')})`);
   // RED CONTROLS (patched copies through the SAME legs)
-  const cut = (src, from, to, name) => { ok(src.includes(from), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', src.replace(from, to), name); };
+  const cut = (src, from, to, name) => { ok(src.includes(from), `the control «${name}» finds its line`); return M.load('src/secret-shapes.js', editAnchor(src, from, to, "src/secret-shapes.js"), name); };
   const MSG_LINE = 'if (message && !q && !LINE_HEADS.has(String(m[4]).toLowerCase())) {';
   const noMsg = cut(SRC, MSG_LINE, 'if (false) {', 'no-message-mode');
   ok(run(noMsg, { message: true }).every((x) => !x.o.text.includes(TAIL)), 'RED CONTROL (the message mode removed): every sighting loses its rest again — the MESSAGE MODE leg goes red');

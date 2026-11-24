@@ -55,7 +55,7 @@ const BELT = {
   settle: [[SETTLE_LINE, '    void 0;']],
   late: [['      for (const x of fly) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(', '      for (const x of []) { const p = byId.get(x.id); if (p && p.clearedAt && p.clearedAt !== x.clearedAt) this._archiveClear(']],
 };
-const cuts = (pairs, tag) => MUT.load('src/task-groups.js', pairs.reduce((src, [a, b]) => { if (src.split(a).length !== 2) throw new Error('control anchor gone: ' + tag); return src.replace(a, b); }, SRC), tag);
+const cuts = (pairs, tag) => MUT.load('src/task-groups.js', pairs.reduce((src, [a, b]) => { if (src.split(a).length !== 2) throw new Error('control anchor gone: ' + tag); return editAnchor(src, a, b, "src/task-groups.js"); }, SRC), tag);
 const walk = (w, limit = 100) => { const all = []; let before = null, pages = 0, r; do { r = w.tg.readProgress(w.id, { before, limit }); all.push(...r.entries); if (r.entries.length) before = r.entries[r.entries.length - 1].at; pages++; } while (r.more && pages < 500); return { all, pages }; };
 
 console.log('① the overflow is MOVED, never dropped (written before the trim; a failed write keeps it live)');

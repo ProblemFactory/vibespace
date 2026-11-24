@@ -574,7 +574,7 @@ const M = mutantCopies('outside-press', repo);
     ['judge(p.seen, e);', 'judge(where(p.target, e), e);'],
   ];
   ok(BASE.every(([a]) => src.split(a).length === 2), 'the three edits the base-closer control makes are each spelled exactly once in utils.js');
-  const baseF = M.write('src/lib/utils.js', BASE.reduce((x, [a, b]) => x.replace(a, b), src), 'base-closer');
+  const baseF = M.write('src/lib/utils.js', BASE.reduce((x, [a, b]) => editAnchor(x, a, b, "src/lib/utils.js"), src), 'base-closer');
   const UBase = await import(pathToFileURL(baseF).href);
   const run = (Mod) => {
     const G = fresh(); let n = 0; const d = Mod.onOutsidePress(G.pop, () => { n++; }, { once: false });

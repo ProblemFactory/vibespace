@@ -37,6 +37,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // lane claude-md-diet (B-23e7): the per-file / per-incident index lines moved out of CLAUDE.md into the kb INDEX heads
 const indexHead = (f) => ((t) => (t.split(/^## INDEX\b.*$/m)[1] || '').split(/^## /m)[0])(read(f));
@@ -459,7 +468,7 @@ console.log('§7 negative controls — patched copies of src/workflow-disk.js');
 {
   const M = mutantCopies('workflow-disk', REPO);
   const src = read('src/workflow-disk.js');
-  const cut = (s, from, to) => { if (!s.includes(from)) throw new Error('mutation anchor missing: ' + from); return s.replace(from, to); };
+  const cut = (s, from, to) => { if (!s.includes(from)) throw new Error('mutation anchor missing: ' + from); return editAnchor(s, from, to, "the text handed to cut()"); };
   // (1) ignores the metas
   const noMeta = M.load('src/workflow-disk.js', cut(src, 'const m = metaOf(id) || {};', 'const m = {};'), 'nometa');
   const bRun = mkRun(OWNER, { labelled: false });
@@ -593,7 +602,7 @@ console.log('§9 a found run is not walked for, a fork finds its parent\'s run, 
   for (const d of fillers) { fs.mkdirSync(d, { recursive: true }); for (let s = 0; s < 40; s++) fs.writeFileSync(path.join(d, `other-${s}.jsonl`), ''); }
   const M9 = mutantCopies('workflow-known', REPO);
   const route = read('src/routes/sessions.js');
-  const cut9 = (s, from, to) => { if (s.split(from).length !== 2) throw new Error('mutation anchor missing or not unique: ' + from); return s.replace(from, to); };
+  const cut9 = (s, from, to) => { if (s.split(from).length !== 2) throw new Error('mutation anchor missing or not unique: ' + from); return editAnchor(s, from, to, "the text handed to cut9()"); };
   // the copies (rounds w5daqaxxs / w5hvsu2v5): FRESH = the route as it is, its own look clock (a look starts at most once a
   // minute per instance); WALK = the release's road, a synchronous walk of the projects folder put back on the poll; NOLOOK = the
   // look never scheduled; PERPOLL = a look started by every poll that could not place its run (no sharing, no minute's bound)

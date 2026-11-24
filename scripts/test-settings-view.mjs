@@ -564,7 +564,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
       const orig = read('src/lib/settings-view.js');
       const NEEDLES = [["  if (unset(L)) return IN_FORCE_UNSET;\n", ''], ['return unset(live.spend) ? IN_FORCE_UNSET : Number(live.spend[f]);', 'return Number(live.spend[f]);']];
       const M7 = mutantCopies('settings-view-unset', REPO);
-      const Mu = await import(pathToFileURL(M7.write('src/lib/settings-view.js', NEEDLES.reduce((x, [f, t]) => x.replace(f, t), orig), 'unset', { esm: true })).href);
+      const Mu = await import(pathToFileURL(M7.write('src/lib/settings-view.js', NEEDLES.reduce((x, [f, t]) => editAnchor(x, f, t, "src/lib/settings-view.js"), orig), 'unset', { esm: true })).href);
       const muStore = Mu.inForceOf(PATH, { live: null, server: (k) => sm6.serverValue(k), budgetLimits: SA.budgetLimits });
       ok(NEEDLES.every(([f]) => orig.includes(f)) && muStore === 0 && Mu.saveMarkWords('saved', tEn, { inForce: muStore }) === 'Saved · in force now: 0',
         'B-0a33 (3) CONTROL: the two «none» answers removed from a copy — the empty cap reads «Saved · in force now: 0» (the release) — RED', JSON.stringify({ muStore }));

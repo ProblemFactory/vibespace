@@ -28,6 +28,15 @@ const A = require(path.join(repo, 'src/desktop-apps.js'));
 const MUT = mutantCopies('rfbg', repo);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const B = (...parts) => Buffer.concat(parts.map((p) => (typeof p === 'string' ? Buffer.from(p, 'latin1') : Buffer.from(p))));
 const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n, 0); return b; };
 const ch = (cp) => String.fromCodePoint(cp);
@@ -157,7 +166,7 @@ console.log('§6 CONTROLS — each rule removed from a patched copy ⇒ its leg 
 {
   const appsSrc = fs.readFileSync(path.join(repo, 'src/machine-desktop-model.js'), 'utf8'); // rv-desktop-apps F-S1: the machine-desktop family's own file
   const dispSrc = fs.readFileSync(path.join(repo, 'src/desktop-display.js'), 'utf8');
-  const cut = (src, from, to) => { if (!src.includes(from)) throw new Error('anchor moved: ' + from); return src.replace(from, to); };
+  const cut = (src, from, to) => { if (!src.includes(from)) throw new Error('anchor moved: ' + from); return editAnchor(src, from, to, "the text handed to cut()"); };
   const noHidden = MUT.load('src/machine-desktop-model.js', cut(appsSrc, 'const hid = HC.hiddenCharsOf(line, { max: 1 });', 'const hid = [];'), 'nohid');
   ok(noHidden.desktopRunPlan('darwin', `a${ch(0x202e)}b`).ok === true, 'CONTROL: without the hidden-character rule an RLO line would run (§3\'s leg catches it)');
   const noMulti = MUT.load('src/machine-desktop-model.js', cut(appsSrc, "if (/[\\r\\n]/.test(line)) return { ok: false, code: 'multi_line'", "if (false) return { ok: false, code: 'multi_line'"), 'nomulti');

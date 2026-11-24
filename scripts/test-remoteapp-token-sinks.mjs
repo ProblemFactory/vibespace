@@ -73,6 +73,15 @@ const express = require('express');
 const MUT = mutantCopies('rats', repo);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 500) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 // lane remoteapp-fake-node-path: a leg whose input an earlier leg failed to make is ✗ NAMING that cause (never a
 // TypeError that hides every leg after it — master .288 crashed at §1's record), and a section that still throws is
 // one ✗ naming the throw; the next section runs
@@ -351,7 +360,7 @@ await section('§7 a spawn PATH without node (the hosted runner\'s — master .2
 await section('CONTROLS — each sink / rule proven able to fail', async () => {
   const S = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
   const RAsrc = fs.readFileSync(path.join(repo, 'src/remoteapp.js'), 'utf8');
-  const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return src.replace(from, to); };
+  const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return editAnchor(src, from, to, "the text handed to cut()"); };
   const runMutant = async (tag, src, { setupOver = {}, envOver = {} } = {}) => {
     const DSm = MUT.load('src/desktop-serve.js', src, tag);
     let dsm = null;
@@ -542,7 +551,7 @@ await section('§8 the sealed row — the card\'s doors, the first connection, t
   const fixed = await racePair(DSreal, 'fixed');
   ok(fixed.runs === 1 && fixed.codes.includes('rdp_trust_busy') && fixed.codes.includes('ok'), 'two first connections at once with a COLD build read ⇒ one runs, the other is refused rdp_trust_busy — ONE /auth-only sign-in to the machine', fixed);
   const Ssrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
-  const cutR = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return src.replace(from, to); };
+  const cutR = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return editAnchor(src, from, to, "the text handed to cutR()"); };
   const markLine = "    rdpTrusting.add(hostId); // taken with the check, BEFORE any await (verify r1: two clicks during a cold build read both ran /auth-only)\n";
   const signLine = "      const signin = await remoteapp.signin(hostId); // refuses a missing user / password BY NAME\n";
   const preFix = MUT.load('src/desktop-serve.js', cutR(cutR(Ssrc, markLine, ''), signLine, signLine + '      rdpTrusting.add(hostId);\n'), 'trust-race');
@@ -591,7 +600,7 @@ await section('§9 THE SINKS of the sealed chain — the password only in the se
   ok(files.some((f) => f.endsWith('integrations.json')) && sFrames.length >= 4 && audits.length >= 4 && answers.length >= 10, 'the sinks were live: the sealed file, the store broadcasts, the audit rows and the route answers exist');
   ok(storeS.resolveMachine('remoteapp', HOST).values.password === PW2, 'the ONE readable place: the sealed record, opened by its consumer\'s resolveMachine');
   // CONTROLS
-  const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return src.replace(from, to); };
+  const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return editAnchor(src, from, to, "the text handed to cut()"); };
   const ISsrc = fs.readFileSync(path.join(repo, 'src/server/integration-store.js'), 'utf8');
   const leakView = MUT.load('src/server/integration-store.js', cut(ISsrc, '      if (!f.secret) values[f.key] = set[f.key] ? String(v) : \'\';', '      values[f.key] = set[f.key] ? String(v) : \'\';'), 'viewleak');
   const ctlStore = leakView.create({ dataDir: sealedDir, env: {}, broadcast: () => { }, log: spyLog });

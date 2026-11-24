@@ -43,11 +43,20 @@ const F = require(path.join(repo, 'src/desktop-fit.js'));
 const MUT = mutantCopies('rapp', repo);
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // fixtures from SHAPES: a fingerprint of 32 runtime bytes, a host id, a user — never a real machine
 const FP = Array.from({ length: 32 }, (_, i) => ((i * 37 + 11) % 256).toString(16).padStart(2, '0')).join(':');
 const HOST = 'dev-' + 'w1n';
-const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 60)}`); return src.replace(from, to); };
+const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 60)}`); return editAnchor(src, from, to, "the text handed to cut()"); };
 
 console.log('§1 the row — one more rung, never on the local ladder');
 const row = M.backendById('remoteapp');

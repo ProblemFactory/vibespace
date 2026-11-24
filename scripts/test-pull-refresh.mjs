@@ -15,6 +15,15 @@ import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out sa
 const { heldRefresher, pullMountArgs, isMountDaemonOf, mountDaemonsOf, killMountDaemons } = require('../src/device-mount.js');
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (cond, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (cond()) return true; await sleep(5); } return cond(); };
 // a value that stays the same for n looks in a row (an effect that is NOT coming — never a fixed sleep)
@@ -365,7 +374,7 @@ try {
     else {
       globalThis.__dmCut = {};
       const cpD = path.join(tmp, 'device-mount-cuts.js');
-      fs.writeFileSync(cpD, dcuts.reduce((x, [, a, b]) => x.replace(a, () => b), dsrc0).replace(/require\('\.\//g, `require('${SRCX}/`));
+      fs.writeFileSync(cpD, dcuts.reduce((x, [, a, b]) => editAnchor(x, a, () => b, "the text a fold hands its step"), dsrc0).replace(/require\('\.\//g, `require('${SRCX}/`));
       DC = require(cpD);
     }
     const dcut = async (k, f) => { globalThis.__dmCut = { [k]: true }; try { return await f(); } finally { globalThis.__dmCut = {}; } };
@@ -728,7 +737,7 @@ try {
       else {
         globalThis.__mmCut = {};
         const cpG = path.join(tmp, 'machine-mounts-cuts.js');
-        fs.writeFileSync(cpG, mcuts.reduce((x, [, a, b]) => x.replace(a, () => b), MSRC).replace(/require\('\.\//g, `require('${SRC}/`));
+        fs.writeFileSync(cpG, mcuts.reduce((x, [, a, b]) => editAnchor(x, a, () => b, "the text a fold hands its step"), MSRC).replace(/require\('\.\//g, `require('${SRC}/`));
         MG = require(cpG).MachineMounts;
       }
       const mcut = async (k, f) => { globalThis.__mmCut = { [k]: true }; try { return await f(); } finally { globalThis.__mmCut = {}; } };

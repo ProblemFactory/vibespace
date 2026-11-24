@@ -65,7 +65,7 @@ const RR_SRC = fs.readFileSync(RRpath, 'utf8');
 const ENG_SRC = fs.readFileSync(ENGpath, 'utf8');
 const ASK_FNS = ['readText', 'readlink', 'entryExists', 'readdir', 'facts', 'stat', 'signature'];
 /** a copy of a product file with ONE named edit — null when its needle does not hit exactly once (said as a red by the caller) */
-const copyOf = (rel, src, from, to, tag) => (src.split(from).length === 2 ? MU.write(rel, src.replace(from, to), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
+const copyOf = (rel, src, from, to, tag) => (src.split(from).length === 2 ? MU.write(rel, editAnchor(src, from, to, "the text handed to copyOf()"), tag) : (() => { throw new Error(`ANCHOR GONE OR NOT UNIQUE (${src.split(from).length - 1} times): ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
 /** swap a copy's asks onto the module every routed site reads through (`RR.readText(…)` is looked up at each call) */
 async function withAsks(copy, fn) { const saved = {}; for (const k of ASK_FNS) { saved[k] = RR[k]; RR[k] = copy[k]; } try { return await fn(); } finally { Object.assign(RR, saved); } }
 const tok = (k) => ['tok', k, 'x'.repeat(8)].join('-');

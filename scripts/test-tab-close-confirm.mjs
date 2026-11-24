@@ -32,6 +32,15 @@ const require = createRequire(import.meta.url);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const J = JSON.stringify;
 
 // strip // and /* */ comments outside string / template literals (a pin a comment satisfies proves nothing).
@@ -346,7 +355,7 @@ const TEXTS = libTexts();
 // ── §4 NEGATIVE CONTROLS ──
 console.log('§4 negative controls (patched copies outside the tree)');
 const M = mutantCopies('tab-close-confirm', REPO);
-const patch = (src, find, repl) => { if (!src.includes(find)) throw new Error('control anchor gone: ' + find.slice(0, 60)); return src.replace(find, repl); };
+const patch = (src, find, repl) => { if (!src.includes(find)) throw new Error('control anchor gone: ' + find.slice(0, 60)); return editAnchor(src, find, repl, "the text handed to patch()"); };
 {
   const clSrc = read(CL_REL);
   const lone = M.load(CL_REL, patch(clSrc, 'scope === \'group\' && Number(members) >= 2;', 'scope === \'group\' && Number(members) >= 1;'), 'asks-lone');

@@ -28,6 +28,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { pathRe, cleanPath, CJK_PUNCT } = require(path.join(ROOT, 'src/path-linkify.js'));
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), `${m} (${JSON.stringify(a)})`);
 const links = (re, text) => { const out = []; text.replace(re, (raw) => { out.push(cleanPath(raw)); return raw; }); return out; };
 
@@ -394,7 +403,7 @@ ok(PL.looksRelPath('docs/plan.md', { prose: true }) && !PL.looksRelPath('标书�
 ok(!badR.length, `looksRelPath: ${REL.length} rows — a first letter or digit of ANY script links (CJK, kana, hangul, fullwidth digits, é); punctuation first, a space, no slash + no file tail, versions / CIDR still do not` + (badR.length ? ' — ' + JSON.stringify(badR) : ''));
 const GATE = "/^[\\p{L}\\p{N}_@%+=.\\-][^\\s<>\"'`|]*$/u.test(txt)";
 const PL_SRC = fs.readFileSync(path.join(ROOT, 'src/path-linkify.js'), 'utf8');
-const BASE_GATE = (src) => src.split(GATE).join("/^[\\w@%+=.\\-][^\\s<>\"'`|]*$/.test(txt)");
+const BASE_GATE = (src) => editAnchor(src, GATE, "/^[\\w@%+=.\\-][^\\s<>\"'`|]*$/.test(txt)", "the text handed to BASE_GATE()", 'join');
 ok(PL_SRC.split(GATE).length === 2, 'the Unicode-aware gate is the one line the base control patches');
 const plBase = path.join(SCR, 'path-linkify-base.cjs'); fs.writeFileSync(plBase, BASE_GATE(PL_SRC));
 const PLB = require(plBase);
