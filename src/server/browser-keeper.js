@@ -1995,6 +1995,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const held = reg.leases.filter((l) => l.profileId === id);
     if (held.length) return { ok: false, code: 'leased', error: `profile "${p.label}" is attached by ${held.length} session(s) (${held.map((l) => l.browserKey).join(', ')}) — detach them first` };
     if (B.isLiveBrowser(reg.browsers[id])) return { ok: false, code: 'running', error: `profile "${p.label}" has a running browser — stop it first` };
+    { const ph = passkeyHeldNow(); if (ph) return { ok: false, code: 'passkeys_unread', status: 503, error: passkeyRemovalWords(ph) }; }   // r3632 MUST 1: HELD — refused in the VERDICT, before a caller unpins, unwatches or moves a lineage
     return { ok: true };
   }
   /** Removal is refused while anything holds or runs it — a cookie jar is
@@ -2011,7 +2012,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!rv.ok) throw namedError(rv.code, rv.error);
     // r3261: THE PASSKEY STORE HELD (unread): a removed profile's keys could not go with it — the removal is refused BY NAME before
     // anything moves (the remover asks the fact; never «dropped» over a store that could not be read). A sweep's retire waits too.
-    { let ph = null; try { ph = passkeyHeld ? passkeyHeld() : null; } catch { ph = null; } if (ph) throw namedError('passkeys_unread', `this browser profile is not removed while ${ph.words || 'the passkeys could not be read'}`); }
+    { const ph = passkeyHeldNow(); if (ph) throw namedError('passkeys_unread', passkeyRemovalWords(ph)); }   // r3632: the BELT (the verdict above refuses first)
     const pv = BF.deletePinnedVerdict({ label: p.label, pinnedBy: pinnedBy(id), unpin });
     if (!pv.ok) throw namedError(pv.code, pv.error, { pinnedCount: pv.count, pinnedNames: pv.names });
     // verify r4 (S26b): the DIRECTORY remembers the lineage its record carried — a retired ephemeral's kept directory outlives it
@@ -5075,7 +5076,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); } catch (e) { log.warn?.(`[browser] ephemeral ${profileId}: stop failed — ${e && e.message}`); }
       if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };
       if (B.isLiveBrowser(reg.browsers[profileId])) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": its browser would not stop — the record is kept for the next pass`); return { removed: false, why: 'still running' }; }
-      try { removeProfile(profileId); } catch (e) { log.warn?.(`[browser] ephemeral ${profileId}: not removed — ${e && e.message}`); return { removed: false, why: String(e && e.message) }; }
+      try { removeProfile(profileId); } catch (e) { if (!(e && e.code === 'passkeys_unread') || !retireHeldSaid) log.warn?.(`[browser] ephemeral ${profileId}: not removed — ${e && e.message}${e && e.code === 'passkeys_unread' ? ' (said once while the passkeys cannot be read: the ephemeral records wait for the next pass after they read)' : ''}`); if (e && e.code === 'passkeys_unread') retireHeldSaid = true; return { removed: false, why: String(e && e.message) }; }
+      retireHeldSaid = false;
       return { removed: true };
     })();
     retiring.set(profileId, pr);
@@ -7270,6 +7272,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function setPasskeyDrop(fn) { passkeyDrop = typeof fn === 'function' ? fn : null; }
   let passkeyHeld = null; // r3261: the dialog watch answers whether the passkey store is HELD (unread) — asked before a profile's removal
   function setPasskeyHeld(fn) { passkeyHeld = typeof fn === 'function' ? fn : null; }
+  /** r3632: the passkey store HELD now? → its facts ({ words, … }) | null — the one fact every remover asks BEFORE anything moves */
+  function passkeyHeldNow() { try { return passkeyHeld ? passkeyHeld() : null; } catch { return null; } }
+  const passkeyRemovalWords = (ph) => `this browser profile is not removed while ${(ph && ph.words) || 'the passkeys could not be read'} — its passkeys would be dropped from a store that could not be read`;
+  let retireHeldSaid = false;   // r3632 (should): the sweep's retire refused while held is said ONCE a hold, not every pass
   /** lane S2: THE browser fact of one live session (`sessionFacts` = browser-fact.sessionFactsOf(session)). */
   function factFor(sessionFacts) {
     if (!sessionFacts || !sessionFacts.browserKey) return null;
@@ -9350,7 +9356,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
     geoRegrant: (profileId) => (geoHoldOwn ? geoHoldOwn.regrant(String(profileId || '')).catch(() => false) : Promise.resolve(false)),   // r2311 (i): the dialog watch's reset or leaving ⇒ the hold grants again
     placeKindFor,   // r2767 (a): the profile's location kind the gates judge by (the running browser's, else the saved)
-    cdpEndpointFor, geoHeldFor: (profileId) => { const r = runningPlaceKind(profileId); if (r !== undefined) return r === 'place' ? ((geoHoldOwn && geoHoldOwn.heldOf(String(profileId || ''))) || { kind: 'place' }) : r === 'blocked' ? { kind: 'blocked' } : null; let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* r2767 (a): the running browser's plan until its restart */ /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, setPasskeyHeld /* r3261 */, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    cdpEndpointFor, geoHeldFor: (profileId) => { const r = runningPlaceKind(profileId); if (r !== undefined) return r === 'place' ? ((geoHoldOwn && geoHoldOwn.heldOf(String(profileId || ''))) || { kind: 'place' }) : r === 'blocked' ? { kind: 'blocked' } : null; let gp = null; try { gp = profile(String(profileId || '')); } catch { gp = null; } return geoPlanFor(gp); }, /* r2767 (a): the running browser's plan until its restart */ /* B-9584 U2c: the PERSON's setting (a place or «blocked») — the dialog watch never replaces or clears it, alive hold or not */ viewersFor: (profileId) => { let p = null; try { p = profile(String(profileId || '')); } catch { p = null; } return p ? viewersOf(p).n : 0; }, /* B-346d: the live views watching a browser now — the dialog watch re-arms while one is open */ setStuckSource, setPasskeyDrop, setPasskeyHeld /* r3261 */, passkeyHeldNow /* r3632 */, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports

@@ -11,6 +11,7 @@ import { fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml } fro
 import { icon as chromeIcon } from './channel-chrome.js';
 import { UI_ICONS } from './icons.js';
 import { passkeyTable, passkeyDeleteWords } from './browser-panel-model.js';
+import { techFold } from './plain-words.js';   // r3632: where a damaged store's bytes are kept — in the fold, never on the face
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 async function act(url, init, what) {
@@ -62,6 +63,9 @@ function pkPaint(pid, o, list) {
   const m = passkeyTable(list, { w: o.words });
   o.sw.checked = m.switchOn; if (o.swt.textContent !== m.switchLabel) o.swt.textContent = m.switchLabel;
   const note = o.head.querySelector('.bprof-pk-note'); if (note.textContent !== m.note) note.textContent = m.note;
+  { const dsig = list && list.damaged && list.damaged.copy ? String(list.damaged.copy) : '';   // r3632 (should): a torn store lifted empty is SAID in place, after a restart too
+    if (dsig !== (o.dmgSig || '')) { o.dmgSig = dsig; if (o.dmg) { o.dmg.remove(); o.dmg = null; }
+      if (dsig) { o.dmg = el('div', 'bprof-pk-empty chat-status-dim'); o.dmg.appendChild(el('span', '', t("The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched."))); const fd = techFold([t('Its damaged bytes are kept beside it as: {name}', { name: dsig })], { mono: true }); if (fd) o.dmg.appendChild(fd); o.body.insertBefore(o.dmg, o.body.firstChild); } } }
   if (!o.cols) { o.cols = el('div', 'bprof-pk-row bprof-pk-cols'); for (const c of m.columns) o.cols.appendChild(el('span', 'bprof-pk-th', c)); o.body.appendChild(o.cols); }
   o.cols.hidden = !m.rows.length;
   const seen = new Set();

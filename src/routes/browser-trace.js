@@ -440,6 +440,7 @@ router.post('/api/browser/profiles/:id/forget', async (req, res) => {
     // set-aside would be refused for), then lane S2's refuse-or-warn — the housekeeping verdict (leased / running / not
     // ours: never an unpin for a set-aside that cannot happen), a PINNED profile only with `unpin` (every pin cleared with
     // its MARK, each chat's browser chip says so; never a dangling pin) — THEN the set-aside (archive-before-remove)
+    { const ph = ctx.keeper && typeof ctx.keeper.passkeyHeldNow === 'function' ? ctx.keeper.passkeyHeldNow() : null; if (ph) return res.status(503).json({ error: `this browser is not set aside while ${ph.words || 'the passkeys could not be read'} — nothing was released, stopped or unpinned`, code: 'passkeys_unread' }); }   // r3632 MUST 1: HELD — refused BEFORE the release and the stop
     let released = null;
     if (release && typeof ctx?.releaseProfile === 'function') released = await ctx.releaseProfile(req.params.id);
     const kv = ctx.keeper && typeof ctx.keeper.removeVerdict === 'function' ? ctx.keeper.removeVerdict(req.params.id) : { ok: true };

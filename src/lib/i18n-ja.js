@@ -4666,6 +4666,7 @@ export default {
   "which plugins are on and trusted": "どのプラグインがオンで信頼済みか",
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace はいま、どのプラグインがオンで信頼済みかを読み込めません — 何も変更されておらず、プラグインも失われていません。数分後にもう一度お試しください（自動でもう一度読み込みます）。",
   "the browsers’ passkeys": "ブラウザのパスキー",   // r3261
+  "The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched.": "保存したパスキーが壊れていたため、この一覧は空から始め直しました。壊れたバイトは一覧の横にそのまま残しています。",   // r3632
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace は API の提案をいま読めません — 何も決定・実行していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace はアプリの提案をいま読めません — 何もインストール・変更していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace はデザインの一覧をいま読めません — 何も変更しておらず、デザインのフォルダーもそのままです。数分後にもう一度押してください（自動でもう一度読みます）。",

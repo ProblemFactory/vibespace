@@ -3,7 +3,9 @@
 // stores, «37 more stores judged», item 1). FAST, in-process: the REAL dialog watch module (src/server/browser-dialogs.js, the
 // store's ONE writer) over the PRODUCTION wiring of the store (src/server/browser-passkey-file.js once it exists; the release's own
 // wiring copied verbatim before), a scratch data folder, MADE-UP passkeys built at run time (never a literal of sealed bytes), the
-// refusal PLACED on the read (a store that does not parse; one this process may not read — said, not judged, where a run reads 0000).
+// refusal PLACED on the read (a store that does not parse; a read refused with EACCES by the leg — the production object's read and the
+// hold's read again of that one path — so every run judges it, root too). r3632 (the round on line 792): the removal's callers (the REAL
+// Forget, the REAL DELETE route) and the agent's status reply, while held.
 // THE HARM it judges (the release): a failed read cached an EMPTY store for the process's life, and the next write — a switch, a
 // removal, a sign-in's count, a registration — wrote the file over: EVERY PASSKEY A PERSON REGISTERED IN AN AGENT BROWSER LOST.
 import './scratch.mjs';
@@ -38,9 +40,21 @@ function releaseWiring(dataDir) {
 }
 const storeOf = (dataDir) => (PF ? PF.passkeyFileStore({ dataDir }) : releaseWiring(dataDir));
 const heldOf = (x) => !!x && (x.code === 'passkeys_unread' || (x.held && typeof x.held === 'object'));
+// r3632 (should, the round on line 792): the unreadable store is a PLACED refusal of the read — the production object's own read (readText,
+// or the release wiring's read) and the hold's read again (fs.promises.readFile of that ONE path) throw EACCES while placed. Never a mode
+// change: a run as root reads a mode-0000 file, and «lifted with no restart» would then have no judged leg.
+const EACCES = () => Object.assign(new Error('EACCES: permission denied, open (placed by the leg)'), { code: 'EACCES', errno: -13 });
+const PLACED = new Set();
+{ const realReadFile = fs.promises.readFile; fs.promises.readFile = function (f, ...a) { return PLACED.has(String(f)) ? Promise.reject(EACCES()) : realReadFile.call(this, f, ...a); }; }
+const refusedRead = (st) => {
+  const r0 = typeof st.readText === 'function' ? st.readText : null, d0 = typeof st.read === 'function' ? st.read : null;
+  if (r0) st.readText = () => { if (PLACED.has(st.file)) throw EACCES(); return r0(); };
+  if (d0) st.read = () => { if (PLACED.has(st.file)) throw EACCES(); return d0(); };
+  return st;
+};
 const placements = [
-  { name: 'a passkey store that does not parse', slug: 'torn', torn: true, place: (f, good) => fs.writeFileSync(f, good.slice(0, Math.floor(good.length / 2))), holds: () => true },
-  { name: 'a passkey store this process may not read', slug: 'mode', torn: false, place: (f) => fs.chmodSync(f, 0o000), holds: (f) => { try { fs.readFileSync(f); return false; } catch (e) { return e.code === 'EACCES'; } } },
+  { name: 'a passkey store that does not parse', slug: 'torn', torn: true, place: (f, good) => fs.writeFileSync(f, good.slice(0, Math.floor(good.length / 2))), store: (st) => st, release: () => { } },
+  { name: 'a passkey store whose read is refused (EACCES, placed)', slug: 'refused', torn: false, place: (f) => { PLACED.add(f); }, store: (st) => refusedRead(st), release: (f) => { PLACED.delete(f); } },
 ];
 const until = async (fn, ms = 4000) => { const t = Date.now() + ms; while (Date.now() < t) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); } return !!fn(); };
 
@@ -53,9 +67,8 @@ for (const pl of placements) {
   const st0 = storeOf(dataDir); fs.writeFileSync(st0.file, good, { mode: 0o600 });
   ok(PS.normalizeStore(JSON.parse(good)).profiles[PID].rows.length === 2, 'PREMISE: the store holds two passkeys (one the person registered, one an agent did)');
   pl.place(st0.file, good);
-  if (!pl.holds(st0.file)) { fs.chmodSync(st0.file, 0o600); console.log(`  (${pl.name}: this run reads a mode-0000 file — SAID, not judged)`); continue; }
-  const s0 = fs.statSync(st0.file), bytes0 = pl.torn ? fs.readFileSync(st0.file) : null;
-  const d = Dm.create({ passkeys: storeOf(dataDir), log: quiet });
+  const s0 = fs.statSync(st0.file), bytes0 = fs.readFileSync(st0.file);   // the leg reads the file itself (only the product's read is refused)
+  const d = Dm.create({ passkeys: pl.store(storeOf(dataDir)), log: quiet });
   // the owner's page and the agent's verbs, while the store is unread
   let list = null; try { list = d.passkeyList(PID); } catch (e) { list = { code: e && e.code, message: e && e.message }; }
   ok(heldOf(list) && !(Array.isArray(list.keys) && list.keys.length === 0), `${pl.name}: the owner's list says THE HOLD in place — never an empty list`, list);
@@ -69,12 +82,24 @@ for (const pl of placements) {
   ok(heldOf(pol) && pol.code !== 'not-found', `${pl.name}: the owner's policy press is refused BY NAME — never «no passkey»`, pol);
   let vr = null; try { vr = d.passkeyVaultRows(); } catch (e) { vr = { code: e && e.code, message: e && e.message }; }
   ok(heldOf(vr) || !!(vr && !Array.isArray(vr) && vr.held), `${pl.name}: the Vault window's passkey rows say THE HOLD — never an empty list`, Array.isArray(vr) ? { rows: vr.length } : vr);
+  let rvl = null; try { rvl = d.passkeyVaultReveal(`${PID}/${human.credentialId}`, 'privateKey'); } catch (e) { rvl = { code: e && e.code, message: e && e.message }; }
+  ok(heldOf(rvl), `${pl.name}: the Vault window's reveal (验证是你) says THE HOLD — never «no such key», never a key`, rvl && (rvl.code ? rvl : { answered: typeof rvl }));
+  // r3632 MUST 2: the agent's passkey STATUS reply while held — the route's own function — says THE HOLD, never a 500 (null.length)
+  {
+    let R = null; try { R = require('../src/routes/browser.js'); } catch { R = null; }
+    const L = d.passkeyList(PID); let v = null; try { v = d.passkeyIn(PID, null); } catch { v = null; }
+    let reply = null; try { reply = R && typeof R.passkeyStatusReply === 'function' ? R.passkeyStatusReply(v || { state: 'none' }, L) : { missing: 'passkeyStatusReply' }; } catch (e) { reply = { threw: e && e.message }; }
+    ok(!!reply && reply.ok === true && !!reply.store && reply.store.held === true && /could not be read/.test(String(reply.text || '')), `${pl.name}: MUST 2 — the agent's passkey STATUS says the hold (the store held, the hold's words) — never a 500`, reply);
+    const oldLine = (x) => (!x ? '' : x.agentsOff ? 'off' : x.keys.length ? 'some' : 'none');   // the release's store line, its shape
+    let threw = false; try { oldLine(L); } catch { threw = true; }
+    ok(threw, `${pl.name}: CONTROL (RED): the store line's old shape over this held list throws (null.length) — the 500 the round found`);
+  }
   let dropped = null; try { dropped = d.dropPasskeys(PID); } catch (e) { dropped = { code: e && e.code }; }
   const s1 = fs.statSync(st0.file);
   const same = s1.ino === s0.ino && (s1.mode & 0o777) === (s0.mode & 0o777) && (!bytes0 || fs.readFileSync(st0.file).equals(bytes0));
   ok(same, `${pl.name}: after every press (the switch, a removal, a policy, a profile's removal) the store is NEVER written over — the same file, its bytes and mode`, { ino: [s0.ino, s1.ino], mode: [(s0.mode & 0o777).toString(8), (s1.mode & 0o777).toString(8)], dropped });
   if (!pl.torn) {
-    fs.chmodSync(st0.file, 0o600);   // the store reads again
+    pl.release(st0.file);   // the read is let through again (the placed refusal lifted)
     const hold = d._passkeyHold || null;
     if (hold) await hold.again();
     await until(() => !hold || !hold.held());
@@ -130,22 +155,21 @@ else {
       const good = JSON.stringify(PS.normalizeStore({ v: 1, profiles: { 'bp-1': { agentsOff: false, rows: [{ ...rowOf(7, 'human'), rpId: 'example.test' }] } } }));
       // each ceremony in its OWN world (a fresh kernel and watch: its first read is the store's), the refusal placed again before it
       const world = async () => {
-        try { fs.chmodSync(st.file, 0o600); } catch { }
+        pl.release(st.file);
         fs.writeFileSync(st.file, good, { mode: 0o600 }); pl.place(st.file, good);
-        if (!pl.holds(st.file)) return null;
         const k = await startFakeKernel({ firstUrl: O + '/' });
         const w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: quiet, enableTimeoutMs: 300, promptAskMs: 60, passkeyOrphanMs: 150,
-          holdersOf: () => [{ browserKey: 'bk-1', sessionId: 's1' }], leaseCountOf: () => 1, labelOf: () => 'Work', passkeys: PF.passkeyFileStore({ dataDir }), takeoverOf: () => false,
+          holdersOf: () => [{ browserKey: 'bk-1', sessionId: 's1' }], leaseCountOf: () => 1, labelOf: () => 'Work', passkeys: pl.store(PF.passkeyFileStore({ dataDir })), takeoverOf: () => false,
           forYou: { add: () => 'fy-1', resolve() {}, ended() {} }, vaultUse: () => ({ receipt: 'vr-000000000001' }) });
         await w.arm('bp-1');
-        return { k, w, s0: fs.statSync(st.file), b0: pl.torn ? fs.readFileSync(st.file) : null, close: async () => { w.shutdown(); await k.close(); } };
+        return { k, w, s0: fs.statSync(st.file), b0: fs.readFileSync(st.file), close: async () => { w.shutdown(); await k.close(); } };
       };
       const rowsNow = () => { try { return PS.normalizeStore(JSON.parse(fs.readFileSync(st.file, 'utf8'))).profiles['bp-1']?.rows?.length ?? 0; } catch { return null; } };
-      const untouched = (x) => { const s1 = fs.statSync(st.file); return pl.torn ? (rowsNow() === null || rowsNow() === 0) /* torn: still the torn bytes, or lifted EMPTY — never a key that landed */ : s1.ino === x.s0.ino && (s1.mode & 0o777) === (x.s0.mode & 0o777); };
+      const untouched = (x) => { const s1 = fs.statSync(st.file); return pl.torn ? (rowsNow() === null || rowsNow() === 0) /* torn: still the torn bytes, or lifted EMPTY — never a key that landed */ : s1.ino === x.s0.ino && fs.readFileSync(st.file).equals(x.b0); };
       let x = await world();
-      if (!x) { console.log(`  (${pl.name}: this run reads a mode-0000 file — SAID, not judged)`); continue; }
       const reg = await x.w.passkeyRegister({ profileId: 'bp-1', browserKey: 'bk-1', sessionId: 's1', rpId: 'example.test', user: 'alice' });
       ok(reg.ok === false && reg.code === 'passkeys_unread' && /could not be read/.test(reg.error) && !/no passkey for/i.test(reg.error), `${pl.name}: (a) an agent's registration is refused BY NAME before any card or ceremony — the hold, never «no passkey»`, reg);
+      await x.close(); x = await world();   // r3632 (should): the page's create in a world of its OWN (the registration's read began the torn hold's copy)
       const c1 = x.k.triggerWebAuthn({ op: 'create', origin: O, user: { id: U1, name: 'alice', displayName: 'Alice' } });
       const a1 = await c1.answerPromise; await until(() => RECS.some((q) => q.kernel && q.kernel.requestId === c1.request.requestId && q.outcome !== 'pending'));
       const r1 = RECS.find((q) => q.kernel && q.kernel.requestId === c1.request.requestId) || null;
@@ -157,6 +181,7 @@ else {
       const r2 = RECS.find((q) => q.kernel && q.kernel.requestId === c2.request.requestId) || null;
       ok(!!a2 && a2.error === 'NotAllowedError' && !!r2 && r2.refused === true && r2.why === 'passkeys_unread' && untouched(x), `${pl.name}: (b) a sign-in while held: no passkey is offered (the site sees none) and the person and the agent are told THE HOLD — never «no passkey for this site»; nothing written over`, { a: a2 && { outcome: a2.outcome, error: a2.error }, recs: recsOf(), rows: rowsNow() });
       await x.close();
+      pl.release(st.file);
     }
     PK.applyEvent = realApply;
   }
@@ -169,12 +194,61 @@ else {
     const p = k.createProfile({ label: 'Mine' });
     let held = { file: 'browser-passkeys.json', code: 'EACCES', words: 'the passkeys could not be read (test)' };
     k.setPasskeyHeld(() => held);
+    const rv = typeof k.removeVerdict === 'function' ? k.removeVerdict(p.id) : null;
+    ok(!!rv && rv.ok === false && rv.code === 'passkeys_unread' && /could not be read/.test(String(rv.error || '')), '(d) MUST 1: the removal VERDICT — asked by the DELETE route and the housekeeping Forget before they unpin, release or move anything — says the hold by name', rv);
     let err = null; try { k.removeProfile(p.id); } catch (e) { err = e; }
     ok(!!err && err.code === 'passkeys_unread' && /could not be read/.test(err.message) && !!k.profile(p.id), '(d) while the passkey store is held a profile\'s removal is refused BY NAME before anything moves — its passkeys are never «dropped» over an unread store', err && { code: err.code, message: String(err.message).slice(0, 160) });
     held = null;
     let gone = null; try { gone = k.removeProfile(p.id); } catch (e) { gone = { threw: e && e.code }; }
     ok(!!gone && !gone.threw && !k.profile(p.id), '…and once the store reads, the removal goes as before', gone && (gone.threw || 'removed'));
     k.shutdown?.();
+  }
+  // ── r3632 MUST 1: A REMOVAL's CALLERS ask the hold BEFORE they move anything — the REAL housekeeping Forget, the REAL DELETE route ──
+  {
+    console.log('— MUST 1: a removal\'s callers ask the hold first');
+    const K = require('../src/server/browser-keeper.js');
+    const BT = require('../src/server/browser-trace.js');
+    const kd = path.join(ROOT, 'callers'), kh = path.join(kd, 'home'); fs.mkdirSync(path.join(kh, '.agent-browser'), { recursive: true });
+    const k = K.create({ dataDir: path.join(kd, 'data'), homeDir: kh, env: () => ({ PATH: '/usr/bin:/bin', HOME: kh }), broadcast: () => { }, serverSetting: () => undefined, serverNotice: () => { }, getTelemetry: () => null, liveKeys: () => new Set(), log: quiet, tickMs: 3600e3, install: false });
+    let held = { file: 'browser-passkeys.json', code: 'EACCES', words: 'the passkeys could not be read (test)' };
+    k.setPasskeyHeld(() => held);
+    // (1) the housekeeping Forget (src/server/browser-trace.js forgetProfile): the folder's lineage is never re-keyed (the keeper's lineage road
+    //     observed — it answers a lineage for the folder and records every move asked of it), the folder and the profile stay
+    const p = k.createProfile({ label: 'Set aside' }); fs.mkdirSync(p.dir, { recursive: true });
+    const moves = [];
+    const kw = { ...k, lineageKeyOf: () => 'lineage-of-' + p.id, moveDirLineage: (key, to) => { moves.push({ key, to }); return { ok: true, moved: true, key }; } };
+    const tr = BT.create({ dataDir: path.join(kd, 'data'), homeDir: kh, keeper: kw, log: quiet, sweepEveryMs: 0 });
+    let fe = null; try { await tr.forgetProfile(p.id); } catch (e) { fe = e; }
+    ok(!!fe && fe.code === 'passkeys_unread' && moves.length === 0 && fs.existsSync(p.dir) && !!k.profile(p.id), 'MUST 1 (the REAL Forget): while the passkeys are held a Forget is refused BY NAME before anything moves — the folder\'s lineage never re-keyed, the folder and the profile stay', { code: fe && fe.code, moves, dir: fs.existsSync(p.dir), profile: !!k.profile(p.id) });
+    tr.shutdown?.();
+    // (2) the DELETE route with the unpin choice (src/routes/browser.js): no conversation's pin is cleared, nobody is told the browser went
+    const R = require('../src/routes/browser.js'); const express = require('express'); const http = require('node:http');
+    const p2 = k.createProfile({ label: 'Pinned' });
+    try { k.setPin('bk-0000000e', p2.id); } catch { /* the PREMISE below says it */ }
+    const before = k.pinnedBy(p2.id).length;
+    R.setup({ keeper: k, activeSessions: new Map(), browserEnv: () => null, notice: () => { } });
+    const app = express(); app.use(express.json()); app.use(R.router);
+    const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    let status = null, j = null;
+    try { const res = await fetch(`http://127.0.0.1:${srv.address().port}/api/browser/profiles/${p2.id}?unpin=1`, { method: 'DELETE' }); status = res.status; j = await res.json().catch(() => null); } catch (e) { j = { threw: e && e.message }; }
+    const after = k.pinnedBy(p2.id).length;
+    ok(before === 1 && status === 503 && !!j && j.code === 'passkeys_unread' && after === 1 && !!k.profile(p2.id), 'MUST 1 (the REAL DELETE route, ?unpin=1): refused BY NAME (503) before any pin is cleared — the conversation keeps its browser and is told nothing went', { before, status, code: j && (j.code || j.threw), after });
+    await new Promise((r) => srv.close(r));
+    // (3) the housekeeping Forget ROUTE asks the hold before its release and its stop (src/routes/browser-trace.js — pinned: its world is the page's)
+    const rt = fs.readFileSync(new URL('../src/routes/browser-trace.js', import.meta.url), 'utf8');
+    const iHold = rt.indexOf('ctx.keeper.passkeyHeldNow()'), iRel = rt.indexOf('released = await ctx.releaseProfile(req.params.id)');
+    ok(iHold > 0 && iRel > iHold, 'MUST 1 (the housekeeping Forget route): the hold is asked BEFORE «release every lease + stop the browser» — nothing is released or stopped for a removal that cannot happen');
+    held = null; k.shutdown?.();
+  }
+  // ── r3632 (shoulds): the panel's label with no count, the dialog's damaged line, the agent's cancel left out of the hold ──
+  {
+    const PM = await import('../src/lib/browser-panel-model.js');
+    const lab = (n) => { const w = { t: (k, o) => (o ? String(k).replace(/\{(\w+)\}/g, (m0, q) => String(o[q])) : k) }; const m = PM.rowMenu({ id: 'bp-1', state: 'idle' }, { passkeys: n, w }).find((x) => x.id === 'passkeys'); return m ? m.label : null; };
+    ok(lab(null) === 'Passkeys…' && lab(0) === 'Passkeys (0)…' && lab(3) === 'Passkeys (3)…', 'the panel\'s menu: a held store\'s count is UNKNOWN («Passkeys…»), never «Passkeys (0)…»', { held: lab(null), zero: lab(0), three: lab(3) });
+    const vsrc = fs.readFileSync(new URL('../src/lib/browser-passkeys-view.js', import.meta.url), 'utf8');
+    ok(/list\.damaged && list\.damaged\.copy/.test(vsrc) && /techFold\(\[t\('Its damaged bytes are kept beside it as: \{name\}'/.test(vsrc), 'the passkeys dialog draws the torn lift\'s DAMAGED mark in place (pinned), the copy\'s base name in its fold — after a restart too');
+    const rsrc = fs.readFileSync(new URL('../src/routes/browser.js', import.meta.url), 'utf8');
+    ok(rsrc.includes("if (L && L.held && action !== 'status' && action !== 'cancel') return res.status(503)") && rsrc.includes("if (action === 'status') return res.json(passkeyStatusReply(v, L));"), 'the agent\'s route: status answers through passkeyStatusReply (the leg\'s function), and cancel is not refused by the hold (it writes nothing; the open ceremony\'s own text sends the agent to it)');
   }
   // ── (e) THE PRODUCTION NAMES: the wiring builds the store through the same module, and wires the hold to the keeper and the digest ──
   {

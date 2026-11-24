@@ -4667,6 +4667,7 @@ export default {
   "which plugins are on and trusted": "哪些插件已开启、已信任",
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace 暂时读不到哪些插件已开启、已信任 — 没有更改任何东西，也没有丢失任何插件。几分钟后再试（它会自己再读一次）。",
   "the browsers’ passkeys": "浏览器的通行密钥",   // r3261
+  "The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched.": "保存的通行密钥已损坏，所以这个列表重新从空开始。损坏的字节原样保留在列表旁边。",   // r3632
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到 API 提案 — 没有做出任何决定，也没有执行任何请求。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到应用提案 — 没有安装或更改任何东西。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到设计列表 — 没有更改任何东西，设计文件夹保持原样。几分钟后再按一次（它会自己再读一次）。",

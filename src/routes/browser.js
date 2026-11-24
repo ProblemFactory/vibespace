@@ -2329,6 +2329,12 @@ router.get('/api/agent/browser/dialog', async (req, res) => {
  *  THIS conversation's own browser (its lease / its ephemeral record only; the reach is asked again after every await — a
  *  lease that went while the watch armed acts on nothing). `cancel` aborts the page's request through the hook (the page's
  *  promise rejects AbortError, Chrome's own window closes). While the user drives it is the user's page: refused. */
+/** r3632 MUST 2 (the round on line 792): the agent's passkey STATUS reply and its store line, one function each — a HELD store
+ *  (passkeyList answers { held, keys: null, agentsOff: null }) says the hold, never `null.length` (a 500 where the hold's own refusal text
+ *  sends the agent to this verb). Exported for the fast leg (test-browser-passkey-held). */
+function passkeyHeldLine(L) { const w = String((L && L.held && L.held.words) || 'the passkeys could not be read right now'); return w.charAt(0).toUpperCase() + w.slice(1) + '.'; }
+function passkeyStoreLine(L) { return !L ? '' : L.held ? passkeyHeldLine(L) : L.agentsOff ? 'The owner turned passkeys off for agents on this profile.' : L.keys.length ? `This profile holds ${L.keys.length} passkey${L.keys.length === 1 ? '' : 's'}: ${L.keys.slice(0, 8).map((x) => `${x.rpId} (${x.userName || x.id}, policy ${x.policy})`).join(', ')}.` : 'This profile holds no passkeys — `vibespace-browser passkey register <site>` asks the owner first.'; }
+function passkeyStatusReply(v, L) { const PK = require('../browser-passkey.js'); return ({ ok: true, passkey: PK.passkeyBlock(v), store: L && L.held ? { held: true } : L ? { keys: L.keys.length, agentsOff: L.agentsOff } : null, text: (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE || v.state === 'refused' ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT) + (passkeyStoreLine(L) ? ' ' + passkeyStoreLine(L) : '') }); }
 router.post('/api/agent/browser/passkey', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
@@ -2349,8 +2355,8 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
     const v = D.passkeyIn(t.profileId, D.scopeFor(t));
     // lane passkey-store-core: the store's answer (publicRow only — never a key) beside the page's state
     const L = typeof D.passkeyList === 'function' ? D.passkeyList(t.profileId) : null;
-    if (L && L.held && action !== 'status') return res.status(503).json({ error: PK.refusedText('passkeys_unread', String(req.body?.rpId || req.body?.ref || '').trim().slice(0, 300) || null), code: 'passkeys_unread' });   // r3261: HELD — the agent told the hold, never «no passkey»
-    const storeLine = !L ? '' : L.agentsOff ? 'The owner turned passkeys off for agents on this profile.' : L.keys.length ? `This profile holds ${L.keys.length} passkey${L.keys.length === 1 ? '' : 's'}: ${L.keys.slice(0, 8).map((x) => `${x.rpId} (${x.userName || x.id}, policy ${x.policy})`).join(', ')}.` : 'This profile holds no passkeys — `vibespace-browser passkey register <site>` asks the owner first.';
+    if (L && L.held && action !== 'status' && action !== 'cancel') return res.status(503).json({ error: PK.refusedText('passkeys_unread', String(req.body?.rpId || req.body?.ref || '').trim().slice(0, 300) || null), code: 'passkeys_unread' });   // r3261: HELD — the agent told the hold, never «no passkey»
+    const storeLine = passkeyStoreLine(L);   // r3632 MUST 2: one function (held first), the status reply's own
     if (action === 'list') return res.json({ ok: true, keys: L ? L.keys : [], agentsOff: !!(L && L.agentsOff), text: storeLine });
     if (action === 'register' || action === 'forget') {
       if (!L) return res.status(409).json({ error: 'VibeSpace keeps no passkeys on this server', code: 'not_watched' });
@@ -2362,7 +2368,7 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
       if (!r.ok) return res.status(r.code === 'passkeys_unread' ? 503 : r.code === 'bad-request' ? 400 : 409).json({ error: r.error, code: r.code });
       return res.json({ ok: true, state: r.state, proposal: { id: r.proposal.id, rpId: r.proposal.rpId, expiresAt: r.proposal.expiresAt }, text: PK.registerText(r.state, r.proposal.rpId) });
     }
-    if (action === 'status') return res.json({ ok: true, passkey: PK.passkeyBlock(v), store: L && L.held ? { held: true } : L ? { keys: L.keys.length, agentsOff: L.agentsOff } : null, text: (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE || v.state === 'refused' ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT) + (storeLine ? ' ' + storeLine : '') });
+    if (action === 'status') return res.json(passkeyStatusReply(v, L));   // r3632 MUST 2: while HELD it says the hold (never a 500)
     let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
     if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('passkey cancel'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
     const r = await D.cancelPasskey(t, { by: 'agent' });
@@ -2999,4 +3005,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, fail, AGENT_PATH_WORDS, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, exceptKeyForPicked, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
+module.exports = { passkeyStatusReply /* r3632 */, router, setup, fail, AGENT_PATH_WORDS, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, exceptKeyForPicked, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
