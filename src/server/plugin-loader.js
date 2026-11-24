@@ -175,7 +175,11 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
     reload();
     for (const fn of [...liftWaiters]) { liftWaiters.delete(fn); try { fn(); } catch { /* the waiter's own */ } }
   }
-  const notify = () => { try { broadcast({ type: 'plugins-manifests-updated', plugins: list() }); } catch { } };
+  // r3634 (line 740's follow): THE HOLD AND A TORN START RIDE BESIDE THE LIST — a page keys its drops on them, never on a row's flag
+  // alone (a Rescan while held whose plugins folder did not list either has no rows to carry `held`); `torn` = this run's registry
+  // started empty from torn bytes (the helper's torn(): kept aside, then empty) — no drop it brings is a person's act
+  const listMeta = () => { const out = {}; try { if (hold.held()) Object.assign(out, { held: hold.words(), code: HELD_CODE }); const tl = hold.torn(); if (tl) out.torn = { since: tl.since || null, at: tl.at || null }; } catch { } return out; };
+  const notify = () => { try { broadcast({ type: 'plugins-manifests-updated', plugins: list(), ...listMeta() }); } catch { } };
   // B-3b8e (4b): a git install / update / uninstall moves what the Plugin Git credential's Test waits for (a repository known on
   // its host) — the store pushes that card again, so an open Integrations window follows without a reopen
   const gitTestWaitsMoved = () => { try { const s = typeof integrations === 'function' ? integrations() : integrations; if (s && typeof s.testWaitsMoved === 'function') s.testWaitsMoved('plugin-git'); } catch { } };
@@ -426,11 +430,12 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     return list().find((p) => p.id === id);
   }
   function reload() { discover(); for (const rec of plugins.values()) { if (rec.enabled) startChild(rec); else stopChild(rec); } syncShims(); notify(); return list(); }
-  function shutdown() { for (const rec of plugins.values()) stopChild(rec); }
+  function shutdown() { for (const rec of plugins.values()) stopChild(rec); try { hold.stop(); } catch { } }   // r3634: a lift after the stop writes nothing
   function get(id) { return plugins.get(id) || null; }
 
   async function install({ source, value, file, ref = null, credential = null, by = 'user' } = {}) {
-    heldRefuse('installing a plugin');   // before the installer writes a file
+    try { heldRefuse('installing a plugin'); }   // before the installer writes a file
+    catch (e) { if (file) fs.rm(String(file), { force: true }, () => { }); throw e; }   // r3634: the uploaded package goes with the refusal
     const r = await installer.install({ source, value, file, ref, credential });
     const prevInst = registry.installs[r.id] || null;
     // CONSENT DOES NOT TRANSFER TO NEW CODE (2.369.43): `enabled` and `trust`
@@ -523,7 +528,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   // ── routes ──
   if (app) {
     const sendErr = (res, e) => res.status(e.status || 500).json({ error: e.message, ...(e.payload || {}) });
-    app.get('/api/plugins/manifests', (req, res) => { let fleet = null; try { fleet = fleetStatus() || null; } catch { fleet = null; } res.json({ plugins: list(), hostVersion, ...(fleet ? { fleet } : {}), ...(hold.held() ? { held: hold.words(), code: HELD_CODE } : {}) }); });
+    app.get('/api/plugins/manifests', (req, res) => { let fleet = null; try { fleet = fleetStatus() || null; } catch { fleet = null; } res.json({ plugins: list(), hostVersion, ...(fleet ? { fleet } : {}), ...listMeta() }); });
     app.post('/api/plugins/manifests/reload', (req, res) => res.json({ plugins: reload() }));
     app.post('/api/plugins/manifests/:id/enabled', (req, res) => {
       try { res.json({ plugin: setEnabled(String(req.params.id), !!req.body?.enabled, { trusted: req.body?.trusted === true }) }); }
@@ -617,7 +622,8 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     // agent tool calls: under /api/agent/ (cookie-exempt like every agent
     // endpoint) — the route REQUIRES the session's vsst_ bearer (agentAuth)
     app.post('/api/agent/plugin-tool/:id/:name', async (req, res) => {
-      if (hold.held()) return res.status(503).json({ ok: false, code: HELD_CODE, error: hold.words() });   // r3305: the agent is told why, never «not found»
+      // r3305: the agent is told why, never «not found» — r3634: only an agent with its session (a caller without one learns nothing of it)
+      if (hold.held()) { let s0 = null; try { s0 = agentAuth(req) || null; } catch { s0 = null; } if (!s0) return res.status(401).json({ ok: false, error: 'missing or unknown session token (vsst_)' }); return res.status(503).json({ ok: false, code: HELD_CODE, error: hold.words() }); }
       const rec = plugins.get(String(req.params.id));
       const tool = rec?.manifest?.contributes?.agentTools?.find((t) => t.name === String(req.params.name));
       if (!rec || !rec.enabled || !tool) return res.status(404).json({ ok: false, error: 'plugin tool not found' });

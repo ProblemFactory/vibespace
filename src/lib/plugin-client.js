@@ -62,23 +62,26 @@ export class PluginClient {
     this._themes = new Map();    // pluginId → Set<themeKey>
     this.errors = new Map();     // pluginId → last client-side load error (panel shows it)
     this._applying = null;
-    app.ws?.onGlobal?.((m) => { if (m?.type === 'plugins-manifests-updated') this.apply(m.plugins); });
+    app.ws?.onGlobal?.((m) => { if (m?.type === 'plugins-manifests-updated') this.apply(m.plugins, { held: m.held, torn: m.torn }); });   // r3634: the hold and a torn start ride beside the list
     this.refresh();
   }
 
   async refresh() {
     const r = await fetchJson('/api/plugins/manifests');
     if (!r || r.error) return;
-    await this.apply(r.plugins || []);
+    await this.apply(r.plugins || [], { held: r.held, torn: r.torn });
   }
 
   /** Idempotent: registers what is enabled, tears down what is not. Serialized so
    *  a burst of broadcasts cannot interleave activate/deactivate of one plugin. */
-  apply(list) {
+  apply(list, meta = {}) {
     // B-f276 (主开发 r3305 (c)): the hub's plugin registry HELD (its rows `held`) — which plugins are on is UNKNOWN: this page keeps what
     // it applied (no module deactivated, no plugin theme dropped — the person's theme is never reset to dark by the silence); applied
     // again when the list reads (the lift's broadcast)
-    if (Array.isArray(list) && list.some((m) => m && m.held)) return this._applying || Promise.resolve();
+    if ((meta && meta.held) || (Array.isArray(list) && list.some((m) => m && m.held))) return this._applying || Promise.resolve();   // r3634: the list's own hold too
+    // r3634: a list from a registry that STARTED EMPTY (torn bytes kept aside) drops what it drops, but no drop of it is a person's act:
+    // a plugin theme that leaves by it stays the person's stored choice, pending, and comes back when the plugin is on again
+    const keepChoice = !!(meta && meta.torn);
     this.manifests = Array.isArray(list) ? list : [];
     const run = async () => {
       for (const w of this.contributedWindows()) this._register(w);
@@ -91,7 +94,7 @@ export class PluginClient {
         await this._applyModule(m);
       }
       for (const id of [...this._settings]) if (!live.has(id)) this._dropSettings(id);
-      for (const id of [...this._themes.keys()]) if (!live.has(id)) this._dropThemes(id);
+      for (const id of [...this._themes.keys()]) if (!live.has(id)) this._dropThemes(id, { keepChoice });
       for (const id of [...this._modules.keys()]) if (!live.has(id)) await this._deactivate(id);
     };
     this._applying = (this._applying || Promise.resolve()).then(run, run).catch((e) => console.error('[plugins] apply failed:', e));
@@ -149,10 +152,10 @@ export class PluginClient {
     if (next.size) this._themes.set(m.id, next); else this._themes.delete(m.id);
     if (next.size || have.size) this.app._refreshThemeDropdown?.();
   }
-  _dropThemes(id) {
+  _dropThemes(id, { keepChoice = false } = {}) {
     const keys = this._themes.get(id);
     if (!keys) return;
-    for (const key of keys) this.app.themeManager?.unregisterPluginTheme?.(key);
+    for (const key of keys) this.app.themeManager?.unregisterPluginTheme?.(key, { keepChoice });
     this._themes.delete(id);
     this.app._refreshThemeDropdown?.();
   }

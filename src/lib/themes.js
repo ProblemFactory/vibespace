@@ -80,11 +80,11 @@ class ThemeManager {
     this._pendingTheme = null;
   }
 
-  apply(name) {
+  apply(name, { store = true } = {}) {
     if (!THEMES[name] && !BUILTIN_THEMES.has(name)) name = 'dark';
     this.current = name;
     document.documentElement.setAttribute('data-theme', name);
-    localStorage.setItem('theme', name);
+    if (store) localStorage.setItem('theme', name);   // r3634: a fallback no person chose is shown, never stored
     const sel = document.getElementById('theme-select');
     if (sel) sel.value = name;
     this._clearInlineOverrides();
@@ -123,11 +123,13 @@ class ThemeManager {
     else if (this.current === key) this.apply(key);
   }
 
-  unregisterPluginTheme(key) {
+  unregisterPluginTheme(key, { keepChoice = false } = {}) {
     delete THEMES[key];
     delete this._pluginThemeLabels[key];
     this._removeStyle(key);
-    if (this.current === key) this.apply('dark');
+    // r3634: a drop no person made (a registry that started empty) SHOWS dark but STORES nothing — the plugin's theme stays the
+    // person's choice, pending: registerPluginTheme applies it again when the plugin is on again
+    if (this.current === key) { if (keepChoice) { this._pendingTheme = key; this.apply('dark', { store: false }); } else this.apply('dark'); }
   }
 
   /** [{ key, label }] of every registered plugin theme (theme picker group). */

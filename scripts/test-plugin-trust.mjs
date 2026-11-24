@@ -633,7 +633,7 @@ ok(rowFnSrc.length > 100 && !/innerHTML/.test(rowFnSrc) && /railRow\(\{[^}]*name
 const ss = read('src/lib/settings-schema.js');
 ok(/export function registerPluginSettings\(pluginId, label, items\)/.test(ss) && /export function unregisterPluginSettings\(pluginId\)/.test(ss) && /export function pluginSettingPath\(pluginId, key\)/.test(ss) && /t\('Plugin: \{name\}'/.test(ss), 'settings-schema exposes register/unregister/path (the only mutation path)');
 const tj = read('src/lib/themes.js');
-ok(/registerPluginTheme\(key, label, cssVars, terminalColors\)/.test(tj) && /unregisterPluginTheme\(key\)/.test(tj) && /getPluginThemes\(\)/.test(tj) && /this\._pendingTheme\.startsWith\('plugin-'\)/.test(tj), 'ThemeManager registers plugin themes under plugin-* and keeps a pending plugin theme instead of falling back to dark');
+ok(/registerPluginTheme\(key, label, cssVars, terminalColors\)/.test(tj) && /unregisterPluginTheme\(key, \{ keepChoice = false \} = \{\}\)/.test(tj) && /getPluginThemes\(\)/.test(tj) && /this\._pendingTheme\.startsWith\('plugin-'\)/.test(tj), 'ThemeManager registers plugin themes under plugin-* and keeps a pending plugin theme instead of falling back to dark');
 ok(/getPluginThemes\?\.\(\)/.test(read('src/lib/app.js')), 'the theme picker lists plugin themes in their own group');
 const ld = read('src/server/plugin-loader.js');
 ok(/execArgv: permissionArgs\(rec, dataDir\)/.test(ld) && /'--permission'/.test(ld) && /--allow-child-process/.test(ld) && /delete env\.NODE_OPTIONS/.test(ld) && /ERR_ACCESS_DENIED/.test(ld), 'the loader forks plugin servers under node --permission with allowlists from the manifest (NODE_OPTIONS stripped) and classifies denials');

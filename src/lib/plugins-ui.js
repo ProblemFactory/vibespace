@@ -117,6 +117,7 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
   l.className = 'plugin-sw';
   const cb = document.createElement('input');
   cb.type = 'checkbox'; cb.setAttribute('role', 'switch'); cb.checked = !!on;
+  if (on == null) { cb.indeterminate = true; cb.setAttribute('aria-checked', 'mixed'); }   // r3634: a held row's switch is not «off» — unknown
   cb.setAttribute('aria-label', label);
   cb.onchange = () => onChange(cb.checked, cb);
   l.append(cb, Object.assign(document.createElement('span'), { className: 'plugin-sw-track' }));
@@ -361,7 +362,7 @@ export function installPluginsUI(App) {
     const enablePlugin = async (p, { trusted = false } = {}) => {
       const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: true, trusted }) });
       if (rr?.consentRequired && !trusted) { const okc = await this._pluginConsentDialog(p, rr.capabilities); if (okc) return enablePlugin(p, { trusted: true }); return; }
-      if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); return; }
+      if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); render(); return; }   // r3634: the switch drawn again as it is (a refused press changes nothing)
       showToast(trusted ? t('Plugin enabled (trusted)') : t('Plugin enabled'));
       this.pluginClient?.refresh?.();
       render();
@@ -423,7 +424,7 @@ export function installPluginsUI(App) {
             return enablePlugin(p);
           }
           const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: false }) });
-          if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); cb.checked = true; return; }
+          if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); if (p.held) { cb.checked = false; cb.indeterminate = true; } else cb.checked = true; return; }   // r3634: put back as it was
           showToast(t('Plugin disabled'));
           this.pluginClient?.refresh?.();
           render();
@@ -659,7 +660,7 @@ export function installPluginsUI(App) {
           const git = srcSel.value === 'git';
           res = await fetchJson('/api/plugins/install', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ source: srcSel.value, value: v, ...(git && refIn.value.trim() ? { ref: refIn.value.trim() } : {}), ...(git && credSel.value ? { credential: credSel.value } : {}) }) });
         }
-        if (!res || res.error) return fail(res?.error ? `${res.error}${res.code ? ` [${res.code}]` : ''}` : t('Install failed'));
+        if (!res || res.error) return fail(heldWordsOf(res) || (res?.error ? `${res.error}${res.code ? ` [${res.code}]` : ''}` : t('Install failed')));   // r3634: a hold in the page's own words
         showToast(t('Installed {id} {version}', { id: res.plugin?.id || '', version: res.plugin?.version || '' }) + (res.replaced ? ' · ' + t('previous copy moved to trash') : ''));
         // A replacement that is not the same package drops the old consent —
         // say so, or the plugin silently comes back disabled (2.369.43).

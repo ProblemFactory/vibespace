@@ -393,7 +393,9 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
     let L;
     try { L = PLm.create({ rootDir: R, app: null, autoStart: true, hostVersion: '2.369.24', log: quietR, binDir, agentEnv: () => ({ PATH: process.env.PATH }) }); }
     finally { fs.readFileSync = realRead; }
-    await sleep(50);   // torn: the copy and the lift run off the loop
+    // torn: the copy and the lift run off the loop — waited for by the hold's own list (r3634: never a fixed sleep under load)
+    if (how === 'torn') { const tw = Date.now(); while (Date.now() - tw < 5000 && !HOLD.holds().some((h) => h.file === 'plugin-registry.json' && h.torn && !h.held)) await sleep(10); }
+    else await sleep(50);
     const tryIt = async (fn) => { try { await fn(); return { ok: true }; } catch (e) { return { status: e.status || null, code: (e.payload && e.payload.code) || e.code || null, msg: String(e.message || '') }; } };
     const held = typeof L.held === 'function' ? L.held() : null;
     const row = (L.list() || []).find((x) => x.id === PID) || null;
@@ -435,6 +437,7 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
   console.log(`    facts (torn bytes): ${JSON.stringify(t)}`);
   ok(t.copies.length === 1 && t.copies[0] === true && t.before.dirKept && t.rowEnabled === false && !t.held,
     'B-f276: TORN bytes are kept aside ONCE (a copy byte for byte beside the file), then the registry starts empty — the plugin\'s folder stays where it is', t);
+  ok(t.dirKept && !t.shimKept, 'B-f276 (r3634, the round\'s pin): a torn lift starts EMPTY as the family designed — the plugin is off, so its derived agent-tool launcher goes (written again at the next enable; kept, it would answer 404); its folder stays', { dirKept: t.dirKept, shimKept: t.shimKept });
   // RED: the release's bare catch (any failure = empty)
   const LS0 = fs.readFileSync(path.join(REPO, 'src/server/plugin-loader.js'), 'utf8');
   const relSrc = editAnchor(LS0, "  { let read; try { read = { text: fs.readFileSync(registryFile, 'utf-8') }; } catch (error) { read = { error }; } const a0 = SR.storeAnswer(read, { valid: REGISTRY_SHAPE }); if (hold.start(a0) === 'data') registry = normalize(a0.value); }",
@@ -513,9 +516,95 @@ ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /r
   const pg = await pageScene(pathToFileURL(path.join(REPO, 'src/lib/plugin-client.js')).href);
   ok(pg.kept && !pg.dropped.length && !pg.deact.length, 'B-f276 (r3305 (c)): the page\'s plugin client keeps what it applied while the list is HELD — no plugin theme dropped (the person\'s theme never reset), no module deactivated', pg);
   const PCs0 = fs.readFileSync(path.join(REPO, 'src/lib/plugin-client.js'), 'utf8');
-  const pcRel = editAnchor(PCs0, '    if (Array.isArray(list) && list.some((m) => m && m.held)) return this._applying || Promise.resolve();\n', '', 'src/lib/plugin-client.js');
+  const pcRel = editAnchor(PCs0, '    if ((meta && meta.held) || (Array.isArray(list) && list.some((m) => m && m.held))) return this._applying || Promise.resolve();   // r3634: the list\'s own hold too\n', '', 'src/lib/plugin-client.js');
   const pgx = await pageScene(pathToFileURL(MCe.write('src/lib/plugin-client.js', pcRel, 'held-as-off')).href);
   ok(!pgx.kept && pgx.dropped.length === 1 && pgx.deact.length === 1, 'RED CONTROL (B-f276, the release\'s apply): the held list reads as «all off» — the plugin\'s theme DROPPED and its module deactivated', pgx);
+  // (r3634, line 740's follow) THE PERSON's THEME, on the two roads where the registry STARTED EMPTY or the list came back empty while
+  // held: the page's client never STORES a fallback theme for a drop no person made — the plugin's theme stays the stored choice,
+  // pending, and comes back when the plugin is on again. The REAL loader's broadcast, the REAL plugin client and the REAL theme manager
+  // (a page's localStorage and document stood in). RED each: the release's client (no hold or torn start beside the list)
+  {
+    const saved = { localStorage: globalThis.localStorage, document: globalThis.document, window: globalThis.window };
+    const store = new Map();
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); }, removeItem: (k) => { store.delete(k); } };
+    const stubEl = () => ({ id: '', textContent: '', style: {}, remove() {}, setAttribute() {} });
+    globalThis.document = { documentElement: { setAttribute() {}, style: { length: 0, removeProperty() {} } }, head: { appendChild() {} }, createElement: stubEl, getElementById: () => null };
+    globalThis.window = { dispatchEvent() {} };
+    try {
+      const { ThemeManager } = await import(pathToFileURL(path.join(REPO, 'src/lib/themes.js')).href);
+      const pcSrc = fs.readFileSync(path.join(REPO, 'src/lib/plugin-client.js'), 'utf8');
+      // a page that shows example.hello's theme, picked by the person; then the list as the hub broadcast it
+      const pageOf = async (pcUrl, msg) => {
+        const { PluginClient, pluginThemeKey } = await import(pcUrl);
+        store.clear(); store.set('theme', 'dark');
+        const tm = new ThemeManager();
+        const key = pluginThemeKey(PID, 'mint');
+        tm.registerPluginTheme(key, 'Hello Mint', {}, null); tm.apply(key);   // the person's pick, stored
+        const pc = Object.create(PluginClient.prototype);
+        Object.assign(pc, { app: { themeManager: tm, _refreshThemeDropdown() {} }, manifests: [], errors: new Map(), _applying: null, _settings: new Set(), _modules: new Map(), _themes: new Map([[PID, new Set([key])]]) });
+        await pc.apply(msg.plugins, { held: msg.held, torn: msg.torn });
+        const out = { stored: store.get('theme'), pending: tm._pendingTheme || null, current: tm.current };
+        tm.registerPluginTheme(key, 'Hello Mint', {}, null);   // the plugin on again: its theme registers again
+        out.back = tm.current === key && store.get('theme') === key;
+        out.key = key;
+        return out;
+      };
+      // (a) A TORN LIFT: torn bytes with the plugin ON — kept aside, the registry starts empty, the reload broadcasts every row off
+      const roadA = async () => {
+        const R = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plugreg-torn-'));
+        const pd = path.join(R, 'data', 'plugins', PID);
+        fs.cpSync(path.join(REPO, 'docs/examples/hello-plugin'), pd, { recursive: true });
+        fs.writeFileSync(path.join(R, 'data', 'plugin-registry.json'), JSON.stringify({ enabled: { [PID]: true }, trust: {}, installs: {} }).slice(0, 30));
+        const msgs = [];
+        const L = PLr.create({ rootDir: R, app: null, autoStart: true, hostVersion: '2.369.24', log: quietR, binDir: path.join(R, 'bin'), broadcast: (m) => msgs.push(m), agentEnv: () => ({ PATH: process.env.PATH }) });
+        const t0 = Date.now(); while (Date.now() - t0 < 5000 && !msgs.some((m) => m && m.torn)) await sleep(10);
+        const msg = msgs.find((m) => m && m.torn) || msgs.at(-1) || { plugins: [] };
+        try { L.shutdown(); } catch { /* its own */ }
+        try { fs.rmSync(R, { recursive: true, force: true }); } catch { /* gone */ }
+        return { msg: { torn: msg.torn || null, held: msg.held || null, rows: (msg.plugins || []).map((p) => ({ id: p.id, enabled: p.enabled })) }, raw: msg };
+      };
+      // (b) A RESCAN WHILE HELD whose plugins folder does not list either: no rows at all — the hold rides beside the empty list
+      const roadB = async () => {
+        const R = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plugreg-rescan-'));
+        const pd = path.join(R, 'data', 'plugins', PID);
+        fs.cpSync(path.join(REPO, 'docs/examples/hello-plugin'), pd, { recursive: true });
+        const regFile = path.resolve(path.join(R, 'data', 'plugin-registry.json'));
+        fs.writeFileSync(regFile, JSON.stringify({ enabled: { [PID]: true }, trust: {}, installs: {} }));
+        const plugDir = path.resolve(path.join(R, 'data', 'plugins'));
+        const msgs = [];
+        const realRead = fs.readFileSync, realDir = fs.readdirSync;
+        fs.readFileSync = function (f, ...a) { if (path.resolve(String(f)) === regFile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, f, ...a); };
+        let L;
+        try { L = PLr.create({ rootDir: R, app: null, autoStart: true, hostVersion: '2.369.24', log: quietR, binDir: path.join(R, 'bin'), broadcast: (m) => msgs.push(m), agentEnv: () => ({ PATH: process.env.PATH }) }); }
+        finally { fs.readFileSync = realRead; }
+        fs.readdirSync = function (d, ...a) { if (path.resolve(String(d)) === plugDir) throw Object.assign(new Error('EIO: i/o error, scandir'), { code: 'EIO' }); return realDir.call(this, d, ...a); };
+        try { L.reload(); } finally { fs.readdirSync = realDir; }   // the Rescan press
+        const msg = msgs.at(-1) || { plugins: [] };
+        try { L.shutdown(); } catch { /* its own */ }
+        try { fs.rmSync(R, { recursive: true, force: true }); } catch { /* gone */ }
+        return { msg: { held: msg.held || null, rows: (msg.plugins || []).length }, raw: msg };
+      };
+      const pcUrl = pathToFileURL(path.join(REPO, 'src/lib/plugin-client.js')).href;
+      const a = await roadA(), b = await roadB();
+      const pa = await pageOf(pcUrl, a.raw), pb = await pageOf(pcUrl, b.raw);
+      console.log(`    facts (theme, torn lift): ${JSON.stringify({ msg: a.msg, page: pa })}`);
+      console.log(`    facts (theme, rescan while held): ${JSON.stringify({ msg: b.msg, page: pb })}`);
+      ok(!!a.msg.torn && !a.msg.held && a.msg.rows.every((r) => r.enabled === false) && pa.stored === pa.key && pa.pending === pa.key && pa.back,
+        'B-f276 (r3634 (a)): A TORN LIFT broadcasts its rows off WITH the torn start beside them — the page drops the plugin\'s theme from view but STORES nothing: the person\'s pick stays stored and pending, and comes back when the plugin is on again', { msg: a.msg, page: pa });
+      ok(!!b.msg.held && b.msg.rows === 0 && pb.stored === pb.key && pb.current === pb.key && pb.back,
+        'B-f276 (r3634 (b)): A RESCAN WHILE HELD whose plugins folder did not list broadcasts an EMPTY list WITH the hold beside it — the page keeps what it applied: the person\'s theme shown and stored', { msg: b.msg, page: pb });
+      // RED: the release's client — it keys on the rows' own flag only and drops with a stored fallback
+      const relPc = editAnchor(editAnchor(pcSrc, '    const keepChoice = !!(meta && meta.torn);\n', '    const keepChoice = false;   // the release: every drop stores the fallback\n', 'src/lib/plugin-client.js'),
+        '    if ((meta && meta.held) || (Array.isArray(list) && list.some((m) => m && m.held)))', '    if ((Array.isArray(list) && list.some((m) => m && m.held)))', 'src/lib/plugin-client.js');
+      const MCt = mutantCopies('plugin-registry-theme', REPO);
+      const relUrl = pathToFileURL(MCt.write('src/lib/plugin-client.js', relPc, 'release-drop-stores')).href;
+      const xa = await pageOf(relUrl, a.raw), xb = await pageOf(relUrl, b.raw);
+      ok(xa.stored === 'dark' && !xa.back && xb.stored === 'dark' && !xb.back,
+        'RED CONTROL (r3634, the release\'s client): on both roads the plugin\'s theme is dropped and DARK IS STORED over the person\'s pick — turning the plugin on again does not bring it back', { torn: xa, rescan: xb });
+    } finally {
+      for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
+    }
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
