@@ -26,6 +26,7 @@ export function exitWords(code, t, { kind = '', status = 0, detail = '' } = {}) 
   switch (code) {
     case 'exit_no_proxy': return row(t('This profile has no proxy of its own — its browser may leave by another road, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.'));
     case 'exit_external_browser': return row(t('This profile attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it.'));
+    case 'browser_settings_unread': return row(t('The exit check’s address cannot be read right now — VibeSpace’s settings are held. Nothing was checked or kept: check again once they read.'));   // B-50e7: the address unread while the settings are held — never «no address is set»
     case 'exit_url_unset': return row(t('No exit check address is set — give one below (an https address you trust), or type the exit by hand.'));
     case 'exit_url_invalid': return row(t('The exit check address must be a public https address with no user name or password in it.'));
     case 'exit_restart_first': return row(t('This browser runs on another road than its proxy now names (the address or its login changed since it started) — restart it, then check the exit.'));

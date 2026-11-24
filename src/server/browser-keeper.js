@@ -494,7 +494,24 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // does a key row REFUSE to run without a key? The key consumer answers (browser-backend keyRequired = the PURE table:
   // every cloud row yes); ONE answer for the gate, the view and start()
   const keyRequired = (id) => { const k = keysOf(); return typeof k.keyRequired === 'function' ? !!k.keyRequired(id) : SW.keyRequiredFor(id); };
-  const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
+  // B-50e7 (主开发 r3332 / r3443): WHILE THE SETTINGS ARE HELD (the persistence router's settingsHeld — the door setting-holds.js receives) the
+  // held view carries no browser.* or plugin.* row: every read here would fall to its default. Each value read while they READ is noted in
+  // ONE memo of THIS process (memory only: no file, nothing kept past the process); held, a read answers that memo; nothing known (a start
+  // while held) ⇒ the scene's SAFE SIDE, never a default as if it were the person's choice. The lift is the door answering null: the next
+  // read is the file's again — no restart. Nothing synchronous is added on the loop (the memo is a Map; the door is a property read).
+  const lastKnown = new Map();
+  const heldNow = () => { try { return settingsHeld() || null; } catch { return null; } };
+  /** one setting read → { v, held, known }: readable ⇒ the file's value (noted); held ⇒ the last value known in this run, if any */
+  const readSetting = (k) => {
+    const h = heldNow();
+    if (h) return lastKnown.has(k) ? { v: lastKnown.get(k), held: h, known: true } : { v: undefined, held: h, known: false };
+    let v; try { v = serverSetting(k); } catch { v = undefined; }
+    lastKnown.set(k, v);
+    return { v, held: null, known: true };
+  };
+  /** `safe` (B-50e7): the value a HELD read with nothing known answers (a scene's safe side) — else the default `d` */
+  const setting = (k, d, safe) => { const r = readSetting(k); if (r.held && !r.known) return safe === undefined ? d : safe; const v = r.v; return v === undefined || v === null || v === '' ? d : v; };
+  const HELD_CODE = 'browser_settings_unread';
   const uid = () => (typeof process.getuid === 'function' ? process.getuid() : null);
 
   // ── state ──
@@ -1097,7 +1114,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // P6 (§6.2 / §6.5): is `sharing:"instance"` a value HERE, and the grants
       // (counts only — never a token, never a raw url)
       mediation: { available: mediationOn(), port: mediator && mediationOn() ? mediator.port() : null, grants: mediator && mediationOn() ? mediator.list() : [] },
-      pins: { ...reg.pins }, cap: { used: running, cap: machineCap(), setting: 'browser.maxRunning' },
+      pins: { ...reg.pins }, cap: { used: running, cap: machineCap(), setting: 'browser.maxRunning', ...(capUnread() ? { unread: true, code: HELD_CODE } : {}) },
       windowLeaks: { count: windowLeaks.count, last: windowLeaks.last ? { ...windowLeaks.last } : null }, // verify r3 T2 ①: rung-2 tabs that landed in another holder's window, closed at once — COUNTED (this run)
       // owner ruling A (2): who DRIVES each shared profile's browser right now (profileId → {browserKey, since, at}) — a
       // browser key, never a name (this digest also reaches agents); the client names it from its own session rows
@@ -1550,7 +1567,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** THE DEFAULT POLICY now — `browser.defaultEngine`: the user's own stored value › the fleet's (fleet.json `browserEngine`) ›
    *  'default' → `{value, source, fleet: {plugin, default} | null}`. */
   function defaultEngineNow() {
-    let own; try { own = serverSetting('browser.defaultEngine'); } catch { own = undefined; }
+    const own = readSetting('browser.defaultEngine').v;   // B-50e7: held ⇒ the last engine known in this run (nothing known ⇒ the default)
     let fe = null; try { const f = typeof fleetFacts === 'function' ? fleetFacts() : null; fe = f && f.browserEngine && typeof f.browserEngine === 'object' ? f.browserEngine : null; } catch { fe = null; }
     return { ...ENG.defaultEngineOf({ own, fleet: fe }), fleet: fe ? { plugin: fe.plugin || null, default: fe.default === true } : null };
   }
@@ -2558,11 +2575,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
 
   // ── the browser: reuse-or-spawn ──
-  function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS)); }
+  function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS, 0)); }   // B-50e7: held, nothing known ⇒ 0 — the idle clock stops nothing
   /** lane browser-windows (U4): the machine's ceiling of running browsers is the SETTING `browser.maxRunning` (1–32), read
    *  at every judgement (a change applies to the next start); the keeper's CONCURRENT_CAP (6) is its default. Desktop apps
    *  keep their own ceiling. The resource guard only REPORTS, as before. */
   function machineCap() { return WIN.maxRunningOf(setting('browser.maxRunning', null), Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP); }
+  /** B-50e7 (r3443 hold 3): the machine's ceiling is UNREAD — held with nothing known: launches count against the product's default, and no number is the person's */
+  const capUnread = () => { const r = readSetting('browser.maxRunning'); return !!(r.held && !r.known); };
   /** r4 LOW 5: the idle timeout an ephemeral's spawn pairs carry (frozen at spawn), else the setting. */
   function pairsIdleMs(pairs) {
     // ONE reading of the pairs' idle (2.369.183: lane P's PURE B.pairsIdleMs — the same fact its launch passes)
@@ -6547,7 +6566,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       } catch (e) { log.warn?.(`[browser] ${rec.profileId}: idle paint ${v.act} failed: ${e && e.message}`); }
     }
   }
-  function idleReleaseAfterMs() { return B.idleReleaseMs(setting('browser.idleReleaseAfterTurnMs', B.DEFAULT_IDLE_RELEASE_MS)); }
+  function idleReleaseAfterMs() { return B.idleReleaseMs(setting('browser.idleReleaseAfterTurnMs', B.DEFAULT_IDLE_RELEASE_MS, 0)); }   // B-50e7: held, nothing known ⇒ 0 — no release by the clock
   /** The tick's release arm: every LIVE managed ephemeral / helper browser whose conversation's turn has been idle ≥ the setting.
    *  → the releases THIS sweep started, `[{profileId, why, settled}]` (`settled` = its stop, never rejecting): the tick
    *  ignores it; a gate samples past every one of them (the 2.369.187 mirror red — a sample at the FIRST stop observed
@@ -6573,7 +6592,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   // ── P3 (§4.3 / §4.3.1): the INPUT SIDE of a lease — takeover, handback, idle ──
   const inputKey = (browserKey, profileId) => T.inputKeyFor(browserKey, profileId || null);
-  function takeoverIdleMs() { return T.takeoverIdleMs(setting('browser.takeoverIdleMs', T.DEFAULT_TAKEOVER_IDLE_MS)); }
+  function takeoverIdleMs() { return T.takeoverIdleMs(setting('browser.takeoverIdleMs', T.DEFAULT_TAKEOVER_IDLE_MS, 0)); }   // B-50e7: held, nothing known ⇒ 0 — a person's takeover never lapses on a default time
   /** The state of one (conversation, browser) pair — a fresh 'agent' state when nobody ever took over. */
   function inputStateFor(browserKey, profileId = null) {
     const k = inputKey(browserKey, profileId);
@@ -7221,7 +7240,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // takeover C3: this conversation's managed ephemeral browser (null until its first page verb)
       ephemeral: ephemeralFor(browserKey),
       // MULTIVIEW D4: the strip's `own/cap` chip — this conversation's live browsers against ITS cap; the machine's ceiling beside it (a count, never names)
-      cap: { own: ownLive(browserKey), cap: cap.cap, origin: cap.origin, explicit: capOf(browserKey), machine: { used: Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length, cap: machineCap() } } };
+      cap: { own: ownLive(browserKey), cap: cap.cap, origin: cap.origin, explicit: capOf(browserKey), machine: { used: Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length, cap: machineCap(), ...(capUnread() ? { unread: true, code: HELD_CODE } : {}) } }, ...(heldNow() ? { settingsHeld: { code: HELD_CODE } } : {}) };   // B-50e7 point 9: the settings held, said where the person looks
   }
 
   /** Lane H: the browser this conversation's agent holds LIVE right now, as
@@ -7568,7 +7587,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // engineArgs). Loopback / link-local is never admitted (egressVerdict).
   const EgressProxy = require('./egress-proxy');
   const egressProxies = new Map(); // profile id → {px, of} — its egress proxy and whose list it admits (`of` names the engine)
-  const engineSites = (of) => { let v; try { v = serverSetting(of.setting); } catch { v = undefined; } return typeof v === 'string' ? v : String(of.fallback || ''); };
+  const engineSites = (of) => { const r = readSetting(of.setting); if (r.held && !r.known) return ''; const v = r.v; return typeof v === 'string' ? v : String(of.fallback || ''); };   // B-50e7: held, nothing known ⇒ no site (the narrower side)
+  /** a host through a profile's egress proxy → the verdict (B-50e7: an engine's list unread while held ⇒ refused naming the hold, nothing of the list) */
+  const egressAllow = (of, h) => (of && of.setting ? (sitesUnread(of) ? { allow: false, why: HELD_EGRESS_WHY } : B.egressVerdict(h, egressListOf(of))) : B.profileProxyVerdict(h));
+  const sitesUnread = (of) => { const r = of && of.setting ? readSetting(of.setting) : null; return !!(r && r.held && !r.known); };
+  const HELD_EGRESS_WHY = 'VibeSpace\'s settings cannot be read right now — this plugin reaches no address until they read';   // r3443 hold 4: nothing of the list
   const egressListOf = (of) => B.parseEgressAllowlist(engineSites(of));
   const egressName = (of) => ENG.engineWords({ id: of.engine, label: of.label });
   async function egressUrlFor(profileId, of, { port = 0 } = {}) {
@@ -7582,7 +7605,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const named = new Set(Object.values(reg.browsers).filter((r) => r && r.egress && Number.isInteger(r.egress.port) && String(r.profileId) !== k0 && B.isLiveBrowser(r)).map((r) => r.egress.port));
     let px = null;
     for (let i = 0; i < 8 && !px; i++) {
-      const c = EgressProxy.create({ allowlist: () => egressListOf(ent.of), allow: (h) => (ent.of && ent.of.setting ? B.egressVerdict(h, egressListOf(ent.of)) : B.profileProxyVerdict(h)), upstream: () => proxyUpstreamOf(k0, ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
+      const c = EgressProxy.create({ allowlist: () => egressListOf(ent.of), allow: (h) => egressAllow(ent.of, h), upstream: () => proxyUpstreamOf(k0, ent.of), log, ...(egressResolve ? { resolve: egressResolve } : {}) });
       try { await c.listen({ port }); } catch (e) {
         if (port && e && e.code === 'EADDRINUSE') throw namedError('egress_proxy_missing', `its allowlisting egress proxy cannot listen on its port ${port} again — another program holds it, and ${w} is never left behind a proxy that is not its own`, { ...extra, port });
         throw namedError('egress_proxy_missing', `the allowlisting egress proxy for ${w} could not listen (${e && e.message}) — ${w} is never started without it`, extra);
@@ -7596,7 +7619,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const raced = egressProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
     if (raced && raced.px.port()) { raced.of = of; px.close().catch(() => {}); return raced.px.url(); }
     egressProxies.set(k0, ent);
-    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${of.setting ? (egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`) : 'every name but loopback'}${of.proxy ? ` — through ${of.proxy.scheme}://${of.proxy.host}:${of.proxy.port}${of.proxy.credential ? ' with its login from the vault' : ''}` : ''}`);
+    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${of.setting ? (sitesUnread(of) ? 'nothing while the settings cannot be read' : (egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`)) : 'every name but loopback'}${of.proxy ? ` — through ${of.proxy.scheme}://${of.proxy.host}:${of.proxy.port}${of.proxy.credential ? ' with its login from the vault' : ''}` : ''}`);
     return px.url();
   }
   /** r2: what a launch RECORDS of its proxy (`rec.egress`, persisted with the record): the port its launch view names + whose list
@@ -7647,7 +7670,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const prow = rowOf(p.provider);
     if (prow && !prow.starts) return { ok: false, code: 'exit_external_browser', error: `"${p.label}" attaches to a browser VibeSpace does not start — that browser leaves by its own settings, so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
     if (!p.proxy) return { ok: false, code: 'exit_no_proxy', error: `"${p.label}" has no proxy of its own — its browser may leave by another road (your own browser config, the launch's environment, the tailnet), so a check here could state an exit it does not use. Type the exit by hand if a plugin needs it` };
-    const url = EXIT.checkUrlVerdict(serverSetting(EXIT.EXIT_URL_KEY));
+    { const r = readSetting(EXIT.EXIT_URL_KEY); if (r.held && !r.known) return { ok: false, status: 503, code: 'browser_settings_unread', error: 'the exit check\'s address cannot be read right now — VibeSpace\'s settings are held; nothing was checked or kept: check again once they read' }; }   // B-50e7 (a person\'s press, refused by name: its one address is unread)
+    const url = EXIT.checkUrlVerdict(readSetting(EXIT.EXIT_URL_KEY).v);
     if (!url.ok) return { ok: false, code: url.code, error: url.error };
     if (!url.value) return { ok: false, code: 'exit_url_unset', error: 'no exit check address is set — give one (an https address you trust) and check again, or type the exit by hand' };
     // the launch's own verdict on the stored proxy (a password in the address, socks4, a paired machine, a login saved for another proxy)
@@ -7845,6 +7869,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // is the keeper's in-memory answer (`cliPin`), mirrored to `cli-pin.json` for the agent's CLI (data/bin/vibespace-browser
   // reads it beside itself — a remote machine has none, so PATH answers there).
   const cliPinFile = () => path.join(dataDir, 'browser-tools', 'cli-pin.json');
+  // B-50e7 (scene 7): the pin the LAST run kept (cli-pin.json), read ONCE at the keeper's birth OFF the loop, held in memory only — what a
+  // start while the settings are held launches with, before this run has computed a pin of its own
+  let birthPin = null;
+  if (dataDir) fs.promises.readFile(cliPinFile(), 'utf8').then((s) => { try { const j = JSON.parse(s); if (j && typeof j.path === 'string' && j.path) birthPin = { version: typeof j.version === 'string' ? j.version : null, path: j.path }; } catch { /* not a pin */ } }, () => { /* no pin kept */ });
   const cliPrefix = (v) => path.join(dataDir, 'browser-tools', VERBS.cliInstallDirName(v));
   /** verify r1 (F2): THE WITNESS of a verified install — `<prefix>/verified.json` {version, path, at, says}, written by
    *  `finishCli` ONLY after the program itself said the version. Without it a folder is NOT an install: npm extracts the
@@ -7904,7 +7932,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // UNREAD (the held view carries no such row): the pin computed from it is the default's («path»), and the mirror below was REMOVED —
     // the person's pinned build gone from the agent's CLI on a guess. Held: the last pin stands, nothing is written; the lift recomputes
     let settingsUnread = false; try { settingsUnread = !!settingsHeld(); } catch { settingsUnread = false; }
-    if (settingsUnread) return cliMemo ? cliMemo.pin : { mode: 'path', version: null, path: null, installed: false, why: 'the settings cannot be read right now — the pin file is left as it is', invalid: null, held: true };
+    if (settingsUnread) return cliMemo ? cliMemo.pin : birthPin ? { mode: 'pinned', version: birthPin.version, path: birthPin.path, installed: true, why: 'the settings cannot be read right now — the pin the last run kept is used', invalid: null, held: true } : { mode: 'path', version: null, path: null, installed: false, why: 'the settings cannot be read right now — the pin file is left as it is', invalid: null, held: true };   // B-50e7 scene 7: nothing known ⇒ the kept pin before PATH
     let raw = ''; try { const v0 = serverSetting('browser.cli'); raw = v0 == null ? '' : String(v0); } catch { raw = ''; }
     if (cliMemo && cliMemo.raw === raw && cliMemo.gen === cliGen) {
       // verify r1 (F4): a pinned install that VANISHED (data/browser-tools wiped, the folder moved) is said at once — the
@@ -9333,7 +9361,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); landedOrThrow(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save — ON DISK before it returns, else it THROWS by name (lane lg-store-writes U5b: the boot's next migration may read the file)
-    diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk, // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
+    diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk,
+    _heldReads: () => ({ idleMs: idleMs(), releaseMs: idleReleaseAfterMs(), takeoverMs: takeoverIdleMs(), cap: machineCap(), capUnread: capUnread(), egress: (of, h) => egressAllow(of, h) }),   // B-50e7: the readers a held settings store reaches (read-only; the legs' seam) // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
     stopRows, managerStop, // lane browsers-stop (majordomo piece 6)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam

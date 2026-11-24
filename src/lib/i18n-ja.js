@@ -15072,6 +15072,9 @@ export default {
   // lane ui-needs-a-button (pick 2): the settings and integration doors
   "Suggesting words is off.": "単語の提案はオフです。",
   "This machine: {used} of {cap} browsers running": "このマシン：{cap} 個中 {used} 個のブラウザが実行中",
+  "The exit check’s address cannot be read right now — VibeSpace’s settings are held. Nothing was checked or kept: check again once they read.": "出口チェックのアドレスを今は読めません——VibeSpace の設定が読めない状態です。何も確認も保存もしていません。設定が読めるようになったらもう一度確認してください。", // B-50e7: the exit check while the settings are held
+  "VibeSpace’s settings cannot be read right now — the browsers keep the choices last known in this run, and stop or lapse nothing by a default clock": "VibeSpace は今、自分の設定を読めません——ブラウザはこの実行で最後に分かっていた選択を使い続け、既定の時間で何かを止めたり戻したりはしません", // B-50e7: the agent browser while the settings are held
+  "This machine: {used} browsers running — meanwhile the limit is the product’s default, {cap}": "このマシン：{used} 個のブラウザが実行中——その間の上限は製品の既定値 {cap} です", // B-50e7: the agent browser while the settings are held
   "Change the limit…": "上限を変更…",
   "Limit for this conversation:": "この会話の上限：",
   "Agents on your real desktop: off": "エージェントによる実デスクトップの操作：オフ",

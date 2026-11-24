@@ -257,7 +257,7 @@ console.log('§2 controls: the rule over synthetic files');
     'the exit check: ONE request, its only socket to the profile\'s forwarder (CONNECT host:port — the name the proxy\'s to resolve), no host literal in the file');
   ok(/if \(status >= 300 && status < 400\) \{ finish\(\{ ok: true, status, contentType, body: Buffer\.alloc\(0\) \}\); return; \}/.test(ec) && /n > capBytes/.test(ec) && /deadlineMs = X\.DEADLINE_MS/.test(ec) && /servername: net\.isIP\(host\) \? undefined : host/.test(ec),
     'the exit check: a redirect is an answer (never followed), the body capped, a deadline, TLS verified as the check host itself');
-  ok((ks.match(/EXC\.requestThrough\(/g) || []).length === 1 && /const url = EXIT\.checkUrlVerdict\(serverSetting\(EXIT\.EXIT_URL_KEY\)\);/.test(ks) && /router\.post\('\/api\/browser\/profiles\/:id\/exit-check'[\s\S]{0,200}refuseAgentBearer\(req, res, EXIT_IS_USERS\)/.test(rb) && /const DEADLINE_MS = 8000;/.test(ex),
+  ok((ks.match(/EXC\.requestThrough\(/g) || []).length === 1 && /const url = EXIT\.checkUrlVerdict\(readSetting\(EXIT\.EXIT_URL_KEY\)\.v\);/.test(ks) && /const readSetting = \(k\) => \{[\s\S]{0,200}v = serverSetting\(k\)/.test(ks) && /router\.post\('\/api\/browser\/profiles\/:id\/exit-check'[\s\S]{0,200}refuseAgentBearer\(req, res, EXIT_IS_USERS\)/.test(rb) && /const DEADLINE_MS = 8000;/.test(ex),
     'the exit check\'s gates: its one caller the keeper\'s exitCheck, the address read from the owner\'s setting (judged by checkUrlVerdict), the route a person\'s (an agent\'s token refused) — never a timer');
 }
 

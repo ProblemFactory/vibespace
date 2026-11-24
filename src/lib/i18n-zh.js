@@ -15073,6 +15073,9 @@ export default {
   // lane ui-needs-a-button (pick 2): the settings and integration doors
   "Suggesting words is off.": "词语建议已关闭。",
   "This machine: {used} of {cap} browsers running": "这台机器：{used}/{cap} 个浏览器在运行",
+  "The exit check’s address cannot be read right now — VibeSpace’s settings are held. Nothing was checked or kept: check again once they read.": "出口检查的地址现在读不到——VibeSpace 的设置暂时读不出来。什么都没检查、也没保存：等设置能读了再检查一次。", // B-50e7: the exit check while the settings are held
+  "VibeSpace’s settings cannot be read right now — the browsers keep the choices last known in this run, and stop or lapse nothing by a default clock": "VibeSpace 现在读不到它的设置——浏览器沿用本次运行里最后知道的选择，不会按默认的时钟停掉或收回任何东西", // B-50e7: the agent browser while the settings are held
+  "This machine: {used} browsers running — meanwhile the limit is the product’s default, {cap}": "这台机器：{used} 个浏览器在运行——在此期间上限是产品的默认值 {cap}", // B-50e7: the agent browser while the settings are held
   "Change the limit…": "更改上限…",
   "Limit for this conversation:": "本会话的上限：",
   "Agents on your real desktop: off": "agent 操作你的真实桌面：已关闭",
