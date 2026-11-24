@@ -191,6 +191,7 @@ function normalizeEntry(key, e) {
     waiting: src.stoppedAt === null || src.stoppedAt === undefined ? normalizeWaiting(src.waiting) : null, // lane B: only a RUNNING entry has tabs waiting
     lastUsedAt: num0(src.lastUsedAt),
     bytes: numOrNull(src.bytes), cacheBytes: numOrNull(src.cacheBytes), bytesAt: num0(src.bytesAt), trimmedAt: numOrNull(src.trimmedAt),
+    recovered: numOrNull(src.recovered),   // r3585: FOUND AGAIN from its folder after the list was damaged (the rebuild's time) — its facts are guessed: it ends only by a person's Forget, until its next real use
   };
 }
 /** The whole store, judged on the way out: `{version, entries: {<bk>: entry}}` — a child key or a malformed key is never
@@ -222,6 +223,7 @@ function keptLimits(read = () => undefined) {
  */
 function keptEndVerdict({ entry, live = false, carried = false, bound = false, endsAtTerminate = false, now = 0, graceMs = KEPT_END_GRACE_MS } = {}) {
   if (!entry) return { end: false, why: 'no-entry' };
+  if (entry.recovered) return { end: false, why: 'recovered' };   // r3585: a row found again from its folder never ends by a silence (its conversation and its stop are not known)
   if (live) return { end: false, why: 'live' };
   if (carried) return { end: false, why: 'carried' };
   if (endsAtTerminate) return { end: true, why: 'conversation-ended' };
@@ -271,6 +273,7 @@ function keptRetentionPlan({ entries = [], perConversation = KEPT_PER_DEFAULT_MB
     const order = rows.filter((e) => !e.live).sort((a, b) => (num0(a.lastUsedAt) - num0(b.lastUsedAt)) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     for (const e of order) {
       if (used <= total) break;
+      if (e.recovered) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: 'found again from its folder after the list was damaged — removed only by a person\'s Forget' }); continue; }   // r3585
       if (e.carried) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: 'its conversation is running (a live session carries it; only its browser stopped) — its logins and tabs are never removed while it runs; reported' }); continue; }
       remove.push({ key: e.key, frees: num0(e.bytes), why: 'the kept browsers passed their total bound — the least recently used goes first' });
       used -= est.get(e.key) || 0;

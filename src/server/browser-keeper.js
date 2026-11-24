@@ -4166,6 +4166,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // only reconnects the view (no folder is read), so it is not asked; the agent's reopen of its waiting tabs is.
     const e00 = ephemeralFor(bk);
     const reconnect = who === 'user' && !!(e00 && (e00.live || starting.has(e00.profileId)));
+    // r3585: the list of kept browsers HELD — a Resume reopens the kept tabs that list holds, so it is refused by name (503 kept_unread),
+    // never «nothing kept»; WHO IT STOPS (r3428 law 3): the person's Resume and the agent's `vibespace-browser resume` of a STOPPED
+    // browser; a person's Resume of a browser that RUNS only reconnects the view (no list is read) and passes
+    if (!reconnect && ks && typeof ks.heldFacts === 'function' && ks.heldFacts()) throw namedError('kept_unread', `Resume: ${ks.heldWords()}`, { status: 503 });
     // (the door runs BEFORE the adopted label is resolved: adoptedLabelOf reads real paths synchronously, so on a disk that
     // hangs the act is refused by name, bounded, and the loop is never held — its verdict's should)
     if (ks && !reconnect && typeof ks.checkThere === 'function' && typeof ks.has === 'function' && ks.has(bk)) await ks.checkThere(bk);

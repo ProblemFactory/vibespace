@@ -1093,7 +1093,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     const ident = el('div', 'bprof-ident');
     ident.appendChild(el('span', 'bprof-label', String(k.label || k.browserKey || '')));
     if (k.kind === 'checking') ident.appendChild(el('span', 'bprof-chip', t('checking…'))); // B-7a30: its folder not checked since the hub started — redrawn when the check lands
-    else if (k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
+    if (k.recovered) { const c = el('span', 'bprof-chip', t('found again')); c.title = t('Found again from its folder after the list of kept browsers was damaged — its tabs are not known'); ident.appendChild(c); }   // r3585
+    if (k.kind !== 'checking' && k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
     ident.title = String(k.browserKey || '');
     row.appendChild(ident);
     const tabs = Array.isArray(k.tabs) ? k.tabs : [];
@@ -1119,7 +1120,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
         load();
       };
       row.appendChild(rs);
-    } else if (!k.live) row.appendChild(el('span', 'bprof-cell bprof-kept-resume-hint chat-status-dim', t('Resume the conversation to reopen its browser')));
+    } else if (!k.live && !(k.recovered && !k.conversationKnown)) row.appendChild(el('span', 'bprof-cell bprof-kept-resume-hint chat-status-dim', t('Resume the conversation to reopen its browser')));   // r3585: a found-again row no conversation names offers no Resume at all
     if (!k.live) {
       const fg = el('button', 'file-tool-btn bprof-btn bprof-kept-forget', t('Forget'));
       fg.title = t('Remove this browser\'s kept logins and tabs now');
@@ -1223,7 +1224,10 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
       keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', held ? t('{used} of {limit} kept — {n} kept browser(s) past the bound are held because their conversations run; Forget frees one', p) : t('{used} of {limit} kept — the running browsers alone pass the bound; nothing can be freed until one stops', p)));
     }
     const krows = Array.isArray(v.kept) ? v.kept : [];
-    if (!krows.length) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation\'s browser has stopped with something to keep.')));
+    // r3585: the list HELD — its words, never «None»; found again from the folders after it was damaged — the count and the copy's name
+    if (v.keptUnread) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', t('VibeSpace cannot read its list of kept browsers right now, so none is shown here. Nothing is lost: no kept browser is removed meanwhile, and the list comes back by itself (it tries again every few minutes).')));
+    else if (v.keptRecovered) keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', v.keptRecovered.copy ? t('The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.', { n: Number(v.keptRecovered.n) || 0, copy: String(v.keptRecovered.copy) }) : t('The list of kept browsers could not be read and is gone: {n} kept browser(s) were found again from their folders, without their tabs.', { n: Number(v.keptRecovered.n) || 0 })));
+    if (!v.keptUnread && !krows.length) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation\'s browser has stopped with something to keep.')));
     const kseen = new Set();
     for (const k of krows) {
       kseen.add(k.browserKey);

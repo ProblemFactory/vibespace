@@ -203,6 +203,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   plugin_registry_unread: 503,   // B-f276 (r3305): the plugin registry is held — an engine profile's start, create or Change build refused by its name
   passkeys_unread: 503,   // r3261: the passkey store is held (unread) — a profile's removal waits for it
   takeovers_unread: 503,   // r3261: the takeover requests are held (unread) — the queue, an ask, a Done and a page verb wait for them
+  kept_unread: 503,   // r3585 (lane card-door-in-chat): the list of kept browsers is held (unread, or being found again from its folders)
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
@@ -1071,7 +1072,7 @@ router.get('/api/browser/kept', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const ks = typeof k.keptStore === 'function' ? k.keptStore() : null;
   if (!ks) return res.status(503).json({ error: 'kept browsers are not available on this server', code: 'unavailable' });
-  try { res.json({ kept: ks.list(), limits: ks.limits(), sweep: ks.lastSweep() }); } catch (e) { fail(res, e); }
+  try { const h = typeof ks.heldFacts === 'function' ? ks.heldFacts() : null; res.json({ kept: ks.list(), limits: ks.limits(), sweep: ks.lastSweep(), ...(h ? { unread: ks.heldWords(), code: 'kept_unread' } : {}) }); } catch (e) { fail(res, e); }   // r3585: held — an empty list is unread, said
 });
 router.delete('/api/browser/kept/:browserKey', async (req, res) => {
   if (refuseHost(req, res)) return;

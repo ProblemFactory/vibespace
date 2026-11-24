@@ -24,6 +24,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const K = require('../browser-kept.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3585 (B-f276 family's leftover): the list under the store-read law
 
 const FILE_MODE = 0o600;
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
@@ -33,6 +35,13 @@ const UNANSWERED = Symbol('unanswered');
 const PERSIST_TABS_MS = 30 * 1000;
 const DU_TIMEOUT_MS = 120 * 1000;
 const BROADCAST_DEBOUNCE_MS = 250;
+/** r3585: the store the hold keeps, by its name (K.KEPT_FILE — said in the journal; the family's census reads it here) */
+const STORE = 'browser-kept.json';
+/** r3585: the list's shape (an object whose entries, when present, are an object) — anything else is torn bytes */
+const KEPT_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.entries === undefined || (!!v.entries && typeof v.entries === 'object' && !Array.isArray(v.entries)));
+/** r3585: the kept folders are listed for a rebuild by a CHILD with a bound — never on the hub's loop (a hung disk ends with the child) */
+const LIST_TIMEOUT_MS = 30 * 1000;
+const LIST_SRC = "const fs=require('fs'),p=require('path');const d=process.argv[1];let n=[];try{n=fs.readdirSync(d)}catch(e){if(e&&e.code==='ENOENT'){process.stdout.write('[]');process.exit(0)}process.stderr.write(String((e&&e.code)||'unreadable'));process.exit(3)}const o=[];for(const x of n){try{const s=fs.lstatSync(p.join(d,x));if(s.isDirectory())o.push([x,s.mtimeMs])}catch(e){}}process.stdout.write(JSON.stringify(o))";
 
 const namedError = (code, msg, extra = {}) => { const e = new Error(msg); e.code = code; Object.assign(e, extra); return e; };
 /** tmp + rename, 0600 at create (a url or a title can be a secret) — the tree's one persistence rule. */
@@ -60,7 +69,9 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   onChange = null,
   // B-50e7 (r3747 must 1): the settings HELD? (the hub's persistence router — the door the keeper has): while held the retention
   // sweep reads no limit (its total would be the default's, never the person's) and removes nothing
-  settingsHeld = () => null } = {}) {
+  settingsHeld = () => null,
+  // r3585: the kept folders' listing for a rebuild (injectable: the gate stands one in) → Promise<{ ok, dirs: [[name, mtimeMs]] } | { ok: false, why }>
+  listFolders = null } = {}) {
   if (!dataDir) throw new Error('browser-kept: dataDir is required');
   const file = path.join(dataDir, K.KEPT_FILE);
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles');
@@ -73,33 +84,41 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
 
   // ── state ──
   let store = null;                // the judged store (lazily loaded)
-  let keptUnread = null;           // r3006: why the file could not be read at this run's load — while set, nothing is written over it
+  // r3585 (THE STORE-READ LAW, the family's leftover «the kept browsers' list»): a read that FAILS holds the list — nothing is written
+  // over it, nothing ends, nothing is removed, and it is read again OFF the loop and LIFTED with no restart (the panel, Resume and
+  // the keep come back by themselves). A lift with NO LIST (torn bytes kept aside once by the helper, or the file gone after a failed
+  // read) is NEVER «empty» here: the rows are REBUILT from the kept folders themselves (each named by its key), marked `recovered`;
+  // a rebuild that does not finish holds the list again (never «rebuilt empty»). browser-env's boot sweep reads the file itself and
+  // fails closed (r3006): a torn or unreadable file spares every key-named folder until the rebuilt list is written.
+  let rebuilding = null, recovered = null;   // rebuilding: { since, copy } while the rows are rebuilt; recovered: { n, copy, at } (this run's rebuild — counts only)
+  const hold = HOLD.create({
+    file, valid: KEPT_SHAPE, code: 'kept_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read its list of kept browsers right now (${h.code}); it reads it again by itself every few minutes. No kept browser is lost: none is removed and nothing is written over the list until it reads`,
+    log: (s) => log.warn?.('[browser-kept] ' + s),
+    onLift: (v, facts) => lifted(v, facts),
+  });
+  const isHeld = () => !!hold.held() || !!rebuilding;
   const latest = new Map();        // bk → { tabs: [{targetId, url, title, active, type}], at, source } — the live list
   const deliberate = new Map();    // bk → { why: 'user'|'agent', at } — a stop the user / the agent asked for
   let flushTimer = null, bcTimer = null, sweepTimer = null, sweeping = null, lastSweep = null, thereTimer = null;
 
   function load() {
     if (store) return store;
-    let raw = null;
-    try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); }
-    catch (e) {
-      if (e && e.code !== 'ENOENT') {
-        // THE SWEEP'S FAIL-CLOSED LAW (主开发 r3006, lane bl-windows): a store that could not be read — a read refused OR bytes that do
-        // not parse — is NEVER «empty» to the boot sweep. The release SET IT ASIDE: the file became «not there», browser-env's own read
-        // (keptKeySet) then answered an EMPTY set, and the boot sweep removed every kept browser's profile folder, its sign-ins. Now the
-        // file stays where it is: browser-env reads it itself (a read that still fails ⇒ unknown ⇒ every key-named directory spared; a
-        // read that now answers ⇒ its keys), and NOTHING is written over it this run (save() below)
-        keptUnread = String((e && (e.code || e.name)) || 'unreadable');
-        log.warn?.(`[browser-kept] ${file} could not be read (${e.message}) — kept as it is: nothing is written over it this run, and no kept browser's folder is removed for it (the sweep reads the file itself)`);
-      }
-    }
-    store = K.normalizeKeptStore(raw);
+    // r3585: the ONE sync read at the start, as before, answered through the family's law (held ⇒ the helper reads it again off the loop)
+    let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: KEPT_SHAPE });
+    store = K.normalizeKeptStore(hold.start(a0) === 'data' ? a0.value : null);
     return store;
   }
+  // THE SWEEP'S FAIL-CLOSED LAW (主开发 r3006, lane bl-windows), which the hold keeps: a store that could not be read — a read refused OR
+  // bytes that do not parse — is NEVER «empty» to the boot sweep. The release SET IT ASIDE: the file became «not there», browser-env's own
+  // read (keptKeySet) then answered an EMPTY set, and the boot sweep removed every kept browser's profile folder, its sign-ins. Now the
+  // file stays where it is while held (torn bytes: COPIED aside, the original left until the rebuilt list is written): browser-env reads
+  // it itself (a read that still fails ⇒ unknown ⇒ every key-named directory spared), and NOTHING is written over it (save() below)
   function save() {
     if (!store) return;
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    if (keptUnread) return;   // r3006: a file that could not be read is never written over (its kept browsers would be gone from it)
+    if (isHeld()) { hold.writable('a change of the kept browsers'); return; }   // r3006 / r3585: an unread (or not yet rebuilt) list is never written over
     try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(file, store); }
     catch (e) { log.warn?.(`[browser-kept] the store could not be written (${e && e.message}) — kept in memory, retried at the next change`); }
   }
@@ -147,7 +166,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     const waiting = wasStopped ? (prev.tabs.length ? { tabs: prev.tabs, stoppedWhy: prev.stoppedWhy, stoppedAt: prev.stoppedAt } : null) : (prev ? prev.waiting : null);
     if (wasStopped) latest.delete(bk);
     s.entries[bk] = K.normalizeEntry(bk, { ...(prev || {}), hasDir, fenced, label: label || (prev && prev.label) || '', sessionId: sessionId || (prev && prev.sessionId) || null,
-      conversationId: convOf(bk) || (prev && prev.conversationId) || null, tabs: wasStopped ? [] : (prev ? prev.tabs : []), waiting, startedAt: t, stoppedAt: null, stoppedWhy: null, lastUsedAt: t });
+      conversationId: convOf(bk) || (prev && prev.conversationId) || null, tabs: wasStopped ? [] : (prev ? prev.tabs : []), waiting, startedAt: t, stoppedAt: null, stoppedWhy: null, lastUsedAt: t, recovered: null });   // r3585: its next real use makes a found-again row ordinary
     save(); changed();
     return { ...s.entries[bk] };
   }
@@ -360,7 +379,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       browserKey: e.browserKey, label: e.label, kind: K.keptKindOf(e), hasDir: e.hasDir, checking: !!e.checking, fenced: e.fenced, tabs: e.tabs.map((t) => ({ ...t })), tabsAt: e.tabsAt,
       startedAt: e.startedAt, stoppedAt: e.stoppedAt, stoppedWhy: e.stoppedWhy, restore: e.restore ? { mode: e.restore.mode, by: e.restore.by, at: e.restore.at } : null, waiting: e.waiting ? e.waiting.tabs.length : 0,
       lastUsedAt: e.lastUsedAt, bytes: e.bytes, cacheBytes: e.cacheBytes, bytesAt: e.bytesAt, trimmedAt: e.trimmedAt,
-      live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId,
+      live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId, recovered: !!e.recovered, conversationKnown: !!e.conversationId,
     }));
   }
   // B-50e7 (r3747 must 1): while the settings are held the bounds are the defaults, never the person's — said unread (the panel says the
@@ -408,6 +427,8 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   /** The user's Forget (the panel row). Refused by name while the browser runs; a missing entry ⇒ not_kept. */
   async function forget(bk, why = 'forgotten by the user') {
     const key = String(bk || '');
+    load(); hold.refuse('Forget');   // r3585: held ⇒ refused by name (503 kept_unread) — nothing was removed
+    if (rebuilding) throw namedError('kept_unread', 'Forget: VibeSpace is finding its kept browsers again from their folders — nothing was removed; try again in a moment', { status: 503 });
     if (!K.isParentKey(key) || !load().entries[key]) throw namedError('not_kept', 'nothing is kept for that browser');
     if (liveOf(key)) throw namedError('kept_live', 'this browser is running — stop it first, then forget it');
     await checkThere(key); // B-7a30 r2: the act's door — its folder asked fresh (5 s), refused by name past it, never a removal on an unanswered disk
@@ -475,6 +496,8 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
    */
   function sweep() {
     if (sweeping) return sweeping;
+    load();
+    if (isHeld()) { log.warn?.('[browser-kept] the sweep waits — the list of kept browsers is held (nothing ends, nothing is removed, no cache is trimmed)'); return Promise.resolve({ held: true }); }   // r3585
     // the B-f276 remainder (bl-jobs): while the profile registry is HELD the kept sweep reads nothing as «gone» — no pass (a folder a
     // named profile holds, a running browser's caches); the keeper's read runs the boot's steps, this boot sweep among them
     { const k = kp(); if (k && typeof k.held === 'function' && k.held()) { log.warn?.('[browser-kept] the sweep waits — the profile registry is held'); return Promise.resolve({ held: true }); } }
@@ -546,7 +569,75 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     if (flushTimer) save();
   }
 
+  // ── r3585: the lift, the rebuild from the folders, the facts the panel and the notice read ──
+  /** LIFTED (the helper's read again answered). A list: loaded, with what this run noted while held laid over it (a row noted then is a
+   *  true fact of a browser that ran meanwhile — newer than the file's). NO list: the rows are rebuilt from the kept folders. */
+  function lifted(v, facts) {
+    if (!v) { rebuildFromFolders((facts && facts.setAside) || null); return; }
+    const noted = store ? store.entries : {};
+    store = K.normalizeKeptStore(v);
+    let laid = 0;
+    for (const [k, e] of Object.entries(noted)) if (!store.entries[k] || (Number(e.lastUsedAt) || 0) > (Number(store.entries[k].lastUsedAt) || 0)) { store.entries[k] = e; laid++; }
+    if (laid) save();
+    changed(); recheckAll().catch(() => {});
+  }
+  /** the kept folders listed by a CHILD with a bound (never the hub's loop) → { ok, dirs } | { ok: false, why } */
+  function listDirs() {
+    if (typeof listFolders === 'function') { try { return Promise.resolve(listFolders(PROFILE_DIR)).catch((e) => ({ ok: false, why: String((e && e.code) || 'failed') })); } catch (e) { return Promise.resolve({ ok: false, why: String((e && e.code) || 'failed') }); } }
+    return new Promise((resolve) => {
+      try {
+        execFileImpl(process.execPath, ['-e', LIST_SRC, PROFILE_DIR], { timeout: LIST_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+          if (err) return resolve({ ok: false, why: err.killed ? 'the listing passed its bound' : String(err.code || 'failed') });
+          try { const a = JSON.parse(String(stdout || '[]')); resolve(Array.isArray(a) ? { ok: true, dirs: a } : { ok: false, why: 'no listing' }); } catch { resolve({ ok: false, why: 'no listing' }); }
+        });
+      } catch (e) { resolve({ ok: false, why: String((e && e.code) || 'spawn failed') }); }
+    });
+  }
+  /** THE REBUILD: every folder data/browser-profiles/<key> whose name is a parent browser key and that no registered profile names
+   *  becomes a row FOUND AGAIN (`recovered`: its last use the folder's change time; its tabs, its waiting restore and its label are in the
+   *  copy kept aside only). Until it lands the list is held (nothing written, nothing ends); one that does not finish holds it again. */
+  function rebuildFromFolders(copy) {
+    if (rebuilding && rebuilding.busy) return rebuilding.busy;
+    rebuilding = { since: (rebuilding && rebuilding.since) || now(), copy: copy || (rebuilding && rebuilding.copy) || null, busy: null };
+    const r0 = rebuilding;
+    r0.busy = (async () => {
+      const r = await listDirs();
+      if (!r || !r.ok) {
+        log.warn?.(`[browser-kept] the kept browsers' folders could not be listed to rebuild ${STORE} (${(r && r.why) || 'failed'}) — the list stays HELD: nothing is written and no kept browser is removed; it is tried again at the list's next read`);
+        rebuilding = null;
+        hold.start({ state: 'unreadable', error: { code: 'rebuild-unfinished' } });   // HELD again by the helper: its ladder reads the file again (the same torn bytes lift once more → rebuilt then)
+        return false;
+      }
+      const at = now(), entries = {};
+      for (const row of r.dirs) {
+        const name = Array.isArray(row) ? String(row[0] || '') : '';
+        if (!K.isParentKey(name)) continue;
+        // a folder a REGISTERED profile names is that profile's (adopted in place): left out only when the keeper ANSWERS so — an unknown
+        // keeper (not built yet, held) leaves it a row: a found-again row is removed only by a Forget, which refuses a registered folder
+        { const kk = kp(); let reg = false; if (kk && typeof kk.profileDirRegistered === 'function' && !(typeof kk.held === 'function' && kk.held())) { try { reg = !!kk.profileDirRegistered(dirOf(name)); } catch { reg = false; } } if (reg) continue; }
+        const t = Math.round(Number(row[1])) || at;
+        entries[name] = { hasDir: true, label: '', startedAt: t, stoppedAt: t, lastUsedAt: t, recovered: at };
+      }
+      const noted = store ? store.entries : {};
+      store = K.normalizeKeptStore({ entries });
+      const n = Object.keys(store.entries).length;
+      for (const [k, e] of Object.entries(noted)) store.entries[k] = e;   // a row noted while it was rebuilt is a true fact: it wins
+      for (const k of Object.keys(entries)) setThere(k, true);
+      recovered = { n, copy: r0.copy ? path.basename(String(r0.copy)) : null, at };
+      rebuilding = null;
+      log.warn?.(`[browser-kept] ${STORE}, the list of kept browsers, was rebuilt from their folders: ${n} found again${recovered.copy ? ` — the damaged copy is kept as ${recovered.copy}` : ''}`);
+      save(); changed(); recheckAll().catch(() => {});
+      return true;
+    })().finally(() => { if (r0) r0.busy = null; });
+    return r0.busy;
+  }
+  /** the panel's and the view's facts while held: { file, code, since } (null: it reads); the words a person reads */
+  const heldFacts = () => { load(); const h = hold.held(); return h ? { file: h.file, code: h.code, since: h.since } : rebuilding ? { file: path.basename(file), code: 'rebuilding', since: rebuilding.since } : null; };
+  const heldWords = () => { load(); return hold.words() || (rebuilding ? 'VibeSpace is finding its kept browsers again from their folders — none is removed meanwhile' : null); };
+  /** this run's rebuild: { n, copy, at } — a count and the copy's base name only (never a key, a folder or a conversation) */
+  const recoveredFacts = () => (recovered ? { ...recovered } : null);
   return { noteStart, noteTabs, noteStop, noteDeliberate, latestOf, has, keys, get, brief, list, limits, forget, adopted, sweep, checkThere /* B-7a30 r2: the acts' door */, recheckAll /* B-7a30 r2: the tick's pass */, boot, shutdown, dirOf, file, lastSweep: () => lastSweep, _load: load, _measure: measure,
+    heldFacts, heldWords, recoveredFacts, _hold: hold, _rebuild: rebuildFromFolders,   // r3585
     setRestore, consumeRestore, afterReopen }; // lane B
 }
 

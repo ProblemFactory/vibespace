@@ -9864,6 +9864,13 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
+  "VibeSpace cannot read its list of kept browsers right now — nothing was removed or changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到保留的浏览器列表——没有删除或更改任何内容。请几分钟后再试（它会自己重新读取）。",
+  "VibeSpace cannot read its list of kept browsers right now, so none is shown here. Nothing is lost: no kept browser is removed meanwhile, and the list comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到保留的浏览器列表，所以这里不显示。没有丢失任何内容：在此期间不会删除任何保留的浏览器，列表会自己恢复（每隔几分钟重试一次）。",
+  "The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.": "保留的浏览器列表已损坏：已从文件夹中重新找到 {n} 个保留的浏览器，但没有它们的标签页。损坏的副本保存为 {copy}。",
+  "The list of kept browsers could not be read and is gone: {n} kept browser(s) were found again from their folders, without their tabs.": "保留的浏览器列表无法读取且已不在：已从文件夹中重新找到 {n} 个保留的浏览器，但没有它们的标签页。",
+  "found again": "已找回",
+  "Found again from its folder after the list of kept browsers was damaged — its tabs are not known": "保留的浏览器列表损坏后，从其文件夹中重新找到——它的标签页未知",
+  "the list of kept browsers": "保留的浏览器列表",
   "VibeSpace cannot read its list of designs right now, so none is shown here. Nothing is lost: the design folders stay as they are, and the list comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到设计列表，所以这里一个也没显示。没有丢失：设计文件夹保持原样，列表会自己回来（每隔几分钟会再试一次）。",
   "VibeSpace cannot read its list of designs right now, so it is not known whether this design was published. Nothing is lost: the design folders stay as they are; a publish pressed now is not taken — press it again once the list reads (it tries again every few minutes).": "VibeSpace 暂时读不到设计列表，所以不知道这个设计是否发布过。没有丢失：设计文件夹保持原样；现在按发布不会被接受 — 列表读到后请再按一次（每隔几分钟会再试一次）。",
   "VibeSpace cannot read its feedback reports right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); marks wait until then.": "VibeSpace 暂时读不到反馈报告，所以这里一个也没显示。没有丢失：读到后它们会回来（每隔几分钟会再试一次）；标记要等到那时。",

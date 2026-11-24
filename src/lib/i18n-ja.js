@@ -9863,6 +9863,13 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "添付がなくなりました",
   "A link in an item was not found": "項目内のリンクが見つかりません",
+  "VibeSpace cannot read its list of kept browsers right now — nothing was removed or changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace は保持中のブラウザの一覧をいま読めません。何も削除・変更していません。数分後にもう一度お試しください（自動で読み直します）。",
+  "VibeSpace cannot read its list of kept browsers right now, so none is shown here. Nothing is lost: no kept browser is removed meanwhile, and the list comes back by itself (it tries again every few minutes).": "VibeSpace は保持中のブラウザの一覧をいま読めないため、ここには表示していません。失われたものはありません。その間に保持中のブラウザを削除することはなく、一覧は自動で戻ります（数分ごとに再試行します）。",
+  "The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.": "保持中のブラウザの一覧が壊れていました。フォルダから {n} 個の保持中のブラウザを見つけ直しました（タブは不明です）。壊れたコピーは {copy} として保存しています。",
+  "The list of kept browsers could not be read and is gone: {n} kept browser(s) were found again from their folders, without their tabs.": "保持中のブラウザの一覧が読めず、見つかりませんでした。フォルダから {n} 個の保持中のブラウザを見つけ直しました（タブは不明です）。",
+  "found again": "見つけ直しました",
+  "Found again from its folder after the list of kept browsers was damaged — its tabs are not known": "保持中のブラウザの一覧が壊れたあと、フォルダから見つけ直しました。タブは不明です",
+  "the list of kept browsers": "保持中のブラウザの一覧",
   "VibeSpace cannot read its list of designs right now, so none is shown here. Nothing is lost: the design folders stay as they are, and the list comes back by itself (it tries again every few minutes).": "VibeSpace はデザインの一覧をいま読めないため、ここには何も表示されません。失われたものはありません：デザインのフォルダーはそのままで、一覧は自動で戻ります（数分ごとに再試行します）。",
   "VibeSpace cannot read its list of designs right now, so it is not known whether this design was published. Nothing is lost: the design folders stay as they are; a publish pressed now is not taken — press it again once the list reads (it tries again every few minutes).": "VibeSpace はデザインの一覧をいま読めないため、このデザインが公開済みかどうかわかりません。失われたものはありません：デザインのフォルダーはそのままです。今押した公開は受け付けられません — 一覧が読めたらもう一度押してください（数分ごとに再試行します）。",
   "VibeSpace cannot read its feedback reports right now, so none is shown here. Nothing is lost: they come back when they read (it tries again every few minutes); marks wait until then.": "VibeSpace はフィードバックの報告をいま読めないため、ここには何も表示されません。失われたものはありません：読めれば戻ります（数分ごとに再試行します）。マークはそれまで待ちます。",
