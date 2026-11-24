@@ -426,6 +426,7 @@ export function installSidebarMounts(Sidebar) {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
         hlist.appendChild(this._buildLocalMachineRow());
+        if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. A machine it named can be paired again; until then its mounts below are kept and its records are not removed.', { name: hd.torn }) }));   // the MOVE: hosts.json's torn lift
         if (mm && typeof mm.torn === 'string' && mm.torn) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its list of machine mounts (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The machines’ folder links stay valid: a paired machine’s end when you remove it; any other ends by its Revoke under Bridge tokens.', { name: mm.torn }) }));   // B-f276 family unit 2 (r3081)
         if (hostsHeld || mountsHeld) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint',
           textContent: hostsHeld ? tr('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.')
@@ -464,7 +465,17 @@ export function installSidebarMounts(Sidebar) {
       // Orphan mounts: mounts whose machine was removed (or none listed).
       // Without this they'd be invisible AND unmanageable (review finding).
       const liveHostIds = new Set(hd.hosts.map((h) => h.id));
-      const orphans = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId)); // held: no machine is known, none is «removed»
+      const orphans = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId) && !m.hostInCopy); // held: no machine is known, none is «removed»
+      // the MOVE (part one): a mount whose machine a kept copy of the damaged list may name is never offered as «removed» — kept, said; the
+      // person's own unmount stays theirs (r3428: a hold for a pass never stops a person's own press)
+      const inCopy = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId) && m.hostInCopy);
+      if (inCopy.length) {
+        const clist = document.createElement('div');
+        clist.className = 'mounts-list';
+        clist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Mounts on machines the damaged list may still name — kept; unmount one only if you no longer want it') }));
+        for (const m of inCopy) clist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(not listed now — the damaged list may name it)') }, m));
+        root.appendChild(clist);
+      }
       if (orphans.length) {
         const olist = document.createElement('div');
         olist.className = 'mounts-list';

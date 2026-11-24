@@ -529,7 +529,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }
               if (w && (w.why === 'vault_locked' || w.why === 'mount_down')) {
                 global.__vsEvent?.('spawn-cwd-waits', `${w.why}/${data.resume ? 'resume' : 'new'}`);
-                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: w.why, cwd, waitsFor: w.name, message: w.why === 'vault_locked' ? CW.lockedWords(cwd, w) : CW.downWords(cwd, w) }));
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: w.why, cwd, waitsFor: w.name, ...(w.held ? { held: true } : {}), message: w.why === 'vault_locked' ? CW.lockedWords(cwd, w) : CW.downWords(cwd, w) }));
                 break;
               }
             }

@@ -59,9 +59,9 @@ function downMountOf(cwd) {
  *  «no mount on the path» is then unknown: the words of the list that cannot be read, or null */
 function heldListOf() {
   const m = reg.mounts;
-  if (m && typeof m.unreadWords === 'function' && call(() => m.unreadWords(), null)) return 'a storage mount (VibeSpace cannot read its list of storage mounts right now)';
+  if (m && typeof m.unreadWords === 'function' && call(() => m.unreadWords(), null)) return 'VibeSpace cannot read its list of storage mounts right now';
   const mm = typeof reg.getMachineMounts === 'function' ? call(() => reg.getMachineMounts(), null) : null;
-  if (mm && typeof mm.unreadWords === 'function' && call(() => mm.unreadWords(), null)) return 'a machine folder (VibeSpace cannot read its list of machine folders right now)';
+  if (mm && typeof mm.unreadWords === 'function' && call(() => mm.unreadWords(), null)) return 'VibeSpace cannot read its list of machine folders right now';
   return null;
 }
 
@@ -91,6 +91,7 @@ async function whenBack(cwd, { ms = BACK_MS, now = () => Date.now(), sleep = (t)
 
 /** The refusal's words (the hub's own log and an older page; the page words it itself, src/lib/session-lifecycle.js). */
 const lockedWords = (cwd, w) => `the vault is locked — the folder ${cwd} is on ${w.name}, which opens after the owner unlocks the vault with the second password (nothing was started; the conversation resumes once it is unlocked)`;
-const downWords = (cwd, w) => `the folder ${cwd} is on ${w.name}, which is not mounted right now — nothing was started and nothing was made there (an empty folder would hide the mount); resume once it is back`;
+const downWords = (cwd, w) => (w && w.held ? `the folder ${cwd} may be on a mount: ${w.name} — nothing was started and nothing was made there (an empty folder would hide the mount); resume once it reads`   // r3360: «may be»
+  : `the folder ${cwd} is on ${w.name}, which is not mounted right now — nothing was started and nothing was made there (an empty folder would hide the mount); resume once it is back`);
 
 module.exports = { register, verdict, whenBack, lockedWords, downWords, HEAL_MS, BACK_MS };

@@ -319,7 +319,9 @@ export function installSessionLifecycle(App, ctx = {}) {
         const folderWaits = (msg.code === 'vault_locked' && !!msg.cwd && !hostId) || msg.code === 'mount_down';
         if (msg.code === 'vault_locked' && !folderWaits) { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
         const where = { name: msg.waitsFor || msg.cwd };
-        const folderWords = !folderWaits ? '' : msg.code === 'mount_down'
+        const folderWords = !folderWaits ? '' : msg.code === 'mount_down' && msg.held   // r3360: a mounts list held — the folder MAY be on a mount
+          ? (resumeId ? t('This conversation’s folder may be on a mount: VibeSpace cannot read its list of mounts right now — nothing was started and nothing was made there; resume it once the list reads again.') : t('The folder may be on a mount: VibeSpace cannot read its list of mounts right now — start again once it reads.'))
+          : msg.code === 'mount_down'
           ? (resumeId ? t('This conversation\u2019s folder is on {name}, which is not mounted right now \u2014 nothing was started; resume it once the mount is back.', where) : t('The folder is on {name}, which is not mounted right now \u2014 start again once it is back.', where))
           : msg.resumesAtUnlock ? (createArgs.initialMessage   // the cure's should: a resume carrying the person's waiting message sends it then — said
             ? t('This conversation\u2019s folder is on {name}, which opens after the vault is unlocked \u2014 while this page is open it resumes by itself once you unlock, and then sends the message you wrote; nothing is lost.', where)
@@ -445,7 +447,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // looked, the two doors) — never a toast alone; the failed-RESUME rescue below stays exactly as it is
         if (msg.code === 'cli-missing') { try { openCliMissingDialog(this, msg); } catch { showToast(text, { type: 'error' }); } }
         // B-ce65 (its read, 4): a refusal names its DOOR — the sidebar opens on its Remote tab at the row of the mount that is down
-        else if (msg.code === 'mount_down' && msg.waitsFor) showToast(text, { type: 'error', action: { label: t('Show in Remote'), run: () => this._openMountsAt(msg.waitsFor) } });
+        else if (msg.code === 'mount_down' && msg.waitsFor && !msg.held) showToast(text, { type: 'error', action: { label: t('Show in Remote'), run: () => this._openMountsAt(msg.waitsFor) } });
         else showToast(text, { type: 'error' });
         if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId)) {   // B-a5a4 (5): every chat harness (it was claude's alone — viewSession reads any backend)
           rescueViewOnly();

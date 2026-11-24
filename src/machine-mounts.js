@@ -307,10 +307,21 @@ class MachineMounts {
     } catch { return false; }
   }
 
+  /** the MOVE (part one): a mount's machine is NOT LISTED but a kept copy of hosts.json's torn bytes may name it — never «removed» */
+  _hostInCopy(hostId) {
+    const h = this.hosts;
+    if (!h || typeof h.namedByCopy !== 'function') return false;
+    let listed = true; try { this.hosts.get(hostId); } catch (e) { listed = !(e && e.code === 'host_not_found'); }   // held ⇒ «listed»: unknown, and the page shows no machine as removed while held
+    if (listed) return false;
+    // the page's words wait for the copies' read (or this run's own tear): an unread answer names every id, and an ordinary boot's first
+    // seconds would say «the damaged list may name it» of a list nothing damaged
+    if (typeof h.copiesRead === 'function' && !h.copiesRead() && !(typeof h.tornCopy === 'function' && h.tornCopy())) return false;
+    try { return !!h.namedByCopy(hostId); } catch { return false; }
+  }
   list() {
-    return this._state.mounts.map((m) => m.dir === 'pull'
+    return this._state.mounts.map((m) => ({ ...(m.dir === 'pull'
       ? this._pullRow(m)
-      : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) });
+      : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) }), ...(this._hostInCopy(m.hostId) ? { hostInCopy: true } : {}) }));
   }
 
   /** B-af94: a pull row's words said from a coded error keep its code (a code is shown only while ITS words are the row's) */

@@ -116,7 +116,7 @@ console.log('② the page says what the create waits for, and the watchdog waits
   const REPL = "        if (watchToast) { try { watchToast.remove(); } catch { } watchToast = null; }   // its read (2): a frame AFTER the watchdog spoke replaces its words";
   const REARM = "        if (spoke || movedTimer) movedWatchdog();   // …and the watchdog watches the new wait: a hub that dies in it is still said (the 15 s timer fires once)";
   const DONE13 = 'waitsUntil = Date.now() + 13000;', RETIME = ' if (movedTimer) movedWatchdog(); }';
-  const DOOR = "        else if (msg.code === 'mount_down' && msg.waitsFor) showToast(text, { type: 'error', action: { label: t('Show in Remote'), run: () => this._openMountsAt(msg.waitsFor) } });";
+  const DOOR = "        else if (msg.code === 'mount_down' && msg.waitsFor && !msg.held) showToast(text, { type: 'error', action: { label: t('Show in Remote'), run: () => this._openMountsAt(msg.waitsFor) } });";   // (r3360: a held list's refusal names no mount to open)
   const start = async (inst, n) => { const P = page(inst); P.app.resumeSession(`fade0000-0000-4000-8000-0000000ce65${n}`, '/srv/nas/proj', 'Conv', { backend: 'claude', backendSessionId: `fade0000-0000-4000-8000-0000000ce65${n}` }); await tick(20); return { P, c: P.creates[0] }; };
   const fr = (c, ms) => c.cb({ type: 'create-waiting', reqId: c.m.reqId, cwd: c.m.cwd, waitsFor: 'NAS share', ms });
   const FAST = 'waitsUntil = Date.now() + 300;';

@@ -621,6 +621,33 @@ try {
       ok(bx.held && bx.code === 'mount-gone', 'RED CONTROL — the held branch cut (in a copy): the borrow is told the mount no longer exists', bx);
       const CA = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
       ok(CA.includes("code === 'no-mounts' || code === 'storage_unread' ? 503 :"), 'the reader table (pin): the channels\' door answers the held refusal 503 (the family\'s status), never the 409 of a mount with no client'); }
+    // ── THE MOVE, part one (r3192's owed rows; r3360): the hosts page's torn words, and a machine's mounts after a torn hosts lift ──
+    { const MMv = require('../src/machine-mounts.js').MachineMounts;
+      // a machine mount whose machine is NOT LISTED: named by a kept copy (after the copies are read) ⇒ `hostInCopy`; removed by the person,
+      // or no copy ⇒ the old «removed machine» row. RED CONTROL: the flag never set (in a copy) — the mount reads as on a removed machine
+      const flagRun = async (MMX, tag, { copy = true, removed = false } = {}) => {
+        const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));
+        if (copy) fs.writeFileSync(f + '.corrupt-1700000000000', '{"hosts": [{"id": "host-dial-made04", "transport": "dial", "name": "made-up"');
+        const Hm = new HMb.HostManager({ dataDir: d });
+        if (removed) { const id = Hm.add({ name: 'made-up', transport: 'dial', deviceId: 'made04' }); await Hm.remove(id); }
+        const early = (() => { const S = Object.create(MMX.prototype); Object.assign(S, { hosts: Hm, _state: { mounts: [{ id: 'mm-made04', dir: 'push', hostId: 'host-dial-made04', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro' }] } }); return !!(S.list()[0] || {}).hostInCopy; })();
+        await Hm._copies().refresh();
+        const S = Object.create(MMX.prototype); Object.assign(S, { hosts: Hm, _state: { mounts: [{ id: 'mm-made04', dir: 'push', hostId: 'host-dial-made04', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro' }] } });
+        return { early, flag: !!(S.list()[0] || {}).hostInCopy };
+      };
+      const fNamed = await flagRun(MMv, 'move-flag'), fNone = await flagRun(MMv, 'move-flag-none', { copy: false }), fGone = await flagRun(MMv, 'move-flag-removed', { removed: true });
+      const fx = await flagRun(mutant('src/machine-mounts.js', [['    try { return !!h.namedByCopy(hostId); } catch { return false; }\n', '    return false;\n']]).MachineMounts, 'move-flag-ctl');
+      ok(fNamed.flag === true && fNamed.early === false && fNone.flag === false && fGone.flag === false, 'THE MOVE (part one): a machine mount whose machine is not listed but a kept copy of the torn hosts list names carries hostInCopy (never «removed») — only once the copies are read; no copy, or the person\'s removal: the old row', { fNamed, fNone, fGone });
+      ok(fx.flag === false, 'RED CONTROL — the flag never set (in a copy): the mount reads as on a removed machine, and its row offers «unmount to clean up»', fx);
+      // the torn lift's copy, said: hosts.tornCopy() names it at boot; the route carries it; the page says it, and keeps the flagged mounts
+      // out of «removed machines» (zh, ja beside)
+      const dT = dirOf('move-torn'), fT = path.join(dT, 'hosts.json'); fs.writeFileSync(fT, '{"hosts": [{"id": "host-made05"');
+      const HT = new HMb.HostManager({ dataDir: dT }), tc = HT.tornCopy();
+      const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), SM = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
+      const H1 = 'VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. A machine it named can be paired again; until then its mounts below are kept and its records are not removed.';
+      const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+      ok(typeof tc === 'string' && /^hosts\.json\.corrupt-\d+$/.test(tc) && fs.existsSync(path.join(dT, tc)) && HT.list().length === 0, 'THE MOVE: a torn hosts.json at boot — the list starts empty and tornCopy() names its kept copy', { tc });
+      ok(ER.includes("...(typeof hosts.tornCopy === 'function' && hosts.tornCopy() ? { torn: hosts.tornCopy() } : {})") && SM.includes("if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(") && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && m.hostInCopy') && SM.includes(`tr('${H1}'`) && zh.includes(`"${H1}":`) && ja.includes(`"${H1}":`), 'THE MOVE (pins): GET /api/hosts carries the torn copy; the page says it (zh, ja) and keeps a flagged mount out of «removed machines», in its own section where the person\'s unmount stays theirs'); }
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));

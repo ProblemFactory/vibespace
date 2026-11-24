@@ -391,7 +391,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     ok(got === 'host_unavailable' && gotx === 'unsupported-host', 'its read r2 (X1): a desktop call on a machine while hosts.json is HELD answers host_unavailable (the keeper marks it offline); CONTROL (no hold check, in a copy): «unsupported-host» — the code on which the keeper DELETES every machine\'s desktop-app records', { got, gotx });
   }
   const ER = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
-  ok(/res\.json\(\{ hosts: list, key: \{ exists: k\.exists, path: k\.path, publicKey: k\.publicKey \}, \.\.\.\(hosts\.unreadWords && hosts\.unreadWords\(\) \? \{ unread: hosts\.unreadWords\(\) \} : \{\}\) \}\);/.test(ER)
+  ok(/res\.json\(\{ hosts: list, key: \{ exists: k\.exists, path: k\.path, publicKey: k\.publicKey \}, \.\.\.\(hosts\.unreadWords && hosts\.unreadWords\(\) \? \{ unread: hosts\.unreadWords\(\) \} : \{\}\)(?:, \.\.\.\(typeof hosts\.tornCopy === 'function' && hosts\.tornCopy\(\) \? \{ torn: hosts\.tornCopy\(\) \} : \{\}\))? \}\);/.test(ER)
     && /app\.delete\('\/api\/hosts\/:id', async \(req, res\) => \{\n  if \(hosts\.unreadWords && hosts\.unreadWords\(\)\) return res\.status\(503\)/.test(ER)
     && /app\.patch\('\/api\/hosts\/:id\/exit-access', async \(req, res\) => \{\n  if \(isAnyBearer\(req\)\) return res\.status\(403\)[^\n]*\n  if \(hosts\.unreadWords && hosts\.unreadWords\(\)\) return res\.status\(503\)/.test(ER),
   'WIRING: the machines list answers WHY it is empty; a removal and an exit-access change are refused BEFORE their side effects (the unpair teardown, the grants store) — an agent token still meets its own 403 first');

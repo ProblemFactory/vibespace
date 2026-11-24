@@ -1133,6 +1133,12 @@ console.log('⑫ A FOLDER THAT WAITS IS NOT GONE (B-864f) — a session folder o
     try {
       const wh = CW.verdict(at(d, 'elsewhere'));
       ok(!!wh && wh.why === 'mount_down' && wh.held === true && /cannot read its list of storage mounts/.test(wh.name) && CW.verdict(at(d, 'elsewhere'), { missing: false }) === null, 'mounts.json HELD: a missing folder is mount_down by the held list\'s words — never «gone», never recreated; an existing one waits for nothing', wh);
+      // r3360: its words say the folder MAY be on a mount (never «is on … not mounted»), the create's refusal carries `held`, and the page
+      // words it so (zh, ja beside)
+      { const dw = CW.downWords(at(d, 'elsewhere'), wh), WC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), SL = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
+        const C1 = 'This conversation’s folder may be on a mount: VibeSpace cannot read its list of mounts right now — nothing was started and nothing was made there; resume it once the list reads again.';
+        const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+        ok(/may be on a mount/.test(dw) && !/is on .*not mounted/.test(dw) && WC.includes('waitsFor: w.name, ...(w.held ? { held: true } : {}), message:') && SL.includes("msg.code === 'mount_down' && msg.held") && SL.includes(`t('${C1}')`) && zh.includes(`"${C1}":`) && ja.includes(`"${C1}":`), 'r3360: a held mounts list\'s missing folder is said as one that MAY be on a mount — the hub\'s words, the refusal\'s `held`, the page\'s sentence (zh, ja)', dw); }
       const { mutantCopies: MC } = await import('./mutant-copy.mjs'), CS = fs.readFileSync(path.join(REPO, 'src/server/cwd-wait.js'), 'utf8');
       const CWh = MC('vs-cwdwait-held', REPO).load('src/server/cwd-wait.js', editAnchor(CS, "  if (!d) { const held = missing ? heldListOf() : null; return held ? { why: 'mount_down', root: null, name: held, held: true } : null; }", '  if (!d) return null;', 'src/server/cwd-wait.js'), 'held-unasked');
       CWh.register({ vault: v, mounts, getHosts: () => ({ get: (id) => HOSTS[id] || null }), getMachineMounts: () => ({ list: () => [] }) });

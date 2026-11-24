@@ -421,6 +421,7 @@ class HostManager {
       const b = SR.afterSetAside(a, aside);
       if (b.state !== 'missing') return this._unreadHold(b);   // its only copy: never written over
       console.warn(`[hosts] hosts.json did not parse (${a.why}) — its bytes are kept in ${path.basename(aside)}; the machines list starts empty`);
+      this._tornCopy = path.basename(aside);   // the MOVE (part one): the page says the torn lift and where its copy is (this run)
     }
     this._state = a.state === 'data' ? a.value : { hosts: [] };
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
@@ -428,7 +429,11 @@ class HostManager {
     for (const h of this._state.hosts) if (HK.pinned(h)) { try { HK.writePinFile(this._sshDir, h); } catch (e) { console.warn(`[hosts] the host-key pin file of ${h.name || h.id} was not written: ${e.message}`); } }
     if (a.state === 'data') this._reachChanged('hosts.json read');   // at boot nothing is wired yet (a no-op); a held store read again mid-life brings machines back — re-judged. Its read r3 (Y2): an EMPTY lift (torn bytes set aside, a gone file) re-judges nothing, as a boot does — a prune over the empty list cleared every machine's exit lists
   }
-  _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
+  _asideName() { return this._file + '.corrupt-' + Date.now(); }
+  /** the copy of hosts.json's torn bytes this run started empty over (its base name), or null — the page's torn words */
+  tornCopy() { return this._tornCopy || null; }
+  /** the kept copies were read (an unread answer names every id — the page waits for a read before it says «the damaged list may name it») */
+  copiesRead() { try { return this._copies().ready(); } catch { return false; } }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
   _unreadHold(a) {
     this._unread = { code: a.code, why: a.why, at: (this._unread && this._unread.at) || Date.now() };
     this._state = { hosts: [] };
@@ -487,6 +492,7 @@ class HostManager {
       if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
       a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
       if (a.state === 'unreadable') { this._unread.code = a.code; return; }
+      this._tornCopy = path.basename(aside);   // the MOVE (part one): the page says this torn lift too
     }
     const was = this._unread; this._unread = null; this._unreadMissingAt = 0; this._unreadTries = 0; this._unreadSaid = false; this._unreadSaveSaid = false;
     if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }

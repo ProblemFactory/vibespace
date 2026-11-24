@@ -258,7 +258,7 @@ app.get('/api/hosts', (req, res) => {
   // lane grants-unify: a machine's `exit` as the page reads it — its two lists from the ONE grants store (the record's
   // own `exit` keeps only ask / hub / lastRun; its pre-unify lists are never served)
   const list = hosts.list().map((h) => { if (!h || typeof h !== 'object') return h; let exit; try { exit = exitProxy.publicExit(h); } catch { exit = { mode: 'unknown' }; } return { ...h, exit }; });
-  res.json({ hosts: list, key: { exists: k.exists, path: k.path, publicKey: k.publicKey }, ...(hosts.unreadWords && hosts.unreadWords() ? { unread: hosts.unreadWords() } : {}) });   // remainder of B-f276: why the list is empty while hosts.json is held
+  res.json({ hosts: list, key: { exists: k.exists, path: k.path, publicKey: k.publicKey }, ...(hosts.unreadWords && hosts.unreadWords() ? { unread: hosts.unreadWords() } : {}), ...(typeof hosts.tornCopy === 'function' && hosts.tornCopy() ? { torn: hosts.tornCopy() } : {}) });   // remainder of B-f276: why the list is empty while hosts.json is held; the MOVE: its torn lift's copy
 });
 app.post('/api/hosts', async (req, res) => {
   // A pasted key may be passphrase-protected: unlock it HERE (ssh-keygen -p,
