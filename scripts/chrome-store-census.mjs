@@ -77,7 +77,10 @@ export function launchesOf(src, { acorn }) {
     if (!arr || seen.has(arr.start)) return; seen.add(arr.start);
     const at = chromeProg ? -1 : chromeAt(arr), next = at >= 0 ? arr.elements[at + 1] : null;
     const quietAt = arr.elements.findIndex((e) => !!e && e.type === 'SpreadElement' && e.argument.type === 'Identifier' && e.argument.name === 'CHROME_QUIET');
-    launches.push({ line: lineOf(arr.start), carried: carries(arr), quiet: at >= 0 ? quietsAfter(arr, at) : quiets(arr), wrapped: at >= 0 ? { at, quietAt } : null, open: at >= 0 && next ? next.start : arr.start + 1 });
+    // B-9dd0 (主开发 r3727): `spread` — the launch spreads CHROME_QUIET itself (after Chrome's element when wrapped), so it carries
+    // scratch.mjs's names rule (a literal background switch quiets, but brings no rule); `named` — its own list names the switch
+    const spread = at >= 0 ? quietAt > at : quietAt >= 0, named = arr.elements.some((e) => !!e && NAMES_SWITCH.test(strOf(e) || ''));
+    launches.push({ line: lineOf(arr.start), carried: carries(arr), quiet: at >= 0 ? quietsAfter(arr, at) : quiets(arr), spread, named, wrapped: at >= 0 ? { at, quietAt } : null, open: at >= 0 && next ? next.start : arr.start + 1 });
   };
   walk(ast, (n) => {
     if (n.type !== 'CallExpression') return;
@@ -107,6 +110,18 @@ export function filesOf(repo) {
   for (const f of tests) for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/\bfrom\s*'\.\/((?!test-)[\w.-]+\.mjs)'/g)) mods.add(m[1]);
   return [...tests, ...[...mods].filter((m) => fs.existsSync(path.join(dir, m)))].sort().map((f) => 'scripts/' + f);
 }
+
+/** B-9dd0 (主开发 r3727): THE NAMES RULE has ONE place — scripts/scratch.mjs chromeNames, carried by CHROME_QUIET (and chromeBelt): a
+ *  file of the scope whose TEXT names the switch is red BY NAME unless it is a row here, each READ (a launch never builds a list of
+ *  its own around the rule: Chrome keeps the LAST copy of a switch) */
+export const NAMES_SWITCH = /--host-resolver-rules\b/;
+export const NAMES_ROWS = Object.freeze({
+  'scripts/scratch.mjs': 'THE ONE PLACE: chromeNames builds the names rule; CHROME_QUIET carries it, chromeBelt and a suite\'s own names (map / own) use it',
+  'scripts/test-browser-propose-chrome.mjs': 'the AGENT BROWSER\'s own config: the fixture\'s name mapped in the scratch HOME\'s ~/.agent-browser/config.json `args` — read by the product\'s own launch (the real driver), not a launch of this suite',
+  'scripts/test-vault-login-chrome.mjs': 'the AGENT BROWSER\'s own config: *.example.com mapped in the scratch HOME\'s ~/.agent-browser/config.json `args` — read by the product\'s own launch (the real driver), not a launch of this suite',
+  'scripts/test-tailnet-reach-chrome.mjs': 'the agent browser DRIVER\'s one line (DRIVER_RULE: every name → the loopback), handed to the product\'s driver — its own Chromes take scratch.mjs\'s rule (RULES = chromeNames)',
+  'scripts/test-architecture.mjs': 'the census\'s own controls (§47d): planted launch texts that name the switch',
+});
 
 /** THE ONE EXEMPT ROW: a suite that brings its OWN Secret Service on a private bus — never the person's (its pin: the private address) */
 export const EXEMPT = Object.freeze({
@@ -141,14 +156,15 @@ export const ROWS = Object.freeze({
 /** the census over a tree → { files, launches, rows, bad: [{ file, line }], unread: [{ file, line }], exempt: [{ file, pinned }],
  *  unparsed: [file], uncovered: [file] (a marker, no launch, no row), stale: [file] (a row whose file holds no marker, or a launch) }.
  *  `patch` = a file's text replaced, `extra` = more files read as if in the scope (planted controls), `rows` = the named rows */
-export function census(repo, { acorn = null, patch = {}, extra = {}, rows = ROWS } = {}) {
+export function census(repo, { acorn = null, patch = {}, extra = {}, rows = ROWS, names: names_ = NAMES_ROWS } = {}) {
   const A = acorn || createRequire(path.join(repo, 'package.json'))('acorn');
-  const out = { files: 0, launches: 0, rows: 0, bad: [], loud: [], wrapped: [], exempt: [], unparsed: [], unread: [], uncovered: [], stale: [] };
+  const out = { files: 0, launches: 0, rows: 0, bad: [], loud: [], wrapped: [], exempt: [], unparsed: [], unread: [], uncovered: [], stale: [], unnamed: [], named: [], namesText: [], namesStale: [] };
   for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
     const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
     const r = launchesOf(src, { acorn: A });
     if (!r.parsed) { out.unparsed.push(f); continue; }
     const marked = TEXT_MARK.test(src), launched = r.launches.length > 0 || r.unread.length > 0;
+    { const names = NAMES_SWITCH.test(src); if (names_[f]) { if (!names) out.namesStale.push(f); } else if (names) out.namesText.push(f); }   // B-9dd0 r3727
     if (rows[f]) { out.rows++; if (!marked || launched) out.stale.push(f); }
     else if (marked && !launched && !EXEMPT[f]) out.uncovered.push(f);
     for (const u of r.unread) if (!EXEMPT[f]) out.unread.push({ file: f, line: u.line });
@@ -156,6 +172,7 @@ export function census(repo, { acorn = null, patch = {}, extra = {}, rows = ROWS
     out.files++; out.launches += r.launches.length;
     // MUST 2 (主开发 r528): the exemption is about the STORE only — an exempt file's launches are still read for the quiet switches
     for (const l of r.launches) { if (!l.quiet) out.loud.push({ file: f, line: l.line, open: l.open }); if (l.wrapped) out.wrapped.push({ file: f, line: l.line, ...l.wrapped, quiet: l.quiet }); }
+    for (const l of r.launches) { if (!l.spread) out.unnamed.push({ file: f, line: l.line }); if (l.named) out.named.push({ file: f, line: l.line }); }   // B-9dd0 r3727: no launch without the rule, none with its own
     if (EXEMPT[f]) { out.exempt.push({ file: f, pinned: EXEMPT[f].pin.test(src) }); continue; }
     for (const l of r.launches) { if (!l.carried) out.bad.push({ file: f, line: l.line }); }   // B-9dd0 unit 2: `loud` = a launch without CHROME_QUIET
   }

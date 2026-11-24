@@ -2182,6 +2182,27 @@ await section(async () => {
     ok(exSrc.includes('spawn(CHROME, [...CHROME_QUIET, ') && exLoud.loud.some((l) => l.file === EXF) && !c.loud.some((l) => l.file === EXF),
       `§47c r528 CONTROL: the EXEMPT file (${EXF}) is read for the quiet switches too — without its spread it reads LOUD; at the tip it carries it`, JSON.stringify(exLoud.loud.filter((l) => l.file === EXF)));
   }
+  // 47d. B-9dd0 (主开发 r3727, after the measure 55394096f: every suite Chrome reached Google's background services in spite of 47c's
+  //     switches): EVERY Chrome a suite launches resolves NO name but the loopback's and the suite's own — scripts/scratch.mjs's ONE
+  //     names rule (chromeNames), carried by CHROME_QUIET. The census reads it: a launch that does not spread CHROME_QUIET brings no
+  //     rule (`unnamed`); a launch, or any file of the scope, that names the switch itself is red BY NAME unless a NAMES row says why.
+  {
+    ok(c.unnamed.length === 0, `§47d every Chrome a suite launches spreads CHROME_QUIET, so it carries the names rule (${c.launches} launches)${c.unnamed.length ? ' — without it: ' + c.unnamed.map((l) => `${l.file}:${l.line}`).join(', ') : ''}`);
+    ok(c.named.length === 0 && c.namesText.length === 0 && c.namesStale.length === 0, `§47d the names switch has ONE place: no launch names it, and every file of the scope that names it is a NAMES row with its reason (${Object.keys(CS.NAMES_ROWS).length} rows); no row is stale${c.named.length || c.namesText.length || c.namesStale.length ? ' — ' + JSON.stringify({ named: c.named, text: c.namesText, stale: c.namesStale }) : ''}`);
+    const scr = fs.readFileSync('scripts/scratch.mjs', 'utf8'), quietSrc = (/^export const CHROME_QUIET = Object\.freeze\((\[[^\]]*\])\)/m.exec(scr) || [])[1] || '';
+    ok(/, chromeNames\(\)\]$/.test(quietSrc) && /'MAP \* \^NOTFOUND', 'EXCLUDE 127\.0\.0\.1', 'EXCLUDE \[::1\]', 'EXCLUDE localhost'/.test(scr) && /chromeNames\(\{ own: list \}\)/.test(scr),
+      '§47d scripts/scratch.mjs: CHROME_QUIET ends with chromeNames() — every name mapped to «^NOTFOUND» (the vendor\'s literal) but the loopback\'s — and chromeBelt takes its rule from the same builder', quietSrc.slice(-60));
+    const Ln = (src) => CS.launchesOf(src, { acorn }).launches[0] || {};
+    const litOnly = Ln("const c = spawn(CHROME, ['--disable-background-networking', '--password-store=basic', '--headless=new', '--remote-debugging-port=0']);\n");
+    const own = Ln("const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--host-resolver-rules=MAP * 127.0.0.1', '--headless=new', '--remote-debugging-port=0']);\n");
+    const viaB = Ln("const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, chromeNames({ map: { 'hub.test': '127.0.0.1' } }), '--headless=new', '--remote-debugging-port=0']);\n");
+    const txt = CS.census(process.cwd(), { acorn, extra: { 'scripts/test-planted-names.mjs': "const RULE = '--host-resolver-rules=MAP * 127.0.0.1';\nexport const X = RULE;\n" } });
+    const gone = CS.census(process.cwd(), { acorn, names: { ...CS.NAMES_ROWS, 'scripts/test-planted-nonames.mjs': 'a row whose file no longer names the switch' }, extra: { 'scripts/test-planted-nonames.mjs': 'export const X = 1;\n' } });
+    ok(litOnly.quiet === true && litOnly.spread === false && own.spread === true && own.named === true && viaB.spread === true && viaB.named === false
+      && txt.namesText.includes('scripts/test-planted-names.mjs') && gone.namesStale.includes('scripts/test-planted-nonames.mjs'),
+      '§47d CONTROL: a launch quiet by the literal switch alone brings no names rule (red); a launch that names the switch itself is red by name, through the builder it is not; a planted file that names the switch in a const is red by its text; a NAMES row whose file no longer names it is stale',
+      JSON.stringify({ litOnly: [litOnly.quiet, litOnly.spread], own: [own.spread, own.named], viaB: [viaB.spread, viaB.named], text: txt.namesText, stale: gone.namesStale }));
+  }
   const L = (src) => CS.launchesOf(src, { acorn });
   const planted = L("import { scratch } from './scratch.mjs';\nconst c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
   const carried = L("import { CHROME_STORE } from './scratch.mjs';\nconst c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");

@@ -74,7 +74,22 @@ export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock
 // — so a suite's Chrome reaches only the loopback the suite drives (the hub under test, a stand-in), never Google's servers. No
 // --disable-features here: a suite that passes its own would lose one of the two lists (Chrome keeps the last switch).
 // scripts/chrome-store-census.mjs + test-architecture §47c: a Chrome launch without it is red.
-export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-domain-reliability', '--metrics-recording-only', '--no-first-run', '--no-default-browser-check']);
+// B-9dd0 (主开发 r3727): THE NAMES RULE, in the same list — every Chrome a suite launches resolves NO name but the loopback's
+// and the suite's own: the measure (55394096f, 164 rows) saw every suite Chrome reach Google's background services in spite of
+// the switches above. The switch and its grammar as the vendor's source has them (chromium.googlesource.com, tag 157.0.8103.78):
+// services/network/public/cpp/network_switches.cc `kHostResolverRules[] = "host-resolver-rules"` («These mappings only apply to
+// the host resolver»); net/base/host_mapping_rules.cc splits the list at «,» and a rule at « », the FIRST matching MAP wins, and an
+// EXCLUDE that matches stops the search (the name resolves as usual); net/dns/mapped_host_resolver.cc fails a name mapped to
+// «^NOTFOUND» with ERR_NAME_NOT_RESOLVED — on the box, no question leaves it. A suite that needs a name of its own gets it HERE:
+// `map` (a name → an address, ahead of the rest) and `own` (EXCLUDE: resolved as usual) — never a switch of its own around this
+// one (Chrome keeps the LAST copy of a switch). scripts/chrome-store-census.mjs + test-architecture §47d: a launch that names the
+// switch itself is red by name.
+export const chromeNames = ({ map = {}, own = [] } = {}) => {
+  const maps = Object.entries(map || {}).map(([h, to]) => `MAP ${h} ${to}`);
+  const keep = [...new Set([...(own || [])].map((h) => String(h || '')).filter(Boolean))].map((h) => `EXCLUDE ${h}`);
+  return `--host-resolver-rules=${[...maps, 'MAP * ^NOTFOUND', 'EXCLUDE 127.0.0.1', 'EXCLUDE [::1]', 'EXCLUDE localhost', ...keep].join(', ')}`;
+};
+export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-domain-reliability', '--metrics-recording-only', '--no-first-run', '--no-default-browser-check', chromeNames()]);
 // B-9dd0's remainder (2) (主开发 r1134): THE BELT, for a Chrome whose page must reach only the suite's OWN targets — a dead proxy
 // (127.0.0.1:9; Chrome never proxies the loopback) bypassed only for `own`, and a resolver that answers every NAME «not found»
 // but the loopback's and `own`'s. `own` = the suite's own targets past the loopback (test-https-hub-chrome: the box's LAN address
@@ -83,7 +98,7 @@ export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '-
 // (no app CSP to report the probes).
 export const chromeBelt = (own = []) => {
   const list = [...new Set([...own].map((h) => String(h || '')).filter(Boolean))];
-  return Object.freeze(['--proxy-server=http://127.0.0.1:9', ...(list.length ? [`--proxy-bypass-list=${list.join(';')}`] : []), `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE [::1], EXCLUDE localhost${list.map((h) => `, EXCLUDE ${h}`).join('')}`]);
+  return Object.freeze(['--proxy-server=http://127.0.0.1:9', ...(list.length ? [`--proxy-bypass-list=${list.join(';')}`] : []), chromeNames({ own: list })]);   // r3727: the names rule from its ONE builder
 };
 /** B-9dd0's remainder (2) and the round's CONTROL (主开发 r1246; r1521: THE CHROME UNDER TEST is probed, never a second one):
  *  reachFrom(cdpPort) opens ONE fresh blank tab in the Chrome listening on `cdpPort` — the suite's OWN Chrome: its proxy and
@@ -127,7 +142,9 @@ export async function chromeReach(chromeBin, { args = [], env = process.env, dir
   const { spawn } = await import('node:child_process');
   const cdpPort = await freePort();
   fs.mkdirSync(dir, { recursive: true });
-  const ch = spawn(chromeBin, [...CHROME_QUIET, ...CHROME_STORE, ...args, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', env });
+  // r3727: CHROME_QUIET's names rule refuses every name, the box's own too; the CONTROL proves the belt by reaching that one name,
+  // so it gets it through the rule's allow list (`own`), the last copy of the switch (Chrome keeps the last) — never the rule left off
+  const ch = spawn(chromeBin, [...CHROME_QUIET, chromeNames({ own: [os.hostname()] }), ...CHROME_STORE, ...args, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', env });
   try { return await reachFrom(cdpPort, { timeoutMs }); }
   finally {
     try { ch.kill('SIGKILL'); } catch { /* gone */ }

@@ -23,7 +23,7 @@
 //      screenshotted (VS_SHOT_DIR=<dir> keeps the PNGs);
 //   ⑤ NOTHING LEAVES LOOPBACK: a 4 Hz socket sampler over this suite's Chrome process trees — no non-loopback peer.
 // The suite's own names resolve by --host-resolver-rules (the attach road: «public.example» + the Funnel name → loopback, every
-// other name ~NOTFOUND; the driver's ONE line: every name → loopback) — the test's DNS, not the product's road; every Chrome
+// other name «not found» (scratch.mjs's names rule); the driver's ONE line: every name → loopback) — the test's DNS, not the product's road; every Chrome
 // runs without background networking. SKIPs by name: no Chrome (everything), no openssl (the https legs), no agent-browser (③).
 // r5: NEVER A HANG — every CDP call answers within its bound (a reply lost at Chrome's exit: Browser.close waited for ever, 300 s
 // under the heavy lock), a Chrome that does not exit is killed by its pid, and the whole suite is bounded (a named ✗, not a hang).
@@ -35,7 +35,7 @@ import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, chromeNames } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -122,7 +122,7 @@ let reach = null;
 const dialed = [];
 // the suite's tunnel: every tailnet address IS a loopback server (the port picks it); a name the door dials by DNS is recorded
 const dial = (h) => { dialed.push(h); return [PEER_IP, BETA_IP, SELF_IP].includes(h) ? '127.0.0.1' : h; };
-const RULES = `--host-resolver-rules=MAP public.example 127.0.0.1, MAP ${FUNNEL} 127.0.0.1, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost`; // the attach road carries ','
+const RULES = chromeNames({ map: { 'public.example': '127.0.0.1', [FUNNEL]: '127.0.0.1' } });  // B-9dd0 r3727: scratch.mjs's ONE names rule, with the suite's own names;  the attach road carries ','
 const DRIVER_RULE = '--host-resolver-rules=MAP * 127.0.0.1'; // the driver's ONE line holds ONE rule: every name → loopback («public.example» included; nothing resolves off the box)
 const QUIET = ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-pings', '--disable-domain-reliability', '--disable-default-apps', '--no-first-run', '--metrics-recording-only'];
 

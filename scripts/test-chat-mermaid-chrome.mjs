@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A MERMAID DIAGRAM DRAWS, WITH A REAL CHROME (lane chat-mermaid, 2.369.351 — the owner, about an Antigravity reply that
 // carried a flowchart: 「能不能展示 flowchart？」). HEAVY: a scratch worktree hub (private HOME) + headless Chrome over raw
-// CDP, zh, OUTBOUND BLOCKED (--host-resolver-rules: no name resolves but the hub's) and every request the page makes LOGGED.
+// CDP, zh, OUTBOUND BLOCKED (scratch.mjs's names rule: no name resolves but the hub's) and every request the page makes LOGGED.
 //   ① a reply in a conversation's history with a 6-node flowchart ⇒ a `.chat-diagram` card INSIDE the message: an <svg> of
 //     ≥ 6 node groups, its labels as text, no foreignObject / on* / foreign id, every CSS rule under the picture's scope;
 //     the toolbar says 图 · 源码 · 复制 · 放大 · the first-render time measured
@@ -28,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, cspReportLines, takeProbeCspReport, probeVerdictFault, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, cspReportLines, takeProbeCspReport, probeVerdictFault, CHROME_STORE, CHROME_QUIET, chromeNames } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -87,7 +87,7 @@ const srvLog = [];
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d)));
 // OUTBOUND BLOCKED: no host name resolves but the hub's own address (a diagram that reaches out fails, never leaks)
-const client = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1280,900', '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1', `--user-data-dir=${scratch('cmm-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
+const client = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1280,900', chromeNames(), `--user-data-dir=${scratch('cmm-client')}`, 'about:blank'], { stdio: 'ignore', detached: true });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
