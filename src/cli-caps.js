@@ -37,7 +37,12 @@ function cliVersionOf(v) {
 
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const isRecord = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
-const byVersion = (a, b) => a.localeCompare(b, 'en', { numeric: true });
+// THE VERSION ORDER (B-360d, 主开发 r3779): ONE collator, kept for the module's life. A compare given its locale and options set its
+// collation up at every call, and the store's caps reader sorts at every call (the roster build twice for every row with a long-lived
+// token: 3.3 ms a build at 40 such rows, 0.8 ms with this; test-cli-caps ⑩). The same order by the language's own rule (ECMA-402: that
+// compare is this collator's compare).
+const VERSION_ORDER = new Intl.Collator('en', { numeric: true });
+const byVersion = (a, b) => VERSION_ORDER.compare(a, b);
 
 /** the fixture's record of EXACTLY version `v` (cliVersionOf's spelling), or null: {versions} ⇒ its own
  *  entry keyed by `v`; a bare record ⇒ itself (oatInFile still checks its cliVersion). */

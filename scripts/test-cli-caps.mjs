@@ -26,6 +26,9 @@
 //      compared but never shown), the body's keys, kinds and identity fields, the count requests, every call by its count — else
 //      DIFFERENT + stop; heads matched by kind, not place; a turn that did not finish is INCOMPLETE; then ALREADY-ON / NO-EFFECT;
 //      RED CONTROLS (anchored copies): the only-with branch emptied, calls by name, heads by place, no turn check
+//   ⑩ (row B-360d, 主开发 r3765 / r3779) the version order is ONE kept collator: the order law over every pair of the fixture's
+//      versions and their build-suffixed forms (read and written as the release ordered them), and the loop-hold pin BY COUNT on the
+//      REAL account manager over a stand-in roster — one roster build makes no compare given options; RED: the release's line in a copy
 import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import fs from 'node:fs';
 import os from 'node:os';
@@ -438,6 +441,69 @@ console.log('⑨ ckptVerdict — the switch changes nothing the CLI sends, or th
   ok('CONTROL: heads matched by their place alone ⇒ the racing side request reads DIFFERENT (why they are matched by kind)', byPlace(run({ heads: [side(), head(1), head(2), head(3)] }), run({ files: 1, heads: [head(1), head(2), side(), head(3)] })).verdict === 'DIFFERENT');
   const noTurn = ck('no turn check', "  if (off.turnOk !== true || on.turnOk !== true) return", "  if (false) return");
   ok('CONTROL: without the turn check a turn that did not finish reads DIFFERENT — a STOP the switch did not cause', noTurn(OFF, run({ files: 1, n: 1, turnOk: false })).verdict === 'DIFFERENT');
+}
+
+// ── ⑩ THE VERSION ORDER IS ONE KEPT COLLATOR (row B-360d's last listed loop hold; 主开发 r3765 / r3779) ──
+// measuredVersions sorted the fixture's versions with a compare given its locale and options (its collation set up at every call), and
+// the store's caps reader (oatFileCaps) sorts at every call: the roster build asks it twice for every row with a long-lived token, at
+// every store change, every GET /api/accounts, the pool engine's 60 s sweep. On the test machine (probe ab3a4f1bd, never lined; the
+// stand-in below): one roster build 3.3 ms on the release, 0.8 ms with one collator kept. The ms are stated here, never pinned.
+console.log('⑩ the version order: one kept collator (B-360d)');
+{
+  // THE ORDER LAW, asked through the module's own readers (measuredVersions reads, withMeasured writes): every pair of names in the
+  // order the release's compare gave them (both from the same input order, so a tie would show as well)
+  const releaseOrder = (a, b) => a.localeCompare(b, 'en', { numeric: true });
+  const FXV = Object.keys(JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8')).versions || {});
+  const names = [...new Set(FXV.flatMap((v) => [v, `${v}-dev.1`, `${v}-dev.2`, `${v}-dev.10`, `${v}-rc.1`, `${v}+build.7`]).concat(['2.1.3', '2.1.30', '2.1.300', '2.1.1000', '2.10.0', '10.0.0']))];
+  const recOf = (v) => ({ cliVersion: v, measuredAt: '2026-11-24', variants: {} });
+  const mapOf = (vs) => ({ versions: Object.fromEntries(vs.map((v) => [v, recOf(v)])) });
+  let pairs = 0; const differ = [];
+  for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+    pairs++; const a = names[i], b = names[j];
+    const want = [b, a].sort(releaseOrder).join(' < '), got = C.measuredVersions(mapOf([b, a])).join(' < ');
+    if (got !== want) differ.push(`${got} (the release: ${want})`);
+  }
+  const wholeWant = names.slice().reverse().sort(releaseOrder);
+  const read = C.measuredVersions(mapOf(names.slice().reverse())), written = Object.keys(C.withMeasured(mapOf(names.slice(1).reverse()), recOf(names[0])).versions);
+  ok(`THE ORDER LAW: the fixture's ${FXV.length} versions and their build-suffixed forms (${names.length} names, ${pairs} pairs) in the release's order, pair by pair, and the whole list read (measuredVersions) and written (withMeasured)`,
+    FXV.length >= 8 && pairs > 1000 && differ.length === 0 && JSON.stringify(read) === JSON.stringify(wholeWant) && JSON.stringify(written) === JSON.stringify(wholeWant), differ.slice(0, 5).join(' · ') || JSON.stringify({ read, written }).slice(0, 300));
+  // THE LOOP-HOLD PIN, BY COUNT: the REAL account manager over the measure's stand-in roster (40 Claude subscription accounts, each
+  // with a long-lived token, 4 pools of 10), the hub's CLI noted as the fixture's newest version: one roster build asks the caps for
+  // every token row and makes NO compare given options. RED: the release's line in a copy of src/cli-caps.js, read by a copy of
+  // src/accounts.js (each copy's other requires are the originals') — the same build makes seven a caps call.
+  const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  const NEWEST = C.measuredVersions(JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8'))).slice(-1)[0];
+  const SHAPE = { scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code', 'user:mcp_servers'], subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' };
+  const roster = path.join(tmp, 'roster');
+  {
+    const am = new AccountManager({ dataDir: roster }), now = Date.now(), ids = [];
+    for (let i = 0; i < 40; i++) {
+      const id = am.createSubscription({ name: `Stand-in ${i + 1}` }).id; ids.push(id);
+      fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'acc-' + i, refreshToken: 'ref-' + i, expiresAt: now + 3600e3, refreshTokenExpiresAt: now + 20 * 86400e3, ...SHAPE } }), { mode: 0o600 });
+    }
+    am.noteCliVersion(NEWEST); await am.oatFileSettled();
+    for (const [i, id] of ids.entries()) { am.setOat(id, ['sk', '-ant-oat01-'].join('') + 'CAPSfake_' + crypto.createHash('sha256').update('stand-in ' + i).digest('hex').slice(0, 48) + '-zz'); await am.oatFileSettled(id); }
+    for (let p = 0; p < 4; p++) am.createPool({ name: `Pool ${p + 1}`, members: ids.slice(p * 10, (p + 1) * 10) });
+    await am.oatFileSettled();
+  }
+  const buildOf = async (AM) => {
+    const am = new AM({ dataDir: roster }); am.noteCliVersion(NEWEST); await am.oatFileSettled();
+    let withOptions = 0, caps = 0, rows = [];
+    const lc = String.prototype.localeCompare, fc = am.oatFileCaps;
+    String.prototype.localeCompare = function (...a) { if (a.length > 2 && a[2] != null) withOptions++; return lc.apply(this, a); };
+    am.oatFileCaps = function (...a) { caps++; return fc.apply(this, a); };
+    try { rows = am.list().accounts || []; } finally { String.prototype.localeCompare = lc; delete am.oatFileCaps; }
+    return { rows: rows.length, tokenRows: rows.filter((r) => r && r.oatCli).length, caps, withOptions, measured: am.oatFileCaps().measured };
+  };
+  const now = await buildOf(AccountManager);
+  ok(`THE LOOP-HOLD PIN (a count): one roster build of ${now.rows} rows (${now.tokenRows} with a long-lived token) asks the caps ${now.caps} times and makes ${now.withOptions} compares given options`,
+    now.rows === 44 && now.tokenRows === 40 && now.caps >= 80 && now.withOptions === 0 && now.measured === FXV.slice().sort(releaseOrder).join(', '), JSON.stringify(now));
+  const SRC10 = fs.readFileSync(CAPS, 'utf8'), ACC10 = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8'), RM = mutantCopies('cli-caps-order', REPO);
+  const relCaps = RM.write('src/cli-caps.js', anchored(SRC10, "const VERSION_ORDER = new Intl.Collator('en', { numeric: true });\nconst byVersion = (a, b) => VERSION_ORDER.compare(a, b);", "const byVersion = (a, b) => a.localeCompare(b, 'en', { numeric: true });", 'the version order: the release\'s line'), 'release-order');   // stale-pins: kept — the RED's text is the release's line, gone from the product on purpose
+  const REL = RM.load('src/accounts.js', anchored(ACC10, "const cliCaps = require('./cli-caps.js');", `const cliCaps = require(${JSON.stringify(relCaps)});`, 'the account store reads the release-order copy'), 'release-order');
+  const red = await buildOf(REL.AccountManager);
+  ok(`RED CONTROL: the release's line in a copy — the same roster build makes ${red.withOptions} compares given options (${red.caps} caps calls), the same caps said`,
+    red.rows === 44 && red.tokenRows === 40 && red.caps >= 80 && red.withOptions >= 7 * red.caps && red.measured === now.measured, JSON.stringify(red));
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
