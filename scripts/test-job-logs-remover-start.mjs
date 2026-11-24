@@ -171,6 +171,11 @@ try {
     // every way a count file can be missing or torn, the REAL count read (a stand-in only for the cut child)
     const D4 = path.join(T, 'd4'), L4 = path.join(D4, 'job-logs'); fs.mkdirSync(L4, { recursive: true });
     let kind = 'good';
+    // r3357 (主开发's should, beside countOf's text pin): the count file as the read will find it — its bytes, inode and mtime, and
+    // the same of a cut write's .tmp; a FIFO is never opened (lstat only)
+    const snapOf = (f) => { try { const st = fs.lstatSync(f); return st.isFile() ? { b: fs.readFileSync(f).toString('base64'), ino: st.ino, m: st.mtimeMs } : { other: true, ino: st.ino }; } catch { return null; } };
+    const snapIn = {}, asLeft = (k) => (snapIn[k] ? { at: snapOf(snapIn[k].f), tmp: snapOf(snapIn[k].f + '.tmp') } : null);
+    const changedBy = (k, l) => !snapIn[k] || !l || JSON.stringify({ at: snapIn[k].at, tmp: snapIn[k].tmp }) !== JSON.stringify(l);
     const hybrid = async (c, a, o) => {
       if (a[5] !== 'sweep') return S0.run(c, a, o);
       const req = path.join(a[2], a[7]), body = JSON.parse(fs.readFileSync(req, 'utf8')); fs.unlinkSync(req);
@@ -180,14 +185,25 @@ try {
       if (kind === 'big') fs.writeFileSync(f, JSON.stringify({ removed: 7, entries: 21, jobDirs: 0, pad: 'x'.repeat(5000) }));
       if (kind === 'odd') fs.writeFileSync(f, JSON.stringify({ removed: -1, entries: 'many' }));
       if (kind === 'fifo') await S0.run('mkfifo', [f], { timeoutMs: 5000 });
+      snapIn[kind] = { f, at: snapOf(f), tmp: snapOf(f + '.tmp') };   // r3357: what the read finds (the stand-in's last act before its exit)
       setTimeout(() => o.onLateExit(), 30);
       return { started: true, timedOut: true, overflow: false, code: null, signal: 'SIGKILL', stdout: '', stderr: '' };
     };
     const countRead = async (k, workerPath = WORKER) => { kind = k; const R = LS.createRemover({ logsDir: L4, timeoutMs: 2000, wedgedMs: 3000, workerPath, runImpl: hybrid }); return Promise.race([R.sweep({ keep: KEEP0, cutoff: 1, max: 1, orphanDir: D4 }), sleep(6000).then(() => ({ hung: true }))]); };
-    const got = {}; for (const k of ['good', 'missing', 'cut', 'big', 'odd', 'fifo']) got[k] = await countRead(k);
+    const got = {}, left = {}; for (const k of ['good', 'missing', 'cut', 'big', 'odd', 'fifo']) { got[k] = await countRead(k); left[k] = asLeft(k); }
     ok(got.good.partial && got.good.partial.removed === 7 && got.good.partial.entries === 21 && got.good.partial.jobDirs === 1 && LS.COUNT_NAME.test(got.good.countFile || ''), 'a whole count file: its count answers the cut pass', got.good);
     const unk = (a, re) => !!a && !a.hung && !a.partial && re.test(a.partialUnknown || '');
     ok(unk(got.missing, /^missing$/) && unk(got.cut, /cut while it was written/) && unk(got.big, /over its bound \(4096 bytes\)/) && unk(got.odd, /not a count/) && unk(got.fifo, /not a file/), 'a count file missing, cut while written, over its bound, not a count, or a FIFO (never waited on) — each answers «unknown», never «nothing removed»', got);
+    // r3357: THE READ'S BEHAVIOUR — every kind's file stands after the read as the read found it (the same bytes, inode, mtime), a
+    // cut write's .tmp too, and a missing file stays missing: the read writes, renames, removes and makes nothing
+    const changed = Object.keys(got).filter((k) => changedBy(k, left[k]));
+    ok(changed.length === 0 && !!(snapIn.good && snapIn.good.at && snapIn.good.at.b) && !!(snapIn.cut && snapIn.cut.tmp && !snapIn.cut.at) && !!(snapIn.missing && !snapIn.missing.at && !snapIn.missing.tmp), `the count read LEAVES THE FILE AS IT FOUND IT: the count file's bytes, inode and mtime equal before and after the read, a cut write's .tmp too, a missing file still missing (${Object.keys(got).length} kinds; changed: ${changed.join(', ') || 'none'})`, { changed, snapIn, left });
+    const COF = '  let o = null; try { o = JSON.parse(rd.text); } catch { }';
+    const rewrites = MC.write('src/job-logs-sweep-worker.js', anchored(WKsrc, COF, "  try { fs.writeFileSync(f, rd.text + ' '); } catch { }\n" + COF, 'red-read-rewrites'), 'red-read-rewrites');
+    const renames = MC.write('src/job-logs-sweep-worker.js', anchored(WKsrc, COF, "  try { fs.writeFileSync(f + '.r', rd.text); fs.renameSync(f + '.r', f); } catch { }\n" + COF, 'red-read-renames'), 'red-read-renames');
+    const ctl = {}; for (const [n, w] of [['rewrites', rewrites], ['renames', renames]]) { const a = await countRead('good', w); ctl[n] = { a, changed: changedBy('good', asLeft('good')) }; }
+    ok(ctl.rewrites.changed && !!(ctl.rewrites.a.partial && ctl.rewrites.a.partial.removed === 7), 'RED: a count read that writes its file back (one byte more) still answers its count — the check sees the file changed', ctl.rewrites);
+    ok(ctl.renames.changed && !!(ctl.renames.a.partial && ctl.renames.a.partial.removed === 7), 'RED: a count read that puts the SAME bytes back by a temp and a rename — the bytes alone would not see it; the inode does', ctl.renames);
     const zeroCount = MC.write('src/job-logs-sweep-worker.js', anchored(WKsrc, "  if (rd.why) return { count: null, why: rd.why === 'missing' && lst(f + '.tmp') ? 'cut while it was written' : rd.why };", '  if (rd.why) return { count: { removed: 0, entries: 0, jobDirs: 0 } };', 'red-missing-is-zero'), 'red-missing-is-zero');
     const zr = await countRead('missing', zeroCount);
     ok(zr.partial && zr.partial.removed === 0, 'RED: a missing count read as zero says «nothing removed» of a pass that may have removed hundreds', zr);
