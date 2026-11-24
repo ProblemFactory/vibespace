@@ -20,6 +20,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A sub-agent's live view no longer misses messages when its log is cut and written again or replaced.
 - Opening a sub-agent's log whose folder stops answering now says so after a short wait, instead of loading forever.
 - A message handed to a running turn whose program then exits stays in the conversation: «Not delivered» if it never arrived, «Not confirmed» if unknown.
+- A forced measure of a browser engine on a busy machine is no longer refused as «being put back» when nothing is being put back.
 
 ## 2.369.417 — 2026-11-23
 
