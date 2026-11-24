@@ -136,12 +136,12 @@ function writeBindingsFile(file, obj) {
 function heldOf(file, { dataDir, log, listMetas, execFileImpl }) {
   let H = HELD.get(file);
   if (H) return H;
-  H = { hold: null, dataDir, rebuilding: null, recovered: null, log, listMetas, execFileImpl };
+  H = { hold: null, dataDir, rebuilding: null, recovered: null, log, listMetas, execFileImpl, owed: new Map(), gen: 0 };   // owed: r3717 — the offers refused while held (sid → {key, at}, bounded)
   H.hold = HOLD.create({
     file, valid: BINDINGS_SHAPE, code: 'bindings_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `VibeSpace cannot read which browser belongs to which conversation right now (${h.code}); it reads it again by itself every few minutes. Nothing ends and nothing is written over it until it reads`,
     log: (s) => { try { log.warn?.('[browser] ' + s); } catch { } },
-    onLift: (v, facts) => { if (!v) rebuildBindings(file, H, (facts && facts.setAside) || null); },
+    onLift: (v, facts) => { if (!v) rebuildBindings(file, H, (facts && facts.setAside) || null); else if (H.owed.size) writeOwed(file, H, v); },   // r3717 (MUST 2): the refused offers written at a lift with data
   });
   HELD.set(file, H);
   return H;
@@ -157,6 +157,32 @@ function listMetaFacts(H) {
       });
     } catch (e) { resolve({ ok: false, why: String((e && e.code) || 'spawn failed') }); }
   });
+}
+/** r3717 (MUST 2): the offers a held file refused, laid over `doc` by record()'s own rules (a conversation keeps its key; a key is ONE
+ *  conversation's — the first holder keeps it) → the number laid; `doc` is changed in place */
+function layOwed(H, doc) {
+  let n = 0;
+  for (const [sid, o] of H.owed) {
+    const cur = doc.byConversation[sid];
+    if (cur && KEY_RE.test(String(cur.key || ''))) continue;   // bound already (to it, or to another key: the first stays)
+    if (Object.entries(doc.byConversation).some(([s2, v]) => s2 !== sid && v && v.key === o.key)) continue;   // another conversation's key
+    doc.byConversation[sid] = { key: o.key, at: o.at }; n++;
+  }
+  H.owed.clear();
+  return n;
+}
+function pruneDoc(doc) {
+  const e = Object.entries(doc.byConversation);
+  if (e.length > MAX_BINDINGS) { e.sort((a, b) => (b[1].at || 0) - (a[1].at || 0)); doc.byConversation = Object.fromEntries(e.slice(0, MAX_BINDINGS)); }
+  return doc;
+}
+/** a lift WITH data after refused offers: they are written now (nothing ends by a binding refused while the file was held) */
+function writeOwed(file, H, v) {
+  const doc = { ...v, byConversation: { ...v.byConversation } };
+  const n = layOwed(H, doc);
+  if (!n) return;
+  try { writeBindingsFile(file, pruneDoc(doc)); H.gen++; try { H.log.warn?.(`[browser] ${FILE_NAME} read again: ${n} binding(s) offered while it was held written now`); } catch { } }
+  catch (e) { try { H.log.warn?.(`[browser] the bindings offered while ${FILE_NAME} was held could not be written (${(e && e.code) || 'failed'}) — each is offered again at its conversation's next record`); } catch { } }
 }
 /** THE REBUILD from the conversations' own records: each record's key bound to the conversation it may bind (bindableIdOf — a fork
  *  source or an implicit fork binds nothing), the newest record winning a key two name; written with `recoveredAt` */
@@ -179,16 +205,18 @@ function rebuildBindings(file, H, copy) {
       const key = String(meta.browserKey || ''), sid = bindableIdOf(meta), t = Math.round(Number(row[5])) || at;
       if (!sid || !KEY_RE.test(key)) continue;
       const prev = byKey.get(key);
-      if (!prev || t > prev.at) byKey.set(key, { sid, at: t });
+      if (!prev || t < prev.at) byKey.set(key, { sid, at: t });   // r3717: the FIRST holder keeps a key (record()'s rule)
     }
     const byConversation = {};
-    for (const [key, v] of byKey) if (!byConversation[v.sid] || v.at > byConversation[v.sid].at) byConversation[v.sid] = { key, at: v.at };
+    for (const [key, v] of byKey) if (!byConversation[v.sid] || v.at < byConversation[v.sid].at) byConversation[v.sid] = { key, at: v.at };   // a conversation keeps its first key
     const doc = { v: 1, byConversation, recoveredAt: at };
+    layOwed(H, doc); pruneDoc(doc);   // r3717: the offers refused meanwhile are true facts; bounded as record() bounds it
     try { writeBindingsFile(file, doc); } catch (e) {
       try { H.log.warn?.(`[browser] the rebuilt ${FILE_NAME} could not be written (${(e && e.code) || 'failed'}) — it stays HELD`); } catch { }
       H.rebuilding = null; H.hold.start({ state: 'unreadable', error: { code: 'rebuild-unwritten' } }); return false;
     }
-    H.recovered = { n: Object.keys(byConversation).length, copy: r0.copy ? path.basename(String(r0.copy)) : null, at };
+    H.gen++;   // r3717: every instance's memory of «already recorded» is cleared (a binding the rebuild dropped is offered again)
+    H.recovered = { n: Object.keys(doc.byConversation).length, copy: r0.copy ? path.basename(String(r0.copy)) : null, at };
     H.rebuilding = null;
     try { H.log.warn?.(`[browser] ${FILE_NAME} was rebuilt from the conversations' records: ${H.recovered.n} binding(s)${H.recovered.copy ? ` — the damaged copy is kept as ${H.recovered.copy}` : ''}`); } catch { }
     return true;
@@ -247,6 +275,7 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
   // Implicit forks already journalled, `tag\0sid` (r7) — the adopted record is
   // re-written dozens of times per turn and says the same thing each time.
   const announced = new Set();
+  let knownGen = 0;   // r3717: the file's generation `known` was filled at
   const opts = { dataDir, log, listMetas, execFileImpl };   // r3585: the hold's and the rebuild's (shared per file)
 
   // r3054 (主开发 — the kept browsers' second door): UNKNOWN IS NOT EMPTY. The file's read in three states: 'ok' (its rows),
@@ -340,12 +369,19 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
   function record(conversationId, key, { at = Date.now() } = {}) {
     const sid = typeof conversationId === 'string' ? conversationId : '';
     if (!sid || !KEY_RE.test(String(key || ''))) return false;
+    { const H0 = HELD.get(file), g = H0 ? H0.gen : 0; if (g !== knownGen) { known.clear(); knownGen = g; } }   // r3717: a rebuild / a lift's write clears it
     if (known.get(sid) === key) return false;
     try {
       // r3054 (2): NOTHING IS WRITTEN OVER AN UNREAD FILE — the record (and the prune it carries) writes nothing when its own read
       // is unknown; `known` stays unset, so the conversation's next record offers the binding again
       const rs = readState();
-      if (rs.state === 'unknown') { sayUnknown(rs.kind); return false; }
+      if (rs.state === 'unknown') {
+        sayUnknown(rs.kind);
+        // r3717 (MUST 2): HELD — the offer is KEPT (bounded) and written at the lift: nothing ends by a binding refused while the file was held
+        const H1 = HELD.get(file);
+        if (H1) { H1.owed.delete(sid); H1.owed.set(sid, { key: String(key), at }); while (H1.owed.size > MAX_BINDINGS) H1.owed.delete(H1.owed.keys().next().value); }
+        return false;
+      }
       const all = rs.all;
       const cur = all.byConversation[sid];
       if (cur && cur.key === key) { known.set(sid, key); return false; }

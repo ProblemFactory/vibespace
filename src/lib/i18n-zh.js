@@ -9864,6 +9864,7 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "一个附件已不在",
   "A link in an item was not found": "条目里的一个链接找不到",
+  "VibeSpace cannot read its list of kept browsers right now, so only the browsers used since are shown here. Nothing is lost: no kept browser is removed meanwhile, and the list comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到保留的浏览器列表，所以这里只显示此后用过的浏览器。没有丢失任何内容：在此期间不会删除任何保留的浏览器，列表会自己恢复（每隔几分钟重试一次）。",
   "VibeSpace cannot read which browser belongs to which conversation right now — nothing was changed, and no kept browser ends meanwhile. Try again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到哪个浏览器属于哪个对话——没有更改任何内容，在此期间也不会结束任何保留的浏览器。请几分钟后再试（它会自己重新读取）。",
   "VibeSpace cannot read which browser belongs to which conversation right now — no kept browser ends meanwhile, and it comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到哪个浏览器属于哪个对话——在此期间不会结束任何保留的浏览器，它会自己恢复（每隔几分钟重试一次）。",
   "Which browser belongs to which conversation was damaged and found again from the conversations' records ({n} found). The damaged copy is kept as {copy}.": "浏览器与对话的对应关系已损坏，已从各对话的记录中重新找回（找回 {n} 个）。损坏的副本保存为 {copy}。",

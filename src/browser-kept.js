@@ -266,7 +266,7 @@ function keptRetentionPlan({ entries = [], perConversation = KEPT_PER_DEFAULT_MB
     let b = num0(e.bytes);
     const cache = Math.min(b, num0(e.cacheBytes));
     if (b > perConversation) {
-      if (!e.live && cache > 0) { trimCaches.push({ key: e.key, frees: cache, why: `over its own bound (${b} of ${perConversation} bytes) — its caches go first, its logins never` }); b -= cache; }
+      if (!e.live && cache > 0 && !e.recovered) { trimCaches.push({ key: e.key, frees: cache, why: `over its own bound (${b} of ${perConversation} bytes) — its caches go first, its logins never` }); b -= cache; }
       if (b > perConversation) kept.push({ key: e.key, used: b, overBy: b - perConversation, why: e.live ? 'running — over its own bound, reported; nothing of a running browser is trimmed' : 'over its own bound even without its caches — its logins are never trimmed; reported' });
     }
     est.set(e.key, b);
@@ -276,7 +276,7 @@ function keptRetentionPlan({ entries = [], perConversation = KEPT_PER_DEFAULT_MB
     const order = rows.filter((e) => !e.live).sort((a, b) => (num0(a.lastUsedAt) - num0(b.lastUsedAt)) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     for (const e of order) {
       if (used <= total) break;
-      if (e.recovered) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: 'found again from its folder after the list was damaged — removed only by a person\'s Forget' }); continue; }   // r3585
+      if (e.recovered || e.stood) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: e.recovered ? 'found again from its folder after the list was damaged — removed only by a person\'s Forget' : 'no conversation names it since the bindings were damaged — removed only by a person\'s Forget' }); continue; }   // r3585 / r3717: the size bound is a clock's act, not the person's
       if (e.carried) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: 'its conversation is running (a live session carries it; only its browser stopped) — its logins and tabs are never removed while it runs; reported' }); continue; }
       remove.push({ key: e.key, frees: num0(e.bytes), why: 'the kept browsers passed their total bound — the least recently used goes first' });
       used -= est.get(e.key) || 0;

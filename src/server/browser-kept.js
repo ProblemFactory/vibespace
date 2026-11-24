@@ -401,9 +401,12 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   }
   /** Remove ONE entry and its directory (re-derived; a registered profile's directory stays). Never a live one; with
    *  `unlessCarried` (the sweep's two rules) never one a live session carries, re-asked here at the act (verify F2). */
-  async function removeEntry(bk, why, { unlessCarried = false } = {}) {
+  async function removeEntry(bk, why, { unlessCarried = false, byPerson = false } = {}) {
     const s = load(); const e = s.entries[bk];
     if (!e) return { removed: false, why: 'not kept' };
+    // r3717 (THE BELT): a row found again after a damage, or one no conversation names since the bindings were damaged, leaves ONLY by the
+    // person's own Forget — never by an end, a bound or any other clock's act, whatever its caller computed
+    if (!byPerson && (e.recovered || unnamedSinceDamage.has(bk))) return { removed: false, why: 'found again after a damage — removed only by the person\'s Forget' };
     if (liveOf(bk)) return { removed: false, why: 'its browser runs' };
     if (unlessCarried && carriedNow(bk)) return { removed: false, why: 'its conversation runs' };
     let dirGone = false, dirKept = null;
@@ -433,7 +436,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     if (!K.isParentKey(key) || !load().entries[key]) throw namedError('not_kept', 'nothing is kept for that browser');
     if (liveOf(key)) throw namedError('kept_live', 'this browser is running — stop it first, then forget it');
     await checkThere(key); // B-7a30 r2: the act's door — its folder asked fresh (5 s), refused by name past it, never a removal on an unanswered disk
-    const r = await removeEntry(key, why);
+    const r = await removeEntry(key, why, { byPerson: true });
     if (!r.removed) throw namedError(/runs|started/.test(r.why) ? 'kept_live' : 'forget_failed', `the browser was not forgotten: ${r.why}`);
     return { ok: true, browserKey: key, dirGone: !!r.dirGone, dirKept: r.dirKept || null };
   }
@@ -529,7 +532,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       // carried = a live session carries the key (its conversation runs): read AFTER the measure's await, fail closed
       let carriedSet = null; try { const v = liveKeys(); carriedSet = v instanceof Set ? v : new Set(v || []); } catch (e) { log.warn?.(`[browser-kept] the live sessions could not be listed (${e && e.message}) — no kept browser is removed by the bound this pass`); carriedSet = null; }
       const carriedAt = new Map(entries.map((e) => [e.browserKey, carriedSet ? carriedSet.has(e.browserKey) : true]));
-      const plan = K.keptRetentionPlan({ entries: entries.map((e) => ({ key: e.browserKey, bytes: sizes[e.browserKey] ? sizes[e.browserKey].bytes : null, cacheBytes: sizes[e.browserKey] ? sizes[e.browserKey].cacheBytes : 0, lastUsedAt: e.lastUsedAt, live: liveNow.get(e.browserKey), carried: carriedAt.get(e.browserKey) })), perConversation: lim.perConversation, total: lim.total });
+      const plan = K.keptRetentionPlan({ entries: entries.map((e) => ({ key: e.browserKey, bytes: sizes[e.browserKey] ? sizes[e.browserKey].bytes : null, cacheBytes: sizes[e.browserKey] ? sizes[e.browserKey].cacheBytes : 0, lastUsedAt: e.lastUsedAt, live: liveNow.get(e.browserKey), carried: carriedAt.get(e.browserKey), recovered: !!e.recovered, stood: unnamedSinceDamage.has(e.browserKey) })), perConversation: lim.perConversation, total: lim.total });   // r3717 (MUST 1, ruling 3): the marks reach the plan
       const trimmed = [], removed = [];
       for (const tc of plan.trimCaches) {
         if (liveOf(tc.key)) continue; // re-asked right before the act
@@ -574,12 +577,22 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // ── r3585: the lift, the rebuild from the folders, the facts the panel and the notice read ──
   /** LIFTED (the helper's read again answered). A list: loaded, with what this run noted while held laid over it (a row noted then is a
    *  true fact of a browser that ran meanwhile — newer than the file's). NO list: the rows are rebuilt from the kept folders. */
+  /** r3717: a row noted while the list was held, laid over the file's row: the noted facts win, and what only the file held stays — its
+   *  label, its restore, and its kept tabs (as `waiting` when the noted browser runs again, as its tabs when it stopped with none) */
+  function mergeNoted(f, n) {
+    if (!f) return n;
+    const out = { ...f, ...n, label: n.label || f.label, restore: n.restore || f.restore || null };
+    const fTabs = Array.isArray(f.tabs) ? f.tabs : [];
+    if (n.stoppedAt == null) { if (!n.waiting && f.stoppedAt != null && fTabs.length) out.waiting = { tabs: fTabs, stoppedWhy: f.stoppedWhy, stoppedAt: f.stoppedAt }; }
+    else if (!(Array.isArray(n.tabs) && n.tabs.length)) out.tabs = fTabs;
+    return K.normalizeEntry(n.browserKey || f.browserKey, out);
+  }
   function lifted(v, facts) {
     if (!v) { rebuildFromFolders((facts && facts.setAside) || null); return; }
     const noted = store ? store.entries : {};
     store = K.normalizeKeptStore(v);
     let laid = 0;
-    for (const [k, e] of Object.entries(noted)) if (!store.entries[k] || (Number(e.lastUsedAt) || 0) > (Number(store.entries[k].lastUsedAt) || 0)) { store.entries[k] = e; laid++; }
+    for (const [k, e] of Object.entries(noted)) if (!store.entries[k] || (Number(e.lastUsedAt) || 0) > (Number(store.entries[k].lastUsedAt) || 0)) { store.entries[k] = mergeNoted(store.entries[k], e); laid++; }
     if (laid) save();
     changed(); recheckAll().catch(() => {});
   }
@@ -614,9 +627,9 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       for (const row of r.dirs) {
         const name = Array.isArray(row) ? String(row[0] || '') : '';
         if (!K.isParentKey(name)) continue;
-        // a folder a REGISTERED profile names is that profile's (adopted in place): left out only when the keeper ANSWERS so — an unknown
-        // keeper (not built yet, held) leaves it a row: a found-again row is removed only by a Forget, which refuses a registered folder
-        { const kk = kp(); let reg = false; if (kk && typeof kk.profileDirRegistered === 'function' && !(typeof kk.held === 'function' && kk.held())) { try { reg = !!kk.profileDirRegistered(dirOf(name)); } catch { reg = false; } } if (reg) continue; }
+        // r3717 (ruling 4): NO registered-profile check here (it resolved real paths on the hub's loop). A folder a registered profile adopted
+        // in place becomes a found-again row: it never ends and is never removed by the bound (src/browser-kept.js keptEndVerdict and
+        // keptRetentionPlan, the recovered guards), its caches are not trimmed, and Forget leaves a registered folder in place (removeEntry)
         const t = Math.round(Number(row[1])) || at;
         entries[name] = { hasDir: true, label: '', startedAt: t, stoppedAt: t, lastUsedAt: t, recovered: at };
       }

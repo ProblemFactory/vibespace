@@ -241,7 +241,7 @@ console.log('⑧ r3585 THE MODEL: a found-again row never ENDS by a silence and 
   const plan = (M) => M.keptRetentionPlan({ entries: [{ key: KEYS[0], bytes: 50 * M.MB, cacheBytes: 0, lastUsedAt: 1, live: false, carried: false, recovered: true }], perConversation: 100 * M.MB, total: M.MB });
   const v = verdict(KB), pl = plan(KB);
   const V0 = asModule('src/browser-kept.js', anchored(MSRC, "  if (entry.recovered) return { end: false, why: 'recovered' };", '', 'r3585 no recovered guard'));
-  const P0 = asModule('src/browser-kept.js', anchored(MSRC, "      if (e.recovered) { kept.push(", "      if (false) { kept.push(", 'r3585 no recovered bound guard'));
+  const P0 = asModule('src/browser-kept.js', anchored(MSRC, "      if (e.recovered || e.stood) { kept.push(", "      if (false) { kept.push(", 'r3585 no recovered bound guard'));
   const v0 = verdict(V0), pl0 = plan(P0);
   ok(v.end === false && v.why === 'recovered' && pl.remove.length === 0 && v0.end === true && pl0.remove.length === 1, 'a found-again row ten hours past the grace with no binding: never ended (why recovered); over the total bound: kept, reported — RED: the model without the two guards ends it and removes it', { v, remove: pl.remove.length, red: { v0, remove0: pl0.remove.length } });
 }
@@ -267,7 +267,7 @@ console.log('⑩ r3585 the person\'s page and the routes say the hold (each by i
 {
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const TV = src('src/lib/browser-trace-view.js'), RB = src('src/routes/browser.js'), BT = src('src/server/browser-trace.js'), UT = src('src/lib/utils.js'), HW = src('src/lib/held-lists-words.js');
-  const H1 = "    if (v.keptUnread) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', t('VibeSpace cannot read its list of kept browsers right now, so none is shown here.";
+  const H1 = "    if (v.keptUnread) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', krows.length ? t('VibeSpace cannot read its list of kept browsers right now, so only the browsers used since are shown here.";
   const panel = (x) => x.includes(H1) && x.includes("    if (!v.keptUnread && !krows.length) keptSec.appendChild(");
   ok(panel(TV) && !panel(anchored(TV, "    if (!v.keptUnread && !krows.length) keptSec.appendChild(", "    if (!krows.length) keptSec.appendChild(", 'r3585 the panel as it was')), 'the Agent browser panel while the list is held: its held words, never «None — no conversation\'s browser has stopped…» (RED: the panel as it was)', null);   // stale-pins: kept (the red copy writes the line as it was)
   const H2 = "    if (k.recovered) { const c = el('span', 'bprof-chip', t('found again'));";
@@ -405,5 +405,110 @@ console.log('⑮ r3585 the panel and the words say the bindings\' hold (each by 
   ok(TV.includes("    if (v.bindingsUnread) keptSec.appendChild(") && BT.includes("...(bindingsUnread ? { bindingsUnread } : {}), ...(bindingsRecovered ? { bindingsRecovered } : {}), "), 'the panel says the bindings\' hold and their rebuild (the view carries both)', null);
   ok(/\n  bindings_unread: \(\) => t\('VibeSpace cannot read which browser belongs to which conversation right now/.test(UT) && HW.includes("'bindings.json': i18nKey('which browser belongs to which conversation'),"), 'r3488: the page\'s held words (bindings_unread) and the list\'s plain name on the family\'s notice', null);
 }
+
+// ══ r3717 (the round wf_2898fc6f-004's two musts, the two rulings and the shoulds) ══
+const KSRC3 = fs.readFileSync(path.join(REPO, 'src/server/browser-kept.js'), 'utf8');
+const BBS3 = fs.readFileSync(path.join(REPO, 'src/server/browser-bindings.js'), 'utf8');
+/** a stand-in `du` that says every kept folder is 9 GB (the total bound passed by far); any other program runs for real */
+const bigDu = (cmd, args, opts, cb) => {
+  if (cmd !== 'du') return realExecFile(cmd, args, opts, cb);
+  const ps = args.slice(args.indexOf('--') + 1);
+  setImmediate(() => cb(null, ps.map((x) => `${/browser-profiles[\\/]bk-[0-9a-f]{8}$/.test(x) ? 9000000000 : 0}\t${x}`).join('\n'), ''));
+  return { kill() { } };
+};
+const PLAN_LINE = ', recovered: !!e.recovered, stood: unnamedSinceDamage.has(e.browserKey) })), perConversation: lim.perConversation, total: lim.total });';
+const BELT_LINE = "    if (!byPerson && (e.recovered || unnamedSinceDamage.has(bk))) return { removed: false, why: 'found again after a damage — removed only by the person\\'s Forget' };\n";
+let planToday = null;
+const todayPlan = () => planToday || (planToday = MUT.load('src/server/browser-kept.js', anchored(anchored(KSRC3, PLAN_LINE, ' })), perConversation: lim.perConversation, total: lim.total });', 'r3717 the plan as it was'), BELT_LINE, '', 'r3717 no belt'), 'kept-sweep-plan-today'));
+
+console.log('⑯ r3717 MUST 1: a found-again row is NOT removed by the total size bound — through the REAL sweep (the marks reach the plan; the remover\'s belt)');
+async function boundRun(KS) {
+  const w = keptWorld(TORN);
+  const S = mkStore(KS, w.dir, { execFileImpl: bigDu });
+  S.has(KEYS[0]);
+  await until(() => !hf(S));
+  const sw = await S.sweep();
+  const out = { recovered: S.list().filter((r) => r.recovered).length, removed: sw && sw.removed, left: w.left() };
+  stopHold(S);
+  return out;
+}
+const M16 = await boundRun(KS0);
+console.log(`    facts: ${JSON.stringify(M16)}`);
+ok(M16.recovered === 2 && M16.removed === 0 && M16.left === 2, 'a torn list rebuilt from the folders, the two kept browsers measured at 9 GB each (far past the total bound): the REAL sweep removes NONE — the size bound is a clock\'s act, not the person\'s', M16);
+const M16x = await boundRun(todayPlan());
+console.log(`    facts (red): ${JSON.stringify(M16x)}`);
+ok(M16x.left === 0, 'RED CONTROL (the plan\'s rows as they were, no belt): the least recently used go first — the found-again rows, their sign-ins deleted by a clock — red', M16x);
+
+console.log('⑰ r3717 RULING 3: a kept browser that STOOD at the bindings\' recovery is not removed by the size bound either — through the REAL sweep');
+async function stoodBoundRun(KSmod) {
+  let clock = 2_000_000;
+  const w = bindWorld({ bytes: '{"v":1,"byConversation":{"x' });
+  const bb = BB0.create({ dataDir: w.dir, log: quiet });
+  const S = KSmod.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock, execFileImpl: bigDu });
+  for (const k of KEYS) { S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); S.noteStop(k, { why: 'idle' }); }
+  try { bb.boundKeys(); } catch { /* the torn read engages the hold */ }
+  await until(() => !hb(bb) && !!(bb.recoveredFacts && bb.recoveredFacts()));
+  clock = Date.now() + 3 * 3600e3;
+  const sw = await S.sweep();
+  const out = { ended: sw && sw.ended, removed: sw && sw.removed, left: KEYS.filter((k) => fs.existsSync(path.join(S.dirOf(k), 'Cookies'))).length };
+  try { S.shutdown(); } catch { /* its own */ }
+  return out;
+}
+const R17 = await stoodBoundRun(KS0);
+console.log(`    facts: ${JSON.stringify(R17)}`);
+ok(R17.ended === 0 && R17.removed === 0 && R17.left === 2, 'the bindings rebuilt from no record: both kept browsers stood at the recovery, three hours past the grace and far past the total bound — NONE ended, NONE removed (what can pile up is what stood at the damage)', R17);
+const R17x = await stoodBoundRun(todayPlan());
+console.log(`    facts (red): ${JSON.stringify(R17x)}`);
+ok(R17x.left === 0, 'RED CONTROL (the plan as it was, no belt): the stood rows go by the bound — red', R17x);
+
+console.log('⑱ r3717 MUST 2: a binding offered while the file was HELD is written at the lift — nothing ends by a binding refused then');
+async function owedRun(BBmod) {
+  let clock = 3_000_000;
+  const w = bindWorld({ bytes: JSON.stringify({ v: 1, byConversation: {} }) });
+  const bb = BBmod.create({ dataDir: w.dir, log: quiet });
+  const S = KS0.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
+  const realRead = fs.readFileSync;
+  fs.readFileSync = function (p, ...a) { if (path.resolve(String(p)) === path.resolve(w.bfile)) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, p, ...a); };
+  let rec;
+  try {
+    try { bb.boundKeys(); } catch { /* the hold engaged */ }
+    rec = bb.record(CONVS[0], KEYS[0], { at: clock });   // a NEW browser's binding, offered while held
+    S.noteStart(KEYS[0], { hasDir: true }); fs.mkdirSync(S.dirOf(KEYS[0]), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(KEYS[0]), 'Cookies'), 'a sign-in'); S.noteStop(KEYS[0], { why: 'idle' });
+  } finally { fs.readFileSync = realRead; }
+  const h = hbHold(bb); if (h) await h.again();   // the lift WITH data
+  clock += 3 * 3600e3;
+  const sw = await S.sweep();
+  const out = { rec, bound: (() => { try { return bb.boundKeys().has(KEYS[0]); } catch (e) { return e.code; } })(), ended: sw && sw.ended, left: fs.existsSync(path.join(S.dirOf(KEYS[0]), 'Cookies')) };
+  if (h) h.stop(); try { S.shutdown(); } catch { /* its own */ }
+  return out;
+}
+const O18 = await owedRun(BB0);
+console.log(`    facts: ${JSON.stringify(O18)}`);
+ok(O18.rec === false && O18.bound === true && O18.ended === 0 && O18.left === true, 'the bindings held (EIO): a new browser\'s binding is refused (nothing written then) but KEPT; the lift with data writes it — three hours later the sweep reads it bound: not ended, its sign-ins kept', O18);
+const O18x = await owedRun(MUT.load('src/server/browser-bindings.js', anchored(BBS3, ' else if (H.owed.size) writeOwed(file, H, v); },', ' },', 'r3717 today\'s lift'), 'kept-sweep-owed-today'));
+console.log(`    facts (red): ${JSON.stringify(O18x)}`);
+ok(O18x.left === false && O18x.ended === 1, 'RED CONTROL (today\'s lift: the refused offer is gone): the browser is never bound and ENDS after the lift, its folder removed — red', O18x);
+
+console.log('⑲ ⑳ r3717 the shoulds: the panel\'s held words over the rows it draws; a row noted while held merges with the file\'s');
+{
+  const TV3 = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
+  const P2 = "krows.length ? t('VibeSpace cannot read its list of kept browsers right now, so only the browsers used since are shown here.";
+  const says = (x) => x.includes(P2);
+  ok(says(TV3) && !says(anchored(TV3, P2, "!krows.length ? t('", 'r3717 the panel as it was')), 'the panel while held with rows noted meanwhile drawn beneath: «only the browsers used since are shown here» — never «none is shown here» above them (RED: the line as it was)', null);
+}
+async function mergeRun(KS) {
+  const w = keptWorld(JSON.stringify({ version: 1, entries: { [KEYS[0]]: { hasDir: true, label: 'Made-up mail', tabs: [{ url: 'https://mail.example/' }], startedAt: 900, stoppedAt: 1000, lastUsedAt: 1000 } } }));
+  const realRead = fs.readFileSync; let refused = 0;
+  fs.readFileSync = function (p, ...a) { if (!refused && path.resolve(String(p)) === w.file) { refused++; throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); } return realRead.call(this, p, ...a); };
+  let S; try { S = mkStore(KS, w.dir); S.has(KEYS[0]); } finally { fs.readFileSync = realRead; }
+  S.noteStart(KEYS[0], { hasDir: true });   // it runs again, noted while held
+  await again(S);
+  const row = S.list().find((r) => r.browserKey === KEYS[0]) || {};
+  stopHold(S);
+  return { label: row.label, waiting: row.waiting };
+}
+const G20 = await mergeRun(KS0);
+const G20x = await mergeRun(MUT.load('src/server/browser-kept.js', anchored(KSRC3, 'store.entries[k] = mergeNoted(store.entries[k], e);', 'store.entries[k] = e;', 'r3717 the noted row laid whole'), 'kept-sweep-merge-today'));
+ok(G20.label === 'Made-up mail' && G20.waiting === 1 && G20x.label !== 'Made-up mail' && G20x.waiting === 0, 'a browser noted while the list was held (it runs again) MERGES at the lift: the file\'s label stays and its kept tab waits to be reopened — RED: the noted row laid whole loses both', { now: G20, red: G20x });
 
 report();
