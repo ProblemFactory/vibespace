@@ -1034,18 +1034,35 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(tn.ended && tn.asides.length === 1 && tn.skel && tn.corrupt && tn.corrupt.words.params.file === tn.asides[0] && !tn.readAgain && tn.held && tn.done && tn.resolved >= 1 && /torn bytes, set aside as jobs\.json\.corrupt-\d+/.test(tn.said), 'cure 2: a read again that finds TORN bytes ends the hold as a boot would — set aside (named in its item), rebuilt from the job logs; the set-aside holds the clean-up, the failure\'s note is done, never «nothing was lost»', tn);
   ok(tnx.readAgain && !tnx.held, 'cure 2 CONTROL (r2: the lift on any answer, in a copy): «nothing was lost» is said of TORN bytes and the clean-up resumes', tnx);
   // CURE 2: ONE IN FLIGHT A STORE covers the read AND its prefetch — a SLOW prefetch with a second try: one read, one file at a time, one load
-  const prefScene = async (Mod, name) => {
+  // r3760 (B-3dbd member, placed by a probe on the kit, run 7da095ac2-20261124185718-box): the counter took every read under ANY
+  // job-logs folder of the process — the suite's other live engines' memory samplers (_sampleUse → _treeAnonMb → pid.json, on a
+  // machine with a memory limit) landed in the window 2 runs in 25 (ctlReads 3); and the window closed at «5 tries», a count of timer
+  // ticks: a store read slower than 4 ticks closed it before the prefetch's first read (ctlReads 0). Now the scene counts ITS OWN
+  // folder's reads only (another engine's are said, never judged), and the window waits on its FACT: the prefetch's first control
+  // read in flight, then three more tries that met the held slot, and the slow read said
+  const prefScene = async (Mod, name, { storeHoldMs = 0, foreign = false } = {}) => {
     const d = mkDir(name), F = path.join(d, 'jobs.json'), b = JSON.stringify([rec('jb-f2760p01', { state: 'up', runs: [{ startedAt: T0 - 1000 }] })]);
+    const OWN = path.join(d, 'job-logs') + path.sep, OTHER = path.join(mkDir(name + '-other'), 'job-logs', 'jb-f2760p99', '1', 'pid.json');
     plant(F, b, 'folder');
     const lp = [];
     const J = engine(Mod, d, lp, { unreadRetry: { firstMs: 5, maxMs: 10, readMs: 30 } });
     unplant(F, b, 'folder');
-    const prf = fs.promises.readFile; let storeReads = 0, ctlReads = 0, release = null;
+    const prf = fs.promises.readFile; let storeReads = 0, ctlReads = 0, others = 0, triesAtRead = null, release = null;
     const gate = new Promise((r) => { release = r; });
-    fs.promises.readFile = function (f, ...a) { const p = String(f); if (p === F) storeReads++; if (p.includes(`${path.sep}job-logs${path.sep}`)) { ctlReads++; return gate.then(() => prf.call(this, f, ...a)); } return prf.call(this, f, ...a); };
+    fs.promises.readFile = function (f, ...a) {
+      const p = String(f);
+      if (p === F) { storeReads++; if (storeHoldMs) return new Promise((r) => setTimeout(r, storeHoldMs)).then(() => prf.call(this, f, ...a)); }   // PLACED: a slow store read
+      if (p.startsWith(OWN)) { if (!ctlReads++) { triesAtRead = J._unreadTries.store; if (foreign) fs.promises.readFile(OTHER).catch(() => { }); } return gate.then(() => prf.call(this, f, ...a)); }   // PLACED: another engine's read inside the window
+      if (p.includes(`${path.sep}job-logs${path.sep}`)) others++;   // another engine's (its sampler): said, never judged
+      return prf.call(this, f, ...a);
+    };
     let during = null;
-    try { await until(() => J._unreadTries.store >= 5, 3000); during = { storeReads, ctlReads, tries: J._unreadTries.store, held: !!J._unread.store }; release(); await until(() => !J._unread.store, 3000); }
-    finally { release(); fs.promises.readFile = prf; }
+    try {
+      const inFlight = await until(() => ctlReads >= 1, 3000);
+      const waited = inFlight && await until(() => J._unreadTries.store >= triesAtRead + 3 && lp.some((l) => /did not answer in/.test(l)), 3000);
+      during = { storeReads, ctlReads, tries: J._unreadTries.store, triesHeld: triesAtRead == null ? 0 : J._unreadTries.store - triesAtRead, triesAtRead, held: !!J._unread.store, others, inFlight, waited };
+      release(); await until(() => !J._unread.store, 3000);
+    } finally { release(); fs.promises.readFile = prf; }
     const out = { during, back: !J._unread.store && J.jobs.has('jb-f2760p01'), storeReads, said: lp.filter((l) => /did not answer in/.test(l)).length, loads: lp.filter((l) => /read again after/.test(l)).length };
     if (J._logsNoteP) await J._logsNoteP; J.shutdown(); return out;
   };
@@ -1053,7 +1070,12 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
   ok(jsrc.split(SLOT_A).length === 2, 'B-f276 cure 2 control setup: the read again\'s answer is one line inside its slot');
   const JS2 = MJ.load('src/jobs.js', editAnchor(jsrc, SLOT_A, SLOT_A + "      if (this._unreadP[which]) this._unreadP[which] = null;   // MUTANT: r2 — the slot covers the read only\n", "src/jobs.js"), 'slot-read-only');
   const pf = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch'), pfx = await prefScene(JS2, 'jobs-triage-reread-prefetch-mut');
-  ok(pf.during && pf.during.tries >= 5 && pf.during.storeReads === 1 && pf.during.ctlReads === 1 && pf.during.held && pf.back && pf.said === 1 && pf.loads === 1, 'cure 2: a SLOW prefetch holds the one slot — the tries go on, ONE read of the store, ONE control file in flight at a time, said once, ONE load once it answers', pf);
+  const slotHeld = (x) => !!x.during && x.during.waited && x.during.triesHeld >= 3 && x.during.storeReads === 1 && x.during.ctlReads === 1 && x.during.held && x.back && x.said === 1 && x.loads === 1;
+  ok(slotHeld(pf), 'cure 2: a SLOW prefetch holds the one slot — the tries go on (three more met it), ONE read of the store, ONE control file of its own in flight at a time, said once, ONE load once it answers', pf);
+  // r3760, THE PLACED FORM (every run, no load): the store's read held 60 ms (the tries pass the old «5» before the prefetch reads)
+  // and another engine's control read started INSIDE the window — the leg judges this engine's prefetch alone, on its fact
+  const pfP = await prefScene({ JobManager }, 'jobs-triage-reread-prefetch-placed', { storeHoldMs: 60, foreign: true });
+  ok(slotHeld(pfP) && pfP.during.triesAtRead >= 5 && pfP.during.others >= 1, `cure 2 PLACED: a store read held 60 ms (${pfP.during && pfP.during.triesAtRead} tries before the prefetch's first read) and another engine's control read in the window (${pfP.during && pfP.during.others}) — the slot is judged on its own prefetch, after its own read began`, pfP);
   ok(pfx.during && (pfx.during.storeReads > 1 || pfx.during.ctlReads > 1), 'cure 2 CONTROL (r2: the slot covers the read only, in a copy): a second try reads the store and starts its prefetch over the slow one', pfx);
   // ── CURE 3 (主开发 11:10Z, as if a must): a store that answers «missing» RIGHT AFTER an unreadable answer is read once more before
   // anything is written at its path — the storage that says «no such file» for a moment about a file that is there
