@@ -29,6 +29,20 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 主开发 r3677: THE FACT, never a time — the push lane's coalesced window FIRED and its wake landed: no window open for the
+// conversation (the engine's own pendingWindows) and nothing pending on its row, after the wakes in flight settled. Bounded by
+// the window × a stated slack (it waits on the evidence; ⑤ is its red: a fixed sleep reads before a late window fires)
+async function windowLanded(eng, key, coalesceSeconds, { slack = 40 } = {}) {
+  const until = Date.now() + (coalesceSeconds * 1000 + 250) * slack;
+  for (;;) {
+    await eng.settleWakes();
+    const en = eng.store.index.snapshot().conversations[key];
+    const open = typeof eng.pendingWindows === 'function' && eng.pendingWindows().some((w) => w.key === key);
+    if (!open && en && !(en.pending || []).length) return true;
+    if (Date.now() >= until) return false;
+    await sleep(20);
+  }
+}
 
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -138,7 +152,7 @@ function laneAdapter(kind, receive, world) {
 }
 
 const engines = [];
-async function runLane(receive, { coalesceSeconds = 0.3, name = receive } = {}) {
+async function runLane(receive, { coalesceSeconds = 0.3, name = receive, late = 0, wait = 'fact' } = {}) {
   const kind = `fake-${receive}`;                 // the seeded record's kind — our module REPLACES the shipped fake for it
   const dir = path.join(ROOT, name);
   const guard = mkGuard(path.join(dir, 'guard'));
@@ -166,9 +180,15 @@ async function runLane(receive, { coalesceSeconds = 0.3, name = receive } = {}) 
     await eng.setPush(kind, { claimedExclusive: 'exclusive' });
     await eng.syncPushLanes();
     if (!world.push) throw new Error('push lane never armed');
-    // the vendor's day arrives one event at a time; the lane's ack is the return
-    for (const r of traffic) { world.records.push(r); await world.push.onEvent({ kind: 'record', eventId: `ev-${r.vendorId}`, convId: CID, record: r, at: Date.now() }); }
-    await sleep(coalesceSeconds * 1000 + 250);
+    // ⑤'s placed LATE window: the window's own timer (its delay the window's length) fires `late` ms later — never another timer
+    const T0 = globalThis.setTimeout, W = coalesceSeconds * 1000;
+    if (late) globalThis.setTimeout = function (fn, d, ...a) { return T0.call(this, fn, Math.abs(Number(d) - W) <= 10 ? Number(d) + late : d, ...a); };
+    try {
+      // the vendor's day arrives one event at a time; the lane's ack is the return
+      for (const r of traffic) { world.records.push(r); await world.push.onEvent({ kind: 'record', eventId: `ev-${r.vendorId}`, convId: CID, record: r, at: Date.now() }); }
+      if (wait === 'sleep') await sleep(coalesceSeconds * 1000 + 250);   // ⑤'s red: the release's fixed wait
+      else await windowLanded(eng, `${kind}/${CID}`, coalesceSeconds);
+    } finally { globalThis.setTimeout = T0; }
   } else {
     world.records.push(...traffic);
     await eng.refresh(kind, CID);
@@ -220,7 +240,7 @@ console.log('③ a record pushed once and polled once collapses to one');
   P.world.records.push(extra);
   const r1 = await P.world.push.onEvent({ kind: 'record', eventId: 'ev-late-1', convId: CID, record: extra, at: Date.now() });
   const r2 = await P.world.push.onEvent({ kind: 'record', eventId: 'ev-late-2', convId: CID, record: extra, at: Date.now() });   // the vendor's at-least-once replay under a NEW event id
-  await sleep(0.3 * 1000 + 250);
+  await windowLanded(P.eng, `${P.kind}/${CID}`, 0.3);   // r3677: its one more wake landed — the fact, not a time
   await P.eng.settleWakes();
   await P.eng.pass(P.kind, { force: true });        // the reconciliation poll sees the same record
   await P.eng.settleWakes();
@@ -239,6 +259,17 @@ console.log('④ a quiet reconcile pass costs nothing');
   await P.eng.pass(P.kind, { force: true });
   await P.eng.settleWakes();
   ok(P.ladder.calls.length === w && chargesOf(P.guard) === c, 'no fresh record ⇒ no wake, no charge');
+}
+
+// ── ⑤ THE WAIT IS ON THE FACT (主开发 r3677): a red once under load — the push lane's coalesced wake had not come when the leg
+//      read it (it came: the ladder had it moments later). Its window placed LATE: the leg still sees its one wake ────────
+console.log('⑤ the push lane\'s window placed late: the leg waits for its wake, not for a time');
+{
+  const LATE_MS = 1500;   // a placed delay of the window's own timer (the box's load did the same to it)
+  const G = await runLane('push', { name: 'push-late', late: LATE_MS });
+  ok(G.wakes === 1 && G.snap.pending.length === 0 && G.snap.pendingElided === 0, `the push lane's window fired ${LATE_MS} ms late: the leg waited for the fact — ONE wake (${G.wakes}), nothing pending (${G.snap.pending.length})`);
+  const Old = await runLane('push', { name: 'push-late-sleep', late: LATE_MS, wait: 'sleep' });
+  ok(Old.wakes === 0 && Old.snap.pending.length > 0, `RED CONTROL: the release's fixed sleep under the same late window reads before it fires (${Old.wakes} wakes, ${Old.snap.pending.length} pending) — a leg that waited on a time would go red`);
 }
 
 for (const e of engines) { try { e.stop(); } catch {} }
