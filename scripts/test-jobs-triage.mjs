@@ -728,6 +728,10 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     // an archived record past the 14 days keeps its folder; a person's ✕ still removes (the logs law, test-job-logs-sweep-heavy round 4)
     const DAY = 86400e3, old = Date.now() - 20 * DAY, arc = (id) => ({ id, kind: 'task', name: 'made-up', state: 'done', owner: {}, access: { view: 'all', control: 'session' }, runs: [{ startedAt: old, endedAt: old + 1000, exit: 0 }], archivedAt: old + 2000, archivedWhy: 'done' });
     R._writeArchive([arc('jb-f2760a0e')]);
+    // B-0248 step 3's follow (line 383): an archive this process still OWES is held at its read (_archiveOwedHold, never flushed on
+    // the loop), so the pass would see no archived record and the leg prove nothing — the record is ON DISK before the pass, as the
+    // release's read made it by its flush
+    await R._writer().durable(R.archiveFile);
     const LD = path.join(R.logsDir, 'jb-f2760a0e'); fs.mkdirSync(LD, { recursive: true }); fs.writeFileSync(path.join(LD, 'run-1.log'), 'made-up');
     await R._gc({ now: Date.now() });
     const keptAtGc = fs.existsSync(LD);
@@ -752,7 +756,7 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     const dT = mkDir('jobs-triage-unread-table-ctl'), FT = path.join(dT, 'jobs.json');
     plant(FT, body, 'folder');
     const XT = engine(JT, dT, []); XT._unreadStopped = true;
-    XT._writeArchive([arc('jb-f2760a0e')]);
+    XT._writeArchive([arc('jb-f2760a0e')]); await XT._writer().durable(XT.archiveFile);   // on disk before the pass (above)
     const LT = path.join(XT.logsDir, 'jb-f2760a0e'); fs.mkdirSync(LT, { recursive: true }); fs.writeFileSync(path.join(LT, 'run-1.log'), 'made-up');
     if (XT._unread.store) await XT._gc({ now: Date.now() });
     const goneCtl = !!XT._unread.store && await until(() => !fs.existsSync(LT), 3000);
