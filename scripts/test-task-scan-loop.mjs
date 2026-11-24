@@ -668,7 +668,12 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const words = [NKY, NFW].flatMap((k) => [valOf(ZHS, k), valOf(JAS, k)]);
       const apart = [ZHS, JAS].every((src) => OTHER.every((k) => valOf(src, k) !== valOf(src, NKY)));
       const body = CVS.slice(CVS.indexOf('  _sayHistoryNotLoaded(code, '), CVS.indexOf('  _historyLoadedNow(msg = null) {'));
-      const first = body.indexOf('if (info && info.storageHung) words') > 0 && body.indexOf('if (info && info.storageHung) words') < body.indexOf('else if (info && info.notKnownYet)') && body.indexOf('else if (info && info.notKnownYet)') < body.indexOf('else if (info && info.readerGone)');   // r2743: the storage's cause first (it carries a time)
+      // the move onto the train 2.369.418 (主开发 r3509): the train's line 660 says the reader's causes through ONE table
+      // (src/lib/reader-words.js, r3077: the storage's first, then the reader gone / busy / restarting) — so the order is read as it
+      // stands now: «not known yet» yields to a hung storage, then the table says every other cause (the toast's words too)
+      const RW = fs.readFileSync(path.join(REPO, 'src/lib/reader-words.js'), 'utf8'), lineFn = RW.slice(RW.indexOf('export function readerLineWords('));
+      const first = body.indexOf('if (info && info.notKnownYet && !info.storageHung) words') > 0 && body.indexOf('if (info && info.notKnownYet && !info.storageHung) words') < body.indexOf('else words = readerLineWords(info, this._clockOf(at));')
+        && CVS.includes('if (info && info.notKnownYet && !info.storageHung) return ') && lineFn.indexOf("if (k === 'storage')") >= 0 && lineFn.indexOf("if (k === 'storage')") < lineFn.indexOf("if (k === 'gone')");   // r2743: the storage's cause first (it carries a time)
       const oldGone = !['src/lib/chat-view.js', 'src/lib/session-lifecycle.js', 'src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].some((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes('it is read again the next time this conversation opens'));   // stale-pins: kept (the absence check: the unit's old sentence is gone)
       ok(words.every((w) => typeof w === 'string' && w.length > 4) && apart && first && oldGone && CVS.includes("t('" + NFW + "')"),
         `r2439 (3) the words: «not known yet» and «not found» in zh and ja (${words.join(' · ')}), apart from line 411's three causes (${apart}), the storage's cause first, then this one, then line 411's others (${first}); the old sentence gone (${oldGone})`);
