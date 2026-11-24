@@ -88,6 +88,17 @@ This file is the engineers' record of every release: the lanes, the verification
 - A file emptied (signed out) and then DELETED on Linux: the signed-out word stands as it was. The usage meter's warning reads it (src/lib/usage-meter.js `_subSignedOut`); 3108d3e37's gone branch had set it back to false. A gone file still keeps no sign-in.
 - Legs: scripts/test-cli-usage-parse.mjs «the machine login's kept read» (j) the key changed and the read fails (no token that ask, the new one the next), (k) emptied then deleted (the flag read through a copy whose only edit exports it); reds: the drop cut, 3108d3e37's gone branch.
 
+### lg-vault-env — the vault run sweep's owed smalls (主开发 r1436, as one unit by r2642)
+- **THE SHRED's OVERWRITE IS BOUNDED** (it runs on the loop: a run's end, the boot's sweep): a file over `SHRED_OVERWRITE_MAX` (1 MiB) is unlinked WITHOUT the overwrite — never a value of the door's (a run file is one template of at most 64 KB with its values put in), only what the run's program left beside them; each file's overwrite stays ≤ 1 MiB, so the sweep's work on the loop is bounded a file.
+- **SAID (kb)**: an older release's scratch whose opener write failed carries no mark and is kept for ever (the law leaves an unmarked folder alone); a sub-folder swapped between the read and the shred is a deliberate same-user act, not defended.
+- **Leg (test-vault-run)**: a dead owner's folder with the door's value file and a file one byte over the bound — the value overwritten before its unlink, the big file unlinked as it is (second names made before the sweep read the difference); RED: a copy without the bound overwrites the big file too.
+
+### lg-vault-env — the artifact fold's four owed smalls (主开发 r1384, as one unit by r2642)
+- **(1) THE PREFETCH's READS RIDE THE PERSON's SHARE**: the reads a history open awaits (the rebuild's prefetch, inside its 2 s bound) slice as FOREGROUND, never a crawl behind two live folds; once the bound is over the rest is read in the background's share (`helperFileOps(of, file, fg)`, `{on}` turned off after the race).
+- **(2) + (3) SAID** (code comment + kb): the rare order where a walk's last slice runs ahead of a pending reset gives the background its whole budget on top in that one iteration (~30 ms, under the law); a third background fold waits at zero until one of two ends.
+- **(4)** the background pacer's empty `end` is kept on purpose (a reader ends its pacer whichever kind it took).
+- **Leg (test-artifacts-handover l2)**: the prefetch's read slices with the foreground share live (RED: the reads in the background's share).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
