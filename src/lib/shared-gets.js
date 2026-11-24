@@ -12,7 +12,8 @@
  *   (c) a caller that asks with OTHER WORDS is another read: the whole URL (its query), the headers, `credentials`, `cache`
  *       are the read's key; a body, a signal (one caller's abort is never another's), a Request object or any other option is
  *       never shared at all;
- *   (d) WRITES ARE NEVER SHARED: only GET is.
+ *   (d) WRITES ARE NEVER SHARED: only GET is;
+ *   (e) A READ IS JOINED ONLY WHILE YOUNG (JOIN_MS below): a read in flight longer is never joined — an ask again is its own request.
  * The first caller gets the response itself; a joiner gets a copy — so a read nobody joined costs nothing (no copy, no tee).
  * Installed once, at the page's boot (src/client.js), over `window.fetch`: every fetch, fetchJson and api() from then on goes
  * through it. The page's imports run BEFORE it: a fetch at a module's top level goes unshared. A relative URL is resolved
@@ -44,9 +45,17 @@ export function readKeyOf(input, init, base) {
   return JSON.stringify([url, heads, o.credentials || '', o.cache || '']);
 }
 
-/** → a fetch that shares a GET while it is in flight (laws a–d above). `base` resolves a relative URL; none given = the page's
- *  address read as each key is made (never the one at install) */
-export function sharedGets(fetchImpl, { base = null } = {}) {
+/** (e) A READ IS JOINED ONLY WHILE IT IS YOUNG (主开发 r3683 — the candidate's find: a read that HANGS was joined by every later
+ *  ask of it: the retry press, the arrow, the next send's tail read all waited on the stuck request). An ask that finds the same
+ *  read in flight for JOIN_MS or longer is its OWN request (and later asks join that newer one). The figure: on the stand-in the
+ *  load's slowest doubled read answered in 356 ms (B-360d's measure), so every double the load sends joins inside it, while a
+ *  read past it is already slow — never one a person's ask again should wait on; it is well under the 2.5 s a send's landing
+ *  allows its tail read (test-chat-send-landing leg 4). */
+export const JOIN_MS = 1000;
+const clock = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+/** → a fetch that shares a GET while it is in flight AND YOUNG (laws a–e). `base` resolves a relative URL; none given = the page's
+ *  address read as each key is made (never the one at install); `joinMs` / `now` = the window and its clock (a suite's) */
+export function sharedGets(fetchImpl, { base = null, joinMs = JOIN_MS, now = clock } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('sharedGets: the fetch handed in is not a function');   // never «name(» in a string: the bundle check reads it as a call
   const inflight = new Map();   // key → { joiners: [{ resolve, reject }] } — only while the read is in flight
   const baseNow = () => base || (typeof location !== 'undefined' ? location.href : 'http://localhost/');
@@ -54,8 +63,8 @@ export function sharedGets(fetchImpl, { base = null } = {}) {
     const key = readKeyOf(input, init, baseNow());
     if (key === null) return fetchImpl(input, init);
     const had = inflight.get(key);
-    if (had) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });
-    const entry = { joiners: [] };
+    if (had && now() - had.at < joinMs) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });   // (e) young: joined
+    const entry = { joiners: [], at: now() };   // (e) none in flight, or the one in flight no longer young: a NEW request (later asks join it)
     inflight.set(key, entry);
     return Promise.resolve().then(() => fetchImpl(input, init)).then((res) => {
       if (inflight.get(key) === entry) inflight.delete(key);   // (a) nothing kept after it lands

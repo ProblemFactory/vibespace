@@ -40,12 +40,13 @@ const settle = (p, ms = GREEN_MS) => Promise.race([p.then((v) => ({ ok: true, v 
 
 try {
   const M = await load(src, 'base');
-  const cutJoin = await load(anchored(src, '    if (had) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });\n', '', 'shared-gets-join-cut'), 'join-cut');
+  const cutJoin = await load(anchored(src, '    if (had && now() - had.at < joinMs) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });   // (e) young: joined\n', '', 'shared-gets-join-cut'), 'join-cut');
   const keptEntry = await load(anchored(src, "      if (inflight.get(key) === entry) inflight.delete(key);   // (a) nothing kept after it lands\n", '', 'shared-gets-kept'), 'kept');
   const deafJoiners = await load(anchored(src, '      for (const j of entry.joiners) j.reject(err);   // (b) a failure reaches every caller that shared it\n', '', 'shared-gets-deaf'), 'deaf');
   const noHeads = await load(anchored(src, "  return JSON.stringify([url, heads, o.credentials || '', o.cache || '']);\n", "  return JSON.stringify([url, [], o.credentials || '', o.cache || '']);\n", 'shared-gets-no-heads'), 'no-heads');
   const anyMethod = await load(anchored(src, "  if (method !== 'GET') return null;\n", '', 'shared-gets-any-method'), 'any-method');
-  const baseAtInstall = await load(anchored(src, 'export function sharedGets(fetchImpl, { base = null } = {}) {', "export function sharedGets(fetchImpl, { base = (typeof location !== 'undefined' ? location.href : 'http://localhost/') } = {}) {", 'shared-gets-base-at-install'), 'base-at-install');
+  const noWindow = await load(anchored(src, '    if (had && now() - had.at < joinMs) return new Promise(', '    if (had) return new Promise(', 'shared-gets-no-window'), 'no-window');
+  const baseAtInstall = await load(anchored(src, 'export function sharedGets(fetchImpl, { base = null, joinMs = JOIN_MS, now = clock } = {}) {', "export function sharedGets(fetchImpl, { base = (typeof location !== 'undefined' ? location.href : 'http://localhost/'), joinMs = JOIN_MS, now = clock } = {}) {", 'shared-gets-base-at-install'), 'base-at-install');
 
   console.log('① two callers while in flight: one request');
   const run1 = async (mod) => { const s = stand(); const f = mod.sharedGets(s.fetch, { base: BASE }); const [a, b] = await Promise.all([f('/api/tasks'), f('/api/tasks')]); const [ja, jb] = await Promise.all([a.json(), b.json()]); return { calls: s.calls.length, ja, jb, left: f.inflightCount() }; };
@@ -90,6 +91,23 @@ try {
     const g5 = await run5(M), r5 = await run5(anyMethod);
     ok(g5.length === 5, `two POSTs, a PUT, a DELETE and a lower-case post at once: ${g5.length} requests (none shared)`, g5);
     ok(r5.length === 4, `RED: the method check cut ⇒ the DELETE and the bodiless post share one request (${r5.length} for 5)`, r5); }
+
+  console.log('⑦ a read that HANGS is joined only while it is young (主开发 r3683)');
+  {
+    const run7 = async (mod, lateMs) => {
+      let T = 5000, n = 0; const calls = [];
+      const fetch = (input) => { calls.push(String(input)); n++; const k = n; return k === 1 ? new Promise(() => { }) : Promise.resolve(new Response(JSON.stringify({ n: k }), { status: 200, headers: { 'Content-Type': 'application/json' } })); };
+      const f = mod.sharedGets(fetch, { base: BASE, now: () => T });
+      void f('/api/chat-tail');   // the first read: it never replies (a stalled connection, a hub slow to reply)
+      T += 200; const young = settle(f('/api/chat-tail'), HUNG_MS);   // inside the window: it joins the young read
+      T += 2000; const late = await settle(f('/api/chat-tail'), lateMs);   // past the window: its own request
+      const lateN = late.ok ? (await late.v.json()).n : null, y = await young;
+      return { calls: calls.length, lateN, youngHung: !!y.hung, late: late.hung ? 'hung' : late.ok ? 'answered' : late.e };
+    };
+    const [g7, r7] = await Promise.all([run7(M, GREEN_MS), run7(noWindow, HUNG_MS)]);   // side by side: the two waits overlap
+    ok(g7.calls === 2 && g7.lateN === 2 && g7.youngHung, `a read that never replies: an ask ${200} ms after it JOINS it (no request), an ask past the window (${M.JOIN_MS} ms) is its OWN request and its reply lands (${g7.calls} requests; the late ask ${g7.late})`, g7);
+    ok(r7.calls === 1 && r7.late === 'hung', `RED: a join at any age ⇒ the later ask joins the hung read and never answers (${r7.calls} request; the late ask ${r7.late})`, r7);
+  }
 
   console.log('⑥ the page installs it at its boot, before the exit hop and the App (by text)');
   { const cl = fs.readFileSync(path.join(REPO, 'src/client.js'), 'utf8');
