@@ -34,7 +34,7 @@ This file is the engineers' record of every release: the lanes, the verification
 ### gmail-connect-wall — B-360d cut 3: the ledger's first load trims as it reads (the fold worker held every row of its window until one end trim)
 - **The fault (a heap snapshot of the fold worker at its peak, on the stand-in ledger):** the load pass trimmed the hot set once, at its end, so every row inside the window waited for it as an object (~2 M rows, ~0.5 GB), while the end trim kept a sixth.
 - **The cure:** in the fold worker (a worker thread; never the hub's loop), the same trim runs whenever the hot set passes 1.5× its ceiling during the pass; the pass's end trims whenever it trimmed.
-- **The law:** the same ledger to the byte wherever the slices fall (test-usage-trim §6, the release's pass against this one at three slice sizes; RED: a trim that drops or doubles one row).
+- **The law:** the same rows and figures wherever the slices fall (test-usage-trim §6, the release's pass against this one at three slice sizes: the hot rows byte for byte, the cold rows with their names decoded, the repeats that cross a trim counted; RED: a trim that drops or doubles one row, and the pass's trim cutting to half the ceiling).
 
 ### cli-update-needs-nothing B-9584 — THE PLACE'S ROAD (B), the owner's choice (主开发 r1791 / r1898): a place is given only to the sites the person lists
 - THE LIST (src/browser-environment.js, PURE): a place's `sites` — each an EXACT origin (scheme, host, port; no wildcard, no suffix match), default none, at most 20, judged at the door and again at use (a list that fails gives no site the place); beside «blocked» refused; the log carries their count, never an origin. Only the dialog (the next unit) writes it; no agent verb does.
