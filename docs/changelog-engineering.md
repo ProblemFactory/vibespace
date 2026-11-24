@@ -256,6 +256,12 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-machines-b — test-exit-rejudge: the hub-restart leg's machine on disk before its hub dies (主开发 r2969; tests only)
 - Three box-zone crashes («no machine matches "Box"», no ✗ line), always as a whole-tree reader under a gate's load: the leg's second hub read hosts.json while the first hub's write was still queued on the store writer's one thread (an urgent write behind the process's other stores' writes, then its IO — the same road since 11-18) — the leg simulates a death where no code runs, milliseconds after adding the machine; a real stop flushes every queued write. Now the leg waits for the scene's machine writes to land (hosts.persisted(), after its access write), the second use's refusal is a named cross, and a RED made by state (a writer whose write never lands) shows the wait still pending and the missing machine. Placed in bl-machines-b's page work/place-exit-rejudge.md.
 
+### bl-ci — a census is read where its debt is made: the everyGate mark (主开发 r2980 + r2981)
+- WHY: test-record-clear-census-interp, heavy only because the fast sum had no room, was red at the 2.369.417 candidate for a day: the lanes gate their own list and the census list, and a heavy row ran only at the box rows and the hosted run.
+- WHAT: scripts/ci.mjs marks the heavy censuses of the tree (`everyGate`, in EVERY_GATE's words): a suite that lists the tracked files and starts nothing but git. A static check (`everyGateOf`, pure) reads the suite, its twins and the helper bindings it takes; test-ci-gate-tiers §8i holds the real table both ways, with a red control for each start kind, the helper closure, a twin and the blanker. `everyGateNames()` is the list the kit and the integrator read at the tip they run.
+- MARKED: test-record-clear-census-interp, test-egress-census. Out by the check: test-ci-gate-tiers-deep (its twin starts node children), test-conversation-needs (real waits; it lists no tracked file).
+- The kit's and the integrator's runners are not changed here: two asks, through the coordinator. The gate's own table and tests only; no product file.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
