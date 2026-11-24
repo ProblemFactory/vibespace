@@ -106,7 +106,8 @@ const NOT_HELD = {
   proposal_door_not_ready: 'the proposal card not on this instance yet — the job\'s row says what to tick',
   write_never_started: 'a write to a machine that never started — not saved, said',
   write_unknown: 'a write to a machine that did not answer — it may have been saved, said',
-  outbox_unread: 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it',  agent_door_unread: 'r3333 unit 1: the agent door\'s record held — the door refuses nobody (a fresh port this run); no route answers it',
+  outbox_unread: 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it',
+  agent_door_unread: 'r3333 unit 1: the agent door\'s record held — the door refuses nobody (a fresh port this run); no route answers it',
 };
 
 // A LIST HOLD WORDED BY ITS OWN DOOR (r3284: its own class, not «not a hold»): a 503 that IS a held list, whose own door words it — the

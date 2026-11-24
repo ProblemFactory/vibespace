@@ -78,7 +78,7 @@ async function keepPort(stateFile, port, log, hold = null) {
   catch (e) { try { await fsp.unlink(tmp); } catch { } log(`[agent-door] its port could not be kept (${(e && e.code) || e}) — a remote session started now loses its tools at the next restart`); }
 }
 
-const fresh = () => ({ server: null, port: 0, said: false, hold: null, during: null, kept: null });
+const fresh = () => ({ server: null, port: 0, said: false, hold: null, during: null, kept: null, busyKept: 0, log: null });
 let state = fresh();   // during: the conversations whose tunnel took this run's port while the record was held; kept: the kept port's listener after the lift
 let startP = null;
 /** listen `srv` on 127.0.0.1:`port` (the door's one address) → { port } | { err } */
@@ -89,28 +89,34 @@ const listenOn = (srv, port) => new Promise((resolve) => {
 });
 /** THE LIFT (r3337): the held record read again — after this run's port is known */
 async function lifted(run, rec, facts, { log, stateFile, avoid }) {
-  const during = run.during ? [...run.during.keys()] : [];
-  run.during = null;
-  if (run !== state || !run.server || !run.port) return;   // closed, or the door never listened (its tunnels end at the hub's own port)
+  // r3764: the conversations that take this run's port are named UNTIL the door listens on the kept port — `during` is emptied only
+  // then (a tunnel baked while the kept port's listen is answered is counted), and kept while the kept port is BUSY (each later one
+  // is named as it takes the port: tunnelPort below)
+  const namesOf = () => (run.during ? [...run.during.keys()] : []);
+  if (run !== state || !run.server || !run.port) { run.during = null; return; }   // closed, or the door never listened (its tunnels end at the hub's own port)
   const now = run.port, kept = rec ? portOf(rec, avoid) : 0;
-  const named = during.length ? `${during.length} remote conversation(s) took this run's port ${now} while it was held: ${during.join(', ')}` : `no remote conversation took this run's port ${now} while it was held`;
+  const named = (during) => during.length ? `${during.length} remote conversation(s) took this run's port ${now} while it was held: ${during.join(', ')}` : `no remote conversation took this run's port ${now} while it was held`;
   if (!kept) {   // torn bytes kept aside, the file gone, or a record with no port of the door's: this run's port is kept (as a start over no record keeps one)
+    const during = namesOf(); run.during = null;
     await keepPort(stateFile, now, log);
-    log(`[agent-door] its record read again (${facts && facts.setAside ? `torn bytes kept aside as ${facts.setAside}` : 'no port in it'}): this run's port ${now} is kept now — ${named}; they keep their tools at the next restart`);
+    log(`[agent-door] its record read again (${facts && facts.setAside ? `torn bytes kept aside as ${facts.setAside}` : 'no port in it'}): this run's port ${now} is kept now — ${named(during)}; they keep their tools at the next restart`);
     return;
   }
-  if (kept === now) { log(`[agent-door] its record read again: it names this run's port ${now} — one listener; ${named}`); return; }
+  if (kept === now) { const during = namesOf(); run.during = null; log(`[agent-door] its record read again: it names this run's port ${now} — one listener; ${named(during)}`); return; }
   const keptServer = net.createServer((sock) => run.server.emit('connection', sock));   // the SAME http server answers (one handler, one verdict)
   const r = await listenOn(keptServer, kept);
-  if (run !== state) { try { keptServer.close(); } catch { } return; }
+  if (run !== state) { try { keptServer.close(); } catch { } run.during = null; return; }
+  const during = namesOf();   // read AFTER the listen answered: a tunnel baked in that window is counted
   if (!r.port) {
-    log(`[agent-door] its record read again: its kept port ${kept} is busy (${(r.err && r.err.code) || r.err}) — the door stays on ${now} for this run; the record is kept as it is (${kept}) and tried again at the next start; ${named}`);
+    run.busyKept = kept;   // r3764: the door stays on this run's port — every later ssh -R that takes it is named as it does (tunnelPort)
+    log(`[agent-door] its record read again: its kept port ${kept} is busy (${(r.err && r.err.code) || r.err}) — the door stays on ${now} for this run; the record is kept as it is (${kept}) and tried again at the next start; the conversations that lived through the restart have tunnels that end at ${kept}, a port another program holds, so their tools reach that program until they restart; ${named(during)}, and every conversation that takes ${now} from now on is named as it does — at the next start that gets ${kept} back they lose their agent tools until they restart`);
     return;
   }
+  run.during = null;
   try { keptServer.unref(); } catch { }
   keptServer.on('error', (e) => log(`[agent-door] ${(e && e.code) || e} on its kept port — the door keeps listening`));
   run.kept = { server: keptServer, port: kept };
-  log(`[agent-door] its record read again: the door ALSO listens on its kept port ${kept} — a remote conversation started before this run reaches its tools again, and new tunnels end there; ${named}${during.length ? ` — at the next restart they lose their agent tools until they restart (the door listens on ${kept} then)` : ''}`);
+  log(`[agent-door] its record read again: the door ALSO listens on its kept port ${kept} — a remote conversation started before this run reaches its tools again, and new tunnels end there; ${named(during)}${during.length ? ` — at the next restart they lose their agent tools until they restart (the door listens on ${kept} then)` : ''}`);
 }
 /** Start the door over the hub's own `app` (an express handler) — once per process, on its kept port when it has one
  *  (`stateFile`), never on `avoid` (the hub's own port). → Promise<port | 0> */
@@ -127,6 +133,7 @@ function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid
   });
   state.server = server;
   const run = state;   // this start's own state (a close() makes a new one)
+  run.log = log;   // r3764: the conversations named as they take the port after a busy lift (tunnelPort)
   const listen = (port) => listenOn(server, port);
   startP = (async () => {
     // r3333 unit 1: the record's one read through the family's helper — HELD when it cannot be read (never «no port kept»)
@@ -161,7 +168,14 @@ function ready() { return startP || Promise.resolve(state.port); }
  *  run's port while the record was held (r3337 (4)) — a dialed tunnel asks at each connection and names none */
 function tunnelPort(fallback, who) {
   const p = state.kept ? state.kept.port : state.port;
-  if (p) { if (state.during && who) state.during.set(String(who), p); return p; }
+  if (p) {
+    if (state.during && who) {
+      const id = String(who), isNew = !state.during.has(id);
+      state.during.set(id, p);
+      if (isNew && state.busyKept && state.log) { try { state.log(`[agent-door] conversation ${id} takes this run's port ${p} (its kept port ${state.busyKept} is busy): at the next start that gets ${state.busyKept} back it loses its agent tools until it restarts`); } catch { } }   // r3764
+    }
+    return p;
+  }
   if (!state.said) { state.said = true; try { console.log('[agent-door] not listening — this tunnel ends at the hub\'s own port'); } catch { } }
   return fallback;
 }

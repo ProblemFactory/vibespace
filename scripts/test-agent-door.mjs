@@ -188,10 +188,13 @@ const liftOf = async (file, logs) => { refused = null; const lifted = await SRH.
   await liftOf(file, logs);
   const busy = logs.filter((m) => new RegExp(`kept port ${K} is busy`).test(m));
   const tp = AL.tunnelPort(1234), kept = fs.readFileSync(file, 'utf8');
+  AL.tunnelPort(1234, 'sess-after-busy'); AL.tunnelPort(1234, 'sess-after-busy'); AL.tunnelPort(1234);   // r3764: an ssh -R after the busy lift (asked twice), a dialed ask
+  const afterBusy = logs.filter((m) => /conversation sess-after-busy takes this run's port/.test(m));
   await AL.close(); await new Promise((r2) => squat.close(r2));
   const again = await AL.start({ app: signedApp, log: () => { }, stateFile: file });
   await AL.close();
   ok(busy.length === 1 && /record is kept as it is/.test(busy[0]) && tp === F && kept === bytes && again === K, 'the KEPT PORT BUSY at the lift: said once by name, the door stays on the fresh port, the record KEPT as it is (never rewritten to the fresh port) — the next start listens on the kept port', { busy, tp, F, K, kept, again });
+  ok(/lived through the restart have tunnels that end at/.test(busy[0] || '') && /a port another program holds/.test(busy[0] || '') && afterBusy.length === 1 && new RegExp(`its kept port ${K} is busy`).test(afterBusy[0]), 'r3764: the busy line says what it means for the conversations that lived through the restart (their tunnels end at a port another program holds), and a conversation whose ssh -R takes the fresh port AFTER the busy lift is named once as it does (a dialed ask names none)', { busy: busy[0], afterBusy });
 }
 {
   const { file, K } = await keptRecord('equal');
