@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-ci-gate-tiers — a PART of THE RELEASE GATE'S OWN GATE (scripts/test-ci-gate.mjs: its head says what the gate guards and why).
 // lane fast-tier-ratchet (2026-10-20) split the one 37 s process into seven ≤ 10 s suites, every section's text unchanged;
-// the shared kit is scripts/ci-gate-kit.mjs. This part: §6 no fast suite claims a machine-global fixture + no-verdict honesty · §7 no literal date · §7b a leg never passes by its name · §8 lanes / the serial table / the impact scope / the full-tier clock · §8d the xpra window family's parts · §8i the everyGate mark, both ways.
+// the shared kit is scripts/ci-gate-kit.mjs. This part: §6 no fast suite claims a machine-global fixture + no-verdict honesty · §7 no literal date · §7b a leg never passes by its name · §8 lanes / the serial table / the impact scope / the full-tier clock · §8d the xpra window family's parts · §8i the everyGate mark, both ways · §8j an isolated fast run names the gated commit's own fast rows it did not run.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -796,16 +796,17 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   const wiredClosing = (x) => {
     const a = x.indexOf('} = await runFastLanes(plan, {'), b = x.indexOf('const closing = fastClosing(', a);
     return a > 0 && b > a && !/\breturn\b/.test(x.slice(a, b))
-      && /\n\s*const closing = fastClosing\(\{ reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
+      && /\n\s*const closing = fastClosing\(\{ reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env, gap: gapW\.tail \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
       && /\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)\n\s*\.then\(\(code\) => exitFlushed\(code\), /.test(x);
   };
-  ok(wiredClosing(src), 'WIRING: fastGate hands every fact to fastClosing (env and part included), nothing returns between the lanes\' end and it, its 1 is returned, and main() exits with fastGate\'s code');
+  ok(wiredClosing(src), 'WIRING: fastGate hands every fact to fastClosing (env, part and an isolated run\'s gap included), nothing returns between the lanes\' end and it, its 1 is returned, and main() exits with fastGate\'s code');
   // CONTROLS of the wiring pin — each mutant's anchor fails BY NAME when it is not in the source, and each mutant is refused
   const wiringMutants = [
     ['the exit on the flag', 'if (closing.code === 1) return 1;', 'if (closing.code === 1 && !keepGoing) return 1;'],
     ['an early return before the closing', '    const closing = fastClosing(', '    if (keepGoing) return 0;\n    const closing = fastClosing('],
-    ['the annotation\'s env dropped', 'hangDir, part, env: process.env });', 'hangDir, part, env: {} });'],
-    ['the part dropped', 'hangDir, part, env: process.env });', 'hangDir, part: null, env: process.env });'],
+    ['the annotation\'s env dropped', 'hangDir, part, env: process.env, gap: gapW.tail });', 'hangDir, part, env: {}, gap: gapW.tail });'],
+    ['the part dropped', 'hangDir, part, env: process.env, gap: gapW.tail });', 'hangDir, part: null, env: process.env, gap: gapW.tail });'],
+    ['the isolated run\'s gap dropped from the RED line (主开发 r3758 hold 2)', 'hangDir, part, env: process.env, gap: gapW.tail });', 'hangDir, part, env: process.env });'],
     ['the skipped legs dropped (B-4829 meets the closing here)', 'fastClosing({ reds, flaky, skippedLegs, keepGoing,', 'fastClosing({ reds, flaky, keepGoing,'],
     ['main() swallowing a part\'s 1', "part })\n    .then((code) => exitFlushed(code), ", "part })\n    .then((code) => exitFlushed(part ? 0 : code), "],
   ];
@@ -1225,6 +1226,91 @@ console.log('\n§8i a heavy census of the tree carries the everyGate mark, and a
   ok(said(bareWord, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: the word 'ls-files' that no git child is handed is no listing (${bareWord.problems[0] || 'no problem'})`);
   const localFn = one({ 'test-zz-census.mjs': L('function trackedFiles() { return []; }', 'console.log(trackedFiles().length);') });
   ok(said(localFn, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: a local function named trackedFiles is no listing, only a helper's binding is (${localFn.problems[0] || 'no problem'})`);
+}
+console.log('\n§8j an isolated fast run NAMES the gated commit\'s own fast rows that the running table does not run (主开发 r3754 / r3758)');
+// An isolated fast tier takes its ROWS from the running table and its SOURCES from the gated commit: a release pushed from an
+// older production checkout ran 850 of the release's 881 fast rows (2.369.418). The step now reads the gated commit's own table as
+// TEXT and says, by name, the rows it did not run: in its opening line, under it, and on every closing line; an unreadable table is
+// said, never a red and never a zero.
+{
+  const ci = await import('./ci.mjs');
+  const T = (rows) => `export const SUITES = [\n${rows}\n];\nexport const EXCLUDED = [];\n`;
+  const same8j = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const row = (n, tier) => `  { name: '${n}', tier: '${tier}', why: 'in-process · 1 s' },`;
+  const BOOM = "  { name: 'test-zz-boom', tier: 'heavy', why: (() => { throw new Error('the gated table was evaluated'); })() },";   // a planted row: evaluating the array throws
+  const running = [{ name: 'test-a', tier: 'fast' }, { name: 'test-b', tier: 'fast' }, { name: 'test-d', tier: 'heavy' }, { name: 'test-h', tier: 'heavy' }];
+  // (1) the PURE reader over planted tables
+  const g = ci.fastTableGap(running, T([row('test-a', 'fast'), row('test-c', 'fast'), row('test-d', 'fast'), row('test-h2', 'heavy'), "  { name: 'test-u', reads: ['src/'], tier: 'fast', why: 'x' },"].join('\n')));
+  ok(g.ok === true && g.gatedFast === 3 && g.notRun.join(' ') === 'test-c test-d' && g.unknown.join(' ') === 'test-u',
+    `PURE fastTableGap: a newer fast row and a row the running table has as heavy are NOT RUN; a newer heavy row and the running rows the gated table dropped are not named; a row shape the reader does not know is said apart (${JSON.stringify(g)})`);
+  const same = ci.fastTableGap(running, T([row('test-a', 'fast'), row('test-b', 'fast'), row('test-d', 'heavy')].join('\n')));
+  ok(same.ok === true && same.notRun.length === 0 && same.unknown.length === 0, `CONTROL: the running table's own rows name nothing (${JSON.stringify(same)})`);
+  const noTable = ci.fastTableGap(running, 'export const OTHER = [];\n'), noText = ci.fastTableGap(running, null);
+  ok(noTable.ok === false && noText.ok === false && noTable.notRun.length === 0, 'PURE fastTableGap: a text with no SUITES array, or no text at all, is an UNREADABLE table (ok false), never a gap of zero');
+  const empty = ci.fastTableGap(running, T('')), helper = ci.fastTableGap(running, T("  row('test-c', 'fast'),")), spread = ci.fastTableGap(running, T([row('test-a', 'fast'), '  ...MORE_ROWS,'].join('\n'))), words = ci.fastTableGap(running, T("  { name: 'test-a', tier: 'fast', why: 'in-process · see ...later rows' },"));
+  const mixed = ci.fastTableGap(running, T([row('test-a', 'fast'), "  row('test-c', 'fast'),"].join('\n'))), afterBracket = ci.fastTableGap(running, "export const SUITES = [...MORE_ROWS,\n" + row('test-c', 'fast') + "\n];\n");
+  ok(empty.ok === false && helper.ok === false && spread.ok === false && mixed.ok === false && afterBracket.ok === false && words.ok === true && words.notRun.length === 0,
+    'PURE fastTableGap: an EMPTY SUITES array, rows made by a helper (none read, or some beside read rows) and a row spread in from code (on its line, or right after the «[») are UNREADABLE too: their rows are not all known, never «every one in the running table»; a «...» inside a row\'s words is no spread (CONTROL)');
+  // (2) the PURE words: the count and the names cut with «and N more», the whole list apart, NOT RUN BY THIS STEP in plain words
+  const many = Array.from({ length: 14 }, (_, i) => `test-n${String(i).padStart(2, '0')}`);
+  const w = ci.fastGapWords({ ok: true, gatedFast: 40, notRun: many, unknown: [] }, { shown: 12 });
+  ok(/^14 fast row\(s\) of the gated commit's own table \(40 fast rows\) were NOT RUN BY THIS STEP/.test(w.head) && w.tail.includes('NOT RUN BY THIS STEP') && w.tail.includes('test-n11 and 2 more') && !w.tail.includes('test-n12')
+    && many.every((n) => w.list.includes(n)) && /the commit's own table runs only where its own ci\.mjs runs the tier: the hosted fast jobs of a push to master or ci\/\*\* or of a pull request, the cut's whole tier/.test(w.tail),
+    `PURE fastGapWords: the closing words carry the count and 12 names «and 2 more», the whole list is its own line, and the cover is said (${w.tail.slice(0, 140)}…)`);
+  const un = ci.fastGapWords({ ok: false, gatedFast: 0, notRun: [], unknown: [] });
+  const UN = "the gated commit's own table could not be read: the rows this step did not run are not known";
+  ok(un.head === UN && un.tail === UN && un.list === '', 'PURE fastGapWords: an unreadable table is said in BOTH the opening and the closing words, never silent and never zero');
+  const both = ci.fastGapWords({ ok: true, gatedFast: 5, notRun: ['test-p'], unknown: ['test-q'] });
+  ok(/NOT RUN BY THIS STEP[^;]*: test-p; 1 row\(s\) of the gated commit's table have a shape this reader does not know[^;]*: test-q \(/.test(both.tail),
+    `PURE fastGapWords: a fast row not run and a row of an unknown shape keep their OWN names after their own words (${both.tail.slice(0, 220)}…)`);
+  const redGap = ci.fastClosing({ reds: ['test-r'], env: {}, gap: w.tail }), redNone = ci.fastClosing({ reds: ['test-r'], env: {} });
+  ok(redGap.code === 1 && redGap.out.some(([k, l]) => k === 'err' && l.startsWith('\n✗ test-r — apart from these reds, 14 fast row(s)') && l.includes('NOT RUN BY THIS STEP') && l.includes('— release gate is RED, do not push'))
+    && same8j(redNone.out, [['err', '\n✗ test-r — release gate is RED, do not push\n']]),
+    'PURE fastClosing: an isolated run\'s RED closing line itself carries the gap (before «release gate is RED», so it still ends with the skip count); with no gap the line is as it was');
+  const none = ci.fastGapWords({ ok: true, gatedFast: 2, notRun: [], unknown: [] }), inPlace = ci.fastGapWords(null);
+  ok(none.tail === '' && /2 fast rows, every one in the running table/.test(none.head) && inPlace.head === '' && inPlace.tail === '' && inPlace.list === '',
+    'PURE fastGapWords: no gap adds nothing to a closing line (the opening says the table was read); an in-place run (one table) says nothing');
+  // (3) A SCRATCH PAIR OF COMMITS through the same git show road: the gated table's text THROWS if it is ever imported or run
+  const THROWS = "throw new Error('the gated table was imported');\nprocess.exit(9);\n";
+  const repo = makeRepo('fastgap');
+  const textA = THROWS + T([row('test-zz-a', 'fast'), row('test-zz-b', 'fast'), BOOM].join('\n'));
+  const A = commit(repo, 'scripts/ci.mjs', textA, 'A: the running table');
+  const textB = THROWS + T([row('test-zz-a', 'fast'), row('test-zz-b', 'fast'), row('test-zz-new', 'fast'), BOOM].join('\n'));
+  const B = commit(repo, 'scripts/ci.mjs', textB, 'B: one fast row more');
+  commit(repo, 'scripts/test-zz-new.mjs', "console.log('ok');\n", 'B2: its suite');
+  const B2 = git(repo, ['rev-parse', 'HEAD']);
+  const tableOf = (text) => [...ci.tableTiersOf(text).tiers].map(([name, tier]) => ({ name, tier }));
+  const atB = ci.fastTableGapAt(repo, B2, tableOf(textA)), ctl = ci.fastTableGapAt(repo, B2, tableOf(textB)), atA = ci.fastTableGapAt(repo, A, tableOf(textA));
+  git(repo, ['rm', '-q', 'scripts/ci.mjs']); git(repo, ['commit', '-q', '-m', 'C: no table']);
+  const C = git(repo, ['rev-parse', 'HEAD']);
+  const atC = ci.fastTableGapAt(repo, C, tableOf(textA)), atNone = ci.fastTableGapAt(repo, '0123456789abcdef0123456789abcdef01234567', tableOf(textA));
+  ok(atB.ok === true && atB.notRun.join(' ') === 'test-zz-new' && atB.gatedFast === 3 && B !== B2,
+    `SCRATCH PAIR: the commit with one fast row more, read through git show against the older running table, names exactly that row (${JSON.stringify(atB)}); its text throws if imported or its array evaluated, and nothing threw`);
+  ok(ctl.ok === true && ctl.notRun.length === 0 && atA.ok === true && atA.notRun.length === 0,
+    'CONTROL: the same commit against its own table, and the older commit against its own, name nothing');
+  ok(atC.ok === false && atNone.ok === false, 'SCRATCH PAIR: a commit with no scripts/ci.mjs, and a sha the repository does not have, are UNREADABLE tables (ok false), never a gap of zero');
+  // (4) THE ANCHOR: fastGate reads the gap when isolated and carries it on its opening line, its list line and every closing line;
+  // the reader imports and runs nothing of the gated commit
+  const CI_TEXT = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
+  const wired = (src) => {
+    const a = src.indexOf('async function fastGate('), b = src.indexOf('\nfunction writeGreenMarker', a);
+    if (a < 0 || b < 0) return false;
+    const body = src.slice(a, b);
+    return body.includes('const gapW = fastGapWords(isolate ? fastTableGapAt(repo, sha) : null);')
+      && /release gate — FAST tier[^\n]*\$\{gapW\.head \?/.test(body) && body.includes('if (gapW.list) console.log(gapW.list);')
+      && /ALL GREEN — fast gate[^\n]*\$\{subject\}\$\{gapW\.tail \? ` — BUT \$\{gapW\.tail\}` : ''\}\$\{absent\.length \?/.test(body)
+      && (body.match(/NO VERDICT — the fast tier could not gate[^\n]*\$\{gapW\.tail \?/g) || []).length === 2
+      && /const closing = fastClosing\(\{[^\n]*, gap: gapW\.tail \}\);/.test(body)
+      && /✗ build FAILED — release gate is RED, do not push\$\{gapW\.tail \? ` — \$\{gapW\.tail\}` : ''\}\\n`\); return 1; \}/.test(body)
+      && /✗ secret-scan RED — release gate is RED, do not push [^\n]*\$\{gapW\.tail \? ` — \$\{gapW\.tail\}` : ''\}\\n`\); return 1; \}/.test(body);
+  };
+  const r0 = CI_TEXT.indexOf('export function fastTableGap('), r1 = CI_TEXT.indexOf('export function fastGapWords(', r0);
+  const reader = r0 > 0 && r1 > r0 ? CI_TEXT.slice(r0, r1) : '';
+  ok(wired(CI_TEXT) && reader !== '' && !/\bimport\(|\brequire\(|\bexec(?:File)?(?:Sync)?\(|\bspawn\(|\beval\(|\bnew Function\b|\bvm\.|process\.execPath|\bfork\(/.test(reader) && (reader.match(/spawnSync\(/g) || []).length === 1 && (reader.match(/spawnSync\('git'/g) || []).length === 1,
+    'ANCHOR: fastGate reads the gated table when isolated and says the gap on its opening line, its list line and ON every closing line (green, the two no-verdict lines, the red closing, a failed build, a red secret scan); the reader runs only git show (no import, require, eval, Function, vm, exec, fork or node child)');
+  ok(!wired(CI_TEXT.replace('fastGapWords(isolate ? fastTableGapAt(repo, sha) : null)', 'fastGapWords(null)')) && !wired(CI_TEXT.replace(" — BUT ${gapW.tail}", ''))
+    && !wired(CI_TEXT.replace('if (gapW.list) console.log(gapW.list);', '')) && !wired(CI_TEXT.replace(', gap: gapW.tail });', ' });')),
+    'CONTROL: the step that never reads the gated table, an ALL GREEN line without the gap, a run without the list line, or a red closing without the gap is refused by the anchor');
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

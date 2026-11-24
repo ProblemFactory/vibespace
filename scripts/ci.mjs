@@ -2724,7 +2724,7 @@ export const FAST_NO_RETRY = Object.freeze([
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
  *  → { out: [['log' | 'err', line]], code: 1 | null } (null: no red — the caller goes on to its other checks) */
-export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env } = {}) {
+export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env, gap = '' } = {}) {
   if (!Array.isArray(reds)) throw new TypeError('fastClosing: reds is not a list — a closing never reads a missing fact as «no red»');   // (the verdict's own fact has no default: the run crashes, exit 1)
   const out = [];
   if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
@@ -2733,7 +2733,7 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
   // a workflow command's message escapes %, CR and LF (GitHub's rule); suite names hold none, the escape keeps it so
   const ghEsc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
   if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}`)}`]);
-  if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; } // (B-4829: the verdict line carries the skip count)
+  if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')}${gap ? ` — apart from these reds, ${gap}` : ''} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; }   // gap: an isolated run's rows not run (fastGapWords) // (B-4829: the verdict line carries the skip count)
   return { out, code: null };
 }
 /** PURE: why a red fast suite is NOT retried, or '' (retry it). A suite that died of a signal this runner did not send
@@ -4140,6 +4140,63 @@ export function tableTiersOf(text) {
   }
   return { ok: true, tiers };
 }
+/** PURE (主开发 r3754 / r3758, lane bl-release): THE FAST ROWS AN ISOLATED RUN DOES NOT RUN. An isolated fast tier (`--isolate --sha`:
+ *  the pre-push hook when the pushed sha is not the checkout's HEAD, a release pushed from an older production checkout) takes its
+ *  ROWS from the RUNNING table and its SOURCES from the gated commit (the absent-is-no-red rule above the scratch-orphan reaper).
+ *  So a fast row of the gated commit's OWN table that the running table does not run as fast is never run by that step (the
+ *  2.369.418 push: 850 rows ran of the release's 881). Read from the gated commit's scripts/ci.mjs TEXT by tableTiersOf: the gated
+ *  code is never imported or run. → { ok: false } when that table cannot be read (no SUITES array, no text, no row read, a row
+ *  spread in from code): the rows this step
+ *  does not run are NOT KNOWN, never a guess of zero; else { ok: true, gatedFast: n, notRun: [the gated fast names the running
+ *  table does not run as fast, sorted], unknown: [names of a row shape the reader does not know that the running table does not
+ *  run as fast: whether they are fast rows is not known] }. */
+export function fastTableGap(runningSuites, gatedText) {
+  const { ok, tiers } = tableTiersOf(gatedText);
+  // a SUITES array this reader found but read no row of (empty, rows made by a helper), or one built in part by a spread
+  // (`...ROWS` where a row stands: a line's start or right after the `[`, never a «...» inside a row's words): its rows are not all
+  // known; so are rows made by a helper call where a row stands (`row('x', 'fast'),`) — unreadable, said as such, never a gap of
+  // zero (the adversarial read)
+  const a = ok ? gatedText.indexOf('export const SUITES = [') : -1, body = a < 0 ? '' : gatedText.slice(a, gatedText.indexOf('\n];', a));
+  if (!ok || tiers.size === 0 || /(^[ \t]*|\[[ \t]*)\.\.\.[A-Za-z_$(]/m.test(body) || /^[ \t]*[A-Za-z_$][\w$]*\(/m.test(body)) return { ok: false, gatedFast: 0, notRun: [], unknown: [] };
+  const runningFast = new Set((runningSuites || []).filter((s) => s && s.tier === 'fast').map((s) => s.name));
+  const notRun = [], unknown = [];
+  let gatedFast = 0;
+  for (const [name, tier] of tiers) {
+    if (tier === 'fast') gatedFast++;
+    if (runningFast.has(name)) continue;
+    if (tier === 'fast') notRun.push(name); else if (tier === null) unknown.push(name);
+  }
+  return { ok: true, gatedFast, notRun: notRun.sort(), unknown: unknown.sort() };
+}
+/** The gated commit's table through `git show <sha>:scripts/ci.mjs` (the road heavyVerdict's table reader takes), then the PURE gap.
+ *  A git that cannot show it is an unreadable table: said, never a guess. Text only: nothing of the gated commit is run. */
+export function fastTableGapAt(repoRoot, sha, runningSuites = SUITES) {
+  const r = spawnSync('git', ['-C', repoRoot, 'show', `${sha}:scripts/ci.mjs`], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 << 20 });
+  return fastTableGap(runningSuites, r.status === 0 ? r.stdout : null);
+}
+/** How many names a closing line carries before «and N more» (the whole list is the step's own line above it). */
+export const FAST_GAP_NAMES_SHOWN = 12;
+/** PURE: what an isolated fast run SAYS of the gap (主开发 r3758's holds 1 + 2). `head` rides the run's opening line; `list` is the
+ *  whole list, printed by name under it; `tail` rides EVERY closing line (green, no verdict, red), with the count and the names cut
+ *  at `shown` (each clause its own names), in plain words: those rows were NOT RUN BY THIS STEP, and where the commit's own table
+ *  IS run (the hosted fast jobs of a push to master or ci/** or of a pull request, the cut's whole tier) — never a claim that it was.
+ *  Each clause is cut at `shown` names on its own. An unreadable table is said in both lines (never silent, never zero) and is no red: an older ref stays pushable. An
+ *  in-place run (`gap` null: one checkout, one table) says nothing. */
+export function fastGapWords(gap, { shown = FAST_GAP_NAMES_SHOWN } = {}) {
+  if (!gap) return { head: '', list: '', tail: '' };
+  if (!gap.ok) {
+    const w = "the gated commit's own table could not be read: the rows this step did not run are not known";
+    return { head: w, list: '', tail: w };
+  }
+  const cut = (xs) => (xs.length <= shown ? xs.join(', ') : `${xs.slice(0, shown).join(', ')} and ${xs.length - shown} more`);
+  if (!gap.notRun.length && !gap.unknown.length) return { head: `the gated commit's own table: ${gap.gatedFast} fast rows, every one in the running table`, list: '', tail: '' };
+  const cover = "the commit's own table runs only where its own ci.mjs runs the tier: the hosted fast jobs of a push to master or ci/** or of a pull request, the cut's whole tier";
+  const notRunSaid = `${gap.notRun.length} fast row(s) of the gated commit's own table (${gap.gatedFast} fast rows) were NOT RUN BY THIS STEP: the running table does not run them as fast`;
+  const unknownSaid = `${gap.unknown.length} row(s) of the gated commit's table have a shape this reader does not know, so whether this step should have run them is not known`;
+  const head = [gap.notRun.length ? notRunSaid : '', gap.unknown.length ? unknownSaid : ''].filter(Boolean).join('; ');
+  const named = (whole) => [gap.notRun.length ? `${notRunSaid}: ${whole ? gap.notRun.join(', ') : cut(gap.notRun)}` : '', gap.unknown.length ? `${unknownSaid}: ${whole ? gap.unknown.join(', ') : cut(gap.unknown)}` : ''].filter(Boolean).join('; ');
+  return { head, list: `[ci] by name — ${named(true)} (${cover})`, tail: `${named(false)} (${cover})` };
+}
 /** PURE: the heavy table a run was judged by (B-479e (2)) — its heavy names, sorted, and their digest; a FULL green carries it. */
 export function heavyTableOf(suites) {
   const heavy = suites.filter((s) => s.tier === 'heavy').map((s) => s.name).sort();
@@ -5200,13 +5257,17 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
   });
   try {
     if (isolate) { wt = addScratchWorktree(sha, 'fast'); runRoot = wt; }
+    // THE GATED COMMIT's OWN TABLE (主开发 r3754 / r3758): an isolated run reads it as TEXT (fastTableGapAt) and SAYS the fast rows the
+    // running table does not run, in its opening line, by name under it, and on every closing line below; in place it is one table
+    const gapW = fastGapWords(isolate ? fastTableGapAt(repo, sha) : null);
     const lanes = fastLaneCount();
     const sourceOf = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
     if (part) fast = fastPartPlan(tier, part.n, { sourceOf }).parts[part.i - 1];
     const plan = scheduleFastLanes(fast, { sourceOf });
-    console.log(`release gate — FAST tier${part ? ` PART ${part.i}/${part.n} (${fast.length} of its ${tier.length} suites)` : ''}: build + ${fast.length} suites (heavy tier: ${SUITES.filter((s) => s.tier === 'heavy').length} suites, runs after the push)${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}`);
-    if (!runBuild({ cwd: runRoot }).ok) { console.error('\n✗ build FAILED — release gate is RED, do not push\n'); return 1; }
-    if (!runSecretScan({ cwd: runRoot, sha }).ok) { console.error('\n✗ secret-scan RED — release gate is RED, do not push (GitHub push protection refuses these shapes: build token shapes at runtime by concatenation)\n'); return 1; }
+    console.log(`release gate — FAST tier${part ? ` PART ${part.i}/${part.n} (${fast.length} of its ${tier.length} suites)` : ''}: build + ${fast.length} suites (heavy tier: ${SUITES.filter((s) => s.tier === 'heavy').length} suites, runs after the push)${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}${gapW.head ? ` · ${gapW.head}` : ''}`);
+    if (gapW.list) console.log(gapW.list);
+    if (!runBuild({ cwd: runRoot }).ok) { console.error(`\n✗ build FAILED — release gate is RED, do not push${gapW.tail ? ` — ${gapW.tail}` : ''}\n`); return 1; }
+    if (!runSecretScan({ cwd: runRoot, sha }).ok) { console.error(`\n✗ secret-scan RED — release gate is RED, do not push (GitHub push protection refuses these shapes: build token shapes at runtime by concatenation)${gapW.tail ? ` — ${gapW.tail}` : ''}\n`); return 1; }
     console.log(`[ci] ${lanes} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}: ${plan.serial.map((s) => s.name).join(', ')}`);
     if (keepGoing) console.log('[ci] --keep-going: every suite runs and every red is listed by name (B-6e71) — nothing is stopped by a red');
     const dirPace = dirSweepPacer();
@@ -5230,7 +5291,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
       },
     });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
-    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env });
+    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env, gap: gapW.tail });
     for (const [w, l] of closing.out) (w === 'err' ? console.error : console.log)(l);
     if (closing.code === 1) return 1;
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
@@ -5240,11 +5301,11 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     // absence is not evidence of breakage, and blocking every old ref is the
     // defect this round is fixing — it just refuses to claim anything.
     if (absent.length === fast.length) {
-      console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: none of its ${fast.length} suites exist at that commit (an old tag, or a commit that predates them). Nothing ran, so nothing is claimed; the push is not blocked by an absence.`);
+      console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: none of its ${fast.length} suites exist at that commit (an old tag, or a commit that predates them). Nothing ran, so nothing is claimed; the push is not blocked by an absence.${gapW.tail ? ` — ${gapW.tail}` : ''}`);
       return 0;
     }
     if (absent.length + skippedByName.length === fast.length) {
-      console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: ${absent.length} of its ${fast.length} suites do not exist at that commit and the rest (${skippedByName.join(', ')}) were SKIPPED by name. Nothing ran, so nothing is claimed; the push is not blocked by an absence.`);
+      console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: ${absent.length} of its ${fast.length} suites do not exist at that commit and the rest (${skippedByName.join(', ')}) were SKIPPED by name. Nothing ran, so nothing is claimed; the push is not blocked by an absence.${gapW.tail ? ` — ${gapW.tail}` : ''}`);
       return 0;
     }
     const sum = timings.reduce((n, t) => n + t.ms, 0);
@@ -5256,7 +5317,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     }
     const ran = fast.length - absent.length - skippedByName.length;
     const subject = isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)';
-    console.log(`\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}${skippedByName.length ? ` — SKIPPED by name, not run and not passed: ${skippedByName.join(', ')}` : ''}${skipCount(skippedLegs)}`);   // B-e381 (主开发 r1037): a skip is not a green — the push's own closing line counts it
+    console.log(`\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${gapW.tail ? ` — BUT ${gapW.tail}` : ''}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}${skippedByName.length ? ` — SKIPPED by name, not run and not passed: ${skippedByName.join(', ')}` : ''}${skipCount(skippedLegs)}`);   // B-e381 (主开发 r1037): a skip is not a green — the push's own closing line counts it
     if (absent.length) console.log(`[ci] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     // The marker's contract is "HEAD, clean, passed", so an isolated run at
     // some other commit must not write one — it proves nothing about the tree
