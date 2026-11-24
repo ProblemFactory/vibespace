@@ -253,6 +253,9 @@ This file is the engineers' record of every release: the lanes, the verification
   - The find answers within 10 s, else it is refused by name; the folder of a look that did not answer stays marked until that look returns (no second look; refused at once), and the first ask after it is served.
   - test-subagent-transcript ⑩: the projects folder's listing stalled by placement (RED: today's finder never answers and stacks a second look).
 
+### bl-machines-b — test-exit-rejudge: the hub-restart leg's machine on disk before its hub dies (主开发 r2969; tests only)
+- Three box-zone crashes («no machine matches "Box"», no ✗ line), always as a whole-tree reader under a gate's load: the leg's second hub read hosts.json while the first hub's write was still queued on the store writer's one thread (an urgent write behind the process's other stores' writes, then its IO — the same road since 11-18) — the leg simulates a death where no code runs, milliseconds after adding the machine; a real stop flushes every queued write. Now the leg waits for the scene's machine writes to land (hosts.persisted(), after its access write), the second use's refusal is a named cross, and a RED made by state (a writer whose write never lands) shows the wait still pending and the missing machine. Placed in bl-machines-b's page work/place-exit-rejudge.md.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
