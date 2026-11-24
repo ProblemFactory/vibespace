@@ -978,8 +978,8 @@ console.log('— ③c a lease revoked / re-pointed / shut down while its client 
   const checkLines = src.split('\n').filter((l) => l.startsWith('      const why = park.why ||') || l.startsWith('      if (why) { try { up.close(); }')).map((l) => l + '\n');
   ok(src.split(termLine).length === 2 && checkLines.length === 2 && checkLines.every((l) => src.split(l).length === 2), 'CONTROL setup: the parked-upstream termination and the open-time grant check are spelled once each');
   const noTerm = MUT3.load('src/server/cdp-mediator.js', editAnchor(src, termLine, '\n', "src/server/cdp-mediator.js"), 'noterm');
-  const noCheck = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), src), 'nocheck');
-  const preFix = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), editAnchor(src, termLine, '\n', "src/server/cdp-mediator.js")), 'prefix');
+  const noCheck = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => editAnchor(t, l, '\n', "src/server/cdp-mediator.js"), src), 'nocheck');
+  const preFix = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => editAnchor(t, l, '\n', "src/server/cdp-mediator.js"), editAnchor(src, termLine, '\n', "src/server/cdp-mediator.js")), 'prefix');
   const [a1, a2] = [await revokeLeg(noTerm), await revokeLeg(noCheck)];
   ok(/^503 /.test(a1.status) && a1.opened === a1.closed && /^503 /.test(a2.status) && a2.opened === a2.closed, `each layer ALONE refuses the revoked lease's parked client (check only: "${a1.status}", ${a1.opened}/${a1.closed}; termination only: "${a2.status}", ${a2.opened}/${a2.closed})`, JSON.stringify({ a1, a2 }));
   const [p1, p2, p3] = [await revokeLeg(preFix), await repointLeg(preFix), await shutdownLeg(preFix)];
