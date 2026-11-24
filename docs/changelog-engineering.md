@@ -155,6 +155,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE: NEW src/hub-pool.js `hubPool(script)` answers src/safe-fs.js's exports only when the worker script exists beside the code, else null; its require is a computed path, so esbuild does not follow it. The three sites ask it.
 - LEGS (test-architecture §107): the build's own input list carries src/hub-pool.js and not src/safe-fs.js, RED CONTROL the same build with the helper's require written as a literal (an esbuild onLoad plugin) carries it again; the helper's body lifted: a machine without the worker's script never reaches the require, the hub's checkout reaches it once, RED the existence line cut.
 
+### bl-machines-b — test-dir-slice-remote: the four other legs judged by their landing (主开发 r2691; tests only)
+- ② (the home), ③ (~/work), the base-relative ask beside a dead base and the file ask reached through a link judged a healthy typed run by the hub's FIRST reply (its own 200 ms wait) under their hosts' 250 ms bound. Now one helper (landedAsk): wait on the landing in the hub's cache (the hosts' 20 s net), read the order where a hung run is out (the base-relative ask: ~/work/sub landed while ~/net/sub's run is out), ask again and judge that reply, end any stall of its own (asserted; a pid seen dead is never signalled again).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
