@@ -231,6 +231,22 @@ const PROBE_BYTES = 64; // the append-only proof: the last bytes before a shard'
 // a pending warm itself only while ≤ TAKEOVER_MAX_BYTES are left (≈ 8 steps: inside the boot law's 250 ms) — past it the
 // async readers wait for the warm and the sync ones answer from the rows loaded so far, naming it (`ledgerLoading()`).
 const TAIL_STEP_BYTES = WARM_SLICE_BYTES;
+// B-360d cut 3 (主开发 r2764 / r2798): THE PASS TRIMS AS IT READS. The trim ran ONCE, at the pass's end: every row inside the
+// window waited for it as an object (the fold worker's first load: ~2 M row objects and their side arrays at the stand-in, the
+// largest holder in the worker after the cells, while the end trim kept a sixth). On the road where the trim runs in the pass's own
+// call, IN A WORKER THREAD (`!isMainThread && !stepped && !this.firstLoadInWorker`: the fold worker's rebuild — never the hub's loop,
+// nor a migration's own instance on it; `passTrim` is a suite's switch) the
+// SAME trim runs when the hot set passes PASS_TRIM_FACTOR × its ceiling, checked after each slice, and the pass's end trims
+// whenever it trimmed. THE RESULT IS THE END TRIM'S, WHEREVER THE SLICES FALL: a trim cuts by time to its own target (7/8 of the
+// ceiling, never below the cutoff before it); rows only ARRIVE during a pass, so the bytes above any time only grow, and a cut
+// taken over the rows read so far is never above the cut the end takes over all of them — an early trim moves only rows the end
+// trim moves; a row that arrives later below an early cut goes cold at its read, where the end trim would have put it; the end's
+// trim lands on the same cut. Rows of one time keep their arrival order on both roads, and the slab's settle orders by time,
+// then by that order: the same columns. A request id met again after its first row went cold is still caught by the pass's own
+// `seen` (every id the pass read, as before). Past its factor the trim re-sorts the hot set (O(the ceiling) a trim, about one
+// trim an eighth of the window past the ceiling): the factor keeps that to a handful a load. test-usage-trim §6: the release's
+// pass and this one at three slice sizes, equal byte for byte; RED: a trim that drops or doubles one row.
+const PASS_TRIM_FACTOR = 1.5;
 const LINE_MAX_BYTES = TAIL_STEP_BYTES;
 const TAKEOVER_MAX_BYTES = 8 * WARM_SLICE_BYTES;
 // r3: EVERY state a paused shard's remedy can be in — the notice (src/server/ledger-shape-notice.js D_NOW) and the Usage
@@ -1350,7 +1366,7 @@ class UsageHistory {
       // (which still never yields). A slice with no whole line in it is a row longer than a slice (read once, its own
       // bytes, ≤ LINE_MAX_BYTES), an unfinished last row (it waits for its newline), or bytes that are no row at all
       // (no newline within LINE_MAX_BYTES: skipped, said once per shard)
-      for (let from = consumed, step = stepped ? chunkBytes : TAIL_STEP_BYTES; from < st.size;) {
+      for (let from = consumed, step = stepped ? chunkBytes : (this.tailStepBytes || TAIL_STEP_BYTES); from < st.size;) {   // tailStepBytes: a suite's slice size (test-usage-trim §6)
         const to = Math.min(st.size, from + step);
         let end = this._consumeRange(c, fn, fp, st, from, to, consumed, pass);
         if (end === from) {
@@ -1360,10 +1376,11 @@ class UsageHistory {
           if (end === from) break; // an unfinished last row (or bytes that moved under the read): the next pass reads on from here
         }
         from = end;
+        if ((this.passTrim ?? !isMainThread) && !stepped && !this.firstLoadInWorker && !pass.trimOff && !c.walking && c.hotBytes > this._ledgerHotMaxBytes() * PASS_TRIM_FACTOR) { pass.trimmed = (pass.trimmed || 0) + 1; this._trimHot(); if (!c.lastTrim || c.lastTrim.end !== 'moved') pass.trimOff = true; }   // B-360d cut 3: the pass trims as it reads (a trim that moved nothing — rows below the cut not coldable — is not asked again this pass)
         if (stepped) yield;
       }
     }
-    if (pass.grew && c.hotBytes > this._ledgerHotMaxBytes()) { if (stepped && !this.firstLoadInWorker) { yield; yield* this._trimSteps(trimBatch); } else this._trimOwed(c); } // the hub: its own steps (U5 — a reader's takeover never drives a trim)
+    if (pass.grew && (c.hotBytes > this._ledgerHotMaxBytes() || pass.trimmed)) { if (stepped && !this.firstLoadInWorker) { yield; yield* this._trimSteps(trimBatch); } else this._trimOwed(c); } // the hub: its own steps (U5 — a reader's takeover never drives a trim) · B-360d cut 3: a pass that trimmed as it read trims at its end too (the end's cut, whatever the slices) // the hub: its own steps (U5 — a reader's takeover never drives a trim)
     // a pass that loaded many cold rows (a boot, a rebuild after a rewrite) orders them NOW, inside the same
     // long load, not in the next query's walk planning (r3: a 13 M-row settle measured 5 s in a 30-day query)
     if (pass.cooled && c.cold.n - c.cold.sortedN > Math.max(65536, c.cold.n >> 2)) { if (stepped) yield; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) { if (stepped) yield; c.cold.idx[k].settle(); } }

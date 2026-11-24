@@ -10631,6 +10631,12 @@ Found by reading during the 2.369.412 release red of test-internal-links-chrome 
     - RED controls: the release's road (every read a look), the life counted from the press, and the PURE row removed.
   - test-channels-agent-cli ㉒: the CLI's note inside the life, then the account asked again 11 minutes later.
 
+## THE LEDGER'S FIRST LOAD HELD EVERY ROW OF ITS WINDOW AS AN OBJECT UNTIL ONE TRIM AT ITS END (B-360d cut 3, lane gmail-connect-wall, 2026-11-24; 主开发 r2764 / r2798)
+- THE FAULT (a heap snapshot of the fold worker at its peak, stand-in ledger): the load pass trimmed the hot set ONCE, at its end. Every row inside the window waited for it as an object: ~2 M row objects and their side arrays (~0.5 GB), while the end trim kept a sixth.
+- THE CURE: in the fold worker (a worker thread; never the hub's loop, nor a migration's own instance on it), the SAME trim runs when the hot set passes 1.5× its ceiling, checked after each slice; the pass's end trims whenever it trimmed.
+- 不变量 = THE SAME LEDGER, WHEREVER THE SLICES FALL: a cut over the rows read so far is never above the end's cut (rows only arrive); rows of one time keep their arrival order on both roads, and the slab's settle orders by time then that order; a repeat is caught by the pass's own seen set.
+- PINS: test-usage-trim §6 — the release's pass and this one at three slice sizes, equal byte for byte (hot rows, both id sets, the cold columns and indexes, the cutoff, each row's fields, the counts, the totals); RED: a trim that drops or doubles one row.
+
 ## THE MEMORY CENSUS SAID «TRANSCRIPT TAILS 276/128 MB · OVER» — AND NOTHING ENFORCED THE 128 (B-360d (A), lane gmail-connect-wall, 2026-11-21; 主开发 r1320 / r1358)
 
 - **What was measured** (the test machine, a scratch hub on 2.369.414, 30 history windows attached):

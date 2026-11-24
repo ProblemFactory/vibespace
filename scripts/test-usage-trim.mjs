@@ -262,8 +262,8 @@ try {
     writeRowsTo(base, Array.from({ length: 300 }, () => mkRow(T - Math.floor(rnd() * DAY)))); c1.checkedAt = 0;
     u._loadEvents(); await settled(c1);
     const srcH = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
-    ok(afterBoot.whole === 0 && afterBoot.rows === 3000 && afterBoot.cold > 0 && whole === 0 && c1.lastTrim && c1.lastTrim.end === 'moved' && (srcH.match(/this\._trimHot\(\)/g) || []).length === 1 && /_trimOwed\(c\) \{ if \(this\.firstLoadInWorker\) this\._trimLater\(c\); else this\._trimHot\(\); \}/.test(srcH),
-      `a boot (${afterBoot.rows} rows, ${afterBoot.cold} cold, the worker's own trims), a rebuild swap and a scan's pass past the ceiling: ${whole} whole trims on the hub's instance (the pass's trim ran through its steps: «${c1.lastTrim && c1.lastTrim.end}»); _trimHot's one caller is _trimOwed, for an instance that is not the hub's`);
+    ok(afterBoot.whole === 0 && afterBoot.rows === 3000 && afterBoot.cold > 0 && whole === 0 && c1.lastTrim && c1.lastTrim.end === 'moved' && (srcH.match(/this\._trimHot\(\)/g) || []).length === 2 && /_trimOwed\(c\) \{ if \(this\.firstLoadInWorker\) this\._trimLater\(c\); else this\._trimHot\(\); \}/.test(srcH) && /\(this\.passTrim \?\? !isMainThread\) && !stepped && !this\.firstLoadInWorker[^\n]*this\._trimHot\(\)/.test(srcH),
+      `a boot (${afterBoot.rows} rows, ${afterBoot.cold} cold, the worker's own trims), a rebuild swap and a scan's pass past the ceiling: ${whole} whole trims on the hub's instance (the pass's trim ran through its steps: «${c1.lastTrim && c1.lastTrim.end}»); _trimHot's callers are _trimOwed, for an instance that is not the hub's, and the pass's own trim in a WORKER THREAD only (B-360d cut 3: never the hub's instance) — _trimOwed, for an instance that is not the hub's`);
   }
 
   console.log('§3d the headroom and a reader\'s window');
@@ -424,6 +424,71 @@ try {
     const a = sumIn(uh), b = sumIn(twin);
     ok(deep.length > 0 && movedTie && heldHot && !c.events.includes(late) && sig(uh) === sig(twin) && JSON.stringify(counts(uh)) === JSON.stringify(counts(twin)) && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b)),
       `a row at the SAME ms as a moved row, come while the stage was open: held hot, moved at the next trim; every priced row and count = the untrimmed twin's, the read-order sum ${a === b ? 'equal to the bit' : `within its last ulp (${(a - b).toExponential(2)})`}`, { deep: deep.length, movedTie, heldHot, a, b });
+  }
+
+  console.log('§6 B-360d cut 3 (主开发 r2764 / r2798): the pass trims as it reads — the same ledger to the byte, wherever the slices fall');
+  {
+    const base = path.join(tmp, 'cut3', 'usage-history'); fs.mkdirSync(base, { recursive: true });
+    const seed0 = seed; seed = 4242;
+    const rows = Array.from({ length: 24000 }, () => mkRow(T - Math.floor(rnd() * 70 * DAY)));   // 70 days: past the 40-day window a row goes cold at its read; inside it the hot set passes its ceiling many times
+    // ROWS OF ONE TIME (lane lg-providers' read): the rows of one reply share their timestamp — 150 groups of three to five rows, spread over
+    // the whole span (some fall just below or just above the pass's own cuts: counted below), shuffled apart like any rows
+    const groupTs = new Set();
+    for (let g = 0; g < 150; g++) { const k = 60 + g * 150, size = 3 + (g % 3); for (let q = 1; q < size; q++) rows[k + q].ts = rows[k].ts; groupTs.add(rows[k].ts); }
+    // A REQUEST ID MET AGAIN ACROSS SHARDS (the first copy wins), a third of them RE-ATTRIBUTED (another account) — some later, some earlier
+    const firsts = rows.filter((e) => e.rid && !e.host).slice(0, 600);
+    const repeats = firsts.map((e, k) => ({ ...e, ts: e.ts + (k % 2 ? 3 * DAY : -2 * DAY), acct: k % 3 ? e.acct : 'acc-z', i: (e.i || 0) + 1 }));
+    // ROWS OUT OF ORDER IN TIME: each shard shuffled, and old rows written into the newest shard
+    const all = rows.concat(repeats);
+    for (let k = all.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [all[k], all[j]] = [all[j], all[k]]; }
+    writeRowsTo(base, all);
+    const newest = path.join(base, shardOf(T)), late = Array.from({ length: 300 }, () => mkRow(T - 50 * DAY - Math.floor(rnd() * 15 * DAY)));
+    fs.appendFileSync(newest, late.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    // A SHARD CUT SHORT: an unfinished last row (no newline) — no road takes it
+    fs.appendFileSync(newest, JSON.stringify(mkRow(T - DAY)).slice(0, 60));
+    seed = seed0;
+    const src = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
+    const MID = /\n {8}if \(\(this\.passTrim \?\? !isMainThread\) && !stepped[^\n]*\n/;
+    const M = mutantCopies('usage-trim-cut3', REPO);
+    const RELEASE = M.load('src/usage-history.js', editAnchor(src, MID, '\n', 'src/usage-history.js'), 'release').UsageHistory;   // the release's road: ONE trim, at the pass's end
+    const STAGE = '        if (i !== undefined) { const loc = c.locs[i]; c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); }\n';
+    const DROPS = M.load('src/usage-history.js', editAnchor(src, STAGE, '        if (i !== undefined) { const loc = c.locs[i]; if (!(globalThis.__cut3Drop && globalThis.__cut3Drop-- === 1)) c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); }\n', 'src/usage-history.js'), 'drops').UsageHistory;
+    const DOUBLES = M.load('src/usage-history.js', editAnchor(src, STAGE, '        if (i !== undefined) { const loc = c.locs[i]; c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); if (globalThis.__cut3Twice && globalThis.__cut3Twice-- === 1) c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); }\n', 'src/usage-history.js'), 'doubles').UsageHistory;
+    const MAX = 400 * 1024;   // the hot ceiling, far under the window's ~3 MB of rows: the pass passes it many times
+    const ridsOf = [...new Set(all.concat(late).map((e) => e.rid).filter(Boolean))];
+    const dump = (u) => {
+      const c = u._evCache; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
+      const n = c.cold.n, sl = (a) => Array.from(a.subarray ? a.subarray(0, n) : a.slice(0, n), (x) => (Number.isNaN(x) ? 'NaN' : x));
+      return JSON.stringify({ hot: c.events.map((e) => JSON.stringify(e)), sizes: c.sizes, locs: c.locs.map(String), hrh: c.hrh.map(String), hotBytes: c.hotBytes, cutoff: c.cutoff,
+        rids: [...c.rids], mids: [...c.mids], coldN: n, ts: sl(c.cold.ts), rh: sl(c.cold.rh), sh: sl(c.cold.sh), off: sl(c.cold.off), tok: c.cold.tok.map(sl), nm: c.cold.nm.map(sl), names: c.cold.names.map((t) => t.vals),
+        ridAt: ridsOf.map((r) => [...c.cold.idx.rid.findSorted(CB.idHash(r))].map(String).sort().join('/')), consumed: [...c.consumed] });
+    };
+    const run = (U, slice) => {
+      const u = new U({ dataDir: path.dirname(base), homeDir: tmp }); u.ledgerWindowMs = 40 * DAY; u.ledgerHotMaxBytes = MAX; u.tailStepBytes = slice; u.passTrim = true;   // the fold worker's road (a worker thread), here in-process
+      let trims = 0, peak = 0; const cuts = []; const own = u._trimHot; u._trimHot = function () { trims++; peak = Math.max(peak, this._evCache.events.length); const r = own.call(this); if (this._evCache.lastTrim && Number.isFinite(this._evCache.lastTrim.cut)) cuts.push(this._evCache.lastTrim.cut); return r; };
+      u._loadEvents();
+      const d = dump(u), c = u._evCache, byRid = new Map(); for (const e of c.events) if (e.rid) byRid.set(e.rid, (byRid.get(e.rid) || 0) + 1);   // after dump's settle: an id's hot rows + its places in the cold rid index
+      return { trims, peak, cuts, once: firsts.map((e) => (byRid.get(e.rid) || 0) + [...c.cold.idx.rid.findSorted(CB.idHash(e.rid))].length), dump: d, sig: sig(u), counts: JSON.stringify(counts(u)), totals: JSON.stringify(u.aggregate({ to: T + DAY }).totals) };
+    };
+    const r0 = run(RELEASE, 64 * 1024), r1 = run(UsageHistory, 64 * 1024), r2 = run(UsageHistory, 4 * 1024), r3 = run(UsageHistory, 1024 * 1024);
+    console.log(`      the release: ${r0.trims} trim(s), at most ${r0.peak} hot rows · this pass at 64 KiB: ${r1.trims} trims, at most ${r1.peak} · at 4 KiB: ${r2.trims}, ${r2.peak} · at 1 MiB: ${r3.trims}, ${r3.peak} — ${JSON.parse(r1.dump).coldN} rows cold, ${JSON.parse(r1.dump).hot.length} hot`);
+    const same = (a, b) => a.dump === b.dump && a.sig === b.sig && a.counts === b.counts && a.totals === b.totals;
+    { const u = new UsageHistory({ dataDir: path.dirname(base), homeDir: tmp }); u.ledgerWindowMs = 40 * DAY; u.ledgerHotMaxBytes = MAX; let t = 0; const own = u._trimHot; u._trimHot = function () { t++; return own.call(this); }; u._loadEvents();
+      ok(t === 2, `ON THE MAIN THREAD (the hub, a migration's own instance) the pass trims as the release does: at its start and its end (${t} trims) — never more work on the hub's loop`); }
+    ok(r0.trims === 2 && r1.trims > 4 && r2.trims > 4 && r3.trims >= 3, `the release trims at its pass's start (the window's cut) and ONCE at its end; this pass trims as it reads (${r1.trims} / ${r2.trims} / ${r3.trims} trims at 64 KiB / 4 KiB / 1 MiB slices)`);
+    ok(same(r0, r1) && same(r0, r2) && same(r0, r3), 'THE SAME LEDGER TO THE BYTE: the release\'s pass and this pass at three slice sizes leave the same hot rows (in order, with their sizes, places and hashes), the same two id sets, the same cold columns and indexes after their settle, the same cutoff — and every reader\'s figure (each row\'s fields, the counts by time, the money\'s totals) equal');
+    ok(r1.peak * 2 < r0.peak && r2.peak * 2 < r0.peak, `the hot set as the pass reads: at most ${r1.peak} / ${r2.peak} rows against the release's ${r0.peak} (the rows inside the window waited for its one end trim)`);
+    const onceAll = (r) => r.once.length === 600 && r.once.every((x) => x === 1);
+    ok([r0, r1, r2, r3].every(onceAll), `A REQUEST ID MET AGAIN is ONE row after the pass on every road (600 ids read twice, across shards, a third re-attributed): the release ${r0.once.filter((x) => x === 1).length} · 64 KiB ${r1.once.filter((x) => x === 1).length} · 4 KiB ${r2.once.filter((x) => x === 1).length} · 1 MiB ${r3.once.filter((x) => x === 1).length} of 600 — the pass's own seen set catches a repeat whose first copy went cold at an earlier trim`);
+    // rows of one time on either side of the pass's own cuts: REACHED (the same-time groups nearest a cut, within 12 h, below it and at or above it)
+    const near = (r) => { let below = 0, above = 0, at = 0; for (const t of groupTs) for (const ct of r.cuts) { if (t === ct) at++; else if (t < ct && ct - t <= 12 * 3600e3) below++; else if (t > ct && t - ct <= 12 * 3600e3) above++; } return { below, above, at }; };
+    const n1 = near(r1), n2 = near(r2);
+    ok(n1.below > 0 && n1.above > 0 && n2.below > 0 && n2.above > 0, `ROWS OF ONE TIME around the pass's own cuts are in the comparison: at 64 KiB ${n1.below} group(s) just below a cut, ${n1.above} just above, ${n1.at} at one · at 4 KiB ${n2.below} / ${n2.above} / ${n2.at}`);
+    globalThis.__cut3Drop = 1; const rd = run(DROPS, 64 * 1024); globalThis.__cut3Drop = 0;
+    globalThis.__cut3Twice = 1; const rt = run(DOUBLES, 64 * 1024); globalThis.__cut3Twice = 0;
+    const HALF = M.load('src/usage-history.js', editAnchor(src, 'pass.trimmed = (pass.trimmed || 0) + 1; this._trimHot();', 'pass.trimmed = (pass.trimmed || 0) + 1; { const m0 = this.ledgerHotMaxBytes; this.ledgerHotMaxBytes = Math.floor(this._ledgerHotMaxBytes() / 2); this._trimHot(); this.ledgerHotMaxBytes = m0; }', 'src/usage-history.js'), 'half').UsageHistory;
+    const rh = run(HALF, 64 * 1024);
+    ok(!same(r0, rd) && !same(r0, rt) && !same(r0, rh), `RED: a trim that DROPS one row, one that DOUBLES one row, and THE PASS's TRIM CUTTING TO HALF THE CEILING (an early cut above the end's: ${JSON.parse(rh.dump).hot.length} rows end hot against the release's ${JSON.parse(r0.dump).hot.length}) are each not the release's ledger by the same comparison`);
   }
 } finally { Date.now = realNow; }
 fs.rmSync(tmp, { recursive: true, force: true });
