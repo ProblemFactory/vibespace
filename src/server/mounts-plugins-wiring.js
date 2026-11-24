@@ -1312,7 +1312,7 @@ function createSessionMessages(session, sessionId) {
     // directory + its tabs outlive the browser (src/server/browser-kept.js); the keeper is its one feeder, its shutdown
     // flushes it; `browser-kept-updated` re-loads the Agent browser panel on every client
     let browserKept = null;
-    try { browserKept = require('./browser-kept').create({ dataDir: path.join(rootDir, 'data'), keeper: () => browserKeeper, serverSetting, broadcast: (m) => bcastAll(m), liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)), onChange: () => browserKeeper?.factsMoved?.() }); } // lane B: a kept change moves the browser fact (Resume)
+    try { browserKept = require('./browser-kept').create({ dataDir: path.join(rootDir, 'data'), keeper: () => browserKeeper, serverSetting, settingsHeld: () => (typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null), broadcast: (m) => bcastAll(m), liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)), onChange: () => browserKeeper?.factsMoved?.() }); } // lane B: a kept change moves the browser fact (Resume)
     catch (e) { browserKept = null; console.warn('[browser] kept browsers unavailable — a conversation\'s browser loses its logins and tabs when it stops: ' + (e && e.message)); }
     // lane grants-unify: the bindings reader the keeper maps a conversation ⇄ its browser key through (read per ask)
     let grantBindings = null; try { grantBindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser] the conversation ⇄ key reader is unavailable — a stopped conversation is judged by its key alone: ' + (e && e.message)); }
@@ -1454,7 +1454,7 @@ function createSessionMessages(session, sessionId) {
     // instance reads the same objects); B-f7ab's late key composes through it too
     const browserEnvFn = () => {
       if (browserEnvMemo !== undefined) return browserEnvMemo;
-      try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, serverNotice: null, telemetry: null }); }
+      try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, settingsHeld: () => (typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null), serverNotice: null, telemetry: null }); }
       catch (e) { console.warn('[browser] pin re-point unavailable — ' + (e && e.message)); browserEnvMemo = null; }
       return browserEnvMemo;
     };

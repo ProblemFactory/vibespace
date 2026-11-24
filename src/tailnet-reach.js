@@ -41,7 +41,7 @@ const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const TS_DOMAIN = 'ts.net';
 const SHOW_MAX = 8; // a DISPLAY's bound (the owner's «known: …» list) — routing reads the whole table, never a cap
 const TOKEN_RE = /^[A-Za-z0-9]{16,64}$/;
-const WHYS = Object.freeze(['no-plugin', 'plugin-off', 'signed-out', 'starting', 'setting', 'not-a-peer', 'system', 'explicit-proxy', 'engine', 'remote', 'door', 'started-before', 'started-signed-out', 'started-setting-off', 'door-failed', 'new-device', 'no-answer', 'refused', 'untrusted-cert', 'cert-warning', 'unreachable']);
+const WHYS = Object.freeze(['no-plugin', 'plugin-off', 'signed-out', 'starting', 'setting', 'not-a-peer', 'system', 'explicit-proxy', 'engine', 'remote', 'door', 'started-before', 'started-signed-out', 'started-setting-off', 'settings-held', 'started-settings-held', 'door-failed', 'new-device', 'no-answer', 'refused', 'untrusted-cert', 'cert-warning', 'unreachable']);
 const PROXY_ENV = Object.freeze(['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']);
 
 /** a URL, a host[:port] or a bare host → the lower-case hostname (no brackets, no trailing dot), '' when none */
@@ -111,7 +111,7 @@ function reachOf(reach) {
   const peers = list(r.peers).filter((p) => p.self !== true); // THE WHOLE TABLE: routing never caps (a display may)
   const state = typeof r.state === 'string' ? r.state : null;
   return { up: r.up === true, mode: ['kernel', 'userspace', 'system'].includes(r.mode) ? r.mode : null, state, read: r.read === true || state !== null,
-    loggedIn: r.loggedIn === true, browsers: r.browsers !== false, peers, self, devices: self ? [...peers, self] : peers, suffix: cleanSuffix(r.suffix),
+    loggedIn: r.loggedIn === true, browsers: r.browsers !== false, browsersHeld: r.browsersHeld === true, peers, self, devices: self ? [...peers, self] : peers, suffix: cleanSuffix(r.suffix),
     known: list(r.known), at: Number(r.at) || 0, stale: r.stale === true, ports: { socks: Number(ports.socks) || 0, http: Number(ports.http) || 0 } };
 }
 /** why the tailnet road is down — null when it is up (the plugin ours, running, signed in, the row on) */
@@ -120,7 +120,7 @@ function downWhy(reach) {
   if (!r) return 'no-plugin';
   if (r.mode === 'system') return 'system'; // a system tailscaled (a dev machine): its own routes and DNS — never ours to steer
   if (!r.up || !r.mode) return 'plugin-off';
-  if (!r.browsers) return 'setting';
+  if (!r.browsers) return r.browsersHeld ? 'settings-held' : 'setting';   // B-50e7: the row UNREAD (the settings held) is never said «off»
   if (r.loggedIn) return null;
   return ['NeedsLogin', 'NeedsMachineAuth'].includes(r.state) ? 'signed-out' : 'starting'; // «not yet read» is never «signed out»
 }
@@ -164,7 +164,7 @@ function launchFor(reach, { explicit = false, engine = false, remote = false } =
   if (!r) return off('no-plugin');
   if (r.mode === 'system') return off('system');
   if (!r.up || !r.mode) return off('plugin-off');
-  if (!r.browsers) return off('setting');
+  if (!r.browsers) return off(r.browsersHeld ? 'settings-held' : 'setting');
   if (explicit) return off('explicit-proxy');
   if (!r.loggedIn) return off(downWhy(r)); // r3: not signed in ⇒ no PAC (Chrome would keep an empty one) — 'signed-out' | 'starting'
   return { on: true, mode: r.mode, why: null };
@@ -227,12 +227,14 @@ const WORDS = Object.freeze({
     'no-plugin': '{host} is a Tailscale {what} — this instance has no Tailscale running: install and start it in ⚙ → Plugins → Tailscale',
     'signed-out': '{host} is a Tailscale {what} — Tailscale is not signed in yet: Log in in ⚙ → Plugins → Tailscale',
     setting: '{host} is a Tailscale {what} — reaching Tailscale devices from browsers is off: turn on «Reach tailnet hosts from browsers» in ⚙ → Plugins → Tailscale',
+    'settings-held': '{host} is a Tailscale {what} — VibeSpace\'s settings cannot be read right now, so browsers reach no Tailscale device by its name until they can be read',
     'not-a-peer': '{host} is not a device on your tailnet',
     known: ' (known: {known})', more: ' and {n} more',
     'explicit-proxy': '{host} is a Tailscale {what} — this browser has its own proxy, which VibeSpace leaves as it is: use a proxy that reaches your tailnet, or remove it',
     'started-before': '{host} is on your tailnet, but this browser started before Tailscale was up — stop it and open the page again: it is routed through Tailscale at its next start',
     'started-signed-out': '{host} is on your tailnet, but this browser started while Tailscale was signed out — stop it and open the page again: it is routed through Tailscale at its next start',
     'started-setting-off': '{host} is on your tailnet, but this browser started while «Reach tailnet hosts from browsers» was off — stop it and open the page again: it is routed through Tailscale at its next start',
+    'started-settings-held': '{host} is on your tailnet, but this browser started while VibeSpace\'s settings could not be read — stop it and open the page again: it is routed through Tailscale at its next start',
     'door-failed': '{host} is on your tailnet, but VibeSpace could not open its tailnet door when this browser started (the hub log says why) — stop it and open the page again',
     'new-device': '{host} joined your tailnet after this browser started — stop it and open the page again: it is reached at its next start',
     'no-answer': '{host} is on your tailnet but did not answer through Tailscale — is that device online?',
@@ -250,12 +252,14 @@ const WORDS = Object.freeze({
     'no-plugin': '{host} 是 Tailscale 里的{what} — 这个实例没有在运行 Tailscale：在 ⚙ → 插件 → Tailscale 里安装并启动它',
     'signed-out': '{host} 是 Tailscale 里的{what} — Tailscale 还没有登录：在 ⚙ → 插件 → Tailscale 里登录',
     setting: '{host} 是 Tailscale 里的{what} — 从浏览器访问 Tailscale 设备已关闭：在 ⚙ → 插件 → Tailscale 打开「从浏览器访问 tailnet 里的机器」',
+    'settings-held': '{host} 是 Tailscale 里的{what} — VibeSpace 现在读不到设置，所以在读到之前，浏览器不会按名字访问任何 Tailscale 设备',
     'not-a-peer': '{host} 不是你 tailnet 里的设备',
     known: '（已知：{known}）', more: '，以及另外 {n} 台',
     'explicit-proxy': '{host} 是 Tailscale 里的{what} — 这个浏览器有自己的代理，VibeSpace 不会改它：换一个能到达 tailnet 的代理，或者去掉它',
     'started-before': '{host} 在你的 tailnet 里，但这个浏览器是在 Tailscale 起来之前启动的 — 关掉它再打开页面：下次启动时会经 Tailscale 访问',
     'started-signed-out': '{host} 在你的 tailnet 里，但这个浏览器是在 Tailscale 没登录时启动的 — 关掉它再打开页面：下次启动时会经 Tailscale 访问',
     'started-setting-off': '{host} 在你的 tailnet 里，但这个浏览器启动时「从浏览器访问 tailnet 里的机器」是关着的 — 关掉它再打开页面：下次启动时会经 Tailscale 访问',
+    'started-settings-held': '{host} 在你的 tailnet 里，但这个浏览器启动时 VibeSpace 读不到设置 — 关掉它再打开页面：下次启动时会经 Tailscale 访问',
     'door-failed': '{host} 在你的 tailnet 里，但这个浏览器启动时 VibeSpace 没能打开它的 tailnet 入口（原因见 hub 日志）— 关掉它再打开页面',
     'new-device': '{host} 是在这个浏览器启动之后才加入你的 tailnet 的 — 关掉它再打开页面：下次启动时就能访问',
     'no-answer': '{host} 在你的 tailnet 里，但经 Tailscale 没有回应 — 那台设备在线吗？',
@@ -273,12 +277,14 @@ const WORDS = Object.freeze({
     'no-plugin': '{host} は Tailscale の{what}です — このインスタンスでは Tailscale が動いていません：⚙ → プラグイン → Tailscale でインストールして起動してください',
     'signed-out': '{host} は Tailscale の{what}です — Tailscale にまだログインしていません：⚙ → プラグイン → Tailscale でログインしてください',
     setting: '{host} は Tailscale の{what}です — ブラウザーから Tailscale のデバイスへの接続がオフです：⚙ → プラグイン → Tailscale で「ブラウザーから tailnet のマシンに接続」をオンにしてください',
+    'settings-held': '{host} は Tailscale の{what}です — VibeSpace が今は設定を読めないため、読めるようになるまでブラウザーは名前で Tailscale のデバイスに接続しません',
     'not-a-peer': '{host} はあなたの tailnet のデバイスではありません',
     known: '（既知：{known}）', more: ' ほか {n} 台',
     'explicit-proxy': '{host} は Tailscale の{what}です — このブラウザーには独自のプロキシがあり、VibeSpace は変更しません：tailnet に届くプロキシを使うか、外してください',
     'started-before': '{host} は tailnet 上にありますが、このブラウザーは Tailscale が起動する前に開始されました — 閉じてからページを開き直してください：次の起動から Tailscale 経由になります',
     'started-signed-out': '{host} は tailnet 上にありますが、このブラウザーは Tailscale にログインしていない間に開始されました — 閉じてからページを開き直してください：次の起動から Tailscale 経由になります',
     'started-setting-off': '{host} は tailnet 上にありますが、このブラウザーは「ブラウザーから tailnet のマシンに接続」がオフの間に開始されました — 閉じてからページを開き直してください：次の起動から Tailscale 経由になります',
+    'started-settings-held': '{host} は tailnet 上にありますが、このブラウザーは VibeSpace が設定を読めない間に開始されました — 閉じてからページを開き直してください：次の起動から Tailscale 経由になります',
     'door-failed': '{host} は tailnet 上にありますが、このブラウザーの起動時に VibeSpace が tailnet の入口を開けませんでした（理由は hub のログにあります）— 閉じてからページを開き直してください',
     'new-device': '{host} はこのブラウザーの起動後に tailnet に加わりました — 閉じてからページを開き直してください：次の起動から届きます',
     'no-answer': '{host} は tailnet 上にありますが、Tailscale 経由で応答がありません — そのデバイスはオンラインですか？',
@@ -329,7 +335,7 @@ function missFor(url, reach, { via = 'browser', launched = undefined, failed = f
   if (via === 'browser' && launched !== undefined && !(launched && launched.arg) && kind === 'device' && !down && road !== 'direct') {
     const w = launched && launched.why;
     if (['engine', 'remote', 'system'].includes(w)) return null; // not VibeSpace's Chrome on this machine to route
-    return say({ 'explicit-proxy': 'explicit-proxy', 'signed-out': 'started-signed-out', setting: 'started-setting-off', door: 'door-failed' }[w] || 'started-before'); // r3: the stamp's own reason
+    return say({ 'explicit-proxy': 'explicit-proxy', 'signed-out': 'started-signed-out', setting: 'started-setting-off', 'settings-held': 'started-settings-held', door: 'door-failed' }[w] || 'started-before'); // r3: the stamp's own reason
   }
   // a current device, on the road VibeSpace added: the words follow the error, through Tailscale
   if (kind === 'device' && !down) {

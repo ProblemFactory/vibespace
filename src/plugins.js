@@ -116,6 +116,9 @@ class PluginManager {
         probeProto: (port, o) => this._probeProto(port, o),
         settings: () => PS.valuesOf(id, this._readSettings()),
         setting: (key) => PS.valuesOf(id, this._readSettings())[key],
+        // B-50e7: are the settings HELD? (the held view the store hands while settings.json cannot be read carries its marker — no
+        // plugin row is in it, so a row read now is its default, never the person's: a plugin whose default is not the safe side asks)
+        settingsHeld: () => { try { return !!(this._readSettings() || {})[Symbol.for('vibespace.settings-held')]; } catch { return false; } },
         writeSettings: (patch) => this._writeSettings(id, patch),
         vault: () => SB.vaultForDir(dataDir), sealedDir: () => SB.sealedDir(dataDir),
       };

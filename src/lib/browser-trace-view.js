@@ -37,7 +37,7 @@
 import { t, tc, deviceLocale } from './i18n.js';
 import { clockOf, dateOf } from './page-time.js';
 import { needLine, needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: the trace switches' doors
-import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog, showContextMenu, escHtml, attachPopoverClose } from './utils.js';
+import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog, showContextMenu, escHtml, attachPopoverClose, heldWordsOf } from './utils.js';   // B-50e7: heldWordsOf — the settings held, said by the family's one table
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { btn, el as chromeEl, icon as chromeIcon } from './channel-chrome.js';
@@ -862,6 +862,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     const size = sizeText(v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE);
     const days = Math.round((v?.limits?.recordingRetentionMs || 7 * 86400000) / 86400000), mb = Math.round((v?.limits?.recordingBytesPerProfile || 200 * 1048576) / 1048576);
     noteTraceLimit(v?.limits?.bytesPerProfile);
+    // B-50e7: the settings held with the bound unread ⇒ the held words, never the default size as the person's (the sweep waits meanwhile)
+    if (v?.limits?.settingsUnread) { hint.textContent = heldWordsOf(v.limits.settingsUnread); return; }
     hint.textContent = t('Each profile keeps its records up to {size}; over it, the oldest sessions\' frames are removed first and every action list stays. Recordings are kept {days} days or {mb} MB. Frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { size, days, mb });
     if (v && v.traceOn === false) hint.append(' ', needLine({ words: t('The action trace is off.'), tone: 'off', doors: [settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' })] }));
   }
@@ -1206,7 +1208,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     for (const e of erows) ephs.appendChild(ephemeralRow(e));
     // lane browser-resume (§3.9): the KEPT browsers — keyed rows (a broadcast never rebuilds a row whose words did not move)
     const kl = v.limits || {};
-    const keptSec = section(t('Kept browsers'), kl.keptTotal ? t('Kept until the conversation ends or the kept browsers pass {size} (each at most {per})', { size: sizeText(kl.keptTotal), per: sizeText(kl.keptPerConversation || 0) }) + '' : '');
+    const keptSec = section(t('Kept browsers'), kl.keptUnread ? heldWordsOf(kl.keptUnread) /* B-50e7: the bounds unread — the hold said, no number as the person's */ : kl.keptTotal ? t('Kept until the conversation ends or the kept browsers pass {size} (each at most {per})', { size: sizeText(kl.keptTotal), per: sizeText(kl.keptPerConversation || 0) }) + '' : '');
     if (kl.keptOn === false) keptSec.appendChild(needLine({ words: t('Keeping is off'), tone: 'off', doors: [settingsDoor(app, 'browser.keepConversationBrowser', { label: t('Turn on…'), kind: 'secondary' })] })); // lane ui-needs-a-button pick 5
     // verify r2 (Y2): the kept sweep's report reaches the user, not only the journal — the total bound held open by
     // running conversations (never removed) is SAID here with what frees it (a per-row Forget); nothing to free is said too

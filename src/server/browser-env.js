@@ -156,6 +156,9 @@ const SWEEP_GRACE_MS = 60 * 60 * 1000;
 const PROFILE_REGISTRY_FILE = 'browser-profiles.json';
 
 function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
+  // B-50e7 (r3747 must 2): the settings HELD? (the hub's persistence router — the door the keeper has). Not given (src/ws-create.js's own
+  // instance, whose ctx carries only the reader), the reader's own hold marker answers it: the held view carries Symbol.for('vibespace.settings-held')
+  settingsHeld = null,
   telemetry = null, homeDir = os.homedir(), facts = null, log = console,
   // The environment the SESSION will get (r4): `agentEnv()` passes the server's
   // own `XDG_RUNTIME_DIR` through and strips every `AGENT_BROWSER_*`, so the
@@ -190,7 +193,19 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   // records into the same file through its own instance; this one only reads.
   const bindings = browserBindings.create({ dataDir, log });
 
-  const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
+  // B-50e7 (r3747 must 2): WHILE THE SETTINGS ARE HELD the held view carries no browser.* row. Each value read while they READ is noted
+  // in ONE memo of this process (memory only); held, a read answers it; nothing known ⇒ the read's SAFE SIDE (`safe`), else its default.
+  // The conversation's spawn environment is built here: a default idle written into it would bind that conversation's browser for its life.
+  const lastKnown = new Map();
+  const heldDoor = typeof settingsHeld === 'function' ? settingsHeld : () => serverSetting(Symbol.for('vibespace.settings-held')) || null;
+  const readSetting = (k) => {
+    let h = null; try { h = heldDoor(); } catch { h = null; }
+    if (h) return lastKnown.has(k) ? { v: lastKnown.get(k), known: true, held: true } : { v: undefined, known: false, held: true };
+    let v; try { v = serverSetting(k); } catch { v = undefined; }
+    lastKnown.set(k, v);
+    return { v, known: true, held: false };
+  };
+  const setting = (k, d, safe) => { const r = readSetting(k); if (r.held && !r.known) return safe === undefined ? d : safe; const v = r.v; return v === undefined || v === null || v === '' ? d : v; };
   const enabled = () => setting('browser.isolateSessions', true) !== false;
   const keeping = () => { if (typeof keepOn === 'function') { try { return !!keepOn(); } catch { return false; } } return KB.keptLimits((k) => setting(k, undefined)).on; };
   /** The browser keys the kept store names (a set; unreadable ⇒ null, and the callers fail CLOSED: the sweep spares every
@@ -610,7 +625,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     const pairs = B.browserEnvFor({
       browserKey, enabled: true, variant: res.variant,
       configPath: res.configPath, profileDir: res.profileDir,
-      idleMs: setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS),
+      idleMs: setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS, 0),   // B-50e7: held, nothing known ⇒ 0 (never) — a default idle written into the spawn env would stop this conversation's browser for its life
       socketDir: res.socketDir || null,
     });
     return { pairs, remotePrelude: res.remotePrelude || '', ...res };

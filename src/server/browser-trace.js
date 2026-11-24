@@ -100,8 +100,22 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   const forgottenFile = path.join(dataDir, T.FORGOTTEN_FILE);
   const abBase = path.join(homeDir, '.agent-browser');
   const rt = () => runtime || (keeper && keeper._runtime) || null;
-  const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
-  const enabled = () => setting('browser.actionTrace', true) !== false && setting('browser.actionTrace', true) !== 'false';
+  // B-50e7 (r3747, the census of readers): while the SETTINGS are held the held view carries no browser.* row — the trace's two reads
+  // took their defaults as the person's: ON for a person who turned it off (a record they refused), and the default size bound for the
+  // sweep that deletes frames down to it. Each value read while they READ is noted in ONE memo of this process (memory only); held, a
+  // read answers it; nothing known ⇒ the safe side: the trace records nothing, and its sweep removes nothing (the reader's own hold marker)
+  const lastKnown = new Map();
+  const settingsHeldNow = () => { try { return serverSetting(Symbol.for('vibespace.settings-held')) || null; } catch { return null; } };
+  const readSetting = (k) => {
+    if (settingsHeldNow()) return lastKnown.has(k) ? { v: lastKnown.get(k), known: true, held: true } : { v: undefined, known: false, held: true };
+    let v; try { v = serverSetting(k); } catch { v = undefined; }
+    lastKnown.set(k, v);
+    return { v, known: true, held: false };
+  };
+  const setting = (k, d, safe) => { const r = readSetting(k); if (r.held && !r.known) return safe === undefined ? d : safe; const v = r.v; return v === undefined || v === null || v === '' ? d : v; };
+  const enabled = () => { const v = setting('browser.actionTrace', true, false); return v !== false && v !== 'false'; };
+  /** B-50e7: the size bound is unread (held, nothing known) — the sweep waits, the panel says the hold, never the default as the person's */
+  const boundUnread = () => { const r = readSetting(T.TRACE_BYTES_SETTING); return !!(r.held && !r.known); };
   /** The per-scope record limit in bytes (setting MB → bytes, default 1 GiB, floor 64 MB). */
   const bytesLimit = () => T.traceBytesLimit(setting(T.TRACE_BYTES_SETTING, undefined));
 
@@ -758,8 +772,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   }
   function sweep() {
     const t = now();
+    // B-50e7 (r3747, the census of readers): the frames' size bound unread (the settings held, nothing known) ⇒ that part WAITS — no
+    // frame is removed on a default bound; the recordings below keep their own bound (a constant, no setting)
+    const unread = boundUnread();
+    if (unread) log.warn?.('[browser-trace] the frames\' size sweep waits — the settings cannot be read (its bound is unread)');
     const limit = bytesLimit();
-    const plan = T.traceSizePlan({ scopes: scopes().map(scopeForPlan), bytesPerScope: limit });
+    const plan = unread ? { removeFrames: [], bytesRemoved: 0, kept: [] } : T.traceSizePlan({ scopes: scopes().map(scopeForPlan), bytesPerScope: limit });
     for (const sc of new Set(plan.removeFrames.map((r) => r.key))) {
       const gone = new Map(plan.removeFrames.filter((r) => r.key === sc).map((r) => [r.id, r]));
       const list = loadIndex(sc);
@@ -785,7 +803,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       for (const r of rp.remove) { try { fs.unlinkSync(path.join(recRoot, pid, r.id)); recRemoved.push({ profileId: pid, file: r.id, why: r.why, bytes: r.bytes }); } catch { /* */ } }
     }
     const framesRemoved = plan.removeFrames.length;
-    lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept };
+    lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, ...(unread ? { held: true } : {}), recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept };
     if (framesRemoved || recRemoved.length) log.log?.(`[browser-trace] sweep: the frames of ${framesRemoved} action(s) (${Math.round(plan.bytesRemoved / 1024)} KB) + ${recRemoved.length} recording(s) removed — ${[...plan.removeFrames, ...recRemoved].slice(0, 3).map((r) => r.why).join('; ')}${framesRemoved + recRemoved.length > 3 ? '; …' : ''} (every action list kept)`);
     bc({ type: 'browser-housekeeping-updated', sweep: lastSweep });
     return { ...lastSweep, plan, recordings: recRemoved };
@@ -1006,7 +1024,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     let kept = [], keptLimits = null, keptSweep = null;
     if (ks) { try { kept = ks.list(); keptLimits = ks.limits(); keptSweep = ks.lastSweep(); } catch (e) { log.warn?.(`[browser-trace] the kept browsers could not be listed: ${e && e.message}`); } }
     return { profiles: rows, ephemeral: eph, ephemeralBrowsers, kept, keptSweep, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), ...(fgHold.held() ? { forgottenUnread: { file: 'browser-forgotten.json', code: fgHold.held().code, since: fgHold.held().since } } : {}), ...(fgDamaged ? { forgottenDamaged: { ...fgDamaged } } : {}), sweep: lastSweep,
-      limits: { bytesPerProfile: bytesLimit(), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR, ...(keptLimits ? { keptOn: keptLimits.on, keptPerConversation: keptLimits.perConversation, keptTotal: keptLimits.total } : {}) },
+      limits: { bytesPerProfile: bytesLimit(), ...(boundUnread() ? { settingsUnread: { code: 'browser_settings_unread' } } : {}), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR, ...(keptLimits ? { keptOn: keptLimits.on, keptPerConversation: keptLimits.perConversation, keptTotal: keptLimits.total, ...(keptLimits.unread ? { keptUnread: { code: keptLimits.code } } : {}) } : {}) },
       traceOn: enabled(), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
   }
 

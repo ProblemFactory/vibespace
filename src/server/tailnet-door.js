@@ -74,7 +74,7 @@ const AGENT_KEYS = ['keepAlive', 'keepAliveMsecs', 'scheduling', 'timeout', 'max
 const agentOptions = (global) => { const o = {}; for (const k of AGENT_KEYS) if (global && global.options && global.options[k] !== undefined) o[k] = global.options[k]; return { ...o, keepAlive: true }; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // the console's short reason a launch went without the PAC (said once per profile and reason per window)
-const LAUNCH_WHY = Object.freeze({ 'plugin-off': 'the Tailscale plugin is off', setting: 'Reach tailnet hosts from browsers is off (⚙ → Plugins → Tailscale)', 'explicit-proxy': 'it has a proxy of its own, which wins', 'signed-out': 'Tailscale is not signed in', starting: 'Tailscale is still starting' });
+const LAUNCH_WHY = Object.freeze({ 'plugin-off': 'the Tailscale plugin is off', setting: 'Reach tailnet hosts from browsers is off (⚙ → Plugins → Tailscale)', 'settings-held': 'VibeSpace\'s settings cannot be read right now — «Reach tailnet hosts from browsers» is unread, so it is off until they read (B-50e7)', 'explicit-proxy': 'it has a proxy of its own, which wins', 'signed-out': 'Tailscale is not signed in', starting: 'Tailscale is still starting' });
 // why a vetted address is never this door's target (src/tailnet-reach.js vetAddress) — the 403's words
 const VET_WORDS = Object.freeze({ loopback: 'a loopback address', unspecified: 'an unspecified address (this machine)', 'link-local': 'a link-local address', metadata: 'a cloud metadata address', 'tailscale-service': 'Tailscale\'s own service address', 'this-hub': 'one of this machine\'s own addresses', 'not-tailnet': 'not a tailnet address', 'not-an-address': 'no usable address' });
 /** an upstream error → the code its words follow (a bare timeout has none) */
@@ -255,7 +255,7 @@ function create({ dataDir = null, reach = () => null, fresh = null, settleMs = S
     const v = TR.launchFor(r, { explicit, engine, remote });
     if (!v.on) {
       const r0 = TR.reachOf(r);
-      const said0 = r0 && (v.why === 'plugin-off' ? r0.known.length > 0 : ['setting', 'explicit-proxy', 'signed-out', 'starting'].includes(v.why) && r0.up);
+      const said0 = r0 && (v.why === 'plugin-off' ? r0.known.length > 0 : ['setting', 'settings-held', 'explicit-proxy', 'signed-out', 'starting'].includes(v.why) && r0.up);
       if (said0 && LAUNCH_WHY[v.why]) sayOnce(`launch:${v.why}:${label}`, `"${String(label).slice(0, 80)}" starts without tailnet reach — ${LAUNCH_WHY[v.why]}`);
       return { on: false, mode: v.mode, why: v.why, arg: null };
     }

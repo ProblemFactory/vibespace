@@ -57,7 +57,10 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // B-7a30: the folder check (injectable: the gate PLACES a stall in it) and the acts' bound / the tick's period
   checkDir = null, thereActMs = THERE_ACT_MS, thereEveryMs = THERE_FRESH_MS,
   // lane B: the browser FACT carries what is kept (the live view's Resume) — a change here re-computes the facts (debounced)
-  onChange = null } = {}) {
+  onChange = null,
+  // B-50e7 (r3747 must 1): the settings HELD? (the hub's persistence router — the door the keeper has): while held the retention
+  // sweep reads no limit (its total would be the default's, never the person's) and removes nothing
+  settingsHeld = () => null } = {}) {
   if (!dataDir) throw new Error('browser-kept: dataDir is required');
   const file = path.join(dataDir, K.KEPT_FILE);
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles');
@@ -360,7 +363,10 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId,
     }));
   }
-  const limits = () => K.keptLimits(setting);
+  // B-50e7 (r3747 must 1): while the settings are held the bounds are the defaults, never the person's — said unread (the panel says the
+  // hold, no number as the person's) and the sweep below waits
+  const settingsHeldNow = () => { try { return settingsHeld() || null; } catch { return null; } };
+  const limits = () => { const l = K.keptLimits(setting); return settingsHeldNow() ? { ...l, unread: true, code: 'browser_settings_unread' } : l; };
 
   // ── ends ──
   /** Rename `p` beside itself (`<p>.<tag>-<ms>`) → the new path; null when there was nothing there; false when it could
@@ -469,6 +475,9 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     // the B-f276 remainder (bl-jobs): while the profile registry is HELD the kept sweep reads nothing as «gone» — no pass (a folder a
     // named profile holds, a running browser's caches); the keeper's read runs the boot's steps, this boot sweep among them
     { const k = kp(); if (k && typeof k.held === 'function' && k.held()) { log.warn?.('[browser-kept] the sweep waits — the profile registry is held'); return Promise.resolve({ held: true }); } }
+    // B-50e7 (r3747 must 1): while the SETTINGS are held its limits are unread — the default total is never the person's bound: the sweep
+    // removes nothing (no kept browser loses its sign-ins on a default); the next sweep after the lift applies the person's bound
+    if (settingsHeldNow()) { log.warn?.('[browser-kept] the sweep waits — the settings cannot be read (its limits are unread)'); return Promise.resolve({ held: true, settings: true }); }
     sweeping = (async () => {
       const t0 = now();
       const s = load();

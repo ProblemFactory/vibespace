@@ -212,8 +212,19 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   let loaded = false, timer = null, viewerProbe = null;
   const sessionsMap = () => (typeof activeSessions === 'function' ? activeSessions() : activeSessions) || new Map();
   const helperOpts = () => ({ python, ...(helper !== undefined ? { helper } : {}), now });
-  const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
-  const takeoverIdleMs = () => T.takeoverIdleMs(setting('browser.takeoverIdleMs', T.DEFAULT_TAKEOVER_IDLE_MS));
+  // B-50e7 (r3747, the census of readers): while the SETTINGS are held (the reader's own hold marker) the held view carries no browser.* row:
+  // each value read while they READ is noted in ONE memo of this process (memory only); held, a read answers it; nothing known ⇒ the
+  // read's SAFE SIDE — a window takeover never lapses on the default time (0 = never)
+  const lastKnown = new Map();
+  const settingsHeldNow = () => { try { return serverSetting(Symbol.for('vibespace.settings-held')) || null; } catch { return null; } };
+  const readSetting = (k) => {
+    if (settingsHeldNow()) return lastKnown.has(k) ? { v: lastKnown.get(k), known: true, held: true } : { v: undefined, known: false, held: true };
+    let v; try { v = serverSetting(k); } catch { v = undefined; }
+    lastKnown.set(k, v);
+    return { v, known: true, held: false };
+  };
+  const setting = (k, d, safe) => { const r = readSetting(k); if (r.held && !r.known) return safe === undefined ? d : safe; const v = r.v; return v === undefined || v === null || v === '' ? d : v; };
+  const takeoverIdleMs = () => T.takeoverIdleMs(setting('browser.takeoverIdleMs', T.DEFAULT_TAKEOVER_IDLE_MS, 0));
   /** P10: the D27 (b) switch as the server reads it — anything but `true` is OFF. */
   const desktopEnabled = () => setting(DESK.SETTING_KEY, false) === true;
   const execP = (bin, args, opts = {}) => new Promise((resolve) => execFile(bin, args, { timeout: 8000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', ...opts }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));

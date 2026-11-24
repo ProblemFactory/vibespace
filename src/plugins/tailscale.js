@@ -183,6 +183,16 @@ module.exports = {
     };
     /** stale = not read in this hub's life yet (a persisted table at most), or read over a minute ago */
     const namesStale = () => !names.live || Date.now() - names.readAt > 60000;
+    // B-50e7 (the census of readers): «Reach tailnet hosts from browsers» while VibeSpace's settings are HELD — the held view carries no
+    // plugin row, so its default «on» would open the person's tailnet machines to every browser here for a person who turned it off.
+    // Held: the value last known in this run (memory only); nothing known ⇒ OFF, said by its own reason (settings-held), never «off»
+    let reachKnown;   // undefined: never read in this run
+    const reachBrowsersNow = () => {
+      let held = false; try { held = !!(typeof h.settingsHeld === 'function' && h.settingsHeld()); } catch { held = false; }
+      if (held) return reachKnown === undefined ? { browsers: false, browsersHeld: true } : { browsers: reachKnown };
+      reachKnown = h.setting('reachBrowsers') !== false;
+      return { browsers: reachKnown };
+    };
 
     const verbs = {
       // the networking mode is a SETTINGS row (All Settings › Plugins › Tailscale); this old door writes it there and
@@ -307,7 +317,7 @@ module.exports = {
         if (up && Date.now() - names.at > (names.list.length ? 60000 : 5000)) refreshNames();
         const rec = h.peek();
         return { up, mode: up ? (rec.mode || 'userspace') : (names.system ? 'system' : null), state: names.state, read: names.readAt > 0, loggedIn: up && names.state === 'Running',
-          browsers: h.setting('reachBrowsers') !== false, peers: up ? names.peers : [], self: up ? names.self : null, suffix: names.suffix,
+          ...reachBrowsersNow(), peers: up ? names.peers : [], self: up ? names.self : null, suffix: names.suffix,
           known: [...names.peers, ...(names.self ? [names.self] : [])], at: names.readAt, stale: up && namesStale(), ports: { socks: SOCKS_PORT, http: SOCKS_PORT + 1 } };
       },
       /** lane tailnet-names r2: reach() AFTER one bounded status read when the table is stale (a restart, a minute old) — a

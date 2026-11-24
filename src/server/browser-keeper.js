@@ -6217,7 +6217,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // ── BROWSE YOURSELF (B-6ae8): the USER as one more holder, on HIS OWN pinned tab ──
   /** How long this holder keeps his tab while AWAY (the owner, 8): he launched the browser ⇒ `browser.humanKeepMs` (12 h);
    *  he joined one an agent launched ⇒ the 10-min `browser.takeoverIdleMs` (the browser then follows its other holders). */
-  function humanKeepOf(h) { return HM.keepFor({ launched: !!(h && h.launched), keepMs: HM.humanKeepMs(setting(HM.HUMAN_KEEP_SETTING, HM.DEFAULT_HUMAN_KEEP_MS)), joinKeepMs: takeoverIdleMs() }); }
+  function humanKeepOf(h) { return HM.keepFor({ launched: !!(h && h.launched), keepMs: HM.humanKeepMs(setting(HM.HUMAN_KEEP_SETTING, HM.DEFAULT_HUMAN_KEEP_MS, 0)), joinKeepMs: takeoverIdleMs() }); }   // B-50e7 (r3747 must 3): held, nothing known ⇒ 0 — a person's own tab never ends on the default 12 h
   /** The panel row's fact for one profile (null = the user does not browse it). */
   function humanOf(profileId) { ensureLoaded(); const h = humans.get(String(profileId || '')); return h ? { ...HM.humanHolderRow(h, { viewers: watchers.get(inputKey(h.key, h.profileId)) || 0 }), keepMs: humanKeepOf(h) } : null; }
   /** The holder a human key names, or null (a stale key: its holder ended). */
@@ -7619,7 +7619,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const raced = egressProxies.get(k0); // two starts of one profile raced the listen: the first proxy stays the one
     if (raced && raced.px.port()) { raced.of = of; px.close().catch(() => {}); return raced.px.url(); }
     egressProxies.set(k0, ent);
-    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${of.setting ? (sitesUnread(of) ? 'nothing while the settings cannot be read' : (egressListOf(of).join(', ') || `nothing (no sites in ${of.setting})`)) : 'every name but loopback'}${of.proxy ? ` — through ${of.proxy.scheme}://${of.proxy.host}:${of.proxy.port}${of.proxy.credential ? ' with its login from the vault' : ''}` : ''}`);
+    log.log?.(`[browser] egress proxy of ${w} for ${k0 || '?'} on ${px.url()} — admits: ${of.setting ? (sitesUnread(of) ? 'nothing while the settings cannot be read' : ((n) => (n ? `${n} site${n === 1 ? '' : 's'} of its list (an address list is private: never named here)` : `nothing (no sites in ${of.setting})`))(egressListOf(of).length)) : 'every name but loopback'}${of.proxy ? ` — through ${of.proxy.scheme}://${of.proxy.host}:${of.proxy.port}${of.proxy.credential ? ' with its login from the vault' : ''}` : ''}`);
     return px.url();
   }
   /** r2: what a launch RECORDS of its proxy (`rec.egress`, persisted with the record): the port its launch view names + whose list
@@ -7872,7 +7872,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // B-50e7 (scene 7): the pin the LAST run kept (cli-pin.json), read ONCE at the keeper's birth OFF the loop, held in memory only — what a
   // start while the settings are held launches with, before this run has computed a pin of its own
   let birthPin = null;
-  if (dataDir) fs.promises.readFile(cliPinFile(), 'utf8').then((s) => { try { const j = JSON.parse(s); if (j && typeof j.path === 'string' && j.path) birthPin = { version: typeof j.version === 'string' ? j.version : null, path: j.path }; } catch { /* not a pin */ } }, () => { /* no pin kept */ });
+  const birthPinRead = !dataDir ? Promise.resolve() : fs.promises.readFile(cliPinFile(), 'utf8').then((s) => { try { const j = JSON.parse(s); if (j && typeof j.path === 'string' && j.path) birthPin = { version: typeof j.version === 'string' ? j.version : null, path: j.path }; } catch { /* not a pin */ } }, () => { /* no pin kept */ });
   const cliPrefix = (v) => path.join(dataDir, 'browser-tools', VERBS.cliInstallDirName(v));
   /** verify r1 (F2): THE WITNESS of a verified install — `<prefix>/verified.json` {version, path, at, says}, written by
    *  `finishCli` ONLY after the program itself said the version. Without it a folder is NOT an install: npm extracts the
@@ -7932,7 +7932,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // UNREAD (the held view carries no such row): the pin computed from it is the default's («path»), and the mirror below was REMOVED —
     // the person's pinned build gone from the agent's CLI on a guess. Held: the last pin stands, nothing is written; the lift recomputes
     let settingsUnread = false; try { settingsUnread = !!settingsHeld(); } catch { settingsUnread = false; }
-    if (settingsUnread) return cliMemo ? cliMemo.pin : birthPin ? { mode: 'pinned', version: birthPin.version, path: birthPin.path, installed: true, why: 'the settings cannot be read right now — the pin the last run kept is used', invalid: null, held: true } : { mode: 'path', version: null, path: null, installed: false, why: 'the settings cannot be read right now — the pin file is left as it is', invalid: null, held: true };   // B-50e7 scene 7: nothing known ⇒ the kept pin before PATH
+    // B-50e7 (r3747 should 1): held, a pin is said «installed» only past the SAME check the memo's road makes (one stat per resolve,
+    // usableExe) — a kept or memo pin whose program vanished is never said installed; PATH answers then, said so
+    if (settingsUnread) {
+      if (cliMemo && (!cliMemo.pin.path || usableExe(cliMemo.pin.path))) return cliMemo.pin;
+      if (birthPin && usableExe(birthPin.path)) return { mode: 'pinned', version: birthPin.version, path: birthPin.path, installed: true, why: 'the settings cannot be read right now — the pin the last run kept is used', invalid: null, held: true };   // B-50e7 scene 7: nothing known ⇒ the kept pin before PATH
+      return { mode: 'path', version: null, path: null, installed: false, why: cliMemo || birthPin ? 'the settings cannot be read right now and the pinned program is not a runnable file — the browser tool on PATH is used; the pin file is left as it is' : 'the settings cannot be read right now — the pin file is left as it is', invalid: null, held: true };
+    }
     let raw = ''; try { const v0 = serverSetting('browser.cli'); raw = v0 == null ? '' : String(v0); } catch { raw = ''; }
     if (cliMemo && cliMemo.raw === raw && cliMemo.gen === cliGen) {
       // verify r1 (F4): a pinned install that VANISHED (data/browser-tools wiped, the folder moved) is said at once — the
@@ -9362,7 +9368,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     machineDisplay, machineDisplayCached, noDisplayMode, headedSetting, // lane headless-fallback (+ H5: the stored window preference, for Settings' fact line): this machine's display now (a fresh probe — Settings' read-only line) + the no-display setting
     reshapeStore: (fn) => { ensureLoaded(); refuseIfHeld('a migration of the profile registry'); const r = fn(reg); commit(); landedOrThrow(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save — ON DISK before it returns, else it THROWS by name (lane lg-store-writes U5b: the boot's next migration may read the file)
     diskOf: (id) => { ensureLoaded(); return disk.diskOf(profile(id)); }, _disk: disk,
-    _heldReads: () => ({ idleMs: idleMs(), releaseMs: idleReleaseAfterMs(), takeoverMs: takeoverIdleMs(), cap: machineCap(), capUnread: capUnread(), egress: (of, h) => egressAllow(of, h) }),   // B-50e7: the readers a held settings store reaches (read-only; the legs' seam) // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
+    _heldReads: () => ({ idleMs: idleMs(), releaseMs: idleReleaseAfterMs(), takeoverMs: takeoverIdleMs(), humanKeepMs: humanKeepOf({ launched: true }), cap: machineCap(), capUnread: capUnread(), egress: (of, h) => egressAllow(of, h), egressStart: (pid, of) => egressUrlFor(pid, of), egressStop: (pid) => dropEgress(pid), pinRead: birthPinRead }),   // B-50e7: the readers a held settings store reaches (read-only; the legs' seam) // lane browser-disk-sample: THE disk fact (the panel row, GET /api/browser/profiles)
     stopRows, managerStop, // lane browsers-stop (majordomo piece 6)
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
