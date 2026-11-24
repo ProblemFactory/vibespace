@@ -9,6 +9,8 @@
 //   L3 THE WALK IS WHOLE `dynamic` = every read the walk cannot name («<file>: <callee>(<argument>)», one entry a site), and
 //                        `handoffs` = every place server code hands the reader on under ANOTHER name (`k: serverSetting`,
 //                        `k: (x) => serverSetting(x)`, `X.k = …`): the suite's two closed lists.
+//   L5 SCHEMA → DOCS     (judged by the suite from `keys` and `docNames`, B-eca3's remainder) every schema row is a name in
+//                        docs/settings.md — a plugin's rows (registered at run time) excepted.
 //   L4 (printed only)    the hand-written rows no RESOLVED read call names — a server read above, or a page read
 //                        (`….settings.get('<key>')`, `onSetting('<key>')` in src/lib, src/*.js); the page's readers do not
 //                        resolve statically (their dynamic count is returned), so the suite prints, never judges (B-eca3's ruling).

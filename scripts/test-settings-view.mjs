@@ -20,7 +20,8 @@
 //      branches) and THE RAIL keeps a row's words ≥ 40 % — the style.css block's rules + its place; the chrome half
 //      (600 / 760 / 1200 / phone 390, the pre-fix control) is test-settings-row-layout (heavy)
 //   §14 (B-eca3) THE SETTINGS' FACES — the server reads schema keys only (one named exception), docs/settings.md names schema or
-//      retired keys only, every hand-off of the reader and every read the walk cannot name is in a closed list; the page's
+//      retired keys only, every schema row is named in docs/settings.md (L5, B-eca3's remainder), every hand-off of the reader and
+//      every read the walk cannot name is in a closed list; the page's
 //      unread rows PRINTED (scripts/settings-faces.mjs, static); a planted red each
 // In-process, no DOM, no server.
 import fs from 'node:fs';
@@ -646,7 +647,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
 // ── §14 THE SETTINGS' FACES (B-eca3, lane lg-text-legs-2) — the schema, docs/settings.md, the server's readers (and, printed,
 // the page's): a name in one face and not the others is red BY NAME. The census is scripts/settings-faces.mjs over this
 // checkout's TEXT (acorn + string reads, nothing run); each law has a planted red below.
-console.log('§14 the settings\' faces: the server reads schema keys only, the docs name schema or retired keys only, the walk is whole');
+console.log('§14 the settings\' faces: the server reads schema keys only, the docs name schema or retired keys only and every schema row, the walk is whole');
 {
   const { settingsFaces } = await import('./settings-faces.mjs');
   // THE ONE server read of a key with no row ON PURPOSE, by name with its why (test-architecture 44d keeps the same one): the
@@ -699,6 +700,10 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
     return {
       l1: [...F.reads.keys()].filter((k) => !F.schema[k] && !(WARNS[k] && F.reads.get(k).length === 1 && F.reads.get(k)[0].startsWith(WARNS[k].at + ':') && F.reads.get(k)[0].endsWith(' in ' + WARNS[k].fn))).map((k) => `${k} ← ${F.reads.get(k).slice(0, 3).join(', ')}`),
       l2: [...F.docNames.keys()].filter((k) => !F.schema[k] && !F.retired.has(k)),
+      // L5 (B-eca3's remainder, 主开发 r3751): every schema row is NAMED in docs/settings.md — the generated reference holds each row
+      // with a category (test-architecture 44d); this also sees a row no table renders. A plugin's rows exist only once it registers
+      // them (src/lib/settings-schema.js registerPluginSettings), so no checkout's docs can name them
+      l5: F.keys.filter((k) => !F.docNames.has(k) && !k.startsWith('plugin.')),
       l3: [...count].filter(([d, n]) => !Object.hasOwn(DYNAMIC, d) || n > DYNAMIC[d][0]).map(([d, n]) => `${d} ×${n}${Object.hasOwn(DYNAMIC, d) ? ` (listed ×${DYNAMIC[d][0]})` : ''}`),
       l3gone: Object.keys(DYNAMIC).filter((d) => (count.get(d) || 0) < DYNAMIC[d][0]),
       hand: F.handoffs.filter((h) => !Object.hasOwn(HANDOFFS, h)),
@@ -709,6 +714,7 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
   console.log(`    ${F.keys.length} schema rows (${F.derived} derived, ${F.stored} with a store of their own) · ${F.retired.size} retired · the server reads ${F.reads.size} keys by name, ${F.dynamic.length} sites by kind, through ${F.handoffs.length} hand-offs · ${F.docNames.size} setting names in docs/settings.md · ${F.files} files read`);
   ok(F.keys.length > 200 && F.reads.size > 80 && J.l1.length === 0, `L1 every key the server reads is a schema row (${F.reads.size} keys) — but the one retired switch read once to say so (${Object.keys(WARNS).join(', ')})${J.l1.length ? ' — NO ROW: ' + J.l1.join(' · ') : ''}`);
   ok(F.docNames.size > 200 && J.l2.length === 0, `L2 every setting name docs/settings.md spells is a schema row or a RETIRED key (${F.docNames.size} names)${J.l2.length ? ' — UNKNOWN: ' + J.l2.join(', ') : ''}`);
+  ok(F.keys.length > 200 && J.l5.length === 0, `L5 every schema row is named in docs/settings.md (${F.keys.length} rows)${J.l5.length ? ' — NOT IN THE DOCS: ' + J.l5.join(', ') : ''}`);
   ok(J.l3.length === 0 && J.hand.length === 0, `L3 the walk is whole: every hand-off of the reader is named with its receivers (${F.handoffs.length}), every server read it cannot name is in the closed list by its count (${F.dynamic.length} sites)${J.hand.length ? ' — NEW HAND-OFF: ' + J.hand.join(' · ') + ' (name its receivers in HANDOFFS)' : ''}${J.l3.length ? ' — NEW: ' + J.l3.join(' · ') + ' (resolve it, or give it a DYNAMIC row with its why)' : ''}`);
   if (J.l3gone.length || J.handGone.length) console.log(`    (no longer found — not red; drop or lower them: ${[...J.l3gone, ...J.handGone].join(' · ')})`);
   // L4, PRINTED (B-eca3's ruling: in the row only if the page's readers resolve by a static walk — they do not: a page read
@@ -725,6 +731,11 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
     rows: { 'sidebar.plantedNobodyReads': { type: 'boolean', default: false, label: 'x', description: 'x', category: 'Sidebar' } },
   });
   const PJ = judge(P);
+  // L5's planted red: the row above, which no docs line names, is red by name; a planted row the docs DO name holds
+  const P5 = await settingsFaces(REPO, { walk: WALK, patch: { 'docs/settings.md': read('docs/settings.md') + '\nPlanted: `sidebar.plantedNamedInDocs`.\n' }, rows: { 'sidebar.plantedNobodyReads': { type: 'boolean', default: false, label: 'x', description: 'x', category: 'Sidebar' }, 'sidebar.plantedNamedInDocs': { type: 'boolean', default: false, label: 'x', description: 'x' } } });
+  const P5J = judge(P5);
+  ok(PJ.l5.join() === 'sidebar.plantedNobodyReads' && P5J.l5.join() === 'sidebar.plantedNobodyReads' && J.l5.length === 0,
+    'CONTROL (RED, L5): a planted schema row that no docs line names is red by name; a planted row the docs name holds, even one with no category (no table renders it)', JSON.stringify({ planted: PJ.l5, named: P5J.l5 }));
   ok(PJ.l1.length === 2 && PJ.l1.some((x) => x.startsWith('channels.plantedNoRow ← src/server/planted-faces.js:')) && PJ.l1.some((x) => x.startsWith('browser.fenceScriptsWhileDriven ←'))
     && PJ.l2.join() === 'browser.plantedNoRow' && PJ.l3.join() === 'src/server/planted-faces.js: serverSetting(computeKey()) ×1' && PJ.hand.join() === 'src/server/planted-faces.js: plantedReader'
     && P.unreadByCall.includes('sidebar.plantedNobodyReads') && !F.unreadByCall.includes('sidebar.plantedNobodyReads'),
