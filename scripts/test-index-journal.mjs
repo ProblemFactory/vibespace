@@ -302,6 +302,7 @@ parentPort.on('message', (m) => {
   const blockIx = m.ev === 'write' && /index\\.json$/.test(m.file) && fs.existsSync(path.join(dirOf, 'blockix'));   // the index unwritable: the journal is the change's only record
   if (blockIx) err = { code: 'EIO', message: 'the index is unwritable in this scene' };
   else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else { try { own = (writeJob(m, f) || {}).own || null; } catch (e) { err = { code: e.code || null, message: e.message }; try { if (m.tmp) fs.unlinkSync(m.tmp); } catch { } } }
+  if (faulty && cfg.late) { const z = new Int32Array(new SharedArrayBuffer(4)), t1 = Date.now(), pf = path.join(dirOf, 'late.pass'); while (!fs.existsSync(pf) && Date.now() - t1 < 10000) Atomics.wait(z, 0, 0, 10); try { fs.unlinkSync(pf); } catch { } }   // ⑮ (2b) r3905: the failed append's ANSWER held (a loaded machine's late answer, placed) until the leg writes late.pass
   if (m.ev === 'write' && m.ownOnly && !own && !was) { try { const st = fs.statSync(m.file, { bigint: true }); own = { dev: st.dev, ino: st.ino }; } catch { } }   // as the real thread answers: a job's own result, else the numbers of a file THIS job made and then failed on (never an older job's: r2593 (1)); these stand-ins write no cell numbers, so the cells' road is proven only in test-store-writer-lanes ⑫ (p1)
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
@@ -539,20 +540,37 @@ async function landLeg(mod, tag) {
   try { st.close(); } catch { } try { w.stop(); } catch { }
   return { during, after };
 }
-async function failLandLeg(mod, tag) {
+// r3905: the leg waits on FACTS — the failure ANSWERED (the store's own word: the compaction owed) before landed is read, then
+// durable() until the row has landed (its answers kept). The release's leg waited a TIME (the fault marker gone — the thread
+// deletes it when the faulty append STARTS — plus a fixed 50 ms) and read ONE durable() blind: a failure answered after those
+// 50 ms (a loaded machine) made that durable() hear the failing append itself (false: the writer answers every waiter at a
+// failure) and landed was read before the retry's compaction ran. place.late holds the failed append's answer in the stand-in
+// thread until the leg releases it 300 ms after the marker went; place.fixedWait is the release's own wait (the red control).
+async function failLandLeg(mod, tag, place = {}) {
   const dir = tmp(tag), w = SW.create({ log: quiet, workerPath: STANDJ });
-  fs.writeFileSync(path.join(dir, 'fault.json'), JSON.stringify({ fault: 'enospc', trunc: 'eio' }));
+  fs.writeFileSync(path.join(dir, 'fault.json'), JSON.stringify({ fault: 'enospc', trunc: 'eio', late: !!place.late }));
   const st = mod.createChannelStore({ dir, log: quiet, writer: w });
   await seed(st, 20);
   fs.writeFileSync(path.join(dir, 'fault'), '1');   // the next append fails as asked (4 KB, then ENOSPC; the truncate-back fails too)
   await st.index.update(() => { st.index.entry('a', 'born-2').note = 'z'.repeat(9000); });
   for (let k = 0; k < 100 && fs.existsSync(path.join(dir, 'fault')); k++) await new Promise((z) => setTimeout(z, 20));
-  await new Promise((z) => setTimeout(z, 50));
-  const afterFail = st.index.landed('a/born-2');
-  await st.index.journalDurable();   // the retry: the compaction
-  const afterRetry = st.index.landed('a/born-2');
+  const pass = path.join(dir, 'late.pass'), release = place.late ? setTimeout(() => fs.writeFileSync(pass, '1'), 300) : null;
+  const answers = [];
+  let afterFail, afterRetry, owed = false;
+  if (place.fixedWait) {   // the release's own wait: a fixed 50 ms, then ONE durable() read blind
+    await new Promise((z) => setTimeout(z, 50));
+    afterFail = st.index.landed('a/born-2');
+    answers.push(await st.index.journalDurable());   // the «retry»
+    afterRetry = st.index.landed('a/born-2');
+  } else {
+    for (let k = 0; k < 250 && !(owed = st.index.journalStats().compactOwed === true); k++) await new Promise((z) => setTimeout(z, 20));   // the failure answered
+    afterFail = st.index.landed('a/born-2');
+    while (!st.index.landed('a/born-2') && answers.length < 5) answers.push(await st.index.journalDurable());   // the retry: the compaction, as a fact
+    afterRetry = st.index.landed('a/born-2');
+  }
+  if (release) { clearTimeout(release); try { fs.writeFileSync(pass, '1'); } catch { } }   // a thread still holding is let go before the stop
   try { st.close(); } catch { } try { w.stop(); } catch { }
-  return { afterFail, afterRetry };
+  return { afterFail, afterRetry, owed, answers };
 }
 async function heldLandLeg(mod, tag, waitMs = 200) {
   const dir = tmp(tag), ixf = path.join(dir, 'index.json');
@@ -578,7 +596,11 @@ async function heldLandLeg(mod, tag, waitMs = 200) {
   const rw = await landLeg(MW, 'land-red2');
   ok(rw.after === false, `⑮ (1) RED CONTROL: a row that lands only by a whole write (B-526c's set put beside the journal by text alone) — still unlanded after its line synced (${rw.after}) — the leg above would go red`, rw);
   const f = await failLandLeg(CS, 'land-fail');
-  ok(f.afterFail === false && f.afterRetry === true, `⑮ (2) a born row whose append FAILED: landed ${f.afterFail}; after the retry's compaction landed: ${f.afterRetry}`, f);
+  ok(f.owed === true && f.afterFail === false && f.afterRetry === true, `⑮ (2) a born row whose append FAILED: landed ${f.afterFail} once the failure was answered (the compaction owed: ${f.owed}); after the retry's compaction landed: ${f.afterRetry} (durable answered ${f.answers.join(', ')})`, f);
+  const fl = await failLandLeg(CS, 'land-fail-late', { late: true });
+  ok(fl.owed === true && fl.afterFail === false && fl.afterRetry === true, `⑮ (2b) the failed append's ANSWER placed late (held until 300 ms after its job began, a loaded machine's answer): landed ${fl.afterFail} once the failure was answered; after the retry's compaction landed: ${fl.afterRetry} (durable answered ${fl.answers.join(', ')})`, fl);
+  const fr = await failLandLeg(CS, 'land-fail-late-red', { late: true, fixedWait: true });
+  ok(fr.afterRetry === false && fr.answers[0] === false, `⑮ (2b) RED CONTROL: the release's own wait (the marker gone + a fixed 50 ms, ONE durable() read blind) under the same late answer — durable heard the failing append itself (${fr.answers[0]}) and landed was read before the retry: ${fr.afterRetry} — the leg above would go red`, fr);
   const MF = M.load('src/channel-store.js', anchored(SRC, "    if (!ok) { if (w && !w.compact) compactOwed = true; return; }", "    if (w) for (const [k, sq] of bornSeq) if (sq <= w.upTo) { unlanded.delete(k); bornSeq.delete(k); }\n    if (!ok) { if (w && !w.compact) compactOwed = true; return; }", 'landed on any answer'), 'land-any');
   const rf = await failLandLeg(MF, 'land-fail-red');
   ok(rf.afterFail === true, `⑮ (2) RED CONTROL: a row said landed on the writer's answer whatever it was — landed after a FAILED append (${rf.afterFail}) — the leg above would go red`, rf);
