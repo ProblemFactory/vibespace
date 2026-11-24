@@ -153,6 +153,78 @@ This file is the engineers' record of every release: the lanes, the verification
 - **A picture the fence refused (box row 431, 主开发 r2886).** test-browser-hidden-paint handed `vibespace-browser screenshot` a path under its scratch root; the CLI's write fence allows the session's project folder, the temp folder the CLI process itself sees and ~/Downloads, and a box row's temp folder is the row's own, so the path was refused (write_path_refused) before the verb ran and the next leg read nothing. The picture now goes under the folder the suite hands as the session's (VIBESPACE_SESSION_CWD): allowed in every environment. The same shape hunted in the other twenty-one: every other writing verb a suite hands the fenced CLI already lands in that session's own folder (test-browser-site-reset-chrome's screenshot, test-browser-mediation-chrome's pdf), and test-browser-mediation-chrome's download and its `--screenshot-dir` fuzz go to the raw driver, which no VibeSpace fence judges.
 - **Control 2's anchor (box row 438, 主开发 r2893).** The passkey suite's first reading on the declared driver ran all 79 real legs green; its section (d), «CONTROL 2: the hook never armed», threw: its needle was the Runtime.addBinding call as it read before 2.369.271 (f57d1cbe9 added executionContextName), so the anchored copy built nothing. The needle is the product's present line, and every text edit of the suite was counted against its product file at the tip: 11 needles, each exactly once.
 
+### Known in 2.369.417 — named with this hotfix (2026-11-23); the coordinator's words, each a pick of a later release
+
+**A. CARRIED FROM «Known in 2.369.416» (A, in the product): what this hotfix closes, and what each open row has left**
+
+- **1 (.416 A1, the data folder's lists after a failed read: PARTLY CLOSED).** This hotfix holds these lists, each under the store-read law, when a read fails: the storage connections, the folder links, the plugin settings, the timed ceiling raises, the automatic continue, the vault's use marks, grants, grant ends and run door, the automation keys and grants, the providers, the published pages, the statuses, the proposals, the designs, the feedback and its outbox, the accounts, and the usage reset claims. The page shows one notice for every held list. Still open: the messages waiting for a conversation's next turn (msg-stash.json), the hand-over memory, the sign-in expiry ledger, the port forwards and the instance address (the last two are lined for the 2.369.418 train).
+- **2 (.416 A2, the automatic usage check's wait state: CLOSED by line 623).** A backoff state that cannot be read is read as the longest wait.
+- **2b (.416 A2b, the accounts list: CLOSED by lines 625, 647 and 659).** An independent verifier read 37 kept and 0 not kept.
+- **3 (.416 A3, the kept browsers' list: OPEN, its price stands).** No line of this hotfix touches it. What is left: the notice a person sees and a way to mend the list.
+- **4 (.416 A4, a key sent to a named popup window of a desktop application: OPEN).** No line of this hotfix touches it. test-desktop-app-rung-chrome is red on the test machine with it, at the release 2.369.416 too.
+- **5 (.416 A5, the Vault window's job chip: CLOSED by line 616).**
+- **6 (.416 A6, the usage cells' file read on the hub's main loop at a start: OPEN).** No line of this hotfix moves that read off the loop.
+- **7 (.416 A7, sign-in on a network home, and a replaced data folder whose sign-in file says «off»: CLOSED by lines 557, 673 and 723).** An independent verifier read 38 kept and 1 not kept; the one not kept was ruled part of the cure.
+- **7b (.416 A7b, a conversation's pool pin: CLOSED by line 629).** The pin is kept when the look fails.
+- **Carried as they stand:** the rest of «Known in 2.369.416» (its B and C, and its older section «still open, named with this train»), each a pick of a later train.
+
+**B. NEW WITH THIS HOTFIX**
+
+- **K1 (row B-9a24: found on 2.369.416, not cured here).** A reset claim continues only the conversations that the account pool moves one by one.
+- **K2 (the test machine's desktop rows: older than this release; .416 B-12).** test-desktop-small-chrome leg ⑧ can be red in the full run of the desktop rows (the kit's heavy mode, three lanes). A second toast is still on the stack when the leg's own toast is closed, at 1024x600 and 951x585. It was red the same way at the 2.369.416 candidate (8e2cea8aa) and at c51494dbc, a commit of 2.369.416. It is green alone (twice at this hotfix's final tree with three print lines added), and at the release in a four-suite run. The second toast's words are not yet caught.
+- **K3 (the test machine's desktop rows: its Chrome 158; .416 B-11).** test-desktop-xpra-window-scale and test-window-target are red on the test machine. Its Chrome is 158, for which the suites hold no measured row (the caption layout, and why a launch without the switch reads as pixels). They are red at the release 2.369.416 too.
+- **K4 (row B-d033: two in-process suites in their zone's last quarter hour).** test-pull-refresh leg B and test-server-root leg «B-1425 r827» were red alone in the UTC zone between 23:43 and 23:58Z on the same tree that is green alone at 00:07 to 00:11Z, with its parent green beside it. Neither starts a hub, and their logs hold no hold of a loop. A cure of the second for load (a wait by wall time) rides the 2.369.418 train; nothing yet shows that it cures the hour.
+- **K5 (read, never green).** These are named, never green:
+  - test-harness-settings and test-queue-steer are partial by law on the box: legs that start the real codex, which the box never starts.
+  - test-browser-stderr-pipe-real's leg Ⓐ needs a base driver older than the box's 0.38.2.
+  - test-office-desktop is not read: the test machine has no python-docx (row B-4829).
+  - Seven desktop rows each skip a leg on the test machine: no xfwm4 or openbox, no firefox, the held-display legs' attach road, and the real driver's legs held on the hub.
+  - Eight of the vault and auto-resume box rows were read one tip before the final one. The final tip differs from that tip by ten lines of words and the changelogs, and the hosted mirror reads those rows at the final tip.
+- **K6 (the first release mirror's reds older than this release, named).** test-record-shape §4d (fast, Node 22: «Known in 2.369.416» B item 8), test-boot-resume-shape (heavy, Node 24: B item 9), and test-integration-toggle (heavy, Node 24: red then green twice in 2.369.416's mirror) were red on both tries in the first cut's mirror. Each was red, or flaky, the same way in 2.369.416's mirror.
+- **K7 (found by the first cut's mirror, cured before any push).** Line 720's fault: a person's removal of an archived job row refused while the jobs list was held. It is cured by line 732: the removal now goes through, and the held guard stays only on the hourly clean-up's archive leg. The five other new reds of that mirror were suites' stand-ins and census rows that lagged the product, cured by lines 730, 731, 732 and 733.
+
+### hot417 — the hotfix 2.369.417's own notes (lane int361; on 0a031b541 = 2.369.416)
+
+- **The hotfix:** the coordinator's list for 2.369.417 on the release 2.369.416 (0a031b541). 61 list lines were picked, each onto the trial's tip of its time (57 for the first cut, and 730 to 733 for the recut); their lanes' commits were cherry-picked with -x. 145 commits lie on the release under the notes: the picked commits, the changelogs laid in their own commits under «## 2.369.417», the cap's arithmetic in its own commits, and the integrator's own commits.
+- **The lines stopped and moved:** a meeting in a product file stopped its line; the line was undone and moved by its lane:
+  - 622, 632 and 643 (moved as 677);
+  - 624 and 644 (in 700);
+  - 664 (as 664 + 699);
+  - 667 (as 682);
+  - the first forms of 673 and 692.
+- **The integrator's meetings and commits:** each only where the coordinator's rulings made it the integrator's:
+  - the changelogs;
+  - the cap's two lines;
+  - the store census rows as unions;
+  - the accounts module's require-edges list as a union (line 663, r3248);
+  - two census counts by arithmetic: the vault run door 1 → 2 (866e5d07d) and the vault use grants 2 → 1 (ad145d515);
+  - the legacy row's release word restated to 2.369.416 (71cb976da).
+- **The cap:** the fast tier's sum cap was restated only by arithmetic, in 11 commits of its own, from the release's 2518 s to 2546 s (2545.311 s over 861 fast rows, through list line 709).
+- **The device bundle:** 5229020 bytes at the final tree. That is 15483 bytes (0.297 per cent) over 2.369.416's signed 5213537, and under the bound of 2 per cent.
+- **The trial's tips, in order:** 11826d011, 0019a9150, 80582583c, ad145d515, a08d8d672, d6fca6a48, 2ead3f254, f71dbb9ad, 72470c553, 397f99cde, 993f86d8b (the first cut's tree), aaf7747cb, 29c71e63a (the recut's tree).
+- **The gates:**
+  - the build checks alone at every tip;
+  - test-spend-paths alone in both zones after each line that touched a spend file (664 + 699; 722);
+  - the fast tier's affected list over each tip's own range, both zones;
+  - THE LAST LIST over the whole delta at f71dbb9ad: 1667 suites in both zones, all green. On top of it, the 34 rows that the last two lines' affected rules name, all green at the final tree.
+  - On the box, one row at a time: the vault rows, the auto-resume rows, the window row, the host-binary rows, the sign-in start, the page's chips, and the seven real-driver rows, each read whole or named above.
+  - On the first test machine, the desktop rows in one heavy-mode run, with a baseline of four at the release.
+- **The first cut and its mirror:**
+  - The first release commit b0f3b1be9 (the bundle signed, 5229020 bytes, sha256 d488e290…) was gated green on the kit and read whole by its release mirror (run 45327120981).
+  - That mirror found six new reds on the hotfix's own lines, so the first cut was NOT pushed.
+  - Four lines cure them on 993f86d8b:
+    - 730: the census's two receiver rows;
+    - 731: test-login-expiry's stand-in;
+    - 732: line 720's fault in src/jobs.js (K7), with test-jobs-triage, test-machine-migrate's stand-in and test-vault-job's grammar leg;
+    - 733: test-safe-fs-path-memory waits for the worker's first answer.
+  - None of the four moves a device bundle input.
+- **The recut's gates:**
+  - the build checks alone at aaf7747cb and at 29c71e63a;
+  - the fast list over 993f86d8b..aaf7747cb: 481 suites in both zones, all green;
+  - the list over aaf7747cb..29c71e63a (line 733's one row): 174 suites in both zones, all green.
+  - The four lines' heavy suites were read green on the first test machine by their lanes.
+- **What rides the 2.369.418 train:** the held rows of that train, the cure of test-server-root's leg for load (K4), and every open row above.
+
 ## 2.369.416 — 2026-11-23
 
 ### bl-windows B-f276 unit 1a — the deliverer's contract with a held producer (the first of three, 主开发 r596)
