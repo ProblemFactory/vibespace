@@ -200,10 +200,12 @@ console.log('(d) a synchronous flush behind a flying write: it waits — measure
   else ok(v1 === 'green', `(d1) a flush behind a flying write WAITS for it, then writes (the main thread held ${d1Ms} ms — the write in flight's remainder; the bound is ${BOUND} ms)${!d1 && d1Flying ? ` — the flush GAVE UP BEFORE its bound (${d1Ms} of ${BOUND} ms) with the write in flight` : ''}`, { d1, d1Ms, d1Flying });
   unhold('adapters.json');
   // RED CONTROL (r3446): a writer copy whose flush gives up AT ONCE while a write is in flight — d1's verdict on it is RED, never «not this case»
+  // r3558: the lane writer (the writer chain) waits for the flush's OWN lane in writeWaiting — d1's stamps flush takes that road (the
+  // stamps and adapters are rewrites, one lane); the copy returns «held» there at once, the write still in flight
   {
     const { mutantCopies } = await import('./mutant-copy.mjs');
-    const swSrc = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8'), ANCH = 'if (busy && !settleInflight(deadline, waitedBy)) {';
-    let SWg = null; try { SWg = mutantCopies('loop-free-d1', REPO).load('src/store-writer.js', anchored(swSrc, ANCH, 'if (busy && true) {', 'd1-gives-up-at-once'), 'gives-up-at-once'); } catch { SWg = null; }   // anchored(): the anchor present ONCE, else no copy (said below)
+    const swSrc = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8'), ANCH = 'if (l.inflight && !settleInflight(l, deadline, waitedBy)) return';
+    let SWg = null; try { SWg = mutantCopies('loop-free-d1', REPO).load('src/store-writer.js', anchored(swSrc, ANCH, 'if (l.inflight) return', 'd1-gives-up-at-once'), 'gives-up-at-once'); } catch { SWg = null; }   // anchored(): the anchor present ONCE, else no copy (said below)
     let vr = null, rMs = null, rFlying = null;
     if (SWg) {
       const dirR = path.join(ROOT, 'd1r'); fs.mkdirSync(dirR, { recursive: true });
