@@ -213,6 +213,7 @@ function createAutoCliLoop(d) {
         let readFailed = false;
         try { raw = usageWrite.readCacheJson(path.join(d.USAGE_CACHE_DIR, a.id + '.json')); } catch (e) { raw = null; readFailed = !!e && e.code !== 'ENOENT' && !(e instanceof SyntaxError); }
         if (readFailed) continue;
+        const ownFetchedAt = (raw && raw.fetchedAt) || 0;   // the row's OWN reading's age: the pick inside a pacing set rotates on it (r3680)
         try {
           // THE PACING MEMORY (B-87fd identity unit 4, 主开发 r3311 MUST 2 — §ban-safety): the rows the one comparison does not prove
           // DIFFERENT pace as ONE (the engine's `pacing`: the release's grouping less the proven splits) — the attempt floor, the
@@ -245,7 +246,7 @@ function createAutoCliLoop(d) {
         const pj = d.projectionRereadFor(a.id, now, billingIndex()), reads = mergedReads(mem);
         // ONE attempt clock for both schedulers (lastMemberReadAt, 2026-09-08); pj = the estimator's PROJECTION (B-f69c ③):
         // a crossing before the next scheduled read asks this same rung now — once per BUCKET (projLabel/projResetsAt vs projReads, quota r2)
-        list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: dr.triggerDrift, activeBurn: dr.moved, drift: dr.drift, rolled: dr.rolled, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });
+        list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, ownFetchedAt, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: dr.triggerDrift, activeBurn: dr.moved, drift: dr.drift, rolled: dr.rolled, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });
       }
       const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs }); const attemptWas = new Map(picks.map((k) => [k, attempts.get(k)]));   // B-360d: given back if the door could not read the sign-in
       for (const key of picks) {

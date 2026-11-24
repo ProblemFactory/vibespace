@@ -21,11 +21,13 @@
 //  8. «LANDED» IS LANDED ONCE (主开发 r3311 MUST 1): two seats split, then their kept facts aged past the bound with no re-read —
 //     still apart, the names unchanged, seat A usable on its own reading, nothing filed under the bare name, no second archive;
 //  9. THE PACING MEMORY (r3311 MUST 2, §ban-safety): the REAL automatic check with a counted stand-in for the probe over four
-//     hours — two unproven rows of one address are asked as often as the release asked them; two seats proven different each
-//     keep their own cadence; 10. two pieces of a long split name never share one anchors file (r3311 (2)).
+//     hours — two unproven rows of one address are asked as often as the release asked them, the ask ROTATING so each row is
+//     asked (r3680); three rows joined by the union, every one asked; two seats proven different each keep their own cadence;
+//     a groups memo built before a landing is dropped at it (r3680); 10. two pieces of a long split name never share one file.
 // RED CONTROLS (each a copy with one named edit, built and run): the release-keyed engine (legs 1, 2 and 4 fail on it — legs 3
 // and 5 are PINS: their law did not move); a retire that archives before its rates entry is on disk; a retire on «unproven»; a
-// retire that reads no kept line again; «landed» as «confirmed in the last 60 s»; an engine with no pacing memory; a store whose
+// retire that reads no kept line again; «landed» as «confirmed in the last 60 s»; an engine with no pacing memory; a loop whose pick
+// does not rotate; a memo that outlives a landing; a store whose
 // seed asks no tie / no mark / no drop; an estimator that refuses a rates file that does not parse.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -65,9 +67,12 @@ const amOf = (m) => (m && !m.err ? (m.AccountManager || m) : m);
 const AMNoGuard = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || !o || typeof o !== 'object') return;\n"]], 'a seed over a tie (RED)'));
 const AMNoMark = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieDropped || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed with no mark (RED)'));
 const AMNoDrop = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed over a drop (RED)'));
+const loopPath = path.join(REPO, 'src/server/auto-cli-loop.js');
+const LoopNoRotate = redCopy('src/server/auto-cli-loop.js', fs.readFileSync(loopPath, 'utf8'), [["list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, ownFetchedAt, lastAttemptAt:", "list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt:"]], 'no rotation inside a pacing set (RED)');
+const RMemo = redCopy('src/server/usage-pool-engine.js', engSrc, [["  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000 || _identGroupsMemo.landed !== landed) {\n", "  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000) {\n"]], 'a memo that outlives a landing (RED)');
 const estPath = path.join(REPO, 'src/usage-estimator.js');
 const EstOld = redCopy('src/usage-estimator.js', fs.readFileSync(estPath, 'utf8'), [["      if (text) { try { all = JSON.parse(text); } catch { all = {}; if (!this._ratesUnparsedSaid) { this._ratesUnparsedSaid = true; console.warn('[usage-estimator] rates.json does not parse: read as empty, as its other writer reads it (each usage history learns its rates again from its readings)'); } } }\n", '      if (text) all = JSON.parse(text);\n']], 'a rates file that does not parse refused (RED)');
-for (const [label, m] of [['«landed» as confirmed in the last 60 s', R60], ['no pacing memory', RNoPace], ['no kept line read again', RNoReread], ['a seed over a tie', AMNoGuard], ['a seed with no mark', AMNoMark], ['a seed over a drop', AMNoDrop], ['a rates file that does not parse refused', EstOld]]) ok(m && !m.err, `RED CONTROL built: ${label}`, (m && m.err) || '');
+for (const [label, m] of [['«landed» as confirmed in the last 60 s', R60], ['no pacing memory', RNoPace], ['no kept line read again', RNoReread], ['a seed over a tie', AMNoGuard], ['a seed with no mark', AMNoMark], ['a seed over a drop', AMNoDrop], ['a rates file that does not parse refused', EstOld], ['no rotation inside a pacing set', LoopNoRotate], ['a memo that outlives a landing', RMemo]]) ok(m && !m.err, `RED CONTROL built: ${label}`, (m && m.err) || '');
 
 // ── a made-up world: organisations and people are invented; no id or address of a real account ──
 let n = 0;
@@ -379,12 +384,12 @@ for (const red of [false, ...(EstOld.err ? [] : [true])]) {
 // ── 9. THE PACING MEMORY (主开发 r3311 MUST 2, §ban-safety): the REAL automatic check (src/server/auto-cli-loop.js), its probe a
 // counted stand-in, four hours in five-minute ticks over each engine's own groups ──
 const loopMod = require(path.join(REPO, 'src/server/auto-cli-loop.js'));
-const paceRun = async (rows, which) => {
+const paceRun = async (rows, which, lm = loopMod) => {
   const W = await world(rows, { copies: which === 'nopace' ? { nopace: RNoPace } : {} }), e = which === 'nopace' ? W.copy.nopace.eng : which === 'release' ? W.today : W.eng, asked = [];
   const orgOf = new Map(W.ids.map((id, i) => [id, rows[i].cache.orgId || null]));
   const realNow = Date.now; let T = realNow(); Date.now = () => T;
   try {
-    const loop = loopMod.createAutoCliLoop({
+    const loop = lm.createAutoCliLoop({
       now: () => T, rand: () => 0.5, dataDir: tmpdir('vs-eig-pace-'), USAGE_CACHE_DIR: W.cacheDir, metric() { },
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined), accounts: W.am, autoCliReady: () => true,
       usageIdentityGroupsCached: () => e.usageIdentityGroupsCached(), usageEstimator: { estimateFor: () => null }, projectionRereadFor: () => null, lastMemberReadAt: () => 0,
@@ -399,10 +404,30 @@ const paceRun = async (rows, which) => {
 { const one = { address: 'pace@example.invalid', orgId: null }, rows = [{ as: one, cache: { ago: 60, u5: 0.2 } }, { as: one, cache: { ago: 30, u5: 0.2 } }];
   const cure = await paceRun(rows, 'eng'), rel = await paceRun(rows, 'release'), nop = RNoPace.err ? null : await paceRun(rows, 'nopace');
   ok(rel.n > 0 && cure.n === rel.n, '9. two UNPROVEN rows of one address (no organisation): the automatic check asks as often as the release asked (one pacing memory)', JSON.stringify({ cure: cure.n, release: rel.n }));
-  if (nop) ok(nop.n > rel.n, 'RED: an engine with no pacing memory asks about the two rows more often than the release (each on its own cadence)', JSON.stringify({ nopace: nop.n, release: rel.n })); }
+  ok(cure.each.every((x) => x > 0), '9. …and the ask ROTATES inside the set (主开发 r3680): EACH row is asked (the one whose own reading is oldest), so neither row\'s own reading freezes', JSON.stringify(cure.each));
+  if (nop) ok(nop.n > rel.n, 'RED: an engine with no pacing memory asks about the two rows more often than the release (each on its own cadence)', JSON.stringify({ nopace: nop.n, release: rel.n }));
+  if (!LoopNoRotate.err) { const stuck = await paceRun(rows, 'eng', LoopNoRotate); ok(stuck.n === rel.n && stuck.each.some((x) => x === 0), 'RED: the loop without its rows\' own reading ages (the uncured pick) asks the first row every time — the other row\'s reading never refreshes', JSON.stringify(stuck.each)); } }
+{ // THREE rows of one address: A and B unproven, B and C unproven, A and C PROVEN different (two organisations' seats) — one pacing set by the
+  // union: the count stays the release's, and every member is asked, the proven-different one too (r3680)
+  const x = 'trio@example.invalid', rows = [{ as: { address: x, orgId: org() }, cache: { ago: 90, u5: 0.2 } }, { as: { address: x, orgId: null }, cache: { ago: 60, u5: 0.2 } }, { as: { address: x, orgId: org() }, cache: { ago: 30, u5: 0.2 } }];
+  const cure = await paceRun(rows, 'eng'), rel = await paceRun(rows, 'release');
+  ok(rel.n > 0 && cure.n === rel.n && cure.each.every((n) => n > 0), '9. THREE rows, the first and the last proven different, one set by the union: the count is the release\'s and EVERY member is asked', JSON.stringify({ cure: cure.each, release: rel.n })); }
 { const { rows } = twoSeats('pace2');
   const cure = await paceRun(rows, 'eng'), rel = await paceRun(rows, 'release'), nop = RNoPace.err ? null : await paceRun(rows, 'nopace');
   ok(cure.each.every((x) => x > 0) && (!nop || cure.n === nop.n) && cure.n > rel.n, '9. two seats PROVEN different: each keeps its own cadence (asked as two accounts are)', JSON.stringify({ cure: cure.each, nopace: nop && nop.n, release: rel.n })); }
+
+// ── 8. THE MEMO NEVER OUTLIVES A LANDING (主开发 r3680): a groups memo built before the rows landed (the release's grouping) is dropped
+// by the store's landing count, so the next decision reads the judged groups at once ──
+for (const [mod, red] of [[null, false], ...(RMemo.err ? [] : [[RMemo, true]])]) {
+  const { rows } = twoSeats(red ? 'memo-red' : 'memo'), W = await world(rows, { update: true, land: false, copies: mod ? { m: mod } : {} });
+  const e = mod ? W.copy.m.eng : W.eng, [X, Y] = W.ids;
+  const cachedGroupOf = (id) => { for (const [, g] of e.usageIdentityGroupsCached()) if (g.accountIds.includes(id)) return g.accountIds.slice().sort().join(','); return id; };
+  const before = cachedGroupOf(X);
+  await W.am.signinFactsSettled(null, { withinMs: 0 });
+  const after = cachedGroupOf(X);
+  if (!red) ok(before === [X, Y].sort().join(',') && after === X, '8. a memo built BEFORE the landing (the release\'s grouping) is dropped AT the landing: the next ask reads the two seats apart at once', JSON.stringify({ before: before.split(',').length, after: after.split(',').length }));
+  else ok(after === [X, Y].sort().join(','), 'RED: a memo kept for its 30 s past the landing still serves the two seats as one group', JSON.stringify({ after: after.split(',').length }));
+  await W.close(); }
 
 // ── 10. two pieces of a LONG split name never share one anchors file (主开发 r3311 (2): the slug keeps the id, cutting the base) ──
 { const long = 'email:' + 'a-very-long-made-up-address-'.repeat(3) + '@example.invalid', ids = ['sub-aaaaaaaa', 'sub-bbbbbbbb'];

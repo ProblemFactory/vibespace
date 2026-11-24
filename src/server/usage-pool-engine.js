@@ -392,8 +392,11 @@ async function retireSplitNames(groups) {
   }
 }
 function usageIdentityGroupsCached() {
-  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000) {
-    _identGroupsMemo.groups = usageIdentityGroups(); _identGroupsMemo.at = Date.now();
+  // …and never past a LANDING (主开发 r3680): a memo built before a row's folder landed would serve the release's grouping for up to
+  // half a minute after it — the store's landing count drops it (a store with no such count: the clock and the folder's reply alone)
+  let landed = null; try { landed = typeof accounts.landedEpoch === 'function' ? accounts.landedEpoch() : null; } catch { landed = null; }
+  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000 || _identGroupsMemo.landed !== landed) {
+    _identGroupsMemo.groups = usageIdentityGroups(); _identGroupsMemo.at = Date.now(); _identGroupsMemo.landed = landed;
   }
   return _identGroupsMemo.groups;
 }

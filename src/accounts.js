@@ -157,7 +157,7 @@ class AccountManager {
     // worker thread with its deadline (one, unref'd: it never holds a process open), built at the first read. ONE road either way.
     const door = safeFs != null ? (typeof safeFs === 'function' ? safeFs : () => safeFs)
       : () => this._ownDoor || (this._ownDoor = new (require('./safe-fs.js').SafeFs)({ poolSize: 1, name: 'accounts-door' }));
-    this._display = DISPLAY.create({ safeFs: door, onLanded: () => this._notifyRowsSoon() });
+    this._display = DISPLAY.create({ safeFs: door, onLanded: () => { this._landedN = (this._landedN || 0) + 1; this._notifyRowsSoon(); } });
     this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
     // Console-login scratch dirs (con-*) are transient; drop any abandoned by a
@@ -633,6 +633,9 @@ class AccountManager {
   _displayForget(a) { try { this._display.drop(this._acctDir(this._acctBackend(a), a.id)); } catch { } }
   /** every display read in flight landed (the suites' ONE seam; a clean shutdown) */
   displaySettled() { return this._display.settled(); }
+  /** how many times a folder's kept facts LANDED changed (read or found unreadable) in this run — a memo built over the kept facts
+   *  (the pool engine's identity groups, 主开发 r3680) is dropped when it moves */
+  landedEpoch() { return this._landedN || 0; }
   /** the store's OWN file door (built only when none was handed: a suite, a tool) is ended — its worker goes (round wldn7whag) */
   close() { const d = this._ownDoor; this._ownDoor = null; try { if (d && typeof d.close === 'function') d.close(); } catch { } try { this._hold && this._hold.stop(); } catch { } }
   /** ask a folder again now — a suite that wrote a sign-in file itself (the ONE seam, then displaySettled) */

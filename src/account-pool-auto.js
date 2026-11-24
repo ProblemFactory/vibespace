@@ -1727,7 +1727,11 @@ function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeM
   const opts = { floorMs, driftPct, maxAgeMs, idleMaxAgeMs, projMoveMs, projWindowMs };
   const eligible = (list || []).map((a) => ({ a, why: cliRefreshWhy(a, now, opts) })).filter((x) => x.why);
   const proj = (x) => (x.why === 'projection' ? Number(x.a.projCrossInMs) : Infinity);
-  eligible.sort((x, y) => (proj(x) - proj(y)) || ((y.a.estDriftPct || 0) - (x.a.estDriftPct || 0)) || ((x.a.fetchedAt || 0) - (y.a.fetchedAt || 0)));
+  // THE ASK ROTATES INSIDE A PACING SET (B-87fd identity unit 4, 主开发 r3680): a set's members carry ONE set of inputs (the set's
+  // freshest reading, its one attempt floor), so they tie; the member whose OWN reading is oldest (`ownFetchedAt`) is asked — the
+  // count stays the set's, and no member's own reading is left to freeze. An entry without it ties as before (the list's order)
+  const own = (x) => Number(x.a.ownFetchedAt != null ? x.a.ownFetchedAt : (x.a.fetchedAt || 0)) || 0;
+  eligible.sort((x, y) => (proj(x) - proj(y)) || ((y.a.estDriftPct || 0) - (x.a.estDriftPct || 0)) || ((x.a.fetchedAt || 0) - (y.a.fetchedAt || 0)) || (own(x) - own(y)));
   return eligible.slice(0, maxPerTick).map((x) => x.a.key);
 }
 
