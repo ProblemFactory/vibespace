@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - A browser profile on a paired machine that several conversations share no longer stops one of them for 30 seconds while another opens and closes tabs.
 - On a paired machine's shared browser profile, each conversation now sees and drives only its own tabs, as on this computer.
+- The New profile dialog no longer says each conversation gets its own tab for a browser VibeSpace only connects to — there, they all share every tab.
 
 ## 2.369.417 — 2026-11-23
 
