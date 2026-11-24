@@ -15352,4 +15352,5 @@ export default {
   "The list of model providers was damaged, so it starts empty — VibeSpace kept the damaged bytes aside (their name is below). Add the providers again: each gets a new key; their old keys stay in the Vault window until you remove them there.": "提供方列表已损坏，所以现在是空的——VibeSpace 把损坏的内容另存了（名字见下方）。请重新添加这些提供方：每个都会得到新的密钥；它们的旧密钥会留在保险库窗口里，直到你在那里删除。", // lane lg-providers B-f276 family follow (r3106)
   "Remove this old key?": "删除这个旧密钥？", // lane lg-providers B-f276 family follow (r3106)
   "The damaged list still names this key's provider. A provider added again has a new key, so this old key is no longer used by any provider in the list. Remove it?": "损坏的列表里仍写着这个密钥的提供方。重新添加的提供方有新的密钥，所以列表里已经没有提供方在用这个旧密钥。要删除它吗？", // lane lg-providers B-f276 family follow (r3106)
+  "Some stored values cannot be listed right now: {what}. Nothing is lost — their file could not be read, and VibeSpace reads it again by itself.": "有些已保存的值暂时无法列出：{what}。没有丢失 — 它们的文件读不到，VibeSpace 会自己再读一次。",
 };

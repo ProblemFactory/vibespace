@@ -66,7 +66,7 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     for (const s of VI.GROUPS) {
       const src = sourceOf(s.store);
       if (!src) { listed.push({ store: s.store, rows: [], missing: true }); continue; }
-      try { listed.push({ store: s.store, rows: src.vaultRows() || [] }); }
+      try { listed.push({ store: s.store, rows: src.vaultRows() || [], held: typeof src.vaultHeld === 'function' ? (src.vaultHeld() || []) : [] }); }   // r3223 (3): what a hold kept out, said
       catch (e) { listed.push({ store: s.store, rows: [], error: codeOf(e) }); }
       uses[s.store] = typeof vault.lastUse === 'function' ? vault.lastUse(s.store) : null;
     }

@@ -271,7 +271,9 @@ function inventoryOf(listed, { uses = {} } = {}) {
     const mine = [];
     for (const raw of Array.isArray(got.rows) ? got.rows : []) { const r = rowOf(s.store, raw, { lastUsed: uses && uses[s.store] }); if (r && !mine.some((x) => x.id === r.id)) mine.push(r); }
     mine.sort((a, b) => a.label.localeCompare(b.label) || a.field.localeCompare(b.field));
-    stores.push({ store: s.store, label: s.label, count: mine.length, error: got.error ? clip(got.error, 80) : null, missing: !!got.missing });
+    // r3223 (3): the parts of a store a HOLD kept out of this listing (an account's own sealed file that could not be read) — by label and code
+    const held = Array.isArray(got.held) ? got.held.filter((h) => h && h.code).map((h) => ({ label: clip(h.label || h.entry || '', 80), code: clip(h.code, 60) })) : [];
+    stores.push({ store: s.store, label: s.label, count: mine.length, error: got.error ? clip(got.error, 80) : null, missing: !!got.missing, ...(held.length ? { held } : {}) });
     rows.push(...mine);
   }
   return { stores, rows };

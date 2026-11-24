@@ -19,6 +19,10 @@
 //      ONE table's, r3168) and words the torn lift (zh, ja).
 //   ④ RED CONTROLS: the store with its read guard cut answers «no paths» (①'s leg turns red); with its save guard and its read
 //      guard cut, a new path writes over the file (the release's shape).
+//   THE ROUND's FOLLOW (主开发 r3223): a refused reply says it was NOT sent and must be sent again; the module's `listNote` (held /
+//      torn) reaches the account's digest row and the section's words; the engine names the accounts a hold kept out of the Vault
+//      listing (vaultHeld → the inventory's `held`); a joiner words a held peer's true cause; the stranger gate's slots counted; the
+//      engine's own journal and the pending codes' sealed fields in the secret lens.
 // At the release (the base of this row) the law's legs are RED: that is the harm, as the release has it.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,7 +80,8 @@ console.log('① THE STORE: callers.json held on a failed read — nothing reads
 {
   const dir = dirOf('store'); const file = plant(dir); const before = onDisk(file);
   const undo = refuse(file);
-  const S = fresh().callersStore(dir, { secrets: box });
+  const M1 = fresh();
+  const S = M1.callersStore(dir, { secrets: box });
   const r = codeOf(() => S.paths());
   ok(!!r && r.code === CODE && r.status === 503, 'a failed read is no «no paths»: a read throws the hold\'s refusal BY NAME (503 webhook_callers_unread)', r || { paths: S.paths() });
   const acts = [
@@ -95,6 +100,12 @@ console.log('① THE STORE: callers.json held on a failed read — nothing reads
   const words = typeof S.heldWords === 'function' ? S.heldWords() : null;
   const lens = [TOKEN_A, PT.tokenHash(TOKEN_A), SEALED, dir, 'made-up ci bot'];
   ok(!!words && /webhook callers/.test(words) && /try again later/.test(words) && lens.every((x) => !words.includes(x)) && got.every(([, e]) => e && lens.every((x) => !e.message.includes(x))), 'the hold\'s words name the store plainly and what still holds — no token, hash, sealed field, caller name or folder path in them or in a refusal', words);
+  // r3223 (2): a reply refused while held is sent again by NOTHING — its reason says so plainly
+  const ad = M1.create({}, { ownDir: dir, secrets: box, log: { log() {}, warn() {}, error() {} } });
+  const sent = await ad.send('ci', { text: 'made-up reply', idemKey: 'made-up-1', envelope: { to: 'c-0000aaaa' } });
+  ok(!!sent && sent.ok === false && sent.retryable === true && /^not sent: /.test(String(sent.detail && sent.detail.reason)) && /send it again once the list reads/.test(String(sent.detail && sent.detail.reason)), 'a reply refused while held says plainly it was NOT sent and must be sent again (nothing re-sends it) — never as if it will go by itself', sent);
+  const ln = typeof M1.listNote === 'function' ? M1.listNote({ ownDir: dir }) : null;
+  ok(!!ln && ln.code === 'held', 'the module declares its list held (listNote) for the account\'s section', ln);
   // a START while held holds again (a fresh module = a restart over the same unread file)
   const S2 = fresh().callersStore(dir, { secrets: box });
   const r2 = codeOf(() => S2.callersRaw('ci'));
@@ -113,7 +124,8 @@ console.log('① THE STORE: callers.json held on a failed read — nothing reads
   // torn bytes: kept aside ONCE per content (0600), then the list starts empty and names the copy
   const dir = dirOf('torn'); const file = path.join(dir, 'callers.json'); const TORN = '{"v":1,"paths":{"ci":{"callers":[{"id":"c-0000aaaa","tokenHash":"' + 'h'.repeat(12);
   fs.writeFileSync(file, TORN, { mode: 0o600 });
-  const S = fresh().callersStore(dir, { secrets: box });
+  const M2 = fresh();
+  const S = M2.callersStore(dir, { secrets: box });
   try { S.paths(); } catch { }
   await until(() => typeof S.torn === 'function' && !!S.torn());
   const copies = () => fs.readdirSync(dir).filter((n) => n.startsWith('callers.json.corrupt-'));
@@ -121,7 +133,9 @@ console.log('① THE STORE: callers.json held on a failed read — nothing reads
   const t1 = typeof S.torn === 'function' ? S.torn() : null;
   ok(c1.length === 1 && onDisk(path.join(dir, c1[0])) === TORN && (fs.statSync(path.join(dir, c1[0])).mode & 0o777) === 0o600 && !!t1 && t1.copy === c1[0], 'torn bytes are kept aside ONCE (the same bytes, 0600) and the lift names the copy by its base name', { copies: c1, torn: t1 });
   let paths = null; try { paths = S.paths(); } catch (e) { paths = e.code; }
-  ok(Array.isArray(paths) && paths.length === 0 && typeof S.lostSlug === 'function' && S.lostSlug('ci') === true && S.lostSlug !== undefined, 'then the list starts empty — and a path it may have lost is known as such for this run (the door answers it «try again later»)', { paths });
+  const tn = typeof M2.listNote === 'function' ? M2.listNote({ ownDir: dir }) : null;
+  ok(!!tn && tn.code === 'torn' && tn.copy === c1[0], 'after the torn lift the module declares it (listNote: torn, the copy\'s base name) for the account\'s section', tn);
+  ok(Array.isArray(paths) && paths.length === 0 && typeof S.lostSlug === 'function' && S.lostSlug('ci') === true, 'then the list starts empty — and a path it may have lost is known as such for this run (the door answers it «try again later»)', { paths });
   stopAll(S);
   fs.writeFileSync(file, TORN, { mode: 0o600 });   // the same torn bytes met again at the next start
   const S2 = fresh().callersStore(dir, { secrets: box });
@@ -166,7 +180,8 @@ async function instance(tag) {
   const R = require(routePath);
   const bc = [];
   const settings = { 'channels.pushCoalesceSeconds': 0, 'webhook.allowPrivateReplyUrl': true };
-  const eng = ENG.create({ dataDir, env: {}, broadcast: (m) => bc.push(m), log: { log() {}, warn() {}, error() {} }, deliver: { async deliverToConversation() { return { ok: true, lane: 'message' }; }, stashFor() {} }, serverSetting: (k) => settings[k], liveSessions: () => [], httpInbound: true });
+  const jl = (...a) => said.push(a.map(String).join(' '));   // r3223: the engine's OWN journal is read by the secret lens too
+  const eng = ENG.create({ dataDir, env: {}, broadcast: (m) => bc.push(m), log: { log: jl, warn: jl, error: jl }, deliver: { async deliverToConversation() { return { ok: true, lane: 'message' }; }, stashFor() {} }, serverSetting: (k) => settings[k], liveSessions: () => [], httpInbound: true });
   const deps = { getEngine: () => eng, dataDir, serverSetting: (k) => settings[k], now: () => Date.now() };
   R.setup(deps);
   require(chanPath).setup({ getEngine: () => eng });
@@ -201,11 +216,11 @@ try {
   // the next start meets an unreadable callers.json (its doc dropped; the routes' first look reads it again)
   const undoC = refuse(cfile);
   A.store().reset();
-  const statsBefore = A.R.stats();
+  const statsBefore = A.R.stats(), slotsBefore = A.R.ipGate.size();
   const h1 = await hook('made-up event two');
-  const statsAfter = A.R.stats();
+  const statsAfter = A.R.stats(), slotsAfter = A.R.ipGate.size();
   ok(h1.status === 503 && h1.j && h1.j.error === 'try-again-later' && h1.headers['retry-after'] === '60', 'a registered caller\'s call while held hears «try again later» (503, Retry-After 60) — never the 401 of an unknown caller', { status: h1.status, body: h1.j });
-  ok(statsAfter.bodyReads === statsBefore.bodyReads && statsAfter.accepted === statsBefore.accepted && !A.R.ipGate.blocked('127.0.0.1', Date.now()), 'nothing is read, stored or charged for it (no body read, nothing accepted, the stranger gate not charged)', { before: statsBefore.bodyReads, after: statsAfter.bodyReads });
+  ok(statsAfter.bodyReads === statsBefore.bodyReads && statsAfter.accepted === statsBefore.accepted && slotsAfter === slotsBefore && !A.R.ipGate.blocked('127.0.0.1', Date.now()), 'nothing is read, stored or charged for it (no body read, nothing accepted, the stranger gate not charged)', { before: statsBefore.bodyReads, after: statsAfter.bodyReads });
   const poll = await A.call('GET', '/api/channels/webhook/ci/replies', { headers: { Authorization: `Bearer ${tok}` } });
   ok(poll.status === 503 && poll.j && poll.j.error === 'try-again-later', 'its poll hears «try again later» too, never 401', { status: poll.status, body: poll.j });
   const list = await A.call('GET', '/api/channels/webhook/paths');
@@ -217,9 +232,22 @@ try {
   const owners = [['the paths list', list], ['a new path', newPath], ['a registration', reg], ['a rotation', rot], ['a pairing code', pc], ['a join', join]];
   ok(owners.every(([, r]) => r.status === 503 && r.j && r.j.code === CODE && /webhook callers/.test(r.j.error)), 'every owner verb is refused BY NAME (503 webhook_callers_unread, the hold\'s words): the paths list, a new path, a registration, a rotation, a pairing code, a join', owners.map(([w, r]) => `${w}: ${r.status} ${r.j && r.j.code}`));
   ok(onDisk(cfile) === cBefore && onDisk(pfile) === pBefore && tmpLeft(A.whDir).length === 0, 'callers.json and pair-pending.json are byte for byte what they were', { callers: onDisk(cfile) === cBefore, pending: onDisk(pfile) === pBefore });
+  // r3223 (1) + (3): the account's digest row carries the module's note; the engine names the account a hold kept out of its Vault listing
+  const dg = A.eng.digest();
+  const whRow = ((dg && dg.adapters) || []).find((a) => a.id === 'webhook');
+  ok(!!whRow && whRow.listNote && whRow.listNote.code === 'held', 'the account\'s digest row carries the list\'s note (held) — the section says it where a person looks', whRow && whRow.listNote);
+  try { A.eng.vaultRows(); } catch { }
+  const vh = typeof A.eng.vaultHeld === 'function' ? A.eng.vaultHeld() : null;
+  const inv = require('../src/vault-inventory.js').inventoryOf([{ store: 'channels', rows: [], held: vh || [] }]);
+  const chStore = inv.stores.find((x) => x.store === 'channels');
+  ok(Array.isArray(vh) && vh.some((h) => h.entry === 'webhook' && h.code === CODE) && !!chStore && Array.isArray(chStore.held) && chStore.held.some((h) => h.code === CODE), 'the engine names the account a hold kept out of its Vault listing (vaultHeld), and the inventory carries it on the store (the window says one line — never a silently shorter list)', { vh, held: chStore && chStore.held });
+  // r3223 (5): a joiner words a held peer's TRUE cause (an older peer's body without `why` keeps today's words)
+  const jr = A.R.joinRefusal ? A.R.joinRefusal({ status: 503, body: JSON.stringify({ ok: false, code: 'store-blocked', why: 'callers-held', error: 'x' }) }, 'Hub A') : null;
+  const jo = A.R.joinRefusal ? A.R.joinRefusal({ status: 503, body: JSON.stringify({ ok: false, code: 'store-blocked', error: 'x' }) }, 'Hub A') : null;
+  ok(!!jr && jr.code === 'peer-paused' && /cannot read its webhook callers or pairing codes/.test(jr.error) && !/channels are paused/.test(jr.error) && !!jo && /channels are paused/.test(jo.error), 'a joiner words a held peer\'s true cause («cannot read its webhook callers or pairing codes»); a peer that names no cause keeps the paused words', { jr, jo });
   const dc = WP.decodeCode(code1.j.code, Date.now());
   const comp = await A.call('POST', '/api/channels/webhook/ci/pair', { headers: { 'X-Webhook-Caller': dc.ok ? dc.caller : 'c-00000000' }, body: '{}' });
-  ok(comp.status === 503 && comp.j && comp.j.code === 'store-blocked' && !!A.R.pending.get('ci', dc.caller, Date.now()) && !A.R.pending.get('ci', dc.caller, Date.now()).spent, 'the completion of a pairing answers store-blocked (the other side reads «try the same code again once it reads»): the code not spent', { status: comp.status, body: comp.j });
+  ok(comp.status === 503 && comp.j && comp.j.code === 'store-blocked' && comp.j.why === 'callers-held' && !!A.R.pending.get('ci', dc.caller, Date.now()) && !A.R.pending.get('ci', dc.caller, Date.now()).spent, 'the completion of a pairing answers store-blocked (the other side reads «try the same code again once it reads»): the code not spent', { status: comp.status, body: comp.j });
   let send = null; try { send = await A.eng.composeEach({ kind: 'user' }, 'webhook', 'ci', { direct: true, text: 'made-up reply', recipients: [cid] }); } catch (e) { send = { thrown: String(e && e.message) }; }
   const sendText = JSON.stringify(send);
   ok(/cannot read its webhook callers/.test(sendText) && !/no longer a caller|no caller|not-found/.test(sendText), 'an owner\'s send says the hold, never «no longer a caller» or «not found»', sendText.slice(0, 300));
@@ -239,9 +267,10 @@ try {
   const liftedP = await HOLD.readAgainOf(WH.PENDING_FILE);
   ok(liftedP === true && !!A.R.pending.get('ci', dc.caller, Date.now()), 'the lift binds the codes again: the one minted before is pending', { liftedP });
   // THE SECRET LENS over every answer, journal line and broadcast of this part
-  const lens = [tok, PT.tokenHash(String(tok)), code1.j.code];
+  let sealedPending = []; try { sealedPending = (JSON.parse(onDisk(pfile) || '{}').rows || []).map((r) => r.tokenEnc).filter(Boolean); } catch { }
+  const lens = [tok, PT.tokenHash(String(tok)), code1.j.code, ...sealedPending];
   const seen = [...A.bodies.filter((b) => !b.includes('"shownOnce":true')), ...said, ...A.bc.map((m) => JSON.stringify(m))];
-  ok(!!tok && lens.every((x) => !seen.some((t) => t.includes(x))), 'THE SECRET LENS: no token, token hash or pairing code in any answer (but the two shown once), journal line or broadcast', seen.filter((t) => lens.some((x) => t.includes(x))).map((t) => t.slice(0, 80)));
+  ok(!!tok && sealedPending.length >= 1 && lens.every((x) => !seen.some((t) => t.includes(x))), 'THE SECRET LENS: no token, token hash or pairing code in any answer (but the two shown once), journal line or broadcast', seen.filter((t) => lens.some((x) => t.includes(x))).map((t) => t.slice(0, 80)));
 } finally { await A.halt(); }
 {
   // a torn lift of this run: the path it lost answers «try again later», never «unknown»; the paths list names the copy
@@ -259,6 +288,8 @@ try {
     const l = await B.call('GET', '/api/channels/webhook/paths');
     ok(h.status === 503 && h.j && h.j.error === 'try-again-later', 'after a torn lift a caller of the path it lost hears «try again later» this run, never 401', { status: h.status, body: h.j });
     ok(l.status === 200 && l.j && l.j.torn && /^callers\.json\.corrupt-/.test(l.j.torn.copy), 'the paths list says the list was damaged and names its copy (the page words it in place)', l.j);
+    const bRow = ((B.eng.digest() || {}).adapters || []).find((a) => a.id === 'webhook');
+    ok(!!bRow && bRow.listNote && bRow.listNote.code === 'torn' && /^callers\.json\.corrupt-/.test(bRow.listNote.copy), 'after a torn lift the account\'s digest row says so with the copy\'s name — the section says it once no path is left (r3223 (1))', bRow && bRow.listNote);
   } finally { await B.halt(); }
 }
 {
@@ -275,6 +306,15 @@ try {
   ok(held && notHere && /export function tornWords/.test(page) && keys.length === 1 && !/restore/i.test(keys[0]) && zh.includes(JSON.stringify(keys[0]) + ':') && ja.includes(JSON.stringify(keys[0]) + ':'), 'the page says both held codes IN PLACE (the hub\'s words until the family\'s ONE table holds their rows — r3168: never in this unit\'s dictionaries) and words the torn lift in zh and ja (never «restore that copy»)', { held, notHere, keys });
 }
 
+{
+  // r3223 (1) + (3): the section and the Vault window say it, in zh and ja too
+  const view = onDisk(path.join(REPO, 'src/lib/webhook-view.js')) || '', panel = onDisk(path.join(REPO, 'src/lib/channels-panel.js')) || '', vw = onDisk(path.join(REPO, 'src/lib/vault-window.js')) || '';
+  const zh = onDisk(path.join(REPO, 'src/lib/i18n-zh.js')) || '', ja = onDisk(path.join(REPO, 'src/lib/i18n-ja.js')) || '';
+  const vkey = (vw.match(/t\("(Some stored values cannot be listed right now: \{what\}[^"]*)"/) || [])[1];
+  ok(/export function listNoteWords\(note, \{ t = tDevice, held = \(\) => null \} = \{\}\)/.test(view) && panel.includes("listNoteWords(a.listNote, { held: (code) => heldWordsOf({ code }) })") && !/from '\.\/utils\.js'/.test(view)
+    && !!vkey && vw.includes("'held-parts'") && zh.includes(JSON.stringify(vkey) + ':') && ja.includes(JSON.stringify(vkey) + ':'),
+    'the account section says the list\'s note (the family table\'s held words, or the torn words) and the Vault window says what a hold kept out, in zh and ja — the words module stays DOM-free', { vkey: !!vkey });
+}
 console.log('④ RED CONTROLS');
 {
   const dir = dirOf('control'); const file = plant(dir); const before = onDisk(file);

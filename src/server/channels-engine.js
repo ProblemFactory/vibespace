@@ -4476,6 +4476,9 @@ function create(deps = {}) {
       removable: !decl || decl.removable !== false, listed: !decl || decl.listed !== false, reach: (decl && decl.reach) || 'grants',
       // lane webhook-l2-ui: the capability row's transport — an inbound door (`http-inbound`) ⇒ the panel offers paths + callers
       pushTransport: c.pushTransport || null,
+      // r3223 (1): the module's DECLARED note about its own list (the webhook callers: held, or started empty from torn bytes) — the
+      // panel words it in the account's section, where a person looks when no path is left
+      listNote: decl && typeof decl.listNote === 'function' ? (() => { try { return decl.listNote({ ownDir: path.join(dataDir, 'channels', String(rec.id)) }) || null; } catch { return null; } })() : null,
       // r3: a send here starts a BILLED TURN (the module's declaration) — the
       // composer says so and echoes the count with its Send (`expectWakes`)
       sendStartsTurn: sendStartsTurn(rec),
@@ -10387,15 +10390,20 @@ function create(deps = {}) {
   // secret, plus what an adapter keeps sealed in its own dir (its module's declared `vaultRows` — never a branch on a
   // kind); masked (the ciphertext rides only to the length class). `vaultReveal` = ONE value through this store's box.
   const vaultModOf = (r) => { try { const m = registry.get(r.kind); return m && typeof m.vaultRows === 'function' ? m : null; } catch { return null; } };
+  // B-f276's family (r3223 (3), lane bl-ci): an account whose own sealed file is HELD (its module's vaultRows threw the hold's refusal) is
+  // remembered by the last listing — the Vault window says which, never a silently shorter list (vaultHeld)
+  let lastVaultHeld = [];
+  function vaultHeld() { return lastVaultHeld.map((h) => ({ ...h })); }
   function vaultRows() {
-    const out = [];
+    const out = [], held = [];
+    lastVaultHeld = held;
     for (const r of adapterRecords().adapters) {
       if (!r || !r.id) continue;
       const label = r.label || r.id, detail = r.kind || '';
       if (r.auth && typeof r.auth.tokenEnc === 'string' && r.auth.tokenEnc) out.push({ entry: r.id, field: 'token', kind: 'oauth-token', label, detail, createdAt: r.auth.updatedAt || null, cipher: r.auth.tokenEnc });
       if (r.credential && typeof r.credential.appSecretEnc === 'string' && r.credential.appSecretEnc) out.push({ entry: r.id, field: 'appSecret', kind: 'client-secret', label, detail, cipher: r.credential.appSecretEnc });
       const mod = vaultModOf(r);
-      if (mod) { try { for (const x of mod.vaultRows({ ownDir: path.join(dataDir, 'channels', String(r.id)) }) || []) out.push({ entry: r.id, field: x.field, kind: x.kind, label: x.label || label, detail: x.detail || detail, createdAt: x.createdAt || null, cipher: x.cipher }); } catch (e) { log.warn(`[channels] ${r.id}: the vault rows could not be listed (${(e && e.code) || 'error'})`); } }
+      if (mod) { try { for (const x of mod.vaultRows({ ownDir: path.join(dataDir, 'channels', String(r.id)) }) || []) out.push({ entry: r.id, field: x.field, kind: x.kind, label: x.label || label, detail: x.detail || detail, createdAt: x.createdAt || null, cipher: x.cipher }); } catch (e) { if (e && e.status === 503 && /_unread$/.test(String(e.code || ''))) held.push({ entry: r.id, label, code: String(e.code) }); log.warn(`[channels] ${r.id}: the vault rows could not be listed (${(e && e.code) || 'error'})`); } }
     }
     return out;
   }
@@ -10479,6 +10487,7 @@ function create(deps = {}) {
     start: ['allow', 'sync', 'its own pause inside: while a family is held it arms nothing and waits through the store’s whenRead, then the same start runs once'],
     stop: ['allow', 'sync', 'stops the engine’s timers — reads no family'],
     vaultRows: ['refused', 'sync', 'refused while paused (no allow row): adapters.json sealed tokens/secrets, masked channels-engine.js:9532'],
+    vaultHeld: ['allow', 'sync', 'r3223 (3): the accounts whose own sealed file the last vault listing met held — the last listing’s list in memory, reads no family (while paused the listing is refused, so it stays as it was)'],
     vaultReveal: ['refused', 'sync', 'refused while paused (no allow row): one sealed value through the box channels-engine.js:9544'],
     secrets: ['allow', 'const', 'a constant — answers the same held or not'],
     pushInbound: ['refused', 'async', 'HTTP inbound door: may arm the lane, then e.adapter.live.deliver → onPushEvent stores + indexes channels-engine.js:9601, 4504; webhook.js:132 answers 200 only on persi…'],
@@ -10701,6 +10710,7 @@ function create(deps = {}) {
     },
     adapterRecords, laneOrScan, start, stop,
     vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
+    vaultHeld,   // r3223 (3): the accounts whose sealed rows the last listing could not list because their own file is held
     // lane webhook-l1-server: THE HTTP INBOUND DOOR — an `http-inbound` push adapter's route hands a JUDGED event here and
     // it reaches the armed lane's emitter (onPushEvent: stored first, deduped by eventId, then indexed / broadcast / the
     // rule funnel); a lane not armed yet is armed now (its auth is local: `connected`). The route answers 200 only on

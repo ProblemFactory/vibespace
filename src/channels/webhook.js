@@ -82,6 +82,8 @@ const PENDING_SHAPE = (d) => !!d && typeof d === 'object' && !Array.isArray(d) &
 const callersWords = (h) => `VibeSpace cannot read its webhook callers right now (${(h && h.code) || 'unreadable'}) — nothing was changed and nothing is written over them, and each caller is told to try again later. VibeSpace reads them again by itself every few minutes.`;
 const pendingWords = (h) => `VibeSpace cannot read its pending pairing codes right now (${(h && h.code) || 'unreadable'}) — no code was made or used and nothing is written over them. VibeSpace reads them again by itself every few minutes.`;
 const holdLog = (s) => console.warn(`[webhook] ${s}`);
+// r3223 (2): a reply refused while the list is held is NOT sent again by anything — said plainly, the person's or agent's act to repeat
+const NOT_SENT_WHILE_HELD = 'not sent: VibeSpace cannot read its webhook callers right now — send it again once the list reads (it reads the list again by itself every few minutes)';
 
 function writeJsonAtomic(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -440,7 +442,8 @@ function create(record = {}, deps = {}) {
     /** THE SEND — the caller is RE-READ now (revoked ⇒ not-found; rotated ⇒ its new key signs). */
     async send(convId, { text, idemKey, envelope = null } = {}) {
       // r3145: held — the send waits (retryable, the hold's words), never «no longer a caller» of a caller the unread list holds
-      if (S && S.held()) return { ok: false, code: 'transport', retryable: true, detail: { why: 'callers-unread', reason: S.heldWords() } };
+      // r3223 (2): nothing re-sends a refused reply (the outbox keeps it failed), so its reason says so plainly — never as if it will go
+      if (S && S.held()) return { ok: false, code: 'transport', retryable: true, detail: { why: 'callers-unread', reason: NOT_SENT_WHILE_HELD } };
       const st = need();
       const to = envelope && typeof envelope.to === 'string' ? envelope.to : null;
       const c = to ? st.caller(convId, to) : null;
@@ -479,6 +482,16 @@ const EGRESS = Object.freeze([]);
  *  paired caller's outbound token (a Bearer caller keeps a hash only: nothing to show); masked — the ciphertext rides only
  *  to src/vault-inventory.js's length class. `vaultReveal` opens ONE of them with the channels box the engine hands in. */
 const CALLER_FIELD_RE = /^caller\.(.+)\.(c-[0-9a-f]{1,32})\.(token|out)$/;
+/** r3223 (1): THE DECLARED NOTE about this adapter's own list, for the account's section (src/server/channels-engine.js adapterView):
+ *  { code: 'held' } while callers.json could not be read, { code: 'torn', copy, since } after a torn lift of this run, else null.
+ *  A fact the panel words (src/lib/webhook-view.js) — no path, caller or token in it. */
+function listNote({ ownDir } = {}) {
+  if (!ownDir) return null;
+  const S = callersStore(ownDir);
+  if (S.held()) return { code: 'held' };
+  const t = S.torn();
+  return t ? { code: 'torn', copy: t.copy, since: t.since } : null;
+}
 function vaultRows({ ownDir } = {}) {
   if (!ownDir) return [];
   const S = callersStore(ownDir), out = [];
@@ -500,6 +513,7 @@ function vaultReveal({ ownDir, secrets } = {}, field) {
 }
 
 module.exports = {
+  listNote,   // r3223 (1): the account section's note about the list (held / torn this run)
   vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's rows of callers.json (the engine asks a module that declares them)
   kind: KIND, caps, create, label: 'Webhook', policyDefault: 'direct', sendStartsTurn: false, EGRESS,
   removable: false, consent: null, reach: 'grants', listed: true, seed: true,

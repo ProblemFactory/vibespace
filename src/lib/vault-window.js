@@ -536,6 +536,10 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       if (!g.rows.length) { if (!heldAuto) want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }
       for (const r of g.rows) { const x = rowEls.get(r.id); if (x) want.push(x.el); }
     }
+    // r3223 (3): a part of a store a HOLD kept out of this listing (an account's own sealed file that could not be read) — said, never a
+    // silently shorter list
+    { const heldParts = (d.stores || []).flatMap((s) => (Array.isArray(s.held) ? s.held : [])).map((h) => h.label).filter(Boolean);
+      if (heldParts.length) want.unshift(emptyEl(t("Some stored values cannot be listed right now: {what}. Nothing is lost — their file could not be read, and VibeSpace reads it again by itself.", { what: [...new Set(heldParts)].join(', ') }), 'held-parts')); }
     if (!v.rows.length && filtered) want.push(st.q ? noMatchEl(v) : emptyEl(t('No stored value matches these filters'), 'empty-match'));
     else if (!v.rows.length && st.purpose === 'all') want.push(emptyEl(t('Nothing stored here'), 'empty-all'));
     reconcile(list, want);

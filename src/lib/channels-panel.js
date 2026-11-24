@@ -42,7 +42,7 @@
 // same shape core's session-card / window / gear menus use — registered by the
 // module that OWNS the feature, so gear-menu.js stays byte-identical to its
 // pinned legacy row list.
-import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover, stateLanded } from './utils.js';
+import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover, stateLanded, heldWordsOf } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, clockOf, dateOf } from './page-time.js';
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
@@ -83,7 +83,7 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 // R4: access and notification — two operations (Grant access… / Notify…),
 // the grain menu, and the one-line summary a row draws.
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
-import { offersPaths, accountSectionOrder } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
+import { offersPaths, accountSectionOrder, listNoteWords } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
 import { showNewPathDialog, showJoinDialog } from './channel-webhook.js';
 import { grainSummaryText, groupLastLine } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
@@ -2238,6 +2238,9 @@ export function renderChannelsPanel(app, c) {
     }
     // the status line(s) — only when there is something to say (a1 D1/D6)
     for (const n of adapterNotes(app, a)) sec.appendChild(n);
+    // r3223 (1): an inbound door's own list held, or started empty from torn bytes this run — said in the account's section, where a
+    // person looks once no path is left (never only inside one path's dialog)
+    { const lw = offersPaths(a) ? listNoteWords(a.listNote, { held: (code) => heldWordsOf({ code }) }) : null; if (lw) sec.appendChild(noteLine('chan-sec-note', lw, { warn: true })); }
     // a SOURCE that is not built in takes the account and pattern grains too (§7.3)
     if (!builtinAgents) for (const n of grainLines(a)) sec.appendChild(n);
     const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });

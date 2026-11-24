@@ -15351,4 +15351,5 @@ export default {
   "The list of model providers was damaged, so it starts empty — VibeSpace kept the damaged bytes aside (their name is below). Add the providers again: each gets a new key; their old keys stay in the Vault window until you remove them there.": "モデルプロバイダーの一覧が壊れていたため、空の一覧で始まりました — VibeSpace は壊れた内容を別に取っておきました（名前は下にあります）。プロバイダーをもう一度追加してください。それぞれ新しいキーが付きます。古いキーは保管庫ウィンドウで削除するまで残ります。", // lane lg-providers B-f276 family follow (r3106)
   "Remove this old key?": "この古いキーを削除しますか？", // lane lg-providers B-f276 family follow (r3106)
   "The damaged list still names this key's provider. A provider added again has a new key, so this old key is no longer used by any provider in the list. Remove it?": "壊れた一覧にはまだこのキーのプロバイダーが書かれています。もう一度追加したプロバイダーには新しいキーがあるので、一覧のどのプロバイダーもこの古いキーを使っていません。削除しますか？", // lane lg-providers B-f276 family follow (r3106)
+  "Some stored values cannot be listed right now: {what}. Nothing is lost — their file could not be read, and VibeSpace reads it again by itself.": "保存された値の一部をいま一覧にできません：{what}。失われてはいません — ファイルを読み込めず、VibeSpace が自動で再読み込みします。",
 };

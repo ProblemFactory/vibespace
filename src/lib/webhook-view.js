@@ -18,6 +18,15 @@ export function heldWords(r) { return r && HELD_CODES.has(r.code) ? String(r.err
  *  do — never «restore that copy» (they are the damaged bytes: restoring them brings the damage back) */
 export function tornWords(torn, { t = tDevice } = {}) { return torn && torn.copy ? t("The webhook callers list was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and the list starts empty: register your callers and pair your instances again, or mend the file by hand and restart VibeSpace.", { copy: String(torn.copy) }) : null; }
 
+/** r3223 (1): the account section's sentence for the module's declared `listNote` — held: `held(code)` (the page hands the family's ONE
+ *  table, src/lib/utils.js heldWordsOf — this module stays DOM-free); torn: tornWords; else null */
+export function listNoteWords(note, { t = tDevice, held = () => null } = {}) {
+  if (!note || typeof note !== 'object') return null;
+  if (note.code === 'held') return held('webhook_callers_unread');
+  if (note.code === 'torn') return tornWords(note, { t });
+  return null;
+}
+
 /** An account whose capability row declares an inbound door offers paths and callers. */
 export const offersPaths = (a) => !!(a && a.pushTransport === 'http-inbound');
 /** lane webhook-section-place (the owner, 2026-10-12: "webhook应该保持在列表最后或者顶部，因为不是自由添加的"): THE ACCOUNT

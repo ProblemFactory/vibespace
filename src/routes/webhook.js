@@ -256,7 +256,7 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
   const st = store();
   // r3145: either file held — refused by name before a byte is read (the code not spent, nothing written): the other side's
   // join reads `store-blocked` as «try the same code again once it reads»
-  if ((st && st.held()) || pendingHeld()) { res.set('Connection', 'close'); res.set('Retry-After', '60'); return res.status(503).set('Cache-Control', 'no-store').json({ ok: false, code: 'store-blocked', error: PAIR_HELD }); }
+  if ((st && st.held()) || pendingHeld()) { res.set('Connection', 'close'); res.set('Retry-After', '60'); return res.status(503).set('Cache-Control', 'no-store').json({ ok: false, code: 'store-blocked', why: 'callers-held', error: PAIR_HELD }); }   // r3223 (5): `why` names the true cause to a joiner that reads it (an older one keeps its paused words)
   const callerId = String(req.headers[WA.HEADERS.caller] || '');
   // verify r1 #2: the path's allow-list holds here too (the ONE check, over the client address)
   const p = st && WA.SLUG_RE.test(slug) && st.path(slug) && WA.allowVerdict(st.path(slug), addr) ? pending.get(slug, callerId, t) : null;
@@ -453,9 +453,11 @@ router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
 /** lane webhook-pair-join: A's refusal of the completion frame, said BY NAME on B. A tells an unproven frame nothing — its
  *  same-shape 401 reads "does not know this code" here; "already used" is A's 409 to a frame that proved the code. */
 function joinRefusal(r, from) {
-  let named = null; try { named = r.body ? JSON.parse(r.body).code : null; } catch { named = null; }
+  let named = null, whyNamed = null; try { const b = r.body ? JSON.parse(r.body) : null; named = b ? b.code : null; whyNamed = b ? b.why : null; } catch { named = null; }
   if (r.status === 409 && named === 'code-used') return { code: 'code-used', error: `${from} says this code was already used — nothing was written; ask for a new code` };
   if (r.status === 401) return { code: 'code-unknown', error: `${from} does not know this code (expired there, replaced by a newer code, or altered) — nothing was written; ask for a new code` };
+  // r3223 (5): the other side's callers list or pairing codes are held — its true cause, never «its channels are paused»
+  if (r.status === 503 && named === 'store-blocked' && whyNamed === 'callers-held') return { code: 'peer-paused', error: `${from} cannot read its webhook callers or pairing codes right now — nothing was written and the code is not spent: try the same code again in a few minutes` };
   if (r.status === 503 && named === 'store-blocked') return { code: 'peer-paused', error: `${from}'s channels are paused (a file of theirs could not be read) — nothing was written and the code is not spent: try the same code again once it reads` };   // B-f276 1c follow (r1588 (6))
   if (r.status === 429) return { code: 'rate-limited', error: `${from} is refusing calls from this address for now — try again in a few minutes` };
   if (r.status === 403 && named === 'pair-wake-held') return { code: 'pair-wake-held', error: `${from}'s path now holds a wake — a code not minted on its owner's page is refused there; nothing was written — ask its owner for a new code from their page` };   // r6
@@ -508,4 +510,4 @@ router.post('/api/channels/webhook/join', json, async (req, res) => {
   } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }
 });
 
-module.exports = { router, setup, pending, stats: () => JSON.parse(JSON.stringify(STATS)), ipGate, memos, ADAPTER_ID };
+module.exports = { router, setup, pending, stats: () => JSON.parse(JSON.stringify(STATS)), ipGate, memos, ADAPTER_ID, joinRefusal };   // joinRefusal: a suite reads the joiner's words (r3223 (5))
