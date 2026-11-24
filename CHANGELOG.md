@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.418 — 2026-11-24
+
+### Fixed
+- A browser profile on a paired machine that several conversations share no longer stops one of them for 30 seconds while another opens and closes tabs.
+- On a paired machine's shared browser profile, each conversation now sees and drives only its own tabs, as on this computer.
+
 ## 2.369.417 — 2026-11-23
 
 ### Fixed
