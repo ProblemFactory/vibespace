@@ -1886,23 +1886,40 @@ const AGENT_VIEW_ROWS = Object.freeze({
   scope: 'what the list makes of it for agents (derived, never the list itself)',
   use: 'whether the ASKING conversation may use it (derived for that asker)',
 });
+/** B-9584 U3 follow (主开发 r2932 (2)) — ONE LEVEL DOWN: AN OBJECT ROW LEAVES BY ITS NAMED SUB-FIELDS, the rows' own law a level
+ *  down: a sub-field the record gains reaches no agent until its shape here names it (the census leg feeds each a planted one). A row
+ *  with no shape here passes a plain value only (a string, a number, a boolean, null); an object or a list on it never leaves. Kept
+ *  inline so this file stays import-free (browser-builds.agentChoiceView / agentMissingView spell the same rules for their callers). */
+const AGENT_VIEW_SHAPES = Object.freeze({
+  // verify r1 (F5, lane browser-admin): a build's PATH never reaches an agent — a chrome file the user named is a fact by KIND only
+  // (versions cross, paths do not); an engine plugin's id is a public name
+  browser: (v) => (v.kind === 'build' ? { kind: 'build', version: v.version } : v.kind === 'path' ? { kind: 'path' } : v.kind === 'plugin' ? { kind: 'plugin', id: v.id } : v.kind === 'default' ? { kind: 'default' } : null),
+  // a vanished build is named by kind too: a build's version, never a named file's path
+  buildMissing: (v) => ({ kind: v.kind == null ? null : v.kind, what: v.kind === 'path' || v.what == null ? null : v.what, code: v.code == null ? null : v.code, at: v.at == null ? null : v.at }),
+  renamedFrom: (v) => ({ host: v.host == null ? null : v.host, at: v.at == null ? null : v.at }),
+  allowedDomains: (v) => (Array.isArray(v) ? v.filter((d) => typeof d === 'string') : null),
+  // B-cf42: the kernel's fact, never the keeper's own bookkeeping (filed, at, the notice id)
+  kernelLive: (v) => ({ engine: v.engine, version: v.version, why: v.why, probe: v.probe, live: v.live }),
+});
+/** r2932 (2): a row's value as an agent may see it — `undefined` = it does not leave. */
+function agentRowValue(k, v) {
+  if (v === undefined || v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  const shape = typeof v === 'object' && Object.prototype.hasOwnProperty.call(AGENT_VIEW_SHAPES, k) ? AGENT_VIEW_SHAPES[k] : null;
+  return shape ? shape(v) : undefined;
+}
 /** A digest row as an agent may see it: ONLY the rows of AGENT_VIEW_ROWS, from the record's public view and the digest's own
- *  derived fields (`extra`: mediated), PLUS `scope` and `use` for the asking conversation. */
+ *  derived fields (`extra`: mediated), each through its shape (one level down), PLUS `scope` and `use` for the asking conversation. */
 function agentProfileView(p, facts = {}, extra = {}) {
   if (!p) return null;
   const pub = publicProfileView(p), ex = extra && typeof extra === 'object' ? extra : {};
   const out = {};
   for (const k of Object.keys(AGENT_VIEW_ROWS)) {
     if (k === 'scope' || k === 'use') continue;   // derived below, for this asker
-    if (Object.prototype.hasOwnProperty.call(ex, k)) out[k] = ex[k];
-    else if (Object.prototype.hasOwnProperty.call(pub, k)) out[k] = pub[k];
+    const from = Object.prototype.hasOwnProperty.call(ex, k) ? ex : Object.prototype.hasOwnProperty.call(pub, k) ? pub : null;
+    if (!from) continue;
+    const v = agentRowValue(k, from[k]);   // r2932 (2): one level down — an object row by its named sub-fields (AGENT_VIEW_SHAPES)
+    if (v !== undefined || from[k] === undefined) out[k] = v;
   }
-  // verify r1 (F5, lane browser-admin): a build's PATH never reaches an agent — a chrome file the user named is a fact by
-  // KIND only (versions cross, paths do not); a vanished one is named by kind too (the rule browser-builds.agentChoiceView
-  // spells; kept inline here so this file stays import-free)
-  if (out.browser && out.browser.kind === 'path') out.browser = { kind: 'path' };
-  if (out.buildMissing && out.buildMissing.kind === 'path') out.buildMissing = { ...out.buildMissing, what: null };
-  if (out.kernelLive) out.kernelLive = { engine: out.kernelLive.engine, version: out.kernelLive.version, why: out.kernelLive.why, probe: out.kernelLive.probe, live: out.kernelLive.live }; // B-cf42: the fact, never the keeper's own bookkeeping
   out.scope = scopeOf(p);
   out.use = agentUseOf(p, facts);
   return out;

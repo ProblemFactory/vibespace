@@ -1936,7 +1936,9 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
         if (await liveFillRefusal(res, k, f, e.profile && e.profile.id, req, verb)) return;
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
-        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: isServerVaultFill ? [] : pairs, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs })), profile: e.profile, browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
+        // B-9584 U3 follow (主开发 r2932 (1)): the record rides as the AGENT's view here too — every agent door through the one view
+        // (its census: test-browser-environment-dialog ⑥, by a request)
+        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: isServerVaultFill ? [] : pairs, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs })), profile: B.agentProfileView(e.profile, agentFactsOf(f), { mediated: !!(e.profile && e.profile.mediated) }), browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
       }
       stampActive(f, '');
       return send({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
@@ -1954,7 +1956,8 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
         { const g = await cliGoneVerdict(k, e.browser); if (g) return failVerdict(res, g); }
         if (await liveFillRefusal(res, k, f, e.profile && e.profile.id, req, verb)) return;
         // verify r2 (D6): a helper's browser keeps nothing — said ONCE, in its own first answer (the CLI prints the note)
-        return send({ ok: true, kind: 'child', handle: v.handle, env: isServerVaultFill ? [] : env.pairs, unset: env.unset, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs: childPairs })), handles: v.handles, pinTab: false, profile: e.profile, browser: agentBrowserOf(e.browser), at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
+        // r2932 (1): a helper's record rides as the agent's view too
+        return send({ ok: true, kind: 'child', handle: v.handle, env: isServerVaultFill ? [] : env.pairs, unset: env.unset, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs: childPairs })), handles: v.handles, pinTab: false, profile: B.agentProfileView(e.profile, agentFactsOf(f), { mediated: !!(e.profile && e.profile.mediated) }), browser: agentBrowserOf(e.browser), at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...(e.created ? { notKept: { text: require('../browser-kept.js').helperNotKeptText() } } : {}) });
       }
       return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }

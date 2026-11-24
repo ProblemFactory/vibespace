@@ -268,18 +268,21 @@ async function legsOf(G, only = null) {
     h2.dispose(); await f2.close();
   }
   // r2311 (small): THE GRANT PHASE's OWN BOUND — a browser that never answers its permission calls holds the arm for the phase's bound
-  // (300 ms here), never twenty sites × the call bound; every site not granted is counted, the tab still released
+  // (300 ms here), never twenty sites × the call bound; every site not granted is counted, the tab still released. The bound is the
+  // hold's OWN call bound handed to it (GB_CALL_MS): the arm answers inside ONE call's bound, never twenty (its RED waits a whole one
+  // on the first call alone) — the mechanism's constant, never a literal clock (test-ci-gate §2e)
   if (run('gbound')) {
+    const GB_CALL_MS = 900;
     const f = await fakeBrowser();
     const SITES = Array.from({ length: 20 }, (_, i) => `https://s${i}.example`);
-    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: 900, closeMs: 300, armMs: 8000, grantMs: 300, rearmMs: [600000] });
+    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: GB_CALL_MS, closeMs: 300, armMs: 8000, grantMs: 300, rearmMs: [600000] });
     f.mode.permission = 'never';
     const t0 = Date.now();
     const r = await h.arm('bp-0000000f', { url: () => f.url, plan: { ...PLACE, sites: SITES } });
     const ms = Date.now() - t0;
     await until(() => idx(f, 'Runtime.runIfWaitingForDebugger') >= 0, 1000);   // the release reaches the fake a moment after the arm answers
     const fact = h.factOf('bp-0000000f');
-    out.grantBound = r.ok === true && ms < 800 && !!fact && fact.ungranted === 20 && idx(f, 'Runtime.runIfWaitingForDebugger') >= 0;
+    out.grantBound = r.ok === true && ms < GB_CALL_MS && !!fact && fact.ungranted === 20 && idx(f, 'Runtime.runIfWaitingForDebugger') >= 0;
     out.grantBoundMs = ms;
     h.dispose(); await f.close();
   }
@@ -309,17 +312,20 @@ async function legsOf(G, only = null) {
   }
   // r2497 (4): THE TAKE-BACK's CALLS share one deadline — every listed origin's «denied» sent at once (five sites, a browser that no longer
   // answers its permission calls): the tab is said closed after about ONE call bound, never five
+  // the take-back's bound is the hold's own constants handed to it: under three call bounds and the close's (TB_CALL_MS, TB_CLOSE_MS),
+  // where five calls one by one take five call bounds and the close's — the mechanism's constants, never a literal clock (§2e)
   if (run('taintBound')) {
+    const TB_CALL_MS = 300, TB_CLOSE_MS = 100;
     const SITES = Array.from({ length: 5 }, (_, i) => `https://t${i}.example`);
     const f = await fakeBrowser({ pages: [{ targetId: 'T0', type: 'page', url: 'about:blank', browserContextId: 'D' }] }), e = [];
-    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: 300, closeMs: 100, armMs: 3000, rearmMs: [600000], onEvent: (x) => e.push(x) });
+    const h = G.create({ WebSocketImpl: WebSocket, log: quiet, boundMs: TB_CALL_MS, closeMs: TB_CLOSE_MS, armMs: 3000, rearmMs: [600000], onEvent: (x) => e.push(x) });
     await h.arm('bp-00000012', { url: () => f.url, plan: { ...PLACE, sites: SITES } });
     f.mode.permission = 'never'; f.mode.place = 'refuse'; f.mode.close = 'never';
     const n0 = f.calls.length, t0 = Date.now(), told = () => e.some((x) => x.kind === 'closed' && x.targetId === 'T6');
     f.open('T6', { browserContextId: 'D' });
     await until(told, 4000);
     const ms = Date.now() - t0, sent = f.calls.slice(n0).filter((c) => c.method === 'Browser.setPermission' && c.params.setting === 'denied' && c.params.origin).length;
-    out.taintBound = told() && ms < 900 && sent === 5; out.taintBoundMs = ms;
+    out.taintBound = told() && ms < 3 * TB_CALL_MS + TB_CLOSE_MS && sent === 5; out.taintBoundMs = ms;
     h.dispose(); await f.close();
   }
   // r2311 (i) THE HOLD GRANTS AGAIN on its own live socket (after another client reset or left); not held ⇒ nothing. (ii) after every
@@ -392,10 +398,10 @@ ok(R.sitesNewCtx, '(B) a new browser context: its tab placed, THEN its grants, T
 ok(R.sitesClosed, '(B) with sites on the list, a tab whose place is refused is CLOSED (never released), said with its target id', R);
 ok(R.taintDefault, 'r2311 (2a) a tab in the DEFAULT context (named by its id) that the hold could neither place nor close: no grant reaches that context — none under the empty name', R);
 ok(R.taintGranted, 'r2311 (2b) a context ALREADY granted that then holds a tab the hold could neither place nor close: its listed origins set back to «denied» there at once (the tab said closed: false)', R);
-ok(R.grantBound, `r2311 (small) the grant phase has its OWN bound: a browser that never answers its permission calls held the arm ${R.grantBoundMs} ms for twenty sites (bound 300 ms), every site counted ungranted, the tab still released`, R);
+ok(R.grantBound, `r2311 (small) the grant phase has its OWN bound: a browser that never answers its permission calls held the arm ${R.grantBoundMs} ms for twenty sites (the phase\'s bound 300 ms; inside ONE call\'s bound, 900 ms, never twenty), every site counted ungranted, the tab still released`, R);
 ok(R.twoTabs, 'r2311 two tabs born at once in a NEW context: the second waits for the first one\'s grants still in flight — neither is released before them', R);
 ok(R.noCtx, 'r2497 (3) a target that names NO browser context: never granted (no permission call at all — a grant with no id is the default context\'s), the tab still placed and released', R);
-ok(R.taintBound, `r2497 (4) the take-back's calls share ONE deadline: five listed origins set back to «denied» at once, the tab said closed after ${R.taintBoundMs} ms (one call bound 300 ms, never five)`, R);
+ok(R.taintBound, `r2497 (4) the take-back's calls share ONE deadline: five listed origins set back to «denied» at once, the tab said closed after ${R.taintBoundMs} ms (under three call bounds of 300 ms and the close\'s 100 ms; one by one, five bounds)`, R);
 ok(R.regrantGrants && R.regrantNotHeld, 'r2311 (i) the hold GRANTS AGAIN on its own live socket (the every-origin denial, then the listed origin) — after another client reset or left; a hold not held, or none, does nothing', R);
 ok(R.grantsTold, 'r2311 (ii) after every grant job with a list: how many sites were not given the place, told (0 at a good arm, 1 when the browser refused) — never an origin', R);
 ok(R.regrantTaint, 'r2767 REQUIRED: a context once granted on this socket is ALWAYS taken back when tainted — a regrant in flight had cleared the jobs, a tab there neither placed nor closed: its listed origin set back to «denied»', R);

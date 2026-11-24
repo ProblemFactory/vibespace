@@ -637,7 +637,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   ok(eg.restored.err && eg.restored.err.restored === true && eg.restored.events.length === 1 && eg.restored.events[0].outcome === 'changed', 'control (g): …the holder read "changed to Chrome 160" while the old build ran again — exactly what ②\'s outcome leg catches', eg.restored.events);
   // verify r1 (F5): the agent's profile view that keeps a named file's path; a status that hands the agent the launch view
   const ps = read('src/browser-profiles.js');
-  const keepPath = editAnchor(ps, "  if (out.browser && out.browser.kind === 'path') out.browser = { kind: 'path' };\n", '', "src/browser-profiles.js");   // r2767: the view's reduction of a named file to its kind
+  const keepPath = editAnchor(ps, "v.kind === 'path' ? { kind: 'path' } :", "v.kind === 'path' ? { kind: 'path', path: v.path } :", "src/browser-profiles.js");   // r2932 (2): the browser row's shape — a named file by its kind
   ok(keepPath !== ps, 'control (e): the patch (an agent profile view that keeps the path) applies');
   const Pe = MUT.load('src/browser-profiles.js', keepPath, 'keep-path');
   const ve = Pe.agentProfileView({ id: 'bp-0000eeee', label: 'E', provider: 'chromium', owner: { kind: 'instance', id: null }, browser: { kind: 'path', path: '/opt/named/chrome' } }, {}, {});
@@ -1125,9 +1125,9 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
     const av = PBv.agentProfileView(markRow, {}, {});
     ok(av.kernelLive && Object.keys(av.kernelLive).sort().join() === 'engine,live,probe,version,why', 'B-cf42 cure: the agent\'s view of a marked profile carries the answer only — never the keeper\'s bookkeeping (filed, at, the notice id)', av.kernelLive);
     const pSrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
-    const pCut = (pSrc.match(/\n  if \(out\.kernelLive\) out\.kernelLive = \{[^\n]*/) || [''])[0];   // r2767: the view is a kept list now (src/browser-profiles.js)
-    if (!pCut) throw new Error('the anchor of the control «B-cf42 cure: the agent view\'s bookkeeping» is not in the source');
-    const PBm = MCk.load('src/browser-profiles.js', editAnchor(pSrc, pCut, '', "src/browser-profiles.js"), 'agent-view-keeps-bookkeeping');
+    const pCut = '  kernelLive: (v) => ({ engine: v.engine, version: v.version, why: v.why, probe: v.probe, live: v.live }),';   // r2932 (2): the kernel's fact row's shape (src/browser-profiles.js AGENT_VIEW_SHAPES)
+    if (!pSrc.includes(pCut)) throw new Error('the anchor of the control «B-cf42 cure: the agent view\'s bookkeeping» is not in the source');
+    const PBm = MCk.load('src/browser-profiles.js', editAnchor(pSrc, pCut, '  kernelLive: (v) => v,', "src/browser-profiles.js"), 'agent-view-keeps-bookkeeping');
     ok('filed' in (PBm.agentProfileView(markRow, {}, {}).kernelLive || {}), 'CONTROL (B-cf42 cure): a view without its projection hands the agent the keeper\'s bookkeeping (RED for the leg above)');
   }
   // the PLUGIN turned off ⇒ the table loses it at once ⇒ refused browser_engine_missing (marked, ONE item)
@@ -2305,7 +2305,7 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
       if (log.onEvent) log.onEvent({ kind: 'grants', profileId: pp.id, ctx: 'B', failed: 0, of: 2, at: 11 });   // r2767 (b): another context succeeds — it never writes over A's failure
       const wCross = recW();
       if (log.onEvent) { log.onEvent({ kind: 'grants', profileId: pp.id, ctx: 'A', failed: 1, of: 2, at: 12 }); log.onEvent({ kind: 'grants', profileId: pp.id, ctx: 'A', failed: 0, of: 2, at: 13 }); }
-      out.grantsTold = { wFail, wCross, wOk: recW(), filed: todos.slice(tGr).map((x) => x.text) };
+      out.grantsTold = { wFail, wCross, wOk: recW(), filed: todos.slice(tGr).map((x) => x.text), filedDetail: todos.slice(tGr).map((x) => String(x.detail || '')) };
       { const e0 = (kg2._reg().browsers[pp.id] || {}).environment; if (e0) e0.locationSaid = said0; }   // the record's own words back (this profile lists no site; the legs after read them)
       // B-9584 (B, 主开发 r1791): a tab the hold CLOSED (sites on the list) — its lease marked «place», said once to the person
       const lz = kg2._reg().leases.find((l) => l && l.profileId === pp.id && String(l.browserKey) === KEY_A);
@@ -2345,8 +2345,9 @@ console.log('— ⑦g B-9584 U2c: the stored denial at the start; a place held o
     '⑦g r1707 (8) THE NOTICES: a tab without its place — ONE For-you line a run (twice said once), its words «denied the location»; the place given again after a restart files NOTHING (r1707 (6): quiet while no site can read it); the hold down for good says a tab may stay frozen (r1707 (5)); no value of the place in any', { unplaced: g0.todoUnplaced, gap: g0.todoGap, down: g0.todoDown });
   ok(/^fixed — 1 of the 2 grants of the sites on its list \(each site, in each browser context\) was not given — there it reads «denied»/.test(String(g0.grantsTold && g0.grantsTold.wFail)) && /^fixed — 1 of the 4 grants of the sites on its list/.test(String(g0.grantsTold && g0.grantsTold.wCross))
     && /only the 2 sites on its list read the place/.test(String(g0.grantsTold && g0.grantsTold.wOk))
-    && g0.grantsTold.filed.length === 1 && /a site on its list was not given its place/.test(g0.grantsTold.filed[0]) && !/127\.0\.0\.1|example/.test(J(g0.grantsTold.filed)),
-    '⑦g r2311 (ii) a grant that failed is TOLD: the record says how many grants of its listed sites were not given, the RUN\'s whole count across contexts (r2767 (b): a later context that succeeds never writes over one that failed), whole again when every context holds; the person told ONCE a run, no origin', g0.grantsTold);
+    && g0.grantsTold.filed.length === 1 && /a site on its list was not given its place/.test(g0.grantsTold.filed[0]) && !/127\.0\.0\.1|example/.test(J(g0.grantsTold.filed))
+    && /did not take 1 of those 2 grants/.test(g0.grantsTold.filedDetail[0]) && /once in each browser context/.test(g0.grantsTold.filedDetail[0]) && !/of the \d+ sites?\b/.test(g0.grantsTold.filedDetail[0]) && !/127\.0\.0\.1|example/.test(J(g0.grantsTold.filedDetail)),
+    '⑦g r2311 (ii) a grant that failed is TOLD: the record says how many grants of its listed sites were not given, the RUN\'s whole count across contexts (r2767 (b): a later context that succeeds never writes over one that failed), whole again when every context holds; the person told ONCE a run, no origin, its count of GRANTS (r2932 (4): one site in one browser context — never «N of the M sites»)', g0.grantsTold);
   ok(J(g0.confirmedFalls) === J({ before: true, lost: false, heldAgain: true }), '⑦g r2172 (c) the record\'s «confirmed» FALLS when the hold is lost (and down) and comes back when it holds again — never «fixed, confirmed» over a dead hold', g0.confirmedFalls);
   ok(g0.leaseFound && g0.lostWhy === 'place' && g0.todoClosed.length === 1 && /a tab was closed/.test(g0.todoClosed[0].text) && !/35\.67|139\.65|example/.test(J(g0.todoClosed)),
     '⑦g B-9584 (B): a tab the hold CLOSED (its place not given, sites on the list) — the lease whose tab it was is marked «place» (its next command says why BY NAME), the person told ONCE a run, no value, no site', { lostWhy: g0.lostWhy, todo: g0.todoClosed });
