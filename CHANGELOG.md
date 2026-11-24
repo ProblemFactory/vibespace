@@ -25,6 +25,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening or closing search in a long conversation no longer moves the message you were reading.
 - When the file of messages waiting to be retried cannot be read, VibeSpace keeps it untouched and reads it again, so the messages it holds are not lost.
 - Saving into a folder under a link in an unmounted machine folder, when the link leads to a mounted one, is no longer refused (the link itself still is).
+- Two VibeSpace instances in one home folder no longer restart each other's Public URLs relay client, so one instance's published address is not taken away.
+- When another VibeSpace in this home holds the relay, the Public URLs card names its process and offers Take it over, so a leftover client no longer blocks it.
 
 ## 2.369.417 — 2026-11-23
 
