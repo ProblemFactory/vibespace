@@ -781,7 +781,7 @@ try {
       // migration flushed the live store's 500 ms debounce itself, so the
       // reshaping is on disk before the runner wrote applied[id]
       const disk0 = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
-      ok(judge(disk0, t0, t1).oldAll && judge(disk0, t0, t1).fresh && !live.writeOwed(), 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: !!live._writeTimer });
+      ok(judge(disk0, t0, t1).oldAll && judge(disk0, t0, t1).fresh && !live.writeOwed(), 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: live.writeOwed() });
       const j = judge(live._state.items, t0, t1);
       ok(res?.status === 'ran' && j.oldAll, 'the 13 stale Spending items become notices AND are resolved done/expired at the end of the window they were about (kept in the store, never deleted)', res);
       const newestRetired = Math.max(...live._state.items.filter((x) => /^ut-old/.test(x.id)).map((x) => x.resolvedAt));

@@ -46,7 +46,8 @@ export async function openResetCreditDialog(app, { accountKey, sessionId = null,
   const resolveTodo = async (status) => {
     if (!todoId) return;
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(todoId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-    if (!r || !r.success) showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
+    if (r && r.code === 'todos-not-on-disk') showToast(t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.'), { type: 'warn', duration: 12000 });   // B-0248 (r3658): made, not on disk yet — a warning, never «could not»
+    else if (!r || !r.success) showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
   };
   return new Promise((resolve) => {
     let settled = false;

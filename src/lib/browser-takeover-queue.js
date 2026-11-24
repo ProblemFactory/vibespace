@@ -54,7 +54,7 @@ export async function replyToTakeover(app, req) {
   const text = await showInputDialog({ title: t('Reply to the agent'), label: t('The agent asks you: {words}', { words: req.text }), placeholder: t('One line — the agent reads it as your message'), confirmText: t('Send') });
   if (text == null || !String(text).trim()) return false;
   const r = await fetchJson(`/api/user-todos/${encodeURIComponent(req.itemId)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: String(text).trim() }) });
-  if (r && r.ok) { showToast(t('Reply sent')); return true; }
+  if (r && r.ok) { if (r.written === false) showToast(`${t('Reply sent')}. ${t('The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.')}`, { type: 'warn', duration: 12000 }); else showToast(t('Reply sent')); return true; }   // B-0248 (r3658): a sent reply whose resolve is not on disk yet says so
   showToast(t('Could not reply: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' });
   return false;
 }

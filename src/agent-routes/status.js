@@ -110,7 +110,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
       const ack = { success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()), ...(item.existing ? {} : { filed: CN.filedLine(item, item.id, OF.tray()) }), ...(proposeFields ? { proposed: require('../ask-setting.js').proposedLine(item.action) } : {}) };   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)
       // B-0248 (lane bl-loop-b, 主开发 r3320): AN AGENT's ASK IS ON DISK BEFORE ITS ACKNOWLEDGEMENT (the store writer's durable) — a write
       // that is not answers 503 by its code with the store's words: the agent is never told «filed» for an ask memory alone holds
-      return Promise.resolve(typeof userTodos.persisted === 'function' ? userTodos.persisted() : true).then((ok) => (res.headersSent ? undefined : ok === false ? res.status(503).json({ ...ack, success: false, code: 'todos-not-on-disk', error: require('../user-todos.js').NOT_ON_DISK }) : res.json(ack)));
+      return require('../user-todos.js').replyOnDisk(userTodos, res, () => res.json(ack), () => res.status(503).json({ ...ack, success: false, code: 'todos-not-on-disk', error: require('../user-todos.js').NOT_ON_DISK }));   // r3658: under the CLI's budget, answered inside the exit's flush
     }
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
   } catch (e) { res.status(e && e.code === 'todos-unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'todos-unread' ? { code: e.code } : {}) }); }

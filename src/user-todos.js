@@ -429,6 +429,8 @@ function previewOf(item) {
   return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true, ...(card ? { card } : {}) };
 }
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
+const PERSIST_BOUND_MS = 20000;   // r3658: persisted()'s bound — under the CLI's 30 s write budget (src/cli-call.js), as src/task-groups.js's
+const WHEN_WRITTEN_AGAIN_MS = 1000;   // r3658: whenWritten() asks the writer again this long after a «not landed» (unref'd)
 const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first (an EXPIRED one before any other: EXPIRED_BY)
 // lane ledger-dedup-law F3 (B-7f9e: 958 expired hub-act cards held 958 of a fleet owner's 1000 slots and evicted the items
 // he had answered): at the cap an item that ended UNANSWERED (its producer's end — the expiry sweep, an ask that ran out or
@@ -840,22 +842,25 @@ class UserTodoManager {
     if (!this._keepAlive) this._keepAlive = setInterval(() => { }, 60e3);
     this._W().dirty(this._file, { name: 'user-todos.write', debounceMs: 500, ...(act ? { rank: 0 } : {}),
       produce: () => {
-        if (!this._dirty) { this._letGo(); return null; }
+        if (!this._dirty) { this._letGoIfDone(); return null; }
         const json = JSON.stringify(this._state, null, 2);
         this._dirty = false;
-        if (json === this._lastWritten) { this._letGo(); return null; }   // no real change → no write
+        if (json === this._lastWritten) { this._letGoIfDone(); return null; }   // no real change → no write
         this._writing = json;
         return json;
       },
       onWritten: (ok, e) => {
-        this._letGo();
+        this._letGoIfDone();
         if (ok) { this._lastWritten = this._writing; this._writeFailures = 0; return; }
         this._dirty = true; this._writeFailures++;
-        try { this._onWriteError?.(e, this._file + '.tmp', { failures: this._writeFailures, retryMs: Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1)) }); } catch { }
+        try { this._onWriteError?.(e, `${this._file}.tmp-${process.pid}-w`, { failures: this._writeFailures, retryMs: Math.min(60000, 1000 * 2 ** Math.min(6, this._writeFailures - 1)) }); } catch { }
       } });
   }
   _W() { return this._writer || require('./store-writer.js').storeWriter(); }
   _letGo() { if (this._keepAlive) { clearInterval(this._keepAlive); this._keepAlive = null; } }
+  /** r3658 (the round on line 805): the ONE keep-alive goes only when NOTHING is owed — a change made while an earlier write was in
+   *  flight keeps it (judged once that landing's step is over: the writer counts its write in flight until then) */
+  _letGoIfDone() { if (!this._keepAlive) return; setImmediate(() => { try { if (!this._dirty && !this._W().pending(this._file)) this._letGo(); } catch { this._letGo(); } }); }
   /** what is owed is written NOW, through the writer's synchronous flush (at the hub's exit the writer's own bounded exit flush
    *  writes it — no store byte on the main thread then); a write it could not land THROWS (the release's contract to its guarded
    *  callers: server.js's exit, a migration's «flushed», a suite) */
@@ -872,13 +877,34 @@ class UserTodoManager {
   /** lane job-logs-sweep r3 §6: a promise resolved once what is in memory NOW is on disk (a caller that records «I told the owner»
    *  does it after the item is on disk); resolved at once when nothing is owed — B-0248: the writer's own `durable` (false: the
    *  write failed — kept and retried) */
-  whenWritten() { if (!this._dirty && !this._W().pending(this._file)) return Promise.resolve(true); return this._W().durable(this._file); }
+  whenWritten() {
+    // r3658 (THE MUST of the round on line 805): THE RELEASE's CONTRACT — settled ONLY once what memory holds is on disk. The writer's
+    // durable() answers false on a failed write or at its bound: that is no landing, so it is asked again (an unref'd re-arm), never
+    // settled false. Its callers act on a landing alone: the set-aside intent's drop (B-44f3: it goes only once the list naming the
+    // kept bytes is on disk) and jobs' «said» mark of a held-log notice (a crash between costs a second telling, never none)
+    return new Promise((resolve) => {
+      const ask = () => {
+        const W = this._W();
+        if (this._dirty && !W.pending(this._file) && !this._unread) this._handToWriter();   // owed in memory, nothing handed: hand it
+        if (!this._dirty && !W.pending(this._file)) { resolve(true); return; }
+        Promise.resolve(W.durable(this._file)).then((ok) => ok, () => false).then((ok) => {
+          if (ok === true) { resolve(true); return; }
+          const t = setTimeout(ask, WHEN_WRITTEN_AGAIN_MS); if (t.unref) t.unref();
+        });
+      };
+      ask();
+    });
+  }
   /** B-0248 (r3320): A PERSON's ACT (an answer, a resolve, a press) and AN AGENT's ACKNOWLEDGED ASK are on disk BEFORE their
    *  reply: the writer's NEXT write (rank 0) and the promise resolves when it is on disk — false when it failed (kept in memory,
    *  retried); the route then answers that it is NOT on disk yet, never a promise memory alone holds */
-  persisted() {
+  persisted(answer = null) {
     if (this._dirty) this._handToWriter({ act: true });
-    return this._W().durable(this._file);   // the writer's own: an owed write made urgent (rank 0); true at once when nothing is owed
+    // r3658: the sibling's shape (src/task-groups.js persisted): a bound UNDER the CLI's own 30 s write budget (an agent's ask is told
+    // «not on disk» with its item, never the CLI's timeout), and `answer(ok)` on the writer's SYNCHRONOUS road — called inside its own
+    // settle, so a door's reply still waiting when the hub stops goes out inside the exit's flush (a .then is never sent there)
+    try { return Promise.resolve(this._W().durable(this._file, { timeoutMs: PERSIST_BOUND_MS, answer })).catch(() => false); }
+    catch { if (answer) { try { answer(false); } catch { } } return Promise.resolve(false); }
   }
 
   _notify() { try { this._onChange(this.snapshot()); } catch { } }
@@ -1475,5 +1501,15 @@ class UserTodoManager {
 
 /** B-0248 (r3320): the words of an act whose write is NOT on disk yet (the writer's durable answered false) — the route answers
  *  them by its code `todos-not-on-disk`, the page words the code; nothing a reply promised is in memory only */
+/** r3658: a door's reply once the list is on disk (B-0248) — ONE reply, given on the writer's synchronous road (inside the exit's
+ *  flush at a stop: identityAtExit first, as every sibling door) or through the promise of a stand-in that ignores the callback;
+ *  `yes()` when on disk, `notYet()` when the write failed or is past its bound (the act stays made, the writer retries) */
+function replyOnDisk(userTodos, res, yes, notYet) {
+  let said = false;
+  const reply = (ok) => { if (said) return; said = true; try { require('./store-writer.js').identityAtExit(res); } catch { } if (res && res.headersSent) return; if (ok === false) notYet(); else yes(); };
+  let p = true;
+  try { p = userTodos && typeof userTodos.persisted === 'function' ? userTodos.persisted(reply) : true; } catch { p = false; }
+  return Promise.resolve(p).then(reply, () => reply(false));
+}
 const NOT_ON_DISK = 'the change is made, but it is not on disk yet: the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it';
-module.exports = { NOT_ON_DISK, fillWords, UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };
+module.exports = { NOT_ON_DISK, replyOnDisk, PERSIST_BOUND_MS, fillWords, UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };

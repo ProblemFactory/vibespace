@@ -898,7 +898,7 @@ app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: 
   // turn — so this door refuses EVERY bearer first, and the person's press rides the status to its listeners
   if (require('./src/write-origin.js').pressBearer(req.headers)) return res.status(403).json({ error: 'the For-you item\'s ✓ is the user\'s — a bearer token (an agent, a job, an automation key) cannot press it', code: 'agent_forbidden' });
   const press = require('./src/write-origin.js').pressOf(req);
-  try { const item = userTodos.setStatus(req.params.id, req.body?.status, 'user', { pressed: press }); userTodos.persisted().then((ok) => (ok === false ? res.status(503).json({ error: require('./src/user-todos.js').NOT_ON_DISK, code: 'todos-not-on-disk', item }) : res.json({ success: true, item }))); }   // B-0248: the person's act is on disk before its answer
+  try { const item = userTodos.setStatus(req.params.id, req.body?.status, 'user', { pressed: press }); require('./src/user-todos.js').replyOnDisk(userTodos, res, () => res.json({ success: true, item }), () => res.status(503).json({ error: require('./src/user-todos.js').NOT_ON_DISK, code: 'todos-not-on-disk', item })); }   // B-0248: the person's act is on disk before its answer
   catch (e) { const decision = e && (e.code === 'decision_row' || e.code === 'decision_final'), held = e && e.code === 'todos-unread'; res.status(held ? 503 : decision ? 409 : 400).json({ error: e.message, ...(decision || held ? { code: e.code } : {}) }); } // lane wake-approve-card r2: a decision row's two verbs only — refused by name
 });
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)

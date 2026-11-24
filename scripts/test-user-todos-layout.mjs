@@ -582,7 +582,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       m3.stop();
       let onDisk = null;
       try { onDisk = JSON.parse(fs.readFileSync(path.join(sdir, 'user-todos.json'), 'utf8')); } catch { }
-      ok(pendingBefore && !m3.writeOwed() && m3._expiryTimer === null && !!onDisk && onDisk.items.some((i) => i.text === 'pending at stop'), 'stop() clears BOTH timers and flushes the pending write before it returns (the owner may remove the dir right after)', { pendingBefore, timer: m3._writeTimer !== null, onDisk: !!onDisk });
+      ok(pendingBefore && !m3.writeOwed() && m3._expiryTimer === null && !!onDisk && onDisk.items.some((i) => i.text === 'pending at stop'), 'stop() clears BOTH timers and flushes the pending write before it returns (the owner may remove the dir right after)', { pendingBefore, owed: m3.writeOwed(), onDisk: !!onDisk });
       fs.rmSync(sdir, { recursive: true, force: true });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }

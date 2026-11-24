@@ -110,12 +110,10 @@ const CAPS_WAIT_MS = 15000, CAPS_POLL_MS = 200, BIG_FRAME = 64 * 1024;   // B-51
 /** B-0248 (lane bl-loop-b, 主开发 r3320): A PERSON's ACT IS ON DISK BEFORE ITS ANSWER — the store writer's durable (the list's
  *  `persisted`); a write that is not answers by its code `todos-not-on-disk` with the store's words. An act that cannot be
  *  undone (a reply already SENT to its conversation) answers ok with `written: false` — never a 503 a retry would send twice */
-const answerDurableOf = (userTodos) => (res, body, { sent = false } = {}) => Promise.resolve(typeof userTodos.persisted === 'function' ? userTodos.persisted() : true).then((ok) => {
-  if (res.headersSent) return undefined;
-  if (ok !== false) return res.json(body);
+const answerDurableOf = (userTodos) => (res, body, { sent = false } = {}) => require('../user-todos.js').replyOnDisk(userTodos, res, () => res.json(body), () => {
   const words = require('../user-todos.js').NOT_ON_DISK;
   return sent ? res.json({ ...body, written: false, code: 'todos-not-on-disk', warning: words }) : res.status(503).json({ ...body, ok: false, error: words, code: 'todos-not-on-disk' });
-});
+});   // r3658: one reply, on the writer's synchronous road (answered inside the exit's flush at a stop)
 
 function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen = null, now = () => Date.now() }) {
   const answerDurable = answerDurableOf(userTodos);

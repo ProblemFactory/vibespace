@@ -913,7 +913,7 @@ console.log('⑤ B-0248: the list\'s write is the store writer\'s (off the loop)
   };
   const B = await durScene(UT);
   ok(B.early === null && B.answered === true && B.onDisk, '⑤b DURABLE BEFORE THE ANSWER: persisted() does not answer while the writer holds the write, and answers true once the ask is ON DISK', B);
-  const Rx = MJ.load('src/user-todos.js', anchored(SRC5, '    if (this._dirty) this._handToWriter({ act: true });\n    return this._W().durable(this._file);', '    return Promise.resolve(true);', 'persisted answering at once'), 'b0248-persisted');
+  const Rx = MJ.load('src/user-todos.js', anchored(SRC5, '    try { return Promise.resolve(this._W().durable(this._file, { timeoutMs: PERSIST_BOUND_MS, answer })).catch(() => false); }\n    catch { if (answer) { try { answer(false); } catch { } } return Promise.resolve(false); }\n', '    if (answer) answer(true); return Promise.resolve(true);\n', 'persisted answering at once'), 'b0248-persisted');
   const BX = await durScene(Rx);
   ok(BX.early === true && !BX.earlyOnDisk, '⑤b RED control (persisted answers at once): «on disk» is answered while the ask is in memory only (red)', BX);
   // (c) A FAILED WRITE IS SAID: a writer whose write fails — persisted() answers false; the routes answer by the code; a reply
@@ -933,18 +933,59 @@ console.log('⑤ B-0248: the list\'s write is the store writer\'s (off the loop)
     const r3 = resOf(); await RR.answerDurableOf({ persisted: () => Promise.resolve(true) })(r3, { ok: true });
     ok(okc === false && r1.code === 503 && r1.body.code === 'todos-not-on-disk' && r1.body.error === UT.NOT_ON_DISK && r2.code === 200 && r2.body.ok === true && r2.body.written === false && r2.body.code === 'todos-not-on-disk' && r3.code === 200 && r3.body.ok === true,
       '⑤c A FAILED WRITE IS SAID: persisted() answers false; a store act answers 503 todos-not-on-disk with the store\'s words; a SENT reply answers ok with written: false; a write on disk answers ok', { okc, r1: r1.code, r2: r2.body && r2.body.written });
+    // r3658: its RED in a copy — the sent road answering plain ok (its write not said)
+    const RRx = MJ.load('src/routes/user-todos-reply.js', anchored(read('src/routes/user-todos-reply.js'), "  return sent ? res.json({ ...body, written: false, code: 'todos-not-on-disk', warning: words }) :", '  return sent ? res.json(body) :', 'the sent road unsaid'), 'b0248-sent-unsaid');
+    const r2x = resOf(); await RRx.answerDurableOf({ persisted: () => Promise.resolve(false) })(r2x, { ok: true, msgId: 'm1' }, { sent: true });
+    ok(r2x.code === 200 && r2x.body && r2x.body.written === undefined, '⑤c RED control (a copy whose sent road answers plain ok): the reply says nothing of the write that did not land (red)', r2x.body);
+    // r3658: ONE reply on the writer's synchronous road — given by persisted's `answer` (inside the exit's flush at a stop), never twice
+    let calls = 0; const r4 = resOf(); r4.json = (b) => { calls++; r4.body = b; r4.headersSent = true; return r4; };
+    await RR.answerDurableOf({ persisted: (answer) => { answer(true); return Promise.resolve(true); } })(r4, { ok: true });
+    ok(calls === 1 && r4.body.ok === true && UT.PERSIST_BOUND_MS === 20000 && /durable\(this\._file, \{ timeoutMs: PERSIST_BOUND_MS, answer \}\)/.test(SRC5), '⑤c the reply is ONE, given on the writer\'s own answer road (persisted\'s callback), and persisted() is bounded at 20 s, under the CLI\'s 30 s write budget', { calls, bound: UT.PERSIST_BOUND_MS });
   }
+  // (e) r3658's MUST: whenWritten() keeps the release's contract — settled only once ON DISK. A boot finds the last run's set-aside
+  // intent (no live list, the kept copy beside it): it files the notice naming the copy and drops the intent only once the list
+  // naming the bytes is on disk. A writer that fails ONCE (ENOSPC, the likely reason the file tore): the intent stays
+  const failOnceWriter = () => {
+    const st = new Map(); let fails = 1;
+    const land = (file, s) => { const ok = fails-- <= 0; const b = s.produce ? s.produce() : null; if (ok && b != null) fs.writeFileSync(file, b); if (ok) s.dirty = false; try { s.onWritten && s.onWritten(ok, ok ? null : Object.assign(new Error('ENOSPC: a placed failure'), { code: 'ENOSPC' })); } catch { } return ok; };
+    return { dirty(file, o) { const s = st.get(file) || {}; for (const [k, v] of Object.entries(o || {})) if (v !== undefined) s[k] = v; s.dirty = true; st.set(file, s); },
+      pending(file) { const s = st.get(file); return !!(s && s.dirty); },
+      durable(file) { const s = st.get(file); if (!s || !s.dirty) return Promise.resolve(true); return Promise.resolve().then(() => land(file, s)); },
+      flushSync(files) { for (const f of files) { const s = st.get(f); if (s && s.dirty) land(f, s); } return { left: [] }; } };
+  };
+  const intentScene = async (Mod) => {
+    const d = dataDir(), f = path.join(d, 'user-todos.json'), to = 'user-todos.json.corrupt-2026-11-24T00-00-00-000Z';
+    fs.writeFileSync(path.join(d, to), '{"items":[{"id":"x","text":"a kept item');
+    fs.writeFileSync(f + '.aside-intent', JSON.stringify({ why: 'corrupt JSON (placed)', to }));
+    const m = quiet(() => new Mod.UserTodoManager({ dataDir: d, onChange() { }, expirySweepMs: 0, writer: failOnceWriter(), onWriteError() { } }));
+    await new Promise((r) => setTimeout(r, 300));   // the boot's first write has FAILED; its whenWritten asks again 1 s later
+    const during = { intent: fs.existsSync(f + '.aside-intent'), onDisk: fs.existsSync(f) };
+    const landed = await Promise.race([m.whenWritten(), new Promise((r) => setTimeout(() => r('no answer in 4 s'), 4000))]);
+    for (let i = 0; i < 60 && fs.existsSync(f + '.aside-intent'); i++) await new Promise((r) => setTimeout(r, 50));   // the boot's own re-ask drops it
+    let names = false; try { names = fs.readFileSync(f, 'utf8').includes(to); } catch { }
+    const after = { landed, intent: fs.existsSync(f + '.aside-intent'), names };
+    try { quiet(() => m.stop()); } catch { }
+    return { during, after };
+  };
+  const E5 = await intentScene(UT);
+  ok(E5.during.intent && !E5.during.onDisk && E5.after.landed === true && !E5.after.intent && E5.after.names, '⑤e r3658\'s MUST: a write that FAILS leaves the set-aside intent in place and whenWritten() unsettled (never «on disk» on a failure); the retry lands the list naming the kept copy, and only then the intent goes', E5);
+  const E5x = await intentScene(MJ.load('src/user-todos.js', anchored(SRC5, '  whenWritten() {\n', "  whenWritten() { if (!this._dirty && !this._W().pending(this._file)) return Promise.resolve(true); return this._W().durable(this._file); }\n  _whenWrittenR3658() {\n", 'the tip\'s whenWritten (the writer\'s durable)'), 'b0248-when-written'));
+  ok(!E5x.during.intent, '⑤e RED control (the tip\'s whenWritten: the writer\'s durable, false on a failure): the intent is dropped while the list naming the kept copy never landed (red)', E5x.during);
   // (d) the doors that answer through it (pins): the status press (server.js), the reply's two roads, resolve-many, the notices'
   // doors, the agent's ask (acknowledged only once on disk) — and the page words the code in zh and ja
   {
     const SJ = read('server.js'), RT = read('src/routes/user-todos-reply.js'), ST = read('src/agent-routes/status.js'), ACT = read('src/lib/user-todos-actions.js'), PAN = read('src/lib/user-todos-panel.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
     const K = 'The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.';
-    ok(/const item = userTodos\.setStatus\(req\.params\.id, req\.body\?\.status, 'user', \{ pressed: press \}\); userTodos\.persisted\(\)\.then\(\(ok\) => \(ok === false \? res\.status\(503\)/.test(SJ)
-      && (RT.match(/return answerDurable\(res, /g) || []).length === 4 && /\{ sent: true \}\);/.test(RT)
-      && /return Promise\.resolve\(typeof userTodos\.persisted === 'function' \? userTodos\.persisted\(\) : true\)\.then\(\(ok\) => \(res\.headersSent \? undefined : ok === false \? res\.status\(503\)/.test(ST),
-      '⑤d the doors answer after the disk: the status press, the reply\'s two roads and resolve-many / the notices\' doors (four), the agent\'s acknowledged ask');
-    ok((ACT.match(/code === 'todos-not-on-disk'/g) || []).length === 4 && /r\.written === false/.test(ACT) && /code === 'todos-not-on-disk'/.test(PAN) && [ZH, JA].every((dd) => dd.includes('\n  ' + JSON.stringify(K) + ': ')),
-      '⑤d the page words the code (the status press, «Mark all read» and its Undo, the bulk dismiss, a sent reply) in its language — zh and ja');
+    const doors = (sj, rt, st) => /const item = userTodos\.setStatus\(req\.params\.id, req\.body\?\.status, 'user', \{ pressed: press \}\); require\('\.\/src\/user-todos\.js'\)\.replyOnDisk\(userTodos, res, \(\) => res\.json\(\{ success: true, item \}\), \(\) => res\.status\(503\)/.test(sj)
+      && (rt.match(/return answerDurable\(res, /g) || []).length === 4 && /\{ sent: true \}\);/.test(rt) && /const answerDurableOf = \(userTodos\) => \(res, body, \{ sent = false \} = \{\}\) => require\('\.\.\/user-todos\.js'\)\.replyOnDisk\(userTodos, res, /.test(rt)
+      && /return require\('\.\.\/user-todos\.js'\)\.replyOnDisk\(userTodos, res, \(\) => res\.json\(ack\), \(\) => res\.status\(503\)/.test(st);
+    ok(doors(SJ, RT, ST), '⑤d the doors answer after the disk, ONE reply on the writer\'s synchronous road (replyOnDisk): the status press, the reply\'s two roads and resolve-many / the notices\' doors (four), the agent\'s acknowledged ask');
+    const RELEASE_PRESS = "const item = userTodos.setStatus(req.params.id, req.body?.status, 'user', { pressed: press }); res.json({ success: true, item }); }";
+    ok(!doors(SJ.replace(/const item = userTodos\.setStatus\(req\.params\.id, req\.body\?\.status, 'user', \{ pressed: press \}\); require[^\n]*/, RELEASE_PRESS), RT, ST), '⑤d RED control (the release\'s press, answered before the disk): the doors\' pin is red');
+    const TQ = read('src/lib/browser-takeover-queue.js'), RC = read('src/lib/reset-credit-dialog.js');
+    const pagePins = (act) => (act.match(/code === 'todos-not-on-disk'/g) || []).length === 4 && /r\.written === false/.test(act) && /code === 'todos-not-on-disk'/.test(PAN) && /r\.written === false/.test(TQ) && /r && r\.code === 'todos-not-on-disk'\) showToast\(t\(/.test(RC) && [ZH, JA].every((dd) => dd.includes('\n  ' + JSON.stringify(K) + ': '));
+    ok(pagePins(ACT), '⑤d the page words the code (the status press, «Mark all read» and its Undo, the bulk dismiss, a sent reply; r3658: the takeover\'s reply and the reset-credit dialog\'s press) in its language — zh and ja');
+    ok(!pagePins(ACT.replace(/r\.written === false/g, 'false')), '⑤d RED control (a sent reply\'s written: false unread): the page pin is red');
   }
 }
 
