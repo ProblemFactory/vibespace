@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After you change a desktop app's scale, its window opens at its new size at once, instead of opening at the old size and jumping.
 - A VibeSpace started inside another one no longer keeps the outer one's telemetry address or task id, nor passes what it was handed to the programs it starts.
 - After a card puts you back where you were reading, dragging the scrollbar no longer snaps you back.
+- With two tabs open, an agent's vault sign-in now fills the tab the agent is on, instead of being refused as phishing for the other tab's site.
 
 ## 2.369.417 — 2026-11-23
 
