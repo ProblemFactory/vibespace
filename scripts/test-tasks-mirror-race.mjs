@@ -22,6 +22,11 @@
 // is dropped only when a NEWER frame is already in (fetchVerdict). The constructed trial now pins that order: both answers
 // held ⇒ the group's frame held too ⇒ released ⇒ the first answer + the replayed frame put the group in, the second
 // (stale) answer is dropped.
+// B-360d part 1 (lines 400 / 479, the hosted red of 45405143191 — 主开发 r3639): the page's fetch SHARES a GET in flight
+// (src/lib/shared-gets.js, installed by src/client.js): the two boot callers of /api/tasks now JOIN one request while the
+// gate holds it — ONE arrival below the page's fetch, TWO answers to its callers. The trial counts the CALLERS above the
+// shared reads (a setter on window.fetch wraps what client.js installs): both boot callers asked, the read they share held
+// by the server's answer, and BOTH callers' answers land after the group's frame — the law's own interleaving, as before.
 //
 // Legs: ① THE CONSTRUCTED INTERLEAVING — the page's /api/tasks answers are
 // GATED until the broadcast has been applied, then released: with the guard
@@ -93,7 +98,14 @@ const PROBE = `${ONBOARDED_SOURCE}; window.__tl = []; window.__gated = null; win
     window.__gatedN++; window.__tl.push({ ev: 'gated', t: performance.now() });
     return p.then(async (res) => { window.__arrivedN = (window.__arrivedN || 0) + 1; window.__tl.push({ ev: 'arrived', t: performance.now() }); await window.__gated.promise; window.__tl.push({ ev: 'released', t: performance.now() }); return res; });
   }
-  return p; }; })();`;
+  return p; };
+  const isTasks = (u, o) => String(u) === '/api/tasks' && (!o || !o.method || o.method === 'GET');
+  window.__askedN = 0; window.__answeredN = 0;
+  let cur = window.fetch;   // ABOVE the page's own fetch: client.js assigns its shared reads here — every CALLER of /api/tasks is counted, and every answer it gets
+  Object.defineProperty(window, 'fetch', { configurable: true, enumerable: true, get() { return cur; }, set(v) { cur = function (u, o) { const q = v.apply(this, arguments);
+    if (isTasks(u, o) && window.__gateTasks) { window.__askedN++; return q.then((res) => { window.__answeredN++; window.__tl.push({ ev: 'answered', t: performance.now() }); return res; }); }
+    return q; }; } });
+})();`;
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: PROBE });
 const J = { 'Content-Type': 'application/json' };
 const load = async ({ gate = false } = {}) => {
@@ -129,7 +141,9 @@ async function constructed(i, tag) {
   // (headers arrived, bodies held) BEFORE the group is created — so both bodies are the pre-group
   // snapshot by construction; the ws connect can land later than the app's first paint, so the
   // count is waited for (a request merely issued could still be served after the POST)
-  const held = await evaljs('(async () => { for (let i = 0; i < 200; i++) { if ((window.__arrivedN || 0) >= 2) return window.__arrivedN; await new Promise((r) => setTimeout(r, 50)); } return window.__arrivedN || 0; })()');
+  // (the shared reads: both boot CALLERS asked, and the read they share — one request, or two if one asked after the other's landed — answered and held)
+  const heldIn = await evaljs('(async () => { for (let i = 0; i < 200; i++) { if ((window.__askedN || 0) >= 2 && (window.__arrivedN || 0) >= 1) break; await new Promise((r) => setTimeout(r, 50)); } return { asked: window.__askedN || 0, arrived: window.__arrivedN || 0 }; })()');
+  const held = heldIn.asked >= 2 && heldIn.arrived >= 1 ? heldIn.asked : 0;
   const gid = await mkGroup(`${tag} ${i}`);
   // the group's frame reached the page while the mirror had not loaded: it is HELD (never applied over nothing)
   const frameHeld = await evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.app.sidebar._tasksHeld || []).some((m) => (m.changed || []).some((c) => c.id === ${JSON.stringify(gid)}))) return true; await new Promise((r) => setTimeout(r, 125)); } return false; })()`);
@@ -140,7 +154,7 @@ async function constructed(i, tag) {
   const still = await mirrorHas(gid);
   const tl = await evaljs('window.__tl');
   await rmGroup(gid);
-  return { held: held >= 2, gated: held, frameHeld, early, seen, still, sets: tl.filter((x) => x.ev === 'set').map((x) => x.n).join('>'), released: tl.filter((x) => x.ev === 'released').length };
+  return { held: held >= 2, gated: `${heldIn.asked} asked, ${heldIn.arrived} held`, frameHeld, early, seen, still, sets: tl.filter((x) => x.ev === 'set').map((x) => x.n).join('>'), released: tl.filter((x) => x.ev === 'released').length, answered: tl.filter((x) => x.ev === 'answered').length };
 }
 
 // ── ① THE CONSTRUCTED INTERLEAVING on the shipped bundle ──
@@ -148,7 +162,7 @@ console.log(`① the stale answers released AFTER the broadcast — ${CONSTRUCTE
 {
   const out = [];
   for (let i = 1; i <= CONSTRUCTED; i++) out.push(await constructed(i, 'Held'));
-  ok(out.every((r) => r.held && r.frameHeld && !r.early && r.seen && r.released >= 2), `FIXTURE: every trial held BOTH boot answers of /api/tasks (${out.map((r) => r.gated).join('/')}), saw the group's frame HELD (not applied over an unloaded mirror), then released them and saw the group in (${out.map((r) => r.sets).join(' ; ')})`, JSON.stringify(out));
+  ok(out.every((r) => r.held && r.frameHeld && !r.early && r.seen && r.released >= 1 && r.answered >= 2), `FIXTURE: every trial held BOTH boot callers' answers of /api/tasks — their shared read held (${out.map((r) => r.gated).join(' / ')}), both answers landing after the frame (${out.map((r) => r.answered).join('/')}), saw the group's frame HELD (not applied over an unloaded mirror), then released them and saw the group in (${out.map((r) => r.sets).join(' ; ')})`, JSON.stringify(out));
   ok(out.every((r) => r.still), `the group stays in the mirror after the stale answers land — ${out.filter((r) => r.still).length}/${CONSTRUCTED} (a fetch issued before a broadcast never overwrites it)`, JSON.stringify(out));
   const roster = await (async () => { const gid = await mkGroup('Roster check'); await waitMirror(gid); await evaljs('window.__releaseTasks(), 1'); const r = await rosterHas('Roster check'); await rmGroup(gid); return r; })();
   ok(roster, 'and the Grant access… roster names it');
@@ -193,7 +207,7 @@ console.log('② CONTROL: the pre-fix mirror (no generation guard) rebuilt into 
   bundle();
   const out = [];
   for (let i = 1; i <= CONSTRUCTED; i++) out.push(await constructed(i, 'Ctl'));
-  ok(out.every((r) => r.held && r.frameHeld && r.released >= 2) && out.every((r) => !r.still), `CONTROL: without the guard the same interleaving EMPTIES the mirror on every trial — ${out.filter((r) => !r.still).length}/${CONSTRUCTED} (${out.map((r) => r.sets).join(' ; ')}) — leg ① would go red`, JSON.stringify(out));
+  ok(out.every((r) => r.held && r.frameHeld && r.released >= 1 && r.answered >= 2) && out.every((r) => !r.still), `CONTROL: without the guard the same interleaving EMPTIES the mirror on every trial — ${out.filter((r) => !r.still).length}/${CONSTRUCTED} (${out.map((r) => r.sets).join(' ; ')}) — leg ① would go red`, JSON.stringify(out));
   fs.writeFileSync(MOD, src);
 }
 
