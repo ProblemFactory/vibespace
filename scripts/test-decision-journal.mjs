@@ -16,6 +16,8 @@
 //   ⑨ r2581 (2): a trim whose rewrite keeps failing never locks the journal — the file whole, the next write an append (RED: armed again)
 //   ⑩ a day the belt keeps whole (past 6 000 lines): one rewrite, then appends (RED: a trim due at every write)
 //   ⑪ the drafter's second look after its landing (RED: none); a judgment's answer waits for its own lines (RED: no wait)
+//   ⑫ r3739: a line that is not a row (a reservation a stop cut mid-write) survives two trims, the rows each keeps the same, its
+//      number in the trim's one line (RED: today's trim drops it)
 import { scratchDir, anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,6 +39,7 @@ const DE = require(path.join(repo, 'src/server/decision-engine.js'));
 const DM = require(path.join(repo, 'src/decision-model.js'));
 const TM = require(path.join(repo, 'src/server/text-model-client.js'));
 const SRC = fs.readFileSync(path.join(repo, 'src/server/decision-engine.js'), 'utf8');
+const DMSRC = fs.readFileSync(path.join(repo, 'src/decision-model.js'), 'utf8');
 const TSRC = fs.readFileSync(path.join(repo, 'src/server/text-model-client.js'), 'utf8');
 const JF = 'decision-journal.jsonl';
 const T0 = Date.UTC(2026, 10, 20, 12, 0, 0);
@@ -103,8 +106,8 @@ const vendor = (asks, { hang = false } = {}) => async (url, opts) => {
   const req = JSON.parse(await new Response(opts.body).text());
   return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ answers: (req.questions || []).map((q) => ({ type: 'predicate', name: q.name, probability: 0.7 })), usage: { input_tokens: 120, output_tokens: 4 } }) };
 };
-const mk = (Mod, { dir, writer, fetchImpl, cents = 100, landMs = 400 }) => {
-  const e = Mod.create({ dataDir: dir, integrations: integ, fetchImpl, writer, now: () => T0, tzOffset: () => 0, log: quiet, reserveLandMs: landMs, timeoutMs: 60000 });
+const mk = (Mod, { dir, writer, fetchImpl, cents = 100, landMs = 400, log = quiet }) => {
+  const e = Mod.create({ dataDir: dir, integrations: integ, fetchImpl, writer, now: () => T0, tzOffset: () => 0, log, reserveLandMs: landMs, timeoutMs: 60000 });
   let c = cents; e.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ dailyBudgetCents: c }) }); e.setCents = (x) => { c = x; };
   return e;
 };
@@ -321,6 +324,29 @@ const answerWaits = async (Mod) => {
 { const WAIT = SRC.slice(SRC.indexOf("    if (jSeq !== j0 && !(r && r.why === 'reservation-unwritten'))"), SRC.indexOf("    return r;\n  }\n  async function judgeCall("));
   const r = await answerWaits(engineCopy([[WAIT, '']], 'answer-no-wait'));
   ok(r.before === true, 'CONTROL (a copy whose answer does not wait for its lines): it answers before its result line is on disk — red', r); }
+
+console.log('⑫ r3739: a line that is not a row is never dropped by a trim, outside the count of rows');
+const CUT = '{"at":' + (T0 - 3600e3) + ',"use":"attention","call":"cut.1","outcome":"reser';   // a reservation line a stop cut mid-write
+const notRowTrims = async (Mod, { damaged }) => {
+  const dir = fresh('notrow'), F = path.join(dir, JF); seed(dir, 5999);
+  if (damaged) { const ls = fs.readFileSync(F, 'utf8').split('\n').filter(Boolean); ls.splice(1, 1); fs.writeFileSync(F, ls.join('\n') + '\n' + CUT); }   // the file's torn tail, in the place of one row past 30 days (every trim drops it): the same count of lines
+  const said = [], log = { ...quiet, log: (l) => said.push(String(l)) };
+  const W = standIn(); W.st.auto = false;
+  const e = mk(Mod, { dir, writer: W, fetchImpl: vendor([]), log });
+  e.ledger.journal({ use: 'learn', outcome: 'refused', why: 'nr-A' }); e.ledger.journal({ use: 'learn', outcome: 'refused', why: 'nr-B' });   // 6 001 lines: a trim is owed
+  W.land(); const t1 = rows(dir);                                                                          // the first trim
+  for (let i = 0; i < 1200; i++) e.ledger.journal({ use: 'learn', outcome: 'refused', why: `nr-more-${i}` });   // past 1.2 × what it kept
+  W.land(); const t2 = rows(dir);                                                                          // the second trim, at ONE landing
+  const cut = (j) => j.filter((x) => typeof x.torn === 'string' && x.torn.includes('"cut.1"')).length, rowsOf = (j) => j.filter((x) => !x.torn).length;
+  return { rewrites: W.st.rewrites, cut1: cut(t1), cut2: cut(t2), rows1: rowsOf(t1), rows2: rowsOf(t2), torn2: t2.filter((x) => x.torn).length, said: said.filter((l) => l.includes('the journal trimmed by its writer')) };
+};
+{ const c = await notRowTrims(DE, { damaged: false }), d = await notRowTrims(DE, { damaged: true });
+  ok(d.rewrites === 2 && c.rewrites === 2 && d.cut1 === 1 && d.cut2 === 1 && d.torn2 === 1, 'a reservation line a stop cut mid-write (the file\'s torn tail: not a row) survives TWO trims, once each, nothing else torn', { d: { ...d, said: undefined }, c: { ...c, said: undefined } });
+  ok(d.rows1 === c.rows1 && d.rows2 === c.rows2 && c.cut1 === 0, '…the count of rows unchanged: each trim keeps the same rows as the file without that line', { rows: [d.rows1, d.rows2], clean: [c.rows1, c.rows2] });
+  ok(d.said.length === 2 && d.said.every((l) => l.includes('and 1 line(s) that are not rows as they are')) && c.said.length === 2 && c.said.every((l) => l.includes('and 0 line(s) that are not rows as they are')), '…and the trim\'s ONE journal line says how many it kept (a number only)', { d: d.said, c: c.said }); }
+{ const DROPS = MUT.write('src/decision-model.js', anchored(DMSRC, "    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) { keep.push(i); continue; }", "    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) continue;", 'trim-drops-not-rows'), 'trim-drops-not-rows');
+  const r = await notRowTrims(engineCopy([["const M = require('../decision-model.js');\n", `const M = require(${JSON.stringify(DROPS)});\n`]], 'trim-drops-not-rows'), { damaged: true });
+  ok(r.cut1 === 0 && r.rewrites === 2, 'CONTROL (the engine over a copy of today\'s trim, r3739): the first trim drops the cut line — bytes no reader read, lost to a timed sweep — red', { ...r, said: undefined }); }
 
 for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 11, label: 'CONTROL: ' })) ok(!!row.pass, row.name, row.detail);
 report();

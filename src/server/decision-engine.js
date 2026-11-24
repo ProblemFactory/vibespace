@@ -303,12 +303,13 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     return { rewrite: { ranges: trim.ranges, size: trim.size }, then: lines.join(''), as: 'decision-journal.write' };
   }
   /** law 5: the byte ranges a trim keeps (decision-model journalKeep: the belt's day, every reservation with no result line, the
-   *  newest inside JOURNAL_DAYS up to JOURNAL_MAX); a line the index does not hold (before the boot's tail) is not kept */
+   *  newest inside JOURNAL_DAYS up to JOURNAL_MAX; a line that is not a row kept as it is, outside that count — r3739); a line the
+   *  index does not hold (before the boot's tail) is not kept */
   function keptRanges() {
     const keepI = M.journalKeep(jIdx.map((x) => ({ at: x.at, call: x.call, outcome: x.out })), { day: M.dayOf(now(), tzOffset(now())), offsetMinOf: tzOffset, now: now(), max: JOURNAL_MAX, days: JOURNAL_DAYS });
     const keep = keepI.map((k) => jIdx[k]), ranges = new Float64Array(keep.length * 2);
     keep.forEach((x, k) => { ranges[2 * k] = x.off; ranges[2 * k + 1] = x.off + x.len + 1; });   // each with its newline (one the file lacks: size + 1)
-    return { ranges, size: jSize, keep, dropped: jIdx.length - keep.length };
+    return { ranges, size: jSize, keep, dropped: jIdx.length - keep.length, notRows: keep.filter((x) => !Number.isFinite(x.at)).length };
   }
   /** the write's outcome — the index follows the file: an append's lines at its end, a trim's kept lines and then its own */
   function journalWritten(ok, err) {
@@ -330,7 +331,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       let off = 0; const kept = [];
       for (const x of w.trim.keep) { kept.push({ ...x, off }); off += x.len + 1; }
       jIdx = kept; jSize = off; jWhole = true; jTorn = false; jKeptFloor = kept.length;
-      log.log?.(`[decision] the journal trimmed by its writer: ${w.trim.size} → ${off} B (${w.trim.dropped} line(s) dropped; kept the day's, every reservation with no result, the newest inside ${JOURNAL_DAYS} days)${renamed ? ' — but its folder\'s fsync failed' : ''}`);
+      log.log?.(`[decision] the journal trimmed by its writer: ${w.trim.size} → ${off} B (${w.trim.dropped} line(s) dropped; kept the day's, every reservation with no result, the newest inside ${JOURNAL_DAYS} days, and ${w.trim.notRows} line(s) that are not rows as they are)${renamed ? ' — but its folder\'s fsync failed' : ''}`);
     }
     if (jKnown) {
       let off = jSize + Buffer.byteLength(w.lead);

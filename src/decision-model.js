@@ -1115,13 +1115,14 @@ function monthSpend(rows, month, offsetMinOf = () => 0) {
 /** B-0248 (r2417 law 5) — WHAT A TRIM OF THE JOURNAL KEEPS (PURE): over `rows` in the file's order ({at, call?, outcome?}; null =
  *  a line that is not a row) → the indexes kept, ascending: EVERY row of the belt's window (`day`: the boot's rebuild counts it), EVERY
  *  reservation with no result line, and the newest rows inside `days` up to `max` in all (the first two count toward it, never cut by
- *  it). A line that is not a row is dropped. */
+ *  it). A line that is not a row (torn, damaged, not an object, no time) is KEPT as it is, OUTSIDE that count: the rows kept are
+ *  the same with it or without it (r3739: bytes no reader could read are never dropped by a timed sweep). */
 function journalKeep(rows, { day, offsetMinOf = () => 0, now, max = 5000, days = 30 } = {}) {
   const list = Array.isArray(rows) ? rows : [], answered = journalCalls(list), cut = Number(now) - days * 86400e3, keep = [];
   let room = max;
   for (let i = list.length - 1; i >= 0; i--) {   // the newest first
     const r = list[i];
-    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) continue;
+    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) { keep.push(i); continue; }   // r3739: not a row: kept, room untouched
     const belt = dayOf(Number(r.at), offsetMinOf(Number(r.at))) === day;
     const open = r.outcome === 'reserved' && typeof r.call === 'string' && !!r.call && !answered.has(r.call);
     if (belt || open || (room > 0 && Number(r.at) >= cut)) { keep.push(i); room--; }

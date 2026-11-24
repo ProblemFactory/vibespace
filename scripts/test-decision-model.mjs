@@ -783,12 +783,15 @@ console.log('㉞ B-0248 (r2417 laws 4 + 5): the journal\'s calls — a reservati
     { at: D0 - 40 * 864e5, call: 'old.1', outcome: 'reserved' },   // 0: a reservation with no result, 40 days old — kept
     { at: D0 - 35 * 864e5 },                                       // 1: past 30 days — dropped
     { at: D0 - 3 * 864e5 }, { at: D0 - 2 * 864e5 },                // 2, 3: inside 30 days — kept while room is left (room 4: the newest first)
-    null,                                                          // 4: a line that is not a row — dropped
+    null,                                                          // 4: a line that is not a row — KEPT as it is, outside the count (r3739)
     { at: D0 - 3600e3 }, { at: D0 - 60e3 },                        // 5, 6: the belt's day — kept
     { at: D0 - 30e3, call: 'n.1', outcome: 'reserved' }, { at: D0 - 20e3, call: 'n.1', outcome: 'ok' },   // 7, 8: today, answered
   ];
   const k = M.journalKeep(keepRows, { day, offsetMinOf: () => 0, now: D0, max: 5, days: 30 });
-  ok(JSON.stringify(k) === JSON.stringify([0, 3, 5, 6, 7, 8]), 'journalKeep: every row of the belt\'s day and every reservation with no result kept (they count toward the cap, never cut by it), then the newest inside 30 days while room is left; past 30 days and non-rows dropped', k);
+  ok(JSON.stringify(k) === JSON.stringify([0, 3, 4, 5, 6, 7, 8]), 'journalKeep: every row of the belt\'s day and every reservation with no result kept (they count toward the cap, never cut by it), then the newest inside 30 days while room is left; past 30 days dropped; the line that is not a row KEPT, outside the count (the rows kept the same: 2 still dropped, 3 still kept)', k);
+  const dropsNotRows = MUTJ.load('src/decision-model.js', anchored(MSRC, "    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) { keep.push(i); continue; }", "    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) continue;", 'trim-drops-not-rows'), 'trim-drops-not-rows');
+  const k3 = dropsNotRows.journalKeep(keepRows, { day, offsetMinOf: () => 0, now: D0, max: 5, days: 30 });
+  ok(!k3.includes(4) && JSON.stringify(k3) === JSON.stringify(k.filter((i) => i !== 4)), 'CONTROL (a copy with the release\'s trim, r3739): the line that is not a row is dropped by the timed sweep — red (the rows the same)', k3);
   const noOpen = MUTJ.load('src/decision-model.js', anchored(MSRC, "    const open = r.outcome === 'reserved' && typeof r.call === 'string' && !!r.call && !answered.has(r.call);", "    const open = false;", 'trim-drops-open'), 'trim-drops-open');
   const k2 = noOpen.journalKeep(keepRows, { day, offsetMinOf: () => 0, now: D0, max: 5, days: 30 });
   ok(!k2.includes(0), 'CONTROL (a copy whose trim forgets the reservations with no result): the stopped call\'s line is trimmed away — the belt loses it — red', k2);
