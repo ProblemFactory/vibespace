@@ -208,6 +208,11 @@ console.log('— §2 a provider removed leaves every pool\'s list in the same ac
   const la = await lkScene('lift', LIVE_EXPR, false), lb = await lkScene('torn', LIVE_EXPR, true);
   ok(!!LIVE_EXPR && eq(la.whileHeld, [la.kept, la.gone]) && !la.held && eq(la.after, [la.kept]),
     '(the move, r3534) A HELD START THAT LIFTS: while providers.json\'s read is refused nothing is pruned (its empty answer is no «every provider removed»); once it reads, the provider removed behind the store leaves the pool\'s list — the hub\'s own flag, read at each prune', la);
+  // (line 817's small follow, round w82951b95 (1)) the pin above (§2's wiring) matches a call that stands in BOTH the route's change
+  // callback and its lift callback, and this leg passes its OWN onLift — so a dropped lift call kept every leg green: the hub's
+  // lift callback is pinned by its own head
+  const LIFT_CALL = "onLift: () => { try { broadcastAll({ type: 'providers-changed', what: 'read', id: null }); } catch { } try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } } }";
+  ok(AURk.split(LIFT_CALL).length === 2, '(line 817\'s follow) the hub\'s OWN lift callback (account-usage-routes, the provider store\'s onLift) asks accounts to prune once the list reads again — pinned by its head, once');
   ok(lb.damaged && !lb.held && eq(lb.whileHeld, [lb.kept, lb.gone]) && eq(lb.after, [lb.kept, lb.gone]),
     '(the move, r3534) TORN BYTES: the hold keeps them aside and starts the list empty — nothing is pruned (the cure\'s «unreadable»): the pool keeps both its providers', lb);
   const va = await lkScene('lift-value', VALUE_EXPR, false), nb = await lkScene('torn-nodamaged', NODMG_EXPR, true);
