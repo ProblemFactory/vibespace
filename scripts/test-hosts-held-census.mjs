@@ -22,6 +22,9 @@ import * as acorn from 'acorn';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// 2b (主开发 r3790): the machines list's hold is the FAMILY HELPER's — `_unread` is its getter. A stand-in made from the prototype
+// carries the hold the store now asks (r3792: a stand-in gains what the hub asks of it): held, its words the store's own
+const heldBy = (H, code = 'EACCES') => { const f = { file: 'hosts.json', code, since: 1 }; H._hold = { held: () => f, words: () => H._heldWords(f), writable: () => false, refuse: (what) => { throw H._heldError(what); } }; return H; };
 const { ok, report } = checker();
 const MJ = mutantCopies('hosts-held-census', ROOT);
 
@@ -331,7 +334,7 @@ console.log('§0 get / findByDeviceId / list while held: «unknown, by name», n
   const HSRC = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
   const FIND = "    if (this._unread) throw this._heldError();\n    // Pure-dial first";
   ok(HSRC.split(FIND).length === 2, 'control setup: the anchor of the control «is it paired says held» is in hosts.js');
-  const held = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; return H; };
+  const held = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; heldBy(H); return H; };
   const codeOf = (fn) => { try { const v = fn(); return v === null || v === undefined ? 'absent' : 'answered'; } catch (e) { return e && e.code; } };
   const H = held(require(path.join(ROOT, 'src/hosts.js')));
   const l = H.list();
@@ -411,7 +414,7 @@ console.log('§3 a message to a conversation on a paired machine is never told �
   const ownerOf = (Mod, { held }) => {
     const H = Object.create(Mod.HostManager.prototype);
     H._state = { hosts: held ? [] : [{ id: 'h-0001', name: 'build box', transport: 'dial', deviceId: 'dev-0001' }] };
-    H._unread = held ? { code: 'EACCES' } : null;
+    if (held) heldBy(H);
     H.convIndex = idx;
     return H.conversationOwner('conv-1');
   };
@@ -419,7 +422,7 @@ console.log('§3 a message to a conversation on a paired machine is never told �
   ok(live === 'h-0001', 'a removed machine\'s old claim is FILTERED (one live claim answers — it made the whole answer null: ALSO CURED)', live);
   // while held, BOTH claims stand (the index cannot be judged) ⇒ ambiguous here by the stub's rule; a single claim answers itself
   const one = { ownerHost(sid, isReg) { return isReg('h-0001') ? 'h-0001' : null; } };
-  const heldOwner = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; H.convIndex = one; return H.conversationOwner('conv-1'); };
+  const heldOwner = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; heldBy(H); H.convIndex = one; return H.conversationOwner('conv-1'); };
   const h = heldOwner(require(path.join(ROOT, 'src/hosts.js')));
   const hx = heldOwner(MJ.load('src/hosts.js', anchored(HSRC, KEEP, '(hid) => !!this.get(hid)', 'hhc-393a'), 'owner-no-held'));   // stale-pins: kept (the control plants the release's text in a copy)
   ok(h === 'h-0001' && hx === null, 'hosts.conversationOwner on a HELD list keeps the conversation\'s claim; CONTROL (the release\'s filter, in a copy): null — the conversation reads as on no machine', { h, hx });
@@ -513,7 +516,7 @@ console.log('§5 the readers that named an absence now say the hold');
   const mountScene = async (Mod, tag) => {
     const M = Object.create(Mod.MachineMounts.prototype);
     const revoked = [];
-    Object.assign(M, { dataDir: D5, _file: path.join(D5, tag + '.json'), hosts: heldHosts, mountTokens: { revoke: (t) => revoked.push(t) }, broadcast: () => { }, log: () => { }, _live: new Map(), _pushTunnelOwned: new Map(), _pushRetryAt: new Map(), _pushDown: new Map(), _pullErrors: new Map(),
+    Object.assign(M, { dataDir: D5, _file: path.join(D5, tag + '.json'), _hold: { held: () => null, writable: () => true }, hosts: heldHosts, mountTokens: { revoke: (t) => revoked.push(t) },   /* 2b: the mounts list's own hold, not held (the stand-in carries what the store asks) */ broadcast: () => { }, log: () => { }, _live: new Map(), _pushTunnelOwned: new Map(), _pushRetryAt: new Map(), _pushDown: new Map(), _pullErrors: new Map(),
       _state: { mounts: [{ id: 'mm-1', dir: 'push', hostId: 'h-0001', tokenId: 'tok-1', method: 'rclone-webdav', mountpoint: '/mnt/x' }] } });
     const code = await codeOf(() => M.unmount('mm-1'));
     return { code, kept: M._state.mounts.length, revoked: revoked.length };
@@ -551,7 +554,7 @@ console.log('§5 the readers that named an absence now say the hold');
   const HSRC = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
   const LH = "    if (this._unread) return 'offline';\n    let h; try { h = this.get(id); } catch { return 'unknown'; }";
   ok(HSRC.split(LH).length === 2, 'control setup: the anchor of the linkState control is in hosts.js');
-  const linkOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; try { return H.linkState('h-0001'); } catch (e) { return 'threw:' + (e && e.code); } };
+  const linkOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; heldBy(H); try { return H.linkState('h-0001'); } catch (e) { return 'threw:' + (e && e.code); } };
   const lk = linkOf(require(path.join(ROOT, 'src/hosts.js')));
   const lkx = linkOf(MJ.load('src/hosts.js', anchored(HSRC, LH, '    const h = this.get(id);', 'hhc-519a'), 'link-no-held'));
   ok(lk === 'offline' && lkx === 'threw:hosts-unread', 'linkState while held answers «offline» (a dark source); CONTROL (the release\'s first line, in a copy): it throws — usage-pool-engine\'s darkSources swallowed it into an EMPTY list', { lk, lkx });
@@ -743,7 +746,7 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   // hosts section's English inside `applied` — the import names the hold by its CODE now and the page words it (hostsHeldWords, zh / ja)
   const HS8 = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
   const IMPC = "skipped: true, code: 'hosts-unread' };";
-  const impOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; try { const r = H.importBundle({ hosts: [{ id: 'h-0002', name: 'x', host: 'x.invalid' }] }); return { code: r && r.code || null, skipped: !!(r && r.skipped) }; } catch (e) { return { threw: (e && e.code) || 'threw' }; } };
+  const impOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; heldBy(H); try { const r = H.importBundle({ hosts: [{ id: 'h-0002', name: 'x', host: 'x.invalid' }] }); return { code: r && r.code || null, skipped: !!(r && r.skipped) }; } catch (e) { return { threw: (e && e.code) || 'threw' }; } };
   const im = impOf(require(path.join(ROOT, 'src/hosts.js'))), imx = impOf(MJ.load('src/hosts.js', anchored(HS8, IMPC, 'skipped: true };', 'hhc-8i1'), 'import-no-code'));   // stale-pins: kept (the control plants the release's text in a copy)
   ok(im.code === 'hosts-unread' && im.skipped && imx.skipped && imx.code === null, 'hosts.importBundle while held: skipped, with the hold\'s CODE (the page words it); CONTROL (the code cut, in a copy): no code — the route can only pass the English on — RED', { im, imx });
   const PRS = fs.readFileSync(path.join(ROOT, 'src/routes/persistence.js'), 'utf8'), APS = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');

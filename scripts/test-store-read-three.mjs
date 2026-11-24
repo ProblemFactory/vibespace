@@ -224,7 +224,7 @@ try {
     console.log('⑤ round wom600meg MUST: a push mount removed while mount-tokens.json is held');
     const crypto = require('node:crypto'), sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
     const MMmod = require('../src/machine-mounts.js');
-    const mk = (MM, tokens, rec, calls) => { const S = Object.create(MM.prototype); Object.assign(S, { _unread: null, _state: { mounts: [rec] }, hosts: { held: () => false, unreadWords: () => null }, mountTokens: tokens, _run: async (...a) => { calls.push('run ' + a[1]); }, _save: () => { calls.push('save'); }, _notify: () => { }, _pushTunnelOwned: new Map(), _pushRetryAt: new Map(), _pushDown: new Map(), _live: new Map() }); return S; };
+    const mk = (MM, tokens, rec, calls) => { const S = Object.create(MM.prototype); Object.assign(S, { _state: { mounts: [rec] }, hosts: { held: () => false, unreadWords: () => null }, mountTokens: tokens, _run: async (...a) => { calls.push('run ' + a[1]); }, _save: () => { calls.push('save'); }, _notify: () => { }, _pushTunnelOwned: new Map(), _pushRetryAt: new Map(), _pushDown: new Map(), _live: new Map() }); return S; };
     const plantT = (tag) => { const d = dirOf(tag), f = path.join(d, 'mount-tokens.json'), RAW = ['vs', 'mt_'].join('') + 'c'.repeat(48); const bytes = JSON.stringify({ tokens: [{ id: 'mtk-push0001', name: 'host:h-made', kind: 'reverse-mount', owner: 'h-made', tokenHash: sha(RAW), root: d, mode: 'ro', createdAt: 1, lastUsedAt: null }] }, null, 2); fs.writeFileSync(f, bytes); const un = refuse(f); let T = null; try { T = new MountTokens({ dataDir: d, log: quiet }); } finally { un(); } return { d, f, RAW, bytes, T }; };
     const rec = { id: 'mm-push0001', dir: 'push', hostId: 'h-made', folder: '/made/up/share', mode: 'ro', mountpoint: '/made/up/mp', method: 'rclone-webdav', tokenId: 'mtk-push0001', createdAt: 1 };
     const A = plantT('push-held'), calls = [], S = mk(MMmod.MachineMounts, A.T, { ...rec }, calls);
@@ -345,6 +345,7 @@ try {
       const d = dirOf(tag), f = path.join(d, 'c.json'), body = '{"rows": [2]}'; fs.writeFileSync(f, body);
       const rf = fs.promises.readFile, said = []; let reads = 0, release = null, h = null, out = null;
       fs.promises.readFile = function (p, ...a) { if (String(p) === f) { reads++; if (!release) return new Promise((res) => { release = () => res(Buffer.from(body)); }); } return rf.call(fs.promises, p, ...a); };
+      const keep = setInterval(() => { }, 1000);   // the helper's bound timer is unref'd (the hub's own loop keeps it): the scene keeps the loop up while a read hangs
       try {
         h = Mod.create({ file: f, code: 'c', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'read again soon'), log: (m) => said.push(m), readMs: () => 30 });
         h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
@@ -356,7 +357,7 @@ try {
         if (release) release();
         const up = await until(() => !h.held());
         out = { first, second, during, waiting: !!(facts && facts.waiting), words, saidOnce: said.filter((l) => /a read again has not answered in 0\.03 s/.test(l)).length, up };
-      } finally { fs.promises.readFile = rf; if (h) h.stop(); }
+      } finally { fs.promises.readFile = rf; clearInterval(keep); if (h) h.stop(); }
       return out;
     };
     const bd = await boundScene(H, 'bound');

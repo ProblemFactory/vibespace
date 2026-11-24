@@ -579,7 +579,7 @@ console.log('⑦ the cure — the readers\' SHOULDs');
       const w = await world({ HM: HMx }); await w.hm.persisted();
       let produce = null; w.hm._storeWriter = { dirty: (f, o) => { produce = o.produce; }, durable: async () => true, whyNotDurable: () => null, flushSync: () => ({ written: [], left: [] }) };
       w.hm._save();   // queued while the store reads fine
-      w.hm._hold.start({ state: 'unreadable', code: 'EACCES', why: 'the read failed' }); w.hm._hold.stop();   // then a hold (its own road — 2b: the helper's start; its timer stopped)
+      w.hm._hold.start({ state: 'unreadable', code: 'EACCES', why: 'the read failed' }); w.hm._hold.stop(); w.hm._state = { hosts: [] };   // then a hold (its own road — 2b: the helper's start, its timer stopped; a hold begins only at a start, over an EMPTY list, as the boot's held branch leaves it)
       let bytes = null, code = null; try { bytes = produce(); } catch (e) { code = e && e.code; }
       return { bytes, code };
     };
