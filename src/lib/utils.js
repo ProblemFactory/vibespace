@@ -1140,7 +1140,7 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     const data = await res.json().catch(() => ({}));
     // row B-422c (r3507): a refusal at file k says what LANDED before it (the server's `landed`, files 1..k−1 in order) — kept as uploaded
     const landedOf = () => (Array.isArray(data.landed) ? data.landed.map((f) => (data.keptWithConversation ? { ...f, keptFrom: data.keptFrom || '', keptDir: data.dir || '' } : f)) : []);
-    if (!res.ok || data.success === false) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code, params: data.params } : {}, { landed: landedOf() });   // B-3b03 follow-up: a refusal by name keeps its code
+    if (!res.ok || data.success === false) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code, params: data.params } : {}, { landed: landedOf(), landedOf: typeof data.landedOf === 'number' ? data.landedOf : null });   // B-3b03 follow-up: a refusal by name keeps its code
     // lane chat-attachments-persist: the server kept them with the conversation (a temporary cwd) — each file says where from
     return (data.files || []).map((f) => (data.keptWithConversation ? { ...f, keptFrom: data.keptFrom || '', keptDir: data.dir || '' } : f));
   };
@@ -1157,8 +1157,10 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
         failed.push({ name: _uploadName(chunk[0]), error: e.message, ...(e.code ? { code: e.code, params: e.params } : {}) });
       } else {
         // Isolate the unreadable file(s): retry each on its own — but never a file that already LANDED before the refusal (B-422c: on
-        // the kept road a second post would place it again as «name (1)»); a page loaded before the server said `landed` retries all
-        const landed = Array.isArray(e.landed) ? e.landed : [];
+        // the kept road a second post would place it again as «name (1)»); a page loaded before the server said `landed` retries all.
+        // Line 834's round: the landed list is taken only when it is shorter than the chunk and the reply counted THIS chunk
+        // (`landedOf`); any other answer retries the whole chunk, as before
+        const landed = Array.isArray(e.landed) && e.landed.length < chunk.length && e.landedOf === chunk.length ? e.landed : [];
         uploaded.push(...landed);
         for (const f of chunk.slice(landed.length)) {
           try { uploaded.push(...await postChunk([f])); }

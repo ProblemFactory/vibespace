@@ -173,8 +173,12 @@ const READ_CAP = 64 * 1024;
 // never a fact about the folder or the file: «not read now», with why, never «empty», «absent» or «not answering». A refusal the
 // STORAGE gave (EIO, EACCES) stays blocked; ENOENT stays missing. → 'restarting' | 'slow' | null
 const READER_DOWN = new Set(['no-worker', 'no-idle-worker', 'no-reader']);
-const readerDownWhy = (f) => (!f || f.ok || f.pending ? null : f.timedOut || f.code === 'timeout' ? 'slow' : READER_DOWN.has(f.code) ? 'restarting' : null);
+// line 834's round (主开发 r3771): a deadline met while NO worker was ever taken (SafeFs's `noWorker`, carried by storage-facts) is
+// the reader restarting; the reader's own one-try refusal (`path-trying`: the first press on that path has not answered yet) is
+// the storage not answering in time — both the reader's, never a fact about the file
+const readerDownWhy = (f) => (!f || f.ok || f.pending ? null : f.noWorker === true ? 'restarting' : f.timedOut || f.code === 'timeout' || f.code === 'path-trying' ? 'slow' : READER_DOWN.has(f.code) ? 'restarting' : null);
 const NOT_READ_WORDS = { restarting: 'its reader is restarting', slow: 'its storage did not answer in time' };
+const KEPT_GOOD_MAX = 256;   // the folders whose last good listing is kept for a refused read (TaskGroupManager._keepGood)
 const TELL_WORDS = { note: 'the path and note only', names: 'file names', index: 'file names + key files', contents: 'full contents' };
 // the unclaimed-HIGH reminder line's TEXT budget in BYTES (CJK = 3 B/char), shared by every group of one injection
 const HIGH_LINE_TEXT_BYTES = 600;
@@ -1055,11 +1059,25 @@ class TaskGroupManager {
     if (offLoop && this._sigReader()) return { ...(hit ? hit.w : { files: [], over: false }), reading: true };
     const files = this._listContextFiles(dir, WALK_CAP + 1);
     // B-422c (r3507 hold 1): a listing NOT READ NOW is never cached as empty — the LAST READ one is kept, marked with its why and its age
-    if (files == null) return { ...(hit ? hit.w : { files: [], over: false }), reading: true, notRead: this._lastUnknown || 'pending', readAt: hit ? hit.at : null };
+    // line 834's round (主开发 r3771): the storage facts' landing clears the walk's cache, and a refusal replacing a listing IS such a
+    // landing — so the last listing read is taken from _lastGood, which that clear never reaches
+    const kept = hit || (this._lastGood && this._lastGood.get(dir));
+    if (files == null) return { ...(kept ? kept.w : { files: [], over: false }), reading: true, notRead: this._lastUnknown || 'pending', readAt: kept ? kept.at : null };
     const w = { files: files.slice(0, WALK_CAP), over: files.length > WALK_CAP };
     if (this._walkCache.size > 256) this._walkCache.clear();
-    this._walkCache.set(dir, { w, at: Date.now() });
+    const at = Date.now();
+    this._walkCache.set(dir, { w, at });
+    this._keepGood(dir, w, at);
     return w;
+  }
+  /** row B-422c (line 834's round, 主开发 r3771): a folder's LAST GOOD listing and when it was read — written wherever the walk's cache
+   *  is set from a read, never cleared by the facts' landing (src/storage-facts.js onLanded), so a refused read can say what was read
+   *  last and how long ago. Bounded: KEPT_GOOD_MAX folders, the oldest dropped first; each good read replaces its folder's. */
+  _keepGood(dir, w, at) {
+    if (!this._lastGood) this._lastGood = new Map();
+    this._lastGood.delete(dir);
+    if (this._lastGood.size >= KEPT_GOOD_MAX) this._lastGood.delete(this._lastGood.keys().next().value);
+    this._lastGood.set(dir, { w, at });
   }
 
   // a told file's text: { text, size, binary, big } — never past READ_CAP (a bigger file is `big`, never read whole)
@@ -1390,7 +1408,7 @@ class TaskGroupManager {
     const hit = this._sigCache && this._sigCache.get(key);
     const take = (h) => {
       // the render lists exactly what this signature saw (its walks, adopted for this turn)
-      if (h.walks) { if (!this._walkCache) this._walkCache = new Map(); for (const [dir, w] of h.walks) this._walkCache.set(dir, { w, at: Date.now() }); }
+      if (h.walks) { if (!this._walkCache) this._walkCache = new Map(); for (const [dir, w] of h.walks) { this._walkCache.set(dir, { w, at: Date.now() }); this._keepGood(dir, w, h.at); } }
       return { sig: h.sig, stale: false };
     };
     if (after != null) return hit && (hit.gen || 0) > after ? take(hit) : { sig: hit ? hit.sig : '', stale: true };
@@ -1429,7 +1447,7 @@ class TaskGroupManager {
       this._sigPut(key, { sig: parts.join('|'), at, gen: this._sigGen, walks });
       if (!this._walkCache) this._walkCache = new Map();
       if (this._walkCache.size > 256) this._walkCache.clear();
-      for (const [dir, w] of walks) { const h = this._walkCache.get(dir); if (!h || h.at <= at) this._walkCache.set(dir, { w, at }); }
+      for (const [dir, w] of walks) { const h = this._walkCache.get(dir); if (!h || h.at <= at) { this._walkCache.set(dir, { w, at }); this._keepGood(dir, w, at); } }
     });
     const done = p.then(() => true, () => false).finally(() => { if (this._sigReads.get(key) === done) this._sigReads.delete(key); });
     this._sigReads.set(key, done);
@@ -1498,7 +1516,9 @@ class TaskGroupManager {
     const reads = due.map((d) => { const at = Date.now(); return sf.call('contextFiles', { path: d, cap: WALK_CAP + 1 }, { timeoutMs: SIG_READ_MS }).then((files) => {
       const list = Array.isArray(files) ? files : [];
       if (this._walkCache.size > 256) this._walkCache.clear();
-      this._walkCache.set(d, { w: { files: list.slice(0, WALK_CAP), over: list.length > WALK_CAP }, at });
+      const w = { files: list.slice(0, WALK_CAP), over: list.length > WALK_CAP };
+      this._walkCache.set(d, { w, at });
+      this._keepGood(d, w, at);
     }, () => { }); });
     let timer = null;
     const bound = new Promise((r) => { timer = setTimeout(r, Math.max(0, boundMs)); });   // a request waits on it: never unref'd

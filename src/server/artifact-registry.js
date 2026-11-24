@@ -431,8 +431,9 @@ const ASK_MANIFEST = 'design.json'; // src/design-model.js MANIFEST_FILE — a d
 // row B-422c, second half (主开发 r3499 / r3507; lane mask-value-shape): a refusal BY THE READER (SafeFs's worker restarting after a
 // deadline — no-worker / no-idle-worker —, or its own deadline) is no fact about the attachment: «not checked now — run vibespace-ask
 // again», never «a folder without design.json» or «check the path». The agent's words: English, untranslated.
-const readerDown = (e) => !!e && (e.code === 'no-worker' || e.code === 'no-idle-worker' || e.noWorker === true || e.safeFsTimeout === true || e.code === 'timeout');
-const NOT_CHECKED = (e) => (e && (e.safeFsTimeout === true || e.code === 'timeout') && e.noWorker !== true ? 'its storage did not answer in time' : 'its reader is restarting');
+// line 834's round (主开发 r3771): SafeFs's one-try refusal (`path-trying`: the first press on that path has not answered) is the reader's too
+const readerDown = (e) => !!e && (e.code === 'no-worker' || e.code === 'no-idle-worker' || e.code === 'path-trying' || e.noWorker === true || e.safeFsTimeout === true || e.code === 'timeout');
+const NOT_CHECKED = (e) => (e && (e.safeFsTimeout === true || e.code === 'timeout' || e.code === 'path-trying') && e.noWorker !== true ? 'its storage did not answer in time' : 'its reader is restarting');
 const errWhy = (e) => { const s = String((e && (e.code || '')) + ' ' + ((e && e.message) || '')); if (readerDown(e)) return 'try-again'; return /EACCES|EPERM|permission denied/i.test(s) ? 'unreadable' : /ENOENT|ENOTDIR|no such file|not found/i.test(s) ? 'missing' : 'unopenable'; };
 /** THE SUBMIT JUDGE: every --artifact must OPEN for the owner — a file exists and is readable on the ASKING conversation's
  *  host (a remote host through RemoteFs `info`, never a local stat of a remote path; locally the SafeFs door: `stat`, then a

@@ -706,7 +706,10 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
   // (files 1..k−1, in order, as a success lists them) and `landedOf` — so the page's retry never places a landed file a second time (the
   // kept road numbers a same-named file). The reply gains fields and loses none.
   const landedBody = (results, dir) => (results && results.length ? { landed: results, landedOf: (req.files || []).length, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir } : {}) } : {});
-  let landedL = null, landedDir = null;
+  let landedL = null, landedDir = null, noted = false;
+  // line 834's round (主开发 r3771): the files that LANDED before a refusal are the conversation's `upload` rows too — the page takes
+  // them as uploaded and never posts them again, so the refusal road notes them (once: never a second time after the success road's)
+  const note = (results) => { if (noted || !results || !results.length) return; noted = true; noteChatUploads(req, results); };
   if (R) {
     try {
       const results = []; landedL = results;
@@ -728,10 +731,11 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
         await fs.promises.unlink(file.path).catch(() => {});
         results.push({ name, path: dest, size: file.size });
       }
-      noteChatUploads(req, results);
+      note(results);
       return res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destDir } : {}) });
     } catch (e) {
       for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
+      note(landedL);
       return res.status(400).json({ ...fsErrorBody(e), ...landedBody(landedL, destDir) });   // B-7f0b D8: a refusal by code (a file over the device link's line) is worded on the page
     }
   }
@@ -783,11 +787,12 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
       fs.unlinkSync(file.path);
       results.push({ name, path: dest, size: file.size });
     }
-    noteChatUploads(req, results);
+    note(results);
     res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destRoot } : {}) });
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)
     for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
+    note(landedL);
     res.status(err.status || 400).json({ ...(err.pullBody || { error: err.message }), ...landedBody(landedL, landedDir) });   // B-fcc7: a pull folder's refusal keeps its code
   }
 });

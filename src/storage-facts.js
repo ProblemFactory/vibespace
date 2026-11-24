@@ -5,7 +5,8 @@
  * src/storage-path.js calls `storage`: the answer is the fact the last OFF-THREAD read gave — SafeFs, its own worker with
  * a per-call deadline — and a fact older than ttlMs is read again in the background (one read per key in flight). The
  * main thread never waits on the mount. A path never read yet answers { pending: true }; the caller words it.
- *   get(op, payload) → { pending: true } | { ok: true, result } | { ok: false, code, timedOut }
+ *   get(op, payload) → { pending: true } | { ok: true, result } | { ok: false, code, timedOut[, noWorker] }
+ * (`noWorker: true` only when SafeFs's deadline met NO worker ever taken — the reader restarting, row B-422c's line 834 round)
  * `onLanded(op, payload, fact)` runs when a read lands with a fact that differs from the one kept.
  */
 function create({ safeFs = () => null, ttlMs = 4000, max = 512, timeoutMs = 5000, onLanded = () => {} } = {}) {
@@ -27,7 +28,7 @@ function create({ safeFs = () => null, ttlMs = 4000, max = 512, timeoutMs = 5000
     }
     if (!f.inflight && (!f.value || now - f.at >= ttlMs)) {
       f.inflight = read(op, payload)
-        .then((result) => ({ ok: true, result }), (e) => ({ ok: false, code: (e && e.code) || (e && e.safeFsTimeout ? 'timeout' : 'error'), timedOut: !!(e && e.safeFsTimeout) }))
+        .then((result) => ({ ok: true, result }), (e) => ({ ok: false, code: (e && e.code) || (e && e.safeFsTimeout ? 'timeout' : 'error'), timedOut: !!(e && e.safeFsTimeout), ...(e && e.noWorker === true ? { noWorker: true } : {}) }))
         .then((v) => {
           const was = f.value ? JSON.stringify(f.value) : null;
           f.value = v; f.at = Date.now(); f.inflight = null;
