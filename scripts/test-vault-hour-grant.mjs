@@ -257,7 +257,7 @@ async function dialogModule() {
     'i18n.js': 'export const t = (s, p) => globalThis.__vurPage.t(s, p);',
     'utils.js': 'export const fetchJson = (u, o) => globalThis.__vurPage.fetchJson(u, o); export const showToast = (m, o) => globalThis.__vurPage.toast(m, o); export const createModalShell = (o) => globalThis.__vurPage.modal(o);',
     'principal-picker.js': 'export const principalPicker = (o) => globalThis.__vurPage.picker(o); export const rosterFromApp = () => globalThis.__vurPage.roster();',
-    'vault-reveal.js': 'export const revealLeftMs = () => (globalThis.__vurPage.reveal ? 300000 : 0); export const revealHeaders = () => ({ "X-Vault-Page": "this-page" }); export const forgetReveal = () => { globalThis.__vurPage.reveal = false; }; export const askRevealPassword = () => globalThis.__vurPage.ask(); export const revealWords = (r) => String((r && (r.error || r.code)) || "");',
+    'vault-reveal.js': 'export const revealLeftMs = () => (globalThis.__vurPage.reveal ? 300000 : 0); export const revealHeaders = () => ({ "X-Vault-Page": "this-page" }); export const forgetReveal = () => { globalThis.__vurPage.reveal = false; }; export const askRevealPassword = () => globalThis.__vurPage.ask(); export const revealWords = (r) => String((r && (r.error || r.code)) || ""); export const heldRowWords = (run) => { const c = run && run.heldCause; return c ? revealWords({ code: "store_held", cause: c }) : globalThis.__vurPage.t("The vault\'s run settings cannot be read right now, so every entry is closed for runs. VibeSpace reads them again by itself"); };',   // lane lg-vault-file (主开发 r3384): line 709 made vault-use-row import heldRowWords — the stand-in carries it, shaped as the product's
   };
   try {
     const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
@@ -1032,6 +1032,13 @@ await leg('Ⓢ the chip', async () => {
     const els9 = ex9 ? walk(ex9.box) : [];
     const to9 = els9.find((e) => /\bvw-use-to\b/.test(e.className)), xs9 = els9.filter((e) => /\bvw-use-except\b/.test(e.className));
     ok(!!(s9 && s9.ok && to9 && to9.textContent === 'Used with no card by: nobody' && xs9.length === 1 && /^except /.test(xs9[0].textContent)), 'Ⓢd (r9, MAJOR A) an except-only row is drawn: «Used with no card by: nobody» and its «except …» chip (r8 drew nothing — the 除了 out of sight)', { s9: s9 && s9.ok, to: to9 && to9.textContent, except: xs9.map((e) => e.textContent) });
+    // lane lg-vault-file (主开发 r3384): THE RUN STORE HELD is said in place — a row whose run facts say `held` draws the hold's sentence
+    // (vault-use-row heldRowWords, through the page's own words) where a bare «paused» stood; a row that is not held draws none
+    const heldLines = (run) => { const ex = VUR && typeof VUR.useExtras === 'function' ? VUR.useExtras({ id: w9.e.id, label: 'TTS API key', run }) : null; return (ex ? walk(ex.box) : []).filter((e) => /\bvw-use-bad\b/.test(e.className)).map((e) => e.textContent); };
+    const HELD_ROW = "The vault's run settings cannot be read right now, so every entry is closed for runs. VibeSpace reads them again by itself";
+    const use9 = () => ({ ...w9.useGrants.publicFor(w9.e.id), entryHosts: [], used: { uses: 0, convs: 0 } });
+    const hy = heldLines({ held: true, paused: true, use: use9() }), hn = heldLines({ use: use9() });
+    ok(hy.includes(HELD_ROW) && !hn.includes(HELD_ROW), 'Ⓢe (r3384) the run store HELD is said in place on the row — heldRowWords through the page\'s own words; a row that is not held says nothing of it', { hy, hn });
   });
 });
 
