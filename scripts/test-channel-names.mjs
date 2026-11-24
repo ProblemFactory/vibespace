@@ -374,11 +374,12 @@ async function verifyRun(EM, UT, tag) {
 // that cannot read people's profiles SAYS it (the account's kept fact → the card, ONE For-you item per sign-in) ────────
 console.log('§N the names a person reads + "people\'s names cannot be read" said where the owner looks');
 const CC = require(path.join(REPO, 'src/channel-caps.js'));
-async function namesRun(EM, tag) {
+async function namesRun(EM, tag, place = {}) {
   const A = 'nr-' + tag;
   const CONVS = [{ id: 'oc_dorn', title: '', kind: 'dm' }, { id: 'oc_kenji', title: '', kind: 'dm' }, { id: 'oc_ops', title: 'Ops room', kind: 'group' }];
   const world = new Map(CONVS.map((c) => [c.id, []]));
-  let seqNo = 0, mode = 'refuse', warmCalls = 0;
+  let seqNo = 0, mode = 'refuse', warmCalls = 0, letGo = null;
+  const held = place.late ? new Promise((z) => { letGo = z; }) : null;   // N4b: the READ warm-up's answer held until the leg lets it go
   const mint = (convId, author) => makeRecord({ adapterId: A, convId, vendorId: `${convId}-${++seqNo}`, at: Date.now() - 600e3 + seqNo * 1000, author: { ...author, isSelf: false, isBot: false }, text: 'hello ' + seqNo });
   const mod = {
     kind: A,
@@ -397,7 +398,7 @@ async function namesRun(EM, tag) {
           return { records: page, anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
         },
         // the people warm-up's answer: a sign-in without the profile permission refuses by name; one with it reads
-        async warmPeople(ids) { warmCalls++; return mode === 'refuse' ? { asked: 0, ok: 0, unreadable: { why: 'scopes', missing: ['contact:base'] } } : { asked: ids.length, ok: ids.length }; },
+        async warmPeople(ids) { warmCalls++; if (mode === 'read' && held) await held; return mode === 'refuse' ? { asked: 0, ok: 0, unreadable: { why: 'scopes', missing: ['contact:base'] } } : { asked: ids.length, ok: ids.length }; },
         async send() { return { ok: true, vendorMessageId: 'sent-1', at: Date.now(), sentAs: 'user' }; },
         async reconcile() { return { unknown: true }; },
       };
@@ -433,9 +434,15 @@ async function namesRun(EM, tag) {
     const hit = (q) => e.rows({ q }).rows.map((r) => r.id).sort().join(',');
     out.search = { mira: hit('mira'), lee: hit('mira holt'), mkt: hit('marketing'), kenji: hit('林远'), dorn: hit('dorn'), boss: hit('bossman') };
     mode = 'read';
+    if (held && !place.fixedWait) setTimeout(letGo, 300);   // N4b: the answer 300 ms late, a loaded machine's
     await round();
+    // N4 waits for the FACT, never a time: the pass does not await its people warm-up; the warm-up's answer writes the account's
+    // record and then resolves the item (namesFact). The release's leg read after the round's fixed 40 ms: under the box zone's
+    // tree run (057771c4f-20261124230203-both) the record had its fact and the item was still open
+    if (!place.fixedWait) for (let k = 0; k < 150 && !(items().length > 0 && items().every((i) => i.status === 'done')); k++) await sleep(20);
     const a2 = acct();
     out.read = { view: a2.namesReadable, row: a2.names, statuses: items().map((i) => i.status) };
+    if (letGo) { letGo(); for (let k = 0; k < 150 && !items().every((i) => i.status === 'done'); k++) await sleep(20); }   // the red control's hold let go after its read; its answer lands before the stop
   } finally { e.stop(); }
   return out;
 }
@@ -449,6 +456,10 @@ async function namesRun(EM, tag) {
   ok(v.search.kenji === 'oc_kenji', 'N3 a search by a Chinese nickname (林远) finds the chat whose raw name is Latin ("Kenji")', JSON.stringify(v.search));
   ok(v.search.boss === '', 'N3 the account\'s OWN nickname is no conversation\'s name (no row admitted by it)', JSON.stringify(v.search));
   ok(v.read.view === null && v.read.row === 'readable' && v.read.statuses.join() === 'done', 'N4 a later warm-up that READS a profile clears the fact (readable) and resolves the For-you item (the re-authorize fixed it)', JSON.stringify(v.read));
+  const vl = await namesRun(ENG, 'n4-late', { late: true });
+  ok(vl.read.view === null && vl.read.row === 'readable' && vl.read.statuses.join() === 'done', 'N4b the READ warm-up\'s answer placed 300 ms late (a loaded machine\'s): the leg still sees the fact cleared and the For-you item resolved — it waits for the item, never a time', JSON.stringify(vl.read));
+  const vr = await namesRun(ENG, 'n4-late-red', { late: true, fixedWait: true });
+  ok(vr.read.statuses.join() === 'open', 'N4b RED CONTROL: the release\'s own wait (the round\'s fixed 40 ms) under the same late answer reads the item still OPEN — N4 would go red', JSON.stringify(vr.read));
   const t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? p[k] : m));
   ok(CC.namesText(r.view, { t }) === 'People\'s names and pictures cannot be read on this account — re-authorize to add the contact permission' && CC.namesText(null, { t }) === '', 'N5 the card\'s note line words it (and nothing while readable)');
   ok(CC.namesSearchText(r.view, { t }) === 'No match — people\'s names cannot be read on this account (re-authorize), so a search by a person\'s other name finds nothing' && CC.namesSearchText(null, { t }) === '', 'N5 the search\'s empty state words it');
