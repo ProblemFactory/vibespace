@@ -19,10 +19,21 @@
 // a live session of that id, or a record naming it, keeps it. Anything else in the folder is never touched, and a link or a folder
 // is never followed. Each file is looked at again just before it goes (still the same file, its conversation still not live).
 // Every removal is said (the count and the names), and every pass that keeps all for an unknown says why.
+// A RECORD GOES ONLY ON A PROOF THAT COVERS THE PLACE ITS CONVERSATION's TRANSCRIPT LIVES (主开发 r3714): the index reads THIS machine's
+// trees, so a file goes only when its frames say its conversation was THIS machine's — a frame handed to a CLI the wrapper ran itself
+// (its `cli`: pid AND birth). A remote conversation's wrapper (data/bin/chat-wrapper.js REMOTE MODE: the CLI runs under a keeper on
+// the paired machine) records no CLI (`cli: null`), and the hub's remote-transcript cache's silence proves nothing about the machine:
+// such a file, or one whose frames cannot be read, is KEPT and counted (said). The bound that leaves: one small file a remote
+// conversation that ever handed a frame. And when the hub's own environment names another configuration folder (CLAUDE_CONFIG_DIR not
+// the home's `.claude`), the index (the home's own folder) covers nothing there: nothing goes, said.
+// THE ONE WINDOW, said: between the second look (an lstat) and the removal (an unlink BY NAME) is one await; a rename into that name
+// in it would be removed. For a file that goes the transcript is already gone everywhere this machine looks, so no CLI here can
+// resume that conversation to write it again.
 // Off the loop: fs.promises only — ONE pass, 30 s after the start, beside the aged wrapper-files sweep (server.js).
 const fsp = require('fs').promises;
 const path = require('path');
-const { DIRNAME } = require('../handed-records.js');
+const os = require('os');
+const { DIRNAME, FILE_MAX } = require('../handed-records.js');
 
 const AGE_MS = 7 * 86400000;                       // the wrapper files' age (server.js hands its own cutoff)
 const FILE_RE = /^(.+?)\.json(-torn|\.\d+\.tmp)?$/;  // the wrapper's own names: <id>.json, its torn copy, its temp
@@ -36,17 +47,32 @@ function liveNames(activeSessions) {
     for (const [id, s] of activeSessions || []) {
       if (typeof id === 'string' && id) names.add(id);
       if (!s || typeof s !== 'object') continue;
-      for (const x of [s.claudeSessionId, s.backendSessionId, s._forkSourceId, ...(Array.isArray(s.forkedFrom) ? s.forkedFrom : [])]) if (typeof x === 'string' && x) names.add(x);
+      for (const x of [s.claudeSessionId, s.backendSessionId, s._forkSourceId, s.forkSourceId, ...(Array.isArray(s.forkedFrom) ? s.forkedFrom : [])]) if (typeof x === 'string' && x) names.add(x);
     }
   } catch { }
   return names;
 }
 const idOfName = (base) => (base.startsWith('hub-') ? base.slice(4) : base);   // a provisional file is named by its hub id
 const same = (a, b) => !!(a && b && a.ino === b.ino && a.dev === b.dev && a.mtimeMs === b.mtimeMs && a.size === b.size);
+/** a frame handed to a CLI the wrapper ran ITSELF — its pid AND its birth (a remote conversation's frame names none) */
+const localCli = (r) => !!(r && r.cli && Number(r.cli.pid) > 1 && typeof r.cli.start === 'string' && r.cli.start);
+/** WHERE a file's conversation lives, by its frames: true = this machine's · false = no CLI of this machine named · null = not readable.
+ *  The conversation's main file (`<base>.json`) answers for its torn copy and its temp; else the file itself. One read a file. */
+async function placeOf(dir, base, own, cache) {
+  for (const f of [base + '.json', own]) {
+    if (cache.has(f)) return cache.get(f);
+    let text = null;
+    try { const st = await fsp.stat(path.join(dir, f)); if (st.size > FILE_MAX) { cache.set(f, null); return null; } text = await fsp.readFile(path.join(dir, f), 'utf8'); }
+    catch (e) { if (e && e.code === 'ENOENT') continue; cache.set(f, null); return null; }
+    let v = null; try { const j = JSON.parse(text); v = !!(j && Array.isArray(j.frames) && j.frames.some(localCli)); } catch { v = null; }
+    cache.set(f, v); return v;
+  }
+  return null;
+}
 
 /** ONE pass → { removed: [file names], kept: n, unknown: why | null } */
-async function sweep({ buffersDir, metaDir, cutoff = Date.now() - AGE_MS, activeSessions = new Map(), verdict = require('./session-meta-verdict.js'), transcripts = () => require('../session-store.js').claudeTranscriptIndex(), log = (m) => console.log('[handed] ' + m) } = {}) {
-  const out = { removed: [], kept: 0, unknown: null };
+async function sweep({ buffersDir, metaDir, cutoff = Date.now() - AGE_MS, configDir = process.env.CLAUDE_CONFIG_DIR || '', homeConfig = path.join(os.homedir(), '.claude'), activeSessions = new Map(), verdict = require('./session-meta-verdict.js'), transcripts = () => require('../session-store.js').claudeTranscriptIndex(), log = (m) => console.log('[handed] ' + m) } = {}) {
+  const out = { removed: [], kept: 0, unknown: null, notHere: 0 };
   if (!buffersDir || !metaDir) return out;
   const dir = path.join(buffersDir, DIRNAME);
   let names;
@@ -62,16 +88,21 @@ async function sweep({ buffersDir, metaDir, cutoff = Date.now() - AGE_MS, active
     let st = null; try { st = await fsp.lstat(path.join(dir, name)); } catch { continue; }
     if (!st.isFile()) continue;
     if (st.mtimeMs > cutoff) { out.kept++; continue; }
-    aged.push({ name, id: idOfName(m[1]), st });
+    aged.push({ name, base: m[1], id: idOfName(m[1]), st });
   }
   if (!aged.length) return out;
   const keepAll = (why) => { out.unknown = why; out.kept += aged.length; log(`the age sweep removed nothing (${aged.length} file(s) past the age): ${why}`); return out; };
   // 2. THE RECORDS THAT NAME IT — the verdict first (a record that could not be read names everything), the live sessions, then
   //    every record form on disk (one read each; a record the verdict holds unread is never read here)
+  if (configDir && path.resolve(configDir) !== path.resolve(homeConfig)) return keepAll('the hub\'s environment names another configuration folder (CLAUDE_CONFIG_DIR) — the transcript index reads the home\'s own, so its silence covers nothing there');
   if (verdict.anyUnreadable()) return keepAll('a conversation\'s record could not be read — it may name any of them (src/server/session-meta-verdict.js)');
+  // 2a. WHERE ITS CONVERSATION LIVES (r3714): only a file whose frames name a CLI this machine ran can be proven gone here
+  const cache = new Map(), here = [];
+  for (const a of aged) { if ((await placeOf(dir, a.base, a.name, cache)) === true) here.push(a); else out.notHere++; }
+  if (out.notHere) log(`the age sweep kept ${out.notHere} file(s) past the age whose conversation is not provably this machine's (a remote conversation, or frames that cannot be read) — the remote-transcript cache's silence is no proof`);
   const live = liveNames(activeSessions);
   const want = new Set();
-  for (const a of aged) if (!live.has(a.id) && !verdict.keeps(a.id)) want.add(a.id);
+  for (const a of here) if (!live.has(a.id) && !verdict.keeps(a.id)) want.add(a.id);
   const named = new Set();
   if (want.size) {
     let recs;
@@ -87,11 +118,11 @@ async function sweep({ buffersDir, metaDir, cutoff = Date.now() - AGE_MS, active
       if (named.size === want.size) break;
     }
   }
-  const left = aged.filter((a) => want.has(a.id) && !named.has(a.id));
+  const left = here.filter((a) => want.has(a.id) && !named.has(a.id));
   if (!left.length) { out.kept += aged.length; return out; }
   // 3. THE TRANSCRIPTS — read whole, or nothing goes
   let index = null;
-  try { index = await transcripts(); } catch (e) { return keepAll(`the transcripts could not be read (${(e && e.message) || e})`); }
+  try { index = await transcripts(); } catch (e) { return keepAll(`the transcripts could not be read (${(e && e.code) || 'the walk threw'})`); }   // a code, never a message (it can carry a path)
   if (!index || index.ok !== true || index.topReadable !== true) return keepAll(`the transcripts were not read whole (${!index ? 'no answer' : index.ok !== true ? 'a folder failed or the walk passed its bound' : 'the projects folder itself was not read'}) — an absent one proves nothing`);
   for (const a of left) {
     if (index.has(a.id)) { out.kept++; continue; }

@@ -37,6 +37,9 @@ const SRC = fs.readFileSync(path.join(ROOT, SWEEP_REL), 'utf8');
 const M = mutantCopies('handed-sweep', ROOT);
 const red = (tag, edits) => { let s = SRC; for (const [a, b] of edits) s = anchored(s, a, b, 'the sweep RED ' + tag); return M.load(SWEEP_REL, s, tag); };
 const DAY = 86400000;
+// a record of THIS machine: a frame handed to a CLI the wrapper ran (pid AND birth); a REMOTE one: the wrapper ran no CLI (REMOTE MODE)
+const LOCAL = JSON.stringify({ v: 1, frames: [{ msgId: 'm-local', cli: { pid: 4242, start: 'l100', boot: '' }, state: 'handed', at: 1 }] });
+const REMOTE = JSON.stringify({ v: 1, frames: [{ msgId: 'm-remote', cli: null, state: 'handed', at: 1 }] });
 const uuid = (n) => '44444444-0000-4000-8000-' + String(n).padStart(12, '0');
 let k = 0;
 
@@ -46,12 +49,12 @@ function world(tag) {
   const w = { buffers: path.join(d, 'buffers'), meta: path.join(d, 'session-meta'), projects: path.join(d, 'home', '.claude', 'projects'), remote: path.join(d, 'remote-jsonl') };
   for (const x of [path.join(w.buffers, HANDED.DIRNAME), w.meta, path.join(w.projects, '-work-a'), path.join(w.remote, 'h1')]) fs.mkdirSync(x, { recursive: true });
   w.handed = path.join(w.buffers, HANDED.DIRNAME);
-  w.file = (name, days, body = '{"v":1,"frames":[]}') => { const p = path.join(w.handed, name); fs.writeFileSync(p, body, { mode: 0o600 }); const t = (Date.now() - days * DAY) / 1000; fs.utimesSync(p, t, t); return name; };
+  w.file = (name, days, body = LOCAL) => { const p = path.join(w.handed, name); fs.writeFileSync(p, body, { mode: 0o600 }); const t = (Date.now() - days * DAY) / 1000; fs.utimesSync(p, t, t); return name; };
   w.tx = (id, where = 'projects') => fs.writeFileSync(path.join(where === 'projects' ? path.join(w.projects, '-work-a') : path.join(w.remote, 'h1'), id + '.jsonl'), '{}\n');
   w.rec = (name, obj) => fs.writeFileSync(path.join(w.meta, name), typeof obj === 'string' ? obj : JSON.stringify(obj));
   w.has = (name) => { try { fs.lstatSync(path.join(w.handed, name)); return true; } catch { return false; } };
   w.index = () => SS.claudeTranscriptIndex({ projectsRoot: w.projects, remoteRoot: w.remote });
-  w.run = async (mod = HS, opts = {}) => { const lines = []; const r = await mod.sweep({ buffersDir: w.buffers, metaDir: w.meta, cutoff: Date.now() - 7 * DAY, transcripts: w.index, log: (m) => lines.push(m), ...opts }); return { ...r, lines }; };
+  w.run = async (mod = HS, opts = {}) => { const lines = []; const r = await mod.sweep({ buffersDir: w.buffers, metaDir: w.meta, cutoff: Date.now() - 7 * DAY, configDir: '', transcripts: w.index, log: (m) => lines.push(m), ...opts }); return { ...r, lines }; };
   return w;
 }
 
@@ -171,15 +174,21 @@ const R_READFAIL = red('readfail', [["catch (e) { if (e && e.code === 'ENOENT') 
 }
 
 say('⑧ WHAT IS NEVER TOUCHED — other names, a link, a folder');
+const R_NOTFILE = red('notfile', [['    if (!st.isFile()) continue;', '    if (false) continue;   // MUTANT: not only plain files']]);
 {
   const w = world('never'), x = uuid(++k);
   for (const n of ['notes.txt', x + '.jsonl', x + '.json.bak', x + '.json-torn.old']) w.file(n, 30);
-  fs.writeFileSync(path.join(BASE, 'target.json'), 'outside'); fs.symlinkSync(path.join(BASE, 'target.json'), path.join(w.handed, uuid(++k) + '.json'));
-  fs.mkdirSync(path.join(w.handed, uuid(++k) + '.json'));
+  // the link and the folder AGED past the cutoff — the link's OWN time (lutimes), not its target's — so only the «a plain file» line keeps them
+  const old = (Date.now() - 30 * DAY) / 1000, linkName = uuid(++k) + '.json', dirName = uuid(++k) + '.json';
+  const plant = (ww) => { const target = path.join(BASE, 'target-' + ww.handed.split(path.sep).slice(-2, -1)[0] + '.json'); fs.writeFileSync(target, LOCAL); fs.symlinkSync(target, path.join(ww.handed, linkName)); fs.lutimesSync(path.join(ww.handed, linkName), old, old); fs.mkdirSync(path.join(ww.handed, dirName)); fs.utimesSync(path.join(ww.handed, dirName), old, old); return target; };
+  const target = plant(w);
   const before = fs.readdirSync(w.handed).sort();
   const r = await w.run();
-  ok(JSON.stringify(fs.readdirSync(w.handed).sort()) === JSON.stringify(before) && fs.readFileSync(path.join(BASE, 'target.json'), 'utf8') === 'outside' && r.removed.length === 0,
-    'names not of the wrapper\'s own shape stay, a link is never followed or removed, a folder is never touched', { before, r });
+  ok(JSON.stringify(fs.readdirSync(w.handed).sort()) === JSON.stringify(before) && fs.readFileSync(target, 'utf8') === LOCAL && r.removed.length === 0 && fs.lstatSync(path.join(w.handed, linkName)).mtimeMs < Date.now() - 29 * DAY,
+    'names not of the wrapper\'s own shape stay; an AGED link named as a record (its target a record of this machine) is never removed, an aged folder never touched', { before, r });
+  const w2 = world('never-red'); plant(w2);
+  await w2.run(R_NOTFILE);
+  ok(!fs.readdirSync(w2.handed).includes(linkName), 'RED: a copy without the «a plain file» line unlinks the aged link');
 }
 
 say('⑨ THE FILE LOOKED AT AGAIN before it goes');
@@ -198,6 +207,34 @@ const R_RECHECK = red('recheck', [['    if (!same(a.st, now) || liveNames(active
   ok(!w2.has(wrote + '.json'), 'RED: a copy with no second look removes a file a wrapper has just written');
 }
 
+say('⑪ A CONVERSATION ON ANOTHER MACHINE — a record goes only on a proof that covers where its transcript lives');
+const R_NOPLACE = red('noplace', [['  for (const a of aged) { if ((await placeOf(dir, a.base, a.name, cache)) === true) here.push(a); else out.notHere++; }', '  for (const a of aged) here.push(a);   // MUTANT: every file taken as this machine\'s']]);
+{
+  const w = world('remote'), far = uuid(++k), torn = uuid(++k), near = uuid(++k);
+  w.file(far + '.json', 9, REMOTE); w.file(torn + '.json', 9, '{"v":1,"frames":[{"msgId":"x","cl'); w.file(near + '.json', 9);   // no cache entry, no record, aged
+  const r = await w.run();
+  ok(w.has(far + '.json') && w.has(torn + '.json') && !w.has(near + '.json') && r.notHere === 2 && r.lines.some((l) => /kept 2 file\(s\) past the age whose conversation is not provably this machine's/.test(l)),
+    'a REMOTE conversation\'s record (its wrapper ran no CLI here) and one whose frames cannot be read are KEPT though no cache, no record and no age keeps them — said by count; a record of this machine goes', r);
+  const w2 = world('remote-red'); w2.file(far + '.json', 9, REMOTE);
+  await w2.run(R_NOPLACE);
+  ok(!w2.has(far + '.json'), 'RED: the sweep before this cure (every file taken as this machine\'s) removes the remote conversation\'s record on the cache\'s silence');
+}
+
+say('⑫ ANOTHER CONFIGURATION FOLDER — the index reads the home\'s own: nothing goes');
+const R_NOCONFIG = red('noconfig', [["  if (configDir && path.resolve(configDir) !== path.resolve(homeConfig)) return keepAll(", '  if (false) return keepAll(']]);
+{
+  const w = world('config'), x = uuid(++k);
+  w.file(x + '.json', 9);
+  const r = await w.run(HS, { configDir: path.join(BASE, 'elsewhere'), homeConfig: path.join(BASE, 'home', '.claude') });
+  const w2 = world('config-same'); w2.file(x + '.json', 9);
+  const r2 = await w2.run(HS, { configDir: path.join(BASE, 'home', '.claude'), homeConfig: path.join(BASE, 'home', '.claude') });
+  ok(w.has(x + '.json') && /another configuration folder/.test(r.unknown || '') && !w2.has(x + '.json'),
+    'a hub whose environment names another configuration folder (CLAUDE_CONFIG_DIR) keeps every file, said; the same folder as the home\'s own changes nothing', { r, r2 });
+  const w3 = world('config-red'); w3.file(x + '.json', 9);
+  await w3.run(R_NOCONFIG, { configDir: path.join(BASE, 'elsewhere'), homeConfig: path.join(BASE, 'home', '.claude') });
+  ok(!w3.has(x + '.json'), 'RED: a copy that never asks the configuration folder removes the file on the home folder\'s silence');
+}
+
 say('⑩ THE WIRING — server.js\'s boot sweep, its one cutoff');
 {
   const S = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
@@ -208,7 +245,7 @@ say('⑩ THE WIRING — server.js\'s boot sweep, its one cutoff');
   ok(!/\b(readFileSync|readdirSync|statSync|lstatSync|unlinkSync|rmSync|existsSync)\b/.test(SRC), 'the sweep runs off the loop: fs.promises only (no sync call in the module)');
 }
 
-for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: 'B-5a4d sweep ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 11, label: 'B-5a4d sweep ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 WD.clear();
 say(`\n${failed ? failed + ' FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);
