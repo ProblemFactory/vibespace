@@ -17,7 +17,9 @@
  *   (f) A READ ASKED AFTER A WRITE OF THIS PAGE NEVER JOINS A READ THAT BEGAN BEFORE THAT WRITE WAS ANSWERED (主开发 r3697): a write
  *       is any ask through this fetch whose method is not GET; while one is out no read joins, and a read that began before its
  *       answer is never joined after it (a page that saves and reads its list again gets the list after its change). Reads with no
- *       write between them join as before. A change made over the socket is outside this law.
+ *       write between them join as before. A change made over the socket, or by the explorer's upload (an XMLHttpRequest, never
+ *       this fetch), is outside this law. HEAD and OPTIONS count as writes (harmless: a read after one is its own request). A write
+ *       that never replies leaves sharing off for the page until it does (the release's behaviour: the safe side).
  * The first caller gets the response itself; a joiner gets a copy — so a read nobody joined costs nothing (no copy, no tee).
  * Installed once, at the page's boot (src/client.js), over `window.fetch`: every fetch, fetchJson and api() from then on goes
  * through it. The page's imports run BEFORE it: a fetch at a module's top level goes unshared. A relative URL is resolved

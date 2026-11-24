@@ -50,6 +50,7 @@ try {
   const answerStill = await load(anchored(src, '  const writeAnswered = () => { writesOut--; era++; };\n', '  const writeAnswered = () => { writesOut--; };\n', 'shared-gets-answer-still'), 'answer-still');
   const everyUnshared = await load(anchored(src, "      if (methodOf(input, init) === 'GET') return fetchImpl(input, init);", '      if (false) return fetchImpl(input, init);', 'shared-gets-every-unshared'), 'every-unshared');
   const negJoins = await load(anchored(src, 'if (had && age >= 0 && age < joinMs', 'if (had && age < joinMs', 'shared-gets-negative-age'), 'negative-age');
+  const lateMark = await load(anchored(src, '      p.then(writeAnswered, writeAnswered);', '      Promise.resolve().then(() => p.then(writeAnswered, writeAnswered));', 'shared-gets-late-mark'), 'late-mark');
   const frozenClock = await load(anchored(src, "const clock = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());", 'const clock = () => 0;', 'shared-gets-frozen-clock'), 'frozen-clock');
   const baseAtInstall = await load(anchored(src, 'export function sharedGets(fetchImpl, { base = null, joinMs = JOIN_MS, now = clock } = {}) {', "export function sharedGets(fetchImpl, { base = (typeof location !== 'undefined' ? location.href : 'http://localhost/'), joinMs = JOIN_MS, now = clock } = {}) {", 'shared-gets-base-at-install'), 'base-at-install');
 
@@ -183,6 +184,26 @@ try {
     ok(n9R === 1, `RED: a negative age taken as young ⇒ joined (${n9R} request)`, { n9R });
     ok(d.requests === 2 && d.youngHung && d.late === 'answered', `the DEFAULT clock: an ask at once joins the hung read, an ask 150 ms later (a 60 ms window) is its own request and its reply lands (${d.requests} requests; the late ask ${d.late})`, d);
     ok(dR.requests === 1 && dR.late === 'hung', `RED: a clock that never moves ⇒ the late ask joins the hung read and hangs (${dR.requests} request; ${dR.late})`, dR);
+  }
+
+  console.log('⑩ a write whose fetch hands back a THENABLE that is not native: its answer is marked before the caller goes on (主开发 r3707)');
+  {
+    const runT = async (mod) => {
+      const calls = [];
+      const fetch = (input, init) => {
+        calls.push((init && init.method) || 'GET');
+        if (init && init.method === 'POST') return { then(res) { setTimeout(() => res(new Response('{}', { status: 200 })), 5); } };   // a thenable, not a native promise
+        return new Promise((r) => setTimeout(() => r(new Response(JSON.stringify({ n: calls.length }), { status: 200, headers: { 'Content-Type': 'application/json' } })), 15));
+      };
+      const f = mod.sharedGets(fetch, { base: BASE });   // the default road: the module's own clock and window
+      await f('/api/tasks', { method: 'POST', body: '{}' });
+      const a = f('/api/tasks'), b = f('/api/tasks');   // asked at once, right after the write's answer
+      await Promise.all([a, b]);
+      return calls.filter((m) => m === 'GET').length;
+    };
+    const [gT, rT] = await Promise.all([runT(M), runT(lateMark)]);
+    ok(gT === 1, `a write answered by a thenable: two reads asked at once right after its answer share ONE request (${gT}) — the answer's mark ran before the caller went on`, { gT });
+    ok(rT === 2, `RED: the mark registered after the caller's own ⇒ the write still counts as out when the caller reads: the two reads go unshared (${rT} requests)`, { rT });
   }
 
   console.log('⑥ the page installs it at its boot, before the exit hop and the App (by text)');
