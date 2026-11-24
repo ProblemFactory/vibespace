@@ -1363,6 +1363,9 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // proxy exit through its own forwarder, and keeping an exit writes it on the profile — the PERSON's presses (EXIT_IS_USERS)
       ['POST', '/api/browser/profiles/:id/exit-check', `/api/browser/profiles/${liveP.id}/exit-check`, {}],
       ['POST', '/api/browser/profiles/:id/egress', `/api/browser/profiles/${liveP.id}/egress`, { publicIp: '203.0.113.9', country: 'JP', timezone: 'Asia/Tokyo' }],
+      // B-9584 U3 (lane cli-update-needs-nothing): a profile's time zone, language and place are the PERSON's setting — «Environment…»
+      // saves through the keeper's one door (ENV_IS_USERS); derived since U3, walked from its follow (this heavy suite was red without it)
+      ['POST', '/api/browser/profiles/:id/environment', `/api/browser/profiles/${liveP.id}/environment`, { environment: { timezone: { mode: 'value', value: 'Asia/Tokyo' } } }],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });
@@ -1382,6 +1385,7 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
     // the keeper's own verdicts, a profile the person does not have answers 404 like no profile, and a copy of the routes without the
     // exit check's guard lets a token through — the walk can go red on it
     ok(!kb.profile(liveP.id).egress, 'the exit check\'s two routes × {vsst_, jbt_}: no exit was kept on the profile by a token (the body a token sent is a whole typed exit)');
+    ok(!kb.profile(liveP.id).environment, 'the environment route × {vsst_, jbt_}: no time zone was set on the profile by a token (B-9584 U3: the body a token sent is a whole setting)');
     const exP = await hit(W, 'POST', `/api/browser/profiles/${liveP.id}/exit-check`, {});
     ok(exP.status === 409 && exP.code === 'exit_no_proxy', '…the PERSON\'s press (no bearer) on «Check the exit…» reaches the keeper\'s own verdict: a profile with no proxy of its own answers 409 exit_no_proxy (no check address asked, nothing kept)', exP);
     const keptP = await hit(W, 'POST', `/api/browser/profiles/${liveP.id}/egress`, { publicIp: '203.0.113.9', country: 'JP', timezone: 'Asia/Tokyo' });
