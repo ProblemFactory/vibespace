@@ -137,12 +137,16 @@ function strayRefusal({ tool, what = 'a message', strays, after = null, detail =
  *  cut is SAID. An older route that does not count ⇒ this CLI's own count of what it sent.
  *  lane bl-msg B-3e61: a route that names what the secret belt MASKED (`masked`: the heads as written) is told that — the
  *  count moved because a value became «redacted», never because the end was cut (four sightings read it as a length cap). */
-function sentLine({ chars: kept, detailChars, masked, maskedMore } = {}, text, detail) {
+function sentLine({ chars: kept, detailChars, masked, maskedMore, scrubbed } = {}, text, detail) {
   const given = chars(String(text ?? '').trim());   // routes trim the ends; that is not a cut
   const n = Number.isFinite(kept) ? kept : chars(text);
   let line = `sent: ${n} character${n === 1 ? '' : 's'}`;
   const said = Array.isArray(masked) ? masked.filter((x) => typeof x === 'string' && x).slice(0, 8) : [];
-  if (said.length) line += ` — the secret belt masked the value at ${said.map((x) => `«${x}»`).join(', ')}${maskedMore ? ' and more' : ''} (each now «redacted»)`;
+  // B-4f7f (主开发 r2804): a route that COUNTS the spans its scrub changed is told so, whether or not it names a head — the sender knows
+  // that what arrived is not what it wrote (a count, never the words)
+  const spans = Number.isInteger(scrubbed) && scrubbed > 0 ? scrubbed : 0;
+  if (spans) line += ` — the secret belt changed ${spans} span${spans === 1 ? '' : 's'} of it to «redacted», so what arrived is not what you wrote${said.length ? ` (a value at ${said.map((x) => `«${x}»`).join(', ')}${maskedMore ? ' and more' : ''})` : ''}`;
+  else if (said.length) line += ` — the secret belt masked the value at ${said.map((x) => `«${x}»`).join(', ')}${maskedMore ? ' and more' : ''} (each now «redacted»)`;
   else if (n < given) line += ` — ${given} were given: the last ${given - n} were CUT`;
   if (typeof detail === 'string' && detail.trim()) {
     const dGiven = chars(detail.trim());

@@ -3184,6 +3184,34 @@ console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the r
   ok(lineMode.p.ok && !lineMode.p.message.text.includes('the rest of the brief arrives'), 'RED CONTROL (the line mode in the group log): the rest of the message is lost again — the SEND leg goes red', JSON.stringify(lineMode.p.message && lineMode.p.message.text));
 }
 
+// B-4f7f (主开发 r2804): THE SENDER IS TOLD HOW MANY spans the scrub changed — the post answers `scrubbed`, a count (never the words) of
+// the belt's marks in what it kept that the sender's OWN text did not already carry; the send and the dispatch answers carry it on
+console.log('§bl-msg B-4f7f the post answers HOW MANY spans its scrub changed (a count, never the words)');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const V1 = ['q7', 'x9z3', 'w5k2', 'm4'].join(''), V2 = ['r8', 'y2v6', 'p1n3', 'k5'].join('');   // values, joined at runtime
+  const TWO = `NO grant line for session:${V1} and later token=${V2} then the rest of the brief arrives`;
+  const OWN = `my own text said «redacted» once, and session:${V1} once`;
+  const drive = async (name, ge) => {
+    const f = fixture(name, ge ? { ge } : {});
+    const made = await f.eng.create({ by: G.OWNER, name: 'count', members: [A, B, C], quiet: true });
+    const gid = made.group.id;
+    const two = await f.eng.post({ group: gid, from: A, text: TWO });
+    const own = await f.eng.post({ group: gid, from: A, text: OWN });
+    const plain = await f.eng.post({ group: gid, from: A, text: 'all green, nothing secret' });
+    f.close();
+    const facts = (q) => (q && q.ok ? { scrubbed: q.scrubbed, marks: q.message.text.split('«redacted»').length - 1, masked: q.masked } : q);
+    return { two: facts(two), own: facts(own), plain: facts(plain) };
+  };
+  const live = await drive('b4f7f');
+  ok(live.two.scrubbed === 2 && live.two.marks === 2 && live.own.scrubbed === 1 && live.own.marks === 2 && live.plain.scrubbed === 0,
+    'B-4f7f: the post answers how many spans its scrub changed — 2 for two masked values; 1 where the sender\'s OWN text already carried a mark (never counted as the scrub\'s); 0 for nothing secret', JSON.stringify(live));
+  const COUNT = '    const scrubbed = Math.max(0, marksIn(body) - marksIn(given));';
+  ok(src.split(COUNT).length === 2, 'the control finds its line (the post\'s count)');
+  const red = await drive('b4f7f-red', mutantCopies('b4f7f-ge', REPO).load('src/server/groups-engine.js', editAnchor(src, COUNT, '    const scrubbed = 0;', "src/server/groups-engine.js"), 'no-count'));
+  ok(red.two.scrubbed === 0 && red.two.marks === 2, 'RED CONTROL (the count removed, a copy of the engine): two spans changed and the answer says none — the leg above goes red', JSON.stringify(red.two));
+}
+
 console.log('§P B-f276 (lane bl-windows, 主开发 r487): a HELD groups.json pauses the agent groups — every door refused BY NAME, nothing granted, nothing sent');
 {
   // B-f276 1c FOLLOW (its round whfrsuwsp lens 3, 主开发 r1588 (5)): THE HUNG SEND (its read r1 M4) BY BEHAVIOUR — the real route over the

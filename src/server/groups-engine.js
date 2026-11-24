@@ -79,6 +79,10 @@ const { makeRecord, inertFrames } = require('../channel-record.js');
 const { toAgentText: agentText } = require('../peer-text.js');   // verify r1 F3: a group's name on its way out (view)
 const DM = require('../dispatch-model.js');   // lane worker-dispatch verify r1 ②: the dispatch ledger's windows (PURE)
 const belt = require('../agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a group message a peer / the disk sees never carries a credential in the clear
+// B-4f7f (主开发 r2804): THE SENDER IS TOLD how many spans the scrub changed — the belt's marks in what is kept that the sender's own
+// text did not already carry (a count, never the words)
+const { REDACTED } = require('../secret-shapes.js');
+const marksIn = (t) => String(t == null ? '' : t).split(REDACTED).length - 1;
 const msgAcl = require('../msg-acl.js');
 // "Clear content…" (2026-09-28): the replacement record, the fold every reader applies, the clear itself
 const RC = require('../record-clear.js');
@@ -1254,6 +1258,7 @@ function create({
     const masked = [];
     const mw = memberWords(getGroup(rg.group.id));
     const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });
+    const scrubbed = Math.max(0, marksIn(body) - marksIn(given));   // B-4f7f: the spans the scrub changed, said back as a count
     // the owner's @-picker places (start / end on the words as typed) moved by what the belt masked before each — its prefix, masked
     const picks = body === given || !Array.isArray(picked) ? picked : picked.map((x) => {
       const ps = Number(x && x.start), pe = Number(x && x.end);
@@ -1305,7 +1310,7 @@ function create({
     const others = res.group.members.map((m) => m.member).filter((m) => m !== from);
     const w = await wakeAll(res.group.id, rec, others, mayWake, { pressed });
     const aw = await awaitWakes(res.group.id, rec, w, mayWake, !!wakeEveryone, { pressed });
-    return { ok: true, group: view(getGroup(res.group.id)), message: rec, masked, woke: w.woke, refused: w.refused, later: w.later, queued: w.queued, awaited: aw };
+    return { ok: true, group: view(getGroup(res.group.id)), message: rec, masked, scrubbed, woke: w.woke, refused: w.refused, later: w.later, queued: w.queued, awaited: aw };
   }
   /** an await entry is kept a day past its `until` (read's clause), then dropped on the next write */
   function pruneAwaits(awaits, at) {

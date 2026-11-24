@@ -145,7 +145,7 @@ const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Grou
         ← long or quoted text: --text-file <path> or --text - (stdin, a heredoc) instead of "text"; the CLI refuses stray words
           (a message is ONE argument: a word after it ⇒ exit 2, nothing sent) — at most 16 KB (the route's bound); it answers sent: N characters
           The secret belt: a value written as a secret (a credential-named NAME=value or NAME: value, a known token) is stored as
-          «redacted» (in a sentence the value only; a header or a key block to its line end) and the answer names each place.
+          «redacted» (in a sentence the value only; a header or a key block to its line end); the answer says how many spans it changed and names each head.
   vibespace-msg dispatch <agent> --file brief.md | --text - | "text"   ← hand a WORKER its next brief: compacted first if idle, then woken (ONE billed turn)
         = send <agent> --wake --compact-first "text". Waits for the compaction (≤ 3 min); says whether it compacted and why not.
           Compacts only a worker in a Task Group you both belong to, idle, with no owner input for 10 min; the compaction

@@ -86,16 +86,40 @@ console.log('§1 the PURE rule (src/agent-cli-text.js)');
   {
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const tsrc = fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8');
-    const T0 = mutantCopies('blm-cli', REPO).load('src/agent-cli-text.js', editAnchor(tsrc, '  if (said.length) line +=', '  if (false) line +=', "src/agent-cli-text.js"), 'no-masked');
+    const T0 = mutantCopies('blm-cli', REPO).load('src/agent-cli-text.js', editAnchor(tsrc, '  else if (said.length) line +=', '  else if (false) line +=', "src/agent-cli-text.js"), 'no-masked');   // B-4f7f: the heads' branch now follows the count's
     ok(T.sentLine({ chars: 30, masked: ['a:'], maskedMore: true }, 'y'.repeat(36)).includes('«a:» and more (each'), '…a ninth mask is said as «and more»');
-    ok(tsrc.includes('  if (said.length) line +=') && T0.sentLine({ chars: 30, masked: ['session:'] }, 'y'.repeat(36)).endsWith('were CUT'), 'RED CONTROL (the masked branch removed): the mask is read as a CUT again — the leg above goes red');
+    ok(tsrc.includes('  else if (said.length) line +=') && T0.sentLine({ chars: 30, masked: ['session:'] }, 'y'.repeat(36)).endsWith('were CUT'), 'RED CONTROL (the masked branch removed): the mask is read as a CUT again — the leg above goes red');
+  }
+  // B-4f7f (主开发 r2804): a route that COUNTS the spans its scrub changed ⇒ the sender is told HOW MANY (a count, never the words),
+  // with or without a head to name — so a sender knows that what arrived is not what it wrote
+  {
+    const both = T.sentLine({ chars: 30, masked: ['session:'], scrubbed: 3 }, 'y'.repeat(36));
+    const bare = T.sentLine({ chars: 30, masked: [], scrubbed: 1 }, 'y'.repeat(36));
+    ok(both === 'sent: 30 characters — the secret belt changed 3 spans of it to «redacted», so what arrived is not what you wrote (a value at «session:»)'
+      && bare === 'sent: 30 characters — the secret belt changed 1 span of it to «redacted», so what arrived is not what you wrote' && !/CUT/.test(both + bare),
+      'B-4f7f: a route that counts the spans its scrub changed ⇒ the line SAYS how many (3, with its head; 1 with no head to name), never a cut', JSON.stringify([both, bare]));
+    ok(T.sentLine({ chars: 30, masked: ['session:'], scrubbed: 0 }, 'y'.repeat(36)).endsWith('(each now «redacted»)') && T.sentLine({ chars: 30, scrubbed: 'x' }, 'y'.repeat(36)).endsWith('were CUT'),
+      '…a count of 0 or a malformed one changes nothing: the heads as before, else the cut');
+    const { mutantCopies: mc } = await import('./mutant-copy.mjs');
+    const tsrc2 = fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8');
+    const T1 = mc('b4f7f-cli', REPO).load('src/agent-cli-text.js', editAnchor(tsrc2, '  if (spans) line +=', '  if (false) line +=', "src/agent-cli-text.js"), 'no-count');
+    const red = T1.sentLine({ chars: 30, masked: [], scrubbed: 2 }, 'y'.repeat(36));
+    ok(!/changed 2 spans/.test(red) && /were CUT/.test(red), 'RED CONTROL (the count branch removed, a copy): the sender is told nothing about the 2 changed spans — the leg above goes red', red);
+  }
+  // …on EVERY road a member's message is sent by: the send's answer and the dispatch's answer carry the engine's count
+  {
+    const AR = require(path.join(REPO, 'src/agent-routes.js'));
+    const post = { group: { id: 'g-1', name: 'lane', pair: true }, pairCreated: false, woke: [], refused: [], later: [], message: { text: 'a «redacted» b «redacted»' }, masked: ['session:'], scrubbed: 2 };
+    const sent = AR.msgSendAnswer(post), none = AR.msgSendAnswer({ ...post, scrubbed: 0 });
+    const disp = AR.dispatchAnswer({ post, record: { why: '', target: null, wake: {} }, replay: false, attempt: null });
+    ok(sent.scrubbed === 2 && disp.scrubbed === 2 && !('scrubbed' in none), 'B-4f7f: the SEND answer and the DISPATCH answer both carry the count (2); a post that changed nothing carries none', JSON.stringify({ sent: sent.scrubbed, dispatch: disp.scrubbed, none: none.scrubbed }));
   }
 }
 
 // ── the FAKE route: counts every call, answers each path in the shape its CLI prints; `chars` = what it got, counted
 const FAKE = { calls: [], mode: 'count' };
 const kept = (t) => (FAKE.mode === 'cut' ? [...String(t)].slice(0, 10).join('') : String(t));
-const counted = (t) => (FAKE.mode === 'none' ? {} : FAKE.mode === 'masked' ? { chars: T.chars(String(t).replace(/session:\S+/, 'session:«redacted»')), masked: ['session:'] } : { chars: T.chars(kept(t)) });   // lane bl-msg B-3e61: a route that names what its belt masked
+const counted = (t) => (FAKE.mode === 'none' ? {} : FAKE.mode === 'masked' ? { chars: T.chars(String(t).replace(/session:\S+/, 'session:«redacted»')), masked: ['session:'] } : FAKE.mode === 'scrubbed' ? { chars: T.chars(String(t).replace(/session:\S+/, 'session:«redacted»').replace(/token=\S+/, 'token=«redacted»')), masked: ['session:'], scrubbed: 2 } : { chars: T.chars(kept(t)) });   // lane bl-msg B-3e61: a route that names what its belt masked
 const srv = http.createServer((req, res) => {
   let b = '';
   req.on('data', (c) => { b += c; });
@@ -294,6 +318,9 @@ console.log('§5 the echo is the ROUTE\'s count');
   ok(old.code === 0 && old.out.includes('sent: 9 characters'), 'an older route without chars ⇒ the CLI\'s own count (code points)', old.out);
   const msk = await run(CLI('msg'), ['send', 'g-1', 'the session:abcdefghijklmnopqrst and the rest'], { mode: 'masked' });
   ok(msk.code === 0 && msk.out.includes('sent: 35 characters — the secret belt masked the value at «session:» (each now «redacted»)') && !/CUT/.test(msk.out), 'lane bl-msg B-3e61: msg send through a route whose belt masked a value ⇒ the confirmation names it, never a cut', msk.out);
+  const V4 = ['abcdefgh', 'ijklmnop', 'qrst'].join('');   // a value, joined at runtime (a secret-shaped fixture is never a literal)
+  const scr = await run(CLI('msg'), ['send', 'g-1', `the session:${V4} and ${['tok', 'en'].join('')}=${V4} end`], { mode: 'scrubbed' });
+  ok(scr.code === 0 && scr.out.includes('the secret belt changed 2 spans of it to «redacted», so what arrived is not what you wrote (a value at «session:»)') && !/CUT/.test(scr.out), 'B-4f7f: msg send through a route that counts the changed spans ⇒ the CLI SAYS how many (2)', scr.out);
   const one = await run(CLI('task'), ['backlog-add', 'x'], { mode: 'count' });
   ok(one.code === 0 && /^ {2}sent: 1 character$/m.test(one.out), 'one character ⇒ singular', one.out);
 }
