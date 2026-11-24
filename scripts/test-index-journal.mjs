@@ -14,7 +14,7 @@
 //   ⑦ LAW 8 — ONE READER: no product file reads channels/index* by name outside the store. RED: the release's migrations read.
 //   ⑥ LAW 11 — A PURGE LEAVES NO BYTE: an account's rows removed in one whole write, the journal's compaction awaited — none
 //      of its keys in index.json or the journal. RED: the removal said done without the compaction.
-//   ⑨ LAW 6 — THE TAIL IS A WHOLE LINE: the writer laws' failed-append scenes (ENOSPC, a short write, an fsync EIO, the
+//   ⑨ (IN THE HEAVY TWIN, §T) LAW 6 — THE TAIL IS A WHOLE LINE: the writer laws' failed-append scenes (ENOSPC, a short write, an fsync EIO, the
 //      truncate-back failing) run with a PACED line — the next journal write is the compaction, nothing glued; a tail with
 //      no newline at load — the same. RED: a failed append that owes no compaction.
 //   ⑩ THE ENGINE (r1312): the static census — under the mail driver and the engine's passes no update scope reaches the
@@ -25,12 +25,13 @@
 //   ⑫ THE HOLD (r1542, on the train): index.json damaged — nothing of the family is read or written: an update refused by
 //      name, no journal line, fold() / journalDurable() refused, no warm-up, both files byte-identical. RED: the journal deaf.
 //   ⑮ A ROW HAS LANDED (r1765, B-526c's set): when its journal line synced (a stall between the append and its sync) — never at
-//      its making, never after a failed append; held: never. REDs: landed at the making; only by a whole write; on any
+//      its making, never after a failed append (⑮ (2) / (2b): IN THE HEAVY TWIN, §T); held: never. REDs: landed at the making; only by a whole write; on any
 //      answer; a journal deaf to the hold.
 //   ⑬ THE FOLLOW (r1542 (2)): law 10's LATER road, law 4's byte bound alone, a row changed before its touch, ⑪'s guard at a
-//      produce, a fn that throws, the purge's failure through the real remove() — each with its red control.
+//      produce, a fn that throws, the purge's failure through the real remove() — each with its red control (⑬ (c)'s: IN THE HEAVY
+//      TWIN, §T).
 //   ⑭ THE STOP (r1542 (3)): paced lines owed at a SIGTERM are on disk after the hub's exit passes. RED: the rank-0 pass alone.
-//   ⑯ THE INDEX APPEARS MID-LIFE (r1763 (3)): read missing, its journal replayed, then the index appears — the older life's
+//   ⑯ (IN THE HEAVY TWIN, §T) THE INDEX APPEARS MID-LIFE (r1763 (3)): read missing, its journal replayed, then the index appears — the older life's
 //      journal stays byte for byte. RED: the compaction's road deaf to the hold.
 //   ⑰ THE LANDING'S ROADS (r1850): a birth after a produced whole write, a rebirth with its old line in flight, the boot, a burst's
 //      whole road, the order across a fold and a compaction, the hold's own guard — with their red controls.
@@ -39,6 +40,8 @@
 //   ⑱ AN IN-ROW STAMP (主开发 r2081): a poll stamp written into the row past the door reaches the stamp journal at the
 //      update's end — a kill before any fold keeps it; the update's heals are ONE append (r2287). REDs: no heal at the
 //      update's end; the heals unbatched.
+//   §T THE HEAVY TWIN (主开发 r3921): scripts/test-index-journal-failures.mjs holds the legs whose seconds are waits — this file
+//      pins that it holds them and runs none of them.
 // Run: node scripts/test-index-journal.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -275,8 +278,8 @@ console.log('⑧ the first change after open, a change after close, lines while 
   ok(t1 === 'after-close', `⑧ M3: a change after close() is on disk (${t1})`);
 }
 
-// ═══ ⑨ LAW 6 ═══
-console.log('⑨ a failed append of a PACED line — the next journal write is the compaction, no glued line');
+// ⑨ moved VERBATIM to the heavy twin scripts/test-index-journal-failures.mjs (§T below); its stand-in thread stays here for ⑮
+// and ⑰ (the twin holds its own copy, the same text):
 // the writer laws' failed-append scenes (test-store-writer-laws ⑧, round 3's law 4) run with a PACED line: a stand-in thread
 // runs the REAL writeJob and, on the FIRST append while a marker exists, hands it a file system that fails as asked —
 // enospc (4 KB written, then ENOSPC) · short (4 KB, then a write of 0) · fsync (EIO at fsync); trunc 'eio' makes the
@@ -309,58 +312,6 @@ parentPort.on('message', (m) => {
   parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own });   // own: as the real thread's answer (B-f276 1c: the store's other lane knows the file it made)
 });
 `);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const parses = (t) => t.split('\n').filter(Boolean).every((l) => { try { JSON.parse(l); return true; } catch { return false; } });
-async function lawSix(mod, fault, trunc, tag) {
-  const dir = tmp(tag), acts = path.join(dir, 'index-acts.ndjson'), marker = path.join(dir, 'fault');
-  fs.writeFileSync(path.join(dir, 'fault.json'), JSON.stringify({ fault, trunc }));
-  const w = SW.create({ log: quiet, workerPath: STANDJ });
-  let after = '', back = null, said = [], fired = false;
-  try {
-    const st = mod.createChannelStore({ dir, log: quiet, writer: w });
-    await seed(st, 4);
-    fs.writeFileSync(path.join(dir, 'blockix'), '1');   // from here the index cannot be written: the journal alone holds the changes
-    await st.index.update(() => { st.index.entry('a', 'c0').readAt = 101; });   // a PACED line, appended whole
-    await st.index.journalDurable();
-    fs.writeFileSync(marker, '1');                                               // the NEXT append fails as asked
-    await st.index.update(() => { st.index.entry('a', 'c1').note = 'x'.repeat(9000); });   // a PACED line: its append fails
-    for (let k = 0; k < 100 && (fs.existsSync(marker) || w.pending(acts)); k++) await sleep(50);   // the writer's own retry (its backoff)
-    fired = !fs.existsSync(marker); after = read(acts);
-    try { st.close(); } catch { }
-    fs.unlinkSync(path.join(dir, 'blockix'));
-    const st2 = mod.createChannelStore({ dir, log: { ...quiet, warn: (l) => said.push(String(l)) }, writer: w });   // a restart over the same folder
-    back = st2.index.peek('a/c1'); try { st2.close(); } catch { }
-  } finally { w.stop(); }
-  const jobs = read(path.join(dir, 'jobs.log')).split('\n').filter(Boolean), at = jobs.findIndex((j) => / FAULT$/.test(j));
-  return { fault, trunc, fired, next: at >= 0 ? jobs[at + 1] || null : null, whole: parses(after) && after.endsWith('\n'), back: !!(back && back.note && back.note.length === 9000), dropped: said.some((l) => /not readable dropped/.test(l)) };
-}
-// law 6's other half: a tail with no newline at load (a kill cut a paced line's newline) — the next journal write is the compaction
-async function lawSixTail(tag) {
-  const dir = tmp(tag), acts = path.join(dir, 'index-acts.ndjson');
-  { const o = open(CS, dir); await seed(o.st, 4); shut(o); }
-  const held = JSON.parse(read(path.join(dir, 'index.json'))).actsSeq || 0;
-  fs.writeFileSync(acts, JSON.stringify({ seq: held + 1, rows: { 'a/c2': { title: 'cut-tail' } } }));   // a whole line, its newline never landed
-  const w = SW.create({ log: quiet, workerPath: STANDJ });
-  let after = '', back = null;
-  try {
-    const st = CS.createChannelStore({ dir, log: quiet, writer: w });
-    await st.index.update(() => { st.index.entry('a', 'c3').readAt = 7; });   // a PACED line after the open tail
-    await st.index.journalDurable();
-    after = read(acts); try { st.close(); } catch { }
-    const st2 = CS.createChannelStore({ dir, log: quiet, writer: w }); back = [(st2.index.peek('a/c2') || {}).title, (st2.index.peek('a/c3') || {}).readAt]; try { st2.close(); } catch { }
-  } finally { w.stop(); }
-  return { first: read(path.join(dir, 'jobs.log')).split('\n')[0], whole: parses(after) && after.endsWith('\n'), back };
-}
-{
-  const R = await Promise.all([['enospc', 'eio'], ['short', 'eio'], ['fsync', 'eio'], ['enospc', 'ok']].map(([f, t]) => lawSix(CS, f, t, `six-${f}-${t}`)).concat([lawSixTail('six-tail')]));
-  const tail = R.pop();
-  ok(R.every((r) => r.fired && r.next === 'whole' && r.whole && r.back && !r.dropped),
-    `⑨ LAW 6: a PACED line's append failed (${R.map((r) => `${r.fault}${r.trunc === 'eio' ? ' + its truncate EIO' : ''}`).join(' · ')}) — the next journal write was the compaction (${R.map((r) => r.next).join(' · ')}), every line parses, nothing dropped, and after a restart the change is THERE`, R);
-  ok(tail.first === 'whole' && tail.whole && tail.back[0] === 'cut-tail' && tail.back[1] === 7, `⑨ LAW 6: a journal whose last line had no newline at load — the next journal write (a paced line's) was the compaction (${tail.first}), and both changes are read after a restart`, tail);
-  const EM = M.load('src/channel-store.js', anchored(SRC, 'if (!ok) { if (w && !w.compact) compactOwed = true; return; }', 'if (!ok) { return; }', 'a failed append owes no compaction'), 'six-no-compact');
-  const red = await lawSix(EM, 'enospc', 'eio', 'six-red');
-  ok(red.fired && (red.next !== 'whole' || !red.whole || !red.back), `⑨ RED CONTROL: a failed append that owes no compaction — the retry was ${red.next === 'append' ? 'an APPEND' : red.next}, glued to the fragment: lines parse ${red.whole}, the change after a restart ${red.back}, a line dropped ${red.dropped} — the leg above would go red`, red);
-}
 
 // ═══ ⑩ THE ENGINE: THE STATIC CENSUS UNDER MAIL + THE REFUSAL STORM ═══
 console.log('⑩ the engine under mail and a refusal storm — no whole touch (each named), no whole write');
@@ -540,38 +491,6 @@ async function landLeg(mod, tag) {
   try { st.close(); } catch { } try { w.stop(); } catch { }
   return { during, after };
 }
-// r3905: the leg waits on FACTS — the failure ANSWERED (the store's own word: the compaction owed) before landed is read, then
-// durable() until the row has landed (its answers kept). The release's leg waited a TIME (the fault marker gone — the thread
-// deletes it when the faulty append STARTS — plus a fixed 50 ms) and read ONE durable() blind: a failure answered after those
-// 50 ms (a loaded machine) made that durable() hear the failing append itself (false: the writer answers every waiter at a
-// failure) and landed was read before the retry's compaction ran. place.late holds the failed append's answer in the stand-in
-// thread until the leg releases it 300 ms after the marker went; place.fixedWait is the release's own wait (the red control).
-async function failLandLeg(mod, tag, place = {}) {
-  const dir = tmp(tag), w = SW.create({ log: quiet, workerPath: STANDJ });
-  fs.writeFileSync(path.join(dir, 'fault.json'), JSON.stringify({ fault: 'enospc', trunc: 'eio', late: !!place.late }));
-  const st = mod.createChannelStore({ dir, log: quiet, writer: w });
-  await seed(st, 20);
-  fs.writeFileSync(path.join(dir, 'fault'), '1');   // the next append fails as asked (4 KB, then ENOSPC; the truncate-back fails too)
-  await st.index.update(() => { st.index.entry('a', 'born-2').note = 'z'.repeat(9000); });
-  for (let k = 0; k < 100 && fs.existsSync(path.join(dir, 'fault')); k++) await new Promise((z) => setTimeout(z, 20));
-  const pass = path.join(dir, 'late.pass'), release = place.late ? setTimeout(() => fs.writeFileSync(pass, '1'), 300) : null;
-  const answers = [];
-  let afterFail, afterRetry, owed = false;
-  if (place.fixedWait) {   // the release's own wait: a fixed 50 ms, then ONE durable() read blind
-    await new Promise((z) => setTimeout(z, 50));
-    afterFail = st.index.landed('a/born-2');
-    answers.push(await st.index.journalDurable());   // the «retry»
-    afterRetry = st.index.landed('a/born-2');
-  } else {
-    for (let k = 0; k < 250 && !(owed = st.index.journalStats().compactOwed === true); k++) await new Promise((z) => setTimeout(z, 20));   // the failure answered
-    afterFail = st.index.landed('a/born-2');
-    while (!st.index.landed('a/born-2') && answers.length < 5) answers.push(await st.index.journalDurable());   // the retry: the compaction, as a fact
-    afterRetry = st.index.landed('a/born-2');
-  }
-  if (release) { clearTimeout(release); try { fs.writeFileSync(pass, '1'); } catch { } }   // a thread still holding is let go before the stop
-  try { st.close(); } catch { } try { w.stop(); } catch { }
-  return { afterFail, afterRetry, owed, answers };
-}
 async function heldLandLeg(mod, tag, waitMs = 200) {
   const dir = tmp(tag), ixf = path.join(dir, 'index.json');
   fs.writeFileSync(ixf, '{"v":1,"conversations":{"a/c0"');   // damaged: the family held
@@ -595,15 +514,6 @@ async function heldLandLeg(mod, tag, waitMs = 200) {
   const MW = M.load('src/channel-store.js', anchored(SRC, "    for (const [k, sq] of bornSeq) if (sq <= w.upTo) { unlanded.delete(k); bornSeq.delete(k); }", "    void 0;", 'landed only by a whole write'), 'land-only-whole');
   const rw = await landLeg(MW, 'land-red2');
   ok(rw.after === false, `⑮ (1) RED CONTROL: a row that lands only by a whole write (B-526c's set put beside the journal by text alone) — still unlanded after its line synced (${rw.after}) — the leg above would go red`, rw);
-  const f = await failLandLeg(CS, 'land-fail');
-  ok(f.owed === true && f.afterFail === false && f.afterRetry === true, `⑮ (2) a born row whose append FAILED: landed ${f.afterFail} once the failure was answered (the compaction owed: ${f.owed}); after the retry's compaction landed: ${f.afterRetry} (durable answered ${f.answers.join(', ')})`, f);
-  const fl = await failLandLeg(CS, 'land-fail-late', { late: true });
-  ok(fl.owed === true && fl.afterFail === false && fl.afterRetry === true, `⑮ (2b) the failed append's ANSWER placed late (held until 300 ms after its job began, a loaded machine's answer): landed ${fl.afterFail} once the failure was answered; after the retry's compaction landed: ${fl.afterRetry} (durable answered ${fl.answers.join(', ')})`, fl);
-  const fr = await failLandLeg(CS, 'land-fail-late-red', { late: true, fixedWait: true });
-  ok(fr.afterRetry === false && fr.answers[0] === false, `⑮ (2b) RED CONTROL: the release's own wait (the marker gone + a fixed 50 ms, ONE durable() read blind) under the same late answer — durable heard the failing append itself (${fr.answers[0]}) and landed was read before the retry: ${fr.afterRetry} — the leg above would go red`, fr);
-  const MF = M.load('src/channel-store.js', anchored(SRC, "    if (!ok) { if (w && !w.compact) compactOwed = true; return; }", "    if (w) for (const [k, sq] of bornSeq) if (sq <= w.upTo) { unlanded.delete(k); bornSeq.delete(k); }\n    if (!ok) { if (w && !w.compact) compactOwed = true; return; }", 'landed on any answer'), 'land-any');
-  const rf = await failLandLeg(MF, 'land-fail-red');
-  ok(rf.afterFail === true, `⑮ (2) RED CONTROL: a row said landed on the writer's answer whatever it was — landed after a FAILED append (${rf.afterFail}) — the leg above would go red`, rf);
   const h = await heldLandLeg(CS, 'land-held');
   ok(h.landed === false && h.afBytes === 0, `⑮ (3) the family HELD: a row born outside an update is never said landed (${h.landed}); no journal byte written (${h.afBytes})`, h);
   const MH = M.load('src/channel-store.js', anchored(anchored(anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'actOf deaf'), "    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }", "    void 0;", 'produceActs deaf'), "      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),", "      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),", 'landed deaf'), "if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; }", "if (closed || !o.size) return;", 'the outside road deaf'), 'land-held-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
@@ -690,10 +600,6 @@ async function purgeLeg(fails, tag) {
   const BM = M.load('src/channel-store.js', anchored(SRC, "      if (bytes > BURST_BYTES) { flushStats.bursts = (flushStats.bursts || 0) + 1; return 'whole'; }", "      void 0;", 'the byte bound removed'), 'bytes-gone');
   const br = await byteLeg(BM, 'bytes-red');
   ok(br.journaled === 100, `⑬ (b) RED CONTROL: only the byte bound removed — the 100 rows journaled (${br.journaled}) — the leg above would go red`, br);
-  const TOUCH_LINE = SRC.split('\n').find((l) => l.startsWith('    if (curTouch) { curTouch.add(key); }'));
-  const TM = M.load('src/channel-store.js', anchored(SRC, TOUCH_LINE, TOUCH_LINE.replace('curTouch.add(key); }', 'curTouch.add(key); { const v0 = ix.conversations[key]; const l0 = v0 ? rowLine(key, v0) : null; if (l0 !== null) rowFp.set(key, fpOf(l0)); } }'), 'the print taken at the touch (the release\'s before)'), 'before-at-touch');
-  const tr3 = await lawThree(TM, 'three-red');
-  ok(!tr3.hazard, `⑬ (c) RED CONTROL for ②'s second half: the print taken at the TOUCH (the release's «before») — the row changed before its touch is lost (${tr3.hazard}) — ② would go red`, tr3);
   const g = await guardLeg(CS, 'guard');
   ok(g.kept, `⑬ (d) ⑪'s GUARD: a produce inside an update's await re-laid the row it changed while index.json could not be written — the row reached the journal (${g.kept})`, g);
   const GM = M.load('src/channel-store.js', anchored(SRC, 'if (curTouch && curTouch.has(k)) rowFp.delete(k); else rowFp.set(k, fpOf(line)); }', 'rowFp.set(k, fpOf(line)); }', 'the guard removed'), 'guard-gone');
@@ -752,38 +658,6 @@ async function stopLeg(mode, tag) {
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   const i0 = srv.indexOf("SW0.beginExit(); SW0.exitFlush({ only: 'rank0' });"), i1 = srv.indexOf("storeWriter().exitFlush({ debtMs: Date.now() - tDebt }); } catch {} process.exit(", i0);
   ok(i0 > 0 && i1 > i0, '⑭ the hub\'s shutdown (server.js) runs that order: beginExit and the rank-0 pass, then the last pass over every store before its exit — this leg proves the WRITER\'s two passes (a copy of them in a child), not the hub\'s whole order: server.js runs its other stops between them (channelsWiring.shutdown() closes this store there), which this child does not (主开发 r2455 (3))');
-}
-
-// ═══ ⑯ THE INDEX APPEARS MID-LIFE (主开发 r1763 (3)): the older life's journal stays byte for byte ═══
-console.log('⑯ an index read missing, its journal replayed, then the index appears — no journal write after');
-async function appearLeg(mod, tag) {
-  const dir = tmp(tag), af = path.join(dir, 'index-acts.ndjson'), ixf = path.join(dir, 'index.json');
-  // a journal of an older life and NO index.json (a mount that came late): its lines replayed at the load; one line cut short ⇒
-  // a compaction owed — a journal write that must never run once the index is held
-  fs.writeFileSync(af, [JSON.stringify({ seq: 1, rows: { 'a/old-1': { title: 'older life 1' } } }), JSON.stringify({ seq: 2, rows: { 'a/old-2': { title: 'older life 2' } } }), '{"seq":3,"rows":{"a/old-3"'].join('\n') + '\n');
-  const af0 = fs.readFileSync(af);
-  const o = open(mod, dir);
-  const replayed = !!o.st.index.peek('a/old-1');
-  fs.writeFileSync(ixf, JSON.stringify({ v: 1, conversations: { 'a/late': { title: 'the late mount' } } }));   // the index APPEARS
-  const first = await o.st.index.update(() => { o.st.index.entry('a', 'n-1').title = 'new'; }, { durable: true }).then(() => 'applied', (e) => (e && e.code) || 'refused');   // its exclusive create meets the file
-  const held = !!o.st.index.blocked();
-  const jd = await o.st.index.journalDurable().then(() => 'landed', (e) => (e && e.code) || 'refused');
-  await o.st.index.durable().catch(() => false);
-  try { o.st.index.entry('a', 'n-2').title = 'outside an update'; } catch { }
-  await new Promise((z) => setTimeout(z, 700));   // past the pace: a journal write asked would have run
-  try { o.st.index.flush(); } catch { }
-  shut(o);
-  let ixKept = false; try { ixKept = !!JSON.parse(read(ixf)).conversations['a/late']; } catch { }
-  return { replayed, first, held, jd, afSame: fs.readFileSync(af).equals(af0), ixKept };
-}
-{
-  const r = await appearLeg(CS, 'appear');
-  ok(r.replayed && r.first !== 'applied' && r.held && r.jd === 'store-blocked' && r.afSame && r.ixKept, `⑯ THE INDEX APPEARED mid-life (read missing, its journal replayed: ${r.replayed}): the act refused at its exclusive write (${r.first}), the family held (${r.held}), journalDurable() ${r.jd}; after durable(), a change outside an update and the stop, the older life's journal is byte for byte (${r.afSame}) and the appeared index kept (${r.ixKept})`, r);
-  // the moved form (B-f276 1c on the train): produceActs holds an APPEARED index by 1c's own answer (EEXIST, by name) before
-  // the held road's LATER — this scene IS the appeared case, so the deaf copy cuts both
-  const DM = M.load('src/channel-store.js', anchored(anchored(anchored(anchored(SRC, 'if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); askActs(); return W().durable(actsFile); },', 'askActs(); return W().durable(actsFile); },', 'jd deaf'), '  function askActs() { if (closed || ixLoad.blocked) return;', '  function askActs() { if (closed) return;', 'askActs deaf'), '    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }', '    void 0;', 'produceActs deaf'), "    if (ixLoad.blocked && ixLoad.q && ixLoad.q.kind === 'appeared') throw Object.assign(new Error('index-acts.ndjson held: ' + ixLoad.blocked), { code: 'EEXIST', familyHeld: true });", '    void 0;', 'produceActs deaf to an appeared index (1c\'s answer)'), 'appear-deaf');
-  const rd = await appearLeg(DM, 'appear-red');
-  ok(!rd.afSame, `⑯ RED CONTROL: the compaction's road deaf to the hold (the journal's wait, askActs and produceActs' two guards: 1c's answer for an appeared index and the held road) — the older life's journal rewritten (${!rd.afSame}) — the leg above would go red`, rd);
 }
 
 // ═══ ⑰ THE LANDING'S ROADS (主开发 r1850) ═══
@@ -979,6 +853,26 @@ console.log('⑲ the grants migration refusing an unreadable index family: its n
   const GR = M.load('src/server/grants-migration.js', anchored(GMSRC, "data/channels/${(e && e.file) || 'index.json'} is unreadable (${(e && e.code) || 'not a whole JSON document'})", "data/channels/${(e && e.file) || 'index.json'} is unreadable (${e.message})", 'the release\'s refusal (the message)'), 'grants-message');   // stale-pins: kept (the red puts the release's refusal back)
   const gr = refusal(GR, 'grants-refusal-red');
   ok(!!gr.msg && gr.msg.includes(gr.dir), '⑲ RED CONTROL: the release\'s refusal (the error\'s message) puts the data folder\'s absolute path into the run\'s words — the leg above would go red', gr);
+}
+
+// ── §T THE HEAVY TWIN HOLDS THE MOVED LEGS (主开发 r3921, row B-7e49's form: a leg cannot fall between the two files) ──
+// ⑨, ⑮ (2) / (2b) with their three red controls, ⑯ with its red control and ⑬ (c)'s red control moved VERBATIM to the heavy twin
+// scripts/test-index-journal-failures.mjs: their seconds are the writer's 1 s failure backoff (⑨, ⑮ (2) / (2b)), fixed waits past
+// the journal's 500 ms pace (⑯) and a mutant that prints a row at each of 2000 touches (⑬ (c)). This file runs none of them.
+console.log('§T the heavy twin holds ⑨, ⑮ (2) / (2b), ⑯ and ⑬ (c)\'s red control — this file runs none of them');
+{
+  const twinRel = 'scripts/test-index-journal-failures.mjs';
+  const twin = fs.existsSync(path.join(REPO, twinRel)) ? fs.readFileSync(path.join(REPO, twinRel), 'utf8') : '';
+  const here = fs.readFileSync(new URL(import.meta.url), 'utf8');
+  const MOVED = ['async function lawSix(mod, fault, trunc, tag) {', 'async function lawSixTail(tag) {', "const red = await lawSix(EM, 'enospc', 'eio', 'six-red');",
+    'async function failLandLeg(mod, tag, place = {}) {', "await failLandLeg(CS, 'land-fail-late-red', { late: true, fixedWait: true })", "const rf = await failLandLeg(MF, 'land-fail-red');",
+    'async function appearLeg(mod, tag) {', "const rd = await appearLeg(DM, 'appear-red');", "const tr3 = await lawThree(TM, 'three-red');"];
+  const holds = (t) => MOVED.every((h) => t.includes(h));
+  const runsNone = (t) => MOVED.every((h) => t.split(h).length === 2);   // each moved text stands here ONCE: in this list
+  ok(holds(twin) && runsNone(here), `§T the heavy twin holds ⑨, ⑮ (2) / (2b), ⑯ and ⑬ (c)'s red control (${MOVED.length} of their texts) — and this file runs none of them`);
+  ok(/\{ name: 'test-index-journal-failures', tier: 'heavy',/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')), '§T the twin is a HEAVY row of the tier');
+  ok(!holds(twin.replace(MOVED[7], '')), 'RED CONTROL — a twin that lost ⑯\'s red control no longer holds the moved legs: §T goes red');
+  ok(!runsNone(here + '\n' + twin.slice(Math.max(0, twin.indexOf(MOVED[0])))), 'RED CONTROL — this file with the twin\'s ⑨ planted back runs the moved legs again: §T goes red');
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
