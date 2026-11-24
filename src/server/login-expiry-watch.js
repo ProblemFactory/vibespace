@@ -39,6 +39,8 @@
 const fs = require('fs');
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
+const SR = require('../store-read.js');   // r3003 (d), lane hub-loop-stalls: login-expiry.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold: a failed read held, never read as «nothing filed yet»
 const { loginAgeText, reviewWarnings, reloggedIn, shortSession, WARN_STAGES, ledgerExp, OAT_ONLY } = require('../login-expiry.js');
 
 // 5 min: the 1 h rung needs a cadence well under an hour, and a file stat +
@@ -243,17 +245,34 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   // minutes before the upgrade still speaks.
   let since = null;
   let timer = null;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  // r3003 (d), lane hub-loop-stalls — THE STORE-READ LAW (the release: ANY failed read or torn bytes = a fresh install — the next sweep
+  // re-filed every warning already filed, lost the item ids a re-login retracts, reset `since` and the measured session lengths, then
+  // saved that over the file). Through store-read's answer to the hold (src/store-read-hold.js, code `expiry_warnings_unread`). HELD: the
+  // sweep (the clock's pass AND the follow-up sweep after a re-login — the login itself is never refused, its retraction waits for the
+  // lift) files, retracts and drops NOTHING (said once a hold) and nothing is written over the file;
+  // LIFTED: the ledger as at a start, then ONE sweep at once (a warning the hold delayed goes now). TORN: kept aside once, then empty —
+  // and THE INBOX IS THE SECOND WITNESS: each warning is filed under the store's identity (itemKey: account, rung, deadline), so the
+  // re-file of a warning already in For you is that item (its words follow the time left), never a second one
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  function load(parsed) {
+    ledger = {}; seen = {}; since = null;
     if (parsed && typeof parsed === 'object' && parsed.members && typeof parsed.members === 'object') ledger = parsed.members;
     if (parsed && parsed.seen && typeof parsed.seen === 'object') seen = parsed.seen;
     if (parsed && Number.isFinite(parsed.since)) since = parsed.since;
-  } catch { /* fresh install */ }
+  }
+  let storeHeldSaid = false;
+  const hold = HOLD.create({ file, valid: isObj, code: 'expiry_warnings_unread', aside: (m) => file + '.corrupt-' + m,
+    words: (h) => `the record of the login warnings already filed could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and a new login warning waits until it reads`,
+    log: (l) => log(`[login-expiry] ${l}`), onLift: (v) => { load(v); storeHeldSaid = false; if (timer) { try { sweep(); } catch (e) { log('[login-expiry] the sweep at the lift failed:', e.message); } } } });
+  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: isObj });
+    if (hold.start(a) === 'data') load(a.value); }
 
   function save() {
     // Atomic (tmp+rename): a torn ledger would either replay every warning or
     // suppress the real one — both are the exact failure this feature exists
     // to prevent.
+    if (!hold.writable('a write of the login warnings record')) return;   // HELD: never over a file that could not be read
     try {
       const tmp = file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify({ version: 1, since, members: ledger, seen }, null, 2), { mode: 0o600 });
@@ -297,6 +316,9 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   // every death after it read as pre-existing, filed silent (主开发 r2067)
   function sweep({ since: factsSince } = {}) {
     const emitted = [], resolved = [];
+    // r3003 (d): THE RECORD UNREAD — which warnings were filed (and which items a re-login retracts) is unknown: nothing is filed, retracted
+    // or dropped (a warning waits — the read again is minutes away; filing now could file it twice); the clock's pass and the routes' sweep after a re-login (its retraction goes at the lift's sweep)
+    { const h = hold.held(); if (h) { if (!storeHeldSaid) { storeHeldSaid = true; log(`[login-expiry] sweep skipped — the record of the login warnings already filed could not be read (${h.code || 'unread'}); nothing filed, retracted or dropped until it reads`); } return { emitted, resolved, held: true }; } }
     // r3044 (4): THE LIST UNREAD — nothing is alive or dead by its silence: the sweep files, retracts and drops NOTHING (its
     // «drop rows for accounts that no longer exist» would delete every warning and every measured session length)
     const listHeld = (() => { try { return typeof accounts.held === 'function' ? (accounts.held() || null) : null; } catch { return { code: 'held-unknown' }; } })();
@@ -376,6 +398,10 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
           urgency: URGENCY[emit] || 'normal',
           by: 'agent',
           sessionName: 'Manage Agents',
+          // r3003 (d): THE INBOX IS THE SECOND WITNESS — the store's ONE identity for a server producer (user-todos «sameCopy»): this
+          // account's rung for this deadline. A record torn and started empty (or a write that never landed) re-files it as the SAME item —
+          // its words follow the time left, it is never filed twice — and its id goes back into the ledger for the retraction
+          itemKey: `login-expiry:${a.id}:${emit}:${lexp ?? 'none'}`,
           i18n: { text: itemWordsFor(emit, name, info, { spanMs: span }), detail: detailWordsFor(a, info), source: { key: i18nKey('Manage agents') } },
           // Same tense rule as the text: a deadline in the past "ended", one
           // in the future "ends" — a wiped record can carry either.
@@ -390,7 +416,8 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
             + '(pooled sessions) or stop (everything else). Re-login from Manage Agents → the account\'s ⋯ menu → Re-login on this machine.',
         });
         // Remember WHICH item, so a re-login can retract exactly this one.
-        if (filedItem?.id && ledger[a.id]) ledger[a.id].items = [...(ledger[a.id].items || []), { id: filedItem.id, text }];
+        if (filedItem?.id && ledger[a.id]) ledger[a.id].items = [...(ledger[a.id].items || []).filter((r) => r && r.id !== filedItem.id), { id: filedItem.id, text: filedItem.text || text }];
+        if (filedItem?.existing) { log(`[login-expiry] ${name}: ${emit} warning already in For you — the same item (its key), not filed again`); continue; }
         emitted.push({ id: a.id, stage: emit });
         log(`[login-expiry] ${name}: ${emit} warning filed (login ends ${fmtWhen(info.refreshExpiresAt)})`);
         try { global.__vsEvent?.('login-expiry-warned', `${a.id}:${emit}`); } catch { }
@@ -426,7 +453,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   }
   function stop() { if (timer) { clearTimeout(timer); timer = null; } }
 
-  return { sweep, start, stop, ledger: () => JSON.parse(JSON.stringify(ledger)), seen: () => JSON.parse(JSON.stringify(seen)), watchingSince: () => since, INBOX_KEY, WARN_STAGES };
+  return { sweep, start, stop, held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), ledger: () => JSON.parse(JSON.stringify(ledger)), seen: () => JSON.parse(JSON.stringify(seen)), watchingSince: () => since, INBOX_KEY, WARN_STAGES };
 }
 
 module.exports = { create, itemTextFor, itemWordsFor, detailWordsFor, shortSessionHint, measureLoginSpan, INBOX_KEY, SWEEP_MS, RESOLVED_BY };

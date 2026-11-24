@@ -4639,6 +4639,8 @@ export default {
   "the messages waiting for agents": "等待代理的消息",
   "the record of messages already handed to agents": "已交给代理的消息记录",
   "The record of messages already handed to agents could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A message an agent hands back waits until it reads.": "已交给代理的消息记录刚才没能读取——VibeSpace 会自己再读一次；没有丢失，也没有改动。代理退回的消息要等读出来之后再处理。",
+  "the record of the login warnings already filed": "已提交的登录提醒记录",
+  "The record of the login warnings already filed could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A new login warning waits until it reads.": "已提交的登录提醒记录刚才没能读取——VibeSpace 会自己再读一次；没有丢失，也没有改动。新的登录提醒要等读出来之后再提交。",
   "the plugins’ settings": "插件的设置",
   "this VibeSpace’s own id": "这个 VibeSpace 自己的标识",
   "the Task Groups": "任务组",

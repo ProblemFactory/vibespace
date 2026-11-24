@@ -4638,6 +4638,8 @@ export default {
   "the messages waiting for agents": "エージェントを待っているメッセージ",
   "the record of messages already handed to agents": "エージェントに渡したメッセージの記録",
   "The record of messages already handed to agents could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A message an agent hands back waits until it reads.": "エージェントに渡したメッセージの記録は今は読み込めませんでした。VibeSpace が自動でもう一度読み込みます。失われても変わってもいません。エージェントから戻されたメッセージは読み込めてから扱います。",
+  "the record of the login warnings already filed": "提出済みのログイン警告の記録",
+  "The record of the login warnings already filed could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A new login warning waits until it reads.": "提出済みのログイン警告の記録は今は読み込めませんでした。VibeSpace が自動でもう一度読み込みます。失われても変わってもいません。新しいログイン警告は読み込めてから提出されます。",
   "the plugins’ settings": "プラグインの設定",
   "this VibeSpace’s own id": "この VibeSpace 自身の ID",
   "the Task Groups": "タスクグループ",

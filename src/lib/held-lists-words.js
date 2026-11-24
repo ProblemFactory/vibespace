@@ -3,7 +3,7 @@
 // answer. `t` is the page's; times come in already worded (page-time). Nothing here names a file, a path or a value.
 const i18nKey = (s) => s;   // a declared visible template (scripts/i18n-extract)
 const NAMES = Object.freeze({
-  'mounts.json': i18nKey('the storage list'), 'stash-handover.json': i18nKey('the record of messages already handed to agents'), 'msg-stash.json': i18nKey('the messages waiting for agents'), 'mount-tokens.json': i18nKey('the folder links'), 'plugins.json': i18nKey('the plugins’ settings'),
+  'mounts.json': i18nKey('the storage list'), 'login-expiry.json': i18nKey('the record of the login warnings already filed'), 'stash-handover.json': i18nKey('the record of messages already handed to agents'), 'msg-stash.json': i18nKey('the messages waiting for agents'), 'mount-tokens.json': i18nKey('the folder links'), 'plugins.json': i18nKey('the plugins’ settings'),
   'user-todos': i18nKey('For you'), 'task-groups': i18nKey('the Task Groups'), 'hosts.json': i18nKey('the paired machines'), 'machine-mounts.json': i18nKey('the mounts of your paired machines'),   // 2b: both on the helper (each row is its file's)
   // the stores that joined the helper on the hotfix's tip (r3224 / r3233 — the family's rows): each list's plain name
   'accounts.json': i18nKey('your accounts list'),
