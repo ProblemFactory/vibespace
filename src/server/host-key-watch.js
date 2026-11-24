@@ -133,10 +133,13 @@ function create({ userTodos = null, hosts = null, log = () => {}, bcast = () => 
   }
   /** The person pinned again / removed the pin / re-paired / removed the machine (or an import dropped it): the episode is
    *  decided — our items of that kind go. */
-  function decided(h, kind = 'ssh', { notice = false } = {}) {
+  function decided(h, kind = 'ssh', { notice = false, part = null } = {}) {
     if (!h || !h.id || !userTodos) return false;
     const name = nameOf(h.name);
-    const items = ours(h.id, kind).concat(kind === 'device' && notice ? notices(h.id) : []); // the notice: only a removal, a new pairing or a Forget
+    // r3873 (4): a pin of ONE of a machine's two keys (part 'machine' | 'hop') decides that key's item only — the other stays while it is
+    // refused; a both pin, an unpin, a removal or a new pairing (no part) decides every item of the kind
+    const isHopItem = (it) => /^\{machine\}: its jump host's /.test(String((it.i18n && it.i18n.text && it.i18n.text.key) || ''));
+    const items = ours(h.id, kind).filter((it) => kind !== 'ssh' || (part !== 'machine' && part !== 'hop') || (part === 'hop') === isHopItem(it)).concat(kind === 'device' && notice ? notices(h.id) : []); // the notice: only a removal, a new pairing or a Forget
     for (const it of items) retract(it);
     if (items.length) log(`[host-key] ${name}: decided by the person — the For-you item is resolved`);
     return items.length > 0;

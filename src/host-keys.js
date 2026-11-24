@@ -164,6 +164,8 @@ function hostKeyWords(stderr) {
   const fp = /key sent by the remote host is\s+(SHA256:[A-Za-z0-9+/=]{20,64})/.exec(t);
   return { fp: fp ? fp[1] : null, said: said.slice(0, 200) };
 }
+/** r3873 (1): ssh's word for a key's type in «No <TYPE> host key is known for …» → the key types that word names */
+const SSH_TYPE_NAMED = Object.freeze({ RSA: ['ssh-rsa'], DSA: ['ssh-dss'], ECDSA: ['ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521'], ED25519: ['ssh-ed25519'], 'ECDSA-SK': ['sk-ecdsa-sha2-nistp256@openssh.com'], 'ED25519-SK': ['sk-ssh-ed25519@openssh.com'] });
 /** The refusal BY NAME (`host-key-changed`) for a record, or null. */
 const nameOfSaid = (said) => { const m = /host key for (\S+) has changed|host key is known for (\S+)/i.exec(String(said || '')); return String(m ? (m[1] || m[2]) : '').replace(/^\[([^\]]+)\](?::\d+)?$/, '$1').toLowerCase(); };
 function hostKeyRefusal(h, stderr) {
@@ -172,14 +174,17 @@ function hostKeyRefusal(h, stderr) {
   const w = hostKeyWords(stderr);
   if (!w) return null;
   const name = (h && (h.name || h.id)) || 'the machine';
-  // r3688 (its round's should): under a PINNED check, ssh's «No … host key is known for <alias>» means the pin FILE holds no line for
-  // it (removed or emptied by hand) — never that the host showed another key: said as that (pinLine 'none'), the same door
-  const noLine = /^No \S+ host key is known for/i.test(w.said);
+  // r3688 + r3873 (1): under a PINNED check ssh says «No <TYPE> host key is known for <alias>» in two cases. The pin FILE lacks the
+  // line (removed or emptied by hand): the record pins a key of that very TYPE, which an intact file would hold — said as that
+  // (pinLine 'none'), the same door. Or the host now shows a key of ANOTHER type than the pinned one (reinstalled without it, or
+  // somebody in the middle offering only another type): a CHANGED key, its warning and its door — never «a start writes it again»
+  const noLineT = /^No (\S+) host key is known for/i.exec(w.said);
+  const noLineOf = (keys) => !!noLineT && keys.some((k) => (SSH_TYPE_NAMED[noLineT[1].toUpperCase()] || []).includes(k.type));
   // r3431: the key ssh refused was the JUMP HOST's (the line names the hop, never the machine) — said as the hop's, its door the same
   const hop = hopAliasOf(h);
   if (hop && hop !== aliasOf(h) && nameOfSaid(w.said) === hop) {
     const hp = hopPinned(h), jh = hopOf(h).host;
-    if (hp && noLine) return Object.assign(new Error(`${name}'s jump host ${jh}: the file that holds the key pinned for it has no line for it, so ssh had no key to check — VibeSpace did not connect. A start of VibeSpace writes it again from the record; or pin it again in ${doorOf(name)}`),
+    if (hp && noLineOf(hopKeysOf(h))) return Object.assign(new Error(`${name}'s jump host ${jh}: the file that holds the key pinned for it has no line for it, so ssh had no key to check — VibeSpace did not connect. A start of VibeSpace writes it again from the record; or pin it again in ${doorOf(name)}`),
       { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: null, sshLine: w.said, pinned: true, pinLine: 'none', jump: jh, params: { host: name, fp: '', jump: jh, pinLine: 'none' } });
     return Object.assign(new Error(`${name}'s jump host ${jh} showed an ssh host key that is not ${hp ? 'the key pinned for it' : 'the key this VibeSpace saw before'} — VibeSpace did not connect${w.fp ? ` (it showed ${w.fp})` : ''}. If the jump host's key really changed, compare it on the jump host and ${hp ? 'pin it again' : 'pin the key it shows now'} in ${doorOf(name)}`),
       { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: w.fp, sshLine: w.said, pinned: hp, jump: jh, params: { host: name, fp: w.fp || '', jump: jh } });
@@ -188,7 +193,7 @@ function hostKeyRefusal(h, stderr) {
   const whose = pin ? 'the key pinned for it' : 'the key this VibeSpace saw before';
   // a machine never pinned is not told to pin it «again» (主开发's verdict of 2026-11-18); the door is THE phrase (DOOR)
   const act = pin ? 'pin it again' : 'pin the key it shows now';
-  if (pin && noLine) return Object.assign(new Error(`${name}: the file that holds the key pinned for it has no line for it, so ssh had no key to check — VibeSpace did not connect. A start of VibeSpace writes it again from the record; or pin it again in ${doorOf(name)}`), { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: null, sshLine: w.said, pinned: true, pinLine: 'none', params: { host: name, fp: '', pinLine: 'none' } });
+  if (pin && noLineOf(keysOf(h))) return Object.assign(new Error(`${name}: the file that holds the key pinned for it has no line for it, so ssh had no key to check — VibeSpace did not connect. A start of VibeSpace writes it again from the record; or pin it again in ${doorOf(name)}`), { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: null, sshLine: w.said, pinned: true, pinLine: 'none', params: { host: name, fp: '', pinLine: 'none' } });
   return Object.assign(new Error(`${name} showed an ssh host key that is not ${whose} — VibeSpace did not connect${w.fp ? ` (it showed ${w.fp})` : ''}. If the machine's key really changed, compare it on the machine and ${act} in ${doorOf(name)}`), { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: w.fp, sshLine: w.said, pinned: pin, params: { host: name, fp: w.fp || '' } });
 }
 

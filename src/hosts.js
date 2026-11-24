@@ -2613,7 +2613,7 @@ class HostManager {
     // the record is the truth the file follows, so the window loses nothing (small 2)
     HK.writePinFile(this._sshDir, h);
     this._dropConnections(h);
-    try { this.onHostKeyPinned?.(h); } catch { }
+    try { this.onHostKeyPinned?.(h, 'ssh', { part: keys && hopKeys ? 'both' : hopKeys ? 'hop' : 'machine' }); } catch { }   // r3873 (4): which key a person pinned decides only its own key's For-you item
     return HK.pinView(h);
   }
 
@@ -2646,16 +2646,24 @@ class HostManager {
    *  name ssh looked the hop up by); none and nothing else to pin ⇒ host-key-not-known (the dialog's scan-and-confirm is its road);
    *  none but the machine's own keys ⇒ the machine is pinned and its row keeps saying the jump host's key is not pinned */
   async _pinKnownHop(h0, hop, file, keys) {
-    // r3688 (its round's should): r1602's certainty rule for the HOP as for the machine — a jump host that is a name of this hub's ssh
-    // configuration (another HostName, its Port when none was typed, or a hop of its own) has its known line filed under a name the
-    // record does not hold: refused by name; its Host key… dialog's scan (the hop asked itself) is its road
+    // r3688 (its round's should) + r3873 (2)(3): r1602's certainty rule for the HOP as for the machine. The hop is pinned from this hub's
+    // line only where ssh's lookup name is CERTAIN: `ssh -G <hop>` answered within its bound and names no configuration of its own
+    // (another HostName, its Port when none was typed, or a hop of its own). A hop of this hub's configuration, or a check with no answer
+    // (uncertain is never certain), leaves the HOP unpinned — its chip and its road (the dialog's scan, the hop asked itself) stay — and
+    // the machine's own known key is pinned exactly as at the release; the press says what it left (`hopLeft`). Nothing else to pin ⇒
+    // refused by name
     const a = await this.resolveAlias(hop.host);
-    if (a && (a.alias || a.proxied || (!hop.port && a.port != null && a.port !== 22))) throw Object.assign(new Error(`${h0.name}'s jump host ${hop.host} takes its address or port from this hub's ssh configuration, so the key ssh trusted for it is filed under a name the record does not hold — open its Host key… to check the key it shows now`), { code: 'host-key-via-config', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
-    let hk;
-    try { hk = await HK.knownKeysOf({ host: hop.host, port: hop.port }, { file: file || this._knownHostsFile() }); }
-    catch (e) { throw Object.assign(new Error(`${h0.name}'s jump host: ${e.message} — open its Host key… to check the key it shows now`), { code: e.code || 'host-key-known-unreadable', hostId: h0.id, params: { name: h0.name } }); }
+    let left = !a ? 'unchecked' : (a.alias || a.proxied || (!hop.port && a.port != null && a.port !== 22)) ? 'via-config' : null;
+    if (left === 'via-config' && !keys) throw Object.assign(new Error(`${h0.name}'s jump host ${hop.host} takes its address or port from this hub's ssh configuration, so the key ssh trusted for it is filed under a name the record does not hold — open its Host key… to check the key it shows now`), { code: 'host-key-via-config', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
+    if (left === 'unchecked' && !keys) throw Object.assign(new Error(`${h0.name}'s jump host ${hop.host}: this hub could not check which name ssh files its key under (ssh -G gave no answer in its bound) — open its Host key… to check the key it shows now`), { code: 'host-key-jump-unchecked', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
+    let hk = [];
+    if (!left) {
+      try { hk = await HK.knownKeysOf({ host: hop.host, port: hop.port }, { file: file || this._knownHostsFile() }); }
+      catch (e) { if (!keys) throw Object.assign(new Error(`${h0.name}'s jump host: ${e.message} — open its Host key… to check the key it shows now`), { code: e.code || 'host-key-known-unreadable', hostId: h0.id, params: { name: h0.name } }); left = 'unreadable'; }
+    }
     if (!hk.length && !keys) throw Object.assign(new Error(`this hub trusts no key for ${h0.name}'s jump host ${hop.host} yet — open its Host key… to check the key it shows now`), { code: 'host-key-not-known', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
-    return this._pinTheseKeys(h0.id, keys, hk.length ? hk : null);
+    const v = await this._pinTheseKeys(h0.id, keys, hk.length ? hk : null);
+    return hk.length ? v : { ...v, hopLeft: left || 'not-known' };
   }
   /** the hub user's own known_hosts. SSH READS THE PASSWD HOME (getpwuid), whatever $HOME says, so the key a first dial trusted
    *  is in THAT home's file (test-architecture §68's reasoned site): a PATH read for its lines (knownKeysOf), never written. */

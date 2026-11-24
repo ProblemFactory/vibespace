@@ -156,7 +156,7 @@ console.log('③ THE ROUTE and THE PAGE');
   ok(/app\.post\('\/api\/hosts\/:id\/host-keys\/known', async \(req, res\) => \{\n  if \(hostKeyHumanOnly\(req, res\)\) return;\n  try \{ const v = await hosts\.pinKnownHostKeys\(req\.params\.id\);/.test(XR),
     'POST /api/hosts/:id/host-keys/known: human only, the press with no file from the caller');
   ok(SM.includes("top.appendChild(pinChip('stale', { text: tr('not pinned')") && SM.includes("pb.textContent = tr('Pin key');") && SM.includes("await api(`/api/hosts/${encodeURIComponent(h.id)}/host-keys/known`, { method: 'POST' });")
-    && SM.includes("const scan = !!e && ['host-key-not-known', 'host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable'].includes(e.code);") && SM.includes("if (scan) this._showHostKeyDialog(h, { scanNow: true }); }") && SM.includes('if (unpinned.length >= 2) {'),
+    && SM.includes("const scan = !!e && ['host-key-not-known', 'host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable', 'host-key-jump-unchecked'].includes(e.code);") && SM.includes("if (scan) this._showHostKeyDialog(h, { scanNow: true }); }") && SM.includes('if (unpinned.length >= 2) {'),
     'the row says «not pinned» with its press; no certain key (none trusted, an ssh-configuration name, the file over its bound or unreadable) opens the scan-and-confirm; «Pin all N» when there are several');
   // r1602: «Pin all N» names each machine that did not pin, in its own words; a REFUSED pin is offered no «not pinned»; the codes worded
   ok(SM.includes("else missed.push(o.words); }") && SM.includes("tr('{n} pinned; not pinned — {list}', { n: pinnedN, list: missed.join(' · ') })")

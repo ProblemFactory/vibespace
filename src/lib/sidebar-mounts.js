@@ -58,6 +58,10 @@ function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed 
   const ep = e && e.body && e.body.params && typeof e.body.params === 'object' ? e.body.params : {};
   if (e && e.code === 'host-key-via-config' && typeof ep.jump === 'string' && ep.jump) return tr('{name}\'s jump host {jump} takes its address or port from this hub\'s ssh configuration, so its key cannot be named from the record — check the key it shows now.', { name, jump: ep.jump });
   if (e && e.code === 'host-key-jump-no-answer') return tr('The jump host {jump} did not answer, so its key could not be read now.', { jump: typeof ep.jump === 'string' ? ep.jump : '' });
+  if (e && e.code === 'host-key-jump-unchecked') return tr('{name}\'s jump host {jump}: this hub could not check which name ssh files its key under (no answer in time) — check the key it shows now.', { name, jump: typeof ep.jump === 'string' ? ep.jump : '' });   // r3873 (3)
+  // r3873 (5): the scan's and the press's own refusals in the page's words (they showed the hub's English sentence)
+  if (e && e.code === 'host-key-none-seen') return tr('{name} showed no ssh host key — check that it can be reached, then look again.', { name });
+  if (e && e.code === 'host-key-not-seen') return tr('{name} does not show every key you chose any more, so nothing was pinned — look again before pinning.', { name });
   if (e && e.code === 'host-key-via-config') return tr('{name} takes its address or port from this hub\'s ssh configuration, so its key cannot be named from the record — check the key it shows now.', { name });
   if (e && e.code === 'host-key-known-too-big') return tr('This hub\'s known_hosts file is over 4 MiB, so it is not read for a pin — check the key {name} shows now.', { name });
   if (e && e.code === 'host-key-known-unreadable') return tr('This hub\'s known_hosts file could not be read — check the key {name} shows now.', { name });
@@ -2742,11 +2746,13 @@ export function installSidebarMounts(Sidebar) {
      *  press opens the Host key… dialog's scan-and-confirm) | 'failed', words } (r1602: «Pin all N» names each one's words) */
     async _pinKnown(h, { one = false } = {}) {
       try {
-        await api(`/api/hosts/${encodeURIComponent(h.id)}/host-keys/known`, { method: 'POST' });
-        if (one) { showToast(tr('{name}: pinned to the key this hub already trusts.', { name: h.name })); this._renderMounts(); }
-        return { kind: 'pinned', words: '' };
+        const r = await api(`/api/hosts/${encodeURIComponent(h.id)}/host-keys/known`, { method: 'POST' });
+        // r3873 (2): the machine pinned as at the release; a jump host this press could not pin with certainty is SAID (its chip stays)
+        const left = r && r.hopLeft ? tr('{name}: pinned to the key this hub already trusts. Its jump host {jump} is not pinned yet — check the key it shows now in Remote → {name} → Host key…', { name: h.name, jump: (r.jumpPin && r.jumpPin.host) || '' }) : '';
+        if (one) { showToast(left || tr('{name}: pinned to the key this hub already trusts.', { name: h.name })); this._renderMounts(); }
+        return { kind: 'pinned', words: left };
       } catch (e) {
-        const scan = !!e && ['host-key-not-known', 'host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable'].includes(e.code);   // no certain key from this hub ⇒ the scan-and-confirm
+        const scan = !!e && ['host-key-not-known', 'host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable', 'host-key-jump-unchecked'].includes(e.code);   // no certain key from this hub ⇒ the scan-and-confirm
         const hopNk = e && e.code === 'host-key-not-known' && e.body && e.body.params && e.body.params.jump;   // r3431: the hop had no known line
         const words = e && e.code === 'host-key-not-known' ? (hopNk ? tr('This hub trusts no key for {name}\'s jump host yet — check the key it shows now.', { name: h.name }) : tr('This hub trusts no key for {name} yet — check the key it shows now.', { name: h.name })) : (hostKeyErrorWords(h, e) || tr('Failed'));
         if (one) { showToast(words, scan ? {} : { type: 'error' }); if (scan) this._showHostKeyDialog(h, { scanNow: true }); }
