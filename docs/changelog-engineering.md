@@ -299,6 +299,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - Legs: test-channel-groups §bl-msg B-4f7f (2 spans ⇒ 2; a mark the sender wrote is not counted ⇒ 1; nothing secret ⇒ 0; RED: the count removed, a copy of the engine); test-cli-one-text (the line with and without heads, a count of 0 or a malformed one changes nothing, RED: the count branch removed; the send and dispatch answers carry the count; the CLI end to end through a route that counts).
 - THE FOLLOW (round w8p1q3bqh, r3330 — line 696 TAKEN, no must): the head rule runs BEFORE the drop loop (a record whose words alone pass the bound loses them first; the others go only if the file is still over — a small frame is never dropped for a huge one); a head with no words draws NOTHING in the view (the journal alone, by its id); the compaction guard takes a compact_boundary record and a summary record only with a time (a title line is no compaction); `_forkSourceId` gets its session-schema row and is asked of the harness's fork capability as `_forkRequested` is; liveForkPending's new answers said (claude-lock-capture essay). Legs ㉔ (a small frame then a huge one: both kept; RED: the head after the drop) and ㉕ (a title line in the span: absence still proven; RED: any summary line).
 
+### bl-ci — the webhook callers' round follow (主开发 r3223, round wh825ryb9)
+- WHAT: after a torn lift the account's section says the damage and where the bytes are kept; a reply refused while held says plainly it was not sent and must be sent again; the Vault window says which values a hold kept out; a joiner names the true cause of a held peer; two kb sentences (the 503 / 401 difference after a torn lift for that run, and the channels key beside a torn copy).
+- The legs of test-webhook-callers-held for each, and the round's leg smalls: the stranger gate's slots counted, the engine's own journal and the sealed fields in the secret lens.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
