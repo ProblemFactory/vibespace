@@ -216,7 +216,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** Revoke: the record keeps its history (revokedAt), the VALUE leaves the vault, every grant of it stops working, a
    *  card up for it settles refused. Works locked too (forgetting needs no DEK). */
   function revoke(keyId, { by = 'user' } = {}) {
-    if (db.bad) return named('failed', unreadWords());   // r3074 (3): the true reason while the record is held, never «not found»
+    if (db.bad) return named('failed', `${unreadWords()} — no key works until it reads again; revoke it then`);   // the round w2y5w89y4 (5): a leaked key is no risk meanwhile   // r3074 (3): the true reason while the record is held, never «not found»
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return { ok: true, already: true, key: A.publicKey(k) };
@@ -762,7 +762,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  value; the refusals a person must see (a 「除了」, Task Groups that could not be read, a row this release cannot read). */
   function mayUseFor(facts = {}) {
     db = read();
-    if (db.bad) return [{ door: 'automation-key-use', resource: '*', name: '', ok: false, code: 'unknown_shape' }];   // r3104 (a): could not be read (the section's own word for a door it cannot read), never «no keys»
+    if (db.bad) return [{ door: 'automation-key-use', resource: '*', name: '', ok: false, code: 'automation_unread' }];   // the round w2y5w89y4 (4): the TRUE reason, its own code (never «a row this release cannot read»)   // r3104 (a): could not be read (the section's own word for a door it cannot read), never «no keys»
     const F = { conversationKeys: (facts.conversationKeys || []).map(String), groupIds: (facts.groupIds || []).map(String), inheritedGroupIds: (facts.inheritedGroupIds || []).map(String), groupsUnreadable: !!facts.groupsUnreadable };
     const out = [];
     for (const k of db.keys) {

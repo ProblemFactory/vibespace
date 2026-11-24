@@ -872,7 +872,10 @@ const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: 
     const au = e2.auditOfKey(k1.key.id), mu = e2.mayUseFor({ conversationKeys: ['conv-1'] });
     e2.keysFor(caller()); const kf = typeof e2.held === 'function' ? e2.held() : null;
     let rvl = null; try { e2.vaultReveal('apikey:' + k1.key.id); rvl = 'answered'; } catch (e) { rvl = e && e.code; }
-    return { placed: pl.used(), readable: gsBad && gsBad.health().readable, m2, l2, rv, ug, au, mu, kf, rvl, same: fs.readFileSync(STORE_OF(w1)).equals(bytes0), digest: JSON.parse(bytes0.toString('utf8')).keys[0].digest };
+    // the automation store's next touch (the round w2y5w89y4 (7)): the doors with no held leg, one line each, and the lock's early return
+    const doors = { grant: e2.grant(k1.key.id, ['session:conv-2']), setReach: e2.setReach(grantId, 'workers'), setOnly: e2.setOnly(grantId, ['group:g1']), setExcept: e2.setExcept(grantId, { except: [] }), prune: e2.pruneEnded(k1.key.id, new Set()) };
+    let lockSame = null; try { await w1.vault.unlock(PW, {}); const b0 = fs.readFileSync(STORE_OF(w1)); w1.vault.lock('door'); lockSame = fs.readFileSync(STORE_OF(w1)).equals(b0); } catch (e) { lockSame = 'threw: ' + (e && e.message); }
+    return { placed: pl.used(), readable: gsBad && gsBad.health().readable, m2, l2, rv, ug, au, mu, kf, rvl, doors, lockSame, same: fs.readFileSync(STORE_OF(w1)).equals(bytes0), digest: JSON.parse(bytes0.toString('utf8')).keys[0].digest };
   };
   const GH = await grantsHeldWorld(ENG);
   const noDigest = (x) => !JSON.stringify([x.m2, x.l2, x.rv, x.ug]).includes(String(x.digest));
@@ -880,9 +883,13 @@ const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: 
     'r3074 ANOTHER STORE\'s UNREAD FILE: the grants file\'s read refused (placed) at a start — the automation record is HELD, a mint is refused naming grants.json, and automation-keys.json stays byte for byte (its grant records kept)', { m2: GH.m2, same: GH.same });
   ok(GH.l2 && GH.l2.ok === true && GH.l2.keys.length === 0 && GH.l2.held && GH.l2.held.code === 'automation_unread' && /grants\.json could not be read/.test(GH.l2.held.why),
     'r3074 THE LIST SAYS «COULD NOT BE READ»: the keys\' list carries the mark (automation_unread, the file named) — never an empty list as a fact', GH.l2);
+  ok(Object.values(GH.doors).every((r) => r && r.ok === false && r.code === 'failed' && /grants\.json could not be read/.test(String(r.why))) && GH.lockSame === true,
+    'the automation store\'s next touch (7): EVERY held door refuses by name — a grant, a reach, «only», «except» and a prune each name the unread file; a vault lock while held writes NOTHING (its early return)', { doors: GH.doors, lockSame: GH.lockSame });
+  ok(/no key works until it reads again; revoke it then/.test(String(GH.rv.why)),
+    'the automation store\'s next touch (5): a revoke refused while held says no key works until the file reads — revoke it then', GH.rv);
   ok(GH.rv.code === 'failed' && /could not be read/.test(String(GH.rv.why)) && GH.ug.code === 'failed' && /could not be read/.test(String(GH.ug.why)),
     'r3074 TRUE REASONS: a revoke and a take-back while the record is held name the unread file — never «not found»', { rv: GH.rv, ug: GH.ug });
-  ok(GH.l2.held.file === 'data/grants.json' && GH.au && GH.au.code === 'failed' && /grants\.json could not be read/.test(String(GH.au.why)) && Array.isArray(GH.mu) && GH.mu.length === 1 && GH.mu[0].ok === false && GH.mu[0].code === 'unknown_shape' && GH.kf && GH.kf.code === 'automation_unread' && GH.rvl === 'automation_unread',
+  ok(GH.l2.held.file === 'data/grants.json' && GH.au && GH.au.code === 'failed' && /grants\.json could not be read/.test(String(GH.au.why)) && Array.isArray(GH.mu) && GH.mu.length === 1 && GH.mu[0].ok === false && GH.mu[0].code === 'automation_unread' && GH.kf && GH.kf.code === 'automation_unread' && GH.rvl === 'automation_unread',
     'r3104 (a) THE SECOND ROADS SAY THE HOLD: the list names the file to mend; a key\'s audit, the «may use» section (could not be read), the agent\'s key list (the hold, not an empty list) and a reveal answer the hold — never «not found», «no keys» or «nothing to reveal»', { file: GH.l2.held.file, au: GH.au, mu: GH.mu, kf: GH.kf, rvl: GH.rvl });
   const MXG = M.load('src/server/automation-engine.js', editAnchor(ESRC, '    if (gh && gh.readable === false) {', '    if (false) {', 'src/server/automation-engine.js'), 'r3074-grants-unread');
   const GHX = await grantsHeldWorld(MXG);
@@ -947,8 +954,11 @@ const shown = (x) => ({ inAwait: x.inAwait, placed: x.placed, r1: x.r1 && { ok: 
   // «Nothing stored here», and shows that group even in the «all» view (the page's own text)
   const VW = fs.readFileSync(path.join(ROOT, 'src/lib/vault-window.js'), 'utf8');
   const HELD_LINE = "const heldAuto = g.id === 'automation' && !!(st.auto && st.auto.held);";
-  ok(VW.includes(HELD_LINE) && VW.includes("if (!g.rows.length && !heldAuto && (st.purpose === 'all' || filtered)) continue;") && /heldAuto \? t\('Automation keys could not be read \(\{file\}\) — they stay on file and nothing is written over them\. Mend that file by hand and restart VibeSpace/.test(VW),
-    'r3074 THE PAGE SAYS IT: the automation group is drawn while its list is held (even in the «all» view) and says the keys could not be read, names the file and what the person can do (mend it by hand, restart) — never «Nothing stored here», never «restore a copy»');
+  ok(VW.includes(HELD_LINE) && VW.includes("if (!g.rows.length && !heldAuto && (st.purpose === 'all' || filtered)) continue;") 
+    && VW.includes("want.push(emptyEl([familyHeldWords('automation_unread'), more].filter(Boolean).join(' '), `held-${g.id}`));")
+    && VW.includes("if (!g.rows.length) { if (!heldAuto) want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }")
+    && /grants\\\.json\$\/\.test\(f\) \? t\('The key grants are read once, when VibeSpace starts: mend that list by hand, then restart VibeSpace/.test(VW),
+    'r3074 THE PAGE SAYS IT (the automation store\'s next touch (1)(2)): the automation group is drawn while its list is held (even in the «all» view), the hold said WHENEVER its mark is set (above its rows too) in the ONE table\'s words, the key grants\' restart said by the door — never «Nothing stored here», never a data/ path, never «restore a copy»');
 }
 console.log('⑫c MUTANT — the config read BEFORE the folder judge');
 {

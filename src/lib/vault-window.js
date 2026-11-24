@@ -24,7 +24,7 @@
 // 「需要你」 item's door in For you (focus = its row).
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, showContextMenu, heldWordsOf } from './utils.js';
+import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, showContextMenu, heldWordsOf, familyHeldWords } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -525,7 +525,15 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       if (g.id === 'web-logins' && st.logins && !h.wide) { h.wide = wideHeaderDoors(() => st.logins, { refresh }); h.el.append(h.wide.el); }
       if (h.wide) { h.wide.el.hidden = !st.logins || d.state !== 'unlocked'; if (st.logins) h.wide.update(); }
       want.push(h.el);
-      if (!g.rows.length) { want.push(emptyEl(heldAuto ? t('Automation keys could not be read ({file}) — they stay on file and nothing is written over them. Mend that file by hand and restart VibeSpace; until then no key works', { file: st.auto.held.file || 'data/automation-keys.json' }) : t('Nothing stored here'), `empty-${g.id}`)); continue; }
+      // the automation store's next touch (r3001 / the round w2y5w89y4 (1)(2)): the hold is said WHENEVER its mark is set (the rows come from
+      // one fetch, the mark from a later one), in the ONE table's words (r3310: familyHeldWords) — never a data/ path; my door adds only what
+      // that table cannot know: the key grants are read once at the start (a restart is load-bearing), or the bytes are torn
+      if (heldAuto) {
+        const f = String(st.auto.held.file || ''), why = String(st.auto.held.why || '');
+        const more = /grants\.json$/.test(f) ? t('The key grants are read once, when VibeSpace starts: mend that list by hand, then restart VibeSpace — the restart is what reads them again.') : /did not parse/.test(why) ? t('The saved list is damaged; it needs mending by hand, then a restart.') : '';
+        want.push(emptyEl([familyHeldWords('automation_unread'), more].filter(Boolean).join(' '), `held-${g.id}`));
+      }
+      if (!g.rows.length) { if (!heldAuto) want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }
       for (const r of g.rows) { const x = rowEls.get(r.id); if (x) want.push(x.el); }
     }
     if (!v.rows.length && filtered) want.push(st.q ? noMatchEl(v) : emptyEl(t('No stored value matches these filters'), 'empty-match'));

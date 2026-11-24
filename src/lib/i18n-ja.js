@@ -10786,7 +10786,9 @@ export default {
   "Newest": "新しい順", // lane vault-contents-window
   "No stored value matches “{q}”": "「{q}」に一致する保存値はありません", // lane vault-contents-window
   "Nothing stored here": "ここには何も保存されていません", // lane vault-contents-window
-  "Automation keys could not be read ({file}) — they stay on file and nothing is written over them. Mend that file by hand and restart VibeSpace; until then no key works": "自動化キーを読み取れませんでした（{file}）— ファイルには残っており、上書きされません。そのファイルを手で直してから VibeSpace を再起動してください。それまでは、どのキーも使えません", // r3074 / r3104 (lane login-request-card)
+  "The key grants are read once, when VibeSpace starts: mend that list by hand, then restart VibeSpace — the restart is what reads them again.": "キーの付与は VibeSpace の起動時に一度だけ読み取られます。そのリストを手で直してから、VibeSpace を再起動してください。再起動で読み直されます。",   // the automation store's next touch (login-request-card)
+  "The saved list is damaged; it needs mending by hand, then a restart.": "保存されたリストが壊れています。手で直してから再起動してください。",   // the automation store's next touch (login-request-card)
+  "unknown — the automation keys could not be read (nothing is lost)": "不明 — 自動化キーを読み取れません（何も失われていません）",   // the automation store's next touch (login-request-card)
   "Parameter": "パラメーター", // lane vault-contents-window
   "Passkeys": "パスキー", // lane vault-contents-window
   "Recently used": "最近使った順", // lane vault-contents-window
