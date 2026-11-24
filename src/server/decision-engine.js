@@ -68,6 +68,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const M = require('../decision-model.js');
+const SR = require('../store-read.js');        // B-f276 family (r3175): one read's answer — data / missing / unreadable / corrupt
+const HOLD = require('../store-read-hold.js');  // …and the family's hold: held, read again off the loop, torn bytes kept aside once
 const A = require('../attention-model.js'); // PURE: THE attention list (lane foryou-folds) — the judge scores only a band-5 tie
 
 const ROW_ID = 'llm';   // lane llm-plugin-rename: the Language model row (the key) — its data files keep their decision-* names
@@ -83,7 +85,6 @@ const TEST_SENTENCE = 'The invoice for the March order is due tomorrow — pleas
 const TEST_QUESTION = Object.freeze({ type: 'predicate', name: 'deadline_or_money', instructions: 'Does the text mention a deadline or money the reader owes?' });
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
-function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
 
 function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(),
   tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000, writer = null,
@@ -127,42 +128,75 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const callOf = (id) => `${CALL_TAG}.${id}`;
   /** the journal's rows from a BOUNDED tail (≤ 2 MB: the journal itself is cut at 5 000 lines / 30 days) — the month's readout and
    *  the boot's rebuild of the day's counter (B-a85f) */
-  function journalTail() {
+  // B-f276 family (form 3 rank 6, lane bl-loop-a, 主开发 r3175): «not there» is told from «the read failed» — a journal that could
+  // not be read is UNREAD (the day's spend is then unknown), never «no calls today»; a line that does not parse is skipped, as before
+  const tailRows = (buf, size) => buf.toString('utf8').split('\n').slice(buf.length < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+  function journalRead() {
+    let fd;
+    try { fd = fs.openSync(F.journal, 'r'); } catch (e) {
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) { jIdx = []; jSize = 0; jWhole = true; jTorn = false; jKnown = true; return { rows: [] }; }   // not there: a new instance
+      return { unread: SR.codeOf(e) };   // unread for another reason: the day's spend unknown (B-f276 family), and no trim this start
+    }
     try {
-      const fd = fs.openSync(F.journal, 'r');
-      try {
-        const size = fs.fstatSync(fd).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
-        fs.readSync(fd, buf, 0, n, size - n);
-        // the index (law 6: the count comes from this read — no second whole read): each whole line by its byte offset; a tail that
-        // starts inside a line skips it, as the rows always did
-        const base = size - n, idx = [], rows = [];
-        let i = 0;
-        if (n < size) { const nl = buf.indexOf(0x0a); i = nl < 0 ? n : nl + 1; }
-        while (i < n) {
-          let e = buf.indexOf(0x0a, i); if (e < 0) e = n;
-          if (e > i) { let r = null; try { r = JSON.parse(buf.toString('utf8', i, e)); } catch { } if (!r || typeof r !== 'object') r = null; rows.push(r); idx.push(idxOf(base + i, e - i, r)); }
-          i = e + 1;
-        }
-        jIdx = idx; jSize = size; jWhole = n === size; jTorn = n > 0 && buf[n - 1] !== 0x0a; jKnown = true;
-        return rows;
-      } finally { fs.closeSync(fd); }
-    } catch (e) { if (e && e.code === 'ENOENT') { jIdx = []; jSize = 0; jWhole = true; jTorn = false; jKnown = true; } return []; }   // unread for another reason: no trim this start
+      const size = fs.fstatSync(fd).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
+      fs.readSync(fd, buf, 0, n, size - n);
+      // the index (law 6: the count comes from this read — no second whole read): each whole line by its byte offset; a tail that
+      // starts inside a line skips it, as the rows always did
+      const base = size - n, idx = [], rows = [];
+      let i = 0;
+      if (n < size) { const nl = buf.indexOf(0x0a); i = nl < 0 ? n : nl + 1; }
+      while (i < n) {
+        let e = buf.indexOf(0x0a, i); if (e < 0) e = n;
+        if (e > i) { let r = null; try { r = JSON.parse(buf.toString('utf8', i, e)); } catch { } if (!r || typeof r !== 'object') r = null; rows.push(r); idx.push(idxOf(base + i, e - i, r)); }
+        i = e + 1;
+      }
+      jIdx = idx; jSize = size; jWhole = n === size; jTorn = n > 0 && buf[n - 1] !== 0x0a; jKnown = true;
+      return { rows };
+    } catch (e) { return { unread: SR.codeOf(e) }; } finally { try { fs.closeSync(fd); } catch (e) { holdLog(`the journal's descriptor could not be closed (${SR.codeOf(e)}) — what was read is used`); } }
   }
   const idxOf = (off, len, r) => ({ off, len, at: r ? Number(r.at) : NaN, call: r && typeof r.call === 'string' ? r.call : null, out: r && typeof r.outcome === 'string' ? r.outcome : null });
+  function journalTail() { return journalRead().rows || []; }
   let rebuiltAtBoot = false;   // B-a85f: the boot raised the day's counter from the journal — written once saveUsage exists
   // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
   // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)
   { const owed = [F.memo, F.usage, F.journal].filter((f) => W().pending(f)); if (owed.length) W().flushSync(owed); }
   let plugin = null;                                   // {peek} — the plugin row's own record (enabled + config)
-  const memo = new Map((readJson(F.memo, {}).entries || []).filter((e) => Array.isArray(e) && e.length === 2).slice(-M.MEMO_MAX));
-  let usage = readJson(F.usage, null) || { day: null, byUse: {} };
+  // B-f276 family (form 3 rank 6, lane bl-loop-a, 主开发 r3175): THE PAID JUDGE's THREE FILES UNDER THE STORE-READ LAW. The release
+  // read ANY failure of the counter, the memo or the journal as «nothing»: today's spend started at zero (the daily budget could be
+  // OVERSPENT), the memo's paid answers were asked again, and the next write landed over the file. NOW «not there» (a new
+  // instance), «the read failed» and «the bytes do not parse» are three answers (src/store-read.js): a counter or a journal that
+  // could not be read makes the day's spend UNKNOWN, and unknown REFUSES every paid judgment BY NAME before anything is reserved
+  // ('spend-unread' — the inbox's clock pass, an agent's ask, a rule's, the owner's Test alike: each spends against this one
+  // counter); a memo that could not be read refuses too ('memo-unread' — never pay again for an answer it may hold). Nothing is
+  // written over a held file; torn bytes are kept aside ONCE (the family's hold), then the store starts empty and the counter is
+  // raised from the journal (B-a85f); the person is told once; each is read again off the loop, and a read again lifts it.
+  const readOf = (f) => { try { return { text: fs.readFileSync(f, 'utf8') }; } catch (error) { return { error }; } };
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const MEMO_SHAPE = (v) => isObj(v) && (v.entries === undefined || Array.isArray(v.entries));
+  const USAGE_SHAPE = (v) => isObj(v) && (v.byUse === undefined || isObj(v.byUse));
+  const holdLog = (line) => log.warn?.(`[decision] ${line}`);
+  const memo = new Map();
+  const memoLoad = (v) => { memo.clear(); for (const e of ((v && v.entries) || []).filter((x) => Array.isArray(x) && x.length === 2).slice(-M.MEMO_MAX)) memo.set(e[0], e[1]); };
+  let usage = { day: null, byUse: {} };
+  let journalUnread = null;   // {code, since} — the journal could not be read: the day's spend is unknown until a read again answers
+  const memoHold = HOLD.create({ file: F.memo, valid: MEMO_SHAPE, code: 'memo-unread', aside: (mark) => `${F.memo}.corrupt-${mark}`, log: holdLog,
+    words: (h) => `the language model plugin's saved answers (decision-memo.json) could not be read (${h.code}): nothing is judged until they read again — none is asked of the provider twice`,
+    onLift: (v) => { memoLoad(v); heldSaid = false; } });
+  const usageHold = HOLD.create({ file: F.usage, valid: USAGE_SHAPE, code: 'spend-unread', aside: (mark) => `${F.usage}.corrupt-${mark}`, log: holdLog,
+    words: (h) => `the language model plugin's spending record for today (decision-usage.json) could not be read (${h.code}): nothing is judged until it reads again — never on a spend of zero`,
+    onLift: (v) => { usage = USAGE_SHAPE(v) ? v : { day: null, byUse: {} }; heldSaid = false; if (!journalUnread) { const r = rebuildFromJournal(journalTail()); if (r) saveUsage(); } } });
+  { const a = SR.storeAnswer(readOf(F.memo), { valid: MEMO_SHAPE }); if (memoHold.start(a) === 'data') memoLoad(a.value); }
+  { const a = SR.storeAnswer(readOf(F.usage), { valid: USAGE_SHAPE }); if (usageHold.start(a) === 'data') usage = a.value; }
+  let heldSaid = false;   // the person told ONCE a hold (a server notice), said again only after a lift and a new hold
   // B-a85f — THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1): a kill between a billed
   // call's journal line and its counter's landing left the counter short (its reservation line is on disk before the ask) — the next
   // calls would spend past the daily budget by that much. Each use is raised to AT LEAST the journal's sum for today, never
   // lowered (a counter ahead of its journal — a trimmed journal — keeps its own); a raise is written (an act) and said once.
-  {
+  /** B-a85f's raise, as a step of its own: each use raised to AT LEAST the journal's sum for today — run at a start that read both
+   *  files, and again when a held one lifts (B-f276 family). → true when it raised (the caller writes it) */
+  function rebuildFromJournal(rows) {
     const day0 = M.dayOf(now(), tzOffset(now()));
-    const j = M.daySpendByUse(journalTail(), day0, tzOffset);
+    const j = M.daySpendByUse(rows, day0, tzOffset);
     if (usage.day !== day0) usage = { day: day0, byUse: {}, rate: usage.rate || {} };
     const raised = [];
     for (const [use, js] of Object.entries(j.byUse)) {
@@ -173,7 +207,13 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
         x.inputTokens = Math.max(Number(x.inputTokens) || 0, js.inputTokens); x.outputTokens = Math.max(Number(x.outputTokens) || 0, js.outputTokens);
       }
     }
-    if (raised.length) { log.warn?.(`[decision] the day's counter was behind its journal (a stop before its write landed) — raised to the journal's sum: ${raised.join('; ')}`); rebuiltAtBoot = true; }
+    if (raised.length) log.warn?.(`[decision] the day's counter was behind its journal (a stop before its write landed) — raised to the journal's sum: ${raised.join('; ')}`);
+    return raised.length > 0;
+  }
+  {
+    const jr = journalRead();
+    if (jr.unread) { journalUnread = { code: jr.unread, since: now() }; holdLog(`the journal (decision-journal.jsonl) could not be read (${jr.unread}) — the day's spend is unknown: nothing is judged, nothing is written to it, and it is read again off the main loop`); }
+    else if (!usageHold.held()) rebuiltAtBoot = rebuildFromJournal(jr.rows);
   }
   let backoff = { step: 0, until: 0 };
   const open = new Map();                              // reservation id → {use, usd}: estimates of the calls in flight
@@ -265,6 +305,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
    *  → its durable() promise (true once the counter holding this change is on disk; false: failed, or still queued) */
   let usageOwedSaid = false;
   function saveUsage() {
+    if (!usageHold.writable('the day\'s counter')) return Promise.resolve(false);   // B-f276 family: nothing written over a counter that was not read
     try {
       W().dirty(F.usage, { name: 'decision-usage.write', rank: 0, mode: 0o600, produce: () => JSON.stringify(usage),
         onWritten: (ok, e) => {
@@ -277,6 +318,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   /** ONE journal line: handed to the store writer (an append of this store, rank 0 — money), never written on the loop. → this
    *  line's seq (a caller that must see it on disk awaits W().durable(F.journal)) */
   function journal(o) {
+    if (journalUnread) return;   // B-f276 family: no line appended and no trim over a journal that was not read (said once at the start)
     const row = M.journalRow({ at: now(), rubric: M.RUBRIC.version, ...o });
     jOwed.push(JSON.stringify(row) + '\n'); jSeq++;
     if (jKnown && (!jWhole || jIdx.length + (jWriting ? jWriting.lines.length : 0) + jOwed.length > Math.max(JOURNAL_MAX, jKeptFloor) * 1.2)) jTrimDue = true;   // law 6: the count from the index (+ the lines on their way)
@@ -367,6 +409,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   }
   /** THE MEMO, PACED through the store writer (lg-store-writes U1): the hub's own cache — a burst of answers is one write */
   function saveMemo() {
+    if (!memoHold.writable('the memo')) return;   // B-f276 family: nothing written over answers that were not read
     try { W().dirty(F.memo, { name: 'decision-memo.write', mode: 0o600, produce: () => JSON.stringify({ entries: [...memo.entries()] }) }); }
     catch (e) { log.warn?.(`[decision] memo not saved: ${e.message}`); }
   }
@@ -381,6 +424,45 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const key = `decision-stop:${why}:${stop.sig.slice(0, 12)}`;
     if (noticedStop === key) return;
     try { const d = serverNotice?.(key, STOP_NOTICE[why], { level: 'warn', i18n: { key: STOP_NOTICE[why] } }); if (d !== 0) noticedStop = key; } catch { }
+  }
+  /** B-f276 family: why a paid judgment is refused now, or null — the day's spend unknown (its counter or its journal not read) or
+   *  the memo not read. The person is told ONCE a hold (a server notice); the reason rides every refusal by name */
+  function storesUnread({ memo: withMemo = true } = {}) {
+    const why = usageHold.held() || journalUnread ? 'spend-unread' : withMemo && memoHold.held() ? 'memo-unread' : null;
+    if (why && !heldSaid) {
+      heldSaid = true;
+      const what = why === 'memo-unread' ? 'its saved answers' : 'its record of what it spent today';
+      try { serverNotice?.('decision-unread', `The language model plugin is paused: VibeSpace cannot read ${what} right now. Nothing is judged and nothing is spent until it reads again — it tries again by itself.`, { level: 'warn' }); } catch { }
+    }
+    return why;
+  }
+  // THE JOURNAL's READ AGAIN (B-f276 family): off the main loop, ONE in flight, on store-read's ladder (30 s doubling to 5 min). The
+  // family's helper parses a whole file as JSON, so the journal (one JSON line a call) keeps this small hold of its own
+  let jTries = 0, jTimer = null, jBusy = false;
+  function journalArm() {
+    if (jTimer || !journalUnread) return;
+    jTimer = setTimeout(() => { jTimer = null; journalAgain().catch(() => { }); }, SR.retryDelay(++jTries));
+    if (jTimer.unref) jTimer.unref();
+  }
+  async function journalAgain() {
+    if (!journalUnread || jBusy) return false;
+    jBusy = true;
+    try {
+      let buf;
+      try { buf = await fs.promises.readFile(F.journal); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) { journalUnread.code = SR.codeOf(e); journalArm(); return false; } buf = Buffer.alloc(0); }
+      const tail = buf.length > 2 * 1024 * 1024 ? buf.subarray(buf.length - 2 * 1024 * 1024) : buf;
+      journalUnread = null; jTries = 0; heldSaid = false;
+      jTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a;   // the next append starts on a new line; the index stays unknown (no trim this start)
+      holdLog('the journal (decision-journal.jsonl) is read again — the day\'s spend is known');
+      if (!usageHold.held() && rebuildFromJournal(tailRows(tail, buf.length))) saveUsage();
+      return true;
+    } finally { jBusy = false; }
+  }
+  if (journalUnread) journalArm();
+  /** a read again of every held file of the judge, now (a person's act, a suite) → the held set after it: {spend, memo} (false = known) */
+  async function readAgain() {
+    await Promise.all([usageHold.held() ? usageHold.again() : null, memoHold.held() ? memoHold.again() : null, journalUnread ? journalAgain() : null]);
+    return { spend: !!(usageHold.held() || journalUnread), memo: !!memoHold.held() };
   }
   function quiet(use, why, extra = {}) {
     lastOutcome = { at: now(), use, outcome: 'refused', why };
@@ -412,6 +494,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     if (key && memo.has(key)) { const a = memo.get(key); memo.delete(key); memo.set(key, a); return { ok: true, memo: true, answers: n > 1 ? M.unbatchAnswers(a, n) : a }; }
     const s = settings();
     if (settingsUnread()) return quiet(use, 'settings-unread');   // B-225b: the owner's cap is not known — never judged on its default
+    { const sh = storesUnread(); if (sh) return quiet(use, sh); }   // B-f276 family: the day's spend (or the memo) unknown — no reservation, no judgment
     const cred = credential(resolved);
     if (stop && cred && stop.sig !== credSig(cred)) { stop = null; say('ok', 'a new key or model is saved: calls resume'); }
     const input = M.buildInput(use, parts);
@@ -670,6 +753,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const ledger = Object.freeze({
     settings,
     settingsUnread,   // B-225b: the text-model client asks it before its verdict
+    storesUnread: () => storesUnread({ memo: false }),   // B-f276 family: …and this — the day's spend unknown ⇒ refused by name before any hold (the drafter keeps no memo)
     spentUsd: () => totalOf(today()).usd + reservedUsd(),
     useUsd: (use) => { const x = today().byUse[use]; return (x ? x.usd : 0) + [...open.values()].filter((r) => r.use === use).reduce((a, r) => a + r.usd, 0); },
     // B-0248 (r2417 laws 1–3): the hold is the slot (sync) AND its reservation line; `landed` answers once that line is on disk —
@@ -684,7 +768,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const textModel = require('./text-model-client.js').create({ integrations, ledger, fetchImpl, now, log, baseUrl: baseUrlFor && baseUrlFor.openrouter ? baseUrlFor.openrouter : null });
 
   if (rebuiltAtBoot) saveUsage();   // B-a85f: the raised counter is written (an act, rank 0)
-  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel, roadFacts, notePaused };
+  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel, roadFacts, notePaused, readAgain };
 }
 
 module.exports = { create, ROW_ID, FEATURE_OF, TEST_SENTENCE };

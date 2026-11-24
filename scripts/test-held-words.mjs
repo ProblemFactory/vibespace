@@ -121,6 +121,10 @@ const OWN_DOOR = {
   'signin-id-held': 'the data folder\'s own id file (src/auth.js, 主开发 r3336): no route refuses with it — the sign-in page and its 503 word the hold (src/signin-table.js signin-held-id-unread); the family\'s notice names the file by its plain name',
   maintenance_unread: 'r3333 unit 3: an operator\'s POST /api/maintenance (no page sends it) — the answer carries its own words',
   auto_resume_unread: 'its own door words it BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words',
+  // B-f276 family (form 3 rank 6, lane bl-loop-a, r3175): the paid judge's two holds — the judge refuses with its OWN why (never the
+  // helper's 503), worded by the drafter card's table (src/lib/learn-card.js REFUSALS) and the engine's own one notice
+  'spend-unread': 'the paid judge\'s own refusal (decision-engine.js storesUnread): the drafter card words it (learn-card REFUSALS) and the engine says one notice — never the generic sentence',
+  'memo-unread': 'the paid judge\'s own refusal (decision-engine.js storesUnread): the engine\'s one notice says it — the judge never answers a route with the helper\'s 503',
 };
 function census(codes, table) {
   const red = [], held = [], generic = [];
@@ -150,12 +154,12 @@ ok(TABLE.rows.every((c) => LIVE_CODES.has(c)), 'every row of the table names a c
 // ①b THE ENDING (r3123): every code of the tree ending in unread / unreadable, whatever its status — classed by groups, each with its why
 const LEFT_ALONE = [
   ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread', 'usage-reading-unread', 'machines_unread' /* r3349: the reading file's set-aside door refused while the machines' list is held — the door's own words (its toast reads `error`) */]],
-  ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
+  ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-unread', 'memo-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
   ['own', 'a store whose own door words its refusal BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words', ['auto_resume_unread']],
   ['own', 'r3333 unit 2: the extraction journal held — the files page words its refusal by its own code (fsErrorText, zh / ja)', ['extract_journal_unread']],
   ['own', 'r3333 unit 3: an operator\'s POST /api/maintenance refused while the banner\'s record is held — the answer carries its own words (no page sends it)', ['maintenance_unread']],
   ['not', 'r3333 unit 3: held stores no route answers — a pass waits (the voice proposals, the unmeasured-CLI tick) or the reads stay in memory (the model catalog)', ['voice_suggestions_unread', 'cli_unmeasured_memory_unread', 'cli_model_catalog_unread']],
-  ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'designs-unread', 'labels-unread', 'status-unread']],
+  ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'decision-unread', 'designs-unread', 'labels-unread', 'status-unread']],
   ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
   // r3857 (the moved MG1 chain, lane lg-group-parents): the migration ledger's codes, classed by who reads them
   ['own', 'r3857 (MG1): the migration ledger unread — a result row\'s code; the ledger\'s own For-you item words it in three languages (src/migration-runner.js LEDGER_WORDS), and the vault\'s restore answers its own migration_failed', ['ledger-unread']],

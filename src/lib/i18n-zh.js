@@ -4708,6 +4708,8 @@ export default {
   "The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched.": "保存的通行密钥已损坏，所以这个列表重新从空开始。损坏的字节原样保留在列表旁边。",   // r3632
   "the requests waiting for you to take over": "等你接管的请求",   // r3261
   "The requests waiting for you to take over a browser could not be read right now, so the item you pressed was put back — VibeSpace reads them again by itself; press it again then.": "暂时无法读取等你接管浏览器的请求，所以你按下的这一项已放回 — VibeSpace 会自动再读；到时再按一次。",   // r4130 (b)
+  "the language model plugin’s spending record": "语言模型插件的花费记录",
+  "the language model plugin’s saved answers": "语言模型插件保存的答案",
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到 API 提案 — 没有做出任何决定，也没有执行任何请求。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到应用提案 — 没有安装或更改任何东西。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到设计列表 — 没有更改任何东西，设计文件夹保持原样。几分钟后再按一次（它会自己再读一次）。",
@@ -10476,6 +10478,7 @@ export default {
   "the model has no zero-data-retention endpoint — pick the other model in “Model that drafts” below": "所选模型没有零数据保留端点——在下面的「起草用的模型」里换另一档",
   "today's drafts used their $0.10 — try again tomorrow": "今天的起草额度（$0.10）已用完——明天再试",
   "the settings could not be read, so the daily limit is not known — try again once they read": "设置读不出来，所以不知道每日上限——等设置能读出后再试",
+  "the LLM plugin's record of what it spent today could not be read — nothing was spent; try again in a few minutes (it reads it again by itself)": "LLM 插件今天的花费记录读不出来——没有花钱；过几分钟再试（它会自己再读）",
   "the LLM plugin's daily limit is spent — try again tomorrow": "LLM 插件今天的花费上限已用完——明天再试",
   "OpenRouter refused the key — check it in Integrations & keys": "OpenRouter 拒绝了这个 key——到「集成与密钥」里检查",
   "OpenRouter says the plan does not allow this model": "OpenRouter 说当前套餐不能用这个模型",

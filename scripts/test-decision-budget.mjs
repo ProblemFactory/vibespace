@@ -372,7 +372,7 @@ console.log('B-a85f — a stop before the counter landed: the next boot raises t
   ok(a.ok1 && a.billed > 0 && !a.onDisk && a.usd === a.billed && a.calls >= 1,
     'B-a85f: two billed calls whose counter NEVER reached the disk (a stop first) — the next boot\'s counter holds the journal\'s sum for today (never 0)', a);
   const deSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
-  const A = '    const j = M.daySpendByUse(journalTail(), day0, tzOffset);';
+  const A = '    const j = M.daySpendByUse(rows, day0, tzOffset);';   // B-f276 family: the boot's raise is its own step now (rebuildFromJournal), the same line
   const DEno = mutantCopies('decision-budget-a85f', REPO).load('src/server/decision-engine.js', anchored(deSrc, A, '    const j = { byUse: {} };   // MUTANT: the journal is never read at boot', 'the boot reads the journal'), 'no-rebuild');
   const ax = await scene(DEno, 'a85f-rebuild-red');
   ok(ax.billed > 0 && ax.usd === 0, 'CONTROL (a copy that never reads the journal at boot): the day restarts at 0 USD while the journal says money was spent — red', ax);

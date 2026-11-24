@@ -49,6 +49,9 @@ const NAMES = Object.freeze({
   'drafts.json': i18nKey('your saved drafts'), 'stage-sync.json': i18nKey('the Stage layout'), 'uploads-sync.json': i18nKey('the list of recent uploads'), 'settings-sync.json': i18nKey('the synced settings'),
   'browser-takeovers.json': i18nKey('the requests waiting for you to take over'),   // r3261 (bl-browser-b): the takeover requests joined the helper
   'dropline-oauth.json': i18nKey('your voice sign-in'),   // bl-chat-b's own plain name (r3334 unit 2)
+  // B-f276 family (form 3 rank 6, lane bl-loop-a, r3175): the paid judge's counter and memo
+  'decision-usage.json': i18nKey('the language model plugin’s spending record'),
+  'decision-memo.json': i18nKey('the language model plugin’s saved answers'),
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

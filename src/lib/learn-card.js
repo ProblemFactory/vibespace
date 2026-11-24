@@ -39,6 +39,7 @@ const REFUSALS = () => ({
   'use-budget': t('today\'s drafts used their $0.10 — try again tomorrow'),
   'labels-unread': t('the labels you taught could not be read — nothing was lost; try again in a few minutes (it reads them again by itself)'),   // r3005: decision-examples.json held — the draft waits, nothing lost
   'settings-unread': t('the settings could not be read, so the daily limit is not known — try again once they read'),   // B-225b: NOT NOW — the daily limit is never judged on its default
+  'spend-unread': t('the LLM plugin\'s record of what it spent today could not be read — nothing was spent; try again in a few minutes (it reads it again by itself)'),   // B-f276 family: the day's spend unknown — NOT NOW, never spent on a counter that was not read
   'daily-budget': t('the LLM plugin\'s daily limit is spent — try again tomorrow'),
   'no-examples': t('answer ✓ and ✗ on a few judged rows first'),
   reconnect: t('OpenRouter refused the key — check it in Integrations & keys'),

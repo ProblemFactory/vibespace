@@ -85,7 +85,9 @@ function world(tag, { budgetCents = 1 } = {}) {
 }
 const usageDoc = (usd) => JSON.stringify({ day: DAY, byUse: { rule: { calls: 3, inputTokens: 300, outputTokens: 6, usd } }, rate: {} });
 const journalOf = (usd) => [1, 2, 3].map((i) => JSON.stringify({ at: T - 3600e3 + i, use: 'rule', outcome: 'ok', usd: usd / 3, inputTokens: 100, outputTokens: 2 })).join('\n') + '\n';
-const bytes = (f) => { try { return realRF.call(fs, f).toString('hex'); } catch { return null; } };
+// the suite's OWN look at a file's bytes reads through the utf-8 road (node's own read, never through fs.openSync — the placed
+// refusal answers that one, so a Buffer read of a held path would read nothing and call it «changed»)
+const bytes = (f) => { try { return realRF.call(fs, f, 'utf8'); } catch { return null; } };
 const judge = (e, i, memo) => e.judge('rule', parts(i), { questions: RULE_Q, memo: memo || { id: `x${i}`, rule: 'r1' } });
 
 try {
@@ -99,7 +101,8 @@ try {
   ok(!r1.ok && r1.why === 'spend-unread' && asked === n1, `the day's spend cannot be read (the counter and the journal): the paid judgment is REFUSED by name («${r1.why}»), nothing sent to the vendor (${asked - n1} asked)`, r1);
   console.log('— L5 nothing written while held');
   await sleep(150);
-  ok(bytes(w1.F.usage) === b1.usage && bytes(w1.F.journal) === b1.journal && !r1b.ok, 'while held: the counter\'s and the journal\'s bytes are unchanged — no write over them, no journal line appended for the refusals', { usage: bytes(w1.F.usage) === b1.usage, journal: bytes(w1.F.journal) === b1.journal });
+  const txt = (f) => { try { return realRF.call(fs, f, 'utf8'); } catch (e) { return `(${e.code})`; } };
+  ok(bytes(w1.F.usage) === b1.usage && bytes(w1.F.journal) === b1.journal && !r1b.ok, 'while held: the counter\'s and the journal\'s bytes are unchanged — no write over them, no journal line appended for the refusals', { usage: bytes(w1.F.usage) === b1.usage, journal: bytes(w1.F.journal) === b1.journal, usageNow: txt(w1.F.usage).slice(0, 300), journalNow: txt(w1.F.journal).slice(-300) });
   console.log('— L7 the person told once');
   const told = w1.notices.filter((n) => /decision/.test(n.id) && /read/.test(n.text));
   ok(told.length === 1, `the person is told ONCE across ${2} refusals (${told.length} notice(s)): ${told[0] ? told[0].text.slice(0, 160) : 'none'}`, w1.notices);
@@ -123,7 +126,7 @@ try {
   const r2 = await judge(e2, 7, { id: 'm7', rule: 'r1' });
   ok(paid.ok && asked === n2a + 1 && hasMemo && !r2.ok && r2.why === 'memo-unread' && asked === n2, `the memo holds the paid answer (asked ${n2a + 1 - n2a} once); its read placed as failing: the same ask is REFUSED by name («${r2.ok ? 'answered' : r2.why}»), never paid again (${asked - n2} asked)`, { paid: paid.ok, hasMemo, r2 });
   await sleep(150);
-  ok(bytes(w2.F.memo) === bm, 'while the memo is held its bytes are unchanged (no write over the answers it holds)');
+  ok(bytes(w2.F.memo) === bm, 'while the memo is held its bytes are unchanged (no write over the answers it holds)', { before: (bm || '').slice(0, 200), now: (bytes(w2.F.memo) || '').slice(0, 200) });
   placed.delete(w2.F.memo);
 
   console.log('— L3 a TORN counter, the journal read');

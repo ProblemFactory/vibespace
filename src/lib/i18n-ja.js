@@ -4707,6 +4707,8 @@ export default {
   "The saved passkeys were damaged, so this list started again empty. Their damaged bytes are kept beside the list, untouched.": "保存したパスキーが壊れていたため、この一覧は空から始め直しました。壊れたバイトは一覧の横にそのまま残しています。",   // r3632
   "the requests waiting for you to take over": "あなたの引き継ぎを待つリクエスト",   // r3261
   "The requests waiting for you to take over a browser could not be read right now, so the item you pressed was put back — VibeSpace reads them again by itself; press it again then.": "ブラウザの引き継ぎを待つリクエストを今は読み取れないため、押した項目は元に戻しました — VibeSpace が自動で読み直します。そのときにもう一度押してください。",   // r4130 (b)
+  "the language model plugin’s spending record": "言語モデル プラグインの利用額の記録",
+  "the language model plugin’s saved answers": "言語モデル プラグインが保存した回答",
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace は API の提案をいま読めません — 何も決定・実行していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace はアプリの提案をいま読めません — 何もインストール・変更していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace はデザインの一覧をいま読めません — 何も変更しておらず、デザインのフォルダーもそのままです。数分後にもう一度押してください（自動でもう一度読みます）。",
@@ -10475,6 +10477,7 @@ export default {
   "the model has no zero-data-retention endpoint — pick the other model in “Model that drafts” below": "選んだモデルにはデータを保持しないエンドポイントがありません — 下の「下書きに使うモデル」で別のモデルを選んでください",
   "today's drafts used their $0.10 — try again tomorrow": "今日の下書き枠（$0.10）を使い切りました — 明日もう一度どうぞ",
   "the settings could not be read, so the daily limit is not known — try again once they read": "設定を読めないため、1 日の上限が分かりません——設定が読めるようになってから、もう一度お試しください",
+  "the LLM plugin's record of what it spent today could not be read — nothing was spent; try again in a few minutes (it reads it again by itself)": "LLM プラグインの今日の利用額の記録を読めません——費用は発生していません。数分後にもう一度お試しください（自動で読み直します）",
   "the LLM plugin's daily limit is spent — try again tomorrow": "LLM プラグインの今日の上限に達しました — 明日もう一度どうぞ",
   "OpenRouter refused the key — check it in Integrations & keys": "OpenRouter がキーを拒否しました — 「連携とキー」で確認してください",
   "OpenRouter says the plan does not allow this model": "OpenRouter によると、このプランではこのモデルを使えません",
