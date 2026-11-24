@@ -231,6 +231,11 @@ This file is the engineers' record of every release: the lanes, the verification
   - CURED (tests, plus one comment in src/permission-outcome.js): the signature and the caller take four or more, the content is parsed as a ternary chain (`splitTernary` / `chainLeaves`, depth-aware), and each correction is judged by ITS OWN condition by row (`CORRECTION_CONDITION`: m9t under the 4th, rHn under the 5th with the caller's `keepsOwnErrorAfterEsc`); ww is the default leaf.
   - The made-up 2.1.328 bundle is re-spelled from the evidence. The text past `(k==` was not in it and is spelled, and said so. Red controls: nHn without the 4th, rHn under the running flag, the caller's 5th argument swapped, the helper without its running conjunct, the chain outside the branch, a negated or or-ed flag, a third correction with no condition row. The old forms, rebuilt, are the red. The live leg prints the WHOLE chain (≤ 600 characters), so the next strict run shows nHn's full condition.
 
+### bl-ci — B-7e49's row test-vault-words: one parse a file (主开发 r2508)
+- PROFILED FIRST, alone on the test machine (probe run b98e3b64d-20261122203945-both, never lined): the nine censuses (the real tree, seven patched copies, the zh mutant) each acorn-parsed the same files again. acorn was 6.2 s of self time, the AST walk 3.5 s, and the prefilter regex over the 1 323 tracked files 0.7 s; each census took ~1.3–1.6 s.
+- THE CUT (tests only): a file's sites, and its prefilter answer, are kept by the file and then by the text OBJECT, and handed on. A patched copy re-parses only the file it patched. What each census judges is untouched; no leg added, removed or weakened; no wait in the suite.
+- THE PAIRED READING (the kit's lane, r2502; alone on the first test machine, both zones, 3 rounds interleaved), run b7c6894e4-20261122224153-both: the uncut copy 6502 / 6559 ms → the cut 1195 / 1162 ms (CPU 8.6 → 1.9 s). The 14 marks are IDENTICAL in both zones (digits and /tmp paths normalised). The row is restated 6.6 → 1.2 s; it had no over left (bl-release's restatement), so the ratchet does not move.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
