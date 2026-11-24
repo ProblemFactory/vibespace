@@ -114,7 +114,7 @@ console.log('② THE WORDS — PURE src/lib/held-lists-words.js');
 const W = await import(pathToFileURL(path.join(REPO, 'src/lib/held-lists-words.js')).href);
 const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p && p[n] !== undefined ? String(p[n]) : m));
 const NAMES = Object.fromEntries(W.HELD_NAMED.map((k) => [k, W.heldListName(k, tt)]));
-ok(NAMES['mounts.json'] === 'the storage list' && NAMES['mount-tokens.json'] === 'the folder links' && NAMES['plugins.json'] === 'the plugins’ settings' && NAMES['user-todos'] === 'For you' && NAMES['task-groups'] === 'the Task Groups' && NAMES.hosts === 'the paired machines' && W.heldListName('frobs.json', tt) === 'a saved list',
+ok(NAMES['mounts.json'] === 'the storage list' && NAMES['mount-tokens.json'] === 'the folder links' && NAMES['plugins.json'] === 'the plugins’ settings' && NAMES['user-todos'] === 'For you' && NAMES['task-groups'] === 'the Task Groups' && NAMES['hosts.json'] === 'the paired machines' && W.heldListName('frobs.json', tt) === 'a saved list',
   'a plain name for every list the hub can name (the helper\'s stores, the older holds); «a saved list» for one not named yet — never its file', NAMES);
 ok(W.heldChipWords(3, tt) === 'Lists unreadable · 3' && W.heldRowWords({ what: 'plugins.json' }, tt, { since: '09:12', next: '09:13' }) === 'the plugins’ settings — since 09:12, next try 09:13' && W.heldRowWords({ what: 'hosts' }, tt, { since: '09:12' }) === 'the paired machines — since 09:12' && W.heldRowWords({ what: 'task-groups' }, tt) === 'the Task Groups',
   'the chip says how many; a row says its plain name, since when and the next try (each only when known)');
@@ -151,11 +151,12 @@ ok(/app\.post\('\/api\/held-lists\/read-again', async \(req, res\) => \{\n {2}if
 // r3212 MUST 2 + small: EVERY bridged row hands a lift signal, and every name it asks is a method its production object carries
 const OLDER = (() => { const i = WIRE.indexOf('  older: ['), j = WIRE.indexOf('\n  ],\n});', i); return i < 0 || j < 0 ? [] : WIRE.slice(i, j).split(/\n    \{ key: '/).slice(1).map((b) => ({ key: b.slice(0, b.indexOf("'")), body: b })); })();
 const liftless = (rows) => rows.filter((r) => !/\bonLift: \(fn(?:, again)?\) =>/.test(r.body)).map((r) => r.key);
-ok(OLDER.length === 3 && liftless(OLDER).length === 0, `every bridged row (${OLDER.map((r) => r.key).join(', ')}) hands a lift signal`, liftless(OLDER));
+ok(OLDER.length === 2 && liftless(OLDER).length === 0,   // 2b: the paired machines are on the helper (no bridged row)
+   `every bridged row (${OLDER.map((r) => r.key).join(', ')}) hands a lift signal`, liftless(OLDER));
 ok(liftless([...OLDER, { key: 'frobs', body: "frobs', facts: () => null, readAgain: () => frobs.readAgain() }" }]).includes('frobs'), 'CONTROL: a bridged row without a lift signal is RED by name');
-const METHODS = { 'user-todos': ['src/user-todos.js', ['unreadState', 'readAgain', 'whenRead']], 'task-groups': ['src/task-groups.js', ['unreadState', 'readAgain', 'onLift']], hosts: ['src/hosts.js', ['held', 'whenRead']] };
+const METHODS = { 'user-todos': ['src/user-todos.js', ['unreadState', 'readAgain', 'whenRead']], 'task-groups': ['src/task-groups.js', ['unreadState', 'readAgain', 'onLift']] };   // 2b: hosts — on the helper, listed by its own row
 const missingNames = Object.entries(METHODS).flatMap(([key, [file, names]]) => { const src = read(file), row = OLDER.find((r) => r.key === key); return names.filter((n) => !new RegExp(`\\n {2}(?:async )?${n}\\(`).test(src) || !row || !row.body.includes(`.${n}(`) && !row.body.includes(`.${n} !== 'function'`)).map((n) => `${key}.${n} (${file})`); });
-ok(missingNames.length === 0, 'every name a bridged row asks is a method its production object carries (user-todos, the Task Groups, the paired machines) — a rename cannot drop a list from the notice with every leg green', missingNames);
+ok(missingNames.length === 0, 'every name a bridged row asks is a method its production object carries (user-todos, the Task Groups) — a rename cannot drop a list from the notice with every leg green', missingNames);
 ok(read('src/task-groups.js').includes("      for (const fn of [...(this._liftHooks || [])]) { try { fn(); } catch { /* a listener's own */ } }   // B-f276 unit B"), 'the Task Groups\' manager fires its lift signal in its own lift (after its listeners are told)');
 
 console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain name');
@@ -163,7 +164,7 @@ console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain
 // helper on the hotfix's tip): a caller the tree has and this map does not is red by name (name its store, then its plain name in the words)
 // r3284: EVERY store a file holds (a list a file): the count of the helper's holds in each file (its `<name>.create(`) must equal its row's —
 // a SECOND held store in an already-mapped file is red by name, as an unmapped caller is
-const CALLERS = { 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tokens.json'], 'src/plugins.js': ['plugins.json'], 'src/accounts.js': ['accounts.json'], 'src/server/apps-engine.js': ['app-proposals.json'],
+const CALLERS = { 'src/hosts.js': ['hosts.json'] /* 2b */, 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tokens.json'], 'src/plugins.js': ['plugins.json'], 'src/accounts.js': ['accounts.json'], 'src/server/apps-engine.js': ['app-proposals.json'],
   'src/routes/files.js': ['extract-journal.json'],   // r3333 unit 2: the archive extraction journal
   'src/server/auto-resume.js': ['auto-resume.json'], 'src/server/browser-trace.js': ['browser-forgotten.json'], 'src/server/channel-api.js': ['api-proposals.json'], 'src/server/channels-attention.js': ['decision-examples.json'],
   'src/server/design-engine.js': ['designs.json'], 'src/server/feedback-forward.js': ['feedback-outbox.json'], 'src/server/doc-engine.js': ['doc-owners.json'], 'src/server/feedback-store.js': ['feedback.json'], 'src/server/provider-store.js': ['providers.json'],
@@ -254,35 +255,28 @@ console.log('⑤ THE FOLLOW (主开发 r3284) — the mark, the let-go wait, the
     && S.first.epoch === S.casts[0].epoch && Number.isInteger(S.first.seq) && S.tooSoon.seq === S.first.seq && S.lift.seq === S.casts[S.casts.length - 1].seq,
     'r3284: every list the hub answers carries its mark — one start (epoch) on every broadcast and answer, the broadcasts counted one by one (seq), a press\'s answer marked as of the last broadcast', { seqs, first: S.first.seq, lift: S.lift.seq });
 }
-// (2) THE PAIRED MACHINES' WAIT, LET GO PAST THEIR BOUND, IS ARMED AGAIN — the real hosts.js whenRead (its bound of 256 waits) and the
-// wiring's OWN row (compiled from mounts-plugins-wiring.js), its lift the real read again of hosts.json
-const HOSTS_ROW = OLDER.find((r) => r.key === 'hosts');
-const hostsRowOf = (H) => new Function('hosts', `return { key: '${HOSTS_ROW.body.slice(0, HOSTS_ROW.body.lastIndexOf('}') + 1)};`)(H);   // eslint-disable-line no-new-func
-async function letGo(hlMod, tag) {
+// (2) 2b (主开发 r3790 decision 2): THE PAIRED MACHINES ARE ON THE HELPER — the notice lists hosts.json by the helper's own row (its
+// plain name the one that exists), «Read again now» reads it, and its lift is broadcast. No bridged row is left, and no wait of the
+// notice is queued on hosts, so none can be let go: r3284's let-go leg is retired (the helper's notice road is legs 67–74's)
+async function hostsOnHelper(tag) {
   const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
   const d = path.join(ROOT, tag), f = path.join(d, 'hosts.json'); fs.mkdirSync(f, { recursive: true });   // THE PLACED REFUSAL: hosts.json is a directory
   const warn = console.warn; console.warn = () => { };
+  let H = null, hl = null;
   try {
-    const H = new HostManager({ dataDir: d }), casts = [];
-    const hl = hlMod.create({ broadcast: (m) => casts.push(m), older: [hostsRowOf(H)] });
+    H = new HostManager({ dataDir: d }); const casts = [];
+    hl = HL.create({ broadcast: (m) => casts.push(m), older: [] });
     hl.say();
-    for (let i = 0; i < 300; i++) H.whenRead(() => { }, `another wait ${i}`, `w${i}`);   // 300 other waits: past the bound, the oldest are let go
-    const kept = !!(H._readWaits && H._readWaits.has('held-lists'));
-    fs.rmSync(f, { recursive: true, force: true }); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));
-    const n0 = casts.length;
-    await H._unreadRetry();   // hosts.json reads again by itself: its waits run
+    const mine = (lists) => (lists || []).some((r) => r.what === 'hosts.json');
+    const listed = mine(hl.list()), cast0 = !!casts.length && mine(casts[casts.length - 1].lists);
+    fs.rmSync(f, { recursive: true, force: true }); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));   // the storage answers again
+    const press = await hl.readAgain();
     const last = casts[casts.length - 1];
-    const out = { held0: !!(casts[0] && casts[0].lists.some((r) => r.key === 'hosts')), kept, told: casts.length > n0 && !!last && last.lists.length === 0, lifted: !H.held() };
-    H._unreadStopped = true; if (H._unreadT) { clearTimeout(H._unreadT); H._unreadT = null; } hl.stop();
-    return out;
-  } finally { console.warn = warn; }
+    return { listed, cast0, pressed: !!(press && press.ok), lifted: !H.held(), told: !!last && !mine(last.lists) };
+  } finally { console.warn = warn; if (H) H._hold.stop(); if (hl) hl.stop(); }
 }
-ok(!!HOSTS_ROW && HOSTS_ROW.body.includes("{ onLetGo: again }"), 'control setup: the wiring\'s paired-machines row is read, and hands its let-go answer');
-const LG = await letGo(HL, 'let-go');
-ok(LG.held0 && LG.kept && LG.lifted && LG.told, 'r3284: the paired machines\' wait for the notice, let go past their bound of waits (300 others), is ARMED AGAIN — when hosts.json reads by itself the lift is broadcast (the chip goes)', LG);
-ok(read('src/server/held-lists.js').includes('ok = !!o.onLift(say, () => again(o));'), 'control setup: the held lists\' arm hands each row its again');
-const LGX = await letGo(memOf('src/server/held-lists.js', 'ok = !!o.onLift(say, () => again(o));', 'ok = !!o.onLift(say);', 'held-lists: the re-arm cut'), 'let-go-red');   // stale-pins: kept — the arm as unit B's cure had it, planted as the RED control (r3284)
-ok(LGX.held0 && !LGX.kept && LGX.lifted && !LGX.told, 'CONTROL: the re-arm cut — the wait let go, hosts.json reads by itself and NOTHING is broadcast (the chip stays): RED', LGX);
+const OH = await hostsOnHelper('hosts-on-helper');
+ok(OH.listed && OH.cast0 && OH.pressed && OH.lifted && OH.told, '2b (decision 2): a HELD hosts.json is listed by the helper\'s own row (hosts.json — «the paired machines»), «Read again now» reads it and lifts the hold, and the lift is broadcast (the chip goes)', OH);
 
 // THE PAGE's MODULE compiled from its source (src/lib/held-lists.js; its imports stood in, the words the real PURE module's)
 const PAGE_NAMES = ['t', 'fetchJson', 'showToast', 'stampAt', 'slotBeside', 'seatBeside', 'openRailPanel', 'heldChipWords', 'heldChipTitle', 'heldSectionTitle', 'heldSectionNote', 'heldPressLabel', 'heldRowWords', 'heldPressWords', 'heldSoonWord', 'document', 'setTimeout', 'clearTimeout', 'Date'];

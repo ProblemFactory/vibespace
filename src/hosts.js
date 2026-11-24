@@ -19,8 +19,8 @@ const path = require('path');
 const FC = require('./fd-close.js');   // B-15ac: the ONE close of a written file (a failed close said in the journal)
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 2 commit 3: the kept copies' question (copiesOf)
+const HOSTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // hosts.json's one shape check (the start's read and the helper's)
 const READ_WAITS_MAX = 256;   // 主开发 01:20Z (4): the waits for a held hosts.json's read are BOUNDED (keyed ones replace: one a key)
-const READ_MS = 60_000;   // the B-f276 remainder's cure: a read again that does not answer in this long is let go (the next try reads afresh)
 const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
 const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js');
@@ -405,108 +405,64 @@ class HostManager {
   _noteRemoved(id) { const was = Array.isArray(this._state.removedIds) ? this._state.removedIds : []; this._state.removedIds = [...was.filter((x) => x !== id), String(id)].slice(-200); }
   _noteAdded(id) { if (Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id))) this._state.removedIds = this._state.removedIds.filter((x) => x !== String(id)); }
   _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, ''), log: (m) => console.warn(m), omit: ['removedIds'] })); }   // (round wjgchwl6a (7): the removed list is no id)
+  /** remainder of B-f276 (bl-jobs, the store-read law over hosts.json — the SOLE holder of every paired machine and every
+   *  dialTokenHash since B-f3e8), on the FAMILY HELPER since 2b (src/store-read-hold.js, 主开发 r3648 / r3790): data → loaded ·
+   *  missing → empty · torn bytes → HELD while they are copied aside OFF the loop (once a content: a copy of the same bytes is their
+   *  copy), then empty · a read that FAILED (EIO, EACCES, a timeout on network storage) → HELD: the machines are not shown, NOTHING is
+   *  written over the file (_save asks the hold), a person's change is refused by name, and the file is read again off the loop until
+   *  it answers (a read past the helper's bound is said, and its answer used the moment it comes). For the copy's moment a lookup
+   *  of a machine refuses by name and a dial-in is held (r3790, decision 1) */
   _load() {
+    this._hold = HOLD.create({
+      file: this._file, valid: HOSTS_SHAPE, code: 'hosts-unread', aside: (mark) => this._asideName(mark),
+      words: (f) => this._heldWords(f), log: (m) => console.warn('[hosts] ' + m),
+      onLift: (value, info) => this._lifted(value, info), readMs: () => this._readMs,   // (_readMs: a suite's knob — unset, the helper's own bound)
+    });
     let read;
     try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
-    this._loadAnswer(SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) }));
+    const a = SR.storeAnswer(read, { valid: HOSTS_SHAPE });
+    if (this._hold.start(a) !== 'held') this._loadAnswer(a);   // held: the machines list stays empty until the lift
   }
-  /** remainder of B-f276 (bl-jobs, the store-read law over hosts.json — the SOLE holder of every paired machine and every
-   *  dialTokenHash since B-f3e8): data → loaded · missing → empty · torn bytes → backed up (a copy), then empty, as before ·
-   *  a read that FAILED (EIO, EACCES, a timeout on network storage) → HELD: the machines are not shown, NOTHING is written over
-   *  the file (_save refuses), a person's change is refused by name, and the file is read again off the loop until it answers */
+  /** what the store holds now: the start's answer (data | missing) or a lift's — the ONE writer of the records from the file */
   _loadAnswer(a) {
-    if (a.state === 'unreadable') return this._unreadHold(a);
-    if (a.state === 'corrupt') {
-      let aside = null;
-      try { aside = this._asideName(); fs.copyFileSync(this._file, aside, fs.constants.COPYFILE_EXCL); } catch { aside = null; }
-      const b = SR.afterSetAside(a, aside);
-      if (b.state !== 'missing') return this._unreadHold(b);   // its only copy: never written over
-      console.warn(`[hosts] hosts.json did not parse (${a.why}) — its bytes are kept in ${path.basename(aside)}; the machines list starts empty`);
-      this._tornCopy = path.basename(aside);   // the MOVE (part one): the page says the torn lift and where its copy is (this run)
-    }
     this._state = a.state === 'data' ? a.value : { hosts: [] };
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
     // lane lg-remote-hardening: every pinned record's file, as its record says (a restored hosts.json, a deleted file)
     for (const h of this._state.hosts) if (HK.pinned(h) || HK.hopPinned(h)) { try { HK.writePinFile(this._sshDir, h); } catch (e) { console.warn(`[hosts] the host-key pin file of ${h.name || h.id} was not written: ${e.message}`); } }
     if (a.state === 'data') this._reachChanged('hosts.json read');   // at boot nothing is wired yet (a no-op); a held store read again mid-life brings machines back — re-judged. Its read r3 (Y2): an EMPTY lift (torn bytes set aside, a gone file) re-judges nothing, as a boot does — a prune over the empty list cleared every machine's exit lists
   }
-  _asideName() { return this._file + '.corrupt-' + Date.now(); }
+  /** the hold LIFTED (the helper's onLift): `value` the records READ, or null (torn bytes kept aside as `setAside`, or the file gone —
+   *  the list starts empty). What waited for the machines runs now */
+  _lifted(value, { setAside = null } = {}) {
+    if (setAside) this._tornCopy = setAside;   // the MOVE (part one): the page says the torn lift and where its copy is (this run)
+    this._loadAnswer(value ? { state: 'data', value } : { state: 'missing' });
+    try { this.onDiscoveryDirty?.(null); } catch { }
+    try { this.onReadAgain?.(); } catch { }   // its read r1 (S1): every page's machines list is drawn again (exit-routes wires hosts-updated)
+    const waits = this._readWaits ? [...this._readWaits.values()].map((w) => w.fn) : []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
+    for (const fn of waits) { try { fn(); } catch (e) { console.warn('[hosts] a wait for the machines failed:', e && e.message); } }
+  }
+  _asideName(mark = Date.now()) { return this._file + '.corrupt-' + mark; }   // ONE set-aside name: the helper's keep and the copies' prefix (the census counts the names)
   /** the copy of hosts.json's torn bytes this run started empty over (its base name), or null — the page's torn words */
   tornCopy() { return this._tornCopy || null; }
+  /** 2b: the hold is the helper's — every guard of this file asks it by its old name: { code, at } while held, else null */
+  get _unread() { const f = this._hold ? this._hold.held() : null; return f ? { code: f.code, at: f.since } : null; }
+  /** a read again now (the held store's own road — the notice's press reads it through the helper) → true when it lifted */
+  readAgain() { return this._hold ? this._hold.again() : Promise.resolve(false); }
   /** the kept copies were read (an unread answer names every id — the page waits for a read before it says «the damaged list may name it») */
   copiesRead() { try { return this._copies().ready(); } catch { return false; } }
   /** part one's words follow (r3792): read, and no copy left out of the look (more copies than it reads: an older one may name an id) */
   copiesWhole() { try { return this._copies().whole(); } catch { return false; } }
   /** read the kept copies if they were never read → a promise settled once the read in flight ends (the mounts list then tells the page) */
   copiesWarm() { try { return this._copies().warm(); } catch { return Promise.resolve(); } }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
-  _unreadHold(a) {
-    this._unread = { code: a.code, why: a.why, at: (this._unread && this._unread.at) || Date.now() };
-    this._state = { hosts: [] };
-    if (!this._unreadSaid) { this._unreadSaid = true; console.warn(`[hosts] hosts.json could not be read (${a.code}: ${a.why}) — held: nothing is written over it, and it is read again off the main loop`); }
-    this._unreadRetrySoon();
-  }
   /** the words a person reads while hosts.json is held (the machines list, a refused change) */
   unreadWords() {
-    // its read r2 (S5): while a read of it has not answered, the words say so (no new read starts then)
-    return this._unread ? `hosts.json in VibeSpace's data folder could not be read (${this._unread.code}); ${this._hungP ? 'a read of it is still waiting for the storage to answer, and its answer is used the moment it comes' : 'VibeSpace reads it again every few minutes'}. No machine is lost: nothing is written over it, and changes to machines wait until it reads.` : null;
+    // its read r2 (S5): while a read of it has not answered past its bound, the words say so (no new read starts then) — 2b: the hold's facts
+    return this._hold ? this._hold.words() : null;
   }
+  /** the held words from the hold's facts (`f`: its code, and `waiting` while a read is past its bound) */
+  _heldWords(f) { return `hosts.json in VibeSpace's data folder could not be read (${f.code}); ${f.waiting ? 'a read of it is still waiting for the storage to answer, and its answer is used the moment it comes' : 'VibeSpace reads it again every few minutes'}. No machine is lost: nothing is written over it, and changes to machines wait until it reads.`; }
   _refuseIfUnread(what) {
     if (this._unread) throw this._heldError(what);
-  }
-  _unreadRetrySoon() {
-    if (this._unreadT || this._unreadStopped) return;
-    const n = this._unreadTries = (this._unreadTries || 0) + 1;
-    const t = this._unreadT = setTimeout(() => { this._unreadT = null; this._unreadRetry().catch((e) => { console.warn('[hosts] hosts.json read again failed:', e && e.message); this._unreadRetrySoon(); }); }, SR.retryDelay(n));
-    t.unref?.();
-  }
-  /** one read again, off this thread; ONE in flight; a «missing» answer right after an unreadable one is read once more (the
-   *  law of batch 2 cure 3: a storage that says «no such file» for a moment never has the file written over) */
-  async _unreadRetry() {
-    if (!this._unread) return;
-    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js's order) — a try that meets one in flight, or a read that fails, never ends the tries
-    if (this._unreadP) return;
-    // its read S3: ONE let-go read at most — a read that hangs keeps its thread of the pool (32), so a new read per try ran it dry in
-    // about 2.5 h (every async fs / dns / crypto of the hub stalled): no new read until the let-go one answers (the tries stay armed)
-    if (this._hungP) { if (!this._hungSaid) { this._hungSaid = true; console.warn('[hosts] hosts.json: the read let go still hangs — no new read is started until it answers'); } return; }
-    const mine = this._unreadSeq = (this._unreadSeq || 0) + 1;   // its read r2 (X2): only the NEWEST try may lift the hold — r3 (Y3): counted once a try READS (a meeting makes no read stale)
-    const p = this._unreadP = fs.promises.readFile(this._file, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
-    // the cure (主开发 23:20Z): the read has a DEADLINE — past READ_MS a read that has not answered is SAID (once) and let go as the
-    // try's own: its answer is JUDGED WHEN IT COMES (its read r2, S5 — a dropped late answer kept slow storage held for ever), and no
-    // second read starts while it hangs (its read r1, S3: one thread of the pool, never one per try)
-    let tm = null;
-    const read = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r({ slow: true }), this._readMs || READ_MS); tm.unref?.(); })]);
-    clearTimeout(tm);
-    if (this._unreadP === p) this._unreadP = null;
-    if (read && read.slow) {
-      this._hungP = p;
-      p.then((late) => { if (this._hungP !== p) return; this._hungP = null; this._hungSaid = false; if (this._unread && !this._unreadStopped && mine === this._unreadSeq) this._unreadJudge(late, mine).catch((e) => console.warn('[hosts] hosts.json: a late answer could not be judged:', e && e.message)); });
-      if (!this._slowSaid) { this._slowSaid = true; console.warn(`[hosts] hosts.json: a read again has not answered in ${(this._readMs || READ_MS) / 1000} s — its answer is used when it comes; no second read starts meanwhile`); }
-      return;
-    }
-    return this._unreadJudge(read, mine);
-  }
-  /** one read's answer while held (a try's, or a late one's) — lifts the hold, or keeps it */
-  async _unreadJudge(read, mine) {
-    if (!this._unread) return;
-    let a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
-    if (a.state === 'unreadable') { this._unread.code = a.code; this._unreadMissingAt = 0; return; }
-    if (a.state === 'missing' && !this._unreadMissingAt) { this._unreadMissingAt = Date.now(); return; }
-    if (a.state === 'corrupt') {   // its read r1 (N1): torn bytes now are copied aside OFF the loop first — no place for them, the hold stands
-      const aside = this._asideName();
-      let ok = false; try { await fs.promises.copyFile(this._file, aside, fs.constants.COPYFILE_EXCL); ok = true; this._copies().invalidate(); } catch { }
-      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands
-      a = SR.afterSetAside(a, ok ? path.basename(aside) : null);
-      if (a.state === 'unreadable') { this._unread.code = a.code; return; }
-      this._tornCopy = path.basename(aside);   // the MOVE (part one): the page says this torn lift too
-    }
-    const was = this._unread; this._unread = null; this._unreadMissingAt = 0; this._unreadTries = 0; this._unreadSaid = false; this._unreadSaveSaid = false;
-    if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
-    this._loadAnswer(a);
-    console.warn(`[hosts] hosts.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${this._state.hosts.length} machine(s)` : a.setAside ? `torn bytes, kept aside as ${a.setAside} — the machines list starts empty` : 'the file is GONE — the machines list starts empty'}`);
-    try { this.onDiscoveryDirty?.(null); } catch { }
-    try { this.onReadAgain?.(); } catch { }   // its read r1 (S1): every page's machines list is drawn again (exit-routes wires hosts-updated)
-    const waits = this._readWaits ? [...this._readWaits.values()].map((w) => w.fn) : []; this._readWaits = null;   // its read r1 (S5): what waited for the machines runs now
-    for (const fn of waits) { try { fn(); } catch (e) { console.warn('[hosts] a wait for the machines failed:', e && e.message); } }
   }
   /** run `fn` over the machines as soon as they are KNOWN — now, or once a held hosts.json reads (its read r1, S5: a sweep over
    *  the held, empty list ran over nothing and never again) */
@@ -536,7 +492,7 @@ class HostManager {
   _save() {
     // THE MEETING (B-f276's held store × B-48a4's queued save; 主开发 23:21Z): law 1 — a HELD hosts.json takes no write: this check is
     // the FIRST line, before anything is queued
-    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; console.warn('[hosts] a hosts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return false; }
+    if (!this._hold.writable('a hosts.json write')) return false;   // (said once a hold, by the helper)
     const W = this._storeWriter || require('./store-writer.js').storeWriter();
     // law 2 — the bytes are made AT the write (lazily): a write queued before a hold must never land the held, EMPTY list. The
     // producer refuses while held: the writer keeps the write owed and retries it, and once the file reads again it writes the

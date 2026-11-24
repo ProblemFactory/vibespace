@@ -665,7 +665,7 @@ console.log('⑯ B-2566\'s remainder (r1730): «gone» by the store\'s CODE; a H
     const R = rig('held-two-' + tag, { mod, owner: () => (box.owner === undefined ? 'h-1' : box.owner), link: () => box.link, store: realStore('held-two-' + tag, [MACHINE_H1()]), connect: async () => { throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); } });
     await R.result(X, 'nightly report finished');
     box.owner = null;   // two machines claim it now: no ONE owner can be named
-    R.store._unreadHold({ code: 'EIO', why: 'i/o error, read' });   // the REAL store's own hold: its read failed
+    R.store._hold.start({ state: 'unreadable', code: 'EIO', why: 'i/o error, read' }); R.store._hold.stop();   // the REAL store's own hold: its read failed (2b: the family helper's start; its read-again timer stopped)
     R.c.now += 11 * 60e3; await R.fire(); await R.fire();
     return { owed: R.deliver.endedEntries(X).length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length, held: R.store.held() };
   };

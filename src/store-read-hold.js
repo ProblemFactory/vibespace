@@ -58,6 +58,9 @@ async function writeWhole(to, buf, log = () => { }) {
 }
 const COPY_LOOK = 20;   // the newest copies of torn bytes compared at a keep (more beside one store are a person's to clear)
 const CEILING = 4;      // round wom600meg (2): the helper's reads in flight across ALL stores (the hub's file pool is shared)
+const READ_MS = 60_000; // 2b (主开发 r3790): a read again that has not answered in this long is SAID (once a hold) and let go as the try's
+                        // own — its answer is judged the moment it comes, and no second read starts while it hangs (one pool thread)
+const SLOW = Symbol('a read past its bound');
 let active = 0;         // …the reads (with their copies) in flight now, every store's
 let keys = 0;           // the opaque keys the list hands out (a hold's full path stays inside)
 /** a read's answer → the hold's code: the error's own CODE or NAME (a word), never its message (which may name a path) */
@@ -73,10 +76,10 @@ const CHANGE = new Set();
 const changed = () => { for (const fn of [...CHANGE]) { try { fn(); } catch { /* a listener's own */ } } };
 function onHoldsChange(fn) { if (typeof fn !== 'function') return () => {}; CHANGE.add(fn); return () => CHANGE.delete(fn); }
 
-function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now } = {}) {
+function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob)
   if (!file || typeof aside !== 'function' || typeof words !== 'function' || !code) throw new Error('store-read-hold: file, aside, words and code are required');
   const name = path.basename(file);
-  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0;   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
+  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0, waitingSince = 0, waitSaid = false;   // waitingSince: a read past its bound (2b)   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
   const prefix = path.basename(aside(''));   // the copies' common head (`<file>.corrupt-`)
   const onErr = (e) => { log(`${name}: a read again failed: ${(e && e.message) || e}`); arm(); };
   function arm() {
@@ -116,15 +119,31 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     return 'held';
   }
   /** ONE read again, off the loop → true when the hold lifted. ONE in flight a store (the read AND its copy), at most CEILING across
-   *  the family; a try that meets either waits for its next rung (armed first) */
+   *  the family; a try that meets either waits for its next rung (armed first). 2b (r3790): a read past its bound (READ_MS) is SAID
+   *  once and let go as the try's own (→ false): the hold's facts carry `waiting` (its since), no second read starts while it hangs,
+   *  and its answer is judged the moment it comes (a dropped late answer kept slow storage held for ever) */
   async function again() {
     if (!held || stopped) return false;
     arm();   // the next try armed FIRST: a try that meets one in flight, the ceiling, or a read that fails never ends the tries
     if (busy || active >= CEILING) return false;
     busy = true; active++;
+    const p = fs.promises.readFile(file).then((buf) => ({ text: buf.toString('utf8'), buf }), (error) => ({ error }));
+    const ms = Number(typeof readMs === 'function' ? readMs() : readMs) || READ_MS;
+    let tm = null;
+    const first = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r(SLOW), ms); tm.unref?.(); })]);
+    clearTimeout(tm);
+    if (first !== SLOW) return judge(first);
+    waitingSince = now();
+    if (!waitSaid) { waitSaid = true; log(`${name}: a read again has not answered in ${ms / 1000} s — its answer is used the moment it comes; no second read starts meanwhile`); }
+    changed();   // the notice hears it (the row's words may say the read waits)
+    p.then((late) => judge(late)).catch(onErr);
+    return false;
+  }
+  /** one read's answer (a try's, or a late one's) — lifts the hold, or keeps it; the read's turn ends here */
+  async function judge(read) {
     let a;
     try {
-      const read = await fs.promises.readFile(file).then((buf) => ({ text: buf.toString('utf8'), buf }), (error) => ({ error }));
+      waitingSince = 0;
       if (!held || stopped) return false;
       a = SR.storeAnswer(read, { valid });
       if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; return false; }
@@ -137,7 +156,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
         if (a.state === 'unreadable') { held.code = 'torn bytes, not copied'; return false; }
       }
     } finally { busy = false; active--; }
-    const was = held; held = null; tries = 0; missingAt = 0; saveSaid = false;
+    const was = held; held = null; tries = 0; missingAt = 0; saveSaid = false; waitSaid = false;
     if (timer) { clearTimeout(timer); timer = null; }
     if (a.setAside) tornLift = { copy: a.setAside, since: was.since, at: now() };
     log(`${name} read again (held since ${new Date(was.since).toISOString()}, ${was.code}): ${a.state === 'data' ? 'its records are back' : a.setAside ? `torn bytes, kept aside as ${a.setAside} — it starts empty` : 'the file is gone — it starts empty'}`);
@@ -145,7 +164,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     nextAt = 0; changed();   // B-f276 unit B: lifted — the notice hears it
     return true;
   }
-  const facts = () => (held ? { file: name, code: held.code, since: held.since } : null);
+  const facts = () => (held ? { file: name, code: held.code, since: held.since, ...(waitingSince ? { waiting: waitingSince } : {}) } : null);   // waiting: a read past its bound (2b)
   /** the refusal BY NAME (503, the caller's code) — `what` the change refused */
   const refusal = (what) => Object.assign(new Error(`${what}: ${words(facts())}`), { code, status: 503 });
   const key = 'h' + (++keys);

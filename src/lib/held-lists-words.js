@@ -4,7 +4,7 @@
 const i18nKey = (s) => s;   // a declared visible template (scripts/i18n-extract)
 const NAMES = Object.freeze({
   'mounts.json': i18nKey('the storage list'), 'mount-tokens.json': i18nKey('the folder links'), 'plugins.json': i18nKey('the plugins’ settings'),
-  'user-todos': i18nKey('For you'), 'task-groups': i18nKey('the Task Groups'), hosts: i18nKey('the paired machines'),
+  'user-todos': i18nKey('For you'), 'task-groups': i18nKey('the Task Groups'), 'hosts.json': i18nKey('the paired machines'),   // 2b: hosts.json on the helper (its row is the file's)
   // the stores that joined the helper on the hotfix's tip (r3224 / r3233 — the family's rows): each list's plain name
   'accounts.json': i18nKey('your accounts list'),
   'instance.json': i18nKey('this VibeSpace’s own id'),   // 主开发 r3336 (src/auth.js): the sign-in's id file (a notice never names the folder)

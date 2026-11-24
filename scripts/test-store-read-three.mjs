@@ -334,6 +334,37 @@ try {
     ok(!!hgy && hgy.late === false && !hgy.lifted, 'RED CONTROL — the answer dropped (in a copy): the storage answers and the hold stands', hgy);
   }
   {
+    // 2b (主开发 r3790): THE FAMILY's READ BOUND — the machines list's 60 s deadline, the helper's own now for every store on it: a read
+    // past its bound is SAID once and let go as the try's own, the hold's facts carry `waiting`, no second read starts while it hangs,
+    // and its answer is used the moment it comes. RED: the bound cut (in a copy) — the try waits on the hung read and nothing is said
+    console.log('⑤ the helper (2b): a read past its bound — said once, let go, its late answer used');
+    const HSRC2 = fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8');
+    const RACE = "    const first = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r(SLOW), ms); tm.unref?.(); })]);\n";
+    ok(HSRC2.split(RACE).length === 2, 'control setup: the read\'s bound is found once in the helper');
+    const boundScene = async (Mod, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'c.json'), body = '{"rows": [2]}'; fs.writeFileSync(f, body);
+      const rf = fs.promises.readFile, said = []; let reads = 0, release = null, h = null, out = null;
+      fs.promises.readFile = function (p, ...a) { if (String(p) === f) { reads++; if (!release) return new Promise((res) => { release = () => res(Buffer.from(body)); }); } return rf.call(fs.promises, p, ...a); };
+      try {
+        h = Mod.create({ file: f, code: 'c', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'read again soon'), log: (m) => said.push(m), readMs: () => 30 });
+        h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
+        // (the leg's own bound on the try: the red's try never returns while the read hangs)
+        const first = await Promise.race([h.again(), new Promise((r) => { const t = setTimeout(() => r('not let go'), 1500); t.unref?.(); })]);
+        const facts = h.held(), words = h.words();
+        const second = await Promise.race([h.again(), new Promise((r) => { const t = setTimeout(() => r('not let go'), 1500); t.unref?.(); })]);
+        const during = reads;
+        if (release) release();
+        const up = await until(() => !h.held());
+        out = { first, second, during, waiting: !!(facts && facts.waiting), words, saidOnce: said.filter((l) => /a read again has not answered in 0\.03 s/.test(l)).length, up };
+      } finally { fs.promises.readFile = rf; if (h) h.stop(); }
+      return out;
+    };
+    const bd = await boundScene(H, 'bound');
+    ok(!!bd && bd.first === false && bd.waiting && bd.words === 'a read waits' && bd.second === false && bd.during === 1 && bd.saidOnce === 1 && bd.up, 'a read past its bound is let go as the try\'s own (the try answers false), SAID once, carried in the hold\'s facts (`waiting`: the words say a read waits); no second read starts while it hangs; its late answer lifts the hold', bd);
+    const bdx = await boundScene(mutant('src/store-read-hold.js', [[RACE, '    const first = await p;\n']]), 'bound-ctl');
+    ok(!!bdx && bdx.first === 'not let go' && !bdx.waiting && bdx.saidOnce === 0, 'RED CONTROL — the bound cut (in a copy): the try waits on the hung read, and nothing says it', bdx);
+  }
+  {
     console.log('⑤ the helper: the family\'s ceiling on the shared pool');
     const ceiling = async (Mod, tag) => {
       const d = dirOf(tag), files = Array.from({ length: 24 }, (_, i) => path.join(d, `s${i}.json`)); files.forEach((x) => fs.writeFileSync(x, '{}'));
@@ -597,20 +628,21 @@ try {
     ok(rmx.pruned === '' && rmx.afterRestart === true, 'RED CONTROL — the removal not asked (in a copy): the copy keeps the removed machine\'s exit lists, across a restart too', rmx);
     // (2) hosts.json held at the start (no copy then); the bytes tear meanwhile; the read again copies them aside ITSELF and lifts empty:
     // the first remover to ask is told NAMED (the answer invalidated by that copy) — RED CONTROL: the invalidation cut, a stale «not named»
-    const staleRun = async (MOD, tag) => {
+    const staleRun = async (MOD, tag, cut = false) => {   // cut: the RED — the copies' invalidation cut on that store's own copies (2b: the keep that makes the copy is the helper's)
       const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [{ id: 'host-made02', name: 'made-up', host: 'made.example.invalid', user: 'u' }] }));
       const un = refuse(f); let Hm = null; try { Hm = new MOD.HostManager({ dataDir: d }); } finally { un(); }
       await Hm._copies().refresh();
+      if (cut) Hm._copies().invalidate = () => { };   /* RED: the helper's keep makes its copy and asks no read again of the copies */
       fs.writeFileSync(f, '{"hosts": [{"id": "host-made02", "name": "made-up"');
-      await Hm._unreadRetry(); await until(() => !Hm.unreadWords());
+      await Hm.readAgain(); await until(() => !Hm.unreadWords());
       const lifted = !Hm.unreadWords() && Hm.list().length === 0, named = Hm.namedByCopy('host-made02');
       await Hm._copies().refresh();
       return { lifted, named, namedRead: Hm.namedByCopy('host-made02') };
     };
     const st1 = await staleRun(HMb, 'stale-copies');
-    const stx = await staleRun(mutant('src/hosts.js', [["ok = true; this._copies().invalidate(); } catch {", "ok = true; } catch {"]]), 'stale-copies-ctl');
+    const stx = await staleRun(HMb, 'stale-copies-ctl', true);
     ok(st1.lifted && st1.named === true && st1.namedRead === true, 'THE COPIES\' ANSWER IS NEVER OLDER THAN THE NEWEST COPY MADE: a tear found by a read again in a running process — the first remover is told NAMED, and the copies read again name it', st1);
-    ok(stx.lifted && stx.named === false, 'RED CONTROL — the store\'s own copy not followed by the invalidation (in a copy): the first remover reads the stale «not named» and would remove it', stx);
+    ok(stx.lifted && stx.named === false, 'RED CONTROL — the copy not followed by the invalidation (cut on that store\'s copies): the first remover reads the stale «not named» and would remove it', stx);
     // ── round wjgchwl6a's follow (r3274) ──
     const H8 = require('../src/store-read-hold.js');
     // (1) THE GENERATION: a read already in flight when the invalidation comes (it listed the folder BEFORE the new copy) sets NOTHING, and
@@ -754,12 +786,21 @@ try {
       // the torn lift's copy, said: hosts.tornCopy() names it at boot; the route carries it; the page says it, and keeps the flagged mounts
       // out of «removed machines» (zh, ja beside)
       const dT = dirOf('move-torn'), fT = path.join(dT, 'hosts.json'); fs.writeFileSync(fT, '{"hosts": [{"id": "host-made05"');
-      const HT = new HMb.HostManager({ dataDir: dT }), tc = HT.tornCopy();
+      const HT = new HMb.HostManager({ dataDir: dT });
+      for (let k = 0; k < 5000 && HT.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // 2b: HELD while its bytes are copied aside off the loop (turns, never a clock)
+      const tc = HT.tornCopy();
       const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), SM = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
       const H1 = 'VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The mounts below are kept and their records are not removed. A device that pairs again gets its mounts back; an ssh machine added again counts as a new machine, so its old mounts stay below until you unmount them.';
       const SEC = 'Mounts on machines not in the list now — kept', ROWW = '(not listed now)';   // the words follow's neutral section (r3792)
       const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
       ok(typeof tc === 'string' && /^hosts\.json\.corrupt-\d+$/.test(tc) && fs.existsSync(path.join(dT, tc)) && HT.list().length === 0, 'THE MOVE: a torn hosts.json at boot — the list starts empty and tornCopy() names its kept copy', { tc });
+      // H6 (r3451), in 2b: a torn hosts.json that STAYS torn is kept aside ONCE per content — the machines list's instance of the helper's
+      // law, its red the helper's own (② «a second start over the SAME torn bytes makes no second copy», the comparison cut)
+      const h6 = await (async () => { const d = dirOf('h6-once'), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, '{"hosts": [{"id": "host-made06", "dialTokenHash": "' + 'f'.repeat(64) + '"');
+        const named = [];
+        for (let k = 0; k < 3; k++) { const H = new HMb.HostManager({ dataDir: d }); for (let j = 0; j < 5000 && H.unreadWords(); j++) await new Promise((r) => setImmediate(r)); named.push(H.tornCopy()); H._hold.stop(); }
+        return { copies: fs.readdirSync(d).filter((n) => n.startsWith('hosts.json.corrupt-')).length, named }; })();
+      ok(h6.copies === 1 && h6.named.every((x) => x && x === h6.named[0]), 'H6 (r3451, 2b): a torn hosts.json that stays torn — three starts, ONE kept copy (the helper\'s keep, off the loop), and every start names it', h6);
       ok(ER.includes("...(typeof hosts.tornCopy === 'function' && hosts.tornCopy() ? { torn: hosts.tornCopy() } : {})") && SM.includes("if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(") && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy && !m.hostUnknown') && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy && m.hostUnknown') && SM.includes(`tr('${SEC}')`) && SM.includes(`tr('${ROWW}')`) && [SEC, ROWW].every((w) => zh.includes(`"${w}":`) && ja.includes(`"${w}":`)) && SM.includes(`tr('${H1}'`) && zh.includes(`"${H1}":`) && ja.includes(`"${H1}":`), 'THE MOVE (pins): GET /api/hosts carries the torn copy; the page says it (zh, ja) and keeps a flagged mount out of «removed machines», in its own section where the person\'s unmount stays theirs'); }
   }
 } catch (e) {

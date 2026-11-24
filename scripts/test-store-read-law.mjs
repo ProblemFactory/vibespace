@@ -32,8 +32,8 @@ const bodyOf = (F) => { try { return fs.statSync(F).isDirectory() ? '(a folder)'
 console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial token hash');
 {
   const HSRC = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
-  const LOAD = "    this._loadAnswer(SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) }));\n";
-  ok(HSRC.split(LOAD).length === 2, 'control setup: hosts.js loads through storeAnswer once (the plant the control swaps)');
+  const LOAD = "    if (this._hold.start(a) !== 'held') this._loadAnswer(a);   // held: the machines list stays empty until the lift\n";   // 2b: the start through the family helper
+  ok(HSRC.split(LOAD).length === 2, 'control setup: hosts.js starts its hold once (the plant the control swaps)');
   const RELEASE = MJ.load('src/hosts.js', anchored(HSRC, LOAD, "    try { this._state = JSON.parse(read.text); } catch { } if (!Array.isArray(this._state.hosts)) this._state.hosts = [];   /* MUTANT: the release — any failure starts EMPTY */\n", 'srl-37a'), 'release-load');
   const body = JSON.stringify({ hosts: [{ id: 'h-0001', name: 'build box', transport: 'dial', deviceId: 'dev-0001' }] });
   const scene = async (Mod, name) => {
@@ -53,7 +53,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
     if (!asRoot) fs.chmodSync(F, 0o000);
     unplant(F, body);   // the storage answers again
-    if (H._unreadRetry) await H._unreadRetry();
+    if (H.readAgain) await H.readAgain();
     return { held, listedWhileHeld, refused: refused ? { code: refused.code, msg: String(refused.message) } : null, kept, back: H.list().map((h) => h.id).join(), words: H.unreadWords ? H.unreadWords() : null, cacheKept, ranWhileHeld, ranAfter: ran.length, lifts: lifts.length, imp: imp && { skipped: !!imp.skipped, threw: imp.threw || null, warned: (imp.warnings || []).some((w) => /^the machines were not imported — hosts\.json/.test(w)) } };
   };
   const r = await scene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-held');
@@ -80,7 +80,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
         H.whenRead(() => ran.push('stop-a2'), 'the remote stop of conversation a', 'stop:a');
       } finally { console.warn = warn; }
       unplant(F, body);
-      if (H._unreadRetry) await H._unreadRetry();
+      if (H.readAgain) await H.readAgain();
       return { ran: ran.length, stops: ran.filter((x) => x.startsWith('stop-')).join(), first: ran[0], said };
     };
     const w = await waitsScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-waits');
@@ -102,7 +102,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
         for (let i = 0; i < 256; i++) H.whenRead(() => ran.push('sweep'), `a sweep ${i}`);
       } finally { console.warn = warn; }
       unplant(F, body);
-      if (H._unreadRetry) await H._unreadRetry();
+      if (H.readAgain) await H.readAgain();
       return { told: told.join(), named: lines.some((l) => /the oldest is let go \(it will not run at the read\): the remote stop of conversation conv-lg$/.test(l)), stopRan: ran.includes('stop'), ran: ran.length };
     };
     const lg = await letGoScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-waits-letgo');
@@ -135,7 +135,7 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       fs.readFileSync = function (f, ...a) { if (String(f) === L) syncReads++; return rfs.call(this, f, ...a); };
       fs.existsSync = function (f, ...a) { if (String(f) === L) syncReads++; return efs.call(this, f, ...a); };
       try {
-        if (H._unreadRetry) await H._unreadRetry();
+        if (H.readAgain) await H.readAgain();
         for (let i = 0; i < 200 && !(H.dialTokenHash && H.dialTokenHash('dev-0001')); i++) await new Promise((res) => setTimeout(res, 5));   // its async read
       } finally { fs.readFileSync = rfs; fs.existsSync = efs; }
       return { r, threw, said: lines.some((l) => /the dial-token migration \(dial-tokens\.json into hosts\.json\) waits for hosts\.json to read/.test(l)), keptWhileHeld, hash: H.dialTokenHash ? H.dialTokenHash('dev-0001') : null, syncReads };
@@ -147,104 +147,24 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const mx = await migScene({ HostManager: MJ.load('src/hosts.js', anchored(HSRC, MIG, '\n    if (false) { this.whenRead(() => { this._migrateDialTokensAtRead(file); }', 'srl-146a'), 'mig-unheld').HostManager }, 'hosts-mig-unheld');
     ok(mx.threw === 'hosts-unread' && !mx.said, 'CONTROL (no held branch, in a copy): the migration throws the hold at the boot — its line was «failed» — RED', mx);
   }
-  // torn bytes: kept aside (a copy), the list starts empty — as the release did, now through the law
+  // torn bytes (2b, 主开发 r3790 decision 1): HELD while they are copied aside OFF the loop by the helper's keep (once a content), then
+  // the list starts empty — the start makes NO synchronous copy; for that moment a lookup of a machine refuses by name
   {
     const d = path.join(D, 'hosts-torn'); fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, 'hosts.json'), '{"hosts": [');
     const H = new (require(path.join(ROOT, 'src/hosts.js')).HostManager)({ dataDir: d });
-    const asides = fs.readdirSync(d).filter((n) => /^hosts\.json\.corrupt-\d+$/.test(n));
-    ok(!H.unreadWords() && H.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"hosts": [', 'torn bytes are KEPT aside (a copy) and the machines list starts empty — never a hold');
+    const atStart = { held: !!H.unreadWords(), copies: fs.readdirSync(d).filter((n) => /^hosts\.json\.corrupt-\d+/.test(n)).length };
+    let refused = null; try { H.get('h-0001'); } catch (e) { refused = e && e.code; }
+    for (let k = 0; k < 5000 && H.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // (turns, never a clock: the copy lands off the loop)
+    const asides = fs.readdirSync(d).filter((n) => /^hosts\.json\.corrupt-\d+/.test(n));
+    ok(atStart.held && atStart.copies === 0 && refused === 'hosts-unread' && !H.unreadWords() && H.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"hosts": [' && H.tornCopy() === asides[0], 'torn bytes (2b, decision 1): HELD while they are copied aside off the loop — no synchronous copy at the start, a lookup refused by name for that moment — then KEPT once and the machines list starts empty (tornCopy() names its copy)', { atStart, refused, asides });
+    H._hold.stop();
   }
-  // «missing» right after an unreadable answer: read once more before anything is written there
-  {
-    const d = path.join(D, 'hosts-gone'); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'hosts.json'); plant(F, body);
-    const H = new (require(path.join(ROOT, 'src/hosts.js')).HostManager)({ dataDir: d });
-    if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true });
-    await H._unreadRetry();
-    const heldAfterOne = !!H.unreadWords();
-    await H._unreadRetry();
-    ok(heldAfterOne && !H.unreadWords() && H.list().length === 0, 'a «missing» answer right after an unreadable one is READ ONCE MORE (the hold stands); missing again, the list starts empty', { heldAfterOne });
-  }
-  // its read r1 (M2): a try that meets a read IN FLIGHT, and a read that then fails, both leave the next try ARMED (the copy's order
-  // returned first — the timer that called it had cleared itself, so one hung read ended the tries until a restart)
-  const armScene = async (Mod, name) => {
-    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'hosts.json'); plant(F, body);
-    const H = new Mod.HostManager({ dataDir: d });
-    const prf = fs.promises.readFile; let release = null;
-    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return new Promise((res, rej) => { release = () => rej(Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' })); }); return prf.call(this, f, ...a); };
-    let armedMeeting = false, armedAfter = false, armedAfterFail = false;
-    try {
-      const first = H._unreadRetry();   // its read hangs
-      clearTimeout(H._unreadT); H._unreadT = null;   // the timer that fires the next try clears itself first
-      await H._unreadRetry();   // …and meets the read in flight
-      armedMeeting = !!H._unreadT;
-      if (release) release(); await first;   // the hung read fails — the try armed by the meeting still stands
-      armedAfter = !!H._unreadT;
-      // its read r2 (X5): a try that meets NOTHING in flight and whose read fails at once arms the next too
-      clearTimeout(H._unreadT); H._unreadT = null;
-      fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); return prf.call(this, f, ...a); };
-      await H._unreadRetry(); armedAfterFail = !!H._unreadT;
-    } finally { fs.promises.readFile = prf; }
-    clearTimeout(H._unreadT); H._unreadT = null; if (!asRoot) fs.chmodSync(F, 0o644);
-    return { armedMeeting, armedAfter, armedAfterFail, held: !!H.unreadWords() };
-  };
-  const ar = await armScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-arm');
-  ok(ar.held && ar.armedMeeting && ar.armedAfter && ar.armedAfterFail, 'its read r1 (M2) / r2 (X5): a try that meets a read in flight arms the next, so does the read that then fails, and so does a try whose own read fails at once — the tries never end while held', ar);
-  const ARM = '    this._unreadRetrySoon();   // its read r1 (M2): the next try is armed FIRST (jobs.js\'s order) — a try that meets one in flight, or a read that fails, never ends the tries\n    if (this._unreadP) return;\n';
-  ok(HSRC.split(ARM).length === 2, 'control setup: the anchor of the control «the next try armed first» is in hosts.js');
-  const arx = await armScene(MJ.load('src/hosts.js', anchored(HSRC, ARM, '    if (this._unreadP) return;   /* MUTANT: the first cut\'s order */\n    this._unreadRetrySoon();\n', 'srl-196a'), 'arm-order'), 'hosts-arm-mut');
-  ok(arx.held && !arx.armedMeeting, 'CONTROL (the first cut\'s order, in a copy): the try that meets a read in flight arms NOTHING', arx);
-  const ary = await armScene(MJ.load('src/hosts.js', anchored(HSRC, ARM, '    if (this._unreadP) { this._unreadRetrySoon(); return; }   /* MUTANT: armed only on a meeting */\n', 'srl-198a'), 'arm-meeting-only'), 'hosts-arm-mut2');
-  ok(ary.held && ary.armedMeeting && !ary.armedAfterFail, 'CONTROL (r2 X5 — armed only on a meeting, in a copy): a try whose own read fails arms NOTHING (the half-vacuous leg r2 named)', ary);
-  // its read r2 (X2): an OLDER try whose torn-bytes copy lands after a NEWER try lifted the hold never lifts it again as empty
-  const raceScene = async (Mod, name) => {
-    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'hosts.json'); plant(F, body);
-    const H = new Mod.HostManager({ dataDir: d });
-    const prf = fs.promises.readFile, pcf = fs.promises.copyFile; let land = null;
-    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.resolve('{"hosts": ['); return prf.call(this, f, ...a); };   // try k reads torn bytes
-    fs.promises.copyFile = function (src, ...a) { if (String(src) === F) return new Promise((res) => { land = res; }); return pcf.call(this, src, ...a); };   // …and its copy aside hangs
-    let olderErr = null, after = null;
-    try {
-      const older = H._unreadRetry().catch((e) => { olderErr = String(e && e.message); });
-      await new Promise((r) => setImmediate(r));
-      fs.promises.readFile = prf; unplant(F, body);   // the storage answers whole
-      await H._unreadRetry();   // try k+1 reads the machines and lifts the hold
-      const lifted = H.list().map((h) => h.id).join();
-      if (land) land(); await older;   // try k's copy lands
-      after = { lifted, list: H.list().map((h) => h.id).join(), held: !!H.unreadWords(), olderErr };
-    } finally { fs.promises.readFile = prf; fs.promises.copyFile = pcf; }
-    clearTimeout(H._unreadT); H._unreadT = null; return after;
-  };
-  const raceHeld = async (Mod, name) => {   // its read r3 (Y4): the NEWER try reads EIO — the hold stands — then the older's copy lands
-    const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
-    const F = path.join(d, 'hosts.json'); plant(F, body);
-    const H = new Mod.HostManager({ dataDir: d });
-    const prf = fs.promises.readFile, pcf = fs.promises.copyFile; let land = null, out = null;
-    fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.resolve('{"hosts": ['); return prf.call(this, f, ...a); };
-    fs.promises.copyFile = function (src, ...a) { if (String(src) === F) return new Promise((res) => { land = res; }); return pcf.call(this, src, ...a); };
-    try {
-      const older = H._unreadRetry().catch(() => { });
-      await new Promise((r) => setImmediate(r));
-      fs.promises.readFile = function (f, ...a) { if (String(f) === F) return Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })); return prf.call(this, f, ...a); };
-      await H._unreadRetry();   // the newer try: EIO — still held
-      if (land) land(); await older;
-      out = { held: !!H.unreadWords(), listed: H.list().length };
-    } finally { fs.promises.readFile = prf; fs.promises.copyFile = pcf; }
-    clearTimeout(H._unreadT); H._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } } return out;
-  };
-  const rh = await raceHeld({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-race-held');
-  const SEQ = '      if (!this._unread || mine !== this._unreadSeq) return;';
-  const rhx = await raceHeld(MJ.load('src/hosts.js', anchored(HSRC, SEQ, '      if (!this._unread) return;   /* MUTANT: the seq half cut */', 'srl-239a'), 'race-seq-half'), 'hosts-race-held-mut');
-  ok(!!rh && rh.held && !!rhx && !rhx.held, 'its read r3 (Y4): the newer try read EIO (the hold stands) and the older try\'s copy lands — the hold STANDS; CONTROL (the seq half cut, in a copy): the older try lifts it as EMPTY', { rh, rhx });
-  const rc = await raceScene({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-race');
-  ok(!!rc && rc.lifted === 'h-0001' && rc.list === 'h-0001' && !rc.held && !rc.olderErr, 'its read r2 (X2): an older try whose copy of torn bytes lands AFTER a newer try lifted the hold changes nothing — the machines stay loaded', rc);
-  const RACE = '      if (!this._unread || mine !== this._unreadSeq) return;   // its read r2 (X2): a newer try read meanwhile (and may have lifted) — its answer stands\n';
-  ok(HSRC.split(RACE).length === 2, 'control setup: the anchor of the control «only the newest try lifts» is in hosts.js');
-  const rcx = await raceScene(MJ.load('src/hosts.js', anchored(HSRC, RACE, '      /* MUTANT: no re-check after the copy */\n', 'srl-245a'), 'no-race-check'), 'hosts-race-mut');
-  ok(!!rcx && (rcx.list === '' || !!rcx.olderErr), 'CONTROL (no re-check after the copy, in a copy): the older try loads the machines list EMPTY over the lifted one (or throws on a hold already gone)', rcx);
+  // 2b (主开发 r3648 / r3792): three laws this store proved on its own road are the FAMILY HELPER's now, proved there with their reds —
+  // retired here: «missing» right after «unreadable» is read once more (test-store-read-three ⑤ «a file GONE right after a failed read
+  // is read once more»); the next try armed FIRST, on a meeting and on a failed read — its read r1 (M2) / r2 (X5) (⑤ «the next try is
+  // armed FIRST»); only the newest try lifts — its read r2 (X2) / r3 (Y4): the helper's ONE read in flight is the read AND its copy, so
+  // no older try's copy can land after a newer try (⑤ «one in flight is the read AND its copy»)
   // the cure (主开发 23:20Z): the SAVE's own guard has its red control (it covers the timers' saves and the stop's flush — removing
   // only it left every leg green)
   {
@@ -255,10 +175,10 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       H._state.hosts.push({ id: 'h-x', name: 'x', transport: 'ssh', host: 'x.invalid', user: 'u' });
       H._save(); H.flushThrottled();   // the meeting with B-48a4 (hub-loop-stalls): a save is the store writer's, QUEUED — what it owes is written NOW, so a write that slipped the guards would be on disk here
       const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
-      clearTimeout(H._unreadT); H._unreadT = null; if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
+      if (H._hold) H._hold.stop(); if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
       return kept;
     };
-    const SAVEH = "    if (this._unread) { if (!this._unreadSaveSaid) { this._unreadSaveSaid = true; console.warn('[hosts] a hosts.json write was refused: the file could not be read, and nothing is written over it until it reads'); } return false; }\n";
+    const SAVEH = "    if (!this._hold.writable('a hosts.json write')) return false;   // (said once a hold, by the helper)\n";   // 2b: the guard asks the helper's hold
     ok(HSRC.split(SAVEH).length === 2, 'control setup: the anchor of the control «the save\'s guard» is in hosts.js');
     const k = saveH({ HostManager: require(path.join(ROOT, 'src/hosts.js')).HostManager }, 'hosts-save-guard');
     // the meeting with B-48a4: the queued write's PRODUCER refuses while held too (law 2: a write queued before a hold never lands
@@ -277,9 +197,9 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
       const F = path.join(d, 'hosts.json'); plant(F, body);
       const H = new Mod.HostManager({ dataDir: d }); let n = 0; H.onReachChange = () => { n++; };
-      if (gone) { if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true }); await H._unreadRetry(); await H._unreadRetry(); }
-      else { unplant(F, body); await H._unreadRetry(); }
-      clearTimeout(H._unreadT); H._unreadT = null; return { lifted: !H.unreadWords(), n };
+      if (gone) { if (asRoot) fs.rmdirSync(F); else fs.rmSync(F, { force: true }); await H.readAgain(); await H.readAgain(); }
+      else { unplant(F, body); await H.readAgain(); }
+      H._hold.stop(); return { lifted: !H.unreadWords(), n };
     };
     const RJ = "    if (a.state === 'data') this._reachChanged('hosts.json read');";
     ok(HSRC.split(RJ).length === 2, 'control setup: the anchor of the control «reach only for what was read» is in hosts.js');
@@ -303,25 +223,20 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
       const keep = setInterval(() => { }, 1000);   // the deadline's timer is unref'd (the hub's own loop keeps it): the suite keeps the loop up
       let out = null;
       try {
-        await H._unreadRetry();   // its read hangs: said and let go at the deadline
-        const afterHung = { inFlight: !!H._unreadP, held: !!H.unreadWords(), words: String(H.unreadWords() || '') };
-        await H._unreadRetry();   // the read still hangs: no second read
+        await H.readAgain();   // its read hangs: said and let go at the helper's bound (2b: hosts' own knob, _readMs)
+        const afterHung = { waiting: !!(H._hold.held() || {}).waiting, held: !!H.unreadWords(), words: String(H.unreadWords() || '') };
+        await H.readAgain();   // the read still hangs: no second read
         const whileHung = calls;
         release(body); for (let k = 0; k < 6; k++) await new Promise((r) => setImmediate(r));   // the storage answers — late
         out = { afterHung, whileHung, calls, lifted: !H.unreadWords(), list: H.list().map((h) => h.id).join() };
-      } finally { fs.promises.readFile = HOLDS.prf; clearInterval(keep); clearTimeout(H._unreadT); H._unreadT = null; unplant(path.join(d, 'hosts.json'), body); }
+      } finally { fs.promises.readFile = HOLDS.prf; clearInterval(keep); H._hold.stop(); unplant(path.join(d, 'hosts.json'), body); }
       return out;
     };
     const back = await deadlineScene(require(path.join(ROOT, 'src/hosts.js')), 'hosts-deadline');
-    ok(!!back && back.afterHung.held && !back.afterHung.inFlight && /a read of it is still waiting/.test(back.afterHung.words) && back.whileHung === 1 && back.calls === 1 && back.lifted && back.list === 'h-0001',
+    ok(!!back && back.afterHung.held && back.afterHung.waiting && /a read of it is still waiting/.test(back.afterHung.words) && back.whileHung === 1 && back.calls === 1 && back.lifted && back.list === 'h-0001',
       'a read again that hangs is said and let go at its deadline (the words say a read waits), no second read starts while it hangs (one thread of the pool), and its LATE answer lifts the hold the moment it comes', back);
-    const LATE = "if (this._unread && !this._unreadStopped && mine === this._unreadSeq) this._unreadJudge(late, mine)", CAP = "    if (this._hungP) { if (!this._hungSaid) {";
-    ok(HSRC.split(LATE).length === 2 && HSRC.split(CAP).length === 2, 'control setup: the anchors of the controls «the late answer judged» and «one read at most» are in hosts.js');
-    const backL = await deadlineScene(MJ.load('src/hosts.js', anchored(HSRC, LATE, 'if (false) this._unreadJudge(late, mine)', 'srl-319a'), 'hosts-late-dropped'), 'hosts-deadline-late');
-    ok(!!backL && !backL.lifted && backL.calls === 1, 'CONTROL (the late answer dropped, in a copy): the storage answered, and the hold stands — slow storage is held for ever', backL);
-    const capLine = HSRC.split('\n').find((l) => l.startsWith(CAP));
-    const backC = await deadlineScene(MJ.load('src/hosts.js', anchored(HSRC, capLine + '\n', '', 'srl-322a'), 'hosts-no-cap'), 'hosts-deadline-cap');
-    ok(!!backC && backC.whileHung === 2, 'CONTROL (the one-read cap cut, in a copy): each try while the first read hangs starts ANOTHER read (a thread of the pool each)', backC);
+    // 2b: its two controls («the late answer judged», «one read at most») are the HELPER's now, each with its red there —
+    // test-store-read-three ⑤ «a read that hangs» (the in-flight mark cut; the answer dropped) and ⑤ «a read past its bound» (the bound cut)
   }
   // the cure (主开发 23:20Z): the device-upgrade watch files no «rerun its install command» while the machines are held — the
   // device's dials are answered «wait» there (its silence is the hub's)

@@ -466,7 +466,7 @@ const skippedRootOf = (h) => (h && h.dialRoot && !DIAL_ROOT_RE.test(String(h.dia
 const hubPinRm = (h) => 'rm -f ' + ['$HOME/.vibespace/agentd', ...(h && DIAL_ROOT_RE.test(String(h.dialRoot || '')) ? [String(h.dialRoot)] : [])].map((r) => `"${r}/state/hub.pub"`).join(' ');
 // B-f276 family unit B (主开发 r3032, lane bl-phone-ui): THE ONE NOTICE's hub half (src/server/held-lists.js) — every held list of the family
 // (the page names each by its plain name), ONE broadcast when the set changes, ONE «Read again now» (the owner's press). The older holds
-// join by their own doors: For you (user-todos), the Task Groups, the paired machines (hosts: it reads again by itself — no press of its own)
+// join by their own doors: For you (user-todos), the Task Groups (2b: the paired machines are on the helper now — listed by it, and the press reads them)
 const heldLists = require('./held-lists.js').create({
   broadcast: (m) => bcastAll(m), log: (m) => console.log(m),
   older: [
@@ -475,8 +475,6 @@ const heldLists = require('./held-lists.js').create({
     { key: 'task-groups', facts: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; const u = tg && typeof tg.unreadState === 'function' ? tg.unreadState() : null; return u ? { since: u.at || null } : null; },
       readAgain: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; return tg && typeof tg.readAgain === 'function' ? tg.readAgain() : Promise.resolve(false); },
       onLift: (fn) => { const tg = typeof getTasks === 'function' ? getTasks() : null; if (!tg || typeof tg.onLift !== 'function') return false; tg.onLift(fn); return true; } },   // r3212: the manager's own lift signal (armed once it exists)
-    { key: 'hosts', facts: () => (hosts && typeof hosts.held === 'function' && hosts.held() ? { since: null } : null),
-      onLift: (fn, again) => { if (!hosts || typeof hosts.whenRead !== 'function') return false; hosts.whenRead(fn, 'the held lists notice', 'held-lists', { onLetGo: again }); return true; } },   // keyed: one wait; let go past the machines' bound of waits, it is armed again at once (r3284)
   ],
 });
 app.delete('/api/hosts/:id/hub-pin', async (req, res) => {

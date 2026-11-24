@@ -565,21 +565,21 @@ console.log('⑦ the cure — the readers\' SHOULDs');
     if (asRoot) fs.mkdirSync(F); else { fs.writeFileSync(F, heldBody); fs.chmodSync(F, 0o000); }   // the read FAILS (EACCES / EISDIR), as bl-jobs' own suite plants it
     unplants.push(() => { try { if (asRoot) fs.rmdirSync(F); else fs.chmodSync(F, 0o644); } catch { } });
     const H = new HMx({ dataDir: d });
-    H._unreadStopped = true; if (H._unreadT) { clearTimeout(H._unreadT); H._unreadT = null; }   // no read-again timer in a suite
+    H._hold.stop();   // no read-again timer in a suite (2b: the hold is the family helper's)
     return { H, d, F };
   };
   const asked = (H) => { const a = []; H._storeWriter = { dirty: (f) => a.push(f), durable: async () => true, whyNotDurable: () => null, flushSync: () => ({ written: [], left: [] }) }; return a; };
   try {
     const law1 = (HMx) => { const { H } = heldOf(HMx); const a = asked(H); const r = H._save(); return { held: !!H.held && H.held(), r, asked: a.length }; };
     const l1 = law1(HostManager);
-    const HM1 = compileAt('src/hosts.js', [["    if (this._unread) { if (!this._unreadSaveSaid) {", "    if (false) { if (!this._unreadSaveSaid) {"]]);
+    const HM1 = compileAt('src/hosts.js', [["    if (!this._hold.writable('a hosts.json write')) return false;", "    if (false) return false;"]]);   // 2b: the guard asks the helper's hold
     const l1c = law1(HM1.HostManager);
     ok(l1.held === true && l1.r === false && l1.asked === 0 && l1c.asked === 1, `law 1: a HELD store's save is refused before anything is queued (the writer asked ${l1.asked} times); CONTROL (RED, the check gone): the writer is asked (${l1c.asked}) — a write of the held, empty list is owed`);
     const law2 = async (HMx) => {
       const w = await world({ HM: HMx }); await w.hm.persisted();
       let produce = null; w.hm._storeWriter = { dirty: (f, o) => { produce = o.produce; }, durable: async () => true, whyNotDurable: () => null, flushSync: () => ({ written: [], left: [] }) };
       w.hm._save();   // queued while the store reads fine
-      w.hm._unreadHold({ code: 'EACCES', why: 'the read failed' }); w.hm._unreadStopped = true; if (w.hm._unreadT) { clearTimeout(w.hm._unreadT); w.hm._unreadT = null; }   // then a hold (its own road)
+      w.hm._hold.start({ state: 'unreadable', code: 'EACCES', why: 'the read failed' }); w.hm._hold.stop();   // then a hold (its own road — 2b: the helper's start; its timer stopped)
       let bytes = null, code = null; try { bytes = produce(); } catch (e) { code = e && e.code; }
       return { bytes, code };
     };

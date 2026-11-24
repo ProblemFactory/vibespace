@@ -905,7 +905,7 @@ console.log('§10 the boot\'s two resume roads over a held-then-read hosts.json 
     const out = { held: H.held(), localOpen };
     out.heldRemote = (await g.reopenRoads({ sessionKey: 'claude:r1', hostId: 'h-0001' })).code || 'ran';
     out.heldLocal = (await g.reopenRoads({ sessionKey: 'claude:l1' })).ok === true;
-    st.read(); await H._unreadRetry(); await tick();   // the store reads again: the queued re-adoption starts (over ssh: seconds)
+    st.read(); await H.readAgain(); await tick();   // the store reads again: the queued re-adoption starts (over ssh: seconds) — 2b: the helper's read again
     out.readoptStarted = started;
     out.windowRemote = (await g.reopenRoads({ sessionKey: 'claude:r2', hostId: 'h-0001' })).code || 'ran';   // submitted IN the window
     out.remoteBeforeSettle = calls.filter((c) => c === 'remote').length;
