@@ -4601,6 +4601,7 @@ export default {
   "Could not reach the server": "无法连接到服务器",
   "the storage list": "存储列表",
   "the folder links": "文件夹链接",
+  "the messages waiting for agents": "等待代理的消息",
   "the plugins’ settings": "插件的设置",
   "this VibeSpace’s own id": "这个 VibeSpace 自己的标识",
   "the Task Groups": "任务组",

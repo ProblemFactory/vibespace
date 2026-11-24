@@ -4600,6 +4600,7 @@ export default {
   "Could not reach the server": "サーバーに到達できません",
   "the storage list": "ストレージの一覧",
   "the folder links": "フォルダーのリンク",
+  "the messages waiting for agents": "エージェントを待っているメッセージ",
   "the plugins’ settings": "プラグインの設定",
   "this VibeSpace’s own id": "この VibeSpace 自身の ID",
   "the Task Groups": "タスクグループ",
