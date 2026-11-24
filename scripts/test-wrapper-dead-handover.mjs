@@ -313,7 +313,10 @@ async function nextWrapper(tag, wrapper = WRAPPER) {
     { type: 'user', uuid: stampOf('msg-ran-own'), timestamp: new Date(Date.now() - 20000).toISOString(), message: { role: 'user', content: [{ type: 'text', text: words('msg-ran-own') }] } }]);
   place(c, [recordOf('msg-cli-gone', gone), recordOf('msg-cli-alive', alive), recordOf('msg-no-identity', null), recordOf('msg-ran-own', gone)]);
   const w = startWrapper(c, 'sess-10-' + tag, { wrapper });
-  await until(() => logHas(w, /handed records at this start: \d+ frame/), 6000);
+  // the evidence, both of it: the journal's line AND the said records on stdout (the pipe can be read after the line is on disk —
+  // the hosted runner's second try)
+  const saidAs = (st) => w.out.some((r) => r.type === 'input_handover' && r.via === 'successor' && r.state === st);
+  await until(() => logHas(w, /handed records at this start: \d+ frame/) && saidAs('undelivered') && saidAs('own-turn'), 6000);
   const said = w.out.filter((r) => r.type === 'input_handover' && r.via === 'successor');
   await stopWrapper(w.child);
   return { c, said, recs: recordsOf(c), log: w.log() };
@@ -332,21 +335,25 @@ async function forkScene(tag = 'fork', wrapper = WRAPPER) {
 }
 /** ⑳ THE JUDGE's MAPPING: a recycled pid, a real zombie, a birth this machine cannot read, no identity — over a whole, small transcript */
 async function zombieOf() {
-  const sh = spawn('sh', ['-c', 'sleep 0 & echo $!; exec sleep 60'], { stdio: ['ignore', 'pipe', 'ignore'] }); sleepers.push(sh);
+  // the child ends AFTER its shell became `sleep 60` (which never reaps): a shell that collects a finished background job before its
+  // exec (the hosted runner's first tries) can no longer take the zombie away
+  const sh = spawn('sh', ['-c', '(sleep 0.3) & echo $!; exec sleep 60'], { stdio: ['ignore', 'pipe', 'ignore'] }); sleepers.push(sh);
   let out = ''; sh.stdout.on('data', (d) => { out += d; });
   await until(() => /^\d+\n/.test(out), 3000);
   const pid = Number(out.split('\n')[0]);
   await until(() => PI.stateOf(pid) === 'Z', 3000);
-  return { pid, start: PI.startToken(pid), boot: PI.bootToken(), state: PI.stateOf(pid) };
+  const state = PI.stateOf(pid), start = PI.startToken(pid);
+  return { pid, start, boot: PI.bootToken(), state, held: state === 'Z' && !!start };   // a zombie this machine HOLDS, its birth read
 }
 async function mapScene() {
   const c = conversation('map');
   const [rec, live, z] = await Promise.all([cliOf({ alive: true }), cliOf({ alive: true }), zombieOf()]);
-  place(c, [recordOf('mR-recycled', { ...rec, start: 'l1' }), recordOf('mZ-zombie', z), recordOf('mU-unknown', { pid: live.pid, start: 'pMon Jan  1 00:00:00 2001', boot: '' }), recordOf('mN-noid', { pid: 4242, start: '', boot: '' })]);
+  // the zombie's record only when a zombie is HELD with its birth read (the precondition, said in ⑳ when it is not met)
+  place(c, [recordOf('mR-recycled', { ...rec, start: 'l1' }), ...(z.held ? [recordOf('mZ-zombie', { pid: z.pid, start: z.start, boot: z.boot })] : []), recordOf('mU-unknown', { pid: live.pid, start: 'pMon Jan  1 00:00:00 2001', boot: '' }), recordOf('mN-noid', { pid: 4242, start: '', boot: '' })]);
   const w = startWrapper(c, 'sess-20-map');
   await until(() => logHas(w, /handed records at this start: \d+ frame/), 6000);
   await stopWrapper(w.child);
-  return { c, recs: recordsOf(c), log: w.log(), zstate: z.state };
+  return { c, recs: recordsOf(c), log: w.log(), zstate: z.state, zHeld: z.held };
 }
 /** ⑲'s RED: a copy that reads the tail IN ITS OWN PROCESS, over the same pipe — still running when the lane has exited and the
  *  product's own read bound has passed again */
@@ -561,8 +568,9 @@ say('⑳ THE JUDGE\'s MAPPING — a recycled pid and a zombie are gone, a birth 
 WD.section('⑳');
 {
   const st = (id) => U20.recs.get(id)?.state;
-  ok(U20.zstate === 'Z' && st('mR-recycled') === 'undelivered' && st('mZ-zombie') === 'undelivered' && st('mU-unknown') === 'handed' && st('mN-noid') === 'handed' && /2 left — /.test(U20.log),
-    `a record whose pid now belongs to another birth (recycled) and one whose CLI is a zombie are judged GONE — the whole transcript proves them «${st('mR-recycled')}» / «${st('mZ-zombie')}»; a birth recorded by a rung this machine cannot read and a record with no birth are UNKNOWN — left «${st('mU-unknown')}» / «${st('mN-noid')}», said`, { states: [...U20.recs.values()].map((r) => [r.msgId, r.state]) });
+  if (!U20.zHeld) say(`  · PRECONDITION NOT MET HERE: no zombie with a readable birth could be held on this machine (its state «${U20.zstate}») — the zombie half of ⑳ is NOT judged in this run; the recycled, unreadable-birth and no-birth halves are`);
+  ok((U20.zHeld ? U20.zstate === 'Z' && st('mZ-zombie') === 'undelivered' : !U20.recs.has('mZ-zombie')) && st('mR-recycled') === 'undelivered' && st('mU-unknown') === 'handed' && st('mN-noid') === 'handed' && /2 left — /.test(U20.log),
+    `a record whose pid now belongs to another birth (recycled)${U20.zHeld ? ' and one whose CLI is a zombie are' : ' is'} judged GONE — the whole transcript proves ${U20.zHeld ? `them «${st('mR-recycled')}» / «${st('mZ-zombie')}»` : `it «${st('mR-recycled')}» (the zombie half NOT judged: precondition above)`}; a birth recorded by a rung this machine cannot read and a record with no birth are UNKNOWN — left «${st('mU-unknown')}» / «${st('mN-noid')}», said`, { held: U20.zHeld, zstate: U20.zstate, states: [...U20.recs.values()].map((r) => [r.msgId, r.state]) });
 }
 
 say('㉑ ONE LOOK OFF A PROCFS — a listing that failed proves nothing, and one listing answers every record');
