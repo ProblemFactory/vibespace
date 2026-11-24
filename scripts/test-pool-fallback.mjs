@@ -144,7 +144,7 @@ console.log('— §2 a provider removed leaves every pool\'s list in the same ac
   am.updatePool(P, { fallbackProviders: [ds.id] });
   const AUR = read('src/server/account-usage-routes.js'), PR = read('src/routes/providers.js');
   ok(AUR.includes("if (typeof accounts.providersChanged === 'function') accounts.providersChanged();") && PR.includes("const r = await providers.remove(String(req.params.id)") && PR.includes("    changed('remove', r.id);")
-    && AUR.includes('fallbackProviders: req.body?.fallbackProviders }, { chooseMember: decide });'),
+    && AUR.includes('fallbackProviders: req.body?.fallbackProviders, crossProviderOpened: req.body?.crossProviderOpened, fallbackProvidersOpened: req.body?.fallbackProvidersOpened }, { chooseMember: decide });'),
     'the hub\'s wiring: the remove door\'s every outcome calls the routes\' onChange, which asks the store to prune; the pool PATCH hands the list to the store');
   const NOPRUNE = '  providersChanged() { this.pruneFallbackProviders(); this._notify(); }';
   const ctl = wireAm(M.load('src/accounts.js', anchored(ACC, NOPRUNE, '  providersChanged() { this._notify(); }', 'a removal that prunes no pool'), 'no-prune').AccountManager, scratchDir('pool-fallback-noprune'));

@@ -118,7 +118,7 @@ console.log('— ④ the roster rows say why a provider cannot start');
 console.log('— ⑤ the wiring');
 {
   const S = read('src/lib/manage-agents.js'), R = read('src/server/account-usage-routes.js');
-  ok(S.includes("body: JSON.stringify(poolSaveBody({ members, priority, codex, cross: st.cross, fb: st.fb, cross0, fb0 })) });")
+  ok(S.includes("body: JSON.stringify(poolSaveBody({ members, priority, codex, cross: st.cross, fb: st.fb, cross0, fb0, crossTouched, fbTouched })) });")
     && S.includes("cross: fresh.crossProvider === 'allow' ? 'allow' : 'never',") && S.includes("if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} fallback providers — remove one first', { n: FALLBACK_MAX })")
     && S.includes("if (c && !c.ready) { const why = fallbackNotReadyWords(c.notReady, t); if (why) showToast(why"),
     '⑤ the switch and the list ride the dialog\'s ONE save (Claude pools only), the switch starts from the pool\'s own (never unless allow), the ninth is refused in words, a provider that cannot start says why at its press');
@@ -135,7 +135,7 @@ const MP = require(path.join(REPO, 'src/model-providers.js'));
 const recOf = (id, label) => MP.normalizeProvider({ id, preset: 'deepseek', kind: 'anthropic-compatible', label });
 const legs6 = (X) => {
   const body = (o) => X.poolSaveBody({ members: ['m1'], priority: [], cross0: 'allow', fb0: ['pv-a'], cross: 'allow', fb: ['pv-a'], ...o });
-  const only = body({}), sw = body({ cross: 'never' }), li = body({ fb: ['pv-a', 'pv-b'] });
+  const only = body({}), sw = body({ cross: 'never' }), li = body({ fb: ['pv-a', 'pv-b'] }), swBack = body({ crossTouched: true }), liBack = body({ fbTouched: true });
   const cx = X.poolSaveBody({ members: ['m1'], priority: [], codex: true, cross: 'allow', cross0: 'never', fb: ['pv-x'], fb0: [] });
   const listed = [{ id: 'pv-demo-router', label: 'Router' }, { id: 'pv-gone-1', label: 'pv-gone-1', known: false }];
   const ch = X.fallbackChoicesWithListed(ROWS, 'claude', listed), gone = ch.find((c) => c.id === 'pv-gone-1');
@@ -143,10 +143,12 @@ const legs6 = (X) => {
   const after = X.poolSaveBody({ members: ['m1'], priority: [], cross0: 'never', cross: 'never', fb0: ['pv-demo-router', 'pv-gone-1'], fb: ['pv-demo-router', 'pv-gone-1', 'pv-demo-deep'] });
   const w = (r) => X.fallbackPressToasts(r, T).map((m) => m.text);
   return {
-    save: JSON.stringify(Object.keys(only)) === '["members","priority"]' && sw.crossProvider === 'never' && !('fallbackProviders' in sw) && eqA(li.fallbackProviders, ['pv-a', 'pv-b']) && !('crossProvider' in li) && JSON.stringify(Object.keys(cx)) === '["members","priority"]',
+    save: JSON.stringify(Object.keys(only)) === '["members","priority"]' && sw.crossProvider === 'never' && sw.crossProviderOpened === 'allow' && !('fallbackProviders' in sw) && eqA(li.fallbackProviders, ['pv-a', 'pv-b']) && eqA(li.fallbackProvidersOpened, ['pv-a']) && !('crossProvider' in li) && JSON.stringify(Object.keys(cx)) === '["members","priority"]',
+    touched: swBack.crossProvider === 'allow' && swBack.crossProviderOpened === 'allow' && eqA(liBack.fallbackProviders, ['pv-a']) && eqA(liBack.fallbackProvidersOpened, ['pv-a']),
+    nofit: (() => { const c = X.fallbackChoicesWithListed([], 'claude', [{ id: 'pv-lab', label: 'Lab', fits: false }])[0]; return !!c && c.notReady === 'no-fit' && c.name === 'Lab' && /no longer serves Claude Code/.test(X.fallbackNotReadyWords(c.notReady, T) || ''); })(),
     listed: !!gone && gone.ready === false && gone.notReady === 'unknown' && /data-id="pv-gone-1" checked/.test(sec) && /VibeSpace does not find this provider now/.test(sec) && eqA(after.fallbackProviders, ['pv-demo-router', 'pv-gone-1', 'pv-demo-deep']),
     words: (() => { const a2 = w({ queued: 2 }), al = w({ queued: 0, already: 2 }), rs = w({ queued: 0, otherRecord: 1 }), no = w({}); return /now if it is idle, or when its turn is over/.test(a2[0]) && al.length === 1 && /2 conversations are already on their way back/.test(al[0]) && rs.length === 1 && !rs.some((x) => /Nothing moved back/.test(x)) && no.length === 1 && /Nothing moved back/.test(no[0]); })(),
-    seen: { only, sw, li, cx, gone, after },
+    seen: { only, sw, li, cx, gone, after, swBack, liBack },
   };
 };
 console.log('— ⑥ the save sends what the person changed; the list keeps what the page cannot see; the press in words (r3886)');
@@ -156,18 +158,23 @@ console.log('— ⑥ the save sends what the person changed; the list keeps what
   ok(L.listed, '⑥ (r3886 (C)) a provider ON the pool\'s list that the store does not know now is LISTED, checked, with its word — a save after adding another keeps it (it leaves only by the person\'s own uncheck)', L.seen);
   const held = MA.fallbackSectionHtml({ cross: 'never', picked: [], choices: [], unread: 'providers.json in VibeSpace\'s data folder could not be read (EIO).' }, T, ESC);
   ok(/could not be read \(EIO\)/.test(held) && !/No model provider fits Claude yet/.test(held), '⑥ (r3886 (B)) while the provider store is held the section says the store\'s OWN words, never «no provider fits yet»');
+  ok(L.touched, '⑥ (r3908 (1)) a field the person TOUCHED is sent even when changed and changed back, WITH the value the dialog opened with (the hub then refuses a stale one by name)', L.seen);
+  ok(L.nofit, '⑥ (r3908 small) a listed provider the store still holds that no longer serves Claude is said as that, by its label — not as removed');
+  const dmg = MA.fallbackSectionHtml({ cross: 'never', picked: ['pv-x'], choices: [], damaged: { copy: 'providers.json.corrupt-demo' } }, T, ESC);
+  ok(/The list of model providers was damaged, so it starts empty/.test(dmg) && /providers\.json\.corrupt-demo/.test(dmg) && /until VibeSpace restarts with the list it reads now/.test(dmg) && !/No model provider fits Claude yet/.test(dmg),
+    '⑥ (r3908 (2)) after a torn lift the section says the family\'s own sentence for a list that started empty, names the copy set aside, and says the way out (a restart reads the list again)');
   ok(L.words, '⑥ (smalls, (F)) the press says QUEUED with an idle one\'s words (now) and a busy one\'s (its turn\'s end); a second press says those already on their way, never «queued» again; «nothing moved back» only when no other line says why');
   const S = read('src/lib/manage-agents.js');
-  ok(S.includes("b.disabled = true;   // (r3886 small) held while its request is in flight") && S.includes("} finally { b.disabled = false; }") && S.includes("if (fbUnread) { cb.checked = st.fb.includes(id); showToast(fbUnread, { type: 'error' }); return; }"),
+  ok(S.includes("b.disabled = true;   // (r3886 small) held while its request is in flight") && S.includes("} finally { b.disabled = false; }") && S.includes("if (fbLock) { cb.checked = st.fb.includes(id); showToast(fbLock, { type: 'error' }); return; }"),
     '⑥ (small, (B)) the press is held only while its request is in flight (released in a finally); a checkbox pressed while the store is held is put back and says the store\'s words');
 }
 
 const M = mutantCopies('pool-fallback-page', REPO);
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 const hubWorld = (AM) => {
-  const dir = scratchDir('pool-fallback-page-hub'), recs = { 'pv-x': recOf('pv-x', 'X'), 'pv-y': recOf('pv-y', 'Y'), 'pv-z': recOf('pv-z', 'Z') }, st = { clean: true, unread: null };
+  const dir = scratchDir('pool-fallback-page-hub'), recs = { 'pv-x': recOf('pv-x', 'X'), 'pv-y': recOf('pv-y', 'Y'), 'pv-z': recOf('pv-z', 'Z') }, st = { clean: true, unread: null, damaged: null };
   const am = new AM({ dataDir: dir });
-  am.setProviderLookup((x) => recs[x && x.id] || null, { clean: () => st.clean, unread: () => st.unread });
+  am.setProviderLookup((x) => recs[x && x.id] || null, { clean: () => st.clean, unread: () => st.unread, damaged: () => st.damaged });
   const A = am.createSubscription({ name: 'Hub' }).id; login(am, A);
   const P = am.createPool({ name: 'Hub pool', members: [A] }).id;
   am.updatePool(P, { fallbackProviders: ['pv-x', 'pv-y'] });
@@ -240,6 +247,43 @@ console.log('— ⑦ the hub\'s own laws, by the store and by requests (r3886 (B
     '⑦ (r3886 (F)) TWO PAGES: a change saved on one page is in the push the hub sends every page (accounts-updated, the whole list), and the other page\'s row draws it from that push with no reload (the app redraws an open roster on that frame)', { pushes: pushes.length, cross: pushed && pushed.crossProvider });
 }
 
+const lawE = (AM) => {
+  const w = hubWorld(AM);
+  w.am.updatePool(w.P, { fallbackProviders: ['pv-x'] });   // ANOTHER page removes pv-y (no opening value: judged as before)
+  let list = null; try { w.am.updatePool(w.P, { fallbackProviders: ['pv-x', 'pv-y', 'pv-z'], fallbackProvidersOpened: ['pv-x', 'pv-y'] }); } catch (e) { list = { code: e.code, message: e.message }; }
+  const listAfter = [...(w.am.get(w.P).fallbackProviders || [])];
+  w.am.updatePool(w.P, { crossProvider: 'allow' });   // ANOTHER page turns «Move without asking» on
+  let sw = null; try { w.am.updatePool(w.P, { crossProvider: 'never', crossProviderOpened: 'never' }); } catch (e) { sw = { code: e.code, message: e.message }; }
+  const swAfter = w.am.get(w.P).crossProvider || 'never';
+  let fresh = 'ok'; try { w.am.updatePool(w.P, { fallbackProviders: ['pv-x', 'pv-z'], fallbackProvidersOpened: ['pv-x'], crossProvider: 'never', crossProviderOpened: 'allow' }); } catch (e) { fresh = e.message; }
+  return { list, listAfter, sw, swAfter, fresh, end: { list: w.am.get(w.P).fallbackProviders, cross: w.am.get(w.P).crossProvider || 'never' } };
+};
+const lawLock = (AM) => {
+  const w = hubWorld(AM); w.st.clean = false; w.st.damaged = { copy: 'providers.json.corrupt-demo', at: 1 };
+  const lockD = (({ providersUnread, providersDamaged }) => ({ providersUnread, providersDamaged }))(w.am.list());
+  let refD = null; try { w.am.updatePool(w.P, { fallbackProviders: ['pv-x'] }); } catch (e) { refD = { code: e.code, message: e.message }; }
+  w.st.damaged = null; w.st.unread = 'providers.json in VibeSpace\'s data folder could not be read (EIO).';
+  const lockH = (({ providersUnread, providersDamaged }) => ({ providersUnread, providersDamaged }))(w.am.list());
+  w.st.clean = true; w.st.unread = null;
+  const lockC = (({ providersUnread, providersDamaged }) => ({ providersUnread, providersDamaged }))(w.am.list());
+  w.recs['pv-y'] = MP.normalizeProvider({ id: 'pv-y', kind: 'self-hosted', wire: 'openai-responses', baseUrl: 'https://lab.invalid/v1', label: 'Lab' });   // still held, speaks Responses: Codex only
+  const row = (w.am.list().accounts.find((r) => r.id === w.P) || {}).fallbackProviders;
+  return { lockD, refD, lockH, lockC, row };
+};
+console.log('— ⑧ the follow\'s laws on the hub: a stale dialog\'s edit refused by name; ONE fact for the lock (r3908)');
+{
+  const e = lawE(AccountManager);
+  ok(e.list && e.list.code === 'pool_changed_elsewhere' && /changed on another page/.test(e.list.message) && eqA(e.listAfter, ['pv-x']),
+    '⑧ (r3908 (1)) THE LIST: a dialog opened on [X, Y]; another page removed Y; the stale dialog ticks Z and saves [X, Y, Z] — refused BY NAME (changed on another page), Y never back on the spend list', e);
+  ok(e.sw && e.sw.code === 'pool_changed_elsewhere' && e.swAfter === 'allow' && e.fresh === 'ok' && eqA(e.end.list, ['pv-x', 'pv-z']) && e.end.cross === 'never',
+    '⑧ (r3908 (1)) THE SWITCH: a dialog opened on «Ask me first»; another page set «Move without asking»; the stale dialog\'s touched switch is refused by name and the other page\'s value stays — a dialog opened on what is stored now saves', e);
+  const l = lawLock(AccountManager);
+  ok(l.lockD.providersDamaged && l.lockD.providersDamaged.copy === 'providers.json.corrupt-demo' && !l.lockD.providersUnread && l.refD && l.refD.code === 'providers_damaged' && /providers\.json\.corrupt-demo/.test(l.refD.message) && /restarts/.test(l.refD.message)
+    && /could not be read \(EIO\)/.test(l.lockH.providersUnread || '') && !l.lockH.providersDamaged && l.lockC.providersUnread === null && !l.lockC.providersDamaged,
+    '⑧ (r3908 (2)) ONE FACT: after a torn lift the list carries providersDamaged (the copy) and the hub\'s refusal names that copy and the restart; while held, providersUnread (the store\'s words); reading, neither — the page\'s lock and the hub\'s refusal read the same flag', l);
+  ok(eqA(l.row, [{ id: 'pv-x', label: 'X' }, { id: 'pv-y', label: 'Lab', fits: false }]), '⑧ (r3908 small) a listed provider the store still holds that no longer serves Claude rides the row by its label, marked fits:false — not as removed', l.row);
+}
+
 console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
 {
   const S = read('src/lib/manage-agents.js');
@@ -250,20 +294,26 @@ console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
   const BACK = "${back ? ` <button class=\"agent-btn pool-fb-back\"";
   const always = await loadMA(anchored(S, BACK, "${true ? ` <button class=\"agent-btn pool-fb-back\"", 'the press always offered'), 'always-press');
   ok(/Move them back/.test(always.fallbackRowHtml({ id: 'pool-demo', fallbackStatus: [{ provider: 'pv-demo-router', label: 'Router', running: 1, canReturn: 0, waiting: 26 }] }, T, ESC)), 'CONTROL (loaded, run): a copy that always offers the press draws it with nothing to bring back ⇒ ②\'s press leg goes RED');
-  const SAVE = "  if (cross !== cross0) body.crossProvider = cross;\n  if (!sameIds(fb, fb0)) body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice();\n";
+  const SAVE = "  if (crossTouched || cross !== cross0) { body.crossProvider = cross; body.crossProviderOpened = cross0; }\n  if (fbTouched || !sameIds(fb, fb0)) { body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice(); body.fallbackProvidersOpened = (Array.isArray(fb0) ? fb0 : []).slice(); }\n";
   const resend = await loadMA(anchored(S, SAVE, "  body.crossProvider = cross;\n  body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice();\n", 'the save re-sends both'), 'resend');
   ok(!legs6(resend).save, 'CONTROL (loaded, run): a copy whose save re-sends the switch and the list as they opened (the release before the cure) ⇒ ⑥\'s save leg goes RED');
-  const LISTED = "    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: 'unknown' });\n";
+  const LISTED = "    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: x.fits === false ? 'no-fit' : 'unknown' });   // (r3908 small) a held record that no longer serves this vendor, said as that\n";
   const dropped = await loadMA(anchored(S, LISTED, '', 'the listed provider dropped'), 'dropped');
   ok(!legs6(dropped).listed, 'CONTROL (loaded, run): a copy that lists only the roster\'s providers drops the one the store does not know ⇒ ⑥\'s list leg goes RED');
   const ALREADY = "  if (al) out.push({ text: al === 1 ? t('1 conversation is already on its way back') : t('{n} conversations are already on their way back', { n: al }), type: 'info' });\n";
   const noAl = await loadMA(anchored(S, ALREADY, '', 'the already line cut'), 'no-already');
   ok(!legs6(noAl).words, 'CONTROL (loaded, run): a copy whose press does not say «already on their way» says «nothing moved back» to a second press ⇒ ⑥\'s words leg goes RED');
   const ACC = read('src/accounts.js');
-  const REFUSE = "      if (ids(fallbackProviders) !== ids(a.fallbackProviders)) {";
+  const REFUSE = "      if (idsOf(fallbackProviders) !== idsOf(a.fallbackProviders)) {";
   const noLaw = M.load('src/accounts.js', anchored(ACC, REFUSE, '      if (false) {', 'the hub\'s refusal cut'), 'no-law').AccountManager;
   const bx = lawB(noLaw);
   ok(!bx.refused && eqA(bx.afterTry, ['pv-x']), 'CONTROL (loaded, run): a store copy without the refusal SHORTENS the list while the provider store cannot be read ⇒ ⑦\'s (B) leg goes RED', bx);
+  const STALE_LIST = "    if (fallbackProviders !== undefined && fallbackProvidersOpened !== undefined && idsOf(a.fallbackProviders) !== idsOf(fallbackProvidersOpened)) {";
+  const ex = lawE(M.load('src/accounts.js', anchored(ACC, STALE_LIST, '    if (false) {', 'the stale list let through'), 'stale-list').AccountManager);
+  ok(!ex.list && eqA(ex.listAfter, ['pv-x', 'pv-y', 'pv-z']), 'CONTROL (loaded, run): a store copy without the list\'s check takes the stale [X, Y, Z] — Y back on the spend list, nobody choosing it ⇒ ⑧\'s list leg goes RED', ex);
+  const STALE_SW = "    if (crossProvider !== undefined && crossProviderOpened !== undefined && (a.crossProvider === 'allow' ? 'allow' : 'never') !== (crossProviderOpened === 'allow' ? 'allow' : 'never')) {";
+  const ey = lawE(M.load('src/accounts.js', anchored(ACC, STALE_SW, '    if (false) {', 'the stale switch let through'), 'stale-switch').AccountManager);
+  ok(!ey.sw && ey.swAfter === 'never', 'CONTROL (loaded, run): a store copy without the switch\'s check writes the stale «Ask me first» over the other page\'s choice ⇒ ⑧\'s switch leg goes RED', ey);
   const KEEP = "      if (!p || p.known === false) { if (listed) { if (!out.includes(pv)) out.push(pv); continue; } throw new Error('no such provider on this hub: ' + pv); }";
   const noKeep = M.load('src/accounts.js', anchored(ACC, KEEP, "      if (!p || p.known === false) throw new Error('no such provider on this hub: ' + pv);", 'the listed id refused'), 'no-keep').AccountManager;
   const cx = lawC(noKeep);

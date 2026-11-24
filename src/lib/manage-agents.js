@@ -152,7 +152,7 @@ export function fallbackChoicesWithListed(providerRows, backend, listed) {
   const out = fallbackChoices(providerRows, backend);
   for (const x of Array.isArray(listed) ? listed : []) {
     if (!x || !x.id || out.some((c) => c.id === x.id)) continue;
-    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: 'unknown' });
+    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: x.fits === false ? 'no-fit' : 'unknown' });   // (r3908 small) a held record that no longer serves this vendor, said as that
   }
   return out;
 }
@@ -160,11 +160,13 @@ const sameIds = (a, b) => (Array.isArray(a) ? a : []).join('\n') === (Array.isAr
 /** (r3886 (A)) THE DIALOG's SAVE SENDS WHAT THE PERSON CHANGED: the members and their order always (as at the base); the switch only
  *  when it differs from its value at the dialog's opening, the list only when it differs from the opening list — a members-only save
  *  carries neither (the pool's setting and its queued moves are left alone). → the PATCH body */
-export function poolSaveBody({ members, priority, codex = false, cross, fb, cross0, fb0 } = {}) {
+export function poolSaveBody({ members, priority, codex = false, cross, fb, cross0, fb0, crossTouched = false, fbTouched = false } = {}) {
   const body = { members, priority };
   if (codex) return body;
-  if (cross !== cross0) body.crossProvider = cross;
-  if (!sameIds(fb, fb0)) body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice();
+  // (r3908 (1)) a field the person TOUCHED is sent (even changed and changed back) WITH the value the dialog opened with: the hub refuses
+  // by name when its stored value is no longer that one (changed on another page) — never a stale value written over a newer one
+  if (crossTouched || cross !== cross0) { body.crossProvider = cross; body.crossProviderOpened = cross0; }
+  if (fbTouched || !sameIds(fb, fb0)) { body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice(); body.fallbackProvidersOpened = (Array.isArray(fb0) ? fb0 : []).slice(); }
   return body;
 }
 /** (r3886 (F), smalls) the press's reply in words → [{ text, type }]: QUEUED and how many (an idle one restarts now, a busy one at its
@@ -186,10 +188,18 @@ export function fallbackPressToasts(r, t) {
 export function fallbackNotReadyWords(code, t) {
   return code === 'vault-locked' ? t('The vault is locked — this provider can take conversations once you unlock it')
     : code === 'no-key' ? t('No key is stored for this provider — add it in the account dialog first')
-    : code === 'unknown' ? t('VibeSpace does not find this provider now (removed, or its list cannot be read) — it stays on this list until you uncheck it') : null;
+    : code === 'unknown' ? t('VibeSpace does not find this provider now (removed, or its list cannot be read) — it stays on this list until you uncheck it')
+    : code === 'no-fit' ? t('This provider no longer serves Claude Code — it stays on this list until you uncheck it') : null;
+}
+/** (r3908 (2)) the words of the list's lock, from the hub's ONE fact: the store's own words while it is held; after a torn lift the
+ *  family's own sentence for a list that started empty (provider-roster, the wizard) and the way out — a restart reads it again */
+export function fallbackLockWords({ unread = null, damaged = null } = {}, t) {
+  if (unread) return String(unread);
+  if (damaged) return t('The list of model providers was damaged, so it starts empty — VibeSpace kept the damaged bytes aside (their name is below). Add the providers again: each gets a new key; their old keys stay in the Vault window until you remove them there.') + ' ' + t('The pool\'s fallback providers stay as they are until VibeSpace restarts with the list it reads now.');
+  return null;
 }
 /** the section's HTML — the switch (its words say the BILL, r3316 (4)) and the list (r3316 (5)) */
-export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [], choices = [], unread = null } = {}, t, esc) {
+export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [], choices = [], unread = null, damaged = null } = {}, t, esc) {
   const head = `<div class="pool-fb-head">${esc(t('When every member is out'))}</div>`;
   if (codex) return `<div class="pool-fb-section">${head}<div class="usage-note">${esc(t('Fallback providers are for Claude pools — a ChatGPT pool waits for its own accounts.'))}</div></div>`;
   const allow = cross === 'allow';
@@ -207,7 +217,8 @@ export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [
     </div>
     <div class="usage-note pool-fb-bill">${esc(bill)}</div>
     ${unread ? `<div class="usage-note pool-fb-unread">${esc(unread)}</div>` : ''}
-    <div class="pool-fb-list">${rows || (unread ? '' : `<div class="empty-hint">${esc(t('No model provider fits Claude yet — add one in the account dialog'))}</div>`)}</div>
+    ${damaged ? `<div class="usage-note pool-fb-unread">${esc(fallbackLockWords({ damaged }, t))}</div><div class="usage-note pool-fb-copy"><code>${esc(String(damaged.copy || ''))}</code></div>` : ''}
+    <div class="pool-fb-list">${rows || (unread || damaged ? '' : `<div class="empty-hint">${esc(t('No model provider fits Claude yet — add one in the account dialog'))}</div>`)}</div>
     <div class="usage-note pool-fb-bound">${esc(t('Used only when every member is out. At most {n} fallback providers.', { n: FALLBACK_MAX }))}</div>
   </div>`;
 }
@@ -1694,7 +1705,10 @@ export function installManageAgents(App, ctx = {}) {
     };
     const fbChoices = codex ? [] : fallbackChoicesWithListed(list?.providerRows, be, fresh.fallbackProviders);   // (r3886 (C)) every listed provider shown, a gone one with its word
     const fbUnread = codex ? null : (list?.providersUnread || null);   // (r3886 (B)) the provider store's own words while it cannot be read
+    const fbDamaged = codex ? null : (list?.providersDamaged || null);   // (r3908 (2)) lifted EMPTY over torn bytes: the SAME fact the hub's refusal reads
+    const fbLock = fbUnread || fbDamaged ? fallbackLockWords({ unread: fbUnread, damaged: fbDamaged }, t) : null;
     const cross0 = st.cross, fb0 = st.fb.slice();   // (r3886 (A)) the switch and the list as the dialog OPENED: a save sends only what changed
+    let crossTouched = false, fbTouched = false;   // (r3908 (1)) what the person touched is sent with its opening value
     const st0 = JSON.stringify(st);
     const nowSec = () => Date.now() / 1000;
     const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: signinUnread(x) ? true : !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
@@ -1719,16 +1733,17 @@ export function installManageAgents(App, ctx = {}) {
           ${r.actions.length ? `<button class="agent-btn pool-prio-menu" data-id="${escHtml(r.id)}" title="${escHtml(t('Order'))}" aria-label="${escHtml(t('Order'))}">⋯</button>` : ''}
         </div>`; }).join('')}
         ${subs.length ? '' : `<div class="empty-hint">${escHtml(t('No subscription accounts yet'))}</div>`}</div>
-      ${fallbackSectionHtml({ codex, cross: st.cross, picked: st.fb, choices: fbChoices, unread: fbUnread }, t, escHtml)}
+      ${fallbackSectionHtml({ codex, cross: st.cross, picked: st.fb, choices: fbChoices, unread: fbUnread, damaged: fbDamaged }, t, escHtml)}
       <div class="dialog-buttons"><button class="btn-create" id="pool-mem-save">${escHtml(t('Save'))}</button></div>`;
       wire(rows);
     };
     const wire = (rows) => {
       // (B-d578 F3b) the section: the switch, the list (≤ FALLBACK_MAX; the ninth refused in words; a provider that cannot start says why)
-      for (const r of body.querySelectorAll('input[name="pool-fb-mode"]')) r.onchange = () => { st.cross = r.value === 'allow' ? 'allow' : 'never'; draw(); };
+      for (const r of body.querySelectorAll('input[name="pool-fb-mode"]')) r.onchange = () => { st.cross = r.value === 'allow' ? 'allow' : 'never'; crossTouched = true; draw(); };
       for (const cb of body.querySelectorAll('.pool-fb-cb')) cb.onchange = () => {
         const id = cb.dataset.id, c = fbChoices.find((x) => x.id === id);
-        if (fbUnread) { cb.checked = st.fb.includes(id); showToast(fbUnread, { type: 'error' }); return; }   // (r3886 (B)) no change of the list while the store cannot be read (the hub refuses it too)
+        if (fbLock) { cb.checked = st.fb.includes(id); showToast(fbLock, { type: 'error' }); return; }   // (r3886 (B), r3908 (2)) no change of the list while the store cannot be read — the hub's own fact, its words
+        fbTouched = true;
         if (cb.checked && !st.fb.includes(id)) {
           if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} fallback providers — remove one first', { n: FALLBACK_MAX }), { type: 'error' }); return; }
           st.fb.push(id);
@@ -1794,7 +1809,8 @@ export function installManageAgents(App, ctx = {}) {
       if (st.mode === 'priority' && !priority.length) { showToast(t('Put at least one member in the order (or choose Automatic)'), { type: 'error' }); return; }
       let r;
       try {
-        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(poolSaveBody({ members, priority, codex, cross: st.cross, fb: st.fb, cross0, fb0 })) });   // (B-d578 F3b) the switch and the list ride the same save
+        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(poolSaveBody({ members, priority, codex, cross: st.cross, fb: st.fb, cross0, fb0, crossTouched, fbTouched })) });   // (B-d578 F3b) the switch and the list ride the same save
+        if (r?.code === 'pool_changed_elsewhere') { showToast(t('This pool\'s fallback setting was changed on another page — nothing was saved; the dialog opens again with the pool as it is now'), { type: 'error', duration: 8000 }); close(); this._poolMembersDialog(poolId, a, refresh); return; }   // (r3908 (1)) the person chooses again on what is true
         if (r?.error) { showToast(r.error, { type: 'error' }); return; }
       } catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); return; }
       close(); refresh?.();

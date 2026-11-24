@@ -518,7 +518,7 @@ class AccountManager {
     try { providerRows = this._providerRows ? this._providerRows() || [] : []; } catch { providerRows = []; }
     return {
       providerRows,   // lane lg-providers U5: BESIDE `accounts`, never in it (the hub's account readers see records only)
-      providersUnread: (() => { try { return this._providerUnread ? this._providerUnread() || null : null; } catch { return null; } })(),   // (r3886 (B)) the provider store's own words while it cannot be read — the page says them, never «no provider fits»
+      ...this._providersLockOf(),   // (r3886 (B), r3908 (2)) providersUnread (the store's words while HELD) or providersDamaged ({copy}: lifted EMPTY over torn bytes) — from the SAME fact the hub's refusal reads
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._rowsOf(this._state.accounts),
       tailsGen: this.tailsGen(),   // B-ee0a: the page reuses its read of the tails only for the same word
@@ -2370,7 +2370,7 @@ class AccountManager {
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name, provider: this._providerBrief(this.memberProviderOf(x.id)) }));
   }
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
-  setProviderLookup(fn, { clean = true, unread = null } = {}) { this._providerLookup = typeof fn === 'function' ? fn : null; this._providerStoreClean = typeof clean === 'function' ? clean : () => clean !== false; this._providerUnread = typeof unread === 'function' ? unread : null; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
+  setProviderLookup(fn, { clean = true, unread = null, damaged = null } = {}) { this._providerLookup = typeof fn === 'function' ? fn : null; this._providerStoreClean = typeof clean === 'function' ? clean : () => clean !== false; this._providerUnread = typeof unread === 'function' ? unread : null; this._providerDamaged = typeof damaged === 'function' ? damaged : null; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
   /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
   providersChanged() { this.pruneFallbackProviders(); this._notify(); }
   /** THE POOL'S FALLBACK PROVIDERS (row B-d578, the fallback member — ruling r1516 / the scene page r2733): third-party providers
@@ -2390,7 +2390,21 @@ class AccountManager {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled' || !Array.isArray(a.fallbackProviders) || !a.fallbackProviders.length) return [];
     const live = new Set(this.poolFallbacksOf(id));
-    return a.fallbackProviders.map((pv) => (live.has(pv) ? { id: pv, label: (this.providerRecordOf(pv) || {}).label || pv } : { id: pv, label: pv, known: false }));
+    return a.fallbackProviders.map((pv) => {
+      if (live.has(pv)) return { id: pv, label: (this.providerRecordOf(pv) || {}).label || pv };
+      const p = this.providerRecordOf(pv);   // (r3908 small) a record the store still HOLDS that no longer serves this pool's vendor: said as that, by its label
+      return p && p.known !== false ? { id: pv, label: p.label || pv, fits: false } : { id: pv, label: pv, known: false };
+    });
+  }
+  /** (r3908 (2)) ONE FACT for the page's note and the hub's refusal: the lookup's clean flag (held, or lifted EMPTY over torn bytes) →
+   *  { providersUnread: the store's words } while held | { providersDamaged: { copy } } after a torn lift | {} when it reads */
+  _providersLockOf() {
+    let clean = true; try { clean = typeof this._providerStoreClean === 'function' ? this._providerStoreClean() !== false : true; } catch { clean = true; }
+    if (clean) return { providersUnread: null };
+    let d = null; try { d = this._providerDamaged ? this._providerDamaged() : null; } catch { d = null; }
+    if (d && d.copy) return { providersUnread: null, providersDamaged: { copy: String(d.copy) } };
+    let w = null; try { w = this._providerUnread ? this._providerUnread() : null; } catch { w = null; }
+    return { providersUnread: w || 'VibeSpace cannot read its list of model providers right now' };
   }
   /** The list a person's save hands in, judged BY NAME before anything is written (updatePool): [] / null ⇒ none (the field
    *  goes: absent = none); each a third-party provider id the store holds that serves this pool's harness; Claude pools only (a
@@ -2994,7 +3008,7 @@ class AccountManager {
   // membership narrows. `auto` is ALWAYS true now: a pool is placed automatically
   // or by its priority, never pinned by hand as a whole — `auto:false` is ignored
   // (said once in the journal; the record keeps `auto` for old clients).
-  updatePool(id, { members, auto, hot, priority, crossProvider, fallbackProviders } = {}, { chooseMember = null } = {}) {
+  updatePool(id, { members, auto, hot, priority, crossProvider, fallbackProviders, crossProviderOpened, fallbackProvidersOpened } = {}, { chooseMember = null } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
     // (B-d578) a third-party provider is never a MEMBER — it is a fallback (below); judged before anything is written
@@ -3003,11 +3017,22 @@ class AccountManager {
     if (Array.isArray(members) && members.some((m) => /^pv-/.test(String(m || '')) && !(Array.isArray(a.members) && a.members.includes(m)))) throw new Error('a provider is never a pool member — list it as a fallback provider');
     // (r3886 (B)) THE LAW ON THE HUB: while the provider store cannot be read (held, or lifted EMPTY over torn bytes — the prune's own
     // fact), a CHANGE of the list is refused by name: no page and no caller can empty or shorten it then
+    // (r3908 (1)) A STALE DIALOG's EDIT IS REFUSED BY NAME: a request that carries a spend field with the value its dialog OPENED with is
+    // refused when the stored value is no longer that one (changed on another page) — the switch, the list as a set and its order; a
+    // caller that sends no opening value is judged as before
+    const idsOf = (x) => (Array.isArray(x) ? x.map(String) : []).join('\n');
+    if (crossProvider !== undefined && crossProviderOpened !== undefined && (a.crossProvider === 'allow' ? 'allow' : 'never') !== (crossProviderOpened === 'allow' ? 'allow' : 'never')) {
+      const e = new Error(`«When every member is out» was changed on another page (it is now ${a.crossProvider === 'allow' ? '«Move without asking»' : '«Ask me first»'}) — nothing was saved; the dialog shows it as it is now`); e.code = 'pool_changed_elsewhere'; throw e;
+    }
+    if (fallbackProviders !== undefined && fallbackProvidersOpened !== undefined && idsOf(a.fallbackProviders) !== idsOf(fallbackProvidersOpened)) {
+      const e = new Error('the pool\'s fallback providers were changed on another page — nothing was saved; the dialog shows them as they are now'); e.code = 'pool_changed_elsewhere'; throw e;
+    }
     if (fallbackProviders !== undefined && typeof this._providerStoreClean === 'function' && this._providerStoreClean() === false) {
-      const ids = (x) => (Array.isArray(x) ? x.map(String) : []).join('\n');
-      if (ids(fallbackProviders) !== ids(a.fallbackProviders)) {
-        let words = null; try { words = this._providerUnread ? this._providerUnread() : null; } catch { words = null; }
-        const e = new Error(`${words || 'VibeSpace cannot read its list of model providers right now'} — the pool's fallback providers are not changed until it reads again`); e.code = 'providers_unread'; throw e;
+      if (idsOf(fallbackProviders) !== idsOf(a.fallbackProviders)) {
+        // (r3908 (2)) the words by the SAME fact the page's note reads: lifted EMPTY over torn bytes names the copy and the way out
+        const lock = this._providersLockOf();
+        if (lock.providersDamaged) { const e = new Error(`the list of model providers was damaged, so it started empty — VibeSpace kept the damaged bytes as ${lock.providersDamaged.copy}. Add the providers again; the pool's fallback providers stay as they are until VibeSpace restarts with the list it reads now`); e.code = 'providers_damaged'; throw e; }
+        const e = new Error(`${lock.providersUnread || 'VibeSpace cannot read its list of model providers right now'} — the pool's fallback providers are not changed until it reads again`); e.code = 'providers_unread'; throw e;
       }
     }
     const fallbackList = fallbackProviders !== undefined ? this._fallbackListOf(a, fallbackProviders) : undefined;
