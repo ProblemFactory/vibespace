@@ -4,6 +4,11 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.419 — 2026-11-24
+
+### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
+- ITS FOLLOW (主开发 r1890, round wl696j3ak — the Disconnect line taken as line 291): the unmount road always settles (a throw in its own body answers by what is known — not detached `unmount_threw`, detached `unmount_unconfirmed`, en/zh/ja — and a throwing `finish` settles it too); a press after the road is a new road; the failure road joined; a Connect while it disconnects says it waits; the eject's word translated — test-mount-act-starts ⑥b with its reds; ⑥'s connect-not-waiting red waits on a fact. Its fresh read (3 SHOULD: finish throwing left it open; the row's own click silent; a throw after the detach said «did not disconnect» — NITs) cured.
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
