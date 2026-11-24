@@ -116,6 +116,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   const enabled = () => { const v = setting('browser.actionTrace', true, false); return v !== false && v !== 'false'; };
   /** B-50e7: the size bound is unread (held, nothing known) — the sweep waits, the panel says the hold, never the default as the person's */
   const boundUnread = () => { const r = readSetting(T.TRACE_BYTES_SETTING); return !!(r.held && !r.known); };
+  /** r3941 (3): the SWITCH unread (held, nothing known) — the trace is off by the hold, said by ITS reason (never «off», no «Turn on» door) */
+  const switchUnread = () => { const r = readSetting('browser.actionTrace'); return !!(r.held && !r.known); };
+  const HELD_TRACE_WHY = 'VibeSpace\'s settings cannot be read right now, so the action trace records nothing until they can be read';
+  const offRefusal = () => (switchUnread() ? { ok: false, code: 'browser_settings_unread', error: HELD_TRACE_WHY } : { ok: false, code: 'trace_off', error: 'the action trace is off (browser.actionTrace)' });
+  /** what the views carry beside `traceOn` while the switch is unread (null when it reads) */
+  const traceHeld = () => (switchUnread() ? { code: 'browser_settings_unread' } : null);
   /** The per-scope record limit in bytes (setting MB → bytes, default 1 GiB, floor 64 MB). */
   const bytesLimit = () => T.traceBytesLimit(setting(T.TRACE_BYTES_SETTING, undefined));
 
@@ -451,7 +457,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
    * share the one arming (`tp.arming`) — the keeper's verb waits on it.
    */
   function watch({ sessionId, profileId = null, browserKey = null, child = false } = {}) {
-    if (!enabled()) return Promise.resolve({ ok: false, code: 'trace_off', error: 'the action trace is off (browser.actionTrace)' });
+    if (!enabled()) return Promise.resolve(offRefusal());
     if (!bridge || typeof bridge.tap !== 'function') return Promise.resolve({ ok: false, code: 'unavailable', error: 'the stream bridge is not wired' });
     if (!sessionId) return Promise.resolve({ ok: false, code: 'bad-request', error: 'a session id is required' });
     const childKey = !profileId && child && B.isChildKey(browserKey) ? String(browserKey) : null;
@@ -496,7 +502,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
    * His acts arrive as the bridge's synthetic command/result pairs; the address row's own commands mirror by themselves.
    */
   function watchHuman({ key, profileId } = {}) {
-    if (!enabled()) return Promise.resolve({ ok: false, code: 'trace_off', error: 'the action trace is off (browser.actionTrace)' });
+    if (!enabled()) return Promise.resolve(offRefusal());
     if (!bridge || typeof bridge.tapHuman !== 'function') return Promise.resolve({ ok: false, code: 'unavailable', error: 'the stream bridge is not wired' });
     const p = keeper && typeof keeper.profile === 'function' ? keeper.profile(profileId) : null;
     if (!p || !HM.recordsMine(p)) return Promise.resolve({ ok: false, code: 'record_mine_off', error: 'this profile does not record your own actions' });
@@ -694,7 +700,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const out = {};
     for (const st of recordings.values()) out[st.profileId] = { file: st.file, since: st.since, browserKey: st.browserKey, sessionId: st.sessionId };
     const refused = {}; for (const [id, r] of recordingRefusals) refused[id] = { ...r };
-    return { recording: out, recordingRefused: refused, traceOn: enabled(), traceTaps: taps.size };
+    return { recording: out, recordingRefused: refused, traceOn: enabled(), ...(traceHeld() ? { traceUnread: traceHeld() } : {}), traceTaps: taps.size };
   }
 
   // ── reading ──
@@ -770,12 +776,13 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     for (const e of entries) { const sid = BS.sessionOfEntry(e, ss); (byS.get(sid) || loose).entries.push({ id: e.id, at: e.at, frameBytes: T.entryFrameBytes(e), listBytes: T.entryListBytes(e), fit: T.isFitEntry(e) }); } // lane trace-fits: the plan drops page-size frames first
     return { key: sc, sessions: [...byS.values(), ...(loose.entries.length ? [loose] : [])] };
   }
+  let sweepHeldSaid = false;
   function sweep() {
     const t = now();
     // B-50e7 (r3747, the census of readers): the frames' size bound unread (the settings held, nothing known) ⇒ that part WAITS — no
     // frame is removed on a default bound; the recordings below keep their own bound (a constant, no setting)
     const unread = boundUnread();
-    if (unread) log.warn?.('[browser-trace] the frames\' size sweep waits — the settings cannot be read (its bound is unread)');
+    if (unread) { if (!sweepHeldSaid) { sweepHeldSaid = true; log.warn?.('[browser-trace] the frames\' size sweep waits while VibeSpace\'s settings cannot be read (its bound is unread) — said once a hold'); } } else sweepHeldSaid = false;   // r3941: once a hold, never once a pass
     const limit = bytesLimit();
     const plan = unread ? { removeFrames: [], bytesRemoved: 0, kept: [] } : T.traceSizePlan({ scopes: scopes().map(scopeForPlan), bytesPerScope: limit });
     for (const sc of new Set(plan.removeFrames.map((r) => r.key))) {
@@ -1025,14 +1032,13 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (ks) { try { kept = ks.list(); keptLimits = ks.limits(); keptSweep = ks.lastSweep(); } catch (e) { log.warn?.(`[browser-trace] the kept browsers could not be listed: ${e && e.message}`); } }
     return { profiles: rows, ephemeral: eph, ephemeralBrowsers, kept, keptSweep, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), ...(fgHold.held() ? { forgottenUnread: { file: 'browser-forgotten.json', code: fgHold.held().code, since: fgHold.held().since } } : {}), ...(fgDamaged ? { forgottenDamaged: { ...fgDamaged } } : {}), sweep: lastSweep,
       limits: { bytesPerProfile: bytesLimit(), ...(boundUnread() ? { settingsUnread: { code: 'browser_settings_unread' } } : {}), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR, ...(keptLimits ? { keptOn: keptLimits.on, keptPerConversation: keptLimits.perConversation, keptTotal: keptLimits.total, ...(keptLimits.unread ? { keptUnread: { code: keptLimits.code } } : {}) } : {}) },
-      traceOn: enabled(), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
+      traceOn: enabled(), ...(traceHeld() ? { traceUnread: traceHeld() } : {}), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
   }
 
   // ── boot / timers ──
-  async function boot() {
-    loadForgotten();
-    if (keeper && typeof keeper.onLease === 'function' && !unsubLease) unsubLease = keeper.onLease(onLeaseEvent);
-    if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest);
+  /** the taps of the browsers RUNNING now (their leases): the boot's arming, and (r3941 (2)) the settings' LIFT's — a hold at a start armed
+   *  none, and the trace the person turned on comes back with no restart and no launch. watch() is idempotent (an armed tap stays). */
+  async function armRunning() {
     let armed = 0;
     if (keeper && enabled()) {
       const reg = keeper._reg();
@@ -1045,6 +1051,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
         const r = await watch({ sessionId: l.sessionId, profileId: l.profileId }); if (r.ok) armed++; maybeStartRecording(l.profileId, l.browserKey, l.sessionId).catch(() => { });
       }
     }
+    return armed;
+  }
+  /** r3941 (2): the settings READ again — what the hold turned off comes back (the hub's ONE lift hook calls this) */
+  function settingsLifted() { return enabled() ? armRunning().catch((e) => { log.warn?.(`[browser-trace] the taps could not be armed at the settings' lift: ${e && e.message}`); return 0; }) : Promise.resolve(0); }
+  async function boot() {
+    loadForgotten();
+    if (keeper && typeof keeper.onLease === 'function' && !unsubLease) unsubLease = keeper.onLease(onLeaseEvent);
+    if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest);
+    const armed = await armRunning();
     // 2026-09-27: a session left open by the last run is RE-OPENED when its lease came back (the keeper re-adopted it),
     // else it ENDS with reason `restart` at its last known moment (its last action, else its start)
     let reopened = 0, endedAtBoot = 0;
@@ -1087,7 +1102,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   function shutdown() { fgHold.stop(); if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
 
   return {
-    enabled, watch, unwatch, watchHuman, unwatchHuman, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
+    enabled, traceHeld /* r3941 (3) */, settingsLifted /* r3941 (2) */, watch, unwatch, watchHuman, unwatchHuman, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
     maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
     traceRoot, recRoot, forgottenFile, abBase, _forgottenHold: fgHold /* r3008: a suite asks its read again (the ladder's try, never a clock) */, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
   };

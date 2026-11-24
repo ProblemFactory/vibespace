@@ -24,7 +24,7 @@ import { btn } from './channel-chrome.js';
 import { drawOverlay, positionKindText, statusText, showFitsPref, fitsToggle, fitRowText, fitRowTitle } from './browser-trace-view.js';
 import { frameUrl, timelineLabel, positionText, foldFits, fitCount, isFitEntry } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { replayEmpty, frameState, replayKey, playTick, pickSession, pickIndex, PLAY_STEP_MS, isSessionId } from '../browser-sessions.js';
-import { whenText, sessionRowText, emptyText, replayTitle, retentionText, actionsText, durationText } from './browser-session-words.js';
+import { whenText, sessionRowText, emptyText, replayTitle, retentionText, actionsText, durationText, traceHeldText } from './browser-session-words.js';
 /** lane ui-plain-words browser-profiles-20: a step in a person's words — the verb by the traced action (src/browser-trace.js
  *  TRACED_ACTIONS; scripts/test-plain-words.mjs: every one has a word) and where, «点击 (120, 90)»; the CLI's own line
  *  (timelineLabel: «mouseclick 120,90») is the label's tooltip. */
@@ -250,7 +250,8 @@ export function openBrowserReplayWindow(app, opts = {}) {
   function setEmpty(kind) {
     const on = !!kind;
     empty.textContent = on ? emptyText(kind, { limit: st.limit }) : '';
-    if (kind === 'trace-off') { const d = settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' }); if (d) empty.append(' ', needDoorButton(d)); }
+    if (kind === 'trace-off' && st.traceHeld) empty.textContent = traceHeldText();   // r3941 (3): off BY THE HOLD — its reason, no «Turn on…» door
+    else if (kind === 'trace-off') { const d = settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' }); if (d) empty.append(' ', needDoorButton(d)); }
     empty.dataset.kind = kind || '';
     empty.style.display = on ? '' : 'none';
     pic.style.display = on ? 'none' : '';
@@ -323,7 +324,7 @@ export function openBrowserReplayWindow(app, opts = {}) {
     st.loading = false;
     if (!r || r.error) { st.error = (r && r.error) || t('server unreachable'); renderSessions(); renderActions(); renderPicture(); return; }
     st.error = null;
-    st.traceOn = r.traceOn !== false; st.limit = Number(r.limit) || 0;
+    st.traceOn = r.traceOn !== false; st.traceHeld = r.traceUnread || null; st.limit = Number(r.limit) || 0;
     if (r.browserKey && !st.tg.browserKey) st.tg = { ...st.tg, browserKey: r.browserKey };
     st.sessions = Array.isArray(r.sessions) ? r.sessions : [];
     const pick = pickSession(st.sessions, st.chosen, st.pendingAt);

@@ -6217,6 +6217,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // ── BROWSE YOURSELF (B-6ae8): the USER as one more holder, on HIS OWN pinned tab ──
   /** How long this holder keeps his tab while AWAY (the owner, 8): he launched the browser ⇒ `browser.humanKeepMs` (12 h);
    *  he joined one an agent launched ⇒ the 10-min `browser.takeoverIdleMs` (the browser then follows its other holders). */
+  /** r3941: a keep time in the journal's words — 0 is «never» (no lapse: the person's own, or the safe side while the settings are held), never «0 h» */
+  const keepWords = (ms, unit, name) => (Number(ms) > 0 ? `${Math.round(ms / unit)} ${name}` : 'with no end (never lapses)');
   function humanKeepOf(h) { return HM.keepFor({ launched: !!(h && h.launched), keepMs: HM.humanKeepMs(setting(HM.HUMAN_KEEP_SETTING, HM.DEFAULT_HUMAN_KEEP_MS, 0)), joinKeepMs: takeoverIdleMs() }); }   // B-50e7 (r3747 must 3): held, nothing known ⇒ 0 — a person's own tab never ends on the default 12 h
   /** The panel row's fact for one profile (null = the user does not browse it). */
   function humanOf(profileId) { ensureLoaded(); const h = humans.get(String(profileId || '')); return h ? { ...HM.humanHolderRow(h, { viewers: watchers.get(inputKey(h.key, h.profileId)) || 0 }), keepMs: humanKeepOf(h) } : null; }
@@ -6275,7 +6277,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         }
         h = { key: v.key, profileId: p.id, since: now(), state: 'away', awaySince: now(), launched, input: T.newInputState(), ownTab: tabIdOf(r.json), fresh: null, freshUsed: false };
         humans.set(p.id, h);
-        log.log?.(`[browser] ${p.id} "${p.label}": the user browses it himself (${v.key}, ${launched ? 'he launched the browser — kept ' + Math.round(humanKeepOf(h) / 3600000) + ' h while away' : 'joined the running browser — kept ' + Math.round(humanKeepOf(h) / 60000) + ' min while away'}; his own tab ${h.ownTab || '(unnamed)'}; ${reg.leases.filter((l) => l.profileId === p.id).length} conversation(s) on it keep working)`);
+        log.log?.(`[browser] ${p.id} "${p.label}": the user browses it himself (${v.key}, ${launched ? 'he launched the browser — kept ' + keepWords(humanKeepOf(h), 3600000, 'h') + ' while away' : 'joined the running browser — kept ' + keepWords(humanKeepOf(h), 60000, 'min') + ' while away'}; his own tab ${h.ownTab || '(unnamed)'}; ${reg.leases.filter((l) => l.profileId === p.id).length} conversation(s) on it keep working)`);
         await settleArming(emitLease({ kind: 'human-start', profileId: p.id, key: v.key, launched, recordMine: HM.recordsMine(p) }));
       } else log.log?.(`[browser] ${p.id} "${p.label}": the user continues browsing it (${v.key}, ${h.state})`);
       h.fresh = crypto.randomBytes(8).toString('hex'); h.freshUsed = false;

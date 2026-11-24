@@ -73,6 +73,11 @@ export function sizeText(bytes) {
 }
 /** The retention sentence every surface repeats (the owner: by size, 1 GB per profile — never by age). */
 export function retentionText(limitBytes) { return t('Frames are kept until this profile\'s records reach {size}; the oldest are removed first.', { size: sizeText(limitBytes) }); }
+/** r3941 (3): the action trace off BY THE SETTINGS' HOLD (its switch unread) — said by its true reason, never «off»; no «Turn on…» door
+ *  (Settings refuses a save while the settings are held) */
+export function traceHeldText() { return t('VibeSpace’s settings cannot be read right now, so the action trace records nothing until they can be read'); }
+/** r3941: the panel's Sweep pressed while the settings are held — nothing was removed, and why */
+export function sweepHeldText() { return t('VibeSpace’s settings cannot be read right now, so the sweep removed nothing: the frames and the kept browsers wait until they can be read'); }
 /** A replay pane's empty state by NAME (src/browser-sessions.js replayEmpty). */
 export function emptyText(kind, { limit = 0 } = {}) {
   if (kind === 'no-sessions') return t('No browser sessions recorded for this conversation');

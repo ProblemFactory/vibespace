@@ -23,6 +23,13 @@
 //   B10 where a person looks: the browser panel says the hold for the bounds it cannot read
 //   B11 «Reach tailnet hosts from browsers» (a plugin row of the agent browser's road): held ⇒ the last value known; nothing known ⇒
 //       OFF, said by its own reason in en / zh / ja — never «the switch is off»
+//   THE FOLLOW (主开发 r3941):
+//   B12 the kept sweep asks the hold AGAIN after its measure: a hold that begins while the sizes are measured removes nothing
+//   B13 what the hold turned off comes back at the LIFT, with no restart and no launch — ONE hook: the tailnet door opens on its kept
+//       port, the trace arms the taps of the browsers already running
+//   B14 the trace off by the hold is said by ITS reason (browser_settings_unread, the hold's words), never «off» with a «Turn on» door
+//   B15 the two sweeps' journal line once a hold, not once a pass; the Sweep press's reply says the hold
+//   B16 the keeper's journal says a person's own browser is kept with no end, never «0 h»
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -258,5 +265,133 @@ console.log('B11 the tailnet reach switch while held: the last value known; noth
     'B11 — THE LAW: a launch while held starts without tailnet reach BY THE HOLD\'S OWN REASON (settings-held), its words in en / zh / ja — never «Reach tailnet hosts from browsers is off» — RED: «setting»', { launch: lv, down: dw, en: words[0] });
   const miss = TR.missFor('https://nas:8006/', { ...UP, browsers: true, browsersHeld: false }, { failed: true, cause: 'net::ERR_NAME_NOT_RESOLVED', launched: { arg: null, mode: 'userspace', why: 'settings-held' } });
   ok(!!(miss && miss.why === 'started-settings-held' && TD.LAUNCH_WHY && typeof TD.LAUNCH_WHY['settings-held'] === 'string'), 'B11 — after the lift, a browser that started while held is told why it has no tailnet road (started-settings-held), and the journal names the hold', miss && { why: miss.why, text: String(miss.text).slice(0, 160) });
+}
+// ══ THE FOLLOW (主开发 r3941): what the cure made, the row's own class ══════════════════════════════════════════════════════════
+// ── B12 — THE KEPT SWEEP ASKS THE HOLD AGAIN AFTER ITS MEASURE ─────────────────────────────────────────────────────────────────
+console.log('B12 the kept sweep: a hold that BEGINS while the sizes are measured — nothing removed on the default bounds');
+{
+  const KS = require('../src/server/browser-kept.js'), KB = require('../src/browser-kept.js');
+  const D = path.join(ROOT, 'kept-mid-' + (++worlds)); fs.mkdirSync(D, { recursive: true });
+  const st = { held: null, settings: { [KB.TOTAL_SETTING]: 8192, [KB.PER_CONVERSATION_SETTING]: 4096 } };
+  const bound = new Set(), sizes = new Map(), lines = [];
+  let clock = 4_000_000_000;
+  // the PLACED hold: the settings become held while the measure's du answers (the await between the sweep's start and its plan)
+  const fakeDu = (cmd, args, opts, cb) => { const paths = args.slice(args.indexOf('--') + 1); const out = paths.filter((p) => sizes.has(p)).map((p) => `${sizes.get(p)}\t${p}`).join('\n'); st.held = HELD; setImmediate(() => cb(null, out + '\n', '')); };
+  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(),
+    bindings: { keys: () => bound, boundKeys: () => bound, conversationOf: (bk) => (bound.has(bk) ? 'conv-' + bk : null) }, serverSetting: heldView(st), log: { log() { }, warn: (l) => lines.push(String(l)), error() { } }, now: () => clock, sweepEveryMs: 0, thereEveryMs: 0, execFileImpl: fakeDu, settingsHeld: () => st.held });
+  const kOld = 'bk-00007001', kNew = 'bk-00007002';
+  for (const [i, k] of [kOld, kNew].entries()) {
+    bound.add(k); clock = 4_000_000_000 + i * 1000;
+    kept.noteStop(k, { why: 'turn-idle', hasDir: true, tabs: [{ url: 'https://' + k + '.example/' }] });
+    const d = kept.dirOf(k); fs.mkdirSync(path.join(d, 'Default'), { recursive: true }); fs.writeFileSync(path.join(d, 'Default', 'Cookies'), 'made-up');
+    sizes.set(d, 3000 * MB);
+  }
+  clock = 4_000_000_000 + 10_000;
+  const r = await kept.sweep();
+  const both = kept.has(kOld) && kept.has(kNew) && fs.existsSync(path.join(kept.dirOf(kOld), 'Default', 'Cookies'));
+  ok(!!(st.held && r && r.held === true && both), 'B12 — THE LAW (r3941 (1)): the sweep READ the settings at its start; the hold began during its measure — asked again after it, the pass removes nothing (both sign-ins kept) — RED: the least recently used removed down to the default 4096 MB', { sweep: r && { held: r.held, removed: r.removed, limit: r.limit }, both, heldNow: !!st.held });
+  kept.shutdown();
+}
+
+// ── B13 — THE LIFT: what the hold turned off comes back, no restart, no launch (ONE hook) ─────────────────────────────────────
+console.log('B13 the lift: the tailnet door follows the road again and the trace arms the running browsers\' taps — nothing launched');
+{
+  // production's names: ONE lift hook in the hub's wiring tells both — the plugins (whose watch the tailnet door follows: its ONE road,
+  // test-tailnet-browsers r4 N1) and the trace
+  const src = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const at = src.indexOf("persistenceRouter.onSettingsLift(() => {\n    try { plugins.settingsLifted(); }");
+  const seg = at < 0 ? '' : src.slice(at, at + 600);
+  ok(!!(at >= 0 && seg.includes("browserTrace.settingsLifted()") && !src.includes('roadChanged')), 'B13 — the hub registers ONE settings-lift hook that tells the plugins (the door follows them) and arms the trace (r3941 (2)) — RED: no hook (a default reach and the trace come back only at a launch)', { found: at >= 0 });
+  // (a) the tailnet door through its ONE follow: the REAL plugin host and the REAL door; the tunnel plugin a stand-in that answers its
+  // reach through the host's own hold question (the real tailscale plugin needs its daemon). Held at a start the door stays closed; at the
+  // lift the host's settingsLifted() reaches the door's follow and it opens on its KEPT port (a browser that survived the restart uses
+  // that port's PAC) — the person's switch on by its default, no stored row, nothing launched
+  const net = await import('node:net');
+  const freePort = await new Promise((res) => { const sv = net.createServer(); sv.listen(0, '127.0.0.1', () => { const { port } = sv.address(); sv.close(() => res(port)); }); });
+  const { PluginManager } = require('../src/plugins.js'), TD = require('../src/server/tailnet-door.js');
+  const DD = path.join(ROOT, 'door-' + (++worlds)); fs.mkdirSync(DD, { recursive: true });
+  fs.writeFileSync(path.join(DD, TD.STATE_FILE), JSON.stringify({ port: freePort }));
+  const tst = { held: HELD };
+  const UPR = { up: true, mode: 'userspace', state: 'Running', read: true, loggedIn: true, peers: [{ name: 'nas.example.ts.net', short: 'nas', ips: ['100.64.0.9'] }], self: null, suffix: 'example.ts.net', known: [], at: 1, ports: { socks: 1, http: 2 } };
+  const TUN = { id: 'tun-standin', label: 'Tunnel stand-in', description: 'a made-up tunnel plugin', provides: ['tunnel'],
+    create: (h) => ({ install() { }, start() { }, stop() { }, status() { return {}; }, reach: () => (typeof h.settingsHeld === 'function' && h.settingsHeld() ? { ...UPR, browsers: false, browsersHeld: true } : { ...UPR, browsers: true }) }) };
+  const pm = new PluginManager({ dataDir: DD, plugins: [TUN], settings: { read: () => (tst.held ? Object.defineProperty({}, MARK, { value: tst.held, enumerable: false }) : {}), patch: () => { } } });
+  const door = TD.follow(pm, { dataDir: DD, log: quiet });
+  await door.synced();
+  const p0 = door.port();
+  tst.held = null;
+  if (typeof pm.settingsLifted === 'function') pm.settingsLifted();
+  await new Promise((r) => setImmediate(r)); await door.synced();
+  const p1 = door.port();
+  ok(!!(!p0 && p1 > 0), 'B13 — THE LAW (a): held at a start the door is closed; at the lift the plugin host tells its watchers and the door follows its road: open on its kept port, nothing launched — RED: it stays closed until a launch', { held: p0 || null, lifted: p1 || null });
+  try { await door.close(); } catch { /* closed */ }
+  // (b) the trace: held at a start its boot arms no tap; at the lift the hook's settingsLifted arms the running browser's tap
+  const TR = require('../src/server/browser-trace.js');
+  const W = path.join(ROOT, 'trace-lift-' + (++worlds)); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true });
+  const st = { held: HELD, settings: { 'browser.actionTrace': true } };
+  let taps = 0;
+  const KEY = 'bk-0000b001';
+  const keeperStub = { _reg: () => ({ profiles: [], leases: [{ profileId: 'bp-0000b001', sessionId: 'sess-lift-1', browserKey: KEY }], browsers: { 'bp-0000b001': { state: 'ready' } } }), isEphemeral: () => true, holdersFor: (bk) => [{ ephemeral: true, child: false, browserKey: bk }], onLease: () => () => { }, addDigest() { }, browserOf: () => ({ state: 'ready' }) };
+  const tr = TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), keeper: keeperStub, bridge: { tap: async () => { taps++; return { ok: true, key: 'k-lift', untap() { } }; } }, serverSetting: heldView(st), log: quiet, sweepEveryMs: 0 });
+  let b = null; try { b = await tr.boot(); } catch (e) { b = { threw: String(e && e.message).slice(0, 120) }; }
+  const t0 = taps;
+  st.held = null;
+  let armed = null; try { armed = typeof tr.settingsLifted === 'function' ? await tr.settingsLifted() : null; } catch (e) { armed = { threw: String(e && e.message).slice(0, 120) }; }
+  ok(!!(t0 === 0 && taps === 1 && armed === 1), 'B13 — THE LAW (b): held at a start the boot armed no tap; at the lift the running browser\'s tap is ARMED, with no launch and no lease — RED: nothing arms it', { boot: b && { armed: b.armed, threw: b.threw }, tapsAtBoot: t0, tapsAfterLift: taps, armed });
+  tr.shutdown();
+}
+
+// ── B14 — THE TRACE OFF BY THE HOLD, SAID BY ITS REASON ───────────────────────────────────────────────────────────────────────
+console.log('B14 the trace while held: its refusal and its views say the hold, never «off» with a «Turn on» door');
+{
+  const TR = require('../src/server/browser-trace.js');
+  const W = path.join(ROOT, 'trace-why-' + (++worlds)); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true });
+  const st = { held: HELD, settings: {} };
+  const tr = TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), bridge: { tap: async () => ({ ok: true, key: 'k', untap() { } }) }, serverSetting: heldView(st), log: quiet, sweepEveryMs: 0 });
+  const w = await tr.watch({ sessionId: 'sess-why-1' });
+  const held = typeof tr.traceHeld === 'function' ? tr.traceHeld() : null;
+  ok(!!(w && w.ok === false && w.code === 'browser_settings_unread' && /settings cannot be read/.test(String(w.error)) && held && held.code === 'browser_settings_unread'), 'B14 — THE LAW (r3941 (3)): the trace\'s refusal while held is the hold\'s, by name — never trace_off «the action trace is off» — RED: trace_off', { watch: w, held });
+  st.held = null;
+  const w2 = await tr.watch({ sessionId: 'sess-why-2' });
+  ok(!!(w2 && w2.ok === true && (typeof tr.traceHeld !== 'function' || tr.traceHeld() === null)), 'B14 — the control: read, the same call arms (the hold said nothing else)', { watch: w2 });
+  tr.shutdown();
+  const route = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8'), view = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8'), rep = fs.readFileSync(path.join(REPO, 'src/lib/browser-replay-window.js'), 'utf8'), words = fs.readFileSync(path.join(REPO, 'src/lib/browser-session-words.js'), 'utf8');
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const KEYW = 'VibeSpace’s settings cannot be read right now, so the action trace records nothing until they can be read';
+  ok(!!((route.match(/traceOn: tr\.enabled\(\), \.\.\.heldOf\(tr\)/g) || []).length === 4 && /browser_settings_unread: 503/.test(route)
+    && view.includes('else if (off && held) sum.textContent = traceHeldText();') && view.includes('else if (st.off && st.offHeld) count.textContent = traceHeldText();') && view.includes("if (v && v.traceOn === false && v.traceUnread) hint.append(' ', needLine({ words: traceHeldText(), tone: 'off', doors: [] }));")
+    && rep.includes("if (kind === 'trace-off' && st.traceHeld) empty.textContent = traceHeldText();") && words.includes(KEYW) && zh.includes(`"${KEYW}":`) && ja.includes(`"${KEYW}":`)),
+    'B14 — every answer that says traceOn carries the hold (4 routes), and the three views say the hold\'s words with NO «Turn on…» door; the words in zh and ja — RED: «off» + a door Settings refuses');
+}
+
+// ── B15 — THE SWEEPS' JOURNAL ONCE A HOLD; THE SWEEP PRESS SAYS THE HOLD ─────────────────────────────────────────────────────────
+console.log('B15 the two sweeps say their wait once a hold, not once a pass; the Sweep press\'s reply says the hold');
+{
+  const KS = require('../src/server/browser-kept.js'), TR = require('../src/server/browser-trace.js');
+  const D = path.join(ROOT, 'kept-once-' + (++worlds)); fs.mkdirSync(D, { recursive: true });
+  const st = { held: HELD, settings: {} }, kl = [], tl = [];
+  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(), bindings: { keys: () => new Set(), boundKeys: () => new Set() }, serverSetting: heldView(st), log: { log() { }, warn: (l) => kl.push(String(l)), error() { } }, sweepEveryMs: 0, thereEveryMs: 0, settingsHeld: () => st.held });
+  const W = path.join(ROOT, 'trace-once-' + worlds); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true });
+  const tr = TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), serverSetting: heldView(st), log: { log() { }, warn: (l) => tl.push(String(l)), error() { } }, sweepEveryMs: 0 });
+  const said = (a, re) => a.filter((l) => re.test(l)).length;
+  for (let i = 0; i < 3; i++) { await kept.sweep(); tr.sweep(); }
+  const k1 = said(kl, /settings cannot be read/), t1 = said(tl, /settings cannot be read/);
+  st.held = null; await kept.sweep(); tr.sweep(); st.held = HELD; await kept.sweep(); tr.sweep();
+  const k2 = said(kl, /settings cannot be read/), t2 = said(tl, /settings cannot be read/);
+  // (the trace's next hold KNOWS its bound from the read pass — its memo — so its sweep runs on the person's value and has nothing to say;
+  // the kept sweep reads the door itself, so its next hold waits again and says it once more)
+  ok(!!(k1 === 1 && t1 === 1 && k2 === 2 && t2 === 1), 'B15 — THE LAW: three passes while held say the wait ONCE for each sweep (never once a pass); after a read pass, the kept sweep\'s next hold says it once again — RED: once a pass', { kept: [k1, k2], trace: [t1, t2] });
+  kept.shutdown(); tr.shutdown();
+  const route = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8'), view = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
+  ok(!!(route.includes("res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed,") && view.includes('if (r && r.held) showToast(sweepHeldText(), { duration: 8000 });')),
+    'B15 — the Sweep press while held: its reply carries the hold (the trace\'s and the kept sweep\'s), and the page says it — never «removed 0» as if it had looked');
+}
+
+// ── B16 — THE KEEPER's JOURNAL SAYS «NEVER», NOT «0 h» ────────────────────────────────────────────────────────────────────────
+console.log('B16 a person\'s own browser kept with no end is said so in the journal');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  ok(!!(src.includes("const keepWords = (ms, unit, name) => (Number(ms) > 0 ? `${Math.round(ms / unit)} ${name}` : 'with no end (never lapses)');") && src.includes("kept ' + keepWords(humanKeepOf(h), 3600000, 'h') + ' while away'") && !src.includes("Math.round(humanKeepOf(h) / 3600000) + ' h while away'")),   // stale-pins: kept (a deliberate absence check: the old «0 h» words are gone)
+    'B16 — the journal line of a person\'s own browsing says «with no end (never lapses)» for a keep of 0, never «kept 0 h»');
 }
 report();

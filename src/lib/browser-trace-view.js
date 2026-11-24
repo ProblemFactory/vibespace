@@ -55,7 +55,7 @@ import { stuckWords, unresponsiveWords } from '../browser-stuck.js'; // lane bro
 import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE, foldFits, visibleEntries, isFitEntry, fitCount } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
 import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the row's "You are browsing it" line (PURE)
-import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
+import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText, traceHeldText, sweepHeldText } from './browser-session-words.js'; // the words every session surface shares
 import { displayFactText } from './browser-display-words.js';
 import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCell, diskFold } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
 import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
@@ -305,9 +305,9 @@ export function createCardTraceLoader(view) {
     // "为啥都是没有记录到操作" — every card on an instance whose agents drive their own profiles read that)
     const untraced = !r.browserKey && !r.sessionId;
     const byCard = assignEntriesToWindows(windows.map((x) => x.w), r.entries || []);
-    for (const { h, w } of windows) render(h, byCard[w.id] || [], { off: r.traceOn === false, untraced, gap: armGapFor(w, st.armFail) });
+    for (const { h, w } of windows) render(h, byCard[w.id] || [], { off: r.traceOn === false, held: r.traceUnread || null, untraced, gap: armGapFor(w, st.armFail) });
   }
-  function render(h, entries, { off = false, error = null, unknown = false, untraced = false, gap = null } = {}) {
+  function render(h, entries, { off = false, held = null, error = null, unknown = false, untraced = false, gap = null } = {}) {
     h.dataset.traceState = error ? 'error' : 'loaded';
     h.dataset.traceUntraced = untraced && !entries.length ? '1' : '';
     h._traceEntries = entries;
@@ -317,6 +317,7 @@ export function createCardTraceLoader(view) {
     if (sum) {
       if (error) sum.textContent = t('trace unavailable: {why}', { why: String(error) });
       else if (s.n || s.fits) sum.textContent = countText(s); // lane trace-fits: agent actions, the page-size changes beside
+      else if (off && held) sum.textContent = traceHeldText();   // r3941 (3): off BY THE HOLD — its reason, no door Settings would refuse
       else if (off) { sum.textContent = t('action trace is off'); const d = settingsDoor(view && view.app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' }); if (d) sum.append(' ', needDoorButton(d)); }
       else if (unknown) sum.textContent = t('no conversation id to look up');
       // r2 L5: the recorder could not tap this browser — its actions in [at, until] were NOT recorded, and that is said
@@ -440,6 +441,7 @@ export function createTraceTimeline(app, { sessionId, browserKey: ownKey = null 
   function renderHead() {
     const fits = fitTotal();
     if (st.error) count.textContent = t('trace unavailable: {why}', { why: String(st.error) });
+    else if (st.off && st.offHeld) count.textContent = traceHeldText();   // r3941 (3)
     else if (st.off) { count.textContent = t('action trace is off'); const d = settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' }); if (d) count.append(' ', needDoorButton(d)); } // lane ui-needs-a-button pick 5
     else count.textContent = countText({ n: agentCount(), failed: 0, fits }) + ' · ' + t('newest last');
     toggle.el.style.display = fits && !st.error ? '' : 'none';
@@ -574,7 +576,7 @@ export function createTraceTimeline(app, { sessionId, browserKey: ownKey = null 
     const [r] = await Promise.all([fetchJson(`/api/browser/actions?${q}`), loadSessions()]);
     st.loading = false;
     if (!r || r.error) { st.error = (r && r.error) || t('server unreachable'); renderHead(); return; }
-    st.off = r.traceOn === false;
+    st.off = r.traceOn === false; st.offHeld = r.traceUnread || null;
     if (r.browserKey) st.browserKey = r.browserKey;
     for (const e of r.entries || []) push(e, { render: false });
     renderList();
@@ -865,7 +867,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     // B-50e7: the settings held with the bound unread ⇒ the held words, never the default size as the person's (the sweep waits meanwhile)
     if (v?.limits?.settingsUnread) { hint.textContent = heldWordsOf(v.limits.settingsUnread); return; }
     hint.textContent = t('Each profile keeps its records up to {size}; over it, the oldest sessions\' frames are removed first and every action list stays. Recordings are kept {days} days or {mb} MB. Frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { size, days, mb });
-    if (v && v.traceOn === false) hint.append(' ', needLine({ words: t('The action trace is off.'), tone: 'off', doors: [settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' })] }));
+    if (v && v.traceOn === false && v.traceUnread) hint.append(' ', needLine({ words: traceHeldText(), tone: 'off', doors: [] }));   // r3941 (3): the hold's reason, no door
+    else if (v && v.traceOn === false) hint.append(' ', needLine({ words: t('The action trace is off.'), tone: 'off', doors: [settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' })] }));
   }
   function renderSummary(v) {
     const rows = v?.profiles || [];
@@ -1335,7 +1338,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
   // (+ tasks-updated: a Task Group's title / membership on a "Who can use it" chip follows the store)
   const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-passkeys-updated' && m.profileId == null) { for (const o of pkOpen.values()) o.load(); } /* r3261: the store's hold lifted — every open list reads again */ else if (m.type === 'browser-passkeys-updated' && pkOpen.has(String(m.profileId || ''))) pkOpen.get(String(m.profileId)).load(); if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || (m.type === 'tasks-updated' && metaChanged(m)) || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane task-group-fanout: a title / membership move only // lane browser-resume: + the kept browsers
   app.ws?.onGlobal?.(onGlobal);
-  sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
+  sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r && r.held) showToast(sweepHeldText(), { duration: 8000 }); else if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();
   winInfo.onClose = () => { st.closed = true; clearInterval(tqTick); try { tqOff(); tq.dispose(); } catch { /* optional */ } if (st.timer) clearTimeout(st.timer); try { ro?.disconnect(); } catch { /* optional */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
   winInfo._browserProfiles = { takeovers: () => tq.rows(), focusRow, load, layout, whoCell: (id) => whoCells.get(id) || null, keptRow: (bk) => (keptRows.get(bk) || {}).row || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length, kept: (st.view?.kept || []).map((k) => ({ browserKey: k.browserKey, tabs: (k.tabs || []).length, kind: k.kind, live: !!k.live })) }) };

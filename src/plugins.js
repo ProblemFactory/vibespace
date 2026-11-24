@@ -228,6 +228,10 @@ class PluginManager {
   /** lane tailnet-names r4: ONE subscription to what a plugin IS — its every broadcast ({type: 'plugins-updated'}: a start, a
    *  stop, a sign-in, an on/off switch) AND its rows written through the settings store ({type: 'rows', id, keys}). → unwatch() */
   watch(fn) { if (typeof fn !== 'function') return () => { }; this._watchers.add(fn); return () => { this._watchers.delete(fn); }; }
+  /** B-50e7 follow (主开发 r3941 (2)): VibeSpace's settings READ again after a hold — every plugin row may read otherwise now, and a row on
+   *  its default has no stored value the lift's write hook would see moved: watch() is told {type: 'settings-lifted'} (the tailnet door
+   *  follows its road again through its ONE follow — no second road into the door) */
+  settingsLifted() { this._tell({ type: 'settings-lifted' }); }
   _tell(ev) { for (const fn of [...this._watchers]) { try { fn(ev); } catch (e) { console.warn('[plugins] a watcher failed:', e && e.message); } } }
 
   /** the words a person reads while plugins.json is held (the plugins list, a refused change) — null when it reads */

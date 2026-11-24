@@ -82,6 +82,8 @@ function keptRowsFor(req, kept) {
   return isAgentBearer(req) ? kept.map(({ tabs, ...r }) => ({ ...r, tabs: [], tabCount: Array.isArray(tabs) ? tabs.length : 0 })) : kept;
 }
 const router = express.Router();
+/** r3941 (3): the trace off BY THE SETTINGS' HOLD rides every answer that says `traceOn` (the views say the hold, no «Turn on» door) */
+const heldOf = (tr) => { try { const h = typeof tr.traceHeld === 'function' ? tr.traceHeld() : null; return h ? { traceUnread: h } : {}; } catch { return {}; } };
 
 let ctx = null;
 function setup(deps) { ctx = deps; }
@@ -99,7 +101,7 @@ const STATUS = {
   // B-8b87 round 3: an edit's proxy refusals by name (the creation's route has the same rows) — never a 500 for a refusal
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400,
   // the trace
-  trace_off: 409, 'not-live': 409, ended: 409, refused: 409,
+  trace_off: 409, 'not-live': 409, ended: 409, refused: 409, browser_settings_unread: 503,   // r3941: the trace off BY THE SETTINGS' HOLD, said by its reason
   // housekeeping (§7.1 / §8 / D8): the sweep's scope, the archive-before-remove rule
   not_ours: 400, leased: 409, running: 409, forget_failed: 500, forgotten_unread: 503, passkeys_unread: 503,   // r3008: the ledger of the browsers set aside could not be read — HELD
   // BROWSE YOURSELF verify r1 (H4): Delete… while the user browses it himself — refused by name (Close / Quit first)
@@ -166,11 +168,11 @@ router.get('/api/browser/actions', (req, res) => {
   if (!browserKey && conversation && ctx?.bindings?.lookup) { try { const k = ctx.bindings.lookup(conversation); if (k) { browserKey = k; keyFrom = 'conversation'; } } catch { /* the store is optional */ } }
   if (!browserKey && givenKey) { browserKey = givenKey; keyFrom = 'given'; }
   // nothing to match by (a conversation the store never bound, no live session) ⇒ an honest EMPTY answer, never "every entry"
-  if (!sessionId && !browserKey) return res.json({ sessionId: null, conversation: conversation || null, browserKey: null, keyFrom: null, traceOn: tr.enabled(), entries: [] });
+  if (!sessionId && !browserKey) return res.json({ sessionId: null, conversation: conversation || null, browserKey: null, keyFrom: null, traceOn: tr.enabled(), ...heldOf(tr), entries: [] });
   try {
     const entries = tr.list({ sessionId: sessionId || null, browserKey, anyOf: true, profileId: sc.profileId, from: Number(req.query.from) || 0, to: req.query.to != null && req.query.to !== '' ? Number(req.query.to) : Infinity, limit: Number(req.query.limit) || 200 }).filter((e) => !(agent && e && e.holder === 'user'));
     // lane trace-fits: `summary` = the agent's actions (`n`, `failed`) with the live view's page-size changes beside (`fits`)
-    res.json({ sessionId: sessionId || null, conversation: conversation || null, browserKey, keyFrom, traceOn: tr.enabled(), entries, summary: T.traceSummary(entries) });
+    res.json({ sessionId: sessionId || null, conversation: conversation || null, browserKey, keyFrom, traceOn: tr.enabled(), ...heldOf(tr), entries, summary: T.traceSummary(entries) });
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/sessions', (req, res) => {
@@ -195,10 +197,10 @@ router.get('/api/browser/sessions', (req, res) => {
   const limit = typeof tr.bytesLimit === 'function' ? tr.bytesLimit() : T.TRACE_BYTES_PER_PROFILE;
   // a conversation this server cannot name (no live key, never bound) ⇒ an honest EMPTY list, never every session
   const conversationAsked = !!(sessionId || conversation || givenKey);
-  if (conversationAsked && !browserKey && !sessionId) return res.json({ traceOn: tr.enabled(), limit, browserKey: null, keyFrom: null, sessions: [] });
+  if (conversationAsked && !browserKey && !sessionId) return res.json({ traceOn: tr.enabled(), ...heldOf(tr), limit, browserKey: null, keyFrom: null, sessions: [] });
   try {
     const list = tr.sessions({ browserKey, sessionId: conversationAsked ? sessionId || null : null, profileId: sc.profileId }).filter((x) => !(agent && x && x.holder === 'user'));
-    const out = { traceOn: tr.enabled(), limit, browserKey, keyFrom, sessions: list };
+    const out = { traceOn: tr.enabled(), ...heldOf(tr), limit, browserKey, keyFrom, sessions: list };
     if (asked) {
       const s = list.find((x) => x.id === asked);
       // the LAST `ENTRIES_MAX` actions ride the answer; a cut is NAMED (`entriesTotal` > `entries.length`) — the window
@@ -342,8 +344,9 @@ router.post('/api/browser/housekeeping/sweep', (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
   // lane browser-resume (§3.9): the panel's Sweep also runs the kept browsers' (ends + the size bound) — it answers by its own broadcast
-  try { const ks = ctx?.keeper && typeof ctx.keeper.keptStore === 'function' ? ctx.keeper.keptStore() : null; if (ks) ks.sweep().catch((e) => console.warn('[browser-kept] sweep failed: ' + (e && e.message))); } catch (e) { console.warn('[browser-kept] sweep failed: ' + (e && e.message)); }
-  try { const r = tr.sweep(); res.json({ ok: true, removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at }); }
+  let keptHeld = false;   // r3941: the press's own reply says the settings' hold (the kept sweep waits; its bounds are unread)
+  try { const ks = ctx?.keeper && typeof ctx.keeper.keptStore === 'function' ? ctx.keeper.keptStore() : null; if (ks) { try { keptHeld = !!(typeof ks.limits === 'function' && ks.limits().unread); } catch { keptHeld = false; } } if (ks) ks.sweep().catch((e) => console.warn('[browser-kept] sweep failed: ' + (e && e.message))); } catch (e) { console.warn('[browser-kept] sweep failed: ' + (e && e.message)); }
+  try { const r = tr.sweep(); res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at }); }
   catch (e) { fail(res, e); }
 });
 /** "Who can use it" as the dialog draws it — FRESH from the registry (mirror-193: never the panel's broadcast copy), with

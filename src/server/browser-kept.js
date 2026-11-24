@@ -366,6 +366,9 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // B-50e7 (r3747 must 1): while the settings are held the bounds are the defaults, never the person's — said unread (the panel says the
   // hold, no number as the person's) and the sweep below waits
   const settingsHeldNow = () => { try { return settingsHeld() || null; } catch { return null; } };
+  // r3941 (the follow): the sweep's wait is said ONCE a hold (the journal), never once a pass; a read pass clears it
+  let heldSaid = false;
+  const sayHeld = () => { if (heldSaid) return; heldSaid = true; log.warn?.('[browser-kept] the sweep waits while VibeSpace\'s settings cannot be read (its limits are unread) — no kept browser is removed until they read; said once a hold'); };
   const limits = () => { const l = K.keptLimits(setting); return settingsHeldNow() ? { ...l, unread: true, code: 'browser_settings_unread' } : l; };
 
   // ── ends ──
@@ -477,7 +480,8 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     { const k = kp(); if (k && typeof k.held === 'function' && k.held()) { log.warn?.('[browser-kept] the sweep waits — the profile registry is held'); return Promise.resolve({ held: true }); } }
     // B-50e7 (r3747 must 1): while the SETTINGS are held its limits are unread — the default total is never the person's bound: the sweep
     // removes nothing (no kept browser loses its sign-ins on a default); the next sweep after the lift applies the person's bound
-    if (settingsHeldNow()) { log.warn?.('[browser-kept] the sweep waits — the settings cannot be read (its limits are unread)'); return Promise.resolve({ held: true, settings: true }); }
+    if (settingsHeldNow()) { sayHeld(); return Promise.resolve({ held: true, settings: true }); }
+    heldSaid = false;
     sweeping = (async () => {
       const t0 = now();
       const s = load();
@@ -494,6 +498,8 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       const entries = Object.values(load().entries);
       const sizes = await measure(entries);
       const lim = limits();
+      // r3941 (1): a hold that BEGAN while the sizes were measured — asked again after the measure's await: nothing is removed on the default bounds
+      if (lim.unread) { sayHeld(); return { held: true, settings: true }; }
       const liveNow = new Map(entries.map((e) => [e.browserKey, liveOf(e.browserKey)]));
       // carried = a live session carries the key (its conversation runs): read AFTER the measure's await, fail closed
       let carriedSet = null; try { const v = liveKeys(); carriedSet = v instanceof Set ? v : new Set(v || []); } catch (e) { log.warn?.(`[browser-kept] the live sessions could not be listed (${e && e.message}) — no kept browser is removed by the bound this pass`); carriedSet = null; }

@@ -1855,6 +1855,14 @@ function createSessionMessages(session, sessionId) {
       app.use(traceRouter);
     }
   } catch (e) { browserTrace = null; console.warn('[browser-trace] recorder unavailable — ' + (e && e.message)); }
+  // B-50e7 follow (主开发 r3941 (2)): WHAT THE SETTINGS' HOLD TURNED OFF COMES BACK AT THE LIFT — no restart, no launch. ONE hook for both:
+  // the plugins tell their watchers (the tailnet door follows its road again through its ONE follow: a person on the switch's default has
+  // no STORED row the lift's write hook would see moved), and the trace arms the taps of the browsers already running (held at a start,
+  // its boot armed none)
+  if (typeof persistenceRouter.onSettingsLift === 'function') persistenceRouter.onSettingsLift(() => {
+    try { plugins.settingsLifted(); } catch (e) { console.warn('[plugins] the settings\' lift could not be told — ' + (e && e.message)); }
+    try { if (browserTrace && typeof browserTrace.settingsLifted === 'function') browserTrace.settingsLifted(); } catch (e) { console.warn('[browser-trace] the taps could not be armed at the settings\' lift — ' + (e && e.message)); }
+  });
   const bootBrowserTrace = () => {
     if (!browserTrace) return;
     try {
