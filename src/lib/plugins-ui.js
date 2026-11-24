@@ -6,6 +6,7 @@ import { railRow } from './rail-row.js'; // lane ui-phone-and-fit M2: THE RAIL R
 import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText, heldWordsOf, pluginsHeldWords } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
+import { UI_ICONS } from './icons.js';   // r3334: the record notice's dismiss (the library's own static SVG)
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { pluginsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a service toast's door
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
@@ -124,6 +125,14 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
 }
 /** one list row: icon dot · name + description [+ a readout line] · chip · switch · [install] · ⚙ — `fact` is a READOUT
  *  (a drawn element, not a control: the LLM plugin's money today, lane decision-spend-readout), under the description */
+/** r3334 (lane bl-chat-b): the OpenCode serve's RECORD withheld — the card's own sentence by its park (the hub's reason is English) */
+function serveRecordWords(p) {
+  if (!p) return '';
+  if (p.parkedKind === 'held') return t('VibeSpace cannot read the record of its OpenCode background service right now, so nothing was started or stopped — a serve from before may still be running. It reads the record again by itself; press again in a few minutes, or read it again from For you.');
+  if (p.parkedKind === 'torn') return t('The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch on starts a new one.');
+  if (p.parkedKind === 'torn-start') return t('The new serve ended before it answered. The serve from before the damaged record may still be running: stop it by hand, then turn the switch on again.');
+  return '';
+}
 function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null, installed = false, idTip = '' }) {
   // lane ui-phone-and-fit M2: THE RAIL ROW (rail-row.js) — dot · the name (+ its description, + a readout) · the controls
   // (the status chip — the plugin's entry when it is a button, so it never folds and is never cut —, the switch, [install], ⚙)
@@ -250,13 +259,25 @@ export function installPluginsUI(App) {
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
         } else if (isServe) {
           chip = !p.installed ? t('the opencode CLI is not installed')
+            : p.parkedKind === 'held' ? t('its record could not be read — nothing was started')   // r3334: the serve's record withheld — its own words
+            : p.parkedKind === 'torn' ? t('its record was damaged — a serve from before may still be running')
+            : p.parkedKind === 'torn-start' ? t('the new serve did not start — the one from before may still be running')
             : p.parkedKind === 'runaway' ? t('stopped as a runaway')
               : p.parkedKind === 'blocked' ? t('blocked by a serve we could not identify')
                 : p.parked ? t('parked after repeated crashes')
                   : running ? t('running on 127.0.0.1:{port}', { port: p.port || '?' }) : p.starting ? t('starting…') : t('turned off');
           tone = running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '';
           chipTitle = p.envForced === true ? t('Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.')
-            : p.envForced === false ? t('Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.') : (p.reason || '');
+            : p.envForced === false ? t('Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.') : (serveRecordWords(p) || p.reason || '');
+          // r3334: a serve from before a damaged record may still run — ONE line on the card until the person dismisses it (no new store)
+          if (p.recordNotice) {
+            fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact plugin-row-notice' });
+            const words = Object.assign(document.createElement('span'), { textContent: p.recordNotice.copy ? t('A serve from before the damaged record may still be running — VibeSpace could not stop it. Its damaged bytes are kept beside the record as {copy}. Stop the serve by hand if it runs.', { copy: p.recordNotice.copy }) : t('A serve from before the damaged record may still be running — VibeSpace could not stop it. Stop the serve by hand if it runs.') });
+            const x = Object.assign(document.createElement('button'), { type: 'button', className: 'plugin-row-notice-x', title: t('Dismiss') });
+            x.setAttribute('aria-label', t('Dismiss')); x.innerHTML = UI_ICONS.close || '';
+            x.onclick = () => act(() => api('config', { body: JSON.stringify({ dismiss: 'record-notice' }) }));
+            fact.append(words, x);
+          }
           swDisabled = (p.envForced !== null && p.envForced !== undefined) || !p.installed;
           // ONE switch: the server keeps enabled and desiredUp together (on = start now AND on every boot)
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));

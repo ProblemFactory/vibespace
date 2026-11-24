@@ -100,7 +100,37 @@ function freePort() {
   });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function readRecord() { try { const r = JSON.parse(fs.readFileSync(RECORD, 'utf8')); return r && r.port > 0 ? r : null; } catch { return null; } }
+// THE RECORD's ONE READ (r3334, the hub's store-read law in this file's own words — the twin of src/opencode-serve.js): «not there»
+// is the ONLY no-record. A read that FAILED (EIO, EACCES, …) fails the op BY NAME and starts nothing: a serve still running from an
+// earlier op would become an orphan nobody here can find again (this host has no keeper and no card). TORN bytes are kept aside ONCE
+// (beside the record, 0600 from their create; the newest copies compared byte for byte — the same bytes are never copied twice) and
+// the op fails by name the same way: a serve from before may still run; the person stops it by hand and removes the record.
+const TORN_LOOK = 20;
+function keepTorn(buf) {
+  const dir = path.dirname(RECORD), head = path.basename(RECORD) + '.corrupt-';
+  try {
+    for (const n of fs.readdirSync(dir).filter((x) => x.startsWith(head)).sort().slice(-TORN_LOOK).reverse()) {
+      try { const b = fs.readFileSync(path.join(dir, n)); if (b.length === buf.length && b.equals(buf)) return n; } catch { /* not this one */ }
+    }
+  } catch { /* no listing: a new copy is tried */ }
+  for (let k = 0; k < 5; k++) {
+    const name = head + Date.now() + (k ? '-' + k : '');
+    try { fs.writeFileSync(path.join(dir, name), buf, { flag: 'wx', mode: 0o600 }); return name; } catch (e) { if (!e || e.code !== 'EEXIST') return null; }
+  }
+  return null;
+}
+function readRecord() {
+  let buf;
+  try { buf = fs.readFileSync(RECORD); } catch (e) {
+    if (e && e.code === 'ENOENT') return null;
+    throw new Error(`the record of the OpenCode serve on this machine (${RECORD}) could not be read (${(e && (e.code || e.name)) || 'unreadable'}) — nothing was started or stopped, and a serve from before may still be running. Try again in a few minutes`);
+  }
+  let r = null;
+  try { r = JSON.parse(buf.toString('utf8')); } catch { r = null; }
+  if (r && r.port > 0) return r;
+  const kept = keepTorn(buf);
+  throw new Error(`the record of the OpenCode serve on this machine (${RECORD}) was damaged${kept ? ` (its bytes are kept beside it as ${kept})` : ''} — a serve from before may still be running, so none is started over it. Stop any \`opencode serve\` on that machine by hand, then remove the record to start fresh`);
+}
 function deleteRecord() { try { fs.unlinkSync(RECORD); } catch { } }
 function writeRecord(r) {
   try {

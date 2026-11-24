@@ -113,6 +113,8 @@ const net = require('net');
 const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');   // THE process-identity ladder (residual (c)): one definition for every caller that signals
 const PI = require('./proc-identity');            // the record's BIRTH (B-5ee1): signalServe → signalIdentity
+const HOLD = require('./store-read-hold.js');     // r3334 (lane bl-chat-b): data/opencode-serve.json under the store-read law (its hold, read again, the torn bytes' copy)
+const SR = require('./store-read.js');            // …the ONE read's answer (data / missing / unreadable / torn)
 const { nameFromText } = require('./discovery-facts');
 const { AcpSessionMessages } = require('./acp-message-manager');
 
@@ -175,6 +177,8 @@ const RECORD_KILL_POLL_MS = 150;
  *  again, or the process exits), and a park that only a button can leave would
  *  keep OpenCode dark long after the machine fixed itself. */
 const BLOCKED_RETRY_MS = 10 * 60 * 1000;
+/** r3334: torn bytes of the record kept in memory to know the person's decision is about THESE bytes (a record is ~200 bytes) */
+const TORN_KEEP_BYTES = 1024 * 1024;
 const CLK_TCK = 100;                               // Linux USER_HZ (getconf CLK_TCK) — /proc stat ticks → seconds
 
 class OpencodeServeError extends Error {
@@ -867,7 +871,79 @@ function createServeLocator({
   const authOf = () => { const e = env() || {}; return e.OPENCODE_SERVER_PASSWORD ? { username: e.OPENCODE_SERVER_USERNAME || 'opencode', password: e.OPENCODE_SERVER_PASSWORD } : null; };
   const mkClient = (port) => new OpencodeServeClient(`http://127.0.0.1:${port}`, { fetchImpl, auth: authOf() });
   const notify = () => { try { onState?.(snapshot()); } catch { } };
-  function readRecord() { try { const r = JSON.parse(fs.readFileSync(recordPath, 'utf8')); return r && Number.isInteger(r.port) && r.port > 0 ? r : null; } catch { return null; } }
+  // r3334 (主开发; lane bl-chat-b — the store family's law r3019 / r3104 / r3122 / r3168, the GO r3341): THE RECORD UNDER THE STORE-READ
+  // LAW (src/store-read-hold.js). The release read ANY failure of data/opencode-serve.json as «no record»: the ladder started a SECOND
+  // serve and wrote its record over the file, and a serve still running from the earlier life became an orphan nobody adopts or stops
+  // (a Disable read «nothing to stop» and removed the file). Now the record's ONE read answers through the law:
+  //   a read that FAILED is HELD — no serve is started by the record's silence on any road (the boot replay, a page's discovery, a
+  //     person's Start, a crash respawn: the ladder parks 'held', no deadline); a person's Start and a Disable are refused BY NAME before
+  //     any change (src/plugins/opencode-serve.js asks startRefusal / stopRefusal — a person's own press is stopped here on purpose: a
+  //     second serve would orphan the first); nothing is written over or removed; it is read again OFF the loop, and at the lift the
+  //     ladder runs as today (the recorded serve adopted when it answers, or settled by its pid and start time), with no restart;
+  //   TORN bytes are kept aside once (the helper's copy) and NEVER lifted as empty by themselves (r3019: the start acts on the record's
+  //     silence): the ladder parks 'torn' and says that a serve from before may still run; only the person's own Start begins a new one
+  //     (their decision on THOSE bytes: the spawn writes a fresh record over them), and a new serve that ends before it answers parks
+  //     'torn-start' by name — no respawn in a row; a Disable saves the switch off and says by name that nothing could be stopped; the
+  //     card keeps one line saying a serve may still run until the person dismisses it (in memory — no new store).
+  // NO PROCESS FACT stands in for the record: a match by command or folder is the name match the kill law forbids.
+  const REC_SHAPE = (r) => !!r && typeof r === 'object' && !Array.isArray(r) && Number.isInteger(r.port) && r.port > 0;
+  let torn = null;   // torn bytes of THIS life: { copy, at, bytes, decided, notice } — their copy's base name and the person's decision
+  const afterTornKids = new WeakSet();   // the serve a person's Start after torn bytes began, until it answers
+  const recWords = (h) => `the record of the OpenCode background service (opencode-serve.json in VibeSpace's data folder) could not be read (${(h && h.code) || 'unreadable'}) — nothing was started or stopped, and a serve from before may still be running. VibeSpace reads it again by itself every few minutes (or read it again from For you)`;
+  const tornWords = () => `the record of the OpenCode background service (opencode-serve.json) was damaged${torn && torn.copy ? ` (its bytes are kept as ${torn.copy})` : ''} — a serve from before may still be running, so VibeSpace starts none by itself. Stop it by hand if it runs; your own Start begins a new one`;
+  const recHold = HOLD.create({
+    file: recordPath, valid: REC_SHAPE, code: 'serve_record_unread', aside: (mark) => recordPath + '.corrupt-' + mark, words: recWords, now,
+    log: (s) => log?.warn?.(`[opencode-serve] ${s}`),
+    onLift: (v, f) => recordLifted(v, f),
+  });
+  /** the record WITHHELD (r3334): a read that failed (held), or torn bytes no person has decided on */
+  const recordHeld = () => !!recHold.held() || !!(torn && !torn.decided);
+  /** THE RECORD's ONE READ (r3334) → the record, or null when there is none — null too while it is withheld (ask recordHeld()) */
+  function readRecord() {
+    if (recordHeld()) return null;
+    let read; try { const buf = fs.readFileSync(recordPath); read = { text: buf.toString('utf8'), buf }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: REC_SHAPE });
+    if (a.state === 'data') return a.value;
+    if (a.state === 'missing') return null;
+    // torn bytes the PERSON decided on (their Start, these same bytes) read as no record: the spawn writes a fresh one (their copy stays)
+    if (a.state === 'corrupt' && torn && torn.decided && torn.bytes && read.buf.equals(torn.bytes)) return null;
+    if (a.state === 'corrupt') torn = { copy: null, at: now(), bytes: read.buf.length <= TORN_KEEP_BYTES ? Buffer.from(read.buf) : null, decided: false, notice: true };
+    recHold.start(a);   // unread: held, read again on the ladder; torn: their copy at once (off the loop), then the 'torn' park
+    parkOnRecord();
+    return null;
+  }
+  /** the ladder PARKED on the record (r3334): 'torn' (damaged bytes, the person decides) or 'held' (a read that failed) — no deadline:
+   *  the helper's lift, or the person's Start after torn bytes, is what moves it */
+  function parkOnRecord() {
+    if (state.parked && state.parkedKind !== 'held' && state.parkedKind !== 'torn') return;   // a runaway / blocked / crash park keeps its own words and deadline
+    const kind = torn && !torn.decided ? 'torn' : 'held';
+    const why = kind === 'torn' ? tornWords() : recWords(recHold.held());
+    if (state.parked && state.parkedKind === kind && state.lastError === why) return;
+    state.parked = true; state.parkedKind = kind; state.retryAfter = 0; state.lastError = why;
+    log?.warn?.(`[opencode-serve] ${why}`);
+    notify();
+  }
+  /** the helper's LIFT (r3334): the record read again — the ladder runs as today when the service is wanted (no restart); torn bytes
+   *  kept aside stay WITHHELD (the person decides) */
+  function recordLifted(v, f) {
+    if (f && f.setAside) {
+      if (!torn) torn = { copy: null, at: now(), bytes: null, decided: false, notice: true };
+      torn.copy = String(f.setAside); torn.decided = false;
+      parkOnRecord(); return;
+    }
+    if (torn && !torn.decided) torn = null;   // the file reads again (mended or removed by hand): nothing is withheld any more
+    if (state.parked && (state.parkedKind === 'held' || state.parkedKind === 'torn')) { state.parked = false; state.parkedKind = null; state.lastError = null; state.retryAfter = 0; }
+    notify();
+    if (!state.stopping && autostartOn()) ensure().catch(() => { });
+  }
+  /** a person's Start after torn bytes: THEIR decision on those bytes (the card said a serve from before may still run) */
+  function decideTorn() { if (torn && !torn.decided) { torn.decided = true; torn.started = false; } }
+  /** …the bytes it is about, when the helper's read (not ours) met them: their kept copy, read OFF the loop before the ladder's read */
+  async function tornBytesOfCopy() {
+    if (!torn || !torn.decided || torn.bytes || !torn.copy) return;
+    const b = await fs.promises.readFile(path.join(path.dirname(recordPath), torn.copy)).catch(() => null);   // undecidable: the bytes are judged again
+    if (b && torn && !torn.bytes && b.length <= TORN_KEEP_BYTES) torn.bytes = b;
+  }
   function writeRecord(r) { try { writeJsonAtomic(recordPath, r); } catch (e) { log?.warn?.(`[opencode-serve] record write failed: ${e.message}`); } }
   /** THE SERVE SIGNAL (B-5ee1) — every signal to a serve pid this process holds no handle for (a runaway park of an
    *  adopted serve, the replace rung, settle's stop, stop({killRecorded})): the record's BIRTH (`start` + `bootId`,
@@ -894,6 +970,7 @@ function createServeLocator({
    *  synchronous, it bumps the epoch FIRST, and "the user turned it off" is the
    *  one instruction that outranks every record on disk. */
   function clearRecord(owns = null) {
+    if (recordHeld()) return false;   // r3334: WITHHELD — nothing is removed (the record may name a serve still running)
     if (owns) {
       const r = readRecord();
       if (!r) return false;
@@ -1009,6 +1086,15 @@ function createServeLocator({
     // never delete a newer ladder's record.
     clearRecord({ port, pid: child.pid || null });
     if (state.stopping || state.parked) { notify(); return; } // a runaway/park already decided the outcome — never respawn on its own SIGTERM
+    if (afterTornKids.has(child)) {
+      // r3334 (the GO r3341 (2)): the serve a person's Start began after torn bytes ENDED before it answered — the serve from before
+      // the damaged record may still run (its port, its store taken): said BY NAME, and parked — never a respawn in a row
+      afterTornKids.delete(child);
+      state.parked = true; state.parkedKind = 'torn-start'; state.retryAfter = 0;
+      state.lastError = `the new opencode serve ended before it answered (${signal || `code ${code}`}) — the serve from before the damaged record may still be running. Stop it by hand, then start again`;
+      log?.error?.(`[opencode-serve] ${state.lastError}`);
+      notify(); return;
+    }
     if (state.startedAt && Date.now() - state.startedAt >= HEALTHY_UPTIME_RESET_MS) state.crashes = 0;
     state.crashes++;
     state.lastError = `opencode serve exited (${signal || `code ${code}`})`;
@@ -1226,7 +1312,9 @@ function createServeLocator({
     if (Date.now() < state.backoffUntil) return null;
     const cmd = commandOf();
     // 1) reuse a recorded instance (a previous VibeSpace's child that outlived a SIGKILL restart)
+    if (torn && torn.decided && !torn.bytes && torn.copy) { await tornBytesOfCopy(); if (cancelled(epoch)) return null; }   // r3334: only after a person's Start on torn bytes
     const rec = readRecord();
+    if (!rec && recordHeld()) { parkOnRecord(); return null; }   // r3334: WITHHELD — no serve is started by the record's silence
     // the serve's OWN empty directory (see ensureServeCwd): resolved before the
     // reuse probe so a recorded instance can be compared against it — but only
     // when it can be USED (a record to compare, or a spawn we are allowed to
@@ -1298,6 +1386,7 @@ function createServeLocator({
     if (!autostartOn()) { state.lastError = serveEnvOverride() === false ? 'the OpenCode background service is forced OFF by VIBESPACE_OPENCODE_SERVE=0 on this instance' : 'the OpenCode background service is off — enable the "OpenCode background service" plugin (⚙ → Plugins) to start it'; return null; }
     const port = await freePort();
     if (cancelled(epoch)) return null;   // never START a third-party daemon for a service that was turned off mid-ladder
+    if (recordHeld()) { parkOnRecord(); return null; }   // r3334: a read that failed meanwhile (a clear's, a stop's): no serve over the record
     let child;
     try {
       let pre = null; try { pre = typeof startPrefix === 'function' ? startPrefix() : null; } catch { pre = null; }   // a verdict that cannot be read starts as the release
@@ -1310,6 +1399,7 @@ function createServeLocator({
     state.start = child.pid ? PI.startToken(child.pid) || null : null; state.bootId = PI.bootToken() || null; // its BIRTH, at the spawn tick (B-5ee1)
     child.once('error', (e) => { state.lastError = `spawn failed: ${e.message}`; });
     child.on('exit', (code, signal) => onChildExit(child, code, signal, port));
+    if (torn && torn.decided && !torn.started) { torn.started = true; afterTornKids.add(child); }   // r3334: the person's Start after torn bytes
     writeRecord({ port, pid: child.pid || null, start: state.start, bootId: state.bootId, startedAt: state.startedAt, command: cmd, cwd: state.cwd || cwd || null });
     const probe = mkClient(port);
     const t0 = Date.now();
@@ -1353,6 +1443,7 @@ function createServeLocator({
       if (await healthy(probe, 1000)) {
         if (cancelled(epoch)) return abandon({ why: cancelWhy() });
         log?.log?.(`[opencode-serve] started pid ${child.pid} on 127.0.0.1:${port} (${Date.now() - t0}ms)`);
+        afterTornKids.delete(child);
         return adopt(port, child.pid || null, 'spawned', epoch);
       }
       await wait(200);
@@ -1389,7 +1480,8 @@ function createServeLocator({
    *  Clears a previous stop() and any park — a user asking for it IS the
    *  deliberate retry a crash/runaway park waits for — then runs the ladder.
    *  Returns the ensure() promise so the caller can report the outcome. */
-  function start() {
+  function start({ byPerson = false } = {}) {
+    if (byPerson && torn && !torn.decided && !recHold.held()) decideTorn();   // r3334: a PERSON's Start after torn bytes is their decision (never a boot replay's)
     state.stopping = false;
     state.parked = false; state.parkedKind = null; state.crashes = 0;
     state.backoffUntil = 0; state.runawayUntil = 0; state.retryAfter = 0; state.lastError = null;
@@ -1436,6 +1528,10 @@ function createServeLocator({
       const birth = talking && decided.pid === livePid ? liveBirth : { start: rec && rec.start, bootId: rec && rec.bootId };
       if (decided.pid) { try { if (decided.pid !== process.pid) signalServe(decided.pid, birth.start, birth.bootId, 'SIGTERM', 'serve stop'); } catch { } }
       else if (decided.why) { state.lastError = decided.why; log?.warn?.(`[opencode-serve] ${decided.why}`); }
+      else if (!talking && recordHeld()) {   // r3334: the record withheld — it names nothing, so nothing is signalled or removed, and that is SAID
+        state.lastError = `the OpenCode background service was turned off, but ${torn && !torn.decided ? `its record was damaged${torn.copy ? ` (its bytes are kept as ${torn.copy})` : ''}` : 'its record could not be read'}: nothing could be stopped — a serve from before may still be running. Stop it by hand if it runs`;
+        log?.warn?.(`[opencode-serve] ${state.lastError}`);
+      }
       clearRecord();
       // A DELIBERATELY-OFF SERVICE IS NOT A BROKEN STORE (S9 residual (a)).
       // `blocked` and `runaway` are the two parks that say "something is wrong
@@ -1461,10 +1557,17 @@ function createServeLocator({
     notify();
   }
   function snapshot() {
-    return { port: state.port, pid: state.pid, cpuNice: state.pid ? (state.cpuNice || null) : null, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client };
+    return { port: state.port, pid: state.pid, cpuNice: state.pid ? (state.cpuNice || null) : null, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client, recordNotice: torn && torn.notice ? { copy: torn.copy || null, at: torn.at } : null };
   }
   if (stopOnExit) process.once('exit', () => { try { stop(); } catch { } });
-  return { client, ensure, start, stop, invalidate, state: snapshot, command: commandOf, recordPath, _sampleGuard: sampleGuard };
+  /** r3334: a person's Start / Disable while the record is HELD (a read that failed) → the refusal BY NAME (503 serve_record_unread),
+   *  asked before any change; null otherwise (torn bytes: the Start is the person's decision, a Disable saves the switch off; a serve we
+   *  are talking to or started is stopped by its own handle or identity) */
+  const startRefusal = () => (recHold.held() && !state.client ? recHold.refusal('starting the OpenCode background service') : null);
+  const stopRefusal = () => (recHold.held() && !state.client && !state.child ? recHold.refusal('turning the OpenCode background service off') : null);
+  /** r3334: the person dismissed the card's line about a serve from before the damaged record (the torn state itself stays as it is) */
+  function dismissRecordNotice() { if (torn && torn.notice) { torn.notice = false; notify(); } return { dismissed: true }; }
+  return { client, ensure, start, stop, invalidate, state: snapshot, command: commandOf, recordPath, startRefusal, stopRefusal, dismissRecordNotice, dispose: () => recHold.stop(), _sampleGuard: sampleGuard };
 }
 
 // ── the store facts ──
@@ -1522,6 +1625,8 @@ function createFacts(locator, { now = Date.now, nameBatch = NAME_BATCH, listCach
     // a BLOCKED record is not a crash loop: it names a process the user has to
     // deal with, and its own lastError is the whole instruction (round 10)
     if (st.parked && st.parkedKind === 'blocked') return st.lastError || 'a recorded `opencode serve` is alive but unreachable and could not be identified — stop that process, or delete data/opencode-serve.json, then start the service again';
+    // r3334: the record withheld (a read that failed, torn bytes) or a Start after torn bytes that did not answer: its own sentence
+    if (st.parked && (st.parkedKind === 'held' || st.parkedKind === 'torn' || st.parkedKind === 'torn-start')) return st.lastError || 'the record of the OpenCode background service could not be read — nothing was started';
     if (st.parked) return `OpenCode serve is parked after ${st.crashes} crashes (${st.lastError || 'unknown error'}) — start it again from ⚙ → Plugins → OpenCode background service`;
     if (st.autostart === false) return st.envForced === false
       ? 'the OpenCode background service is forced OFF by VIBESPACE_OPENCODE_SERVE=0 on this instance — stopped OpenCode conversations cannot be listed or opened'
@@ -2275,7 +2380,7 @@ function install(opts) {
   return installed;
 }
 function facts() { return installed || NULL_FACTS; }
-function uninstall() { const f = installed; installed = null; try { f?.stopLive?.(); } catch { } try { f?.locator?.stop?.(); } catch { } }
+function uninstall() { const f = installed; installed = null; try { f?.stopLive?.(); } catch { } try { f?.locator?.stop?.(); } catch { } try { f?.locator?.dispose?.(); } catch { } }
 
 module.exports = {
   OpencodeServeClient, OpencodeServeError, createServeLocator, createFacts, OpencodeServeSessionMessages,

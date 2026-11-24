@@ -5941,6 +5941,11 @@ html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open { max
 .plugin-row-desc { font-size: 10px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .plugin-row-fact { margin-top: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; } /* lane decision-spend-readout: the LLM plugin's money today — a readout, not a control; it WRAPS (the desk rail is ~75 px wide: an ellipsis would hide the money) */
 .plugin-row-fact.is-near-cap, .settings-row-fact.is-near-cap { color: var(--red, #e55); } /* ≥ 90 % of the day's cap */
+.plugin-row-notice { display: flex; align-items: flex-start; gap: 4px; color: var(--text); } /* r3334: a serve from before a damaged record may still run — one line until dismissed */
+.plugin-row-notice-x { flex-shrink: 0; display: inline-flex; padding: 2px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); cursor: pointer; }
+.plugin-row-notice-x:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.plugin-row-notice-x svg { width: 10px; height: 10px; }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .plugin-row-notice-x { min-height: 32px; min-width: 32px; align-items: center; justify-content: center; } }
 .settings-spend-producer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .settings-spend-producer .settings-row-fact { margin-top: 0; flex: 1 1 auto; } .settings-spend-producer .settings-link-btn { margin-top: 0; }
 /* B-db5d: a manifest plugin's Update… / Uninstall… cluster is always the row's «⋯» menu (rail-row data-rail-fold="always") — it is never drawn in the row, so it has no rule here; the old grid areas of the row's controls went with the rail row */
 .plugin-manifests-head { flex-wrap: wrap; }

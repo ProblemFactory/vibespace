@@ -834,7 +834,9 @@ app.get('/vibespace-node/:version/:file', async (req, res) => {
 // lane hub-sync-holds (rank 13): the panel's rows are the KEPT statuses (no synchronous child on this turn); opening it is a person's press,
 // so every kept status is asked again (async, bounded) and a change reaches the panel by its broadcast
 /** a plugin door's refusal: a HELD plugins.json (B-f276 family unit 1) answers 503 with its code — the page words it by code */
-const pluginRefusal = (res, e) => res.status(e && e.code === 'plugins_unread' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'plugins_unread' ? { code: e.code } : {}) });
+// …and a plugin's OWN held store (r3334: the OpenCode serve's record, 503 serve_record_unread) answers its code the same way
+const heldOf = (e) => !!e && (e.code === 'plugins_unread' || (e.status === 503 && typeof e.code === 'string' && /^[A-Za-z0-9_-]{1,60}$/.test(e.code)));
+const pluginRefusal = (res, e) => res.status(heldOf(e) ? 503 : 400).json({ error: e.message, ...(heldOf(e) ? { code: e.code } : {}) });
 app.get('/api/plugins', (req, res) => {
   try { res.json({ plugins: plugins.list(), ...(plugins.unreadWords() ? { unread: plugins.unreadWords() } : {}), ...(plugins.tornCopy() ? { torn: plugins.tornCopy() } : {}) }); plugins.refreshAll(); } catch (e) { res.status(500).json({ error: e.message }); }   // B-f276 family unit 1: why every plugin reads as off
 });

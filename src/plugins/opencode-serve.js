@@ -24,7 +24,11 @@ module.exports = {
     const ocLocator = () => { const f = ocFacts(); return f && f.locator ? f.locator : null; };
 
     const verbs = {
-      config() { throw new Error('the OpenCode background service has nothing to configure — it binds a free port on 127.0.0.1'); },
+      // r3334: the ONE thing a person may set here is the dismissal of the card's line about a serve from before a damaged record
+      config(patch = {}) {
+        if (patch && patch.dismiss === 'record-notice') { const r = ocLocator()?.dismissRecordNotice?.() || { dismissed: true }; h.notify(); return r; }
+        throw new Error('the OpenCode background service has nothing to configure — it binds a free port on 127.0.0.1');
+      },
 
       // The OpenCode service is not a "also start it at boot" checkbox — it IS
       // the switch, and `enabled`/`desiredUp` move in LOCKSTEP. Anything else is
@@ -46,7 +50,7 @@ module.exports = {
           const st = verbs.status();
           if (!st.installed || st.envForced === false || st.running) return;
           console.log('[plugins] boot replay: starting the OpenCode background service');
-          verbs.start();
+          verbs.start({ replay: true });   // r3334: a replay is no person's decision on a damaged record
         } catch (e) { console.warn('[plugins] boot replay opencode-serve failed:', e.message); }
       },
 
@@ -59,10 +63,12 @@ module.exports = {
         return { installed: true, version: st.version || null };
       },
 
-      start() {
+      start({ replay = false } = {}) {
         const st = ocServeState();
         if (!st.installed) throw new Error('the `opencode` CLI is not on PATH — install OpenCode (https://opencode.ai) first');
         if (serve.serveEnvOverride() === false) throw new Error('VIBESPACE_OPENCODE_SERVE=0 is set on this instance — the OpenCode background service is forced off by the environment');
+        // r3334: the serve's record HELD (a read that failed) — refused BY NAME before any change: a second serve would orphan one still running
+        { const no = ocLocator()?.startRefusal?.(); if (no) throw no; }
         const rec = h.rec();
         rec.enabled = true;      // Start IS the enable: autostart reads enabled && desiredUp
         rec.desiredUp = true;
@@ -74,12 +80,14 @@ module.exports = {
         // was filled while the service was off, and without this the sidebar
         // would keep showing "no stopped conversations" after the user turned it
         // on (the cache-invalidation law — one dirty signal at the entry point).
-        if (loc?.start) Promise.resolve(loc.start()).catch(() => { }).then(() => { try { ocFacts()?.invalidate?.(); } catch { } h.notify(); });
+        if (loc?.start) Promise.resolve(loc.start({ byPerson: !replay })).catch(() => { }).then(() => { try { ocFacts()?.invalidate?.(); } catch { } h.notify(); });
         h.notify();
         return { starting: true };
       },
 
       stop() {
+        // r3334: the serve's record HELD — nothing can be named to stop: refused BY NAME before any change (never «nothing to stop»)
+        { const no = ocLocator()?.stopRefusal?.(); if (no) throw no; }
         const rec = h.rec();
         rec.enabled = false;          // lockstep with desiredUp — ONE switch, no "enabled but off" limbo
         rec.desiredUp = false;
@@ -115,6 +123,7 @@ module.exports = {
           cpuPct: st.cpuPct == null ? null : Math.round(st.cpuPct),
           rssMb: st.rssBytes ? Math.round(st.rssBytes / 1048576) : null,
           lastError: st.lastError || null,
+          recordNotice: st.recordNotice || null,   // r3334: a serve from before a damaged record may still run — the card's line until dismissed
           reason: running ? null : (() => { try { return ocFacts()?.reasonUnavailable?.() || null; } catch { return null; } })(),
         };
       },

@@ -15566,4 +15566,13 @@ export default {
   "Automatic follows the kept exit — none is kept yet, so it acts as this machine's": "自动会跟随已保存的出口——目前还没有保存，所以按本机的",
   "Environment…": "环境…",
   "This profile's time zone, language and location — what its browser tells the sites it opens; applied at its next start": "这个配置的时区、语言和位置——它的浏览器告诉所打开网站的信息；下次启动时生效",
+  "VibeSpace cannot read the record of its OpenCode background service right now, so nothing was started or stopped — a serve from before may still be running. It reads the record again by itself; press again in a few minutes, or read it again from For you.": "VibeSpace 暂时读不出 OpenCode 后台服务的记录，所以没有启动或停止任何 serve——之前的 serve 可能仍在运行。它会自动再读这份记录；请过几分钟再按一次，或在「待你处理」里重新读取。", // lane bl-chat-b r3334 (the OpenCode serve's record)
+  "its record could not be read — nothing was started": "它的记录读不出来——没有启动任何 serve",
+  "its record was damaged — a serve from before may still be running": "它的记录已损坏——之前的 serve 可能仍在运行",
+  "the new serve did not start — the one from before may still be running": "新的 serve 没有启动——之前的那个可能仍在运行",
+  "The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch on starts a new one.": "OpenCode 后台服务的记录已损坏，所以 VibeSpace 不会自行启动 serve——之前的那个可能仍在运行。如果它在运行，请手动停止；打开开关会启动一个新的。",
+  "The new serve ended before it answered. The serve from before the damaged record may still be running: stop it by hand, then turn the switch on again.": "新的 serve 在应答之前就结束了。损坏记录之前的 serve 可能仍在运行：请先手动停止它，再打开开关。",
+  "A serve from before the damaged record may still be running — VibeSpace could not stop it. Its damaged bytes are kept beside the record as {copy}. Stop the serve by hand if it runs.": "损坏记录之前的 serve 可能仍在运行——VibeSpace 无法停止它。损坏的字节另存在记录旁边，名为 {copy}。如果那个 serve 在运行，请手动停止。",
+  "A serve from before the damaged record may still be running — VibeSpace could not stop it. Stop the serve by hand if it runs.": "损坏记录之前的 serve 可能仍在运行——VibeSpace 无法停止它。如果那个 serve 在运行，请手动停止。",
+  "the record of the OpenCode background service": "OpenCode 后台服务的记录",   // lane bl-chat-b r3334 unit 1: the held list's plain name
 };

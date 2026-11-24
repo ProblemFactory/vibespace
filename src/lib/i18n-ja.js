@@ -15565,4 +15565,13 @@ export default {
   "Automatic follows the kept exit — none is kept yet, so it acts as this machine's": "自動は保存した出口に従います。まだ保存されていないので、このマシンのものになります",
   "Environment…": "環境…",
   "This profile's time zone, language and location — what its browser tells the sites it opens; applied at its next start": "このプロファイルのタイムゾーン、言語、位置情報。ブラウザが開くサイトに伝える内容で、次回の起動時に反映されます",
+  "VibeSpace cannot read the record of its OpenCode background service right now, so nothing was started or stopped — a serve from before may still be running. It reads the record again by itself; press again in a few minutes, or read it again from For you.": "VibeSpace は今、OpenCode バックグラウンドサービスの記録を読み取れないため、serve を何も起動・停止していません——以前の serve がまだ動いている可能性があります。記録は自動で読み直します。数分後にもう一度押すか、「あなた宛て」から読み直してください。", // lane bl-chat-b r3334 (the OpenCode serve's record)
+  "its record could not be read — nothing was started": "記録を読み取れません——何も起動していません",
+  "its record was damaged — a serve from before may still be running": "記録が壊れています——以前の serve がまだ動いている可能性があります",
+  "the new serve did not start — the one from before may still be running": "新しい serve は起動しませんでした——以前のものがまだ動いている可能性があります",
+  "The record of the OpenCode background service was damaged, so VibeSpace starts no serve by itself — one from before may still be running. Stop it by hand if it runs; turning the switch on starts a new one.": "OpenCode バックグラウンドサービスの記録が壊れているため、VibeSpace は自分では serve を起動しません——以前のものがまだ動いている可能性があります。動いていれば手動で止めてください。スイッチをオンにすると新しいものを起動します。",
+  "The new serve ended before it answered. The serve from before the damaged record may still be running: stop it by hand, then turn the switch on again.": "新しい serve は応答する前に終了しました。壊れた記録より前の serve がまだ動いている可能性があります。手動で止めてから、もう一度スイッチをオンにしてください。",
+  "A serve from before the damaged record may still be running — VibeSpace could not stop it. Its damaged bytes are kept beside the record as {copy}. Stop the serve by hand if it runs.": "壊れた記録より前の serve がまだ動いている可能性があります——VibeSpace は止められませんでした。壊れたバイトは記録の横に {copy} として保存してあります。動いていれば手動で止めてください。",
+  "A serve from before the damaged record may still be running — VibeSpace could not stop it. Stop the serve by hand if it runs.": "壊れた記録より前の serve がまだ動いている可能性があります——VibeSpace は止められませんでした。動いていれば手動で止めてください。",
+  "the record of the OpenCode background service": "OpenCode バックグラウンドサービスの記録",   // lane bl-chat-b r3334 unit 1: the held list's plain name
 };
