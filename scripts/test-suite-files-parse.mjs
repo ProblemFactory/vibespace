@@ -95,11 +95,13 @@ console.log('§1 THE TREE — every file under scripts/ that Node would load as 
   // law's own and serves both laws; no other reader in this process parses these files, and nothing is kept across runs
   const self = path.basename(fileURLToPath(import.meta.url));
   var EDITS = {}, HELPERS = {}, PARAMS = {};   // eslint-disable-line no-var — §3 reads them (PARAMS: the second list, B-0d3e slice 8)
-  // B-0d3e (主开发 r2677): the PLANTED site, met by this same walk and asked of the same censuses — kept apart from both lists
-  // it rides the SAME branch as every script (a key of its own in the same maps; §3 takes it out before judging): a broken filter
-  // or collection empties the lists AND the plant, so the plant legs go red with them
-  var PLANT_REL = 'scripts/fixtures/census-plant.mjs', PLANT_KEY = 'fixtures/census-plant.mjs', PLANT_SRC = null, PLANT = null;   // eslint-disable-line no-var — §3 reads them
-  const r = unparseable(REPO, { visit: (rel, src, ast) => { const m = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/.exec(rel) || (rel === PLANT_REL ? [rel, PLANT_KEY] : null); if (!m || m[1] === self) return; if (m[1] === PLANT_KEY) PLANT_SRC = src; const { edits: e, helpers: h, paramEdits: pe } = censusAll(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; if (pe.length) PARAMS[m[1]] = pe; } });
+  // B-0d3e (主开发 r2677 / r2799): the PLANTED sites (scripts/lib/census-plant.mjs), admitted by the walk's ONE filter like every
+  // script it censuses — no branch of their own: a filter broken by a later edit loses the plant with the lists, and the plant legs
+  // go red (§3's red control breaks a copy of this very filter); §3 takes the plant's row out of the maps before any list is judged
+  var SCRIPT_RE = /^scripts\/((?:lib\/)?[^/]+\.mjs)$/, PLANT_REL = 'scripts/lib/census-plant.mjs', PLANT_KEY = 'lib/census-plant.mjs', PLANT_SRC = null, PLANT = null;   // eslint-disable-line no-var — §3 reads them
+  var admitBy = (re) => (rel) => { const m = re.exec(rel); return m && m[1] !== self ? m[1] : null; };   // eslint-disable-line no-var — the filter, as §3's red control runs it on a copy
+  const admit = admitBy(SCRIPT_RE);
+  const r = unparseable(REPO, { visit: (rel, src, ast) => { const key = admit(rel); if (!key) return; const m = [rel, key]; if (key === PLANT_KEY) PLANT_SRC = src; const { edits: e, helpers: h, paramEdits: pe } = censusAll(src, { ast }); if (e.length) EDITS[m[1]] = e; if (h.length) HELPERS[m[1]] = h; if (pe.length) PARAMS[m[1]] = pe; } });
   const ms = Math.round(performance.now() - t0);
   ok(r.files.length >= 1000 && r.files.includes('scripts/ci.mjs') && r.files.includes('scripts/test-suite-files-parse.mjs'),
     `the walk met ${r.files.length} files (${(r.bytes / 1e6).toFixed(1)} MB: ${r.kinds.module} ES modules, ${r.kinds.commonjs} CommonJS, ${r.kinds.detect} by Node's detection), this suite and scripts/ci.mjs among them`);
@@ -206,7 +208,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const j = judge(per, LISTED);
   // NON-VACUOUS BY A PLANT, never by a count of debt (主开发 r2677: «a census that goes red because the debt was paid is the wrong
   // shape»; the floor it replaces asked the live count to hold half of the list, so the row's own fall would have reddened it).
-  // §1's walk parsed scripts/fixtures/census-plant.mjs like every file under scripts/ and both censuses answered there: its one
+  // §1's walk admitted scripts/lib/census-plant.mjs by its one filter, like every script, and both censuses answered there: its one
   // planted helper — its own parameter the anchor of a product edit that reaches a loader and fails by no name — is ONE edit and
   // ONE anchor helper. A walk, or a census, that read nothing finds nothing there. The plants stand outside every list.
   const plantSaid = (c) => (c ? `${c.edits.length} edit(s)${c.edits.length ? ' at line ' + c.edits.map((e) => e.line).join(', ') : ''}, ${c.helpers.length} helper(s)${c.helpers.length ? ' ' + c.helpers.map((h) => h.name).join(', ') : ''}` : 'the walk did not meet it');
@@ -216,6 +218,10 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const unplanted = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedCut')).join('\n') : '';
   const UNP = PLANT ? censusOf(unplanted) : null;
   ok(!!UNP && unplanted !== PLANT.src && !plantFound(UNP) && !UNP.edits.length && !UNP.helpers.length && UNP.paramEdits.length === 1, `RED CONTROL: the same censuses over a copy of the plant with plantedCut taken out find ${plantSaid(UNP)} — the leg above would go red — and still the other plant (${UNP ? UNP.paramEdits.length : '?'} of the second list: the census answered on the copy)`);
+  // RED CONTROL of the FILTER (主开发 r2799): a copy of the walk's own pattern with its lib branch broken admits no plant — so a later
+  // edit that breaks the filter loses the plant with the lists, and the plant legs above go red; the true filter admits it
+  const BROKEN_RE = new RegExp(SCRIPT_RE.source.replace('(?:lib\\/)?', ''));
+  ok(BROKEN_RE.source !== SCRIPT_RE.source && admitBy(SCRIPT_RE)(PLANT_REL) === PLANT_KEY && admitBy(BROKEN_RE)(PLANT_REL) === null && PLANT_SRC !== null, `RED CONTROL: the walk's filter admits the plant (${admitBy(SCRIPT_RE)(PLANT_REL)}; the walk met it: ${PLANT_SRC !== null}); a copy of it with the lib branch broken (${BROKEN_RE}) admits ${admitBy(BROKEN_RE)(PLANT_REL) || 'none'} — the plant legs would go red with the lists`);
   // THE SECOND LIST (B-0d3e slice 8, 主开发 r2678: «the new kind is counted APART: a second list of the same census with its own
   // fixture and its own founding pin, its one row B-0d3e … born with the planted control and no count floor»): scripts/lib/param-text-census.mjs
   // paramTextEdits — a plain edit whose TEXT is a helper's parameter or a loop's variable (no name bound to a product read: those
@@ -230,7 +236,14 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   ok(!overP.length, `the second list's edits (a text HANDED by a parameter or a loop, then loaded) never rise without a row's id beside it (the list ${Object.values(PLISTED).reduce((a, b) => a + b, 0)} in ${Object.keys(PLISTED).length} files; live ${Object.values(pper).reduce((a, b) => a + b, 0)} in ${Object.keys(pper).length})${overP.length ? ` — ${overP.length} file(s) over their count, EVERY ONE on its own line below (to admit one on purpose: a row under YOUR backlog id in scripts/fixtures/param-text-edits.json)` : ''}`);
   sayOver(overP);
   if (pj.fell.length) console.log(`    (${pj.fell.length} file(s) of the second list now carry fewer — not red; lower their rows when convenient: ${pj.fell.slice(0, 8).join(', ')}${pj.fell.length > 8 ? ', …' : ''})`);
-  // ITS PLANT and ITS RED: plantedHandedText in the same fixture — one edit of this list, none of the first's
+  // ITS DOOR AND WALK ARE THE FIRST LIST'S (主开发 r2799's should): the module reads them by the same text, pinned here — the walk line,
+  // the product read's patterns and the edit / loader door, each found verbatim in scripts/mutant-copy.mjs
+  { const MC = fs.readFileSync(path.join(REPO, 'scripts', 'mutant-copy.mjs'), 'utf-8'), PT = fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'param-text-census.mjs'), 'utf-8');
+    const lineOf = (t, head) => (t.split('\n').find((l) => l.trim().startsWith(head)) || '').trim();
+    const DOOR = "!/\\.(?:replace|replaceAll|join)\\(/.test(src) || !/(?:\\.load|\\.write|_compile|runIn\\w*Context|compileFunction|writeFileSync|new Function)\\(/.test(src)";
+    const same = { walk: !!lineOf(PT, 'const walkAst = ') && MC.split('\n').some((l) => l.trim() === lineOf(PT, 'const walkAst = ')), read: !!lineOf(PT, 'const READ = ') && MC.includes(lineOf(PT, 'const READ = ')), door: PT.includes(DOOR) && MC.includes(DOOR) };
+    ok(same.walk && same.read && same.door, `the second list's door and walk are the first list's own text (scripts/lib/param-text-census.mjs ≡ scripts/mutant-copy.mjs: walk ${same.walk}, product read ${same.read}, edit / loader door ${same.door})`); }
+  // ITS PLANT and ITS RED: plantedHandedText in the same plant file — one edit of this list, none of the first's
   const plant2 = (c) => !!c && c.paramEdits.length === 1 && c.paramEdits[0].text === "text.replace('const ', 'let ')";
   ok(plant2(PLANT) && plantFound(PLANT), `the walk finds the second list's PLANTED site in ${PLANT_REL} (plantedHandedText: ${PLANT ? PLANT.paramEdits.map((e) => `line ${e.line} ${e.text}`).join(', ') || 'none' : 'the walk did not meet it'}), and the first list's plant is unchanged by it (${plantSaid(PLANT)})`);
   const unplanted2 = PLANT ? PLANT.src.split('\n').filter((l) => !l.startsWith('export const plantedHandedText')).join('\n') : '';
@@ -258,6 +271,7 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const P = (body) => `import fs from 'node:fs';\nconst src = fs.readFileSync(path.join(REPO, 'src/x.js'), 'utf8');\n${body}\n`;
   // THE SECOND LIST'S RULES (B-0d3e slice 8), each pinned by a planted script (P builds it: a product read, then the body; `true` = the body alone)
   const CASES2 = [
+    ["const def = (mutate) => { const out = mutate(src); return MUT.load('src/x.js', out, 't'); }; const m = def((s) => s.replace('a', 'b'));", 0, "NOT FOLLOWED, a stated limit (主开发 r2799): a text handed to an ARROW given as an argument (test-frp-plugin's mutantDef), edited there, then loaded"],
     ["const cut = (s, a, b) => MUT.load('src/x.js', s.replace(a, b), 't');", 1, "a helper HANDED the text: its edit is the text a copy loads"],
     ["const m = MUT.load('src/x.js', [['a', 'b']].reduce((t, [a, b]) => t.replace(a, b), src), 't');", 1, "a fold's step: the fold's answer is the copy's text"],
     ["const f = (s) => { for (const [a, b] of [['a', 'b']]) s = s.replace(a, b); return s; }; const m = MUT.load('src/x.js', f(src), 't');", 1, "a loop's edit in a helper whose call is a copy's text"],
@@ -342,6 +356,10 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
     ["const from = 'a', to = 'b'; " + L('src.split(from).join(to)'), 1, 'an anchor held in a variable named «from»'],
   ];
   const caseMiss = CASES.map(([body, want, why]) => [unanchoredEdits(P(body)).length, want, why]).filter(([got, want]) => got !== want);
+  // the ONE walk answers these as the lone calls do, for BOTH of the first list's censuses (主开发 r2799's should: before, only the
+  // second list's cases compared them)
+  const parity1 = CASES.filter(([body]) => { const t = P(body), w = censusAll(t, { ast: acorn.parse(t, OPTS.module) }); return JSON.stringify(w.edits) !== JSON.stringify(unanchoredEdits(t)) || JSON.stringify(w.helpers) !== JSON.stringify(anchorHelpers(t)); }).map(([, , why]) => why);
+  ok(!parity1.length, `CONTROL: the one walk (censusAll) answers the first list's ${CASES.length} planted scripts as unanchoredEdits and anchorHelpers alone do${parity1.length ? ' — DIFFERS: ' + parity1.join(' | ') : ''}`);
   ok(caseMiss.length === 0, `CONTROL: only a REBASE of module paths is left out — ${CASES.filter((c) => c[1] === 0).length} rebases not counted, ${CASES.filter((c) => c[1] === 1).length} look-alikes counted${caseMiss.length ? ' — WRONG: ' + caseMiss.map(([g, w, y]) => `${y} ${g} (meant ${w})`).join(' · ') : ''}`);
   const jA = judge({ 'test-new.mjs': 1, 'test-old.mjs': 3 }, { 'test-old.mjs': 3 }), jB = judge({ 'test-old.mjs': 1 }, { 'test-old.mjs': 3 });
   ok(jA.added.join() === 'test-new.mjs' && !jB.added.length && jB.fell.join() === 'test-old.mjs', 'CONTROL: a file that ADDS an unanchored edit is red by name; one whose count falls is only said (the one-way rule)');
