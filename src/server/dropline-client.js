@@ -190,6 +190,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
    *  OAuth sign-in (lane dropline-connect-door: the card's Test on a signed-in row with an empty key was a red "no key"). */
   async function testRunner({ resolved, signal } = {}) {
     const key = resolved && resolved.values && resolved.values.apiKey;
+    if (!key && !livePair() && heldNow()) { const e = heldError('testing the voice sign-in'); return { ok: false, error: e.message, code: e.code }; }   // r3932: HELD — the hold's words, never «sign in above»
     if (!key && !livePair()) return { ok: false, error: 'no Dropline key and no Fish Audio sign-in — sign in above, or paste a key' };
     // the card says "Connected: <name> · <team>"
     try { const m = await me(key || null, { signal }); return { ok: true, detail: `${m.name}${m.team ? ' · ' + m.team : ''}${key ? '' : ' (Fish Audio sign-in)'}` }; } catch (e) { return { ok: false, error: e.message, code: e.code }; }
@@ -224,7 +225,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     if (!res.ok) throw await vendorError(res);
     const pair = pairOf(await res.json(), clientId, { registeredFor: (pairNow() || {}).registeredFor || null, registeredClientId: (pairNow() || {}).registeredClientId || null });   // B-1e9a: the hub's own client over a preset survives the sign-in
     if (!pair.access) throw new DroplineError('failed', 'Fish Audio answered no access token', { status: 502 });
-    tokens.write(pair);
+    tokens.write(pair, { byPerson: true });   // r3932: the person's fresh pair — the torn bytes' plain copies shredded
     let who = { name: '', team: '' };
     try { who = await me(); tokens.write({ ...pairNow(), name: who.name, team: who.team }); } catch (e) { log.warn?.(`[voice] connected, but /v1/me failed: ${e && e.message}`); }
     log.log?.('[voice] Dropline connected by OAuth'); // never the code, the verifier or a token
@@ -238,7 +239,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     const p = pairNow() || {};
     if (heldNow()) throw heldError('disconnecting the voice sign-in');   // r3334: HELD — the unread file is not cleared
     if (pairLocked) throw lockedError();   // B-1e9a cure: a LOCKED vault refuses by name — never the sealed file cleared blind (the kept registration with it)
-    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();
+    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }, { byPerson: true }); else tokens.clear();   // r3932: the person's act
     return { ok: true };
   }
   function account() {

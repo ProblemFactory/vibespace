@@ -30,6 +30,10 @@
 //     two folders matches neither (round w9jhivwdo (3)). A hold's code is the error's own CODE or NAME, clamped — never its message,
 //     which may hold a path (round w9jhivwdo (4)).
 //   A TORN LIFT SAYS SO: onLift's facts carry setAside, and torn() answers { copy, since, at } for that run (the store's words).
+//   A COPY OF SECRET BYTES (主开发 r3932, lane bl-chat-b — the vault's own law at the voice sign-in): a store whose torn bytes are
+//     secret material names its copy's ROAD, `copy: { bytes(buf), opens(onDisk) }`: bytes() the bytes the copy is WRITTEN with (a
+//     sealed store's: in a box under its own key from the copy's creation; null: no copy can be made now, the hold stands), opens() a
+//     copy's bytes back for the once-per-content compare (null: it cannot be judged — not this one). No road: the bytes as they are.
 const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js');
@@ -76,8 +80,9 @@ const CHANGE = new Set();
 const changed = () => { for (const fn of [...CHANGE]) { try { fn(); } catch { /* a listener's own */ } } };
 function onHoldsChange(fn) { if (typeof fn !== 'function') return () => {}; CHANGE.add(fn); return () => CHANGE.delete(fn); }
 
-function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob)
+function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS, copy = null } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob)
   if (!file || typeof aside !== 'function' || typeof words !== 'function' || !code) throw new Error('store-read-hold: file, aside, words and code are required');
+  if (copy && (typeof copy.bytes !== 'function' || typeof copy.opens !== 'function')) throw new Error('store-read-hold: a copy road is { bytes, opens }');
   const name = path.basename(file);
   let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0, waitingSince = 0, waitSaid = false, unlikeSaid = false, keepFailSaid = false, emptySaid = false;   // r3986: said once a hold each (r4039 (b): the empty file's)   // waitingSince: a read past its bound (2b)   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
   const prefix = path.basename(aside(''));   // the copies' common head (`<file>.corrupt-`)
@@ -92,16 +97,20 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
   /** the torn bytes' copy, OFF the loop. A copy of THESE bytes already beside the store (the same size, the same bytes — the newest
    *  COPY_LOOK copies are compared) IS their copy: nothing new is made. Else an exclusive create of the caller's dated name (0600 — a
    *  store may hold sealed secrets) → the copy's basename, or null (no place for it) */
+  /** a copy on disk IS these bytes? — byte for byte (a store's copy road: its bytes opened back first) */
+  const sameAs = (on, buf) => { const back = copy ? copy.opens(on) : on; return Buffer.isBuffer(back) && back.equals(buf); };
   async function keep(buf) {
     const dir = path.dirname(file);
     let names = [];
     try { names = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(prefix)).sort().slice(-COPY_LOOK); } catch { names = []; }
     for (const n of names.reverse()) {
-      try { const p = path.join(dir, n); const st = await fs.promises.stat(p); if (st.isFile() && st.size === buf.length && (await fs.promises.readFile(p)).equals(buf)) return n; } catch { /* not this one */ }
+      try { const p = path.join(dir, n); const st = await fs.promises.stat(p); if (st.isFile() && (copy || st.size === buf.length) && sameAs(await fs.promises.readFile(p), buf)) return n; } catch { /* not this one */ }
     }
+    let bytes = buf;   // r3932: a store's copy road writes its own bytes (sealed from the copy's creation); none now ⇒ the hold stands
+    if (copy) { try { bytes = copy.bytes(buf); } catch { bytes = null; } if (!Buffer.isBuffer(bytes)) return null; }
     for (let k = 0; k < 5; k++) {
       const to = aside(String(now()) + (k ? '-' + k : ''));
-      const w = await writeWhole(to, buf, log);   // r3144: whole under a part name, synced, put in place only when whole
+      const w = await writeWhole(to, bytes, log);   // r3144: whole under a part name, synced, put in place only when whole
       if (w.ok) { const c = COPIES.get(file + '\n' + prefix); if (c) c.invalidate(); return path.basename(to); }   // (a copy added: its store's copies' answer read again)
       if (!w.error || w.error.code !== 'EEXIST') { keepWhy = (w.error && (w.error.code || w.error.name)) || 'not written'; return null; }
     }

@@ -16,13 +16,20 @@
  *     does not parse) are kept aside ONCE by the helper (0600 from their create — they hold sealed sign-in material; never in a
  *     journal line or a reply: no message of the parse reaches one), then read as ABSENT with the damage said (`torn()` → the
  *     copy's base name) until a write lands over them (the person's Connect) or the file is cleared.
+ *   · r3932 (the vault's own law at this store, lane bl-chat-b): NO PLAIN COPY OF A SIGN-IN OUTLIVES ITS LIVE FILE's SEAL OR REPLACE.
+ *     The copies are SEALED at the vault's seal of the live file (the open hook, the first read's seal, a copy the hold put in place
+ *     while it opened): their bytes as they are, in a box under THIS store's key, the plain bytes overwritten in place — they stay
+ *     the person's. They are SHREDDED at the person's own act that replaces the sign-in (a Connect's fresh pair, a Disconnect), as
+ *     the release's Connect shredded the torn file. A copy made while the vault is OPEN is written sealed from its creation (the
+ *     hold's copy road); none is made while it is LOCKED (the lock's refusal: nothing read, nothing copied). Never at a start or on
+ *     a timer. A good file put back BY HAND is read only after a restart (the damage is cached for the vault's epoch).
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
-const { replaceShredding } = require('../secret-file.js');
+const { replaceShredding, shredFileSync } = require('../secret-file.js');
 const HOLD = require('../store-read-hold.js');   // r3334 unit 2: the store-read law's hold (its read again, the torn bytes' copy)
 const SR = require('../store-read.js');
 
@@ -37,11 +44,17 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
   let cache, cacheAt = null;
   // r3334 unit 2: the hold (only when the caller names it — a store without one keeps the release's answers)
   let tornText = null, tornBy = null, pendingTorn = null;   // the torn bytes KEPT (their copy made) — read as absent while they stay
+  const hlog = hold && typeof hold.log === 'function' ? hold.log : () => { };
+  const asideOf = (mark) => file + '.corrupt-' + mark;   // the copies' ONE name (the hold makes them; r3932 seals or shreds them)
   const H = hold && hold.code ? HOLD.create({
-    file, code: hold.code, aside: (mark) => file + '.corrupt-' + mark, words: typeof hold.words === 'function' ? hold.words : () => `${base} could not be read`,
-    log: typeof hold.log === 'function' ? hold.log : () => { },
+    file, code: hold.code, aside: asideOf, words: typeof hold.words === 'function' ? hold.words : () => `${base} could not be read`,
+    log: hlog,
+    copy: { bytes: (buf) => copyBytes(buf), opens: (on) => copyOpens(on) },   // r3932: the copy's road — sealed while the vault is open
     // the lift: torn bytes copied (their copy named) ⇒ read as absent with the damage said; a read that answers ⇒ read as before
-    onLift: (v, f) => { cache = undefined; cacheAt = null; if (f && f.setAside) { tornText = pendingTorn; tornBy = String(f.setAside); } else { tornText = null; tornBy = null; } pendingTorn = null; },
+    onLift: (v, f) => {
+      cache = undefined; cacheAt = null; if (f && f.setAside) { tornText = pendingTorn; tornBy = String(f.setAside); } else { tornText = null; tornBy = null; } pendingTorn = null;
+      if (f && f.setAside && stateOf() === 'unlocked') sealCopies();   // r3932: a copy put in place as the vault opened is sealed with the rest
+    },
   }) : null;
   /** the hold's refusal BY NAME (503, the caller's code) — `what` the act refused; null when nothing is held */
   const heldRefusal = (what) => (H && H.held() ? H.refusal(what) : null);
@@ -69,6 +82,47 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
     const k = keyOf({ mint: true });
     try { replaceShredding(file, JSON.stringify({ sealed: MARK, entry, box: SB.encWith(k, JSON.stringify(obj)) }) + '\n'); } finally { k.fill(0); }
   }
+  // r3932: THE COPIES' ROAD — `<file>.corrupt-*` (the hold's copies of torn bytes), a sealed one a box marked `copy: 'torn-bytes'`
+  const COPY = 'torn-bytes';
+  const copyHead = path.basename(asideOf(''));   // the copies' common head (`<file>.corrupt-`), from their one name
+  const isCopyBox = (j) => isSealed(j) && j.copy === COPY;
+  const parsedOf = (buf) => { try { return JSON.parse(buf.toString('utf8')); } catch { return null; } };
+  /** a copy's bytes, as they are, in a box under this store's key (minted into the vault at the first, as writeSealed does) */
+  function boxOfCopy(buf) { const k = keyOf({ mint: true }); try { return Buffer.from(JSON.stringify({ sealed: MARK, entry, copy: COPY, box: SB.encWith(k, buf.toString('base64')) }) + '\n'); } finally { k.fill(0); } }
+  /** the hold's copy road: the bytes a copy is WRITTEN with — plain with no vault set up, sealed while it is open, none while locked */
+  function copyBytes(buf) { const st = stateOf(); return st === 'not_set_up' ? buf : st === 'unlocked' ? boxOfCopy(buf) : null; }
+  /** …and a copy's bytes back for its compare (a box opens only while the vault is open; null: not judged) */
+  function copyOpens(on) { const j = parsedOf(on); if (!isCopyBox(j)) return on; if (stateOf() !== 'unlocked') return null; const k = keyOf(); try { return Buffer.from(SB.decWith(k, j.box), 'base64'); } finally { k.fill(0); } }
+  /** the copies beside the live file → [abs path] (files only — never a replace's own temp) */
+  function copiesNow() {
+    const dir = path.dirname(file);
+    let names = []; try { names = fs.readdirSync(dir); } catch { return []; }
+    return names.filter((n) => n.startsWith(copyHead) && !/\.tmp-\d+-[0-9a-f]{8}$/.test(n)).map((n) => path.join(dir, n)).filter((p) => { try { return fs.lstatSync(p).isFile(); } catch { return false; } });
+  }
+  /** the vault's seal of the live file: every PLAIN copy sealed under this store's key (replaceShredding: the plain inode overwritten) → how many */
+  function sealCopies() {
+    if (!H || stateOf() !== 'unlocked') return 0;
+    let n = 0;
+    for (const p of copiesNow()) {
+      let on; try { on = fs.readFileSync(p); } catch (e) { hlog(`${path.basename(p)}: a copy of torn bytes could not be read to seal it (${(e && e.code) || 'unreadable'}) — it stays as it is`); continue; }
+      if (isCopyBox(parsedOf(on))) continue;
+      try { replaceShredding(p, boxOfCopy(on)); n++; } catch (e) { hlog(`${path.basename(p)}: a copy of torn bytes could not be sealed (${(e && e.code) || 'failed'}) — it stays as it is`); }
+    }
+    if (n) hlog(`${base}: ${n} plain cop${n === 1 ? 'y' : 'ies'} of its torn bytes sealed under the vault (the plain bytes overwritten in place)`);
+    return n;
+  }
+  /** the person's own act replaced the sign-in (a Connect's fresh pair, a Disconnect): every copy that is no box SHREDDED → how many */
+  function shredCopies() {
+    if (!H) return 0;
+    let n = 0;
+    for (const p of copiesNow()) {
+      let boxed = false; try { boxed = isCopyBox(parsedOf(fs.readFileSync(p))); } catch { boxed = false; }
+      if (boxed) continue;
+      if (shredFileSync(p)) n++; else hlog(`${path.basename(p)}: a plain copy of torn bytes could not be removed — it stays as it is`);
+    }
+    if (n) hlog(`${base}: ${n} plain cop${n === 1 ? 'y' : 'ies'} of its torn bytes shredded (the person replaced the sign-in)`);
+    return n;
+  }
   /** → the object, or null (absent / damaged — the plain token file's answer); LOCKED ⇒ throws `vault_locked`; HELD (r3334: a read
    *  that failed, or torn bytes while their copy is made) ⇒ throws the hold's refusal BY NAME */
   function read() {
@@ -84,6 +138,7 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
       let torn = false;
       try { j = JSON.parse(text); } catch { j = null; torn = true; }   // (the parse's own message is never kept: it may quote the bytes)
       if (torn && H && text !== tornText) {
+        if (st === 'locked') throw lockedRefusal();   // r3932: no copy while the vault is LOCKED (it could only be plain) — read at the unlock
         // r3334: TORN bytes — held while the helper keeps them aside ONCE (off the loop); then read as absent, the damage said
         pendingTorn = text; tornText = null; tornBy = null;
         H.start({ state: 'corrupt', code: 'did not parse', why: 'did not parse', writable: false });
@@ -96,19 +151,22 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
       try { j = JSON.parse(SB.decWith(k, j.box)); } finally { k.fill(0); }
     } else if (j !== null) {
       if (st === 'locked') throw lockedRefusal();   // nothing is read while locked — a plaintext copy neither
-      if (st === 'unlocked') { try { writeSealed(j); } catch { /* stays plain — the next open seals it */ } }
+      if (st === 'unlocked') { try { writeSealed(j); sealCopies(); } catch { /* stays plain — the next open seals it */ } }   // r3932: its plain copies with it
     }
     cache = j; cacheAt = at;
     return j;
   }
-  function write(obj) {
+  /** `byPerson` (r3932): the person's own act wrote it (a Connect's fresh pair, a Disconnect's kept registration) — the torn bytes'
+   *  plain copies are shredded once it landed */
+  function write(obj, { byPerson = false } = {}) {
     { const no = heldRefusal(`writing ${base}`); if (no) throw no; }   // r3334: HELD — nothing is written over the file
     const st = stateOf();
     if (st === 'locked') throw lockedRefusal();
     if (st === 'unlocked') writeSealed(obj);
     else { fs.mkdirSync(path.dirname(file), { recursive: true }); replaceShredding(file, JSON.stringify(obj)); }   // not set up: plain JSON, 0600 (as before)
     cache = obj; cacheAt = epochOf();
-    tornText = null; tornBy = null;   // r3334: a write landed over the torn bytes (the person's Connect): the damage is over (their copy stays)
+    tornText = null; tornBy = null;   // r3334: a write landed over the torn bytes (the person's Connect): the damage is over
+    if (byPerson) shredCopies();      // r3932: …and no plain copy of the old sign-in outlives it (a sealed one stays the person's)
   }
   /** Disconnect: the file and its vault key forgotten (a locked vault forgets too — dropping an entry needs no DEK). */
   function clear() {
@@ -116,6 +174,7 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
     try { fs.unlinkSync(file); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
     cache = null; cacheAt = epochOf();
     tornText = null; tornBy = null;
+    shredCopies();   // r3932: the person's Disconnect — no plain copy of the sign-in outlives it
     const v = vault();
     if (v && v.state() !== 'not_set_up') v.secretDrop(entry);
   }
@@ -123,6 +182,7 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
   function seal() {
     if (stateOf() !== 'unlocked') return false;
     if (H && H.held()) return false;   // r3334: HELD — nothing is written over the unread file (the lift's next read seals it)
+    sealCopies();   // r3932: the vault's seal — the torn bytes' plain copies sealed under this store's key (the live file below)
     const text = readRaw();
     if (text === null) return false;
     let j; try { j = JSON.parse(text); } catch { return false; }

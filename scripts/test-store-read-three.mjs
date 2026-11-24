@@ -513,7 +513,7 @@ try {
     };
     const wr = await wholeRun(H, 'whole');
     ok(wr.left.length === 0 && wr.heldAfter && wr.up && wr.copies === 1 && wr.whole && wr.parts === 0, 'three bytes written then «no space»: NO file is left (no part, no short copy), the store stays held; the next try writes the copy WHOLE and lifts', wr);
-    const wrx = await wholeRun(mutant('src/store-read-hold.js', [["      const w = await writeWhole(to, buf, log);   // r3144: whole under a part name, synced, put in place only when whole", "      const w = await fs.promises.writeFile(to, buf, { flag: 'wx', mode: 0o600 }).then(() => ({ ok: true }), (error) => ({ error }));"]]), 'whole-ctl');
+    const wrx = await wholeRun(mutant('src/store-read-hold.js', [["      const w = await writeWhole(to, bytes, log);   // r3144: whole under a part name, synced, put in place only when whole", "      const w = await fs.promises.writeFile(to, bytes, { flag: 'wx', mode: 0o600 }).then(() => ({ ok: true }), (error) => ({ error }));"]]), 'whole-ctl');
     ok(wrx.left.length >= 1, 'RED CONTROL — the copy written straight to its dated name (the round\'s finding): a SHORT file is left at a copy\'s name for good', wrx);
   }
   {
