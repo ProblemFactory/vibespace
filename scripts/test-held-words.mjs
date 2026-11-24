@@ -148,6 +148,10 @@ const LEFT_ALONE = [
   ['own', 'r3333 unit 2: the extraction journal held — the files page words its refusal by its own code (fsErrorText, zh / ja)', ['extract_journal_unread']],
   ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'designs-unread', 'labels-unread', 'status-unread']],
   ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
+  // r3857 (the moved MG1 chain, lane lg-group-parents): the migration ledger's codes, classed by who reads them
+  ['own', 'r3857 (MG1): the migration ledger unread — a result row\'s code; the ledger\'s own For-you item words it in three languages (src/migration-runner.js LEDGER_WORDS), and the vault\'s restore answers its own migration_failed', ['ledger-unread']],
+  ['not', 'r3857 (MG1): a migration\'s input unread — the error a migration throws; the runner\'s one failed road says it (the For-you failed item, the journal), no route answers it', ['migration-input-unread']],
+  ['not', 'r3857 (MG1): the unread migration ledger\'s notice key (serverNotice) — its words are the ledger\'s For-you item\'s; no route answers it', ['migrations-ledger-unread']],
   ['not', 'r3333 unit 1: the agent door\'s record held — the door refuses nobody (a fresh port this run, the family\'s notice names the hold)', ['agent_door_unread']],
   // r3314: the units picked into the hotfix's trial after the chain
   ['own', 'a spend guard refusal\'s why (an unattended turn waits on an account whose usage reading cannot be read): the guard words it in its OWN table (src/spend-authorizer.js REFUSAL_WORDS, the owning lane\'s) — no page refusal code', ['reading-unread']],
