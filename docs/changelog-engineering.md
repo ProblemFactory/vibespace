@@ -161,6 +161,9 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-machines-b — test-dir-slice-remote: legs 4 and 7 judged by their landing (主开发 r2789; tests only)
 - ④'s slow folder (0.3 s plus ls) had to land inside its host's 800 ms bound and a 3 s wait; ⑦'s landing step needed a healthy rest inside 250 ms. Now ④'s host carries the 20 s net and the leg waits on the landing (10 s); ⑦'s landing-step run — started while the no-stall mark is set — carries the net and is waited on (10 s), while ⑦'s hung rests keep 250 ms (their misses are its facts); ⑦ ends every live placed stall; ④'s «never marked» is read off the hub's hung marks.
 
+### bl-machines-b — test-dir-slice-remote: legs 6 and 7 count their stalls at a state (主开发 r2909; tests only)
+- ⑥ and ⑦ counted planted stalls after waits, and their hung runs ended at a 250 ms bound: under load a run could be killed before it planted, and the count read one less. Now such a run ends AT ITS STALL — the moment it is planted, seen by the run's own mark (VS_PL_RUN beside the suite's pid file) — inside the 20 s net; ⑥'s second dead run is waited on by its end, never by the bound's clock.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
