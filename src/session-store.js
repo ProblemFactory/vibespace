@@ -819,7 +819,7 @@ function warmPaged(fp, { fresh = null, bulk = false } = {}) {
 const cachedCopyWins = (c, entry) => !!(c && entry && c !== entry && (entry.mtimeMs === -1 || (c.lookAt != null && entry.lookAt != null && c.lookAt > entry.lookAt)));   // PURE — the law above
 const stampLook = (r, at) => { if (r && r.entry && r.mode !== 'hit' && r.entry.lookAt == null) r.entry.lookAt = at; return r; };   // a hit is the copy itself: its own look stands
 // → true: put; false: the cached copy won — the warm that read it says NOT «ready» (its caller returns false: the page is told nothing)
-const putUnlessNewer = (id, entry) => { if (cachedCopyWins(_jsonlCache.get(id), entry)) return false; _warmPut(id, entry); return true; };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse
+const putUnlessNewer = (id, entry) => { if (cachedCopyWins(_jsonlCache.get(id) || _handoffGet(id), entry)) return false; _warmPut(id, entry); return true; };   // B-80cb cure: every warm's put is the warm's — the cache, or (not admitted) the handoff to the next parse; «unless newer» asks the handoff too: the kept copy judged is the cache's, or the handed one (round wf_32f917e5-722: an older read never replaces a newer handed tail)
 const promoteWarm = (job) => { if (!job || !job.bulk) return; const i = _warmQ.bulk.indexOf(job); if (i < 0) return; _warmQ.bulk.splice(i, 1); job.bulk = false; _warmQ.person.push(job); };
 // ONE WARM A SESSION AT A TIME: a second ask while one is in flight joins it (the parse's 2 s re-warm, an attach, a page) — never a
 // second history read of the same file sent to the pool (the whole-state read: unjoined re-warms queued reads whose deadlines ended

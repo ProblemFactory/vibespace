@@ -702,7 +702,7 @@ const isStorageHung = (e, fp, { ownCall = false } = {}) => !!e && (e.code === 'p
 function readerCauseOf(e) {
   if (!e) return 'restarting';   // no pool object: its build is tried again (POOL_RETRY_MS) — given up for good is readerGone
   if (e.code === 'no-worker' || e.noWorker === true) return 'restarting';
-  if (e.code === 'no-idle-worker' || e.code === 'history_busy' || e.code === 'heap_bound' || e.safeFsTimeout === true) return 'busy';
+  if (e.code === 'no-idle-worker' || e.code === 'history_busy' || e.code === 'warm_busy' || e.code === 'heap_bound' || e.safeFsTimeout === true) return 'busy';
   return null;
 }
 function readerRefusal(e, fp = null, opts = {}) {
@@ -833,7 +833,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
     } catch (e) {
       const code = e && e.code;
       // the warm's road: the history LANE's own bound or wait says nothing of the file — its one-shot read follows by design
-      if (!(entry && (code === 'heap_bound' || code === 'history_busy'))) seen(e, !token);
+      if (!(entry && (code === 'heap_bound' || code === 'history_busy' || code === 'warm_busy'))) seen(e, !token);   // warm_busy: a warm lane's own wait (round wf_32f917e5-722)
       if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
       if (refusal && (refusal.storageHung || fileStorageHung(fp))) { if (entry) { refusal.retryAt = nextReadAt(fp); refusal.readerGone = poolGone(); throw refusal; } return said(`its storage hung (${(e && e.message) || e}) — no one-shot read sent into it`); }   // the warm's road: thrown, its catch reads it as the storage's   // nothing more tried there (a retry of a storage file is ONE call)
       why = code === 'heap_bound' ? `the ${lane || 'history'} worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' || code === 'warm_busy' ? `the ${lane || 'history'} lane was busy past its wait` : `the ${lane || 'history'} worker failed (${(e && e.message) || e})`;

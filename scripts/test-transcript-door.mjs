@@ -187,7 +187,7 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
     } finally { M._warmHandoffTestSeam({ liveMaxBytes: null }); M.jsonlCacheClear(); }
   };
   const roads = (SS_SRC.match(/\bputUnlessNewer\(claudeSessionId, /g) || []).length;
-  const onePut = /const putUnlessNewer = \(id, entry\) => \{[^\n]*\)\) _warmPut\(id, entry\); \};/.test(SS_SRC);
+  const onePut = /const putUnlessNewer = \(id, entry\) => \{[^\n]*\) return false; _warmPut\(id, entry\); return true; \};/.test(SS_SRC);   // line 816's form: it answers whether it put
   const hb = await bounded(SS);
   ok(roads === 3 && onePut && hb.held >= 5 && hb.holding === 4 && hb.pushedOut === hb.held - 4,
     `r3562 (2) — the handoff holds at most 4 whichever warm road hands over: the three roads put through ONE function (${roads} callers of putUnlessNewer, its put _warmPut: ${onePut}); ${hb.held} hand-overs left ${hb.holding} held, ${hb.pushedOut} pushed out`, { roads, onePut, ...hb });
@@ -195,6 +195,36 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
   try { SSb = mutantCopies('transcript-door-no-bound', REPO).load(SS_REL, anchored(SS_SRC, '  while (_warmHandoff.size > WARM_HANDOFF_MAX) {', '  while (false) {', 'the handoff without its bound'), 'nobound'); } catch (e) { whyb = String((e && e.message) || e); }
   const hbx = SSb ? await bounded(SSb) : null;
   ok(!!hbx && hbx.held >= 5 && hbx.holding === hbx.held && hbx.pushedOut === 0, `RED CONTROL (the handoff without its bound): ${hbx ? hbx.held : '?'} hand-overs left ${hbx ? hbx.holding : '?'} held — every one`, hbx || whyb);
+  // round wf_32f917e5-722 (its SHOULD, taken): «UNLESS NEWER» ASKS THE HANDOFF TOO — an older read of the same file (the sliced read
+  // or the storage retry, which no warm joins) never replaces a newer handed tail. Read on a copy that names the helper and the map
+  // (nothing else changed); RED: the release's form, the cache alone asked
+  const PUT_TAIL = '\nmodule.exports.__t = { putUnlessNewer, _warmHandoff };\n';
+  const putOlder = async (src, tag) => {
+    const M = mutantCopies('transcript-door-' + tag, REPO).load(SS_REL, src + PUT_TAIL, tag);
+    M._warmHandoffTestSeam({ liveMaxBytes: 1 });
+    try {
+      M.jsonlCacheClear();
+      const A = small(40), B = small(41);
+      await M.warmSessionJsonlAsync(A.id, CWD); await M.warmSessionJsonlAsync(B.id, CWD);   // B's tail: not admitted, handed over
+      const h = M.__t._warmHandoff.get(B.id), newer = h && h.entry;
+      if (!newer) return { handed: false };
+      if (newer.lookAt == null) return { handed: true, looked: false };   // line 816's law judges a read by its LOOK's moment: a warm's read carries one
+      const older = { ...newer, lookAt: newer.lookAt - 1000 };   // the same file, its look taken BEFORE the handed tail's (a read that waited)
+      const answered = M.__t.putUnlessNewer(B.id, older);
+      const kept = (M.__t._warmHandoff.get(B.id) || {}).entry;
+      return { handed: true, looked: true, answered, keptNewer: kept === newer, tookOlder: kept === older };
+    } finally { M._warmHandoffTestSeam({ liveMaxBytes: null }); M.jsonlCacheClear(); }
+  };
+  const pn = await putOlder(SS_SRC, 'unless-newer');
+  ok(pn.handed && pn.looked && pn.answered === false && pn.keptNewer && !pn.tookOlder, `«unless newer» asks the handoff: an older read of a handed file lands — the newer handed tail stays, and the put answers false (not «ready») (${JSON.stringify(pn)})`, pn);
+  let pnx = null, whyn = null;
+  try { pnx = await putOlder(anchored(SS_SRC, 'const putUnlessNewer = (id, entry) => { if (cachedCopyWins(_jsonlCache.get(id) || _handoffGet(id), entry)) return false;', 'const putUnlessNewer = (id, entry) => { if (cachedCopyWins(_jsonlCache.get(id), entry)) return false;', 'line 816\'s «unless newer»: the cache alone'), 'unless-newer-cache'); } catch (e) { whyn = String((e && e.message) || e); }   // stale-pins: kept (the release's own form, put back by the control)
+  ok(!!pnx && pnx.handed && pnx.looked && pnx.answered === true && pnx.tookOlder, `RED CONTROL (line 816's «unless newer», the cache alone asked): the older read replaced the newer handed tail (${JSON.stringify(pnx)})`, pnx || whyn);
+  // its other SHOULD, taken: a warm lane's own wait (warm_busy) is the lane's, never the file's — named beside history_busy where the
+  // warm's road skips the file's note, and where the reader's cause is said (busy)
+  const CX_SRC = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+  ok(CX_SRC.includes("code === 'history_busy' || code === 'warm_busy'))) seen(e, !token);") && CX_SRC.includes("e.code === 'history_busy' || e.code === 'warm_busy' || e.code === 'heap_bound'"),
+    'a warm lane\'s own wait (warm_busy) is named beside history_busy: the warm road notes nothing on the FILE for it, and the reader\'s cause says «busy»');
   // ── 主开发 r2195 (round wll8bb3rr): the handed tail serves EVERY reader of its warm; the door carries the bulk word and asks «still
   // wanted» after the warm; handed tails go at their time; a handed tail read from the first byte says so ──
   const ssCopy = (tag, from, to, what) => { try { return { M: mutantCopies(`transcript-door-${tag}`, REPO).load(SS_REL, anchored(SS_SRC, from, to, what), tag) }; } catch (e) { return { why: e.message }; } };
