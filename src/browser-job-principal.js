@@ -40,7 +40,17 @@ function isRunningJob(job) { return !!job && typeof job === 'object' && RUNNING_
  *  'unknown'. While the jobs store is HELD (its read failed: `jm._unread.store`) its memory is EMPTY because it is unread — every job
  *  would read as «not running» and the keeper's reconcile would release every job's browser handle and close its tabs: the answer is
  *  'unknown', and the release rule below keeps a handle on 'unknown' (nothing is removed on a store's silence) */
+/** r3571 (the job handles' keep): the jobs engine CANNOT SAY yet → that reason's code, else null — absent, not loaded (it loads its
+ *  jobs on a timer after the listen turn, and the keeper's first look comes before), or its start failed (its list stays empty for
+ *  the run). «Could not be told» is never «not running»: the keeper's ask answers unknown, and unknown releases nothing */
+function jobsUnknownCode(jm) {
+  if (!jm) return 'jobs_engine_absent';
+  if (jm.initError) return 'jobs_engine_failed';
+  if (jm.ready !== true) return 'jobs_engine_not_ready';
+  return null;
+}
 function jobRunningIn(jm, jobId) {
+  if (jobsUnknownCode(jm)) return 'unknown';   // r3571: its handle is carried until the engine can say (judged by facts then)
   if (jm && jm._unread && jm._unread.store) return 'unknown';
   const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null;
   // 主开发 r3115 (1), the census's J1: a job the engine CANNOT VERIFY — `unverified` (a skeleton recovered from torn bytes, a job whose
@@ -115,12 +125,12 @@ function jobHandles(children) {
 /** The handles a running job carries (the keeper adds them to its live set). `isRunning(jobId)` asks the jobs engine. */
 function carriedJobHandles(children, isRunning) {
   const out = new Set();
-  for (const { handle, jobId } of jobHandles(children)) { let on = false; try { on = !!isRunning(jobId); } catch { on = false; } if (on) out.add(handle); }
+  for (const { handle, jobId } of jobHandles(children)) { let on = false; try { on = !!isRunning(jobId); } catch { on = true; /* r3571: an ask that throws could not tell — carried, never released */ } if (on) out.add(handle); }
   return out;
 }
 /** THE RELEASE RULE (evidence, never a name): a job handle whose job is not running — finished, archived, an id the engine does not
  *  know. A job whose state is UNKNOWN (isRunning answers 'unknown' — the jobs store held: jobRunningIn) is CARRIED: never released on
- *  a store's silence (B-f276 family unit 2, r3084) */
+ *  a store's silence (B-f276 family unit 2, r3084), nor while the engine cannot say, nor on an ask that throws (r3571) */
 function jobChildrenToRelease(children, isRunning) {
   const carried = carriedJobHandles(children, isRunning);
   return jobHandles(children).filter((x) => !carried.has(x.handle));
@@ -128,6 +138,6 @@ function jobChildrenToRelease(children, isRunning) {
 
 module.exports = {
   RUNNING_STATES, JOB_ROUTES_ALLOWED, JOB_ROUTES_REFUSED,
-  isRunningJob, jobRunningIn, ownerConversationOf, jobLabelOf, jobPrincipalOf, jobRouteVerdict, jobResolveVerdict,
+  isRunningJob, jobRunningIn, jobsUnknownCode, ownerConversationOf, jobLabelOf, jobPrincipalOf, jobRouteVerdict, jobResolveVerdict,
   jobHandleOf, jobHandles, carriedJobHandles, jobChildrenToRelease,
 };

@@ -499,7 +499,7 @@ try {
     ok(dx === 'unsupported-host', 'RED CONTROL — the copies not asked (in a copy): «not a paired machine» — the keeper would drop its records', dx);
     // jobs: the keeper's release (J1) — a job no longer listed that a kept copy names is unknown
     const J = require('../src/browser-job-principal.js');
-    const jm = { jobs: new Map(), namedByCopy: (id) => id === 'jb-made0001' };
+    const jm = { ready: true, jobs: new Map(), namedByCopy: (id) => id === 'jb-made0001' };   // r3571: a READY engine (one that cannot say yet answers unknown for every id)
     const JX = mutant('src/browser-job-principal.js', [["  if (!j && jm && typeof jm.namedByCopy === 'function') { try { if (jm.namedByCopy(String(jobId))) return 'unknown'; } catch { return 'unknown'; } }", ""]]);
     ok(J.jobRunningIn(jm, 'jb-made0001') === 'unknown' && J.jobRunningIn(jm, 'jb-made0002') === false && JX.jobRunningIn(jm, 'jb-made0001') === false, 'jobs (J1): a job no longer listed that a kept copy names is UNKNOWN (its handle kept); another is not running as today; RED CONTROL (in a copy): read as not running');
     const VJD = fs.readFileSync(path.join(REPO, 'src/server/vault-job-door.js'), 'utf8');

@@ -1339,7 +1339,10 @@ function createSessionMessages(session, sessionId) {
       liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)),
       // lane jobs-browser: a RUNNING job carries its browser handle (its lease outlives its owner conversation until the job ends)
       jobName: (jobId) => { try { const jm = getJobs ? getJobs() : null; const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(String(jobId)) : null; return j ? require('../job-model.js').labelVia(jm)(j) || null : null; } catch { return null; } }, // accept-fixes-strip F8: the live view names a job's tab
-      jobRunning: (jobId) => { try { const jm = getJobs ? getJobs() : null; return require('../browser-job-principal').jobRunningIn(jm, jobId); } catch { return false; } },
+      // r3571: while the jobs engine cannot say (absent, not loaded yet, its start failed) or the ask throws, the answer is UNKNOWN and
+      // releases nothing — said ONCE a run by its code; the next look once the engine can say judges each handle by facts
+      jobRunning: (() => { const said = new Set(), P = require('../browser-job-principal'); const say = (code) => { if (said.has(code)) return; said.add(code); console.warn(`[browser] job handles are kept, none released, while the jobs engine cannot say whether their jobs run (${code}); each is judged once it can`); };
+        return (jobId) => { try { const jm = getJobs ? getJobs() : null; const why = P.jobsUnknownCode(jm); if (why) { say(why); return 'unknown'; } return P.jobRunningIn(jm, jobId); } catch { say('jobs_ask_threw'); return 'unknown'; } }; })(),
       settingsHeld: () => (typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null),   // B-f276 family unit 2: the CLI pin never computed from an unread setting
       // identity verify r2 (2026-09-28): the keys carried by live sessions on ANOTHER machine (an ssh host / a paired device —
       // rung H): the keeper refuses their `use` / attach (`remote_session`) and never writes them into "Who can use it"

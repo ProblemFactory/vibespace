@@ -118,7 +118,9 @@ function handleTable(M) {
     { name: '…a helper\'s handle is never a job\'s', good: M.jobHandleOf(children, 'jb-xyz', OWNER) === null },
     { name: 'carriedJobHandles = the running jobs\' handles only', good: [...M.carriedJobHandles(children, running)].sort().join(',') === [OWNER + '.2', OTHER + '.1'].sort().join(',') },
     { name: 'THE RELEASE RULE: a finished job\'s and an unknown job\'s handles are released; a running one\'s and a helper\'s are not', good: M.jobChildrenToRelease(children, running).map((x) => x.handle).sort().join(',') === [OWNER + '.3', OWNER + '.4'].sort().join(',') },
-    { name: '…a throwing engine releases (fail toward release, never a lease nobody carries)', good: M.jobChildrenToRelease(children, () => { throw new Error('down'); }).length === 4 },
+    // r3571 (主开发 r3792): the law is turned — «could not be told» is never «not running». A throwing engine CARRIES every handle for
+    // that run (said once by its code at the wiring); the first look once it can say judges each by facts (before: fail toward release)
+    { name: '…a throwing engine carries every handle (r3571: «could not be told» is never «not running»)', good: M.jobChildrenToRelease(children, () => { throw new Error('down'); }).length === 0 && M.carriedJobHandles(children, () => { throw new Error('down'); }).size === 4 },
   ];
 }
 for (const r of handleTable(J)) ok(r.good, r.name);
@@ -357,6 +359,37 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     for (const row of copiesCensus(MU.files, MU.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
     jA.state = st0;
   }
+  // r3571 (the job handles' keep): while the jobs engine CANNOT SAY — not loaded yet (it loads its jobs on a timer after the listen
+  // turn, and the keeper's first look comes before), or its start failed (its list stays empty for the run), or the ask throws — the
+  // answer is UNKNOWN and the real reconcile releases nothing: the handle, its lease, its window and its tabs all kept
+  { const keep = new Map(jobs);
+    const keptNow = (win, tabs, j0) => !!k._reg().children[H] && leasesOf(H).includes(pBank.id) && tabs.length > 0 && tabs.every((t) => model.targets.get(t).state !== 'closed') && !jl.slice(j0).some((x) => /job handle released/.test(x));
+    jobs.clear(); jm.ready = false;   // the engine made, its jobs not loaded yet: the list is EMPTY
+    const winN = lw(H), tabsN = windowTabs(winN), jlN = jl.length, codeN = J.jobsUnknownCode(jm);
+    k.reconcile({ graceMs: 0 }); await new Promise((r) => setTimeout(r, 50));
+    ok(codeN === 'jobs_engine_not_ready' && keptNow(winN, tabsN, jlN), 'THE ENGINE NOT LOADED YET (r3571): the real reconcile over its EMPTY list releases NOTHING — the job\'s handle, its lease, its window and its tabs all kept', { codeN, children: Object.keys(k._reg().children), said: jl.slice(jlN) });
+    jm.initError = 'EACCES: permission denied, mkdir (placed)';   // its start failed: the list stays empty for the run
+    const winF = lw(H), tabsF = windowTabs(winF), jlF = jl.length, codeF = J.jobsUnknownCode(jm);
+    k.reconcile({ graceMs: 0 }); await new Promise((r) => setTimeout(r, 50));
+    ok(codeF === 'jobs_engine_failed' && keptNow(winF, tabsF, jlF), 'THE ENGINE WHOSE START FAILED (r3571): the real reconcile releases NOTHING — every job handle stays carried for the run', { codeF, said: jl.slice(jlF) });
+    const MN = mutantCopies('jobs-browser-not-ready', REPO), JSRC2 = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
+    const JN = MN.load('src/browser-job-principal.js', anchored(JSRC2, "  if (jobsUnknownCode(jm)) return 'unknown';   // r3571: its handle is carried until the engine can say (judged by facts then)\n", '', 'r3571: the engine not asked whether it can say'));
+    const relN = (ready, err) => { jm.ready = ready; if (err) jm.initError = err; else delete jm.initError; return JN.jobChildrenToRelease(k._reg().children, (id) => JN.jobRunningIn(jm, id)).some((x) => x.handle === H); };
+    ok(relN(false, null) && relN(false, 'EACCES (placed)'), 'RED CONTROL — the engine not asked whether it can say (the release\'s road, in a copy): over the engine not loaded yet, and over the engine whose start failed, the rule releases that handle');
+    for (const row of copiesCensus(MN.files, MN.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    jobs.clear(); for (const [a, b] of keep) jobs.set(a, b); delete jm.initError; jm.ready = true;
+    // an ask that THROWS could not tell: carried (the wiring's own catch answers unknown too, pinned below)
+    const boom = () => { throw new Error('a made-up failure of the ask'); };
+    const MT = mutantCopies('jobs-browser-ask-throws', REPO), JSRC3 = fs.readFileSync(path.join(REPO, 'src/browser-job-principal.js'), 'utf8');
+    const JT = MT.load('src/browser-job-principal.js', anchored(JSRC3, "catch { on = true; /* r3571: an ask that throws could not tell — carried, never released */ }", 'catch { on = false; }', 'r3571: a throw read as not running'));
+    ok(!J.jobChildrenToRelease(k._reg().children, boom).some((x) => x.handle === H) && J.carriedJobHandles(k._reg().children, boom).has(H), 'AN ASK THAT THROWS (r3571): the job\'s handle is CARRIED — never released on a failure of the ask');
+    ok(JT.jobChildrenToRelease(k._reg().children, boom).some((x) => x.handle === H), 'RED CONTROL — a throw read as not running (the release\'s road, in a copy): the rule releases that handle');
+    for (const row of copiesCensus(MT.files, MT.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
+    // a READY engine still judges by facts: a job it lists as finished releases its handle (the rule's own road, unchanged)
+    const jR = jobs.get('jb-0000aaaa'), stR = jR.state; jR.state = 'done';
+    ok(J.jobsUnknownCode(jm) === null && J.jobChildrenToRelease(k._reg().children, (id) => J.jobRunningIn(jm, id)).some((x) => x.handle === H), 'a READY engine still judges by facts: a job it lists as finished releases its handle');
+    jR.state = stR;
+  }
   // 主开发 r3115 (the census's one unverified item, verified): the SETTINGS HELD — `browser.cli` unread: the CLI pin file the agent's
   // CLI reads is never REMOVED over a setting the keeper could not read (it was: the default «path» pin removed the mirror)
   { const pinAt = (dd) => { const pf = path.join(dd, 'browser-tools', 'cli-pin.json'); fs.mkdirSync(path.dirname(pf), { recursive: true }); fs.writeFileSync(pf, JSON.stringify({ version: '9.9.9', path: '/made/up/agent-browser' })); return pf; };
@@ -593,7 +626,7 @@ console.log('— ⑤ the wiring: the CLI reads the job token, a run\'s end relea
   ok(/_finalizeRun\(job, run, exit, why\) \{\n(\s*if \(run\.endedAt\) return; \/\/ ONE JUDGE PER RUN END[^\n]*\n)?\s*run\.endedAt = exit\.endedAt \|\| now\(\);\n[^\n]*\n\s*try \{ this\.d\.onRunEnded\?\.\(job, run\); \} catch \{ \}/.test(read('src/jobs.js')), 'the run\'s finalize calls onRunEnded FIRST (before any state branch — every run end releases)');
   ok(/onRunEnded: \(job, run\) => onRunEnded\(job, run\)/.test(read('src/server/jobs-wiring.js')) && /onRunEnded: \(job\) => \{ try \{ browserKeeper\?\.releaseJob\?\.\(job\.id, 'the job run ended'\); \} catch \{ \} \}/.test(read('server.js')), 'jobs-wiring forwards it and server.js releases the job\'s browser handle (keeper.releaseJob)');
   const mw = read('src/server/mounts-plugins-wiring.js');
-  ok(/jobRunning: \(jobId\) => \{[^\n]*jobRunningIn\(jm, jobId\)/.test(mw) && /getJobs: \(\) => \(getJobs \? getJobs\(\) : null\),\n\s*bindingsLookup: \(cid\) =>/.test(mw) && /getJobs: \(\) => jobsWiring\.getJobs\(\)/.test(read('server.js')), 'the keeper asks the engine which jobs run; the routes get the engine + the owner\'s recorded key');
+  ok(mw.includes("        return (jobId) => { try { const jm = getJobs ? getJobs() : null; const why = P.jobsUnknownCode(jm); if (why) { say(why); return 'unknown'; } return P.jobRunningIn(jm, jobId); } catch { say('jobs_ask_threw'); return 'unknown'; } }; })(),\n") && /getJobs: \(\) => \(getJobs \? getJobs\(\) : null\),\n\s*bindingsLookup: \(cid\) =>/.test(mw) && /getJobs: \(\) => jobsWiring\.getJobs\(\)/.test(read('server.js')), 'the keeper asks the engine which jobs run (r3571: while it cannot say, or the ask throws, UNKNOWN — said once by its code); the routes get the engine + the owner\'s recorded key');
   const kp = read('src/server/browser-keeper.js');
   ok(/for \(const \{ handle \} of J\.jobChildrenToRelease\(reg\.children, jobRunning\)\) releaseJobHandle\(handle, 'its job is not running'\);\n\s*const live = liveKeys\(\);/.test(kp), 'the reconcile (boot + every tick) releases a job handle whose job is not running BEFORE the carrier rule');
   ok(/function liveKeys\(\) \{[\s\S]{0,200}sessionLiveKeys\(\)[\s\S]{0,200}J\.carriedJobHandles\(reg\.children, jobRunning\)/.test(kp), 'the keeper\'s live set = the live sessions\' keys + the handles RUNNING jobs carry');
