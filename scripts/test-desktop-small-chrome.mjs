@@ -404,6 +404,7 @@ const pageFace = async () => {
 };
 /** one leg of a walk: a throw is a NAMED ✗ with where it threw, and the walk goes on (CI hotfix .358: a TypeError at 951×585
  *  ended the run — the three viewports after it never reached the log) */
+const TC_PORT_CTL = { done: false, judged: false, tag: null, ports: [] };   // r3574: the leg ⑧ control's run (once)
 const step = async (name, fn) => {
   try { await fn(); } catch (e) { check(`${name}: the leg ran to its end`, false, String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); } finally { mutantOn = null; }
 };
@@ -774,14 +775,31 @@ const runViewport = async ([VW, VH], font) => {
     const tcCleared = await evalJs(`(() => { const w = [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => (t.innerText || '').trim().slice(0, 160)); document.querySelectorAll('#global-toasts').forEach((t) => t.remove()); return w; })()`);
     await sleep(400); await evalJs(`(window.__tc = { hits: 0, placed: 0 }, 1)`);
     const tcOwnBy = await evalJs(`(() => { const c = [...app.wm.windows.values()].find((w) => w.type === 'chat' && w.id !== window.__tcKeep); app.wm.requestClose(c.id); const all = [...document.querySelectorAll('#global-toasts .global-toast')]; const byWords = all.find((t) => /keeps running/.test(t.innerText || '')); const own = byWords || all[all.length - 1]; if (own) own.dataset.tcOwn = '1'; return own ? (byWords ? 'its sentence' : 'the newest toast (its sentence not found)') : 'none'; })()`); await sleep(500); // a running conversation's ✕ says it keeps running — a toast with its ✕
-    const tcArrive = await evalJs(`({ ...window.__tc, toasts: document.querySelectorAll('#global-toasts .global-toast').length, own: !!document.querySelector('#global-toasts .global-toast[data-tc-own="1"]'), words: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => (t.innerText || '').trim().slice(0, 160)) })`);
+    const tcArrive = await evalJs(`({ ...window.__tc, toasts: document.querySelectorAll('#global-toasts .global-toast').length, own: !!document.querySelector('#global-toasts .global-toast[data-tc-own="1"]'), others: document.querySelectorAll('#global-toasts .global-toast:not([data-tc-own="1"])').length, words: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => (t.innerText || '').trim().slice(0, 160)) })`);
     const h3 = await evalJs(HITS);
+    // r3574 (lane bl-phone-ui, the follow of line 742 on line 603's form): every toast up before the close was cleared above, so a toast of
+    // ANOTHER KIND on the stack now ARRIVED INSIDE THE WINDOW (a full run: the hub's notice of a new listening port at its next sweep). It
+    // is named, never counted: each adds the leg's own ARRIVAL bound (3 reads of the stack's rect — two placements) to the bounds below.
+    // RED CONTROL, once a run (the first size): two such notices raised through the page's own handler (relayBroadcastJs — the hub's own
+    // frame) between the close's arrival and its ✕, 150 ms apart, each its own placement pass — line 603's bounds alone are red for them
+    if (!TC_PORT_CTL.done) {
+      TC_PORT_CTL.done = true; TC_PORT_CTL.tag = tag; TC_PORT_CTL.ports = [23000 + Math.floor(Math.random() * 4000), 27000 + Math.floor(Math.random() * 4000)];
+      for (const port of TC_PORT_CTL.ports) { await evalJs(relayBroadcastJs(`{ type: 'machine-ports-new', hostId: '__local__', hostName: 'This machine', ports: [{ port: ${port}, proc: 'zz-control' }] }`)); await sleep(150); }
+      await sleep(300);
+    }
     const tcX = await evalJs(`(() => { const x = document.querySelector('#global-toasts .global-toast[data-tc-own="1"] .global-toast-x'); if (x) x.click(); return !!x; })()`); await sleep(400);
     const tcLife = await evalJs(`({ ...window.__tc, ownGone: !document.querySelector('#global-toasts .global-toast[data-tc-own="1"]'), stack: !!document.getElementById('global-toasts'), left: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => (t.innerText || '').trim().slice(0, 160)) })`);
     await evalJs(`(() => { window.__tc = null; if (window.__tcKeep) app.wm.toggleMaximize(window.__tcKeep); return 1; })()`); await sleep(300);
     console.log(`    the close's toast (${tag}): before the close ${tcCleared.length ? 'the stack held ' + J(tcCleared) + ' (cleared)' : 'no toast'} · found by ${tcOwnBy} · arrival ${J(tcArrive)} · its own ✕ ${tcX ? 'pressed' : 'NOT FOUND'} · its whole life to the ✕ ${J(tcLife)} (${J(tcSet)})`);
-    check(`⑧ ${tag} (lane window-close-stall — RED on 5c77612ef): a running chat's ✕ with a maximized chat's composer and title bar in the toast's column — its toast is placed with 0 hit tests (the click's task and the frames after), in ${tcArrive.placed} placements`, tcSet.maximized && tcSet.composer && tcArrive.toasts >= 1 && tcArrive.hits === 0 && tcArrive.placed >= 1 && tcArrive.placed <= 3, { tcSet, tcArrive });
-    check(`⑧ ${tag}: the close's toast is GONE 400 ms after its own ✕ (found by ${tcOwnBy}) — its whole life (shown, then its ✕) in ${tcLife.placed} placements (≤ 4) and 0 hit tests, never a storm${tcLife.left.length ? ` (the stack stays for ${tcLife.left.length} other toast(s): ${J(tcLife.left)})` : ''}`, tcArrive.own && tcX && tcLife.ownGone && tcLife.hits === 0 && tcLife.placed <= 4, { tcCleared, tcOwnBy, tcArrive, tcLife });
+    const TC_ARRIVAL = 3;   // the leg's own law for one toast's arrival: 1 to 3 reads of the stack's rect
+    check(`⑧ ${tag} (lane window-close-stall — RED on 5c77612ef): a running chat's ✕ with a maximized chat's composer and title bar in the toast's column — its toast is placed with 0 hit tests (the click's task and the frames after), in ${tcArrive.placed} placements${tcArrive.others ? ` (+ ${tcArrive.others} toast(s) of another kind that arrived inside the window, named, not counted: ${J(tcArrive.words)})` : ''}`, tcSet.maximized && tcSet.composer && tcArrive.toasts >= 1 && tcArrive.hits === 0 && tcArrive.placed >= 1 && tcArrive.placed <= TC_ARRIVAL + TC_ARRIVAL * tcArrive.others, { tcSet, tcArrive });
+    check(`⑧ ${tag}: the close's toast is GONE 400 ms after its own ✕ (found by ${tcOwnBy}) — its whole life (shown, then its ✕) in ${tcLife.placed} placements (≤ 4, + ${TC_ARRIVAL} for each toast of another kind that arrived inside the window) and 0 hit tests, never a storm${tcLife.left.length ? ` (the stack stays for ${tcLife.left.length} other toast(s), named, not counted: ${J(tcLife.left)})` : ''}`, tcArrive.own && tcX && tcLife.ownGone && tcLife.hits === 0 && tcLife.placed <= 4 + TC_ARRIVAL * tcLife.left.length, { tcCleared, tcOwnBy, tcArrive, tcLife });
+    if (TC_PORT_CTL.tag === tag && !TC_PORT_CTL.judged) {
+      TC_PORT_CTL.judged = true;
+      const named = TC_PORT_CTL.ports.every((port) => tcLife.left.some((w) => w.includes(`port ${port}`)));
+      const old603 = tcLife.hits === 0 && tcLife.placed <= 4;   // line 603's life bound, the arrivals counted as the close's
+      check(`⑧ ${tag} CONTROL (r3574): two notices of a new listening port (ports ${TC_PORT_CTL.ports.join(', ')}) arrived inside the window through the page's own handler — line 603's bound alone is RED for that named cause (${tcLife.placed} placements > 4), the leg's judgment with each arrival's own bound green`, named && !old603 && tcLife.ownGone && tcLife.placed <= 4 + TC_ARRIVAL * tcLife.left.length, { named, old603, tcLife });
+    }
     await evalJs(`(() => { app.showNewSessionDialog(); return 1; })()`); await sleep(700);
     const h4 = await evalJs(HITS);
     await esc(); await sleep(300);
