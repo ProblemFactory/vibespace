@@ -1516,12 +1516,18 @@ console.log('lane mask-value-shape B-829f: A VALUE THAT IS ITSELF ESCAPED JSON i
     ok(idem, 'B-829f a second pass over the belt\'s own output changes nothing (both modes; the scenes and 300 generated texts)'); }
   // (d) THE TIME BOUND, by a STEP COUNT (no clock in this suite: a slow machine is never red, a regression of ten times is): the reader's
   // steps on five made-up 64 KiB worst shapes stay under 4 per character
-  { const ST = M.load('src/secret-shapes.js', editAnchor(SRC, '/*esc-step*/', 'globalThis.__escSteps = (globalThis.__escSteps || 0) + 1;', 'src/secret-shapes.js', 'join'), 'b829f-steps');
+  // r3200: the line-end lookup is counted too (the characters it scans), so a lookup per value start would show
+  const COUNTED = (src) => editAnchor(editAnchor(src, '/*esc-step*/', 'globalThis.__escSteps = (globalThis.__escSteps || 0) + 1;', 'src/secret-shapes.js', 'join'), '/*esc-line*/', 'globalThis.__escSteps = (globalThis.__escSteps || 0) + (lineEnd - vs);', 'src/secret-shapes.js');
+  { const ST = M.load('src/secret-shapes.js', COUNTED(SRC), 'b829f-steps');
     const N = SS.INPUT_MAX || 65536, fill = (u) => u.repeat(Math.ceil(N / u.length)).slice(0, N);
     const W = [['name starts that never close', fill('\\"a')], ['holder pairs back to back', fill('\\"token\\":\\"v\\",')], ['one value 64 KiB long', '\\"token\\":\\"' + 'v'.repeat(N - 20) + '\\"'],
-      ['backslash runs before every quote', fill('\\\\\\"')], ['an unclosed value on one long line', '\\"token\\":\\"' + fill('\\\\\\"x').slice(20)]];
+      ['backslash runs before every quote', fill('\\\\\\"')], ['an unclosed value on one long line', '\\"token\\":\\"' + fill('\\\\\\"x').slice(20)],
+      ['value starts back to back on ONE long line, its end at the text\'s end (r3200: the end looked up once a line)', fill('\\"token\\":\\"v\\",').slice(0, N - 1) + '\n']];
     const steps = W.map(([w, t]) => { globalThis.__escSteps = 0; ST.redactSecrets(t); return [w, globalThis.__escSteps, t.length]; });
-    ok(steps.every(([, s, n]) => s <= 4 * n), `B-829f (d) THE BOUND: the reader is linear — ${steps.map(([w, s, n]) => `${w} ${s} steps / ${n} characters`).join(' · ')} (the ceiling: 4 a character)`); }
+    ok(steps.length === 6 && steps.every(([, s, n]) => s <= 4 * n), `B-829f (d) THE BOUND: the reader is linear, its line-end lookups counted — ${steps.map(([w, s, n]) => `${w} ${s} steps / ${n} characters`).join(' · ')} (the ceiling: 4 a character)`);
+    const EVERY = M.load('src/secret-shapes.js', COUNTED(editAnchor(SRC, '    if (vs > lineEnd) {', '    if (true) {', 'src/secret-shapes.js')), 'b829f-every');
+    const [w6, t6] = W[5]; globalThis.__escSteps = 0; EVERY.redactSecrets(t6); const s6 = globalThis.__escSteps;
+    ok(s6 > 4 * t6.length, `RED CONTROL (the line's end looked up again for every value start, c2e4437e8's form): «${w6}» takes ${s6} steps for ${t6.length} characters — the bound leg goes red`); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -773,7 +773,7 @@ const ESC_NAME_MAX = 80, ESC_VALUE_MAX = 8192;
 const escNameCode = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 46 || c === 45;
 function redactEscapedPairs(text, say) {
   if (text.indexOf('\\"') < 0) return { text, n: 0 };
-  const L = text.length; let out = '', last = 0, n = 0, i = 0;
+  const L = text.length; let out = '', last = 0, n = 0, i = 0, lineEnd = -1;   // r3200: the line's end is CACHED, looked up once a line (as redactKv's)
   while ((i = text.indexOf('\\"', i)) >= 0) {
     /*esc-step*/
     if (i > 0 && text.charCodeAt(i - 1) === 92) { i += 2; continue; }   // a longer backslash run: a second level, left as today
@@ -786,7 +786,9 @@ function redactEscapedPairs(text, say) {
     q++;
     while (q < L && (text.charCodeAt(q) === 32 || text.charCodeAt(q) === 9)) { /*esc-step*/ q++; }
     if (text.charCodeAt(q) !== 92 || text.charCodeAt(q + 1) !== 34) { i = q; continue; }   // not a string value: left alone
-    const vs = q + 2, nl = text.indexOf('\n', vs), end = Math.min(nl < 0 ? L : nl, vs + ESC_VALUE_MAX + 1);
+    const vs = q + 2;
+    if (vs > lineEnd) { const nl = text.indexOf('\n', vs); lineEnd = nl < 0 ? L : nl; /*esc-line*/ }   // a value on a line already read keeps its end
+    const end = Math.min(lineEnd, vs + ESC_VALUE_MAX + 1);
     let r = vs, ve = -1;
     // the value ends at the next \" whose backslash run CLOSES in the once-unescaped JSON (a run of 1, 5, 9 … backslashes; a run of 3
     // is an escaped quote inside the value)
