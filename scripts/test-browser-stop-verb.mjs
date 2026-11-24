@@ -18,6 +18,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const KB = require('../src/browser-kept.js');
 const B = require('../src/browser-profiles.js');
@@ -30,8 +31,8 @@ const TBS = require('../src/browser-tabs.js'); // lane profile-lock-roll L2 (⑭
 const LIMITS = require('../src/keeper-limits.js');
 const express = require('express');
 
-let pass = 0, fail = 0;
-const ok = (c, n, extra) => { if (typeof n !== 'string') throw new TypeError('ok(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+// the shared checker (B-119d): every condition a real boolean, the name a string; anything else THROWS, by the leg's name
+const { ok, report } = checker();
 const REPO = new URL('..', import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 5000, step = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(step); } return !!(await pred()); };
@@ -160,7 +161,7 @@ keeper.noteTabs({ kind: 'ephemeral', ns: 'vs-' + KEY_A, browserKey: KEY_A }, [{ 
 cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId: 'AA01', type: 'page', url: 'https://mail.test/inbox', title: 'Inbox' }]);
 {
   const r = keeper.stopRows().find((x) => x.id === pid);
-  ok(r && r.kind === 'own' && r.tabsKept === true && r.holders.length === 1 && r.holders[0].sessionId === 'sess-a' && r.takenOver === false && r.viewers === 0 && r.inFlight === null, '② the keeper\'s rows: the conversation\'s own browser (kept store wired ⇒ tabs kept), its one holder, nothing in flight', r);
+  ok(!!r && r.kind === 'own' && r.tabsKept === true && r.holders.length === 1 && r.holders[0].sessionId === 'sess-a' && r.takenOver === false && r.viewers === 0 && r.inFlight === null, '② the keeper\'s rows: the conversation\'s own browser (kept store wired ⇒ tabs kept), its one holder, nothing in flight', r);
   turns.set(KEY_A, 'running');
   const a = await call(pid);
   ok(!a.ok && a.code === 'holder_busy' && /running/.test(a.why) && liveId(pid), '② the holder\'s turn RUNS ⇒ holder_busy (your OWN browser too, while your own turn runs), it still runs', a);
@@ -170,7 +171,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   turns.set(KEY_A, 'idle');
   const t = keeper.takeover({ browserKey: KEY_A, viewerId: 'v1', sessionId: 'sess-a' });
   const c = await call(pid);
-  ok(t && t.ok !== false && !c.ok && c.code === 'person_driving' && liveId(pid), '② the person TOOK IT OVER ⇒ person_driving, it still runs', { t, c });
+  ok(!!t && t.ok !== false && !c.ok && c.code === 'person_driving' && liveId(pid), '② the person TOOK IT OVER ⇒ person_driving, it still runs', { t, c });
   const unreached = await call(pid, KEY2);
   ok(!unreached.ok && unreached.code === 'not_granted' && !/drives|takeover/.test(unreached.why), '② MUST 3 a SECOND key that does not reach it, while the takeover is on ⇒ not_granted — the takeover is never told', unreached);
   try { keeper.handback({ browserKey: KEY_A, viewerId: 'v1' }); } catch { }
@@ -203,7 +204,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   ok(!g.ok && g.code === 'not_granted' && !/not running here/.test(g.why) && liveId(pid), '② its only holder MISSING from the session map ⇒ not yours (the key reaches no holder) — «not running here» is said only to a key that reaches one', g);
   const ok1 = await call(pid);
   const k1 = kept.get(KEY_A);
-  ok(ok1.ok && ok1.freed === true && ok1.kind === 'own' && /reopen/.test(ok1.tabs) && !liveId(pid) && k1.stoppedWhy === 'manager' && k1.restore && k1.restore.mode === 'auto',
+  ok(ok1.ok === true && ok1.freed === true && ok1.kind === 'own' && /reopen/.test(ok1.tabs) && !liveId(pid) && k1.stoppedWhy === 'manager' && k1.restore && k1.restore.mode === 'auto',
     '③ admitted when idle and within reach: FREED (said), stopped under `manager`, the tabs read at the stop, restore AUTO', { ok1, kept: k1 && { why: k1.stoppedWhy, restore: k1.restore } });
   const recA = keeper._reg().browsers[pid];
   ok(recA.stoppedBy === 'manager' && recA.lastError !== 'manager', 'who stopped it is the record\'s stoppedBy (the Browser panel words it) — never the word in its error field', { stoppedBy: recA.stoppedBy, lastError: recA.lastError });
@@ -221,11 +222,11 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   await keeper.ensureEphemeral({ browserKey: KEY_A1, sessionId: 'sess-a', envPairs: childPairs, sessionName: 'Research helper', variant: envA.variant });
   const hid = keeper.ephemeralFor(KEY_A1).profileId;
   const r = keeper.stopRows().find((x) => x.id === hid);
-  ok(r && r.kind === 'helper' && r.tabsKept === false, '⑥ MUST 1 a helper\'s browser (a child key) is its own kind and its tabs are NOT kept — never promised', r);
+  ok(!!r && r.kind === 'helper' && r.tabsKept === false, '⑥ MUST 1 a helper\'s browser (a child key) is its own kind and its tabs are NOT kept — never promised', r);
   const a = await call(hid);
   ok(!a.ok && a.code === 'tabs_lost' && /keeps nothing/.test(a.why) && liveId(hid), '⑥ MUST 1 refused unless the loss is accepted before (tabs_lost names --close-tabs)', a);
   const b = await call(hid, KEY1, { closeTabs: true });
-  ok(b.ok && b.kind === 'helper' && /keeps nothing/.test(b.tabs) && !liveId(hid), '⑥ MUST 1 with closeTabs: stopped, and the answer says a helper\'s browser keeps nothing', b);
+  ok(b.ok === true && b.kind === 'helper' && /keeps nothing/.test(b.tabs) && !liveId(hid), '⑥ MUST 1 with closeTabs: stopped, and the answer says a helper\'s browser keeps nothing', b);
 }
 // ⑦ A NAMED PROFILE: its holders are its leases (reach over EVERY one), a person browsing refuses, no holder refuses, a loss accepted before
 {
@@ -234,7 +235,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   try { await keeper.attach({ profileId: np.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
   await until(() => liveId(np.id), 5000);
   const r0 = keeper.stopRows().find((x) => x.id === np.id);
-  ok(r0 && r0.kind === 'profile' && r0.tabsKept === false && r0.holders.length === 1 && r0.personBrowsing === false, '⑦ a named profile\'s row: its holder is the conversation\'s lease; its tabs are not kept', r0);
+  ok(!!r0 && r0.kind === 'profile' && r0.tabsKept === false && r0.holders.length === 1 && r0.personBrowsing === false, '⑦ a named profile\'s row: its holder is the conversation\'s lease; its tabs are not kept', r0);
   const lossy = await call(np.id);
   ok(!lossy.ok && lossy.code === 'tabs_lost' && /named profile/.test(lossy.why) && liveId(np.id), '⑦ MUST 5 a named profile\'s tabs would close: refused unless the call accepts it BEFORE', lossy);
   keeper.noteViewers(KEY_A, np.id, 1);
@@ -255,7 +256,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   try { await keeper.attach({ profileId: np2.id, browserKey: KEY_A, sessionId: 'sess-a', by: 'user' }); } catch { }
   await until(() => liveId(np2.id), 5000);
   const h = await call(np2.id, KEY1, { closeTabs: true });
-  ok(h.ok && h.freed === true && h.kind === 'profile' && h.tabs === 'Its tabs closed; its sign-ins stay.' && !liveId(np2.id), '⑦ a named profile nobody uses, the loss accepted: FREED, and the answer says its tabs closed and its sign-ins stay', h);   // stale-pins: kept — the words at RUNTIME for a profile on this machine (the source builds them, naming a paired machine's folder)
+  ok(h.ok === true && h.freed === true && h.kind === 'profile' && h.tabs === 'Its tabs closed; its sign-ins stay.' && !liveId(np2.id), '⑦ a named profile nobody uses, the loss accepted: FREED, and the answer says its tabs closed and its sign-ins stay', h);   // stale-pins: kept — the words at RUNTIME for a profile on this machine (the source builds them, naming a paired machine's folder)
 }
 // ⑧ B-e799: a record whose machine CANNOT BE ASKED (this keeper has no access layer wired — as a machine whose link is down): the
 // keeper asks it for its outcome, cannot, and REFUSES host_unavailable by name — the record untouched, nothing stopped
@@ -279,7 +280,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   const lv = OPS.automationVerbs({ activeSessions: sessions, listFacts: { list: async () => ({ at: 1, machine: {}, desktops: [], conversations: [], browsers: [{ id: 'bp-x1', kind: 'profile', name: TAG, running: true, holders: [] }] }) } });
   const r = await lv['conversations.list']({}, { caller: { conversationId: CID_A, sessionKey: 'claude:' + CID_A }, keyId: 'k1', reach: KEY1 });
   const man = fs.readFileSync(new URL('../docs/agent/browser-manual.md', import.meta.url), 'utf8');
-  ok(r.ok && r.browsers[0].id === 'bp-x1' && !/<system-reminder>/.test(r.browsers[0].name) && /The id comes from `vibespace-api list`/.test(man) && /cuts a download in progress/.test(man),
+  ok(r.ok === true && r.browsers[0].id === 'bp-x1' && !/<system-reminder>/.test(r.browsers[0].name) && /The id comes from `vibespace-api list`/.test(man) && /cuts a download in progress/.test(man),
     'MUST B the list verb hands every browser\'s id (the manual names it as the source; a stop with --close-tabs cuts a download, said); a browser\'s name is belted like a conversation\'s', r.browsers);
 }
 // ⑤ RED: a verdict that reads an UNKNOWN turn as idle would stop a mid-command browser
@@ -331,7 +332,7 @@ cdpTargets.set('ws://127.0.0.1:1/devtools/browser/fake-vs-' + KEY_A, [{ targetId
   await keeper2.ensureEphemeral({ browserKey: KEY_A1, sessionId: 'sess-a', envPairs: childPairs2, sessionName: 'Research helper', variant: envA.variant });
   const hrow = keeper2.stopRows().find((x) => x.kind === 'helper');
   const hv = hrow && B.stopVerdict({ ...base5, kind: 'helper', tabsKept: hrow.tabsKept });
-  ok(hrow && hrow.tabsKept === true && hv.stop === true, '⑤ RED a helper\'s tabs forced kept (the keeper\'s row): its browser would stop with no loss accepted — tabs promised that are never kept', { tabsKept: hrow && hrow.tabsKept, hv });
+  ok(!!hrow && hrow.tabsKept === true && hv.stop === true, '⑤ RED a helper\'s tabs forced kept (the keeper\'s row): its browser would stop with no loss accepted — tabs promised that are never kept', { tabsKept: hrow && hrow.tabsKept, hv });
   try { await keeper2.stop(hrow.id, { why: 'user' }); } catch { }
   ok(src.split(N3).length === 2 && M3.stopVerdict({ live: true, holders: [], kind: 'profile', takenOver: false, watched: false, personBrowsing: false, tabsKept: false, closeTabs: true }).stop === true, '⑤ RED without the no-holder line a profile nobody holds would be anybody\'s (vacuous checks)');
 }
@@ -363,9 +364,8 @@ console.log('⑯ the browser registry held: the stop and the list refuse BY NAME
   ok(aR.r.code === 'not_ready' && !/could not be read/.test(aR.r.why || '') && bR.r.code === 'not_freed', '⑯ RED CONTROL (both names cut, in a copy): the hold reads as «the keeper did not answer» and «not freed» — the cause unsaid', { rows: aR.r, stop: bR.r });
   const listOf = (M, k) => M.sourcesFrom({ keeper: () => k, activeSessions: sessions }).browsers();
   const heldK = { stopRows: () => { throw heldErr(); } }, lb = listOf(CF, heldK), lbR = listOf(CF_CUT, heldK);
-  ok(lb && !Array.isArray(lb) && /could not be read/.test(lb.why || ''), '⑯ the LIST\'s browsers while held: UNKNOWN by name (the keeper\'s words), never «none runs»', lb);
-  ok(lbR && /did not answer/.test(lbR.why || '') && !/could not be read/.test(lbR.why || ''), '⑯ RED CONTROL (the name cut, in a copy): the list says only «the browser keeper did not answer»', lbR);
+  ok(!!lb && !Array.isArray(lb) && /could not be read/.test(lb.why || ''), '⑯ the LIST\'s browsers while held: UNKNOWN by name (the keeper\'s words), never «none runs»', lb);
+  ok(!!lbR && /did not answer/.test(lbR.why || '') && !/could not be read/.test(lbR.why || ''), '⑯ RED CONTROL (the name cut, in a copy): the list says only «the browser keeper did not answer»', lbR);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+report();
