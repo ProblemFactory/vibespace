@@ -262,6 +262,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - MARKED: test-record-clear-census-interp, test-egress-census. Out by the check: test-ci-gate-tiers-deep (its twin starts node children), test-conversation-needs (real waits; it lists no tracked file).
 - The kit's and the integrator's runners are not changed here: two asks, through the coordinator. The gate's own table and tests only; no product file.
 
+### bl-ci — the everyGate check's blind spots closed (主开发 r3098, round wx85w73o5's follow)
+- WHY: the round took line 620 with no must, and named the forms that would let a future marked suite start something unseen.
+- WHAT: a module specifier is kept whatever its length; a child_process binding under any name, a dotted or computed member, a destructured require, process.binding(, globalThis.fetch(, a bare network module and an unbound import('./….mjs') are starts; the tree list counts only as a git child's 'ls-files' argument or a helper's trackedFiles / listSuiteFiles binding. The header names what the check does not read. test-ci-gate-tiers §8i adds a red control for each form and two for the tree list's edges.
+- The same two marked rows; no tier, cap or row moved. Tests and the gate's own table only.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
