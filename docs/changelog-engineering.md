@@ -190,6 +190,16 @@ This file is the engineers' record of every release: the lanes, the verification
 - Legs: scripts/test-creds-merge.mjs §2b — a sign-in landing over an UNCHANGED survivor (it stays, the survivor's old file its archive), the law on the taken branch (ours' keys alone) and on the stood path, the link-in error said true with the reply's fact, the folded folder kept on a failed rename, the survivor's file gone at the rename, the stood fact; scripts/test-oat-materialize.mjs §8 — the law on the strip and re-mint roads. Each with its red.
 - Censuses by name: test-oat-mint ⑤ (+ the two settle functions' private writes) and ⑦ (their doors; the swap's own unlink leaves); test-sync-fs-census (swapSync 5 → 4, settleAsideSync 2); test-store-write-census (account-material 19 → 20).
 
+### bl-loop-b — line 609's follow: the last smalls of the content guard (主开发 r3042, round wokvqzw2b, for 2.369.417)
+- (1) The journal says what became of the file read: «it held our token alone, which is not kept» when its aside was REMOVED, never «rests archived» (settleAside / settleAsideSync now answer removed | rest | kept | ours; the error carries `asideSettled`).
+- (2) A cut of an aside to its CLI keys that FAILS leaves our token in it — said by the member's name (the merge, the oat sync), never swallowed.
+- (3) A stood merge reads the folded file AGAIN and asks «ours?» on it as it is now: a vendor sign-in written there since the first read is archived whole, never removed with the folder.
+- (4) A kept folded folder is a fact of the merge (`foldKept`, data-relative); the login route answers `mergeFoldKept` and the dialog says where the new sign-in is (zh, ja).
+- (5) The dialog asks for a new sign-in only when the survivor's name is EMPTY (`archived`); a stood merge whose put-back answered back says what is there stands.
+- (6) A failed write of the survivor's settings file, or a failed folder step, is said by name and keeps the folded folder (its place in the facts) — the outer best-effort catch is never silent.
+- (7) The stale comment and the archive-name assert's words follow the archive to the swap's aside (`-a<8 hex>`).
+- Legs: scripts/test-creds-merge.mjs §2b (r3042) — a removed aside said as removed; a failed cut said by name; the folded file asked again; the kept folder's place in the facts; the settings file's failure said; scripts/test-oat-materialize.mjs §8 — the oat sync's removed aside said as removed. Each with its red. Censuses: mount-reader-census accounts.js 22 → 23, test-sync-fs-census accounts.js 35 → 36 (the folded file read again).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
