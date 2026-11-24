@@ -222,7 +222,7 @@ await leg(148, async () => {
   const sw = await swRun(DELIVER0, 'head');
   console.log(`    facts: the stash wake over a kept receipt ${JSON.stringify(sw)}`);
   ok(sw.during.posts === 0 && sw.during.owed === 1 && sw.posts === 1 && sw.owed === 0, 'B-f276 1b (the 1a round\'s should): the STASH WAKE over a receipt the gate keeps — never rendered, claimed, fallen or cancelled while kept; posted ONCE when the gate lets it out', JSON.stringify(sw));
-  const swx = await swRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, "    held(cid, e) { const ref = e && e.meta && e.meta.ref; if (!ref || stashEntries(cid).some((x) => x && x.ref === ref)) return false; return (stash[cid] || []).some((x) => x && x.ref === ref && isKept(cid, x)); },\n", '', 'the stash wake without its hook'), 'stash-wake-no-hook'), 'cut');
+  const swx = await swRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, "    held(cid, e) { const ref = e && e.meta && e.meta.ref; if (!ref || stashEntries(cid).some((x) => x && x.ref === ref)) return false; if (isHeld() && !(stash[cid] || []).some((x) => x && x.ref === ref)) return true;   /* r3663 (2): its entry may wait in the unread list — unknown is held, never «carried» */ return (stash[cid] || []).some((x) => x && x.ref === ref && isKept(cid, x)); },\n", '', 'the stash wake without its hook'), 'stash-wake-no-hook'), 'cut');
   ok(swx.posts === 0, 'B-f276 1b STASH-WAKE CONTROL (the stash wake without its held hook, in a copy): its render finds no receipt and CANCELS the wake while the receipt is kept — nothing goes at the lift — red', JSON.stringify(swx));
 
   // THE PARK'S CAP (the read's must 1): the door first — a held wake is never the victim, the cap's loop ends

@@ -1513,11 +1513,12 @@ function create(engineCtx) {
     for (const q of Object.values(ob.proposals || {})) {
       const d = q.receiptDelivery;
       if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
-      if (tornAt != null && !(Number(d.at) > tornAt)) { if (d.at != null && Number.isFinite(Number(d.at))) tornIds.push(q.id); continue; }   // a legacy row with no instant: unknown, as before (never «torn», never «handed»)   // stashed before the torn bytes: never «handed» — round wozyl97qk (g): it ENDS «torn» (its entry was in the damaged list, kept aside)
       let held = null;
       try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
       const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));
-      if (!still) gone.push(q.id);
+      if (still) continue;   // r3663 (the round's should): a receipt the stash still holds WAITS, whatever a torn instant says (a torn copy beside the list never ends what the list still holds)
+      if (tornAt != null && !(Number(d.at) > tornAt)) { if (d.at != null && Number.isFinite(Number(d.at))) tornIds.push(q.id); continue; }   // stashed before torn bytes and gone: «torn», never «handed»; a legacy row with no instant: unknown, as before (never «torn», never «handed»)   // stashed before the torn bytes: never «handed» — round wozyl97qk (g): it ENDS «torn» (its entry was in the damaged list, kept aside)
+      gone.push(q.id);
     }
     if (tornIds.length) {
       const t0 = now();
