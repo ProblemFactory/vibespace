@@ -3266,7 +3266,8 @@ function create(deps = {}) {
     const s = selfSettle.get(adapterId);
     if (!s || !s.size) { selfSettle.delete(adapterId); return 0; }
     const rec = adapterRecords().adapters.find((r) => r && r.id === adapterId);
-    const self = rec ? selfIdOf(rec) : null;
+    if (!rec) { selfSettle.delete(adapterId); return 0; }   // line 743's should: a removed account — nothing to settle, its noted rows dropped
+    const self = selfIdOf(rec);
     if (!self) return 0;   // r3279 (2): no own id yet — the noted rows are KEPT, settled when a pass learns it
     selfSettle.delete(adapterId);
     let n = 0, cut = 0;

@@ -21,8 +21,15 @@
 //   ⑧ A CLOSE DURING A REBUILD saves it unfinished; the next store rebuilds it and counts every file. RED: a close that saves it as the
 //      truth (its missed files orphaned).
 //   ② also: an earlier version's ledger with an entry whose file is gone — a whole walk is the truth, the entry leaves. RED: kept.
-//   ⑨ «FORGET ITS DATA» DURING A REBUILD: the next put rebuilds at once and whole, the forgotten walk still held (and it lands
-//      nothing). RED: a forget that leaves the rebuild in flight (the next put waits on the forgotten walk).
+//   ⑨ «FORGET ITS DATA» DURING A REBUILD, then the account ADDED AGAIN (B-92fc: a forgotten account writes nothing until then): the
+//      next put rebuilds at once and whole, the forgotten walk still held (and it lands nothing). RED: a forget that leaves the
+//      rebuild in flight (the next put waits on the forgotten walk).
+//   ⑨b (line 743's should) THE FORGOTTEN WALK LANDS WHILE THE NEXT REBUILD IS HELD, a put admitted to that next rebuild after its
+//      listing: the put is counted at the next landing. RED: a landing that drops the admitted set before its identity check.
+//   ⑥b (line 743's should) A FILE THAT COULD NOT BE ASKED (its meta and its stat answer EIO) in an earlier version's ledger: the walk
+//      is UNFINISHED and the entry kept. RED: the stat's failure read as «gone» (a whole walk prunes it).
+//   ②b (line 743's should) AN EARLIER VERSION's LEDGER WHOSE FILES ARE ALL GONE: the whole walk prunes every entry and the ledger is
+//      saved (v 2, empty) once. RED: a landing that saves only a ledger with entries (the dead v 1 walked at every start).
 // Run: node scripts/test-channel-att-ledger.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -196,7 +203,7 @@ async function badMetaLeg(mod, tag) {
 {
   const r = await badMetaLeg(CS, 'badmeta');
   ok(r.files === N && r.bytes === N * SIZE && r.said === 1 && r.kept, `⑤ a meta that does not parse: counted by its file's own size (${r.files} files, ${r.bytes} bytes), said once (${r.said}), never removed (${r.kept})`, r);
-  const STAT = "        try { const st = await fs.promises.stat(f); if (st.isFile()) { found[`${c}/${nm}`] = { bytes: st.size, usedAt: Math.round(st.mtimeMs) || 0 }; bad++; } } catch { /* gone meanwhile */ }";
+  const STAT = "        try { const st = await fs.promises.stat(f); if (st.isFile()) { found[`${c}/${nm}`] = { bytes: st.size, usedAt: Math.round(st.mtimeMs) || 0 }; bad++; } } catch (e) { if (!e || e.code !== 'ENOENT') failed = failed || (e && e.code) || 'error'; }";
   await redOf(STAT, async () => {
     const rs = await badMetaLeg(M.load('src/channel-store.js', anchored(SRC, STAT, '', 'a rebuild that skips a meta that does not parse'), 'skip-bad'), 'badmeta-red');
     ok(rs.files === N - 1, `⑤ RED CONTROL: a rebuild that skips the meta that does not parse — ${rs.files} of ${N} counted (its file orphaned) — the leg above would go red`, rs);
@@ -316,6 +323,8 @@ async function closeLeg(mod, tag) {
 
 // ═══ ⑨ «FORGET ITS DATA» DURING A REBUILD ═══
 console.log('⑨ the account forgotten during a held rebuild: the next put rebuilds at once, and the old walk lands nothing');
+// B-92fc (the train's line 582): a forgotten account writes nothing until the same id is added again — its gone mark ends then
+async function readd(st) { if (typeof st.joinedOf !== 'function') return; await st.adapters.update((a) => { a.adapters.push({ id: ACC, kind: 'fake', label: 'Fake', enabled: true }); }); await st.joinedOf(ACC); }
 async function purgeLeg(mod, tag, waitMs = 2000) {
   const dir = tmp(tag);
   const seeded = await seed(dir);
@@ -329,7 +338,8 @@ async function purgeLeg(mod, tag, waitMs = 2000) {
   try {
     o.st.attachmentUsage(ACC);
     for (let k = 0; k < 100 && !hit; k++) await turns(10);
-    o.st.purgeAccount(ACC);   // «Forget its data», the rebuild still held
+    await o.st.purgeAccount(ACC);   // «Forget its data» (its marks set at once, the rebuild's among them; its folders removed off the loop) — the rebuild still held
+    await readd(o.st);   // the train's B-92fc law: a forgotten account writes nothing until it is ADDED AGAIN
     await o.st.attachmentPut(ACC, CONV, 'p1', { data: Buffer.alloc(SIZE, 70), mime: 'image/png', msg: 'q1' }, { budgetBytes: 1e9 });
     // THE NEXT PUT REBUILDS AT ONCE: its own walk settles while the forgotten one is still held (never waits on it)
     const atOnce = await Promise.race([o.st.attachmentLedgerSettled(ACC).then(() => true), turns(waitMs).then(() => false)]);
@@ -348,6 +358,101 @@ async function purgeLeg(mod, tag, waitMs = 2000) {
   await redOf(CLEAR, async () => {
     const rc = await purgeLeg(M.load('src/channel-store.js', anchored(SRC, CLEAR, '', 'a forget that leaves the rebuild in flight'), 'purge-keeps'), 'purge-red', 300);   // its mutant waits on a walk held until the release: a short bound
     ok(rc.atOnce === false, `⑨ RED CONTROL: «Forget its data» leaves the rebuild in flight — the next put's ledger waits on the forgotten walk (settled while the forgotten walk is held: ${rc.atOnce}), unfinished until a later use walks again — the leg above would go red`, rc);
+  });
+}
+
+// ═══ ⑨b THE FORGOTTEN WALK LEAVES THE NEXT REBUILD's ADMITTED SET ALONE ═══
+console.log('⑨b the forgotten walk lands while the next rebuild is held: a put admitted to that rebuild is counted');
+async function admittedLeg(mod, tag) {
+  const dir = tmp(tag);
+  const seeded = await seed(dir);
+  fs.unlinkSync(ledgerOf(dir));
+  const first = path.join(dir, 'attachments', ACC, CONV, seeded[0]) + '.json', second = path.join(dir, 'attachments', ACC, CONV, blob('p1', 'q1')) + '.json';
+  let rel1 = () => {}, rel2 = () => {}, hit1 = false, hit2 = false;
+  const g1 = new Promise((z) => { rel1 = z; }), g2 = new Promise((z) => { rel2 = z; });
+  fs.promises.readFile = async function (q, ...x) { const p = path.resolve(String(q)); if (p === first && !hit1) { hit1 = true; await g1; } else if (p === second && !hit2) { hit2 = true; await g2; } return P0.call(this, q, ...x); };
+  const o = open(mod, dir);
+  let r;
+  try {
+    o.st.attachmentUsage(ACC);   // the FIRST walk, held at a meta
+    for (let k = 0; k < 100 && !hit1; k++) await turns(10);
+    await o.st.purgeAccount(ACC);
+    await readd(o.st);
+    await o.st.attachmentPut(ACC, CONV, 'p1', { data: Buffer.alloc(SIZE, 80), mime: 'image/png', msg: 'q1' }, { budgetBytes: 1e9 });   // the SECOND walk starts, held at p1's meta
+    for (let k = 0; k < 100 && !hit2; k++) await turns(10);
+    await o.st.attachmentPut(ACC, CONV, 'p3', { data: Buffer.alloc(SIZE, 81), mime: 'image/png', msg: 'q3' }, { budgetBytes: 1e9 });   // admitted to the second rebuild, after its listing
+    rel1();   // the forgotten walk lands now, the second still held
+    for (let k = 0; k < 5; k++) await turns(10);
+    rel2();
+    const u = await settled(o.st);
+    r = { hit1, hit2, files: u.files };
+  } finally { restore(); rel1(); rel2(); shut(o); }
+  return r;
+}
+{
+  const r = await admittedLeg(CS, 'admitted');
+  ok(r.hit1 && r.hit2 && r.files === 2, `⑨b the forgotten walk landed while the next rebuild was held: the put admitted to that rebuild after its listing is counted at its landing (${r.files} of 2: p1 and p3)`, r);
+  const IDC = '      if (lruRebuilding.get(adapterId) !== p) return;';
+  await redOf(IDC, async () => {
+    const rn = await admittedLeg(M.load('src/channel-store.js', anchored(SRC, IDC, '      lruAdmitted.delete(adapterId);\n      if (lruRebuilding.get(adapterId) !== p) return;', 'a landing that drops the admitted set before its identity check'), 'admitted-cut'), 'admitted-red');
+    ok(rn.files === 1, `⑨b RED CONTROL: a landing that drops the admitted set before its identity check — the forgotten walk takes the next rebuild's set, and the put admitted to it is pruned (${rn.files} of 2) — the leg above would go red`, rn);
+  });
+}
+
+// ═══ ⑥b A FILE THAT COULD NOT BE ASKED ═══
+console.log('⑥b a file whose meta and stat answer EIO, in an earlier version\'s ledger: the walk unfinished, the entry kept');
+async function statLeg(mod, tag) {
+  const dir = tmp(tag);
+  const seeded = await seed(dir);
+  const lf = ledgerOf(dir), led = JSON.parse(R0.call(fs, lf, 'utf8'));
+  led.v = 1; fs.writeFileSync(lf, JSON.stringify(led));   // an earlier version's ledger: rebuilt, every entry there
+  const X = path.join(dir, 'attachments', ACC, CONV, seeded[2]), S0 = fs.promises.stat;
+  const eio = () => Object.assign(new Error('EIO: placed'), { code: 'EIO' });
+  fs.promises.readFile = async function (q, ...x) { if (path.resolve(String(q)) === X + '.json') throw eio(); return P0.call(this, q, ...x); };
+  fs.promises.stat = async function (q, ...x) { if (path.resolve(String(q)) === X) throw eio(); return S0.call(this, q, ...x); };
+  const o = open(mod, dir);
+  let r;
+  try {
+    o.st.attachmentUsage(ACC); const u = await settled(o.st);
+    restore(); fs.promises.stat = S0;
+    o.st.lruFlush(); await o.w.durable(lf);
+    let l2 = null; try { l2 = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
+    r = { files: u.files, v: l2 ? l2.v : null };
+  } finally { restore(); fs.promises.stat = S0; shut(o); }
+  return r;
+}
+{
+  const r = await statLeg(CS, 'stat-eio');
+  ok(r.files === N && r.v === 1, `⑥b a file whose meta and stat answer EIO: the walk UNFINISHED — its entry kept (${r.files} of ${N} counted), the ledger saved without its mark (v ${r.v})`, r);
+  const STATC = "} catch (e) { if (!e || e.code !== 'ENOENT') failed = failed || (e && e.code) || 'error'; }   // line 743's should";
+  await redOf(STATC, async () => {
+    const rn = await statLeg(M.load('src/channel-store.js', anchored(SRC, STATC, "} catch { /* gone meanwhile */ }   // line 743's should", 'a stat\'s failure read as gone (the commit\'s)'), 'stat-gone'), 'stat-red');
+    ok(rn.files === N - 1 && rn.v === 2, `⑥b RED CONTROL: a stat's failure read as «gone» — the whole walk prunes a file still there (${rn.files} of ${N}, v ${rn.v}) — the leg above would go red`, rn);
+  });
+}
+
+// ═══ ②b AN EARLIER VERSION's LEDGER WHOSE FILES ARE ALL GONE ═══
+console.log('②b an earlier version\'s ledger whose files are all gone: every entry pruned, the ledger saved once (v 2, empty)');
+async function allGoneLeg(mod, tag) {
+  const dir = tmp(tag);
+  await seed(dir);
+  const lf = ledgerOf(dir), led = JSON.parse(R0.call(fs, lf, 'utf8'));
+  fs.rmSync(path.join(dir, 'attachments', ACC, CONV), { recursive: true, force: true });
+  led.v = 1; fs.writeFileSync(lf, JSON.stringify(led));
+  const o = open(mod, dir);
+  o.st.attachmentUsage(ACC); const u = await settled(o.st);
+  o.st.lruFlush(); await o.w.durable(lf);
+  let l2 = null; try { l2 = JSON.parse(R0.call(fs, lf, 'utf8')); } catch { }
+  shut(o);
+  return { files: u.files, v: l2 ? l2.v : null, kept: l2 && l2.items ? Object.keys(l2.items).length : -1 };
+}
+{
+  const r = await allGoneLeg(CS, 'all-gone');
+  ok(r.files === 0 && r.v === 2 && r.kept === 0, `②b an earlier version's ledger whose ${N} files are all gone: every entry pruned (${r.files} counted) and the ledger saved once (v ${r.v}, ${r.kept} entries)`, r);
+  const DIRTY = '      if (Object.keys(l.items).length || pruned) { lruDirty.add(adapterId); lruTouch(adapterId); }';
+  await redOf(DIRTY, async () => {
+    const rn = await allGoneLeg(M.load('src/channel-store.js', anchored(SRC, DIRTY, '      if (Object.keys(l.items).length) { lruDirty.add(adapterId); lruTouch(adapterId); }', 'a landing that saves only a ledger with entries'), 'save-nonempty'), 'all-gone-red');   // stale-pins: kept (the red control restores the commit's condition)
+    ok(rn.v === 1 && rn.kept === N, `②b RED CONTROL: a landing that saves only a ledger with entries — the dead v ${rn.v} ledger stays with its ${rn.kept} entries, walked again at every start — the leg above would go red`, rn);
   });
 }
 

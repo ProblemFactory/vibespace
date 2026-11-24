@@ -2396,7 +2396,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         let meta = null;
         try { meta = JSON.parse(await fs.promises.readFile(f + '.json', 'utf-8')); } catch { meta = null; }
         if (meta && typeof meta === 'object' && Number.isFinite(Number(meta.bytes))) { found[`${c}/${nm}`] = { bytes: Number(meta.bytes), usedAt: Number(meta.at) || 0 }; return; }
-        try { const st = await fs.promises.stat(f); if (st.isFile()) { found[`${c}/${nm}`] = { bytes: st.size, usedAt: Math.round(st.mtimeMs) || 0 }; bad++; } } catch { /* gone meanwhile */ }
+        try { const st = await fs.promises.stat(f); if (st.isFile()) { found[`${c}/${nm}`] = { bytes: st.size, usedAt: Math.round(st.mtimeMs) || 0 }; bad++; } } catch (e) { if (!e || e.code !== 'ENOENT') failed = failed || (e && e.code) || 'error'; }   // line 743's should: a file that could not be ASKED is no gone file — the walk is unfinished (item 6's rule), its entry never pruned
       }));
     }
     return { found, bad, failed };
@@ -2424,7 +2424,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       lruUnfinished.delete(adapterId);
       l.v = LRU_V;
       if (added || pruned || why !== 'missing') warn(`[channels] ${adapterId}: the attachment ledger (lru.json) ${why} — rebuilt from the folder: ${Object.keys(r.found).length} cached file(s), ${added} put back in the count${pruned ? `, ${pruned} entry(ies) with no file left` : ''}`);
-      if (Object.keys(l.items).length) { lruDirty.add(adapterId); lruTouch(adapterId); }   // saved ONCE, by the ledger's own coalesced flush (never a second synchronous write site)
+      if (Object.keys(l.items).length || pruned) { lruDirty.add(adapterId); lruTouch(adapterId); }   // saved ONCE, by the ledger's own coalesced flush (never a second synchronous write site)
     }).catch((e) => { if (lruRebuilding.get(adapterId) === p) lruRebuilding.delete(adapterId); if ((purgeSeq.get(adapterId) || 0) !== ep) return; lruAdmitted.delete(adapterId); lruLater(adapterId, (e && e.code) || (e && e.message) || String(e)); });
     lruRebuilding.set(adapterId, p);
     return p;
