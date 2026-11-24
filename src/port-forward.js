@@ -856,16 +856,21 @@ class PortForwardManager {
    *  a machine-link event still heals immediately via onMachineLinked. */
   async _healSweep() {
     let changed = false;
+    // r3660: a job's row whose job the engine KNOWS no longer asks for its address (ownerAsks false: a take-down the relay answered late
+    // left the address on the row) is never published again here — the jobs engine's pass takes it down; unknown (null) keeps this road
+    const jm = (() => { try { return this.getJobs && this.getJobs(); } catch { return null; } })();
+    const asksNot = (rec) => { try { return !!(rec.ownerJob && jm && typeof jm.ownerAsks === 'function' && jm.ownerAsks(rec.ownerJob, rec.remotePort) === false); } catch { return false; } };
     for (const rec of this._state.forwards) {
       const needStart = !this._live.has(rec.id);
-      const needPublish = !!(rec.publicUrl && this.plugins && !this._published.has(rec.id));
+      const noAsk = !!(rec.publicUrl && asksNot(rec));
+      const needPublish = !!(rec.publicUrl && this.plugins && !this._published.has(rec.id)) && !noAsk;
       if (!needStart && !needPublish) continue;
       const at = this._healRetryAt.get(rec.id) || 0;
       if (Date.now() < at) continue;
       this._healRetryAt.set(rec.id, Date.now() + 5 * 60000);
       try {
         if (needStart) { await this._start(rec); rec.error = null; this._probeForward(rec); }
-        const pubOk = await this._republish(rec);
+        const pubOk = noAsk ? true : await this._republish(rec);
         if (pubOk) { this._healRetryAt.delete(rec.id); rec.error = null; }
         changed = true;
       } catch (e) { if (rec.error !== e.message) { rec.error = e.message; changed = true; } }

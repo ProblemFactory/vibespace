@@ -3523,7 +3523,9 @@ class JobManager {
       if (job) { job._pfId = null; job.publishedUrl = null; this._touch(job); }
       const p0 = Promise.resolve(pf.unpublish(rec.id, { keepName: true })).then(() => false, (e) => { this.d.log(`[jobs] ${why}: unpublish ${rec.id} — ${(e && e.message) || e}`); return false; });
       const late = await Promise.race([p0, new Promise((res) => { const t = setTimeout(() => res(true), boundMs); p0.then(() => clearTimeout(t)); })]);   // a bound that must fire: never unref'd (cleared when the relay answers)
-      if (late) { out.unanswered.push(rec.id); this.d.log(`[jobs] ${why}: the relay did not answer the unpublish of ${rec.id} within ${Math.round(boundMs / 1000)} s — its row left as it is`); continue; }
+      // r3660: a late take-down asks the pass again once it settles (that turn finds the known, stopped owner and takes the row down);
+      // meanwhile the heal sweep never publishes it again (src/port-forward.js asks ownerAsks below)
+      if (late) { out.unanswered.push(rec.id); this.d.log(`[jobs] ${why}: the relay did not answer the unpublish of ${rec.id} within ${Math.round(boundMs / 1000)} s — its row left as it is; the pass is asked again once it answers`); p0.then(() => this.forwardsReconcile('a late unpublish answered')); continue; }
       const now2 = this.jobs.get(rec.ownerJob);   // judged again after the await: a start meanwhile owns the row — never unforwarded under it
       if (now2 && (wants(now2) || (now2._publish && now2._publish.state === 'publishing'))) { out.inFlight.push(rec.id); continue; }
       try { await pf.unforward(rec.id, { keepName: true }); } catch (e) { this.d.log(`[jobs] ${why}: unforward ${rec.id} — ${(e && e.message) || e}`); }
@@ -5333,7 +5335,18 @@ class JobManager {
     if (!this.ready || this.readOnly || this._recordsHeld()) return null;
     const live = this.jobs.get(id);
     if (live) return !LS.isSkeleton(live) ? true : null;
+    if (!this.archive) return null;   // r3660: the archive not loaded yet — never read here (the Ports broadcast asks this per row)
     try { return this.archivedById(id) ? true : false; } catch { return null; }
+  }
+  /** r3660: does the job a row names still ask for that row's address (on that port)? false ONLY when this engine can say so: it KNOWS
+   *  the job (live or archived) and the job no longer asks (stopped, archived, publish off, another port) with no start of its own in
+   *  flight; null = it cannot say (unknown keeps). The Ports store's heal sweep never publishes again a row this answers false for */
+  ownerAsks(id, port) {
+    if (this.ownerKnown(id) !== true) return null;
+    const job = this.jobs.get(id);
+    if (!job) return false;   // archived: it asks for nothing
+    if (job._publish && job._publish.state === 'publishing') return true;
+    return job.kind === 'service' && !!job.publish && ['up', 'starting'].includes(job.state) && Number((job.ports || [])[0]) === Number(port);
   }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
@@ -5341,7 +5354,7 @@ class JobManager {
     // not be taken down, and an unknown row is kept (never read as removed); the stop is not refused
     // r3327: only a service that can own a row (it asks to publish, or holds one); a remove-with-stop STOPS it and refuses only the removal
     if (this._mayOwnForward(job) && this._portsHeld()) {
-      if (stop && this._verifyAlive(this._readStamp(job))) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; return { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true }; }
+      if (stop && this._verifyAlive(this._readStamp(job))) { const s = this.stop(job, { force: false }); if (s && s.error) return s; return { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true }; }   // r3660: «stopped» only when the stop happened (else its own words)
       return ['up', 'starting'].includes(job.state) ? { error: RM_PORTS_HELD, code: 'ports_unread' } : { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true };
     }
     if (this._notifsUnread && job && job.clearedAt) return { error: this._notifsClearedWords(job.id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
