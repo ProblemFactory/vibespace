@@ -247,8 +247,8 @@ console.log('— §3 the spawn road: a listed fallback the chooser placed starts
   const r4d = am.resolveForSpawn(P, 'claude', { sessionKey: 'claude:fb-4d', chooseMember: chooser(other.id) });
   am.get(P).fallbackProviders = [ds.id, 'pv-gone-by-hand'];   // a dangling id (a hand edit) on the record
   const r4e = am.resolveForSpawn(P, 'claude', { sessionKey: 'claude:fb-4e', chooseMember: chooser('pv-gone-by-hand') });
-  ok(r4d.kind === 'subscription' && r4d.poolTarget === A && r4e.kind === 'subscription' && eq(am.poolFallbacksOf(P), [ds.id]) && eq(rowOf(am, P).fallbackProviders, [{ id: ds.id, label: 'DeepSeek' }]),
-    'a provider the pool does NOT list (another of the hub\'s), or a gone one still named on the record, is never its road: the members\' road; the list and the row leave the gone one out', { r4d: r4d.kind, r4e: r4e.kind, live: am.poolFallbacksOf(P) });
+  ok(r4d.kind === 'subscription' && r4d.poolTarget === A && r4e.kind === 'subscription' && eq(am.poolFallbacksOf(P), [ds.id]) && eq(rowOf(am, P).fallbackProviders, [{ id: ds.id, label: 'DeepSeek' }, { id: 'pv-gone-by-hand', label: 'pv-gone-by-hand', known: false }]),
+    'a provider the pool does NOT list (another of the hub\'s), or a gone one still named on the record, is never its road: the members\' road; the LIVE list leaves the gone one out, and the row SHOWS it marked known:false (r3886 (C): the page lists it with its word, a save keeps it until the person unchecks it)', { r4d: r4d.kind, r4e: r4e.kind, live: am.poolFallbacksOf(P), row: rowOf(am, P).fallbackProviders });
   am.updatePool(P, { fallbackProviders: [ds.id] });
   const P3 = am.createPool({ name: 'No list', members: [A] }).id;
   const r5 = am.resolveForSpawn(P3, 'claude', { sessionKey: 'claude:fb-5', chooseMember: chooser(ds.id) });
@@ -893,6 +893,14 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   wTl.eng.tellFallbackStatus(wTl.P);
   ok(toldOnce === 1 && toldTl === 2 && JSON.stringify(wTl.eng.fallbackStatus(wTl.P).map((r) => r.running)) === '[2]',
     '(F3b) the pool row\'s fallback counts tell the clients only when they CHANGE: the same counts twice push once, a second conversation on the fallback pushes again', { toldOnce, toldTl });
+  { // (r3886 small) a pool's FIRST status with nothing on a fallback pushes NOTHING (a hub start no longer pushes every pool's list once)
+    const wF0 = world(); wF0.client();
+    let told0 = 0; const real0 = wF0.am.noteFallbackStatus.bind(wF0.am); wF0.am.noteFallbackStatus = () => { told0++; return real0(); };
+    wF0.eng._fbStatusSig.delete(wF0.P);
+    wF0.eng.tellFallbackStatus(wF0.P); const firstEmpty = told0;
+    onFb(wF0, 'f01'); wF0.eng.tellFallbackStatus(wF0.P);
+    ok(firstEmpty === 0 && told0 === 1, '(r3886 small) a pool\'s first status with nothing on a fallback pushes nothing; the first conversation on it pushes once', { firstEmpty, told0 });
+  }
   // (r3338, with F3b) THE DWELL ACROSS A HUB RESTART: a conversation restored with the stamp its meta carries (boot-restore maps
   // meta.poolFallbackDwell → _poolFallbackDwell) is not put on the fallback again inside the dwell, every member out, the pool allowing
   const BRs = read('src/server/boot-restore.js');
@@ -909,6 +917,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await wPl.pass();
   const prPl = wPl.eng.fallbackMoveBack(wPl.P);
   await until(wPl, () => wPl.restarts().length >= 4);
+  const prPl2 = wPl.eng.fallbackMoveBack(wPl.P);   // (r3886 (F)) PRESSED TWICE: the same six, four out and two queued by the first press
   await wPl.settle();
   const firstPl = wPl.restarts().length;
   let maxPl = firstPl, landedPl = 0;
@@ -921,6 +930,15 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   }
   ok(prPl.queued === 6 && firstPl === 4 && maxPl <= 4 && wPl.restarts().length === 6,
     '(r3338, F3b) a press\'s move BACK holds its slot until it LANDS: six queued, four out at once, the next only as one lands (its resumed conversation seen); all six in the end', { queued: prPl.queued, firstPl, maxPl, restarts: wPl.restarts().length });
+  ok(prPl2.queued === 0 && prPl2.already === 6 && wPl.restarts().length === 6,
+    '(r3886 (F)) PRESSED TWICE LANDS ONCE: the second press queues nothing and says the six already on their way (never «queued» again); six restarts in all, not twelve', { second: prPl2, restarts: wPl.restarts().length });
+  { // RED (loaded, run): an engine copy whose press counts a conversation already on its way as queued again
+    const wTw2 = world({ engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, "queueFallbackMove(poolId, sid, to, 'person', now); if (was) already++; else n++;", "queueFallbackMove(poolId, sid, to, 'person', now); n++;", 'pressed twice counted twice'), 'eng-press-twice') });
+    wTw2.client(); heal(wTw2); for (let i = 0; i < 3; i++) onFbRec(wTw2, 'tw' + i, { fromModel: 'sonnet' });
+    await wTw2.pass();
+    wTw2.eng.fallbackMoveBack(wTw2.P); const again = wTw2.eng.fallbackMoveBack(wTw2.P);
+    ok(again.queued === 3 && !again.already, 'CONTROL (loaded, run): an engine copy that counts the second press as queued again says three queued a second time ⇒ the PRESSED TWICE leg goes RED', again);
+  }
   // RED CONTROLS of §5
   const DWELL = "    if (!removed && now - (Number(rec.at) || 0) < FALLBACK_DWELL_MS) continue;   // the DWELL: the pool moves nobody back inside it";
   const wDw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, DWELL, '', 'no dwell'), 'eng-no-dwell') });

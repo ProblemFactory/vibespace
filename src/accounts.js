@@ -518,6 +518,7 @@ class AccountManager {
     try { providerRows = this._providerRows ? this._providerRows() || [] : []; } catch { providerRows = []; }
     return {
       providerRows,   // lane lg-providers U5: BESIDE `accounts`, never in it (the hub's account readers see records only)
+      providersUnread: (() => { try { return this._providerUnread ? this._providerUnread() || null : null; } catch { return null; } })(),   // (r3886 (B)) the provider store's own words while it cannot be read — the page says them, never «no provider fits»
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._rowsOf(this._state.accounts),
       tailsGen: this.tailsGen(),   // B-ee0a: the page reuses its read of the tails only for the same word
@@ -548,7 +549,7 @@ class AccountManager {
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', fallbackProviders: this.poolFallbacksOf(a.id).map((pv) => ({ id: pv, label: (this.providerRecordOf(pv) || {}).label || pv })), fallbackStatus: (() => { try { const r = this._fallbackStatusOf ? this._fallbackStatusOf(a.id) : null; return Array.isArray(r) && r.length ? r : null; } catch { return null; } })(), currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
+          return { ...base, pooled: true, facts: this._factsOf(d), loggedIn: d.state === 'read' ? !!info.loggedIn : null, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembersShown(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', fallbackProviders: this.fallbackListRowsOf(a.id), fallbackStatus: (() => { try { const r = this._fallbackStatusOf ? this._fallbackStatusOf(a.id) : null; return Array.isArray(r) && r.length ? r : null; } catch { return null; } })(), currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginStateShown(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -2369,7 +2370,7 @@ class AccountManager {
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name, provider: this._providerBrief(this.memberProviderOf(x.id)) }));
   }
   /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
-  setProviderLookup(fn, { clean = true } = {}) { this._providerLookup = typeof fn === 'function' ? fn : null; this._providerStoreClean = typeof clean === 'function' ? clean : () => clean !== false; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
+  setProviderLookup(fn, { clean = true, unread = null } = {}) { this._providerLookup = typeof fn === 'function' ? fn : null; this._providerStoreClean = typeof clean === 'function' ? clean : () => clean !== false; this._providerUnread = typeof unread === 'function' ? unread : null; if (this._providerLookup) { try { this.pruneFallbackProviders(); } catch { } } }   // (B-d578 F2, round wokm0ktwv) ONE prune at a start: a removal's two files with a crash between them still end in the same act
   /** (lane lg-providers) a third-party provider was added / changed / removed: every page re-reads the account lists */
   providersChanged() { this.pruneFallbackProviders(); this._notify(); }
   /** THE POOL'S FALLBACK PROVIDERS (row B-d578, the fallback member — ruling r1516 / the scene page r2733): third-party providers
@@ -2381,6 +2382,15 @@ class AccountManager {
     if (!a || this._acctType(a) !== 'pooled' || !Array.isArray(a.fallbackProviders) || !a.fallbackProviders.length) return [];
     const be = this._acctBackend(a) || 'claude';
     return a.fallbackProviders.filter((pv) => { const p = this.providerRecordOf(pv); return !!p && p.known !== false && providerFitsHarness(p, be); });
+  }
+  /** (r3886 (C)) the pool's SAVED fallback list for its row — every id on the record, a live one with its label, one the provider store
+   *  does not know or that does not fit now (removed, skipped, the list unreadable) marked `known: false`: the page LISTS it with its
+   *  word and it leaves the list only by the person's own act (a save after adding one provider never drops another unseen) */
+  fallbackListRowsOf(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'pooled' || !Array.isArray(a.fallbackProviders) || !a.fallbackProviders.length) return [];
+    const live = new Set(this.poolFallbacksOf(id));
+    return a.fallbackProviders.map((pv) => (live.has(pv) ? { id: pv, label: (this.providerRecordOf(pv) || {}).label || pv } : { id: pv, label: pv, known: false }));
   }
   /** The list a person's save hands in, judged BY NAME before anything is written (updatePool): [] / null ⇒ none (the field
    *  goes: absent = none); each a third-party provider id the store holds that serves this pool's harness; Claude pools only (a
@@ -2395,9 +2405,10 @@ class AccountManager {
     const out = [];
     for (const pv of input) {
       if (typeof pv !== 'string' || !/^pv-[a-z0-9][a-z0-9-]{0,63}$/.test(pv) || builtInProviderOf(pv)) throw new Error('not a third-party provider: ' + String(pv).slice(0, 80));
-      const p = this.providerRecordOf(pv);
-      if (!p || p.known === false) throw new Error('no such provider on this hub: ' + pv);
-      if (!providerFitsHarness(p, be)) throw new Error(`${p.label || pv} does not serve Claude Code — it cannot be this pool's fallback`);
+      const p = this.providerRecordOf(pv), listed = Array.isArray(a.fallbackProviders) && a.fallbackProviders.includes(pv);
+      // (r3886 (C)) an id ALREADY on the pool's list that the store does not know now stays as the person left it — never refused, never dropped
+      if (!p || p.known === false) { if (listed) { if (!out.includes(pv)) out.push(pv); continue; } throw new Error('no such provider on this hub: ' + pv); }
+      if (!providerFitsHarness(p, be)) { if (listed) { if (!out.includes(pv)) out.push(pv); continue; } throw new Error(`${p.label || pv} does not serve Claude Code — it cannot be this pool's fallback`); }
       if (!out.includes(pv)) out.push(pv);
     }
     if (out.length > FALLBACK_PROVIDERS_MAX) throw new Error(`a pool lists at most ${FALLBACK_PROVIDERS_MAX} fallback providers`);
@@ -2990,6 +3001,15 @@ class AccountManager {
     // (a provider id ALREADY on the record — a save an older hub took — is dropped by this save, never refused: the member's own «Exclude
     // from pool» re-sends the list as it stands; round wokm0ktwv)
     if (Array.isArray(members) && members.some((m) => /^pv-/.test(String(m || '')) && !(Array.isArray(a.members) && a.members.includes(m)))) throw new Error('a provider is never a pool member — list it as a fallback provider');
+    // (r3886 (B)) THE LAW ON THE HUB: while the provider store cannot be read (held, or lifted EMPTY over torn bytes — the prune's own
+    // fact), a CHANGE of the list is refused by name: no page and no caller can empty or shorten it then
+    if (fallbackProviders !== undefined && typeof this._providerStoreClean === 'function' && this._providerStoreClean() === false) {
+      const ids = (x) => (Array.isArray(x) ? x.map(String) : []).join('\n');
+      if (ids(fallbackProviders) !== ids(a.fallbackProviders)) {
+        let words = null; try { words = this._providerUnread ? this._providerUnread() : null; } catch { words = null; }
+        const e = new Error(`${words || 'VibeSpace cannot read its list of model providers right now'} — the pool's fallback providers are not changed until it reads again`); e.code = 'providers_unread'; throw e;
+      }
+    }
     const fallbackList = fallbackProviders !== undefined ? this._fallbackListOf(a, fallbackProviders) : undefined;
     // A REFUSED WRITE CHANGES NOTHING (B-d578 F2, round wokm0ktwv): the record as it was is kept and put back whole when any check below
     // refuses — a write refused for its priority used to leave the list and the older fields on the live record for the next save

@@ -146,13 +146,50 @@ export function fallbackChoices(providerRows, backend) {
   }
   return out;
 }
+/** (r3886 (C)) the choices plus every provider ON the pool's saved list that the roster does not offer now (`known: false` on the row:
+ *  removed, skipped, the store unreadable) — LISTED with its word, so a save never drops a provider the person could not see */
+export function fallbackChoicesWithListed(providerRows, backend, listed) {
+  const out = fallbackChoices(providerRows, backend);
+  for (const x of Array.isArray(listed) ? listed : []) {
+    if (!x || !x.id || out.some((c) => c.id === x.id)) continue;
+    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: 'unknown' });
+  }
+  return out;
+}
+const sameIds = (a, b) => (Array.isArray(a) ? a : []).join('\n') === (Array.isArray(b) ? b : []).join('\n');
+/** (r3886 (A)) THE DIALOG's SAVE SENDS WHAT THE PERSON CHANGED: the members and their order always (as at the base); the switch only
+ *  when it differs from its value at the dialog's opening, the list only when it differs from the opening list — a members-only save
+ *  carries neither (the pool's setting and its queued moves are left alone). → the PATCH body */
+export function poolSaveBody({ members, priority, codex = false, cross, fb, cross0, fb0 } = {}) {
+  const body = { members, priority };
+  if (codex) return body;
+  if (cross !== cross0) body.crossProvider = cross;
+  if (!sameIds(fb, fb0)) body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice();
+  return body;
+}
+/** (r3886 (F), smalls) the press's reply in words → [{ text, type }]: QUEUED and how many (an idle one restarts now, a busy one at its
+ *  turn's end), those already on their way said apart (pressed twice: never counted again), each reason a conversation stays; «nothing
+ *  moved back» only when no other line says why */
+export function fallbackPressToasts(r, t) {
+  const out = [], n = Number(r && r.queued) || 0, al = Number(r && r.already) || 0;
+  if (n) out.push({ text: n === 1 ? t('1 conversation is queued to move back — it restarts there now if it is idle, or when its turn is over') : t('{n} conversations are queued to move back — each restarts there now if it is idle, or when its turn is over', { n }), type: 'success' });
+  if (al) out.push({ text: al === 1 ? t('1 conversation is already on its way back') : t('{n} conversations are already on their way back', { n: al }), type: 'info' });
+  const nm = Number(r && r.noModel) || 0;
+  if (nm) out.push({ text: t('{n} cannot move back by a press — VibeSpace does not know the model they came from; pick a model for each in Session Properties', { n: nm }), type: 'info' });
+  for (const [k, w] of [['lapsed', '{n} cannot come back yet: the pool\'s default member has lapsed — renew it, or pick another default in Members & placement'], ['familyUnknown', '{n} cannot come back yet: VibeSpace cannot tell which family their first model belongs to'], ['otherRecord', '{n} could not be moved back: their record names another provider than the one they run on']]) {
+    const c = Number(r && r[k]) || 0; if (c) out.push({ text: t(w, { n: c }), type: 'info' });
+  }
+  if (!out.length) out.push({ text: t('Nothing moved back — no conversation can come back right now'), type: 'info' });
+  return out;
+}
 /** the word a provider that cannot start wears beside its row (never a greyed control: its press says it too) */
 export function fallbackNotReadyWords(code, t) {
   return code === 'vault-locked' ? t('The vault is locked — this provider can take conversations once you unlock it')
-    : code === 'no-key' ? t('No key is stored for this provider — add it in the account dialog first') : null;
+    : code === 'no-key' ? t('No key is stored for this provider — add it in the account dialog first')
+    : code === 'unknown' ? t('VibeSpace does not find this provider now (removed, or its list cannot be read) — it stays on this list until you uncheck it') : null;
 }
 /** the section's HTML — the switch (its words say the BILL, r3316 (4)) and the list (r3316 (5)) */
-export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [], choices = [] } = {}, t, esc) {
+export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [], choices = [], unread = null } = {}, t, esc) {
   const head = `<div class="pool-fb-head">${esc(t('When every member is out'))}</div>`;
   if (codex) return `<div class="pool-fb-section">${head}<div class="usage-note">${esc(t('Fallback providers are for Claude pools — a ChatGPT pool waits for its own accounts.'))}</div></div>`;
   const allow = cross === 'allow';
@@ -169,7 +206,8 @@ export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [
       <label><input type="radio" name="pool-fb-mode" value="allow" ${allow ? 'checked' : ''}> ${esc(t('Move without asking'))}</label>
     </div>
     <div class="usage-note pool-fb-bill">${esc(bill)}</div>
-    <div class="pool-fb-list">${rows || `<div class="empty-hint">${esc(t('No model provider fits Claude yet — add one in the account dialog'))}</div>`}</div>
+    ${unread ? `<div class="usage-note pool-fb-unread">${esc(unread)}</div>` : ''}
+    <div class="pool-fb-list">${rows || (unread ? '' : `<div class="empty-hint">${esc(t('No model provider fits Claude yet — add one in the account dialog'))}</div>`)}</div>
     <div class="usage-note pool-fb-bound">${esc(t('Used only when every member is out. At most {n} fallback providers.', { n: FALLBACK_MAX }))}</div>
   </div>`;
 }
@@ -1654,7 +1692,9 @@ export function installManageAgents(App, ctx = {}) {
       cross: fresh.crossProvider === 'allow' ? 'allow' : 'never',   // (B-d578 F3b) «Ask me first» stays the default (r3316 (4))
       fb: Array.isArray(fresh.fallbackProviders) ? fresh.fallbackProviders.map((x) => x.id) : [],
     };
-    const fbChoices = codex ? [] : fallbackChoices(list?.providerRows, be);
+    const fbChoices = codex ? [] : fallbackChoicesWithListed(list?.providerRows, be, fresh.fallbackProviders);   // (r3886 (C)) every listed provider shown, a gone one with its word
+    const fbUnread = codex ? null : (list?.providersUnread || null);   // (r3886 (B)) the provider store's own words while it cannot be read
+    const cross0 = st.cross, fb0 = st.fb.slice();   // (r3886 (A)) the switch and the list as the dialog OPENED: a save sends only what changed
     const st0 = JSON.stringify(st);
     const nowSec = () => Date.now() / 1000;
     const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: signinUnread(x) ? true : !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
@@ -1679,7 +1719,7 @@ export function installManageAgents(App, ctx = {}) {
           ${r.actions.length ? `<button class="agent-btn pool-prio-menu" data-id="${escHtml(r.id)}" title="${escHtml(t('Order'))}" aria-label="${escHtml(t('Order'))}">⋯</button>` : ''}
         </div>`; }).join('')}
         ${subs.length ? '' : `<div class="empty-hint">${escHtml(t('No subscription accounts yet'))}</div>`}</div>
-      ${fallbackSectionHtml({ codex, cross: st.cross, picked: st.fb, choices: fbChoices }, t, escHtml)}
+      ${fallbackSectionHtml({ codex, cross: st.cross, picked: st.fb, choices: fbChoices, unread: fbUnread }, t, escHtml)}
       <div class="dialog-buttons"><button class="btn-create" id="pool-mem-save">${escHtml(t('Save'))}</button></div>`;
       wire(rows);
     };
@@ -1688,6 +1728,7 @@ export function installManageAgents(App, ctx = {}) {
       for (const r of body.querySelectorAll('input[name="pool-fb-mode"]')) r.onchange = () => { st.cross = r.value === 'allow' ? 'allow' : 'never'; draw(); };
       for (const cb of body.querySelectorAll('.pool-fb-cb')) cb.onchange = () => {
         const id = cb.dataset.id, c = fbChoices.find((x) => x.id === id);
+        if (fbUnread) { cb.checked = st.fb.includes(id); showToast(fbUnread, { type: 'error' }); return; }   // (r3886 (B)) no change of the list while the store cannot be read (the hub refuses it too)
         if (cb.checked && !st.fb.includes(id)) {
           if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} fallback providers — remove one first', { n: FALLBACK_MAX }), { type: 'error' }); return; }
           st.fb.push(id);
@@ -1753,7 +1794,7 @@ export function installManageAgents(App, ctx = {}) {
       if (st.mode === 'priority' && !priority.length) { showToast(t('Put at least one member in the order (or choose Automatic)'), { type: 'error' }); return; }
       let r;
       try {
-        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members, priority, ...(codex ? {} : { crossProvider: st.cross, fallbackProviders: st.fb.slice() }) }) });   // (B-d578 F3b) the switch and the list ride the same save
+        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(poolSaveBody({ members, priority, codex, cross: st.cross, fb: st.fb, cross0, fb0 })) });   // (B-d578 F3b) the switch and the list ride the same save
         if (r?.error) { showToast(r.error, { type: 'error' }); return; }
       } catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); return; }
       close(); refresh?.();
@@ -3669,13 +3710,12 @@ export function installManageAgents(App, ctx = {}) {
     // (B-d578 F3b, r3316 (3)) the pool row's ONE press: a person's act (the route's personVerdict), its reply says QUEUED and how many
     for (const b of left.querySelectorAll('.pool-fb-back')) b.onclick = async (e) => {
       e.stopPropagation();
-      const r = await fetchJson('/api/accounts/' + encodeURIComponent(b.dataset.pool) + '/fallback/move-back', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (b.disabled) return;
+      b.disabled = true;   // (r3886 small) held while its request is in flight — only then (never dimmed with a hint)
+      let r = null;
+      try { r = await fetchJson('/api/accounts/' + encodeURIComponent(b.dataset.pool) + '/fallback/move-back', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } finally { b.disabled = false; }
       if (!r || r.error || r.ok === false) { showToast(t('Could not move them back — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
-      const n = Number(r.queued) || 0;
-      showToast(n === 1 ? t('1 conversation is queued to move back — it restarts there when its turn is over') : n ? t('{n} conversations are queued to move back — each restarts there when its turn is over', { n }) : t('Nothing moved back — no conversation can come back right now'), { type: n ? 'success' : 'info' });
-      const nm = Number(r.noModel) || 0;
-      if (nm) showToast(t('{n} cannot move back by a press — VibeSpace does not know the model they came from; pick a model for each in Session Properties', { n: nm }), { type: 'info', duration: 8000 });
-      for (const [k, w] of [['lapsed', '{n} cannot come back yet: the pool\'s default member has lapsed — renew it, or pick another default in Members & placement'], ['familyUnknown', '{n} cannot come back yet: VibeSpace cannot tell which family their first model belongs to'], ['otherRecord', '{n} could not be moved back: their record names another provider than the one they run on']]) { const c = Number(r[k]) || 0; if (c) showToast(t(w, { n: c }), { type: 'info', duration: 8000 }); }   // (r3338 (2) (4)) each reason, in words   // (r3319 (5)) the no-record line's «a person's press only» — said in the press's own reply
+      for (const m of fallbackPressToasts(r, t)) showToast(m.text, { type: m.type, duration: m.type === 'success' ? undefined : 8000 });   // (r3886 (F), smalls) the reply's words, built pure
     };
     // Redesign (2.178.0): the four Add… buttons collapse into ONE menu on the
     // roster header — they wrapped into a vertical CJK pile when narrow and

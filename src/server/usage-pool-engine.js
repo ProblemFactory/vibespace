@@ -8202,8 +8202,10 @@ async function executeFallbackBack(e, now = Date.now()) {
 const _fbStatusSig = new Map();   // pool id → the counts the clients were last told (JSON)
 function tellFallbackStatus(poolId) {
   let sig = ''; try { sig = JSON.stringify(fallbackStatus(poolId)); } catch { return; }
-  if (_fbStatusSig.get(poolId) === sig) return;
+  const prev = _fbStatusSig.get(poolId);
+  if (prev === sig) return;
   _fbStatusSig.set(poolId, sig);
+  if (prev === undefined && sig === '[]') return;   // (r3886 small) a pool's FIRST status with nothing on a fallback pushes nothing
   try { if (typeof accounts.noteFallbackStatus === 'function') accounts.noteFallbackStatus(); } catch { }
 }
 /** THE PERSON's press (the page, unit F3b): move these conversations of the pool — or every one on a fallback — back NOW (at the head of
@@ -8211,7 +8213,7 @@ function tellFallbackStatus(poolId) {
 function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
   const a = accounts.get(poolId);
   if (!a) return { queued: 0 };
-  let n = 0, noModel = 0, lapsed = 0, familyUnknown = 0, otherRecord = 0;
+  let n = 0, already = 0, noModel = 0, lapsed = 0, familyUnknown = 0, otherRecord = 0;
   for (const [sid, s2] of activeSessions) {
     if (s2._accountId !== poolId || s2.host || (Array.isArray(sids) && !sids.includes(sid))) continue;
     let held = null; try { held = heldPoolMemberFor(s2, poolId); } catch { }
@@ -8220,11 +8222,14 @@ function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
     if (!rec) { if (s2._poolFallback) otherRecord++; continue; }   // (r3338 (4)) a record of ANOTHER provider: counted, said in the reply
     const v = fallbackBackVerdict(poolId, rec, now, s2, sid), to = v.to;
     if (!to) { if (v.why === 'no-first-model') noModel++; else if (v.why === 'default-lapsed') lapsed++; else if (v.why === 'family-unknown') familyUnknown++; continue; }   // (r3338 (2)) each reason counted, said in the reply
-    queueFallbackMove(poolId, sid, to, 'person', now); n++;
+    // (r3886 (F)) PRESSED TWICE LANDS ONCE: a conversation whose move back is already the person's (queued by a press, or out) is
+    // counted apart — `already` — never as queued a second time (the queue is keyed by the conversation)
+    const q0 = _fbQueue.get(sid), was = _fbInFlight.has(sid) || !!(q0 && q0.to === to && q0.by === 'person');
+    queueFallbackMove(poolId, sid, to, 'person', now); if (was) already++; else n++;
   }
   if (n) pumpFallbackMoves(now);
   tellFallbackStatus(poolId);
-  return { queued: n, noModel, lapsed, familyUnknown, otherRecord };
+  return { queued: n, already, noModel, lapsed, familyUnknown, otherRecord };
 }
 /** The pool row's count (the page, unit F3b): per provider, how many conversations run on it and how many could come back now. */
 function fallbackStatus(poolId, now = Date.now()) {

@@ -49,7 +49,7 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   // THE ACCOUNT'S MODELS (design q-053 r1 §3, lane provider-record): data/providers.json + the account dialog's model
   // section's two routes (src/routes/account-models.js); a built-in provider's rows are its harness's catalog NOW
   const providers = require('./provider-store.js').create({ dataDir: path.join(rootDir, 'data'), catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; }, onLift: () => { try { broadcastAll({ type: 'providers-changed', what: 'read', id: null }); } catch { } try { if (typeof accounts.providersChanged === 'function') accounts.providersChanged(); } catch { } } });   // (B-f276 family) a held providers.json read again: every list re-reads
-  if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct), { clean: typeof providers.readClean === 'function' ? () => providers.readClean() && !(typeof providers.damaged === 'function' && providers.damaged()) : true }); /* (the move onto 2.369.418) the store-read hold's LIVE answer, read at each prune: held, or lifted EMPTY over torn bytes kept aside (as the Vault's remover refuses a key a kept copy names), is the cure's «unreadable» — nothing pruned; a value read once at the start refused every prune after a held start lifted */ // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
+  if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct), { clean: typeof providers.readClean === 'function' ? () => providers.readClean() && !(typeof providers.damaged === 'function' && providers.damaged()) : true, unread: () => (typeof providers.unread === 'function' ? providers.unread() : null) }); /* (the move onto 2.369.418) the store-read hold's LIVE answer, read at each prune: held, or lifted EMPTY over torn bytes kept aside (as the Vault's remover refuses a key a kept copy names), is the cure's «unreadable» — nothing pruned; a value read once at the start refused every prune after a held start lifted */ // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
   // lane lg-providers U2: a `pv-<id>` account spawns through the provider's own road (its key from the vault, its own empty home)
   if (typeof accounts.setFallbackStatusLookup === 'function' && typeof engine.fallbackStatus === 'function') accounts.setFallbackStatusLookup((id) => engine.fallbackStatus(id));   // (B-d578 F3b) the pool row's fallback counts
   if (typeof accounts.setProviderRows === 'function') accounts.setProviderRows(() => { const open = (() => { try { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return !!v && v.state() === 'unlocked'; } catch { return false; } })(); return require('../model-providers.js').rosterRowsOf(providers.thirdParty(), { usable: (p) => open && providers.hasKey(p.id), whyNot: (p) => (!open ? 'vault-locked' : !providers.hasKey(p.id) ? 'no-key' : null) }); });   // lane lg-providers U5: the rows every page lists (U1 cure: usable = the vault open AND the record's entry in it, read off its names)
@@ -277,7 +277,7 @@ require('../routes/account-tails.js').registerAccountTailRoutes(app, { accounts,
 app.get('/api/accounts', (req, res) => res.json(require('../routes/account-tails.js').accountsAnswer({ accounts, hosts })));
 // the B-f276 family (lane bl-windows, 主开发 r2947 (2)): a change over accounts that could not be read is refused BY NAME — 503 with its
 // code and words (the dialog says nothing was changed and that it reads again by itself); every other refusal as before (400)
-const failAcct = (res, e) => (e && e.code === 'accounts_unread' ? res.status(503).json({ error: e.message, code: 'accounts_unread' }) : res.status(400).json({ error: e.message }));
+const failAcct = (res, e) => (e && (e.code === 'accounts_unread' || e.code === 'providers_unread') ? res.status(503).json({ error: e.message, code: e.code }) : res.status(400).json({ error: e.message }));   // (r3886 (B)) a list change while the provider store is held answers its code too
 app.post('/api/accounts', (req, res) => {
   try { res.json({ success: true, account: accounts.add(req.body || {}) }); }
   catch (e) { failAcct(res, e); }
@@ -442,6 +442,9 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
   try {
     const id = req.params.id;
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    // (r3886 (D)) THE TWO SPEND FIELDS ARE A PERSON's: a request that carries the switch or the fallback list asks the tree's ONE verdict,
+    // as the press does (no bearer of any kind, this instance's own page); a request with neither is judged as before
+    if (req.body && (req.body.crossProvider !== undefined || req.body.fallbackProviders !== undefined)) { const who = require('../routes/vault.js').personVerdict(req); if (!who.ok) return res.status(403).json({ ok: false, code: who.code || 'human_only', error: 'the pool\'s fallback switch and list are set by a person on this page only' }); }
     // Narrowing the member list away from the CURRENT target makes updatePool
     // re-point IMMEDIATELY (symlink swap) — a running claude re-reads the
     // credential file mid-session, so this must mirror /target's contract
@@ -618,7 +621,7 @@ app.post('/api/accounts/:poolId/fallback/move-back', (req, res) => {
     const pa = accounts.get(poolId);
     if (!pa || pa.type !== 'pooled') return res.status(400).json({ ok: false, code: 'not_pooled', error: 'not a pooled account' });
     const r = engine.fallbackMoveBack(poolId);
-    res.json({ ok: true, queued: (r && r.queued) || 0, noModel: (r && r.noModel) || 0, lapsed: (r && r.lapsed) || 0, familyUnknown: (r && r.familyUnknown) || 0, otherRecord: (r && r.otherRecord) || 0 });   // (r3319 (5), r3338 (2) (4)) each reason a conversation could not move, counted   // (r3319 (5)) those whose first model is unknown: not queued, said why
+    res.json({ ok: true, queued: (r && r.queued) || 0, already: (r && r.already) || 0, noModel: (r && r.noModel) || 0, lapsed: (r && r.lapsed) || 0, familyUnknown: (r && r.familyUnknown) || 0, otherRecord: (r && r.otherRecord) || 0 });   // (r3319 (5), r3338 (2) (4)) each reason a conversation could not move, counted   // (r3319 (5)) those whose first model is unknown: not queued, said why
   } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
 });
 app.post('/api/accounts/pool-cross/asks/:askId', (req, res) => {
