@@ -47,11 +47,13 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 if (!fs.existsSync(path.join(repo, 'public', 'bundle.js'))) { console.log('✗ no public/bundle.js — run `npm run build` first'); process.exit(1); }
 
-const [PORT, CDP_PORT] = await freePorts(2);
+const [PORT, CDP_PORT, CDP_PORT_BARS] = await freePorts(3);   // r3653: + the second Chrome's (the (d5) scenes, scrollbars drawn)
 const root = mintRoot('chat-needs-wt'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // rule nine (hub-boot.mjs): the suite's own browser carries a HOME in the root, so the helper ends it before the root goes
 const fakeHome = path.join(root, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });
 const chromeDir = scratch('chat-needs-chrome');
+const chromeDirBars = scratch('chat-needs-chrome-bars');   // r3653: the second Chrome's profile (the (d5) scenes) — ended with the suite
+let chromeBars = null;
 const stubDir = path.join(root, 'stub');
 const WORK = path.join(stubDir, 'work', 'ops');
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1])  : process.env.VS_UI_SHOTS_DIR ? path.join(process.env.VS_UI_SHOTS_DIR, 'test-chat-needs-strip-chrome') : scratch('chat-strip-shots'); // CI uploads VS_UI_SHOTS_DIR on a failure — each half under its own name
@@ -148,9 +150,10 @@ const chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debug
   '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
+  try { if (chromeBars) chromeBars.kill('SIGKILL'); } catch { }   // r3653: the second Chrome, by the handle the suite started
   // B-7a99: what this suite makes TODAY — its browser's profile folder (70758c1e9 stopped making the five MUT folders this line still
   // named: the line threw at every exit, before it removed anything, and the browser folder stayed behind every run)
-  for (const d of [chromeDir]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir, chromeDirBars]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
 const PENDS = new Map();
@@ -609,58 +612,69 @@ try {
       //     (scripts/gutter-drag.mjs: a press the page sees land on the list's own gutter); THEN the hold runs, each stop() it asks counted.
       //     The reader stays where they dragged. RED: the release's hold question (only _navigatedSince) — the hold pulls the reader back to
       //     the put-back's place. Held by states: the hold asked, the press landed, the stop asked as often as the hold's steps ask it.
-      const gutterDrag = gutterDragger({ evalJs: A.evalJs, cdp: A.cdp, sleep });
-      const atOf = (id) => A.evalJs(`(() => { const l = ${VIEW}._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(id)}); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`);
-      const dragScene = async ({ release = false } = {}) => {
-        await choose(ids[1], 82); await sleep(3000);
-        const p0 = await A.evalJs(READ16);
-        await A.evalJs(`(() => { const v = ${VIEW}; window.__d5 = { asked: false, stops: [], release: ${release ? 'true' : 'false'} };
+      // r3653 (the train's box row 662, its PRECONDITION legs: the gutter 0 px with the list overflowing, the class off, the emulation
+      // answered): THIS SUITE's CHROME HIDES EVERY SCROLLBAR BY ITS LAUNCH FLAG (--hide-scrollbars), and no emulation call lifts it (the
+      // emulation's hide is OR'ed with the launch's). So the two (d5) scenes run on a page of a SECOND Chrome of the suite's own,
+      // launched as the first but WITHOUT that flag (its own profile under the suite's scratch, ended by the suite): the same hub, the same
+      // conversation, q81's record hidden there by the same rule. The other legs keep the first Chrome (their geometry was measured in a
+      // Chrome with no scrollbars). The drag through scripts/gutter-drag.mjs, as before.
+      const barsChrome = async () => {
+        chromeBars = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT_BARS}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+          '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDirBars}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
+        let t = null;
+        for (let i = 0; i < 120 && !t; i++) { try { t = (await (await fetch(`http://127.0.0.1:${CDP_PORT_BARS}/json`)).json()).filter((x) => x.type === 'page')[0] || null; } catch { } if (!t) await sleep(250); }
+        if (!t) throw new Error('the second Chrome (scrollbars drawn) never exposed a CDP page target');
+        return connect(t);
+      };
+      const pickOn = (P, id) => P.evalJs(`(() => { const it = app._inboxModel.byId(${J(id)}); app._inboxModel.jump(it.sessionKey, it); return 1; })()`);
+      const chooseOn = async (P, id, n) => { await pickOn(P, id); await P.waitFor(`(() => { const x = ${ST(id)}; return x.card && x.inView && (/question ${n}/.test(x.cmd) || x.docked); })()`, 15000).catch(() => {}); await sleep(1200); return P.evalJs(ST(id)); };
+      const atOf = (P, id) => P.evalJs(`(() => { const l = ${VIEW}._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(id)}); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`);
+      const dragScene = async (P, { release = false } = {}) => {
+        await chooseOn(P, ids[1], 82); await sleep(3000);
+        const p0 = await P.evalJs(READ16);
+        await P.evalJs(`(() => { const v = ${VIEW}; window.__d5 = { asked: false, stops: [], release: ${release ? 'true' : 'false'} };
           if (window.__d5.release) v._readerActedSince = function (since) { return !!this._navigatedSince(since); };   // THE RELEASE'S QUESTION (the red control)
           v._holdReaderTop = function (el, top, o = {}) {   // DEFERRED: kept, its guard raised as the real hold raises it first
             clearTimeout(v._jumpGuardTimer); v._programmaticScroll = true; window.__d5.asked = true; window.__d5.t0 = Date.now(); window.__d5.top = top;
             window.__d5.run = () => { delete v._holdReaderTop; v._holdReaderTop(el, top, { ...o, stop: () => { const r = !!(o.stop && o.stop()); window.__d5.stops.push(r); return r; } }); };
           };
           return 1; })()`);
-        await pick(ids[0]);
-        const asked = await A.waitFor('!!(window.__d5 && window.__d5.asked)', 15000).catch(() => false);
-        // the list's own scrollbar, shown for the act (as test-minimap-jump's bare prep does): this suite's Chrome hides scrollbars
-        // (--hide-scrollbars — undone for this page by CDP while the scene runs) and the minimap hides the native one (its class).
-        // r3605 (the train's candidate, box row 636: the drag never happened, the gutter 0 wide): THE SCROLLBAR IS MADE, NEVER ASSUMED —
-        // the emulation call's failure is SAID (never swallowed); the list's bar is REBUILT under the page's new setting (Chrome applies
-        // hide-scrollbars when a scroller's bar is made again: one frame without overflow, one with — its scrollTop kept); the minimap's
-        // class is HELD OFF until the scene ends (a redraw of the strip puts it back: counted); and the facts are read for the
-        // precondition below (the gutter, the overflow, the class, the computed scrollbar-width)
-        const emu = await A.cdp('Emulation.setScrollbarsHidden', { hidden: false }).then(() => null, (e) => String((e && e.message) || e).slice(0, 200));
-        const prep = await A.evalJs(`(() => { const l = ${VIEW}._messageList; const had = l.classList.contains('chat-minimap-active');
+        await pickOn(P, ids[0]);
+        const asked = await P.waitFor('!!(window.__d5 && window.__d5.asked)', 15000).catch(() => false);
+        // the list's own scrollbar, drawn in this Chrome (no hide flag); the minimap hides the native one by its class: HELD OFF until the
+        // scene ends (a redraw of the strip puts it back: counted); the facts read for the precondition below
+        const prep = await P.evalJs(`(() => { const l = ${VIEW}._messageList; const had = l.classList.contains('chat-minimap-active');
           l.classList.remove('chat-minimap-active');
-          const st = l.scrollTop; l.style.overflowY = 'hidden'; void l.offsetWidth; l.style.overflowY = ''; void l.offsetWidth; if (l.scrollTop !== st) l.scrollTop = st;
           window.__d5.readded = 0;
           window.__d5.keep = new MutationObserver(() => { if (l.classList.contains('chat-minimap-active')) { window.__d5.readded++; l.classList.remove('chat-minimap-active'); } });
           window.__d5.keep.observe(l, { attributes: true, attributeFilter: ['class'] });
           return { had }; })()`);
         await sleep(200);   // the list re-lays out around its scrollbar (its records' tops are read after it)
-        const bar = await A.evalJs(`(() => { const l = ${VIEW}._messageList, cs = getComputedStyle(l); return { sbw: l.offsetWidth - l.clientWidth - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0), over: l.scrollHeight > l.clientHeight + 1, sh: l.scrollHeight, ch: l.clientHeight, sw: cs.scrollbarWidth, cls: l.classList.contains('chat-minimap-active'), readded: window.__d5.readded || 0 }; })()`);
-        const before = await atOf(p0.id);
-        const dr = asked ? await gutterDrag(`${VIEW}._messageList`, { dy: -24, steps: 4 }) : { ok: false, why: 'the put-back never asked its hold' };
-        const dragged = await atOf(p0.id);
-        const stamped = await A.evalJs(`!!${VIEW}._navigatedSince(window.__d5.t0 || 0)`);   // the premise: the drag under the guard stamped no reader act
-        await A.evalJs('(window.__d5.run && window.__d5.run(), 1)');
+        const bar = await P.evalJs(`(() => { const l = ${VIEW}._messageList, cs = getComputedStyle(l); return { sbw: l.offsetWidth - l.clientWidth - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0), over: l.scrollHeight > l.clientHeight + 1, sh: l.scrollHeight, ch: l.clientHeight, sw: cs.scrollbarWidth, cls: l.classList.contains('chat-minimap-active'), readded: window.__d5.readded || 0 }; })()`);
+        const before = await atOf(P, p0.id);
+        const dr = asked ? await gutterDragger({ evalJs: P.evalJs, cdp: P.cdp, sleep })(`${VIEW}._messageList`, { dy: -24, steps: 4 }) : { ok: false, why: 'the put-back never asked its hold' };
+        const dragged = await atOf(P, p0.id);
+        const stamped = await P.evalJs(`!!${VIEW}._navigatedSince(window.__d5.t0 || 0)`);   // the premise: the drag under the guard stamped no reader act
+        await P.evalJs('(window.__d5.run && window.__d5.run(), 1)');
         // the hold's steps, each asking its stop: let go at once ⇒ its first frame + the three re-anchors (4); held ⇒ twelve frames + three (15)
-        await A.waitFor(`(window.__d5.stops || []).length >= ${release ? 15 : 4}`, 5000).catch(() => false);
-        const after = await atOf(p0.id), stops = await A.evalJs('(window.__d5.stops || []).slice()'), aim = await A.evalJs('window.__d5.top');
-        const readded = await A.evalJs(`(() => { const v = ${VIEW}, n = window.__d5.readded || 0; if (window.__d5.keep) window.__d5.keep.disconnect(); delete v._holdReaderTop; if (window.__d5.release) delete v._readerActedSince; if (v._minimap && !v._minimap.classList.contains('hidden')) v._messageList.classList.add('chat-minimap-active'); return n; })()`);
-        await A.cdp('Emulation.setScrollbarsHidden', { hidden: true }).catch(() => null);   // the suite's own setting back (the scene's end)
-        return { asked, p0, aim: aim == null ? null : Math.round(aim), before, dr, dragged, stamped, after, stops, movedByDrag: before != null && dragged != null ? dragged - before : null, emu, prep, bar, readded };
+        await P.waitFor(`(window.__d5.stops || []).length >= ${release ? 15 : 4}`, 5000).catch(() => false);
+        const after = await atOf(P, p0.id), stops = await P.evalJs('(window.__d5.stops || []).slice()'), aim = await P.evalJs('window.__d5.top');
+        const readded = await P.evalJs(`(() => { const v = ${VIEW}, n = window.__d5.readded || 0; if (window.__d5.keep) window.__d5.keep.disconnect(); delete v._holdReaderTop; if (window.__d5.release) delete v._readerActedSince; if (v._minimap && !v._minimap.classList.contains('hidden')) v._messageList.classList.add('chat-minimap-active'); return n; })()`);
+        return { asked, p0, aim: aim == null ? null : Math.round(aim), before, dr, dragged, stamped, after, stops, movedByDrag: before != null && dragged != null ? dragged - before : null, prep, bar, readded };
       };
-      const dg = await dragScene();
+      const B = await barsChrome();
+      await toConv(B, sid, [], 1280, 800, false); await B.waitFor(`(() => { const v = ${VIEW}; return !!v && v._pinned && v._windowEnd >= v._total; })()`, 15000).catch(() => { }); await sleep(1500);
+      await B.evalJs(`(() => { const s = document.createElement('style'); s.id = 'hide16'; s.textContent = '.chat-msg[data-msg-id="' + CSS.escape(${J(rid81)}) + '"] { display: none !important; }'; document.head.appendChild(s); return 1; })()`);
+      const dg = await dragScene(B);
       // r3605: THE PRECONDITION, by name — the list's own scrollbar is DRAWN before the drag (a gutter wider than 0, the list overflowing),
       // else the drag proves nothing and its control cannot go red; the facts say which (the emulation's error, the class, the width rule)
-      const barSaid = (d) => `its gutter ${d.bar ? d.bar.sbw : '?'} px, the list ${d.bar && d.bar.over ? 'overflowing' : 'NOT overflowing'} (${d.bar ? d.bar.sh + ' over ' + d.bar.ch : '?'} px), scrollbar-width ${d.bar ? d.bar.sw : '?'}, the minimap's class ${d.bar && d.bar.cls ? 'ON' : 'off'} (put back ${d.readded || 0}× by a redraw, held off), the emulation call ${d.emu ? 'FAILED: ' + d.emu : 'answered'}`;
-      check(`(d5) PRECONDITION: the list's own scrollbar is drawn before the drag — ${barSaid(dg)}`, !!dg.bar && dg.bar.sbw > 0 && dg.bar.over && !dg.bar.cls, { emu: dg.emu, prep: dg.prep, bar: dg.bar, readded: dg.readded });
+      const barSaid = (d) => `its gutter ${d.bar ? d.bar.sbw : '?'} px, the list ${d.bar && d.bar.over ? 'overflowing' : 'NOT overflowing'} (${d.bar ? d.bar.sh + ' over ' + d.bar.ch : '?'} px), scrollbar-width ${d.bar ? d.bar.sw : '?'}, the minimap's class ${d.bar && d.bar.cls ? 'ON' : 'off'} (put back ${d.readded || 0}× by a redraw, held off) — in the second Chrome (no hide flag)`;
+      check(`(d5) PRECONDITION: the list's own scrollbar is drawn before the drag — ${barSaid(dg)}`, !!dg.bar && dg.bar.sbw > 0 && dg.bar.over && !dg.bar.cls, { prep: dg.prep, bar: dg.bar, readded: dg.readded });
       check(`(d5) B-43f3 / r2579: the person drags the list's scrollbar while the put-back's hold is due — its stop is asked (${dg.stops.length}×: ${dg.stops.join(',')}) and it lets go at once: the reader stays where they dragged (${dg.p0.id} at ${dg.after}, dragged to ${dg.dragged}, put back at ${dg.before})`, dg.asked === true && dg.dr.ok === true && !dg.stamped && dg.stops.length >= 1 && dg.stops.every((r) => r === true) && dg.movedByDrag != null && Math.abs(dg.movedByDrag) >= 20 && dg.after != null && Math.abs(dg.after - dg.dragged) <= 4, dg);
-      const dgR = await dragScene({ release: true });
-      check(`(d5) PRECONDITION (the red control's scene): the list's own scrollbar is drawn before the drag — ${barSaid(dgR)}`, !!dgR.bar && dgR.bar.sbw > 0 && dgR.bar.over && !dgR.bar.cls, { emu: dgR.emu, prep: dgR.prep, bar: dgR.bar, readded: dgR.readded });
+      const dgR = await dragScene(B, { release: true });
+      check(`(d5) PRECONDITION (the red control's scene): the list's own scrollbar is drawn before the drag — ${barSaid(dgR)}`, !!dgR.bar && dgR.bar.sbw > 0 && dgR.bar.over && !dgR.bar.cls, { prep: dgR.prep, bar: dgR.bar, readded: dgR.readded });
       check(`(d5) RED CONTROL: the release's hold question (only _navigatedSince) — the drag under the guard is no act, the hold's stop says no (${dgR.stops.length}×) and it pulls the reader back to the put-back's place (${dgR.p0.id} at ${dgR.after}, the put-back's aim ${dgR.aim}, dragged to ${dgR.dragged})`, dgR.asked === true && dgR.dr.ok === true && !dgR.stamped && dgR.stops.length >= 12 && dgR.stops.every((r) => r === false) && dgR.movedByDrag != null && Math.abs(dgR.movedByDrag) >= 20 && dgR.after != null && dgR.aim != null && Math.abs(dgR.after - dgR.aim) <= 4 && Math.abs(dgR.dragged - dgR.aim) >= 20, dgR);
+      B.close(); try { chromeBars.kill('SIGKILL'); } catch { }   // r3653: the second Chrome ended by its own handle (the exit's cleanup removes its profile)
       await A.evalJs(`(() => { document.getElementById('hide16')?.remove(); return 1; })()`);
       await TAIL16(null);
     }
