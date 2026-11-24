@@ -655,8 +655,13 @@ try {
         } finally { clearInterval(mm._sweep); }
       };
       // cure-3 read #2: a LINKED machine's pull on the folder an OFFLINE machine's record holds (a replacement under the same
-      // name lands on the same default mount point) — at boot its heal waits for the offline record's step on that folder
-      const twin = async (MM) => {
+      // name lands on the same default mount point) — at boot its heal waits for the offline record's step on that folder.
+      // B-d033 (lane artifacts-by-intent, 主开发 r3551): the scene waits on FACTS — the offline step entered its gate, the linked heal
+      // read the marks (only _up reads them: counted), then nothing else moves while the gate holds. It counted four loop turns
+      // («every stub answers in microtasks»); since 427fc58ea restore() first awaits a real read of the kept copies (off the loop),
+      // so the count lost whenever that read landed later (8 red of 71 rows, at any load). `copiesHeld` PLACES that read on a hold
+      // opened after the old count's four turns: the old count must read a race there, the facts must not
+      const twin = async (MM, { copiesHeld = false } = {}) => {
         const dataDir = path.join(tmp, 'fcc7-twin-' + Math.random().toString(36).slice(2)); fs.mkdirSync(dataDir, { recursive: true });
         const mpT = path.join(tmp, 'fcc7', 'twin'), g = held(), evs = [];
         fs.writeFileSync(path.join(dataDir, 'machine-mounts.json'), JSON.stringify({ mounts: [
@@ -671,12 +676,19 @@ try {
         clearInterval(mm._sweep);
         mm._pairGraceMs = 0;   // B-844b: the two records are a PAIR on one folder — the grace over, the linked one (it can mount now) holds; this leg is about the ORDER of the steps
         mm._realMp.set('mm-x', path.resolve(mpT)); mm._realMp.set('mm-y', path.resolve(mpT));   // known up front: no realpath child skews the order
+        let markReads = 0;
+        mm._releasing = new (class extends Map { [Symbol.iterator]() { markReads++; return super[Symbol.iterator](); } })();   // restore keeps it (`|| new Map()`)
+        const cp = held();
+        if (copiesHeld) { const rc = mm._copies(); mm._copies = () => ({ ...rc, refresh: () => cp.p.then(() => rc.refresh()) }); }
         try {
           const restored = mm.restore();
-          for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));   // every stub answers in microtasks
+          let before4 = null;
+          if (copiesHeld) { for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r)); before4 = evs.slice(); cp.open(); }   // the OLD clock, judged only here
+          const entered = await until(() => g.at >= 1, 10000), read = await until(() => markReads >= 1, 10000);
+          await quiet(() => evs.length);   // an effect that is NOT coming: nothing else moves while the offline step holds the folder
           const before = evs.slice();
           g.open(); await restored; await until(() => mm._live.has('mm-y'));
-          return { raced: before.length !== 1 || before.includes('mount'), before, live: mm._live.has('mm-y'), evs };
+          return { raced: before.length !== 1 || before.includes('mount'), entered, read, before, ...(copiesHeld ? { oldRaced: before4.length !== 1 || before4.includes('mount'), before4 } : {}), live: mm._live.has('mm-y'), evs };
         } finally { clearInterval(mm._sweep); }
       };
       // cure 4 (the readers' should): the person removes the pull while the mount it ASKED for waits — mountPull / remount
@@ -728,18 +740,23 @@ try {
       const br = await boot(MM3, { removeE: true, readd: true, hangE: true });
       check('B: cure 2 (as if a must) — a pull the person REMOVED while its heal waited for the boot release is never mounted (no rclone, no live entry for a gone record)', !br.mountedE && !br.liveE && br.waited, JSON.stringify(br));
       check('B: cure 3 (the cure-2 read #3, #6) — the same folder added again meanwhile (a NEW record) waits for the boot\'s step on that folder, then mounts; the removed record\'s hung step leaves no words', !br.racedF && br.liveF && br.fAfter && !br.wordsE, JSON.stringify(br));
-      const lg = await landGone(MM3), wh = await wordsGone(MM3, 'heal'), wb = await wordsGone(MM3, 'boot'), tw = await twin(MM3);
+      const lg = await landGone(MM3), wh = await wordsGone(MM3, 'heal'), wb = await wordsGone(MM3, 'boot'), tw = await twin(MM3), twh = await twin(MM3, { copiesHeld: true });
       const ap = await removedAsk(MM3, 'pull'), ar = await removedAsk(MM3, 'remount'), ah = await removedAsk(MM3, 'pull', 'hung'), am = await removedAsk(MM3, 'remount', 'mark');
       check('B: cure 4 (the readers\' should) — the person removes the pull while the mount it asked for waits: mountPull and remount refuse with the removal\'s words (mount_removed), never a 200 with live:false — and nothing of it stays mounted', ap.code === 'mount_removed' && ar.code === 'mount_removed' && !ap.live2 && !ar.live2, JSON.stringify({ ap, ar }));
       check('B: cure 4 (its read #3, #4, #6) — the same when the road THREW first (a hung release: never the stale «could not release» words) and when the boot\'s mark held the folder; the person\'s own removal is no failure event', ah.code === 'mount_removed' && am.code === 'mount_removed' && !ap.failedEvent && !ah.failedEvent, JSON.stringify({ ah, am }));
       check('B: cure 3 (the cure-3 read #2) — every offline mark is set BEFORE a linked machine heals: its pull on the same folder waits for the offline record\'s step, then mounts', tw.raced === false && tw.live === true, JSON.stringify(tw));
+      check('B: cure 3 (the cure-3 read #2) under a PLACED hold of the kept copies\' read restore() awaits first (B-d033) — four loop turns read a race although the order is right (the old clock lost); the scene\'s facts (its gate entered, the marks read, nothing else moving) do not',
+        twh.oldRaced === true && twh.raced === false && twh.live === true && twh.entered === true && twh.read === true, JSON.stringify(twh));
       check('B: cure 3 (the cure-2 read #4) — a pull removed WHILE its mount is being made: the mount lets go when it lands, no live entry for a gone record', lg.torn === 1 && lg.live === false, JSON.stringify(lg));
       check('B: cure 3 (the cure-2 read #6) — a pull removed WHILE its release hangs gets no «could not release» words back, on the heal\'s road and on the boot\'s', wh === false && wb === false, JSON.stringify({ wh, wb }));
       if (MG) {
         const bc = await mcut('gone1', () => boot(MG, { removeE: true })), bi = await mcut('byId', () => boot(MG, { removeE: true, readd: true }));
         const lc = await mcut('gone2', () => landGone(MG)), w1 = await mcut('words1', () => wordsGone(MG, 'heal')), w2 = await mcut('words2', () => wordsGone(MG, 'boot'));
         // (the «heal before the marks» cut's control is gone with B-844b r4: _up AWAITS the pair check before it reads the marks, so a heal
-        // reads them only after restore set them — the order is structural now; the twin leg above holds the outcome)
+        // reads them only after restore set them — the order is structural now; the twin leg above holds the outcome. B-d033: the twin's
+        // own red is the «heal does not wait» cut below)
+        const tc = await mcut('wait', () => twin(MG));
+        check('CONTROL (B-d033, the heal does not wait for the boot release): the twin scene reads the race — the linked pull releases and mounts while the offline record\'s step still holds the folder (red)', tc.raced === true && tc.read === true, JSON.stringify(tc));
         const cp = await mcut('asked', () => removedAsk(MG, 'pull')), cr = await mcut('asked', () => removedAsk(MG, 'remount'));
         const ct = await mcut('askedThrow', () => removedAsk(MG, 'pull', 'hung')), cq = await mcut('quiet', () => removedAsk(MG, 'pull'));
         check('CONTROL (no check after the asked mount / the road\'s own throw passed on / the removal logged as a failure): live:false for the removed pull / the stale «could not release» refusal / a failure event (red)',
