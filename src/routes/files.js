@@ -358,7 +358,10 @@ router.get('/api/dir-complete', async (req, res) => {
     return;
   }
   const input = req.query.path || '';
-  const timeout = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [] }); }, 500);
+  // row B-422c, second half (主开发 r3499 / r3507; lane mask-value-shape): the legacy local answer NAMES a refusal, as the remote one
+  // does — its bound is `partial` with its words, a refusal is its error and code; only a parent that does not exist (ENOENT /
+  // ENOTDIR) is a plain empty answer («nothing matches» is true then). The reply gains fields and loses none.
+  const timeout = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [], partial: true, error: 'storage did not answer in time — try again in a moment' }); }, 500);
 
   try {
     const expanded = expandTilde(input);
@@ -378,9 +381,12 @@ router.get('/api/dir-complete', async (req, res) => {
     }
     clearTimeout(timeout);
     if (!res.headersSent) res.json({ suggestions: dirs });
-  } catch {
+  } catch (e) {
     clearTimeout(timeout);
-    if (!res.headersSent) res.json({ suggestions: [] });
+    if (res.headersSent) return;
+    if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return res.json({ suggestions: [] });
+    const down = e && (e.code === 'no-worker' || e.code === 'no-idle-worker' || e.safeFsTimeout === true);
+    res.json({ suggestions: [], error: down ? (e.safeFsTimeout === true && !e.noWorker ? 'storage did not answer in time — try again in a moment' : 'not read now: its reader is restarting — try again in a moment') : String((e && e.message) || e).slice(0, 120), code: (e && e.code) || (e && e.safeFsTimeout ? 'timeout' : 'error') });
   }
 });
 
@@ -696,9 +702,14 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
   try { clientNames = JSON.parse(req.body.fileNames || '[]'); } catch {}
   // Remote upload: stream each temp file to the host over ssh
   const R = rfs(req);
+  // row B-422c, second half (主开发 r3499 / r3507; lane mask-value-shape): a refusal at file k of n says what LANDED before it — `landed`
+  // (files 1..k−1, in order, as a success lists them) and `landedOf` — so the page's retry never places a landed file a second time (the
+  // kept road numbers a same-named file). The reply gains fields and loses none.
+  const landedBody = (results, dir) => (results && results.length ? { landed: results, landedOf: (req.files || []).length, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir } : {}) } : {});
+  let landedL = null, landedDir = null;
   if (R) {
     try {
-      const results = [];
+      const results = []; landedL = results;
       if (keepWithConv && REMOTE_TEMP_RE.test(String(destDir))) {   // road a, a remote host: its own persistent folder, absolute
         const home = String(await R.fs.home(R.host) || '').replace(/\/+$/, '');
         if (home) { keptFrom = destDir; destDir = `${home}/.vibespace/chat-attachments/${conv}`; await R.fs.mkdir(R.host, destDir); }
@@ -721,11 +732,11 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
       return res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destDir } : {}) });
     } catch (e) {
       for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
-      return res.status(400).json(fsErrorBody(e));   // B-7f0b D8: a refusal by code (a file over the device link's line) is worded on the page
+      return res.status(400).json({ ...fsErrorBody(e), ...landedBody(landedL, destDir) });   // B-7f0b D8: a refusal by code (a file over the device link's line) is worded on the page
     }
   }
   try {
-    const results = [];
+    const results = []; landedL = results;
     let destRoot = path.resolve(expandTilde(destDir)); // chat.uploadDir may be ~/Downloads
     if (keepWithConv && underTempRoot(destRoot, req.app.locals.chatTempRoots || TEMP_ROOTS())) { keptFrom = destRoot; destRoot = path.join(req.app.locals.chatAttachmentsRoot || ATTACH_ROOT, conv, 'files'); }   // road a: kept with the conversation (a gate's root: app.locals.chatAttachmentsRoot)
     // B-fcc7 (read 5): an upload ADDS to its folder — a machine's pull folder that is not mounted refuses it (its multipart destDir
@@ -734,6 +745,7 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
     if (pullUp) throw Object.assign(new Error(pullShadowBody(pullUp).error), { status: 503, pullBody: pullShadowBody(pullUp) });
     // dest side may be a mount → all dest-touching fs ops go through SafeFs.
     // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
+    landedDir = destRoot;
     await sfs(req).call('mkdir', { path: destRoot }); // ensure target exists (plain-file uploads to a fresh dir)
     // lane chat-attachments-persist: on the KEPT road a same-named file (or folder) is never overwritten — «name (1).ext»;
     // anywhere else an upload replaces a same-named file, as it always did
@@ -776,7 +788,7 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)
     for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
-    res.status(err.status || 400).json(err.pullBody || { error: err.message });   // B-fcc7: a pull folder's refusal keeps its code
+    res.status(err.status || 400).json({ ...(err.pullBody || { error: err.message }), ...landedBody(landedL, landedDir) });   // B-fcc7: a pull folder's refusal keeps its code
   }
 });
 

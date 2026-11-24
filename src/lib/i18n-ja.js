@@ -12245,6 +12245,8 @@ export default {
   "the group's first folder": "タスクグループの最初のフォルダー", // lane task-group-context
   "Not found right now": "現在見つかりません", // lane task-group-context
   "Its storage is not answering": "その保存先が応答していません", // lane task-group-context
+  "Not read now: its storage did not answer in time — look again in a moment": "今は読めていません：保存先が時間内に応答しませんでした — 少ししてからもう一度ご覧ください", // lane mask-value-shape B-422c
+  "Not read now: its reader is restarting — look again in a moment": "今は読めていません：読み取り処理が再起動中です — 少ししてからもう一度ご覧ください", // lane mask-value-shape B-422c
   "On the machine {host}: told only to conversations opened there": "{host} 上：そのマシンで開いた会話にだけ伝えます", // lane task-group-context
   "Not applied: {path} was not found — the row keeps {old}": "未反映：{path} が見つかりません —— この行は {old} のままです", // lane task-group-context
   "What this path is for (one line)": "このパスの用途（一行で）", // lane task-group-context

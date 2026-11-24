@@ -12246,6 +12246,8 @@ export default {
   "the group's first folder": "任务组的第一个文件夹", // lane task-group-context
   "Not found right now": "现在找不到", // lane task-group-context
   "Its storage is not answering": "它所在的存储没有响应", // lane task-group-context
+  "Not read now: its storage did not answer in time — look again in a moment": "暂未读取：它所在的存储没有及时回应——请稍后再看", // lane mask-value-shape B-422c
+  "Not read now: its reader is restarting — look again in a moment": "暂未读取：读取进程正在重启——请稍后再看", // lane mask-value-shape B-422c
   "On the machine {host}: told only to conversations opened there": "在 {host} 上：只告诉在那台机器上开的会话", // lane task-group-context
   "Not applied: {path} was not found — the row keeps {old}": "未生效：找不到 {path} —— 这一行仍是 {old}", // lane task-group-context
   "What this path is for (one line)": "这个路径管什么（一句话）", // lane task-group-context

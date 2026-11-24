@@ -168,6 +168,13 @@ const sigEsc = (p) => p.replace(/%/g, '%25').replace(/\|/g, '%7C');
 // a told file is read up to this many bytes (a bigger one never fits a budget whole — it steps down)
 const READ_CAP = 64 * 1024;
 // the four depths in the agent's words (a stepped row's line names both)
+// row B-422c, second half (主开发 r3499 / r3507; lane mask-value-shape): a storage fact refused BY THE OFF-THREAD READER (its worker
+// restarting after a deadline — SafeFs no-worker / no-idle-worker —, no reader wired, or its own read past the deadline) is UNKNOWN,
+// never a fact about the folder or the file: «not read now», with why, never «empty», «absent» or «not answering». A refusal the
+// STORAGE gave (EIO, EACCES) stays blocked; ENOENT stays missing. → 'restarting' | 'slow' | null
+const READER_DOWN = new Set(['no-worker', 'no-idle-worker', 'no-reader']);
+const readerDownWhy = (f) => (!f || f.ok || f.pending ? null : f.timedOut || f.code === 'timeout' ? 'slow' : READER_DOWN.has(f.code) ? 'restarting' : null);
+const NOT_READ_WORDS = { restarting: 'its reader is restarting', slow: 'its storage did not answer in time' };
 const TELL_WORDS = { note: 'the path and note only', names: 'file names', index: 'file names + key files', contents: 'full contents' };
 // the unclaimed-HIGH reminder line's TEXT budget in BYTES (CJK = 3 B/char), shared by every group of one injection
 const HIGH_LINE_TEXT_BYTES = 600;
@@ -866,7 +873,12 @@ class TaskGroupManager {
   }
 
   _listContextFiles(dir, cap = 100) {
-    if (SP.storageRootOf(dir)) { const f = this._facts.get('contextFiles', { path: dir, cap }); return f.ok && Array.isArray(f.result) ? f.result : []; }
+    if (SP.storageRootOf(dir)) {
+      const f = this._facts.get('contextFiles', { path: dir, cap });
+      if (f.ok) return Array.isArray(f.result) ? f.result : [];
+      if (f.pending || readerDownWhy(f)) { this._lastUnknown = f.pending ? 'pending' : readerDownWhy(f); return null; }   // B-422c: UNKNOWN, never []
+      return [];
+    }
     const out = [];
     const walk = (d, rel, depth) => {
       if (out.length >= cap || depth > 4) return;
@@ -902,7 +914,9 @@ class TaskGroupManager {
     if (hit && Date.now() - hit.at < 4000) return hit.sig;
     // Path is escaped (% then |) so renderContextDiff can parse entries back
     // out of the joined string — a raw '|' in a filename would shear the entry.
-    const sig = this._listContextFiles(dir, 200)
+    const listed = this._listContextFiles(dir, 200);
+    if (listed == null) return hit ? hit.sig : '';   // B-422c: a listing not read now keeps the last signature, never an empty one
+    const sig = listed
       .map((f) => `${f.path.replace(/%/g, '%25').replace(/\|/g, '%7C')}:${f.size}:${Math.round(f.mtime || 0)}`)
       .join('|');
     this._sigCache.set(dir, { sig, at: Date.now() });
@@ -923,9 +937,10 @@ class TaskGroupManager {
     if (typeof abs !== 'string' || !path.isAbsolute(abs)) return 'missing';
     if (DOOR.blocked(abs)) return 'blocked';
     if (SP.storageRootOf(abs)) {
-      const f = this._facts.get('stat', { path: abs });
+      const f = this._facts.get('stat', { path: abs }), why = this._noteRead(abs, f);   // B-422c: what this read is, kept for the words
       if (f.pending) return 'reading';
       if (f.ok) return f.result.isDirectory ? 'dir' : f.result.isFile ? 'file' : 'missing';
+      if (why) return 'reading';   // B-422c: the reader refused — not read now, never «not answering»
       return f.code === 'ENOENT' || f.code === 'ENOTDIR' ? 'missing' : 'blocked';
     }
     try { const st = fs.statSync(abs); return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'missing'; } catch { return 'missing'; }
@@ -1016,8 +1031,17 @@ class TaskGroupManager {
   // a row's stat, behind the mount door (B-afc4: a blocked mount is answered, never read) — null when blocked / gone
   _stat(abs) {
     if (DOOR.blocked(abs)) return null;
-    if (SP.storageRootOf(abs)) { const f = this._facts.get('stat', { path: abs }); return f.ok ? { size: f.result.size, mtimeMs: f.result.mtimeMs, isDirectory: () => !!f.result.isDirectory, isFile: () => !!f.result.isFile } : null; }
+    if (SP.storageRootOf(abs)) { const f = this._facts.get('stat', { path: abs }); this._noteRead(abs, f); return f.ok ? { size: f.result.size, mtimeMs: f.result.mtimeMs, isDirectory: () => !!f.result.isDirectory, isFile: () => !!f.result.isFile } : null; }
     try { return fs.statSync(abs); } catch { return null; }
+  }
+  // B-422c: a storage path NOT READ NOW (its fact pending, or refused by the reader) → its why ('pending' | 'restarting' | 'slow'),
+  // else null — what the readers above RECORDED from the fact they read (no second read, nothing asked of the mount here)
+  _notReadOf(abs) { return (this._notReadWhy && this._notReadWhy.get(abs)) || null; }
+  _noteRead(abs, f) {
+    const why = f.pending ? 'pending' : readerDownWhy(f);
+    if (!this._notReadWhy) this._notReadWhy = new Map();
+    if (why) { if (this._notReadWhy.size > 512) this._notReadWhy.clear(); this._notReadWhy.set(abs, why); } else this._notReadWhy.delete(abs);
+    return why;
   }
 
   // a listed folder's files, path order (≤ WALK_DEPTH deep, ≤ WALK_CAP; `over` = more were there) — cached 4 s per folder;
@@ -1030,6 +1054,8 @@ class TaskGroupManager {
     // lane task-group-fanout: a hook-path reader with an off-thread reader wired never walks here — the last listing, said
     if (offLoop && this._sigReader()) return { ...(hit ? hit.w : { files: [], over: false }), reading: true };
     const files = this._listContextFiles(dir, WALK_CAP + 1);
+    // B-422c (r3507 hold 1): a listing NOT READ NOW is never cached as empty — the LAST READ one is kept, marked with its why and its age
+    if (files == null) return { ...(hit ? hit.w : { files: [], over: false }), reading: true, notRead: this._lastUnknown || 'pending', readAt: hit ? hit.at : null };
     const w = { files: files.slice(0, WALK_CAP), over: files.length > WALK_CAP };
     if (this._walkCache.size > 256) this._walkCache.clear();
     this._walkCache.set(dir, { w, at: Date.now() });
@@ -1041,7 +1067,8 @@ class TaskGroupManager {
     if (SP.storageRootOf(abs) && !DOOR.blocked(abs)) {
       const f = this._facts.get('textHead', { path: abs, cap: READ_CAP });
       if (f.ok) return f.result;
-      return { text: '', size: 0, binary: false, big: false, reading: !!f.pending, missing: f.code === 'ENOENT', blocked: !f.pending && f.code !== 'ENOENT' };
+      const down = readerDownWhy(f);   // B-422c: the reader refused — reading (not read now), never blocked
+      return { text: '', size: 0, binary: false, big: false, reading: !!f.pending || !!down, missing: f.code === 'ENOENT', blocked: !f.pending && !down && f.code !== 'ENOENT' };
     }
     const st = this._stat(abs);   // the mount door is asked there, BEFORE any read
     if (!st) return { text: '', size: 0, binary: false, big: false, blocked: DOOR.blocked(abs), missing: !DOOR.blocked(abs) };
@@ -1179,6 +1206,7 @@ class TaskGroupManager {
     if (!x || (!x.abs && x.kind === 'missing')) state = ' — not there now';
     else if (x.kind === 'missing') state = ' — not there now';
     else if (x.kind === 'blocked') state = ' — its storage is not answering, not read';
+    else if (x.kind === 'reading' && NOT_READ_WORDS[this._notReadOf(x.abs)]) state = ` — not read now (${NOT_READ_WORDS[this._notReadOf(x.abs)]}): it is read again at the next ask`;   // B-422c
     else if (x.kind === 'reading') state = ' — on a storage mount, read off the main loop: its first answer has not landed yet';
     else if (x.kind === 'remote') state = ` — a folder on the machine "${agentLine(x.host)}": told only to conversations opened there`;
     const told = full ? ` [told: ${TELL_WORDS[TC.chosenTell(r, x && x.kind)]}]` : '';
@@ -1197,7 +1225,8 @@ class TaskGroupManager {
     // the bytes files not yet read would add (their size + a header line + the quote marks, about 1 in 16 bytes a line)
     const estimate = (files) => files.reduce((n, f) => n + (f.size || 0) + Math.ceil((f.size || 0) / 16) + B([`  ${f.path} (00.0 KB):`]), 0);
     if (x.kind === 'file') {
-      if (level === 'names') { const st = this._stat(x.abs); const l = `${head} — ${kb(st ? st.size : 0)}`; return { lines: [l], bytes: B([l]) }; }
+      // B-422c: a told file's size not read now is said so, never «0 B»
+      if (level === 'names') { const st = this._stat(x.abs), nr = !st && this._notReadOf(x.abs); const l = `${head} — ${st ? kb(st.size) : nr ? `size not read now (${NOT_READ_WORDS[nr] || 'its first answer has not landed yet'})` : kb(0)}`; return { lines: [l], bytes: B([l]) }; }
       const f = this._readText(x.abs);
       if (f.big || f.missing || f.blocked || f.reading) return { lines: [head], bytes: Infinity };
       if (f.binary) { const l = `${head} — ${kb(f.size)}, binary (not shown)`; return { lines: [l], bytes: B([l]) }; }
@@ -1207,6 +1236,11 @@ class TaskGroupManager {
     const w = this._walk(x.abs);
     if (w.over) return { lines: [head], bytes: Infinity, over: true };
     const names = w.files.map((f) => `  - ${agentLine(f.path)} (${kb(f.size)})`);
+    if (w.notRead) {   // B-422c (r3507 hold 1): not read now — the last read listing, said as such with its age; no file of it is read
+      const why = NOT_READ_WORDS[w.notRead] || 'its first answer has not landed yet', n = w.files.length;
+      const ls = [`${head} — not read now (${why}): ${w.readAt ? `the listing below is the LAST READ one, ${Math.max(0, Math.round((Date.now() - w.readAt) / 1000))} s ago — ${n} file${n === 1 ? '' : 's'}` : 'no listing read yet'}; ask again in a moment`, ...(w.readAt ? names : [])];
+      return { lines: ls, bytes: B(ls), files: n };
+    }
     if (level === 'names') {
       const ls = [`${head} — ${w.files.length} file${w.files.length === 1 ? '' : 's'} below (paths relative to it), read what you need:`, ...names];
       return { lines: ls, bytes: B(ls), files: w.files.length };
@@ -1318,8 +1352,8 @@ class TaskGroupManager {
   _syncSig(t, key) {
     const parts = [];
     for (const j of this._sigJobs(t)) {
-      if (j.kind === 'file') { const st = this._stat(j.abs); if (st) parts.push(`${sigEsc(j.abs)}:${st.size}:${Math.round(st.mtimeMs || 0)}`); }
-      else for (const f of this._walk(j.abs, { fresh: true }).files) parts.push(`${sigEsc(j.abs + '/' + f.path)}:${f.size}:${Math.round(f.mtime || 0)}`);
+      if (j.kind === 'file') { const st = this._stat(j.abs); if (!st && this._notReadOf(j.abs)) return null; if (st) parts.push(`${sigEsc(j.abs)}:${st.size}:${Math.round(st.mtimeMs || 0)}`); }
+      else { const w = this._walk(j.abs, { fresh: true }); if (w.notRead) return null; for (const f of w.files) parts.push(`${sigEsc(j.abs + '/' + f.path)}:${f.size}:${Math.round(f.mtime || 0)}`); }   // B-422c: a listing not read now is no fact
     }
     const sig = parts.join('|');
     this._sigPut(key, { sig, at: Date.now() });
@@ -1361,7 +1395,7 @@ class TaskGroupManager {
     };
     if (after != null) return hit && (hit.gen || 0) > after ? take(hit) : { sig: hit ? hit.sig : '', stale: true };
     if (hit && Date.now() - hit.at < 4000) return take(hit);
-    if (!this._sigReader()) return { sig: this._syncSig(t, key), stale: false };
+    if (!this._sigReader()) { const sg = this._syncSig(t, key); return sg == null ? { sig: hit ? hit.sig : '', stale: true } : { sig: sg, stale: false }; }   // B-422c: a fact not read now defers, as the off-thread road does
     return { sig: hit ? hit.sig : '', stale: true };
   }
   /** the landing count a stale mark records (signatureFact `after`) */
@@ -1437,12 +1471,13 @@ class TaskGroupManager {
     const rows = [];
     // lane task-group-fanout: `offLoop` (the agent route, after readWalks) — a folder still being read is listed as last
     // read and SAID (its note), never walked on the main thread
-    const said = (note, w) => (w.reading ? `${note ? note + ' — ' : ''}(still being read: a slow folder — ask again in a moment)` : note);
+    const said = (note, w) => (w.notRead ? `${note ? note + ' — ' : ''}(not read now: ${NOT_READ_WORDS[w.notRead] || 'its first answer has not landed yet'} — ${w.readAt ? `the files are the LAST READ listing, ${Math.max(0, Math.round((Date.now() - w.readAt) / 1000))} s ago` : 'no listing read yet'}; ask again in a moment)`   // B-422c
+      : (w.reading ? `${note ? note + ' — ' : ''}(still being read: a slow folder — ask again in a moment)` : note));
     for (const it of this._toldRows(t)) {
       if (it.head || it.gone || !it.x || !it.x.abs) continue;
       const shown = this._shown(it.x, ctxBase, notesAbs);
       if (it.x.kind === 'dir') { const w = this._walk(it.x.abs, { offLoop }); rows.push({ path: shown, note: said(it.row.note || '', w), files: w.files.map((f) => ({ path: shown + '/' + f.path, size: f.size })) }); }
-      else if (it.x.kind === 'file') { const st = this._stat(it.x.abs); rows.push({ path: shown, note: it.row.note || '', files: [{ path: shown, size: st ? st.size : 0 }] }); }
+      else if (it.x.kind === 'file') { const st = this._stat(it.x.abs), nr = !st && this._notReadOf(it.x.abs); rows.push({ path: shown, note: nr ? `${it.row.note ? it.row.note + ' — ' : ''}(size not read now: ${NOT_READ_WORDS[nr] || 'its first answer has not landed yet'}; ask again in a moment)` : it.row.note || '', files: [{ path: shown, size: st ? st.size : nr ? null : 0 }] }); }   // B-422c: never size 0 for a size not read
     }
     const base = notesAbs ? (ctxBase || notesAbs) : null;
     return { dir: base, files: notesAbs ? this._walk(notesAbs, { offLoop }).files.map((f) => ({ path: base + '/' + f.path, size: f.size })) : [], rows };
@@ -2702,7 +2737,7 @@ class TaskGroupManager {
       // a parent pick that would close a cycle from these, so it never re-implements the walk
       ancestors: this.ancestorsOf([t.id]), descendants: this._descendantsOf(t.id),
       ctx: rows.map((r) => ({ ...r, ...(r.tags ? { tags: [...r.tags] } : {}) })),
-      ctxRes: res.map((x) => (x.ref ? { ref: true } : { abs: x.abs || null, kind: x.kind, via: x.via || null, ...(x.host ? { host: x.host } : {}) })),
+      ctxRes: res.map((x) => (x.ref ? { ref: true } : { abs: x.abs || null, kind: x.kind, via: x.via || null, ...(x.host ? { host: x.host } : {}), ...(x.kind === 'reading' && NOT_READ_WORDS[this._notReadOf(x.abs)] ? { why: this._notReadOf(x.abs) } : {}) })),   // B-422c: the page words a reader refusal
       folders: TC.discoverFolders(rows, res), contextDir: TC.notesDir(rows, res),
       ...this.visibilityOf(t.id),   // int346: lane grants-unify's outside visibility (rows of the grants store) rides this ONE wire shape
     };

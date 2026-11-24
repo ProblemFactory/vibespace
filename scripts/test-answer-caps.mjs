@@ -254,7 +254,7 @@ console.log('⑤ the page: the Files view words the refusal by its code');
   ok(!!w2.r && w2.r.success === true && !!w3.e && /No space left/.test(w3.e.message) && !fsErrorBody(w3.e).code && !!w4.e && /^device link lost/.test(w4.e.message) && w4.sshTried === 0 && w4.e.writeUnknown === true && !!w5.e && /No space left/.test(w5.e.message) && w5.sshTried === 1,
     'a machine WITH an ssh road: that road writes it (the working road kept), and when it fails its OWN words are said (a full disk is never hidden behind the line\'s refusal); B-23e5 r2299 A4: a write the device was SENT (its link lost after) takes NO second road and is UNKNOWN; one refused before sending (not connected) falls to the ssh road', { w2: w2.r, w3: w3.e && w3.e.message, w4: w4.e && w4.e.message, w5: w5.e && w5.e.message });
   const UP = read('src/routes/files.js');
-  ok(UP.includes("      return res.status(400).json(fsErrorBody(e));   // B-7f0b D8: a refusal by code"), 'the upload road answers a refusal by its code too (the explorer\'s upload words it with fsErrorText)');
+  ok(UP.includes("      return res.status(400).json({ ...fsErrorBody(e), ...landedBody(landedL, destDir) });   // B-7f0b D8: a refusal by code"), 'the upload road answers a refusal by its code too (the explorer\'s upload words it with fsErrorText) — with the files that landed before it beside the body (B-422c)');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

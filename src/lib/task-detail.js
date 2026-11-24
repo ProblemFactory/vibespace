@@ -218,6 +218,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     if (x && VIA[x.via] && VIA[x.via]()) resWords.push(VIA[x.via]());
     if (kind === 'missing') resWords.push(t('Not found right now'));
     else if (kind === 'blocked') resWords.push(t('Its storage is not answering'));
+    else if (kind === 'reading' && x && (x.why === 'restarting' || x.why === 'slow')) resWords.push(x.why === 'slow' ? t('Not read now: its storage did not answer in time — look again in a moment') : t('Not read now: its reader is restarting — look again in a moment'));   // B-422c: a reader refusal, never «not answering»
     else if (kind === 'remote') {
       // B-06de cure (WITH IT): the machine by its NAME; an id the machines list does not hold is said as such, with its door (a list
       // not here yet says the id, never «not paired»)

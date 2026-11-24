@@ -554,7 +554,7 @@ console.log('④ the conversions: a storage path is never read on the main threa
   const k0 = tgm._kindOf(sc), r0 = tgm._readText(path.join(sc, 'NOTES.md')), w0 = tgm._listContextFiles(sc, 100);
   await tgm._facts.settled();
   const k1 = tgm._kindOf(sc), r1 = tgm._readText(path.join(sc, 'NOTES.md')), w1 = tgm._listContextFiles(sc, 100);
-  ok(k0 === 'reading' && r0.reading === true && Array.isArray(w0) && !w0.length, `before the first off-thread answer: the row is 'reading', the file not read, the walk empty (${k0})`);
+  ok(k0 === 'reading' && r0.reading === true && w0 === null, `before the first off-thread answer: the row is 'reading', the file not read, the listing NOT KNOWN (null — never an empty list, B-422c) (${k0})`);
   ok(k1 === 'dir' && r1.text === '# the notes\n' && w1.length === 4 && tgm._kindOf(path.join(store, 'nope')) === 'reading', `after it lands: dir, the file's text, the 4 files — every answer a SafeFs fact (${k1}, ${w1.length} files)`);
   ok(tgm.groupsForSession({ cwd: path.join(store, 'proj') }).length === 0 && !tgm._realCache?.has(path.join(store, 'proj')), 'a session cwd on the storage root is never realpathed (the cwd itself matches; not cached)');
   ok(SS.recoverCwdFromProjDir(path.join(store, 'ctx', 'sub').replace(/[/._]/g, '-')).startsWith(store), `the project-dir decode takes the mount point as there and never probes below it (${SS.recoverCwdFromProjDir(path.join(store, 'ctx', 'sub').replace(/[/._]/g, '-'))})`);

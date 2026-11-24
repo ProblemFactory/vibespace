@@ -428,7 +428,12 @@ function handover({ from = {}, to = [], items = [], reach = null, at = Date.now(
 // ── WHAT AN ASK SHOWS (lane foryou-attachments, owner 2026-10-09 21:42Z, binding: "artifact attachment 必须要在 agent 提交的时候
 // 检查 validity，确保用户收到的时候可以打开，不然就提醒 agent 重发") ──
 const ASK_MANIFEST = 'design.json'; // src/design-model.js MANIFEST_FILE — a design folder is one that holds it
-const errWhy = (e) => { const s = String((e && (e.code || '')) + ' ' + ((e && e.message) || '')); return /EACCES|EPERM|permission denied/i.test(s) ? 'unreadable' : /ENOENT|ENOTDIR|no such file|not found/i.test(s) ? 'missing' : 'unopenable'; };
+// row B-422c, second half (主开发 r3499 / r3507; lane mask-value-shape): a refusal BY THE READER (SafeFs's worker restarting after a
+// deadline — no-worker / no-idle-worker —, or its own deadline) is no fact about the attachment: «not checked now — run vibespace-ask
+// again», never «a folder without design.json» or «check the path». The agent's words: English, untranslated.
+const readerDown = (e) => !!e && (e.code === 'no-worker' || e.code === 'no-idle-worker' || e.noWorker === true || e.safeFsTimeout === true || e.code === 'timeout');
+const NOT_CHECKED = (e) => (e && (e.safeFsTimeout === true || e.code === 'timeout') && e.noWorker !== true ? 'its storage did not answer in time' : 'its reader is restarting');
+const errWhy = (e) => { const s = String((e && (e.code || '')) + ' ' + ((e && e.message) || '')); if (readerDown(e)) return 'try-again'; return /EACCES|EPERM|permission denied/i.test(s) ? 'unreadable' : /ENOENT|ENOTDIR|no such file|not found/i.test(s) ? 'missing' : 'unopenable'; };
 /** THE SUBMIT JUDGE: every --artifact must OPEN for the owner — a file exists and is readable on the ASKING conversation's
  *  host (a remote host through RemoteFs `info`, never a local stat of a remote path; locally the SafeFs door: `stat`, then a
  *  one-byte `readChunk` = R_OK; a link whose target is gone fails the stat), a folder only as a design (its design.json
@@ -468,14 +473,22 @@ async function judgeAsk({ session = null, items = [], fsCall = null, remote = nu
     let r;
     try { r = await probe(p); } catch (e) {
       const why = errWhy(e);
-      bad.push({ item, why, error: why === 'missing' ? `${item}: no such file ${where} — check the path (absolute against your shell's cwd); a link whose target is gone counts as missing`
+      bad.push({ item, why, error: why === 'try-again' ? `${item}: not checked now (${NOT_CHECKED(e)}) — run vibespace-ask again in a moment`
+        : why === 'missing' ? `${item}: no such file ${where} — check the path (absolute against your shell's cwd); a link whose target is gone counts as missing`
         : why === 'unreadable' ? `${item}: not readable ${where} (permission denied) — make it readable (chmod a+r) or attach a readable copy`
         : `${item}: cannot be opened ${where} (${String((e && e.message) || e).slice(0, 160)}) — check the path and run vibespace-ask again` });
       continue;
     }
     if (r.dir) {
       try { const m = await probe(p + '/' + ASK_MANIFEST); if (m.dir) throw Object.assign(new Error('a folder'), { code: 'ENOENT' }); }
-      catch { bad.push({ item, why: 'folder', error: `${item}: a folder without ${ASK_MANIFEST} — attach a file in it, or a design folder (vibespace-design new|open makes one)` }); continue; }
+      catch (e) {   // B-422c: the manifest's refusal is judged by its code — only a manifest truly missing is «a folder without design.json»
+        const why = errWhy(e);
+        bad.push(why === 'try-again' ? { item, why, error: `${item}: not checked now (${NOT_CHECKED(e)}) — run vibespace-ask again in a moment` }
+          : why === 'unreadable' ? { item, why, error: `${item}: its ${ASK_MANIFEST} is not readable ${where} (permission denied) — make it readable, or attach a file in it` }
+          : why === 'missing' ? { item, why: 'folder', error: `${item}: a folder without ${ASK_MANIFEST} — attach a file in it, or a design folder (vibespace-design new|open makes one)` }
+          : { item, why, error: `${item}: its ${ASK_MANIFEST} cannot be opened ${where} (${String((e && e.message) || e).slice(0, 160)}) — run vibespace-ask again` });
+        continue;
+      }
       artifacts.push({ kind: 'design', host, path: p, name: AF.baseName(p) });
     } else artifacts.push({ kind: 'file', host, path: p, name: AF.baseName(p) });
   }
