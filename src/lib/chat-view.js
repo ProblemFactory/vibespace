@@ -8251,6 +8251,19 @@ class ChatView {
   _runsAnchor(list) {
     if (this._pinned || !(list.scrollTop > 0)) return null;
     const st = list.scrollTop, end = st + list.clientHeight;
+    // WHILE A SLAB SETTLES ABOVE THE READER the rebuild keeps THE CARD BEING READ still — the settle watch's card (B-3e8b's
+    // remainder, 主开发 r3822: the topmost element kept still moved the read card by what the rebuild changed between them);
+    // outside a slab's life, or with no card (a navigation forgot it, the list let it go), the topmost element as below (B-f1f0)
+    const card = this._gapSettle?.card?.();
+    if (card) {
+      const out = { el: card, delta: card.offsetTop - st, h: card.offsetHeight, below: [], read: true };
+      for (let el = card.nextElementSibling; el; el = el.nextElementSibling) {
+        if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
+        if (el.offsetTop >= end) break;
+        if (el.offsetHeight > 0) out.below.push([el, el.offsetTop - st]);
+      }
+      return out;
+    }
     let out = null;
     for (const el of list.children) {
       if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
@@ -8295,7 +8308,7 @@ class ChatView {
     const stBefore = list.scrollTop;
     this._traceExpect('runsRestore');
     list.scrollTop = keep ? a.offsetTop - keep[1] : a === anchorEl ? a.offsetTop - anchor.delta : a.offsetTop;
-    if (Math.abs(list.scrollTop - stBefore) > 1) { this._listMovedAt = performance.now(); this._trace('runsRestore', { same: a === anchorEl, kept: !!keep, from: Math.round(stBefore), to: Math.round(list.scrollTop) }); } // (B-ef04: a move of the list)
+    if (Math.abs(list.scrollTop - stBefore) > 1) { this._listMovedAt = performance.now(); this._trace('runsRestore', { same: a === anchorEl, kept: !!keep, from: Math.round(stBefore), to: Math.round(list.scrollTop), ...(anchor.read ? { read: true } : {}) }); } // (B-ef04: a move of the list)
   }
 
   _updateRuns() {

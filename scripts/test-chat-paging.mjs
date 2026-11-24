@@ -559,9 +559,12 @@ const runGestures = async (plan, label) => {
     const pt = (await evaljs(WHEEL_POINT_SOURCE(dir, c.notches * c.deltaY))) || { x: cx, y: cy, moved: 0 };
     const reads = globalThis.__notchReads && name === 'gap-up-hold-1' ? globalThis.__notchReads : null;   // §4h's law, per notch
     if (reads) reads.push(await evaljs(NOTCH_READ));
+    if (reads && globalThis.__firstNotchUntil) await evaljs('(() => { const R = window.__ral; if (R) { R.armed = 1; R.landed = 0; R.runs = 0; R.between = []; } const G = window.__grow; if (G) { G.armed = 1; G.landed = 0; } return 1; })()');   // §4h (r3822 / r3898): armed at the hold's start
     for (let i = 0; i < c.notches; i++) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY: dir === 'up' ? -c.deltaY : c.deltaY });
       if (c.gap) await sleep(c.gap);
+      // §4h (主开发 r3822): THE FIRST NOTCH HELD until a placed condition — the race PLACED, never load (law 2)
+      if (reads && i === 0 && globalThis.__firstNotchUntil) { const t = Date.now() + 4000; while (Date.now() < t && !(await evaljs(globalThis.__firstNotchUntil))) await sleep(20); }
       if (reads) reads.push(await evaljs(NOTCH_READ));
     }
     await sleep(c.settle);
@@ -745,7 +748,52 @@ const notchLaw = (reads, notchPx, zoomed = false) => {
   const worst = extras.reduce((m, x) => (x != null && Math.abs(x) > Math.abs(m) ? x : m), 0);
   return { ok: !lost && Math.abs(carried) <= NOTCH_TOL_PX && Math.abs(worst) <= NOTCH_TOL_PX, L, notch: Math.round(np * 10) / 10, carried: Math.round(carried), worst: Math.round(worst), lost, extras: extras.map((x) => (x == null ? 'gone' : Math.round(x))) };
 };
+// B-3e8b's remainder (主开发 r3822): A RUNS REBUILD WHILE THE SLAB SETTLES, PLACED. The natural scene (probe 8: the rebuild re-drew
+// headers on both sides of its anchor) depends on where each run's slab ends (561 rows in one run, 559 in the next: 27 px or 1 px),
+// so the leg places it: once the hold's slab has landed (the first notch held), a 27 px run header stands between the topmost
+// element in view and the card being read; once the browser has painted it, a REAL runs rebuild runs — its first act takes every
+// header away, its last puts its anchor back. Read directly: how far the rebuild moved the card being read, and the topmost
+// element. The control blinds the cure (the rebuild keeps the topmost element, as outside a slab's life).
+const RUNS_PLANTED = (control) => `(() => { const v = window.__v; const R = window.__ral = { armed: 0, landed: 0, landedAt: 0, natural: 0, forcing: 0, step: 0, at: 0, control: ${control ? 1 : 0} };
+  const tr = v._trace.bind(v); v._trace = (tag, d) => { if (tag === 'gapUp:done' && R.armed && !R.landed) { R.landed = 1; R.landedAt = performance.now(); } return tr(tag, d); };
+  // the slab's own first rebuild (debounced, ~200 ms after the landing: it re-draws the headers around the new rows — probe 8) is
+  // let run first and counted; the placed rebuild comes after it, so it takes away the planted header and nothing else
+  const up = v._updateRuns.bind(v); v._updateRuns = function (...a) { if (R.landed && !R.forcing) R.natural++; return up(...a); };
+  return { installed: true }; })()`;
+const RUNS_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.armed = 1; if (!R.landed) return false;
+  const v = window.__v, list = v._messageList, now = performance.now();
+  if (R.step === 0 && !R.natural && now - R.landedAt < 1500) return false;   // the slab's own first rebuild first (bounded)
+  if (R.step === 0) { const st = list.scrollTop, c = window.__notchTop; let t = null;
+    for (const el of list.children) { if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue; if (el.offsetTop + el.offsetHeight <= st) continue; t = el; break; }
+    if (!t || !c || !c.isConnected || t === c || !(t.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING)) { R.step = -1; return true; }
+    const h = document.createElement('div'); h.className = 'chat-run-header'; h.style.flex = 'none'; h.style.height = '27px'; h.style.minHeight = '27px';   /* flex none: kept at its height in the overflowing column list */ t.after(h);
+    R.t = t; R.c = c; R.step = 1; R.at = now; return false; }
+  if (R.step === 1) { if (now - R.at < 120) return false;
+    if (R.control && v._gapSettle) v._gapSettle.card = () => null;
+    const lt = list.getBoundingClientRect().top, c0 = R.c.getBoundingClientRect().top - lt, t0 = R.t.getBoundingClientRect().top - lt;
+    R.forcing = 1; v._updateRuns(); R.forcing = 0;
+    R.cardMoved = Math.round(R.c.getBoundingClientRect().top - lt - c0); R.topMoved = Math.round(R.t.getBoundingClientRect().top - lt - t0); R.alive = !!v._gapSettleRO;
+    R.step = 2; R.at = now; return false; }
+  return R.step < 0 || now - R.at > 120; })()`;
+// B-3e8b's remainder, the second mover (主开发 r3898, placed by probe 10d): A ROW BETWEEN THE VIEWPORT's TOP AND THE CARD BEING READ GROWS
+// BEFORE ANY SCROLL (on the hosted runner its picture loaded inside the first notches): once the hold's slab has landed, the first notch
+// held, one such row grows 209 px (one picture row, measured); the control starts the watch with no reader card (its line the
+// viewport's top, as the release)
+const GROW_PLACED = (control) => `(() => { const v = window.__v, list = v._messageList; const G = window.__grow = { armed: 0, landed: 0, row: null, at: 0 };
+  const tr = v._trace.bind(v); v._trace = (tag, d) => { if (tag === 'gapUp:done' && G.armed) G.landed = 1; return tr(tag, d); };
+  if (${control ? 1 : 0}) { const w = v._watchGapSettle; v._watchGapSettle = function () { return w.call(this, null); }; }
+  return { installed: true }; })()`;
+const GROW_UNTIL = `(() => { const G = window.__grow; if (!G) return false; G.armed = 1; if (!G.landed) return false;
+  if (!G.row) { const list = window.__v._messageList, c = window.__notchTop, st = list.scrollTop;
+    if (c && c.isConnected) for (const el of list.children) { if (el === c) break; if (!el.classList.contains('chat-msg') || el.offsetHeight < 20) continue; if (el.offsetTop >= st + 5 && el.offsetTop + el.offsetHeight <= c.offsetTop - 1) { G.row = el; break; } }
+    if (!G.row) { G.row = 'none'; return true; }
+    const pad = document.createElement('div'); pad.style.height = '209px'; G.row.appendChild(pad); G.at = performance.now(); G.rowAt = Math.round(G.row.offsetTop - st); return false; }
+  return G.row === 'none' || performance.now() - G.at > 150; })()`;
 const BLIND = {
+  'grow placed': GROW_PLACED(false),
+  'grow placed, control': GROW_PLACED(true),
+  'runs placed': RUNS_PLANTED(false),
+  'runs placed, control': RUNS_PLANTED(true),
   "(1')": `(() => { const v = window.__v; v._gapReaderCard = () => null; return { blinded: "(1') no reader read at the insert" }; })()`,
   '(2) off': `(() => { const v = window.__v; v._watchGapSettle = () => { }; return { blinded: '(2) the settle watch: the browser anchoring alone' }; })()`,
   '(2) twice': `(() => { const v = window.__v, w = v._watchGapSettle; v._watchGapSettle = function (...a) { const r = w.apply(this, a); this._messageList.style.overflowAnchor = ''; return r; }; return { blinded: '(2) answered beside the browser anchoring' }; })()`,
@@ -783,6 +831,21 @@ const firstHoldOn = async (label, blind, after) => {
 // landing on it), 200 px taller.
 const READ_TOP = `const list = window.__list, lt = () => list.getBoundingClientRect().top, paint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
   const topCard = () => { const st = list.scrollTop; for (const c of list.children) { const cl = c.classList; if (c._isSeekSentinel || !cl || !cl.contains('chat-msg') || cl.contains('chat-run-header') || cl.contains('chat-run-footer')) continue; if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st + 0.5) return c; } return null; };`;
+const BOTH_RULES = `(async () => { ${READ_TOP}
+  const v = window.__v, R = window.__ral, ral = R ? { landed: R.landed, step: R.step, cardMoved: R.cardMoved ?? null, topMoved: R.topMoved ?? null, alive: !!R.alive } : null; await paint();
+  const topEl = () => { const st = list.scrollTop; for (const el of list.children) { if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue; if (el.offsetTop + el.offsetHeight <= st) continue; return el; } return null; };
+  const off = (el) => el && el.isConnected && el.offsetParent !== null ? el.getBoundingClientRect().top - lt() : null;
+  const rebuild = async (t, c) => { const h = document.createElement('div'); h.className = 'chat-run-header'; h.style.flex = 'none'; h.style.height = '27px'; h.style.minHeight = '27px';   /* flex none: kept at its height in the overflowing column list */ t.after(h); await paint(); await new Promise((r) => setTimeout(r, 120)); await paint();
+    const c0 = off(c), t0 = off(t); v._updateRuns(); return { card: Math.round(off(c) - c0), top: Math.round(off(t) - t0) }; };
+  if (!v._gapSettleRO || !v._gapSettle || !v._gapSettle.card) return { ral, both: { ok: false, why: 'the watch has ended' } };
+  const card = v._gapSettle.card(), t1 = topEl();
+  if (!card || !t1 || card === t1 || !(t1.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING)) return { ral, both: { ok: false, why: 'the card being read is not below the topmost element' } };
+  const inside = await rebuild(t1, card);
+  v._stopGapSettle('leg: the watch has ended'); await paint();
+  const t2 = topEl(); if (!t2 || t2 === card) return { ral, both: { ok: false, why: 'after the watch: the card is the topmost element', inside } };
+  const after = await rebuild(t2, card);
+  return { ral, both: { ok: true, inside, after } };
+})()`;
 const SWAP_ABOVE = `(async () => { ${READ_TOP}
   const v = window.__v; await paint();
   const st = list.scrollTop, top = topCard(); let above = null;
@@ -891,6 +954,47 @@ const searchScene = async (tail, stopFirst = false) => {
   const ct = await firstHold('a carry with a pending change', null, { after: CARRY_SAME_TASK(false) }), cc = await firstHold('a carry with a pending change, control', null, { after: CARRY_SAME_TASK(true) });
   check(`§4h ONE AUTHORITY, A CARRY IN THE TASK OF A PENDING CHANGE: a row above the reading line grew 150 px and a ${ct.after?.carry} px carry landed in the same task — the card at the reading line moved exactly the carry (${ct.after?.moved} px; ± ${NOTCH_TOL_PX}); CONTROL, the watch's flush blinded for that carry: it moved ${cc.after?.moved} px (the growth answered by no one)`, !!ct.after?.ok && Math.abs(ct.after.moved - ct.after.carry) <= NOTCH_TOL_PX && !!cc.after?.ok && Math.abs(cc.after.moved - cc.after.carry) > NOTCH_TOL_PX, JSON.stringify({ leg: ct.after, control: cc.after }));
   // MUST 2 (b): a card above the reading line replaced by a newer, taller version of itself while the watch lives
+  // B-3e8b's REMAINDER (主开发 r3822, measured by probe 8: the landing is exact; 267 ms later a runs rebuild put ITS anchor, the
+  // topmost element, back, and the card being read moved by what the rebuild changed between them — 27 px on the box, 38 px on
+  // the hosted runner, where the rebuild ran inside the first notch). THE LAW: while a slab settles above the reader, a runs
+  // rebuild keeps THE CARD BEING READ still; outside a slab's life the older rule stands (a fold never moves a scrolled reader:
+  // the topmost element keeps its place). THE RACE PLACED: the first notch is held until the slab has landed AND a runs rebuild
+  // has run after it; three fresh pages; the control the same with the rebuild's anchor forced to the topmost element.
+  const RAL = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, cardMoved: R.cardMoved ?? null, topMoved: R.topMoved ?? null, alive: !!R.alive } : null; })()';
+  const placedHold = async (label, control, after = RAL) => {
+    globalThis.__firstNotchUntil = RUNS_UNTIL;
+    try { return await firstHold(label, control ? 'runs placed, control' : 'runs placed', { after }); } finally { globalThis.__firstNotchUntil = null; }
+  };
+  const placed = [], placedCtl = [];
+  for (let k = 1; k <= 3; k++) placed.push(await placedHold(`a runs rebuild inside the first notch, ${k} of 3`, false, k === 1 ? BOTH_RULES : RAL));
+  placedCtl.push(await placedHold('a runs rebuild inside the first notch, control', true));
+  const ralOf = (h) => (h.after && h.after.ral) || h.after || null;
+  // the scene held: the slab landed, the header stood between the topmost element and the card, the rebuild ran while the watch lived
+  const inScene = (h) => { const R = ralOf(h); return !!R && R.landed === 1 && R.step === 2 && R.alive && R.cardMoved != null && R.topMoved != null; };
+  check(`§4h A RUNS REBUILD WHILE THE SLAB SETTLES KEEPS THE CARD BEING READ (主开发 r3822, placed: the first notch held until the slab landed; a 27 px run header between the topmost element and the card, then a real rebuild that takes it away; three fresh pages): ${placed.every(inScene) ? '' : 'PRECONDITION NOT MET (the scene on every page) — '}the card moved ${placed.map((h) => ralOf(h)?.cardMoved).join(' / ')} px, the topmost element ${placed.map((h) => ralOf(h)?.topMoved).join(' / ')} px (± ${NOTCH_TOL_PX})`,
+    placed.every(inScene) && placed.every((h) => Math.abs(ralOf(h).cardMoved) <= NOTCH_TOL_PX && Math.abs(ralOf(h).topMoved - ralOf(h).cardMoved) > NOTCH_TOL_PX), JSON.stringify(placed.map((h) => ralOf(h))));
+  check(`§4h CONTROL: the rebuild keeps the topmost element (the cure blinded) ⇒ the card being read moves by what the rebuild took away between them (${ralOf(placedCtl[0])?.cardMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red`,
+    inScene(placedCtl[0]) && Math.abs(ralOf(placedCtl[0]).cardMoved) > NOTCH_TOL_PX, JSON.stringify(ralOf(placedCtl[0])));
+  // BOTH RULES ON ONE PAGE (r3822 hold 2): the same placed rebuild inside the slab's life keeps the card being read; a moment after
+  // the watch has ended it keeps the topmost element (the older rule, untouched)
+  const both = placed[0] && placed[0].after && placed[0].after.both;
+  check(`§4h BOTH RULES: ${both && both.ok ? '' : 'PRECONDITION NOT MET (' + ((both && both.why) || 'no scene') + ') — '}a rebuild inside the slab's life keeps the card being read (it moved ${both?.inside?.card} px, the topmost element ${both?.inside?.top} px); the same rebuild after the watch ended keeps the topmost element (it moved ${both?.after?.top} px, the card ${both?.after?.card} px; ± ${NOTCH_TOL_PX})`,
+    !!both && both.ok && Math.abs(both.inside.card) <= NOTCH_TOL_PX && Math.abs(both.inside.top) > NOTCH_TOL_PX && Math.abs(both.after.top) <= NOTCH_TOL_PX && Math.abs(both.after.card) > NOTCH_TOL_PX, JSON.stringify(both || null));
+  // THE SECOND MOVER (主开发 r3898): a row between the viewport's top and the card being read grows inside the held first notch, before
+  // any scroll — the watch answers it (its line is the landing reader card's until the first scroll); at the default size and at a
+  // chat font of 16; the control (the watch started with no reader card: the viewport's top as its line) misses by the growth
+  const GROWN = '(() => { const G = window.__grow; return G ? { landed: G.landed, row: G.row === "none" ? "none" : !!G.row, rowAt: G.rowAt ?? null } : null; })()';
+  const growHold = async (label, control, store = null) => {
+    globalThis.__firstNotchUntil = GROW_UNTIL;
+    try { return await firstHold(label, control ? 'grow placed, control' : 'grow placed', { store, after: GROWN }); } finally { globalThis.__firstNotchUntil = null; }
+  };
+  const gr = [await growHold('a row grows between the top and the card inside the first notch', false), await growHold('a row grows between the top and the card inside the first notch, at chat font 16', false, { termFontSize: '16' })];
+  const grc = await growHold('a row grows between the top and the card inside the first notch, control', true);
+  const grew = (h) => !!h.after && h.after.landed === 1 && h.after.row === true && !!h.law && h.law.L === 0;
+  check(`§4h A ROW BETWEEN THE TOP AND THE CARD GROWS BEFORE ANY SCROLL (主开发 r3898): ${gr.every(grew) ? '' : 'PRECONDITION NOT MET (the slab landed and a row between the viewport top and the card grew 209 px inside the held first notch, at both sizes) — '}the card at the reading line moved exactly one notch (carried ${gr.map((h) => h.law.carried).join(' / ')} px at the default size / font 16, the row ${gr.map((h) => h.after?.rowAt).join(' / ')} px below the top; ± ${NOTCH_TOL_PX})`,
+    gr.every(grew) && gr.every((h) => h.law.ok), JSON.stringify(gr.map((h) => ({ law: h.law, after: h.after }))));
+  check(`§4h CONTROL: the watch started with no reader card (its line the viewport top before any scroll) ⇒ the card misses by the row's growth (carried ${grc.law.carried} px; more than ${NOTCH_TOL_PX}) — the leg can go red`,
+    grew(grc) && Math.abs(grc.law.carried ?? 0) > NOTCH_TOL_PX, JSON.stringify({ law: grc.law, after: grc.after }));
   const sw = await firstHold('a card above replaced', null, { after: SWAP_ABOVE });
   check(`§4h ONE AUTHORITY, A CARD REPLACED ABOVE THE READING LINE: the scene held (the watch alive ${sw.after?.alive}, the card ${sw.after?.grew} px taller) and the card at the reading line stayed (${sw.after?.moved} px; ± ${NOTCH_TOL_PX})`, !!sw.after?.ok && sw.after.alive && sw.after.grew >= 150 && Math.abs(sw.after.moved) <= NOTCH_TOL_PX, JSON.stringify(sw.after));
 }
