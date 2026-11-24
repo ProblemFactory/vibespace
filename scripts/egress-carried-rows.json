@@ -1,5 +1,5 @@
 {
- "how": "B-9dd0 (主开发 r1246): the rows whose node children the egress reader MAY carry into — every ci.mjs row the tree's impact scope (affectedSuites over the READERS) does NOT name. A row not listed (a new suite included) reads its children not at all. Derived; scripts/test-egress-census.mjs re-derives it and is red when it drifts. Each row added after the first derivation is listed in `judged` with its judgement (主开发 r2063): whether the suite starts a child, of what kind, and so how the reader holds it.",
+ "how": "B-9dd0 (主开发 r1246): the rows whose node children the egress reader MAY carry into — every ci.mjs row the tree's impact scope (affectedSuites over the READERS) does NOT name. A row not listed (a new suite included) reads its children not at all. Derived; scripts/test-egress-census.mjs re-derives it and is red when it drifts. Each row added after the first derivation is listed in `judged` with its judgement (主开发 r2063): whether the suite starts a child, of what kind, and so how the reader holds it. A program under data/bin that reads a command line (data/bin/job-wrapper.js since line 762, B-d8f4) is driven, by the impact scope's own rule («a program the product spawns keeps every boot»), by EVERY row that boots the product: so no booting row carries. Kept on purpose (主开发 r3733, lg-leak-census): the census is never narrower than the gate's own scope, and the wide rule errs only toward carrying less.",
  "readers": [
   "data/bin/job-wrapper.js",
   "data/bin/vibespace-opencode-op",
@@ -34,7 +34,6 @@
   "test-browser-fit-pins",
   "test-browser-kept-pins",
   "test-browser-live-pins",
-  "test-browser-mediation-pins",
   "test-browser-panel-model",
   "test-browser-passkey-store",
   "test-browser-share-verdicts",
@@ -60,7 +59,6 @@
   "test-conversation-index",
   "test-cpu-capture-live",
   "test-creds-symlink-swap",
-  "test-ctx-sync",
   "test-deliverable-kinds",
   "test-desktop-displays-layout",
   "test-desktop-stream-keepalive-pins",
@@ -124,7 +122,6 @@
   "test-totp",
   "test-usage-anchors",
   "test-usage-eta",
-  "test-usage-index-parity",
   "test-usage-ledger-perf",
   "test-usage-pace",
   "test-usage-scan-subagents",
