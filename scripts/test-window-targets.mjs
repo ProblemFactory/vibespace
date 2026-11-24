@@ -1177,7 +1177,10 @@ console.log('§4 the engine over a fake keeper + the routes');
         actOnNode: async (o) => { acts.push(o.verb); if (o.verb === 'text') { await step('textRead'); return { ok: true, did: { verb: 'text', bytes: 5, cut: false, text: 'hello' }, ms: 1 }; } return { ok: true, did: { action: 'click' }, ms: 1 }; }, // r1852: the text verb's helper read is a named await (a race leg fires there)
       };
       const recD = { id: 'da-race', label: 'Race', exec: 'x', state: 'ready', display: ':98', pids: { app: 4242 }, backend: 'vnc-display', startedAt: Date.now(), readyAt: Date.now() };
-      const keeperD = { listApps: () => [recD], get: (id) => (id === recD.id ? recD : null), sessionPids: () => [4242], x11EnvFor: () => ({ DISPLAY: ':98' }) };
+      // r3390 (line 665, the window reconcile over a held desktop-apps.json): the keeper answers as desktop-serve does while its record
+      // file is HELD (held() true, its records gone from memory) — `raceHeld`, set only by the 'store-held' act below
+      let raceHeld = false;
+      const keeperD = { listApps: () => (raceHeld ? [] : [recD]), get: (id) => (!raceHeld && id === recD.id ? recD : null), sessionPids: () => [4242], x11EnvFor: () => ({ DISPLAY: ':98' }), held: () => raceHeld };
       // the app's own windows (the plan the screenshot composes — the xpra rung's road; the grab is the delayed windowShot)
       const keeperW = { ...keeperD, windows: async () => ({ ok: true, windows: [{ id: 7, title: 'Race', cls: 'race', x: 0, y: 0, w: 10, h: 10, mapped: true }] }) };
       const sessD = new Map([['s1', { agentToken: 'vsst_race', name: 'alpha', backend: 'claude', backendSessionId: 'conv-race' }]]);
@@ -1218,6 +1221,9 @@ console.log('§4 the engine over a fake keeper + the routes');
         'reattach+takeover': (E) => () => { E.detach('da-race', fD); E.attach('da-race', fD); trigger = { at: 'type-keys', fire: USER.takeover(E), delayMs: 100, fired: false }; },
         // r3 F1: the USER changes their mind (revoke, share again) and the agent re-attaches while the verb awaits, then takes over
         'reshare+takeover': (E) => () => { E.revokeReach('da-race', P); E.grantReach('da-race', P); E.attach('da-race', fD); trigger = { at: 'type-keys', fire: USER.takeover(E), delayMs: 100, fired: false }; },
+        // r3390: desktop-apps.json HELD lands while the verb awaits — the engine's reconcile tick runs over it (the boot's, or the
+        // 30 s one), then the file reads again before the verb resumes: a held store names no window gone
+        'store-held': (E) => () => { raceHeld = true; try { E.reconcile({ graceMs: 0 }); } finally { raceHeld = false; } },
         none: () => () => { },
       };
       /** THE LEGS — each names the await its user act lands in and what must hold after */
@@ -1243,6 +1249,7 @@ console.log('§4 the engine over a fake keeper + the routes');
         { name: 'L5: a REVOKE 100 ms into a running scroll cancels it — not_exposed, did.partial, the child killed, the lease gone', prep: { mode: 'pixels' }, injectMs: 400, at: 'scroll', delayMs: 100, user: 'revoke', run: (E) => E.act('da-race', fD, { verb: 'scroll', direction: 'down', by: 20 }), want: (o, E) => o.code === 'not_exposed' && o.did && o.did.partial === true && o.killed.join() === 'scroll' && o.ms < 350 && !E.leaseOf('da-race') },
         { name: 'r3 F1: the same session DETACHES + RE-ATTACHES while the input probe awaits, then a TAKEOVER 100 ms into the running type ⇒ window_paused, did.partial, the child killed, the lease kept (the act is the WINDOW\'s, not the old lease object\'s)', prep: { mode: 'pixels' }, injectMs: 400, at: 'probeInputBackends', user: 'reattach+takeover', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'a long text the agent is typing' }), want: (o, E) => o.code === 'window_paused' && o.did && o.did.partial === true && o.killed.join() === 'type-keys' && o.acts.join() === 'type-keys' && o.ms < 350 && !!E.leaseOf('da-race') },
         { name: 'r3 F1: the user REVOKES + SHARES AGAIN and the agent RE-ATTACHES while the input probe awaits, then a TAKEOVER 100 ms into the running type ⇒ window_paused, did.partial, the child killed, the lease kept', prep: { mode: 'pixels' }, injectMs: 400, at: 'probeInputBackends', user: 'reshare+takeover', run: (E) => E.act('da-race', fD, { verb: 'type', text: 'a long text the agent is typing' }), want: (o, E) => o.code === 'window_paused' && o.did && o.did.partial === true && o.killed.join() === 'type-keys' && o.acts.join() === 'type-keys' && o.ms < 350 && !!E.leaseOf('da-race') },
+        { name: 'r3390 (line 665): desktop-apps.json HELD while a snapshot awaits its traversal — the reconcile tick that meets the hold keeps the lease and the share (an unread store names no window gone), the tree handed over', prep: { mode: 'tree' }, at: 'snapshotTarget', user: 'store-held', run: (E) => E.snapshot('da-race', fD), want: (o, E) => o.code === null && !!o.answered && !!E.leaseOf('da-race') },
         { name: 'r3 F4: `list` — a revoke while its input-backend probe awaits ⇒ the window is NOT in the answer (the row is never handed over one await late)', prep: { mode: 'pixels' }, at: 'probeInputBackends', user: 'revoke', run: (E) => E.list(fD), want: (o) => o.code === null && !!o.answered && Array.isArray(o.answered.targets) && !o.answered.targets.some((r) => r.handle === 'da-race') },
       ];
       async function runLeg(Es, leg) {
