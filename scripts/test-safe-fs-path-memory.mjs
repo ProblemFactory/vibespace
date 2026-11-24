@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checker } from './lib/check.mjs';
-import { anchored } from './scratch.mjs';
+import { anchored, scratchDir } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
@@ -268,12 +268,16 @@ async function sideD(ok, console) {   // B-4b9a: started beside the other pool s
 console.log('①g 主开发\'s r275: a person\'s own press is tried; a path that replies is forgiven; a repeat end doubles its time');
 await told(sideG);
 async function sideG(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
-  const run = async (Mod) => {
+  // THE FACT THE TIMED PRESSES WAIT FOR (主开发 r3409, the hosted mirror of 2.369.417 on Node 24.22.3): a pool marks a worker LIVE at its
+  // construction, before its script has loaded — the scene's 300 ms deadline must be the op's own, never the boot's: the worker has
+  // ANSWERED once (a 1 ms sleep on a path of its own, with the pool's long deadline) before a timed press is asked
+  const ready = async (pool, warm) => { await untilLive(pool, 1); if (warm) await pool.call('__sleep', { path: '/scratch-b23e5/ready/x', ms: 1 }, { timeoutMs: 15000 }).catch(() => { }); };
+  const run = async (Mod, { workerPath = null, warm = true } = {}) => {
     let shift = 0; const clock = () => performance.now() + shift;
-    const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-press', timeouts: { default: 15000, __sleep: 300 }, hungMs: 30000, mountsText, clock });
+    const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-press', timeouts: { default: 15000, __sleep: 300 }, hungMs: 30000, mountsText, clock, ...(workerPath ? { workerPath } : {}) });
     const out = {};
     try {
-      await untilLive(pool, 1);
+      await ready(pool, warm);
       const word = (p) => p.then(() => 'answered', (e) => (e && e.code === 'path-hung' ? (e.tried ? 'path-hung, tried' : 'path-hung') : e && e.safeFsTimeout ? 'deadline' : String(e && e.code)));
       // THE PRESS AFTER A RECOVERY: a path remembered dead, then mended — the person's press is asked at once, answers, and is forgiven
       await pool._noteHung({ path: '/scratch-b23e5/mended/x' }, 'stat', 15000);
@@ -286,7 +290,7 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
       out.deadPress = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: 4000 }, { attended: true }));
       out.deadEnds = pool.stats().timeouts - ends0;
       out.renewed = ((pool._hung.get('/scratch-b23e5/still/x') || {}).until || 0) > (until0 || 0);
-      await untilLive(pool, 1);
+      await ready(pool, warm);   // the worker the dead press ended comes back: its first op after a fresh boot is a timed one too
       out.unmarked = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: 4000 }));
       out.unmarkedEnds = pool.stats().timeouts - ends0;
       // r316 MUST 1: a LISTING's entry (the path itself) is forgiven only by a listing that replies at exactly that path — never by the
@@ -310,6 +314,11 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
     return out;
   };
   const nowP = run(SF);   // the scene and its RED copies run side by side (each its own pool)
+  // r3409: THE HOSTED RED, PLACED — a worker whose boot is slow (its script waits 400 ms in Atomics.wait before it loads the real worker;
+  // a sleep on the worker's own thread, never load): with the wait on the fact the scene holds; without it the hosted red comes back
+  const SLOW = path.join(scratchDir('safe-fs-path-memory-boot'), 'slow-boot-worker.js');
+  fs.writeFileSync(SLOW, `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);\nrequire(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});\n`);
+  const slowP = run(SF, { workerPath: SLOW }), slowRedP = run(SF, { workerPath: SLOW, warm: false });
   // RED CONTROLS, each over the copy without its rule
   const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   const ATT = '    if (hp && !opts.attended) return Promise.reject(pathHungRefusal(hp.path, hp.ms));\n', FGV = '    this._forgive(call.payload, call.op);   // r275 / r316: the path answered — what its entry\'s kind lets this reply clear leaves\n';
@@ -317,7 +326,9 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
   const noFgv = src.split(FGV).length === 2 ? mutantCopies('safe-fs-path-memory-fgv', REPO).load('src/safe-fs.js', anchored(src, FGV, '', 'never-forgiven'), 'never-forgiven') : null;
   const WIDE_FGV = "        if (p === h && m.self) for (const sk of Object.keys(m.self)) if (sk === key || (wide && WIDE_OPS.has(sk))) { delete m.self[sk]; changed = true; }\n";
   const tooWide = src.split(WIDE_FGV).length === 2 ? mutantCopies('safe-fs-path-memory-wide', REPO).load('src/safe-fs.js', anchored(src, WIDE_FGV, "        if (p === h || p.startsWith(h.endsWith('/') ? h : h + '/')) { this._hung.delete(h); continue; }\n", 'forgiven-too-wide'), 'forgiven-too-wide') : null;   // stale-pins: kept (r275's wide rule, the RED's copy)
-  const [now, r1, r2, r3] = await Promise.all([nowP, noAtt ? run(noAtt) : null, noFgv ? run(noFgv) : null, tooWide ? run(tooWide) : null]);
+  const [now, r1, r2, r3, slow, slowRed] = await Promise.all([nowP, noAtt ? run(noAtt) : null, noFgv ? run(noFgv) : null, tooWide ? run(tooWide) : null, slowP, slowRedP]);
+  ok(slow.press === 'answered' && slow.after === 'answered' && slow.deadPress === 'path-hung, tried' && slow.deadEnds === 1 && slow.renewed, `a worker whose boot is SLOW (placed: 400 ms before its script listens): the scene waits for its first answer — the press answers (${slow.press}), the dead press ends ONE worker (${slow.deadEnds}), the memory renewed (${slow.renewed})`, slow);
+  ok(slowRed.press === 'path-hung, tried' && slowRed.deadPress === 'no-worker' && slowRed.deadEnds === 0 && !slowRed.renewed, `RED CONTROL (no wait on the fact): the HOSTED RED's own answers, reproduced by placement — the first timed press carries the worker's boot and overruns its 300 ms (${slowRed.press}), then the dead press falls in the pool's respawn window (${slowRed.deadPress}), ${slowRed.deadEnds} worker ended, the memory renewed: ${slowRed.renewed}`, slowRed);
   console.log(`  [measure] ${JSON.stringify(now)}`);
   ok(now.unmarked0 === 'path-hung' && now.press === 'answered' && now.after === 'answered', `the press after a recovery: an unmarked call is refused (${now.unmarked0}); the person's press is asked at once (${now.press}); answered, the path is forgiven — the next unmarked call is asked too (${now.after})`, now);
   ok(now.deadPress === 'path-hung, tried' && now.deadEnds === 1 && now.renewed && now.unmarked === 'path-hung' && now.unmarkedEnds === 1, `the press on a still-dead path is tried once — ONE worker ends (${now.deadEnds}), the memory renewed (${now.renewed}), its words the memory's own (${now.deadPress}); an unmarked caller after it is refused, no worker (${now.unmarked})`, now);
