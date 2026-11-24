@@ -751,6 +751,21 @@ const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting:
   const rc = ke._reg().browsers[pe.id].browserChoice;
   ok(rc && rc.kind === 'plugin' && rc.id === EID && rc.version === KVER, 'the browser record says what this launch was asked to run: {kind:\'plugin\', id, version} (the probe\'s version)', rc);
   await ke.stop(pe.id, { why: 'user' });
+  // B-9584 r3946 MUST 1: THE LAUNCH RECORDS WHAT ITS PROBE SAID — through a REAL launch of the fixture engine: the release's probe (no
+  // field) ⇒ the record says false; its probe stating geolocationIsolated (mode.json) ⇒ the running browser's record says true and the
+  // profile may say «cannot leak» while it runs. RED: a keeper whose launch return drops the fact
+  {
+    const isoLaunch = async (K2, pid) => { setMode({ probe: { geolocationIsolated: true } }); try { await K2.start(pid, { why: 'test' }); const r2 = K2._reg().browsers[pid].browserChoice; const v2 = K2.placeIsolatedFor(pid); await K2.stop(pid, { why: 'user' }); return { rec: r2 ? r2.geolocationIsolated : undefined, verdict: v2 }; } finally { setMode(null); } };
+    const g1 = await isoLaunch(ke, pe.id);
+    ok(rc.geolocationIsolated === false && g1.rec === true && g1.verdict === true, '⑦ B-9584 r3946: a REAL launch records what its probe said of the place — the release\'s kernel (no field) false, a probe stating geolocationIsolated true; and while that browser runs, its profile may say «cannot leak»', { first: rc.geolocationIsolated, g1 });
+    const kSrcI = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const MCi = mutantCopies('browser-builds-launch-iso', REPO);
+    const KI = MCi.load('src/server/browser-keeper.js', editAnchor(kSrcI, 'label: engine.label || null, geolocationIsolated: engine.geolocationIsolated === true }', 'label: engine.label || null }', 'src/server/browser-keeper.js'), 'launch-drops-iso');
+    const kI = mkKeeper(path.join(ROOT, 'data-eng-iso'), { engines: ENGR, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) }, KI);
+    const pI = kI.createProfile({ label: 'Kernel iso', browser: { kind: 'plugin', id: EID } }, { engine: await kI.engineFactOf(EID) });
+    const gR = await isoLaunch(kI, pI.id);
+    ok(gR.rec === false && gR.verdict === false, '⑦ RED (B-9584 r3946) — a launch whose return drops the probe\'s fact records false: «cannot leak» is never said while a patched browser runs', gR);
+  }
   // the kernel VANISHES
   fs.renameSync(KP, KP + '.away');
   const n0 = fake.launches().length, t1 = todos.length;

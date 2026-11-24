@@ -529,12 +529,12 @@ router.get('/api/browser/engines', async (req, res) => {
   // B-f276 (主开发 r3305 (a)): the plugin registry HELD — which engines are on is unknown: answered BY NAME (the Settings row's failed
   // answer: «could not be read», the stored value kept as itself), never an engine list that says «none is enabled»
   { const h = typeof k.enginesHeld === 'function' ? k.enginesHeld() : null; if (h) return res.status(503).json({ error: h.words, code: 'plugin_registry_unread' }); }
-  // B-9584 r3795: `?profile=<id>` — the Environment dialog's one sentence: may THAT profile's page say «cannot leak» (what runs now and
-  // what starts next, judged over the rows of this very answer)? A keeper without the verdict, or another id, answers no field
-  try {
-    const engines = await k.engineRowsView(), pid = String(req.query?.profile || '');
-    res.json({ engines, defaultEngine: k.defaultEngineNow(), ...(ID_RE.test(pid) && typeof k.placeIsolatedFor === 'function' ? { placeIsolated: k.placeIsolatedFor(pid, engines) === true } : {}) });
-  } catch (e) { fail(res, e); }
+  // B-9584 r3795 / r3946: `?profile=<id>` — the Environment dialog's one sentence: may THAT profile's page say «cannot leak» (what runs
+  // now and what starts next)? Answered from the keeper's KEPT probe and the registry — no engine is asked, no table walked; with that
+  // profile's own row and browser record (the open form's baseline). A malformed id, or a keeper without it: the table as before
+  const pid = String(req.query?.profile || '');
+  if (ID_RE.test(pid) && typeof k.placeAnswerFor === 'function') { try { return res.json(k.placeAnswerFor(pid)); } catch (e) { return fail(res, e); } }
+  try { res.json({ engines: await k.engineRowsView(), defaultEngine: k.defaultEngineNow() }); } catch (e) { fail(res, e); }
 });
 /** lane engine-distribution: «Download kernel» — a PERSON's act (cookie-only): the engine's kernel downloaded into its place
  *  (kernel.json's artifact, or the fleet's), verified (sha256), unpacked, its receipt written, its version measured. The

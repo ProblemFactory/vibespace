@@ -12,25 +12,47 @@ export const ENV_KEYS = Object.freeze(['timezone', 'language', 'location']);
 export function placeIsolatedOf(answer) {
   return !!(answer && !answer.error && answer.placeIsolated === true);
 }
-/** r3795 (3): THE OPEN FORM FOLLOWS THE PROFILE — the broadcasts that can move the verdict (its record: Change build…; its browser's
- *  state: a start, a stop, a kernel landing at a start) ask the server again while the form is open. */
-export const LEAK_MOVES = Object.freeze(['browser-profiles-updated', 'browser-housekeeping-updated']);
-/** The sentence's watch (no DOM, node-tested): `ask()` → the server's answer, `say(isolated)`, `on(fn)` / `off(fn)` the app's
- *  broadcasts. start() says the weaker sentence at once, then asks; ONE ask in flight — a move meanwhile asks once more after it;
- *  stop() (the form closed) says nothing more. → { start, stop }. */
-export function leakWatch({ ask, say, on = null, off = null }) {
-  let live = false, inFlight = false, again = false;
+/** r3795 (3) / r3946: THE OPEN FORM FOLLOWS ITS OWN PROFILE — it asks again only on a move that concerns IT: a profiles broadcast that
+ *  moves this profile's own row (its build choice, its kernel mark) or its browser record (its state, its recorded launch), or a move
+ *  of the engines' kernels (browser-engines-updated). Another profile's move asks nothing. */
+export const LEAK_MOVES = Object.freeze(['browser-profiles-updated', 'browser-engines-updated']);
+/** This profile's signature in a digest-shaped message (a broadcast, or the server's own answer): null when the message has no row of it. */
+export function leakSignOf(m, id) {
+  const p = m && Array.isArray(m.profiles) ? m.profiles.find((x) => x && x.id === id) : null;
+  if (!p) return null;
+  const b = m.browsers && typeof m.browsers === 'object' ? m.browsers[id] : null;
+  return JSON.stringify([p.browser || null, p.kernelLive || null, b ? b.state || null : null, b ? b.browserChoice || null : null]);
+}
+/** The sentence's watch (no DOM, node-tested): `id` / `choice` the profile and its choice when the form opened, `ask()` → the server's
+ *  answer, `say(isolated)`, `on(fn)` / `off(fn)` the app's broadcasts. A profile on stock Chrome ASKS NOTHING (words only, the owner's
+ *  decision) until a move of its own puts it on an engine; ONE ask in flight, a move meanwhile asks once more after it; the server's
+ *  answer is the baseline the broadcasts are compared with; stop() (the form closed) says nothing more. → { start, stop }. */
+export function leakWatch({ id = '', choice = null, ask, say, on = null, off = null }) {
+  let live = false, inFlight = false, again = false, sign = null;
+  let plugin = !!(choice && choice.kind === 'plugin');
   const once = async () => {
     if (!live) return;
+    if (!plugin) { say(false); return; }
     if (inFlight) { again = true; return; }
     inFlight = true;
-    let isolated = false;
-    try { isolated = placeIsolatedOf(await ask()); } catch { isolated = false; }
+    let a = null;
+    try { a = await ask(); } catch { a = null; }
     inFlight = false;
-    if (live) say(isolated);
-    if (again && live) { again = false; await once(); }
+    if (!live) return;
+    { const s0 = leakSignOf(a, id); if (s0 !== null) sign = s0; }
+    say(placeIsolatedOf(a));
+    if (again) { again = false; await once(); }
   };
-  const onMove = (m) => { if (live && m && LEAK_MOVES.includes(m.type)) once(); };
+  const onMove = (m) => {
+    if (!live || !m || !LEAK_MOVES.includes(m.type)) return;   // only the two moves that can move it
+    if (m.type === 'browser-engines-updated') { if (plugin) once(); return; }
+    const s1 = leakSignOf(m, id);
+    if (s1 === null || s1 === sign) return;
+    sign = s1;
+    const p = m.profiles.find((x) => x && x.id === id);
+    plugin = !!(p && p.browser && p.browser.kind === 'plugin');
+    once();
+  };
   return {
     start() { if (live) return Promise.resolve(); live = true; say(false); if (on) on(onMove); return once(); },
     stop() { live = false; if (off) off(onMove); },

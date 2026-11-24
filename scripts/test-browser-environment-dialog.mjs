@@ -20,6 +20,8 @@
 //      the verdict and copied by the engines view (two REDs); the dialog's one sentence under the location (PURE model + words, zh/ja).
 //      r3795: «cannot leak» only when what runs now and what starts next are both that kernel — the verdict of a profile over its three
 //      scenes (each with its RED), the keeper and the route that answer it, the open form's watch, a RED for each PURE helper.
+//      r3946: the answer reads the KEPT probe (12 answers, 0 probes; RED: one that asks again), the open form asks only on ITS profile's
+//      moves (unrelated broadcasts: none; its own: one; RED: blind to whose move), stock Chrome asks nothing.
 //   ⑦ r2767 (a): ONE PLAN WHILE A BROWSER RUNS — after a save place → this machine's while it runs, the gates still judge a place;
 //      r2932 (5) the other direction: started with nothing set, a place saved while it runs is judged by the SAVED place (stricter).
 import fs from 'node:fs';
@@ -305,44 +307,71 @@ console.log('— ⑧ the owner\'s decision on the place hole (r2911 / r2916): th
     ['scene 1: running another engine', { choice: PLUG, row: OKROW, running: { ...RUN_ISO, id: 'old.engine' } }, false],
     ['scene 1: running its live answer otherwise (kernelLive)', { choice: PLUG, row: OKROW, running: RUN_ISO, kernelLive: { why: 'features' } }, false],
     ['running the patched kernel it was launched from', { choice: PLUG, row: OKROW, running: RUN_ISO }, true],
+    ['running it, a kernel mark of ANOTHER engine (r3946 should)', { choice: PLUG, row: OKROW, running: RUN_ISO, kernelLive: { engine: 'old.engine', why: 'features' } }, true],
   ];
   const vOf = (E) => VCASES.map(([n, x]) => [n, E.placeIsolatedVerdict(x)]);
   const gV = vOf(ENGN);
   ok(J(gV.map(([, v]) => v)) === J(VCASES.map(([, , w]) => w)), '⑧ r3795 THE VERDICT OF A PROFILE: «cannot leak» only for a patched kernel in place and runnable, nothing waiting to take its place, and (when its browser runs) the program launched from it with that fact; every other case false', gV.filter(([n, v], i) => v !== VCASES[i][2]));
-  const noRun = MUT8.load('src/browser-engines.js', anchored(esrc, "  if (running && !(running.kind === 'plugin' && running.id === choice.id && running.geolocationIsolated === true && !kernelLive)) return false;\n", '', 'decision RED the verdict blind to what runs'), 'verdict-no-run');
+  const noRun = MUT8.load('src/browser-engines.js', anchored(esrc, "  if (running && !(running.kind === 'plugin' && running.id === choice.id && running.geolocationIsolated === true && !markHere)) return false;\n", '', 'decision RED the verdict blind to what runs'), 'verdict-no-run');
   ok(vOf(noRun).filter(([n, v]) => /^scene 1/.test(n) && v === true).length === 5, '⑧ RED (scene 1) — a verdict blind to what runs: «cannot leak» of a browser still running the old program, a stock one, another engine, an unrecorded launch, a disagreeing kernel', vOf(noRun).filter(([n]) => /^scene 1/.test(n)));
   const noNext = MUT8.load('src/browser-engines.js', anchored(esrc, "  { const k = row.kernel || null; if (k && (k.next || k.landing || k.state === 'downloading')) return false; }\n", '', 'decision RED the verdict blind to the next start'), 'verdict-no-next');
   ok(vOf(noNext).filter(([n, v]) => /^scene 2/.test(n) && v === true).length === 3, '⑧ RED (scene 2) — a verdict blind to the next start: «cannot leak» while an unpatched kernel waits, lands or downloads', vOf(noNext).filter(([n]) => /^scene 2/.test(n)));
-  // …over the keeper: its record, its engine's row of the table read, its LIVE browser's recorded choice (what the launch's probe said)
+  // …over the keeper (r3946): its record, its engine's KEPT probe (no probe asked by the verdict), its LIVE browser's recorded launch
   {
-    const kv = mkKE(K), pv = kv.createProfile({ label: 'On a kernel' }); recOf(kv, pv.id).browser = { kind: 'plugin', id: 'acme.engine' };
-    const rowsV = await kv.engineRowsView();
-    const idle = kv.placeIsolatedFor(pv.id, rowsV);
+    let probes = 0;
+    const countStand = (E) => { const st = engStand(E); return { ...st, probe: async (id) => { probes++; return st.probe(id); } }; };
+    const kv = mkKE(K, { engines: countStand(ENGN) }), pv = kv.createProfile({ label: 'On a kernel' }); recOf(kv, pv.id).browser = { kind: 'plugin', id: 'acme.engine' };
+    const before = kv.placeIsolatedFor(pv.id);   // nothing kept yet: not known
+    await kv.engineRowsView();   // a probe of each engine (the Settings row, Change build…) — kept
+    const p0 = probes;
+    const idle = kv.placeIsolatedFor(pv.id);
     kv._reg().browsers[pv.id] = { profileId: pv.id, state: 'ready', browserChoice: { kind: 'plugin', id: 'acme.engine', version: null, geolocationIsolated: false } };
-    const oldRuns = kv.placeIsolatedFor(pv.id, rowsV);
+    const oldRuns = kv.placeIsolatedFor(pv.id);
     kv._reg().browsers[pv.id].browserChoice.geolocationIsolated = true;
-    const newRuns = kv.placeIsolatedFor(pv.id, rowsV);
+    const newRuns = kv.placeIsolatedFor(pv.id);
+    const ans = []; for (let i = 0; i < 12; i++) ans.push(kv.placeAnswerFor(pv.id));
+    const askedProbes = probes - p0;
     delete kv._reg().browsers[pv.id];
-    const ps = kv.createProfile({ label: 'Stock' }), stock = kv.placeIsolatedFor(ps.id, rowsV);
+    const ps = kv.createProfile({ label: 'Stock' }), stock = kv.placeIsolatedFor(ps.id);
     kv.shutdown?.();
-    const kw = mkKE(K, { engineDistribution: () => ({ kernelFact: () => ({ state: 'installed', next: { version: '149.0', sha256: null, stagedAt: 1, unread: null }, landing: null }) }) });
+    let sha = 'a'.repeat(64);
+    const kw = mkKE(K, { engineDistribution: () => ({ kernelFact: () => ({ state: 'installed', sha256: sha, installedAt: 1, next: { version: '149.0', sha256: null, stagedAt: 1, unread: null }, landing: null }) }) });
     const pw = kw.createProfile({ label: 'Waiting' }); recOf(kw, pw.id).browser = { kind: 'plugin', id: 'acme.engine' };
-    const waiting = kw.placeIsolatedFor(pw.id, await kw.engineRowsView());
+    await kw.engineRowsView(); const waiting = kw.placeIsolatedFor(pw.id);
     kw.shutdown?.();
-    ok(idle === true && oldRuns === false && newRuns === true && stock === false && waiting === false && /geolocationIsolated: be\.engine\.geolocationIsolated === true/.test(ksrc),
-      '⑧ r3795 OVER THE KEEPER: a patched kernel, browser not running ⇒ yes; the browser still running a launch whose probe said otherwise (scene 1) ⇒ no, launched patched ⇒ yes; stock Chrome ⇒ no; another kernel waiting for the next start (scene 2) ⇒ no; every engine launch records what its probe said', { idle, oldRuns, newRuns, stock, waiting });
+    const kz = mkKE(K, { engineDistribution: () => ({ kernelFact: () => ({ state: 'installed', sha256: sha, installedAt: 1, next: null, landing: null }) }) });
+    const pz = kz.createProfile({ label: 'Moved' }); recOf(kz, pz.id).browser = { kind: 'plugin', id: 'acme.engine' };
+    await kz.engineRowsView(); const keptSame = kz.placeIsolatedFor(pz.id);
+    sha = 'b'.repeat(64); const keptMoved = kz.placeIsolatedFor(pz.id);   // another kernel landed in its place since the probe
+    kz.shutdown?.();
+    const A0 = ans[0] || {};
+    ok(before === false && idle === true && oldRuns === false && newRuns === true && stock === false && waiting === false && keptSame === true && keptMoved === false
+        && askedProbes === 0 && A0.placeIsolated === true && J(A0.profiles) === J([{ id: pv.id, browser: { kind: 'plugin', id: 'acme.engine' }, kernelLive: null }]) && A0.browsers[pv.id].state === 'ready',
+      '⑧ r3946 OVER THE KEEPER: nothing kept ⇒ no; the kept probe of a patched kernel, browser not running ⇒ yes; still running a launch whose probe said otherwise (scene 1) ⇒ no, launched patched ⇒ yes; stock Chrome ⇒ no; another kernel waiting (scene 2) ⇒ no; the kernel in place moved since the probe ⇒ no; and TWELVE answers asked NO probe (the kept one), each with the profile\'s own row and browser record', { before, idle, oldRuns, newRuns, stock, waiting, keptSame, keptMoved, askedProbes, A0 });
+    const ksrc2 = read('src/server/browser-keeper.js');
+    const Kfresh = MUT8.load('src/server/browser-keeper.js', anchored(ksrc2, '    const row = c && c.kind === \'plugin\' ? keptRowOf(c.id) : null;\n', '    const row = c && c.kind === \'plugin\' ? (engineFactOf(c.id), keptRowOf(c.id)) : null;\n', 'decision RED the answer asks a probe'), 'answer-probes');
+    probes = 0;
+    const kf = mkKE(Kfresh, { engines: countStand(ENGN) }), pf = kf.createProfile({ label: 'Fresh' }); recOf(kf, pf.id).browser = { kind: 'plugin', id: 'acme.engine' };
+    await kf.engineRowsView(); const pf0 = probes; for (let i = 0; i < 12; i++) kf.placeAnswerFor(pf.id);
+    await new Promise((r) => setTimeout(r, 20)); const freshProbes = probes - pf0; kf.shutdown?.();
+    ok(freshProbes === 12, '⑧ RED (r3946) — an answer that asks its engine again: twelve answers start twelve probes', { freshProbes });
+    // where a waiting kernel comes from (r3946 should): engine-distribution stages a download beside a kernel in use as `next` — a pin
+    // back to an older build included — and kernelFact answers it as `next`
+    const dsrc = read('src/server/engine-distribution.js');
+    ok(dsrc.includes('    rec.next = { ...kfact, stagedAt: now() };') && dsrc.includes('      next: r.next ? { version: r.next.version || null, sha256: r.next.sha256 || null, stagedAt: r.next.stagedAt || null, unread: unreadNext(sid) } : null,'),
+      '⑧ PIN (r3946 should): a kernel downloaded while one is in use — a pin back included — waits as the record\'s `next`, and kernelFact answers it as `next` (the field the verdict reads)');
   }
-  // …and its route: GET /api/browser/engines?profile=<id> answers the verdict for that profile, over the rows of the same answer
+  // …and its route: GET /api/browser/engines?profile=<id> answers from the keeper's kept verdict — the table is never walked for it
   {
-    const express = require('express'), RBe = require('../src/routes/browser.js'), seen = [];
-    RBe.setup({ keeper: { engineRowsView: async () => [{ id: 'acme.engine', geolocationIsolated: true }], defaultEngineNow: () => ({ value: 'default' }), placeIsolatedFor: (id, rows) => { seen.push([id, rows.length]); return id === 'bp-000000ea'; } } });
+    const express = require('express'), RBe = require('../src/routes/browser.js'), seen = []; let walked = 0;
+    RBe.setup({ keeper: { engineRowsView: async () => { walked++; return [{ id: 'acme.engine', geolocationIsolated: true }]; }, defaultEngineNow: () => ({ value: 'default' }), placeAnswerFor: (id) => { seen.push(id); return { placeIsolated: id === 'bp-000000ea', profiles: [{ id, browser: null, kernelLive: null }], browsers: {} }; } } });
     const app = express(); app.use(express.json()); app.use(RBe.router);
     const srv = await new Promise((res) => { const sv = app.listen(0, '127.0.0.1', () => res(sv)); });
     const get = (q) => fetch(`http://127.0.0.1:${srv.address().port}/api/browser/engines${q}`).then(async (x) => ({ status: x.status, body: await x.json().catch(() => null) }));
-    const yes = await get('?profile=bp-000000ea'), no = await get('?profile=bp-000000eb'), bad = await get('?profile=../x'), none = await get('');
+    const yes = await get('?profile=bp-000000ea'), no = await get('?profile=bp-000000eb'), w0 = walked, bad = await get('?profile=../x'), none = await get('');
     await new Promise((res) => srv.close(res));
-    ok(yes.body.placeIsolated === true && no.body.placeIsolated === false && !('placeIsolated' in bad.body) && !('placeIsolated' in none.body) && J(seen) === J([['bp-000000ea', 1], ['bp-000000eb', 1]]) && Array.isArray(yes.body.engines),
-      '⑧ r3795 THE ROUTE: ?profile=<id> answers that profile\'s verdict over the rows of the same answer; another id ⇒ false; a malformed id or none ⇒ no field (the table as before)', { yes: yes.body.placeIsolated, no: no.body.placeIsolated, bad: bad.body, seen });
+    ok(yes.body.placeIsolated === true && no.body.placeIsolated === false && w0 === 0 && !('placeIsolated' in bad.body) && Array.isArray(bad.body.engines) && Array.isArray(none.body.engines) && J(seen) === J(['bp-000000ea', 'bp-000000eb']),
+      '⑧ r3946 THE ROUTE: ?profile=<id> answers that profile\'s verdict (yes / no) WITHOUT walking the engines table; a malformed id or none answers the table as before', { yes: yes.body, no: no.body.placeIsolated, walkedForProfiles: w0, seen });
   }
   // the page's two PURE helpers, each with its RED (r3795): the answer read, the sentence chosen
   const F8 = await import(new URL('../src/lib/browser-environment-form.js', import.meta.url).href);
@@ -364,29 +393,44 @@ console.log('— ⑧ the owner\'s decision on the place hole (r2911 / r2916): th
   ok(J(wOf(Wloose)) !== J([true, false, false, false, false]), '⑧ RED — the sentence chosen loosely: a string or a number says «cannot leak»', wOf(Wloose));
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
   ok([wIso, wNot].every((s) => ZH.includes(J(s) + ':') && JA.includes(J(s) + ':')), '⑧ both sentences have their zh and ja rows');
-  // r3795 SCENE 3: THE OPEN FORM FOLLOWS THE PROFILE — the watch the dialog runs, with a stand-in server and broadcasts
-  const watchRun = async (Fm) => {
-    const said = [], hs = new Set(); let answer = { placeIsolated: true };
-    const w = Fm.leakWatch({ ask: async () => answer, say: (x) => said.push(x), on: (h) => hs.add(h), off: (h) => hs.delete(h) });
-    await w.start();
-    answer = { placeIsolated: false };   // the person moves the profile to stock Chrome with Change build… while the form is open
-    for (const h of hs) h({ type: 'browser-profiles-updated' });
-    await new Promise((r) => setTimeout(r, 20));
+  // r3795 SCENE 3 + r3946: THE OPEN FORM FOLLOWS ITS OWN PROFILE — the watch the dialog runs, with a stand-in server and broadcasts
+  const PID8 = 'bp-000000ea';
+  const digest = (browser, state = null, extra = []) => ({ type: 'browser-profiles-updated', profiles: [{ id: PID8, browser, kernelLive: null }, ...extra], browsers: state ? { [PID8]: { state, browserChoice: null } } : {} });
+  const watchRun = async (Fm, choice = { kind: 'plugin', id: 'acme.engine' }) => {
+    const said = [], hs = new Set(); let asks = 0, answer = { placeIsolated: true, profiles: [{ id: PID8, browser: { kind: 'plugin', id: 'acme.engine' }, kernelLive: null }], browsers: {} };
+    const w = Fm.leakWatch({ id: PID8, choice, ask: async () => { asks++; return answer; }, say: (x) => said.push(x), on: (h) => hs.add(h), off: (h) => hs.delete(h) });
+    const emit = async (m) => { for (const h of [...hs]) h(m); await new Promise((r) => setTimeout(r, 15)); };
+    await w.start(); await new Promise((r) => setTimeout(r, 15));
+    const a0 = asks;
+    // a run of broadcasts that do NOT concern this profile: another profile's moves, the trace's housekeeping, this one unchanged
+    for (let i = 0; i < 6; i++) await emit(digest(choice, null, [{ id: 'bp-0000ffff', browser: { kind: 'default' }, kernelLive: null, n: i }]));   // this profile's own row unchanged (its choice), another profile moving
+    await emit({ type: 'browser-housekeeping-updated' }); await emit({ type: 'browser-trace-appended' });
+    const unrelated = asks - a0;
+    await emit(digest(choice, 'ready'));   // its own browser started: one ask (none on stock Chrome)
+    const own = asks - a0 - unrelated;
+    answer = { placeIsolated: false, profiles: [{ id: PID8, browser: { kind: 'default' }, kernelLive: null }], browsers: {} };
+    const a1 = asks;
+    await emit(digest({ kind: 'default' }, 'ready'));   // Change build… moved it to stock Chrome while the form is open: no ask, the weaker words
+    const toStock = asks - a1;
     const before = said.length; w.stop();
-    for (const h of hs) h({ type: 'browser-profiles-updated' });
-    await new Promise((r) => setTimeout(r, 20));
-    return { said, afterStop: said.length - before, subscribed: hs.size };
+    await emit(digest({ kind: 'plugin', id: 'acme.engine' }, 'ready'));
+    return { said, afterStop: said.length - before, subscribed: hs.size, first: a0, unrelated, own, toStock };
   };
   const ws0 = await watchRun(F8);
-  ok(J(ws0.said) === J([false, true, false]) && ws0.afterStop === 0 && ws0.subscribed === 0,
-    '⑧ r3795 SCENE 3: the open form says the weaker sentence at once, «cannot leak» on the verdict, and the weaker one again the moment Change build… moves the profile (its broadcast asks again); closed, it hears nothing more', ws0);
-  const Fdeaf = await esmCopy('src/lib/browser-environment-form.js', anchored(fsrc, '  const onMove = (m) => { if (live && m && LEAK_MOVES.includes(m.type)) once(); };', '  const onMove = () => {};', 'decision RED the watch deaf to moves'), 'watch-deaf');
+  ok(J(ws0.said) === J([false, true, true, false]) && ws0.first === 1 && ws0.unrelated === 0 && ws0.own === 1 && ws0.toStock === 0 && ws0.afterStop === 0 && ws0.subscribed === 0,
+    '⑧ r3795 SCENE 3 + r3946: the open form says the weaker sentence at once and «cannot leak» on the verdict (ONE ask); a run of broadcasts that concern another profile or nothing asks NONE; its own browser starting asks ONE; Change build… to stock Chrome says the weaker sentence with NO ask; closed, it hears nothing more', ws0);
+  const wsS = await watchRun(F8, { kind: 'default' });
+  ok(wsS.first === 0 && wsS.unrelated === 0 && wsS.own === 0 && wsS.said.every((x) => x === false), '⑧ r3946: a profile on stock Chrome ASKS NOTHING — words only, as the owner decided (open, unrelated moves, its own start)', wsS);
+  const Fdeaf = await esmCopy('src/lib/browser-environment-form.js', anchored(fsrc, "  const onMove = (m) => {\n    if (!live || !m || !LEAK_MOVES.includes(m.type)) return;   // only the two moves that can move it\n", "  const onMove = (m) => {\n    return;\n", 'decision RED the watch deaf to moves'), 'watch-deaf');
   const ws1 = await watchRun(Fdeaf);
-  ok(J(ws1.said) === J([false, true]), '⑧ RED (scene 3) — a watch deaf to the profile\'s moves: the open form keeps saying «cannot leak» after Change build…', ws1);
+  ok(ws1.own === 0 && ws1.said[ws1.said.length - 1] === true, '⑧ RED (scene 3) — a watch deaf to the profile\'s moves: the open form keeps saying «cannot leak» after Change build…', ws1);
+  const Fblind = await esmCopy('src/lib/browser-environment-form.js', anchored(fsrc, '    if (s1 === null || s1 === sign) return;\n', '', 'decision RED the watch blind to whose move'), 'watch-blind');
+  const ws2 = await watchRun(Fblind);
+  ok(ws2.unrelated > 0, '⑧ RED (r3946) — a watch blind to whose move it is: every unrelated broadcast asks the server again', ws2);
   const DS = read('src/lib/browser-environment-dialog.js');
-  ok(DS.includes("watch = leakWatch({ ask: () => fetchJson(`/api/browser/engines?profile=${encodeURIComponent(r.id)}`), say: (iso) => { leak.textContent = placeLeakWords(iso, t); }, on: (h) => app.ws?.onGlobal?.(h), off: (h) => app.ws?.offGlobal?.(h) });")
+  ok(DS.includes("watch = leakWatch({ id: String(r.id), choice: r.browser || null, ask: () => fetchJson(`/api/browser/engines?profile=${encodeURIComponent(r.id)}`), say: (iso) => { leak.textContent = placeLeakWords(iso, t); }, on: (h) => app.ws?.onGlobal?.(h), off: (h) => app.ws?.offGlobal?.(h) });")
       && DS.includes('shell.ready.then((s) => { if (s) watch.start(); });') && DS.includes('try { if (watch) watch.stop(); } catch') && DS.includes("const leak = el('div', 'bnew-hint benv-leak', placeLeakWords(false, t));") && DS.includes('lrow.append(lsel, place, blocked, leak);') && !/leak\.(disabled|setAttribute\('disabled)/.test(DS),
-    '⑧ PIN: the dialog runs the watch — the weaker sentence until the server answers, the first ask once the form opens (§103 r4), asked again on the profile\'s moves, stopped when it closes; nothing greyed, nothing refused');
+    '⑧ PIN: the dialog runs the watch with its profile and its choice — the weaker sentence until the server answers, the first ask once the form opens (§103 r4), stopped when it closes; nothing greyed, nothing refused');
   for (const c of copiesCensus(MUT8.files, MUT8.dir, REPO, { label: '⑧ controls: ' })) ok(c.pass, c.name, c.detail);
 }
 report();

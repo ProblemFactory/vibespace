@@ -463,7 +463,9 @@ function placeIsolatedVerdict({ choice = null, host = null, ephemeral = false, r
   // …and no other kernel to take its place at the next start (one waiting beside it, one landing, one downloading)
   { const k = row.kernel || null; if (k && (k.next || k.landing || k.state === 'downloading')) return false; }
   // what RUNS now: launched from this engine with that same fact, its live answer never otherwise than its probe
-  if (running && !(running.kind === 'plugin' && running.id === choice.id && running.geolocationIsolated === true && !kernelLive)) return false;
+  // (r3946 should) a kernelLive mark counts when it is THIS engine's (liveOfEngine's own rule); a mark that names no engine counts too
+  const markHere = !!kernelLive && (kernelLive.engine == null || kernelLive.engine === choice.id);
+  if (running && !(running.kind === 'plugin' && running.id === choice.id && running.geolocationIsolated === true && !markHere)) return false;
   return true;
 }
 

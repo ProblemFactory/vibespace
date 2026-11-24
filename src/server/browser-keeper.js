@@ -1534,7 +1534,23 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const r = engs();
     if (!r || typeof r.probe !== 'function') return ENG.missingOf({ id });
     const v = await r.probe(id);
-    return v.ok ? withKernelFact(v.fact) : { code: v.code, error: v.error, ...(v.failed ? { failed: v.failed } : {}) }; // B-a470: the plugin's own error rides to the card
+    if (v.ok) { const f = withKernelFact(v.fact); probeKept.set(String(id), f); return f; }   // B-9584 r3946: the probe KEPT (the page's place sentence reads it, never asks one)
+    probeKept.delete(String(id));
+    return { code: v.code, error: v.error, ...(v.failed ? { failed: v.failed } : {}) }; // B-a470: the plugin's own error rides to the card
+  }
+  /** B-9584 r3946: each engine's LAST probe fact (a launch, the engines table, a create asks one) — the place sentence's verdict reads
+   *  it and starts no program. */
+  const probeKept = new Map();
+  /** The engine's row as the verdict reads it, from its KEPT probe: null when none is kept, when it was the owner's own program (the
+   *  plugin cannot read it and VibeSpace never scans it), or when the kernel in place moved since (its record's sha256 / installedAt);
+   *  its kernel's waiting / landing / downloading facts are the record's NOW (a read of the record, no program). */
+  function keptRowOf(id) {
+    const f = probeKept.get(String(id || ''));
+    if (!f || f.code || f.source === 'user') return null;
+    const d = eds(); const k = d && typeof d.kernelFact === 'function' ? d.kernelFact(f.id) : null;
+    const was = f.kernel || null;
+    if (((was && was.sha256) || null) !== ((k && k.sha256) || null) || ((was && was.installedAt) || null) !== ((k && k.installedAt) || null)) return null;
+    return { id: f.id, installed: !!f.installed, executable: !!f.executable, geolocationIsolated: f.geolocationIsolated === true && !!f.installed && !!f.executable, code: null, kernel: k ? { state: k.state, next: k.next, landing: k.landing } : null };
   }
   // lane engine-distribution: the engine RECORD's facts beside the probe's — the version VibeSpace measured, the download
   const eds = () => { try { return typeof engineDistribution === 'function' ? engineDistribution() : engineDistribution; } catch { return null; } };
@@ -1566,16 +1582,24 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     }
     return out;
   }
-  /** B-9584 r3795: may THIS profile's page say «cannot leak» now? The PURE verdict (ENG.placeIsolatedVerdict) over its record, its
-   *  engine's row of the table just read (`rows`, a fresh probe), its live browser's recorded choice and its kernelLive mark. */
-  function placeIsolatedFor(profileId, rows = []) {
+  /** B-9584 r3795 / r3946: may THIS profile's page say «cannot leak» now? The PURE verdict (ENG.placeIsolatedVerdict) over its record,
+   *  its engine's KEPT probe (keptRowOf — no probe asked here), its live browser's recorded launch and its kernelLive mark. */
+  function placeIsolatedFor(profileId) {
     let p = null; try { p = profile(String(profileId || '')); } catch { p = null; }
     if (!p) return false;
     const c = p.browser ? BB.choiceView(p.browser) : null;
-    const row = c && c.kind === 'plugin' ? (Array.isArray(rows) ? rows : []).find((r) => r && r.id === c.id) || null : null;
+    const row = c && c.kind === 'plugin' ? keptRowOf(c.id) : null;
     const rg = reg.browsers[p.id];
     const running = rg && B.isLiveBrowser(rg) ? (rg.browserChoice || { kind: 'default' }) : null;
     return ENG.placeIsolatedVerdict({ choice: c, host: p.host || null, ephemeral: isEph(p), row, running, kernelLive: p.kernelLive || null });
+  }
+  /** r3946: the page's ONE answer — the verdict, and THIS profile's own row and browser record in the digest's very shape (the open
+   *  form's baseline: it asks again only when a broadcast moves them). Reads the registry and the kept probe: starts no program. */
+  function placeAnswerFor(profileId) {
+    let p = null; try { p = profile(String(profileId || '')); } catch { p = null; }
+    if (!p) return { placeIsolated: false, profiles: [], browsers: {} };
+    const rg = reg.browsers[p.id];
+    return { placeIsolated: placeIsolatedFor(p.id), profiles: [{ id: p.id, browser: p.browser || null, kernelLive: p.kernelLive || null }], browsers: rg ? { [p.id]: { state: rg.state || null, browserChoice: rg.browserChoice || null } } : {} };
   }
   /** THE DEFAULT POLICY now — `browser.defaultEngine`: the user's own stored value › the fleet's (fleet.json `browserEngine`) ›
    *  'default' → `{value, source, fleet: {plugin, default} | null}`. */
@@ -1898,7 +1922,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // B-9584 U2a: what the start SAYS — the engine's echo of what the browser really got (none ⇒ «not confirmed», never «applied»)
     // and every choice it could not follow (U1's `unfollowed`); nothing for a profile that sets nothing
     const environment = p.environment ? { applied: lo.launch.applied || null, confirmed: !!lo.launch.applied, unfollowed: envR.unfollowed } : null;
-    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null }, ...(environment ? { environment } : {}) };
+    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null, geolocationIsolated: engine.geolocationIsolated === true }, ...(environment ? { environment } : {}) };   // B-9584 r3946: + the launch's own probe fact (recordedChoice records it)
   }
   /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
   const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version, geolocationIsolated: be.engine.geolocationIsolated === true } : {}) } : { kind: 'default' });   // B-9584 r3795: what the launched program's probe said of its place (what RUNS)
@@ -9426,7 +9450,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     enginesHeld: () => { const r = engs(); try { return r && typeof r.held === 'function' ? r.held() : null; } catch { return null; } }, // B-f276 (r3305 (a)): the engine table's registry held
-    engineFactOf, engineRowsView, placeIsolatedFor, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
+    engineFactOf, engineRowsView, placeIsolatedFor, placeAnswerFor, defaultEngineNow, noteEngineLive, // B-cf42: the dialog watch hands each engine profile's live kernel answer in // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
     installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
     cliPin, cliFactReady, rejudgeClis /* B-7a30: the CLI judge's pass (the gate awaits it) */, _cliNow: () => cliNow() /* B-7a30: the launch's bounded stamp (the gate places a stall in it) */, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api

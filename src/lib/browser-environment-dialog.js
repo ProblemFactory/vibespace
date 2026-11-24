@@ -71,10 +71,11 @@ export function openEnvironmentDialog(app, r, { onDone = null, onClose = null } 
   lsel.addEventListener('change', lshow); lshow();
   // B-9584, the owner's decision (r2911 / r2916 / r3795): ONE plain sentence on whether this browser can give a site this machine's real
   // place — a fact said once, never a greyed control or a refusal. «Cannot leak» only on the SERVER's verdict for this profile (what
-  // runs now and what starts next); the weaker sentence until it answers and on any failure; asked again on every broadcast that can
-  // move it while the form is open (Change build…, a start, a stop); the first ask waits for the form to OPEN (§103 r4)
+  // runs now and what starts next); the weaker sentence until it answers and on any failure; asked again only on a move of THIS profile
+  // (Change build…, its browser started or stopped) or of the engines' kernels, never on another profile's; a profile on stock Chrome
+  // asks nothing (r3946); the first ask waits for the form to OPEN (§103 r4)
   const leak = el('div', 'bnew-hint benv-leak', placeLeakWords(false, t));
-  watch = leakWatch({ ask: () => fetchJson(`/api/browser/engines?profile=${encodeURIComponent(r.id)}`), say: (iso) => { leak.textContent = placeLeakWords(iso, t); }, on: (h) => app.ws?.onGlobal?.(h), off: (h) => app.ws?.offGlobal?.(h) });
+  watch = leakWatch({ id: String(r.id), choice: r.browser || null, ask: () => fetchJson(`/api/browser/engines?profile=${encodeURIComponent(r.id)}`), say: (iso) => { leak.textContent = placeLeakWords(iso, t); }, on: (h) => app.ws?.onGlobal?.(h), off: (h) => app.ws?.offGlobal?.(h) });
   shell.ready.then((s) => { if (s) watch.start(); });   // once it opens (r4: a queued form waits behind the open one's ask)
   lrow.append(lsel, place, blocked, leak);
   body.appendChild(lrow);
