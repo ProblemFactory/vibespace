@@ -212,7 +212,7 @@ async function openMediatedCdpSession(WebSocket, cdpUrl, targetId) {
   };
 }
 
-async function runColdLockedPair(repoDir, kind) {
+async function runColdLockedPair(repoDir, kind, { control = false } = {}) {
   const { startFakeKernel } = await import(pathToFileURL(path.join(repoDir, 'scripts/fixtures/fake-kernel.mjs')).href);
   const ORIGIN = 'https://firstfill.example.test';
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), `vs-r28-coldpair-${kind}-`));
@@ -232,12 +232,12 @@ async function runColdLockedPair(repoDir, kind) {
     ],
   });
   try {
-    const runStep = (step, extraArgs = []) => new Promise((resolve) => {
+    const runStep = (step, extraArgs = [], extraEnv = {}) => new Promise((resolve) => {
       const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r28-cxdg-'));
       const c = spawn(
         process.execPath,
         [SELF_PATH, `--repo=${repoDir}`, `--first-fill-worker=${kind}`, `--worker-mode=${step}`, `--data-dir=${dataDir}`, `--ws-url=${fk.wsUrl}`, ...extraArgs],
-        { env: { ...process.env, XDG_RUNTIME_DIR: xdg, VIBESPACE_SKIP_AGENT_HOOKS: '1' } },
+        { env: { ...process.env, XDG_RUNTIME_DIR: xdg, VIBESPACE_SKIP_AGENT_HOOKS: '1', ...extraEnv } },
       );
       let out = '', err = '';
       c.stdout.on('data', (d) => { out += d; });
@@ -249,7 +249,23 @@ async function runColdLockedPair(repoDir, kind) {
         resolve({ exitCode: code, ...parsed });
       });
     });
-    const fillStep = await runStep('cold-step1-fill');
+    // r2913 RED CONTROL: THE RACE, PLACED — the store writer's rename of the keeper's registry is HELD (a preload, in its worker thread
+    // only, waiting while a flag file exists) and the stand-in keeper has NO landing wait: the fill types, answers 200 and its child
+    // exits at once with the record still held in the writer; the flag goes only after that child closed. Never made by load.
+    let stallEnv = {}, stallFlag = null;
+    if (control) {
+      stallFlag = path.join(tmpRoot, 'stall.flag'); fs.writeFileSync(stallFlag, '1');
+      const pre = path.join(tmpRoot, 'stall-rename.cjs');
+      fs.writeFileSync(pre, [
+        "'use strict';",
+        "const fs = require('fs'), wt = require('worker_threads');",
+        "const FLAG = process.env.R28_STALL_FLAG;",
+        "if (FLAG && !wt.isMainThread) { const o = fs.renameSync; fs.renameSync = function (a, b) { if (String(b).endsWith('browser-profiles.json')) { const sab = new Int32Array(new SharedArrayBuffer(4)); const t0 = Date.now(); while (fs.existsSync(FLAG) && Date.now() - t0 < 20000) Atomics.wait(sab, 0, 0, 20); } return o.apply(this, arguments); }; }",
+      ].join(String.fromCharCode(10)));
+      stallEnv = { NODE_OPTIONS: `--require ${pre}`, R28_STALL_FLAG: stallFlag };
+    }
+    const fillStep = await runStep('cold-step1-fill', control ? ['--no-landing-wait'] : [], stallEnv);
+    if (stallFlag) fs.rmSync(stallFlag, { force: true });
     if (!fillStep.ok || !fillStep.pid) return { ok: false, kind, stage: 'step1', fillStep };
     const bootStep = await runStep('cold-step2-locked', [`--pid=${fillStep.pid}`, `--secret=${fillStep.secret}`]);
     return { ok: bootStep.ok === true, kind, fillStep, bootStep };
@@ -385,6 +401,8 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
         cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: wsEndpoint } : { ok: false }),
         mediator: () => mediator,
         saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
+        // r2913: the real keeper's landing wait, carried — the fill types only once the tab's fence record is on disk, as in the product
+        ...(extOpts && extOpts.noLandingWait ? {} : { whenLanded: (o) => keeperReal.whenLanded(o) }),
         loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
         loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
           BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
@@ -484,6 +502,8 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
       cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: wsEndpoint } : { ok: false }),
       mediator: () => mediator,
       saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
+      // r2913: the real keeper's landing wait, carried — the fill types only once the tab's fence record is on disk, as in the product
+      ...(extOpts && extOpts.noLandingWait ? {} : { whenLanded: (o) => keeperReal.whenLanded(o) }),
       loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
       loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
         BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
@@ -659,6 +679,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
     runColdLockedPair(repoDir, 'long'),
     runColdLockedPair(repoDir, 'short'),
     runColdLockedPair(repoDir, 'otp'),
+    runColdLockedPair(repoDir, 'short', { control: true }),   // r2913: the RED CONTROL (the race, placed)
   ]);
 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r28-nails-'));
@@ -838,6 +859,8 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
       cdpEndpointOf: async (id) => (id === PID ? { ok: true, url: relay.wsUrl, wsUrl: relay.wsUrl, port: relay.port } : { ok: false }),
       mediator: () => mediator,
       saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
+      // r2913: the real keeper's landing wait, carried — the fill types only once the tab's fence record is on disk, as in the product
+      whenLanded: (o) => keeperReal.whenLanded(o),
       loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
       loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
         BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remoteSession: Boolean(remoteSession), agent: true }),
@@ -1829,12 +1852,21 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
 
     // ── R28-6c: Addendum — 3 True First-Fill Child-Process Scenarios (`long`, `short`, `otp`) ──
     {
-      const [longSame, shortSame, otpSame, longCold, shortCold, otpCold] = await r28ChildrenPromise;
+      const [longSame, shortSame, otpSame, longCold, shortCold, otpCold, raceCold] = await r28ChildrenPromise;
       ok(
         longSame.ok === true && shortSame.ok === true && otpSame.ok === true
           && longCold.ok === true && shortCold.ok === true && otpCold.ok === true,
         'R28-6c (Property 4 true first-fill child processes × 3): brand-new process + never-filled tab + 1 single fill + vault.lock() + reconnect (and 2nd-process never-unlocked cold boot) fails closed for long password (>=8B), short password (<8B), and 6-digit OTP',
         { longSame, shortSame, otpSame, longCold, shortCold, otpCold },
+      );
+      // r2913: THE RED CONTROL — the leg's old form, the race placed: a stand-in keeper with NO landing wait, its fence write held at the
+      // store writer's rename, its child exiting at once after the fill's 200: the record is lost, and the cold second process READS the
+      // held tab (200). That was the short case's red once on the candidate's whole tier; with the landing wait carried, the leg above
+      // judges the product's road (the fill types only once the record is on disk)
+      ok(
+        !!(raceCold.fillStep && raceCold.fillStep.fillStatus === 200 && raceCold.bootStep && raceCold.bootStep.readHeldStatus === 200),
+        'R28-6c RED CONTROL (r2913): a stand-in keeper with NO landing wait whose child exits at once after the fill (its fence write held at the store writer\'s rename, placed) LOSES the record: the cold second process reads the held tab',
+        { fillStatus: raceCold.fillStep && raceCold.fillStep.fillStatus, readHeldStatus: raceCold.bootStep && raceCold.bootStep.readHeldStatus, readHeldCode: raceCold.bootStep && raceCold.bootStep.readHeldCode },
       );
     }
   } finally {
@@ -1865,6 +1897,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF_PATH)
       wsUrl: flagOf('ws-url'),
       pid: flagOf('pid'),
       secret: flagOf('secret'),
+      noLandingWait: process.argv.includes('--no-landing-wait'),   // r2913: the RED CONTROL's child only
     });
     process.stdout.write(JSON.stringify(res) + '\n', () => {
       process.exit(res.ok ? 0 : 1);
