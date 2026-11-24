@@ -867,7 +867,7 @@ console.log('⑤ B-0248: the list\'s write is the store writer\'s (off the loop)
   const lateMeter = () => { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last - TICK_MS); last = n; }, TICK_MS); return { stop() { clearInterval(t); return Math.round(worst); } }; };
   // (a) THE PLACED STALL: the real list, the real store writer's thread, a scratch dir; every synchronous write-family call of
   // THIS thread under the dir is held STALL_MS (scripts/fixtures/fs-stall.cjs: the writer's thread loads its own fs, never held)
-  const stallScene = async (Mod) => {
+  const stallScene = async (Mod, n = 4) => {   // n: the changes made under the stall (the red copy needs ONE to hold the loop — r3713: the suite's time)
     const d = dataDir();
     const m = quiet(() => new Mod.UserTodoManager({ dataDir: d, onChange() { }, expirySweepMs: 0 }));
     for (let i = 0; i < 50; i++) m.add('claude:s' + (i % 10), { text: 'ask ' + i, detail: 'x'.repeat(1500), urgency: 'normal', by: 'agent', origin: 'agent' });
@@ -876,17 +876,17 @@ console.log('⑤ B-0248: the list\'s write is the store writer\'s (off the loop)
     const meter = lateMeter();
     let late = null, written = null;
     try {
-      for (let i = 0; i < 4; i++) { m.add('claude:t' + i, { text: 'late ' + i, urgency: 'normal', by: 'agent', origin: 'agent' }); await new Promise((r) => setTimeout(r, 150)); }
+      for (let i = 0; i < n; i++) { m.add('claude:t' + i, { text: 'late ' + i, urgency: 'normal', by: 'agent', origin: 'agent' }); await new Promise((r) => setTimeout(r, 150)); }
       written = await m.whenWritten();
     } finally { late = meter.stop(); S.restore(); }
-    let last = false; try { last = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf8')).items.some((x) => x.text === 'late 3'); } catch { }
+    let last = false; try { last = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf8')).items.some((x) => x.text === 'late ' + (n - 1)); } catch { }
     try { quiet(() => m.stop()); } catch { }
     return { late, written, last, stalled: S.calls.filter((c) => c.kind === 'write' && c.stalled).length };
   };
   const A = await stallScene(UT);
   ok(A.late < STALL_MS && A.stalled === 0 && A.written === true && A.last, `⑤a THE PLACED STALL (${STALL_MS} ms in every main-thread write under the list's dir): four For-you changes, the loop's worst lateness ${A.late} ms < one stall, NO main-thread write stalled, every change on disk (the writer's thread)`, A);
   const Rel = MJ.load('src/user-todos.js', anchored(SRC5, '    this._dirty = true;\n    this._handToWriter();\n  }', "    this._dirty = true;\n    { const json = JSON.stringify(this._state, null, 2); fs.writeFileSync(this._file + '.tmp', json); fs.renameSync(this._file + '.tmp', this._file); this._lastWritten = json; this._dirty = false; }\n  }", 'the release\'s write on the loop'), 'b0248-release');
-  const AX = await stallScene(Rel);
+  const AX = await stallScene(Rel, 1);   // one change held by the release's write on the loop is the red
   ok(AX.late >= STALL_MS && AX.stalled > 0, `⑤a RED control (the release's write: temp + rename on the loop): the loop is held a stall's length or more (${AX.late} ms; ${AX.stalled} main-thread writes stalled) (red)`, AX);
   // (b) DURABLE BEFORE THE ANSWER: a writer that HOLDS its write until released — persisted() answers only once the bytes are on disk
   const holdingWriter = (landOk = true) => {
