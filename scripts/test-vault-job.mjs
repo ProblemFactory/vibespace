@@ -1256,10 +1256,14 @@ async function legWrapperSkip(doorSrc = null) {
   // options end at the FIRST operand (as GNU reads them): a dash word after it is the program the wrapper would exec
   const operandEnds = [[['env', 'A=1', '-i'], '-i'], [['timeout', '60', '--'], '--']];
   const got = [], wrap = [];
-  for (const pre of understood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script, '--poll', '60'], cwd: dir }); got.push({ pre: pre.join(' ') || '(none)', program: p.program.path, script: p.script && p.script.path, command: p.command, unread: !!p.program.unread }); }
-  for (const pre of notUnderstood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }); wrap.push({ pre: pre.join(' '), program: p.program.path, want: onPath(pre[0]), script: p.script && p.script.path, command: p.command, unparsed: p.program.unparsed === true, writable: p.program.writable === true }); }
+  // r3408 (placed): this leg judges the wrapper GRAMMAR, never the read's bound (legFactsCard's): on a two-core hosted runner, inside this
+  // group of ~40 legs that spawn jobs, the first cold read of node's binary missed the card's 2 s and the row said «unread» — the grammar's
+  // reads get a bound no load reaches
+  const GRAMMAR_BOUND = { ms: 60e3 };
+  for (const pre of understood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script, '--poll', '60'], cwd: dir }, GRAMMAR_BOUND); got.push({ pre: pre.join(' ') || '(none)', program: p.program.path, script: p.script && p.script.path, command: p.command, unread: !!p.program.unread }); }
+  for (const pre of notUnderstood) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }, GRAMMAR_BOUND); wrap.push({ pre: pre.join(' '), program: p.program.path, want: onPath(pre[0]), script: p.script && p.script.path, command: p.command, unparsed: p.program.unparsed === true, writable: p.program.writable === true }); }
   const ends = [];
-  for (const [pre, want] of operandEnds) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }); ends.push({ pre: pre.join(' '), program: p.program.path, want }); }
+  for (const [pre, want] of operandEnds) { const p = await D.programFacts({ argv: [...pre, process.execPath, script], cwd: dir }, GRAMMAR_BOUND); ends.push({ pre: pre.join(' '), program: p.program.path, want }); }
   rows.got = got;
   row(got.every((g) => g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread) && got.filter((g) => g.pre !== '(none)').every((g) => g.command.startsWith(g.pre.split(' ')[0] + ' ')),
     'THE WRAPPERS IN FRONT (rounds w6tezed7d, whmslzr9y): `timeout 3600`, `nohup`, `nice -n 5`, `env A=1 B=2`, two in a row — and an option that takes a VALUE (`timeout -s KILL 60`, `--signal KILL`, `-k 5`, `env -u HOME`, `env -C <dir>`, `stdbuf -o L`, `stdbuf -oL`, `taskset 0x3`, `taskset -c 0-1`, `nice -5`): the card names the program it RUNS (node\'s real path) and its script — never an option\'s value', got.filter((g) => !(g.program === node && g.script === real && g.command.endsWith('bot.js --poll 60') && !g.unread && (g.pre === '(none)' || g.command.startsWith(g.pre.split(' ')[0] + ' ')))));   // the cases that missed, whatever they missed

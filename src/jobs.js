@@ -4517,7 +4517,10 @@ class JobManager {
     // ARCHIVED records keep their record (the cap bounds it) but their log
     // dirs follow the SAME 14-day retention as a live record's (triage §13)
     try {
-      for (const rec of this.archivedList()) {   // B-0248 step 3: never a stale copy of a LIVE record (its live logs are its own)
+      // B-f276 family unit 2, the reader table (r3230) — THE CLOCK's verdict only (r3408): while jobs.json is HELD its memory is empty because
+      // UNREAD, so «never a stale copy of a live record» cannot be judged — the hourly leg takes no archived record's folder then. A person's
+      // ✕ (and its owed re-send) still removes while held: the logs law's hold is the pass's (test-job-logs-sweep-heavy round 4)
+      if (!(this._unread && this._unread.store)) for (const rec of this.archivedList()) {   // B-0248 step 3: never a stale copy of a LIVE record (its live logs are its own)
         if ((rec.runs == null || Array.isArray(rec.runs)) && M.terminalAt(rec) < cutoff) whole.push(rec.id);   // round 3 §3: a record whose runs cannot be read has no end to age by — kept
       }
     } catch { }
@@ -4542,9 +4545,7 @@ class JobManager {
   _logsRemover() {
     const o = (this.d && this.d.logsSweep) || {};   // workerPath: a suite's slow-storage stand-in around the real worker
     // filterWhole: THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS (round 2) — an id a live record names again by then keeps its dir
-    // B-f276 family unit 2, the reader table (r3230): while jobs.json is HELD its memory is empty because UNREAD — «no live record names it»
-    // is unknown then, so EVERY id is named (kept): the hourly clean-up's archive leg and an archived row's ✕ never take a live job's folder
-    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => (this._unread && this._unread.store ? [] : ids.filter((id) => !this.jobs.has(id))), procRoot: typeof o.procRoot === 'string' ? o.procRoot : null });
+    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id)), procRoot: typeof o.procRoot === 'string' ? o.procRoot : null });
     return this._logsRm;
   }
   /** a WHOLE job dir — its caller's verdict (the gc's two legs, the archive cap, the ✕, the boot collapse) — removed in the

@@ -724,19 +724,39 @@ console.log('§14 B-f276: an unreadable store is kept as it is, written by nothi
     ok(wg.status === 503 && wg.body.code === 'records-unread' && /a conversation's jobs cannot be listed while the job records cannot be read/.test(wg.body.error), 'the reader table (r3230): a conversation\'s wake-grant rows (the Terminate confirm) while held answer the hold by name (503) — never «owns no job»', wg);
     const tk = R.tokenHeldAnswer('jbt_' + '0'.repeat(32));
     ok(!!tk && tk.status === 503 && tk.code === 'records-unread' && /a job's token cannot be checked/.test(tk.error) && R.tokenHeldAnswer('vsst_made') === null, 'the reader table: a job\'s token while held is answered by the hold\'s words (503) — never «unknown job token» to a job that may be running', tk);
-    const LD = path.join(R.logsDir, 'jb-f2760a01'); fs.mkdirSync(LD, { recursive: true }); fs.writeFileSync(path.join(LD, 'run-1.log'), 'made-up');
-    const lw = await R._logsWhole(['jb-f2760a01']);
-    ok(!!lw && (lw.gone || []).length === 0 && (lw.keptWhy || {})['jb-f2760a01'] === 'named' && fs.existsSync(LD), 'the reader table: the logs remover while held NAMES every id (kept) — a live job\'s folder never goes on «no live record names it»', lw);
+    // the hourly clean-up's ARCHIVE leg (the clock's verdict, r3408): while held, «never a stale copy of a live record» cannot be judged —
+    // an archived record past the 14 days keeps its folder; a person's ✕ still removes (the logs law, test-job-logs-sweep-heavy round 4)
+    const DAY = 86400e3, old = Date.now() - 20 * DAY, arc = (id) => ({ id, kind: 'task', name: 'made-up', state: 'done', owner: {}, access: { view: 'all', control: 'session' }, runs: [{ startedAt: old, endedAt: old + 1000, exit: 0 }], archivedAt: old + 2000, archivedWhy: 'done' });
+    R._writeArchive([arc('jb-f2760a0e')]);
+    const LD = path.join(R.logsDir, 'jb-f2760a0e'); fs.mkdirSync(LD, { recursive: true }); fs.writeFileSync(path.join(LD, 'run-1.log'), 'made-up');
+    await R._gc({ now: Date.now() });
+    const keptAtGc = fs.existsSync(LD);
+    // …and A PERSON's ✕ of an archived row still removes its logs WHILE HELD (r3408 / r3413: the hold is the clean-up pass's, never a
+    // person's own removal) — RED CONTROL below: line 720's filter (every id kept while held), in a copy
+    const rmWhileHeld = async (J, id) => { J._writeArchive([...(J._loadArchive() || []), arc(id)]); const dir = path.join(J.logsDir, id); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'run-1.log'), 'made-up');
+      const r = J.rmArchived(id); const g = r && r.ok ? await Promise.race([J._logsGone.get(id) || Promise.resolve(null), new Promise((res) => setTimeout(() => res('no answer in 10 s'), 10e3))]) : null;
+      return { r, g, gone: !fs.existsSync(dir) }; };
+    const pr = await rmWhileHeld(R, 'jb-f2760a0d');
     R.shutdown();
-    // RED CONTROL: the remover's held branch cut (in a copy) — the same ask takes the folder
+    const MJP = mutantCopies('jobs-unread-person', ROOT), jsP = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
+    const JP = MJP.load('src/jobs.js', editAnchor(jsP, 'filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id))', 'filterWhole: (ids) => (this._unread && this._unread.store ? [] : ids.filter((id) => !this.jobs.has(id)))', 'src/jobs.js'), 'line-720-filter');
+    const dP = mkDir('jobs-triage-unread-person-ctl'); plant(path.join(dP, 'jobs.json'), body, 'folder');
+    const XP = engine(JP, dP, []); XP._unreadStopped = true;
+    const px = XP._unread.store ? await rmWhileHeld(XP, 'jb-f2760a0d') : null;
+    XP.shutdown();
+    ok(!!pr.r && pr.r.ok && pr.g && pr.g.gone === true && pr.gone && !!px && px.r.ok && px.gone === false && px.g && px.g.kept === 'named', 'the reader table (r3413): while held a PERSON\'s ✕ of an archived row still removes its logs (the hold is the clean-up pass\'s) — RED CONTROL (in a copy, line 720\'s filter): the folder kept («named»)', { pr, px });
+    for (const rr of copiesCensus(MJP.files, MJP.dir, ROOT, { minCopies: 1, label: 'reader-table person ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
+    // RED CONTROL: the archive leg's held guard cut (in a copy) — the same hourly pass takes the folder while held
     const MJT = mutantCopies('jobs-unread-table', ROOT), jsT = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf-8');
-    const JT = MJT.load('src/jobs.js', editAnchor(jsT, 'filterWhole: (ids) => (this._unread && this._unread.store ? [] : ids.filter((id) => !this.jobs.has(id)))', 'filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id))', 'src/jobs.js'), 'logs-unheld');
+    const JT = MJT.load('src/jobs.js', editAnchor(jsT, '      if (!(this._unread && this._unread.store)) for (const rec of this.archivedList()) {', '      for (const rec of this.archivedList()) {', 'src/jobs.js'), 'gc-archive-unheld');
     const dT = mkDir('jobs-triage-unread-table-ctl'), FT = path.join(dT, 'jobs.json');
     plant(FT, body, 'folder');
     const XT = engine(JT, dT, []); XT._unreadStopped = true;
-    const LT = path.join(XT.logsDir, 'jb-f2760a01'); fs.mkdirSync(LT, { recursive: true }); fs.writeFileSync(path.join(LT, 'run-1.log'), 'made-up');
-    const lx = !!XT._unread.store ? await XT._logsWhole(['jb-f2760a01']) : null;
-    ok(!!XT._unread.store && !!lx && (lx.gone || []).includes('jb-f2760a01') && !fs.existsSync(LT), 'RED CONTROL — the logs remover\'s held branch cut (in a copy): while held the live job\'s folder goes', lx);
+    XT._writeArchive([arc('jb-f2760a0e')]);
+    const LT = path.join(XT.logsDir, 'jb-f2760a0e'); fs.mkdirSync(LT, { recursive: true }); fs.writeFileSync(path.join(LT, 'run-1.log'), 'made-up');
+    if (XT._unread.store) await XT._gc({ now: Date.now() });
+    const goneCtl = !!XT._unread.store && await until(() => !fs.existsSync(LT), 3000);
+    ok(keptAtGc && fs.existsSync(LD) && goneCtl, 'the reader table (r3408 placed): while held the hourly clean-up\'s ARCHIVE leg takes no archived record\'s folder — RED CONTROL (in a copy, the guard cut): the same pass takes it', { keptAtGc, kept: fs.existsSync(LD), goneCtl });
     XT.shutdown();
     for (const rr of copiesCensus(MJT.files, MJT.dir, ROOT, { minCopies: 1, label: 'reader-table ' })) ok(rr.pass, rr.name + (rr.pass ? '' : ' — ' + rr.detail));
     // THE TOKEN DOORS' CENSUS: every src file that looks a jbt_ token up is a row — its lookups and its held answers counted (a new

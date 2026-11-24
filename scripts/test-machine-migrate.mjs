@@ -87,6 +87,9 @@ const fakeTokens = {
   ],
 };
 const mm3 = new MachineMounts({ dataDir, hosts: hosts2, mountTokens: fakeTokens });
+// B-f276 family unit 2 (r3408 placed): the sweep keeps what a kept copy of torn bytes may name — its ONE caller (restore) reads the copies
+// first; an unread copies' answer names every id (unknown keeps), so the stand-in reads them as restore does (none here: nothing names them)
+await mm3._copies().refresh();
 mm3.gcOrphanTokens();
 check('GC revokes reverse-mount tokens with no push record (by kind), leaves share tokens', JSON.stringify(revoked.sort()) === '["tk-legacy","tk-orphan"]', JSON.stringify(revoked));
 
