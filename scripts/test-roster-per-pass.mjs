@@ -22,7 +22,9 @@
 //     tree, never a subagents / workflows directory; A TREE THAT WAS NOT READ WHOLE SAYS NOTHING IS GONE (EACCES, EMFILE,
 //     a directory vanishing mid-walk, a walk past its bound ⇒ 0 gone, while the same ids ARE gone on a whole tree); a walk
 //     that never returns is unknown after the bound and the sweep ends; a stuck walk is not doubled; a transcript that
-//     appears between two sweeps is seen by the second.
+//     appears between two sweeps is seen by the second. 主开发 r3877: once the stuck walk returns, its reply is waited for as a FACT
+//     (a sweep that counts its sessions gone), never a fixed 20 ms; tree:hung-late places that answer 300 ms late, and its red control
+//     (the fixed wait) reads 0 gone.
 //     ROUND 2: A «GONE» VERDICT IS TRUE WHEN IT ACTS — the verifier's scenes (a conversation that writes its FIRST
 //     transcript and leaves the roster while the sweep awaits an earlier act; a transcript written right after its
 //     directory was listed) close nothing, equal to master; G gone candidates ⇒ G asks; a name a failed walk read is
@@ -312,6 +314,8 @@ function countFs(roots) {
 }
 
 // ── the legs (each returns {ok, detail}; HEAD must pass every one, a red control / mutant must fail its own) ───────────
+// r3877: tree:hung-late's placed stall — the stuck walk's own answer `lateMs` after its release; `fixedWait` is its red (the release's 20 ms)
+const HUNG = { lateMs: 0, fixedWait: false };
 const LEGS = {
   // ① counts at the owner's shape
   async 'count:list'(A) { const x = await world(A, SHAPE(A)); x.counter.builds = 0; const t = performance.now(); x.w.groups.list(); const ms = performance.now() - t, n = x.counter.builds; return { ok: n <= 1, detail: `list() at ${A.small ? 'the small' : "the owner's"} shape: ${n} roster build(s), ${ms.toFixed(1)} ms`, n, ms }; },
@@ -429,7 +433,8 @@ const LEGS = {
     const r = path.join(ROOT, 'trees-hung-' + (++wn)); const proj = path.join(r, 'projects'), remote = path.join(r, 'remote'), cx = path.join(r, 'codex');
     fs.mkdirSync(path.join(proj, '-opt-p0'), { recursive: true }); fs.mkdirSync(remote, { recursive: true }); fs.mkdirSync(cx, { recursive: true });
     let release = null, tops = 0;
-    const hang = { ...fs.promises, readdir: (p, o) => { if (String(p) === proj) tops++; if (String(p) === path.join(proj, '-opt-p0') && !release) return new Promise((res) => { release = () => res(fs.promises.readdir(p, o)); }); return fs.promises.readdir(p, o); } };
+    // the stuck walk's read answers when released — HUNG.lateMs after it (tree:hung-late's placed stall: only THIS walk's answer is late)
+    const hang = { ...fs.promises, readdir: (p, o) => { if (String(p) === proj) tops++; if (String(p) === path.join(proj, '-opt-p0') && !release) return new Promise((res) => { release = () => { const go = () => res(fs.promises.readdir(p, o)); if (HUNG.lateMs) setTimeout(go, HUNG.lateMs); else go(); }; }); return fs.promises.readdir(p, o); } };
     const io = { claude: { projectsRoot: proj, remoteRoot: remote, fsp: hang, boundMs: 60 }, codex: { sessionsDir: cx, remoteRoot: remote, boundMs: 60 } };
     const x = await world(A, { io });
     const said = []; const warn0 = console.warn; console.warn = (...a) => { const t = String(a[0] || ''); if (t.startsWith('[transcripts]')) said.push(t); else warn0(...a); };
@@ -441,12 +446,25 @@ const LEGS = {
     const doubled = tops - topsAfter1, gone2 = goneNew(x);
     const j = await x.liveness.forSweep(); const late = !!(j.index && j.index.trees && j.index.trees.projects && j.index.trees.projects.late);
     const saidWhileOut = said.slice();
-    if (release) release(); await sleep(20);
-    await x.w.groups.sweepEnded(); const gone3 = goneNew(x);
+    if (release) release();
+    // r3877: the returned walk's reply waited for as a FACT (a sweep that counts its sessions gone), never a fixed 20 ms: under load its
+    // remaining reads landed after ONE sweep (red once in a gate, run 1d11bafb1-20261124203035-both: «once it returns: 0 gone»). A guard
+    // of forty sweeps keeps a walk that truly never returns red
+    let gone3 = 0;
+    if (HUNG.fixedWait) { await sleep(20); await x.w.groups.sweepEnded(); gone3 = goneNew(x); }
+    else for (let k = 0; k < 40 && gone3 === 0; k++) { await x.w.groups.sweepEnded(); gone3 = goneNew(x); if (!gone3) await sleep(20); }
     console.warn = warn0;
     const once = saidWhileOut.length === 1 && saidWhileOut[0].includes(proj) && / has not answered since \d{4}-\d\d-\d\dT/.test(saidWhileOut[0]) && /nobody is judged gone on it/.test(saidWhileOut[0]);
     // the sweep ENDED while its walk was still out (the readdir unanswered): unknown after the bound, not after the walk
-    return { ok: out1 !== 'never' && stillOut1 && gone1 === 0 && out2 !== 'never' && gone2 === 0 && doubled === 0 && late && gone3 > 0 && once, detail: `a walk that never returns: the sweep ended in ${ms1.toFixed(0)} ms (bound 60 ms) with the walk still out: ${stillOut1}, ${out1 === 'never' ? 'NEVER' : gone1} judged gone; the next sweep while it is still out: ${out2 === 'never' ? 'NEVER' : gone2} gone, ${doubled} new top read(s), late=${late}; once it returns: ${gone3} gone; the journal said it ${saidWhileOut.length}× («${(saidWhileOut[0] || '').slice(0, 90)}…»)` };
+    return { gone3, ok: out1 !== 'never' && stillOut1 && gone1 === 0 && out2 !== 'never' && gone2 === 0 && doubled === 0 && late && gone3 > 0 && once, detail: `a walk that never returns: the sweep ended in ${ms1.toFixed(0)} ms (bound 60 ms) with the walk still out: ${stillOut1}, ${out1 === 'never' ? 'NEVER' : gone1} judged gone; the next sweep while it is still out: ${out2 === 'never' ? 'NEVER' : gone2} gone, ${doubled} new top read(s), late=${late}; once it returns: ${gone3} gone; the journal said it ${saidWhileOut.length}× («${(saidWhileOut[0] || '').slice(0, 90)}…»)` };
+  },
+  async 'tree:hung-late'(A) {   // r3877: the stuck walk's answer placed late after its release (a loaded machine did the same once): the leg waits for the fact
+    let g, old;
+    try {
+      Object.assign(HUNG, { lateMs: 300, fixedWait: false }); g = await LEGS['tree:hung'](A);
+      Object.assign(HUNG, { lateMs: 300, fixedWait: true }); old = await LEGS['tree:hung'](A);
+    } finally { Object.assign(HUNG, { lateMs: 0, fixedWait: false }); }
+    return { ok: !!(g && g.ok && old && old.gone3 === 0), detail: `the stuck walk's answer placed 300 ms after its release: the leg waits for its fact — ${g ? g.gone3 : '?'} gone (${g && g.ok ? 'every item green' : 'RED: ' + (g && g.detail)}); RED CONTROL: the release's fixed 20 ms wait reads ${old ? old.gone3 : '?'} gone — a leg that waited on a time would go red` };
   },
   async 'tree:appears'(A) {
     const r = path.join(ROOT, 'trees-appear-' + (++wn)); const proj = path.join(r, 'projects'), remote = path.join(r, 'remote'), cx = path.join(r, 'codex');
@@ -649,7 +667,7 @@ async function writerLegs(A, { report = true, only = null } = {}) {
 await writerLegs(HEAD);
 
 say(`  [${(performance.now() - t00).toFixed(0)} ms]`); say('④ frozen entries · ⑤ the transcript trees · ⑥ the gap');
-for (const leg of ['frozen', 'rename:between-passes', 'tree:whole-vs-unreadable', 'tree:hung', 'tree:appears', 'gone:true-when-it-acts', 'gone:said-asks-nothing', 'gap:leading-edge', 'gap:burst']) { const r = await run(leg, HEAD); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of ['frozen', 'rename:between-passes', 'tree:whole-vs-unreadable', 'tree:hung', 'tree:hung-late', 'tree:appears', 'gone:true-when-it-acts', 'gone:said-asks-nothing', 'gap:leading-edge', 'gap:burst']) { const r = await run(leg, HEAD); ok(r.ok, `${leg}: ${r.detail}`); }
 
 say('⑦ server.js hands the roster builder + its fingerprint (the suite cannot boot server.js: the line is pinned by name)');
 {
