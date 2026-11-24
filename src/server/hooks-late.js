@@ -80,7 +80,7 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
           : cfg && cfg.error && !Object.keys(hooks && typeof hooks === 'object' ? hooks : {}).some((k) => saidHooks(k) && (hooks[k].error || hooks[k].why) === cfg.error) ? [cfg.error] : []),
         ...(hooks && hooks.optedOut && typeof hooks.error === 'string' ? [hooks.error] : []),   // r2345 (1): an opted-out start whose look at our rows was not read (the guard) — the press says it, never «applied» over it
       ];
-      res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: harnessConfig.cliConfigStatus(), status: await agentHooksStatus() });
+      res.json({ ok: !failed.length, ...(failed.length ? { error: failed.join('; ') } : {}), hooks, cliConfig: await harnessConfig.cliConfigStatus(), status: await agentHooksStatus() });
     } catch (e) { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); } });
   }
 

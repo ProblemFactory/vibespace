@@ -224,7 +224,7 @@ console.log('§4 the plan');
   ok('cliConfigPlanB64 is shell-safe base64 that decodes to the plan', /^[A-Za-z0-9+/=]+$/.test(b64) && JSON.stringify(HC.decodePlan(b64)) === JSON.stringify(off));
   ok('decodePlan refuses garbage / a foreign version', HC.decodePlan('') === null && HC.decodePlan('!!!') === null && HC.decodePlan(Buffer.from('{"v":2,"files":[]}').toString('base64')) === null);
   ok('contributedTables lists no built-in', sync.contributedTables().length === 0);
-  ok('cliConfigStatus lists the off rows apart and reports safe=false for an unsafe server', (() => { const st = sync.cliConfigStatus(); return st.safe === false && st.off.some((o) => o.harness === 'claude' && o.key === 'transcriptRetentionDays') && st.lastWrite === null; })());
+  ok('cliConfigStatus lists the off rows apart and reports safe=false for an unsafe server', await (async () => { const st = await sync.cliConfigStatus(); return st.safe === false && st.off.some((o) => o.harness === 'claude' && o.key === 'transcriptRetentionDays') && st.lastWrite === null; })());
   store['codex.historyPersistence'] = 'bogus';
   ok('an out-of-vocabulary enum never reaches the plan as itself — the default rides (codex 0.154.0 refuses to load `persistence = "bogus"`)', sync.cliConfigPlan().files.find((f) => f.id === 'config')?.set[0].value === 'save-all');
   store['codex.historyPersistence'] = 'save-all"\nmodel = "evil';
@@ -526,7 +526,7 @@ console.log('§9 onSettingsWrite');
   await sync.onSettingsWrite({ 'claude.transcriptRetentionDays': 365 }, { 'claude.transcriptRetentionDays': 36500 });
   const j = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
   ok('a cli-config key change re-applies the plan on this machine (365 written; codex toml missing dir reported, not created)', j.cleanupPeriodDays === 365 && !fs.existsSync(path.join(home, '.codex')));
-  const st = sync.cliConfigStatus();
+  const st = await sync.cliConfigStatus({ ms: 20000 });   // r3462: a Promise — the helper's own --status read, off the loop (a fresh-content check waits past a loaded machine's spawn)
   ok('cliConfigStatus after a write: fresh receipt applied + in-memory lastWrite with its reason', st.receipts.find((r) => r.key === 'transcriptRetentionDays')?.state === 'applied' && st.lastWrite?.reason === 'settings change' && st.safe === true);
   const unsafe = createSync({ serverSetting: (k) => store[k], harnesses, adapterRegistry, activeSessions, hookRegistrationSafe: () => false, home, log: () => {}, warn: () => {} });
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"cleanupPeriodDays":1}');

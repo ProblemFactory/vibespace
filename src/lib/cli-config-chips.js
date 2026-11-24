@@ -49,6 +49,8 @@ export function receiptLine(r, { t, where, lastWriteAt = null, now = Date.now(),
       return { tone: 'bad', text: `⚠ ${where}: ${t('could not be written')}${r.reason ? ` — ${r.reason}` : ''}` };
     case 'unknown':
     default:
+      // r3462: the helper's read of this machine's files did not answer within the route's bound (a home that stops answering)
+      if (r && (r.reason === 'not-known-now' || r.reason === 'not-read')) return { tone: 'warn', text: `? ${where}: ${target} ${r.reason === 'not-read' ? t('not known now — the read of the file failed') : t('not known now — the file did not answer in time')}${r.readAt ? ` · ${t('last read {ago}', { ago: ago(now - r.readAt, t) })}` : ''}` };
       if (r && /no-node/.test(String(r.reason || ''))) return { tone: 'bad', text: `✗ ${where}: ${t('node missing on the host — agent tools cannot run')}` };
       return { tone: 'dim', text: `? ${where}: ${t('not checked — reinstall the agent tools')}` };
   }

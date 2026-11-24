@@ -17,9 +17,12 @@
 //                                a git worktree, a temp root or the skip belt
 //                                never writes the owner's CLI config — the
 //                                2026-07-21 + 2026-10-01 incident class
-//   cliConfigStatus()            fresh receipts (D2: every probe re-reads the
-//                                target file; the last local write is kept in
-//                                memory only, never persisted)
+//   cliConfigStatus()            → Promise: fresh receipts (D2: every probe
+//                                re-reads the target file — by the SHIPPED
+//                                helper's own --status run, never on the
+//                                hub's loop: r3462) or, past its bound, each
+//                                key «not known now» by name; the last local
+//                                write is kept in memory only, never persisted
 //   onSettingsWrite(next, prev)  the diff hook: any cli-config key changed ⇒
 //                                sync; any spawn row with a `live` verb changed
 //                                ⇒ the verb is written to every running chat
@@ -29,7 +32,10 @@
 // Literal harness ids are FORBIDDEN in this tier (test-architecture's census):
 // every id here arrives from a session, an account or the registry.
 const { HARNESS_SETTINGS, settingPath, rowOf, rowsOfKind, coerce, readRow, refusedValue, buildConfigPlan } = require('../harness-settings');
-const { readConfigPlan, encodePlan } = require('../harness-config');   // B-ddf3 unit 2 line 1: no applier here — this machine is written by the shipped helper
+const { encodePlan } = require('../harness-config');
+const STATUS_MS = 3000;   // r3462: how long a route waits for the helper's read of this machine's files (a page's look at its status)
+const STATUS_FRESH_MS = 60000;    // r3462: a read this young answers a caller whose own wait ran out (a short bound refuses no one)
+const STATUS_BACKOFF_MS = 60000;  // r3462: after a read the helper did not finish within the run's bound, no new read for this long   // B-ddf3 unit 2 line 1: no applier here — this machine is written by the shipped helper
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a push's pass (batch 21's cure)
 
 /** Descriptor facts → plan specs for buildConfigPlan (ONE spelling: the
@@ -82,7 +88,7 @@ function accessorsFor({ serverSetting, harnesses }) {
   return { harnessSetting, harnessDeclares, harnessSpawnSettings };
 }
 
-function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null, helperPath = null, starter = null, hooksWanted = () => false, runner = null }) {
+function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null, helperPath = null, starter = null, hooksWanted = () => false, runner = null, statusMs = STATUS_MS, statusFreshMs = STATUS_FRESH_MS }) {
   // THE ROOT VERDICT (src/server-root.js, read by agent-tool-generators): the
   // refusal object when this server must not write the owner's CLI config.
   // Without the server's verdict (tests, tooling) an unsafe flag still refuses.
@@ -183,12 +189,55 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       return { receipts: r.receipts, files, landing: r };
     });
   }
-  /** Fresh receipts for the UI: the plan's managed keys read off disk NOW, plus
-   *  the last in-memory local write (age shown as "written N minutes ago"). */
-  function cliConfigStatus() {
+  /** Fresh receipts for the UI: the plan's managed keys read off disk NOW, plus the last in-memory local write (age shown as
+   *  "written N minutes ago"). B-ddf3 (the verifier's law five, r3462): THE STATUS NEVER READS THE HOME ON THE HUB's LOOP — the
+   *  keys are read by the SHIPPED helper's own --status run (its own process: the runner's status road, bounded by the run's
+   *  bound), ONE read in flight shared by every caller, each waiting up to `ms`. → Promise
+   *  - A read that STARTED BEFORE the last landing is never joined (it may have read the files before that write): a new one starts.
+   *  - A SHORT BOUND REFUSES NO ONE (r2513): a caller whose own wait ran out is answered by the last read if it is younger than
+   *    `statusFreshMs` and started after the last landing (its time rides as `readAt`).
+   *  - Else every key answers `state: 'unknown'` by name — `reason: 'not-known-now'` when the home did not answer in time,
+   *    `'not-read'` when the read itself failed (the helper's own failure line, no helper road) — with `readAt` (the last read or
+   *    landing known), and `unread` says why. A helper's CFG|*| line (its own failure) is never taken for fresh receipts.
+   *  - A HUNG HOME PILES NO HELPERS: after a read the helper did not finish within the run's bound, no new read is asked for
+   *    `STATUS_BACKOFF_MS` (one helper a minute at most, never one a look). */
+  let statusFlight = null, lastRead = null, statusBackoffUntil = 0;
+  const landedAt = () => { const l = cliRunner && cliRunner.last(); return (l && !l.skipped && l.at) || 0; };
+  const usableRead = (r) => !!r && !r.timedOut && !r.backoff && Array.isArray(r.receipts) && !r.receipts.some((x) => x.harness == null) && (r.receipts.length > 0 || !r.why);
+  function readByHelper() {
+    if (statusFlight && statusFlight.startedAt >= landedAt()) return statusFlight.p;
+    if (Date.now() < statusBackoffUntil) return Promise.resolve({ backoff: true, why: `an earlier read of this machine's files did not finish within the helper's bound — the next read is asked in ${Math.ceil((statusBackoffUntil - Date.now()) / 1000)} s` });
+    const startedAt = Date.now();
+    const p = Promise.resolve().then(() => cliRunner.status(cliConfigPlanB64())).then((r) => {
+      if (usableRead(r)) lastRead = { at: startedAt, receipts: r.receipts || [] };
+      else if (r && /ran past its|did not answer/.test(String(r.why || ''))) statusBackoffUntil = Date.now() + STATUS_BACKOFF_MS;
+      return r;
+    }, (e) => ({ why: (e && e.message) || String(e) }));
+    const f = { p, startedAt };
+    statusFlight = f;
+    p.then(() => { if (statusFlight === f) statusFlight = null; });
+    return p;
+  }
+  async function cliConfigStatus({ ms = statusMs } = {}) {
     const plan = cliConfigPlan();
-    let receipts = [];
-    try { receipts = readConfigPlan(plan, { home }); } catch (e) { receipts = [{ state: 'error', reason: e.message }]; }
+    const r = !cliRunner ? { why: 'no helper road on this server' } : await new Promise((resolve) => {
+      const t = setTimeout(() => resolve({ timedOut: true, why: `the helper's read of this machine's files did not answer within ${ms} ms` }), ms);
+      t.unref?.();
+      readByHelper().then((x) => { clearTimeout(t); resolve(x); });
+    });
+    // each receipt carries its file and path from the plan (a helper's CFG line holds the key, never the file)
+    const keyOf = (f, s) => ({ harness: f.harness, id: f.id, rel: f.rel.join('/'), key: s.key, path: s.path.join('.'), want: s.value });
+    const sets = plan.files.flatMap((f) => (Array.isArray(f.set) ? f.set : []).map((s) => keyOf(f, s)));
+    const joined = (list) => list.map((x) => { const k = sets.find((y) => y.harness === x.harness && y.key === x.key); return k ? { ...k, ...x, rel: k.rel, path: k.path } : x; });
+    let receipts, unread = null, readAt = null;
+    if (usableRead(r)) { receipts = joined(r.receipts || []); readAt = Date.now(); }
+    else if (lastRead && lastRead.at >= landedAt() && Date.now() - lastRead.at <= statusFreshMs) { receipts = joined(lastRead.receipts); readAt = lastRead.at; }
+    else {
+      const whole = r && Array.isArray(r.receipts) ? r.receipts.find((x) => x.harness == null) : null;
+      unread = `not known now — ${whole ? `the helper's read failed: ${whole.reason || whole.state}` : r.why || 'the read failed'}`;
+      const knownAt = Math.max((lastRead && lastRead.at) || 0, landedAt()) || null, reason = r.timedOut || r.backoff ? 'not-known-now' : 'not-read';
+      receipts = sets.map((k) => ({ ...k, state: 'unknown', reason, why: unread, readAt: knownAt }));
+    }
     // Rows whose value is `off` are not in the plan; the UI still wants to say
     // "leaving the CLI's own value alone" for them, so they are listed apart.
     const off = [];
@@ -196,7 +245,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       if (!plan.files.some((f) => f.harness === h.id && f.set.some((s) => s.key === row.key))) off.push({ harness: h.id, key: row.key, rel: (h.settings.files[row.apply.file] || {}).rel?.join('/') || null, path: row.apply.path.join('.') });
     }
     const refused = refusalNow();
-    return { safe: !refused, refused, registeredAfterError: recoveryNow(), files: plan.files.map((f) => ({ harness: f.harness, id: f.id, rel: f.rel.join('/'), format: f.format, keys: f.set.map((s) => s.key) })), receipts, off, lastWrite: lastWrite ? { at: lastWrite.at, reason: lastWrite.reason, receipts: lastWrite.receipts } : null };
+    return { safe: !refused, refused, registeredAfterError: recoveryNow(), files: plan.files.map((f) => ({ harness: f.harness, id: f.id, rel: f.rel.join('/'), format: f.format, keys: f.set.map((s) => s.key) })), receipts, readAt, unread, off, lastWrite: lastWrite ? { at: lastWrite.at, reason: lastWrite.reason, receipts: lastWrite.receipts } : null };
   }
   /** Every spawn row carrying a live verb, with its harness + persisted path. */
   function liveRows() {

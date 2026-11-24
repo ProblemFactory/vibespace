@@ -318,7 +318,7 @@ const syncFor = (root, home, extra = {}) => require(path.join(repo, 'src/server/
     const rs = await sync.syncCliConfig({ reason: 'boot' });
     const sfB = path.join(homeB, '.claude', 'settings.json');
     ok("the boot cli-config plan follows the same rule: ~/.claude present ⇒ settings.json created with cleanupPeriodDays 36500 (0600), journal says created", fs.existsSync(sfB) && JSON.parse(fs.readFileSync(sfB, 'utf8')).cleanupPeriodDays === 36500 && modeOf(sfB) === 0o600 && logs.some((l) => /\[cli-config\] created ~\/\.claude\/settings\.json \(the CLI had never written one\) \(boot\)/.test(l)) && rs.receipts.some((x) => x.key === 'transcriptRetentionDays' && x.state === 'applied'), logs);
-    const st = sync.cliConfigStatus();
+    const st = await sync.cliConfigStatus({ ms: 20000 });   // r3462: a Promise — the helper's own read, off the loop (a fresh-content check waits past a loaded machine's spawn)
     ok("…and its status receipt reads applied afterwards (and a fresh HOME without ~/.claude reads missing: no-dir)", st.receipts.find((x) => x.key === 'transcriptRetentionDays').state === 'applied');
   } finally { delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
 }
