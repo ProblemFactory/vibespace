@@ -13,7 +13,23 @@ import { checker } from './lib/check.mjs';
 import * as GHG from './gen-gh-grammar.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { ok, report } = checker();
+// THE LOOP ENDS BY ITSELF (lane bl-release, 2026-11-24, the hosted Node 24 heavy shard of both cuts): report() used to call
+// process.exit, and three first tries on Node 24.22.3 (0a031b541 twice, 9cdd6ba46 once) printed «ALL PASS (8)» and then hung
+// inside it for the whole 600 s bound — by the hang report's threads line, Node's own exit (the main thread on a futex, two
+// helpers left, no JS to answer the signal); never on Node 22, never on a retry. So report() sets the code and the loop ends on
+// its own: the isolate is torn down before the platform, the road a suite with no exit call takes. A handle that still holds
+// the loop 5 s after the report is a leak of this suite: it is NAMED on stderr and the exit is forced RED (a green row's stderr is
+// not kept by the tier, so a green forced exit would be silent). What this cures is read from the threads line, not proved: the
+// proof is a hosted Node 24 first try that ends by itself; if one still hangs after the loop ended, the next step is the names
+// of the two threads left (the hang report counts them as idle helpers)
+const { ok, report } = checker({ exit: (c) => {
+  process.exitCode = c;
+  setTimeout(() => {
+    console.error(`  ✗ test-vault-run-model-gh: the loop did not end 5 s after the report (still active: ${process.getActiveResourcesInfo().join(', ') || 'none named'}) — a handle of this suite leaked; forced exit 1`);
+    process.exit(1);
+  }, 5000).unref();
+  return c;
+} });
 const V = require(path.join(REPO, 'src/vault-run.js'));
 
 console.log('THE ENV gh RUNS IN: a scratch HOME, nothing of a person');
@@ -62,16 +78,29 @@ await (async () => {
       console.log(`  · SKIP gh grammar census: live gh ${live} ≠ pinned ${pinned} — install gh ${pinned} to re-parse the grammar`); return;
     }
     // r2380 (3): FROM THE VENDOR'S OWN TEXT at the pinned version (its environment help, the one the census parses below), never from
-    // memory: every variable whose paragraph speaks of an update check, telemetry or the network is named here, and one the
-    // scratch environment does not set is printed «NOT SET» — a report line, never a cross, until its first hosted run (主开发 r2400)
+    // memory: every variable whose paragraph speaks of an update check, telemetry or the network is named, and each one must be SET
+    // in the scratch environment. A LAW since the first hosted runs (主开发 r2400 / r2750, lane bl-release, 2026-11-24): there, at
+    // 0a031b541 and at 9cdd6ba46, gh 2.102.0's own text named DO_NOT_TRACK, GH_NO_EXTENSION_UPDATE_NOTIFIER, GH_NO_UPDATE_NOTIFIER
+    // and GH_TELEMETRY, and the scratch environment set all four. A re-pinned gh that names one more is red until the builder sets
+    // it; a help reworded so that the reading finds none of the four is red, never a vacuous green
     {
       const envText = GHG.ghHelpTopic('environment') || '';
       const paras = envText.split(/\n\s*\n/).filter((p) => /\b(?:update|telemetry|network|notif)/i.test(p));
       const named = [...new Set(paras.flatMap((p) => p.match(/\b(?:GH|DO_NOT|NO)_[A-Z0-9_]+\b/g) || []))].sort();
+      // SET = a non-empty value (spawn drops an undefined one, and an empty one is no switch); THE LAW is one predicate, and the red
+      // control judges that same predicate. A new name read here may be one the builder must never set (a host, a debug switch): its
+      // red then asks for a re-review of this reading at the re-pin, never a blind add to scratchGhEnv
+      const unsetIn = (env) => named.filter((n) => !(typeof env[n] === 'string' && env[n] !== ''));
+      const HOSTED_WORDS = ['DO_NOT_TRACK', 'GH_NO_EXTENSION_UPDATE_NOTIFIER', 'GH_NO_UPDATE_NOTIFIER', 'GH_TELEMETRY'];   // what gh 2.102.0 printed on the hosted runner
+      const lawHolds = (env, words = HOSTED_WORDS) => envText !== '' && words.every((n) => named.includes(n)) && unsetIn(env).length === 0;
+      const unset = unsetIn(GH_ENV);
       console.log(`  · the environment help of gh ${pinned} names ${named.length ? named.join(', ') : 'no variable'} beside an update check, telemetry or the network`);
-      const unset = named.filter((n) => !(n in GH_ENV));   // a REPORT, never a cross (主开发 r2400): the first hosted run shows 2.102.0's own
-      // words; the commit after that run turns this into a law (a fourth name at 2.102.0 must not turn the final candidate's run red)
-      console.log(`  · ${envText ? 'set in the scratch environment: ' + (named.filter((n) => n in GH_ENV).join(', ') || 'none') + (unset.length ? ' · NOT SET: ' + unset.join(', ') : '') : 'the environment help could not be read'}`);
+      ok(lawHolds(GH_ENV),
+        `every variable gh ${pinned}'s own environment help names beside an update check, telemetry or the network is SET in the scratch environment (${named.join(', ') || 'none named'}${unset.length ? ' · NOT SET: ' + unset.join(', ') : ''}), the four the hosted runs printed among them`);
+      const noTelemetry = Object.fromEntries(Object.entries(GH_ENV).filter(([k]) => k !== 'GH_TELEMETRY'));
+      const emptyTelemetry = { ...GH_ENV, GH_TELEMETRY: '' };
+      ok(!lawHolds(noTelemetry) && unsetIn(noTelemetry).join(' ') === 'GH_TELEMETRY' && !lawHolds(emptyTelemetry) && !lawHolds(GH_ENV, [...HOSTED_WORDS, 'GH_NOT_IN_THE_HELP']),
+        `RED CONTROL: the same law does not hold over the scratch environment without GH_TELEMETRY or with it empty, nor when a name the help does not print is required (NOT SET: ${unsetIn(noTelemetry).join(', ') || 'nothing'}): the leg above can fail`);
     }
     const { table, unreadable, shas } = await GHG.buildGrammarParallel();                            // the WHOLE live tree, concurrently (~0.9 s): the SAME parse as the serial generator, so no spurious drift; shas = the live help-text sha of every EMITTED (allowlisted) verb
     const shippedKeys = new Set(Object.keys(shipped)), liveKeys = new Set(Object.keys(table));
