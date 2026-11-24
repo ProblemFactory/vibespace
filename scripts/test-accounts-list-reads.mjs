@@ -408,6 +408,12 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
     amM.codexGlobalStatus = () => ({ loggedIn: true, email: 'xa@example.test' });
     const cacheM = path.join(MD, 'data', 'usage-cache'); fs.mkdirSync(cacheM, { recursive: true });
     const machineFile = path.join(MD, 'data', 'usage-cache.json');
+    // THE MACHINE LOGIN's FILE IS THE STORE WRITER's DERIVED COPY (src/usage-routes.js writeUsageCache: marked dirty, written LATER on the
+    // writer's own thread; memory is authoritative): every judge of it reads it only after the writer's OWN LANDING of what it owes
+    // (afterLanding, bounded — a store owing nothing answers at once), so «merged» is never read before the write and «merges nothing»
+    // is never passed by a write still owed. The named copies below share this writer (their requires reach the real modules).
+    const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+    const landed = () => SW.afterLanding(machineFile, () => true, { timeoutMs: 5000 });
     // codex: the machine login's reading is NEWER than A's own — a merge writes it onto A's file
     const tA = Date.now() - 60000, tG = Date.now() - 1000, rs = Math.floor(Date.now() / 1000) + 3600;
     const cxSnap = (pct, at) => normalizeCodexRateLimit({ limit_id: 'codex', primary: { used_percent: pct, window_minutes: 300, resets_at: rs }, secondary: { used_percent: pct, window_minutes: 10080, resets_at: rs + 86400 } }, at);
@@ -427,6 +433,7 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
     const aAt = Date.now() - 500;   // claude: A's own reading, newer than any the machine login holds — a merge writes it onto the machine login's file
     fs.writeFileSync(usageWrite.cacheFileFor(cacheM, MA), JSON.stringify({ fetchedAt: aAt, five_hour: { utilization: 33, resets_at: new Date(Date.now() + 36e5).toISOString() } }));
     let um = await X.usage();
+    await landed();
     ck('(c) an UNDECIDED pass on a KEPT link (A, its address the machine login\'s present one, A\'s sign-in unreadable) merges NOTHING: claude — the machine login\'s file takes no reading of A; codex — A\'s file takes no reading of the machine login',
       um.globalLogin.accountId === MA && um.codexGlobalLogin.accountId === XA && atOf(machineFile) !== aAt && xaAt() === tA && wA.ok && wG.ok,
       JSON.stringify({ links: [um.globalLogin.accountId === MA, um.codexGlobalLogin.accountId === XA], machine: atOf(machineFile) === aAt ? 'A WRITTEN' : 'not A', xa: xaAt() === tA ? 'own' : xaAt(), seeds: [wA.ok, wG.ok, wA.why, wG.why] }));
@@ -435,6 +442,7 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
     um = await X.usage();   // claude has no memo: the same instance decides and merges
     const Y = await mkUsage();   // codex's summary is a 30 s memo: a second instance's first pass, decided
     um = await Y.usage();
+    await landed();
     ck('(c) …the control: the SAME files on a DECIDED pass are merged (claude: A\'s newer reading onto the machine login\'s file; codex: the machine login\'s newer reading onto A\'s file)',
       atOf(machineFile) === aAt && xaAt() === tG, JSON.stringify({ machine: atOf(machineFile) === aAt, xa: xaAt() === tG ? 'merged' : xaAt() }));
     // (e) THE MANUAL IDENTITY REPAIR (主开发 r1574 (1)) is a person's press: it reads the sign-in facts NOW within the person's bound,
@@ -464,6 +472,7 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
     // DECIDES and keeps the links, A's sign-in made unreadable, A's newer reading, the undecided pass); each copy drops ONE gate and
     // that harness merges — the same judge reads each red
     const undecidedPass = async (setup) => {
+      await landed();   // a write owed by the pass before lands before this scene's files are reset
       door.deadUnder.clear(); await amM.signinFactsSettled([MA, XA], { withinMs: 0 });
       for (const file of [machineFile, usageWrite.cacheFileFor(cacheM, MA), usageWrite.cacheFileFor(cacheM, XA), usageWrite.cacheFileFor(cacheM, '__global_codex__')]) fs.rmSync(file, { force: true });
       const seeds = [usageWrite.writeCacheObject({ cacheDir: cacheM, key: XA, obj: cxSnap(11, tA), source: 'codex-rate-limits', backend: 'codex' }), usageWrite.writeCacheObject({ cacheDir: cacheM, key: '__global_codex__', obj: cxSnap(22, tG), source: 'codex-rate-limits', backend: 'codex' })];
@@ -472,6 +481,7 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
       await amM.signinFactsSettled([MA, XA], { withinMs: 0 });
       fs.writeFileSync(usageWrite.cacheFileFor(cacheM, MA), JSON.stringify({ fetchedAt: aAt, five_hour: { utilization: 33, resets_at: new Date(Date.now() + 36e5).toISOString() } }));
       const u = await inst.usage();
+      await landed();
       door.deadUnder.clear();
       return { seeded: seeds.every((w) => w.ok), claudeLinked: u.globalLogin.accountId === MA, codexLinked: u.codexGlobalLogin.accountId === XA, machineA: atOf(machineFile) === aAt, xaOwn: xaAt() === tA };
     };
