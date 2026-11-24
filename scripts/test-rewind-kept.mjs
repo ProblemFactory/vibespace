@@ -346,20 +346,47 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   await KD.sendKeptLines({ readyState: 1, send: (x) => tSent.push(JSON.parse(x)) }, 'conv-t', { dataRoot: tr, call, now: T0 });
   ok(fs.readFileSync(path.join(tr, 'conv-t', K.LINES_FILE), 'utf8') === torn && !!tl && tl.unrecorded === true && tl.door === true && !!tTold[0] && tTold[0].unrecorded === true && !!tSent[0] && tSent[0].data.torn === true,
     '② A RECORD THAT CANNOT BE READ (r2245 (8)): never treated as empty — not written over; the press\'s line is told live and SAID not recorded; an attach says the record could not be read', { tl, sent: tSent[0] && tSent[0].data });
-  // r2372 (1): A SESSION's END KEEPS THE RECORD (a resume or an exit is not a deletion) — the one remover every end path reads
-  // (src/server/wrapper-files.js) touches no kept line; forgetLines is for a conversation's DELETE (no delete road yet)
+  // r2372 (1): THE RECORD FOLLOWS THE CONVERSATION — a session's end (the one remover every end path reads) KEEPS it; only the
+  // conversation's DELETE forgets it, and a press answering after that writes nothing (r2372 (5))
   const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
   const KDnow = require(path.join(REPO, 'src/server/rewind-kept-door.js'));   // the door as loaded now (the restart leg above loaded it afresh)
   const fdata = at2('fdata'), fbuf = path.join(fdata, 'buffers'), froot = path.join(fdata, 'rewind-kept'), fpress = K.pressIdOf(T0, '0000f3f3');
   fs.mkdirSync(fbuf, { recursive: true });
-  for (const c of ['conv-f', 'conv-g']) await call('writeLines', { root: path.join(froot, c), lines: [{ press: K.pressIdOf(T0, '0000f2f2'), at: T0, until: T0 + 1, state: 'put-back' }] });
-  fs.mkdirSync(path.join(froot, 'conv-g', fpress));   // a press folder of that conversation still standing
-  WF.removeWrapperFiles(fbuf, 'conv-f');
+  for (const c of ['claude-c-f', 'claude-c-g']) await call('writeLines', { root: path.join(froot, c), lines: [{ press: K.pressIdOf(T0, '0000f2f2'), at: T0, until: T0 + 1, state: 'put-back' }] });
+  fs.mkdirSync(path.join(froot, 'claude-c-g', fpress));   // a press folder of that conversation still standing
+  WF.removeWrapperFiles(fbuf, 'claude-c-f');
   await new Promise((r) => setTimeout(r, 50));
-  const keptAtEnd = fs.existsSync(path.join(froot, 'conv-f', K.LINES_FILE));
-  await KDnow.forgetLines('conv-g', { dataRoot: froot });
-  ok(keptAtEnd && !fs.existsSync(path.join(froot, 'conv-g', K.LINES_FILE)) && fs.existsSync(path.join(froot, 'conv-g', fpress)) && !/rewind-kept/.test(fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8')),
-    '② A SESSION\'s END KEEPS THE RECORD (r2372 (1): the end paths\' one remover touches no kept line, and loads nothing of the kept door); forgetLines — a conversation\'s delete — takes the record, its press folders stay for their own days', { keptAtEnd });
+  const keptAtEnd = fs.existsSync(path.join(froot, 'claude-c-f', K.LINES_FILE));
+  await KDnow.forgetLines('claude-c-g', { dataRoot: froot });
+  const late = await KDnow.noteLine('claude-c-g', { press: K.pressIdOf(T0 + 5, '0000f6f6'), at: T0 + 5, until: T0 + K.KEEP.lifeMs, state: 'kept', files: 1 }, { dataRoot: froot, call, now: T0 + 5 });
+  ok(keptAtEnd && !fs.existsSync(path.join(froot, 'claude-c-g', K.LINES_FILE)) && fs.existsSync(path.join(froot, 'claude-c-g', fpress)) && late === null,
+    '② A SESSION\'s END KEEPS THE RECORD (r2372 (1): a resume or an exit is not a deletion); the conversation\'s DELETE forgets it (its press folders stay for their own days) and a press answering after the forget writes NOTHING (r2372 (5))', { keptAtEnd, late });
+  // r2372 (1): the key is the CONVERSATION's — a resumed session (a new session id, the same conversation) draws the line and its door
+  const sA = { mode: 'chat', backend: 'claude', claudeSessionId: 'c-res-1' }, sB = { mode: 'chat', backend: 'claude', claudeSessionId: 'c-res-1' };
+  const ck = KDnow.convKeyOf(sA), rr = at2('resr'), rw = at2('resw'), rf = path.join(rw, 'r.txt'); fs.writeFileSync(rf, 'r\n');
+  const rk = await KDnow.keepFor({ session: sA, conv: ck, files: [rf], by: HUMAN, now: T0, hex8: '0000f7f7', ...KA(rr) });
+  const rTold = [];
+  await KDnow.afterFilesPress(sA, ck, { ok: true, results: { kept: { press: rk.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: (sx, id, fr) => rTold.push([id, fr]), now: T0, sid: 'sess-before', ...KA(rr) });
+  const rSent = []; await KDnow.sendKeptLines({ readyState: 1, send: (x) => rSent.push(JSON.parse(x)) }, KDnow.convKeyOf(sB), { ...KA(rr), dataRoot: rr, sid: 'sess-after', now: T0 + 1 });
+  ok(ck === 'claude-c-res-1' && KDnow.convKeyOf({ backend: 'claude' }) === null && rTold.length === 1 && rTold[0][0] === 'sess-before' && rTold[0][1].sessionId === 'sess-before'
+    && !!rSent[0] && rSent[0].sessionId === 'sess-after' && rSent[0].data.lines.length === 1 && rSent[0].data.lines[0].door === true,
+    '② THE KEY IS THE CONVERSATION\'s (r2372 (1)): <backend>-<its own id>; the session that pressed is told on ITS id, and the RESUMED session (a new id) draws the same line WITH its door', { ck, told: rTold.map((x) => x[0]), sent: rSent[0] && rSent[0].sessionId });
+  // r2372 (3): a look at the machines that fails tells NOTHING (never a false «gone»); the line is still recorded
+  const fr2 = at2('failr'), fw2 = at2('failw'), ff2 = path.join(fw2, 'f.txt'); fs.writeFileSync(ff2, 'f\n');
+  const fk2 = await KDnow.keepFor({ session: { mode: 'chat' }, conv: 'claude-c-fail', files: [ff2], by: HUMAN, now: T0, hex8: '0000f8f8', ...KA(fr2) });
+  const noList = (op, payload) => (op === 'list' ? Promise.reject(Object.assign(new Error('EIO'), { code: 'EIO' })) : call(op, payload));
+  const fTold = [];
+  const fv = await KDnow.afterFilesPress({ mode: 'chat' }, 'claude-c-fail', { ok: true, results: { kept: { press: fk2.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: (sx, id, fr) => fTold.push(fr), now: T0, dataRoot: fr2, call: noList });
+  ok(fTold.length === 0 && fv === null && (await KDnow.linesOf('claude-c-fail', { now: T0 + 1, ...KA(fr2) })).length === 1,
+    '② A LOOK AT THE MACHINES THAT FAILS tells NOTHING (r2372 (3): never a false «gone» to every client); the line is recorded all the same and an attach draws it', { told: fTold.length });
+  // r2372 (4): a row whose KEPT COPY cannot be read is named apart — not counted as «the kept copy still holds them»
+  const lr = at2('lostr'), lw = at2('lostw'), lf = path.join(lw, 'l.txt'); fs.writeFileSync(lf, 'l\n');
+  const lk = await KDnow.keepFor({ session: { mode: 'chat' }, conv: 'claude-c-lost', files: [lf], by: HUMAN, now: T0, hex8: '0000f9f9', ...KA(lr) });
+  await KDnow.afterFilesPress({ mode: 'chat' }, 'claude-c-lost', { ok: true, results: { kept: { press: lk.press, machine: null, files: 2 }, files: { ok: true } } }, { broadcastToSession: () => { }, now: T0, ...KA(lr) });
+  await KDnow.afterPutBack({ mode: 'chat' }, 'claude-c-lost', lk.press, { ok: true, rows: [{ path: '/w/a', act: 'overwrite', done: false, why: 'kept-changed' }, { path: '/w/b', act: 'overwrite', done: false, why: 'EACCES' }] }, { broadcastToSession: () => { }, now: T0 + 9, ...KA(lr) });
+  const ll = (await KDnow.linesOf('claude-c-lost', { now: T0 + 10, ...KA(lr) }))[0];
+  ok(!!ll && ll.state === 'kept' && ll.door === true && ll.notPut === 1 && ll.keptLost === 1 && ll.triedAt === T0 + 9,
+    '② A ROW WHOSE KEPT COPY CANNOT BE READ is named apart (r2372 (4)): one not put back that the copy holds, one the copy cannot give back', ll);
   }
   // THE REAL POOL (no `call`): the «rewind-keep» worker thread does the keep and its read-back
   const poolRoot = fs.mkdtempSync(path.join(SCRATCH, 'pool-'));
@@ -555,6 +582,13 @@ console.log('— red controls');
   const nk = await noWrite.keepFor({ session: { mode: 'chat' }, conv: 'c-nw', files: [nf], by: HUMAN, now: T0, hex8: '0000cbcb', ...KA(nr) });
   await noWrite.afterFilesPress({ mode: 'chat' }, 'c-nw', { ok: true, results: { kept: { press: nk.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: () => { }, now: T0, ...KA(nr) });
   ok((await KD.linesOf('c-nw', { now: T0 + 1, ...KA(nr) })).length === 0, 'RED CONTROL (a kept line never written to its record): after the hub restarts the conversation shows no line of what was done to its files');
+  const bySession = M.load('src/server/rewind-kept-door.js', anchored(DSRC, '  const id = session && (session.claudeSessionId || session.backendSessionId);', '  const id = session && session.sessionId;', 'kept: keyed by the session'), 'by-session');
+  { const a = { mode: 'chat', backend: 'claude', sessionId: 'sess-1', claudeSessionId: 'c-red-1' }, b = { mode: 'chat', backend: 'claude', sessionId: 'sess-2', claudeSessionId: 'c-red-1' };
+    const br = hubAt('bysr'), bw = hubAt('bysw'), bf = path.join(bw, 'b.txt'); fs.writeFileSync(bf, 'b\n');
+    const bk = await bySession.keepFor({ session: { mode: 'chat' }, conv: bySession.convKeyOf(a), files: [bf], by: HUMAN, now: T0, hex8: '0000fafa', ...KA(br) });
+    await bySession.afterFilesPress(a, bySession.convKeyOf(a), { ok: true, results: { kept: { press: bk.press, machine: null, files: 1 }, files: { ok: true } } }, { broadcastToSession: () => { }, now: T0, ...KA(br) });
+    const bs = []; await bySession.sendKeptLines({ readyState: 1, send: (x) => bs.push(x) }, bySession.convKeyOf(b), { ...KA(br), dataRoot: br, now: T0 + 1 });
+    ok(bs.length === 0, 'RED CONTROL (the record keyed by the session): after a resume the conversation shows no line — a seven-day copy with no door'); }
   const noCap = M.load('src/server/rewind-kept-door.js', anchored(DSRC, 'cappedOf(lines.concat([line]), Number(opts.now) || Date.now())', 'lines.concat([line]).slice(-LINES_MAX)', 'kept: the cap drops the oldest whatever it holds'), 'no-cap');   // stale-pins: kept (a red control: it plants the old text)
   const cr2 = hubAt('capr'), live9 = K.pressIdOf(T0 - 5000, '0000e0e0');
   await call('writeLines', { root: path.join(cr2, 'conv-cap'), lines: [{ press: live9, at: T0 - 5000, until: T0 + K.KEEP.lifeMs, state: 'kept', files: 1 }, ...Array.from({ length: KD.LINES_MAX - 1 }, (_, i) => ({ press: K.pressIdOf(T0 - 4000 + i, (0xe100 + i).toString(16).padStart(8, '0')), at: T0 - 4000 + i, until: T0 + K.KEEP.lifeMs, state: 'put-back' }))] });

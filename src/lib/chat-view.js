@@ -2288,7 +2288,8 @@ class ChatView {
   _sayKeptLine(d, { told = false, draw = true } = {}) {
     if (!d || typeof d.press !== 'string' || !d.press) return;
     const lines = this._keptLines || (this._keptLines = new Map());
-    lines.set(d.press, { ...(lines.get(d.press) || {}), ...d });
+    // r2372 (3): a told PATCH (a field the hub could not record) is laid over what the page drew — never an undefined over a state
+    lines.set(d.press, { ...(lines.get(d.press) || {}), ...Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined)) });
     if (told && d.door === true) this._keptClosed = false;   // a copy just kept is shown, even after a close
     if (draw) this._drawKeptStrip();
   }
@@ -2302,10 +2303,11 @@ class ChatView {
       x.onclick = () => { this._keptClosed = true; this._drawKeptStrip(); };   // this view only: the record stays on the hub
       strip.append(box, x);
       this._keptStrip = strip; this._keptBox = box;
-      if (typeof ResizeObserver === 'function') { try { new ResizeObserver(() => this._keptHeight()).observe(strip); } catch { } }   // a width change wraps its lines
+      if (typeof ResizeObserver === 'function') { try { this._keptRo = new ResizeObserver(() => this._keptHeight()); this._keptRo.observe(strip); } catch { } }   // a width change wraps its lines (it ends with the view)
     }
     const strip = this._keptStrip, box = this._keptBox, list = this._messageList;
     if (!strip.isConnected) { if (list && list.parentNode === this._container) this._container.insertBefore(strip, list); else this._container.appendChild(strip); }
+    const scrolled = Number(box.scrollTop) || 0;   // r2372: a line that arrives keeps the strip's scroll place
     box.textContent = '';
     const lineOf = (text) => { const line = document.createElement('div'), words = document.createElement('span'); line.className = 'chat-system chat-rewind-kept-line'; words.textContent = text; line.appendChild(words); box.appendChild(line); return line; };
     if (this._keptTorn) lineOf(t('The record of this conversation\'s kept files could not be read — it is left as it is.'));
@@ -2316,7 +2318,16 @@ class ChatView {
       if (said) { const s = document.createElement('span'); s.className = 'chat-rewind-kept-said'; s.textContent = said; line.appendChild(s); }   // the LATEST outcome, in place
       if (m.door) { const b = document.createElement('button'); b.type = 'button'; b.textContent = putBackDoorWords(); b.onclick = () => this._putBackFiles(d.press); line.appendChild(b); }
     }
+    box.scrollTop = scrolled;
     this._keptHeight();
+  }
+  /** THE VIEW ENDS (dispose): «Checking the files…» goes with it (r2372 (2): an ask a closed view drops never settles), and the
+   *  strip's size watcher stops */
+  _endKeptView() {
+    try { this._filesCheckNote?.remove?.(); } catch { }
+    this._filesCheckNote = null;
+    try { this._keptRo?.disconnect?.(); } catch { }
+    this._keptRo = null;
   }
   /** the strip's height, for what floats over the list's top edge (public/chat.css: the history status, the position pill, the run bar, the left-behind line) */
   _keptHeight() {
@@ -2378,7 +2389,8 @@ class ChatView {
         if (!m.ok) { free(); this._sayRewindRefusal(m.reason, m.cls); return true; }
         if (!files) { this._confirmRewind(msg, plan, m); return true; }   // still one in flight while the confirm is open (one dialog)
         const note = files.settled ? null : showToast(t('Checking the files…'), { pinned: true });   // r2245 (4): a person's press is attended while the files dry run is out (≤ 20 s)
-        files.then((f) => { if (note && typeof note.remove === 'function') note.remove(); if (this._disposed) { free(); return; } this._confirmRewind(msg, plan, m, f); });   // a window closed meanwhile draws no dialog
+        this._filesCheckNote = note;   // the view's end takes it away too (_endKeptView)
+        files.then((f) => { if (note && typeof note.remove === 'function') note.remove(); if (this._filesCheckNote === note) this._filesCheckNote = null; if (this._disposed) { free(); return; } this._confirmRewind(msg, plan, m, f); });   // a window closed meanwhile draws no dialog
         return true;
       },
       { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { this._rewindCancel?.(); if (this._disposed) return; free(); showToast(t('No answer to the rewind yet — the conversation is as you see it.'), { type: 'error' }); } },
@@ -8797,6 +8809,7 @@ class ChatView {
   dispose() {
     this._statusBar?.dispose?.();
     clearTimeout(this._rewindAnswerTimer); this._rewindCancel?.(); // B-437e: a closed view says nothing about a rewind
+    this._endKeptView?.(); // B-437e U3 (r2372 (2)): «Checking the files…» and the strip's size watcher end with the view
     clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; try { this._historyAskCancel?.(); this._historyReloadCancel?.(); this._historyReadyOff?.(); } catch { }   // row B-422c: a closed view asks nothing again
     try { this._outboxOff?.(); } catch { } // lane outbox-session-chip: the chip stops hearing the outbox feed
     try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card

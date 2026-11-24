@@ -1258,19 +1258,20 @@ function registerWsHandler(wss, ctx) {
 
         case 'rewind-files': {   // B-437e files tier: the confirm's facts (dryRun) or a press with its choice — src/server/rewind-files-door.js; the PERSON only
           const session = activeSessions.get(data.sessionId), D = require('./server/rewind-files-door.js'), by = ws._personPage === true ? byOfWs(ws) : null;
-          const conv = typeof data.sessionId === 'string' ? data.sessionId : null;   // the conversation's own folder (the kept copies)
+          const conv = require('./server/rewind-kept-door.js').convKeyOf(session);   // the CONVERSATION's own folder (the kept copies follow it across a resume — r2372 (1))
           const job = data.dryRun === true ? D.filesConfirmOf({ session, msgId: data.msgId, by, hosts, conv })
             : D.pressFiles({ session, msgId: data.msgId, by, hosts, conv, choice: data.choice, drawn: data.drawn || null, lastSeenUuid: data.lastSeenUuid, expectTaken: Number.isFinite(data.expectTaken) ? data.expectTaken : null, reqId: typeof data.reqId === 'string' ? data.reqId : null });
           const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId: data.msgId ?? null, ...r })); } catch { } };
-          job.then((r) => { reply(r); if (data.dryRun !== true) require('./server/rewind-kept-door.js').afterFilesPress(session, conv, r, { broadcastToSession, hosts, msgId: data.msgId }); }, (e) => { console.error('[rewind-files] the door failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });   // a throw is said, never a silent page
+          job.then((r) => { reply(r); if (data.dryRun !== true) require('./server/rewind-kept-door.js').afterFilesPress(session, conv, r, { broadcastToSession, hosts, msgId: data.msgId, sid: data.sessionId }); }, (e) => { console.error('[rewind-files] the door failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });   // a throw is said, never a silent page
           break;
         }
 
         case 'rewind-files-put-back': {   // B-437e the kept copy: «put my files back as they were» — the plan (dryRun) or the act; the PERSON only; files only
           const session = activeSessions.get(data.sessionId), by = ws._personPage === true ? byOfWs(ws) : null;
           const reply = (r) => { try { ws.send(JSON.stringify({ type: 'rewind-files-put-back-result', sessionId: data.sessionId, reqId: data.reqId ?? null, press: data.press ?? null, ...r })); } catch { } };
-          require('./server/rewind-kept-door.js').putBack({ session, conv: typeof data.sessionId === 'string' ? data.sessionId : null, press: data.press, by, hosts, dryRun: data.dryRun === true, expect: Array.isArray(data.expect) ? data.expect : null })
-            .then((r) => { reply(r); require('./server/rewind-kept-door.js').afterPutBack(session, data.sessionId, data.press, r, { broadcastToSession, hosts }); }, (e) => { console.error('[rewind-files] the put-back failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });
+          const conv = require('./server/rewind-kept-door.js').convKeyOf(session);   // the conversation's own folder (r2372 (1))
+          require('./server/rewind-kept-door.js').putBack({ session, conv, press: data.press, by, hosts, dryRun: data.dryRun === true, expect: Array.isArray(data.expect) ? data.expect : null })
+            .then((r) => { reply(r); require('./server/rewind-kept-door.js').afterPutBack(session, conv, data.press, r, { broadcastToSession, hosts, sid: data.sessionId }); }, (e) => { console.error('[rewind-files] the put-back failed:', e && e.message); reply({ ok: false, reason: 'door-failed', cls: 'failed' }); });
           break;
         }
 
@@ -1992,7 +1993,7 @@ function registerWsHandler(wss, ctx) {
               })));
               if (ws.readyState === WS_OPEN && !livePayload.historyNotLoaded) BULK.replied(session);   // B-cd4b r1093, THE DOOR: the attach replied the history (whatever served it: its read, the hub's copy, a replay) — a socket gone first keeps the mark   // row B-422c at the move: a «not loaded» reply is a refusal said — it consumes nothing (bulk-read.js: the retry is still the first read)
               armResume(session, ws);
-              try { require('./server/rewind-kept-door.js').sendKeptLines(ws, data.sessionId); } catch { }   // B-437e U3: the kept lines (what a rewind did to its files) drawn again
+              try { const KD = require('./server/rewind-kept-door.js'), c = KD.convKeyOf(session); if (c) KD.sendKeptLines(ws, c, { sid: data.sessionId }); } catch { }   // B-437e U3: the kept lines (what a rewind did to its files) drawn again
               // ASK THE ONE PROCESS THAT KNOWS (2026-09-09, the ghost-row
               // incident). We just told the client our queue is a GUESS, so
               // the strip is showing NOTHING; the wrapper's answer is an

@@ -15663,6 +15663,8 @@ export default {
   "Files cannot be put back in this conversation.": "この会話ではファイルを元に戻せません。",
   "Files put back or removed: {n}.": "元に戻した、または削除したファイル: {n} 件。",
   "A copy of {n} file(s) as they stood before {which} is kept {where} until {date}.": "{which}の前の {n} 件のファイルのコピーを{where}に {date} まで保存しています。",
+  "At the put-back on {date}, {k} file(s) could not be read from the kept copy — it cannot put them back.": "{date} の復元では、{k} 件のファイルを保存したコピーから読めませんでした — このコピーでは元に戻せません。",
+  "{k} file(s) could not be read from the kept copy — it cannot put them back.": "{k} 件のファイルを保存したコピーから読めませんでした — このコピーでは元に戻せません。",
   "A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.": "{date} の復元で {m} 件のファイルが戻りませんでした — 保存したコピーにはまだ残っています。",
   "Checking the files…": "ファイルを確認中…",
   "Files were put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.": "{which}でファイルを元に戻しました — それ以前の {n} 件のファイルのコピーを{where}に {date} まで保存しています。",

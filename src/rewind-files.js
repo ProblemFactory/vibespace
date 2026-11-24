@@ -289,6 +289,8 @@ function editsFromMessages(messages, { targetId, whole = false, cli = null, skil
 function changedAfterOf(files, { mtimes = {}, edits = null, max = MAX_FILES } = {}) {
   // r1332 (5): two listed or edited paths equal but for letter case — one file on a case-blind storage, two on another: not judged
   // (its reader: also a composed vs a decomposed letter — one file on APFS — and a trailing dot or space — one file on Windows)
+  // (主开发 r1383: the fold strips a trailing dot or space before EVERY separator, so two folders on Linux that differ only by a
+  // trailing dot read as twins too — that fails closed, «could not be checked», never «same»: it stands)
   const seen = new Map();
   for (const p of [...(Array.isArray(files) ? files : []).map(normPath), ...(edits && Array.isArray(edits.before) ? edits.before : []), ...Object.keys((edits && edits.byPath) || {})]) {
     if (typeof p !== 'string') continue;

@@ -15664,6 +15664,8 @@ export default {
   "Files cannot be put back in this conversation.": "这个对话无法恢复文件。",
   "Files put back or removed: {n}.": "已恢复或删除的文件：{n} 个。",
   "A copy of {n} file(s) as they stood before {which} is kept {where} until {date}.": "{which}之前 {n} 个文件的副本保留{where}，到 {date} 为止。",
+  "At the put-back on {date}, {k} file(s) could not be read from the kept copy — it cannot put them back.": "{date} 的恢复中，有 {k} 个文件从保留的副本里读不出来 —— 它没法恢复这些文件。",
+  "{k} file(s) could not be read from the kept copy — it cannot put them back.": "有 {k} 个文件从保留的副本里读不出来 —— 它没法恢复这些文件。",
   "A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.": "{date} 的恢复有 {m} 个文件没有恢复 —— 保留的副本里仍有它们。",
   "Checking the files…": "正在检查文件…",
   "Files were put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.": "{which}已恢复文件 —— 之前 {n} 个文件的副本保留{where}，到 {date} 为止。",

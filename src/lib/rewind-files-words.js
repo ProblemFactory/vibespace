@@ -154,7 +154,9 @@ export function keptLineModel(line, { fmt = (ms) => dateOf(ms, { words: true }) 
       : l.step === 'partial' ? t('Some files may have been put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.', w)
         : l.step === 'none' ? t('No files were put back by {which} — the copy of {n} file(s) kept before it stays {where} until {date}.', w)
           : t('Files were put back by {which} — a copy of {n} file(s) as they were before it is kept {where} until {date}.', w);
-    const tried = Number(l.notPut) > 0 ? [t('A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.', { date: fmt(Number(l.triedAt) || Number(l.at)), m: Number(l.notPut) })] : [];
+    const when = fmt(Number(l.triedAt) || Number(l.at));
+    const tried = [...(Number(l.notPut) > 0 ? [t('A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.', { date: when, m: Number(l.notPut) })] : []),
+      ...(Number(l.keptLost) > 0 ? [t('At the put-back on {date}, {k} file(s) could not be read from the kept copy — it cannot put them back.', { date: when, k: Number(l.keptLost) })] : [])];   // r2372 (4): named apart
     return { door: true, words: said(head, ...tried) };
   }
   return { door: false, words: said(t('The copy kept for {which} is gone (it was kept seven days).', { which })) };
@@ -198,7 +200,8 @@ const PUT_REFUSALS = () => ({
 export function putBackOutcomeWords(r) {
   if (!r || r.ok !== true) return PUT_REFUSALS()[r && r.reason] || t('Nothing was put back.');
   const rows = Array.isArray(r.rows) ? r.rows : [];
-  const done = rows.filter((x) => x.done === true).length, not = rows.filter((x) => x.done !== true && x.act !== 'unchanged').length;
-  if (!not) return t('Put back as they were: {n} file(s).', { n: done });
-  return t('Put back as they were: {n} file(s); {m} not put back — the kept copy still holds them.', { n: done, m: not });
+  const left = rows.filter((x) => x.done !== true && x.act !== 'unchanged'), done = rows.filter((x) => x.done === true).length;
+  const lost = left.filter((x) => x.why === 'kept-changed').length, not = left.length - lost;   // r2372 (4): a kept copy that cannot be read holds nothing
+  const head = !not ? t('Put back as they were: {n} file(s).', { n: done }) : t('Put back as they were: {n} file(s); {m} not put back — the kept copy still holds them.', { n: done, m: not });
+  return lost ? `${head} ${t('{k} file(s) could not be read from the kept copy — it cannot put them back.', { k: lost })}` : head;
 }

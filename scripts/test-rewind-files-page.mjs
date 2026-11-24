@@ -121,6 +121,11 @@ console.log('— ① the words');
   const refused = W.putBackOutcomeWords({ ok: false, reason: 'pending' });
   ok(plan.length === K.PUT_BACK_ACTS.length && plan.every((p) => !/not known/.test(p)) && /already being put back/.test(refused) && W.putBackOutcomeWords({ ok: true, rows: [{ done: true }, { done: false, act: 'overwrite' }] }) === t('Put back as they were: {n} file(s); {m} not put back — the kept copy still holds them.', { n: 1, m: 1 }),
     '① THE PUT-BACK: each act named before it acts; a second client\'s press of one put-back said in a person\'s words (pending); what was not put back counted', { plan, refused });
+  const lostW = W.putBackOutcomeWords({ ok: true, rows: [{ done: true, act: 'overwrite' }, { done: false, act: 'overwrite', why: 'kept-changed' }, { done: false, act: 'overwrite', why: 'EACCES' }] });
+  const lostL = W.keptLineModel({ press: 'kp-x', state: 'kept', door: true, files: 3, until: 9, at: 3, msgAt: 2, step: 'done', triedAt: 5, notPut: 1, keptLost: 1 }, { fmt: (ms) => `D${ms}` });
+  ok(lostW === `${t('Put back as they were: {n} file(s); {m} not put back — the kept copy still holds them.', { n: 1, m: 1 })} ${t('{k} file(s) could not be read from the kept copy — it cannot put them back.', { k: 1 })}`
+    && lostL.words.includes(t('A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.', { date: 'D5', m: 1 })) && lostL.words.includes(t('At the put-back on {date}, {k} file(s) could not be read from the kept copy — it cannot put them back.', { date: 'D5', k: 1 })),
+    '① A ROW WHOSE KEPT COPY CANNOT BE READ is named apart (r2372 (4)) — in the put-back\'s answer and in the line — never counted as «the kept copy still holds them»', { lostW, lostL: lostL.words });
   const bounded = W.putBackPlanWords(Array.from({ length: 20 }, (_, i) => ({ path: `/w/p${i}.js`, act: 'overwrite' })));
   ok(bounded.length === W.SHOWN_MAX + 1 && bounded[W.SHOWN_MAX] === t('and {n} more', { n: 20 - W.SHOWN_MAX }), `① THE PUT-BACK's CONFIRM is bounded as the files confirm is (r2245 (11)): ${W.SHOWN_MAX} rows, «and N more»`, bounded.length);
   const d = W.drawnOf(FILES());
@@ -136,7 +141,7 @@ class El {
   get innerHTML() { return this._html || ''; }
   insertBefore(c, ref) { if (c.parent) c.remove(); c.parent = this; const i = this.children.indexOf(ref); if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); return c; }
   get textContent() { return this._text; }
-  set textContent(v) { for (const c of this.children) c.parent = null; this.children = []; this._text = String(v); }   // as the DOM: setting it removes the children
+  set textContent(v) { for (const c of this.children) c.parent = null; this.children = []; this._text = String(v); this.scrollTop = 0; }   // as the DOM: setting it removes the children (and the scroll place goes with them)
   append(...k) { for (const c of k) this.appendChild(c); }
   appendChild(c) { if (c.parent) c.remove(); c.parent = this; this.children.push(c); return c; }
   prepend(c) { if (c.parent) c.remove(); c.parent = this; this.children.unshift(c); return c; }
@@ -153,6 +158,8 @@ const stubSet = (fn, ms) => { const id = ++clock.n; clock.timers.push({ id, fn, 
 const stubClear = (id) => { clock.timers = clock.timers.filter((x) => x.id !== id); };
 const store = { m: new Map(), getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }, setItem(k, v) { this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); }, get length() { return this.m.size; }, key(i) { return [...this.m.keys()][i] || null; } };
 const said = [], toasts = [];
+const watchers = [];
+class RO { constructor(fn) { this.fn = fn; this.on = false; watchers.push(this); } observe() { this.on = true; } disconnect() { this.on = false; } }   // the strip's size watcher, a stand-in
 const FROM = "  // ── B-437e U3: THE FILES TIER's PAGE", TO = '  // Fork a new session from a specific assistant message (the chat fork button).';
 const liftView = (src, words = W) => {
   const a = src.indexOf(FROM), b = src.indexOf(TO, a + 1);
@@ -162,7 +169,7 @@ const liftView = (src, words = W) => {
     openClock: () => clock.now, PAGE_START: 0, lateFocus: () => true, document: documentStub, dateOf, REWIND_FILES_ASK_MS: 20000, REWIND_FILES_PRESS_MS: 150000,
     showToast: (m, o) => { said.push([m, o && o.type]); const el = { removed: false, remove() { this.removed = true; } }; toasts.push([m, el, o || {}]); return el; },
     showConfirmDialog: (o) => { said.push(['confirm', o]); return Promise.resolve(view && view._yes); },
-    confirmModel: words.confirmModel, drawnOf: words.drawnOf, filesOutcomeWords: words.filesOutcomeWords, pressRefusalWords: words.pressRefusalWords, keptLineModel: words.keptLineModel, keptOrderOf: words.keptOrderOf, UI_ICONS: { close: '<svg></svg>' },
+    confirmModel: words.confirmModel, drawnOf: words.drawnOf, filesOutcomeWords: words.filesOutcomeWords, pressRefusalWords: words.pressRefusalWords, keptLineModel: words.keptLineModel, keptOrderOf: words.keptOrderOf, UI_ICONS: { close: '<svg></svg>' }, ResizeObserver: RO,
     putBackDoorWords: words.putBackDoorWords, putBackPlanWords: words.putBackPlanWords, putBackOutcomeWords: words.putBackOutcomeWords };
   const names = Object.keys(deps);
   return new Function(...names, `return class { ${src.slice(a, b)} }`)(...names.map((k) => deps[k]));
@@ -296,12 +303,33 @@ const dryAnswer = (q) => q.match({ type: 'rewind-result', sessionId: 'sess-1', r
     '② TWO PRESSES of one put-back on this page: ONE ask; the second press is SAID (the button stays live, never greyed)', pbs.length);
   stripNow().remove(); s.v._redrawKeptLines();
   ok(!!stripNow() && s.root.children.indexOf(stripNow()) < s.root.children.indexOf(s.list), '② a strip dropped from the page is drawn again in its place by a redraw (a history load calls it)');
+  // r2372 (3): a told PATCH with no state of its own (a put-back over a record that could not be read) keeps what the page drew
+  const live1 = att.data.lines.find((l) => l.door === true);
+  meta.call(s.v, { type: 'msg', sessionId: 'sess-1', op: 'meta', subtype: 'rewind-kept-line', data: { press: live1.press, triedAt: T, notPut: 1, unrecorded: true } });
+  const kept1 = s.v._keptLines.get(live1.press);
+  ok(kept1.state === 'kept' && kept1.door === true && doors().length === 1 && box().children[0].innerText.includes(t('This line could not be saved: the conversation\'s record of kept files could not be read.')),
+    '② A TOLD PATCH WITH NO STATE (r2372 (3)) is laid over the line the page drew — its state and its door kept, never turned to «gone»; the line says it was not saved', kept1);
+  // a line that arrives keeps the strip's scroll place (r2372)
+  box().scrollTop = 40;
+  meta.call(s.v, { type: 'msg', sessionId: 'sess-1', op: 'meta', subtype: 'rewind-kept-line', data: { ...live1, files: 2 } });
+  ok(box().scrollTop === 40, '② a line that arrives keeps the strip\'s own scroll place (r2372)', box().scrollTop);
+  // r2372 (2): THE VIEW's END takes «Checking the files…» away (a closed view's ask never settles) and stops the strip's size watcher
+  const sc = fresh(V, { files: true }); view = sc.v; toasts.length = 0; sc.v._yes = false;
+  sc.v._rewindFromMessage(person); await tick();
+  dryAnswer(tierOne(sc.reqs)); await tick();
+  sc.v._sayKeptLine({ ...live1 });
+  const chk = toasts.find((x) => x[0] === t('Checking the files…')), ro = watchers[watchers.length - 1];
+  const before2 = !!chk && chk[1].removed === false && !!ro && ro.on === true;
+  sc.v._disposed = true; sc.v._endKeptView();
+  ok(before2 && chk[1].removed === true && ro.on === false && /this\._endKeptView\?\.\(\); \/\/ B-437e U3 \(r2372 \(2\)\)/.test(VSRC.slice(VSRC.indexOf('  dispose() {'), VSRC.indexOf('  dispose() {') + 600)),
+    '② THE VIEW\'s END (dispose calls _endKeptView — r2372 (2)): «Checking the files…» is taken away though the files ask never answers, and the strip\'s size watcher stops', { before2, removed: chk && chk[1].removed, ro: ro && ro.on });
   // THE WIRING no other leg reads (r2245 (11)): the hub's attach field and after-calls; the page's meta parse; the history loads' redraw
   const WS = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const WIRES = [['the attach payload\'s files fact', 'fileCheckpoints: session._fileCheckpoints === true,'],
-    ['the record sent at an attach', "require('./server/rewind-kept-door.js').sendKeptLines(ws, data.sessionId)"],
-    ['the line after a files press (any answer that kept)', "if (data.dryRun !== true) require('./server/rewind-kept-door.js').afterFilesPress(session, conv, r, { broadcastToSession, hosts, msgId: data.msgId })"],
-    ['the lines after a put-back', "require('./server/rewind-kept-door.js').afterPutBack(session, data.sessionId, data.press, r, { broadcastToSession, hosts })"]];
+    ['the record sent at an attach, keyed by the conversation, framed for the page', "const KD = require('./server/rewind-kept-door.js'), c = KD.convKeyOf(session); if (c) KD.sendKeptLines(ws, c, { sid: data.sessionId });"],
+    ['the files press keyed by the conversation (r2372 (1))', "const conv = require('./server/rewind-kept-door.js').convKeyOf(session);   // the CONVERSATION's own folder"],
+    ['the line after a files press (any answer that kept)', "if (data.dryRun !== true) require('./server/rewind-kept-door.js').afterFilesPress(session, conv, r, { broadcastToSession, hosts, msgId: data.msgId, sid: data.sessionId })"],
+    ['the lines after a put-back', "require('./server/rewind-kept-door.js').afterPutBack(session, conv, data.press, r, { broadcastToSession, hosts, sid: data.sessionId })"]];
   const unwired = WIRES.filter(([, x]) => WS.split(x).length !== 2).map(([n]) => n);
   const parseLine = VSRC.split('\n').find((l) => l.includes("if ('fileCheckpoints' in meta)"));
   const pv = {}, parse = new Function('meta', parseLine || 'throw new Error("no parse line")');
@@ -336,6 +364,13 @@ console.log('— red controls');
   const nw = await pressThrough(noWatch);
   nw.press.match({ type: 'rewind-files-result', sessionId: 'sess-1', reqId: nw.press.msg.reqId, ok: true, steps: ['files', 'conversation'], results: { files: { ok: true }, kept: { press: 'kp-mwq6g800-0000aaaa', files: 2 }, conversation: { ok: true, asked: true } }, outcome: { done: ['files', 'conversation'] } });
   ok(!clock.timers.some((x) => x.id === nw.s.v._rewindAnswerTimer), 'RED CONTROL (the press\'s watchdog never armed): the conversation step waits with no minute — the leg\'s own-timer read sees it (it could not, with a shared clock)');
+  const keepsNote = liftView(anchored(VSRC, "    try { this._filesCheckNote?.remove?.(); } catch { }\n", '', 'page: the view\'s end leaves the checking line'));
+  const kn = fresh(keepsNote, { files: true }); view = kn.v; toasts.length = 0; kn.v._yes = false;
+  kn.v._rewindFromMessage(person); await tick();
+  dryAnswer(tierOne(kn.reqs)); await tick();
+  kn.v._disposed = true; kn.v._endKeptView();
+  const knNote = toasts.find((x) => x[0] === t('Checking the files…'));
+  ok(!!knNote && knNote[1].removed === false, 'RED CONTROL (the view\'s end leaves «Checking the files…»): a window closed while its files are checked leaves the line pinned for good');
   const unwiredMeta = metaOf(anchored(VSRC, "{ this._onKeptMeta(op); return; }", "{ void op; return; }", 'page: the kept-lines meta not wired'));
   const uw = fresh(V0, { files: true }); view = uw.v;
   unwiredMeta.call(uw.v, (await serverFrames('0000adad', { now: Date.now() - 100, msgAt: Date.now() - 9e5 })).told[0]);

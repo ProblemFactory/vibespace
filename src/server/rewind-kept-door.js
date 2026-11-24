@@ -287,6 +287,14 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
 // computed, r2245 (1)). The door («Put my files back as they were») stands ONLY while its copy does: after the seven days, or once
 // every file is put back, the line stays and SAYS so (never a greyed door). The record goes with its conversation (forgetLines).
 const LINES_MAX = 32;
+/** THE CONVERSATION's OWN KEY (主开发 r2372 (1)): the kept copies and their lines follow the CONVERSATION, not the session — a resume
+ *  or an exit gives a new session id, the harness's own conversation id stays (claude: its session uuid) → '<backend>-<id>' | null */
+function convKeyOf(session) {
+  const id = session && (session.claudeSessionId || session.backendSessionId);
+  const be = String((session && session.backend) || 'claude');
+  return id && /^[\w-]{1,100}$/.test(String(id)) && /^[a-z][\w-]{0,20}$/.test(be) ? `${be}-${id}` : null;
+}
+const FORGOTTEN = new Set();   // conversations whose record was forgotten: a press answering after it writes nothing (r2372 (5))
 const LINE_CHAIN = new Map();   // conversation → its last line write (one after another: two notes never race one file)
 function chained(conv, fn) {
   const prev = LINE_CHAIN.get(conv) || Promise.resolve();
@@ -307,7 +315,9 @@ function cappedOf(lines, now, max = LINES_MAX) {
  *  read — it is never written over, r2245 (8)) | null */
 function noteLine(conv, patch, opts = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv) || !patch || !K.PRESS_RE.test(String(patch.press || ''))) return Promise.resolve(null);
+  if (FORGOTTEN.has(conv)) { try { console.warn(`[rewind-kept] a line for ${conv} after its record was forgotten — not written`); } catch { } return Promise.resolve(null); }
   return chained(conv, async () => {
+    if (FORGOTTEN.has(conv)) return null;   // forgotten while this note waited its turn
     const hub = hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call });
     const read = await hub.readLines();
     if (read.torn || read.unreadable) {
@@ -342,15 +352,17 @@ const linesOf = async (conv, opts = {}) => (await linesRead(conv, opts)).lines;
 const lineOfKeep = (kept, { at, msgId = null, msgAt = null, machine = null, files = 0, step = null, of = null } = {}) => ({ press: kept.press, at, until: at + K.KEEP.lifeMs,
   msgId: typeof msgId === 'string' ? msgId : null, msgAt: Number.isFinite(Number(msgAt)) && Number(msgAt) > 0 ? Number(msgAt) : null, machine, files: Number(files) || 0, step, of, state: 'kept' });
 const nameOf2 = (hosts, id) => { if (!id) return null; try { const h = hosts && typeof hosts.get === 'function' ? hosts.get(id) : null; return (h && (h.name || h.label)) || String(id); } catch { return String(id); } };
-const told = (broadcastToSession, session, conv, line) => { if (!line || typeof broadcastToSession !== 'function' || !session) return; try { broadcastToSession(session, conv, { type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-line', data: line }); } catch { } };
-/** the lines just written, TOLD as a page draws them (r2245 (1): the door computed exactly as an attach's) */
-async function tellLines(session, conv, lines, { broadcastToSession, now, ...opts }) {
+const told = (broadcastToSession, session, sid, line) => { if (!line || typeof broadcastToSession !== 'function' || !session) return; try { broadcastToSession(session, sid, { type: 'msg', sessionId: sid, op: 'meta', subtype: 'rewind-kept-line', data: line }); } catch { } };
+/** the lines just written, TOLD as a page draws them (r2245 (1): the door computed exactly as an attach's) to the page's session
+ *  `sid`. A look at the machines that fails tells NOTHING (r2372 (3): never a false «gone»); a patch that was not recorded and has
+ *  no state of its own is told as the patch only (the page keeps the state it drew) */
+async function tellLines(session, conv, lines, { broadcastToSession, now, sid = conv, ...opts }) {
   const got = lines.filter(Boolean);
   if (!got.length) return got;
   let here = null;
-  try { here = await hereOf(hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call })); } catch { here = new Set(); }
-  const views = got.map((l) => ({ ...viewOf(l, here, now), ...(l.unrecorded ? { unrecorded: true } : {}) }));
-  for (const v of views) told(broadcastToSession, session, conv, v);
+  try { here = await hereOf(hubRoad(conv, { dataRoot: opts.dataRoot, call: opts.call })); } catch { return []; }
+  const views = got.map((l) => (l.unrecorded && !l.state ? { ...l } : { ...viewOf(l, here, now), ...(l.unrecorded ? { unrecorded: true } : {}) }));
+  for (const v of views) told(broadcastToSession, session, sid, v);
   return views;
 }
 /** after a FILES PRESS answered (src/ws-handler.js, the rewind-files case): a keep made ⇒ its line, told to every client — whatever
@@ -366,28 +378,31 @@ function afterFilesPress(session, conv, r, { broadcastToSession, hosts = null, m
  *  (its door while the copy stands) and records the try (`triedAt`, `notPut`); its keep-first (what stood there) is a line of its own */
 function afterPutBack(session, conv, press, r, { broadcastToSession, hosts = null, now = Date.now(), ...opts } = {}) {
   if (!r || r.ok !== true || r.dryRun === true || !K.PRESS_RE.test(String(press || ''))) return Promise.resolve(null);
-  const rows = Array.isArray(r.rows) ? r.rows : [], acted = rows.filter((x) => x && x.act !== 'unchanged'), notPut = acted.filter((x) => x.done !== true).length;
-  const jobs = [noteLine(conv, notPut ? { press, triedAt: now, notPut } : { press, state: 'put-back', putBackAt: now }, { ...opts, now })];
+  const rows = Array.isArray(r.rows) ? r.rows : [], acted = rows.filter((x) => x && x.act !== 'unchanged'), left = acted.filter((x) => x.done !== true);
+  // r2372 (4): a row refused because its KEPT COPY cannot be read (or no longer matches) is named apart — the copy does not hold it
+  const keptLost = left.filter((x) => x.why === 'kept-changed').length, notPut = left.length - keptLost;
+  const jobs = [noteLine(conv, left.length ? { press, triedAt: now, notPut, keptLost } : { press, state: 'put-back', putBackAt: now }, { ...opts, now })];
   if (r.kept && K.PRESS_RE.test(String(r.kept.press || ''))) jobs.push(noteLine(conv, lineOfKeep(r.kept, { at: now, of: 'put-back', machine: nameOf2(hosts, r.kept.machine), files: rows.filter((x) => x.act === 'overwrite' || x.act === 'remove').length }), { ...opts, now }));
   return Promise.all(jobs).then((lines) => tellLines(session, conv, lines, { broadcastToSession, now, ...opts }), () => null);
 }
 /** an ATTACH (a reload): the conversation's lines sent again as their own meta, read off the loop — and only where it HAS a lines
  *  file (one async look: a conversation that never kept anything starts no keep pool); a record that cannot be read is SAID */
-function sendKeptLines(ws, conv, { dataRoot = DATA_ROOT, ...opts } = {}) {
+function sendKeptLines(ws, conv, { dataRoot = DATA_ROOT, sid = conv, ...opts } = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv)) return Promise.resolve([]);
   return fsp.access(path.join(dataRoot, conv, K.LINES_FILE)).then(() => linesRead(conv, { dataRoot, ...opts }), () => ({ lines: [], torn: false })).then(({ lines, torn }) => {
-    if ((lines.length || torn) && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'msg', sessionId: conv, op: 'meta', subtype: 'rewind-kept-lines', data: { lines, ...(torn ? { torn: true } : {}) } }));
+    if ((lines.length || torn) && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'msg', sessionId: sid, op: 'meta', subtype: 'rewind-kept-lines', data: { lines, ...(torn ? { torn: true } : {}) } }));
     return lines;
   }, () => []);
 }
-/** A CONVERSATION DELETED: its lines record goes, after any note in flight; its press folders stay for their own seven days (the
- *  sweep takes them), so its folder goes only when nothing else is in it. NOT a session's end — a resume or an exit keeps the
- *  conversation and its copies (主开发 r2372 (1)); VibeSpace has no delete road yet (an archive is a flag), so nothing calls it */
+/** THE CONVERSATION DELETED (r2372 (1)): its lines record goes, after any note in flight, and a press answering later writes nothing
+ *  (r2372 (5)); its press folders stay for their own seven days (the sweep takes them). NOT a session's end — a resume or an exit
+ *  keeps the conversation and its copies. VibeSpace has no delete road today (an archive is a flag), so nothing calls it yet */
 function forgetLines(conv, { dataRoot = DATA_ROOT } = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv) || conv === '.' || conv === '..') return Promise.resolve(false);
+  FORGOTTEN.add(conv);
   const dir = path.join(dataRoot, conv);
   return chained(conv, () => fsp.rm(path.join(dir, K.LINES_FILE), { force: true }).then(() => fsp.rmdir(dir).catch(() => { })).then(() => true, () => false));
 }
 const chainOf = (conv) => LINE_CHAIN.get(conv) || null;   // a leg's wait for the writes in flight
 
-module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, noteLine, linesOf, linesRead, afterFilesPress, afterPutBack, sendKeptLines, forgetLines, chainOf, cappedOf, machineNameOf: nameOf2, LINES_MAX, DATA_ROOT };
+module.exports = { keepableOf, keepFor, putBack, manifestAt, roadOf, hubRoad, pairedRoad, stampOf, closePool, noteLine, linesOf, linesRead, afterFilesPress, afterPutBack, sendKeptLines, forgetLines, chainOf, convKeyOf, cappedOf, machineNameOf: nameOf2, LINES_MAX, DATA_ROOT };

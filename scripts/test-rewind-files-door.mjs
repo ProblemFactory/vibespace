@@ -287,9 +287,9 @@ console.log('— ④ the press');
   finally { F.filesRequestOf = made; }
   const told = [];
   const tl = th && th.results && th.results.kept ? await KD.afterFilesPress(tc.session, 'rf-door', th, { broadcastToSession: (s, i, fr) => told.push(fr), now: Date.now(), dataRoot: KEEP_ROOT, call: keepCall }) : null;
-  ok(!!th && th.ok === false && th.reason === 'door-failed' && !!th.results.kept && Number(th.results.kept.msgAt) > 0 && th.outcome.maybePartial === true && RQ.filesOutOf(tc.session) === null
+  ok(!!th && th.ok === false && th.reason === 'door-failed' && !!th.results.kept && Number(th.results.kept.msgAt) > 1e12 && Number(th.results.kept.msgAt) <= Date.now() && th.outcome.maybePartial === true && RQ.filesOutOf(tc.session) === null
     && !!tl && tl.door === true && tl.step === 'partial' && told.length === 1 && told[0].data.door === true,
-    '④ A PRESS THAT THROWS AFTER ITS KEEP (r2245 (7)): the answer says the copy stands and that some files may have been put back; its line is written and told WITH its door; the mark released', { th: th && { reason: th.reason, outcome: th.outcome }, tl });
+    '④ A PRESS THAT THROWS AFTER ITS KEEP (r2245 (7)): the answer says the copy stands and that some files may have been put back; its line is written and told WITH its door; the mark released; the message\'s time is in MILLISECONDS (r2372: the sentence names its date)', { th: th && { reason: th.reason, outcome: th.outcome }, tl });
   const oc = conv({ answers: [DRY()] });
   const ro = await D.pressFiles({ session: oc.session, msgId: oc.pid, by: HUMAN, ...KA, choice: 'conversation', lastSeenUuid: U(9), stat: stat(MT) });
   ok(!ro.ok && ro.reason === 'page-behind' && ro.step === 'conversation', '④ «THE CONVERSATION ONLY» refused by tier one\'s door: marked the conversation\'s too (r2245 (10)) — the page says it in tier one\'s words', ro);
