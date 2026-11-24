@@ -1817,8 +1817,11 @@ const offRuns = [legFactsOffLoop(null, stOff), MUT_NOBOUND ? legFactsOffLoop(MUT
 let tBegan = null;
 await Promise.race([Promise.all([stOff.began, MUT_NOBOUND ? stNoBound.began : null]), new Promise((r) => { tBegan = setTimeout(r, 3000); })]);
 clearTimeout(tBegan);
+// ⑫b's card is judged AT ITS BOUND (never the stall's end) — it runs to its end beside the two timed reads, before the other legs set
+// up: the same legs' synchronous setups held the loop past the bound and its stalled read answered first (red in UTC at 35c84a98a)
+const factsCardEarly = await legFactsCard();
 const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut, noFlagMut, noLineMut, carryRows, carryMut, handRows, handMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
-  legFactsCard(), legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
+  factsCardEarly, legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
   legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
   legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {},
   legQuietLine(), QUIET_NONE ? legQuietLine(QUIET_NONE) : {},
