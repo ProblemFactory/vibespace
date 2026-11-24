@@ -327,7 +327,13 @@ async function routeLeg(RM, tag) {
 // ═══ ⑤b A LIFT WITH NO OWN ID (r3279 (2)) ═══
 console.log('⑤b a lift whose file names no own id: the noted rows kept, settled at the next pass that knows it');
 let knownB = null;
-const LATER = (() => { const m = FAKE.makeFakeAdapter({ kind: 'later', receive: 'poll', sendAs: ['user'] }); const inner = m.create; return { kind: 'later', caps: m.caps, create(rec, deps) { const impl = inner(rec, deps); impl.selfId = () => knownB; return impl; } }; })();
+// 主开发 r3859: THE LEG's TIMES ARE PLACED. The fake world pins its instants to a UTC day boundary (src/channels/fake.js worldFor):
+// the 'later' room's two own messages sit at 2/7 and 6/7 of a day past it, and the read mark after the first walk sits at the
+// engine's now. On the wall clock the newest own message falls BEHIND that mark every day from 20:34Z to midnight (the candidate's
+// tier ran at 20:34Z: the leg's own premise gone). Both the adapter's world and the engine run on ONE made-up instant, noon of a
+// fixed day: the newest own message is then 8.6 h ahead of the read mark, whatever the hour of the run
+const T_LATER = Date.UTC(2026, 10, 20, 12, 0, 0);
+const LATER = (() => { const m = FAKE.makeFakeAdapter({ kind: 'later', receive: 'poll', sendAs: ['user'], now: () => T_LATER }); const inner = m.create; return { kind: 'later', caps: m.caps, create(rec, deps) { const impl = inner(rec, deps); impl.selfId = () => knownB; return impl; } }; })();
 async function keptLeg(EM, tag, waitMs = 1800) {
   const dataDir = tmp(tag), chan = path.join(dataDir, 'channels'), A = 'later';
   fs.mkdirSync(chan, { recursive: true }); accountsFile(chan, A);
@@ -335,7 +341,7 @@ async function keptLeg(EM, tag, waitMs = 1800) {
   knownB = null;
   const lift = refuseRead(file);
   const registry = CH.createChannelRegistry(); registry.register(LATER);
-  const e = EM.create({ dataDir, registry, env: {}, broadcast: () => {}, log: quiet });
+  const e = EM.create({ dataDir, registry, env: {}, broadcast: () => {}, log: quiet, now: () => T_LATER });   // the placed instant (r3859)
   let r;
   try {
     await e.pass(A, { force: true });
