@@ -267,6 +267,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - WHAT: a module specifier is kept whatever its length; a child_process binding under any name, a dotted or computed member, a destructured require, process.binding(, globalThis.fetch(, a bare network module and an unbound import('./….mjs') are starts; the tree list counts only as a git child's 'ls-files' argument or a helper's trackedFiles / listSuiteFiles binding. The header names what the check does not read. test-ci-gate-tiers §8i adds a red control for each form and two for the tree list's edges.
 - The same two marked rows; no tier, cap or row moved. Tests and the gate's own table only.
 
+### bl-keys-misc B-5a4d root, unit 1 — a handed frame's record by its conversation, drawn by the history read (主开发 r2852; the roads page; r3160)
+- WHY: a frame handed to a running turn whose CLI died was lost in silence — every road to a next wrapper mints a new hub id, the exit teardown removes that id's files, the stopped view reads the transcript alone. Three refused rounds (r3010, r3094, r3153) and the page of the real roads.
+- WHAT: data/bin/chat-wrapper.js keeps each handed frame's record in <buffers>/handed/<conversation id>.json (0600; the id moves with the CLI's own; merge-on-write, forward-only states, no lock) and settles it at its CLI's exit (that exit = «gone»; 2 s bound, never holding the exit). src/handed-records.js (new) warms it off the loop beside the transcript; src/session-store.js draws «Not delivered» / «Not confirmed» at the send time in the stopped view and after a Resume. The chip states 'undelivered' and 'unconfirmed' (in the turn, drawn in place; en / zh / ja); src/loop-census.js + scripts/mount-reader-census.mjs rows for the new module.
+- GATE: scripts/test-wrapper-dead-handover.mjs (fast): the REAL wrapper over the stand-in CLI, the REAL teardown, a resume under a NEW hub id, the id moving, a killed wrapper, two writers, the drawer's four replies; RED: a record named by the hub id (the tip before).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
