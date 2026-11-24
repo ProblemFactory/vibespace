@@ -964,6 +964,7 @@
   "test-user-state-bounds-work.mjs": 1,
   "test-user-state-bounds.mjs": 1,
   "test-user-state-echo-chrome.mjs": 1,
+  "test-user-state-echo-rounds.mjs": 1,
   "test-user-state-echo.mjs": 1,
   "test-user-todos-expiry.mjs": 1,
   "test-user-todos-honest.mjs": 1,
