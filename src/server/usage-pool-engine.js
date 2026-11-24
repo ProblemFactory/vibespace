@@ -724,9 +724,12 @@ function poolReadReading({ group = true } = {}) {
     // file standing in for it; a file NOT THERE stays «no reading» exactly as before
     raw = usageWrite.readReading(path.join(USAGE_CACHE_DIR, id + '.json'), id, { via: RR });
     if (raw === usageWrite.UNREAD_READING) return raw;
+    // A GROUP's CACHED READING STANDS IN ONLY FOR A SIBLING's (B-87fd identity unit 4, 主开发 r3840): when the group's freshest is the
+    // row's OWN last reading (the memo's copy of its file), it never stands in for the row's live read — the file decides, and a file
+    // NOT THERE is «no reading» (the law above; the release kept it only while its memo predated the file's last reading)
     if (group) try {
       for (const [, g] of usageIdentityGroupsCached()) {
-        if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
+        if (g.accountIds.includes(id) && g.cache && g.accountId !== id && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
       }
     } catch { }
     // A PERSON'S RESET CLAIM IS A VIEW (lane account-reset-door): a claimed lane older than its claim reads as reset — the

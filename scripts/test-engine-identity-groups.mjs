@@ -67,12 +67,13 @@ const amOf = (m) => (m && !m.err ? (m.AccountManager || m) : m);
 const AMNoGuard = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || !o || typeof o !== 'object') return;\n"]], 'a seed over a tie (RED)'));
 const AMNoMark = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieDropped || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed with no mark (RED)'));
 const AMNoDrop = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed over a drop (RED)'));
+const RStandIn = redCopy('src/server/usage-pool-engine.js', engSrc, [["g.accountIds.includes(id) && g.cache && g.accountId !== id && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)", "g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)"]], 'the group\'s copy of the row\'s own reading stands in (RED)');
 const loopPath = path.join(REPO, 'src/server/auto-cli-loop.js');
 const LoopNoRotate = redCopy('src/server/auto-cli-loop.js', fs.readFileSync(loopPath, 'utf8'), [["list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, ownFetchedAt, lastAttemptAt:", "list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt:"]], 'no rotation inside a pacing set (RED)');
 const RMemo = redCopy('src/server/usage-pool-engine.js', engSrc, [["  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000 || _identGroupsMemo.landed !== landed) {\n", "  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000) {\n"]], 'a memo that outlives a landing (RED)');
 const estPath = path.join(REPO, 'src/usage-estimator.js');
 const EstOld = redCopy('src/usage-estimator.js', fs.readFileSync(estPath, 'utf8'), [["      if (text) { try { all = JSON.parse(text); } catch { all = {}; if (!this._ratesUnparsedSaid) { this._ratesUnparsedSaid = true; console.warn('[usage-estimator] rates.json does not parse: read as empty, as its other writer reads it (each usage history learns its rates again from its readings)'); } } }\n", '      if (text) all = JSON.parse(text);\n']], 'a rates file that does not parse refused (RED)');
-for (const [label, m] of [['«landed» as confirmed in the last 60 s', R60], ['no pacing memory', RNoPace], ['no kept line read again', RNoReread], ['a seed over a tie', AMNoGuard], ['a seed with no mark', AMNoMark], ['a seed over a drop', AMNoDrop], ['a rates file that does not parse refused', EstOld], ['no rotation inside a pacing set', LoopNoRotate], ['a memo that outlives a landing', RMemo]]) ok(m && !m.err, `RED CONTROL built: ${label}`, (m && m.err) || '');
+for (const [label, m] of [['«landed» as confirmed in the last 60 s', R60], ['no pacing memory', RNoPace], ['no kept line read again', RNoReread], ['a seed over a tie', AMNoGuard], ['a seed with no mark', AMNoMark], ['a seed over a drop', AMNoDrop], ['a rates file that does not parse refused', EstOld], ['no rotation inside a pacing set', LoopNoRotate], ['a memo that outlives a landing', RMemo], ['the group\'s copy of the row\'s own reading stands in', RStandIn]]) ok(m && !m.err, `RED CONTROL built: ${label}`, (m && m.err) || '');
 
 // ── a made-up world: organisations and people are invented; no id or address of a real account ──
 let n = 0;
@@ -435,6 +436,25 @@ for (const [mod, red] of [[null, false], ...(RMemo.err ? [] : [[RMemo, true]])])
   const slugs = [...G.keys()].map((k) => UA.anchorSlug(k)), naive = ids.map((id) => UA.anchorSlug(long + '/' + id));
   ok(naive[0] === naive[1], 'PREMISE: the release spelling cuts a long split name\'s id off (both pieces one file)', JSON.stringify(naive.map((x) => x.length)));
   ok(G.size === 2 && slugs[0] !== slugs[1] && ids.every((id, i) => slugs[i].endsWith('_' + id)), '10. each piece keeps its own id inside the anchors file\'s name (the base gives up its end)', JSON.stringify(slugs.map((x) => x.slice(-14)))); }
+
+// ── 11. A GROUP's CACHED READING STANDS IN ONLY FOR A SIBLING's (主开发 r3840): the row's OWN file gone while the groups' memo still
+// holds its last reading — the row's live read decides: «no usage data» (the usage reading file's law: a file NOT THERE is no reading);
+// a SIBLING's fresher reading still stands in while the row's own file reads, as before ──
+for (const [mod, red] of [[null, false], ...(RStandIn.err ? [] : [[RStandIn, true]])]) {
+  const O = org(), W = await world([{ as: { address: red ? 'gone-red@example.invalid' : 'gone@example.invalid', orgId: O }, cache: { ago: 60, u5: 0.1, orgId: O } }], { copies: mod ? { m: mod } : {} });
+  const e = mod ? W.copy.m.eng : W.eng, [X] = W.ids;
+  writeCache(W.cacheDir, X, { ago: 0, u5: 1, orgId: O });   // the row's last reading: spent
+  await e.usageFolder.fresh();   // the folder's reply: the memo is built again over the spent reading
+  const before = usableOf(e, X);
+  fs.rmSync(path.join(W.cacheDir, X + '.json'));   // its own file GONE; the memo still holds its last reading
+  let after = null; try { after = e.quotaVerdictFor(X); } catch (err) { after = { threw: err.message }; }
+  if (!red) ok(before === false && !!after && after.usable !== false && !after.readingUnread, '11. the row\'s OWN file gone while the memo holds its last (spent) reading: the live read decides — «no usage data», never the memo\'s copy standing in', JSON.stringify({ before, after: after && { usable: after.usable, reason: after.reason } }));
+  else ok(!!after && after.usable === false, 'RED: the stand-in as it was — the memo\'s copy of the deleted file\'s spent reading still holds the row', JSON.stringify({ after: after && { usable: after.usable } }));
+  await W.close(); }
+{ const O = org(), acct = { address: 'pair@example.invalid', orgId: O }, W = await world([{ as: acct, cache: { ago: 120, u5: 0.1, orgId: O } }, { as: acct, cache: { ago: 10, u5: 1, orgId: O } }]);
+  const [X, Y] = W.ids;
+  ok(groupOf(W.eng, X) === [X, Y].sort().join(',') && usableOf(W.eng, X) === false, '11. …a SIBLING\'s fresher reading still stands in while the row\'s own file reads (one account in two rows: X is judged on Y\'s fresher spent reading, as before)', JSON.stringify({ group: groupOf(W.eng, X) === [X, Y].sort().join(','), X: usableOf(W.eng, X) }));
+  await W.close(); }
 
 // ── the PURE grouping alone: a row with no record stands alone; «unproven» is apart ──
 { const G = engMod.identityGroupsOf([{ id: 'a', accountId: 'a', today: 'email:x', rec: null }, { id: 'b', accountId: 'b', today: 'email:x', rec: null }], { same: () => 'same' });

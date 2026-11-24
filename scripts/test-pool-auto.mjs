@@ -3170,16 +3170,17 @@ await (async () => {
       ck('r3 MINOR 2: TWO POOLS sharing members, two spawns 1 min apart ⇒ two DIFFERENT guesses (UCI, then Fish) — never the same guess twice; a third spawn holds on the default', !!tp && tp[0] === 'uci' && tp[1] === 'fish' && tp[2] === 'martin', JSON.stringify(tp));
       // MINOR 4a: the proving decision reads THE pool's reading (poolReadReading — the identity group's freshest, the own
       // 5h tombstone kept): a member whose own file is old but whose identity's machine login read it an hour ago is NOT a guess
-      const groupWorld = (engine) => {
+      const groupWorld = async (engine) => {
         const w = world({ engine });
         if (!w) return null;
         const nS = Math.floor(Date.now() / 1000), cd = path.join(w.am._dataDir, 'usage-cache');
         fs.writeFileSync(path.join(cd, w.id.uci + '.json'), JSON.stringify({ fetchedAt: Date.now() - 5 * 86400e3, orgUuid: 'org-r3', source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nS - 2 * 86400 } }));
         fs.writeFileSync(path.join(cd, '__global__.json'), JSON.stringify({ fetchedAt: Date.now() - 3600e3, orgUuid: 'org-r3', source: 'passive', fiveHour: { utilization: 0.1, resetsAt: nS + 3 * 3600 }, sevenDay: { utilization: 0.05, resetsAt: nS + 5 * 86400 } }));
+        await w.eng.usageFolder.refresh();   // the two readings written straight into the folder, taken by a refresh (as twoPools does) — the groups see the machine login's reading; without it the leg read the memo's copy of UCI's OWN earlier file (B-87fd unit 4, 主开发 r3840: that copy never stands in)
         let r; const lines = quietly(() => { r = w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1' }); });
         return { at: nameOf(w, r), proving: lines.some((l) => /placed on UCI Max to confirm/.test(l)) };
       };
-      const gw = groupWorld(engMod);
+      const gw = await groupWorld(engMod);
       ck('r3 4a: the proving spawn judges a member on THE POOL\'s reading — UCI\'s own file is 5 days old, its identity\'s machine login read it an hour ago ⇒ proven, never «placed on UCI to confirm»', !!gw && !gw.proving, JSON.stringify(gw));
       // RED controls — each on a patched copy of the REAL engine (a fresh `create`, so the module's slot is the copy's)
       const { mutantCopies: mcE, copiesCensus: ccE } = await import('./mutant-copy.mjs');
@@ -3194,7 +3195,7 @@ await (async () => {
       const tpRed = ePer ? await twoPools(ePer) : null;
       ck('r3 MINOR 2 RED: with a hold map PER POOL the second pool sends its spawn onto the SAME guess (UCI, UCI)', !!tpRed && tpRed[0] === 'uci' && tpRed[1] === 'uci', JSON.stringify(tpRed));
       const eOwn = ectl('ownfile', [['readReading: poolReadReading(),', "readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
-      const gwRed = eOwn ? groupWorld(eOwn) : null;
+      const gwRed = eOwn ? await groupWorld(eOwn) : null;
       ck('r3 4a RED: a proving decision handed the member\'s OWN FILE only (no identity group) places a spawn on UCI to confirm a reset its identity already read', !!gwRed && gwRed.proving === true, JSON.stringify(gwRed));
       for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, r.pass);
     } else ck('proving engine SKIP — pools unsupported', true);
