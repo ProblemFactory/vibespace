@@ -122,6 +122,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - test-pool-fallback: the hub's OWN lift callback (account-usage-routes, the provider store's onLift → accounts.providersChanged) pinned by its head, once — §2's wiring pin matched a call the change callback also holds, and the lift leg passes its own callback, so a dropped lift call kept every leg green.
 - kb-features: a lift over a GONE file is the law's «no file» and prunes as a start with no file (less spend, never more); after a torn lift a provider the person removes stays in the pool's saved record as a dead id until the next clean start, never spent on; F1's older corner (a removal's failed write while a models save waits) named beside the removal, not built.
 
+### bl-ci — the mirror's apt update goes once more after a pause (主开发 r3181's small)
+- WHY: the release mirror run 45164852385 lost four jobs at «Install dtach»: the second mirror's apt update passed its 80 s bound (a stalled source), exit 124, before any suite ran — a second attempt of about an hour.
+- WHAT: scripts/ci-apt.sh warns on a failed second-mirror update and tries it ONCE more after CI_APT_PAUSE (20 s), the same list and bound; that third failure is the red that names it. Both dtach steps are bounded at 7 min (the worst path 380 s). test-ci-gate §2f: a leg where the paused try serves, the all-stall leg's new sequence, both bounds read.
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
