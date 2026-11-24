@@ -5045,6 +5045,7 @@ export default {
   "the spend budget refused it": "花费预算拒绝了它",
   "its wake could not be recorded (the store write failed) — kept for its next turn": "它的唤醒无法记录（存储写入失败）— 留到它的下一轮",
   "it could not be stored for the next turn (the disk write failed) — the receipt stays on this card": "无法为下一轮存储（磁盘写入失败）— 回执留在这张卡片上",
+  "handed to its next turn, not on disk: the list of messages waiting could not be read — it is lost if VibeSpace restarts before that list reads again (the receipt stays on this card)": "已交给它的下一轮，但没有写入磁盘：等待中的消息列表刚才没能读取——如果 VibeSpace 在那份列表重新读出之前重启，它就会丢失（回执保留在这张卡片上）",
   "this session's agent predates notification steering — delivering mid-turn would open a billed turn; kept for its next turn (restart the session to receive them mid-turn)": "这个会话的 agent 早于通知插入功能 —— 在回合中投递会开启一次计费回合；留到它的下一轮（重启会话即可在回合中接收）",
   "no turn was running to join — delivering now would open a billed turn; kept for its next turn": "没有正在进行的回合可加入 —— 现在投递会开启一次计费回合；留到它的下一轮",
   "the notification was removed while it was on its way": "通知在投递途中被移除了",

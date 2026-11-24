@@ -1516,6 +1516,7 @@ function create(engineCtx) {
       let held = null;
       try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
       const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));
+      if (!still && d.notOnDisk) continue;   // r3720: taken in memory only while the list was held — a restart may have lost it: UNKNOWN, never «handed», never «not sent»
       if (still) continue;   // r3663 (the round's should): a receipt the stash still holds WAITS, whatever a torn instant says (a torn copy beside the list never ends what the list still holds)
       if (tornAt != null && !(Number(d.at) > tornAt)) { if (d.at != null && Number.isFinite(Number(d.at))) tornIds.push(q.id); continue; }   // stashed before torn bytes and gone: «torn», never «handed»; a legacy row with no instant: unknown, as before (never «torn», never «handed»)   // stashed before the torn bytes: never «handed» — round wozyl97qk (g): it ENDS «torn» (its entry was in the damaged list, kept aside)
       gone.push(q.id);
@@ -2397,7 +2398,7 @@ function create(engineCtx) {
     const fromName = 'Channels · Outbox';
     const cardText = withheld ? `Receipt: your proposal — ${rc.status} (access removed)` : `${CR.nameOf([rTitle], p.convId || p.id)}: receipt — ${rc.status}${rc.reason ? ` — ${String(rc.reason).slice(0, 160)}` : ''}`;
     const channel = !withheld && p.convId ? CR.refOf({ adapterId: p.adapterId, convId: p.convId, name: rTitle, account: rec ? (rec.label || rec.id) : null, vendor: rec ? rec.kind : null }) : null;
-    let r = null, stashed = false, stashErr = null;
+    let r = null, stashed = false, stashErr = null, notOnDisk = false;   // r3720: the list of waiting messages held ⇒ the receipt is TAKEN for the next turn in memory only — its card says so, and the reconcile reads it as unknown if a restart loses it
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
     else {
       // lane owner-press-attended: the decider's «… and wake the agent now» is its OWN, attended reason (one per proposal,
@@ -2410,7 +2411,7 @@ function create(engineCtx) {
         // was running (`no free lane`) ⇒ busy; the conversation was idle and a delivery would open a billed turn ⇒ paced
         const stashWhy = (r && r.refused === 'no-wake') ? (/no free lane|running one|after the running/.test(String(r.reason || '')) ? 'busy' : 'paced') : null;
         // verify r4: a stash whose disk write failed THROWS (the entry is not stored) — the card says that, never "waiting"
-        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id, ...(stashWhy ? { held: { kind: 'notice', why: stashWhy } } : {}), about: stashAbout({ keys: key ? [key] : [], account: key ? null : p.adapterId, cid, groups: live ? null : (Array.isArray(cur.drafterGroups) ? cur.drafterGroups : []), inherited: live ? null : (Array.isArray(cur.drafterInherited) ? cur.drafterInherited : []), groupsUnreadable: !live && cur.drafterGroupsUnreadable === true }) }); stashed = true; } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
+        try { const st0 = deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id, ...(stashWhy ? { held: { kind: 'notice', why: stashWhy } } : {}), about: stashAbout({ keys: key ? [key] : [], account: key ? null : p.adapterId, cid, groups: live ? null : (Array.isArray(cur.drafterGroups) ? cur.drafterGroups : []), inherited: live ? null : (Array.isArray(cur.drafterInherited) ? cur.drafterInherited : []), groupsUnreadable: !live && cur.drafterGroupsUnreadable === true }) }); stashed = true; notOnDisk = !!(st0 && st0.stored === false); } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
       }
     }
     // a stashed receipt for a drafter whose session is not live is KEPT for when it comes back — the card says so
@@ -2426,7 +2427,7 @@ function create(engineCtx) {
     let blocked = owed && owed.blocked ? owed.blocked : null;
     if (!blocked && stashed && !gone && cur.receiptChoiceBlocked && deliver && typeof deliver.wakeBlock === 'function') { try { blocked = deliver.wakeBlock(cid); } catch { blocked = null; } }
     const delivery = {
-      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, ...(r && r.ok && r.queued ? { queued: true } : {}), refused: stashErr ? 'stash-failed' : (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
+      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, ...(r && r.ok && r.queued ? { queued: true } : {}), refused: stashErr ? 'stash-failed' : notOnDisk ? 'not-on-disk' : (r && r.refused) || null, ...(notOnDisk ? { notOnDisk: true } : {}), woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
       choice: cur.receiptChoice || 'next-turn', verdict: verdict.why || null, ...(gone ? { gone: true } : {}),
       ...(owed && owed.parked ? { paced: { retryAt: owed.retryAt, retryInMs: owed.retryInMs } } : {}),   // the park as a FACT (D5): the toast and the card promise only this
       ...(blocked ? { blocked: blocked.cause } : {}),

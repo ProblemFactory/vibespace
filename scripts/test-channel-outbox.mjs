@@ -1122,7 +1122,11 @@ function mkReal(opts = {}) {
   const dataDir = opts.dataDir || path.join(ROOT, opts.name || `r${++seq}`);
   fs.mkdirSync(dataDir, { recursive: true });
   const events = [], delivered = [];
-  const real = (opts.ladderMod || DEL).create({ dataDir, activeSessions: new Map(), log: () => {} });
+  // r3720: `holdRead` — the ladder's ONE start read of msg-stash.json PLACED as a refusal (EIO), so the list of waiting messages is HELD
+  const realRead = fs.readFileSync, held = path.resolve(path.join(dataDir, 'msg-stash.json')); let place = !!opts.holdRead;
+  if (place) fs.readFileSync = function (f, ...a) { if (place && typeof f === 'string' && path.resolve(f) === held) { place = false; throw Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' }); } return realRead.call(this, f, ...a); };
+  let real = null;
+  try { real = (opts.ladderMod || DEL).create({ dataDir, activeSessions: new Map(), log: () => {} }); } finally { fs.readFileSync = realRead; }
   const ladder = {
     delay: 0,
     async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (ladder.delay) await sleep(ladder.delay); if (o.noWake === true) return { ok: false, reason: 'no free lane', refused: 'no-wake' }; return { ok: true, lane: 'message' }; },
@@ -1281,6 +1285,27 @@ async function takenLeg(ladderMod, name) {
   const tl = await tornLeg('torn-remover', false), tr = await tornLeg('torn-remover-red', true);
   ok(Number.isFinite(tl.tornAt) && tl.drained === null && tl.how === 'torn' && tl.fate === 'torn' && /was damaged; the receipt is kept here/.test(tl.text), `THE REMOVER LAW: a receipt stashed before the stash's torn bytes is never read as handed — it ENDS «torn» (round wozyl97qk (g)): «${tl.text}»`, tl);
   ok(tr.drained === 'reconciled', `RED: a reconcile that cannot see the torn instant reads the stash's silence as handed (${tr.drained})`, tr);
+}
+{
+  // r3720 A RECEIPT TAKEN WHILE THE LIST IS HELD: in memory only — its card's record says «not on disk»; the stop loses it; the next
+  // boot's reconcile reads its silence as UNKNOWN — never «handed», never «not sent». RED: the same record without its mark (the card a
+  // receipt had before) is read as handed
+  const heldReceiptRun = async (name, unmark) => {
+    const W = mkReal({ name, holdRead: true }); const { eng } = W; await prime(eng);
+    const p = await eng.propose(AGENT, A, C, { text: 'a receipt while the list is held' }); await eng.approve(p.proposal.id, {});
+    const d0 = { ...(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}) };
+    const heldNow = !!W.real.stashHeld();
+    if (unmark) await eng.store.outbox.update((ob) => { const q = ob.proposals[p.proposal.id]; if (q && q.receiptDelivery) { delete q.receiptDelivery.notOnDisk; q.receiptDelivery.refused = null; } });
+    eng.stop();
+    const W2 = mkReal({ name, dataDir: W.dataDir });
+    await W2.eng.reconcileReceiptFates();
+    const q = W2.eng.store.outbox.snapshot().proposals[p.proposal.id];
+    W2.eng.stop();
+    return { heldNow, stashed: !!d0.stashed, notOnDisk: !!d0.notOnDisk, refused: d0.refused || null, drained: q.receiptDrainedHow || null, how: q.receiptEvictedHow || null };
+  };
+  const g = await heldReceiptRun('held-receipt', false), r = await heldReceiptRun('held-receipt-red', true);
+  ok(g.heldNow && g.stashed && g.notOnDisk && g.refused === 'not-on-disk' && g.drained === null && g.how === null, `r3720: a receipt taken while the list is held is said «not on disk» on its card; lost by the stop, the next reconcile reads it as UNKNOWN — never handed, never not sent`, g);
+  ok(r.drained === 'reconciled', `RED: the record without its mark is read as handed (${r.drained})`, r);
 }
 {
   // merge-e a ref'd entry whose write FAILS is taken back EXACTLY: the queue as it was (a claimed entry at its head, the cap's
@@ -1583,9 +1608,9 @@ async function durableLeg(ladderMod, name) {
   // failed write its sender was told "queued" and it vanished at the next restart with one log line)
   ok(d.refOnDisk && d.peerOnDisk === 2, 'every entry is on disk the moment stashFor returns — the receipt AND the peer\'s (2 on disk)', JSON.stringify(d));
   const dsrcV3 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-  const LINE = '    const stored = flush();\n    if (!stored && entry.ref) {';
+  const LINE = '    const stored = flush();\n    if (!stored && entry.ref && !stashHold.held()) {';
   ok(dsrcV3.split(LINE).length === 2, 'the durable-first line is present once (the control debounces every entry)');
-  const dc = await durableLeg(MV3.load('src/server/conversation-deliver.js', editAnchor(dsrcV3, LINE, '    persistStash(); const stored = true;\n    if (!stored && entry.ref) {', "src/server/conversation-deliver.js"), 'stash-debounced'), 'v3-durable-ctl');
+  const dc = await durableLeg(MV3.load('src/server/conversation-deliver.js', editAnchor(dsrcV3, LINE, '    persistStash(); const stored = true;\n    if (!stored && entry.ref && !stashHold.held()) {', "src/server/conversation-deliver.js"), 'stash-debounced'), 'v3-durable-ctl');
   ok(!dc.refOnDisk && dc.peerOnDisk === 0, 'CONTROL: a ladder that debounces every entry has nothing on disk when the producer records "stashed" — the leg would go red');
   // verify r4 (2026-09-27): …AND WHEN THAT WRITE FAILS THE PRODUCER IS TOLD — a full disk at the decision (the write
   // threw, was logged, the entry stayed in memory) left the outbox saying `stashed`; the next boot's reconcile found
@@ -1614,7 +1639,7 @@ async function durableLeg(ladderMod, name) {
     ok(!u.threw && !u.stashed && u.refused === 'stash-failed' && u.held === 0 && u.fate0 === 'undelivered' && u.gone === 0 && u.fate1 === 'undelivered' && /could not be stored/.test(u.why), `a stash write that FAILS: the entry is taken back (0 held), the receipt is \`undelivered\` by name (stash-failed), the decision still lands, and the next boot's reconcile reads nothing as handed (${JSON.stringify(u)})`);
     // the .195 merge: the take-back restores the queue EXACTLY (`before`) — the cap (channel-jump's capUnclaimed) may drop from
     // anywhere between claimed entries, so an unshift of what it dropped would re-order the queue
-    const THROW = "    if (!stored && entry.ref) {\n      q.splice(0, q.length, ...before);";
+    const THROW = "    if (!stored && entry.ref && !stashHold.held()) {\n      q.splice(0, q.length, ...before);";
     ok(dsrcV3.split(THROW).length === 2, 'the take-back line is present once (the control keeps the entry and says stashed)');
     const uc = await unwritableLeg(MV3.load('src/server/conversation-deliver.js', editAnchor(editAnchor(dsrcV3, THROW, "    if (false) {\n      q.splice(0, q.length, ...before);", "src/server/conversation-deliver.js"), "    if (!stored) { const why", "    if (false) { const why", "src/server/conversation-deliver.js"), 'stash-write-ignored'), ENG, 'v4-unwritable-ctl');
     ok(uc.stashed && uc.held === 1 && uc.fate0 === 'waiting' && uc.gone === 1 && uc.fate1 === 'handed', `CONTROL: a ladder that says "stashed" over a failed write is read as "handed with an earlier message" at the next boot (${JSON.stringify(uc)}) — the leg would go red`);

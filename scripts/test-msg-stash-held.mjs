@@ -29,16 +29,7 @@ const placeReads = (file, n = 1) => {
   return { seen, restore: () => { fs.readFileSync = realS; } };
 };
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-/** a PLACED refusal of the next `n` sync writes of `file` (EIO) — the side copy's write failing while held */
-const placeWrites = (file, n = 1) => {
-  const f = path.resolve(file), realW = fs.writeFileSync; let seen = 0;
-  fs.writeFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p) === f && seen < n) { seen++; throw EIO(); } return realW.call(this, p, ...a); };
-  return { restore: () => { fs.writeFileSync = realW; } };
-};
-const SIDE = 'msg-stash-held.json';   // r3326: the side copy beside the list
 const modeOf = (f) => { try { return fs.statSync(f).mode & 0o777; } catch { return null; } };
-/** the side copy's removal is OFF the loop: wait until it is gone (a bound, never a fixed sleep) */
-const goneSide = async (F) => { const p = path.join(path.dirname(F), SIDE); for (let i = 0; i < 200 && fs.existsSync(p); i++) await sleep(2); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let dirN = 0;
 const mk = () => { const d = path.join(scratch('msg-stash-held'), 'd' + (++dirN)); fs.mkdirSync(d, { recursive: true }); return d; };
@@ -52,41 +43,34 @@ const both = (j) => !!j && [CA, CB].every((c) => Array.isArray(j[c]) && j[c].len
 const heldStart = (Mod = CD, dir = mk(), bytes = BYTES) => { const F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, bytes); const pr = placeReads(F); let D = null; try { D = Mod.create(deps(dir)); } finally { pr.restore(); } return { D, F, dir, seen: pr.seen.sync }; };
 const codeOf = (fn) => { try { fn(); return null; } catch (e) { return (e && e.code) || 'threw'; } };
 
-console.log('§1 a stash that could not be read is HELD: nothing is written over it; what comes meanwhile is ACCEPTED beside it (the side copy), and both come back whole');
+console.log('§1 a stash that could not be read is HELD: nothing is written over it; what comes meanwhile is KEPT IN MEMORY (r3720), and it all comes back at the lift');
 {
   // CONTROL: the read answers ⇒ the stop keeps both conversations' entries
   const d0 = mk(), F0 = path.join(d0, 'msg-stash.json'); fs.writeFileSync(F0, BYTES);
   const D0 = CD.create(deps(d0)); D0.flush();
-  ok(both(readJson(F0)) && D0.stashHeld() === null && !fs.existsSync(path.join(d0, SIDE)), 'CONTROL: the stash read at the start ⇒ the stop keeps both conversations\' waiting entries, nothing held, no side copy', readJson(F0));
+  ok(both(readJson(F0)) && D0.stashHeld() === null, 'CONTROL: the stash read at the start ⇒ the stop keeps both conversations\' waiting entries, nothing held', readJson(F0));
   const { D, F, dir, seen } = heldStart();
   const held = D.stashHeld();
   ok(seen === 1 && !!held && held.code === 'EIO' && /could not be read/.test(D.stashUnreadWords() || ''), `PLANT: the start's one read answered EIO ⇒ HELD (${held && held.code}), its words say so`, held);
   D.flush();
   ok(fs.readFileSync(F, 'utf8') === BYTES, 'HELD: the hub stop (deliver.flush) writes NOTHING over the list — its bytes as they were', fs.readFileSync(F, 'utf8').slice(0, 80));
-  // r3326 (a): every entry stashed while held — with a ref or without — is ACCEPTED as when the list reads: memory AND the side copy
+  // r3720: every entry stashed while held — with a ref or without — is TAKEN into memory, its producer told «taken, not on disk»
   const evs = []; D.onStash((ev, cid) => evs.push(ev + ':' + cid));
   const st1 = D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a message stashed while held' });
   const st2 = D.stashFor(CC, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'a receipt while held', ref: 'p-2' });
-  const side = readJson(path.join(dir, SIDE)) || {};
-  const sideQ = side[CC] || [];
-  ok(st1 && st1.stored === true && st2 && st2.stored === true && evs.filter((x) => x === 'stashed:' + CC).length === 1 && !evs.includes('unwritten:' + CC), 'HELD: an entry without a ref AND one with a ref are accepted — «stored»; the ref\'d producer hears «stashed» after its bytes are on disk', { st1, st2, evs });
-  ok(fs.readFileSync(F, 'utf8') === BYTES && sideQ.length === 2 && sideQ.every((e) => typeof e.sid === 'string' && e.sid) && sideQ[1].ref === 'p-2' && sideQ.every((e) => typeof e.g === 'string' && e.g === sideQ[0].g) && !('__gen' in side), `HELD: both in the side copy beside the list (${SIDE}: ${sideQ.length}, each with its acceptance id and this life's generation ${sideQ[0] && sideQ[0].g}); the list untouched`, side);
-  ok(modeOf(path.join(dir, SIDE)) === 0o600, `the side copy holds people's messages: 0600 from its create (${(modeOf(path.join(dir, SIDE)) || 0).toString(8)})`);
-  // a road that DECIDES from the stash (a receipt's fate, a dedupe) is told «unknown»: stashPeek throws the hold's refusal
+  ok(st1 && st1.stored === false && st2 && st2.stored === false && /taken, not on disk/.test(st1.why || '') && /lost if VibeSpace restarts before that list reads again/.test(st1.why || '') && evs.includes('unwritten:' + CC), `HELD: an entry without a ref AND one with a ref are TAKEN — «${st1 && st1.why}»`, { st1, st2, evs });
+  ok(fs.readFileSync(F, 'utf8') === BYTES && D.stashEntries(CC).length === 2 && !fs.readdirSync(dir).some((n) => n !== 'msg-stash.json' && n.startsWith('msg-stash')), `HELD: both in memory (${D.stashEntries(CC).length}); no file of any kind beside the list; the list untouched`, fs.readdirSync(dir));
   ok(codeOf(() => D.stashPeek(CB)) === 'msg_stash_unread', 'HELD: stashPeek (a road that decides from the stash) is refused by name — it decides nothing', codeOf(() => D.stashPeek(CB)));
-  // the read again answers ⇒ LIFTED: what the list held, then what was accepted meanwhile — ONE write, the side copy removed after it
   const lifted = await D.stashReadAgain();
-  await goneSide(F);
   const after = readJson(F);
-  ok(lifted === true && D.stashHeld() === null && both(after) && after[CC] && after[CC].length === 2 && after[CC][0].text === 'a message stashed while held' && after[CC][1].ref === 'p-2' && D.stashPeek(CB).length === 1,
-    'LIFTED: both conversations\' entries are back, the two accepted while held after them — on disk in the list, peek answers again', after);
-  ok(!fs.existsSync(path.join(dir, SIDE)) && Array.isArray(after.__sideMerged) && after.__sideMerged.includes(sideQ[0].g) && modeOf(F) === 0o600, `LIFTED: the list names the copy merged (__sideMerged ${JSON.stringify(after.__sideMerged)}), then the copy is removed; the list 0600 too`, { exists: fs.existsSync(path.join(dir, SIDE)) });
-  // RED: the release's held write (nothing written while held) — the entry has no home but memory
+  ok(lifted === true && D.stashHeld() === null && both(after) && after[CC] && after[CC].length === 2 && after[CC][0].text === 'a message stashed while held' && after[CC][1].ref === 'p-2' && D.stashPeek(CB).length === 1 && modeOf(F) === 0o600,
+    'LIFTED: both conversations\' entries are back, the two taken while held after them — ONE write to the list (0600), peek answers again', after);
+  // RED: a held write that writes the list over (the release's shape: no hold)
   const SRC0 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
-  const NOSIDE = M.load('src/server/conversation-deliver.js', anchored(SRC0, '    const toSide = !!stashHold.held();', '    if (stashHold.held()) return false; const toSide = false;', 'no-side-copy'), 'no-side-copy');
-  const r = heldStart(NOSIDE);
-  const rs = r.D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a message stashed while held' });
-  ok(rs && rs.stored === false && !fs.existsSync(path.join(r.dir, SIDE)), 'RED: no side copy — the entry is kept in memory only (a restart loses it)', rs);
+  const OVER = M.load('src/server/conversation-deliver.js', anchored(SRC0, "    if (!stashHold.writable('a write of the messages waiting for conversations')) return false;", '', 'list-written-over-while-held'), 'list-written-over-while-held');
+  const r = heldStart(OVER);
+  r.D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a message stashed while held' });
+  ok(!both(readJson(r.F)), 'RED: a write that does not ask the hold — the list is written over with memory alone (both conversations\' entries gone)', readJson(r.F));
 }
 
 console.log('§2 a restart while held reads the same file again; the RED: the release\'s read');
@@ -164,51 +148,62 @@ console.log('§5 where the person meets it: the strip says the hold, the hand-ov
   ok(!!tw && tw.head.includes('msg-stash.json.corrupt-1') && /Send again anything that should still reach them/.test(tw.head) && !/restore/i.test(tw.head), `the STRIP after torn bytes names the copy and what the person can do («${tw && tw.head}»)`);
 }
 
-console.log('§5b r3299 row 2c / r3329 (4): an entry kept in memory only (its side copy could not be written) is never lost SILENTLY — the journal counts EVERY one, never a word');
+console.log('§5b r3299 row 2c / r3329 (4) / r3720 (6): what memory keeps while held is never lost SILENTLY — the journal COUNTS every entry, never names one');
 {
   const dir = mk(), F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, BYTES);
   const logs = [];
   const pr = placeReads(F); let D = null; try { D = CD.create(deps(dir, { log: (...a) => logs.push(a.join(' ')) })); } finally { pr.restore(); }
-  const pw = placeWrites(path.join(dir, SIDE + '.tmp'), 99);   // the side copy's every write refused (EIO) while held
-  const r1 = D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'secret words one' });
-  for (let i = 2; i <= 5; i++) D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'secret words ' + i });
-  ok(r1 && r1.stored === false && /could not be read, so this one is kept in memory until they read/.test(r1.why || ''), `the producer hears it: not stored, in memory until the list reads, its cause the hold (${r1 && r1.why})`, r1);
-  const said = logs.filter((l) => /kept in memory only/.test(l));
-  D.flush(); pw.restore();
-  const stop = logs.filter((l) => /kept in memory only this hold/.test(l));
-  ok(said.length >= 2 && !said.some((l) => l.includes('secret words')) && /\b1 entry is kept/.test(said[0]) && said.some((l) => /\b4 entries are kept/.test(l)) && stop.length === 1 && /\b5 entries kept in memory only this hold are lost/.test(stop[0]), `ROW 2c: the journal counts every entry kept in memory only — at the first, at each doubling, the whole count at the stop — never a word of a message («${stop[0]}»)`, said.concat(stop));
+  for (let i = 1; i <= 5; i++) D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'secret words ' + i });
+  const said = logs.filter((l) => /taken into memory only this hold/.test(l));
+  D.flush();
+  const stop = logs.filter((l) => /taken this hold and not handed out/.test(l));
+  ok(said.length >= 2 && !said.concat(stop).some((l) => l.includes('secret words') || l.includes(CC)) && /\b1 entry taken/.test(said[0]) && said.some((l) => /\b4 entries taken/.test(l)) && stop.length === 1 && /\b5 entries taken this hold and not handed out are lost/.test(stop[0]), `ROW 2c: the journal counts every entry kept in memory only — at the first, at each doubling, the whole count at the stop — no word, no conversation («${stop[0]}»)`, said.concat(stop));
+}
+
+{
+  // r3728 (the verifier's row): THE STOP COUNTS WHAT MEMORY STILL HOLDS UNHANDED — four taken while held, three handed out at the next
+  // prompt, the stop says ONE is lost. RED: the hold's count of acceptances (it says four)
+  const run = (Mod = CD) => {
+    const dir = mk(), F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, BYTES);
+    const logs = [];
+    const pr = placeReads(F); let D = null; try { D = Mod.create(deps(dir, { log: (...a) => logs.push(a.join(' ')) })); } finally { pr.restore(); }
+    for (let i = 1; i <= 3; i++) D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'handed ' + i });
+    D.stashFor(CB, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'still waiting' });
+    const took = D.drainStash(CC);
+    D.flush();
+    const stop = logs.filter((l) => /lost with this process/.test(l));
+    return { took: (took || []).length, stop };
+  };
+  const g = run();
+  ok(g.took === 3 && g.stop.length === 1 && /\b1 entry taken this hold and not handed out is lost/.test(g.stop[0]), `the stop counts what memory still holds unhanded: four taken, three handed out, «${g.stop[0]}»`, g);
+  const SRC6 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+  const BYTAKEN = M.load('src/server/conversation-deliver.js', anchored(SRC6, "    const unhanded = isHeld() ? Object.keys(stash).filter(isConvName).reduce((n, c) => n + (Array.isArray(stash[c]) ? stash[c].length : 0), 0) : 0;", '    const unhanded = isHeld() ? memOnly : 0;', 'stop-counts-acceptances'), 'stop-counts-acceptances');
+  const r = run(BYTAKEN);
+  ok(r.stop.length === 1 && /\b4 entries taken this hold and not handed out are lost/.test(r.stop[0]), `RED: the hold's count of acceptances says four where one is lost («${r.stop[0]}»)`, r);
 }
 
 console.log('§6 the round wozyl97qk: the stop while held (the truth), the reserved names, one entry a slot, the owed wake, the hand-back, the park');
 {
-  // THE STOP WHILE HELD (r3326): an entry accepted while held is in the side copy; the next start (still held) has it back in memory, and a
-  // start at which the list READS merges it at once — nothing stranded, nothing twice
+  // THE STOP WHILE HELD (r3720 (6)): an entry taken while held lives in memory only; the stop writes nothing; the next start (still held, or
+  // reading) does not have it — its producer was told at acceptance, the journal counted it at the stop
   const { D, F, dir } = heldStart();
-  D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'accepted while held' });
+  const st = D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'accepted while held' });
   D.flush();
   const pr = placeReads(F); let D2 = null; try { D2 = CD.create(deps(dir)); } finally { pr.restore(); }
-  ok(fs.readFileSync(F, 'utf8') === BYTES && !!D2.stashHeld() && D2.stashKeptCount(CC) === 1 && D2.stashEntries(CC).length === 0, 'THE STOP WHILE HELD: a second start still held has the entry back from the side copy — KEPT (r3663 (4): an earlier life\'s entry is not handed out until the list reads); the list untouched');
-  D2.flush();
   const D3 = CD.create(deps(dir));
-  await goneSide(F);
-  const j = readJson(F) || {};
-  ok(!D3.stashHeld() && both(j) && (j[CC] || []).length === 1 && j[CC][0].text === 'accepted while held' && !fs.existsSync(path.join(dir, SIDE)), 'A START THAT READS after a held stop: the side copy merged into the list at once, ONCE, then removed — nothing stranded', j);
+  ok(st && st.stored === false && fs.readFileSync(F, 'utf8') === BYTES && D2.stashEntries(CC).length === 0 && D3.stashEntries(CC).length === 0 && both(readJson(F)), 'THE STOP WHILE HELD, named: the entry taken while held is in no store after the restart — its producer was told «not on disk»; the list as it was');
 }
 {
-  // THE RESERVED NAMES (r3329 (1)) are never a conversation — the list's __slots, __tornAt, __sideMerged and the side copy's __slots (and an old __gen):
-  // never counted, handed over, trimmed or drawn
+  // THE RESERVED NAMES (r3329 (1)) are never a conversation — the list's __slots, __tornAt and any later `__…`: never counted, handed over,
+  // trimmed or drawn
   const dir = mk(), F = path.join(dir, 'msg-stash.json');
-  fs.writeFileSync(F, JSON.stringify({ ...BEFORE, __slots: { [CA]: { w: '["x"]' } }, __tornAt: 12345, __sideMerged: ['g-old'], __future: [{ text: 'a reserved name of a later release' }] }));
+  fs.writeFileSync(F, JSON.stringify({ ...BEFORE, __slots: { [CA]: { w: '["x"]' } }, __tornAt: 12345, __future: [{ text: 'a reserved name of a later release' }] }));
   const D = CD.create(deps(dir));
-  const names = ['__slots', '__tornAt', '__sideMerged', '__gen', '__future'];
+  const names = ['__slots', '__tornAt', '__future'];
   ok(!D.stashCids().some((c) => c.startsWith('__')) && D.stashTornAt() === 12345 && names.every((n) => D.stashEntries(n).length === 0 && D.stashCount(n) === 0), 'THE RESERVED NAMES are never a conversation: not counted, no entries', D.stashCids());
   D.flush();
   const j = readJson(F) || {};
-  ok(Array.isArray(j.__sideMerged) && j.__sideMerged[0] === 'g-old' && !('__future' in j) && both(j), 'a write keeps the list\'s own reserved names as its own (an unknown `__` name is never written back as a queue)', j);
-  const { D: H, dir: hd } = heldStart();
-  H.stashFor(CA, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'one' });
-  const side = readJson(path.join(hd, SIDE)) || {};
-  ok(!('__gen' in side) && Object.keys(side).filter((k) => !k.startsWith('__')).join() === CA && !H.stashCids().some((c) => c.startsWith('__')), 'the side copy holds conversations only (each entry carries its life\'s generation; the copy no name of its own)', side);
+  ok(j.__tornAt === 12345 && !('__future' in j) && both(j), 'a write keeps the list\'s own reserved names as its own (an unknown `__` name is never written back as a queue)', j);
 }
 {
   // ONE ENTRY A SLOT ACROSS THE LIFT: the file holds S's slot entry; while held wait-watch files it again in memory; the lift keeps ONE
@@ -266,8 +261,8 @@ console.log('§6 the round wozyl97qk: the stop while held (the truth), the reser
   ok(D.heldWhyOf({ id: 'r-2', cid: CC, kind: 'notification', text: 'a paced wake', producer: 'jobs', owed: true, attempts: [] }) === null, 'a LIVE conversation\'s owed wake is not held for the list (it needs no claim)');
 }
 {
-  // THE FOUR HAND-BACK DOORS ARE DONE AS AT THE RELEASE (r3326 (b)): a frame handed back from a gone wrapper while held — its words go to
-  // the stash WITH its ref, accepted beside the list (on disk), and the frame is handed back («back» is true: its words are on disk)
+  // THE FOUR HAND-BACK DOORS ARE DONE AS AT THE RELEASE (r3720): a frame handed back from a gone wrapper while held — its words go to the
+  // stash WITH its ref, TAKEN into memory (never refused: a refusal would drop words the wrapper already gave up), and the frame is handed back
   const QW = require(path.join(REPO, 'src/server/queued-wakes.js'));
   const run = (Mod = CD) => {
     const { D, dir } = heldStart(Mod);
@@ -276,20 +271,18 @@ console.log('§6 the round wozyl97qk: the stop while held (the truth), the reser
     const backs = []; Q.onHandedBack((c, e) => backs.push(e && e.id));
     const stash = (e, w) => { D.stashFor(CA, { source: 'agent', kind: 'peer', fromName: w.fromName || null, text: w.text, ref: w.ref }); };   // the facade's heldBackStash, as at the release
     const back = Q.handBackGone(CA, stash, 'its process is gone');
-    const side = (readJson(path.join(dir, SIDE)) || {})[CA] || [];
-    return { back: back.length, backs: backs.length, onDisk: side.filter((e) => String(e.text || '').includes('a peer\'s words queued in a wrapper') && !!e.ref).length };
+    return { back: back.length, backs: backs.length, inMemory: D.stashEntries(CA).filter((e) => String(e.text || '').includes('a peer\'s words queued in a wrapper') && !!e.ref).length };
   };
   const g = run();
-  ok(g.back === 1 && g.backs === 1 && g.onDisk === 1, `the hand-back while held: DONE — the words on disk beside the list with their ref (${g.onDisk}), the frame handed back`, g);
+  ok(g.back === 1 && g.backs === 1 && g.inMemory === 1, `the hand-back while held: DONE — the words taken into memory with their ref (${g.inMemory}), the frame handed back`, g);
   const SRC3 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
-  const NOSIDE = M.load('src/server/conversation-deliver.js', anchored(SRC3, '    const toSide = !!stashHold.held();', '    if (stashHold.held()) return false; const toSide = false;', 'no-side-copy-hb'), 'no-side-copy-hb');
-  const r = run(NOSIDE);
-  ok(r.onDisk === 0, 'RED: no side copy — the ref\'d words are refused while held and the hand-back leaves them in no store (the first cure\'s loss)', r);
-  ok(!/stashHeldFor|left live/.test(fs.readFileSync(path.join(REPO, 'src/server/queued-wakes.js'), 'utf8')), 'the queued wakes keep no state for the hold (the «left live» road left with the shape)');
+  const REFUSE = M.load('src/server/conversation-deliver.js', anchored(SRC3, '    if (!stored && entry.ref && !stashHold.held()) {', '    if (!stored && entry.ref) {', 'refd-refused-while-held'), 'refd-refused-while-held');   // stale-pins: kept — the hold's refusal of a ref'd entry, planted back as the RED
+  const r = run(REFUSE);
+  ok(r.inMemory === 0 && r.back === 1, 'RED: a ref\'d entry refused while held — the hand-back drops the words the wrapper gave up (in no store)', r);
 }
 {
-  // THE PARK's FALL IS DURABLE (r3326 (b)): a notice parked by the ladder reaches its bound while the list is held ⇒ it FALLS as at the
-  // release — out of the park, into the stash, on disk beside the list; and a frame that may have landed is never posted again
+  // THE PARK's FALL WHILE HELD (r3720): a notice parked by the ladder reaches its bound while the list is held ⇒ it FALLS as at the
+  // release — out of the park, into the stash's memory (its fall told «not on disk»); and a frame that may have landed is never posted again
   const dir = mk(), F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, BYTES);
   let now = 1_700_000_000_000; const timers = []; let posts = 0;
   const clock = { now: () => now, setTimeout: (fn, ms) => { const t = { at: now + ms, fn }; timers.push(t); return t; }, clearTimeout: (t) => { if (t) t.dead = true; } };
@@ -302,16 +295,16 @@ console.log('§6 the round wozyl97qk: the stop while held (the truth), the reser
   const r0 = await D.deliverToConversation(CC, 'a notice parked for retry', { fromName: 'Background Work · job', kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test' } });
   session._isStreaming = false;
   for (let i = 0; i < 45 && D.retryCount(CC) > 0; i++) { now += 60 * 1000; await D.noteTurnEnd(session); }
-  const side = (readJson(path.join(dir, SIDE)) || {})[CC] || [];
-  ok(r0 && r0.parked === true && D.retryCount(CC) === 0 && side.some((e) => String(e.text || '').endsWith('a notice parked for retry')) && fs.readFileSync(F, 'utf8') === BYTES, '(a) the bound reached while held: the entry FALLS as at the release — out of the park, into the stash, on disk beside the list (the list untouched)', side);
+  const mem = D.stashEntries(CC);
+  ok(r0 && r0.parked === true && D.retryCount(CC) === 0 && mem.some((e) => String(e.text || '').endsWith('a notice parked for retry')) && fs.readFileSync(F, 'utf8') === BYTES, '(a) the bound reached while held: the entry FALLS as at the release — out of the park, into the stash\'s memory (the list untouched)', mem.map((e) => e.text));
   // a may-have-landed entry (in flight when the last process stopped) falls to the stash at the first sweep — NEVER posted again
   const dir2 = mk(), F2 = path.join(dir2, 'msg-stash.json'); fs.writeFileSync(F2, BYTES);
   fs.writeFileSync(path.join(dir2, 'msg-retry.json'), JSON.stringify({ [CC]: [{ id: 'rt-landed-1', cid: CC, text: 'a frame that may have landed', fromName: 'Background Work · job', kind: 'notification', spendReason: 'job-notification', producer: 'test', inflight: true, firstAt: now, attempts: [{ at: now, reason: 'posted' }], nextAt: now, retries: 0 }] }));
   posts = 0;
   const pr2 = placeReads(F2); let D2 = null; try { D2 = CD.create(deps(dir2, { activeSessions: sessions, retryClock: clock, peerMsg: { findPeer: (c) => (c === CC ? { name: 'Owner', socketPath: path.join(dir2, 'none.sock'), pid: process.pid } : null), postToPeer: async () => { posts++; return { ok: true }; }, postChannelEvent: async () => ({ ok: false }) }, authorizeSpend: () => ({ ok: true, identity: { key: 'acct', name: 'Work' }, hold: { k: 1 } }), noteSpend: () => { }, releaseSpend: () => { } })); } finally { pr2.restore(); }
   await D2.noteTurnEnd(session);
-  const side2 = (readJson(path.join(dir2, SIDE)) || {})[CC] || [];
-  ok(posts === 0 && D2.retryCount(CC) === 0 && side2.some((e) => String(e.text || '').includes('a frame that may have landed')), `a may-have-landed entry while held: handed to the stash beside the list, NEVER posted again (posts ${posts})`, { posts, side2 });
+  const mem2 = D2.stashEntries(CC);
+  ok(posts === 0 && D2.retryCount(CC) === 0 && mem2.some((e) => String(e.text || '').includes('a frame that may have landed')), `a may-have-landed entry while held: handed to the stash's memory, NEVER posted again (posts ${posts})`, { posts, mem2: mem2.map((e) => e.text) });
 }
 
 {
@@ -323,104 +316,22 @@ console.log('§6 the round wozyl97qk: the stop while held (the truth), the reser
     'PRODUCTION: server.js passes the one deliver object to the channels wiring → the engine → channels-outbound (no facade picking names)');
 }
 
-console.log('§7 ONE ENTRY, ONCE (r3329 (2)) — each way an entry could come twice');
-{
-  // (i) a crash after the list's merged write and before the side copy's removal: the list names the copy merged ⇒ the next start removes it
-  // and merges nothing — even after the list drained the entries meanwhile; and a start that cannot read the list keeps the copy's entries
-  // only until the list's lift, where the merged generation drops them
-  const { D, F, dir } = heldStart();
-  D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'accepted while held, once' });
-  const sideBytes = fs.readFileSync(path.join(dir, SIDE), 'utf8');
-  await D.stashReadAgain(); await goneSide(F);
-  fs.writeFileSync(path.join(dir, SIDE), sideBytes);   // the crash: the copy still there after the merged write
-  const D2 = CD.create(deps(dir)); await goneSide(F);
-  const n2 = ((readJson(F) || {})[CC] || []).filter((e) => e.text === 'accepted while held, once').length;
-  ok(n2 === 1 && !fs.existsSync(path.join(dir, SIDE)), `(i) the copy the list names merged: removed at the next start, never merged again (${n2} in the list)`);
-  D2.drainStash(CC); D2.flush();
-  fs.writeFileSync(path.join(dir, SIDE), sideBytes);
-  const D3 = CD.create(deps(dir)); await goneSide(F);
-  ok(D3.stashEntries(CC).length === 0 && !fs.existsSync(path.join(dir, SIDE)), '(i) …and after the list delivered it: the old copy brings nothing back (its generation is named merged)', D3.stashEntries(CC));
-  fs.writeFileSync(path.join(dir, SIDE), sideBytes);
-  const pr = placeReads(F); let D4 = null; try { D4 = CD.create(deps(dir)); } finally { pr.restore(); }
-  const heldHad = D4.stashKeptCount(CC), handed = D4.stashEntries(CC).length;
-  await D4.stashReadAgain(); await goneSide(F);
-  ok(heldHad === 1 && handed === 0 && ((readJson(F) || {})[CC] || []).length === 0, `(i) …and when that start cannot read the list: the copy's entry is KEPT in memory (${heldHad}, never handed out), and the lift drops it — the list names its generation merged`, readJson(F));
-}
-{
-  // (ii) a second start while held: the copy read back, the next entry after it, the lift merges each ONCE
-  const { D, F, dir } = heldStart();
-  D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'first life' }); D.flush();
-  const pr = placeReads(F); let D2 = null; try { D2 = CD.create(deps(dir)); } finally { pr.restore(); }
-  D2.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'second life' });
-  await D2.stashReadAgain(); await goneSide(F);
-  const q = ((readJson(F) || {})[CC] || []).map((e) => e.text);
-  ok(q.join('|') === 'first life|second life', `(ii) a second start while held: each entry ONCE, in order (${q.join(', ')})`, q);
-}
+console.log('§7 ONE ENTRY, ONCE (r3329 (2)) — delivered while held, and a producer ref');
 {
   // (iii) an entry DELIVERED at a conversation's next prompt while held is never met again at the lift
   const { D, F } = heldStart();
   D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'delivered while held' });
   const took = D.drainStash(CC);
-  await D.stashReadAgain(); await goneSide(F);
+  await D.stashReadAgain();
   ok(Array.isArray(took) && took.length === 1 && !((readJson(F) || {})[CC] || []).length, '(iii) delivered at the next prompt while held: not in the list after the lift (the copy beside it was rewritten without it)', readJson(F));
   // and a producer's ref: an entry whose ref the list already holds is never added again
   const { D: E, F: G } = heldStart();
   E.stashFor(CB, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'a receipt waiting', ref: 'p-1' });
-  await E.stashReadAgain(); await goneSide(G);
+  await E.stashReadAgain();
   ok(((readJson(G) || {})[CB] || []).filter((e) => e.ref === 'p-1').length === 1, '(iv) a producer ref the list already holds: never added twice', readJson(G));
 }
 
-console.log('§8 the side copy\'s own bad days (r3326 (e))');
-{
-  // UNREADABLE at a start, the list READS: the copy's own hold — nothing written over the copy; r3663 (5): the LIST's write is never refused for
-  // the copy's sake (what comes meanwhile is on disk in the list); the claim still waits until both read; at the copy's lift its entries merge
-  const { D: D0, F, dir } = heldStart();
-  D0.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'in the copy' }); D0.flush();
-  const sideBytes = fs.readFileSync(path.join(dir, SIDE), 'utf8');
-  const pr = placeReads(path.join(dir, SIDE)); let D = null; try { D = CD.create(deps(dir)); } finally { pr.restore(); }
-  const st = D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'while the copy is unread' });
-  const st2 = D.stashFor(CC, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'a ref\'d one', ref: 'p-9' });
-  const onList = ((readJson(F) || {})[CC] || []).map((e) => e.text);
-  ok(!!D.stashHeld() && st && st.stored === true && st2 && st2.stored === true && fs.readFileSync(path.join(dir, SIDE), 'utf8') === sideBytes && onList.join('|') === 'while the copy is unread|a ref\'d one' && codeOf(() => D.stashPeek(CC)) === 'msg_stash_unread',
-    'UNREADABLE COPY, the list reads: nothing written over the copy; what comes is ACCEPTED on disk in the list (r3663 (5)); the readers that decide still wait', { st, st2, onList });
-  await D.stashReadAgain(); await goneSide(F);
-  const q = ((readJson(F) || {})[CC] || []).map((e) => e.text);
-  ok(!D.stashHeld() && q.join('|') === 'in the copy|while the copy is unread|a ref\'d one' && both(readJson(F)) && !fs.existsSync(path.join(dir, SIDE)), `UNREADABLE COPY, LIFTED: the list's, the copy's entry, then this life's — ONE write, the copy removed (${q.join(', ')})`, readJson(F));
-}
-{
-  // r3663 (5) THE PROMPT's HAND-OUT IS RECORDED: the copy unreadable at a start, the list reads; CA's next prompt drains Ada's message; a fresh
-  // start does not hand it again. RED: the list's write refused for the copy's sake (the shape's line 209)
-  const run = async (Mod = CD) => {
-    const { D: D0, dir } = heldStart(Mod);
-    D0.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'in the copy' }); D0.flush();
-    const F = path.join(dir, 'msg-stash.json');
-    const pr = placeReads(path.join(dir, SIDE)); let D = null; try { D = Mod.create(deps(dir)); } finally { pr.restore(); }
-    const took = D.drainStash(CA);
-    D.flush();
-    const pr2 = placeReads(path.join(dir, SIDE)); let D2 = null; try { D2 = Mod.create(deps(dir)); } finally { pr2.restore(); }
-    return { took: (took || []).length, again: D2.stashEntries(CA).length, onDisk: ((readJson(F) || {})[CA] || []).length };
-  };
-  const g = await run();
-  ok(g.took === 1 && g.again === 0 && g.onDisk === 0, `(5) the copy unreadable, the list reads: a prompt's hand-out is RECORDED in the list — a restart does not hand it again (${g.again})`, g);
-  const SRC5 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
-  const REFUSE = M.load('src/server/conversation-deliver.js', anchored(SRC5, '    const toSide = !!stashHold.held();', "    if (sideHold && sideHold.held()) { sideHold.writable('x'); return false; } const toSide = !!stashHold.held();", 'list-write-refused-for-the-copy'), 'list-write-refused-for-the-copy');
-  const r = await run(REFUSE);
-  ok(r.took === 1 && r.again === 1, `RED: the list's write refused for the copy's sake — the restart hands Ada's message again (${r.again})`, r);
-}
-{
-  // TORN copy: kept aside once (0600), the stash starts from what memory holds; its instant remembered (a receipt in it is unknown, never «handed»)
-  const dir = mk(), F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, BYTES);
-  const TORN = '{"' + CC + '": [{"text": "a cut';
-  fs.writeFileSync(path.join(dir, SIDE), TORN);
-  const D = CD.create(deps(dir));
-  for (let i = 0; i < 200 && D.stashHeld(); i++) await sleep(10);
-  await goneSide(F);
-  const copies = fs.readdirSync(dir).filter((n) => n.startsWith(SIDE + '.corrupt-'));
-  const t = D.stashTorn();
-  ok(!D.stashHeld() && copies.length === 1 && fs.readFileSync(path.join(dir, copies[0]), 'utf8') === TORN && modeOf(path.join(dir, copies[0])) === 0o600 && !!t && t.copy === copies[0] && Number.isFinite(D.stashTornAt()) && both(readJson(F)), `TORN COPY: kept aside ONCE, byte for byte, 0600; named; the instant remembered; the list as it was (${copies.join(', ')})`, { copies, t });
-}
-
-console.log('§9 round w5nhhs3r7 (r3663): one ref two messages; a live wake while held; the copy\'s generations; an earlier life\'s entry kept');
+console.log('§9 round w5nhhs3r7 (r3663): one ref two messages; a live wake while held');
 const SRC9 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
 {
   // (1) ONE REF, TWO MESSAGES: a refresh note waits in the list under the producer's one ref; while held a NEWER, different note under the
@@ -429,7 +340,7 @@ const SRC9 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js
     const bytes = JSON.stringify({ ...BEFORE, [CC]: [{ source: 'agent', kind: 'notification', fromName: 'VibeSpace', text: 'refresh note A', ref: 'refresh-note', ts: 3 }] });
     const { D, F } = heldStart(Mod, mk(), bytes);
     D.stashFor(CC, { source: 'agent', kind: 'notification', fromName: 'VibeSpace', text: 'refresh note B', ref: 'refresh-note' });
-    await D.stashReadAgain(); await goneSide(F);
+    await D.stashReadAgain();
     return ((readJson(F) || {})[CC] || []).map((e) => e.text);
   };
   const g = await run();
@@ -467,47 +378,4 @@ const SRC9 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js
   const r = await run(NOUNKNOWN);
   ok(r.parked && !r.owedHeld, 'RED: the hook that reads the unread list\'s silence — the owed wake is taken out as «carried» while held, and nobody is woken for the receipt after the lift', r);
 }
-/** life one: A accepted beside the list while held, the lift merges it (the list names its generation), the copy's removal never done (a crash) */
-async function mergedNotRemoved(Mod) {
-  const { D: L1, F, dir } = heldStart(Mod);
-  L1.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'A, life one' });
-  const copy1 = fs.readFileSync(path.join(dir, SIDE), 'utf8');
-  await L1.stashReadAgain(); await goneSide(F);
-  fs.writeFileSync(path.join(dir, SIDE), copy1);
-  return { F, dir };
-}
-{
-  // (3) A SECOND START WHILE HELD over a merged-but-unremoved copy: B accepted, a stop while held, then a start that reads — exactly one A and
-  // one B (each life its own generation; a merge skips only the entries of a generation the list names). RED: the copy dropped by a name
-  const run = async (Mod = CD) => {
-    const { F, dir } = await mergedNotRemoved(Mod);
-    const pr = placeReads(F); let L2 = null; try { L2 = Mod.create(deps(dir)); } finally { pr.restore(); }
-    L2.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'B, life two' }); L2.flush();
-    Mod.create(deps(dir)); await goneSide(F);
-    const q = ((readJson(F) || {})[CC] || []).map((e) => e.text);
-    return { a: q.filter((t) => t === 'A, life one').length, b: q.filter((t) => t === 'B, life two').length };
-  };
-  const g = await run();
-  ok(g.a === 1 && g.b === 1, `(3) a held second start over a merged copy, a new entry, a stop while held, a start that reads: A once, B once (${g.a}, ${g.b})`, g);
-  const BYNAME = M.load('src/server/conversation-deliver.js', anchored(SRC9, 'side[cid] = side[cid].filter((e) => !(e && e.g && sideMerged.includes(e.g)));', 'side[cid] = side[cid].filter(() => !sideMerged.length);', 'copy-dropped-by-a-name'), 'copy-dropped-by-a-name');
-  const r = await run(BYNAME);
-  ok(r.b === 0, `RED: a copy dropped by a name the list holds — B, accepted and told «stored», is lost (${r.b})`, r);
-}
-{
-  // (4) AN EARLIER LIFE's ENTRY IS KEPT while the list is held: over a merged-but-unremoved copy, the next prompt drains nothing of it; after the
-  // lift A is in the list ONCE (it is handed then, once). RED: the gate that lets it out while held — handed now AND back from the list
-  const run = async (Mod = CD) => {
-    const { F, dir } = await mergedNotRemoved(Mod);
-    const pr = placeReads(F); let L2 = null; try { L2 = Mod.create(deps(dir)); } finally { pr.restore(); }
-    const took = (L2.drainStash(CC) || []).map((e) => e.text);
-    await L2.stashReadAgain(); await goneSide(F);
-    return { took, inList: ((readJson(F) || {})[CC] || []).filter((e) => e.text === 'A, life one').length };
-  };
-  const g = await run();
-  ok(!g.took.includes('A, life one') && g.inList === 1, `(4) an earlier life's entry is not handed out while the list is held; after the lift it is in the list once (${g.inList})`, g);
-  const LETOUT = M.load('src/server/conversation-deliver.js', anchored(SRC9, '      if (copyKept(e)) { kept.add(e); i++; continue; }\n', '', 'copy-entry-let-out-while-held'), 'copy-entry-let-out-while-held');
-  const r = await run(LETOUT);
-  ok(r.took.includes('A, life one') && r.inList === 1, 'RED: let out while held — A is handed now AND waits in the list again: twice', r);
-}
-
 report();
