@@ -421,9 +421,9 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
     const wG = usageWrite.writeCacheObject({ cacheDir: cacheM, key: '__global_codex__', obj: cxSnap(22, tG), source: 'codex-rate-limits', backend: 'codex' });
     const atOf = (f) => { try { const o = JSON.parse(fs.readFileSync(f, 'utf8')); return Number((o && o.claude ? o.claude : o).fetchedAt) || 0; } catch { return 0; } };
     const xaAt = () => atOf(usageWrite.cacheFileFor(cacheM, XA));
-    const mkUsage = async (setup = setupUsage) => {   // setup: the real road, or a named copy's (the mutants below)
+    const mkUsage = async (setup = setupUsage, at = { dir: cacheM, file: machineFile }) => {   // setup: the real road, or a named copy's (the mutants below); at: its folder
       const r = {}, out = {};
-      await quiet(async () => setup({ app: { get: (p, h) => { r['GET ' + p] = h; }, post: (p, h) => { r['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} }, accounts: amM, hosts: null, usageHistory: null, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: machineFile, USAGE_CACHE_DIR: cacheM, CODEX_SESSIONS_DIR: path.join(MD, 'codex-sessions'), META_DIR: path.join(MD, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(MD, 'data', 'session-buffers'), probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: '/nonexistent/claude', repairIdentityAnchors: (why, o = {}) => { out.repairSince = o.since; return { counts: { restamped: 0 }, ms: 0, identities: [] }; } }));
+      await quiet(async () => setup({ app: { get: (p, h) => { r['GET ' + p] = h; }, post: (p, h) => { r['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} }, accounts: amM, hosts: null, usageHistory: null, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: at.file, USAGE_CACHE_DIR: at.dir, CODEX_SESSIONS_DIR: path.join(MD, 'codex-sessions'), META_DIR: path.join(MD, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(MD, 'data', 'session-buffers'), probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: '/nonexistent/claude', repairIdentityAnchors: (why, o = {}) => { out.repairSince = o.since; return { counts: { restamped: 0 }, ms: 0, identities: [] }; } }));
       return { usage: () => quiet(() => new Promise((resolve) => r['GET /api/usage']({ headers: {}, query: {} }, { json: resolve, status() { return this; } }))), r, get repairSince() { return out.repairSince; } };
     };
     const X = await mkUsage();   // its first pass (at setup) DECIDES: A on both harnesses
@@ -471,19 +471,24 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
     // (c) NAMED MUTANTS of the two «undecided merges nothing» gates: the leg's own scene rebuilt (the seeds, a first pass that
     // DECIDES and keeps the links, A's sign-in made unreadable, A's newer reading, the undecided pass); each copy drops ONE gate and
     // that harness merges — the same judge reads each red
+    let sceneN = 0;
     const undecidedPass = async (setup) => {
-      await landed();   // a write owed by the pass before lands before this scene's files are reset
+      await landed();   // a write owed by the pass before lands first
       door.deadUnder.clear(); await amM.signinFactsSettled([MA, XA], { withinMs: 0 });
-      for (const file of [machineFile, usageWrite.cacheFileFor(cacheM, MA), usageWrite.cacheFileFor(cacheM, XA), usageWrite.cacheFileFor(cacheM, '__global_codex__')]) fs.rmSync(file, { force: true });
-      const seeds = [usageWrite.writeCacheObject({ cacheDir: cacheM, key: XA, obj: cxSnap(11, tA), source: 'codex-rate-limits', backend: 'codex' }), usageWrite.writeCacheObject({ cacheDir: cacheM, key: '__global_codex__', obj: cxSnap(22, tG), source: 'codex-rate-limits', backend: 'codex' })];
-      const inst = await mkUsage(setup);   // its first pass DECIDES: A on both harnesses
+      // THE SCENE ON A FOLDER OF ITS OWN: the usage folder has ONE reader (src/usage-cache-folder.js) and every instance this suite made
+      // hears that folder's refreshes — the earlier instances, holding A's merged reading in memory, would write it into this scene's reset
+      // files. A hub has ONE instance; so each rebuilt scene runs on a cache folder and a machine file no earlier instance reads.
+      const dirS = path.join(MD, 'data', `usage-cache-scene-${++sceneN}`), fileS = path.join(MD, 'data', `usage-cache-scene-${sceneN}.json`);
+      fs.mkdirSync(dirS, { recursive: true });
+      const seeds = [usageWrite.writeCacheObject({ cacheDir: dirS, key: XA, obj: cxSnap(11, tA), source: 'codex-rate-limits', backend: 'codex' }), usageWrite.writeCacheObject({ cacheDir: dirS, key: '__global_codex__', obj: cxSnap(22, tG), source: 'codex-rate-limits', backend: 'codex' })];
+      const inst = await mkUsage(setup, { dir: dirS, file: fileS });   // its first pass DECIDES: A on both harnesses
       door.deadUnder.add(amM.subDir(MA)); door.deadUnder.add(amM.codexSubDir(XA));
       await amM.signinFactsSettled([MA, XA], { withinMs: 0 });
-      fs.writeFileSync(usageWrite.cacheFileFor(cacheM, MA), JSON.stringify({ fetchedAt: aAt, five_hour: { utilization: 33, resets_at: new Date(Date.now() + 36e5).toISOString() } }));
+      fs.writeFileSync(usageWrite.cacheFileFor(dirS, MA), JSON.stringify({ fetchedAt: aAt, five_hour: { utilization: 33, resets_at: new Date(Date.now() + 36e5).toISOString() } }));
       const u = await inst.usage();
-      await landed();
+      await SW.afterLanding(fileS, () => true, { timeoutMs: 5000 });   // the scene's own machine file, after the writer's landing
       door.deadUnder.clear();
-      return { seeded: seeds.every((w) => w.ok), claudeLinked: u.globalLogin.accountId === MA, codexLinked: u.codexGlobalLogin.accountId === XA, machineA: atOf(machineFile) === aAt, xaOwn: xaAt() === tA };
+      return { seeded: seeds.every((w) => w.ok), claudeLinked: u.globalLogin.accountId === MA, codexLinked: u.codexGlobalLogin.accountId === XA, machineA: atOf(fileS) === aAt, xaOwn: atOf(usageWrite.cacheFileFor(dirS, XA)) === tA };
     };
     const judgeU = (p) => p.seeded && p.claudeLinked && p.codexLinked && !p.machineA && p.xaOwn;
     const uCure = await undecidedPass(setupUsage);
