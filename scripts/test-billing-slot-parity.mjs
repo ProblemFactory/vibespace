@@ -212,6 +212,8 @@ export const ROWS = Object.freeze([
   ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'executeFallbackBack', 'pool', 1],
   ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'fallbackMoveBack', 'pool', 1],
   ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'fallbackStatus', 'pool', 1],
+  ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'fallbackFactOf', 'pool', 1],   // B-d578 r3918: the conversation's own strip — is it held by a fallback provider
+  ['fallbackBackVerdict', 'src/server/usage-pool-engine.js', 'fallbackFactOf', 'pool', 1],   // B-d578 r3918: the member that can take it back NOW (the pool row's verdict)
   ['fireIdentity@src/server/auto-resume.js', 'src/server/auto-resume.js', 'identityFor', 'pile', 1],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'attemptFire', 'spend', 1],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'deliver', 'spend', 1],
@@ -563,6 +565,7 @@ export const CONSUMERS = Object.freeze({
   "executeFallbackBack": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-d578 F3a: a move BACK made — heldPoolMemberFor names the fallback it leaves, fallbackBackTarget the member (re-judged after the record landed); it restarts there and returns {moved, why} only."},
   "fallbackMoveBack": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-d578 F3a: the person's press — queues each conversation held by a fallback (heldPoolMemberFor) whose way back fallbackBackTarget names; returns {queued} only."},
   "fallbackStatus": {"file": "src/server/usage-pool-engine.js", "fields": ["provider"], "why": "B-d578 F3a: the pool row's counts per fallback provider: provider = the member heldPoolMemberFor names (a provider id), canReturn counted by fallbackBackTarget."},
+  "fallbackFactOf": {"file": "src/server/usage-pool-engine.js", "fields": ["provider", "back"], "why": "B-d578 r3918: the conversation's own strip fact: provider = the member heldPoolMemberFor names (a provider id), back = the member fallbackBackVerdict names now; reads only, moves nothing."},
   "crossVerdictNow": {"file": "src/server/usage-pool-engine.js", "fields": ["curFor"], "why": "B-d578 F2: the ONE re-judgement under allow of a conversation (the cross card's answer through crossMoveNow, the fallback queue's move through fallbackJudge): sessionBillingMember/poolCurrentFor give its currentId, returned as curFor beside the verdict so the caller moves FROM that member."},
   "deliver": {"file": "src/server/auto-resume.js", "fields": [], "why": "attemptFire's post-gate closure: re-resolves identityFor, authorizes and charges the continue inside; returns only a boolean delivered."},
   "deliverToConversation": {"file": "src/server/conversation-deliver.js", "fields": ["identity"], "why": "delivers a message after the spend check; a refusal's object echoes the verdict's identity for the refusal's words and the stash"},

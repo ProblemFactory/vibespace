@@ -253,3 +253,39 @@ export function poolSubmenuModel({ pool = {}, auth = null, pinId = null, live = 
 export function submenuNoteWords(row, t, { fmtTime = (ms) => new Date(ms).toISOString() } = {}) {
   return (row.notes || []).map((n) => t(n.key, n.params && typeof n.params.atMs === 'number' ? { time: fmtTime(n.params.atMs) } : (n.params || {}))).join(' · ');
 }
+
+/** (B-d578, r3918) THE CONVERSATION's OWN PRESS in its status strip, from its live fact (the hub's fallbackFactOf) → null | {
+ *  words, press, request } — the WORDS say where it runs and the bill; the PRESS is a separate button (never the words made
+ *  clickable) and is there only when it can act: «Move back to {member}» when a member can take it NOW, «Move to {provider} — billed
+ *  there» while the pool asks (Ask me first) to move it; `request` = the one call the press makes, naming THIS conversation. */
+export function fallbackStripOf(f, t) {
+  if (!f || typeof t !== 'function') return null;
+  if (f.on && f.on.provider) {
+    const words = t('Runs on {provider} — billed there, on {provider}\'s own bill', { provider: f.on.label || f.on.provider });
+    if (!f.on.back || !f.on.back.id) return { words: words + ' · ' + t('no member can take it back yet'), press: null, request: null };
+    return { words, press: t('Move back to {member}', { member: f.on.back.name || f.on.back.id }),
+      request: { url: '/api/accounts/' + encodeURIComponent(f.on.poolId) + '/fallback/move-back', body: { sids: [f.on.sid] }, kind: 'back' } };
+  }
+  if (f.can && f.can.askId) {
+    return { words: t('Every member of its pool is out'), press: t('Move to {provider} — billed there, on {provider}\'s own bill', { provider: f.can.label || f.can.provider }),
+      request: { url: '/api/accounts/pool-cross/asks/' + encodeURIComponent(f.can.askId), body: { answer: 'once', sid: f.can.sid }, kind: 'to', provider: f.can.label || f.can.provider } };
+  }
+  return null;
+}
+
+/** (r3886 (F), smalls; moved here by r3918 so the conversation's strip says the SAME words) the press's reply in words → [{ text, type }]: QUEUED and how many (an idle one restarts now, a busy one at its
+ *  turn's end), those already on their way said apart (pressed twice: never counted again), each reason a conversation stays; «nothing
+ *  moved back» only when no other line says why */
+export function fallbackPressToasts(r, t) {
+  const out = [], n = Number(r && r.queued) || 0, al = Number(r && r.already) || 0;
+  if (n) out.push({ text: n === 1 ? t('1 conversation is queued to move back — it restarts there now if it is idle, or when its turn is over') : t('{n} conversations are queued to move back — each restarts there now if it is idle, or when its turn is over', { n }), type: 'success' });
+  if (al) out.push({ text: al === 1 ? t('1 conversation is already on its way back') : t('{n} conversations are already on their way back', { n: al }), type: 'info' });
+  const nm = Number(r && r.noModel) || 0;
+  if (nm) out.push({ text: t('{n} cannot move back by a press — VibeSpace does not know the model they came from; pick a model for each in Session Properties', { n: nm }), type: 'info' });
+  for (const [k, w] of [['lapsed', '{n} cannot come back yet: the pool\'s default member has lapsed — renew it, or pick another default in Members & placement'], ['familyUnknown', '{n} cannot come back yet: VibeSpace cannot tell which family their first model belongs to'], ['otherRecord', '{n} could not be moved back: their record names another provider than the one they run on']]) {
+    const c = Number(r && r[k]) || 0; if (c) out.push({ text: t(w, { n: c }), type: 'info' });
+  }
+  if (!out.length) out.push({ text: t('Nothing moved back — no conversation can come back right now'), type: 'info' });
+  return out;
+}
+

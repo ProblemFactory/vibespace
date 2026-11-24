@@ -8209,6 +8209,45 @@ function tellFallbackStatus(poolId) {
   if (prev === undefined && sig === '[]') return;   // (r3886 small) a pool's FIRST status with nothing on a fallback pushes nothing
   try { if (typeof accounts.noteFallbackStatus === 'function') accounts.noteFallbackStatus(); } catch { }
 }
+/** (r3918 (e)) THE STRIP's FACTS REACH EVERY PAGE BY THE PAYLOAD's OWN PUSH: a pool's conversations' facts (fallbackFactOf) as one
+ *  signature; when it moves — an ask filed or answered, a member able to take one back again or no longer, a move made — the session
+ *  list's ONE notify point (onSessionListChange ⇒ the /ws broadcast of the live payload) is asked once, debounced; a pool's FIRST signature with
+ *  no fact pushes nothing. Its cost: the facts of the pool's conversations at each fallback pass (one back verdict for each on a fallback). */
+const _fbFactSig = new Map();   // poolId → the signature last told
+function tellFallbackFacts(poolId, now = Date.now()) {
+  let sig = '';
+  try { const rows = []; for (const [sid, s2] of activeSessions) { if (s2._accountId !== poolId || s2.host) continue; const f = fallbackFactOf(sid, now); if (f) rows.push([sid, f]); } sig = JSON.stringify(rows); } catch { return false; }
+  const prev = _fbFactSig.get(poolId);
+  if (prev === sig) return false;
+  _fbFactSig.set(poolId, sig);
+  if (prev === undefined && sig === '[]') return false;
+  try { stoppedListChanged(); } catch { }   // the engine's ONE debounced notify of the session list (one broadcast per burst, 300 ms)
+  return true;
+}
+/** (r3918) THE CONVERSATION's OWN FACT for its status strip (the live payload, the person's pages only) → ONE of:
+ *   { on: { poolId, provider, label, back: { id, name } | null, why } } — it runs on its pool's fallback; `back` the member that can
+ *     take it NOW (the pool row's own verdict, fallbackBackVerdict), `why` the reason when none can;
+ *   { can: { poolId, provider, label, askId } } — it waits at every member's wall while the pool ASKS (never «Move without asking»)
+ *     to move it to that fallback (the open For-you ask names it);
+ *   null — nothing to say or press. Names by labelOf (a name, never an e-mail address). */
+function fallbackFactOf(sid, now = Date.now()) {
+  const s2 = activeSessions.get(sid);
+  if (!s2 || s2.host) return null;
+  const poolId = s2._accountId, a = poolId ? accounts.get(poolId) : null;
+  if (!a || a.type !== 'pooled') return null;
+  let held = null; try { held = heldPoolMemberFor(s2, poolId); } catch { }
+  const fb = poolFallbackSet(a);
+  if (held && /^pv-/.test(String(held))) {
+    if (!fb || !fb.has(held)) return null;
+    const rec = s2._poolFallback && s2._poolFallback.provider === held ? s2._poolFallback : null;
+    let v = { to: null, why: 'no-first-model' }; try { if (rec) v = fallbackBackVerdict(poolId, rec, now, s2, sid); } catch { }
+    return { on: { sid, poolId, provider: held, label: labelOf(held), back: v.to ? { id: v.to, name: labelOf(v.to) } : null, why: v.to ? null : (v.why || null) } };
+  }
+  if (a.crossProvider === 'allow') return null;   // the pool moves by itself: no «Move to» press is drawn (r3918 (2))
+  if (_fbQueue.has(sid) || _fbInFlight.has(sid)) return null;   // already on its way (its own press, or the item's Allow once): no second press
+  for (const q of _fbAsks.values()) if (q.poolId === poolId && q.sids.has(sid)) return { can: { sid, poolId, provider: q.pv, label: labelOf(q.pv), askId: q.askId } };
+  return null;
+}
 /** THE PERSON's press (the page, unit F3b): move these conversations of the pool — or every one on a fallback — back NOW (at the head of
  *  the queue, never counted; each still re-judged). → {queued} */
 function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
@@ -8337,14 +8376,26 @@ function drawFallbackAsk(q, a) {
 }
 /** THE PERSON's answer to a fallback item (answerCrossProviderAsk hands it here): once / always / deny → {ok, state, moved: false, queued, why} —
  *  `queued` the conversations put at the head of the queue (each move is said when it is made); `why` 'gone' when none waits */
-function answerFallbackAsk(q, answer, now = Date.now()) {
+function answerFallbackAsk(q, answer, now = Date.now(), { sid = null } = {}) {
   const settle = (by) => { _fbAsks.delete(q.key); _fbAskById.delete(q.askId); if (q.todoId) { try { const t = getUserTodos(); if (t && typeof t.setStatus === 'function') t.setStatus(q.todoId, 'done', by); } catch { } } };
-  if (answer === 'deny') { _fbAskQuiet.set(q.key, now + CROSS_ASK_QUIET_MS); settle('denied'); console.log(`[pool] fallback ${q.poolId}: denied — nothing moves to ${q.pv} (not asked again for 6 h)`); return { ok: true, state: 'denied', moved: false, moving: 0 }; }
+  // (r3918 (a)) THE CONVERSATION's OWN PRESS: «Allow once» with ONE conversation named — the same answer, the same queue, a person's
+  // press (attended: never counted against the unattended cap); only THAT conversation is queued, the ask stays open for the others
+  if (sid) {
+    if (answer !== 'once') return { ok: false, status: 400, code: 'bad_args', error: 'one conversation is answered «once» only' };
+    const s1 = activeSessions.get(String(sid));
+    if (!q.sids.has(String(sid)) || !s1 || s1._accountId !== q.poolId) return { ok: false, status: 409, code: 'not_waiting', error: 'that conversation is not one of this pool\'s waiting for this provider' };
+    queueFallbackMove(q.poolId, String(sid), q.pv, 'person', now);
+    q.sids.delete(String(sid));
+    if (!q.sids.size) settle('allowed');
+    pumpFallbackMoves(now); tellFallbackFacts(q.poolId, now);
+    return { ok: true, state: 'allowed', moved: false, queued: 1, sid: String(sid) };
+  }
+  if (answer === 'deny') { _fbAskQuiet.set(q.key, now + CROSS_ASK_QUIET_MS); settle('denied'); tellFallbackFacts(q.poolId, now); console.log(`[pool] fallback ${q.poolId}: denied — nothing moves to ${q.pv} (not asked again for 6 h)`); return { ok: true, state: 'denied', moved: false, moving: 0 }; }
   if (answer === 'always') { try { accounts.updatePool(q.poolId, { crossProvider: 'allow' }); } catch (e) { return { ok: false, status: 400, code: 'pool_gone', error: e.message }; } }
   const sids = [...q.sids.keys()].filter((sid) => activeSessions.get(sid)?._accountId === q.poolId);
   for (const sid of sids) queueFallbackMove(q.poolId, sid, q.pv, 'person', now);
   settle(answer === 'always' ? 'always' : 'allowed');
-  pumpFallbackMoves(now);
+  pumpFallbackMoves(now); tellFallbackFacts(q.poolId, now);
   return { ok: true, state: answer === 'always' ? 'always' : 'allowed', moved: false, queued: sids.length, ...(sids.length ? {} : { why: 'gone' }) };   // (r3041 (a)) QUEUED, not moved: each move is said by the hub's own count when it is made (a refused one in its own line)
 }
 // THE OWNER'S CARD (decision ①, 2026-10-20 — 「切到 X 需要你同意」). Under the pool's crossProvider 'never' a conversation
@@ -8400,9 +8451,10 @@ function settleCrossAsk(q, status = 'done', by = 'answered') {
 }
 function closeCrossAsksFor(poolId, sid, by) { for (const q of [..._crossAsks.values()]) if (q.poolId === poolId && q.sid === sid) settleCrossAsk(q, 'done', by); }
 /** THE PERSON's answer (the cookie route): once / always / deny → {ok, state, moved, why} | a named refusal. */
-function answerCrossProviderAsk(askId, { answer, now = Date.now() } = {}) {
+function answerCrossProviderAsk(askId, { answer, now = Date.now(), sid = null } = {}) {
   const fk = _fbAskById.get(String(askId || '')), fq = fk ? _fbAsks.get(fk) : null; // (B-d578 F2) a fallback item — one a pool and provider
-  if (fq) { if (!['once', 'always', 'deny'].includes(answer)) return { ok: false, status: 400, code: 'bad_args', error: 'the answer is once, always or deny' }; return answerFallbackAsk(fq, answer, now); }
+  if (fq) { if (!['once', 'always', 'deny'].includes(answer)) return { ok: false, status: 400, code: 'bad_args', error: 'the answer is once, always or deny' }; return answerFallbackAsk(fq, answer, now, { sid }); }
+  if (sid) return { ok: false, status: 400, code: 'bad_args', error: 'one conversation is named only on a fallback provider\'s ask' };   // (r3918) the conversation's own press answers a fallback ask only
   const q = _crossAsks.get(String(askId || ''));
   if (!q) return { ok: false, status: 404, code: 'ask_unknown', error: 'that request is gone' };
   if (!['once', 'always', 'deny'].includes(answer)) return { ok: false, status: 400, code: 'bad_args', error: 'the answer is once, always or deny' };
@@ -9399,7 +9451,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         }
       } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
     }
-    if (poolCaps.planC) { try { syncFallbackAsks(poolId, a, fbOffered, only, now); judgeFallbackReturns(poolId, a, only, now); pumpFallbackMoves(now); tellFallbackStatus(poolId); } catch (e) { console.warn('[pool] fallback pass:', e.message); } } // (B-d578 F2) scene 1's count; (F3a) coming back; the queue
+    if (poolCaps.planC) { try { syncFallbackAsks(poolId, a, fbOffered, only, now); judgeFallbackReturns(poolId, a, only, now); pumpFallbackMoves(now); tellFallbackStatus(poolId); tellFallbackFacts(poolId, now); } catch (e) { console.warn('[pool] fallback pass:', e.message); } } // (B-d578 F2) scene 1's count; (F3a) coming back; the queue
     // THE WARM CACHE, pool-default form: the default moves EVERY conversation
     // without its own link at once (the `affected` set below), so its proactive
     // move waits while ANY of them is warm — the warmest one (largest ttl − ago
@@ -9616,7 +9668,7 @@ function maybeStopOnFallback(session, id, from, to) {
     providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, dropCrossCarry, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     queueFallbackMove, pumpFallbackMoves, fallbackJudge, fallbackRows, syncFallbackAsks, answerFallbackAsk, _fbQueue, _fbMovedAt, _fbAsks, FALLBACK_MOVES_PER_MIN,
     purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, _fbLanding, _fbBackoff, convBackend, noteFallbackLanded, endFallbackEpisode, // F2 cure (r2939) + cure 2 (r3041) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
-    judgeFallbackReturns, fallbackBackTarget, fallbackBackVerdict, fallbackMoveBack, fallbackStatus, FALLBACK_DWELL_MS, _fbDwell, sweepFallbackDwell, stampFallbackDwell, tellFallbackStatus, _fbStatusSig, // B-d578 F3a: coming back; F3b: the row's counts
+    judgeFallbackReturns, fallbackBackTarget, fallbackBackVerdict, fallbackMoveBack, fallbackStatus, fallbackFactOf, tellFallbackFacts, _fbFactSig, FALLBACK_DWELL_MS, _fbDwell, sweepFallbackDwell, stampFallbackDwell, tellFallbackStatus, _fbStatusSig, // B-d578 F3a: coming back; F3b: the row's counts
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)

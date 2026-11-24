@@ -50,7 +50,7 @@ import { wallWords, groupWalls, staleLaneAge, markT } from './account-wall-words
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
-import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
+import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords, fallbackPressToasts } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
 import { deviceLocale } from './i18n.js';
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
@@ -139,6 +139,7 @@ const acctTypeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 
 // ── B-d578 F3b, THE PAGE of the fallback member (r3316): the «When every member is out» section of «Members & placement…» and the
 // pool row's fallback counts + its ONE press. PURE string builders (the suites drive them); nothing here asks a vendor — every
 // fact is the accounts list the client already holds (r3316 (6)).
+export { fallbackPressToasts };   // (r3918) the press's reply words now live in the PURE pool model — the pool row and the conversation's strip say the same
 export const FALLBACK_MAX = 8;   // the store's own bound (accounts FALLBACK_PROVIDERS_MAX)
 /** the providers a pool may list: the accounts list's provider rows that fit ITS harness (`backend`, the pool's own), one per provider */
 export function fallbackChoices(providerRows, backend) {
@@ -191,21 +192,6 @@ export function poolSaveBody({ members, priority, codex = false, cross, fb, cros
   if (crossTouched || cross !== cross0) { body.crossProvider = cross; body.crossProviderOpened = cross0; }
   if (fbTouched || !sameIds(fb, fb0)) { body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice(); body.fallbackProvidersOpened = (Array.isArray(fb0) ? fb0 : []).slice(); }
   return body;
-}
-/** (r3886 (F), smalls) the press's reply in words → [{ text, type }]: QUEUED and how many (an idle one restarts now, a busy one at its
- *  turn's end), those already on their way said apart (pressed twice: never counted again), each reason a conversation stays; «nothing
- *  moved back» only when no other line says why */
-export function fallbackPressToasts(r, t) {
-  const out = [], n = Number(r && r.queued) || 0, al = Number(r && r.already) || 0;
-  if (n) out.push({ text: n === 1 ? t('1 conversation is queued to move back — it restarts there now if it is idle, or when its turn is over') : t('{n} conversations are queued to move back — each restarts there now if it is idle, or when its turn is over', { n }), type: 'success' });
-  if (al) out.push({ text: al === 1 ? t('1 conversation is already on its way back') : t('{n} conversations are already on their way back', { n: al }), type: 'info' });
-  const nm = Number(r && r.noModel) || 0;
-  if (nm) out.push({ text: t('{n} cannot move back by a press — VibeSpace does not know the model they came from; pick a model for each in Session Properties', { n: nm }), type: 'info' });
-  for (const [k, w] of [['lapsed', '{n} cannot come back yet: the pool\'s default member has lapsed — renew it, or pick another default in Members & placement'], ['familyUnknown', '{n} cannot come back yet: VibeSpace cannot tell which family their first model belongs to'], ['otherRecord', '{n} could not be moved back: their record names another provider than the one they run on']]) {
-    const c = Number(r && r[k]) || 0; if (c) out.push({ text: t(w, { n: c }), type: 'info' });
-  }
-  if (!out.length) out.push({ text: t('Nothing moved back — no conversation can come back right now'), type: 'info' });
-  return out;
 }
 /** the word a provider that cannot start wears beside its row (never a greyed control: its press says it too) */
 export function fallbackNotReadyWords(code, t) {

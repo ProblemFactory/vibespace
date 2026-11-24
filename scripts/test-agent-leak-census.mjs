@@ -776,6 +776,7 @@ const CATALOG = {
   'server.js:pathMounts': { kind: 'make', why: 'the /svc path mounts: a pass-through handler (no service is mounted)', make: () => ({ handler: (req, res, next) => next() }) },
   'server.js:X_ENV': { kind: 'make', why: 'a pick of cli-env.js create(): the X display env (it probes the box\'s display with programs) — none', make: () => ({}) },
   'server.js:refreshXEnv': { kind: 'make', why: 'a pick of cli-env.js create(): the X env refresh — a no-op', make: () => () => ({}) },
+  'server.js:fallbackFactOf': { kind: 'make', why: 'a pick of usage-pool-engine.js create() (B-d578 r3918): the conversation\'s own fallback fact, read only by the live payload of the page\'s /ws (no client here) — no census conversation is on a pool\'s fallback: null', make: () => () => null },
   'server.js:harnessAvailability': { kind: 'inert', why: 'a pick of cli-env.js create(): which agent CLIs this box has (it runs `which`) — the census has none' },
   'src/server/mounts-plugins-wiring.js:hostVersion': { kind: 'make', why: 'the plugin loader\'s host version (read from package.json under the root; the scratch root has none) — the tree\'s own', make: () => R('package.json').version },
   'src/server/mounts-plugins-wiring.js:browserKeeper': { kind: 'make', why: 'THE browser keeper starts Chrome — not in the world: null is the product\'s own branch (keeperOr503: «browser profiles are not available on this server»); the browser routes are swept to that refusal', make: () => null },

@@ -23,7 +23,7 @@ const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.mat
  *  mask-value-shape): the SAME two rows below ONE_ROW_PX, the short forms at SHORT_FORM_PX; nothing behind ⋯ / ﹀. */
 export const SHORT_WINDOW_PX = 300;
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
-import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
+import { billingAuthKey, placementNote, fallbackStripOf, fallbackPressToasts } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
 import { costBasisOf, costChipWords, addedKindsChipWords } from './chat-bar-words.js'; // PURE (lane door-healthy-chat): the cost's words + the record-kinds chip
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -134,6 +134,7 @@ export class ChatStatusBar {
     this._onRestartSession = onRestartSession || null;
     this._servedModel = null; // actual serving model (per-turn) — fallback detection
     this._refusalFallback = null; // B-c643: the last safety-classifier reroute {from, to, category} — the ⚠ chip names it while `to` serves
+    this._poolFallback = null; this._fbBusy = false; // (B-d578 r3918) the conversation's fallback fact (the live payload) and its one press in flight
     this._allowReview = allowReview;
     // (lane mask-value-shape) a conversation of its own HAS an Outbox: «Outbox · 0» from the first render; a subagent's viewer
     // (outbox: false) drafts under its parent's id and wears none (chat-view _wireOutboxChip)
@@ -638,6 +639,25 @@ export class ChatStatusBar {
     return !!this._servedModel && !sameModel(this._servedModel, target);
   }
 
+  /** (B-d578 r3918) the conversation's OWN fallback fact (the live payload's poolFallback) — its words and its one press */
+  setPoolFallback(f) {
+    const next = f && (f.on || f.can) ? f : null;
+    if (JSON.stringify(next) === JSON.stringify(this._poolFallback)) return;
+    this._poolFallback = next; this.render();
+  }
+  /** the press: ONE request naming THIS conversation; held only while it is in flight; its reply in the pool row's own words */
+  async _fbPress() {
+    const fs = fallbackStripOf(this._poolFallback, t);
+    if (!fs || !fs.request || this._fbBusy) return;
+    this._fbBusy = true; this.render();
+    let r = null;
+    try { r = await fetchJson(fs.request.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fs.request.body) }); } finally { this._fbBusy = false; this.render(); }
+    if (!r || r.error || r.ok === false) { showToast(t('Could not move it — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
+    const said = fs.request.kind === 'to'
+      ? [{ text: t('This conversation is queued to move to {provider} — it restarts there now if it is idle, or when its turn is over', { provider: fs.request.provider }), type: 'success' }]
+      : fallbackPressToasts(r, t);
+    for (const m of said) showToast(m.text, { type: m.type, duration: m.type === 'success' ? undefined : 8000 });
+  }
   /** B-c643: a safety-classifier reroute (the `model-refusal-fallback` notice's
    *  side effect, live or rebuilt). While its `to` is the served model the ⚠
    *  chip says "refusal (category)" and its tooltip names the reroute — it used
@@ -1029,6 +1049,9 @@ export class ChatStatusBar {
       inDoor('style', `chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}`, tip, label);
     }
 
+    // (B-d578 r3918) THE CONVERSATION's OWN PRESS: its words (where it runs, the bill) and — only when it can act — ONE button BESIDE them
+    { const fs = fallbackStripOf(this._poolFallback, t);
+      if (fs) chip('fallback', 'chat-status-fallback', fs.words, `<span class="chat-status-fb-words">${escHtml(fs.words)}</span>${fs.press ? ` <button type="button" class="agent-btn chat-status-fb-press"${this._fbBusy ? ' disabled' : ''}>${escHtml(fs.press)}</button>` : ''}`); }
     // Auto-continue after a usage limit (2.368.0; GENERIC since 2026-09-08).
     // Shown for any harness that can BOTH classify a limit and restart a turn
     // — `caps.autoResume.supported`, the derived row, never a backend id — and
@@ -1583,6 +1606,7 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
+    if (e.target.closest('.chat-status-fb-press')) { e.stopPropagation(); this._fbPress(); return; }   // (B-d578 r3918) the conversation's own press — the BUTTON, never its words
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
     const bChip = e.target.closest('.chat-status-billing');

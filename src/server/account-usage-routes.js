@@ -661,7 +661,17 @@ app.post('/api/accounts/:poolId/fallback/move-back', (req, res) => {
     const poolId = String(req.params.poolId || '');
     const pa = accounts.get(poolId);
     if (!pa || pa.type !== 'pooled') return res.status(400).json({ ok: false, code: 'not_pooled', error: 'not a pooled account' });
-    const r = engine.fallbackMoveBack(poolId);
+    // (r3918) THE CONVERSATION's OWN PRESS: `{ sids: [sid] }` names ONE conversation — of THIS pool and on one of its fallbacks, else
+    // refused by name; the pool's others are left as they are
+    let sids = null;
+    if (req.body && req.body.sids !== undefined) {
+      const want = Array.isArray(req.body.sids) ? req.body.sids.map(String) : null;
+      if (!want || want.length !== 1) return res.status(400).json({ ok: false, code: 'bad_args', error: 'name one conversation' });
+      const f = typeof engine.fallbackFactOf === 'function' ? engine.fallbackFactOf(want[0]) : null;
+      if (!f || !f.on || f.on.poolId !== poolId) return res.status(409).json({ ok: false, code: 'not_on_fallback', error: 'that conversation is not one of this pool\'s on a fallback provider' });
+      sids = want;
+    }
+    const r = engine.fallbackMoveBack(poolId, sids);
     res.json({ ok: true, queued: (r && r.queued) || 0, already: (r && r.already) || 0, noModel: (r && r.noModel) || 0, lapsed: (r && r.lapsed) || 0, familyUnknown: (r && r.familyUnknown) || 0, otherRecord: (r && r.otherRecord) || 0 });   // (r3319 (5), r3338 (2) (4)) each reason a conversation could not move, counted   // (r3319 (5)) those whose first model is unknown: not queued, said why
   } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
 });
@@ -669,7 +679,7 @@ app.post('/api/accounts/pool-cross/asks/:askId', (req, res) => {
   try {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
     if (typeof engine.answerCrossProviderAsk !== 'function') return res.status(503).json({ error: 'pool engine unavailable', code: 'no_engine' });
-    const r = engine.answerCrossProviderAsk(String(req.params.askId || ''), { answer: req.body && req.body.answer });
+    const r = engine.answerCrossProviderAsk(String(req.params.askId || ''), { answer: req.body && req.body.answer, sid: req.body && req.body.sid ? String(req.body.sid) : null });   // (r3918 (a)) the conversation's own «Move to»: the same answer with ONE conversation named, the same guard
     if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'failed', error: (r && r.error) || 'nothing changed' });
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }

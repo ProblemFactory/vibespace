@@ -50,7 +50,7 @@ console.log('② the arrangement, every mark present at once');
   ok(one.oneRow && one.rows.length === 1, `ONE row at ${ONE_ROW_PX} (${one.rows[0].join(' · ')})`);
   ok(at(1200).rows.length === 1 && at(1440).rows.length === 1, 'one row at 1200 and 1440');
   const two = at(500);
-  ok(two.rows.length === 2 && two.rows[0].join() === 'turnstate,remote,autoresume,model,perm,ctx' && two.rows[1].join() === 'artifacts,outbox,browser,channels,tasks,settings',
+  ok(two.rows.length === 2 && two.rows[0].join() === 'turnstate,remote,autoresume,fallback,model,perm,ctx' && two.rows[1].join() === 'artifacts,outbox,browser,channels,tasks,settings',
     `TWO rows at 500 — row 1 «${two.rows[0].join(' · ')}», row 2 «${two.rows[1].join(' · ')}»`);
   const ladder = [280, 320, 360, 420, 500, 720];
   ok(ladder.every((w) => JSON.stringify(at(w).rows) === JSON.stringify(two.rows)), `the SAME two rows at ${ladder.join(' / ')} (a thing never changes row with the width)`);

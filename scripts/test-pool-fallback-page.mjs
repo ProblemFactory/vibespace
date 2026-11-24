@@ -83,7 +83,7 @@ console.log('— ② the pool row');
   const why = MA.fallbackStatusLines([{ provider: 'pv-demo-router', label: 'Router', running: 4, canReturn: 0, waiting: 0, lapsed: 2, familyUnknown: 1, noModel: 1 }], T).map((l) => l.text);
   ok(why.includes("2 cannot come back yet: the pool's default member has lapsed") && why.includes("1 cannot come back yet: VibeSpace cannot tell their first model's family") && why.includes('1 cannot come back by themselves: their first model is unknown'),
     '② (r3338 (2)) the row says WHY some stay, each count apart, in words a person can act on (the default lapsed, the family unknown, the first model unknown)', why);
-  const S2 = read('src/lib/manage-agents.js');
+  const S2 = read('src/lib/pool-priority-model.js');   // (r3918) the press's reply words moved to the PURE pool model (the strip says the same)
   ok(S2.includes("[['lapsed', '{n} cannot come back yet: the pool\\'s default member has lapsed — renew it, or pick another default in Members & placement'], ['familyUnknown',") && read('src/server/account-usage-routes.js').includes("lapsed: (r && r.lapsed) || 0, familyUnknown: (r && r.familyUnknown) || 0, otherRecord: (r && r.otherRecord) || 0"),
     '② (r3338 (2) (4)) the press\'s reply carries each reason and its toast words each one');
 }
@@ -124,7 +124,7 @@ console.log('— ⑤ the wiring');
     '⑤ the switch and the list ride the dialog\'s ONE save (Claude pools only), the switch starts from the pool\'s own (never unless allow), the ninth is refused in words, a provider that cannot start says why at its press');
   ok(R.includes("app.post('/api/accounts/:poolId/fallback/move-back', (req, res) => {") && R.includes("const who = require('../routes/vault.js').personVerdict(req);")
     && R.includes("res.json({ ok: true, queued: (r && r.queued) || 0, already: (r && r.already) || 0, noModel: (r && r.noModel) || 0, lapsed: (r && r.lapsed) || 0, familyUnknown: (r && r.familyUnknown) || 0, otherRecord: (r && r.otherRecord) || 0 });") && S.includes("'/fallback/move-back', { method: 'POST'")
-    && S.includes("t('{n} cannot move back by a press — VibeSpace does not know the model they came from; pick a model for each in Session Properties', { n: nm })"),
+    && read('src/lib/pool-priority-model.js').includes("t('{n} cannot move back by a press — VibeSpace does not know the model they came from; pick a model for each in Session Properties', { n: nm })"),
     '⑤ the press is a person\'s (the tree\'s one verdict for a sign-in that is not the page\'s); its reply says QUEUED and how many, and how many could not move (no first model) in words');
 }
 
@@ -349,6 +349,40 @@ const hostileOk = (h) => !/<img/.test(h) && !/<"x>/.test(h) && /&lt;img src=x on
   ok(hostileOk(hh), '⑪ (r4028 (2)) a key named «<img src=x onerror=1>"q» with the tail «<"x>» is drawn escaped — no tag and no bare quote reach the page, in its name, its label or its vendor-and-tail line', hh.slice(0, 600));
 }
 
+const PMOD = await import(path.join(REPO, 'src/lib/pool-priority-model.js'));
+const strip9 = (X) => {
+  const on = { on: { sid: 's1', poolId: 'pool-demo', provider: 'pv-demo-router', label: 'Router', back: { id: 'sub-a', name: 'Team Max' }, why: null } };
+  const onNo = { on: { ...on.on, back: null, why: 'no-member' } };
+  const can = { can: { sid: 's2', poolId: 'pool-demo', provider: 'pv-demo-router', label: 'Router', askId: 'ask-1' } };
+  const a = X.fallbackStripOf(on, T), b = X.fallbackStripOf(onNo, T), c = X.fallbackStripOf(can, T), n = X.fallbackStripOf(null, T);
+  return { a, b, c, n,
+    back: !!a && /Runs on Router — billed there, on Router's own bill/.test(a.words) && a.press === 'Move back to Team Max' && a.request && a.request.url === '/api/accounts/pool-demo/fallback/move-back' && eqA(a.request.body, { sids: ['s1'] }),
+    none: !!b && !b.press && !b.request && /no member can take it back yet/.test(b.words) && n === null,
+    to: !!c && c.press === "Move to Router — billed there, on Router's own bill" && c.request && c.request.url === '/api/accounts/pool-cross/asks/ask-1' && eqA(c.request.body, { answer: 'once', sid: 's2' }) };
+};
+console.log('— ⑨ the conversation\'s own press in its status strip (r3918)');
+{
+  const z = strip9(PMOD);
+  ok(z.back && z.to, '⑨ (r3918 (b)) the strip\'s words say where it runs and the BILL; «Move back to {member}» names THIS conversation; «Move to {provider} — billed there, on {provider}\'s own bill» is the ask\'s Allow once for THIS conversation', z);
+  ok(z.none, '⑨ (r3918 (c) (d)) with no member able to take it back the strip says why and draws NO press; with no fact, nothing', z.b);
+  const BAR = read('src/lib/chat-status-bar.js'), VIEW = read('src/lib/chat-view.js'), TAB = read('src/lib/strip-table.js');
+  ok(BAR.includes("<span class=\"chat-status-fb-words\">${escHtml(fs.words)}</span>${fs.press ? ` <button type=\"button\" class=\"agent-btn chat-status-fb-press\"${this._fbBusy ? ' disabled' : ''}>${escHtml(fs.press)}</button>` : ''}")
+    && BAR.includes("if (e.target.closest('.chat-status-fb-press')) { e.stopPropagation(); this._fbPress(); return; }")
+    && BAR.includes("} finally { this._fbBusy = false; this.render(); }") && BAR.includes(": fallbackPressToasts(r, t);")
+    && VIEW.includes("this._statusBar?.setPoolFallback?.(row.poolFallback || null);") && TAB.includes("row('fallback', 'I', 'row1', 35, { exists: true }),"),
+    '⑨ (r3918 (c)) the press is a BUTTON beside the words (only its own click acts — the words are never made clickable), held only while its request is in flight (released in a finally); a «Move back» reply in the pool row\'s own words; the chat view feeds it the payload\'s fact; the strip\'s table places it on row 1');
+  // (e) WHO SEES THE FACT — the live payload's roads, and nothing else
+  const SRV = read('server.js'), WSH = read('src/ws-handler.js');
+  const tracked = (await import(pathToFileURL(path.join(REPO, 'scripts/tracked-files.mjs')).href)).trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(c|m)?js$/.test(f));
+  const callers = tracked.filter((f) => read(f).split('\n').some((l) => !/^\s*(\/\/|\*|\/\*)/.test(l) && /activeSessionsPayload\(\)/.test(l)));
+  const factUsers = tracked.filter((f) => read(f).split('\n').some((l) => !/^\s*(\/\/|\*|\/\*)/.test(l) && /\bfallbackFactOf\s*\(/.test(l)));   // a CALL (or its definition) on a code line — a comment naming it is no reader
+  ok(SRV.includes("poolPin: poolPinFactOf(s), poolFallback: (() => { try { return fallbackFactOf(id); } catch { return null; } })(),")
+    && eqA(callers.sort(), ['server.js', 'src/ws-handler.js']) && SRV.includes("const msg = JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() });") && WSH.includes("ws.send(JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() }));")
+    && SRV.includes("if (pathname === '/ws') {\n    if (!auth.requestAuthed(req)) return deny();") && read('src/auth.js').includes('return this.checkToken(Auth.cookieToken(req));')
+    && eqA(factUsers.sort(), ['server.js', 'src/server/account-usage-routes.js', 'src/server/usage-pool-engine.js']),
+    '⑨ (r3918 (e)) WHO SEES THE FACT: the live payload is built only for the page\'s /ws (its broadcast and its first frame — the only two callers in the tree), and /ws admits only the person\'s page (the same-origin verdict and the owner\'s cookie, never a bearer); the fact is read nowhere else but the engine and the routes\' own one-conversation checks — no agent, job or automation read carries it', { callers, factUsers });
+}
+
 console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
 {
   const S = read('src/lib/manage-agents.js');
@@ -369,8 +403,13 @@ console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
   const dropped = await loadMA(anchored(S, LISTED, '', 'the listed provider dropped'), 'dropped');
   ok(!legs6(dropped).listed, 'CONTROL (loaded, run): a copy that lists only the roster\'s providers drops the one the store does not know ⇒ ⑥\'s list leg goes RED');
   const ALREADY = "  if (al) out.push({ text: al === 1 ? t('1 conversation is already on its way back') : t('{n} conversations are already on their way back', { n: al }), type: 'info' });\n";
-  const noAl = await loadMA(anchored(S, ALREADY, '', 'the already line cut'), 'no-already');
-  ok(!legs6(noAl).words, 'CONTROL (loaded, run): a copy whose press does not say «already on their way» says «nothing moved back» to a second press ⇒ ⑥\'s words leg goes RED');
+  const PPM = read('src/lib/pool-priority-model.js');
+  const NOBACK = "    if (!f.on.back || !f.on.back.id) return { words: words + ' · ' + t('no member can take it back yet'), press: null, request: null };\n";
+  const pressAlways = await import(pathToFileURL(M.write('src/lib/pool-priority-model.js', anchored(PPM, NOBACK, '', 'a press with no member'), 'press-always')).href);
+  let crashed = false; try { strip9(pressAlways); } catch { crashed = true; }
+  ok(crashed || !strip9(pressAlways).none, 'CONTROL (loaded, run): a pool-model copy that offers «Move back» with no member to take it ⇒ ⑨\'s no-press leg goes RED');
+  const noAlP = await import(pathToFileURL(M.write('src/lib/pool-priority-model.js', anchored(PPM, ALREADY, '', 'the already line cut'), 'no-already')).href);
+  ok(!legs6({ ...MA, fallbackPressToasts: noAlP.fallbackPressToasts }).words, 'CONTROL (loaded, run): a copy whose press does not say «already on their way» says «nothing moved back» to a second press ⇒ ⑥\'s words leg goes RED');
   const ACC = read('src/accounts.js');
   const REFUSE = "      if (idsOf(fallbackProviders) !== idsOf(a.fallbackProviders)) {";
   const noLaw = M.load('src/accounts.js', anchored(ACC, REFUSE, '      if (false) {', 'the hub\'s refusal cut'), 'no-law').AccountManager;

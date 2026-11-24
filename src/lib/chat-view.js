@@ -6084,6 +6084,7 @@ class ChatView {
     this._chatInput?.setStash?.(this._stashFact.stash, { turn: this._stashFact.turn });
     this._resumedFact = row.resumedBy || null;   // piece 7 rule 3: a delivery resumed it — the line says what and when
     this._chatInput?.setResumedBy?.(this._resumedFact);
+    this._statusBar?.setPoolFallback?.(row.poolFallback || null);   // (B-d578 r3918) the conversation's own fallback fact: its strip's words and its one press
     const fact = row.browserFact || null;
     if (!fact) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
     if (this._browserFacts && this._browserFacts.fact.digest === fact.digest) return;
