@@ -2488,7 +2488,12 @@ class JobManager {
    *  stop's own (counts, kernel process names), never a record's */
   _runLogLine(file, text) {
     if (!file) return;
-    fs.promises.appendFile(file, `\n${text}\n`).catch(() => { });
+    // r3888 (law 3 of r3735, for the engine's own lines): ONE ordered road a run's log — each append starts after the one before it has
+    // landed (two separate appends could land out of order: a force stop's two sentences were read in the reverse order)
+    const road = this._runLogRoad || (this._runLogRoad = new Map());
+    const next = (road.get(file) || Promise.resolve()).then(() => fs.promises.appendFile(file, `\n${text}\n`)).catch(() => { });
+    road.set(file, next);
+    next.then(() => { if (road.get(file) === next) road.delete(file); });   // (a run's road ends with its last line: nothing kept)
   }
   /** B-c134 cure (MUST A): the wrappers this engine holds — each live job's, by the pid it spawned or adopted — kept out of every
    *  stop's walk but their own job's (a recycled pid only makes a stop end less) */

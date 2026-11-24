@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { stopScenes } from './lib/stop-scenes.mjs';
+import { stopScenes, forcedLanded } from './lib/stop-scenes.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
@@ -163,6 +163,46 @@ ok(ctl.held && ctl.left.some((m) => m.comm === 'flock' || m.comm === 'sh') && !c
 const fz = await jobScene(WRAP, 'job-force', { force: true });
 ok(fz.held && !fz.left.length && fz.free && /its forced end killed \d+ process(es)? it started outside its group/.test(fz.said), 'B-c134: a FORCE stop (the wrapper SIGKILLed) — the engine reads the tree first and kills it, said in the log; nothing left', { left: names(fz.left), said: fz.said });   // stale-pins: kept — the engine's line still opens «its forced end killed N» whenever it killed any (B-d8f4 r902 builds it in two parts)
 ok(/\[jobs\] stop: its forced end killed \d+ process(es)? it started outside its group \([^)]*\)/.test(fz.log), 'B-c134 cure (MUST B): the FORCE stop\'s line is in the job\'s OWN log — where the person reads it (the wrapper is dead; the engine writes it)', fz.log.split('\n').filter((l) => /\[jobs\]/.test(l)));
+// r3888 (the MUST B item, placed by reading — r3876): the force scene waits on its FACT — every forced-end sentence the journal holds for
+// the job is in its log (forcedLanded). The red run's own state, placed: the journal holds the «killed» sentence and the log only the
+// other one — the release's wait (the first sentence's landing) read there; the fact's wait does not
+{
+  const JID = 'jb-made0901', K = `[jobs] ${JID}: its forced end killed 2 processes it started outside its group (sleep, sleep)`, U = `[jobs] ${JID}: its forced end — its mark could not be read in 1 process of ours (in uninterruptible sleep, inside an exec, or not dumpable): what carries its mark there may be left`;
+  const inLog = (l) => `\n[jobs] stop: ${l.slice(l.indexOf('its forced end'))}\n`, part = inLog(U), whole = inLog(U) + inLog(K);
+  const releaseWait = (log) => log.includes('[jobs] stop: its forced end');   // the release's wait, as stop-scenes.mjs had it
+  ok(!forcedLanded([K, U], JID, part) && forcedLanded([K, U], JID, whole) && forcedLanded([K], JID, inLog(K)) && !forcedLanded([], JID, whole), 'r3888: the force scene reads the job\'s log once EVERY forced-end sentence the journal holds for the job is in it — the red run\'s state (the «killed» sentence not yet landed) is not yet');
+  ok(releaseWait(part), 'RED CONTROL — the release\'s wait (the first sentence\'s landing): it reads the red run\'s state as landed, before the «killed» sentence');
+}
+// r3888 (law 3 of r3735, the engine's own lines): ONE ordered road a run's log — two engine lines, a STALL placed on the first append:
+// the log holds them in the order they were written. RED: the separate appends (the release's _runLogLine, in a copy)
+{
+  const JSRCr = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const ROAD = "    const next = (road.get(file) || Promise.resolve()).then(() => fs.promises.appendFile(file, `\\n${text}\\n`)).catch(() => { });\n    road.set(file, next);\n";
+  const MJr = mutantCopies('stop-tree-runlog', ROOT);
+  const JMx = MJr.load('src/jobs.js', editAnchor(JSRCr, ROAD, "    fs.promises.appendFile(file, `\\n${text}\\n`).catch(() => { }); const next = Promise.resolve();   /* MUTANT: the release — separate appends */\n", 'src/jobs.js')).JobManager;
+  const order = async (JM, tag) => {
+    const f = path.join(D, tag + '.log'); fs.writeFileSync(f, '');
+    const pa = fs.promises.appendFile; let release = null, n = 0;
+    fs.promises.appendFile = function (p, ...a) { if (String(p) === f && n++ === 0) return new Promise((res, rej) => { release = () => pa.call(fs.promises, p, ...a).then(res, rej); }); return pa.call(fs.promises, p, ...a); };   // THE STALL: the first append waits
+    try {
+      const self = {};
+      JM.prototype._runLogLine.call(self, f, '[jobs] stop: the first line'); JM.prototype._runLogLine.call(self, f, '[jobs] stop: the second line');
+      for (let k = 0; k < 200 && !release; k++) await new Promise((r) => setImmediate(r));
+      for (let k = 0; k < 50; k++) await new Promise((r) => setImmediate(r));   // (a separate second append lands in these turns)
+      const during = fs.readFileSync(f, 'utf8');
+      if (release) release();
+      for (let k = 0; k < 5000 && !(/first line/.test(fs.readFileSync(f, 'utf8')) && /second line/.test(fs.readFileSync(f, 'utf8'))); k++) await new Promise((r) => setImmediate(r));
+      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));   // (the last append's own callback ends the road)
+      const after = fs.readFileSync(f, 'utf8');
+      return { during: during.trim(), ordered: after.indexOf('the first line') >= 0 && after.indexOf('the first line') < after.indexOf('the second line'), road: !!(self._runLogRoad && self._runLogRoad.size) };
+    } finally { fs.promises.appendFile = pa; }
+  };
+  const { JobManager: JMr } = require(path.join(ROOT, 'src/jobs.js'));
+  const o = await order(JMr, 'runlog-road'), ox = await order(JMx, 'runlog-road-ctl');
+  ok(o.ordered && o.during === '' && !o.road, 'r3888: the engine\'s own lines in a job\'s log go by ONE ordered road — the first append STALLED, the second waits for it, and the log holds them in the order they were written (the road ends with its last line)', o);
+  ok(!ox.ordered && /second line/.test(ox.during), 'RED CONTROL — the release\'s separate appends (in a copy): the second line lands while the first is stalled — the log holds them reversed', ox);
+  for (const r of copiesCensus(MJr.files, MJr.dir, ROOT, { minCopies: 1, label: 'r3888 ' })) ok(r.pass, r.name, r.detail);
+}
 ok(real.heldOut, 'B-c134 cure (MUST A): the engine keeps each live job\'s wrapper OUT of every other stop\'s walk (PI.keptOut names it) — and its own stop walks it (the root)', real.heldOut);
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 0, label: 'B-c134 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
@@ -304,7 +344,7 @@ console.log('§7 B-c134 cure MUST B — A STOP THAT COULD NOT END EVERYTHING TEL
     ok(!/not ours to signal/.test(drive(mut).into), 'CONTROL (the refused signal not collected): the job\'s log is silent about it');
   }
   const js = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
-  ok(/const treeCut = tree\.cut \|\| all\.length > rows\.length;/.test(js) && /\.\.\.\(treeCut \? \{ treeCut: true \} : \{\}\)/.test(js) && /_runLogFile\(job\) \{[\s\S]{0,200}?run\.log \|\| path\.join\(this\._ctlDir\(job, run\.startedAt\), 'current\.log'\)/.test(js) && /fs\.promises\.appendFile\(file, `\\n\$\{text\}\\n`\)\.catch\(\(\) => \{ \}\);/.test(js), 'the intent\'s row cap (256) is a CUT the wrapper says; the engine\'s line is appended to the run\'s log off the loop');
+  ok(/const treeCut = tree\.cut \|\| all\.length > rows\.length;/.test(js) && /\.\.\.\(treeCut \? \{ treeCut: true \} : \{\}\)/.test(js) && /_runLogFile\(job\) \{[\s\S]{0,200}?run\.log \|\| path\.join\(this\._ctlDir\(job, run\.startedAt\), 'current\.log'\)/.test(js) && /\.then\(\(\) => fs\.promises\.appendFile\(file, `\\n\$\{text\}\\n`\)\)\.catch\(\(\) => \{ \}\);/.test(js), 'the intent\'s row cap (256) is a CUT the wrapper says; the engine\'s line is appended to the run\'s log off the loop — r3888: by its ONE ordered road');
 }
 
 console.log('§8 B-c134 cure — WHICH END ENDS THE BACKGROUND TREE (the coordinator\'s question, every caller counted)');

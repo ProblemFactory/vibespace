@@ -7,6 +7,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
+/** r3888 (the MUST B item, placed by reading — r3876): ONE force stop can say TWO forced-end sentences (the kill road asked again before
+ *  the wrapper had ended). The scene reads the job's log once EVERY forced-end sentence the journal holds for the job is in it — its
+ *  fact — never at the first one's landing. `journal`: the engine's journal lines; `log`: the job's log text */
+export function forcedLanded(journal, jobId, log) {
+  const want = (journal || []).filter((l) => l.includes(jobId) && l.includes('its forced end')).map((l) => '[jobs] stop: ' + l.slice(l.indexOf('its forced end')));
+  return want.length > 0 && want.every((s) => String(log || '').includes(s));
+}
 export function stopScenes({ D, mine, ROOT }) {
 const require = createRequire(path.join(ROOT, 'scripts', 'lib', 'stop-scenes.mjs'));
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
@@ -51,7 +58,7 @@ const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAl
   const free = spawnSync('flock', ['-n', marker, 'true']).status === 0;
   const terms = (() => { try { return fs.readFileSync(heard, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } })();
   const readLog = () => { try { const run = job.runs[job.runs.length - 1]; return fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { return ''; } };
-  if (force) await until(() => readLog().includes('[jobs] stop: its forced end'), 3000);   // the engine's line lands off the loop
+  if (force) await until(() => forcedLanded(logs, job.id, readLog()), 3000);   // the engine's lines land off the loop — r3888: every one the journal holds
   const log = readLog();
   const said = logs.filter((l) => l.includes(job.id)).join(' | ');
   let intent = null; try { const run = job.runs[job.runs.length - 1]; intent = JSON.parse(fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'stop.json'), 'utf8')); } catch { }
