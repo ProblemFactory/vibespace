@@ -415,8 +415,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       rchip.addEventListener('click', (e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); });
     } else if (s.remoteState === 'record-unread') {
       // r3245 (1): a live conversation whose record could not be read at the hub's start — LISTED by its socket's name, never opened
-      // here (its attach is refused by name, its words saying why); Stop ends it. The words are the tables' own row (no new row)
-      rchip.innerHTML = `<span class="chip-icon">${UI_ICONS.alert || ''}</span><span class="chip-text">${escHtml(tr('Status unknown — it could not be read'))}</span>`;
+      // here (its attach is refused by name, its words saying why); Stop ends it (r3749: words of its own, the record's, not «status»)
+      rchip.innerHTML = `<span class="chip-icon">${UI_ICONS.alert || ''}</span><span class="chip-text">${escHtml(tr('its record could not be read'))}</span>`;
+      rchip.dataset.tip = tr('This conversation keeps running, but its record could not be read when VibeSpace started, so it is not opened here. It opens after the next start once its record reads. Stop ends it.');
     } else {
       rchip.innerHTML = `<span class="chip-icon">⟳</span><span class="chip-text">${escHtml(tr('host unreachable'))}</span>`;
       rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');

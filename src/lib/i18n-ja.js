@@ -593,6 +593,12 @@ export default {
   "Drag windows to edges to snap | Use toolbar for layout presets | Toggle sidebar for sessions": "ウィンドウを端へドラッグでスナップ | ツールバーでレイアウトプリセット | サイドバーでセッション管理",
   "Auto (system)": "自動（システムに従う）",
   "Backend": "バックエンド",
+  "its record could not be read": "記録を読めません", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "This conversation keeps running, but its record could not be read when VibeSpace started, so it is not opened here. It opens after the next start once its record reads. Stop ends it.": "この会話は動き続けていますが、VibeSpace の起動時に記録を読めなかったため、ここでは開きません。次の起動で記録が読めれば開きます。「停止」で終了します。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "“{name}” was stopped here, but its record could not be read — if it ran on another machine, its side there may still be running.": "“{name}”はここで停止しましたが、記録を読めませんでした。別のマシンで動いていた場合、そちら側はまだ動いている可能性があります。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "Automatic continue OFF for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue ON.": "“{name}”の自動継続オフはまだディスクに保存されていません（ストレージが応答しませんでした）。書き込み前に VibeSpace が再起動すると、この会話は自動継続オンに戻ります。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "Automatic continue ON for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue OFF.": "“{name}”の自動継続オンはまだディスクに保存されていません（ストレージが応答しませんでした）。書き込み前に VibeSpace が再起動すると、この会話は自動継続オフに戻ります。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "A change to “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the change is lost.": "“{name}”への変更はまだディスクに保存されていません（ストレージが応答しませんでした）。書き込み前に VibeSpace が再起動すると、この変更は失われます。", // r3749: the session record's words (a listed unread conversation, an owed change)
   "host unreachable": "ホスト到達不能",
   "The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.": "このセッションが動作するマシンに現在到達できません — 接続は自動的に再試行されます。送信したメッセージはキューに入り、復帰後に配信されます。",
   "Host": "リモートホスト",

@@ -657,7 +657,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   function bulkCounts() {
     let total = 0, on = 0;
     for (const [, s] of activeSessions) {
-      if (!s || s.isTmuxView || !verbFor(s)) continue;
+      if (!s || s.isTmuxView || s._metaUnread || !verbFor(s)) continue;   // (r3749: nor is it counted)
       total++;
       if (enabledFor(s)) on++;
     }
@@ -676,7 +676,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     saveHeld++;
     try {
       for (const [id, s] of activeSessions) {
-        if (!s || s.isTmuxView || !verbFor(s)) continue;
+        if (!s || s.isTmuxView || s._metaUnread || !verbFor(s)) continue;   // (r3749: a listed conversation whose record could not be read takes no choice it cannot save)
         if (s._autoResume === !!on) continue;            // already its explicit choice
         const flips = enabledFor(s) !== !!on;            // a session that only FOLLOWED the default gets the explicit choice too,
         setEnabled(id, !!on, { quiet: true });           // but is not counted as turned on/off when nothing it does changes

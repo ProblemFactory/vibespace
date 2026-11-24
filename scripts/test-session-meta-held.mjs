@@ -12,7 +12,7 @@
 //     unread; the dead socket's retire, the re-adopt and the two aged sweeps ask the same (by their code)
 //   ④ TORN BYTES are kept aside once, and the record lifts empty with the waiting changes on it
 //   ⑤ THE PERSON: the family's live list names each unread record (one notice reads it)
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -224,9 +224,8 @@ console.log('⑪ r3245 — the whole restatement carries the LIVE conversation\'
   ACTIVE.set('sess-made-up-live-4', { sockName: s, name: 'the fourth live conversation', _accountId: 'acct-made-up-live', host: 'a-made-up-machine', _initialGroupId: 'g-made-up-live', _poolPin: { pool: 'pool-made-up', member: 'm-made-up' } });
   SS.readSessionMeta(s);
   await copied(s);
-  await sleep(20);
   SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the fourth live conversation', cwd: '/made/up/live-4', webuiSessionId: 'sess-made-up-live-4' }, { durable: true, whole: true });
-  land(s); await sleep(50); land(s);
+  for (let i = 0; i < 80 && !((onDisk(s) || {}).accountId); i++) { land(s); await sleep(25); }   // (r3749: a wait on the record, not a fixed sleep)
   const d = onDisk(s);
   ACTIVE.delete('sess-made-up-live-4');
   ok(!!(d && d.accountId === 'acct-made-up-live' && d.host === 'a-made-up-machine' && d.taskId === 'g-made-up-live' && d.poolPin && d.poolPin.pool === 'pool-made-up'),
@@ -263,10 +262,11 @@ console.log('⑫ r3245 (1) — a live conversation whose record is unread at a s
   const rs = (SV.match(/remoteState: ([^\n]*?),\s+\/\/ r2/) || [])[1] || '';
   const stateOf = (expr, s) => { try { return new Function('s', `return ${expr};`)(s); } catch (e) { return 'threw: ' + e.message; } };
   const Ltoday = { ...L, _remoteState: null };   // the listing without its state (RED below)
-  ok(!!(rs && stateOf(rs, L) === 'record-unread' && stateOf(rs, {}) === null && stateOf(rs, Ltoday) === null && /s\.remoteState === 'record-unread'/.test(CARD) && CARD.includes("tr('Status unknown — it could not be read')")),
+  ok(!!(rs && stateOf(rs, L) === 'record-unread' && stateOf(rs, {}) === null && stateOf(rs, Ltoday) === null && /s\.remoteState === 'record-unread'/.test(CARD) && CARD.includes("tr('its record could not be read')")),
     `its row in the conversation list (the payload's own state expression) says its record could not be read (state ${stateOf(rs, L)}; the card's chip words and tip) and an ordinary conversation's row is unchanged — RED: without its state the row names nothing (${stateOf(rs, Ltoday)})`);
   const zh = SRC('src/lib/i18n-zh.js'), ja = SRC('src/lib/i18n-ja.js');
-  ok(['Status unknown — it could not be read'].every((k) => zh.includes(`"${k}": "`) && ja.includes(`"${k}": "`)), 'the chip\'s words are a row the Chinese and Japanese tables already hold');
+  const tip = (CARD.match(/rchip\.dataset\.tip = tr\('(This conversation keeps running, but its record[^']*)'\)/) || [])[1] || '';
+  ok(!!(tip && ['its record could not be read', tip].every((k) => zh.includes(`"${k}": "`) && ja.includes(`"${k}": "`))), 'r3749: the chip\'s words and its tip speak of the record, each with its Chinese and Japanese row');
   // the attach: refused BY NAME, before the socket joins the conversation
   const refusal = lineOf(WS, 'if (session && session._metaUnread) {');
   const attachOf = (line) => { const sent = []; const r = new Function('session', 'ws', 'data', `do {\n${line}\nreturn 'attached'; } while (false); return 'refused';`)(L, { send: (m) => sent.push(JSON.parse(m)) }, { sessionId: S }); return { r, sent }; };
@@ -277,53 +277,135 @@ console.log('⑫ r3245 (1) — a live conversation whose record is unread at a s
   // its Stop: the kill body (the release's, pinned by test-discovery-spawn) reaches its socket and its record
   const stop = lineOf(WS, 'if (session._metaUnread) { session.socketPath');
   const body = WS.indexOf('const endSessionBody = async'), si = WS.indexOf(stop), kill = WS.indexOf('// Kill the dtach session process (which kills claude as its child)');
-  const Lc = { ...L }; new Function('session', stop)(Lc);
+  const STOPW = (WS.match(/const META_UNREAD_STOP = i18nKey\('([^']*)'\)/) || [])[1] || '', said = [];
+  const sayLine = lineOf(WS, 'const sayUnreadStop = (s) => {');
+  const sayUnreadStop = new Function('ctx', 'META_UNREAD_STOP', sayLine + '\nreturn sayUnreadStop;')({ serverNotice: (key, text, o) => said.push({ key, text, o }) }, STOPW);
+  const Lc = { ...L }; new Function('session', 'sayUnreadStop', stop)(Lc, sayUnreadStop);
   const back = SS.deleteSessionMeta(Lc.sockName);
   const row = (SMV && typeof SMV.rows === 'function' ? SMV.rows() : []).find((r) => r.name === S || r.file === S + '.json' || String(r.file || '').endsWith(S + '.json'));
-  ok(!!(stop && body > 0 && si > body && si < kill && WS.indexOf('session._exitAsked = { by: \'terminate\'', body) < si && Lc.socketPath === '/made/up/sockets/' + S && Lc.sockName === S && back === false && (onDisk(S) || {}).webuiSessionId === 'sess-made-up-unread' && row && row.removalOwed === true),
-    `its Stop reaches its socket (the kill body's ${'`'}if (session.socketPath)${'`'} ends the process holding ${Lc.socketPath}) and its record: the removal is REMEMBERED for its read (${back}, removal owed ${row && row.removalOwed}), the record itself still there — RED: without the line the kill body has no socket to end and no record to name (${!!L.socketPath} / ${!!L.sockName})`,
+  ok(!!(stop && body > 0 && si > body && si < kill && WS.indexOf('session._exitAsked = { by: \'terminate\'', body) < si && Lc.socketPath === '/made/up/sockets/' + S && Lc.sockName === S && STOPW && said.length === 1 && said[0].o.i18n.key === STOPW && said[0].o.i18n.params.name === S && said[0].text.includes(S) && back === false && (onDisk(S) || {}).webuiSessionId === 'sess-made-up-unread' && row && row.removalOwed === true),
+    `its Stop reaches its socket (the kill body's ${'`'}if (session.socketPath)${'`'} ends the process holding ${Lc.socketPath}) and its record: the removal is REMEMBERED for its read (${back}, removal owed ${row && row.removalOwed}), the record itself still there; r3749: its Stop TELLS the person a side on another machine may still run («${said[0] && said[0].text}») — RED: without the line the kill body has no socket to end and no record to name (${!!L.socketPath} / ${!!L.sockName})`,
     { row });
 }
 
-console.log('⑬ r3302 — an owed patch is written AGAIN BY ITSELF and the stop writes what is owed: a person\'s «automatic continue OFF» survives a restart');
+console.log('⑭ r3245 (2) / r3749 — a torn record the person removed is restated from what its LIVE conversation knows');
+{
+  const SSP = path.join(REPO, 'src/server/session-stdout.js'), SSsrc = fs.readFileSync(SSP, 'utf8'), M14 = mutantCopies('smheld14', REPO);
+  const ROAD = 'return liftMeta(sockName, liveExtrasOf(sockName));';
+  const scene = async (SSx, s) => {
+    const f = path.join(META_DIR, s + '.json');
+    fs.writeFileSync(f, '{"name":"a torn conversation with a live session","cwd":"/made/up');
+    ACTIVE.set('sess-' + s, { sockName: s, name: 'the live one', _accountId: 'acct-' + s, host: 'machine-' + s, _initialGroupId: 'g-' + s });
+    SSx.readSessionMeta(s); await copied(s);
+    fs.unlinkSync(f);
+    const gone = SSx.readSessionMeta(s); ACTIVE.delete('sess-' + s);
+    return gone;
+  };
+  const mk14 = (mod) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null });
+  const g = await scene(SS, 'vs-smheld-removed-live');
+  const R = await scene(mk14(M14.load('src/server/session-stdout.js', anchored(SSsrc, ROAD, 'return liftMeta(sockName, {});', 'the removed road handed an empty record'), 'removed-empty')), 'vs-smheld-removed-live-red');
+  ok(!!(g && !unread(g) && g.accountId === 'acct-vs-smheld-removed-live' && g.host === 'machine-vs-smheld-removed-live' && g.taskId === 'g-vs-smheld-removed-live' && R && !unread(R) && !R.accountId && !R.host),
+    `a torn record the person REMOVED after its copy reads as what its live conversation knows — its account (${g && g.accountId}), machine, group — never an empty record a stub would spread; RED (the lift handed an empty record): none of them (${R && JSON.stringify(R)})`, { g, R });
+}
+
+console.log('⑮ r3245 (3) / r3749 — a torn record restated whole is marked ONCE: no second read, no second helper, no second «did not parse»');
+{
+  const SSP = path.join(REPO, 'src/server/session-stdout.js'), SSsrc = fs.readFileSync(SSP, 'utf8'), M15 = mutantCopies('smheld15', REPO);
+  const ONE = '{ durable, sync, flagOnly, prev: {} });';
+  const mk15 = (mod) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null });
+  const LOGS = [], realW = console.warn, realL = console.log;
+  console.warn = (...a) => { LOGS.push(a.join(' ')); }; console.log = (...a) => { LOGS.push(a.join(' ')); realL(...a); };
+  const scene = async (SSx, s) => {
+    fs.writeFileSync(path.join(META_DIR, s + '.json'), '{"name":"a torn conversation restated","cwd":"/made/up');
+    SSx.readSessionMeta(s); await copied(s);
+    const before = LOGS.filter((l) => l.includes(s) && /did not parse|could not be read/.test(l)).length;
+    SSx.writeSessionMeta(s, { name: 'a torn conversation restated', cwd: '/made/up/15', webuiSessionId: 'sess-' + s }, { durable: true, whole: true });
+    land(s);
+    return { before, after: LOGS.filter((l) => l.includes(s) && /did not parse|could not be read/.test(l)).length, marked: SMV.isMarked(s), d: onDisk(s) };
+  };
+  const one = await scene(SS, 'vs-smheld-restated-once');
+  const two = await scene(mk15(M15.load('src/server/session-stdout.js', anchored(SSsrc, ONE, '{ durable, sync, flagOnly });', 'the recursion without the read version'), 'second-mark')), 'vs-smheld-restated-twice');
+  console.warn = realW; console.log = realL;
+  ok(!!(one.before >= 1 && one.after === one.before && one.marked === false && one.d && one.d.cwd === '/made/up/15' && two && (two.marked === true || two.after > two.before)),
+    `a whole restatement of a torn record (after its copy) passes the version it read: the still-torn file is read NO second time — no second mark (${one.marked}), no second line (${one.before} → ${one.after}); RED (its recursion without the read version): marked again (${two && two.marked}, lines ${two && two.before} → ${two && two.after})`, { one, two });
+}
+
+console.log('⑬ r3302 / r3749 — an owed patch is written AGAIN BY ITSELF, the stop writes what is owed, a write in flight never brings the old value back, and the person is TOLD');
 {
   // (LAST in this suite: its stop is the store writer's own exit flush.) The chain's clock, scaled for a suite: the hub's bound is
-  // 10 s and its own tries 2 / 5 / 15 / 30 / 60 s — here ONE bound and ONE try
-  const CLOCK = { linkMs: 1000, againMs: [1000] };
+  // 10 s and its own tries 2 / 5 / 15 / 30 / 60 s — here ONE bound and ONE try (the flight scene: its one try far off, its writes first)
+  const CLOCK = { linkMs: 1000, againMs: [1000] }, CLOCK_FAR = { linkMs: 1000, againMs: [600000] };
   const STALL = new Map();   // file → off-loop reads HELD (a PLACED stall of the chain's read: it never answers)
   const before = fs.promises.readFile;
   fs.promises.readFile = function (p, ...a) { const k = typeof p === 'string' ? path.resolve(p) : null; const n = k ? STALL.get(k) || 0 : 0; if (n > 0) { STALL.set(k, n - 1); return new Promise(() => { }); } return before.call(fs.promises, p, ...a); };
-  const SSP = path.join(REPO, 'src/server/session-stdout.js'), SSsrc = fs.readFileSync(SSP, 'utf8');
-  const AGAIN = '    else { owedPatch.set(fp, full); oweAgain(sockName, fp, owner); }';
-  const mk = (mod) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null, patchClock: CLOCK });
-  const cured = mk(require(SSP));
-  const today = SSsrc.includes(AGAIN) ? mk(mutantCopies('smheld', REPO).load('src/server/session-stdout.js', SSsrc.replace(AGAIN, '    else owedPatch.set(fp, full);   // TODAY: owed to the NEXT patch only'), 'owed')) : null;
+  const SSP = path.join(REPO, 'src/server/session-stdout.js'), SSsrc = fs.readFileSync(SSP, 'utf8'), MUT = mutantCopies('smheld', REPO);
+  const AGAIN = '    else { owedPatch.set(fp, full); oweAgain(sockName, fp, owner, Object.keys(patch || {}).length > 0); }';
+  const PENDING = '  pendingMeta.set(fp, text); writingMeta.set(fp, text); writingOwed.set(fp, owed);';
+  const TELL = ' tellOwed(sockName, fp); }';
+  const NOTICES = [], WARNS = [], realWarn = console.warn;
+  console.warn = (...a) => { WARNS.push(a.join(' ')); };
+  const mk = (mod, clock) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null, patchClock: clock, serverNotice: (key, text, o) => NOTICES.push({ key, text, o }) });
+  const mut = (from, to, tag) => MUT.load('src/server/session-stdout.js', anchored(SSsrc, from, to, tag), tag);
+  const cured = mk(require(SSP), CLOCK), curedFar = mk(require(SSP), CLOCK_FAR);
+  const todayM = mut(AGAIN, '    else owedPatch.set(fp, full);   // TODAY: owed to the NEXT patch only', 'owed'), today = todayM && mk(todayM, CLOCK);
+  const flightM = mut(PENDING, '  writingMeta.set(fp, t); writingOwed.set(fp, owed);   // e4bcad50b: the owed keys in the BYTES only', 'flight'), flight = flightM && mk(flightM, CLOCK_FAR);
+  const silentM = mut(TELL, ' }', 'silent'), silent = silentM && mk(silentM, CLOCK);
+  const NAME = (s) => 'the conversation the person calls ' + s;
   const press = (SSx, s, held) => {   // a stopped conversation; the person turns automatic continue OFF; its link's read is held
     fs.writeFileSync(path.join(META_DIR, s + '.json'), JSON.stringify({ name: 'a stopped conversation', webuiSessionId: 'sess-' + s, autoResume: true }));
+    ACTIVE.set('sess-' + s, { sockName: s, name: NAME(s) });
     STALL.set(path.resolve(path.join(META_DIR, s + '.json')), held);
     return SSx.patchSessionMeta(s, { autoResume: false }, { owner: 'sess-' + s });
   };
   const autoOf = (s) => { const d = onDisk(s); return d && typeof d === 'object' ? d.autoResume : d; };
+  // THE FLIGHT (r3749's must): while the write that carries the owed change is in flight, a whole writer spreads the record — placed IN
+  // that window: the store writer's producer of this record, wrapped; right after it hands its bytes the next writer spreads (never load)
+  const SWx = require(path.join(REPO, 'src/store-writer.js')).storeWriter(), realDirty = SWx.dirty, HOOK = new Map();
+  SWx.dirty = function (file, o) {
+    const h = HOOK.get(file);
+    if (h && !h.fired && o && typeof o.produce === 'function') { const p0 = o.produce; o = { ...o, produce: (x) => { const b = p0(x); if (!h.fired && typeof b === 'string') { h.fired = true; h.during(); } return b; } }; }
+    return realDirty.call(this, file, o);
+  };
+  const flightScene = async (SSx, s) => {
+    const first = await press(SSx, s, Infinity);   // dropped at its bound: owed; its own try far off
+    HOOK.set(path.join(META_DIR, s + '.json'), { fired: false, during: () => SSx.writeSessionMeta(s, { ...SSx.readSessionMeta(s), lastRequestAt: 2 }) });
+    SSx.writeSessionMeta(s, { ...SSx.readSessionMeta(s), apiKeySource: 'a-whole-writer' });   // a whole writer of the boot backfill's shape
+    for (let i = 0; i < 200 && !((onDisk(s) || {}).lastRequestAt === 2); i++) await sleep(10);
+    return { first, fired: HOOK.get(path.join(META_DIR, s + '.json')).fired, landed: (onDisk(s) || {}).lastRequestAt === 2 };
+  };
   const t0 = Date.now();
-  // (a) the storage answers again after the held read; (b) it stays held for every off-loop read until the stop
-  const firsts = await Promise.all([press(cured, 'vs-owed-a', 1), press(cured, 'vs-owed-b', Infinity), ...(today ? [press(today, 'vs-owed-a-today', 1), press(today, 'vs-owed-b-today', Infinity)] : [])]);
+  // (a) the storage answers again after the held read; (b) it stays held off the loop, the hub's own synchronous read of the record
+  // answers (its whole writers read it so); (b2) held, and no read answers since: the stop must not block on it; (c) the flight
+  const [firsts, fl, flT] = await Promise.all([
+    Promise.all([press(cured, 'vs-owed-a', 1), press(cured, 'vs-owed-b', Infinity), press(cured, 'vs-owed-b2', Infinity), ...(today ? [press(today, 'vs-owed-a-today', 1), press(today, 'vs-owed-b-today', Infinity)] : []), ...(silent ? [press(silent, 'vs-owed-b-silent', Infinity)] : [])]),
+    flightScene(curedFar, 'vs-owed-c'), flight ? flightScene(flight, 'vs-owed-c-today') : null]);
+  const whileTrying = NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b:')).length;   // a try still owed: no word yet
   // until the cured (a) is on disk and the cured (b) has spent its tries: its bound, the try's wait, the try's bound
   const spent = CLOCK.linkMs + CLOCK.againMs[0] + CLOCK.linkMs;
-  while (Date.now() - t0 < spent + CLOCK.linkMs && !(autoOf('vs-owed-a') === false && Date.now() - t0 > spent)) await sleep(50);
+  while (Date.now() - t0 < spent + CLOCK.linkMs && !(autoOf('vs-owed-a') === false && Date.now() - t0 > spent && NOTICES.some((n) => n.key.startsWith('meta-owed:vs-owed-b:')))) await sleep(50);
   const beforeStop = { a: autoOf('vs-owed-a'), aToday: autoOf('vs-owed-a-today'), b: autoOf('vs-owed-b'), bToday: autoOf('vs-owed-b-today'), at: Date.now() - t0 };
+  cured.readSessionMeta('vs-owed-b'); if (today) today.readSessionMeta('vs-owed-b-today');   // (b) the hub's own synchronous read answers
   // THE STOP: the hub's exit flushes what cannot be re-derived first (rank 0)
-  const SWx = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  SWx.dirty = realDirty;
   SWx.exitFlush({ only: 'rank0' });   // (its keeper thread is not armed here: this is the flush alone)
   // THE NEW START: a fresh store over the same records
-  const fresh = require(path.join(REPO, 'src/server/session-stdout.js')).create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: new Map(), engine: {}, getHosts: () => null });
-  const after = Object.fromEntries(['vs-owed-a', 'vs-owed-b', 'vs-owed-a-today', 'vs-owed-b-today'].map((s) => [s, fresh.readSessionMeta(s).autoResume]));
-  fs.promises.readFile = before;
+  const fresh = require(SSP).create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: new Map(), engine: {}, getHosts: () => null });
+  const after = Object.fromEntries(['vs-owed-a', 'vs-owed-b', 'vs-owed-b2', 'vs-owed-c', 'vs-owed-a-today', 'vs-owed-b-today', 'vs-owed-c-today'].map((s) => [s, fresh.readSessionMeta(s).autoResume]));
+  fs.promises.readFile = before; console.warn = realWarn;
+  for (const s of ['a', 'b', 'b2', 'c', 'a-today', 'b-today', 'b-silent', 'c-today']) ACTIVE.delete('sess-vs-owed-' + s);
   ok(!!(firsts[0] === false && firsts[1] === false && beforeStop.a === false && after['vs-owed-a'] === false),
     `the person's press whose link the held read dropped (${firsts[0]}) is written AGAIN BY ITSELF, off the loop, with no later patch: on disk before any stop (${beforeStop.a} at ${beforeStop.at} ms) and the new start reads automatic continue OFF (${after['vs-owed-a']})`, { firsts, beforeStop, after });
   ok(!!(beforeStop.b === true && after['vs-owed-b'] === false),
-    `storage that never answers an off-loop read: the press stays owed through its own tries (${beforeStop.b} on disk) and THE STOP's flush writes it — the new start reads OFF (${after['vs-owed-b']}), never a conversation continued against the person's word`, { beforeStop, after });
-  ok(!!(today && beforeStop.aToday === true && after['vs-owed-a-today'] === true && after['vs-owed-b-today'] === true),
-    `RED (today's owed-to-the-next rule): with no later patch the press lives in memory only — nothing writes it again (${beforeStop.aToday}) and the stop writes nothing: the new start reads automatic continue ON again (${after['vs-owed-a-today']} / ${after['vs-owed-b-today']}), and its reset continues the conversation — a turn nobody typed`, { beforeStop, after });
+    `storage that answers no read off the loop while the hub's own synchronous read of the record answers: the press stays owed through its own tries (${beforeStop.b} on disk) and THE STOP's flush writes it — the new start reads OFF (${after['vs-owed-b']})`, { beforeStop, after });
+  const skipSaid = WARNS.filter((w) => /vs-owed-b2: the stop's flush does not read its record/.test(w)).length;
+  ok(!!(after['vs-owed-b2'] === true && skipSaid === 1),
+    `r3749: a record whose last read off the loop never answered (and none since) is NOT read by the stop's flush — a storage that may hang the exit holds nothing there; said once in the journal (${skipSaid}), and the person was told when the tries ended (below)`, { after, skipSaid });
+  ok(!!(fl.first === false && fl.fired && fl.landed && after['vs-owed-c'] === false && flT && flT.fired && flT.landed && after['vs-owed-c-today'] === true),
+    `r3749 THE MUST: a whole writer that spreads the record WHILE the write carrying the owed change is in flight spreads the person's value — both writes land and the new start reads OFF (${after['vs-owed-c']}); RED (e4bcad50b's form, the owed keys in the bytes only): the second write puts the old value back and the new start reads ON (${after['vs-owed-c-today']}) — a turn nobody typed`, { fl, flT, after });
+  const told = NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b:')), toldSilent = NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b-silent:'));
+  const saidOnce = WARNS.filter((w) => /vs-owed-b: a change of its record \(autoResume\) could not be written in 1 tries of its own/.test(w)).length;
+  ok(!!(whileTrying === 0 && told.length === 1 && told[0].o && told[0].o.i18n && /^Automatic continue OFF for “\{name\}” is not saved on disk yet/.test(told[0].o.i18n.key) && told[0].o.i18n.params.name === NAME('vs-owed-b') && told[0].text.includes(NAME('vs-owed-b')) && saidOnce === 1 && silent && toldSilent.length === 0),
+    `r3749: THE PERSON IS TOLD — when the tries end without a landing, ONE notice naming the conversation by what the person calls it («${told[0] && told[0].text}»), none while a try was still owed (${whileTrying}), the journal's line said once (${saidOnce}); RED (the tries' end without its word): no notice (${toldSilent.length})`, { told, whileTrying, saidOnce });
 }
 
 clearInterval(KEEP);

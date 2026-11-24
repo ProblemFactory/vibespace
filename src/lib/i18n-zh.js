@@ -593,6 +593,12 @@ export default {
   "Drag windows to edges to snap | Use toolbar for layout presets | Toggle sidebar for sessions": "拖动窗口到边缘吸附 | 工具栏选择布局预设 | 侧栏管理会话",
   "Auto (system)": "自动（跟随系统）",
   "Backend": "后端",
+  "its record could not be read": "记录无法读取", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "This conversation keeps running, but its record could not be read when VibeSpace started, so it is not opened here. It opens after the next start once its record reads. Stop ends it.": "这个对话仍在运行，但 VibeSpace 启动时它的记录无法读取，所以这里不打开它。下次启动、记录能读取后才会打开。「停止」会结束它。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "“{name}” was stopped here, but its record could not be read — if it ran on another machine, its side there may still be running.": "“{name}”已在这里停止，但它的记录无法读取——如果它在另一台机器上运行，那边可能仍在运行。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "Automatic continue OFF for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue ON.": "“{name}”的「自动继续：关」还没有存到磁盘——它的存储没有响应。如果 VibeSpace 在写入前重启，这个对话会恢复为「自动继续：开」。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "Automatic continue ON for “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the conversation comes back with automatic continue OFF.": "“{name}”的「自动继续：开」还没有存到磁盘——它的存储没有响应。如果 VibeSpace 在写入前重启，这个对话会恢复为「自动继续：关」。", // r3749: the session record's words (a listed unread conversation, an owed change)
+  "A change to “{name}” is not saved on disk yet — its storage did not answer. If VibeSpace restarts before it is written, the change is lost.": "对“{name}”的更改还没有存到磁盘——它的存储没有响应。如果 VibeSpace 在写入前重启，这个更改会丢失。", // r3749: the session record's words (a listed unread conversation, an owed change)
   "host unreachable": "主机不可达",
   "The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.": "这个会话所在的机器当前不可达 — 连接会自动重试；你发送的消息会排队，机器恢复后送达。",
   "Host": "远程主机",

@@ -1053,8 +1053,9 @@ export function installSessionLifecycle(App, ctx = {}) {
           // Not rescuable (terminal window / synthetic id): removing the
           // placeholder without this leaves the same anonymous blank shell the
           // rescue exists to prevent — state the failure in the window.
-          this._windowPending(winInfo, (msg.message || t('Session not found.'))
-            + '\n\n' + t('Resume it from the sidebar.'));
+          this._windowPending(winInfo, msg.code === 'session-meta-unread'   // r3749: a listed conversation whose record could not be read — its own words, no «resume» advice
+            ? t('This conversation keeps running, but its record could not be read when VibeSpace started, so it is not opened here. It opens after the next start once its record reads. Stop ends it.')
+            : (msg.message || t('Session not found.')) + '\n\n' + t('Resume it from the sidebar.'));
         }
         return true;
       }

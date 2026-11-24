@@ -463,6 +463,9 @@ function registerWsHandler(wss, ctx) {
   // B-c134 cure (the coordinator's question): the background tree ends ONLY when the end asks — a person's Terminate and an archive
   // (the page's kill carries endTree: true; the automation archive verb passes it). An end a resume follows (a restart, an account
   // or permission switch, a pool's cold restart), a setup flow's own terminal and the automation end verb keep it, as the release did
+  const META_UNREAD_STOP = i18nKey('“{name}” was stopped here, but its record could not be read — if it ran on another machine, its side there may still be running.');   // r3749: its Stop ends the side here; with its record unread the hub cannot know a machine's side (i18n rows: zh / ja)
+  const sayUnreadStop = (s) => { const nm = s._metaUnread.sock, k = META_UNREAD_STOP; try { ctx.serverNotice?.(`meta-unread-stop:${nm}`, k.replace('{name}', nm), { level: 2, i18n: { key: k, params: { name: nm } } }); } catch { } };   // r3245 (1) / r3749: a LISTED conversation whose record could not be read — its Stop alone names its socket (its process ended) and its record (the removal remembered for its read), and tells the person what may still run elsewhere
+  const META_UNREAD_PASSES = new Set(['attach', 'kill', 'view-close', 'resize', 'size-override']);   // r3749: what a listed unread conversation takes (the attach refuses by name itself) — ws message types, not a signal's argv (listed so the pid census never reads one as an argv)
   const endSessionBody = async (data, { reply, actBy, endTree = false } = {}) => {
     // Stale-serverId robustness (2.179.0): after a server restart the
     // client can hold an OLD webui id — a kill that silently no-ops
@@ -512,7 +515,7 @@ function registerWsHandler(wss, ctx) {
       // Cancel any pending delayed-SIGINT from a recent interrupt — after
       // kill, the childPid may be reused by an unrelated process
       if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
-      if (session._metaUnread) { session.socketPath = session._metaUnread.socketPath; session.sockName = session._metaUnread.sock; }   // r3245 (1): a conversation LISTED with an unread record — its Stop alone names its socket (its process ended) and its record (the removal remembered for its read)
+      if (session._metaUnread) { session.socketPath = session._metaUnread.socketPath; session.sockName = session._metaUnread.sock; sayUnreadStop(session); }   // r3245 (1) / r3749: a listed unread conversation (sayUnreadStop)
       // Kill the dtach session process (which kills claude as its child)
       // The dtach process is the parent of our attach PTY's target
       if (session.socketPath) {
@@ -952,6 +955,7 @@ function registerWsHandler(wss, ctx) {
       let data;
       try { data = JSON.parse(raw); } catch { return; }
       try {
+        if (refusedUnread(data)) return;   // r3749: a listed conversation whose record could not be read takes only Stop (and its attach's own refusal)
         await handleMessage(data);
       } catch (err) {
         // A malformed/unexpected client message must never crash the server
@@ -961,6 +965,13 @@ function registerWsHandler(wss, ctx) {
       }
     });
 
+    // r3749: a LISTED conversation whose record could not be read — the person's acts other than Stop are refused BY NAME (each would change memory only)
+    function refusedUnread(data) {
+      const s = data && typeof data.sessionId === 'string' && activeSessions ? activeSessions.get(data.sessionId) : null;
+      if (!s || !s._metaUnread || META_UNREAD_PASSES.has(data.type)) return false;
+      try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, reqId: data.reqId, code: 'session-meta-unread', message: `${s._metaUnread.sock}: its record could not be read — ${String(data.type).slice(0, 40)} is refused (it would change memory only); Stop ends it` })); } catch { }
+      return true;
+    }
     async function handleMessage(data) {
       // B-cd4b: a restored survivor whose batched attach still waits (src/server/boot-restore.js) is attached at its first use —
       // every message below may read or write its pty (input, an interrupt, a resize, an attach)

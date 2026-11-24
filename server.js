@@ -391,7 +391,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta, patch
     noteCompacted, // a compaction's end resets the cache fact — the claude parse's call (lane cache-warmth-compact)
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure, sessionModelFor, // sessionModelFor: the acp-events wall road's model (lane agy-wall-signal r2)
     modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, noteTurnRunning, noteTurnError, recordCodexQuotaSignal, catchUpResetCreditFromBuffer, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteStreamRecord, recordIsLate, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },   // noteTurnEnd = the hooked wrapper above (the park); catchUpResetCreditFromBuffer = lane reset-path's buffer-file catch-up (codex-events — wired at the 2.369.202 integration)
-  checkClaudeGoalStatus,
+  checkClaudeGoalStatus, serverNotice: (...a) => serverNotice(...a), // r3749: the owed change's one notice to the person
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
   noteModelSeen: (...a) => noteModelSeen(...a),
