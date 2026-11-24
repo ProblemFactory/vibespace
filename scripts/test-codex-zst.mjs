@@ -1888,7 +1888,7 @@ console.log('— ⑦ B-f64b: the boot\'s process walk — no ps per exited pid, 
     twcCut, twcCut + "  if (op === 'codexOpenThreads') globalThis.__vsOpenAsks = (globalThis.__vsOpenAsks || 0) + 1;   // the leg counts the walks asked\n", "src/adapters/codex.js"), 'pool-down');
   const reqCut = "} = require('./adapters/codex');";
   if (!csSrc.includes(reqCut)) throw new Error('the anchor of the leg «B-f64b: the store over a pool-down adapter» is not in the source');
-  const downCs = (src, tag) => MCi.load('src/codex-session-store.js', src.replace(reqCut, `} = require(${JSON.stringify(adDown)});`), tag);
+  const downCs = (src, tag) => MCi.load('src/codex-session-store.js', editAnchor(src, reqCut, `} = require(${JSON.stringify(adDown)});`, "src/codex-session-store.js", 'first'), tag);
   const dn = downCs(csSrc, 'pool-down-store');
   const d1 = await procWalksAsync(async () => ({ sync: dn.listCodexThreads({ activeSessions: new Map() }), ids: await dn.listOpenCodexThreadIdsAsync(), list: await dn.listCodexThreadsAsync({ activeSessions: new Map() }) }));
   ok(d1.n === 0 && d1.out.ids === null && d1.out.list.length === 0 && said(d1.out.sync) === 'stopped/unknown',

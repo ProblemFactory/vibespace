@@ -2329,7 +2329,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
       ["    if (!this._userDirty && !this._applying && !this._deferT && this._owedDesks().size) { this._deferT = setTimeout(() => { this._deferT = null; this.scheduleAutoSave(); }, 200); return; } // an owed recipe (r4 N1) waits for the gate too — asked again every 200 ms until it opens; no dirty bit, no input time\n", ''],
     ];
     if (ok(cut.every(([a]) => LY.includes(a)), 'mutant pr4-owed-rearm: the patched lines exist in layout.js')) {
-      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', cut.reduce((s, [a, b]) => s.replace(a, b), LY), 'pr4-owed-rearm', { esm: true })).href)).LayoutManager;
+      const LMx = (await import(pathToFileURL(M.write('src/lib/layout.js', cut.reduce((s, [a, b]) => editAnchor(s, a, b, "src/lib/layout.js"), LY), 'pr4-owed-rearm', { esm: true })).href)).LayoutManager;
       const f = await pr4Legs({ LM: LMx, install: installPR, quiet: true, legs: ['owe'] });
       ok(f.length === 3 && f.every((n) => n.startsWith('§PR4 (owe)')), `mutant pr4-owed-rearm (5033f0a06's owed recipe: cleared only by a save of its own desktop, re-armed after every remote record with a fabricated input time): (owe) RED ×3 — the recipes not carried, the idle phone echoing, the new session's page echoing (${f.length})`);
     }

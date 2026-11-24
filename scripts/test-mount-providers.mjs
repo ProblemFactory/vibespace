@@ -80,7 +80,7 @@ const idxCopy = MC.write('src/mount-providers/index.js', idxAcme, 'acme');
 const mountsSrc = read('src/mounts.js');
 const NEEDLE = "require('./mount-providers/index.js')";
 ok(mountsSrc.split(NEEDLE).length === 2, '② src/mounts.js reaches the family through its one list require');
-const withList = (src, tag) => MC.load('src/mounts.js', src.split(NEEDLE).join(`require(${JSON.stringify(idxCopy)})`), tag).MountManager;
+const withList = (src, tag) => MC.load('src/mounts.js', editAnchor(src, NEEDLE, `require(${JSON.stringify(idxCopy)})`, "src/mounts.js", 'join'), tag).MountManager;
 async function drive(MM, tag) {
   const dd = path.join(ROOT, 'acme-' + tag); fs.mkdirSync(dd, { recursive: true });
   const mm = new MM({ dataDir: dd });

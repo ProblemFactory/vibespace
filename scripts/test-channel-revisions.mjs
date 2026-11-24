@@ -666,9 +666,9 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   const MARK_READ = '      if (had.size) {\n';
   const ASKED = '      const ks = owedFor ? keep.filter((pk) => !!asked && asked.pks.has(pk)) : keep;\n';
   ok(src.split(KEEP).length === 2 && src.split(MARK_READ).length === 2 && src.split(ASKED).length === 2, 'control setup: the per-member keep, the wake site\'s mark and the re-run\'s asked set are present once each');
-  const secondForm = (s) => s.replace(KEEP, OLD_GROUP_KEEP);
-  const noMark = (s) => s.replace(MARK_READ, '      if (false) {\n');
-  const keepsAnew = (s) => s.replace(ASKED, '      const ks = keep;\n');
+  const secondForm = (s) => editAnchor(s, KEEP, OLD_GROUP_KEEP, "the text handed to secondForm()");
+  const noMark = (s) => editAnchor(s, MARK_READ, '      if (false) {\n', "the text handed to noMark()");
+  const keepsAnew = (s) => editAnchor(s, ASKED, '      const ks = keep;\n', "the text handed to keepsAnew()");
 
   // L1 + L2 — a member being read again that still CARRIES its group: the group's round-robin wakes it now; nothing kept
   async function carriesLeg(ENGM, tag) {

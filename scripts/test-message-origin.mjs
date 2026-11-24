@@ -38,6 +38,15 @@ const ok = (name, cond, detail) => {
   let d = ''; try { d = detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700); } catch { d = ' — ' + String(detail); }
   console.log('  ✗ ' + name + d);
 };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const AN_PATH = path.join(REPO, 'src/assistant-note.js');
 const AN = require(AN_PATH);
@@ -216,7 +225,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
     "    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Turn stopped'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the marker says THAT a stop happened, never who pressed it (a stop the product sends writes the same marker); the result row says «Interrupted»\n",
     "      if (msg.originKind === 'wakeup') return this._renderNotificationMsg(rawText, { label: t('Scheduled wake-up'), detail: rawText.trim() });\n"];
   ok('…the control\'s anchors are in chat-renderers.js once each', CUT.every((c) => CRS.split(c).length === 2));
-  const CR1 = await import(pathToFileURL(MUTC.write('src/lib/chat-renderers.js', CUT.reduce((x, c) => x.replace(c, ''), CRS).replace("from 'marked';", `from ${JSON.stringify(import.meta.resolve('marked'))};`), 'no3d90', { esm: true })).href);
+  const CR1 = await import(pathToFileURL(MUTC.write('src/lib/chat-renderers.js', CUT.reduce((x, c) => editAnchor(x, c, '', "src/lib/chat-renderers.js"), CRS).replace("from 'marked';", `from ${JSON.stringify(import.meta.resolve('marked'))};`), 'no3d90', { esm: true })).href);
   const doc0 = globalThis.document;
   globalThis.document = { createElement: () => ({ className: '', innerHTML: '', title: '', classList: { add() { }, toggle() { } }, querySelector: () => null, appendChild() { }, setAttribute() { } }), addEventListener() { }, removeEventListener() { } };
   const CASES = [['mo-compact-1', 'Context compacted'], ['mo-interrupt-1', 'Turn stopped'], ['mo-interrupt-tool', 'Turn stopped'], ['mo-notification-wakeup', 'Scheduled wake-up']];
@@ -451,7 +460,7 @@ console.log('§5 VIBESPACE\'S OWN RECORD (B-9a2e + B-3d90 item 2): what VibeSpac
   // THE CONTROLS: each piece removed ⇒ its leg goes RED
   {
     const SPS = read('src/sent-provenance.js'), MMS = read('src/message-manager.js'), CMS = read('src/codex-message-manager.js');
-    const cut = (src, from, to, rel, tag) => { if (src.split(from).length !== 2) { ok(`the control's anchor is in ${rel} once: ${from.slice(0, 60)}`, false); return null; } return MUTC.load(rel, src.replace(from, to), tag); };
+    const cut = (src, from, to, rel, tag) => { if (src.split(from).length !== 2) { ok(`the control's anchor is in ${rel} once: ${from.slice(0, 60)}`, false); return null; } return MUTC.load(rel, editAnchor(src, from, to, "the text handed to cut()"), tag); };
     const noWin = cut(SPS, '!(t >= r.at - SKEW_MS && t <= r.at + WINDOW_MS)', 'false', 'src/sent-provenance.js', 'nowindow');
     ok('CONTROL (no window): a send long before the record still names it — bound 1\'s leg goes RED', !!noWin && noWin.matchKind([noWin.rowOf(CONT, 'auto-resume', T0)], { at: T0 + noWin.WINDOW_MS + 60000, text: CONT }) === 'auto-resume');
     const older = cut(SPS, 'r.at >= before.at', 'r.at < before.at', 'src/sent-provenance.js', 'olderwins');

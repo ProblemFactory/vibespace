@@ -27,6 +27,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 600) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = { log() { }, warn() { }, error() { } };
 const ROOT = scratch('cli-kept');
@@ -38,7 +47,7 @@ const F = require('../src/browser-facts.js');
 const CM = await import('../src/lib/browser-cli-model.js');
 const MUT = mutantCopies('cli-kept', REPO);
 const kSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-const cut = (text, anchor, by, what) => { ok(text.includes(anchor), `control setup: ${what} is where the control cuts`); return text.replace(anchor, by); };
+const cut = (text, anchor, by, what) => { ok(text.includes(anchor), `control setup: ${what} is where the control cuts`); return editAnchor(text, anchor, by, "the text handed to cut()"); };
 const idOf = (p) => { const st = fs.statSync(p); return `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}`; };
 // every sync fs call naming a CLI file or a CLI folder while `fn` runs
 const SYNC = Object.keys(fs).filter((k) => k.endsWith('Sync') && typeof fs[k] === 'function');

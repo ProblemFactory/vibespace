@@ -5004,7 +5004,7 @@ async function pausedLegs(ENGmod, tag) {
   ok(CUTS.every(([from]) => src.split(from).length === 2), 'CONTROL setup: the gate is where the control cuts it');
   const { mutantCopies: mcOf } = await import('./mutant-copy.mjs');
   const MC = mcOf('channel-outbox-paused', REPO);
-  const cut = MC.load('src/server/channels-engine.js', CUTS.reduce((t, [a, b]) => t.replace(a, b), src), 'paused-gate-cut');
+  const cut = MC.load('src/server/channels-engine.js', CUTS.reduce((t, [a, b]) => editAnchor(t, a, b, "src/server/channels-engine.js"), src), 'paused-gate-cut');
   const c = await pausedLegs(cut, 'cut');
   { const TOT = "    if (!keys && scope === 'totals') return { ...totalsNow(t), scope: 'totals', at: t, paused: indexHeld() ? pausedFacts() : null };";
     const { anchored: anchoredT } = await import('./scratch.mjs');

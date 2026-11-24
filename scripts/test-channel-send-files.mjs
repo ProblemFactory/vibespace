@@ -870,7 +870,7 @@ ok(rej.length === 0, `the words reach the agent (real engine over the Slack adap
 {
   const keepR = setInterval(() => {}, 1000);
   const SS = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8'), LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
-  const copy = (src, file, from, to, tag) => (src.includes(from) ? require(MC.write(`src/channels/${file}`, src.replace(from, to), tag)) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
+  const copy = (src, file, from, to, tag) => (src.includes(from) ? require(MC.write(`src/channels/${file}`, editAnchor(src, from, to, "the text handed to copy()"), tag)) : (() => { throw new Error(`ANCHOR GONE ${JSON.stringify(String(from).slice(0, 80))} — the control's anchor is not in the source — move it with the product line (B-0d3e)`); })());
   const redBy = async (M, judge, pins) => { if (!M) return null; const r = await judge(M); return pins.filter((p) => r[p]); };
   const say = (red, pins) => (red === null ? 'the patch site is gone' : red.length === pins.length ? `red by ${red.join(' ')}` : `red by ${red.join(' ') || 'nothing'} — GREEN on ${pins.filter((p) => !red.includes(p)).join(' ')}`);
   const NO_RETRY = '        if (!next.go) throw stoppedUpload(e, n, next.stop);';

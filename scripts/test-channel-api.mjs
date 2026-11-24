@@ -62,7 +62,7 @@ const srcJs = () => SRC_JS || (SRC_JS = fs.readdirSync(path.join(REPO, 'src'), {
 const SRC = textOf('src/channel-api.js');
 const OSRC = textOf('src/server/channel-api.js');
 const MUT = mutantCopies('channel-api', REPO);
-const mutate = (src, a, b) => { if (!src.includes(a)) throw new Error(`mutant anchor missing: ${a.slice(0, 80)}`); return src.replace(a, b); };
+const mutate = (src, a, b) => { if (!src.includes(a)) throw new Error(`mutant anchor missing: ${a.slice(0, 80)}`); return editAnchor(src, a, b, "the text handed to mutate()"); };
 
 // ── ① THE PURE FENCE — rows; each `judge(F)` is run on the original (must pass) and on its mutant (must fail) ──
 console.log('① the fence (PURE), every rule a row with a control');
@@ -451,7 +451,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
   const R1 = [
     ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ['state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));', 'state.shapes = state.shapes.filter((s) => true || shapeStays(s, cred, heldNow, mark, KEEP));']],
     ['pending', `one conversation keeps at most ${F.PENDING_MAX} proposals waiting on a credential; the next is api_budget (M2)`, ['if (waiting >= F.PENDING_MAX)', 'if (false)']],
-    ['digest', 'Approve carries the card\'s digest: a record rewritten on disk (digest recomputed) + a restart runs NOTHING (M3)', ['if (!digest || digest !== (p.frozen && p.frozen.digest))', 'if (false)']],
+    ['digest', 'Approve carries the card\'s digest: a record rewritten on disk (digest recomputed) + a restart runs NOTHING (M3)', ["if (!digest || digest !== (p.frozen && p.frozen.digest)) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you approved", "if (false) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you approved"]],   // the Approve road's check (a second road holds the same test)
     ['refresh', 'a Google mount\'s refresh is single-flight (5 concurrent calls ⇒ 1) and paced after a refusal (4 calls ⇒ 1) (M4)', ['if (fl && fl.then) return fl;\n    if (fl && fl.failedUntil > now())', 'if (false) return fl;\n    if (false)']],
     ['mountWords', 'mounts.json HELD: the agent\'s creds say the hold — never «no API credentials are granted» (the reader table, r3230)', ["    const mh = mountsHeldOf();   // B-f276 (r3230's table): mounts.json held — a mount's credentials are UNKNOWN, never «none granted»", '    const mh = null;']],
     ['mountDocs', 'mounts.json HELD: a mount credential\'s docs answer store-blocked by name — never api_not_granted (the reader table)', ["    { const mh = String(cred || '').startsWith('mount:') ? mountsHeldOf() : null; if (mh) return { ok: false, code: 'store-blocked', error: mh }; }   // B-f276 (r3230's table)", '']],

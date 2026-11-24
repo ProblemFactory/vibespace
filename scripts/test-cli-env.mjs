@@ -439,7 +439,7 @@ const M = mutantCopies('cli-env', REPO); // ONE copy set for ④ and ⑦ — its
     ['machineStatus({ cmd: cmdOf(h.id) })', 'machineStatus({ cmd: cliCmds?.current?.(h.id) ?? null })'],
   ];
   ok('control pre-fix: the patched lines exist in the route', PRE.every(([a]) => rtSrc.includes(a)));
-  const preRoute = M.load('src/server/backend-status-route.js', PRE.reduce((s, [a, b]) => s.replace(a, b), rtSrc), 'pre-fix');
+  const preRoute = M.load('src/server/backend-status-route.js', PRE.reduce((s, [a, b]) => editAnchor(s, a, b, "src/server/backend-status-route.js"), rtSrc), 'pre-fix');
   const redP = (await routeLegs(preRoute, CLI)).filter((r) => !r.pass).map((r) => r.name);
   ok(`control pre-fix (the boot answer, no check — the owner's card): the "appears" leg is RED (${redP.length} red)`, redP.some((n) => /says INSTALLED/.test(n)), redP.join(' | ').slice(0, 300));
   const staleRoute = M.load('src/server/backend-status-route.js', editAnchor(rtSrc, 'machineStatus({ cmd: cmdOf(h.id) })', 'machineStatus({ cmd: cliCmds?.current?.(h.id) ?? null })', "src/server/backend-status-route.js"), 'current-not-checked');

@@ -1033,7 +1033,7 @@ await section('⑨', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r3', REPO);
   const src = read('src/channel-touch.js');
-  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { okAnchor(text.split(from).length - 1, tag, file, from); return MUT.load(file, text.replace(from, to), tag); };
+  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { okAnchor(text.split(from).length - 1, tag, file, from); return MUT.load(file, editAnchor(text, from, to, "the text handed to copy()"), tag); };
   // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
   // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
   const SW = read('src/shell-words.js');
@@ -1258,7 +1258,7 @@ await section('⑩', async () => {
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r4', REPO);
   const src = read('src/channel-touch.js'), MMS = read('src/message-manager.js');
-  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { okAnchor(text.split(from).length - 1, tag, file, from); return MUT.load(file, text.replace(from, to), tag); };
+  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { okAnchor(text.split(from).length - 1, tag, file, from); return MUT.load(file, editAnchor(text, from, to, "the text handed to copy()"), tag); };
   // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
   // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
   const SW = read('src/shell-words.js');

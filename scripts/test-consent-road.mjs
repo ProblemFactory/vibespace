@@ -292,7 +292,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
   const DICT_IMPORTS = ["import zh from './i18n-zh.js';", "import ja from './i18n-ja.js';"];
   ok(DICT_IMPORTS.every((x) => i18nSrc.split(x).length === 2) && /export function resolveLang\(\)/.test(i18nSrc), 'src/lib/i18n.js still imports its two dictionaries and exports resolveLang (the parity copy\'s two stubs land)');
   try {
-    const I18N = await import(new URL(`file://${MUT.write('src/lib/i18n.js', DICT_IMPORTS.reduce((t, x) => t.replace(x, `const ${x.split(' ')[1]} = {};`), i18nSrc), 'parity', { esm: true })}`).href);
+    const I18N = await import(new URL(`file://${MUT.write('src/lib/i18n.js', DICT_IMPORTS.reduce((t, x) => editAnchor(t, x, `const ${x.split(' ')[1]} = {};`, "src/lib/i18n.js"), i18nSrc), 'parity', { esm: true })}`).href);
     parity = PICK.filter(([h]) => typeof h === 'string').map(([h, nav]) => { navStub.language = nav || 'en'; return { h, nav, app: I18N.resolveLang(), page: CR.landingLang(h) }; });
   } finally {
     for (const [k, d] of [['navigator', had.nav], ['localStorage', had.ls]]) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }

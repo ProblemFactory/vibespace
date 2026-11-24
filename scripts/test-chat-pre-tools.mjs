@@ -30,6 +30,15 @@ const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, m, detail) => { if (typeof m !== 'string') throw new Error(`ok: the condition goes FIRST, the name second (got a ${typeof m} for the name)`); if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 400) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 // ── A SMALL FAKE DOM (test-card-grammar's): elements, text, innerHTML parsed, a small selector engine ──
 const cls = (n) => String(n.className || '').split(/\s+/);
@@ -141,7 +150,7 @@ const built = await esbuild.build({
 const TEXT = built.outputFiles[0].text;
 const load = (tag, text) => { const f = path.join(SCR, `r-${tag}.cjs`); fs.writeFileSync(f, text); return require(f); };
 /** an anchored edit of the bundled text (esbuild renames locals and double-quotes strings — the anchors are regexes) */
-const mutant = (text, re, to) => { if (!re.test(text)) throw new Error('control anchor gone: ' + re); return text.replace(re, to); };
+const mutant = (text, re, to) => { if (!re.test(text)) throw new Error('control anchor gone: ' + re); return editAnchor(text, re, to, "the text handed to mutant()"); };
 const REAL = load('real', TEXT);
 // (a) THE BASE'S RULE: every block a Copy + Wrap toolbar (a file's picker too), laid AFTER its block (f5e087bb5's overlay)
 const controls = () => ({ BASE_RULE: load('base', mutant(mutant(TEXT, /const \{ kind, tools, at \} = preToolsOf\((\w+)\);/, 'const { kind, tools, at } = { kind: "code", tools: ["copy", "wrap", ...($1.classList.contains("chat-code-block") ? ["lang"] : [])], at: "row" };'),
