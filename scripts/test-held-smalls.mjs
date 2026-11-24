@@ -92,8 +92,8 @@ console.log('① the voice suggestions\' ledger');
   }
   {
     const SRC = read(ENGINE);
-    const anchor = "    const st = ledgerHold.start(a);\n    if (st === 'held') return null;";
-    const Rel = M.load(ENGINE, anchored(SRC, anchor, "    const st = a.state === 'unreadable' ? 'missing' : ledgerHold.start(a);", 'voice-release'), 'voice-release');
+    const anchor = "    const st = ledgerHold.start(a);\n";
+    const Rel = M.load(ENGINE, anchored(SRC, anchor, "    const st = a.state === 'unreadable' ? 'missing' : ledgerHold.start(a);\n", 'voice-release'), 'voice-release');
     const w = await world();
     REFUSED.add(w.file);
     const out = await rig(Rel, w.file, fresh()).seen(seenArgs);
@@ -220,6 +220,41 @@ console.log('④ the model catalog\'s ledger');
     CAT._reset();
     ok(during.rows.join() === NEW && during.bytes && during.held === 1, 'HELD (EIO): this run\'s read is kept in memory, the save writes nothing over the ledger, the family\'s list names it', during);
     ok(lifted === true && !!after.binaries[OLD] && !!after.binaries[NEW] && after.current === NEW, 'LIFTED: the row of the build no longer installed is back, this run\'s read goes over the file\'s, written once', { lifted, rows: Object.keys(after.binaries || {}), current: after.current });
+  }
+  // r3770 (line 836's required follow): AT THE LIFT THE PRICE LAYER TAKES THE OLD BUILDS' ROWS BACK — this run read a build during the
+  // hold (its price layer = that build only); after the lift the price layer handed to usage-history (its own setCatalogPricing, the
+  // object the catalog calls) holds the old build's row too. RED: the follow's guard of before (the readers handed the ledger only
+  // when this run had read no build)
+  const UH = require(path.join(REPO, 'src/usage-history.js'));
+  const priced = (id, model, built) => ({ state: 'read', cli: '2.1.' + built.slice(8, 10), builtAt: built, models: [{ id: model, family: 'opus', label: 'Leg ' + model.slice(7), firstParty: null, window: null, oneM: null, maxOutput: null, tier: null, price: { input: 1, output: 5, cacheWrite5m: 1.25, cacheWrite1h: 2, cacheRead: 0.1 } }], aliases: {}, latestPerFamily: {}, refused: [] });
+  const layerLeg = async (Mod) => {
+    const dir = dataDir('catalog-price'), file = path.join(dir, 'cli-model-catalog.json');
+    fs.writeFileSync(file, JSON.stringify({ schema: 1, current: OLD, binaries: { [OLD]: priced(OLD, 'claude-legacy-only-9', '2026-09-01T00:00:00Z') }, said: [] }));
+    const real = UH.setCatalogPricing; let layer = null;
+    UH.setCatalogPricing = function (L) { layer = L; return real.apply(this, arguments); };
+    try {
+      REFUSED.add(file);
+      Mod._reset();
+      const l = Mod._load(dir);
+      l.binaries[NEW] = priced(NEW, 'claude-current-1', '2026-11-20T00:00:00Z'); l.current = NEW;
+      Mod.apply({ save: false });   // this run's read of the binary in use, handed to the readers (as noteBinary does)
+      const ids = () => Object.values((layer && layer.rows) || {}).map((r) => r.id).sort().join();
+      const during = ids();
+      await liftOf(file);
+      const after = ids();
+      Mod._reset();
+      return { during, after };
+    } finally { UH.setCatalogPricing = real; REFUSED.delete(file); try { real(null); } catch { } }
+  };
+  {
+    const CAT = require(path.join(REPO, CAT_PATH));
+    const r = await layerLeg(CAT);
+    ok(r.during === 'claude-current-1' && r.after === 'claude-current-1,claude-legacy-only-9', 'r3770 LIFTED: the price layer handed to usage-history takes the old build\'s row back (a model only that build\'s catalog prices is priced by it again, never by the family\'s row)', r);
+    const SRC = read(CAT_PATH);
+    const anchor = "  if (!was.current) st.key = out.current;   // nothing read this run: the file's view is in force (law A)\n  try { apply({ save: false }); } catch { }   // r3770: ALWAYS the merged ledger to the readers — the price layer takes the old builds' rows back\n";
+    const Before = M.load(CAT_PATH, anchored(SRC, anchor, "  if (!was.current) { st.key = out.current; try { apply({ save: false }); } catch { } }\n", 'catalog-guard-before'), 'catalog-guard-before');
+    const rb = await layerLeg(Before);
+    ok(rb.after === 'claude-current-1', 'r3770 RED the guard of before (the readers handed the ledger only when no build was read): after the lift the price layer still lacks the old build\'s row', rb);
   }
   {
     const SRC = read(CAT_PATH);

@@ -67,7 +67,10 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       words: () => `the voice suggestions' ledger (${LEDGER_NAME}) could not be read — no word is proposed until it reads; it is read again by itself`,
       onLift: (v) => { ledger = VM.ledgerOf(v); const w = waiting.splice(0); if (w.length) { let L = ledger; for (const f of w) L = f(L); writeLedger(L); } } });
     const st = ledgerHold.start(a);
-    if (st === 'held') return null;
+    if (st === 'held') {   // r3770: the waiting changes are memory only — said once, at the hold
+      log.warn?.(`[voice] ${LEDGER_NAME} is held: a person's adds and dismissals wait in memory until it reads — a restart before then loses them (a word dismissed meanwhile may be proposed again)`);
+      return null;
+    }
     ledgerHold.stop(); ledgerHold = false;   // read: no hold to keep (false: never read again in this run)
     return (ledger = VM.ledgerOf(st === 'data' ? a.value : null));
   };

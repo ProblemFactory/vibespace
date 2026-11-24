@@ -104,8 +104,9 @@ const isEntry = (e) => {
 // r3333 unit 3 (lane lg-group-parents, the store-read family): THE LEDGER IS HELD when it cannot be read — the release read any failure
 // as «no ledger» and the next save wrote over it: the rows of builds no longer installed were lost. HELD: this run's reads are kept in
 // memory (the binary in use is read and in force as before), nothing is written over the file, it is read again off the loop; at its
-// read the file's rows come back and this run's reads go over them, written once. Torn bytes (or a file that is no ledger of this
-// schema): kept aside ONCE, then it starts empty, as before.
+// read the file's rows come back and this run's reads go over them, written once, and the readers (the price layer, the view) are
+// handed the merged ledger (r3770). Torn bytes (or a file that is no ledger of this schema — one a NEWER build wrote too): kept aside
+// ONCE, then it starts empty and a file of this build's shape is written, as at the release (now with a copy).
 const ledgerValid = (l) => !!l && typeof l === 'object' && !Array.isArray(l) && l.schema === 1 && !!l.binaries && typeof l.binaries === 'object' && !Array.isArray(l.binaries);
 const LEDGER_WORDS = `the model catalog's ledger (${LEDGER}) could not be read — what this run reads is kept in memory and nothing is written over it; it is read again by itself`;
 /** law E: what the load ACCEPTS is exactly what the save can write — a non-entry is dropped here, never carried */
@@ -132,7 +133,8 @@ function liftLedger(dataDir, v) {
   out.current = was.current || out.current;
   out.said = [...new Set([...out.said, ...was.said])];
   st.ledger = out;
-  if (!was.current) { st.key = out.current; try { apply({ save: false }); } catch { } }   // nothing read this run: the file's view is in force (law A)
+  if (!was.current) st.key = out.current;   // nothing read this run: the file's view is in force (law A)
+  try { apply({ save: false }); } catch { }   // r3770: ALWAYS the merged ledger to the readers — the price layer takes the old builds' rows back
   saveLedger();
 }
 function ledgerOf(l) {
@@ -308,7 +310,7 @@ function noteBinary({ cmd, version = null, dataDir = null, which = null, event =
     } catch { return null; } finally { clearTimeout(tm); }
     if (!s.isFile()) return null;
     const key = `${version || '?'}|${s.dev}:${s.ino}:${s.size}:${Math.round(s.mtimeMs)}`;
-    const l = loadLedger(dataDir);
+    let l = loadLedger(dataDir);
     // the binary in use, already read BY THIS READER: nothing to do. An entry an older reader wrote is read once more — also right
     // after a boot (law A loads the ledger and sets the key; before lane level-signal-2b this early return skipped that re-read, so a
     // reader's new fact — the plan values at 2, the level signal at 3 — never reached the binary in use until the CLI updated)
@@ -317,6 +319,7 @@ function noteBinary({ cmd, version = null, dataDir = null, which = null, event =
     const known = !!(e && e.reader === CMC.READER_VERSION && !e.retry); // an I/O failure is tried again (law E); a verdict stays
     if (!known) {
       e = await readBinary(real, { version, expect: { dev: s.dev, ino: s.ino }, timeoutMs, open });
+      if (st.ledger && st.ledger !== l && st.dataDir === dataDir) l = st.ledger;   // r3770: a held ledger's lift replaced it during the read — the read lands in the ledger in force
       l.binaries[key] = e;
     }
     l.current = key; st.key = key;
