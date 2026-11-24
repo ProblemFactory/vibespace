@@ -106,6 +106,14 @@ class Auth {
     this._idHold.start(a);
   }
   _idHeld() { return !!(this._idHold && this._idHold.held()); }
+  /** the boot's own password road (the env password, a generated one, the declaration), deferred while a hold stood — replayed ONCE,
+   *  whichever hold parked it; a generated password is said, as at a start */
+  _replayEnsure() {
+    const opts = this._idEnsure || this._netEnsure; this._idEnsure = null; this._netEnsure = null;
+    if (!opts) return;
+    const r = this.ensurePassword(opts);
+    if (r && r.generated) { try { console.log(`  Generated workspace password: ${r.generated} (persisted in data/auth.json — set VIBESPACE_PASSWORD to choose your own)`); } catch { } }
+  }
   /** the id file READ AGAIN (data, or gone): the start judged again with the id now known — a start held by the id's silence opens or
    *  holds by the folder's own rule; a start that opened does what it skipped (the id written if it is gone, the witness written). Torn
    *  bytes lift as «no id» (their copy kept aside): a witness of any id then still holds the start — nothing is minted while it stands */
@@ -119,10 +127,17 @@ class Auth {
       const v = SW.verdictOf({ auth: was.auth, dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir });
       this._held = null;
       if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule, now that the id is known
+      // 主开发 r3629 (round w43tjwjp5, must 1): THE SAME TAIL the start runs after its verdict — a start held by the id BEFORE that tail never
+      // asked a network home: the home's look comes first now (the boot's road handed on to it), unless the person's start-new file decides
+      if (f.netHome && !(this._net && this._net.done)) {
+        if (!f.startNew) { if (this._idEnsure && !this._netEnsure) { this._netEnsure = this._idEnsure; this._idEnsure = null; } this._checkHome(was.auth, was.table); return; }
+        this._startNewUsed = true;
+      }
       this._state = was.auth === 'off' ? was.table : null;
+      if (this._state) this._tokensTail();   // the off table's own tail at the start (its migration)
       try { console.warn(`[auth] the data folder's own id file reads again (${f.instance ? f.instance.id : 'none'}): no sign-in witness names another folder — the instance opens as it would have`); } catch { }
       this._afterLoad();
-      if (this._idEnsure) { const opts = this._idEnsure; this._idEnsure = null; this.ensurePassword(opts); }   // the boot's own password road, replayed
+      this._replayEnsure();   // r3629 (musts 2, 3): the boot's own password road, from the id's hold or the network home's, replayed once
       return;
     }
     if (!this._held) this._afterLoad();   // the start opened: what it skipped while the id was unknown
@@ -138,10 +153,16 @@ class Auth {
     if (this._startNewUsed) {   // r2869 (2) + r2926 (1): THE PERSON's START-NEW ACT — this start does not wait for the home folder and READS
       // none of it; as the person's act (like deleting the witness) every witness copy is removed — the home folder's off the loop — and
       // the file is removed only once that copy is gone, so the decision lasts past the next start
+      if (this._startNewDone) {   // r3629: the id's lift — the act was done ONCE at the start: only what it skipped while the id was unread
+        if (!this._idHeld()) { try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id could not be written (${(e && e.message) || e})`); } }
+        if (f.instance && this._state && this._state.passwordHash) { this._syncWitness(); this._netWitness(); }   // a sign-in set meanwhile (the boot's, the person's): its copies, as at a set — none read, none removed again
+        return;
+      }
       for (const w of (f.found || [])) if (!w.net) { try { SW.removeWitness({ file: w.file }); } catch { } }
       f.found = (f.found || []).filter((w) => w.net); f.witness = null;
       this._sayOnce('start-new', `[auth] ${path.join(this._dataDir, SW.START_NEW)} was there: this start did not wait for the home folder ${f.netHome} and read none of it; every sign-in witness copy is removed (the home folder's off the loop), then the file`);
       if (!this._idHeld()) { try { f.instance = SW.ensureInstance(this._dataDir, f.instance); } catch (e) { this._sayOnce('instance', `[auth] the data folder's id could not be written (${(e && e.message) || e})`); } }   // r3336: never minted over an unread id file
+      this._startNewDone = true;
       this._netStartNew();
       return;
     }
@@ -308,14 +329,13 @@ class Auth {
     if (a.found) f.found = [...(f.found || []), a.found];   // MARKED net (SW.netAnswerOf): the local writer never takes it
     const v = SW.verdictOf({ auth: n.was, dataLink: f.dataLink, instance: f.instance, idUnread: f.idUnread, found: f.found, dataDir: this._dataDir });
     this._held = null;
+    if (v.hold && v.hold.idUnread && this._netEnsure) { this._idEnsure = this._netEnsure; this._netEnsure = null; }   // r3629 (musts 2, 3): held by the id now — its lift replays the boot's road
     if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule (r2869 (3))
     this._state = n.was === 'off' ? n.table : null;
+    if (this._state) this._tokensTail();   // r3629's walk: the off table's own tail at the start (its migration), as the id's lift does
     if (past) { try { console.warn(`[auth] the home folder ${f.netHome} answered: no sign-in witness of another folder there — the instance opens as it would have`); } catch { } }
     this._afterLoad();
-    if (this._netEnsure) {   // the boot's own password road, held until the answer (server.js asked it while this was checking)
-      const r = this.ensurePassword(this._netEnsure); this._netEnsure = null;
-      if (r && r.generated) { try { console.log(`  Generated workspace password: ${r.generated} (persisted in data/auth.json — set VIBESPACE_PASSWORD to choose your own)`); } catch { } }
-    }
+    this._replayEnsure();   // the boot's own password road, held until the answer (server.js asked it while this was checking) — the one replay
   }
   /** H1: THE NETWORK HOME's COPY, kept like the others but ONLY through the pool (never on the loop): written at a start that is not
    *  held and at every set / import, removed when the sign-in is turned off; a START reads it first and never writes over or removes
@@ -374,7 +394,11 @@ class Auth {
     // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
     // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
     // one: 30 days from now, still inside its 180-day cap); the old file's bytes are overwritten (replaceShredding)
-    const out = migrateTokens(this._state && this._state.tokens, Date.now());   // the table's shared law (src/signin-table.js)
+    this._tokensTail();
+  }
+  /** the start's tail over a loaded table: a plaintext token map becomes its digests (the table's shared law, src/signin-table.js) */
+  _tokensTail() {
+    const out = migrateTokens(this._state && this._state.tokens, Date.now());
     if (out) {
       this._state.tokens = out;
       try { this._save(); } catch (e) { console.warn('[auth] the login tokens could not be re-written as digests:', e.message); }

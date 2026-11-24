@@ -180,7 +180,7 @@ console.log('⑥ r3340 (1): a NETWORK home — «no witness anywhere» only when
     return { held: a.held ? a.held.kind : null, minted: bytesOf(it.id) !== before };
   };
   const still = await run('net-stall', 'stall'), none = await run('net-none', 'none');
-  ok(!!still.held && !still.minted, `the home still not answering: held «${still.held}» — a home still checking (or one whose read failed) is NOT «no witness»`, still);
+  ok(still.held === 'home' && !still.minted, `the home still not answering: held «${still.held}» (past its bound) — a home still checking (or one whose read failed) is NOT «no witness»`, still);
   ok(!none.held && !none.minted, 'the home answered «none»: no witness anywhere — the instance opens as a new one does, nothing minted over the unread file', none);
 }
 
@@ -194,6 +194,81 @@ console.log('⑦ the family\'s notice: the hold listed by the file while unread,
   await readAgain(a);
   const n2 = n();
   ok(!!HOLD && n1 === n0 + 1 && n2 === n0, `the family's one list of holds names ${SW.INSTANCE_FILE} while it is unread (${n0} → ${n1}) and not after it reads again (${n2})`);
+}
+
+console.log('⑧ 主开发 r3629 (round w43tjwjp5): THE LIFT REPLAYS THE START\'s TAIL — the network home\'s look, the boot\'s own road, the start-new act once');
+{
+  const nfs = (it) => `25 1 0:50 / ${it.home} rw,relatime shared:1 - nfs4 server:/home rw\n`;
+  const quick = { netBoundMs: 30, netReaskMs: 60, netReaskMaxMs: 120 };
+  const docOf = (it, id) => J(SW.witnessDoc({ root: it.root, dataDir: it.data, id }));
+  const homePool = (it, id, calls = []) => ({ calls, call: (op, payload = {}) => { calls.push(op); return Promise.resolve(op === 'netRead' ? { file: path.join(payload.path || '', 'signin-net.json'), text: docOf(it, id) } : {}); } });
+  const withEnv = async (k, v, fn) => { const was = process.env[k]; process.env[k] = v; try { return await fn(); } finally { if (was === undefined) delete process.env[k]; else process.env[k] = was; } };
+  const ID = 'vi-0c0c0c0c0c0c', OTHER = 'vi-0d0d0d0d0d0d';
+  /** a start on a network home, the id file refused at the start and read again after: `local` = the folder's own local witness, `net` = the home's copy's id */
+  const scene = async (name, { local = false, net = ID, A0 = Auth, ensure = {}, cfg = {}, startNew = false, table = null, refuse = true } = {}) => {
+    const it = install(name); fs.writeFileSync(it.id, J({ v: 1, id: ID, createdAt: 1 }));
+    if (table) fs.writeFileSync(it.auth, J(table));
+    if (local) { fs.mkdirSync(path.dirname(varWitness(it)), { recursive: true, mode: 0o700 }); fs.writeFileSync(varWitness(it), docOf(it, ID)); }
+    if (startNew) fs.writeFileSync(path.join(it.data, SW.START_NEW), '');
+    const pool = homePool(it, net), undo = refuse ? refuseRead(it.id) : () => {};
+    let a; try { a = quiet(() => { const x = new A0(it.data, { witness: cfgOf(it, { mountinfo: nfs(it), pool, ...quick, ...cfg }) }); x.ensurePassword(ensure); return x; }).v; await until(() => !a.held || a.held.kind !== 'checking', 1500); } finally { undo(); }
+    const before = a.held ? { kind: a.held.kind, idUnread: !!a.held.idUnread } : null;
+    const said = [], log0 = console.log, warn0 = console.warn; console.log = (...m) => said.push(m.join(' ')); console.warn = (...m) => said.push(m.join(' '));
+    try { if (refuse) await readAgain(a); await until(() => !a.held || (!a.held.idUnread && a.held.kind !== 'checking'), 1500); await a._netWrites; } finally { console.log = log0; console.warn = warn0; }
+    return { it, a, pool, before, after: a.held ? a.held.kind : null, said };
+  };
+  // must 1: a LOCAL witness of the folder's id holds the start by the id BEFORE its tail; the network copy names ANOTHER folder
+  const m1 = await scene('lift-net-other', { local: true, net: OTHER });
+  ok(!!m1.before && m1.before.idUnread && m1.after === 'folder' && m1.pool.calls.includes('netRead'), `the start held by the id file before its tail (${m1.before && m1.before.kind}); at the lift the NETWORK HOME is looked at first (${m1.pool.calls.join(',')}) — its copy of another folder holds it («${m1.after}»), never an open by the local copy alone`, { before: m1.before, after: m1.after, calls: m1.pool.calls });
+  await red('lift-tail-cut', async () => {
+    const RT = authCut("      if (f.netHome && !(this._net && this._net.done)) {\n        if (!f.startNew) {", "      if (false) {\n        if (!f.startNew) {", 'lift-tail-cut');
+    const r1 = await scene('lift-net-other-red', { local: true, net: OTHER, A0: RT });
+    ok(r1.after === null, `RED CONTROL: the lift without the start's tail — no look judges the home's copy (the witness writer only reads it and keeps it: ${r1.pool.calls.join(',')}), the instance OPENS by the local copy alone`);
+  });
+  // musts 2 + 3: the network home answers the folder's OWN id while the id is unread — the boot's road (parked while the home was asked) replayed at the lift
+  const m2 = await withEnv('VIBESPACE_PASSWORD', 'pw-lift-0001', () => scene('lift-env-pw'));
+  ok(m2.after === null && m2.a.passwordEnabled && m2.a.verifyPassword('pw-lift-0001') && api(m2.a).code === 401, `held by the id after the home answered (${m2.before && m2.before.kind}); at the lift the boot's VIBESPACE_PASSWORD applies — the instance opens BEHIND it (${api(m2.a).code} without a login)`, { before: m2.before, enabled: m2.a.passwordEnabled });
+  await red('lift-replay-cut', async () => {
+    const RR = authCut("      this._replayEnsure();   // r3629 (musts 2, 3)", "      // replay cut   // r3629 (musts 2, 3)", 'lift-replay-cut');
+    const r2 = await withEnv('VIBESPACE_PASSWORD', 'pw-lift-0002', () => scene('lift-env-pw-red', { A0: RR }));
+    ok(r2.after === null && !r2.a.passwordEnabled, 'RED CONTROL: the boot\'s road not replayed at the lift — OPEN with no sign-in though VIBESPACE_PASSWORD was set');
+  });
+  const m3 = await scene('lift-declared', { cfg: { env: { [SW.DECLARE_ENV]: 'required' } } });
+  ok(m3.after === 'declared', `the declaration (${SW.DECLARE_ENV}=required) with no password: after the lift HELD «declared» (${m3.after}) — never open`);
+  const m4 = await scene('lift-generate', { ensure: { generateIfMissing: true } });
+  ok(m4.a.passwordEnabled && m4.said.filter((l) => /Generated workspace password: /.test(l)).length === 1, 'a generated password at the lift is SAID once, as at a start (never a sign-in nobody can read)', m4.said.filter((l) => /Generated/.test(l)));
+  // the person's start-new act with the id unread: done ONCE (one removal through the worker), the lift only mints what it skipped
+  const m5 = await scene('lift-start-new', { startNew: true });
+  const idNow = (it) => { try { return JSON.parse(fs.readFileSync(it.id, 'utf-8')).id; } catch { return null; } };
+  ok(m5.after === null && m5.pool.calls.filter((c) => c === 'netRemove').length === 1 && !m5.pool.calls.includes('netRead') && idNow(m5.it) === ID, `the start-new act: the home's copy removed ONCE (${m5.pool.calls.join(',') || 'none'}), none read, the lift does not act again; the unread id never minted over (${idNow(m5.it)})`, m5.pool.calls);
+  // the start-new act with a sign-in set while the id was unread (the boot's VIBESPACE_PASSWORD): its copies are written at the lift — not at the next restart
+  const m5b = await withEnv('VIBESPACE_PASSWORD', 'pw-lift-0003', () => scene('lift-start-new-pw', { startNew: true }));
+  ok(m5b.after === null && m5b.a.verifyPassword('pw-lift-0003') && m5b.pool.calls.join(',') === 'netRemove,netWrite' && fs.existsSync(varWitness(m5b.it)), `the start-new act and a sign-in set while the id was unread: at the lift its copies are WRITTEN (the home's after the removal: ${m5b.pool.calls.join(',')}; the local one ${fs.existsSync(varWitness(m5b.it))})`);
+  await red('start-new-lift-cut', async () => {
+    const RW = authCut("        if (f.instance && this._state && this._state.passwordHash) { this._syncWitness(); this._netWitness(); }", "        if (false) { this._syncWitness(); this._netWitness(); }", 'start-new-lift-cut');
+    const r5 = await withEnv('VIBESPACE_PASSWORD', 'pw-lift-0004', () => scene('lift-start-new-pw-red', { startNew: true, A0: RW }));
+    ok(r5.after === null && r5.pool.calls.join(',') === 'netRemove' && !fs.existsSync(varWitness(r5.it)), `RED CONTROL: the lift writes nothing — the set sign-in has no copy until the next restart (${r5.pool.calls.join(',')})`);
+    const RM = authCut("\n      if (!this._idHeld()) { try { f.instance = SW.ensureInstance", "\n      if (true) { try { f.instance = SW.ensureInstance", 'start-new-mint-cut');
+    const r5m = await scene('lift-start-new-mint-red', { startNew: true, A0: RM });
+    ok(idNow(r5m.it) !== ID, `RED CONTROL: the start-new act's mint unguarded — a new id written over the unread one (${idNow(r5m.it)})`);
+  });
+  // THE WALK's find (r3629: every other start held before its tail): a table that says «off» held by the home's look, or by the id, skipped the
+  // start's own tail — its plaintext login tokens stayed plaintext on disk; each lift runs it now
+  const OFF = { tokens: { 'plain-login-token-0001': { createdAt: 1 } } };
+  const keysOf = (it) => { try { return Object.keys(JSON.parse(fs.readFileSync(it.auth, 'utf-8')).tokens || {}); } catch { return null; } };
+  const digested = (it) => { const k = keysOf(it); return !!k && k.length === 1 && /^[0-9a-f]{64}$/.test(k[0]); };
+  const m6 = await scene('lift-net-off-tokens', { table: OFF, refuse: false });
+  ok(m6.after === null && m6.pool.calls.includes('netRead') && digested(m6.it), `«off» held by the home's look: after its answer the login tokens are DIGESTS on disk, as at a start never held (${keysOf(m6.it)})`);
+  const m7 = await scene('lift-id-off-tokens', { table: OFF });
+  ok(!!m7.before && m7.before.idUnread && m7.after === null && digested(m7.it), `«off» held by the id: after the lift the login tokens are DIGESTS on disk (${keysOf(m7.it)})`);
+  await red('lift-tokens-cut', async () => {
+    const RN = authCut("    if (this._state) this._tokensTail();   // r3629's walk", "    // cut   // r3629's walk", 'net-tokens-cut');
+    const r6 = await scene('lift-net-off-tokens-red', { table: OFF, refuse: false, A0: RN });
+    ok(r6.after === null && !digested(r6.it), 'RED CONTROL: the home answer\'s lift without the tail — the plaintext token stays on disk');
+    const RI = authCut("      if (this._state) this._tokensTail();   // the off table's own tail at the start", "      // cut   // the off table's own tail at the start", 'id-tokens-cut');
+    const r7 = await scene('lift-id-off-tokens-red', { table: OFF, A0: RI });
+    ok(r7.after === null && !digested(r7.it), 'RED CONTROL: the id\'s lift without the tail — the plaintext token stays on disk');
+  });
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

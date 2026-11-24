@@ -557,7 +557,7 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
   const R = install('h1-boot-pw');
   const r1 = await withEnv('env-pw-0008', async () => { const a = boot(R, Auth); await until(() => !a.held); return a; });
   ok(!r1.held && r1.passwordEnabled && r1.verifyPassword('env-pw-0008'), 'the boot\'s password road waits for the answer and is REPLAYED after it: guarded by VIBESPACE_PASSWORD');
-  const RR = authCut('    if (this._netEnsure) {   // the boot\'s own password road', '    if (false) {   // the boot\'s own password road', 'replay-cut');
+  const RR = authCut('    this._replayEnsure();   // the boot\'s own password road, held until the answer', '    void 0;   // the boot\'s own password road, held until the answer', 'replay-cut');
   const R2 = install('h1-boot-pw-red');
   const r2 = await withEnv('env-pw-0009', async () => { const a = boot(R2, RR); await until(() => !a.held); return a; });
   ok(!r2.held && !r2.passwordEnabled, 'RED CONTROL: the replay cut — the fresh install opens with NO sign-in though VIBESPACE_PASSWORD was set');
