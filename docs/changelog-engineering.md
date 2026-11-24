@@ -411,6 +411,88 @@ This file is the engineers' record of every release: the lanes, the verification
 - The follow's r2245 (9) hook made src/server/wrapper-files.js removeWrapperFiles load the kept door, so test-wrapper-files reached src/cli-identity.js through its import graph and test-egress-census (heavy) found its carried list stale. r2372 (1) asks the hook away anyway: a session's end (a resume, an exit) is not a conversation's deletion. wrapper-files.js is the release's again, byte for byte; forgetLines stays for a delete road (none yet).
 - Leg: test-rewind-kept — the end paths' remover keeps the record and names nothing of the kept door; forgetLines takes it (its press folders stay).
 
+### Known in 2.369.418 — named with this train (2026-11-24); the coordinator's words, each a pick of a later release
+
+**A. CARRIED FROM «Known in 2.369.417»: what this train closes, and what each open row has left**
+
+- **1 (.417 A1, the data folder's lists after a failed read: PARTLY CLOSED).** This train holds more of these lists under the store-read law, each when its read fails. Those its notes name:
+  - each channel account's people memo (line 766 with its held words, line 800);
+  - the file of messages waiting to be retried, and the paired machines' file (row B-f276's remainder, line 771);
+  - a purged channel account's marks (row B-92fc, line 582 with its must in line 765).
+  Still open, left for 2.369.419, none on this train:
+  - the messages waiting for a conversation's next turn;
+  - the port forwards and the instance's address;
+  - the plugin registry and the synced stores;
+  - the passkey store and the vault record;
+  - the voice sign-in's file and the OpenCode service's file;
+  - from «Known in 2.369.417», the hand-over memory and the sign-in expiry ledger.
+- **3 (.417 A3, the kept browsers' list: OPEN).** No line of this train puts it under the law. Its cure rides 2.369.419.
+- **4 (.417 A4, a key sent to a named popup window of a desktop application).** test-desktop-app-rung-chrome read ALL PASS in the candidate's desktop run (test machine 1, run 91217121e-20261124133202-box).
+- **6 (.417 A6, the usage cells' file read on the hub's main loop at a start: OPEN).** Line 754 retires the shadow usage index. Whether the cells' read at a start now leaves the main loop has not been read.
+- **K1 (row B-9a24): NOT cured here.** Its cure waits for a full money round.
+- **K2 (.417 K2, the second toast in test-desktop-small-chrome leg ⑧): CLOSED by line 603.** The leg judges its own toast. test-desktop-small-chrome read ALL PASS (420) in the candidate's desktop run. Line 742 is withdrawn: line 603 holds its case.
+- **K3 (.417 K3, the test machine's desktop pair on Chrome 158): OPEN, older than this train.** test-desktop-xpra-window-scale and test-window-target are red with the same failing lines at the release 2.369.416 (0a031b541), at 2.369.417's final tree (f71dbb9ad) and at this candidate (91217121e). The side-by-side page is the desktop page of this cut.
+- **K4 (.417 K4, row B-d033): CURED in the suites by line 796.** test-pull-refresh's twin scene now waits on facts, not on four loop turns. The zone's last quarter hour has not yet been read with it.
+- **K5 (.417 K5, read, never green), as today's box rows read them:**
+  - test-harness-settings and test-queue-steer read ALL PASS on the box.
+  - test-codex-sandbox-net is PARTIAL by name: its functional leg is skipped under VS_NO_REAL_CLI.
+  - test-agy-cli-probe is NO READING: there is no agy on the box, so the probe skipped.
+  - test-office-desktop is not read: the test machine has no python-docx.
+- **K6 (.417 K6, the first release mirror's older reds).** test-record-shape §4d (fast, Node 22) is green in the candidate's first hosted run. The two heavy rows named on Node 24 (test-boot-resume-shape, test-integration-toggle) were not read on Node 24 by that run: its heavy shards ran on Node 22.
+- **Carried as they stand:** the rest of «Known in 2.369.417», each a pick of a later train.
+
+**B. NEW WITH THIS TRAIN**
+
+- **N1 (the shared reads: lines 400 and 479).** Found by the candidate's first hosted run, test-chat-send-landing leg 4.
+  - The fault: the page shares one request between callers that ask for the same read at the same moment. A read that hung was joined by every later ask of it, so the arrow, a retry press and the next send's tail read all waited on the stuck request.
+  - Cured by lines 815 and 819: a read is joined only in its first second, and never across a write of the page (a read asked after a save never joins a read begun before the save's reply).
+  - LEFT: an ask inside the first second of a read that hangs still waits with it, as the first caller does; and a change made over the socket or by the file explorer's upload is outside the second law: a read asked right after it can still join a read of the same address begun up to one second before.
+- **N2 (row B-3e8b, line 764: CURED EXCEPT ONE LANDING; the row stays open).** Scrolling up into older messages no longer throws the card being read: every wheel notch moves it by exactly the notch.
+  - LEFT: when the first block of older history lands inside the first notch, the card ends 27 px (the hub box) to 38 px (the hosted runner) past where the wheel put it, once, at that landing.
+  - In the same scene the release 2.369.417 moves it 253 to 280 px at the landing, 467 px at the worst notch, and 1005 px by the end (the first-notch probe on the box at the candidate and on the release).
+  - The suite's leg for that landing (test-chat-paging section 4h, a bound of 8 px) is new with this train and is RED on the hosted runner for that one landing: named here ahead of the mirror. Its cure is a pick of 2.369.419.
+  - The same suite's search leg (no depth of its three stood comparable on the hosted runner: the suite's own, not the product's) is red there too; its tests-only cure rides 2.369.419 with the remainder's.
+- **N3 (test-channels-lane-parity: a named flake).** It was red once, in the box zone only, in the last whole fast tier on the second machine under that tier's load: the push lane's coalesced wake was read before it came. It is green alone in both zones at the tip (run bb8f3fd7b-20261124153619-both). Its leg's wait is with its lane.
+- **N4 (the candidate's first hosted run, 45405143191: sixteen red suites, each placed and cured before any push).**
+  - One was the product, in a row of this train never released: a session's end forgot the conversation's kept lines (row 773, cured by line 801).
+  - One was the shared reads (N1), cured by lines 815 and 819.
+  - The others were suites' stand-ins, census rows and readings that lagged the tree (lines 794 to 804 and 808 to 810).
+- **N5 (left for 2.369.419 by the coordinator's order).** Line 742 is withdrawn (line 603 already cures the leg). Also left: line 772, the last commit of row 769 (row B-323e's Disconnect follow), and every unit that needed a reader round after the list closed.
+- **N6 (read, never green).**
+  - The desktop run's unread and partial rows, as its page says: 8 of the 53 not run on the test machine. Seven are real-driver rows, which only the box can run: they are read there at 012d9891d before the push, their verdicts in the cut's box page. The eighth is test-office-desktop, not read.
+  - The box rows that ended NO READING or PARTIAL: test-agy-cli-probe (NO READING) and test-codex-sandbox-net (PARTIAL by name).
+- **N7 (the fast tier's readings).** The tier was read on the second machine; three rows were read alone on the first (test-creds-merge, test-message-origin, test-account-pool). The second machine's load read them at about ten times their stated time.
+
+### train418 — the train 2.369.418's own notes (lane int361; on 9cdd6ba46 = 2.369.417)
+
+- **The train.** The coordinator's list for 2.369.418 was picked onto the release 2.369.417 (9cdd6ba46) in order, each unit with its taken follows as one group, the lanes' commits cherry-picked with -x.
+  - The first pass ended at 00b68e917. Then came the retry of the integrator's own stops, giving the base d1e10e6d7.
+  - THE GO (the coordinator's list GO-418) added the three cures of the candidate's reds, six late lines, nineteen moved chains and the two money picks last, each money pick followed by test-spend-paths alone in both zones.
+  - After the go came the cures of the whole tier's and the first hosted run's reds, each one commit read by the coordinator.
+  - 148 list lines are on the train and 68 stopped. A stopped line met a product file or a suite's legs; it was undone and moved by its lane (most came back in the go as moved chains), or it rides 2.369.419.
+  - 364 commits lie on the release under these notes (the confirmed tip 1c9c4af53).
+- **The integrator's meetings and commits**, each only where the coordinator's rulings made it the integrator's:
+  - the changelogs laid under «## 2.369.418» in their own commits;
+  - the fast tier's sum cap by arithmetic in its own commits;
+  - the census unions and counts by arithmetic: row 776's count row of test-data-store-census, the pronoun census's rows;
+  - the readings, twice: from the candidate's whole tier, then from the last one, with three rows read alone on machine 1;
+  - FAST_OVER_RATCHET's 24 (line 754 retired test-usage-index-owner);
+  - test-held-words' class of B-21cc's current_tab_unreadable;
+  - two kb INDEX lines of line 764 moved back into the INDEX (§82 ⑥);
+  - the three words the pronoun census asked for, and src/usage-history.js's two slot bounds renamed (the coordinator's r3556 and r3583).
+- **The cap.** The fast tier's sum cap went from the release's 2546 s to 2486 s, by arithmetic only: the lanes' heavy twins paid it down, and each pick's own rows raised it by their stated truth.
+- **The device bundle.** Its inputs moved in this train: data/bin/chat-wrapper.js, src/adapters/codex.js, src/session-store.js, src/sysinfo.js and src/transcript-service.js. It is built and signed in the release commit, which says its size and digest against 2.369.417's signed 5229020 bytes and the 2 % bound.
+- **The candidate's tips, in order:** d1e10e6d7 (the base), 91217121e (the go's picks in), c0eff16d0 (the first hosted run), 475531b66 (the last whole tier), 5915fc06e (the readings), 012d9891d (line 815), 1c9c4af53 (line 819: the confirmed tip).
+- **The gates:**
+  - the build checks alone at every new tip;
+  - test-spend-paths alone in both zones after each money line;
+  - the whole fast tier in both zones three times: at d1e10e6d7, at 91217121e (the go's gate, its reds placed by the coordinator: no chain came off) and at 475531b66, the last, with its machine-1 part;
+  - test-ci-gate and the build checks alone in both zones at 012d9891d;
+  - the candidate's first hosted run, 45405143191 at c0eff16d0, its sixteen red suites placed by job (N4), with B-28b1's four counts read from shard 4's kept output: a 5, b 0, c 0, c-unwitnessed 1;
+  - on the box, one row at a time under the heavy lock: the 29 rows the coordinator kept (the lanes' stated rows, the two other driver rows, the ten binary rows), each red one's cure read again, the deciding runs of row 764, and the six real-driver desktop rows;
+  - on test machine 1, the desktop rows in one heavy-mode run (53 asked, 45 run; K3 and N6).
+- **The release commit differs from the confirmed tip** by these notes, the version bump and the signed manifest only.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
