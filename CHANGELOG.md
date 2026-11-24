@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The New profile dialog no longer says each conversation gets its own tab for a browser VibeSpace only connects to — there, they all share every tab.
 - After you change a desktop app's scale, its window opens at its new size at once, instead of opening at the old size and jumping.
 - A VibeSpace started inside another one no longer keeps the outer one's telemetry address or task id, nor passes what it was handed to the programs it starts.
+- After a card puts you back where you were reading, dragging the scrollbar no longer snaps you back.
 
 ## 2.369.417 — 2026-11-23
 
