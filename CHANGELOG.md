@@ -23,6 +23,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A forced measure of a browser engine on a busy machine is no longer refused as «being put back» when nothing is being put back.
 - Scrolling up into older messages of a long conversation no longer jumps past what you were reading.
 - Opening or closing search in a long conversation no longer moves the message you were reading.
+- When the file of messages waiting to be retried cannot be read, VibeSpace keeps it untouched and reads it again, so the messages it holds are not lost.
 
 ## 2.369.417 — 2026-11-23
 
