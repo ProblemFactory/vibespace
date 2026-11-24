@@ -232,7 +232,7 @@ const ROWS = {
 const sourceOf = (store) => ({ vaultRows: () => ROWS[store].map(({ v, ...r }) => r), vaultReveal: (e, f) => { const r = ROWS[store].find((x) => x.entry === e && x.field === f); return r ? r.v : null; } });
 const CALLER = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane X', cwd: null };
 let worldN = 0;
-async function world({ instance = 'local', killGraceMs = 400, askMs = null, lateMs = null, doorMod = DOOR, setup = true, pipeGraceMs = 300, doorExtra = {} } = {}) {   // doorExtra: the door's own seams (its scrubber worker's file, figures, silence bound)
+async function world({ instance = 'local', killGraceMs = 400, askMs = null, lateMs = null, doorMod = DOOR, setup = true, pipeGraceMs = 300, doorExtra = {}, runBoundMs = null } = {}) {   // doorExtra: the door's own seams (its scrubber worker's file, figures, silence bound)
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
   for (const d of [dataDir, work, runRoot]) fs.mkdirSync(d, { recursive: true });
   const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false });
@@ -240,7 +240,9 @@ async function world({ instance = 'local', killGraceMs = 400, askMs = null, late
   const userTodos = new UserTodoManager({ dataDir, expirySweepMs: 3600e3 });
   const logs = [];
   const timerLog = [];   // every bound the door set (ms) — a bound is proven by the timer the door armed, never by a wall clock
-  const timers = { set: (fn, ms) => { timerLog.push(ms); return setTimeout(fn, askMs != null && ms === VR.ASK_TTL_MS ? askMs : lateMs != null && ms === DOOR.LATE_TTL_MS ? lateMs : ms); }, clear: (h) => clearTimeout(h) };
+  // runBoundMs (B-54a9, 主开发 r3437): a scene's --timeout 1 bound — ARMED as the door arms it (1000 ms, in the log) — fires after this
+  // many ms of real time: a child that never ends by itself is stopped by THAT timer whenever it fires, so no verdict rests on the 1 s
+  const timers = { set: (fn, ms) => { timerLog.push(ms); return setTimeout(fn, askMs != null && ms === VR.ASK_TTL_MS ? askMs : lateMs != null && ms === DOOR.LATE_TTL_MS ? lateMs : runBoundMs != null && ms === 1000 ? runBoundMs : ms); }, clear: (h) => clearTimeout(h) };
   const gone = new Set();
   const mk = (mod = doorMod, extra = {}) => mod.create({ dataDir, vault, userTodos, sources: Object.fromEntries(Object.keys(ROWS).map((s) => [s, () => sourceOf(s)])), instanceKind: () => instance,
     runRoot: () => runRoot, home: SUITE_HOME, tmpDir: SUITE_TMP, agentEnv: () => ({ ...SUITE_ENV, PATH: BIN + ':' + SUITE_ENV.PATH }), killGraceMs, pipeGraceMs, timers, liveOf: (cid) => !gone.has(cid), log: (m) => logs.push(String(m)), isRootOwned: isRootOwnedTest, ...extra });   // round 10: extra deps (a capturing spawnImpl, a PATH-with-a-writable-head agentEnv) for the spawn-env seal test
@@ -248,6 +250,9 @@ async function world({ instance = 'local', killGraceMs = 400, askMs = null, late
   return { dir, dataDir, work, runRoot, vault, userTodos, door, logs, gone, mk, timerLog, caller: { ...CALLER, cwd: work } };
 }
 const cardsOf = (w) => (w.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'vault-run-ask');
+/** B-54a9 (主开发 r3437): A CARD OR THE RUN'S END, whichever comes first — for a road that may draw no card (the run then goes on
+ *  without asking): the wait ends on the run's end, never on the card's whole bound. → the card, or null once the run ended */
+async function waitCardOrEnd(w, run, ms = 3000) { let ended = false; Promise.resolve(run).then(() => { ended = true; }, () => { ended = true; }); const t = Date.now(); while (Date.now() - t < ms) { const c = cardsOf(w); if (c.length) return c[c.length - 1]; if (ended) return null; await sleep(5); } return null; }
 async function waitCard(w, ms = 3000) { const t = Date.now(); while (Date.now() - t < ms) { const c = cardsOf(w); if (c.length) return c[c.length - 1]; await sleep(5); } return null; }
 /** A run whose card (if one comes) is answered `answer`. → { r, card, a } */
 async function runAnswered(w, args, { answer = 'once', reauthed = false, door = w.door, caller = w.caller, cwd = w.work, ttl } = {}) {
@@ -1311,7 +1316,7 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
 
 console.log('⑥ THE TIMEOUT');
 {
-  const w = await world();
+  const w = await world({ runBoundMs: 50 });   // B-54a9: the armed 1 s bound fires at 50 ms (the printer's «sleep» never ends by itself)
   openRow(w);
   const { r } = await runAnswered(w, ['--timeout', '1', ...ENV('sleep', path.join(w.work, 'p2.txt'))]);
   ok(r.ok && r.timedOut === true && r.signal === 'SIGTERM' && w.timerLog.includes(1000), '--timeout 1: the door armed its 1 s bound, the child was stopped there (SIGTERM) and the answer says timedOut', { timedOut: r.timedOut, signal: r.signal, timers: w.timerLog });
@@ -1333,6 +1338,21 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
   const twoOff = (w) => { w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false }); w.door.setRunnable({ id: 'mounts:m2#secretKey', on: false }); };
   const bothOff = (list) => !!(list && list.includes('mounts:m1#secretKey') && list.includes('mounts:m2#secretKey'));
   const SLOW = { storeRetry: { firstMs: 600000, maxMs: 600000, missingMs: 600000 } }, QUICK = { storeRetry: { firstMs: 15, maxMs: 30, missingMs: 15 } };
+  // B-54a9 (主开发 r3437/r3540): THE LIFT'S WAIT ENDS ON ITS FACT for both copies, never a wall clock — lifted, OR every read again the
+  // door ARMED has ENDED with no next one armed: each read again is counted at its end (a refused open, or its own fd closed — the
+  // door reads open → stat → read → close — then its verdict run), each arming is the world's timer log (the door's timers are the
+  // world's; a read again's delay is the scene's QUICK retry, at most its maxMs, so no other bound is counted as one). A copy whose
+  // held read again never arms the next one (the red control's «return») is read at that end
+  const countReads = (file) => { const real = fs.promises.open; let n = 0; fs.promises.open = function (p, ...x) { const q = real.call(this, p, ...x); if (typeof p !== 'string' || path.resolve(p) !== path.resolve(file)) return q; return q.then((fh) => { const close = fh.close.bind(fh); fh.close = () => close().then((v) => { n++; return v; }); return fh; }, (e) => { n++; throw e; }); }; return { ended: () => n, undo: () => { fs.promises.open = real; } }; };
+  const waitLiftOrSettled = async (d, w, reads, armedFrom, ms = 30000) => {
+    const armed = () => w.timerLog.slice(armedFrom).filter((t) => t <= QUICK.storeRetry.maxMs).length;   // the read-again timers the door armed
+    for (const tEnd = Date.now() + ms; d._storeHeld() && Date.now() < tEnd;) {
+      const n = reads.ended();
+      if (n >= 1 && armed() <= n) { await new Promise((r) => setImmediate(r)); if (reads.ended() === n && armed() <= n) break; }   // settled: every armed read ended, none armed after
+      await sleep(5);
+    }
+    return !d._storeHeld();
+  };
   const waitLift = async (d, ms = 3000) => { for (let k = 0; k < ms / 10 && d._storeHeld(); k++) await sleep(10); return !d._storeHeld(); };
   // (1) THE VERIFIER'S SCENE (lg-store-writes VR1): two entries OFF; the door's next life reads the store ONCE with an error; the
   // owner's next switch — refused BY NAME, the file not written over, both OFF switches still on disk
@@ -1363,14 +1383,14 @@ console.log('⑥c THE STORE READ (主开发 r2920) — a read of data/vault-run.
   // is lifted by itself, the owner's next switch lands, and every switch made before stands; red control: a read again that never lifts
   const liftLeg = async (doorMod) => {
     const w = await world({ doorMod }); twoOff(w);
-    const undoS = placeSync(fileOf(w), ['EIO']), undoA = placeAsync(fileOf(w), ['ETIMEDOUT']);
-    let d, held0, lifted, c;
-    try { d = w.mk(doorMod, QUICK); held0 = !!(d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }).code === 'store_held'); undoS(); lifted = await waitLift(d, 1500); c = d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }); } finally { undoS(); undoA(); }
+    const undoS = placeSync(fileOf(w), ['EIO']), undoA = placeAsync(fileOf(w), ['ETIMEDOUT']), reads = countReads(fileOf(w));   // the load's read placed EIO, the first read again ETIMEDOUT: the next one would lift
+    let d, held0, lifted, c, readsEnded;
+    try { const armedFrom = w.timerLog.length; d = w.mk(doorMod, QUICK); held0 = !!(d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }).code === 'store_held'); undoS(); lifted = await waitLiftOrSettled(d, w, reads, armedFrom); readsEnded = reads.ended(); c = d.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true }); } finally { reads.undo(); undoS(); undoA(); }
     const list = suspendedOf(w);
-    return { held0, lifted, ok: !!(c && c.ok), m2Off: !!(list && list.includes('mounts:m2#secretKey')), m1On: !!(list && !list.includes('mounts:m1#secretKey')) };
+    return { held0, lifted, readsEnded, ok: !!(c && c.ok), m2Off: !!(list && list.includes('mounts:m2#secretKey')), m1On: !!(list && !list.includes('mounts:m1#secretKey')) };
   };
   const l1 = await liftLeg(DOOR), l0 = await liftLeg(doorCopy("    if (lawOf(a, { applied: false }) === 'held') return;", '    return;', 'a read again that never lifts'));
-  ok(l1.held0 && l1.lifted && l1.ok && l1.m2Off && l1.m1On && !l0.lifted && !l0.ok, `r2920 THE LIFT WITHOUT A RESTART: held at the load, one read again failed, the next one read — lifted by itself; the owner's switch then lands and the OFF made before stands (m2 still OFF); red control: «a read again that never lifts» keeps refusing`, { l1, l0 });
+  ok(l1.held0 && l1.lifted && l1.ok && l1.m2Off && l1.m1On && !l0.lifted && !l0.ok && l0.readsEnded >= 1, `r2920 THE LIFT WITHOUT A RESTART: held at the load, one read again failed, the next one read — lifted by itself; the owner's switch then lands and the OFF made before stands (m2 still OFF); red control: «a read again that never lifts» keeps refusing`, { l1, l0 });
   // (4) «MISSING» RIGHT AFTER «UNREADABLE» is read once more: the load fails, the read again answers «missing», the next one reads —
   // lifted; the load after it answers «missing» ONCE more, and is read again before it counts — the OFF switches stand; red control:
   // a «missing» taken at once (a new, empty store written over by the next switch)
@@ -3323,7 +3343,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const F = capOf();
   const dF = mkGh({ spawnImpl: F.spawn, agentEnv: () => ({ ...SUITE_ENV, HOME: SUITE_HOME, PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
   const pF = dF.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-mint', '--', GHREAL_GH, 'issue', 'create', '-R', 'o/r', '--title', 't', '--body', 'see https://evil.test/x'], cwd: sw.work });
-  const cardF = await waitCard(sw);
+  const cardF = await waitCardOrEnd(sw, pF);   // B-54a9: this road draws no card (the mint's own host): the wait ends at the run's end
   if (cardF) dF.answer(cardF.action.askId, { answer: 'once' });
   const rF = await pF; const EF = F.get() ? F.get().env : {};
   ok(rF.ok && EF.GH_HOST === 'github.com' && EF.GH_TOKEN === 'agent-minted-ghv-0123456789abc' && EF.GH_ENTERPRISE_TOKEN === undefined,
