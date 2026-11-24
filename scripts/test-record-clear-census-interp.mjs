@@ -136,9 +136,16 @@ const I_SINKS = [
 ];
 const I_ALLOWED = { toast: ['ref'], dialog: ['live'], title: ['live'], notice: [], telemetry: [], error: [], sentence: [], console: [], journal: ['length'], todo: ['cascade', 'own'], activity: ['own'], status: ['own'], peer: ['transcript'] };
 const iEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// the SIZE forms of the class `length` — a mention of the read inside one of these is its size, never its words
+const I_LENGTH_FORMS = Object.freeze([
+  (r) => String.raw`\b(B|Buffer\.byteLength)\(\s*${r}\b[^)]*\)`,
+  (r) => String.raw`${r}\.length\b`,
+  (r) => String.raw`\bString\(\s*${r}\s*\)\.length\b`,   // r3664: the text wrapped in a string conversion, then its size (conversation-deliver.js's set-aside line)
+]);
+const iShowsLength = (forms) => (args, read) => { const r = iEsc(read); const code = iCode(args).replace(new RegExp(forms.map((f) => f(r)).join('|'), 'g'), ''); return !new RegExp(String.raw`(?<![\w$.])${r}\b`).test(code); };
 const I_CHECK = {
-  // `length`: the line prints a record's SIZE, never its words — every mention of the read is inside B(…) / byteLength(…) / .length
-  length: (args, read) => { const r = iEsc(read); const code = iCode(args).replace(new RegExp(String.raw`\b(B|Buffer\.byteLength)\(\s*${r}\b[^)]*\)|${r}\.length\b`, 'g'), ''); return !new RegExp(String.raw`(?<![\w$.])${r}\b`).test(code); },
+  // `length`: the line prints a record's SIZE, never its words — every mention of the read is inside one of I_LENGTH_FORMS
+  length: iShowsLength(I_LENGTH_FORMS),
   ref: (args) => /history:\s*\{\s*m:/.test(args) && /ref:\s*\{\s*kind:/.test(args),
   live: (args) => /\b(isCleared|clearedText|shownText|wordsOf)\(/.test(args),
   cascade: (args) => /\bjobId\b/.test(args) || /^\s*job\s*,\s*M\.forYouCopy\(job\b/.test(args),   // r3: `_forYou(job, M.forYouCopy(job, …))` — the door stamps the job's id
@@ -835,6 +842,13 @@ console.log('§I the interpolation census (verify r8): every message that embeds
   ok(J8.deadRecv.length === 0 && J8.deadSites.length === 0, 'I no dead row (every receiver and every site class is still in the tree)', { recv: J8.deadRecv, sites: J8.deadSites });
   ok(J8.bad.length === 0, `I every read of a record / a carrier at a sink is of a class the sink allows AND shows it (${J8.recordSites.length}: ${[...new Set(J8.recordSites.map((s) => s.cls))].join(' / ')})`, J8.bad);
   ok(Object.values(I_RECV).every(([k, why]) => k && why.length >= 6) && Object.values(I_SITES).every(([c, why]) => I_CHECK[c] && why.length >= 20), 'I every receiver names what it is; every site class names why');
+  // r3664 (the box's red at ebc6d0672): the class length's forms — a size spelled String(<read>).length is shown (the retry park's
+  // set-aside line); the words wrapped without .length, or printed beside the size, are not
+  const LEN_GOOD = '`set aside as ${path.basename(aside)} (${String(read.text).length} bytes kept); the retry park starts empty`';
+  const LEN_WORDS = '`set aside: ${String(read.text)}`', LEN_BESIDE = '`${String(read.text).length} bytes kept: ${read.text}`';
+  ok(I_CHECK.length(LEN_GOOD, 'read.text') && !I_CHECK.length(LEN_WORDS, 'read.text') && !I_CHECK.length(LEN_BESIDE, 'read.text'),
+    'I the class length shows a size spelled String(<read>).length (r3664: the retry park\'s set-aside line) — and the words wrapped without .length, or printed beside the size, are RED');
+  ok(!iShowsLength(I_LENGTH_FORMS.filter((f) => !/String/.test(f('x'))))(LEN_GOOD, 'read.text'), 'CONTROL (r3664): with that form cut, the set-aside line\'s size is RED — «claims length but its words do not show it», the box\'s red at ebc6d0672');
   { const al = rows.filter((r) => r.alias), defs = new Set(al.map((r) => `${r.rel}:${r.defLine}:${r.alias}`));
     ok(al.length >= 25 && defs.size >= 15 && al.every((r) => r.read && r.sink && I_RECV[`${iRel(r.rel)}|${iRecvOf(r.read)}`]), `I verify r9 — THE ONE-LEVEL ALIAS PASS: a text field COPIED into a local (\`const x = rec.<field>\` / \`const { field } = rec\`) and handed to a sink in its block is a read at that sink — ${defs.size} copies, ${al.length} sink reads, every one judged by the receiver + site tables above (a copy into an object's member or through two locals is declared)`, al.length); }
   ok(iAbsent(srcs).length === 0, `I the absent sinks stay absent — ${I_ABSENT.map(([w]) => w).join(', ')}: zero sites`, iAbsent(srcs));
