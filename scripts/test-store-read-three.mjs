@@ -269,6 +269,71 @@ try {
     ok(flx.during > 1, 'RED CONTROL (round w9jhivwdo (5)) — the in-flight mark cut: the tries start a second read while the copy hangs', flx);
   }
   {
+    // 2b (主开发 r3648 / r3790): the two laws hosts.json and machine-mounts.json proved on their own roads (test-store-read-law M2/X5
+    // and the read that hangs), proved HERE on the helper first, each with its red — so the stores' legs can be retired as they move
+    console.log('⑤ the helper (2b): the next try is armed FIRST — by a try that meets a read in flight, and by a try whose read fails');
+    const HSRC = fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8');
+    const ARM = HSRC.split('\n').find((l) => l.startsWith('    arm();   // the next try armed FIRST')) + '\n', BUSY = '    if (busy || active >= CEILING) return false;\n';
+    ok(HSRC.split(ARM + BUSY).length === 2, 'control setup: the helper arms its next try on the line before its in-flight check (found once)');
+    const armScene = async (Mod, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'a.json'); fs.writeFileSync(f, '{}');
+      const st = globalThis.setTimeout, fns = [];
+      // the hold's OWN rungs are caught (never left to fire): each one armed is counted, and fired by the leg when it chooses
+      globalThis.setTimeout = function (fn, ms, ...a) { if (String(fn).includes('again().catch(onErr)')) { fns.push(fn); return { unref() { return this; }, ref() { return this; } }; } return st(fn, ms, ...a); };
+      const rf = fs.promises.readFile, eio = () => Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' });
+      let phase = 'fail', reads = 0, failHung = null, h = null, out = null;
+      fs.promises.readFile = function (p, ...a) { if (String(p) === f) { reads++; if (phase === 'hang') return new Promise((_, rej) => { failHung = rej; }); return Promise.reject(eio()); } return rf.call(fs.promises, p, ...a); };
+      try {
+        h = Mod.create({ file: f, code: 'a', aside: (m) => f + '.corrupt-' + m, words: () => 'a' });
+        h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });   // held: its first rung armed
+        phase = 'hang'; const older = h.again();   // a try whose read hangs: the one read in flight
+        await until(() => !!failHung);
+        const beforeMeet = fns.length;
+        fns[fns.length - 1]();   // the armed rung FIRES while that read is in flight: its try meets it
+        await new Promise((r) => setImmediate(r));
+        const meetArmed = fns.length > beforeMeet;
+        phase = 'fail'; failHung(eio()); await older;   // the read in flight fails
+        const beforeFail = fns.length;
+        fns[fns.length - 1]();   // the next rung fires: its own read fails at once
+        for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r));
+        out = { meetArmed, failArmed: fns.length > beforeFail, held: !!h.held(), reads };
+      } finally { fs.promises.readFile = rf; globalThis.setTimeout = st; if (h) h.stop(); }
+      return out;
+    };
+    const am = await armScene(H, 'arm-first');
+    ok(!!am && am.meetArmed && am.failArmed && am.held && am.reads === 2, 'a try that meets a read in flight arms the next try, and so does a try whose own read fails: the tries never end while the store is held (two reads, never more)', am);
+    const amx = await armScene(mutant('src/store-read-hold.js', [[ARM + BUSY, BUSY + '    arm();\n']]), 'arm-after-ctl');
+    ok(!!amx && !amx.meetArmed, 'RED CONTROL — the next try armed AFTER the in-flight check (in a copy): the try that meets a read in flight arms nothing', amx);
+    const amy = await armScene(mutant('src/store-read-hold.js', [[ARM + BUSY, '    if (busy || active >= CEILING) { arm(); return false; }\n']]), 'arm-meet-ctl');
+    ok(!!amy && amy.meetArmed && !amy.failArmed, 'RED CONTROL — the next try armed only on a meeting (in a copy): a try whose own read fails arms nothing, and the tries end', amy);
+
+    console.log('⑤ the helper (2b): a read that hangs — one read at most while it hangs, and its late answer is used');
+    const LATE = '      if (!held || stopped) return false;\n      a = SR.storeAnswer(read, { valid });\n';
+    ok(HSRC.split(LATE).length === 2, 'control setup: the read again judges its answer on the line after the read (found once)');
+    const hungScene = async (Mod, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'b.json'), body = '{"rows": [1]}'; fs.writeFileSync(f, body);
+      const rf = fs.promises.readFile; let reads = 0, release = null, lifts = 0, value = null, h = null, out = null;
+      fs.promises.readFile = function (p, ...a) { if (String(p) === f) { reads++; if (!release) return new Promise((res) => { release = () => res(Buffer.from(body)); }); } return rf.call(fs.promises, p, ...a); };
+      try {
+        h = Mod.create({ file: f, code: 'b', aside: (m) => f + '.corrupt-' + m, words: () => 'b', onLift: (v) => { lifts++; value = v; } });
+        h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
+        const first = h.again();   // its read hangs
+        await until(() => !!release);
+        const second = await h.again(), third = await h.again();   // two more tries while it hangs
+        const during = reads, heldDuring = !!h.held();
+        release(); const late = await first;   // the storage answers, late
+        out = { during, heldDuring, second, third, late, lifted: !h.held(), lifts, rows: value && Array.isArray(value.rows) ? value.rows.join() : null };
+      } finally { fs.promises.readFile = rf; if (h) h.stop(); }
+      return out;
+    };
+    const hg = await hungScene(H, 'hung');
+    ok(!!hg && hg.during === 1 && hg.heldDuring && hg.second === false && hg.third === false && hg.late === true && hg.lifted && hg.lifts === 1 && hg.rows === '1', 'while a read hangs two more tries start NO second read (the store stays held); the storage answering late lifts the hold with its records', hg);
+    const hgx = await hungScene(mutant('src/store-read-hold.js', [[BUSY, '    if (active >= CEILING) return false;\n']]), 'hung-busy-ctl');
+    ok(!!hgx && hgx.during > 1, 'RED CONTROL — the in-flight mark cut (in a copy): each try while the read hangs starts another read', hgx);
+    const hgy = await hungScene(mutant('src/store-read-hold.js', [[LATE, '      if (!held || stopped || read) return false;\n      a = SR.storeAnswer(read, { valid });\n']]), 'hung-late-ctl');
+    ok(!!hgy && hgy.late === false && !hgy.lifted, 'RED CONTROL — the answer dropped (in a copy): the storage answers and the hold stands', hgy);
+  }
+  {
     console.log('⑤ the helper: the family\'s ceiling on the shared pool');
     const ceiling = async (Mod, tag) => {
       const d = dirOf(tag), files = Array.from({ length: 24 }, (_, i) => path.join(d, `s${i}.json`)); files.forEach((x) => fs.writeFileSync(x, '{}'));
