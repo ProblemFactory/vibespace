@@ -314,7 +314,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     const proposer = (it.action && it.action.proposer) || it.sessionKey;
     const cid = String(proposer || '').slice(String(proposer || '').indexOf(':') + 1);
     if (!cid || !deliver || typeof deliver.stashFor !== 'function') return false;
-    try { const r = deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: `${it.id}:${Date.now().toString(36)}`, text: PT.toAgentText(String(text || '')) }); return !(r && r.stored === false); }   // THE belt: a conversation's or a job's name on it may be an agent's words
+    try { const r = deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: `${it.id}:${Date.now().toString(36)}`, text: PT.toAgentText(String(text || '')) }); if (r && r.stored === false && r.taken) { log(`answer for ${proposer} ${r.why}`); return true; } return !(r && r.stored === false); }   // THE belt: a conversation's or a job's name on it may be an agent's words; r3919 must 2: TAKEN while the list is unread is TOLD (in memory, it goes at the agent's next prompt) — said in the journal, never «could not be told»
     catch (e) { log(`answer not stashed for ${proposer}: ${e && e.message || e}`); return false; }
   }
 

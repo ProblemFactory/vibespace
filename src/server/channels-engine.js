@@ -6619,7 +6619,7 @@ function create(deps = {}) {
       const prev = rxDigested.get(mk);
       if (!sig || (prev && (prev.sig === sig || t - prev.at < RX_DIGEST_MSG_MS))) continue;
       let held = [];
-      try { held = typeof deliver.stashPeek === 'function' ? deliver.stashPeek(cid) || [] : []; } catch { held = []; }
+      try { held = typeof deliver.stashPeek === 'function' ? deliver.stashPeek(cid, { memory: true }) || [] : []; } catch { held = []; }   // r3919 (the class): while the list is unread the caps count what memory holds (the refused peek read [] and the caps counted nothing)
       if (held.length >= RX_DIGEST_STASH_CAP) { log.log(`[channels] ${rec.id}/${convId}: a reaction digest for ${cid} was dropped — its next-turn queue is full`); continue; }
       if (held.filter((x) => x && x.fromName === RX_DIGEST_FROM && String(x.text || '').endsWith(tag)).length >= RX_DIGEST_CONV_MAX) continue;
       const line = Rx.reactionDigestLine(list, { title });

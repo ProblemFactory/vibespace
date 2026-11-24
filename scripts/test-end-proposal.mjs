@@ -299,6 +299,36 @@ console.log('③ THE STORE — one card per proposer (a second proposal ADDS); a
   b.w.stop(); br.w.stop();
 }
 
+{
+  // r3919 must 2 (lane hub-loop-stalls): AN ANSWER TAKEN WHILE THE LIST IS UNREAD IS TOLD — the REAL ladder held (its one start read of
+  // msg-stash.json PLACED as EIO): the answer is taken into memory and goes at the agent's next prompt, so the press says it was told —
+  // never «The agent could not be told — tell it in chat» (the person would type it again; the agent would read it twice).
+  // RED: the release's reading of the reply (stored:false = not told)
+  const CDm = require(path.join(REPO, 'src/server/conversation-deliver.js'));
+  const takenRun = async (mutate) => {
+    const w = world({}, mutate);
+    const dir = fs.mkdtempSync(path.join(scratch, 'held-')), F = path.join(dir, 'msg-stash.json');
+    fs.writeFileSync(F, '{}');
+    const realRead = fs.readFileSync; let place = true;
+    fs.readFileSync = function (f, ...a) { if (place && typeof f === 'string' && path.resolve(f) === path.resolve(F)) { place = false; throw Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' }); } return realRead.call(this, f, ...a); };
+    let D = null;
+    try { D = CDm.create({ dataDir: dir, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }) }, getHosts: () => null, getConvIndex: () => null, serverSetting: () => undefined, activeSessions: new Map(), emitPeerCard: () => { }, log: () => { } }); }
+    finally { fs.readFileSync = realRead; }
+    w.deliver.stashFor = (cid, env) => D.stashFor(cid, env);   // the store's ladder IS the real one for this press
+    w.rows.set('claude:aaaa', raw('claude:aaaa'));
+    const p = await w.store.propose({ targets: 'claude:aaaa', why: 'idle' }, { caller: CALLER, reach });
+    const id = openProps(w)[0];
+    const r = await press(w, id, { terminate: [] });
+    const out = { proposed: !!(p && p.ok), held: !!D.stashHeld(), told: r && r.told, waiting: D.stashEntries('p0p0').filter((e) => e && String(e.ref || '').startsWith(id + ':')).length, onDisk: realRead.call(fs, F, 'utf8') };
+    w.stop();
+    return out;
+  };
+  const g = await takenRun();
+  ok(g.proposed && g.held && g.told === true && g.waiting === 1 && g.onDisk === '{}', 'r3919 must 2: the list held, the answer TAKEN into memory (one entry waiting, the unread file untouched) — the press says it was told (the page: «The agent will read it at its next turn»)', g);
+  const r = await takenRun((src) => src.replace("if (r && r.stored === false && r.taken) { log(`answer for ${proposer} ${r.why}`); return true; } ", ''));
+  ok(r.held && r.told === false && r.waiting === 1, 'RED: the release\'s reading of the reply — «could not be told» over an answer that WAITS in memory (the person told to type it again)', r);
+}
+
 console.log('④ THE SECOND KIND — the wake grant piece 7 proposes: each row names the conversation its job will WAKE (must 1)');
 {
   const R7 = (id, name, more = {}) => ({ id, name, kind: 'job', nextAt: null, grant: false, by: null, ...more });   // piece 7's wakeChoiceRows shape

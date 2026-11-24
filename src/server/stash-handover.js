@@ -775,6 +775,25 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  pressing client has open, which it can only SKIP (a client never makes a conversation live; they are counted).
    *  An earlier press's note still waiting is replaced, never doubled: the new one is stored first, then the old one
    *  is taken out by identity (a failed write loses neither). → `{ok, queued, replaced, skipped, failed, ids}` | refusal. */
+  /** r3919 (the class): THE REFRESH NOTE's REPLACE ACROSS THE HOLD — while the list was unread, an earlier press's note waiting IN it could not
+   *  be taken out (memory only was seen), so the lift's merge kept both (one ref, two texts — r3663's rule). At the lift the NEWEST refresh
+   *  note of each conversation stays and the older go: the agent never reads a stale note after the new one */
+  function keepNewestRefresh() {
+    const d = getDeliver();
+    if (!d || typeof d.stashCids !== 'function' || typeof d.stashEntries !== 'function' || typeof d.drainStash !== 'function') return 0;
+    let n = 0;
+    for (const cid of d.stashCids()) {
+      let notes = [];
+      try { notes = d.stashEntries(cid).filter((e) => RN.isRefreshEntry(e) && !e.ho); } catch { notes = []; }
+      if (notes.length < 2) continue;
+      const newest = notes.reduce((a, b) => ((Number(b.ts) || 0) >= (Number(a.ts) || 0) ? b : a));
+      try { d.drainStash(cid, new Set(notes.filter((e) => e !== newest))); n += notes.length - 1; }
+      catch (e) { log.warn?.(`[stash] ${cid}: an older refresh note could not be taken out at the list's read — ${(e && e.message) || e}`); }
+    }
+    if (n) log.log?.(`[stash] the list of waiting messages read again: ${n} older refresh note${n === 1 ? '' : 's'} taken out — the newest of each conversation stays`);
+    return n;
+  }
+  { const d0 = getDeliver(); if (d0 && typeof d0.onStashLift === 'function') d0.onStashLift(() => keepNewestRefresh()); }
   function refreshLive(note, { others = [] } = {}) {
     if (closed) return { ok: false, code: 'restarting', error: 'the server is restarting — nothing was queued' };
     const d = getDeliver();
@@ -795,17 +814,17 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const cidOfRow = new Map(rows.map((r) => [r.id, r.conversationId]));
     const text = agentText(plan.text, { kind: 'block', max: RN.REFRESH_NOTE_MAX });
     const ids = [];
-    let replaced = 0, failed = 0;
+    let replaced = 0, failed = 0, notOnDisk = 0;
     for (const id of plan.queue) {
       const cid = cidOfRow.get(id);
       const old = waitingOf(cid);
-      try { d.stashFor(cid, { source: 'agent', kind: 'notification', fromName: RN.REFRESH_FROM, ref: RN.REFRESH_REF, text }); }
+      try { const st = d.stashFor(cid, { source: 'agent', kind: 'notification', fromName: RN.REFRESH_FROM, ref: RN.REFRESH_REF, text }); if (st && st.stored === false && st.taken) notOnDisk++; }   // r3919 (the class): TAKEN while the list is unread — counted and said
       catch (e) { failed++; log.warn?.(`[stash] refresh note for ${id} not queued — ${(e && e.message) || e}`); continue; }
       if (old.length) { try { d.drainStash(cid, new Set(old)); replaced++; } catch (e) { log.warn?.(`[stash] the earlier refresh note for ${id} could not be taken out — ${(e && e.message) || e}`); } }
       ids.push(id);
     }
-    log.log?.(`[stash] refresh note queued for ${ids.length} live conversation(s) (${replaced} replaced, ${plan.skipped.length} skipped, ${failed} failed)`);
-    return { ok: true, queued: ids.length, replaced, skipped: plan.skipped.length, failed, ids };
+    log.log?.(`[stash] refresh note queued for ${ids.length} live conversation(s) (${replaced} replaced, ${plan.skipped.length} skipped, ${failed} failed)${notOnDisk ? ` — ${notOnDisk} taken, not on disk: the list of messages waiting could not be read (an earlier note waiting in it is replaced when it reads)` : ''}`);
+    return { ok: true, queued: ids.length, replaced, skipped: plan.skipped.length, failed, ids, ...(notOnDisk ? { notOnDisk } : {}) };
   }
 
   /** Shutdown: wait (bounded) for every hand-over in flight — a SIGTERM restart is then exactly-once by construction

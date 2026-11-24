@@ -114,9 +114,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // B-f276 family (主开发 r3003 (a), lane hub-loop-stalls): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of
   // this file — a failed read, torn bytes — as an EMPTY stash, and the next write (the hub's own stop, any stash or drain) wrote it
   // over: every message, job result and receipt waiting for a conversation's next turn gone, said nowhere. HELD: nothing is written
-  // over the file (an entry stashed meanwhile lives in memory — a ref'd one is refused BY NAME to its producer, as a failed write
-  // is), a road that DECIDES from the stash (stashPeek: a receipt's fate, a dedupe) is told «unknown» (the hold's refusal: it
-  // decides nothing), the hand-over is refused by name and the conversation's strip says so (stash-handover), and the file is read
+  // over the file (r3720: an entry stashed meanwhile is TAKEN into memory, a ref'd one too — its producer is told «taken, not on disk»,
+  // `{stored:false, taken:true, why}`), a road that DECIDES from the stash's SILENCE (stashPeek: a receipt's fate) is told «unknown» (the
+  // hold's refusal: it decides nothing) — a road that needs only a HIT (a dedupe, a cap) peeks memory (`{memory:true}`: an entry
+  // found is evidence; a miss stays unknown, r3919), the hand-over is refused by name and the conversation's strip says so (stash-handover), and the file is read
   // again off the loop. LIFTED: the entries read — each judged again by the stores that own their words (a clear made while held
   // reaches them), a hand-over stamp of an earlier process released — then what memory took meanwhile after them, written once.
   // TORN BYTES: kept aside once (msg-stash.json.corrupt-<mark>), then the stash starts from what memory holds; `__tornAt` (a
@@ -333,7 +334,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (keptOff.length) emitStash('evicted', cid, keptOff, { held: q.length, heldCap: HELD_CAP });
     if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });
     stashChanged(cid);
-    if (!stored) { const why = isHeld() ? 'taken, not on disk: the list of messages waiting for conversations could not be read — this one is lost if VibeSpace restarts before that list reads again (unless that conversation\'s next turn takes it first)' : `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`; if (isHeld()) noteMemOnly(); emitStash('unwritten', cid, [entry], { why }); return { stored: false, why }; }
+    if (!stored) { const why = isHeld() ? 'taken, not on disk: the list of messages waiting for conversations could not be read — this one is lost if VibeSpace restarts before that list reads again (unless that conversation\'s next turn takes it first)' : `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`; const taken = isHeld(); if (taken) noteMemOnly(); emitStash('unwritten', cid, [entry], { why, ...(taken ? { taken: true } : {}) }); return { stored: false, why, ...(taken ? { taken: true } : {}) }; }   // r3919: `taken` = the list is held, the entry is in memory and goes at the next prompt (told, not failed)
     return { stored: true, why: null };
   }
   // THE STASH IS VISIBLE (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): every write and
@@ -497,7 +498,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // a ref'd entry back in the queue is WAITING again (the .195 merge, withdraw's checklist ⑤): without `stashed` its
     // producer's card kept "handed" over a receipt the agent never got; no `evicted` — a restore never trims (jump r4)
     emitStash('stashed', cid, mine);
-    if (!stored) emitStash('unwritten', cid, mine, { why: `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn` });
+    if (!stored) { const taken = isHeld(); if (taken) for (let i = 0; i < mine.length; i++) noteMemOnly(); emitStash('unwritten', cid, mine, { why: taken ? 'taken, not on disk: the list of messages waiting for conversations could not be read — lost if VibeSpace restarts before that list reads again (unless that conversation\'s next turn takes them first)' : `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`, ...(taken ? { taken: true } : {}) }); }   // r3919 (should): while held, the hold's own words and count
     return mine.length;
   }
   // A FRAME THAT CAME BACK (verify r2): the two stdout consumers re-stash a delivered frame the wrapper could not run.
@@ -607,7 +608,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** A READ of one conversation's held entries (2026-09-27 verify: the
    *  channels engine's boot reconcile asks whether a receipt is still
    *  waiting). Copies; never drains, never re-orders. */
-  function stashPeek(cid) { const hh = heldHold(); if (hh) hh.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }   // HELD: a road that DECIDES from the stash is told «unknown» (r3104 (a))
+  // r3919 (the class): `{memory:true}` — a road that needs only a HIT (the hand-back's dedupe, the reaction digest's caps) reads what memory
+  // holds while the list is held: an entry FOUND is evidence; a miss is not absence (the unread list may hold one) and decides nothing
+  function stashPeek(cid, { memory = false } = {}) { const hh = heldHold(); if (hh && !memory) hh.refuse('reading the messages waiting for this conversation'); gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }   // HELD: a road that DECIDES from the stash's silence is told «unknown» (r3104 (a))
   /** ONE ENTRY, ONCE (r3329 (2)): `incoming`'s entries after `base`'s — an entry whose acceptance id (`sid`) or producer `ref` the base
    *  already holds is never added again; a slot entry of `incoming` (not in a hand-over) replaces the base's entry of the same slot (round
    *  wozyl97qk (c): the agent never reads one notice twice). → the count added */
@@ -632,14 +635,22 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  that own their words, an earlier process's hand-over stamps released — then MEMORY's after them (every entry accepted while held and
    *  not handed out; never twice), ONE write. The merge is that one write; the steps after it are each their own try (afterLift) */
   function liftStash(v, facts) {
-    const read = STASH_SHAPE(v) ? v : {};
-    const r = takeReserved(read);
-    const released = releaseClaims(read);
+    // r3919 (small): THE MERGE IN A TRY THAT KEEPS THE HOLD — computed beside memory (nothing of `stash` is replaced until it ends); a
+    // throw takes the hold again (the helper read it as lifted): nothing is written over the list, memory stays as it was, the ladder reads again
+    let read, r, released, took, kept = 0;
+    try {
+      read = STASH_SHAPE(v) ? v : {};
+      r = takeReserved(read);
+      released = releaseClaims(read);
+      for (const q of Object.values(read)) for (const e of q) { try { judgeEntry(e); } catch { } }
+      for (const q of Object.values(read)) kept += q.length;
+      took = mergeQueues(read, stash);
+    } catch (err) {
+      log(`[deliver] the stash's lift could not merge the list with memory (${(err && err.message) || err}) — held again: nothing is written over the list; it is read again`);
+      try { stashHold.start({ state: 'unreadable', error: { code: 'lift-merge-failed' } }); } catch (e2) { log('[deliver] the stash could not be held again:', e2 && e2.message); }
+      return;
+    }
     for (const x of released) { releasedAtBoot.push(x); log(`[deliver] ${x.cid}: ${claimedWords(x.ids)}`); }
-    for (const q of Object.values(read)) for (const e of q) { try { judgeEntry(e); } catch { } }
-    let kept = 0;
-    for (const q of Object.values(read)) kept += q.length;
-    const took = mergeQueues(read, stash);
     stash = read;
     slots = { ...r.sl, ...slots };
     tornAt = facts && facts.setAside ? Date.now() : (r.ta != null ? r.ta : tornAt);

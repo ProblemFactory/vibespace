@@ -1509,7 +1509,7 @@ function create(engineCtx) {
     // were kept aside at `tornAt` (the stash remembers the instant across restarts): a receipt stashed before it is UNKNOWN — never
     // read as handed; it stays as it is until a person decides (the card keeps «waiting»)
     let tornAt = null; try { tornAt = typeof deliver.stashTornAt === 'function' ? deliver.stashTornAt() : null; } catch { tornAt = null; }
-    const tornIds = [];
+    const tornIds = [], onDisk = [];
     for (const q of Object.values(ob.proposals || {})) {
       const d = q.receiptDelivery;
       if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
@@ -1517,9 +1517,14 @@ function create(engineCtx) {
       try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
       const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));
       if (!still && d.notOnDisk) continue;   // r3720: taken in memory only while the list was held — a restart may have lost it: UNKNOWN, never «handed», never «not sent»
-      if (still) continue;   // r3663 (the round's should): a receipt the stash still holds WAITS, whatever a torn instant says (a torn copy beside the list never ends what the list still holds)
+      if (still) { if (d.notOnDisk) onDisk.push(q.id); continue; }   // r3663 (the round's should): a receipt the stash still holds WAITS, whatever a torn instant says (a torn copy beside the list never ends what the list still holds); r3919: the peek ANSWERED (the list reads) and holds it — on disk now: its mark leaves
       if (tornAt != null && !(Number(d.at) > tornAt)) { if (d.at != null && Number.isFinite(Number(d.at))) tornIds.push(q.id); continue; }   // stashed before torn bytes and gone: «torn», never «handed»; a legacy row with no instant: unknown, as before (never «torn», never «handed»)   // stashed before the torn bytes: never «handed» — round wozyl97qk (g): it ENDS «torn» (its entry was in the damaged list, kept aside)
       gone.push(q.id);
+    }
+    if (onDisk.length) {   // r3919 must 1: the lift wrote what memory took — the card's «not on disk» leaves (a receipt lost by a restart keeps it: unknown)
+      await store.outbox.update((ob2) => { for (const id of onDisk) { const q = ob2.proposals[id]; if (q && q.receiptDelivery && q.receiptDelivery.notOnDisk) delete q.receiptDelivery.notOnDisk; } });
+      notifyOutbox(onDisk);
+      log.log(`[channels] ${onDisk.length} stashed receipt(s) taken while the list of waiting messages was unread are on disk now (the list read) — their cards no longer say «not on disk»`);
     }
     if (tornIds.length) {
       const t0 = now();
@@ -2427,7 +2432,7 @@ function create(engineCtx) {
     let blocked = owed && owed.blocked ? owed.blocked : null;
     if (!blocked && stashed && !gone && cur.receiptChoiceBlocked && deliver && typeof deliver.wakeBlock === 'function') { try { blocked = deliver.wakeBlock(cid); } catch { blocked = null; } }
     const delivery = {
-      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, ...(r && r.ok && r.queued ? { queued: true } : {}), refused: stashErr ? 'stash-failed' : notOnDisk ? 'not-on-disk' : (r && r.refused) || null, ...(notOnDisk ? { notOnDisk: true } : {}), woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
+      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, ...(r && r.ok && r.queued ? { queued: true } : {}), refused: stashErr ? 'stash-failed' : (r && r.refused) || null, ...(notOnDisk ? { notOnDisk: true } : {}),   /* r3919 must 1: the mark in its OWN field — the wake's own refusal keeps its place */ woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
       choice: cur.receiptChoice || 'next-turn', verdict: verdict.why || null, ...(gone ? { gone: true } : {}),
       ...(owed && owed.parked ? { paced: { retryAt: owed.retryAt, retryInMs: owed.retryInMs } } : {}),   // the park as a FACT (D5): the toast and the card promise only this
       ...(blocked ? { blocked: blocked.cause } : {}),

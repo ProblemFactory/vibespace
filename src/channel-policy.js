@@ -1555,7 +1555,7 @@ function receiptFateOf(p) {
   // …and a wake-now the ENGINE downgraded before the ladder (verify r4: the proposal's wake row could not be
   // written — `row-unwritten`) is said the same way; `already-woken` / `gone` are not refusals
   const rowLost = !del.woke && del.choice === 'wake-now' && del.verdict === 'row-unwritten';
-  if (del.stashed) return { kind: del.gone ? 'gone' : 'waiting', who, at: Number(del.at) || null, woke: false, ...(del.paced ? { wakePaced: true } : {}), ...(del.wakeFell ? { wakeFell: del.wakeFell.why || 'not-reachable' } : del.blocked ? { wakeFell: del.blocked } : {}), wakeRefused: del.woke ? (del.refused || 'refused') : (rowLost ? 'row-unwritten' : null), why: del.woke ? (del.why || null) : null };
+  if (del.stashed) return { kind: del.gone ? 'gone' : 'waiting', who, at: Number(del.at) || null, woke: false, ...(del.paced ? { wakePaced: true } : {}), ...(del.wakeFell ? { wakeFell: del.wakeFell.why || 'not-reachable' } : del.blocked ? { wakeFell: del.blocked } : {}), wakeRefused: del.woke ? (del.refused || 'refused') : (rowLost ? 'row-unwritten' : null), why: del.woke ? (del.why || null) : null, ...(del.notOnDisk ? { notOnDisk: true } : {}) };   // r3919 must 1: the mark, whatever the choice
   return { kind: 'undelivered', who, at: Number(del.at) || null, woke: false, refused: del.refused || null, why: del.why || null };
 }
 /** The fate line's words. `stamp(ms)` = the card's own clock format;
@@ -1570,15 +1570,19 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
       if (f.queued) return t('Queued for {agent} at {time} — it runs when its current turn ends', { agent, time: stamp(f.at) });
       return f.woke ? t('Handed to {agent} at {time} — it was woken for it', { agent, time: stamp(f.at) }) : t('Handed to {agent} at {time}', { agent, time: stamp(f.at) });
     case 'waiting':
-      // lane paced-wake-retry: the decider's wake the pace holds, and its fall (D6): the card says where the wake stands
-      if (f.wakeFell === 'may-have-landed') return t('Waiting for {agent}\'s next message — the wake may have reached it (the server stopped while it was on its way)', { agent });
-      if (f.wakeFell === 'paced-out') return t('Waiting for {agent}\'s next message — the wake could not land within its hour', { agent });
-      if (f.wakeFell === 'not-running') return t('Waiting for {agent}\'s next message — its conversation is not running, so it was not woken', { agent });
-      if (f.wakeFell === 'spend-cap') return t('Waiting for {agent}\'s next message — the spend ceiling refused the wake', { agent });
-      if (liveFallText(f.wakeFell, t)) return t('Waiting for {agent}\'s next message — {why}, so it was not woken', { agent, why: liveFallText(f.wakeFell, t) });
-      if (f.wakeFell) return t('Waiting for {agent}\'s next message — the wake did not reach it', { agent });
-      if (f.wakePaced) return t('The wake pace holds this — {agent} is woken for it shortly', { agent });
-      return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
+      { const line = ((f) => {
+        // lane paced-wake-retry: the decider's wake the pace holds, and its fall (D6): the card says where the wake stands
+        if (f.wakeFell === 'may-have-landed') return t('Waiting for {agent}\'s next message — the wake may have reached it (the server stopped while it was on its way)', { agent });
+        if (f.wakeFell === 'paced-out') return t('Waiting for {agent}\'s next message — the wake could not land within its hour', { agent });
+        if (f.wakeFell === 'not-running') return t('Waiting for {agent}\'s next message — its conversation is not running, so it was not woken', { agent });
+        if (f.wakeFell === 'spend-cap') return t('Waiting for {agent}\'s next message — the spend ceiling refused the wake', { agent });
+        if (liveFallText(f.wakeFell, t)) return t('Waiting for {agent}\'s next message — {why}, so it was not woken', { agent, why: liveFallText(f.wakeFell, t) });
+        if (f.wakeFell) return t('Waiting for {agent}\'s next message — the wake did not reach it', { agent });
+        if (f.wakePaced) return t('The wake pace holds this — {agent} is woken for it shortly', { agent });
+        return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
+      })(f);
+      // r3919 must 1: TAKEN WHILE THE LIST WAS UNREAD — said beside the wait whatever the choice (the wake's own refusal keeps its place)
+      return f.notOnDisk ? t('{line} — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again (the receipt stays on this card)', { line }) : line; }
     case 'gone': return t('{agent} is gone — receipt kept', { agent });
     case 'evicted': return t('Not delivered — {agent}\'s queue was full; the receipt is kept here', { agent });
     case 'torn': return t('Not delivered — the list of messages waiting for {agent} was damaged; the receipt is kept here', { agent });

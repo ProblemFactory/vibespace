@@ -323,7 +323,7 @@ console.log('§7 ONE ENTRY, ONCE (r3329 (2)) — delivered while held, and a pro
   D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'delivered while held' });
   const took = D.drainStash(CC);
   await D.stashReadAgain();
-  ok(Array.isArray(took) && took.length === 1 && !((readJson(F) || {})[CC] || []).length, '(iii) delivered at the next prompt while held: not in the list after the lift (the copy beside it was rewritten without it)', readJson(F));
+  ok(Array.isArray(took) && took.length === 1 && !((readJson(F) || {})[CC] || []).length, '(iii) delivered at the next prompt while held: not in the list after the lift (memory handed it out; the lift writes what memory still holds)', readJson(F));
   // and a producer's ref: an entry whose ref the list already holds is never added again
   const { D: E, F: G } = heldStart();
   E.stashFor(CB, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'a receipt waiting', ref: 'p-1' });
@@ -377,5 +377,130 @@ const SRC9 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js
   const NOUNKNOWN = M.load('src/server/conversation-deliver.js', anchored(SRC9, "if (isHeld() && !(stash[cid] || []).some((x) => x && x.ref === ref)) return true;", '', 'stash-wake-silence-read-as-carried'), 'stash-wake-silence-read-as-carried');
   const r = await run(NOUNKNOWN);
   ok(r.parked && !r.owedHeld, 'RED: the hook that reads the unread list\'s silence — the owed wake is taken out as «carried» while held, and nobody is woken for the receipt after the lift', r);
+}
+console.log('§10 r3919 THE CLASS — every caller of the accept and of the peek reads the hold: the peek of memory, the hand-back, the refresh note, the lift that cannot merge, the census');
+const SRC10 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+const RN = require(path.join(REPO, 'src/refresh-note.js'));
+{
+  // (a) THE PEEK OF MEMORY: while held the plain peek is refused (a road that decides from the stash's SILENCE decides nothing); `{memory:true}`
+  // answers what memory holds — an entry found is evidence, a miss is no absence. The accept says TAKEN, never a failed write
+  const { D } = heldStart();
+  const st = D.stashFor(CC, { source: 'agent', kind: 'notification', fromName: 'VibeSpace browser', text: 'a hand-back', ref: 'bres-0a0b0c0d' });
+  const plain = codeOf(() => D.stashPeek(CC)), mem = D.stashPeek(CC, { memory: true }), miss = D.stashPeek(CA, { memory: true });
+  ok(st.stored === false && st.taken === true && /^taken, not on disk/.test(st.why) && !!plain && mem.length === 1 && mem[0].ref === 'bres-0a0b0c0d' && miss.length === 0, 'HELD: the accept answers TAKEN (stored:false, taken:true, its words); the plain peek is refused; the peek of memory finds memory\'s entry and finds nothing where memory holds nothing', { st, plain, mem: mem.length, miss: miss.length });
+}
+{
+  // (b) THE HAND-BACK PRESSED TWICE WHILE HELD (a double press, a second owner tab, a retried POST): ONE frame — memory's first frame is the
+  // evidence the dedupe reads. RED: the dedupe's plain peek (refused while held, read as nothing waiting): two frames, the agent reads it twice
+  const HBSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-handback.js'), 'utf8');
+  const press2 = async (HBm) => {
+    const { D } = heldStart();
+    const sess = { name: 'Agent One', backend: 'claude', backendSessionId: CC, claudeSessionId: CC, mode: 'chat' };
+    const keeper = { continueState: async () => ({ ok: true, tabs: [{ url: 'https://example.test/a', title: 'A' }], currentIndex: 0, tookOver: false, own: false, rerun: null, userActs: [] }) };
+    const hb = HBm.create({ keeper, deliver: D, activeSessions: new Map([['s1', sess]]), emitCard: () => true, notice: () => { }, log: { log() { }, warn() { } } });
+    const a = await hb.continueFor({ sessionId: 's1', note: 'first press' });
+    const b = await hb.continueFor({ sessionId: 's1', note: 'second press' });
+    return { held: !!D.stashHeld(), a: a.ok, b: b.ok ? 'ok' : b.code, frames: D.stashPeek(CC, { memory: true }).filter((e) => /^bres-/.test(String(e.ref || ''))).length };
+  };
+  const g = await press2(require(path.join(REPO, 'src/server/browser-handback.js')));
+  ok(g.held && g.a && g.b === 'already_handed_back' && g.frames === 1, `the hand-back pressed twice while the list is unread: the second refused already_handed_back — ONE frame (${g.frames})`, g);
+  const r = await press2(M.load('src/server/browser-handback.js', anchored(HBSRC, 'deliver.stashPeek(cid, { memory: true })', 'deliver.stashPeek(cid)', 'dedupe-plain-peek'), 'dedupe-plain-peek'));   // stale-pins: kept — the RED puts the plain peek back
+  ok(r.held && r.b === 'ok' && r.frames === 2, `RED: the dedupe's plain peek — refused while held, read as nothing waiting: two frames (${r.frames})`, r);
+}
+{
+  // (c) THE REFRESH NOTE ACROSS THE HOLD: an earlier press's note waits IN the unread list; a newer press while held is TAKEN (counted, said) and
+  // cannot take the old one out; at the lift the NEWEST stays, the older goes. RED: no replace at the lift — both, the stale note first
+  const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8');
+  const runR = async (SHm) => {
+    const dir = mk(), F = path.join(dir, 'msg-stash.json');
+    fs.writeFileSync(F, JSON.stringify({ ...BEFORE, [CC]: [{ source: 'agent', kind: 'notification', fromName: RN.REFRESH_FROM, ref: RN.REFRESH_REF, text: 'refresh note A (an earlier press)', ts: 3 }] }));
+    fs.mkdirSync(path.join(dir, 'session-buffers'), { recursive: true });
+    const s = { name: 'Owner', backend: 'claude', backendSessionId: CC, claudeSessionId: CC, mode: 'chat', _isStreaming: false, buffer: '', sockName: 'cw-r1', socketPath: path.join(dir, 'cw-r1') };
+    const sessions = new Map([['r1', s]]);
+    const pr = placeReads(F); let D = null; try { D = CD.create(deps(dir, { activeSessions: sessions })); } finally { pr.restore(); }
+    const jm = new JobManager({ dataDir: dir, log: () => { }, broadcast: () => { }, onStash: () => { } });
+    const view = SHm.create({ activeSessions: sessions, getDeliver: () => D, getJobs: () => jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash, debounceMs: 10, log: { log() { }, warn() { } }, dataDir: dir });
+    const q = view.refreshLive('refresh note B (the newer press)');
+    await D.stashReadAgain(); await sleep(20);
+    const after = D.stashEntries(CC).filter((e) => RN.isRefreshEntry(e)).map((e) => e.text);
+    jm.shutdown?.();
+    return { queued: q.queued, notOnDisk: q.notOnDisk || 0, after, disk: ((readJson(F) || {})[CC] || []).filter((e) => RN.isRefreshEntry(e)).length };
+  };
+  const g = await runR(SH);
+  ok(g.queued === 1 && g.notOnDisk === 1 && g.after.length === 1 && /refresh note B/.test(g.after[0]), `the refresh note pressed while the list is unread: TAKEN and said (notOnDisk ${g.notOnDisk}); at the lift the newest stays, the older goes («${g.after.join(' | ')}»)`, g);
+  const r = await runR(M.load('src/server/stash-handover.js', anchored(SHSRC, "  { const d0 = getDeliver(); if (d0 && typeof d0.onStashLift === 'function') d0.onStashLift(() => keepNewestRefresh()); }\n", '', 'no-refresh-replace-at-lift'), 'no-refresh-replace-at-lift'));
+  ok(r.after.length === 2 && /refresh note A/.test(r.after[0]), `RED: no replace at the lift — the stale note and the new one, the stale first (${r.after.length})`, r);
+}
+{
+  // (d) THE LIFT THAT CANNOT MERGE (a throw in the merge): HELD AGAIN — nothing written over the list, memory as it was, read again on its
+  // ladder. RED: a catch that does not take the hold again — the next write covers the list with memory alone
+  const THROWS = anchored(SRC10, '  function mergeQueues(base, incoming) {\n    let n = 0;\n', "  function mergeQueues(base, incoming) {\n    throw new Error('a planted merge failure');\n", 'merge-throws');
+  const runM = async (src, name) => {
+    const { D, F } = heldStart(M.load('src/server/conversation-deliver.js', src, name));
+    D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'taken while held' });
+    const lifted = await D.stashReadAgain();
+    D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'after the failed lift' });
+    return { lifted, held: !!D.stashHeld(), untouched: fs.readFileSync(F, 'utf8') === BYTES, mem: D.stashPeek(CC, { memory: true }).length };
+  };
+  const g = await runM(THROWS, 'merge-throws');
+  ok(g.held && g.untouched && g.mem === 2, 'the lift whose merge throws: HELD AGAIN — the list\'s bytes as they were after another accept, memory\'s two entries kept', g);
+  const r = await runM(anchored(THROWS, "      try { stashHold.start({ state: 'unreadable', error: { code: 'lift-merge-failed' } }); } catch (e2) { log('[deliver] the stash could not be held again:', e2 && e2.message); }\n", '', 'merge-throws-no-rehold'), 'merge-throws-no-rehold');
+  ok(!r.held && !r.untouched, 'RED: a catch that does not hold again — the next write covers the list (its entries gone)', r);
+}
+{
+  // (e) THE SOURCE PINS moved here from the heavy strip suite (r3919): the boot order, the stash's ONE start read, the facade's stop
+  const sj = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const iDeliver = sj.indexOf("const deliver = require('./src/server/conversation-deliver.js').create("), iView = sj.indexOf("const stashView = require('./src/server/stash-handover.js').create("), iListen = sj.indexOf('hub.listen(PORT, HOST'), iRestore = sj.indexOf('restoreSessions();', iListen);
+  ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen, 'THE BOOT ORDER: the ladder (its stash read synchronously at create), then the hand-over view, both before hub.listen; restoreSessions inside the listen callback', { iDeliver, iView, iListen, iRestore });
+  ok(/let read0; try \{ read0 = \{ text: fs\.readFileSync\(stashFile, 'utf-8'\) \}; \} catch \(error\) \{ read0 = \{ error \}; \}/.test(SRC10), 'THE ONE START READ: the stash file read synchronously at create, its answer through store-read (never a JSON.parse that reads a failure as empty)');
+  ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush: flushAtStop,/.test(SRC10), 'THE FACADE\'s STOP: `flush` is flushAtStop (the stop counts what memory holds unhanded while held)');
+}
+{
+  // (f) THE CENSUS OF CALLERS (r3919): every call of the stash's accept (`stashFor(`) and of its peek (`stashPeek(`) in src and server.js has
+  // a ROW — what it does with «taken, not on disk» and with a refused peek. A caller born without a row is RED until it is judged
+  const CALLERS = {
+    // file: { accept: n, peek: n, plainPeek: n — the peeks that DECIDE from silence (refused while held, decide nothing) }
+    'src/agent-routes.js': { accept: 1 },                 // says it: «queued in memory only — taken, not on disk …» to the sender
+    'src/server/apps-engine.js': { accept: 1 },           // says it: the journal; the outcome waits in memory
+    'src/server/artifact-registry.js': { accept: 1 },     // ignores it, rightly: a stored:false that is not queued:false is told
+    'src/server/browser-handback.js': { accept: 4, peek: 1 },   // 177 / 418 say it (durable:false, why); 203 the journal; 480 told 'stashed' (true: it waits in memory); 407 peeks MEMORY (a hit is evidence)
+    'src/server/channel-api-cards.js': { accept: 1, peek: 1, plainPeek: 1 },   // 82 marks the receipt «not on disk» (r3919); the lift's peek clears it only on a HIT (a refused peek keeps the mark)
+    'src/server/channels-engine.js': { accept: 6, peek: 1 },    // 6613 / 7126 / 8849 ignore it rightly (notes; memory holds them); 9145 / 9410 / 9853 read it right — not durable: the kept rows stay for a restart (errs toward again, never lost); 6606 peeks MEMORY for the digest's caps
+    'src/server/channels-outbound.js': { accept: 1, peek: 1, plainPeek: 1 },   // 2413 the receipt's mark in its own field (r3919 must 1); 1516 the reconcile: a refused peek decides nothing
+    'src/server/conversation-deliver.js': { accept: 3 },  // the ladder's own (a paced-out fall, the park's fall, a held-back hand-back): its journal counts them
+    'src/server/design-engine.js': { accept: 1 },         // says it: stored:false + why to the comment's sender
+    'src/server/doc-engine.js': { accept: 1 },            // says it: stored:false to the doc's comment
+    'src/server/end-proposals.js': { accept: 1 },         // TAKEN is told (r3919 must 2) — said in the journal
+    'src/server/stash-handover.js': { accept: 1 },        // the refresh note: taken counted and said; the older note goes at the lift
+    'src/server/stdout/acp-events.js': { accept: 1 },     // a frame handed back, stashed as itself: memory holds it — ignores it rightly
+    'src/server/stdout/codex-events.js': { accept: 1 },   // the same, codex
+    'src/server/vault-paste-door.js': { accept: 2 },      // 143 says it (the journal), told; 504 told (it waits in memory)
+    'src/server/window-request.js': { accept: 1 },        // says it: durable:false + why
+  };
+  const strip = (t) => t.split('\n').map((l) => (/^\s*(\*|\/\/)/.test(l) ? '' : l.replace(/\s\/\/.*$/, ''))).join('\n');
+  const countIn = (t) => ({ accept: (strip(t).match(/\bstashFor\s*(?:\?\.)?\(/g) || []).length - (strip(t).match(/function stashFor\s*\(/g) || []).length,
+    peek: (strip(t).match(/\bstashPeek\s*(?:\?\.)?\(/g) || []).length - (strip(t).match(/function stashPeek\s*\(/g) || []).length,
+    memoryPeek: (strip(t).match(/\bstashPeek\s*(?:\?\.)?\([^()]*\{\s*memory:\s*true\s*\}\s*\)/g) || []).length });
+  const walk = (dir, out = []) => { for (const n of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, n.name); if (n.isDirectory()) walk(f, out); else if (/\.(c|m)?js$/.test(n.name)) out.push(f); } return out; };
+  const census = (texts) => {
+    const bad = [];
+    for (const [rel, t] of texts) {
+      const c = countIn(t), row = CALLERS[rel] || null;
+      if (!c.accept && !c.peek) { if (row) bad.push(`${rel}: a row with no caller left`); continue; }
+      if (!row) { bad.push(`${rel}: ${c.accept} accept / ${c.peek} peek call(s) and no row — judge each: what it does with «taken, not on disk», and with a refused peek`); continue; }
+      if (c.accept !== (row.accept || 0) || c.peek !== (row.peek || 0)) bad.push(`${rel}: ${c.accept} accept / ${c.peek} peek, its row says ${row.accept || 0} / ${row.peek || 0}`);
+      else if (c.peek - c.memoryPeek !== (row.plainPeek || 0)) bad.push(`${rel}: ${c.peek - c.memoryPeek} plain peek(s) that decide from silence, its row says ${row.plainPeek || 0}`);
+    }
+    for (const rel of Object.keys(CALLERS)) if (!texts.has(rel)) bad.push(`${rel}: a row for a file that is gone`);
+    return bad;
+  };
+  const texts = new Map();
+  for (const f of [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js')]) { const t = fs.readFileSync(f, 'utf8'); if (/\bstash(For|Peek)\b/.test(t)) texts.set(path.relative(REPO, f).split(path.sep).join('/'), t); }
+  const bad = census(texts);
+  const n = Object.values(CALLERS).reduce((a, r) => a + (r.accept || 0) + (r.peek || 0), 0);
+  ok(bad.length === 0 && n === 31, `THE CENSUS: ${n} calls of the accept and the peek in ${Object.keys(CALLERS).length} files, each with its row (27 accepts; 4 peeks — two of memory, two plain that decide nothing from a refusal)`, bad);
+  const planted = new Map(texts); planted.set('src/server/a-new-producer.js', "deliver.stashFor(cid, { text: 'x' });");
+  const planted2 = new Map(texts); planted2.set('src/server/channels-engine.js', texts.get('src/server/channels-engine.js').replace('deliver.stashPeek(cid, { memory: true })', 'deliver.stashPeek(cid)'));   // stale-pins: kept — the RED puts the plain peek back
+  ok(census(planted).some((b) => /a-new-producer\.js: 1 accept/.test(b)) && census(planted2).some((b) => /channels-engine\.js: 1 plain peek/.test(b)), 'RED: a caller born without a row, and a memory peek turned into a plain one, are each named');
 }
 report();

@@ -80,11 +80,23 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
       try { r = await deliver.deliverToConversation(p.conv, text, { kind: 'notification', noWake: true, spendReason: 'channel-receipt', fromName: 'Channels · API' }); } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
     }
     if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
-      try { deliver.stashFor(p.conv, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · API', text, ref: p.id }); r = { ok: true, stashed: true }; }
+      try { const st0 = deliver.stashFor(p.conv, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · API', text, ref: p.id }); r = { ok: true, stashed: true, ...(st0 && st0.stored === false && st0.taken ? { notOnDisk: true } : {}) }; if (r.notOnDisk) log.warn(`[channel-api-cards] ${p.id}: the receipt ${st0.why}`); }   // r3919 (the class): TAKEN while the list is unread — the record carries the mark, as the Outbox's receipt does
       catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
     }
-    st.receipt = { at: now(), how: r && r.ok ? (r.stashed ? 'stashed' : 'delivered') : 'undelivered', fate: C.fateOf(p) };
+    st.receipt = { at: now(), how: r && r.ok ? (r.stashed ? 'stashed' : 'delivered') : 'undelivered', fate: C.fateOf(p), ...(r && r.notOnDisk ? { notOnDisk: true } : {}) };
   }
+  // r3919: the list read again — a receipt the WRITTEN list holds (by its ref) is on disk now: its mark leaves; one the list does not hold
+  // keeps it (lost by a restart before the read, or handed at a prompt meanwhile: unknown — never said «on disk»)
+  try { if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(() => { try {
+    let n = 0;
+    for (const [id, st] of Object.entries(state.items)) {
+      if (!st || !st.receipt || !st.receipt.notOnDisk) continue;
+      const p = records().find((x) => x.id === id);
+      let held = null; try { held = p && p.conv && typeof deliver.stashPeek === 'function' ? deliver.stashPeek(p.conv) : null; } catch { held = null; }
+      if (held && held.some((e) => e && String(e.ref || '') === id)) { delete st.receipt.notOnDisk; n++; }
+    }
+    if (n) save();
+  } catch (e) { log.warn(`[channel-api-cards] the receipts' marks at the stash's lift: ${(e && e.message) || e}`); } }); } catch { }
 
   // ── lane inline-receipts-compose-api: THE CLI READS IT INLINE (the owner: a command that performs an action answers
   // with its outcome; a message carries only what the actor could not learn from its own command) ──────────────────

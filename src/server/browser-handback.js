@@ -404,7 +404,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     // a restart, an eviction all move the truth); a stash that cannot be peeked leaves the press alone (a dedupe, not a gate).
     if (!st.tookOver) {
       let waiting = null;
-      try { waiting = typeof deliver.stashPeek === 'function' ? ((deliver.stashPeek(cid) || []).find((e) => e && e.ref && /^bres-[0-9a-f]{8,16}$/.test(String(e.ref)) && e.fromName === FROM_NAME) || null) : null; } catch { waiting = null; }
+      // r3919 (the class): `{memory:true}` — while the list is unread, memory's own entries are EVIDENCE (a hit refuses the second press;
+      // a miss stays unknown and files, as before); the plain peek was refused there and two presses gave the agent the hand-back twice
+      try { waiting = typeof deliver.stashPeek === 'function' ? ((deliver.stashPeek(cid, { memory: true }) || []).find((e) => e && e.ref && /^bres-[0-9a-f]{8,16}$/.test(String(e.ref)) && e.fromName === FROM_NAME) || null) : null; } catch { waiting = null; }
       if (waiting) {
         log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''} for ${sess.id}: hand-back refused already_handed_back — ${waiting.ref} still waits for the agent's next turn (nothing new: no takeover ended here)`);
         return { ok: false, code: 'already_handed_back', error: 'already handed back — the agent reads it with its next turn; take the browser over again to hand it back anew', id: String(waiting.ref) };
