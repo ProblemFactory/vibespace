@@ -463,7 +463,7 @@ const I_RECV = {
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
   'src/lib/user-todos-actions.js|r.browser': ['browser profile', 'a profile label (the For-you Restart of a browser that stopped answering — int220, lane browser-unresponsive)'],
-  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/may-use-section.js|a': ['channel account', 'unit what-it-may-use: the account a tick in Session Properties\' «What it may use» takes back — its name in the toast that says its access row was not removed'], 'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
+  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/may-use-section.js|a': ['channel account', 'unit what-it-may-use: the account a tick in Session Properties\' «What it may use» takes back — its name in the toast that says its access row was not removed'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
   'src/lib/channel-webhook.js|v': ['channel author', 'a webhook caller\'s registered name (the owner typed it; the author of its calls)'], 'src/lib/channel-webhook.js|o': ['outbox proposal', 'a send\'s outcome — the caller\'s name + the server\'s refusal reason'], // lane webhook-l2-ui
   'src/lib/channel-webhook.js|ck': ['channel author', 'the other VibeSpace\'s name its pairing code carries (its owner\'s reply name), worded in the join box\'s done toast'], 'src/routes/webhook.js|cv': ['channel author', 'the other VibeSpace\'s name its pairing code carries, named in the join\'s refusal sentence'], // lane webhook-pair-join
@@ -524,6 +524,11 @@ const I_RECV = {
   'src/claude-oat-probe.js|r': ['words', 'a variant\'s verdict line — the measurement\'s own words (journal, the forked child)'],
   'src/server/cli-self-measure.js|full': ['words', 'the ledger record the hub just kept — its state + reason CODE (cli-caps words them), never an item\'s text'],
   'src/server/usage-pool-engine.js|ck': ['words', 'the pool card\'s calm line while a check runs (PURE account-pool-auto poolCheckingNotice) — the source of the notice, never a copy of a record'],
+  // 主开发 r3640 (the candidate's hosted run 45405143191): the WHOLE list at the train's tip (a scratch copy printed it in full): three
+  // receivers its lines added; one row gone dead (channel-account-dialogs.js k — its label now reaches the dialog through a local)
+  'src/server/conversation-deliver.js|read': ['carrier', 'the retry park file\'s raw bytes at the boot\'s own read (data/msg-retry.json: parked deliveries\' words) — its set-aside journal line names how many bytes were kept, never their words'],
+  'src/server/subagent-transcript.js|w': ['words', 'a PURE sentence (folderWords: the projects folder, or one project folder by its base name, did not answer — within N s) — a folder\'s name and a time, never a record\'s words'],
+  'src/server/usage-pool-engine.js|w': ['words', 'the reset-credit hold\'s own For-you notice (heldNoticeWords: the engine\'s fixed sentence, its detail and its i18n keys) — the engine\'s words, never a record\'s'],
   // 主开发 r3575 / r3588 (the train 2.369.418's content): two receivers its lines added; two rows gone dead (manage-agents.js x — the fold's
   // could-not-compare names now gathered into a local before the toast, B-360d; browser-switcher.js st.view?.profile — the switch's words now a
   // local `said` before the toast, B-7aef's follow line 607): their words still reach those toasts through the locals, account names and a label
@@ -769,6 +774,7 @@ const I_SITES = {
   'src/server/groups-engine.js|peer|rep.text': ['transcript', 'a wake report delivered to a member (a refused one rides the next report; a handed-back one is the stash the door rewrites)'],
   'src/server/groups-engine.js|peer|wc.text': ['transcript', 'a group message delivered to a member (the wake card\'s words — B-9fd6)'],
   'src/server/session-brain.js|status|fact.branch': ['own', 'the vcs entry\'s own write (the door drops its branch)'],
+  'src/server/conversation-deliver.js|journal|read.text': ['length', 'r3640: the retry park\'s set-aside line names the bytes kept (their LENGTH), never their words'],
   'src/agent-routes.js|journal|u.text': ['length', 'the injection\'s held line names the jobs update\'s SIZE, never its words'],
   'src/agent-routes.js|journal|rep.text': ['length', 'the injection\'s held line names the report\'s SIZE, never its words'],
   'data/bin/codex-chat-wrapper.js|journal|data.context': ['length', 'the wrapper\'s log names the injected context\'s LENGTH, never its words'],
