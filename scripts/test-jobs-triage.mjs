@@ -1298,13 +1298,17 @@ console.log('§17 B-8bd5: the job that filed a panel withdraws it once its cause
     J.jobs.set(job.id, job);
     const ctl = J._ctlDir(job, T0); fs.mkdirSync(ctl, { recursive: true });   // 主开发 21:46Z: a stdin-open job reads what its panel got on its stdin
     const posted = J.ask(job, PANEL8);
+    // r3796 (B-7e49): the mirror's appends to this job's folder, counted in flight (each ended a turn after it settles) — what the
+    // tail's wait ends on: a copy that never mirrors ends at once, not at a 500 ms clock
+    const prA = fs.promises.appendFile, ap = { n: 0 }; fs.promises.appendFile = function (f, ...a) { const p = prA.call(this, f, ...a); if (String(f).startsWith(ctl)) { ap.n++; const done = () => setImmediate(() => { ap.n--; }); p.then(done, done); } return p; };
     const waiting = J.waitFor(J.ansWaiters, job.id, 60_000).then(() => 'woken');
     const asked = job.state;
     const w = J.withdrawAsk(job);
     landedU4();   // the deferred-save census: the withdraw's steps (the mirror, the wait, the For-you item) ride its landing — landed here
     const woke = await Promise.race([waiting, new Promise((r) => setImmediate(() => r('still waiting')))]);
     const again = J.withdrawAsk(job);
-    let tail = ''; for (let k = 0; k < 50 && !tail; k++) { try { tail = fs.readFileSync(path.join(ctl, 'answers.jsonl'), 'utf8'); } catch { } if (!tail) await new Promise((r) => setTimeout(r, 10)); }   // the mirror appends OFF the loop
+    let tail = ''; for (let k = 0; k < 50 && !tail; k++) { const none = !ap.n; try { tail = fs.readFileSync(path.join(ctl, 'answers.jsonl'), 'utf8'); } catch { } if (tail || none) break; await new Promise((r) => setTimeout(r, 10)); }   // the mirror appends OFF the loop (a read made with no append in flight is the last one)
+    fs.promises.appendFile = prA;
     const out = { posted: posted.version, asked, w, state: job.state, pending: job.interaction && job.interaction.pending, resolved, woke, again, recorded: ((job.interaction && job.interaction.answers) || []).filter((x) => x && x.withdrawn === true).map((x) => x.version), stdin: tail.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.withdrawn === true).length };
     J.shutdown(); return out;
   };
@@ -2324,8 +2328,11 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
       flushSync(files) { for (const f of files || [...S.keys()]) land(f, true); return { written: [], left: [] }; },
       forget: (f) => { S.delete(f); },
     };
-    return { W, land, landAll: () => { for (const f of [...S.keys()]) land(f, true); } };
+    return { W, land, landAll: () => { for (const f of [...S.keys()]) land(f, true); }, ridesOf: (f) => { const s = S.get(f); return s ? s.rides.length : 0; } };   // r3796: what still rides a file's landing
   };
+  // r3796 (B-7e49): a scene's own count of the reads of ONE file in flight — each ended a turn after it settles, so the reader's own
+  // .then chain has run: what a wait on «the read again has answered» ends on
+  const readsOf = (file) => { const prf = fs.promises.readFile, c = { n: 0, started: 0, stop: () => { fs.promises.readFile = prf; } }; fs.promises.readFile = function (f, ...a) { const p = prf.call(this, f, ...a); if (String(f) === file) { c.n++; c.started++; const done = () => setImmediate(() => { c.n--; }); p.then(done, done); } return p; }; return c; };
   const seedDone = () => fx.jobs.filter((j) => j.state === 'done' && !j.cron && !j.cronParent).map(strip);
   const scene = (Mod, tag, g = gatedJobsWriter()) => {
     const d = mkDir('jobs-archive-writer-' + tag);
@@ -2399,8 +2406,13 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     const n0 = J2.archivedCount(), held = (J2._unread.archive && J2._unread.archive.code) || null, flushed = flushes;
     const clearWords = ((J2.clearJobs(['jb-0000c1e0'], { by: 'owner' }) || {}).archiveUnread) || '';   // r2255 (2): a clear met while it holds
     g.W.flushSync = fs0;
-    g.land(AF);                                                   // the first engine's write lands
-    for (let i = 0; i < 200 && J2._unread.archive; i++) await new Promise((r) => setTimeout(r, 10));
+    const rd = readsOf(AF);
+    try {
+      g.land(AF);                                                 // the first engine's write lands (its riders run inside the landing)
+      // r3796 (B-7e49): the wait ends on its FACT — the hold lifted, or nothing left that could lift it (no ride on the archive, no read
+      // of it in flight, no write of it owed): a copy that never reads again ends here at once, not at the 2 s bound
+      for (let i = 0; i < 200 && J2._unread.archive && (g.ridesOf(AF) || rd.n || g.W.pending(AF)); i++) await new Promise((r) => setTimeout(r, 10));
+    } finally { rd.stop(); }
     const n = J2.archivedCount(), noted = !!(J2._logsNoteOwed && J2._logsNoteOwed.archive), saidFailed = logs2.some((l) => /could not be read/.test(l));
     try { J.shutdown(); } catch { } try { J2.shutdown(); } catch { }
     return { n0, held, flushed, n, readAgain: !J2._unread.archive, noted, saidFailed, clearWords };
@@ -2432,16 +2444,21 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     J.archiveSweep({ now: T0 + 25 * H });   // write 1, handed
     const J2 = new Mod2.JobManager({ dataDir: d, broadcast: () => { }, notifyUser: () => ({ ok: true }), log: () => { }, archivePolicy: () => policy, writer: g.W, logsSweep: { bootDelayMs: 3600e3 }, unreadRetry: { firstMs: 60e3, maxMs: 60e3 } });
     J2.archivedCount();                      // held (EOWED)
+    const rd = readsOf(AF);
+    try {
     g.land(AF);                              // write 1 lands: the second engine's read again starts (off the loop)
     const n1 = JSON.parse(fs.readFileSync(AF, 'utf8')).length;
     J._writeArchive(J._archiveNext().slice(1));   // write 2 (one record fewer), handed WHILE that read runs
-    for (let i = 0; i < 50; i++) { await new Promise((r) => setTimeout(r, 10)); if (!J2._unread.archive) break; }   // the read finishes (a copy that loads it lifts the hold: the wait ends there)
+    // r3796 (B-7e49): ends on its FACT — the read again begun at write 1's landing has ANSWERED (a copy that loads it lifts the hold;
+    // the engine rides write 2's landing): never a 500 ms clock
+    for (let i = 0; i < 50 && J2._unread.archive && !(rd.started && !rd.n); i++) await new Promise((r) => setTimeout(r, 10));
     const midway = { held: !!J2._unread.archive, n: J2.archivedCount() };
     g.land(AF);                              // write 2 lands
     for (let i = 0; i < 200 && J2._unread.archive; i++) await new Promise((r) => setTimeout(r, 10));
     const after = { held: !!J2._unread.archive, n: J2.archivedCount() };
     try { J.shutdown(); } catch { } try { J2.shutdown(); } catch { }
     return { n1, midway, after };
+    } finally { rd.stop(); }
   };
   const OR = await owedRace({ JobManager }, 'owed-race');
   ok(OR.n1 > 1 && OR.midway.held && OR.midway.n === 0 && !OR.after.held && OR.after.n === OR.n1 - 1, 'a write handed while the owed read again reads is waited for at ITS landing — the second engine never loads the older file, and reads the newer once it lands', OR);
@@ -2826,7 +2843,10 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
     const id = J.archivedList()[0].id; let ans = null;
     J.rmArchived(id, (x) => { ans = x; });
-    for (let i = 0; i < 100 && ans === null; i++) await new Promise((r) => setTimeout(r, 10));   // r2255 (4): waits on the answer itself (a cut bound never answers: the wait ends, the control reads null)
+    // r3796 (B-7e49): the bound's OWN TURN is the fact — a timer of the bound's length set after the ✕ fires after the bound's timer (Node
+    // runs timers of one length in the order they were set), then the answer's own turns: the answer is there (r2255 (4)), or a copy
+    // with no bound has given none — read at the bound, never at a 1 s clock
+    await new Promise((r) => setTimeout(r, J.d.rmReplyMs)); for (let i = 0; i < 10 && ans === null; i++) await new Promise((r) => setImmediate(r));
     const atBound = ans;
     let later = null; J.logsGone(id, 60e3).then((x) => { later = x; });   // r1963: a later ask, the write still not landed
     for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));   // answered AT ONCE (a few turns), or it waits with the write
