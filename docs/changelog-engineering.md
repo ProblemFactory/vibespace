@@ -31,6 +31,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE: src/server/rewind-requests.js `goalFenceOf` (the same fence, `rewindFenceLeft`); src/ws-handler.js's set-goal case asks it before any write and answers `error {code:'rewind-out', scope:'goal', left}`; reading the goal (`status`) is never stopped. It stops the PERSON's own press only: the agent's goal state read from its records is not a press. The page: the composer's «Setting goal…» line ends and the typed /goal goes back into a free box (src/lib/chat-input.js `refusedGoal`), the view says why with the seconds left (src/lib/chat-view.js `_sayRefusedGoal`; three sentences in en + zh + ja).
 - Legs: scripts/test-checkpoints.mjs §10 — ws-handler's own set-goal case lifted over stand-ins: set, clear and resume refused with nothing written while a files press is out; status answered; free again with none out or past the minute; the composer's and the view's methods lifted; RED: the case unfenced.
 
+### gmail-connect-wall — B-360d cut 3: the ledger's first load trims as it reads (the fold worker held every row of its window until one end trim)
+- **The fault (a heap snapshot of the fold worker at its peak, on the stand-in ledger):** the load pass trimmed the hot set once, at its end, so every row inside the window waited for it as an object (~2 M rows, ~0.5 GB), while the end trim kept a sixth.
+- **The cure:** in the fold worker (a worker thread; never the hub's loop), the same trim runs whenever the hot set passes 1.5× its ceiling during the pass; the pass's end trims whenever it trimmed.
+- **The law:** the same ledger to the byte wherever the slices fall (test-usage-trim §6, the release's pass against this one at three slice sizes; RED: a trim that drops or doubles one row).
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
