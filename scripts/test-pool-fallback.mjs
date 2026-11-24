@@ -293,7 +293,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const nowS = () => Math.floor(Date.now() / 1000);
   const cacheOf = (u5) => JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand', fiveHour: { utilization: u5, resetsAt: nowS() + 7200 }, sevenDay: { utilization: 0.4, resetsAt: nowS() + 3 * 86400 } });
   const EMPTY_MANAGED = path.join(scratchDir('pool-fallback-managed-none'), 'none');   // the machine's managed Claude settings folder, stood in EMPTY (never the test machine's own)
-  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED, landingMs = 90e3 } = {}) => {
+  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED, landingMs = 90e3, fb = null } = {}) => {
     const dir = scratchDir('pool-fallback-eng'), root = fs.mkdtempSync(path.join(dir, 'w-')), dataDir = path.join(root, 'data');
     const wam = wireAm(AccountManager, dataDir);
     wam.setProviderRows(() => MP.rosterRowsOf(store.thirdParty(), { usable: (p) => vault.state() === 'unlocked' && store.hasKey(p.id) }));
@@ -302,7 +302,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     const poolIds = [];
     for (let i = 0; i < pools; i++) {
       const id = wam.createPool({ name: i ? 'Team ' + (i + 1) : 'Team', members: [WA, WB] }).id;
-      wam.setPoolTarget(id, WA); wam.updatePool(id, { hot: true, fallbackProviders: [ds.id], ...(cross ? { crossProvider: cross } : {}) });
+      wam.setPoolTarget(id, WA); wam.updatePool(id, { hot: true, fallbackProviders: fb || [ds.id], ...(cross ? { crossProvider: cross } : {}) });
       poolIds.push(id);
     }
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
@@ -350,6 +350,14 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     return { am: wam, eng, A: WA, B: WB, P: poolIds[0], P2: poolIds[1], pools: poolIds, cacheDir, sessions, notices, sent, items, cards, metas, meta, mk, pass, settle, mute, restarts, client, todos };
   };
   const fbItems = (w) => w.items.filter((x) => x.action && x.action.type === 'pool-cross-provider' && x.action.fallback === true);
+
+  // (r3945 (3)) THE ORDER OF USE: two keys of ONE vendor listed — the pool moves a conversation to the FIRST of the saved list that can
+  // take it (fallbackRows walks the list; no reading ranks one key over another); the same two in the other order ⇒ the other
+  const orderScene = async (fb) => { const w = world({ cross: 'allow', fb }); w.client(); w.mk('o1'); await w.pass(); const m = w.metas.get('cw-o1'); return m && m.poolFallback ? m.poolFallback.provider : null; };
+  const dsB = (await store.add({ preset: 'deepseek', key: KEY, label: 'Second key' })).provider;   // a second DeepSeek key (ds2 was removed above)
+  const oA = await orderScene([dsB.id, ds.id]), oB = await orderScene([ds.id, dsB.id]);
+  await store.remove(dsB.id);   // the scenes below see the store as before
+  ok(oA === dsB.id && oB === ds.id, '(r3945 (3)) two keys of one vendor listed: the pool moves a conversation to the FIRST of the saved list — the list\'s order is the order of use (the page stands its rows in it)', { oA, oB, ds: ds.id, dsB: dsB.id });
 
   // SCENE 1 — every member out, the switch 'never': nothing moves; ONE item a pool and provider with its live count
   const w1 = world();

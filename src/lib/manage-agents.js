@@ -26,7 +26,7 @@ import { needLine, pairDoor, needDoorButton, settingsDoor, sayOnLine } from './n
 import { techFold, techFoldHtml } from './plain-words.js'; // lane ui-plain-words: where a CLI was found folds when nothing is wrong
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
-import { accountsWithTails, withHostKeyTail } from './account-tails.js'; // B-ba7d (B-ee0a: a paired machine's CLI-key tail too): the roster's own read of the accounts, the person's tails laid on
+import { accountsWithTails, withHostKeyTail, tailOf } from './account-tails.js'; // B-ba7d (B-ee0a: a paired machine's CLI-key tail too): the roster's own read of the accounts, the person's tails laid on
 import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
@@ -35,6 +35,7 @@ import { oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: ONE last da
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
 import { renderProviderRows, namedLiveRows } from './provider-roster.js'; // lane lg-providers U5 (B-d578): a third party's rows under the roster
 import { openProviderWizard } from './provider-wizard.js'; // lane lg-providers U5: Add a third-party model… (four screens)
+import { shippedOf } from '../model-providers.js'; // (r3945) a pay-as-you-go key's vendor: the preset the person chose in the wizard
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
 import { openOatShapeDialog } from './oat-shape-dialog.js';
 import { shapeName } from '../plan-names.js'; // PURE (lane oat-add-door, acceptance r1): a plan by the table's CURRENT names on the row's line // lane oat-add-door: the guided door — sign in once, or choose the subscription type
@@ -142,7 +143,7 @@ export function fallbackChoices(providerRows, backend) {
   const seen = new Set(), out = [];
   for (const r of Array.isArray(providerRows) ? providerRows : []) {
     if (!r || !backend || r.backend !== backend || r.type !== 'provider' || !r.id || seen.has(r.id)) continue;   // a provider ROW (its type — never a branch on the id's shape) of the pool's own harness (handed, never a literal: §78)
-    seen.add(r.id); out.push({ id: r.id, name: r.name || r.id, ready: !!r.loggedIn, notReady: r.loggedIn ? null : (r.notReady || null) });
+    seen.add(r.id); out.push({ id: r.id, name: r.name || r.id, ready: !!r.loggedIn, notReady: r.loggedIn ? null : (r.notReady || null), preset: r.preset || null, tail: typeof r.tail === 'string' && r.tail ? r.tail : null });   // (r3945) tail: the person's own read laid on the row (accountsWithTails) — the list carries none
   }
   return out;
 }
@@ -152,9 +153,29 @@ export function fallbackChoicesWithListed(providerRows, backend, listed) {
   const out = fallbackChoices(providerRows, backend);
   for (const x of Array.isArray(listed) ? listed : []) {
     if (!x || !x.id || out.some((c) => c.id === x.id)) continue;
-    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: x.fits === false ? 'no-fit' : 'unknown' });   // (r3908 small) a held record that no longer serves this vendor, said as that
+    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: x.fits === false ? 'no-fit' : 'unknown', preset: null, tail: null });   // (r3908 small) a held record that no longer serves this vendor, said as that
   }
   return out;
+}
+/** (r3945 (1)) a pay-as-you-go key's VENDOR in words: the preset the person chose in the wizard, by its own name there (DeepSeek, Kimi,
+ *  GLM, MiniMax, OpenRouter; a self-hosted record «Other or self-hosted»); null when the row names no preset (a listed key the
+ *  store does not know now) */
+export function fallbackVendorOf(row, t) {
+  const s = row && row.preset ? shippedOf(row.preset) : null;
+  return s ? t(s.label) : null;
+}
+/** (r3945 (1)) WHAT A ROW IS, under its name: its vendor and ••••<the last four characters of its key> — two keys of one vendor told
+ *  apart at a glance; the tail only from the person's own read (never in the accounts list or its push, B-ba7d) */
+export function fallbackWhatWords({ vendor = null, tail = null } = {}) {
+  return [vendor, tail ? '••••' + tail : null].filter(Boolean).join(' · ');
+}
+/** (r3945 (3)) THE ROWS IN THE ORDER OF USE: the engine walks the saved list top first (usage-pool-engine fallbackRows, then
+ *  the chooser's stable order — no reading ranks one key over another) and takes the first that can take the conversation; so the
+ *  checked rows stand first, in the saved list's order (a newly checked one last), then the others in the roster's order */
+export function fallbackRowsInOrder(choices, picked) {
+  const list = Array.isArray(choices) ? choices : [], on = Array.isArray(picked) ? picked : [];
+  const byId = new Map(list.map((c) => [c.id, c]));
+  return [...on.map((id) => byId.get(id)).filter(Boolean), ...list.filter((c) => !on.includes(c.id))];
 }
 const sameIds = (a, b) => (Array.isArray(a) ? a : []).join('\n') === (Array.isArray(b) ? b : []).join('\n');
 /** (r3886 (A)) THE DIALOG's SAVE SENDS WHAT THE PERSON CHANGED: the members and their order always (as at the base); the switch only
@@ -200,26 +221,26 @@ export function fallbackLockWords({ unread = null, damaged = null } = {}, t) {
 }
 /** the section's HTML — the switch (its words say the BILL, r3316 (4)) and the list (r3316 (5)) */
 export function fallbackSectionHtml({ codex = false, cross = 'never', picked = [], choices = [], unread = null, damaged = null } = {}, t, esc) {
-  const head = `<div class="pool-fb-head">${esc(t('When every member is out'))}</div>`;
-  if (codex) return `<div class="pool-fb-section">${head}<div class="usage-note">${esc(t('Fallback providers are for Claude pools — a ChatGPT pool waits for its own accounts.'))}</div></div>`;
+  const head = `<div class="pool-fb-head">${esc(t('When every member is out: pay-as-you-go API keys'))}</div>`;   // (r3945 (2)) METERED keys, never «provider» alone (read as a vendor)
+  if (codex) return `<div class="pool-fb-section">${head}<div class="usage-note">${esc(t('Pay-as-you-go API keys are for Claude pools — a ChatGPT pool waits for its own accounts.'))}</div></div>`;
   const allow = cross === 'allow';
   const bill = allow
-    ? t('The pool moves a conversation to a fallback provider by itself — it then continues there and is BILLED THERE, on that provider\'s own bill, not on this pool\'s subscriptions.')
-    : t('The pool asks you in For you before a conversation moves to a fallback provider (its use there is billed on that provider\'s own bill).');
-  const rows = choices.map((c) => {
-    const on = picked.includes(c.id), why = c.ready ? null : fallbackNotReadyWords(c.notReady, t);
-    return `<label class="pool-fb-row" data-id="${esc(c.id)}"><input type="checkbox" class="pool-fb-cb" data-id="${esc(c.id)}" ${on ? 'checked' : ''} aria-label="${esc(c.name)}"> <span class="pool-fb-name">${esc(c.name)}</span>${why ? `<br><span class="pool-mem-sub pool-fb-why">${esc(why)}</span>` : ''}</label>`;
+    ? t('The pool moves a conversation to one of these keys by itself — it then continues there and is BILLED THERE, on that key\'s own bill at its vendor, not on this pool\'s subscriptions.')
+    : t('The pool asks you in For you before a conversation moves to one of these keys (its use there is billed on that key\'s own bill at its vendor).');
+  const rows = fallbackRowsInOrder(choices, picked).map((c) => {
+    const on = picked.includes(c.id), why = c.ready ? null : fallbackNotReadyWords(c.notReady, t), what = fallbackWhatWords({ vendor: fallbackVendorOf(c, t), tail: c.tail });
+    return `<label class="pool-fb-row" data-id="${esc(c.id)}"><input type="checkbox" class="pool-fb-cb" data-id="${esc(c.id)}" ${on ? 'checked' : ''} aria-label="${esc(c.name)}"> <span class="pool-fb-name">${esc(c.name)}</span>${what ? `<br><span class="pool-mem-sub pool-fb-what">${esc(what)}</span>` : ''}${why ? `<br><span class="pool-mem-sub pool-fb-why">${esc(why)}</span>` : ''}</label>`;
   }).join('');
   return `<div class="pool-fb-section">${head}
-    <div class="pool-place-row pool-fb-switch" role="radiogroup" aria-label="${esc(t('When every member is out'))}">
+    <div class="pool-place-row pool-fb-switch" role="radiogroup" aria-label="${esc(t('When every member is out: pay-as-you-go API keys'))}">
       <label><input type="radio" name="pool-fb-mode" value="never" ${allow ? '' : 'checked'}> ${esc(t('Ask me first'))}</label>
       <label><input type="radio" name="pool-fb-mode" value="allow" ${allow ? 'checked' : ''}> ${esc(t('Move without asking'))}</label>
     </div>
     <div class="usage-note pool-fb-bill">${esc(bill)}</div>
     ${unread ? `<div class="usage-note pool-fb-unread">${esc(unread)}</div>` : ''}
     ${damaged ? `<div class="usage-note pool-fb-unread">${esc(fallbackLockWords({ damaged }, t))}</div><div class="usage-note pool-fb-copy"><code>${esc(String(damaged.copy || ''))}</code></div>` : ''}
-    <div class="pool-fb-list">${rows || (unread || damaged ? '' : `<div class="empty-hint">${esc(t('No model provider fits Claude yet — add one in the account dialog'))}</div>`)}</div>
-    <div class="usage-note pool-fb-bound">${esc(t('Used only when every member is out. At most {n} fallback providers.', { n: FALLBACK_MAX }))}</div>
+    <div class="pool-fb-list">${rows || (unread || damaged ? '' : `<div class="empty-hint">${esc(t('No pay-as-you-go API key serves Claude yet — add one in the account dialog'))}</div>`)}</div>
+    <div class="usage-note pool-fb-bound">${esc(t('Each row is one API key you added, paid as you go: its vendor bills its use on that key\'s own bill — never on this pool\'s subscriptions. Used only when every member is out, top first: the first key that can take the conversation then. At most {n}.', { n: FALLBACK_MAX }))}</div>
   </div>`;
 }
 /** the pool row's fallback lines from the counts the list carries (r3316 (2)) → [{ text, back }] — `back`: the row's ONE press is offered */
@@ -1680,7 +1701,7 @@ export function installManageAgents(App, ctx = {}) {
   // drag handle — and on #1 "Move every conversation here now" (never greyed).
   async _poolMembersDialog(poolId, a, refresh) {
     let list;
-    try { list = await fetchJson('/api/accounts'); } catch { showToast(t('Could not load accounts'), { type: 'error' }); return; }
+    try { list = await accountsWithTails(); } catch { showToast(t('Could not load accounts'), { type: 'error' }); return; }   // (r3945) the roster's own read: GET /api/accounts + the PERSON's tails (B-ba7d) laid on its rows
     // Members are the pool's OWN backend's logins (a codex pool switches
     // among ChatGPT accounts — 2.369.18; the dialog was claude-only)
     const be = a?.backend || 'claude';
@@ -1704,6 +1725,7 @@ export function installManageAgents(App, ctx = {}) {
       fb: Array.isArray(fresh.fallbackProviders) ? fresh.fallbackProviders.map((x) => x.id) : [],
     };
     const fbChoices = codex ? [] : fallbackChoicesWithListed(list?.providerRows, be, fresh.fallbackProviders);   // (r3886 (C)) every listed provider shown, a gone one with its word
+    for (const c of fbChoices) if (!c.tail) c.tail = tailOf(c.id);   // (r3945) a listed key the roster does not offer now: its tail from the same read, if it gave one
     const fbUnread = codex ? null : (list?.providersUnread || null);   // (r3886 (B)) the provider store's own words while it cannot be read
     const fbDamaged = codex ? null : (list?.providersDamaged || null);   // (r3908 (2)) lifted EMPTY over torn bytes: the SAME fact the hub's refusal reads
     const fbLock = fbUnread || fbDamaged ? fallbackLockWords({ unread: fbUnread, damaged: fbDamaged }, t) : null;
@@ -1749,6 +1771,7 @@ export function installManageAgents(App, ctx = {}) {
           st.fb.push(id);
           if (c && !c.ready) { const why = fallbackNotReadyWords(c.notReady, t); if (why) showToast(why, { type: 'info' }); }
         } else if (!cb.checked) st.fb = st.fb.filter((x) => x !== id);
+        draw();   // (r3945 (3)) the row stands where the pool will use it: the checked ones first, in the list's order
       };
       for (const r of body.querySelectorAll('input[name="pool-place"]')) r.onchange = () => {
         st.mode = r.value;

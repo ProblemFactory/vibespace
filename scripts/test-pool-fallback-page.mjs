@@ -55,14 +55,14 @@ console.log('— ① the section');
   const never = MA.fallbackSectionHtml({ cross: 'never', picked: ['pv-demo-router'], choices }, T, ESC);
   const allow = MA.fallbackSectionHtml({ cross: 'allow', picked: ['pv-demo-router', 'pv-demo-local'], choices }, T, ESC);
   const codex = MA.fallbackSectionHtml({ codex: true, choices }, T, ESC);
-  ok(/value="never" checked/.test(never) && !/value="allow" checked/.test(never) && /asks you in For you before a conversation moves/.test(never),
+  ok(/value="never" checked/.test(never) && !/value="allow" checked/.test(never) && /asks you in For you before a conversation moves to one of these keys/.test(never),
     '① «Ask me first» is the default and says the pool asks in For you first');
-  ok(/value="allow" checked/.test(allow) && /continues there and is BILLED THERE, on that provider's own bill, not on this pool's subscriptions/.test(allow.replace(/&#39;|'/g, "'")),
+  ok(/value="allow" checked/.test(allow) && /continues there and is BILLED THERE, on that key's own bill at its vendor, not on this pool's subscriptions/.test(allow.replace(/&#39;|'/g, "'")),
     '① «Move without asking» says the BILL in plain words: the conversation continues on that provider and is billed THERE, on its own bill');
   ok((never.match(/class="pool-fb-row"/g) || []).length === 3 && /No key is stored for this provider — add it in the account dialog first/.test(never) && !/disabled/.test(never + allow)
-    && /data-id="pv-demo-router" checked/.test(never) && /At most 8 fallback providers/.test(never),
+    && /data-id="pv-demo-router" checked/.test(never) && /At most 8\./.test(never),
     '① three providers, the one with no stored key worded beside its row — no control greyed (none disabled); the picked one checked; the bound said (8)');
-  ok(/Fallback providers are for Claude pools/.test(codex) && !/pool-fb-row/.test(codex) && !/pool-fb-mode/.test(codex), '① a ChatGPT pool says its sentence and lists nothing (no switch, no rows)');
+  ok(/Pay-as-you-go API keys are for Claude pools/.test(codex) && !/pool-fb-row/.test(codex) && !/pool-fb-mode/.test(codex), '① a ChatGPT pool says its sentence and lists nothing (no switch, no rows)');
   ok(MA.fallbackNotReadyWords('vault-locked', T) === 'The vault is locked — this provider can take conversations once you unlock it' && MA.fallbackNotReadyWords(null, T) === null,
     '① the vault locked has its own word; a ready provider wears none');
 }
@@ -157,11 +157,11 @@ console.log('— ⑥ the save sends what the person changed; the list keeps what
   ok(L.save, '⑥ (r3886 (A)) a members-only save carries NEITHER the switch nor the list (a dialog opened on «Move without asking» never turns it on again; the pool\'s queued moves are left alone); a changed switch alone carries the switch, a changed list alone the list; a ChatGPT pool carries neither', L.seen);
   ok(L.listed, '⑥ (r3886 (C)) a provider ON the pool\'s list that the store does not know now is LISTED, checked, with its word — a save after adding another keeps it (it leaves only by the person\'s own uncheck)', L.seen);
   const held = MA.fallbackSectionHtml({ cross: 'never', picked: [], choices: [], unread: 'providers.json in VibeSpace\'s data folder could not be read (EIO).' }, T, ESC);
-  ok(/could not be read \(EIO\)/.test(held) && !/No model provider fits Claude yet/.test(held), '⑥ (r3886 (B)) while the provider store is held the section says the store\'s OWN words, never «no provider fits yet»');
+  ok(/could not be read \(EIO\)/.test(held) && !/No pay-as-you-go API key serves Claude yet/.test(held), '⑥ (r3886 (B)) while the provider store is held the section says the store\'s OWN words, never «no key serves Claude yet»');
   ok(L.touched, '⑥ (r3908 (1)) a field the person TOUCHED is sent even when changed and changed back, WITH the value the dialog opened with (the hub then refuses a stale one by name)', L.seen);
   ok(L.nofit, '⑥ (r3908 small) a listed provider the store still holds that no longer serves Claude is said as that, by its label — not as removed');
   const dmg = MA.fallbackSectionHtml({ cross: 'never', picked: ['pv-x'], choices: [], damaged: { copy: 'providers.json.corrupt-demo' } }, T, ESC);
-  ok(/The list of model providers was damaged, so it starts empty/.test(dmg) && /providers\.json\.corrupt-demo/.test(dmg) && /until VibeSpace restarts with the list it reads now/.test(dmg) && !/No model provider fits Claude yet/.test(dmg),
+  ok(/The list of model providers was damaged, so it starts empty/.test(dmg) && /providers\.json\.corrupt-demo/.test(dmg) && /until VibeSpace restarts with the list it reads now/.test(dmg) && !/No pay-as-you-go API key serves Claude yet/.test(dmg),
     '⑥ (r3908 (2)) after a torn lift the section says the family\'s own sentence for a list that started empty, names the copy set aside, and says the way out (a restart reads the list again)');
   ok(L.words, '⑥ (smalls, (F)) the press says QUEUED with an idle one\'s words (now) and a busy one\'s (its turn\'s end); a second press says those already on their way, never «queued» again; «nothing moved back» only when no other line says why');
   const S = read('src/lib/manage-agents.js');
@@ -284,12 +284,60 @@ console.log('— ⑧ the follow\'s laws on the hub: a stale dialog\'s edit refus
   ok(eqA(l.row, [{ id: 'pv-x', label: 'X' }, { id: 'pv-y', label: 'Lab', fits: false }]), '⑧ (r3908 small) a listed provider the store still holds that no longer serves Claude rides the row by its label, marked fits:false — not as removed', l.row);
 }
 
+console.log('— ⑩ each row says what it is — its name, its vendor, ••••its last four (the person\'s read only) — in the order the pool uses them (r3945)');
+{
+  const AT = await import(path.join(REPO, 'src/lib/account-tails.js'));
+  const LIST = { providerRows: [
+    { id: 'pv-demo-router', name: 'Router', type: 'provider', backend: 'claude', loggedIn: true, preset: 'deepseek', kind: 'anthropic-compatible' },
+    { id: 'pv-demo-deep2', name: 'DeepSeek', type: 'provider', backend: 'claude', loggedIn: true, preset: 'deepseek', kind: 'anthropic-compatible' },
+    { id: 'pv-demo-lab', name: 'Home lab', type: 'provider', backend: 'claude', loggedIn: true, preset: 'other', kind: 'self-hosted' },
+  ] };
+  const TAILS = { 'pv-demo-router': 'e9b6', 'pv-demo-deep2': '41c2', 'pv-demo-lab': '7f30' };
+  const subs = (h) => [...h.matchAll(/<span class="pool-mem-sub pool-fb-what">([^<]*)<\/span>/g)].map((m) => m[1]);
+  const ids = (h) => [...h.matchAll(/<label class="pool-fb-row" data-id="([^"]+)"/g)].map((m) => m[1]);
+  const bare = MA.fallbackSectionHtml({ cross: 'never', picked: [], choices: MA.fallbackChoices(LIST.providerRows, 'claude') }, T, ESC);
+  const laid = AT.withTails(LIST, { accounts: {}, cliKey: null, providers: TAILS });   // the person's read (POST /api/accounts/tails) laid on the rows
+  const html = MA.fallbackSectionHtml({ cross: 'never', picked: ['pv-demo-lab', 'pv-demo-router'], choices: MA.fallbackChoices(laid.providerRows, 'claude') }, T, ESC);
+  ok(eqA(subs(bare), ['DeepSeek', 'DeepSeek', 'Other or self-hosted']) && !/••••/.test(bare),
+    '⑩ (r3945 (1)) each row names its VENDOR under its name — the preset the person chose (two keys of DeepSeek, one self-hosted) — and, before the person\'s read, no characters of a key', subs(bare));
+  ok(eqA(subs(html), ['Other or self-hosted · ••••7f30', 'DeepSeek · ••••e9b6', 'DeepSeek · ••••41c2']) && subs(html)[1] !== subs(html)[2],
+    '⑩ (r3945 (1)) with the person\'s read laid on: the vendor and ••••the last four — two keys of ONE vendor told apart at a glance', subs(html));
+  ok(eqA(ids(html), ['pv-demo-lab', 'pv-demo-router', 'pv-demo-deep2']) && eqA(ids(bare), ['pv-demo-router', 'pv-demo-deep2', 'pv-demo-lab']),
+    '⑩ (r3945 (3)) the rows stand in the order the pool uses them: the checked ones first, in the saved list\'s order, then the others (the engine\'s order: test-pool-fallback)', { checked: ids(html), none: ids(bare) });
+  const S = read('src/lib/manage-agents.js');
+  ok(/When every member is out: pay-as-you-go API keys/.test(html) && /Each row is one API key you added, paid as you go: its vendor bills its use on that key&#39;s own bill|Each row is one API key you added, paid as you go: its vendor bills its use on that key's own bill/.test(html)
+    && /Used only when every member is out, top first: the first key that can take the conversation then\. At most 8\./.test(html)
+    && S.includes("try { list = await accountsWithTails(); } catch {") && S.includes("draw();   // (r3945 (3)) the row stands where the pool will use it"),
+    '⑩ (r3945 (2)) the section is named for what it lists — METERED keys, each billed by its vendor on its own bill, used only when every member is out, top first; the dialog reads the rows with the person\'s tails (the roster\'s own read) and redraws a checked row into its place');
+  // B-ba7d: THE LIST AND ITS PUSH CARRY NO TAIL — a real store of three keys (two of one vendor, one self-hosted), the pool listing all three
+  const tailsLaw = (MPX) => {
+    const dir = scratchDir('pool-fallback-page-tails'), pushes = [];
+    const am = new AccountManager({ dataDir: dir, onChange: (l) => pushes.push(l) });
+    const rec = (id, o, tail) => ({ ...MP.normalizeProvider({ id, ...o }), tail });
+    const recs = { 'pv-t1': rec('pv-t1', { preset: 'deepseek', kind: 'anthropic-compatible', label: 'Router' }, 'Qz7w'), 'pv-t2': rec('pv-t2', { preset: 'deepseek', kind: 'anthropic-compatible', label: 'DeepSeek' }, 'Kx4p'),
+      'pv-t3': rec('pv-t3', { preset: 'other', kind: 'self-hosted', wire: 'anthropic-messages', baseUrl: 'https://lab.invalid/v1', label: 'Home lab' }, 'Mv9t') };
+    am.setProviderLookup((x) => recs[x && x.id] || null);
+    am.setProviderRows(() => MPX.rosterRowsOf(Object.values(recs), { usable: true }));
+    const A = am.createSubscription({ name: 'Tails' }).id; login(am, A);
+    const P = am.createPool({ name: 'Tails pool', members: [A] }).id;
+    pushes.length = 0; am.updatePool(P, { fallbackProviders: ['pv-t1', 'pv-t2', 'pv-t3'] });
+    const all = JSON.stringify(am.list()) + JSON.stringify(pushes);
+    return { pushes: pushes.length, rows: (am.list().providerRows || []).length, listed: ((am.get(P) || {}).fallbackProviders || []).length, tails: ['Qz7w', 'Kx4p', 'Mv9t'].filter((x) => all.includes(x)) };
+  };
+  const tl = tailsLaw(MP);
+  ok(tl.pushes > 0 && tl.rows >= 3 && tl.listed === 3 && tl.tails.length === 0,
+    '⑩ (B-ba7d) the accounts list and its push carry NO character of a key after this change — the rows\' tails come only from the person\'s own read on the page', tl);
+  const MPS = read('src/model-providers.js');
+  const tx = tailsLaw(M.load('src/model-providers.js', anchored(MPS, 'localOnly: true,', 'localOnly: true, tail: p.tail,', 'the list carries the tail'), 'mp-list-tail'));
+  ok(tx.tails.length === 3, 'CONTROL (loaded, run): a model-providers copy whose roster rows carry the tail puts the three tails in the list and its push ⇒ the leg goes RED', tx);
+}
+
 console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
 {
   const S = read('src/lib/manage-agents.js');
   const loadMA = async (src, tag) => import(pathToFileURL(M.write('src/lib/manage-agents.js', src, tag)).href);
-  const BILL = "t('The pool moves a conversation to a fallback provider by itself — it then continues there and is BILLED THERE, on that provider\\'s own bill, not on this pool\\'s subscriptions.')";
-  const noBill = await loadMA(anchored(S, BILL, "t('The pool moves a conversation to a fallback provider by itself.')", 'the bill cut'), 'no-bill');
+  const BILL = "t('The pool moves a conversation to one of these keys by itself — it then continues there and is BILLED THERE, on that key\\'s own bill at its vendor, not on this pool\\'s subscriptions.')";
+  const noBill = await loadMA(anchored(S, BILL, "t('The pool moves a conversation to one of these keys by itself.')", 'the bill cut'), 'no-bill');
   ok(!/BILLED THERE/.test(noBill.fallbackSectionHtml({ cross: 'allow', picked: [], choices: [] }, T, ESC)), 'CONTROL (loaded, run): a copy whose «Move without asking» says no bill draws the section WITHOUT the bill ⇒ ①\'s bill leg goes RED');
   const BACK = "${back ? ` <button class=\"agent-btn pool-fb-back\"";
   const always = await loadMA(anchored(S, BACK, "${true ? ` <button class=\"agent-btn pool-fb-back\"", 'the press always offered'), 'always-press');
@@ -297,7 +345,7 @@ console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
   const SAVE = "  if (crossTouched || cross !== cross0) { body.crossProvider = cross; body.crossProviderOpened = cross0; }\n  if (fbTouched || !sameIds(fb, fb0)) { body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice(); body.fallbackProvidersOpened = (Array.isArray(fb0) ? fb0 : []).slice(); }\n";
   const resend = await loadMA(anchored(S, SAVE, "  body.crossProvider = cross;\n  body.fallbackProviders = (Array.isArray(fb) ? fb : []).slice();\n", 'the save re-sends both'), 'resend');
   ok(!legs6(resend).save, 'CONTROL (loaded, run): a copy whose save re-sends the switch and the list as they opened (the release before the cure) ⇒ ⑥\'s save leg goes RED');
-  const LISTED = "    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: x.fits === false ? 'no-fit' : 'unknown' });   // (r3908 small) a held record that no longer serves this vendor, said as that\n";
+  const LISTED = "    out.push({ id: x.id, name: x.label || x.id, ready: false, notReady: x.fits === false ? 'no-fit' : 'unknown', preset: null, tail: null });   // (r3908 small) a held record that no longer serves this vendor, said as that\n";
   const dropped = await loadMA(anchored(S, LISTED, '', 'the listed provider dropped'), 'dropped');
   ok(!legs6(dropped).listed, 'CONTROL (loaded, run): a copy that lists only the roster\'s providers drops the one the store does not know ⇒ ⑥\'s list leg goes RED');
   const ALREADY = "  if (al) out.push({ text: al === 1 ? t('1 conversation is already on its way back') : t('{n} conversations are already on their way back', { n: al }), type: 'info' });\n";
