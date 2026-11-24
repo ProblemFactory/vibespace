@@ -960,6 +960,7 @@
   "test-usage-two-rings.mjs": 1,
   "test-usage-walk-parity.mjs": 1,
   "test-usage-window-pivots.mjs": 1,
+  "test-user-state-bounds-work.mjs": 1,
   "test-user-state-bounds.mjs": 1,
   "test-user-state-echo-chrome.mjs": 1,
   "test-user-state-echo.mjs": 1,
