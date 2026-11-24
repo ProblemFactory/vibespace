@@ -209,6 +209,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const stashedTabFencesByProfile = new Map(); // profileId → {browserId, tabs: Map(targetId → {url, liveFill, postLiftGuards})} (same-process reconnect only)
   const fillEpochsByProfile = new Map();  // profileId → Map(targetId → number)
   const credSigsByProfile = new Map();    // profileId → Array<{len, sha256, rHash, rPow}>
+  const scrubValuesVer = new Map();       // profileId → n: THE VALUES' COUNTER (主开发 r3342 (4)) — moved by both writers (recordScrubSecret, recordProfileCredSigs); the frame scrub's worker is handed the values again when it moved
   const credRequestIdsByProfile = new Map(); // profileId → Set<string>
   const knownFenceProfiles = new Set();   // profileIds whose live/persisted login fences this watch instance tracks
   const fenceAuditLines = [];             // bounded journal of fences ended by ceiling / browser-stop / target-gone / url-changed
@@ -3096,14 +3097,18 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!pid || !Array.isArray(sigs) || !sigs.length) return;
     let list = credSigsByProfile.get(pid);
     if (!list) { list = []; credSigsByProfile.set(pid, list); }
+    let moved = 0;
     for (const sg of sigs) {
       if (!sg || !sg.len || !sg.sha256) continue;
       const idx = list.findIndex((x) => x.len === sg.len && x.sha256 === sg.sha256);
       if (idx !== -1) list.splice(idx, 1);
       list.push(sg);
+      moved++;
     }
     if (list.length > 128) list.splice(0, list.length - 128);
+    if (moved) bumpScrubValues(pid);   // r3342 (4): at the cap an add can leave the list's length and its last element as they were — the counter moves
   }
+  function bumpScrubValues(pid) { scrubValuesVer.set(pid, (scrubValuesVer.get(pid) || 0) + 1); }
   function noteCredRequestId(profileId, reqId) {
     const pid = String(profileId || '');
     const id = reqId != null ? String(reqId).trim() : '';
@@ -3194,6 +3199,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     list.push({ label: lbl, value: val, bytes, at });
     if (list.length > 32) list.splice(0, list.length - 32);
     scrubCompiledByProfile.delete(pid);
+    bumpScrubValues(pid);   // r3342 (4): the values' counter, the other writer
     noteScrubName(pid, lbl, at, persist);
   }
   /** The names list: one entry per filled vault entry `{name, at, id}` — the id is what a held row refers to (a row never holds a
@@ -3373,13 +3379,19 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── THE FRAME SCRUB'S WORKER (lane lg-vault-file, 主开发 r1915 (b) + r2445) ──
   // A frame past THE ON-LOOP FIGURE (64 KiB: the worst lawful scrub of that size holds the loop under 50 ms by the measure) is
   // scrubbed by the profile's worker (src/server/browser-scrub-worker.js: the same scrubber, the same frame scrub); a smaller one stays
-  // on the loop. The worker gets the values by MESSAGE only and lives only while the profile is live and the vault open: it starts at
-  // the first frame that needs it and ends at the profile's end, a lock (endScrubWorkers) or an idle stretch. An answer late past its
-  // bound ENDS it — every frame it held is withheld WHOLE, by name — and the next large frame starts a new one past a floor between
-  // starts (inside the floor: withheld by name). The journal gets the profile's label and a count — never a value, a page's text or
-  // an address. The ORDER of a socket's frames is the mediator's (src/server/cdp-mediator.js: one ordered sender a connection).
-  const SCRUB_FIG = Object.freeze({ onLoopMax: 64 * 1024, walkMs: 5000, boundMs: 10000, idleMs: 30000, floorMs: 5000, ...(scrubFigures && typeof scrubFigures === 'object' ? scrubFigures : {}) });
-  const scrubWorkers = new Map();     // pid → { w, pend: Map(seq → { resolve, timer }), seq, fn, sigsN, sigsTop, idle }
+  // on the loop. The worker gets the values by MESSAGE only: it starts at the first frame that needs it and ends at the profile's end,
+  // a lock (endScrubWorkers) or an idle stretch. THE WORKER's COPY ENDS AT A LOCK; THE LOOP's COPY IS THE BOUNDARY AND STANDS UNTIL
+  // THE PROFILE ENDS (主开发 r3342 (2)): the next large frame after a lock starts a worker again with the loop's values. A worker
+  // silent past its BOUND on the frame it is on ENDS — every frame it held is withheld WHOLE, by name — and the next large frame
+  // starts a new one past a floor between starts (inside the floor: withheld by name). The bound is timed from the frame's TURN (主开发
+  // r3342 (3)): the worker scrubs one frame at a time and answers each once, in order, so a frame's turn starts when the one before it
+  // is answered (or at its post, to an idle worker) — a healthy worker in a burst is never ended. Each frame also has one CEILING
+  // from its post (60 s: one connection's queue bound, 64 MiB, at the worst lawful scrub's rate, 4 MiB in 3.5 s, is 56 s): past it
+  // that frame alone is withheld by name, so nothing waits without end. The journal gets the profile's label and a count — never a
+  // value, a page's text or an address. The ORDER of a socket's frames is the mediator's (src/server/cdp-mediator.js: one ordered
+  // sender a connection).
+  const SCRUB_FIG = Object.freeze({ onLoopMax: 64 * 1024, walkMs: 5000, boundMs: 10000, ceilingMs: 60000, idleMs: 30000, floorMs: 5000, ...(scrubFigures && typeof scrubFigures === 'object' ? scrubFigures : {}) });
+  const scrubWorkers = new Map();     // pid → { w, pend: Map(seq → { resolve, timer: its ceiling }), seq, answered, turn, fn, ver, idle }
   const scrubStartedAt = new Map();   // pid → when its last worker started (the floor between starts)
   const scrubWithheld = new Map();    // pid → { n, total, saidAt } — the journal's count
   let WTm = null, WMm = null;
@@ -3405,19 +3417,26 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       s = startScrubWorker(pid);
       if (!s) return Promise.resolve(withheldFor(pid, 'no scrub worker could start'));
     }
-    const top = sigs.length ? sigs[sigs.length - 1] : null;
-    if (s.fn !== fn || s.sigsN !== sigs.length || s.sigsTop !== top) {   // the values changed since the worker last got them: by message, before the frame
-      s.fn = fn; s.sigsN = sigs.length; s.sigsTop = top;
+    const ver = scrubValuesVer.get(pid) || 0;
+    if (s.fn !== fn || s.ver !== ver) {   // the values changed since the worker last got them (the counter both writers move, r3342 (4)): by message, before the frame
+      s.fn = fn; s.ver = ver;
       try { s.w.postMessage({ type: 'values', pairs: fn ? scrubPairsOf(pid) : [], sigs, minB: VR().MIN_MASK_BYTES || 8, budgetMs: SCRUB_FIG.walkMs }); } catch { endScrubWorker(pid, 'the values could not be handed over'); return Promise.resolve(withheldFor(pid, 'the values could not be handed over')); }
     }
     const seq = ++s.seq;
     armScrubIdle(pid, s);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => endScrubWorker(pid, `no answer within ${SCRUB_FIG.boundMs} ms`, s), SCRUB_FIG.boundMs);
+      const timer = setTimeout(() => { const p = s.pend.get(seq); if (!p) return; s.pend.delete(seq); p.resolve(withheldFor(pid, `no answer within ${SCRUB_FIG.ceilingMs} ms of its post`)); }, SCRUB_FIG.ceilingMs);   // THE CEILING: this frame alone
       timer.unref?.();
       s.pend.set(seq, { resolve, timer });
+      if (s.answered === seq - 1) armScrubTurn(pid, s);   // the worker was idle: this frame's turn starts at its post
       try { s.w.postMessage({ type: 'frame', seq, frame: frameStr }); } catch { endScrubWorker(pid, 'the frame could not be handed over', s); }
     });
+  }
+  /** THE BOUND (r2445 law 5, timed from the TURN — 主开发 r3342 (3)): the frame the worker is on has boundMs; silent past it, the worker is ENDED */
+  function armScrubTurn(pid, s) {
+    if (s.turn) clearTimeout(s.turn);
+    s.turn = setTimeout(() => endScrubWorker(pid, `no answer within ${SCRUB_FIG.boundMs} ms`, s), SCRUB_FIG.boundMs);
+    s.turn.unref?.();
   }
   function startScrubWorker(pid) {
     const { Worker } = WT();
@@ -3425,13 +3444,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     try { w = new Worker(scrubWorkerFile || require('path').join(__dirname, 'browser-scrub-worker.js')); } catch (e) { say('scrub-worker-start:' + pid, `${scrubLabel(pid)}: the frame scrub's worker could not start (${(e && e.code) || 'error'}) — its large frames are withheld by name`); return null; }
     try { WM().trackWorker('browser-scrub', w); } catch { /* the census's own */ }
     scrubStartedAt.set(pid, now());
-    const s = { w, pend: new Map(), seq: 0, fn: undefined, sigsN: -1, sigsTop: undefined, idle: null };
+    const s = { w, pend: new Map(), seq: 0, answered: 0, turn: null, fn: undefined, ver: -1, idle: null };
     scrubWorkers.set(pid, s);
     w.on('message', (msg) => {
       if (msg && msg.ev === 'memory') return;   // the memory census's answer, not ours
       if (!msg || msg.type !== 'done') return;
+      if (Number(msg.seq) > s.answered) s.answered = Number(msg.seq);   // answered in order, each once: the next frame's turn starts now
+      if (s.answered < s.seq) armScrubTurn(pid, s); else if (s.turn) { clearTimeout(s.turn); s.turn = null; }
       const p = s.pend.get(msg.seq);
-      if (!p) return;
+      if (!p) return;   // its ceiling withheld it already
       s.pend.delete(msg.seq); clearTimeout(p.timer);
       p.resolve(msg.r && typeof msg.r === 'object' ? frameDone(pid, msg.r, SCRUB_FIG.walkMs) : withheldFor(pid, String(msg.withheld || 'no answer')));
     });
@@ -3446,6 +3467,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!s || (only && s !== only)) return;
     scrubWorkers.delete(pid);
     if (s.idle) clearTimeout(s.idle);
+    if (s.turn) clearTimeout(s.turn);
     for (const p of s.pend.values()) { clearTimeout(p.timer); p.resolve(withheldFor(pid, why)); }
     s.pend.clear();
     try { s.w.terminate(); } catch { /* gone */ }
@@ -4485,6 +4507,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     scrubMissingByProfile.delete(pid);
     scrubCompiledByProfile.delete(pid);
     endScrubWorker(String(pid), 'the profile ended');   // 主开发 r2445 law 4: the frame scrub's worker ends with the profile
+    scrubStartedAt.delete(String(pid)); scrubWithheld.delete(String(pid)); scrubValuesVer.delete(pid);   // r3342 (6): its per-profile facts leave with it
     sweepHoldNotices(`${HOLD_KEY}${pid}:`);   // (lane chrome-157: every hold notice of the profile ends with its holds, a past hub life's too)
     activeTabByProfile.delete(pid);
     stashedSnapshotsByProfile.delete(pid);

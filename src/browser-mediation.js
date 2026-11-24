@@ -1100,15 +1100,18 @@ function folderLostNotice({ label = '', tries = WINDOW_PUTBACK_TRIES } = {}) {
  *  { out } | { withheld } (a frame scrubbed off the loop). Frames leave in the order posted; a pending one holds the frames behind it
  *  until it is answered; with nothing waiting a frame leaves at once (synchronously). What waits is bounded in BYTES (`maxBytes`):
  *  past it a frame is withheld. `withheld(why, reply)` gives what leaves in a withheld frame's place — a refusal by name for a reply
- *  (`reply` = its {id, sessionId}), null for an event. */
+ *  (`reply` = its {id, sessionId}), null for an event. `own` (主开发 r3342 (1)) = the mediator's OWN frame (its refusal, a reply it
+ *  makes: small, one for a call of the client's): never withheld by the bound — it waits in its order, counted in what waits, and
+ *  leaves (a driver never waits on an id the mediator answered itself). `bytes` = the frame's UTF-8 bytes, the caller's count (a
+ *  refusal left in a withheld frame's place is counted by its length: its words are ASCII). */
 function orderedSender({ send, maxBytes, withheld }) {
   const q = [];
   let waiting = 0;
   const flush = () => { while (q.length && q[0].done) { const it = q.shift(); waiting -= it.bytes; if (it.out != null) { try { send(it.out); } catch { /* gone */ } } } };
-  function post(r, bytes, reply = null) {
+  function post(r, bytes, reply = null, own = false) {
     if (typeof r === 'string' && !q.length) { send(r); return; }
     let n = Number(bytes) || 0;
-    if (q.length && waiting + n > maxBytes) {
+    if (!own && q.length && waiting + n > maxBytes) {   // the bound judges the browser's frames: the mediator's own (`own`) always wait in order
       if (r && typeof r.then === 'function') r.then(() => { }, () => { });
       r = withheld('the frames waiting for this connection are past their bound', reply);
       n = r ? r.length : 0;

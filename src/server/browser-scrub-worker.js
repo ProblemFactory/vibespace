@@ -2,7 +2,9 @@
 // THE BROWSER FRAMES' SCRUB WORKER (lane lg-vault-file, 主开发 r1915 (b) + r2445: the dialogs' text scrub through a worker). One
 // worker a browser profile, while that profile needs it.
 // - src/server/browser-dialogs.js starts it at the first CDP frame past the on-loop figure, and ends it at the profile's end, at a
-//   vault lock, after an idle stretch, or when an answer is late past its bound (the next large frame starts a new one, past a floor).
+//   vault lock, after an idle stretch, or when it is silent past its bound on the frame it is on (timed from that frame's turn, 主开发
+//   r3342 (3): it answers its frames one at a time, in order). The worker's copy ends at a lock; the loop's copy is the boundary and
+//   stands until the profile ends (r3342 (2)): the next large frame starts a new one with the loop's values, past a floor.
 // - The profile's values reach it by MESSAGE only (a «values» message: the masked values, the credential signatures, the mask floor
 //   and the walk's budget); it reads no file, opens nothing and sends no request. It compiles them with THE SAME scrubber the loop
 //   uses (src/vault-scrubber.js compileTextScrubber) and runs THE SAME frame scrub (src/cdp-frame-scrub.js scrubFrame) — never a

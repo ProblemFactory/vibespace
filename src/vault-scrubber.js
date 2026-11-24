@@ -679,7 +679,7 @@ function compileTextScrubber(secrets) {
   }
   const texts = [...table.keys()].sort((a, b) => b.length - a.length);
   const maxFormLen = texts.length ? texts[0].length : 0;
-  const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
+  const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;   // the release's full-forms regex (主开发 r3342 (6)): this tree's two passes read H.hre, the heads, never it; it stays so scripts/vault-run-scrub-legs.mjs rebuilds the release's scrubber from this text (its copy drops the budget's lines, each pass's H.hre with them) — one regex a recompile, at a value's change
   const H = headsOf(texts), textHeads = repeatingHeads(H.keys), CUT = placeholderOf({ label: '\u2026' });   // THE TEXT BUDGET (主开发 r1216 / r1915): the textHeads (the run scan's own builder), their repeating textHeads, the cut's placeholder
   let overs = 0, spend = () => { };   // THE TEXT BUDGET: the call's one spend (a no-op between calls), and how many calls failed closed
   const OVER = Symbol('vault-run.text-over');   // THE TEXT BUDGET

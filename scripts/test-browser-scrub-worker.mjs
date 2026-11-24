@@ -18,12 +18,23 @@
 //   ⑦ THE ON-LOOP FIGURE: 64 KiB — at it on the loop, past it the worker (red: a 256 KiB figure)
 //   ⑧ THE TEXT BUDGET (r1915 (a)) — one heads builder for the run scan and the text scrubber (red: a planted second one); a
 //      call past the figure withholds the frame whole
+// and the follow's (主开发 r3342):
+//   ⑨ THE BOUND FROM THE TURN — a burst of frames, each under the bound alone (a placed stall), all answered (red: the bound
+//      timed from the post)
+//   ⑩ THE SIGNATURE ROAD — a request frame past the figure whose credential is known by its signature only: the loop notes the
+//      request id the worker found (red: the worker's answer without them); at the cap of 128 an add that leaves the list's length
+//      and last element as they were still reaches the worker (red: the worker refreshed by length and last element)
+//   ⑪ THE MEDIATOR's REAL WIRING — a withheld browser reply answers its id and session through the real send (red: the reply's
+//      identity dropped); behind a pending frame filling the bound, the mediator's own refusal still answers its id (red: its own
+//      frames under the bound)
+//   ⑫ PINS — the lock's subscriber ends the workers (red: a hollow subscriber); the queue's bound is 64 MiB on the real wiring
+//      (red: an unbounded one)
 // Stand-ins only: no browser, no real profile, no site; every value is made up at runtime.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { scratchDir, anchored } from './scratch.mjs';
+import { scratchDir, anchored, freePort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';   // THE ONE ASSERTION HELPER (B-1747): a swapped call throws, never a green leg
 
@@ -159,7 +170,7 @@ console.log('④ WHERE THE VALUES LIVE — started by the first large frame; end
   d.endScrubWorkers('a lock');
   const afterLock = d.scrubWorkerFacts(PID).live;
   await d.scrubCdpFrameAsync(PID, bigFrame(4096));
-  const third = d.scrubWorkerFacts(PID).live;
+  const third = d.scrubWorkerFacts(PID).live;   // 主开发 r3342 (2): the worker's copy ends at a lock; the loop's copy is the boundary and stands until the profile ends
   await sleep(700);
   const afterIdle = d.scrubWorkerFacts(PID).live;
   const leaves = MUT.load('src/server/browser-dialogs.js', anchored(SRC_BD, "    endScrubWorker(String(pid), 'the profile ended');", '', 'test-browser-scrub-worker ④ the profile\'s end leaves the worker'), 'end-leaves-worker');
@@ -171,13 +182,13 @@ console.log('④ WHERE THE VALUES LIVE — started by the first large frame; end
   const site = SRC_BD.match(/new Worker\(([^\n]*?)\);/);
   const byMessage = !!site && site[1] === "scrubWorkerFile || require('path').join(__dirname, 'browser-scrub-worker.js')" && !/workerData|env:|argv:/.test(site[0]);
   ok(!before && !afterSmall && afterLarge && !afterEnd && again && !afterLock && third && !afterIdle && redLive && byMessage,
-    '④ WHERE THE VALUES LIVE: no thread before a large frame (nor for a small one); the first large frame starts it; it ends at the profile\'s end, at a lock, after an idle stretch; the worker is made with its file alone (the values reach it by message: no workerData, env or argv); red control: «the profile\'s end that leaves the worker» keeps it', { before, afterSmall, afterLarge, afterEnd, again, afterLock, third, afterIdle, redLive, site: site && site[1] });
+    '④ WHERE THE VALUES LIVE: no thread before a large frame (nor for a small one); the first large frame starts it; it ends at the profile\'s end, at a lock, after an idle stretch — the worker\'s copy ends at a lock; the loop\'s copy is the boundary and stands until the profile ends (r3342 (2): the next large frame after a lock starts a worker again); the worker is made with its file alone (the values reach it by message: no workerData, env or argv); red control: «the profile\'s end that leaves the worker» keeps it', { before, afterSmall, afterLarge, afterEnd, again, afterLock, third, afterIdle, redLive, site: site && site[1] });
 }
 
 console.log('⑤ PAST ITS BOUND: ENDED — a floor between starts');
 {
   const leg = async (mod) => {
-    const d = mk(mod, { onLoopMax: 1024, boundMs: 150, floorMs: 900 }, { scrubWorkerFile: STALL });
+    const d = mk(mod, { onLoopMax: 1024, boundMs: 150, ceilingMs: 300, floorMs: 900 }, { scrubWorkerFile: STALL });   // (the ceiling: the red copy's frames to a live, stalled worker end there)
     const a = await d.scrubCdpFrameAsync(PID, bigFrame(4096));
     const liveAfterBound = d.scrubWorkerFacts(PID).live, started1 = d.scrubWorkerFacts(PID).startedAt;
     const b = await d.scrubCdpFrameAsync(PID, bigFrame(4096));   // inside the floor: no new start
@@ -191,7 +202,7 @@ console.log('⑤ PAST ITS BOUND: ENDED — a floor between starts');
     return { a: a && a.withheld, liveAfterBound, b: b && b.withheld, sameStart: started1 === started2, newStart: started3 !== started2 };
   };
   const real = await leg(BD);
-  const spins = MUT.load('src/server/browser-dialogs.js', anchored(SRC_BD, "const timer = setTimeout(() => endScrubWorker(pid, `no answer within ${SCRUB_FIG.boundMs} ms`, s), SCRUB_FIG.boundMs);", "const timer = setTimeout(() => { const p = s.pend.get(seq); if (p) { s.pend.delete(seq); p.resolve(withheldFor(pid, 'late')); } }, SCRUB_FIG.boundMs);", 'test-browser-scrub-worker ⑤ a bound that leaves the worker running'), 'bound-spins');
+  const spins = MUT.load('src/server/browser-dialogs.js', anchored(SRC_BD, "s.turn = setTimeout(() => endScrubWorker(pid, `no answer within ${SCRUB_FIG.boundMs} ms`, s), SCRUB_FIG.boundMs);", "s.turn = setTimeout(() => { for (const [q, p] of s.pend) { s.pend.delete(q); clearTimeout(p.timer); p.resolve(withheldFor(pid, 'late')); } }, SCRUB_FIG.boundMs);", 'test-browser-scrub-worker ⑤ a bound that leaves the worker running'), 'bound-spins');
   const red = await leg(spins);
   ok(!!real.a && !real.liveAfterBound && /floor/.test(String(real.b)) && real.sameStart && real.newStart && red.liveAfterBound,
     `⑤ PAST ITS BOUND: the late frame is withheld and the worker ENDED; the next large frame inside the floor is withheld by name («${real.b}») with no new start; past the floor a new worker starts; red control: «a bound that leaves the worker running» keeps it`, { real, red });
@@ -210,7 +221,7 @@ console.log('⑥ THE QUEUE IS BOUNDED in bytes');
     return new Promise((r) => setTimeout(() => r({ waiting, sent: sent.join(',') }), 20));
   };
   const real = await leg(M);
-  const unbounded = MUT.load('src/browser-mediation.js', anchored(SRC_M, 'if (q.length && waiting + n > maxBytes) {', 'if (false) {', 'test-browser-scrub-worker ⑥ no bound'), 'no-bound');
+  const unbounded = MUT.load('src/browser-mediation.js', anchored(SRC_M, 'if (!own && q.length && waiting + n > maxBytes) {', 'if (false) {', 'test-browser-scrub-worker ⑥ no bound'), 'no-bound');
   const red = await leg(unbounded);
   ok(real.waiting <= 100 && real.sent === 'first,refused:9' && red.waiting > 100, `⑥ THE QUEUE IS BOUNDED: behind a frame waiting for its scrub, a frame past the bytes' bound is withheld by name (its refusal sent in its place: ${real.sent}), what waits stays ≤ the bound (${real.waiting}); red control: «a sender with no bound» holds ${red.waiting} bytes`, { real, red });
 }
@@ -252,6 +263,130 @@ console.log('⑧ THE TEXT BUDGET (主开发 r1915 (a)) — ONE heads builder; a 
   const pass = CS.scrubFrame(F8, { fn: VS.compileTextScrubber(PAIRS) });
   const over = CS.scrubFrame(F8, { fn: tiny.compileTextScrubber(PAIRS) });
   ok(typeof pass.out === 'string' && !pass.out.includes(VALUE) && !pass.withheld && over.out === null && !!over.withheld, `⑧ THE FIGURE: within the text budget the frame is scrubbed and leaves; with a scrubber whose figure is tiny every call runs past it and the frame is withheld WHOLE («${over.withheld}»)`, { pass: pass.withheld, over: over.withheld });
+}
+
+console.log('⑨ THE BOUND FROM THE TURN (主开发 r3342 (3)) — a burst, each frame under the bound alone, all answered');
+{
+  // the stand-in (law 8): THE REAL worker behind a placed stall of 200 ms before each frame of the burst (the first frame warms it)
+  const SLOW = path.join(DIR, 'slow-worker.cjs');
+  fs.writeFileSync(SLOW, "'use strict';\nconst { parentPort } = require('worker_threads');\nconst nap = new Int32Array(new SharedArrayBuffer(4));\nparentPort.on('message', (msg) => { if (msg && msg.type === 'frame' && msg.seq > 1) Atomics.wait(nap, 0, 0, 200); /* a placed stall */ });\nrequire(" + JSON.stringify(path.join(REPO, 'src/server/browser-scrub-worker.js')) + ");\n");
+  const leg = async (mod) => {
+    const d = mk(mod, { onLoopMax: 1024, boundMs: 600, floorMs: 0 }, { scrubWorkerFile: SLOW });
+    const warm = await d.scrubCdpFrameAsync(PID, bigFrame(4096, { id: 20 }));   // started and answered: no start inside the burst's turns
+    const burst = await Promise.all([21, 22, 23, 24].map((id) => d.scrubCdpFrameAsync(PID, bigFrame(4096, { id }))));
+    const live = d.scrubWorkerFacts(PID).live;
+    d.endScrubWorkers('the leg ended');
+    return { warm: !!(warm && typeof warm.out === 'string'), answered: burst.filter((a) => a && typeof a.out === 'string' && !a.out.includes(VALUE)).length, withheld: burst.filter((a) => a && a.withheld).length, live };
+  };
+  const real = await leg(BD);
+  const fromPost = MUT.load('src/server/browser-dialogs.js', anchored(SRC_BD, '      if (s.answered === seq - 1) armScrubTurn(pid, s);', "      { const t = setTimeout(() => endScrubWorker(pid, 'late', s), SCRUB_FIG.boundMs); t.unref?.(); }", 'test-browser-scrub-worker ⑨ the bound timed from the post'), 'bound-from-post');
+  const red = await leg(fromPost);
+  ok(real.warm && real.answered === 4 && real.withheld === 0 && real.live && red.withheld > 0, `⑨ THE BOUND FROM THE TURN: four frames posted at once to a worker that takes 200 ms over each (a placed stall), the bound 600 ms: all four answered and scrubbed, the worker still live (a frame's bound starts at its turn); red control: «the bound timed from the post» ends the worker and withholds ${red.withheld} of them`, { real, red });
+}
+
+console.log('⑩ THE SIGNATURE ROAD (主开发 r3342 (4) + (5)) — the ids the worker found are the loop\'s; the worker\'s copy moves at the cap');
+{
+  const madeUp = () => 'Sg' + crypto.randomBytes(10).toString('hex') + 'Z';   // made up: a credential known by its SIGNATURE only
+  const reqFrame = (reqId, secret) => JSON.stringify({ method: 'Network.requestWillBeSent', params: { requestId: reqId, initiator: { type: 'other', note: pad(4096) }, request: { url: 'https://example.invalid/login', method: 'POST', headers: {}, postData: `user=a&pw=${secret}` } } });
+  const world = (mod, extra = {}) => {
+    let fence = null;   // the fence the module hands the mediator (setLoginFence): its isCredRequestId is the production name of the fact
+    const d = mk(mod, { onLoopMax: 1024, floorMs: 0 }, { keeper: { mediator: () => ({ setLoginFence: (f) => { fence = f; } }) }, ...extra });
+    return { d, noted: (id) => !!(fence && typeof fence.isCredRequestId === 'function' && fence.isCredRequestId(PID, id)) };
+  };
+  const half = async (workerFile) => {
+    const w = world(BD, workerFile ? { scrubWorkerFile: workerFile } : {});
+    const S2 = madeUp();
+    w.d._recordCredSigs(PID, [CS.credSigOf(S2)]);
+    const a = await w.d.scrubCdpFrameAsync(PID, reqFrame('r-sig-1', S2));
+    const r = { noted: w.noted('r-sig-1'), clean: !!(a && typeof a.out === 'string' && !a.out.includes(S2)) };
+    w.d.endScrubWorkers('the leg ended');
+    return r;
+  };
+  const realHalf = await half(null);
+  const unnoted = MUT.write('src/server/browser-scrub-worker.js', anchored(SRC_W, 'noted: r.noted,', 'noted: [],', 'test-browser-scrub-worker ⑩ the worker\'s answer without its ids'), 'worker-unnoted');
+  const redHalf = await half(unnoted);
+  ok(realHalf.noted && realHalf.clean && !redHalf.noted, '⑩ THE WORKER\'s HALF: a request frame past the figure whose body carries a credential known by its signature only — the worker redacts it and the loop NOTES its request id (the fence\'s isCredRequestId, the name the mediator asks); red control: «the worker\'s answer without its ids» leaves it unnoted', { realHalf, redHalf });
+  const cap = async (mod) => {
+    const w = world(mod);
+    const many = Array.from({ length: 128 }, () => CS.credSigOf(madeUp()));
+    w.d._recordCredSigs(PID, many);   // the list at its cap
+    await w.d.scrubCdpFrameAsync(PID, bigFrame(4096));   // the worker is handed the 128
+    const X = madeUp();
+    w.d._recordCredSigs(PID, [CS.credSigOf(X)]);   // an add …
+    w.d._recordCredSigs(PID, [many[127]]);   // … and the top recorded again: the length (128) and the last element as before
+    const a = await w.d.scrubCdpFrameAsync(PID, reqFrame('r-cap-1', X));
+    const r = { noted: w.noted('r-cap-1'), clean: !!(a && typeof a.out === 'string' && !a.out.includes(X)) };
+    w.d.endScrubWorkers('the leg ended');
+    return r;
+  };
+  const realCap = await cap(BD);
+  const byLast = MUT.load('src/server/browser-dialogs.js', anchored(anchored(SRC_BD,
+    '    const ver = scrubValuesVer.get(pid) || 0;\n    if (s.fn !== fn || s.ver !== ver) {', '    const top = sigs.length ? sigs[sigs.length - 1] : null;\n    if (s.fn !== fn || s.sigsN !== sigs.length || s.sigsTop !== top) {', 'test-browser-scrub-worker ⑩ the check by length and last element'),
+    '      s.fn = fn; s.ver = ver;', '      s.fn = fn; s.sigsN = sigs.length; s.sigsTop = top;', 'test-browser-scrub-worker ⑩ the check by length and last element (its note)'), 'sigs-by-last');
+  const redCap = await cap(byLast);
+  ok(realCap.noted && realCap.clean && !redCap.noted && !redCap.clean, '⑩ AT THE CAP: 128 signatures, then an add and the top recorded again (the list\'s length and last element as before) — the values\' counter moved, the worker is handed them again, the new credential is redacted and its request noted; red control: «the worker refreshed by length and last element» keeps it stale (the credential leaves unredacted)', { realCap, redCap });
+}
+
+console.log('⑪ THE MEDIATOR\'s REAL WIRING (主开发 r3342 (1) + (5)) — a withheld reply answers its id; its own refusal past the bound answers');
+{
+  const { WebSocket, WebSocketServer } = require('ws');
+  const until = async (pred, ms) => { for (let k = 0; k * 10 < ms && !pred(); k++) await sleep(10); return !!pred(); };
+  const UNLISTED = 'Madeup.notInTheCensus';   // a method the census does not list: the mediator refuses it itself (sendOwn), and says so once in its journal
+  const leg = async (MEDmod, waitMs) => {
+    const upPort = await freePort();
+    const chrome = new WebSocketServer({ port: upPort, host: '127.0.0.1' });   // a stand-in browser: answers every call
+    await new Promise((r) => chrome.on('listening', r));
+    chrome.on('connection', (ws) => ws.on('message', (data) => { const m = JSON.parse(String(data)); ws.send(JSON.stringify(m.method === 'Browser.getVersion' ? { id: m.id, result: { product: 'HeadlessChrome/120.0.0.0', protocolVersion: '1.3' } } : m.method === 'Target.attachToTarget' ? { id: m.id, result: { sessionId: 'S-T1' } } : { id: m.id, sessionId: m.sessionId, result: { result: { type: 'string', value: 'answered ' + m.id } } })); }));
+    let mode = 'pass', release = null;
+    const fence = { scrubCdpFrameAsync: (pid, str) => {   // a stand-in fence: the off-loop door alone
+      if (mode === 'withhold' && str.includes('"answered ')) return Promise.resolve({ withheld: 'a placed answer' });
+      if (mode === 'hold' && str.includes('"answered ')) { mode = 'pass'; return new Promise((r) => { release = () => r({ out: str }); }); }
+      return str;
+    } };
+    const said = [];
+    const med = MEDmod.create({ log: { log: (l) => said.push(String(l)), warn: (l) => said.push(String(l)) }, loginFence: fence, clientQueueMaxBytes: 100 });
+    await med.listen();
+    const grant = await med.grantFor({ profileId: PID, browserKey: 'k-made-up', upstream: `ws://127.0.0.1:${upPort}/devtools/browser/made-up`, targetIds: ['T1'], paused: () => false });
+    const cdp = new WebSocket(grant.url);
+    await new Promise((r, e) => { cdp.on('open', r); cdp.on('error', e); });
+    const got = []; cdp.on('message', (d) => got.push(JSON.parse(String(d))));
+    const of = (id) => got.find((r) => r.id === id) || null;
+    cdp.send(JSON.stringify({ id: 1, method: 'Target.attachToTarget', params: { targetId: 'T1', flatten: true } }));
+    await until(() => !!of(1), 3000);
+    mode = 'withhold';   // (a) the browser's reply on a session, withheld by the scrub
+    cdp.send(JSON.stringify({ id: 2, sessionId: 'S-T1', method: 'Runtime.evaluate', params: { expression: '1' } }));
+    await until(() => !!of(2), waitMs);
+    mode = 'hold';   // (b) the next reply waits for its scrub and fills the bound (100 bytes) …
+    cdp.send(JSON.stringify({ id: 3, sessionId: 'S-T1', method: 'Runtime.evaluate', params: { expression: '2' } }));
+    await until(() => !!release, 3000);
+    cdp.send(JSON.stringify({ id: 4, method: UNLISTED, params: {} }));   // … and the mediator refuses a call itself behind it
+    await until(() => said.some((l) => l.includes(UNLISTED)), 3000);   // its journal line is said in the step that posts the refusal
+    if (release) release();
+    await until(() => !!of(3) && !!of(4), waitMs);
+    const r = { attach: !!(of(1) && of(1).result), r2: of(2), r4: of(4), order: got.findIndex((x) => x.id === 3) < got.findIndex((x) => x.id === 4) };
+    try { cdp.close(); } catch { /* */ } try { med.shutdown(); } catch { /* */ } try { chrome.close(); } catch { /* */ }
+    return r;
+  };
+  const real = await leg(MED, 3000);
+  const withheldReply = !!(real.r2 && real.r2.id === 2 && real.r2.sessionId === 'S-T1' && M.refusalCodeOf(real.r2) === MED.FRAME_WITHHELD_CODE);
+  const ownAnswered = !!(real.r4 && real.r4.id === 4 && M.refusalCodeOf(real.r4) && M.refusalCodeOf(real.r4) !== MED.FRAME_WITHHELD_CODE && real.order);
+  const noIdentity = MUT.load('src/server/cdp-mediator.js', anchored(SRC_MED, 'sendClient(JSON.stringify(out.reply), out.reply);', 'sendClient(JSON.stringify(out.reply));', 'test-browser-scrub-worker ⑪ the reply\'s identity dropped'), 'reply-no-identity');
+  const redA = await leg(noIdentity, 600);
+  const ownBound = MUT.load('src/server/cdp-mediator.js', anchored(SRC_MED, "postOut(t, Buffer.byteLength(t, 'utf8'), null, true);", "postOut(t, Buffer.byteLength(t, 'utf8'), null);", 'test-browser-scrub-worker ⑪ its own frames under the bound'), 'own-under-bound');
+  const redB = await leg(ownBound, 600);
+  ok(real.attach && withheldReply && !redA.r2, `⑪ LAW 3 ON THE REAL WIRING: a browser reply on a session that the scrub withholds is answered frame_withheld BY NAME through the mediator's real send, its id and session kept; red control: «the reply's identity dropped» leaves the driver waiting (${redA.r2 ? 'answered' : 'no answer'})`, { r2: real.r2, redA: redA.r2 });
+  ok(ownAnswered && !redB.r4, `⑪ THE MEDIATOR's OWN REFUSAL behind a pending frame that fills the bound (100 bytes) is never withheld: it answers its id (${real.r4 ? M.refusalCodeOf(real.r4) : 'none'}), after the frame before it; red control: «its own frames under the bound» drops it (${redB.r4 ? 'answered' : 'no answer'})`, { r4: real.r4, order: real.order, redB: redB.r4 });
+}
+
+console.log('⑫ PINS (主开发 r3342 (5)) — the lock\'s subscriber; the queue\'s bound');
+{
+  const SRC_WIRE = SRC('src/server/mounts-plugins-wiring.js');
+  const lockPin = (t) => (t.match(/vault\.onLock\(\(\) => \{[^\n]*?\}\);/g) || []).filter((x) => /browserDialogs\.endScrubWorkers\(/.test(x)).length;
+  const hollow = SRC_WIRE.replace("browserDialogs.endScrubWorkers('a lock');", '/* nothing */');
+  ok(lockPin(SRC_WIRE) === 1 && lockPin(hollow) === 0 && hollow !== SRC_WIRE, '⑫ THE LOCK: the wiring\'s ONE vault.onLock subscriber for the frame scrub ends the workers (browserDialogs.endScrubWorkers); red control: a hollow subscriber is not counted', { real: lockPin(SRC_WIRE), hollow: lockPin(hollow) });
+  const qPin = (t) => /\nconst CLIENT_QUEUE_MAX_BYTES = 64 \* 1024 \* 1024;\n/.test(t) && /\{ clientQueueMaxBytes = CLIENT_QUEUE_MAX_BYTES\b/.test(t) && /M\.orderedSender\(\{ send: \(t\) => ws\.send\(t\), maxBytes: clientQueueMaxBytes, withheld: withheldOut \}\)/.test(t);
+  const unbounded = SRC_MED.replace('maxBytes: clientQueueMaxBytes, withheld: withheldOut', 'maxBytes: Infinity, withheld: withheldOut');
+  ok(qPin(SRC_MED) && MED.CLIENT_QUEUE_MAX_BYTES === 64 * 1024 * 1024 && !qPin(unbounded) && unbounded !== SRC_MED, '⑫ THE QUEUE\'s BOUND: 64 MiB (CLIENT_QUEUE_MAX_BYTES), the create\'s default, passed to the ordered sender on the real wiring (⑪ shows it acting there); red control: an unbounded sender is not pinned', { fig: MED.CLIENT_QUEUE_MAX_BYTES });
 }
 
 for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);

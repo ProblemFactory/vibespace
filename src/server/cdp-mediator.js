@@ -66,7 +66,8 @@ const M = require('../browser-mediation.js');
 
 const MAX_PAYLOAD = 256 * 1024 * 1024; // a Page.captureScreenshot / printToPDF answer can be tens of MB
 // 主开发 r2445 (lane lg-vault-file, the frame scrub's worker): what may WAIT for one client behind a frame scrubbed off the loop —
-// in bytes (law 6); a lone frame always leaves (up to MAX_PAYLOAD), a frame past the bound behind others is withheld by name
+// in UTF-8 bytes (law 6; counted by Buffer.byteLength, never a string's length — 主开发 r3342 (6)); a lone frame always leaves (up to
+// MAX_PAYLOAD), a browser frame past the bound behind others is withheld by name; the mediator's own frames are never withheld by it
 const CLIENT_QUEUE_MAX_BYTES = 64 * 1024 * 1024;
 const FRAME_WITHHELD_CODE = 'frame_withheld';
 const frameWithheldWords = (why) => `VibeSpace withheld this answer whole: a frame this large is scrubbed of the vault's values off the hub's loop, and that scrub could not answer (${String(why || 'no answer').slice(0, 120)}). Nothing of it is shown unscrubbed; ask for a smaller part (a narrower query, a clip)`;
@@ -263,10 +264,12 @@ function create({ clientQueueMaxBytes = CLIENT_QUEUE_MAX_BYTES /* r2445 law 6: a
     // makes). A frame the fence scrubs OFF THE LOOP (past the on-loop figure: the profile's worker) holds the frames behind it until
     // it is answered; with nothing waiting, a frame leaves at once. What waits is bounded in BYTES: past the bound a frame is withheld by
     // name. A withheld REPLY is answered with a refusal by name (frame_withheld: the driver never waits on it); a withheld event is
-    // dropped and counted (g.scrubWithheld).
+    // dropped and counted (g.scrubWithheld). The bound counts BYTES (UTF-8) and judges the browser's frames only: the mediator's own
+    // (sendOwn — a refusal or a reply it makes, one for a call of the client's, small) are never withheld by it, they wait in their
+    // order and leave (主开发 r3342 (1): an own frame carries no reply identity, so a withheld one would leave the driver waiting).
     const withheldOut = (why, reply) => { g.scrubWithheld = (g.scrubWithheld || 0) + 1; return reply && reply.id != null ? JSON.stringify(M.refusal(reply.id, FRAME_WITHHELD_CODE, frameWithheldWords(why), reply.sessionId)) : null; };
     const postOut = M.orderedSender({ send: (t) => ws.send(t), maxBytes: clientQueueMaxBytes, withheld: withheldOut }).post;   // the client's ONE way out (src/browser-mediation.js)
-    const sendOwn = (str) => { const t = String(str); postOut(t, t.length, null); };
+    const sendOwn = (str) => { const t = String(str); postOut(t, Buffer.byteLength(t, 'utf8'), null, true); };
     conn.sendOwn = sendOwn;
     const closeBoth = (code, reason) => {
       const had = g.conns.delete(conn);
@@ -455,7 +458,7 @@ function create({ clientQueueMaxBytes = CLIENT_QUEUE_MAX_BYTES /* r2445 law 6: a
         : loginFence && typeof loginFence.scrubCdpFrame === 'function'
           ? loginFence.scrubCdpFrame(g.profileId, str)
           : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
-      postOut(out, str.length, reply);
+      postOut(out == null && str ? withheldOut('the scrub withheld it', reply) : out, Buffer.byteLength(String(str || ''), 'utf8'), reply);   // r3342 (1): the fence's on-loop road withholds a frame as null — a reply is refused by name there too, never a gap
     };
     // B-70af (主开发's readers, 00:15Z): ONE after-filter for every event this connection is shown — the upstream's (below) and an
     // out-of-band admission's replay (admitInto → conn.deliver): the live-fill fence, its masking and the trace taint judge both,
