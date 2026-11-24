@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.419 — 2026-11-24
+
+### Added
+- A browser profile's ⋯ menu has «Environment…» to set the time zone, the language and the location its browser tells the sites it opens.
+- With a place set, only the sites on the profile's list read it; every other site is denied the location, with no prompt.
+
 ## 2.369.418 — 2026-11-24
 
 ### Changed
