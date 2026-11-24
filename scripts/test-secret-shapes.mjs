@@ -300,7 +300,7 @@ console.log('lane mask-value-shape: THE NAME GRAMMAR (two censuses) + THE PUBLIC
   const M = mutantCopies('mvs', REPO);
   const FY = await import(path.join(REPO, 'src/lib/foryou-links.js'));
   const DM = r('src/decision-model.js');
-  // the owner's URL, retyped from his shot (Google's PUBLIC gcloud client id; state / code_challenge are per-flow public nonces —
+  // the owner's URL, retyped from the owner's own shot (Google's PUBLIC gcloud client id; state / code_challenge are per-flow public nonces —
   // joined at runtime all the same, the hygiene law for any token-shaped run)
   const OWNER = ['https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559.apps.googleusercontent.com',
     '&redirect_uri=https%3A%2F%2Fsdk.cloud.google.com%2Fauthcode.html&scope=openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email',
@@ -1493,7 +1493,7 @@ console.log('lane mask-value-shape B-829f: A VALUE THAT IS ITSELF ESCAPED JSON i
     ok(MODES.slice(0, 2).every(([, f]) => !f(SS, fx).includes('\\"x\\"') && !f(SS, fxPlain).includes('"x"')), `B-829f (e) THE PRICE — a fixture value quoted in prose about code is masked inside escaped JSON, as plain JSON's is today (${J(MODES[0][1](SS, fx))})`);
     const se = 'cfg: "{' + '\\"session\\":\\"main\\"' + '}"', sePlain = 'cfg: {"session":"main"}';
     ok(MODES.slice(0, 2).every(([, f]) => !f(SS, se).includes('main') && !f(SS, sePlain).includes('main')), `B-829f (e) THE PRICE — a plain session name is masked inside escaped JSON, as plain JSON's is today (the grammar holds «session»): ${J(MODES[0][1](SS, se))}`);
-    const prose = ['he wrote \\"hello\\" and \\"bye\\"', 'the flag \\"--fast\\" stays', 'a \\"name\\" field and a \\"type\\" field'];
+    const prose = ['the note says \\"hello\\" and \\"bye\\"', 'the flag \\"--fast\\" stays', 'a \\"name\\" field and a \\"type\\" field'];
     ok(prose.every((t) => MODES.every(([, f]) => f(SS, t) === t)), 'B-829f (e) prose that merely QUOTES with escaped quotes is untouched (no colon after the quoted word, no string value)'); }
   // (g) a descriptor stays, and a number, a boolean or null after the colon is no string: left alone
   { const t = 'out: "{' + '\\"token_type\\":\\"Bearer\\",\\"expires_in\\":3600,\\"token\\":3600,\\"auth\\":true,\\"key\\":null' + '}"';

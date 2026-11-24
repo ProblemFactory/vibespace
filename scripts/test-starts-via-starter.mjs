@@ -750,8 +750,8 @@ WD.section('⑩');
       return { timedOut: !!(r && r.timedOut), answered: /answered/.test(String((r && r.stdout) || '')), kills: neg.length, job, stderr: String((r && r.stderr) || '').slice(0, 300) };
     } finally { process.kill = k0; }
   };
-  const he = await groupKillsIn(S2); if (he.job > 1) endLeftover(he.job);
-  ok(!he.timedOut && he.answered && he.kills === 1, `(e) the old road: the same holder — answered at the exit (${!he.timedOut}), the group signalled ONCE (${he.kills})`, he);
+  const hx = await groupKillsIn(S2); if (hx.job > 1) endLeftover(hx.job);
+  ok(!hx.timedOut && hx.answered && hx.kills === 1, `(e) the old road: the same holder — answered at the exit (${!hx.timedOut}), the group signalled ONCE (${hx.kills})`, hx);
   const CSRC10 = read('src/server/child-starter.js');
   const TODAY_CS = anchored(anchored(CSRC10, "{ c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", "{ try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", 'the group end at every call'),
     "c.on('exit', (code, signal) => { endOwnGroup(c); if (t) { clearTimeout(t); t = null; } setTimeout(() => { if (done) return; done = true; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); }, SESSION_DRAIN_MS); }); }",
@@ -759,8 +759,8 @@ WD.section('⑩');
   const OLDCS = M.load('src/server/child-starter.js', TODAY_CS, 'today-old-road');
   const S2R = OLDCS.createChildStarter({ script: DIES, log: { warn() { } } });
   for (let i = 0; i < 6 && !S2R.stats().direct; i++) await S2R.run('/bin/bash', ['-c', 'true'], { timeoutMs: 500 });
-  const heR = await groupKillsIn(S2R); if (heR.job > 1) endLeftover(heR.job);
-  ok(S2R.stats().direct === true && heR.timedOut && heR.kills >= 2, `(e) RED: 35213bad6's old road — the bound reached (${heR.timedOut}), the reaped leader's group signalled again (${heR.kills})`, heR);
+  const hxR = await groupKillsIn(S2R); if (hxR.job > 1) endLeftover(hxR.job);
+  ok(S2R.stats().direct === true && hxR.timedOut && hxR.kills >= 2, `(e) RED: 35213bad6's old road — the bound reached (${hxR.timedOut}), the reaped leader's group signalled again (${hxR.kills})`, hxR);
   const CSS = read('src/server/child-starter.js'), PROC = read('src/server/child-starter-proc.js');
   const own = (src) => src.includes("function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }");
   ok(own(CSS) && own(PROC) && (PROC.match(/process\.kill\(/g) || []).length === 1 && (CSS.match(/process\.kill\(/g) || []).length === 1,
