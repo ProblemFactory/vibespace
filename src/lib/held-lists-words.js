@@ -15,6 +15,7 @@ const NAMES = Object.freeze({
   'designs.json': i18nKey('the list of designs'),
   'feedback-outbox.json': i18nKey('the feedback waiting to be sent'),
   'feedback.json': i18nKey('the feedback reports'),
+  'extract-journal.json': i18nKey('the record of unfinished extractions'),   // r3333 unit 2 (lane lg-group-parents): the archive extraction journal
   'providers.json': i18nKey('the list of model providers'),
   'published-pages.json': i18nKey('the list of published pages'),
   'setting-holds.json': i18nKey('the raised spending ceilings'),

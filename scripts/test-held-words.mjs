@@ -110,6 +110,7 @@ const NOT_HELD = {
 // A LIST HOLD WORDED BY ITS OWN DOOR (r3284: its own class, not «not a hold»): a 503 that IS a held list, whose own door words it — the
 // step leaves it, so that door's words stand (classed so in ①b too)
 const OWN_DOOR = {
+  extract_journal_unread: 'r3333 unit 2: the files page words it by its own code (src/lib/file-explorer-ops.js fsErrorText, zh / ja) — an extraction refused while the journal is held',
   auto_resume_unread: 'its own door words it BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words',
 };
 function census(codes, table) {
@@ -142,6 +143,7 @@ const LEFT_ALONE = [
   ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread', 'usage-reading-unread', 'machines_unread' /* r3349: the reading file's set-aside door refused while the machines' list is held — the door's own words (its toast reads `error`) */]],
   ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
   ['own', 'a store whose own door words its refusal BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words', ['auto_resume_unread']],
+  ['own', 'r3333 unit 2: the extraction journal held — the files page words its refusal by its own code (fsErrorText, zh / ja)', ['extract_journal_unread']],
   ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'designs-unread', 'labels-unread', 'status-unread']],
   ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
   // r3314: the units picked into the hotfix's trial after the chain

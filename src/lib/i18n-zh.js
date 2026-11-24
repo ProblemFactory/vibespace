@@ -4607,6 +4607,7 @@ export default {
   "the list of designs": "设计列表",
   "the feedback waiting to be sent": "等待发送的反馈",
   "the feedback reports": "反馈报告",
+  "the record of unfinished extractions": "未完成解压的记录",
   "the list of model providers": "模型提供方列表",
   "the list of published pages": "已发布页面的列表",
   "the raised spending ceilings": "被调高的支出上限",
@@ -14223,6 +14224,8 @@ export default {
   "this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "此文件在存储「{mount}」上，这类预览暂时不能显示存储上的文件——请下载它，或复制到本地文件夹后再打开",
   "this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "此文件在存储上，这类预览暂时不能显示存储上的文件——请下载它，或复制到本地文件夹后再打开",
   "another document is being parsed — try again in a moment": "另一个文档正在解析——请稍后再试",
+  "the extraction journal could not be read, so it is not known whether an earlier extraction into this folder was cut short — try again when it reads (it is read again by itself)": "读不出解压记录，因此不知道之前解压到这个文件夹时是否中途被打断——等它能读出时再试（它会自己再读）",   // lane lg-group-parents r3333 unit 2: the extraction journal held / torn
+  "the extraction journal's earlier record did not parse (it is kept aside), so it is not known whether an earlier extraction into this folder was cut short — extract it into a new or empty folder": "解压记录的早先内容无法解析（已另存），因此不知道之前解压到这个文件夹时是否中途被打断——请解压到新的或空的文件夹",   // lane lg-group-parents r3333 unit 2: the extraction journal held / torn
   "this folder or file did not answer in time — try again in {s} s": "这个文件夹或文件没有及时响应 — 请 {s} 秒后再试",
   "the file readers are restarting — try again in a moment": "文件读取进程正在重启 — 请稍后再试",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "“{machine}” 已离线——只有机器连接时，此文件夹才会显示它的文件",

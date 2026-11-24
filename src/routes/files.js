@@ -1132,23 +1132,57 @@ const extractOps = new Map(); // opId → {done,total,status,error,dest,child}
 // recovery. Persist archive+dest across restarts: a re-extract into a
 // journaled dest escalates to overwrite so the fresh pass rewrites (repairs)
 // every file from the archive; the entry clears only on clean completion. ──
-const EXTRACT_JOURNAL = path.join(__dirname, '..', '..', 'data', 'extract-journal.json');
-function readExtractJournal() {
-  try { return JSON.parse(fs.readFileSync(EXTRACT_JOURNAL, 'utf-8')) || {}; } catch { return {}; }
+const EXTRACT_JOURNAL_AT = { file: path.join(__dirname, '..', '..', 'data', 'extract-journal.json') };   // the suites' seam moves it (router.__extractJournal.at)
+// r3333 unit 2 (lane lg-group-parents, the store-read family): THE JOURNAL IS HELD when it cannot be read — never «no extraction
+// was cut short». It is read ONCE (at its first use, the one sync read as before) through the family's helper
+// (src/store-read-hold.js), kept in memory, read again OFF the loop while held, lifted with no restart:
+//   · HELD (a read that failed): every local extraction is refused BY NAME before anything starts — no folder made, no mark,
+//     no spawn — a mark cannot be written while held, so an extraction that is cut short would be lost to the next retry
+//   · TORN BYTES: kept aside ONCE, then it starts empty — and for the rest of this run an extraction into a folder that already
+//     holds something is refused by name (whether an earlier one into it was cut short is unknown: the journal's silence calls
+//     nothing whole); a NEW or EMPTY folder cannot hold a cut-short file, so that one goes on (the page offers no «Overwrite»)
+//   · nothing is written over the file while held (the helper's writable())
+const SR = require('../store-read.js');
+const SRH = require('../store-read-hold.js');   // the family's hold (one read again off the loop, torn bytes kept aside once)
+const EXTRACT_JOURNAL_WORDS = 'the extraction journal could not be read, so it is not known whether an earlier extraction into this folder was cut short — try again when it reads (it is read again by itself)';
+const EXTRACT_TORN_WORDS = 'the extraction journal\'s earlier record did not parse (it is kept aside), so it is not known whether an earlier extraction into this folder was cut short — extract it into a new or empty folder';
+const journalValid = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+let extractJournal = null, journalHold = null, journalTorn = false;
+function journalLoad() {
+  if (journalHold) return;
+  journalHold = SRH.create({ file: EXTRACT_JOURNAL_AT.file, valid: journalValid, aside: (mark) => `${EXTRACT_JOURNAL_AT.file}.corrupt-${mark}`, words: () => EXTRACT_JOURNAL_WORDS, code: 'extract_journal_unread', log: (m) => console.warn(`[extract] ${m}`),
+    onLift: (v, f) => { extractJournal = journalValid(v) ? v : {}; if (f && f.setAside) journalTorn = true; } });
+  let read; try { read = { text: fs.readFileSync(EXTRACT_JOURNAL_AT.file, 'utf-8') }; } catch (error) { read = { error }; }
+  const a = SR.storeAnswer(read, { valid: journalValid });
+  const st = journalHold.start(a);
+  extractJournal = st === 'data' ? a.value : st === 'missing' ? {} : null;
 }
+/** the refusal of a local extraction while the journal is HELD — null: it goes on */
+function extractJournalRefusal() {
+  journalLoad();
+  return journalHold.held() ? { error: EXTRACT_JOURNAL_WORDS, code: 'extract_journal_unread' } : null;
+}
+/** torn in this run: only a new or empty folder goes on — `names` = the folder's listing ([] when it is not there; null: unread) */
+function extractTornRefusal(names) {
+  if (!journalTorn) return null;
+  return Array.isArray(names) && !names.length ? null : { error: EXTRACT_TORN_WORDS, code: 'extract_journal_torn' };
+}
+function readExtractJournal() { journalLoad(); return extractJournal || {}; }
 function writeExtractJournal(j) {
-  // atomic tmp+rename (persistence invariant)
-  try { const tmp = EXTRACT_JOURNAL + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(j)); fs.renameSync(tmp, EXTRACT_JOURNAL); } catch {}
+  // atomic tmp+rename (persistence invariant); never over a held journal (nothing written over a file that could not be read)
+  if (!journalHold || !journalHold.writable('a mark of the extraction journal')) return;
+  extractJournal = j;
+  try { const f = EXTRACT_JOURNAL_AT.file, tmp = f + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(j)); fs.renameSync(tmp, f); } catch {}
 }
 function markExtractStart(fp, destDir) {
-  const j = readExtractJournal();
+  const j = { ...readExtractJournal() };
   j[fp + '\n' + destDir] = Date.now();
   const keys = Object.keys(j);
   if (keys.length > 200) for (const k of keys.sort((a, b) => j[a] - j[b]).slice(0, keys.length - 200)) delete j[k];
   writeExtractJournal(j);
 }
 function clearExtractMark(fp, destDir) {
-  const j = readExtractJournal();
+  const j = { ...readExtractJournal() };
   if ((fp + '\n' + destDir) in j) { delete j[fp + '\n' + destDir]; writeExtractJournal(j); }
 }
 function hadInterruptedExtract(fp, destDir) {
@@ -1194,6 +1228,12 @@ router.post('/api/archive/extract', async (req, res) => {
   const destDir = safePath(dest);
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
+  { const refused = extractJournalRefusal(); if (refused) return res.status(503).json(refused); }   // r3333 unit 2: before any folder, mark or spawn
+  if (journalTorn) {   // r3333 unit 2: the journal was torn in this run — only a new or empty folder (it cannot hold a cut-short file)
+    let names = null;
+    try { ({ entries: names } = await sfs(req).call('readdirNames', { path: destDir })); } catch (e) { names = e && e.code === 'ENOENT' ? [] : null; }
+    const refused = extractTornRefusal(names); if (refused) return res.status(503).json(refused);
+  }
   try { await sfs(req).call('mkdir', { path: destDir }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   // #23: a prior extraction of this archive into this dest was interrupted —
   // its truncated files EXIST, so skip-existing would silently keep them.
@@ -1605,4 +1645,9 @@ router.get('/api/file/stat', async (req, res) => {
   } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
+// r3333 unit 2: the suites' ONE seam — the journal's file moved to a scratch folder (the real logic, never the checkout's data/)
+router.__extractJournal = Object.freeze({
+  at(file) { if (journalHold) journalHold.stop(); journalHold = null; extractJournal = null; journalTorn = false; EXTRACT_JOURNAL_AT.file = file; },
+  refusal: () => extractJournalRefusal(), torn: (names) => extractTornRefusal(names), mark: (fp, d) => markExtractStart(fp, d), clear: (fp, d) => clearExtractMark(fp, d), had: (fp, d) => hadInterruptedExtract(fp, d),
+});
 module.exports = router;

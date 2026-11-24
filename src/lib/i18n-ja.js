@@ -4606,6 +4606,7 @@ export default {
   "the list of designs": "デザインの一覧",
   "the feedback waiting to be sent": "送信待ちのフィードバック",
   "the feedback reports": "フィードバックの報告",
+  "the record of unfinished extractions": "未完了の展開の記録",
   "the list of model providers": "モデルプロバイダーの一覧",
   "the list of published pages": "公開ページの一覧",
   "the raised spending ceilings": "引き上げた支出上限",
@@ -14222,6 +14223,8 @@ export default {
   "this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "このファイルはストレージ「{mount}」上にあります。この種類のプレビューは、ストレージ上のファイルにはまだ表示できません — ダウンロードするか、ローカルフォルダーにコピーしてから開いてください",
   "this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "このファイルはストレージ上にあります。この種類のプレビューは、ストレージ上のファイルにはまだ表示できません — ダウンロードするか、ローカルフォルダーにコピーしてから開いてください",
   "another document is being parsed — try again in a moment": "別のドキュメントを解析中です——しばらくしてからもう一度お試しください",
+  "the extraction journal could not be read, so it is not known whether an earlier extraction into this folder was cut short — try again when it reads (it is read again by itself)": "展開の記録が読めないため、このフォルダーへの以前の展開が途中で切れたかどうか分かりません——読めるようになってからもう一度試してください（自動でもう一度読みます）",   // lane lg-group-parents r3333 unit 2: the extraction journal held / torn
+  "the extraction journal's earlier record did not parse (it is kept aside), so it is not known whether an earlier extraction into this folder was cut short — extract it into a new or empty folder": "展開の記録の以前の内容を解析できなかったため（別に保存しました）、このフォルダーへの以前の展開が途中で切れたかどうか分かりません——新しいフォルダーか空のフォルダーに展開してください",   // lane lg-group-parents r3333 unit 2: the extraction journal held / torn
   "this folder or file did not answer in time — try again in {s} s": "このフォルダーまたはファイルは時間内に応答しませんでした — {s} 秒後にもう一度お試しください",
   "the file readers are restarting — try again in a moment": "ファイル読み取りプロセスが再起動中です — 少し待ってからもう一度お試しください",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "「{machine}」はオフラインです——このフォルダーはマシンの接続中にだけそのファイルを表示します",
