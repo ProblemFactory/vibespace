@@ -99,6 +99,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - **(4)** the background pacer's empty `end` is kept on purpose (a reader ends its pacer whichever kind it took).
 - **Leg (test-artifacts-handover l2)**: the prefetch's read slices with the foreground share live (RED: the reads in the background's share).
 
+### card-door-in-chat — B-7e49: test-ci-heavy-verdict's real-child legs to a heavy twin; its scratch repositories made once (主开发 r2459 / r2496)
+- **Profiled first.** Every child of the suite timed and charged to its section (alone on the second machine, both zones, 13.6–17.4 s): 1239 children, 1203 of them git. The row's «about 250 git children in 18 scratch repositories» are the repositories' making (init, three configs, add, commit, the commit's rev-parse), about 1.5 s; the other 950 are the readers under test asking real git — what each scene judges.
+- **The making.** ONE repository is made once (the same init and config, plus gc.auto 0 and maintenance.auto false: a scene's commit starts no auto-maintenance child) and each scene's is a copy of it; a commit's id is read from the ref git just wrote (rev-parse when it is not a loose ref).
+- **The heavy twin** scripts/test-ci-heavy-verdict-real.mjs holds, verbatim with their marks, the legs whose scene is a real child: §2 B-479e's four planted suites run (a suite that skipped itself), §4e / §4f's scripts/ci.mjs --status children (three answers), B-737b's nine planted suites run through this tree's reader and the release's (its RED CONTROL), §6's scripts/ci.mjs children (the --heavy-verdict refusals, --check-heavy's three answers), §7d the differential on real git. Every pure verdict leg and every red control that needs no real child stays fast (B-479e's wiring, B-737b's passed count, §6's one call site, §7 parity and §7c on the oracle). §2's plan over the 471 heavy sources is built ONCE already (the commit's plans read one-suite commits): nothing there to share. §T pins the twin: it holds those legs, the fast file runs none of them, master's reader is the same bytes in both, the row is heavy.
+- **Censuses moved with it:** the skip-sentence rows (13 sentences: 5 stay, 8 moved), §5's copies census reads 7 copies (the eighth, the release reader of B-737b, moved with its control; its floor stays 6), the kb INDEX line.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
