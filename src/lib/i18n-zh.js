@@ -15505,4 +15505,8 @@ export default {
   "{path} — put back (it is not there now)": "{path} —— 恢复（它现在不在那里）",
   "{path} — put back over what is there now (that is kept first)": "{path} —— 覆盖现在的内容来恢复（现在的内容会先被保留）",
   "{path} — removed (it did not exist then)": "{path} —— 删除（当时它并不存在）",
+  // B-437e (lane lg-rewind, 主开发 r2682): a person's goal press refused while a rewind is out
+  "A rewind is on its way — the goal was not changed; your /goal is back in the box. Change it after the rewind answers (in {s} s at the latest), or stop the conversation.": "回退还在路上 —— 目标没有改；你的 /goal 已放回输入框。回退有了回音再改（最多等 {s} 秒），或者停止这个对话。",
+  "A rewind is on its way — the goal was not changed (the box already had text, so your /goal was left out). Change it after the rewind answers (in {s} s at the latest), or stop the conversation.": "回退还在路上 —— 目标没有改（输入框里已经有文字，所以你的 /goal 没有放回去）。回退有了回音再改（最多等 {s} 秒），或者停止这个对话。",
+  "A rewind is on its way — the goal was not changed. Change it after the rewind answers (in {s} s at the latest), or stop the conversation.": "回退还在路上 —— 目标没有改。回退有了回音再改（最多等 {s} 秒），或者停止这个对话。",
 };

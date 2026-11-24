@@ -33,6 +33,10 @@
 //      while a turn runs says so and opens no dialog; the confirm names the count and that files stay; ONE ws frame; the
 //      answer puts the words back only into an empty box; every refusal reason has its words; every word in zh + ja; the
 //      CSS slot and the touch rule
+//   §10 THE PERSON's GOAL PRESS behind the same fence (主开发 r2682): src/ws-handler.js's own set-goal case, lifted over stand-ins —
+//      while a rewind is out a set, a clear and a resume are refused BY NAME (rewind-out, the seconds left) and NOTHING is written to
+//      the CLI; reading the goal is never stopped; free again once the rewind answers or its minute has passed; the page gives the
+//      typed /goal back into a free box and says why (the composer's and the view's own methods, lifted) — RED: the case unfenced
 import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,6 +44,7 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { anchored } from './scratch.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'b06f36e90'; // 2.369.407 — no checkpoints row, no door
@@ -1134,6 +1139,53 @@ say('— §9 the page\'s door');
     && /@media \(hover: none\) and \(pointer: coarse\) \{ \.chat-msg > \.chat-rewind-btn \{ display: none; \} \}/.test(css) && /:has\(> \.chat-rewind-btn\)[^{]*\{ padding-right: 56px; \}/.test(css),
     'the CSS: the fork\'s slot (a person\'s message never has a fork button), the words keep the column free, a touch client hides it in its OWN rule (the pinned touch line untouched; the … menu row serves touch)');
   ok(/rewind: +_s\('<path/.test(read('src/lib/icons.js')), 'the button is an SVG icon (UI_ICONS.rewind)');
+}
+
+say('— §10 the person\'s goal press behind the same fence (r2682)');
+{
+  const RQG = require(path.join(REPO, 'src/server/rewind-requests.js'));
+  const LIFE10 = door.REWIND_LIFE_MS;
+  const liftGoal = (src) => {
+    const a = src.indexOf("        case 'set-goal': {"), b = src.indexOf("\n        case 'rename-session'", a);
+    if (a < 0 || b < 0) throw new Error('lift: the set-goal case of src/ws-handler.js not found');
+    return new Function('data', 'ws', 'activeSessions', 'broadcastToSession', 'writeSessionMeta', 'readSessionMeta', 'require', `switch (data.type) {\n${src.slice(a, b)}\n}`);
+  };
+  const srcRequire = (p) => require(path.join(REPO, 'src', p.replace(/^\.\//, '')));
+  const press = (caseFn, data, { out = null } = {}) => {
+    const typed = [], sent = [], told = [];
+    const session = { mode: 'chat', backend: 'claude', _goal: 'the old goal', _prevGoal: 'an older goal', pty: { write: (l) => typed.push(l) } };
+    if (out) RQG.setFilesOut(session, { id: 'vsf-goal', at: out, files: true, pty: session.pty });
+    caseFn({ type: 'set-goal', sessionId: 'cp-goal', ...data }, { send: (x) => sent.push(JSON.parse(x)) }, new Map([['cp-goal', session]]), (sx, id, f) => told.push(f), async () => true, () => ({}), srcRequire);
+    return { typed, sent, told, goal: session._goal };
+  };
+  const live = liftGoal(read('src/ws-handler.js'));
+  const now = Date.now();
+  const set = press(live, { goal: 'ship it' }, { out: now }), clear = press(live, { goal: null }, { out: now }), resume = press(live, { action: 'resume' }, { out: now });
+  const refused = (r) => r.typed.length === 0 && r.told.length === 0 && r.goal === 'the old goal' && r.sent.length === 1 && r.sent[0].type === 'error' && r.sent[0].code === 'rewind-out' && r.sent[0].scope === 'goal'
+    && r.sent[0].left > 0 && r.sent[0].left <= LIFE10 / 1000 && /the goal was not changed/.test(r.sent[0].error || '');
+  ok(refused(set) && refused(clear) && refused(resume), '§10 WHILE A REWIND IS OUT a person\'s goal set, clear and resume are refused BY NAME (rewind-out, scope goal, the seconds left) — nothing written to the CLI, the goal unchanged, nobody told a goal moved', JSON.stringify(set.sent));
+  const status = press(live, { action: 'status' }, { out: now });
+  ok(status.typed.length === 0 && status.sent.length === 1 && status.sent[0].type === 'goal-updated' && /Goal active: the old goal/.test(status.sent[0].statusMsg || ''), '§10 reading the goal (status) is never stopped by the fence', JSON.stringify(status.sent));
+  const free = press(live, { goal: 'ship it' }), late = press(live, { goal: 'ship it' }, { out: now - LIFE10 - 1 });
+  ok([free, late].every((r) => r.typed.length === 1 && JSON.parse(r.typed[0]).type === 'set-goal' && r.goal === 'ship it' && r.told.length === 1 && r.told[0].type === 'goal-updated'),
+    '§10 with no rewind out — or once its stated minute has passed — the goal press goes through as before (one frame to the CLI, every client told)', JSON.stringify([free.typed, late.typed]));
+  // the page: the typed /goal back into a free box, and the words (the composer's and the view's own methods, lifted)
+  const CI = read('src/lib/chat-input.js'), CV = read('src/lib/chat-view.js');
+  const slice = (src, from, to) => { const a = src.indexOf(from), b = src.indexOf(to, a + 1); if (a < 0 || b < 0) throw new Error('lift: ' + from.trim()); return src.slice(a, b); };
+  const toasts = [], tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && x in p ? p[x] : `{${x}}`));
+  const Box = new Function('t', 'showToast', `return class { ${slice(CI, '  refusedGoal() {', '\n  confirmGoal() {')} ${slice(CV, '  _sayRefusedGoal(put, left) {', '\n  /** A refused ACTION (Compact now)')} }`)(tt, (m, o) => toasts.push([m, o && o.type]));
+  const box = (text, value) => Object.assign(new Box(), { _pendingGoal: text ? { text } : null, _goalTimer: 1, _clearPending() { this.cleared = true; }, _textarea: { value }, putBack(x) { if (!x) return 'none'; if (this._textarea.value.trim()) return 'kept'; this._textarea.value = x; return 'restored'; } });
+  const b1 = box('/goal ship it', ''), r1 = b1.refusedGoal(); b1._sayRefusedGoal(r1, 42);
+  const b2 = box('/goal ship it', 'a draft'), r2 = b2.refusedGoal();
+  const b3 = box(null, ''), r3 = b3.refusedGoal(); b3._sayRefusedGoal(r3, 42);
+  const line = CV.split('\n').find((l) => l.includes("msg.code === 'rewind-out' && msg.scope === 'goal'")) || '';
+  const routed = []; new Function('msg', line).call({ _chatInput: { refusedGoal: () => 'restored' }, _sayRefusedGoal: (put, left) => routed.push([put, left]) }, { code: 'rewind-out', scope: 'goal', left: 9 });
+  ok(r1 === 'restored' && b1._textarea.value === '/goal ship it' && b1._pendingGoal === null && b1.cleared && r2 === 'kept' && b2._textarea.value === 'a draft' && r3 === null
+    && /your \/goal is back in the box/.test(toasts[0][0]) && /in 42 s at the latest/.test(toasts[0][0]) && toasts[0][1] === 'error' && /the goal was not changed\. Change it/.test(toasts[1][0]) && JSON.stringify(routed) === '[["restored",9]]',
+    '§10 THE PAGE: the hub\'s goal refusal ends the «Setting goal…» line and puts the typed /goal back into a FREE box (a box with text is left alone; a status-bar press has none), said with the seconds left', JSON.stringify(toasts));
+  const unfenced = liftGoal(anchored(read('src/ws-handler.js'), "            if (fenced) { try { ws.send(JSON.stringify({ type: 'error', code: 'rewind-out', scope: 'goal', sessionId: data.sessionId, left: fenced.left, error: fenced.error, message: fenced.error })); } catch { } break; }\n", '', 'checkpoints: the goal case unfenced'));
+  const u = press(unfenced, { goal: 'ship it' }, { out: now });
+  ok(u.typed.length === 1 && u.goal === 'ship it', 'RED CONTROL (the goal case unfenced): a person\'s /goal goes to the CLI while a rewind is out');
 }
 
 say(failed ? `\n${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${passed}${skipped ? `; ${skipped} red control SKIPPED — not in this clone` : ''})`);

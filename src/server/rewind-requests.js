@@ -72,6 +72,17 @@ function rewindFenceLeft(session, now = Date.now()) {
   const o = rewindOut(session, now);
   return o ? Math.min(REWIND_LIFE_MS, Math.max(0, outAt(session, o) + REWIND_LIFE_MS - now)) : 0;
 }
+/** THE PERSON'S GOAL PRESS behind the same fence (主开发 r2682): a set, a clear or a resume of the conversation's goal is a frame on
+ *  the CLI's input like a typed message, so while a rewind is out it is refused BY NAME (`rewind_out`, the seconds left) and
+ *  nothing is written; reading the goal (`status`) is never stopped. It stops the PERSON's own press only — the agent's own goal
+ *  state read from its records is not a press → null (go on) | the refusal */
+function goalFenceOf(session, action, now = Date.now()) {
+  if (action === 'status') return null;
+  const fence = rewindFenceLeft(session, now);
+  if (!(fence > 0)) return null;
+  const left = Math.ceil(fence / 1000);
+  return { ok: false, code: 'rewind_out', left, error: `A rewind is on its way — the goal was not changed. Change it after the rewind answers (in ${left} s at the latest), or stop the conversation.` };
+}
 
 /** One press — or its DRY RUN (`dryRun`: the plan's words for the confirm, nothing written). Returns the frame for the
  *  page that pressed: `{ ok: true, requestId?, dryRun?, taken, turns, files }`, or `{ ok: false, reason, cls }`. Writes
@@ -109,4 +120,4 @@ function requestRewind({ session, msgId, lastSeenUuid, by, dryRun = false, expec
   return { ok: true, requestId: out.requestId, ...said };
 }
 
-module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut, conversationOut, setFilesOut, filesOutOf, rewindFenceLeft };
+module.exports = { rewindStateOf, requestRewind, personOfUpgrade, rewindOut, conversationOut, setFilesOut, filesOutOf, rewindFenceLeft, goalFenceOf };

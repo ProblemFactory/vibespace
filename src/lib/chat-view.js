@@ -2487,6 +2487,15 @@ class ChatView {
         : t('A rewind is on its way — your message was not sent. Send it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s }), { type: 'error' });
   }
 
+  /** A refused GOAL PRESS (B-437e, 主开发 r2682): the hub changed no goal while a rewind is out — the typed /goal is back in the box
+   *  (or the box already had text), said with the seconds the fence has left; a press from the status bar has no box text */
+  _sayRefusedGoal(put, left) {
+    const s = Math.max(1, Math.ceil(Number(left) || 60));
+    showToast(put === 'restored' ? t('A rewind is on its way — the goal was not changed; your /goal is back in the box. Change it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s })
+      : put === 'kept' ? t('A rewind is on its way — the goal was not changed (the box already had text, so your /goal was left out). Change it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s })
+        : t('A rewind is on its way — the goal was not changed. Change it after the rewind answers (in {s} s at the latest), or stop the conversation.', { s }), { type: 'error' });
+  }
+
   /** A refused ACTION (Compact now) gives its button back: it disabled itself for a send the hub did not take (B-437e). */
   _giveActionsBack() {
     this._messageList?.querySelectorAll?.('.chat-ctx-compact-btn').forEach((b) => { b.disabled = false; });
@@ -7655,6 +7664,7 @@ class ChatView {
     if (isScopedRefusal(msg)) {
       this._hideTyping();
       // B-437e: a send the hub refused while a rewind is out — the words back in the box, said once (no ✗ line)
+      if (msg.code === 'rewind-out' && msg.scope === 'goal') { this._sayRefusedGoal(this._chatInput?.refusedGoal?.() || null, msg.left); return; }   // B-437e (r2682): a goal press waits on a rewind out
       if (msg.code === 'rewind-out') { const put = this._chatInput?.refusedSend?.(msg.msgId); if (put) this._sayRefusedSend(put, msg.left); if (put === 'action') this._giveActionsBack(); return; }
       // A refused LIVE style switch can be a FACT about this session: only
       // 'style-wrapper-old' means THIS wrapper will never serve the verb, so

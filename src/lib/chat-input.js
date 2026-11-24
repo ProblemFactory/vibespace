@@ -1302,6 +1302,18 @@ export class ChatInput {
     }, 10000);
   }
 
+  /** THE HUB REFUSED THE /goal (B-437e, 主开发 r2682: a rewind is out): its pending line ends and the typed command goes back into a
+   *  free box → 'restored' | 'kept' (the box had text) | null (this box sent no /goal: a press from the status bar) */
+  refusedGoal() {
+    const p = this._pendingGoal;
+    if (!p) return null;
+    clearTimeout(this._goalTimer);
+    this._goalTimer = null;
+    this._pendingGoal = null;
+    this._clearPending();
+    return this.putBack(p.text);
+  }
+
   confirmGoal() {
     if (!this._pendingGoal) return;
     clearTimeout(this._goalTimer);

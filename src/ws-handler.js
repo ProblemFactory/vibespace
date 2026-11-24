@@ -1437,6 +1437,10 @@ function registerWsHandler(wss, ctx) {
         case 'set-goal': {
           const session = activeSessions.get(data.sessionId);
           if (session?.mode === 'chat') {
+            // B-437e (主开发 r2682): a person's goal set / clear / resume waits on a rewind that is out, refused by name as typing is
+            // (src/server/rewind-requests.js goalFenceOf); reading the goal is never stopped
+            const fenced = require('./server/rewind-requests.js').goalFenceOf(session, data.action);
+            if (fenced) { try { ws.send(JSON.stringify({ type: 'error', code: 'rewind-out', scope: 'goal', sessionId: data.sessionId, left: fenced.left, error: fenced.error, message: fenced.error })); } catch { } break; }
             if (data.action === 'status') {
               const goal = session._goal;
               const prev = session._prevGoal;

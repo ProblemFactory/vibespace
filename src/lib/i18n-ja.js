@@ -15504,4 +15504,8 @@ export default {
   "{path} — put back (it is not there now)": "{path} — 元に戻します（今はそこにありません）",
   "{path} — put back over what is there now (that is kept first)": "{path} — 今の内容の上に元に戻します（今の内容は先に保存します）",
   "{path} — removed (it did not exist then)": "{path} — 削除します（当時は存在しませんでした）",
+  // B-437e (lane lg-rewind, 主开发 r2682): a person's goal press refused while a rewind is out
+  "A rewind is on its way — the goal was not changed; your /goal is back in the box. Change it after the rewind answers (in {s} s at the latest), or stop the conversation.": "戻す操作の応答待ちです — 目標は変えていません。/goal は入力欄に戻しました。応答のあと（長くても {s} 秒後）に変えるか、会話を停止してください。",
+  "A rewind is on its way — the goal was not changed (the box already had text, so your /goal was left out). Change it after the rewind answers (in {s} s at the latest), or stop the conversation.": "戻す操作の応答待ちです — 目標は変えていません（入力欄に文字があったので、/goal は戻していません）。応答のあと（長くても {s} 秒後）に変えるか、会話を停止してください。",
+  "A rewind is on its way — the goal was not changed. Change it after the rewind answers (in {s} s at the latest), or stop the conversation.": "戻す操作の応答待ちです — 目標は変えていません。応答のあと（長くても {s} 秒後）に変えるか、会話を停止してください。",
 };
