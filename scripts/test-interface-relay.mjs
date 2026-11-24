@@ -251,7 +251,10 @@ async function syncCalls(I) {
   const stripped = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   const asyncWriter = (() => { const t = read('src/secret-file.js'), i = t.indexOf('async function replaceShreddingAsync('); return i < 0 ? 'replaceShreddingAsync MISSING Sync' : t.slice(i, t.indexOf('\n}\n', i) + 2); })();
   const syncForms = [...files.map((f) => `src/interface/${f}`), 'src/start-pipe.js', 'src/agentd/chan-socket.js', 'src/login-page.js', 'src/landing-lang.js'].flatMap((rel) => [...stripped(read(rel)).matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `${rel}: ${m[0]}`))
-    .concat([...stripped(asyncWriter).matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `src/secret-file.js replaceShreddingAsync: ${m[0]}`));
+    .concat([...stripped(asyncWriter).matchAll(/\b[A-Za-z]+Sync\b/g)].map((m) => `src/secret-file.js replaceShreddingAsync: ${m[0]}`))
+    // B-dc3f (1) (主开发 r3433): ONE name allowed by name — the sign-in table's start facts, read ONCE BEFORE the interface listens (its
+    // `factsNow`, called by load() alone, cached after); the count above holds the after-listen law at run time; any other name stays red
+    .filter((x) => x !== 'src/interface/signin.js: startFactsSync');
   ok(JSON.stringify(files.sort()) === JSON.stringify(['admission.js', 'front.js', 'index.js', 'main.js', 'owners.js', 'relay.js', 'signin.js']) && syncForms.length === 0, `and read statically: no …Sync name in src/interface's ${files.length} files nor in src/start-pipe.js, the reader it shares, nor in src/agentd/chan-socket.js, nor in the sign-in road's page, language and async writer (a reference taken at load is seen too)`, syncForms);
   const mutRelay = mutant('src/interface/relay.js', "    stats.exchanges++;", "    stats.exchanges++; require('fs').statSync(__filename);");
   const mut = await syncCalls(interfaceWith({ relay: mutRelay }));

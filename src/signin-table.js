@@ -78,6 +78,14 @@ function judgeRead({ error = null, text = null, linkGone = false } = {}) {
 /** the journal's held line (B-dc3f), said ONCE at the holder's start — `file` the table's path, `sso` = single sign-on still guards;
  *  `held` = the held state: a folder / link / declared hold (B-dc3f (1)) says its own line, whose act IS the page's en words
  *  (主开发 r2152: the journal and the page can never name different acts) */
+/** THE HELD OBJECT (B-dc3f (1)): a hold's why and kind, and for a folder kind the data folder and every witness file the verdict
+ *  named (the act's own) — the piped form's interface builds it here; the plain form's src/auth.js `_hold` builds the same shape */
+function heldOf({ why, kind = 'file', verdict = null, dataDir = '' } = {}) {
+  const files = verdict && Array.isArray(verdict.files) ? verdict.files : [];
+  const h = { why, kind, ...(kind !== 'file' ? { dir: dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };
+  if (verdict && verdict.home) h.home = verdict.home;
+  return h;
+}
 function heldJournal(file, why, sso, held = null) {
   if (held && held.kind && held.kind !== 'file') {
     const act = heldWords('en', false, held).fix.replace(/\.$/, '');
@@ -147,6 +155,7 @@ function rateFail(map, ip, now) {
 }
 
 module.exports = {
+  heldOf,
   TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, MAX_TOKENS, OWN_RULE_UPGRADES, LOCAL_ROAD, routeKey, DECLARE_ENV, heldWords, heldCause, escHtml, tokenDigest, DIGEST_RE, loginAlive, cookieMaxAge, judgeRead,
   heldJournal, HELD_UPGRADE, SCRYPT_KEYLEN, hashSync, hash, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, RATE_FAILS, RATE_LOCK_MS, rateCheck, rateFail,
 };

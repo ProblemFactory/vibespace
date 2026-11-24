@@ -27,7 +27,7 @@ const path = require('path');
 const crypto = require('crypto');
 const LI = require('./local-index.js');
 const SR = require('./store-read.js');   // 主开发 r3336: the id file's one read, answered by the store-read law
-const { replaceShredding } = require('./secret-file.js');
+const { replaceShredding, replaceShreddingAsync } = require('./secret-file.js');
 
 const V = 1;
 const INSTANCE_FILE = 'instance.json';
@@ -225,9 +225,42 @@ function writeWitness({ place, file, root, dataDir, id, uid = null }) {
   replaceShredding(file, JSON.stringify(witnessDoc({ root, dataDir, id })));
   return true;
 }
+/** THE ONE WRITER's CHOICE (PURE — the plain form's `_syncWitness` rule, said once here for the piped form's interface): a password set
+ *  ⇒ written at the ladder's place and at every LOCAL copy whose folder takes a write; none ⇒ every local copy removed — but at a
+ *  START whose folder held another id or none, every copy is kept (`foreignAt`). A network copy is never the local writer's */
+function writePlan({ set = false, place = null, file = null, found = [], atStart = false, startId = null } = {}) {
+  const local = (found || []).filter((w) => !w.net);
+  if (set) return { write: [...new Set([...(place && place.dir && file ? [file] : []), ...local.filter((w) => w.writable !== false).map((w) => w.file)])], remove: [], kept: false };
+  if (atStart && foreignAt(found, startId)) return { write: [], remove: [], kept: local.length > 0 };
+  return { write: [], remove: local.map((w) => w.file), kept: false };
+}
+/** THE ONE WRITER's ACTS OFF THE LOOP (主开发 r3433: the piped form's interface makes no synchronous disk call once it listens) — the
+ *  same doc and the same rung law as `ensureInstance` / `writeWitness` / `removeWitness`, through the async replace. The id is minted
+ *  ONLY where nothing is there (ENOENT): a file that is THERE and could not be read is never written over (主开发 r3336's law) → the id, or null */
+async function ensureInstanceAsync(dataDir, current) {
+  if (current && current.id) return current;
+  const file = path.join(dataDir, INSTANCE_FILE);
+  try { await fs.promises.lstat(file); return null; } catch (e) { if (!e || e.code !== 'ENOENT') return null; }
+  const doc = newInstance();
+  await replaceShreddingAsync(file, JSON.stringify(doc));
+  return { id: doc.id, createdAt: doc.createdAt };
+}
+async function writeWitnessAsync({ place, file, root, dataDir, id, uid = null }) {
+  if (!place || !place.dir || !file || !id) return false;
+  await fs.promises.mkdir(place.dir, { recursive: true, mode: 0o700 });
+  const st = await fs.promises.lstat(place.dir);
+  const law = LI.rungFolderOf({ exists: true, symlink: st.isSymbolicLink(), dir: st.isDirectory(), uid: st.uid, mode: st.mode & 0o7777 }, { uid, dir: place.dir });
+  if (!law.ok) throw new Error(law.why);
+  await replaceShreddingAsync(file, JSON.stringify(witnessDoc({ root, dataDir, id })));
+  return true;
+}
+async function removeWitnessAsync({ file }) {
+  if (!file) return false;
+  try { await fs.promises.unlink(file); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
+}
 function removeWitness({ file }) {
   if (!file) return false;
   try { fs.unlinkSync(file); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
-module.exports = { V, INSTANCE_FILE, ID_RE, instanceValid, idAsideOf, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };
+module.exports = { writePlan, ensureInstanceAsync, writeWitnessAsync, removeWitnessAsync, V, INSTANCE_FILE, ID_RE, instanceValid, idAsideOf, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };

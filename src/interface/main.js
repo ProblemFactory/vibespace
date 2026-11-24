@@ -23,7 +23,9 @@
 // THE SIGN-IN TABLE IS NAMED, NEVER GUESSED (piece B3b-1, 主开发 r1060 + r1517 (A)): `signin.file` is REQUIRED — an absolute path
 // whose folder is this account's alone (the link's rule: whoever may write the folder may put another table in its place); a start
 // line without it, or with a relative path or a foreign folder, is a bad start by name (exit 2): an interface with no table would
-// stamp no login and its hub would refuse every page. A missing FILE is a new instance (sign-in off), as in the plain form; a file
+// stamp no login and its hub would refuse every page. A missing FILE is a new instance (sign-in off), as in the plain form — unless the
+// named data folder's verdict holds it (B-dc3f (1), 主开发 r3433: `folder`, `root`, `home`, `uid`, `throwaway`, `declared`, ADDITIVE — the
+// plain form's src/signin-witness.js, one implementation; a line without them keeps this reading, said once); a file
 // that cannot be read HOLDS the instance (B-dc3f). `clerk` = { publishableKey, allowedEmails } — no secret, and no environment is
 // read for it; `password` (the supervisor's VIBESPACE_PASSWORD) and `generate` (a container's first start) are the plain form's
 // boot resolution (src/auth.js ensurePassword), held in memory only until the table is resolved. A generated password is said
@@ -58,8 +60,17 @@ async function signinWhy(signin, uid) {
   if (!path.isAbsolute(signin.file)) return `the sign-in table's path is not absolute (${JSON.stringify(signin.file.slice(0, 120))})`;
   const c = signin.clerk;
   if (c != null && (typeof c !== 'object' || Array.isArray(c) || typeof c.publishableKey !== 'string' || !(c.allowedEmails == null || typeof c.allowedEmails === 'string' || Array.isArray(c.allowedEmails)))) return 'the start line\'s single sign-on settings are not { publishableKey, allowedEmails }';
+  // B-dc3f (1) (主开发 r3433 Q1): THE NAMED FIELDS of the same verdict — ADDITIVE: a line without `folder` keeps today's reading by name
+  if (signin.folder !== undefined) {
+    if (typeof signin.folder !== 'string' || !path.isAbsolute(signin.folder)) return `the sign-in table's data folder (signin.folder) is not an absolute path (${JSON.stringify(String(signin.folder).slice(0, 120))})`;
+    for (const k of ['root', 'home']) if (signin[k] !== undefined && (typeof signin[k] !== 'string' || !path.isAbsolute(signin[k]))) return `the sign-in table's ${k} (signin.${k}) is not an absolute path`;
+    if (signin.uid !== undefined && signin.uid !== null && !Number.isInteger(signin.uid)) return 'the sign-in table\'s uid (signin.uid) is not a whole number';
+    for (const k of ['throwaway', 'declared']) if (signin[k] !== undefined && typeof signin[k] !== 'boolean') return `the sign-in table's ${k} (signin.${k}) is not true or false`;
+  }
   return ownFolderWhy(path.dirname(signin.file), "the sign-in table's folder", uid);
 }
+/** B-dc3f (1): the start line's named fields → the table's witness (null: none named — today's reading, said once by the table) */
+const witnessOf = (signin) => (signin && typeof signin.folder === 'string' ? { folder: signin.folder, root: signin.root || path.dirname(signin.folder), home: signin.home || '', uid: Number.isInteger(signin.uid) ? signin.uid : null, throwaway: signin.throwaway === true, declared: signin.declared === true } : null);
 
 /** → { iface, ready: Promise<{ port, link }>, stop() } — `pipe` = a suite's stream handed in AS the start pipe (else the
  *  descriptor VIBESPACE_START_FD names); `exit(code)` ends the process (a suite hands a spy); `startMs` the start line's bound. */
@@ -74,7 +85,7 @@ function main({ pipe = null, env = process.env, exit = (c) => process.exit(c), l
     if (folder) { const e = new Error(folder); e.badStart = true; throw e; }
     const table = await signinWhy(line.signin);       // the sign-in table is named, never guessed (piece B3b-1)
     if (table) { const e = new Error(table); e.badStart = true; throw e; }
-    const t = signinTable.create({ file: line.signin.file, clerk: line.signin.clerk || null, log });
+    const t = signinTable.create({ file: line.signin.file, clerk: line.signin.clerk || null, log, witness: witnessOf(line.signin) });
     await t.load();
     const { generated } = await t.ensure({ password: typeof line.signin.password === 'string' ? line.signin.password : '', generate: line.signin.generate === true });
     line.signin = { file: line.signin.file };   // the boot's password is not kept past its resolution
@@ -130,4 +141,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, listenAt, linkFolderWhy, signinWhy };
+module.exports = { main, listenAt, linkFolderWhy, signinWhy, witnessOf };

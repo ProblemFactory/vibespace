@@ -24,6 +24,7 @@
 //   IN MEMORY ONLY, DECLARED: the wrong-password counters (an interface restart resets them) and, while held under single sign-on,
 //     its logins (as the plain form).
 const fsp = require('fs').promises;
+const path = require('path');
 const crypto = require('crypto');
 const T = require('../signin-table.js');
 const { loginHtml } = require('../login-page.js');
@@ -33,6 +34,7 @@ const { doorClassOf } = require('../door.js');
 const { crossSiteVerdict, ownOriginOf } = require('../write-origin.js');
 const { replaceShreddingAsync } = require('../secret-file.js');
 const { ClerkAuth } = require('../clerk-auth.js');
+const SW = require('../signin-witness.js');   // B-dc3f (1) (主开发 r2341 / r3433): the plain form's verdict and writer — ONE implementation
 
 const SCRYPT_MAX = 4;     // hashes in flight at once; one more is refused by name (never queued on the loop's work)
 const BODY_MAX = 4096;    // a sign-in body over this is dropped with its connection (the plain form's express_json_lite)
@@ -47,7 +49,7 @@ const heldError = (held) => Object.assign(new Error(`the sign-in file is held ($
  *  upgradeRefused(req), refuseUpgrade(socket), revokeAll(why) → n, stateLine(), onChange(fn), flushed(), stats() }
  *  `file` absolute (main.js judged it); `clerk` = { publishableKey, allowedEmails } or null (no environment is read);
  *  `clerkAuth` a suite's stand-in; `now` the clock; `hashOf` the hash (a suite's slow one holds hashes in flight) */
-function create({ file, clerk = null, clerkAuth = null, log = console, now = () => Date.now(), hashOf = T.hash } = {}) {
+function create({ file, clerk = null, clerkAuth = null, log = console, now = () => Date.now(), hashOf = T.hash, witness = null } = {}) {
   const ck = clerkAuth || (clerk ? new ClerkAuth({ publishableKey: String(clerk.publishableKey || ''), allowedEmails: Array.isArray(clerk.allowedEmails) ? clerk.allowedEmails.join(',') : String(clerk.allowedEmails || ''), keepLastGood: true }) : null);
   let state = null, held = null, scrypts = 0;
   let epoch = 0;   // the follow (law 1): the highest vault-lock order applied — every live login's stamp carries it
@@ -90,10 +92,49 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
   }
 
   // ── THE LOAD, judged by the shared law (B-dc3f's shapes and words) ──
-  function hold(why) {
+  function hold(why, kind = 'file', verdict = null) {
     state = sso() ? { tokens: {} } : null;   // single sign-on still guards: its logins in MEMORY only (save writes nothing while held)
-    held = { why };
-    try { log.error?.(`[interface] ${T.heldJournal(file, why, sso())}`); } catch { }   // said ONCE, here, at the start
+    held = T.heldOf({ why, kind, verdict, dataDir: witness ? witness.folder : '' });   // B-dc3f (1): a folder kind carries its act's files
+    try { log.error?.(`[interface] ${T.heldJournal(file, why, sso(), held)}`); } catch { }   // said ONCE, here, at the start
+  }
+  // ── B-dc3f (1), THE PIPED FORM (主开发 r2341 / r3433): THE SAME VERDICT as the plain form. The start line NAMES the data folder, the
+  // install root, the home, the uid, throwaway and declared (`witness`, main.js judged it): the start's facts are read ONCE, BEFORE the
+  // interface listens (src/signin-witness.js startFactsSync); every write after is OFF THE LOOP (the async writer). A line that names
+  // none of it keeps today's reading BY NAME (an older supervisor), said once. A home on a network mount: its copy is NOT read here (a
+  // limit, named in the kb, until a supervisor exists — the plain form's worker pool is its own unit)
+  const saidOnce = new Set();
+  const sayOnce = (k, line) => { if (saidOnce.has(k)) return; saidOnce.add(k); try { log.warn?.(`[interface] ${line}`); } catch { } };
+  let facts = null, lastWitness = Promise.resolve();
+  function factsNow() {
+    if (!witness) { sayOnce('no-folder', 'the start line names no data folder (signin.folder): the sign-in table is read as before — a missing table is a new instance (an older supervisor)'); return null; }
+    if (facts) return facts;
+    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, home: witness.home, uid: witness.uid, env: witness.declared ? { [SW.DECLARE_ENV]: 'required' } : {}, throwaway: witness.throwaway ? 'throwaway' : false, ...(witness.varTmp ? { varTmp: witness.varTmp } : {}) }); }   // varTmp: a suite's scratch rung only (no start-line field)
+    catch (e) { sayOnce('facts', `the data folder's sign-in facts could not be read (${(e && e.code) || 'error'}) — the table is read as before`); facts = null; }
+    if (facts && facts.netHome) sayOnce('net-home', `the home folder ${facts.netHome} is a network mount: the piped form does not read its sign-in witness (a limit) — only the persistent local places`);
+    return facts;
+  }
+  /** the start's writes, OFF THE LOOP, at a start that is not held: the folder's id once (never over a file that is there), then the
+   *  witness kept by the one writer's choice (SW.writePlan) */
+  async function startWrites() {
+    const f = factsNow();
+    if (!f) return;
+    const startId = f.instance && f.instance.id;
+    try { const got = await SW.ensureInstanceAsync(witness.folder, f.instance); if (got) f.instance = got; } catch (e) { sayOnce('instance', `the data folder's id could not be written (${(e && e.code) || 'error'}) — no witness is kept until it is`); }
+    if (!f.instance) { sayOnce('id-held', `the data folder's id file ${path.join(witness.folder, SW.INSTANCE_FILE)} is there and could not be read: nothing is written over it, and no witness is kept until it reads`); return; }
+    await writeWitnesses({ atStart: true, startId });
+  }
+  function writeWitnesses({ atStart = false, startId = null } = {}) {
+    const f = facts;
+    if (!f || !f.instance || held) return lastWitness;
+    const plan = SW.writePlan({ set: !!(state && state.passwordHash), place: f.place, file: f.file, found: f.found, atStart, startId });
+    if (plan.kept) sayOnce('foreign', `a sign-in witness names another data folder than ${witness.folder} — this start keeps every copy as it is`);
+    lastWitness = lastWitness.then(async () => {
+      for (const w of plan.write) { try { await SW.writeWitnessAsync({ place: { dir: path.dirname(w) }, file: w, root: f.root, dataDir: f.dataDir, id: f.instance.id, uid: f.uid }); } catch (e) { sayOnce('witness', `the sign-in witness ${w} could not be written (${(e && e.message) || e}) — it is written again at the next start`); } }
+      for (const w of plan.remove) { try { await SW.removeWitnessAsync({ file: w }); } catch (e) { sayOnce('witness-rm', `the sign-in witness ${w} could not be removed (${(e && e.code) || 'error'}) — it is removed again at the next start`); } }
+      if (plan.write.length) { f.witness = { id: f.instance.id }; f.found = plan.write.map((w) => ({ file: w, doc: { id: f.instance.id } })); }
+      else if (plan.remove.length) { f.found = []; f.witness = null; }
+    });
+    return lastWitness;
   }
   async function load() {
     held = null;
@@ -101,14 +142,20 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     try { text = await fsp.readFile(file, 'utf-8'); } catch (e) { error = e || Object.assign(new Error('an error'), { code: 'an error' }); }
     if (error && error.code === 'ENOENT') { try { await fsp.lstat(file); linkGone = true; } catch (e) { void e; /* nothing at the path */ } }
     const j = T.judgeRead({ error, text, linkGone });
+    // B-dc3f (1): a table that is missing, or says off, asks THE SAME VERDICT as the plain form (SW.verdictOf) — never a second copy of it
+    const was = j.held ? null : j.missing ? 'missing' : (j.state && !j.state.passwordHash ? 'off' : null);
+    const f = was ? factsNow() : null;
+    const v = f ? SW.verdictOf({ auth: was, dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: witness.folder }) : { hold: null };
     if (j.held) hold(j.held);
-    else if (j.missing) state = null;   // truly missing: nothing at the path — a new instance
+    else if (v.hold) hold(v.hold.why, v.hold.kind, v.hold);   // a folder that is not the one its sign-in was set in: held, never a new open instance
+    else if (j.missing) state = null;   // truly missing: nothing at the path — a new instance (no witness names another folder)
     else {
       state = j.state;
       const out = T.migrateTokens(state.tokens, now());   // a plaintext token map becomes its digests (once)
       if (out) { state.tokens = out; await save().catch((e) => { try { log.warn?.(`[interface] an older build's plaintext login map could not be re-keyed on disk (${(e && e.code) || 'error'}) — it is re-keyed in memory`); } catch { } }); }
     }
     changed();
+    if (!held) { factsNow(); await startWrites(); }   // B-dc3f (1): the id and the witness, BEFORE the interface listens (main.js awaits load)
   }
 
   // ── THE HASH, bounded ──
@@ -127,12 +174,20 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = await scrypt(pw, salt);
     state = { passwordHash, salt, userSet: userSet || state?.userSet || false, tokens: state?.tokens || {} };
-    const w = save(); changed(); return w;
+    const w = save(); changed();
+    w.then((landed) => { if (landed) writeWitnesses(); }, () => { });   // B-dc3f (1): the witness after the table is ON DISK, off the loop
+    return w;
   }
   /** THE BOOT'S RESOLUTION, as the plain form's ensurePassword (src/auth.js): a user-set state is kept; `password` (the
    *  supervisor's VIBESPACE_PASSWORD, on the start pipe only) is set when it does not match; `generate` (a container's first
    *  start) makes one and answers it ONCE, for the journal → { generated? } */
-  async function ensure({ password = '', generate = false } = {}) {
+  /** B-dc3f (1): THE DECLARATION (named in the start line, never read from the environment): required, no password, no single sign-on ⇒ held */
+  async function ensure(opts = {}) {
+    const r = await ensureRoad(opts);
+    if (!held && witness && witness.declared && !passwordEnabled() && !sso()) { hold(`${SW.DECLARE_ENV}=required is set and no password is set`, 'declared'); changed(); }
+    return r;
+  }
+  async function ensureRoad({ password = '', generate = false } = {}) {
     if (held || state?.userSet) return {};
     if (password) { if (!passwordEnabled() || T.hashMatches(await scrypt(password, state.salt), state.passwordHash) === false) await setPassword(password); return {}; }
     if (passwordEnabled() || !generate) return {};
@@ -228,7 +283,7 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     answer(res, 302, html ? `<p>Found. Redirecting to <a href="${T.escHtml(to)}">${T.escHtml(to)}</a></p>` : `Found. Redirecting to ${to}`, { Location: to, Vary: 'Accept', 'Content-Type': html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8' }, cookies);
   }
   function refuseHeld(req, res, { sso: s = false, page = false } = {}) {
-    const lang = landingLang(req.headers['accept-language']), w = T.heldWords(lang, s);
+    const lang = landingLang(req.headers['accept-language']), w = T.heldWords(lang, s, held);
     if (page || (req.method === 'GET' && String(req.headers.accept || '').includes('text/html'))) return answer(res, page ? 200 : 503, T.heldPage(held, lang, w), { 'Retry-After': '3600', 'Content-Type': 'text/html; charset=utf-8' });
     return json(res, 503, T.heldJson(held, lang, w), null, { 'Retry-After': '3600' });
   }
@@ -346,6 +401,7 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     load, ensure, road, head, upgradeRefused, refuseUpgrade, revokeAll, adoptEpoch, stateLine,
     onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
     flushed: () => writing || Promise.resolve(),
+    witnessed: () => lastWitness,   // B-dc3f (1): the witness's last write, off the loop (a suite awaits it)
     get held() { return held; }, get shut() { return shut(); }, get enabled() { return enabled(); },
     stats: () => ({ ...said, held: held ? held.why : null, enabled: enabled(), scrypts, epoch, logins: Object.keys((state && state.tokens) || {}).length }),
   };
