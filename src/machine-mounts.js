@@ -307,21 +307,38 @@ class MachineMounts {
     } catch { return false; }
   }
 
-  /** the MOVE (part one): a mount's machine is NOT LISTED but a kept copy of hosts.json's torn bytes may name it — never «removed» */
+  /** r3813: is the mount's machine in the machines list (a held list counts as listed — unknown, never «not listed») */
+  _hostListed(hostId) { try { this.hosts.get(hostId); return true; } catch (e) { return !(e && e.code === 'host_not_found'); } }
+  /** the MOVE (part one): a mount's machine is NOT LISTED but a kept copy of hosts.json's torn bytes may name it — never «removed».
+   *  → true (a kept copy names it), false (not listed, and no copy names it: removed), null — UNKNOWN (part one's words follow, r3792):
+   *  the copies not read yet (a later run's first moments), a copy that cannot be read or is over the bound, or more copies than the
+   *  look reads — the page says it neutrally (neither «removed» nor «may still name»), and is told once the copies are read */
   _hostInCopy(hostId) {
     const h = this.hosts;
     if (!h || typeof h.namedByCopy !== 'function') return false;
     let listed = true; try { this.hosts.get(hostId); } catch (e) { listed = !(e && e.code === 'host_not_found'); }   // held ⇒ «listed»: unknown, and the page shows no machine as removed while held
     if (listed) return false;
-    // the page's words wait for the copies' read (or this run's own tear): an unread answer names every id, and an ordinary boot's first
-    // seconds would say «the damaged list may name it» of a list nothing damaged
-    if (typeof h.copiesRead === 'function' && !h.copiesRead() && !(typeof h.tornCopy === 'function' && h.tornCopy())) return false;
-    try { return !!h.namedByCopy(hostId); } catch { return false; }
+    let named = false; try { named = !!h.namedByCopy(hostId); } catch { return null; }
+    // the copies not read: an unread answer names every id but a person's removal (that one is «removed» at once). This run's own tear
+    // says «may still name»; otherwise the page waits for the read, said neutrally — an ordinary boot's first seconds would otherwise
+    // say «the damaged list may name it» of a list nothing damaged, or «removed» of a machine a copy names
+    if (typeof h.copiesRead === 'function' && !h.copiesRead()) { if (!named) return false; if (typeof h.tornCopy === 'function' && h.tornCopy()) return true; this._tellWhenCopiesRead(); return null; }
+    if (named) return true;
+    if (typeof h.copiesWhole === 'function' && !h.copiesWhole()) return null;   // more copies than the look reads: an older one may name it
+    return false;
+  }
+  /** part one's words follow (r3792): the page is TOLD when the kept copies become read — an unknown row then takes its own section.
+   *  One read asked at a time, at most once a minute (a copy that cannot be read is asked again by the copies' own minute) */
+  _tellWhenCopiesRead() {
+    const h = this.hosts, at = Date.now();
+    if (typeof h.copiesWarm !== 'function' || (this._copiesTellAt && at - this._copiesTellAt < 60000)) return;
+    this._copiesTellAt = at;
+    Promise.resolve().then(() => h.copiesWarm()).catch(() => { }).then(() => { try { if (h.copiesRead()) this._notify(); } catch { /* a stand-in without a broadcast */ } });
   }
   list() {
     return this._state.mounts.map((m) => ({ ...(m.dir === 'pull'
       ? this._pullRow(m)
-      : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) }), ...(this._hostInCopy(m.hostId) ? { hostInCopy: true } : {}) }));
+      : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) }), ...((v) => (v === true ? { hostInCopy: true } : v === null ? { hostUnknown: true } : {}))(this._hostInCopy(m.hostId)) }));
   }
 
   /** B-af94: a pull row's words said from a coded error keep its code (a code is shown only while ITS words are the row's) */
@@ -644,19 +661,22 @@ class MachineMounts {
   async _unmountPush(rec) {
     // best-effort on the machine (it may be offline) — the token is revoked
     // and the record dropped REGARDLESS, so a dead machine can't hold a live
-    // credential hostage
-    try {
+    // credential hostage. r3813: → null when the machine's side was reached, else why not ('not-listed' | 'not-reached') — said
+    const listed = this._hostListed(rec.hostId);
+    let side = listed ? null : 'not-listed';
+    if (listed) try {
       if (rec.method === 'rclone-webdav' || rec.method === 'rclone-nfs' || rec.method === 'mount_webdav') {
         await this._run(rec.hostId, 'sh', ['-c', `fusermount -u '${rec.mountpoint}' 2>/dev/null || umount '${rec.mountpoint}' 2>/dev/null || true`]);
       } else if (rec.method === 'net-use') {
         await this._run(rec.hostId, 'cmd', ['/c', `net use ${rec.mountpoint} /delete /y`]);
       }
-    } catch { }
+    } catch { side = 'not-reached'; }
     try { this.mountTokens.revoke?.(rec.tokenId); } catch { }
     { const opening = this._doors && this._doors.get(rec.id); if (opening) { this._doors.delete(rec.id); try { await (await opening).close(); } catch { } } }   // B-7f0b: its door goes with it (its connections too)
     if (rec.tunnelPort) { // release the device-side listener (best-effort)
       try { const dm = await this.hosts.deviceBounded(rec.hostId); await dm.reverseUnforward(rec.tunnelPort); } catch { }
     }
+    return side;
   }
 
   // ═══ PULL direction (the machine's folder → this workspace) ═══
@@ -847,7 +867,7 @@ class MachineMounts {
     this._refuseIfUnread('mounting again');   // remainder of B-f276: a held machine-mounts.json takes no change
     const rec = this._state.mounts.find((m) => m.id === id);
     if (!rec) throw MW.refusal('unknown_mount');
-    if (!this._online(rec.hostId)) throw this.hosts.held?.() ? Object.assign(new Error(`mounting again: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 }) : MW.refusal('machine_offline_start');   // the B-f276 remainder (H21): held, not offline — beside B-af94's coded refusal (the move onto 921c0de17)
+    if (!this._online(rec.hostId)) throw this.hosts.held?.() ? Object.assign(new Error(`mounting again: ${this.hosts.unreadWords()}`), { code: 'hosts-unread', status: 503 }) : MW.refusal(this._hostListed(rec.hostId) ? 'machine_offline_start' : 'machine_not_listed');   // r3813: a machine not listed is never told «start its daemon»   // the B-f276 remainder (H21): held, not offline — beside B-af94's coded refusal (the move onto 921c0de17)
     if (rec.dir === 'push') {
       // a push mount manually umounted ON the machine (or torn by a reboot):
       // the raw token is unrecoverable (hashed at rest), so re-creating with
@@ -871,6 +891,7 @@ class MachineMounts {
     const i = this._state.mounts.findIndex((m) => m.id === id);
     if (i < 0) throw MW.refusal('unknown_mount');
     const rec = this._state.mounts[i];
+    let side = null;   // r3813: a push mount's own machine side NOT reached — 'not-listed' (its machine is not in the list) or 'not-reached' (it did not answer)
     // the B-f276 remainder's cure (主开发 23:20Z, its audit H5): a PUSH mount's unmount runs ON its machine — while hosts.json is HELD
     // that machine cannot be reached, and the remote unmount was swallowed while the token was revoked and the record dropped (a dead
     // mount left on the machine, nothing said): refused by name, nothing changed
@@ -888,7 +909,7 @@ class MachineMounts {
       this._held.delete(id);
       this._proofKept?.delete(id); this._proofNever?.delete(id);   // B-02f6 remainder (r1214): «never again» ends with the record
     } else {
-      await this._unmountPush(rec);
+      side = await this._unmountPush(rec);
       this._pushTunnelOwned.delete(id);
       this._pushRetryAt.delete(id);
       this._pushDown?.delete(id);
@@ -896,7 +917,8 @@ class MachineMounts {
     this._state.mounts.splice(i, 1);   // (its real path stays known: a chain of it still ending must see a record added again on that folder)
     this._save(); this._notify();
     if (rec.dir === 'pull') this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the record it held back may be free now
-    return { ok: true };
+    // r3813: a push mount's machine side that could not be reached is SAID (its token is revoked, so the stale mount there opens nothing)
+    return { ok: true, ...(side ? { machineSide: side } : {}) };
   }
 
   /** B-844b / B-6c4f: the record whose folder is `real` or nests with it (in either direction), but `exceptId` → { kind, other } | null.

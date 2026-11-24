@@ -219,7 +219,7 @@ function copiesOf({ file, prefix, log = null, omit = [] } = {}) {
   const keyOf = file + '\n' + prefix;
   if (COPIES.has(keyOf)) return COPIES.get(keyOf);
   const dir = path.dirname(file);
-  let ids = null, failed = false, listedAt = 0, listed = null, inflight = null, againAfter = false, gen = 0, saidFail = false;
+  let ids = null, failed = false, listedAt = 0, listed = null, inflight = null, againAfter = false, gen = 0, saidFail = false, cut = false;   // cut: more copies than the look reads (an older one is not read)
   const sayFail = (e) => {
     if (saidFail || typeof log !== 'function') return;
     saidFail = true;
@@ -232,9 +232,9 @@ function copiesOf({ file, prefix, log = null, omit = [] } = {}) {
     const g = gen;
     const one = (async () => {
       try {
-        const all = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(prefix)).sort().slice(-COPY_LOOK);
+        const every = (await fs.promises.readdir(dir)).filter((n) => n.startsWith(prefix)).sort(), all = every.slice(-COPY_LOOK);
         if (g !== gen) return;   // invalidated meanwhile: the follow-up reads
-        listedAt = Date.now();
+        listedAt = Date.now(); cut = every.length > all.length;
         if (ids && !failed && listed && listed.join('\n') === all.join('\n')) return;   // the same copies: the answer stands
         const set = new Set();
         for (const n of all) {
@@ -259,6 +259,9 @@ function copiesOf({ file, prefix, log = null, omit = [] } = {}) {
     },
     /** the copies were read (false: every id is named) */
     ready: () => !!ids && !failed,
+    /** part one's words follow (r3792): the copies were read AND none was left out of the look (false: an id no copy read names may
+     *  still be named by an older copy — a caller that SAYS «no copy names it» says unknown instead) */
+    whole: () => !!ids && !failed && !cut,
     refresh,
     /** round wxzvih2as's MUST: THE ANSWER IS NEVER OLDER THAN THE NEWEST COPY THIS PROCESS MADE — a store that makes its own copy of
      *  torn bytes calls this right after: every id is NAMED until the copies are read again (off the loop) */

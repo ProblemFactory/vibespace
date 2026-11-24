@@ -43,9 +43,11 @@ export default {
   "wakes «{name}»": "唤醒「{name}」",
   "Each ticked job may resume the conversation named on its row after that conversation is ended — every resume starts a turn billed to that conversation’s account:": "勾选的每个任务都可以在其所在行列出的对话被终止后恢复该对话——每次恢复都会开始一轮计费，记在那个对话的账号上：",
   "This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.": "这个对话的任务现在无法列出：后台工作读不到它的记录。它们保留现有的唤醒选择——等记录能读取后，再到后台工作里修改。",
-  "VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. A machine it named can be paired again; until then its mounts below are kept and its records are not removed.": "VibeSpace 无法使用它的机器列表（文件已损坏），所以列表从空开始。旧的字节保存在它旁边的 {name}。它列过的机器可以重新配对；在那之前，下面这些挂载会被保留，它们的记录不会被删除。",
+  "VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The mounts below are kept and their records are not removed. A device that pairs again gets its mounts back; an ssh machine added again counts as a new machine, so its old mounts stay below until you unmount them.": "VibeSpace 无法使用它的机器列表（文件已损坏），所以列表从空开始。旧的字节保存在它旁边的 {name}。下面的挂载会被保留，它们的记录不会被删除。重新配对的设备会找回它的挂载；重新添加的 ssh 机器会被当作一台新机器，所以它的旧挂载会留在下面，直到你卸载它们。",
   "Mounts on machines the damaged list may still name — kept; unmount one only if you no longer want it": "损坏的列表可能仍列着的机器上的挂载——已保留；只有在你不再需要时才卸载",
   "(not listed now — the damaged list may name it)": "（现在未列出——损坏的列表可能列着它）",
+  "Mounts on machines not in the list now — kept": "现在不在列表中的机器上的挂载——已保留",
+  "(not listed now)": "（现在未列出）",
   "This conversation’s folder may be on a mount: VibeSpace cannot read its list of mounts right now — nothing was started and nothing was made there; resume it once the list reads again.": "这个对话的文件夹可能在一个挂载上：VibeSpace 现在读不到它的挂载列表——没有启动任何东西，也没有在那里创建任何东西；等列表能读取后再恢复它。",
   "The folder may be on a mount: VibeSpace cannot read its list of mounts right now — start again once it reads.": "这个文件夹可能在一个挂载上：VibeSpace 现在读不到它的挂载列表——等它能读取后再重新开始。",
   "Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):": "它的任务和定时任务——勾选的那些可以在你终止它之后恢复它（随「终止所选」一起保存；每次恢复都会开始一轮计费）：",
@@ -2956,6 +2958,9 @@ export default {
   "the machine went offline while its folder was being mounted": "挂载其文件夹的过程中机器离线了",
   "unknown machine mount": "未知的机器挂载",
   "machine is offline — start its daemon first": "机器离线——先启动它的守护进程",
+  "this machine is not in the machines list now — pair it again before mounting here, or unmount this mount": "这台机器现在不在机器列表中——先重新配对再在这里挂载，或者卸载这个挂载",
+  "Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything": "已在这里卸载——它的机器现在不在列表中，所以没有到达机器那一端；它的链接已不能再打开任何东西",
+  "Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything": "已在这里卸载——它的机器没有应答，所以没有到达机器那一端；它的链接已不能再打开任何东西",
   "could not release the folder {mountpoint} — its unmount did not answer in {s} s": "无法释放文件夹 {mountpoint}——它的卸载在 {s} 秒内没有回应",
   "Did not disconnect — {why}; try again in a moment": "没有断开连接——{why}；请稍后再试",   // B-323e follow (lane bl-machines-b)
   "Disconnected, but could not confirm its process ended — {why}": "已断开连接，但无法确认它的进程已经结束——{why}",   // B-323e follow (lane bl-machines-b)

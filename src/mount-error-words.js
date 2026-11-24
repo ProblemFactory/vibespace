@@ -40,6 +40,7 @@ const WORDS = Object.freeze({
   machine_went_offline: i18nKey('the machine went offline while its folder was being mounted'),
   unknown_mount: i18nKey('unknown machine mount'),
   machine_offline_start: i18nKey('machine is offline — start its daemon first'),
+  machine_not_listed: i18nKey('this machine is not in the machines list now — pair it again before mounting here, or unmount this mount'),   // r3813 (part one's words follow): a machine NOT LISTED is not «offline» — no daemon start helps
   mount_not_empty: i18nKey('this folder is not empty, so the machine’s folder cannot be mounted over it — move its files out, then press Remount now'),
   mount_point_releasing: i18nKey('a pull just removed from this folder is still being let go — it is tried again by itself'),
   mount_point_unchecked: i18nKey('this folder could not be checked yet (it did not answer) — it is tried again by itself'),

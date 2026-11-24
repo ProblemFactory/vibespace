@@ -434,7 +434,11 @@ class HostManager {
   /** the copy of hosts.json's torn bytes this run started empty over (its base name), or null — the page's torn words */
   tornCopy() { return this._tornCopy || null; }
   /** the kept copies were read (an unread answer names every id — the page waits for a read before it says «the damaged list may name it») */
-  copiesRead() { try { return this._copies().ready(); } catch { return false; } }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
+  copiesRead() { try { return this._copies().ready(); } catch { return false; } }
+  /** part one's words follow (r3792): read, and no copy left out of the look (more copies than it reads: an older one may name an id) */
+  copiesWhole() { try { return this._copies().whole(); } catch { return false; } }
+  /** read the kept copies if they were never read → a promise settled once the read in flight ends (the mounts list then tells the page) */
+  copiesWarm() { try { return this._copies().warm(); } catch { return Promise.resolve(); } }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
   _unreadHold(a) {
     this._unread = { code: a.code, why: a.why, at: (this._unread && this._unread.at) || Date.now() };
     this._state = { hosts: [] };

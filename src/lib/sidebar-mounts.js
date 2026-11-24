@@ -442,7 +442,7 @@ export function installSidebarMounts(Sidebar) {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
         hlist.appendChild(this._buildLocalMachineRow());
-        if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. A machine it named can be paired again; until then its mounts below are kept and its records are not removed.', { name: hd.torn }) }));   // the MOVE: hosts.json's torn lift
+        if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The mounts below are kept and their records are not removed. A device that pairs again gets its mounts back; an ssh machine added again counts as a new machine, so its old mounts stay below until you unmount them.', { name: hd.torn }) }));   // the MOVE: hosts.json's torn lift
         if (mm && typeof mm.torn === 'string' && mm.torn) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-torn-hint', textContent: tr('VibeSpace could not use its list of machine mounts (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The machines’ folder links stay valid: a paired machine’s end when you remove it; any other ends by its Revoke under Bridge tokens.', { name: mm.torn }) }));   // B-f276 family unit 2 (r3081)
         if (hostsHeld || mountsHeld) hlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline mounts-held-hint',
           textContent: hostsHeld ? tr('VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.')
@@ -481,7 +481,7 @@ export function installSidebarMounts(Sidebar) {
       // Orphan mounts: mounts whose machine was removed (or none listed).
       // Without this they'd be invisible AND unmanageable (review finding).
       const liveHostIds = new Set(hd.hosts.map((h) => h.id));
-      const orphans = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId) && !m.hostInCopy); // held: no machine is known, none is «removed»
+      const orphans = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId) && !m.hostInCopy && !m.hostUnknown); // held: no machine is known, none is «removed»
       // the MOVE (part one): a mount whose machine a kept copy of the damaged list may name is never offered as «removed» — kept, said; the
       // person's own unmount stays theirs (r3428: a hold for a pass never stops a person's own press)
       const inCopy = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId) && m.hostInCopy);
@@ -489,14 +489,24 @@ export function installSidebarMounts(Sidebar) {
         const clist = document.createElement('div');
         clist.className = 'mounts-list';
         clist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Mounts on machines the damaged list may still name — kept; unmount one only if you no longer want it') }));
-        for (const m of inCopy) clist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(not listed now — the damaged list may name it)') }, m));
+        for (const m of inCopy) clist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(not listed now — the damaged list may name it)'), notListed: true }, m));
         root.appendChild(clist);
+      }
+      // part one's words follow (r3792): UNKNOWN — the kept copies not read yet, a copy that cannot be read, more copies than the look
+      // reads — said neutrally (neither «removed» nor «may still name»); the hub tells the page once they are read
+      const unknownHost = hostsHeld ? [] : this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId) && !m.hostInCopy && m.hostUnknown);
+      if (unknownHost.length) {
+        const ulist = document.createElement('div');
+        ulist.className = 'mounts-list';
+        ulist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Mounts on machines not in the list now — kept') }));
+        for (const m of unknownHost) ulist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(not listed now)'), notListed: true }, m));
+        root.appendChild(ulist);
       }
       if (orphans.length) {
         const olist = document.createElement('div');
         olist.className = 'mounts-list';
         olist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Mounts on removed machines — unmount to clean up') }));
-        for (const m of orphans) olist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(removed machine)') }, m));
+        for (const m of orphans) olist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(removed machine)'), notListed: true }, m));
         root.appendChild(olist);
       }
       const addHost = document.createElement('button');
@@ -1449,7 +1459,7 @@ export function installSidebarMounts(Sidebar) {
           <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : m.error ? escHtml(pullErrorText(m)) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
           <b class="mounts-name" title="${escHtml(h.name || m.hostId)}:${escHtml(m.remotePath)} → ${escHtml(m.mountpoint)}">${escHtml(m.remotePath.split('/').pop() || m.remotePath)}</b>
           <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the device link)', { mp: m.mountpoint }))}">⬇ ${escHtml(tr('from machine'))}</span>`;
-        if (!m.live && !(m.errorParams && m.errorParams.held)) {   // B-844b r4: a HELD row offers no Remount (it can only be refused) — its words are drawn below
+        if (!m.live && !(m.errorParams && m.errorParams.held) && !h.notListed) {   // B-844b r4: a HELD row offers no Remount (it can only be refused) — its words are drawn below; r3813: nor a row whose machine is not listed (refused by name: machine_not_listed — never «start its daemon»)
           const re = document.createElement('button');
           re.className = 'mounts-icon-btn';
           re.innerHTML = MI.retry; re.title = m.online ? tr('Remount now') : tr('Remount (machine is offline — start its daemon first)');
@@ -1488,7 +1498,7 @@ export function installSidebarMounts(Sidebar) {
           <span class="mounts-dot mounts-dot-${pushDown ? 'err' : pushGone ? 'off' : 'ok'}" title="${escHtml(pushDotTip)}"></span>
           <b class="mounts-name" title="${escHtml(m.folder)}">${escHtml(m.folder.split('/').pop() || m.folder)}</b>
           <span class="mounts-badge" title="${escHtml(viaTip)}">⬆ ${escHtml(pushGone ? tr('gone on machine') : tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
-        if (pushGone) {
+        if (pushGone && !h.notListed) {   // r3813: a machine not listed cannot be reached — no Re-mount offered
           const re = document.createElement('button');
           re.className = 'mounts-icon-btn';
           re.innerHTML = MI.retry; re.title = tr('Re-mount on the machine');
@@ -1507,7 +1517,7 @@ export function installSidebarMounts(Sidebar) {
       un.title = m.dir === 'pull' ? tr('Unmount') : tr('Unmount from this machine');
       un.onclick = async (e) => {
         e.stopPropagation(); un.disabled = true;
-        try { await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
+        try { const r = await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(r && r.machineSide === 'not-listed' ? tr('Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything') : r && r.machineSide === 'not-reached' ? tr('Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything') : tr('Unmounted')); }   // r3813: a push mount's machine side not reached is said
         catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
         this._renderMounts();
       };

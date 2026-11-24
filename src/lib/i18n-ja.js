@@ -43,9 +43,11 @@ export default {
   "wakes «{name}»": "「{name}」を起こす",
   "Each ticked job may resume the conversation named on its row after that conversation is ended — every resume starts a turn billed to that conversation’s account:": "チェックした各ジョブは、その行にある会話が終了した後にその会話を再開できます。再開するたびに、その会話のアカウントで課金されるターンが始まります：",
   "This conversation’s jobs cannot be listed right now: Background Work cannot read its records. They keep the wake choices they have — change them in Background Work once its records read again.": "この会話のジョブは今は一覧にできません：バックグラウンド作業が記録を読めないためです。ジョブは今の再開の設定のままです — 記録が読めるようになったら、バックグラウンド作業で変更してください。",
-  "VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. A machine it named can be paired again; until then its mounts below are kept and its records are not removed.": "VibeSpace はマシンの一覧を使えませんでした（ファイルが壊れていました）。そのため一覧は空から始まりました。古いバイトはその横に {name} として保存されています。一覧にあったマシンは再びペアリングできます。それまで下のマウントは保持され、その記録は削除されません。",
+  "VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The mounts below are kept and their records are not removed. A device that pairs again gets its mounts back; an ssh machine added again counts as a new machine, so its old mounts stay below until you unmount them.": "VibeSpace はマシンの一覧を使えませんでした（ファイルが壊れていました）。そのため一覧は空から始まりました。古いバイトはその横に {name} として保存されています。下のマウントは保持され、その記録は削除されません。もう一度ペアリングしたデバイスはマウントが戻ります。もう一度追加した ssh マシンは新しいマシンとして扱われるため、古いマウントはマウント解除するまで下に残ります。",
   "Mounts on machines the damaged list may still name — kept; unmount one only if you no longer want it": "壊れた一覧にまだ載っているかもしれないマシンのマウント — 保持しています。不要な場合にだけマウント解除してください",
   "(not listed now — the damaged list may name it)": "（今は一覧にありません — 壊れた一覧に載っているかもしれません）",
+  "Mounts on machines not in the list now — kept": "今は一覧にないマシンのマウント — 保持しています",
+  "(not listed now)": "（今は一覧にありません）",
   "This conversation’s folder may be on a mount: VibeSpace cannot read its list of mounts right now — nothing was started and nothing was made there; resume it once the list reads again.": "この会話のフォルダーはマウント上にあるかもしれません。VibeSpace は今マウントの一覧を読めません — 何も起動しておらず、そこには何も作っていません。一覧が読めるようになったら再開してください。",
   "The folder may be on a mount: VibeSpace cannot read its list of mounts right now — start again once it reads.": "このフォルダーはマウント上にあるかもしれません。VibeSpace は今マウントの一覧を読めません — 読めるようになったらもう一度始めてください。",
   "Its jobs and schedules — a ticked one may resume it after you terminate it (stored with «Terminate selected»; every resume starts a billed turn):": "この会話のジョブと予定 — チェックしたものは終了後にこの会話を再開できます（「選択したものを終了」と一緒に保存。再開のたびに課金されるターンが始まります）：",
@@ -2959,6 +2961,9 @@ export default {
   "Did not disconnect — {why}; try again in a moment": "切断できませんでした — {why}。しばらくしてからもう一度お試しください",   // B-323e follow (lane bl-machines-b)
   "Disconnected, but could not confirm its process ended — {why}": "切断しましたが、そのプロセスが終了したかは確認できませんでした — {why}",   // B-323e follow (lane bl-machines-b)
   "Connects once the disconnect has finished": "切断が終わってから接続します",   // B-323e follow (lane bl-machines-b)
+  "this machine is not in the machines list now — pair it again before mounting here, or unmount this mount": "このマシンは今マシン一覧にありません — ここにマウントする前にもう一度ペアリングするか、このマウントを解除してください",
+  "Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything": "ここでマウント解除しました — そのマシンは今一覧にないため、マシン側には届きませんでした。そのリンクはもう何も開けません",
+  "Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything": "ここでマウント解除しました — そのマシンが応答しなかったため、マシン側には届きませんでした。そのリンクはもう何も開けません",
   "could not release the folder {mountpoint} — its unmount did not answer in {s} s": "フォルダー {mountpoint} を解放できませんでした — アンマウントが {s} 秒以内に応答しませんでした",
   "device serve-folder failed: {detail}": "デバイスの serve-folder に失敗しました: {detail}",
   "rclone webdav mount exited: {detail}": "rclone webdav マウントが終了しました: {detail}",

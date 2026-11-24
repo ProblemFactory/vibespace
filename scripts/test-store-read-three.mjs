@@ -625,29 +625,77 @@ try {
     { const MMv = require('../src/machine-mounts.js').MachineMounts;
       // a machine mount whose machine is NOT LISTED: named by a kept copy (after the copies are read) ⇒ `hostInCopy`; removed by the person,
       // or no copy ⇒ the old «removed machine» row. RED CONTROL: the flag never set (in a copy) — the mount reads as on a removed machine
-      const flagRun = async (MMX, tag, { copy = true, removed = false } = {}) => {
+      // part one's words follow (r3792): three answers — named (`hostInCopy`), not named (the old row), and UNKNOWN (`hostUnknown`: the
+      // copies not read yet, a copy that cannot be read, more copies than the look reads), said neutrally; the page TOLD once they are read
+      const flagRun = async (MMX, tag, { copy = true, removed = false, many = false, unreadable = false } = {}) => {
         const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [] }));
         if (copy) fs.writeFileSync(f + '.corrupt-1700000000000', '{"hosts": [{"id": "host-dial-made04", "transport": "dial", "name": "made-up"');
-        const Hm = new HMb.HostManager({ dataDir: d });
-        if (removed) { const id = Hm.add({ name: 'made-up', transport: 'dial', deviceId: 'made04' }); await Hm.remove(id); }
-        const early = (() => { const S = Object.create(MMX.prototype); Object.assign(S, { hosts: Hm, _state: { mounts: [{ id: 'mm-made04', dir: 'push', hostId: 'host-dial-made04', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro' }] } }); return !!(S.list()[0] || {}).hostInCopy; })();
-        await Hm._copies().refresh();
-        const S = Object.create(MMX.prototype); Object.assign(S, { hosts: Hm, _state: { mounts: [{ id: 'mm-made04', dir: 'push', hostId: 'host-dial-made04', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro' }] } });
-        return { early, flag: !!(S.list()[0] || {}).hostInCopy };
+        if (many) for (let k = 1; k <= 20; k++) fs.writeFileSync(f + '.corrupt-17000000' + String(10000 + k), '{"hosts": [{"id": "host-dial-other' + k + '"');   // twenty NEWER copies: the one that names made04 falls out of the look
+        const un = unreadable ? refuse(f + '.corrupt-1700000000000') : () => { };
+        try {
+          const Hm = new HMb.HostManager({ dataDir: d });
+          if (removed) { const id = Hm.add({ name: 'made-up', transport: 'dial', deviceId: 'made04' }); await Hm.remove(id); }
+          const told = [];
+          const mk = () => { const S = Object.create(MMX.prototype); Object.assign(S, { hosts: Hm, broadcast: (m) => told.push(m && m.type), _state: { mounts: [{ id: 'mm-made04', dir: 'push', hostId: 'host-dial-made04', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro' }] } }); return S; };
+          const row0 = mk().list()[0] || {};   // the copies' read still in flight (the start asked it)
+          await Hm._copies().refresh();
+          for (let k = 0; k < 8; k++) await new Promise((r) => setImmediate(r));   // (the tell's own turns)
+          const row = mk().list()[0] || {};
+          return { early: !!row0.hostInCopy, earlyUnknown: !!row0.hostUnknown, flag: !!row.hostInCopy, unknown: !!row.hostUnknown, told: told.filter((t) => t === 'machine-mounts-updated').length };
+        } finally { un(); }
       };
       const fNamed = await flagRun(MMv, 'move-flag'), fNone = await flagRun(MMv, 'move-flag-none', { copy: false }), fGone = await flagRun(MMv, 'move-flag-removed', { removed: true });
-      const fx = await flagRun(mutant('src/machine-mounts.js', [['    try { return !!h.namedByCopy(hostId); } catch { return false; }\n', '    return false;\n']]).MachineMounts, 'move-flag-ctl');
-      ok(fNamed.flag === true && fNamed.early === false && fNone.flag === false && fGone.flag === false, 'THE MOVE (part one): a machine mount whose machine is not listed but a kept copy of the torn hosts list names carries hostInCopy (never «removed») — only once the copies are read; no copy, or the person\'s removal: the old row', { fNamed, fNone, fGone });
+      const fMany = await flagRun(MMv, 'move-flag-many', { many: true }), fUnr = await flagRun(MMv, 'move-flag-unread', { unreadable: true });
+      const MMSRC = fs.readFileSync(path.join(REPO, 'src/machine-mounts.js'), 'utf8');
+      const TELL = 'this._tellWhenCopiesRead(); return null; }', WHOLE = "    if (typeof h.copiesWhole === 'function' && !h.copiesWhole()) return null;   // more copies than the look reads: an older one may name it\n";
+      ok(MMSRC.split(TELL).length === 2 && MMSRC.split(WHOLE).length === 2 && MMSRC.split('    if (named) return true;\n').length === 2, 'control setup: the unknown answer, its tell, the look\'s cut and the named answer are each found once in machine-mounts.js');
+      const fx = await flagRun(mutant('src/machine-mounts.js', [['    if (named) return true;\n', '']]).MachineMounts, 'move-flag-ctl');
+      ok(fNamed.flag === true && fNamed.early === false && fNone.flag === false && !fNone.unknown && fGone.flag === false && !fGone.unknown, 'THE MOVE (part one): a machine mount whose machine is not listed but a kept copy of the torn hosts list names carries hostInCopy (never «removed») — only once the copies are read; no copy, or the person\'s removal: the old row', { fNamed, fNone, fGone });
       ok(fx.flag === false, 'RED CONTROL — the flag never set (in a copy): the mount reads as on a removed machine, and its row offers «unmount to clean up»', fx);
+      ok(fNamed.earlyUnknown && fNone.earlyUnknown && !fGone.earlyUnknown && !fGone.early && fNamed.told === 1 && !fNamed.unknown, 'THE WORDS FOLLOW (r3792): while the copies are not read yet a mount whose machine is not listed is UNKNOWN (hostUnknown: neither «removed» nor «may still name») — a person\'s removal is «removed» at once — and the page is TOLD once, when the copies are read', { fNamed, fNone, fGone });
+      ok(fMany.unknown && !fMany.flag && fUnr.unknown && !fUnr.flag && fUnr.told === 0, 'THE WORDS FOLLOW: more copies than the look reads (an older one names the machine) is UNKNOWN, never «removed»; a copy that cannot be read is UNKNOWN, and nothing is told while none is read', { fMany, fUnr });
+      const fxT = await flagRun(mutant('src/machine-mounts.js', [[TELL, 'return null; }']]).MachineMounts, 'move-flag-tell-ctl');
+      const fxE = await flagRun(mutant('src/machine-mounts.js', [[TELL, 'return false; }']]).MachineMounts, 'move-flag-early-ctl');
+      const fxW = await flagRun(mutant('src/machine-mounts.js', [[WHOLE, '']]).MachineMounts, 'move-flag-many-ctl', { many: true });
+      ok(fxT.told === 0 && fxE.earlyUnknown === false && fxW.unknown === false, 'RED CONTROLS (each in a copy) — the tell cut: the page is never told the copies were read; the unknown answer cut (part one\'s road): the first moments draw the mount as on a removed machine; the look\'s cut not asked: a machine an older copy names is «removed»', { fxT, fxE, fxW });
+      // r3813 (the verifier's two facts, same follow): a REMOUNT on a machine not listed is refused as «not in the machines list» — never
+      // «start its daemon» (the page offers no Remount there); a PUSH UNMOUNT whose machine side was not reached SAYS so (not listed, or no
+      // answer), its token revoked and its record dropped as before
+      const sideRun = async (MMX, tag, { listed = false } = {}) => {
+        const d = dirOf(tag); fs.writeFileSync(path.join(d, 'machine-mounts.json'), JSON.stringify({ mounts: [
+          { id: 'mm-push01', dir: 'push', hostId: 'host-made07', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro', method: 'rclone-webdav', tokenId: 'tok-made07', createdAt: 1 },
+          { id: 'mm-pull01', dir: 'pull', hostId: 'host-made07', remotePath: '/srv/r', mountpoint: path.join(d, 'pulled'), createdAt: 1 }] }));
+        const revoked = [];
+        const hosts = { get: (id) => { if (listed) return { id, name: 'made-up', transport: 'ssh', host: 'made.example.invalid', user: 'u' }; throw Object.assign(new Error('host not found'), { code: 'host_not_found' }); }, findByDeviceId: () => null, held: () => false };
+        const M = new MMX({ dataDir: d, hosts, mountTokens: { list: () => [], revoke: (t) => revoked.push(t) }, broadcast() { }, log() { } }); clearInterval(M._sweep);
+        if (listed) M._run = async () => { throw new Error('the machine did not answer (placed)'); };
+        let re = null; if (!listed) { try { await M.remount('mm-pull01'); re = 'answered'; } catch (e) { re = e && e.code; } }   // (a LISTED ssh machine reads as online: its remount would start a real pull — not asked here)
+        const un = await M.unmount('mm-push01');
+        return { re, side: un && un.machineSide, revoked: revoked.join(), left: M.list().map((m) => m.id).join() };
+      };
+      const sNL = await sideRun(MMv, 'side-not-listed'), sNR = await sideRun(MMv, 'side-no-answer', { listed: true });
+      ok(sNL.re === 'machine_not_listed' && sNL.side === 'not-listed' && sNL.revoked === 'tok-made07' && sNL.left === 'mm-pull01' && sNR.side === 'not-reached' && sNR.revoked === 'tok-made07', 'r3813: a remount on a machine NOT LISTED is refused as such (machine_not_listed — never «start its daemon»); a push unmount there answers machineSide not-listed (and not-reached when the machine did not answer) — its token revoked, its record dropped', { sNL, sNR });
+      const MMS2 = fs.readFileSync(path.join(REPO, 'src/machine-mounts.js'), 'utf8');
+      const RENL = "MW.refusal(this._hostListed(rec.hostId) ? 'machine_offline_start' : 'machine_not_listed')", SIDE = "    return { ok: true, ...(side ? { machineSide: side } : {}) };\n";
+      ok(MMS2.split(RENL).length === 2 && MMS2.split(SIDE).length === 2, 'control setup: the remount\'s refusal and the unmount\'s answer are each found once in machine-mounts.js');
+      const sX = await sideRun(mutant('src/machine-mounts.js', [[RENL, "MW.refusal('machine_offline_start')"], [SIDE, '    return { ok: true };\n']]).MachineMounts, 'side-ctl');
+      ok(sX.re === 'machine_offline_start' && sX.side === undefined, 'RED CONTROLS (in a copy) — the release\'s words: «start its daemon» for a machine not listed, and an unmount that answers done with nothing said of the machine side', sX);
+      const NR_L = 'Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything', NR_R = 'Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything';
+      const MWS = fs.readFileSync(path.join(REPO, 'src/mount-error-words.js'), 'utf8'), NLW = 'this machine is not in the machines list now — pair it again before mounting here, or unmount this mount';
+      const SMr = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), zhr = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jar = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+      ok(SMr.includes("if (!m.live && !(m.errorParams && m.errorParams.held) && !h.notListed) {") && SMr.includes('if (pushGone && !h.notListed) {') && (SMr.match(/, notListed: true \}, m\)\);/g) || []).length === 3
+        && SMr.includes(`r && r.machineSide === 'not-listed' ? tr('${NR_L}')`) && SMr.includes(`r && r.machineSide === 'not-reached' ? tr('${NR_R}')`) && MWS.includes(`machine_not_listed: i18nKey('${NLW}')`)
+        && [NR_L, NR_R, NLW].every((w) => zhr.includes(`"${w}":`) && jar.includes(`"${w}":`)), 'r3813 (pins): the three sections of machines not listed offer no Remount; the unmount\'s toast says a machine side not reached; the refusal\'s words (zh, ja beside)');
       // the torn lift's copy, said: hosts.tornCopy() names it at boot; the route carries it; the page says it, and keeps the flagged mounts
       // out of «removed machines» (zh, ja beside)
       const dT = dirOf('move-torn'), fT = path.join(dT, 'hosts.json'); fs.writeFileSync(fT, '{"hosts": [{"id": "host-made05"');
       const HT = new HMb.HostManager({ dataDir: dT }), tc = HT.tornCopy();
       const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), SM = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-      const H1 = 'VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. A machine it named can be paired again; until then its mounts below are kept and its records are not removed.';
+      const H1 = 'VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The mounts below are kept and their records are not removed. A device that pairs again gets its mounts back; an ssh machine added again counts as a new machine, so its old mounts stay below until you unmount them.';
+      const SEC = 'Mounts on machines not in the list now — kept', ROWW = '(not listed now)';   // the words follow's neutral section (r3792)
       const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
       ok(typeof tc === 'string' && /^hosts\.json\.corrupt-\d+$/.test(tc) && fs.existsSync(path.join(dT, tc)) && HT.list().length === 0, 'THE MOVE: a torn hosts.json at boot — the list starts empty and tornCopy() names its kept copy', { tc });
-      ok(ER.includes("...(typeof hosts.tornCopy === 'function' && hosts.tornCopy() ? { torn: hosts.tornCopy() } : {})") && SM.includes("if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(") && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && m.hostInCopy') && SM.includes(`tr('${H1}'`) && zh.includes(`"${H1}":`) && ja.includes(`"${H1}":`), 'THE MOVE (pins): GET /api/hosts carries the torn copy; the page says it (zh, ja) and keeps a flagged mount out of «removed machines», in its own section where the person\'s unmount stays theirs'); }
+      ok(ER.includes("...(typeof hosts.tornCopy === 'function' && hosts.tornCopy() ? { torn: hosts.tornCopy() } : {})") && SM.includes("if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(") && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy && !m.hostUnknown') && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy && m.hostUnknown') && SM.includes(`tr('${SEC}')`) && SM.includes(`tr('${ROWW}')`) && [SEC, ROWW].every((w) => zh.includes(`"${w}":`) && ja.includes(`"${w}":`)) && SM.includes(`tr('${H1}'`) && zh.includes(`"${H1}":`) && ja.includes(`"${H1}":`), 'THE MOVE (pins): GET /api/hosts carries the torn copy; the page says it (zh, ja) and keeps a flagged mount out of «removed machines», in its own section where the person\'s unmount stays theirs'); }
   }
 } catch (e) {
   fail++; console.log('  ✗ the suite threw: ' + ((e && e.stack) || e));
