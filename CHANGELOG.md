@@ -8,6 +8,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A browser profile's ⋯ menu has «Environment…» to set the time zone, the language and the location its browser tells the sites it opens.
 - With a place set, only the sites on the profile's list read it; every other site is denied the location, with no prompt.
 
+### Fixed
+- A notice about a refused agent action now names the conversation or browser it was about, while the agent itself still learns nothing more.
+
 ## 2.369.418 — 2026-11-24
 
 ### Changed
