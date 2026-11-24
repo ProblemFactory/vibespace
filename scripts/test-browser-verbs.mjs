@@ -1155,11 +1155,21 @@ try {
     {
       const ALT = path.join(ROOT, 'alt-tmp'); fs.mkdirSync(ALT, { recursive: true }); const ALT_REAL = fs.realpathSync(ALT);
       const aenv = { ...wenv, TMPDIR: ALT };
-      const named = (r) => r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`${ALT_REAL} or ~/Downloads; nothing ran`) && r.stderr.includes(`remedy: save under the project, ${ALT_REAL} or ~/Downloads`) && !/\/tmp or ~\/Downloads/.test(r.stderr);   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+      // r3637 (the hosted runner's scratch lives UNDER /tmp): the absence checks read the RELEASE's OWN WORDS exactly — «, /tmp or
+      // ~/Downloads» in a refusal, «the project, /tmp or ~/Downloads only)» and «outside the project, /tmp» at a line's end in the help —
+      // never «/tmp» as a prefix: a real temp folder named by its path may itself begin with /tmp/ (/tmp/vs-…/alt-tmp there)
+      const releaseRefusal = (x) => String(x).includes(', /tmp or ~/Downloads');
+      const releaseHelp = (x) => String(x).includes('the project, /tmp or ~/Downloads only)') || /outside the project, \/tmp\n/.test(String(x));
+      const named = (r) => r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`${ALT_REAL} or ~/Downloads; nothing ran`) && r.stderr.includes(`remedy: save under the project, ${ALT_REAL} or ~/Downloads`) && !releaseRefusal(r.stderr);   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
       const ra = await nodeCli(CLI, ['pdf', '/etc/x.pdf'], { env: aenv, cwd: WD });
       const rh = await nodeCli(CLI, ['help'], { env: aenv, cwd: WD });
-      ok(named(ra) && rh.stdout.includes(`(files are written under the project, ${ALT_REAL} or ~/Downloads only)`) && rh.stdout.includes(`to a path outside the project, ${ALT_REAL}`) && !/the project, \/tmp/.test(rh.stdout),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
+      ok(named(ra) && rh.stdout.includes(`(files are written under the project, ${ALT_REAL} or ~/Downloads only)`) && rh.stdout.includes(`to a path outside the project, ${ALT_REAL}`) && !releaseHelp(rh.stdout),   // stale-pins: kept — a deliberate absence check of the release's «/tmp» words (r2886)
         'THE TEMP FOLDER NAMED (r2886): with TMPDIR elsewhere the refusal, its remedy and the help name THAT folder by its real path — never «/tmp»', { stderr: ra.stderr.slice(-400), help: (rh.stdout.match(/files are written under[^\n]*/) || [''])[0] });
+      {   // r3637 CONTROL — the placing of the hosted run's red (45405143191): the same help and refusal with the folder at a hosted runner's
+          // place (/tmp/vs-hosted-…/alt-tmp, its path text only — nothing is written there)
+        const HOSTED = '/tmp/vs-hosted-madeup/alt-tmp', hh = rh.stdout.split(ALT_REAL).join(HOSTED), hr = ra.stderr.split(ALT_REAL).join(HOSTED);
+        ok(/the project, \/tmp/.test(hh) && !releaseHelp(hh) && !releaseRefusal(hr) && hh.includes(`to a path outside the project, ${HOSTED}`), 'r3637 CONTROL: a temp folder whose path begins with /tmp/ (the hosted runner\'s scratch) — the old prefix check reads the RIGHT words as the release\'s (its red there); the exact checks hold', { help: (hh.match(/to a path outside the project[^\n]*/) || [''])[0] });
+      }
       const rs = await nodeCli(CLI, ['pdf', path.join(ALT, 'alt.pdf')], { env: aenv, cwd: WD });
       ok(rs.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['pdf', path.join(ALT_REAL, 'alt.pdf')]), '…and a save in THAT folder passes the fence (the fake binary ran it, handed its real path)', rs.stderr);
       const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8'), today = anchored(vsrc, '${TMP} or ~/Downloads', '/tmp or ~/Downloads', 'the release words (r2886)', { count: 7 });   // stale-pins: kept — the release's words restored for the RED control (r2886)
