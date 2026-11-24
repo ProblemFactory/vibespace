@@ -232,7 +232,7 @@ const ROWS = [
   ["src/server/browser-attach-launch.js", "ownedDir", 4, "local-only", "socket dirs /tmp/vs-ab-<uid>[/<profileId>] (AT.attachSocketDir over B.SOCKET_DIR_BASE = \"/tmp\")"],
   ["src/server/browser-attach-launch.js", "readPortFile", 2, "local-only", "DevToolsActivePort in the profile's dir (keeper p.dir: ~/.agent-browser/vs-bp-*)"],
   ["src/server/browser-attach-launch.js", "spawnChrome", 4, "local-only", "portFile in p.dir (~/.agent-browser/vs-bp-*); logFile = <dataDir>/browser-env/attach/<id>.log (browser-keeper launch)"],
-  ["src/server/browser-bindings.js", "*", 2, "local-only", "<dataDir>/browser-env/bindings.json (+ .tmp)"],
+  ["src/server/browser-bindings.js", "*", 6, "local-only", "<dataDir>/browser-env/bindings.json (+ .tmp); r3585: the one writer lifted out of create (its folder's mode check) and the rebuild child's script (data/session-meta, read in the child, never the hub's loop)"],
   ["src/server/browser-builds-keeper.js", "create > dirWritten", 1, "local-only", "p.dir = a local profile's Chrome dir: made under ~/.agent-browser/ (createProfile) or adopted only inside ~/.agent-browser | <dataDir>/browser-profiles; p.host skipped"],
   ["src/server/browser-builds-keeper.js", "*", 22, "local-only", "every path is under buildsRoot() = ~/.agent-browser/browsers (homeDir = os.homedir()) or installDir / installMarker() = <dataDir>/browser-tools"],
   ["src/server/browser-cli-install.js", "*", 7, "local-only", "<dataDir>/browser-tools: cliPrefix(version), its verified.json, install-running.json marker, install.log in installDir"],

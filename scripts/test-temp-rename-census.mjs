@@ -240,7 +240,7 @@ const ROWS = [
   ["src/server/boot-restore.js", "unsynced", "store", "", "writeJsonAtomic", "create > keepEnded"],
   ["src/server/boot-restore.js", "move", "move", "", "create > retireDeadSocket"],
   ["src/server/boot-trace.js", "unsynced", "store", "", "start > close"],
-  ["src/server/browser-bindings.js", "unsynced", "store", "", "create > writeAll"],
+  ["src/server/browser-bindings.js", "unsynced", "store", "", "writeBindingsFile"],   // r3585: the one writer lifted out of create (every instance's record, and the rebuild)
   ["src/server/browser-builds-keeper.js", "move", "derived", "a browser build's folder landed or removed (downloaded again)", "create > landUnpacked", "create > removeChromeBuild"],
   ["src/server/browser-clone-run.js", "unsynced", "derived", "a profile copied for one run", "copyProfileDir"],
   ["src/server/browser-display-config.js", "unsynced", "derived", "a generated wrapper, made again when it differs", "create > engineWrapperFor"],

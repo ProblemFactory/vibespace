@@ -9863,6 +9863,11 @@ export default {
   // lane foryou-attachments: an ask's chip / link whose target is gone
   "An attachment is gone": "添付がなくなりました",
   "A link in an item was not found": "項目内のリンクが見つかりません",
+  "VibeSpace cannot read which browser belongs to which conversation right now — nothing was changed, and no kept browser ends meanwhile. Try again in a few minutes (it reads it again by itself).": "VibeSpace はどのブラウザがどの会話のものかをいま読めません。何も変更しておらず、その間に保持中のブラウザを終わらせることもありません。数分後にもう一度お試しください（自動で読み直します）。",
+  "VibeSpace cannot read which browser belongs to which conversation right now — no kept browser ends meanwhile, and it comes back by itself (it tries again every few minutes).": "VibeSpace はどのブラウザがどの会話のものかをいま読めません。その間に保持中のブラウザを終わらせることはなく、自動で戻ります（数分ごとに再試行します）。",
+  "Which browser belongs to which conversation was damaged and found again from the conversations' records ({n} found). The damaged copy is kept as {copy}.": "ブラウザと会話の対応が壊れていたため、各会話の記録から見つけ直しました（{n} 件）。壊れたコピーは {copy} として保存しています。",
+  "no conversation names it since the bindings were damaged": "対応が壊れてから、どの会話もこのブラウザを指していません",
+  "which browser belongs to which conversation": "どのブラウザがどの会話のものか",
   "VibeSpace cannot read its list of kept browsers right now — nothing was removed or changed. Try again in a few minutes (it reads it again by itself).": "VibeSpace は保持中のブラウザの一覧をいま読めません。何も削除・変更していません。数分後にもう一度お試しください（自動で読み直します）。",
   "VibeSpace cannot read its list of kept browsers right now, so none is shown here. Nothing is lost: no kept browser is removed meanwhile, and the list comes back by itself (it tries again every few minutes).": "VibeSpace は保持中のブラウザの一覧をいま読めないため、ここには表示していません。失われたものはありません。その間に保持中のブラウザを削除することはなく、一覧は自動で戻ります（数分ごとに再試行します）。",
   "The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.": "保持中のブラウザの一覧が壊れていました。フォルダから {n} 個の保持中のブラウザを見つけ直しました（タブは不明です）。壊れたコピーは {copy} として保存しています。",

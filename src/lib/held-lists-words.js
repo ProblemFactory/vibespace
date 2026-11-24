@@ -14,6 +14,7 @@ const NAMES = Object.freeze({
   'auto-resume.json': i18nKey('the record of waiting continues'),
   'browser-forgotten.json': i18nKey('the browsers you set aside'),
   'browser-kept.json': i18nKey('the list of kept browsers'),   // card-door-in-chat (r3585)
+  'bindings.json': i18nKey('which browser belongs to which conversation'),   // card-door-in-chat (r3585: browser-env/bindings.json)
   'api-proposals.json': i18nKey('the API proposals'),
   'decision-examples.json': i18nKey('the labels you taught'),
   'designs.json': i18nKey('the list of designs'),

@@ -221,13 +221,16 @@ function keptLimits(read = () => undefined) {
  * again). `endsAtTerminate` (default false) is the literal reading of the ruling ("its session is killed"): any entry no
  * live session carries ends. → `{end, why}`.
  */
-function keptEndVerdict({ entry, live = false, carried = false, bound = false, endsAtTerminate = false, now = 0, graceMs = KEPT_END_GRACE_MS } = {}) {
+function keptEndVerdict({ entry, live = false, carried = false, bound = false, endsAtTerminate = false, now = 0, graceMs = KEPT_END_GRACE_MS, bindingsRecoveredAt = 0 } = {}) {
   if (!entry) return { end: false, why: 'no-entry' };
   if (entry.recovered) return { end: false, why: 'recovered' };   // r3585: a row found again from its folder never ends by a silence (its conversation and its stop are not known)
   if (live) return { end: false, why: 'live' };
   if (carried) return { end: false, why: 'carried' };
   if (endsAtTerminate) return { end: true, why: 'conversation-ended' };
   if (bound) return { end: false, why: 'bound' };
+  // r3590 (the bindings rebuilt after they were damaged — PER ROW, no timer, no press): a kept browser that STOOD at the recovery (started
+  // before it) and that no rebuilt binding names never ends by that silence; its next real use writes a true binding (then it is ordinary)
+  if (Number(bindingsRecoveredAt) > 0 && (Number(entry.startedAt) || Number(entry.lastUsedAt) || 0) < Number(bindingsRecoveredAt)) return { end: false, why: 'bindings-recovered' };
   const since = Number(entry.stoppedAt) || Number(entry.lastUsedAt) || 0;
   if (graceMs > 0 && now - since < graceMs) return { end: false, why: 'grace' };
   return { end: true, why: 'conversation-gone' };

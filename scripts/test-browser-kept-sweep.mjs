@@ -122,14 +122,18 @@ async function bindScene(BBm, how) {
     rec = bindings.record('c-cccc3333-0000-4000-8000-000000000003', 'bk-0000c013', { at: clock });   // a record while the file cannot be read
   } finally { fs.readFileSync = realRead; }
   const left = KEYS.filter((k) => fs.existsSync(path.join(S.dirOf(k), 'Cookies'))).length;
-  const res = { how, refusedN, ended: sw ? sw.ended : null, removed: KEYS.length - left, kept: KEYS.filter((k) => S.has(k)).length, recorded: rec, same: realRead(bfile, 'utf8') === bytes };
+  // r3585: torn bytes are copied aside OFF the loop (the helper's own read again) — waited for, bounded (a loaded machine is slower)
+  const hasCopy = () => fs.readdirSync(path.dirname(bfile)).some((n) => n.startsWith('bindings.json.corrupt-') && realRead(path.join(path.dirname(bfile), n), 'utf8') === bytes);
+  let copyKept = false;
+  for (let i = 0; i < 800 && how === 'torn' && BBm === BB0 && !(copyKept = hasCopy()); i++) await new Promise((r) => setTimeout(r, 10));   // the real module's copy only (the red control's never comes)
+  const res = { how, refusedN, ended: sw ? sw.ended : null, removed: KEYS.length - left, kept: KEYS.filter((k) => S.has(k)).length, recorded: rec, same: realRead(bfile, 'utf8') === bytes, copyKept };
   try { S.shutdown(); } catch { /* its own */ }
   return res;
 }
 for (const how of ['refused', 'torn']) {
   const b = await bindScene(BB0, how);
   console.log(`    facts: ${JSON.stringify(b)}`);
-  ok((how === 'torn' || b.refusedN >= 1) && b.ended === 0 && b.removed === 0 && b.kept === KEYS.length && b.recorded === false && b.same,
+  ok((how === 'torn' || b.refusedN >= 1) && b.ended === 0 && b.removed === 0 && b.kept === KEYS.length && b.recorded === false && (how === 'torn' ? b.copyKept : b.same),   // r3585: torn bytes are kept aside once, then rebuilt (⑫)
     `${how === 'torn' ? 'torn bytes in the bindings file' : 'the bindings file\'s read refused (EIO)'} at the hourly kept sweep, both kept browsers stopped an hour past the grace: UNKNOWN IS NOT EMPTY — ZERO ended, ZERO folders removed (their sign-ins stay); a record then writes NOTHING over the file (byte for byte)`, b);
   const bx = await bindScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, '  function readState() {\n', "  function readState() { // the release: a bare catch — any failure, or bytes that do not parse, answer EMPTY\n    try { const raw = JSON.parse(fs.readFileSync(file, 'utf8')); if (raw && typeof raw === 'object' && raw.byConversation && typeof raw.byConversation === 'object') return { state: 'ok', all: raw }; } catch { }\n    return { state: 'absent', all: { v: 1, byConversation: {} } };\n  }\n  function readStateNow() {\n", 'r3054 control: the release\'s bare catch'), `bindings-bare-catch-${how}`), how);
   console.log(`    facts (red): ${JSON.stringify(bx)}`);
@@ -267,7 +271,7 @@ console.log('⑩ r3585 the person\'s page and the routes say the hold (each by i
   const panel = (x) => x.includes(H1) && x.includes("    if (!v.keptUnread && !krows.length) keptSec.appendChild(");
   ok(panel(TV) && !panel(anchored(TV, "    if (!v.keptUnread && !krows.length) keptSec.appendChild(", "    if (!krows.length) keptSec.appendChild(", 'r3585 the panel as it was')), 'the Agent browser panel while the list is held: its held words, never «None — no conversation\'s browser has stopped…» (RED: the panel as it was)', null);   // stale-pins: kept (the red copy writes the line as it was)
   const H2 = "    if (k.recovered) { const c = el('span', 'bprof-chip', t('found again'));";
-  ok(TV.includes(H2) && TV.includes("    } else if (!k.live && !(k.recovered && !k.conversationKnown)) row.appendChild(") && TV.includes("t('The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.'"), 'a found-again row says so (its chip); one no conversation names offers no Resume at all (no dead hint); the section says the count and the copy\'s name', null);
+  ok(TV.includes(H2) && TV.includes("    else if (!k.live && !(k.recovered && !k.conversationKnown)) row.appendChild(") && TV.includes("t('The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.'"), 'a found-again row says so (its chip); one no conversation names offers no Resume at all (no dead hint); the section says the count and the copy\'s name', null);
   const H3 = "...(keptUnread ? { keptUnread } : {}), ...(keptRecovered ? { keptRecovered } : {}), ";
   ok(BT.includes(H3) && !anchored(BT, H3, '', 'r3585 the view as it was').includes(H3), 'the panel\'s one read carries the hold and the rebuild\'s count (RED: the view as it was)', null);
   const KP = src('src/server/browser-keeper.js');
@@ -275,6 +279,131 @@ console.log('⑩ r3585 the person\'s page and the routes say the hold (each by i
   const resumeGuard = (x) => { const r = x.indexOf('    const reconnect = who === \'user\''), g = x.indexOf(H4); return r >= 0 && g > r && g < x.indexOf('    let entry0 = null; try { entry0 = ks ? ks.get(bk) : null; }', r); };   // the NEXT entry0 read after the reconnect (the keeper has two)
   ok(resumeGuard(KP) && !resumeGuard(anchored(KP, H4, '', 'r3585 the resume as it was')) && RB.includes("  kept_unread: 503,") && RB.includes("...(h ? { unread: ks.heldWords(), code: 'kept_unread' } : {})"), 'Resume of a STOPPED browser — the person\'s and the agent\'s — refused by name while held (503 kept_unread), never «nothing kept»; a reconnect of a running one passes; the list says its hold; the status row (RED: the resume as it was)', null);
   ok(/\n  kept_unread: \(\) => t\('VibeSpace cannot read its list of kept browsers right now/.test(UT) && HW.includes("'browser-kept.json': i18nKey('the list of kept browsers'),"), 'r3488: the unit carries its rows — the page\'s held words (kept_unread) and the list\'s plain name on the family\'s notice', null);
+}
+
+// ══ r3585 commit 2: the bindings under the store-read law (a failed or torn read engages ONE hold; a torn lift rebuilt from the records) ══
+const BBm = BB0;
+/** a data folder with the bindings file, the kept browsers and (optionally) the conversations' records */
+function bindWorld({ metas = [], bytes = null } = {}) {
+  const dir = path.join(ROOT, `n${++wn}`);
+  fs.mkdirSync(path.join(dir, 'browser-env'), { recursive: true }); fs.mkdirSync(path.join(dir, 'session-meta'), { recursive: true });
+  const bfile = path.join(dir, 'browser-env', 'bindings.json');
+  if (bytes !== null) fs.writeFileSync(bfile, bytes);
+  metas.forEach((m, i) => fs.writeFileSync(path.join(dir, 'session-meta', `sess-madeup-${i}.json`), JSON.stringify(m)));
+  return { dir, bfile };
+}
+const hb = (bb) => (bb && typeof bb.heldFacts === 'function' ? bb.heldFacts() : null), hbHold = (bb) => (bb && typeof bb._hold === 'function' ? bb._hold() : null);
+
+console.log('⑪ r3585 the bindings\' read REFUSED: ONE hold engaged (no further read of that file on the hub\'s loop); read again off the loop and LIFTED with no restart');
+async function bindHeldRun(BBmod) {
+  const w = bindWorld({ bytes: JSON.stringify({ v: 1, byConversation: { [CONVS[0]]: { key: KEYS[0], at: 1 }, [CONVS[1]]: { key: KEYS[1], at: 1 } } }) });
+  const bb = BBmod.create({ dataDir: w.dir, log: quiet });
+  const realRead = fs.readFileSync; let reads = 0, refuse = true;
+  fs.readFileSync = function (p, ...a) { if (path.resolve(String(p)) === path.resolve(w.bfile)) { reads++; if (refuse) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); } return realRead.call(this, p, ...a); };
+  let first = null, more = 0, rec = null, held = null;
+  try {
+    try { bb.boundKeys(); } catch (e) { first = e.code; }
+    const r0 = reads;
+    for (let i = 0; i < 5; i++) { try { bb.boundKeys(); } catch { /* unknown */ } bb.lookup(CONVS[0]); bb.keys(); }
+    more = reads - r0; rec = bb.record(CONVS[0], KEYS[0]); held = hb(bb);
+    refuse = false;
+  } finally { fs.readFileSync = realRead; }
+  const h = hbHold(bb); if (h) await h.again();
+  let after = null; try { after = [...bb.boundKeys()].length; } catch (e) { after = e.code; }
+  if (h) h.stop();
+  return { first, more, rec, held: held && held.code, after };
+}
+const B11 = await bindHeldRun(BBm);
+console.log(`    facts: ${JSON.stringify(B11)}`);
+ok(B11.first === 'bindings_unknown' && B11.more === 0 && B11.rec === false && B11.held === 'EIO' && B11.after === 2,
+  'the bindings\' read refused (EIO): unknown (r3054 — nothing ends), ONE hold for the file (EIO), fifteen later calls read the file NO more on the loop, a record writes nothing; its read again off the loop LIFTS it with no restart — both bindings back', B11);
+const BBS1 = fs.readFileSync(path.join(REPO, 'src/server/browser-bindings.js'), 'utf8');
+const B11x = await bindHeldRun(MUT.load('src/server/browser-bindings.js', anchored(BBS1, "    { const H = HELD.get(file); if (H && (H.hold.held() || H.rebuilding)) return { state: 'unknown', kind: H.hold.held() ? String(H.hold.held().code) : 'rebuilding' }; }\n", '', 'r3585 the release: every call reads the failing file again'), 'kept-sweep-bind-reads'));
+console.log(`    facts (red): ${JSON.stringify(B11x)}`);
+ok(B11x.more >= 15, 'RED CONTROL (the release: every call reads the failing file again on the loop) — fifteen more reads of a storage that does not answer — red', B11x);
+
+console.log('⑫ r3585 TORN bindings: kept aside once, REBUILT from the conversations\' own records; r3590\'s per-row rule — a kept browser that STOOD at the recovery and that no binding names never ends by that silence; one kept after it is ordinary');
+const STOOD = 'bk-0000d014', LATER = 'bk-0000e015';
+async function bindTornRun(BBmod, KSmod) {
+  let clock = 2_000_000;
+  const w = bindWorld({ bytes: '{"v":1,"byConversation":{"' + CONVS[0] + '":{"key":"bk-00', metas: [
+    { browserKey: KEYS[0], claudeSessionId: CONVS[0], browserKeyFor: CONVS[0] },
+    { browserKey: KEYS[1], claudeSessionId: CONVS[1], browserKeyFor: CONVS[1] },
+    { browserKey: 'bk-0000f016', claudeSessionId: 'c-ffff6666-0000-4000-8000-000000000006', forkSourceId: 'c-ffff6666-0000-4000-8000-000000000006' },   // a fork source: binds nothing
+  ] });
+  const bb = BBmod.create({ dataDir: w.dir, log: quiet });
+  const S = KSmod.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
+  for (const k of [...KEYS, STOOD]) { S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); S.noteStop(k, { why: 'idle' }); }
+  try { bb.boundKeys(); } catch { /* the torn read engages the hold */ }
+  await until(() => !hb(bb) && !!(bb.recoveredFacts && bb.recoveredFacts()));
+  const rec = bb.recoveredFacts ? bb.recoveredFacts() : null;
+  // a kept browser started AFTER the recovery, its binding never written (a made-up loss): ordinary — it ends after its grace
+  clock = Date.now() + 1000;
+  S.noteStart(LATER, { hasDir: true }); fs.mkdirSync(S.dirOf(LATER), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(LATER), 'Cookies'), 'a sign-in'); S.noteStop(LATER, { why: 'idle' });
+  clock += 3 * 3600e3;   // three hours later: all four stopped far past the grace
+  const sw = await S.sweep();
+  const row = (k) => S.list().find((r) => r.browserKey === k) || null;
+  const out = { rebuilt: rec && rec.n, copy: !!(rec && rec.copy), bound: (() => { try { return [...bb.boundKeys()].sort().join(','); } catch (e) { return e.code; } })(),
+    stoodKept: S.has(STOOD), stoodSays: !!(row(STOOD) && row(STOOD).unnamedSinceDamage), laterEnded: !S.has(LATER), keptBound: KEYS.every((k) => S.has(k)), ended: sw && sw.ended };
+  try { S.shutdown(); } catch { /* its own */ }
+  return out;
+}
+const B12 = await bindTornRun(BBm, KS0);
+console.log(`    facts: ${JSON.stringify(B12)}`);
+ok(B12.rebuilt === 2 && B12.copy && B12.bound === [...KEYS].sort().join(',') && B12.stoodKept && B12.stoodSays && B12.keptBound && B12.laterEnded && B12.ended === 1,
+  'torn bindings: kept aside once, REBUILT from the two conversations\' records (the fork source binds nothing): both kept browsers bound again; the one that stood at the recovery with no record is NOT ended (its row says «no conversation names it since the bindings were damaged»); the one kept after the recovery with no binding ends as ordinary', B12);
+const KM = fs.readFileSync(path.join(REPO, 'src/browser-kept.js'), 'utf8');
+{
+  const Mod = require('node:module');
+  const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
+  const V = (M) => M.keptEndVerdict({ entry: { browserKey: STOOD, startedAt: 1000, stoppedAt: 2000 }, bound: false, now: 10 * 3600e3, graceMs: 3600e3, bindingsRecoveredAt: 5000 });
+  const V2 = (M) => M.keptEndVerdict({ entry: { browserKey: LATER, startedAt: 6000, stoppedAt: 7000 }, bound: false, now: 10 * 3600e3, graceMs: 3600e3, bindingsRecoveredAt: 5000 });
+  const M0 = asModule('src/browser-kept.js', anchored(KM, "  if (Number(bindingsRecoveredAt) > 0 && (Number(entry.startedAt) || Number(entry.lastUsedAt) || 0) < Number(bindingsRecoveredAt)) return { end: false, why: 'bindings-recovered' };\n", '', 'r3590 no per-row rule'));
+  ok(V(KB).why === 'bindings-recovered' && V2(KB).end === true && V(M0).end === true, 'THE MODEL (r3590): stood at the recovery ⇒ never ended by the silence; kept after it ⇒ ordinary — RED: the model without the rule ends the one that stood', { stood: V(KB), later: V2(KB), red: V(M0) });
+}
+
+console.log('⑬ r3585 a bindings rebuild that does NOT finish leaves the file HELD — nothing ends; the next read again rebuilds it');
+{
+  let answer = { ok: false, why: 'made-up: the records did not answer' };
+  const w = bindWorld({ bytes: '{"v":1,"byConversation":{"x' });
+  const bb = BBm.create({ dataDir: w.dir, log: quiet, listMetas: () => answer });
+  try { bb.boundKeys(); } catch { /* torn */ }
+  await until(() => !!hb(bb) && hb(bb).code === 'rebuild-unfinished');
+  const held = hb(bb), same = fs.readFileSync(w.bfile, 'utf8') === '{"v":1,"byConversation":{"x';
+  let ends = null; try { bb.boundKeys(); ends = 'answered'; } catch (e) { ends = e.code; }
+  answer = { ok: true, rows: [[KEYS[0], CONVS[0], '', '', CONVS[0], 1000]] };
+  const h = hbHold(bb); if (h) await h.again();
+  await until(() => !hb(bb));
+  let after = null; try { after = [...bb.boundKeys()].join(','); } catch (e) { after = e.code; }
+  ok(!!held && held.code === 'rebuild-unfinished' && same && ends === 'bindings_unknown' && after === KEYS[0], 'the records\' listing does not answer: HELD again (rebuild-unfinished), the torn file left as it is, the sweep\'s read answers unknown (nothing ends); the next read again rebuilds it', { held, same, ends, after });
+  if (h) h.stop();
+}
+
+console.log('⑭ r3585 the bindings\' rebuild reads the records in a CHILD with a bound — none on the hub\'s loop');
+{
+  const w = bindWorld({ bytes: '{"v":1,"byConversation":{"y', metas: [{ browserKey: KEYS[0], claudeSessionId: CONVS[0], browserKeyFor: CONVS[0] }] });
+  const calls = [], MDIR = path.resolve(path.join(w.dir, 'session-meta'));
+  const realDir = fs.readdirSync; let inLoop = 0;
+  fs.readdirSync = function (p, ...a) { if (path.resolve(String(p)) === MDIR) inLoop++; return realDir.call(this, p, ...a); };
+  let bb;
+  try {
+    bb = BBm.create({ dataDir: w.dir, log: quiet, execFileImpl: (cmd, args, opts, cb) => { calls.push({ cmd, e: args[0], timeout: opts && opts.timeout }); return realExecFile(cmd, args, opts, cb); } });
+    try { bb.boundKeys(); } catch { /* torn */ }
+    await until(() => !hb(bb) && !!(bb.recoveredFacts && bb.recoveredFacts()));
+  } finally { fs.readdirSync = realDir; }
+  const child = calls.find((c) => c.cmd === process.execPath && c.e === '-e');
+  ok(!!child && child.timeout > 0 && inLoop === 0 && !!(bb.recoveredFacts && bb.recoveredFacts() && bb.recoveredFacts().n === 1), 'the records are read by ONE child (node -e) with a timeout; the hub\'s own process lists none of data/session-meta for it', { child, inLoop });
+}
+
+console.log('⑮ r3585 the panel and the words say the bindings\' hold (each by its lines)');
+{
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const TV = src('src/lib/browser-trace-view.js'), UT = src('src/lib/utils.js'), HW = src('src/lib/held-lists-words.js'), BT = src('src/server/browser-trace.js');
+  const R1 = "    } else if (!k.live && k.unnamedSinceDamage) row.appendChild(el('span', 'bprof-cell bprof-kept-unnamed chat-status-dim', t('no conversation names it since the bindings were damaged')));";
+  const rowSays = (x) => x.includes(R1) && x.indexOf(R1) < x.indexOf("    else if (!k.live && !(k.recovered && !k.conversationKnown)) row.appendChild(");
+  ok(rowSays(TV) && !rowSays(anchored(TV, R1 + '   // r3590: its fact, and no Resume where no conversation can open it\n', '', 'r3590 the row as it was')), 'a kept browser no conversation names since the bindings were damaged says so, and offers no Resume hint (RED: the row as it was)', null);
+  ok(TV.includes("    if (v.bindingsUnread) keptSec.appendChild(") && BT.includes("...(bindingsUnread ? { bindingsUnread } : {}), ...(bindingsRecovered ? { bindingsRecovered } : {}), "), 'the panel says the bindings\' hold and their rebuild (the view carries both)', null);
+  ok(/\n  bindings_unread: \(\) => t\('VibeSpace cannot read which browser belongs to which conversation right now/.test(UT) && HW.includes("'bindings.json': i18nKey('which browser belongs to which conversation'),"), 'r3488: the page\'s held words (bindings_unread) and the list\'s plain name on the family\'s notice', null);
 }
 
 report();

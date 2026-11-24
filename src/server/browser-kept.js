@@ -90,6 +90,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // read) is NEVER «empty» here: the rows are REBUILT from the kept folders themselves (each named by its key), marked `recovered`;
   // a rebuild that does not finish holds the list again (never «rebuilt empty»). browser-env's boot sweep reads the file itself and
   // fails closed (r3006): a torn or unreadable file spares every key-named folder until the rebuilt list is written.
+  const unnamedSinceDamage = new Set();   // r3590: the kept browsers the last sweep kept for «no binding names them since the bindings were damaged»
   let rebuilding = null, recovered = null;   // rebuilding: { since, copy } while the rows are rebuilt; recovered: { n, copy, at } (this run's rebuild — counts only)
   const hold = HOLD.create({
     file, valid: KEPT_SHAPE, code: 'kept_unread', aside: (mark) => file + '.corrupt-' + mark,
@@ -379,7 +380,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       browserKey: e.browserKey, label: e.label, kind: K.keptKindOf(e), hasDir: e.hasDir, checking: !!e.checking, fenced: e.fenced, tabs: e.tabs.map((t) => ({ ...t })), tabsAt: e.tabsAt,
       startedAt: e.startedAt, stoppedAt: e.stoppedAt, stoppedWhy: e.stoppedWhy, restore: e.restore ? { mode: e.restore.mode, by: e.restore.by, at: e.restore.at } : null, waiting: e.waiting ? e.waiting.tabs.length : 0,
       lastUsedAt: e.lastUsedAt, bytes: e.bytes, cacheBytes: e.cacheBytes, bytesAt: e.bytesAt, trimmedAt: e.trimmedAt,
-      live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId, recovered: !!e.recovered, conversationKnown: !!e.conversationId,
+      live: liveOf(e.browserKey), carried: carried.has(e.browserKey), sessionId: e.sessionId, recovered: !!e.recovered, conversationKnown: !!e.conversationId, unnamedSinceDamage: unnamedSinceDamage.has(e.browserKey),
     }));
   }
   // B-50e7 (r3747 must 1): while the settings are held the bounds are the defaults, never the person's — said unread (the panel says the
@@ -514,7 +515,8 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
       const ended = [];
       if (carried && bound) {
         for (const e of Object.values(s.entries)) {
-          const v = K.keptEndVerdict({ entry: e, live: liveOf(e.browserKey), carried: carried.has(e.browserKey), bound: bound.has(e.browserKey), endsAtTerminate, now: now(), graceMs });
+          const v = K.keptEndVerdict({ entry: e, live: liveOf(e.browserKey), carried: carried.has(e.browserKey), bound: bound.has(e.browserKey), endsAtTerminate, now: now(), graceMs, bindingsRecoveredAt: Number(bound.recoveredAt) || 0 });
+          if (v.why === 'bindings-recovered') unnamedSinceDamage.add(e.browserKey); else unnamedSinceDamage.delete(e.browserKey);   // r3590: the row says its fact
           if (v.end) { const r = await removeEntry(e.browserKey, v.why === 'conversation-ended' ? 'its conversation ended' : 'its conversation can never come back to it (no live session carries it and no binding names it)', { unlessCarried: true }); if (r.removed) ended.push({ key: e.browserKey, why: v.why }); }
         }
       }
@@ -636,8 +638,11 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   const heldWords = () => { load(); return hold.words() || (rebuilding ? 'VibeSpace is finding its kept browsers again from their folders — none is removed meanwhile' : null); };
   /** this run's rebuild: { n, copy, at } — a count and the copy's base name only (never a key, a folder or a conversation) */
   const recoveredFacts = () => (recovered ? { ...recovered } : null);
+  /** r3585: the bindings' hold (memory only, no read of the file) and their rebuild's count — for the panel */
+  const bindingsHeld = () => { try { const bb = bindingsOf(); return typeof bb.heldFacts === 'function' ? bb.heldFacts() : null; } catch { return null; } };
+  const bindingsRecovered = () => { try { const bb = bindingsOf(); return typeof bb.recoveredFacts === 'function' ? bb.recoveredFacts() : null; } catch { return null; } };
   return { noteStart, noteTabs, noteStop, noteDeliberate, latestOf, has, keys, get, brief, list, limits, forget, adopted, sweep, checkThere /* B-7a30 r2: the acts' door */, recheckAll /* B-7a30 r2: the tick's pass */, boot, shutdown, dirOf, file, lastSweep: () => lastSweep, _load: load, _measure: measure,
-    heldFacts, heldWords, recoveredFacts, _hold: hold, _rebuild: rebuildFromFolders,   // r3585
+    heldFacts, heldWords, recoveredFacts, bindingsHeld, bindingsRecovered, _hold: hold, _rebuild: rebuildFromFolders,   // r3585
     setRestore, consumeRestore, afterReopen }; // lane B
 }
 

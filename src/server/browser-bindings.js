@@ -97,6 +97,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3585 (B-f276 family's leftover): a failed or torn read engages the family's hold
 const FILE_NAME = 'bindings.json';
 const DIR_REL = 'browser-env';           // the same directory browser-env.js owns (its ENV_DIR)
 const MAX_BINDINGS = 4096;
@@ -106,6 +108,93 @@ const KEY_RE = /^bk-[0-9a-f]{8}$/;
 const REFUSAL_METRIC = 'browser-binding-move-refused';
 const SHARE_METRIC = 'browser-binding-share-refused';   // r7: a NEW conversation offered a key another one holds
 const IMPLICIT_FORK_METRIC = 'browser-binding-implicit-fork'; // r7: the harness announced an id the key was not decided for
+// ── r3585: THE STORE-READ LAW for the bindings (the family's leftover, its second file) ──
+// The healthy road is as before: every call reads the file (this module's other instances in the hub write it — session-stdout's,
+// the keeper's, the kept store's …), so no read is added. A read that FAILS or bytes that do not parse ENGAGE ONE HOLD for the file,
+// shared by every instance (HELD below): while it stands no call reads the file again on the hub's loop — each answers «unknown» as
+// r3054 made it (nothing ends, nothing is written over it, readers show no rows) — and the helper reads it again OFF the loop. LIFTED
+// with a list: the calls read the file again, with no restart. LIFTED with NO list (torn bytes kept aside once, or the file gone after
+// a failed read): the map is REBUILT from the conversations' own records (data/session-meta/*.json: browserKey + the conversation it
+// was decided for — the resume's rung 2), read by ONE child with a bound, never on the loop; the rebuilt file carries `recoveredAt`
+// (the per-row rule of r3590: a kept browser that STOOD at the recovery and that no rebuilt binding names never ends by that silence).
+// A rebuild that does not finish holds the file again — never «rebuilt empty».
+const BINDINGS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && !!v.byConversation && typeof v.byConversation === 'object' && !Array.isArray(v.byConversation);
+const HELD = new Map();   // file → { hold, dataDir, rebuilding, recovered } — one per file, every instance's
+const META_TIMEOUT_MS = 30 * 1000;
+/** the child's script: every data/session-meta/*.json's binding facts → [[browserKey, claudeSessionId, backendSessionId, forkSourceId, browserKeyFor, mtimeMs]] */
+const META_SRC = "const fs=require('fs'),p=require('path');const d=process.argv[1];let n=[];try{n=fs.readdirSync(d)}catch(e){if(e&&e.code==='ENOENT'){process.stdout.write('[]');process.exit(0)}process.stderr.write(String((e&&e.code)||'unreadable'));process.exit(3)}const o=[];const s=(v)=>typeof v==='string'?v.slice(0,200):'';for(const x of n){if(!x.endsWith('.json'))continue;try{const f=p.join(d,x);const m=JSON.parse(fs.readFileSync(f,'utf8'));if(m&&typeof m.browserKey==='string')o.push([s(m.browserKey),s(m.claudeSessionId),s(m.backendSessionId),s(m.forkSourceId),s(m.browserKeyFor),fs.statSync(f).mtimeMs])}catch(e){}}process.stdout.write(JSON.stringify(o))";
+/** THE ONE WRITER of the file (every instance's record, and the rebuild): its folder 0700, the file 0600, tmp + rename */
+function writeBindingsFile(file, obj) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  try { if ((fs.statSync(dir).mode & 0o777) !== DIR_MODE) fs.chmodSync(dir, DIR_MODE); } catch { }
+  const tmp = file + '.tmp-' + crypto.randomBytes(4).toString('hex');
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: FILE_MODE });
+  fs.renameSync(tmp, file);
+}
+/** the hold of `file` (made once, at its first failed or torn read) */
+function heldOf(file, { dataDir, log, listMetas, execFileImpl }) {
+  let H = HELD.get(file);
+  if (H) return H;
+  H = { hold: null, dataDir, rebuilding: null, recovered: null, log, listMetas, execFileImpl };
+  H.hold = HOLD.create({
+    file, valid: BINDINGS_SHAPE, code: 'bindings_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read which browser belongs to which conversation right now (${h.code}); it reads it again by itself every few minutes. Nothing ends and nothing is written over it until it reads`,
+    log: (s) => { try { log.warn?.('[browser] ' + s); } catch { } },
+    onLift: (v, facts) => { if (!v) rebuildBindings(file, H, (facts && facts.setAside) || null); },
+  });
+  HELD.set(file, H);
+  return H;
+}
+function listMetaFacts(H) {
+  const dir = path.join(H.dataDir, 'session-meta');
+  if (typeof H.listMetas === 'function') { try { return Promise.resolve(H.listMetas(dir)).catch((e) => ({ ok: false, why: String((e && e.code) || 'failed') })); } catch (e) { return Promise.resolve({ ok: false, why: String((e && e.code) || 'failed') }); } }
+  return new Promise((resolve) => {
+    try {
+      (H.execFileImpl || require('child_process').execFile)(process.execPath, ['-e', META_SRC, dir], { timeout: META_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+        if (err) return resolve({ ok: false, why: err.killed ? 'the records\' listing passed its bound' : String(err.code || 'failed') });
+        try { const a = JSON.parse(String(stdout || '[]')); resolve(Array.isArray(a) ? { ok: true, rows: a } : { ok: false, why: 'no listing' }); } catch { resolve({ ok: false, why: 'no listing' }); }
+      });
+    } catch (e) { resolve({ ok: false, why: String((e && e.code) || 'spawn failed') }); }
+  });
+}
+/** THE REBUILD from the conversations' own records: each record's key bound to the conversation it may bind (bindableIdOf — a fork
+ *  source or an implicit fork binds nothing), the newest record winning a key two name; written with `recoveredAt` */
+function rebuildBindings(file, H, copy) {
+  if (H.rebuilding && H.rebuilding.busy) return H.rebuilding.busy;
+  H.rebuilding = { since: (H.rebuilding && H.rebuilding.since) || Date.now(), copy: copy || (H.rebuilding && H.rebuilding.copy) || null, busy: null };
+  const r0 = H.rebuilding;
+  r0.busy = (async () => {
+    const r = await listMetaFacts(H);
+    if (!r || !r.ok) {
+      try { H.log.warn?.(`[browser] the conversations' records could not be listed to rebuild ${FILE_NAME} (${(r && r.why) || 'failed'}) — it stays HELD: nothing ends and nothing is written; it is tried again at its next read`); } catch { }
+      H.rebuilding = null;
+      H.hold.start({ state: 'unreadable', error: { code: 'rebuild-unfinished' } });
+      return false;
+    }
+    const at = Date.now(), byKey = new Map();
+    for (const row of r.rows) {
+      if (!Array.isArray(row)) continue;
+      const meta = { browserKey: row[0], claudeSessionId: row[1] || undefined, backendSessionId: row[2] || undefined, forkSourceId: row[3] || undefined, browserKeyFor: row[4] || undefined };
+      const key = String(meta.browserKey || ''), sid = bindableIdOf(meta), t = Math.round(Number(row[5])) || at;
+      if (!sid || !KEY_RE.test(key)) continue;
+      const prev = byKey.get(key);
+      if (!prev || t > prev.at) byKey.set(key, { sid, at: t });
+    }
+    const byConversation = {};
+    for (const [key, v] of byKey) if (!byConversation[v.sid] || v.at > byConversation[v.sid].at) byConversation[v.sid] = { key, at: v.at };
+    const doc = { v: 1, byConversation, recoveredAt: at };
+    try { writeBindingsFile(file, doc); } catch (e) {
+      try { H.log.warn?.(`[browser] the rebuilt ${FILE_NAME} could not be written (${(e && e.code) || 'failed'}) — it stays HELD`); } catch { }
+      H.rebuilding = null; H.hold.start({ state: 'unreadable', error: { code: 'rebuild-unwritten' } }); return false;
+    }
+    H.recovered = { n: Object.keys(byConversation).length, copy: r0.copy ? path.basename(String(r0.copy)) : null, at };
+    H.rebuilding = null;
+    try { H.log.warn?.(`[browser] ${FILE_NAME} was rebuilt from the conversations' records: ${H.recovered.n} binding(s)${H.recovered.copy ? ` — the damaged copy is kept as ${H.recovered.copy}` : ''}`); } catch { }
+    return true;
+  })().finally(() => { r0.busy = null; });
+  return r0.busy;
+}
 
 /** The one rule for "which id is this conversation filed under" — shared in
  *  spirit with `reading-repair._sessionKeyMap` (claude first, then the
@@ -144,7 +233,7 @@ function keyDecidedFor(meta) {
   return typeof v === 'string' && v ? v : '';
 }
 
-function create({ dataDir, log = console } = {}) {
+function create({ dataDir, log = console, listMetas = null, execFileImpl = null } = {}) {
   if (!dataDir) throw new Error('browser-bindings: dataDir required');
   const dir = path.join(dataDir, DIR_REL);
   const file = path.join(dir, FILE_NAME);
@@ -158,15 +247,23 @@ function create({ dataDir, log = console } = {}) {
   // Implicit forks already journalled, `tag\0sid` (r7) — the adopted record is
   // re-written dozens of times per turn and says the same thing each time.
   const announced = new Set();
+  const opts = { dataDir, log, listMetas, execFileImpl };   // r3585: the hold's and the rebuild's (shared per file)
 
   // r3054 (主开发 — the kept browsers' second door): UNKNOWN IS NOT EMPTY. The file's read in three states: 'ok' (its rows),
   // 'absent' (no file: a fresh instance — truly empty) and 'unknown' (a read that FAILED, or bytes that do not parse or are not the
   // store's shape). `readAll` keeps answering what a READER may show (unknown ⇒ no rows: a name, a resume's rung 1, the fresh-key
   // rule); every road that ENDS by «no binding names it» asks `boundKeys` (unknown ⇒ a throw), and nothing is WRITTEN over it.
   function readState() {
+    // r3585: HELD — no read of a file that failed on the hub's loop (the helper reads it again off the loop); a rebuild in flight: unknown
+    { const H = HELD.get(file); if (H && (H.hold.held() || H.rebuilding)) return { state: 'unknown', kind: H.hold.held() ? String(H.hold.held().code) : 'rebuilding' }; }
     let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? { state: 'absent', all: { v: 1, byConversation: {} } } : { state: 'unknown', kind: String((e && e.code) || 'read-failed') }; }
-    try { const raw = JSON.parse(text); if (raw && typeof raw === 'object' && raw.byConversation && typeof raw.byConversation === 'object') return { state: 'ok', all: raw }; } catch { }
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+      if (e && e.code === 'ENOENT') return { state: 'absent', all: { v: 1, byConversation: {} } };
+      heldOf(file, opts).hold.start(SR.storeAnswer({ error: e }, { valid: BINDINGS_SHAPE }));   // r3585: the hold engaged (read again off the loop)
+      return { state: 'unknown', kind: String((e && e.code) || 'read-failed') };
+    }
+    try { const raw = JSON.parse(text); if (BINDINGS_SHAPE(raw)) return { state: 'ok', all: raw }; } catch { }
+    heldOf(file, opts).hold.start(SR.storeAnswer({ text }, { valid: BINDINGS_SHAPE }));   // r3585: torn bytes — kept aside once off the loop, then rebuilt from the records
     return { state: 'unknown', kind: 'unparsable' };
   }
   function readAll() { const r = readState(); return r.all || { v: 1, byConversation: {} }; }
@@ -177,13 +274,7 @@ function create({ dataDir, log = console } = {}) {
     unknownSaid.add(kind);
     try { log.warn?.(`[browser] ${FILE_NAME} could not be read (${kind}) — no browser binding is written while it is unknown; each is offered again at its conversation's next record, and nothing ends by «no binding names it»`); } catch { }
   }
-  function writeAll(obj) {
-    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    try { if ((fs.statSync(dir).mode & 0o777) !== DIR_MODE) fs.chmodSync(dir, DIR_MODE); } catch { }
-    const tmp = file + '.tmp-' + crypto.randomBytes(4).toString('hex');
-    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: FILE_MODE });
-    fs.renameSync(tmp, file);
-  }
+  function writeAll(obj) { writeBindingsFile(file, obj); }
   function prune(byConversation) {
     const entries = Object.entries(byConversation);
     if (entries.length <= MAX_BINDINGS) return byConversation;
@@ -303,10 +394,17 @@ function create({ dataDir, log = console } = {}) {
     if (rs.state === 'unknown') { sayUnknown(rs.kind); throw Object.assign(new Error(`${FILE_NAME} could not be read (${rs.kind})`), { code: 'bindings_unknown' }); }
     const out = new Set();
     for (const v of Object.values(rs.all.byConversation)) if (v && KEY_RE.test(String(v.key || ''))) out.add(String(v.key));
+    out.recoveredAt = Number(rs.all.recoveredAt) || 0;   // r3585: the same read says when the file was rebuilt (r3590's per-row rule)
     return out;
   }
   /** 'ok' | 'absent' | 'unknown' — the file's read now (r3054: a one-shot step that would MOVE by «no binding names it» waits). */
   function state() { return readState().state; }
+  /** r3585: the time the file was rebuilt from the conversations' records (0: never) — a kept browser older than it that no binding
+   *  names never ends by that silence (r3590's per-row rule) */
+  function recoveredAt() { const r = readState(); return r.state === 'ok' ? (Number(r.all.recoveredAt) || 0) : 0; }
+  /** r3585: the file's hold facts ({ file, code, since } — null: it reads) and this run's rebuild ({ n, copy, at }: a count and the copy's base name) */
+  function heldFacts() { const H = HELD.get(file); if (!H) return null; const h = H.hold.held(); return h ? { file: h.file, code: h.code, since: h.since } : H.rebuilding ? { file: FILE_NAME, code: 'rebuilding', since: H.rebuilding.since } : null; }
+  function recoveredFacts() { const H = HELD.get(file); return H && H.recovered ? { ...H.recovered } : null; }
 
   /** Every bound key (for a sweeper that wants to know which keys a stopped
    *  conversation could still come back for). r3054: an UNKNOWN file names none here — kept for the fresh-key rule, whose other
@@ -325,7 +423,8 @@ function create({ dataDir, log = console } = {}) {
   /** How many (session, conversation) implicit-fork announcements were journalled (r7). */
   function implicitForks() { return announced.size; }
 
-  return { record, lookup, conversationOf, conversationsByKey, keys, boundKeys, state, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS };
+  return { record, lookup, conversationOf, conversationsByKey, keys, boundKeys, state, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS,
+    recoveredAt, heldFacts, recoveredFacts, _hold: () => (HELD.get(file) || {}).hold || null, _rebuild: () => { const H = HELD.get(file); return H ? rebuildBindings(file, H, null) : Promise.resolve(false); } };   // r3585
 }
 
 module.exports = { create, conversationIdOf, bindableIdOf, keyDecidedFor, FILE_NAME, DIR_REL, MAX_BINDINGS, REFUSAL_METRIC, SHARE_METRIC, IMPLICIT_FORK_METRIC };
