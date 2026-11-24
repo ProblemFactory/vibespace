@@ -287,7 +287,7 @@ console.log('③ THE SSH RUNG\'s twin — an unreadable record and torn bytes fa
   const U = await runTwin(TWIN);
   ok('the twin: a record whose read FAILS fails the op BY NAME (could not be read, a serve from before may still run) and starts nothing — its words name the record as ~/.vibespace/opencode-serve.json, never the home folder', !!U.ans && U.ans.ok === false && /could not be read \(EIO\)/.test(U.ans.error) && /may still be running/.test(U.ans.error) && U.ans.error.includes('~/.vibespace/opencode-serve.json') && !U.ans.error.includes(path.dirname(U.base)) && !U.started, U);
   const TT = await runTwin(TWIN, { torn: true });
-  ok('the twin: torn bytes are kept aside ONCE (0600, the same bytes), the op fails by name, nothing starts, the record left as it was — the words say «remove that record», never «stop any serve» (an agent may read them; a person\'s own serve could be hit)', !!TT.ans && TT.ans.ok === false && /was damaged/.test(TT.ans.error) && /Remove that record to start fresh/.test(TT.ans.error) && !/stop any|by hand/i.test(TT.ans.error) && !TT.ans.error.includes(path.dirname(TT.base)) && TT.copies.length === 1 && TT.ans.error.includes(TT.copies[0]) && TT.kept[0].mode === 0o600 && TT.kept[0].same && !TT.started && realRead(TT.rec).equals(TORN), TT);
+  ok('the twin: torn bytes are kept aside ONCE (0600, the same bytes), the op fails by name, nothing starts, the record left as it was — the words say the damaged record as a FACT (read again at the next op; a person may remove it), never «stop any serve» and never an order (an agent may read them; a person\'s own serve could be hit)', !!TT.ans && TT.ans.ok === false && /was damaged/.test(TT.ans.error) && /It is read again at the next op; a person may remove it to start fresh/.test(TT.ans.error) && !/stop any|by hand|\. Remove/i.test(TT.ans.error) && !TT.ans.error.includes(path.dirname(TT.base)) && TT.copies.length === 1 && TT.ans.error.includes(TT.copies[0]) && TT.kept[0].mode === 0o600 && TT.kept[0].same && !TT.started && realRead(TT.rec).equals(TORN), TT);
   // RED CONTROL: the release's twin (any failure is «no record») starts the stand-in
   const TSRC = read('data/bin/vibespace-opencode-op');
   const TWIN_RE = /\/\/ THE RECORD's ONE READ \(r3334[\s\S]*?\nfunction readRecord\(\) \{\n[\s\S]*?\n\}\n/;   // stale-pins: kept
@@ -313,7 +313,7 @@ console.log('⑥ r3675 (line 812\'s round, its must): a record mended or REMOVED
     return { dir, L, words, st: L.loc.state() };
   };
   const D = await devScene(serve);
-  ok('THE DEVICE: torn bytes park «torn» with the words of what works on that machine — remove the record (read again at the next use); never a Start, For you or «stop … by hand» it does not have', /was damaged/.test(D.words) && /Remove that record to start fresh: it is read again at the next use/.test(D.words) && !/Start|For you|by hand/.test(D.words), D.words);
+  ok('THE DEVICE: torn bytes park «torn» with the words of what works on that machine, as a FACT (read again at the next use; a person may remove it) — never an order a tool could give an agent, never a Start, For you or «stop … by hand» it does not have', /was damaged/.test(D.words) && /It is read again at the next use; a person may remove it to start fresh/.test(D.words) && !/Start|For you|by hand|^Remove|\. Remove/.test(D.words), D.words);
   ok('…the record REMOVED by hand ⇒ the next ladder starts exactly ONE serve, with no person\'s Start and no restart; the park gone', D.L.spawns.length === 1 && D.st.ready === true && D.st.parked === false, { spawns: D.L.spawns.length, st: D.st });
   // RED CONTROL: 57bf2ed76's read (torn bytes no person decided on short-circuit the read; the 'torn' park returns at the ladder's top)
   const OLD812 = anchored(anchored(OSRC, "    if (recHold.held()) return null;   // r3675:", "    if (recordHeld()) return null;   // (57bf2ed76) r3675-cut:", 'the read short-circuits on torn bytes'),
@@ -328,6 +328,15 @@ console.log('⑥ r3675 (line 812\'s round, its must): a record mended or REMOVED
   const wH = LH.loc.state().lastError || '';
   ok('THE DEVICE, held: the words say it is read again by itself — never «For you» (the hold lives in that machine\'s daemon)', /could not be read \(EIO\)/.test(wH) && /read again by itself/.test(wH) && !/For you/.test(wH) && LH.spawns.length === 0, wH);
   refused.delete(fileH); LH.loc.stop(); LH.loc.dispose?.();
+  {
+    const NOOPT = MO.load('src/opencode-serve.js', anchored(OSRC, '  const recWords = (h) => (personStart\n', '  const recWords = (h) => (true\n', 'the device words cut'), 'device-words-cut');   // stale-pins: kept (the option's words cut — the leg's RED)
+    const dirR = mkdir(), fileR = path.join(dirR, 'opencode-serve.json');
+    fs.writeFileSync(fileR, J({ port: 41778, pid: 999999125, startedAt: 1 })); refused.add(fileR);
+    const LR = locatorOf(dirR, { mod: NOOPT, extra: { personStart: false } }); await LR.loc.client({ budgetMs: 800 });
+    const wR = LR.loc.state().lastError || '';
+    ok('RED CONTROL (the option\'s words cut, in a copy): the device is told of For you, which it does not have', /For you/.test(wR), wR);
+    refused.delete(fileR); LR.loc.stop(); LR.loc.dispose?.();
+  }
   // (c) THE HUB: a record MENDED by hand (naming the running serve) while parked 'torn' ⇒ the next discovery adopts it — no Start
   const h = await holder(), dirM = mkdir(), fileM = path.join(dirM, 'opencode-serve.json'), portM = 41600 + dirs;
   answering.add(portM); fs.writeFileSync(fileM, TORN);
@@ -337,7 +346,19 @@ console.log('⑥ r3675 (line 812\'s round, its must): a record mended or REMOVED
   await LM.loc.client({ budgetMs: 3000 }); await until(() => LM.loc.state().ready === true);
   const sM = LM.loc.state();
   ok('THE HUB: a record MENDED by hand while «torn» is seen at the next discovery — the running serve ADOPTED (its pid), no spawn, no Start, the park gone', sM.ready === true && sM.source === 'reused' && sM.pid === h.pid && LM.spawns.length === 0 && sM.parked === false, sM);
-  LM.loc.stop(); LM.loc.dispose?.(); h.kill('SIGKILL');
+  LM.loc.stop(); LM.loc.dispose?.();
+  {
+    const dirMR = mkdir(), fileMR = path.join(dirMR, 'opencode-serve.json'), portMR = 41700 + dirs;
+    answering.add(portMR); fs.writeFileSync(fileMR, TORN);
+    const LMR = locatorOf(dirMR, { mod: MO.load('src/opencode-serve.js', OLD812, 'torn-short-circuit-hub') }); await LMR.loc.client({ budgetMs: 1500 });
+    await until(() => LMR.loc.state().parkedKind === 'torn' && LMR.loc.state().recordNotice && LMR.loc.state().recordNotice.copy);
+    fs.writeFileSync(fileMR, J(recordOf(dirMR, portMR, h.pid)));
+    await LMR.loc.client({ budgetMs: 1500 }); await sleep(300);
+    const sMR = LMR.loc.state();
+    ok('RED CONTROL (57bf2ed76\'s read, in a copy): the record mended by hand is never seen — still «torn», no serve adopted', sMR.ready === false && sMR.parkedKind === 'torn' && LMR.spawns.length === 0, sMR);
+    LMR.loc.stop(); LMR.loc.dispose?.();
+  }
+  h.kill('SIGKILL');
   // (d) HELD, THEN TORN AT THE LIFT, THEN THE PERSON's START (the helper's read meets the bytes, not ours: the decision reads their kept copy off the loop)
   const dirT = mkdir(), fileT = path.join(dirT, 'opencode-serve.json');
   fs.writeFileSync(fileT, J({ port: 41888, pid: 999999124, startedAt: 1 })); refused.add(fileT);
@@ -351,11 +372,30 @@ console.log('⑥ r3675 (line 812\'s round, its must): a record mended or REMOVED
   let recT = null; try { recT = JSON.parse(realRead(fileT, 'utf8')); } catch { recT = null; }
   ok('HELD → TORN at the lift → the person\'s Start: the decision is tied to the bytes through their KEPT copy (read off the loop) — ONE new serve, a fresh record, the copy kept', heldFirst && upT && LT.spawns.length === 1 && !!recT && recT.pid === LT.loc.state().pid && copiesIn(dirT).length === 1, { heldFirst, spawns: LT.spawns.length, recT });
   LT.loc.stop(); LT.loc.dispose?.();
+  {
+    const NOCOPY = MO.load('src/opencode-serve.js', anchored(OSRC, "    if (torn && torn.decided && !torn.bytes && !Number.isInteger(torn.size) && torn.copy) { await tornBytesOfCopy(); if (cancelled(epoch)) return null; }", '', 'the kept copy\'s read cut'), 'kept-copy-read-cut');   // stale-pins: kept (the kept copy's read cut — the leg's RED)
+    const dirTR = mkdir(), fileTR = path.join(dirTR, 'opencode-serve.json');
+    fs.writeFileSync(fileTR, J({ port: 41889, pid: 999999126, startedAt: 1 })); refused.add(fileTR);
+    const LTR = locatorOf(dirTR, { mod: NOCOPY }); await LTR.loc.client({ budgetMs: 800 });
+    fs.writeFileSync(fileTR, TORN); refused.delete(fileTR);
+    await HOLD.readAgainOf(rowOf(fileTR));
+    await until(() => LTR.loc.state().parkedKind === 'torn' && LTR.loc.state().recordNotice && LTR.loc.state().recordNotice.copy);
+    plugOf(LTR.loc).verbs.start(); await sleep(600);
+    ok('RED CONTROL (the kept copy\'s read cut, in a copy): the person\'s Start after a helper-met tear cannot be tied to the bytes — no serve starts, the park «torn» again', LTR.spawns.length === 0 && LTR.loc.state().parkedKind === 'torn', { spawns: LTR.spawns.length, st: LTR.loc.state() });
+    LTR.loc.stop(); LTR.loc.dispose?.();
+  }
 }
 
 console.log('⑦ r3675: the card says what works — «off and on» when the switch is on, the true way out when the bytes cannot be compared');
 {
   const PUI = read('src/lib/plugins-ui.js');
+  const fnSrc = (/\nfunction serveRecordWords\(p\) \{\n[\s\S]*?\n\}\n/.exec(PUI) || [''])[0];
+  const srw = fnSrc ? new Function('t', `${fnSrc}\nreturn serveRecordWords;`)((x) => x) : null;
+  const w = (p) => (srw ? srw(p) : null);
+  ok('THE CARD\'s WORD STEP, DRIVEN (its function out of the real file): held · torn with the switch off (on starts a new one) · torn with the switch ON (off and on again) · torn that cannot be compared (remove by hand) · torn-start · nothing for no park', !!srw
+    && /cannot read the record/.test(w({ parkedKind: 'held' })) && /turning the switch on starts a new one/.test(w({ parkedKind: 'torn', enabled: false })) && /turning the switch off and on again starts a new one/.test(w({ parkedKind: 'torn', enabled: true }))
+    && /could not be compared/.test(w({ parkedKind: 'torn', enabled: true, recordNotice: { undecidable: true } })) && /ended before it answered/.test(w({ parkedKind: 'torn-start' })) && w({ parkedKind: null }) === '' && w(null) === '',
+    [w({ parkedKind: 'held' }), w({ parkedKind: 'torn', enabled: true })].map((x) => String(x).slice(0, 60)));
   ok('the card\'s words by the park: «held» · «torn» (off and on again when the switch is on; remove by hand when the bytes cannot be compared) · «torn-start»; the record\'s line dismissed through the plugin\'s one setting', /p\.parkedKind === 'torn' && p\.recordNotice && p\.recordNotice\.undecidable\) return t\('The record of the OpenCode background service was damaged, and its bytes could not be compared/.test(PUI)
     && /p\.parkedKind === 'torn' && p\.enabled\) return t\('[^']*turning the switch off and on again starts a new one/.test(PUI) && /p\.parkedKind === 'held' \? t\(/.test(PUI) && /p\.parkedKind === 'torn-start' \? t\(/.test(PUI)
     && PUI.includes("api('config', { body: JSON.stringify({ dismiss: 'record-notice' }) })"));

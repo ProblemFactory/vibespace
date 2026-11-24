@@ -130,7 +130,7 @@ function readRecord() {
   if (r && r.port > 0) return r;
   const kept = keepTorn(buf);
   // r3675: words an agent may read never say «stop any serve» (a person's own serve could be hit): the serve from before the damaged record, and the one way out that works here
-  throw new Error(`the record of the OpenCode serve on this machine (~/.vibespace/opencode-serve.json) was damaged${kept ? ` (its bytes are kept beside it as ${kept})` : ''} — the serve from before the damaged record may still be running, and a damaged record cannot name it, so none is started over it. Remove that record to start fresh`);
+  throw new Error(`the record of the OpenCode serve on this machine (~/.vibespace/opencode-serve.json) was damaged${kept ? ` (its bytes are kept beside it as ${kept})` : ''} — the serve from before the damaged record may still be running, and a damaged record cannot name it, so none is started over it. It is read again at the next op; a person may remove it to start fresh`);
 }
 function deleteRecord() { try { fs.unlinkSync(RECORD); } catch { } }
 function writeRecord(r) {

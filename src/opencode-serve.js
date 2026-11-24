@@ -899,7 +899,7 @@ function createServeLocator({
   // a machine with no person's Start: remove the record (it is read again at the next use); words to an agent never say «stop any serve»
   const tornWords = () => {
     const kept = torn && torn.copy ? ` (its bytes are kept as ${torn.copy})` : '';
-    if (!personStart) return `the record of the OpenCode serve on this machine (opencode-serve.json in its .vibespace folder) was damaged${kept} — the serve from before the damaged record may still be running, and a damaged record cannot name it, so none is started over it. Remove that record to start fresh: it is read again at the next use`;
+    if (!personStart) return `the record of the OpenCode serve on this machine (opencode-serve.json in its .vibespace folder) was damaged${kept} — the serve from before the damaged record may still be running, and a damaged record cannot name it, so none is started over it. It is read again at the next use; a person may remove it to start fresh`;
     if (torn && torn.undecidable) return `the record of the OpenCode background service (opencode-serve.json) was damaged${kept}, and its bytes could not be compared with their kept copy — the serve from before may still be running. Remove opencode-serve.json from VibeSpace's data folder by hand to start fresh: it is read again at the next use`;
     return `the record of the OpenCode background service (opencode-serve.json) was damaged${kept} — a serve from before may still be running, so VibeSpace starts none by itself. Stop it by hand if it runs; your own Start (the switch, off and on again if it is on) begins a new one — or remove the record by hand`;
   };
@@ -923,9 +923,9 @@ function createServeLocator({
       // the SAME damaged bytes (compared whole when kept, by their size when too large to keep): the person's decision reads them as no record; an undecided park stands
       const same = torn.bytes ? read.buf.equals(torn.bytes) : (Number.isInteger(torn.size) && torn.size === read.buf.length);
       if (same && torn.decided) return null;
-      if (same) { if (!torn.bytes && read.buf.length <= TORN_KEEP_BYTES) torn.bytes = Buffer.from(read.buf); torn.size = read.buf.length; parkOnRecord(); return null; }
+      if (same) { if (!torn.bytes && read.buf.length <= TORN_KEEP_BYTES) torn.bytes = Buffer.from(read.buf); torn.size = read.buf.length; torn.undecidable = false; parkOnRecord(); return null; }   // r3794: the read holds the bytes (or their size) itself — a person's off-and-on decides again
     }
-    if (a.state === 'corrupt') torn = { copy: null, at: now(), bytes: read.buf.length <= TORN_KEEP_BYTES ? Buffer.from(read.buf) : null, size: read.buf.length, decided: false, notice: true, undecidable: !!(torn && torn.undecidable) };
+    if (a.state === 'corrupt') torn = { copy: null, at: now(), bytes: read.buf.length <= TORN_KEEP_BYTES ? Buffer.from(read.buf) : null, size: read.buf.length, decided: false, notice: true, undecidable: false };   // r3794: this read holds the bytes (or their size): the decision can be tied to them
     recHold.start(a);   // unread: held, read again on the ladder; torn: their copy at once (off the loop), then the 'torn' park
     parkOnRecord();
     return null;
