@@ -250,6 +250,16 @@ else {
     const rsrc = fs.readFileSync(new URL('../src/routes/browser.js', import.meta.url), 'utf8');
     ok(rsrc.includes("if (L && L.held && action !== 'status' && action !== 'cancel') return res.status(503)") && rsrc.includes("if (action === 'status') return res.json(passkeyStatusReply(v, L));"), 'the agent\'s route: status answers through passkeyStatusReply (the leg\'s function), and cancel is not refused by the hold (it writes nothing; the open ceremony\'s own text sends the agent to it)');
   }
+  // ── r3702: the unstored harvest's journal line names NO site; the ephemeral retire asks the hold BEFORE its stop (both pinned: the
+  //    harvest is unreachable while held by the gates' order, the retire needs a live browser to stop) ──
+  {
+    const dsrc = fs.readFileSync(new URL('../src/server/browser-dialogs.js', import.meta.url), 'utf8');
+    const line = dsrc.split('\n').find((l) => l.includes("say('pk-harvest-unstored:'")) || '';
+    ok(!!line && !/rpId|nr\.|site:/.test(line.replace(/the site may hold a passkey VibeSpace does not/, '')) && /\$\{pid\}/.test(line), 'r3702 MUST: the journal line of a harvest that could not be stored names the profile alone — never the passkey\'s site', line.slice(0, 200));
+    const ksrc = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
+    const iAsk = ksrc.indexOf("not retired while the passkeys could not be read"), iStop = ksrc.indexOf("try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }");
+    ok(iAsk > 0 && iStop > iAsk, 'r3702: the ephemeral retire asks the hold BEFORE it stops the browser — nothing stopped or removed while the passkeys are held');
+  }
   // ── (e) THE PRODUCTION NAMES: the wiring builds the store through the same module, and wires the hold to the keeper and the digest ──
   {
     const wsrc = fs.readFileSync(new URL('../src/server/mounts-plugins-wiring.js', import.meta.url), 'utf8');

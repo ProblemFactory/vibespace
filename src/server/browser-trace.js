@@ -851,7 +851,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   async function forgetProfile(id, { unpin = false } = {}) {
     if (!keeper) throw namedError('unavailable', 'no keeper');
     loadForgotten(); fgHold.refuse('setting this browser aside');   // r3008: the ledger HELD — refused by name before anything moves
-    { const ph = keeper && typeof keeper.passkeyHeldNow === 'function' ? keeper.passkeyHeldNow() : null; if (ph) throw namedError('passkeys_unread', `this browser is not set aside while ${ph.words || 'the passkeys could not be read'} — its passkeys would be dropped from a store that could not be read`); }   // r3632 MUST 1: the passkeys HELD — refused before the unwatch and the lineage's move
+    { const ph = keeper && typeof keeper.passkeyHeldNow === 'function' ? keeper.passkeyHeldNow() : null; if (ph) throw namedError('passkeys_unread', `this browser was not set aside: its passkeys could not be read (${ph.code || 'unread'}), and removing it now would drop them from a store that could not be read — nothing was moved; VibeSpace reads them again by itself, then it can be set aside`); }   // r3632 MUST 1: the passkeys HELD — refused before the unwatch and the lineage's move
     const p = keeper.profile(id);
     const reg = keeper._reg();
     const v = T.forgetVerdict({ profile: p, leases: reg.leases, browsers: reg.browsers });

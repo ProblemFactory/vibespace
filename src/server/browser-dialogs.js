@@ -2255,7 +2255,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     pkKeyOk();
     const nr = PS.normalizeRow({ credentialId: cid, rpId: c.rpId, userHandle: b64u(c.userHandle), userName: c.userName, displayName: c.userDisplayName, keySealed: sealed, signCount: c.signCount, createdBy: rec && rec.createdBy === 'human' ? 'human' : 'agent', bySession: pkOwner(w, e), createdAt: now(), policy: PS.NEW_KEY_POLICY });
     if (!nr) return say('pk-harvest:' + pid, `${pid}: a new passkey was not stored (its fields did not read)`);
-    if (!pkWrite(PS.withRow(store, pid, nr))) return say('pk-harvest-unstored:' + pid, `${pid}: a new passkey for ${nr.rpId} was NOT stored — the passkey store could not be read or written; the site may hold a passkey VibeSpace does not`);   // r3632 (should): the belt says it
+    if (!pkWrite(PS.withRow(store, pid, nr))) return say('pk-harvest-unstored:' + pid, pkHeld() ? `${pid}: a new passkey was NOT stored — the passkey store could not be read; the site may hold a passkey VibeSpace does not` : `${pid}: a new passkey is kept in memory but NOT saved to disk yet — the store's write failed`);   // r3632 (should): the belt says it; r3702 MUST: never the site in the journal
     if (rec) { rec.harvested = true; rec.userName = nr.userName; }
     emit({ kind: 'passkeys', profileId: pid });
   }

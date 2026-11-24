@@ -249,7 +249,7 @@ const f2 = async (Km) => {
 {
   const g = await f2(K);
   ok(g.kept && g.state === 'ready' && g.alive && g.closes === 0 && g.out && g.out.kept === true, 'the conversation resumed inside the reap\'s window: after the reap the retire reads the lease again — the record KEPT, the browser it just started left RUNNING, no CLI start', g);
-  const noReread = editAnchor(ksrc, "      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };\n      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }", "      try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); }", "src/server/browser-keeper.js");
+  const noReread = editAnchor(ksrc, "      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };\n      { const ph = passkeyHeldNow();", "      { const ph = passkeyHeldNow();", "src/server/browser-keeper.js")   /* r3702: the re-read now sits before the passkey hold's ask (still before the stop) */;
   ok(noReread !== ksrc, 'MUTANT (the re-read after the reap removed): the patch applies');
   if (noReread !== ksrc) {
     const gm = await f2(M.load('src/server/browser-keeper.js', noReread, 'no-reread'));

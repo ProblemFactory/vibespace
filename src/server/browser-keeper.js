@@ -5073,6 +5073,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // keeper-sweep-yields F2: NOTHING OF A CARRIED CONVERSATION IS ENDED BY THE SWEEP — the lease is read again after the
       // reap's await and before the stop (a conversation resumed meanwhile may have started its browser again)
       if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };
+      { const ph = passkeyHeldNow();   // r3702: the passkeys HELD — the retire asks BEFORE its stop (the road's order is the law's): nothing stopped, nothing removed
+        if (ph) { if (!retireHeldSaid) log.warn?.(`[browser] ephemeral ${profileId}: not retired while the passkeys could not be read (${ph.code || 'unread'}) — nothing stopped or removed; said once, the ephemeral records retire at the first pass after they read`); retireHeldSaid = true; return { removed: false, why: 'the passkeys could not be read' }; }
+        retireHeldSaid = false; }   // the store reads: the «said once» mark goes back
       try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); } catch (e) { log.warn?.(`[browser] ephemeral ${profileId}: stop failed — ${e && e.message}`); }
       if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };
       if (B.isLiveBrowser(reg.browsers[profileId])) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": its browser would not stop — the record is kept for the next pass`); return { removed: false, why: 'still running' }; }
@@ -7274,7 +7277,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function setPasskeyHeld(fn) { passkeyHeld = typeof fn === 'function' ? fn : null; }
   /** r3632: the passkey store HELD now? → its facts ({ words, … }) | null — the one fact every remover asks BEFORE anything moves */
   function passkeyHeldNow() { try { return passkeyHeld ? passkeyHeld() : null; } catch { return null; } }
-  const passkeyRemovalWords = (ph) => `this browser profile is not removed while ${(ph && ph.words) || 'the passkeys could not be read'} — its passkeys would be dropped from a store that could not be read`;
+  const passkeyRemovalWords = (ph) => `this browser profile was not removed: its passkeys could not be read (${(ph && ph.code) || 'unread'}), and removing it now would drop them from a store that could not be read — nothing was removed; VibeSpace reads them again by itself, then the removal can be pressed again`;   // r3702: a removal's words
   let retireHeldSaid = false;   // r3632 (should): the sweep's retire refused while held is said ONCE a hold, not every pass
   /** lane S2: THE browser fact of one live session (`sessionFacts` = browser-fact.sessionFactsOf(session)). */
   function factFor(sessionFacts) {
