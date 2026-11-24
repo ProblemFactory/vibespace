@@ -19,6 +19,11 @@ const NAMES = Object.freeze({
   'feedback.json': i18nKey('the feedback reports'),
   'extract-journal.json': i18nKey('the record of unfinished extractions'),   // r3333 unit 2 (lane lg-group-parents): the archive extraction journal
   'providers.json': i18nKey('the list of model providers'),
+  // r3333 unit 3 (lane lg-group-parents): four small stores
+  'voice-suggestions.json': i18nKey('the voice dictionary suggestions'),
+  'cli-unmeasured-notice.json': i18nKey('the record of the unmeasured Claude Code notice'),
+  'maintenance.json': i18nKey('the maintenance banner'),
+  'cli-model-catalog.json': i18nKey('the Claude Code model catalog'),
   'published-pages.json': i18nKey('the list of published pages'),
   'setting-holds.json': i18nKey('the raised spending ceilings'),
   'vault-use-marks.json': i18nKey('who may use your stored values'),

@@ -25,6 +25,8 @@ const fs = require('fs');
 const path = require('path');
 const CMC = require('../claude-model-catalog.js');
 const CPC = require('../claude-plan-catalog.js');
+const SR = require('../store-read.js');
+const SRH = require('../store-read-hold.js');   // r3333 unit 3: the ledger HELD when it cannot be read
 const LEVEL_REPORTED = require('./cli-level-reported.js');   // B-24e2: what the paired machines read of their own binaries (in memory)
 
 const LEDGER = 'cli-model-catalog.json';
@@ -47,7 +49,7 @@ const LEVEL_SCAN_MAX = 64 << 20;
 const CONTENT_CODES = new Set(['no-anchor', 'no-literal', 'not-a-literal', 'forbidden-key', 'too-deep', 'string-long', 'array-long', 'literal-long',
   'expected-colon', 'expected-comma', 'bad-key', 'bad-number', 'bad-escape', 'unterminated-string', 'newline-in-string', 'parse-budget', 'no-valid-model']);
 
-const st = { dataDir: null, ledger: null, key: null, reading: null, subs: [], event: null, log: null, saveSaid: false, pricesBy: new Map() };
+const st = { dataDir: null, ledger: null, key: null, reading: null, subs: [], event: null, log: null, saveSaid: false, pricesBy: new Map(), hold: null };
 const fresh = () => ({ schema: 1, reader: CMC.READER_VERSION, current: null, binaries: {}, said: [] });
 const SAID_NAMES = ['cli-model-catalog-read', 'cli-unknown-model-price', 'cli-unknown-model-catalog', 'cli-unknown-model-alias', 'cli-unknown-model'];
 /** what of the «said» set is still TRUE: a binary still kept, a model a kept binary still names, a price disagreement the
@@ -99,14 +101,43 @@ const isEntry = (e) => {
   return (e.refused || []).every((r) => !!r && typeof r === 'object' && !Array.isArray(r) && typeof r.code === 'string');
 };
 
+// r3333 unit 3 (lane lg-group-parents, the store-read family): THE LEDGER IS HELD when it cannot be read — the release read any failure
+// as «no ledger» and the next save wrote over it: the rows of builds no longer installed were lost. HELD: this run's reads are kept in
+// memory (the binary in use is read and in force as before), nothing is written over the file, it is read again off the loop; at its
+// read the file's rows come back and this run's reads go over them, written once. Torn bytes (or a file that is no ledger of this
+// schema): kept aside ONCE, then it starts empty, as before.
+const ledgerValid = (l) => !!l && typeof l === 'object' && !Array.isArray(l) && l.schema === 1 && !!l.binaries && typeof l.binaries === 'object' && !Array.isArray(l.binaries);
+const LEDGER_WORDS = `the model catalog's ledger (${LEDGER}) could not be read — what this run reads is kept in memory and nothing is written over it; it is read again by itself`;
 /** law E: what the load ACCEPTS is exactly what the save can write — a non-entry is dropped here, never carried */
 function loadLedger(dataDir) {
   if (st.ledger && st.dataDir === dataDir) return st.ledger;
   st.dataDir = dataDir || null;
+  if (st.hold) { st.hold.stop(); st.hold = null; }
   let l = null;
-  if (dataDir) { try { l = JSON.parse(fs.readFileSync(path.join(dataDir, LEDGER), 'utf8')); } catch { l = null; } }
+  if (dataDir) {
+    const file = path.join(dataDir, LEDGER);
+    let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: ledgerValid });
+    st.hold = SRH.create({ file, valid: ledgerValid, aside: (mark) => `${file}.corrupt-${mark}`, words: () => LEDGER_WORDS, code: 'cli_model_catalog_unread',
+      log: (m) => say('log', `[cli-model-catalog] ${m}`), onLift: (v) => liftLedger(dataDir, v) });
+    if (st.hold.start(a) === 'data') l = a.value;
+  }
+  return (st.ledger = ledgerOf(l));
+}
+/** the held ledger read again: the file's rows, then this run's reads over them (newer), written once */
+function liftLedger(dataDir, v) {
+  if (st.dataDir !== dataDir || !st.ledger) return;
+  const was = st.ledger, out = ledgerOf(v);
+  for (const [k, e] of Object.entries(was.binaries)) out.binaries[k] = e;
+  out.current = was.current || out.current;
+  out.said = [...new Set([...out.said, ...was.said])];
+  st.ledger = out;
+  if (!was.current) { st.key = out.current; try { apply({ save: false }); } catch { } }   // nothing read this run: the file's view is in force (law A)
+  saveLedger();
+}
+function ledgerOf(l) {
   const out = fresh();
-  if (l && typeof l === 'object' && !Array.isArray(l) && l.schema === 1 && l.binaries && typeof l.binaries === 'object' && !Array.isArray(l.binaries)) {
+  if (ledgerValid(l)) {
     for (const [k, e] of Object.entries(l.binaries)) if (k !== '__proto__' && isEntry(e)) out.binaries[k] = { ...e, refused: Array.isArray(e.refused) ? e.refused : [] };
     out.current = typeof l.current === 'string' && out.binaries[l.current] ? l.current : null;
     // THE «SAID» SET (tidy, acceptance r3): nothing is dropped by age — a line still current is never forgotten (a slice of
@@ -114,11 +145,11 @@ function loadLedger(dataDir) {
     // and a name this module never says is not a line at all
     out.said = Array.isArray(l.said) ? l.said.filter((x) => typeof x === 'string' && SAID_NAMES.some((n) => x.startsWith(n + '|'))) : [];
   }
-  st.ledger = out;
   return out;
 }
 function saveLedger() {
   if (!st.dataDir || !st.ledger) return;
+  if (st.hold && !st.hold.writable('the model catalog\'s ledger')) return;   // r3333 unit 3: never over a held ledger (said once)
   try {
     const b = st.ledger.binaries;
     const keys = Object.keys(b).sort((x, y) => String((b[y] && b[y].readAt) || '').localeCompare(String((b[x] && b[x].readAt) || '')));
@@ -360,7 +391,7 @@ function status() {
   return cur ? { cli: cur.cli, builtAt: cur.builtAt, state: cur.state, models: cur.models.length, refused: cur.refused.length, reason: cur.reason || null, ms: cur.evidence && cur.evidence.ms } : null;
 }
 /** tests only: forget the in-process state (the ledger file stays — a «restart»; the subscribers are wiring and stay) */
-function _reset() { st.dataDir = null; st.ledger = null; st.key = null; st.reading = null; st.event = null; st.log = null; st.saveSaid = false; st.pricesBy = new Map(); } // the subscribers stay (module wiring)
+function _reset() { if (st.hold) { st.hold.stop(); st.hold = null; } st.dataDir = null; st.ledger = null; st.key = null; st.reading = null; st.event = null; st.log = null; st.saveSaid = false; st.pricesBy = new Map(); } // the subscribers stay (module wiring)
 
 /** tests only: the ledger loaded with no reader fed (no apply, no listener) / a save now (prune + write) */
 function _load(dataDir) { return loadLedger(dataDir); }

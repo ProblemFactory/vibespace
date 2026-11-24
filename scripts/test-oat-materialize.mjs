@@ -777,15 +777,19 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     if (M) { const rr = leg(M); ok(rr.open === 1, 'RED CONTROL (4): with learning skipped in the spell (b552c972) a NEW item is filed for the version the owner dismissed', rr); }
   }
   { // (5) (a) a DAMAGED memory: said once, rebuilt from the ledger (by the item's FACT) before anything is filed
-    const leg = (M, body) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.wait(60e3); n.tick(); fs.writeFileSync(w.memFile, body(w, id)); w.names = w.names.slice(0, 4); w.wait(16 * 60e3); const l0 = w.logs.length; w.mk(M).tick(); w.wait(16 * 60e3); w.mk(M).tick(); return { id, st: w.todos.get(id).status, items: w.mine().length, said: w.logs.slice(l0).filter((l) => /memory cli-unmeasured-notice\.json is damaged/.test(l)).length }; };
+    // r3333 unit 3: torn bytes are HELD while their copy is made (the family's helper), then the damaged road as before — the restart
+    // ticks once, waits for that lift (the helper's own list), ticks again
+    const SRH5 = require(path.join(REPO, 'src/store-read-hold.js'));
+    const lifted5 = async () => { for (let i = 0; i < 150 && SRH5.holds().some((h) => h.file === 'cli-unmeasured-notice.json' && h.held); i++) await new Promise((r) => setTimeout(r, 20)); };
+    const leg = async (M, body) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.wait(60e3); n.tick(); fs.writeFileSync(w.memFile, body(w, id)); w.names = w.names.slice(0, 4); w.wait(16 * 60e3); const l0 = w.logs.length; const n1 = w.mk(M); n1.tick(); await lifted5(); n1.tick(); w.wait(16 * 60e3); w.mk(M).tick(); return { id, st: w.todos.get(id).status, items: w.mine().length, said: w.logs.slice(l0).filter((l) => /memory cli-unmeasured-notice\.json is damaged/.test(l)).length }; };
     const garbage = () => 'garbage {{{ not json';
     const neverHad = (w) => JSON.stringify({ versions: { '2.1.312': { filedAt: 1, itemId: 'ut-neverhad00', count: 6, resolvedBy: null, resolvedAt: null } } });
-    const g = leg(NOTICE, garbage), nh = leg(NOTICE, neverHad);
+    const g = await leg(NOTICE, garbage), nh = await leg(NOTICE, neverHad);
     ok(g.st === 'dismissed' && g.items === 1 && g.said === 1, 'r3 (5) a GARBAGE memory file (then two members re-logged): said ONCE in the journal over two restarts, rebuilt from the ledger — the dismissal holds, no second item', g);
     ok(nh.st === 'dismissed' && nh.items === 1, 'r3 (5) a memory naming an item the store never had (resolvedBy null) while the dismissed item is in the ledger, the count 6→4 ⇒ still dismissed, no second item (b552c972: a SECOND item filed beside it)', nh);
     ok(w0FactOf(NOTICE), 'r3 (5) …the item carries its FACT (`' + NF + '`: the version) — the ledger belt keys on it, never on the words');
     const M = red('(5)', 'const byFact = (todos) => {', 'const byFact = (todos) => new Map(); const byFact0 = (todos) => {');
-    if (M) { const rr = leg(M, neverHad); ok(rr.items === 2, 'RED CONTROL (5): with the ledger belt not keyed on the fact, the never-had memory files a SECOND item for the dismissed version', rr); }
+    if (M) { const rr = await leg(M, neverHad); ok(rr.items === 2, 'RED CONTROL (5): with the ledger belt not keyed on the fact, the never-had memory files a SECOND item for the dismissed version', rr); }
   }
   { // (6) (d) the bound: 21 versions, the first one dismissed, the ledger pruned — the owner's word outlives the agent's
     const leg = (M) => { const w = world(M); const n = w.mk(M); const ids = []; for (let k = 0; k < 21; k++) { w.cli = '2.1.' + (400 + k); w.wait(16 * 60e3); ids.push(n.tick()); if (k === 0) { w.todos.setStatus(ids[0], 'dismissed', 'user'); w.wait(60e3); n.tick(); } } for (const id of ids) if (id && w.todos.get(id) && w.todos.get(id).status !== 'open') prune(w, id); const keys = Object.keys(JSON.parse(fs.readFileSync(w.memFile, 'utf8')).versions); w.cli = '2.1.400'; w.wait(16 * 60e3); const back = n.tick(); return { kept: keys.length, has400: keys.includes('2.1.400'), refiled: back }; };

@@ -20,6 +20,9 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const { writeJsonAtomic } = require('../channel-store.js'); // the ONE atomic data/*.json writer
+const SR = require('../store-read.js');
+const SRH = require('../store-read-hold.js');   // r3333 unit 3: the ledger HELD when it cannot be read
+const LEDGER_NAME = 'voice-suggestions.json';   // the ledger's base name (the wiring hands its path; the family's notice names it by this)
 const T = require('../voice-teach.js');
 const VM = require('../voice-model.js');
 
@@ -41,18 +44,35 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
   const capOk = (kind) => model.capLeft(state(), kind, now()) > 0;
   // THE SUGGESTION LEDGER (lane voice-dictionary-nag): read once from the plugin's own store file, written whole on each
   // change (no file named — a test — ⇒ in memory)
-  let ledger = null;
-  const readLedger = () => {
-    if (ledger) return ledger;
-    let raw = null;
-    if (ledgerFile) { try { raw = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[voice] the suggestion ledger was not read: ${e && e.message}`); } }
-    return (ledger = VM.ledgerOf(raw));
-  };
+  // r3333 unit 3 (lane lg-group-parents, the store-read family): THE LEDGER IS HELD when it cannot be read — the release read any
+  // failure as an empty ledger (dismissed words were proposed again) and the next change wrote over it. HELD: NO WORD IS PROPOSED
+  // (the pass after a dictation — a dismissed one would come again); a person's add or dismissal goes on as before (the dictionary
+  // and the For-you item are their own) and its ledger CHANGE waits in memory, replayed onto the ledger at its read and written
+  // once; nothing is written over the file meanwhile; it is read again off the loop. Torn bytes: kept aside ONCE, then empty.
+  const ledgerValid = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  let ledger = null, ledgerHold = null, waiting = [];
   const writeLedger = (L) => {
     ledger = VM.ledgerOf(L);
     if (ledgerFile) { try { writeJsonAtomic(ledgerFile, { v: 1, words: ledger.words }, { mode: 0o600 }); } catch (e) { log.warn?.(`[voice] the suggestion ledger was not written: ${e && e.message}`); } }
     return ledger;
   };
+  /** → the ledger, or null while it is HELD (never «empty») */
+  const readLedger = () => {
+    if (ledger) return ledger;
+    if (!ledgerFile) return (ledger = VM.ledgerOf(null));
+    if (ledgerHold) return null;   // held (a lift sets the ledger)
+    let read; try { read = { text: fs.readFileSync(ledgerFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: ledgerValid });
+    ledgerHold = SRH.create({ file: ledgerFile, valid: ledgerValid, aside: (mark) => `${ledgerFile}.corrupt-${mark}`, code: 'voice_suggestions_unread', log: (m) => log.warn?.(`[voice] ${m}`),
+      words: () => `the voice suggestions' ledger (${LEDGER_NAME}) could not be read — no word is proposed until it reads; it is read again by itself`,
+      onLift: (v) => { ledger = VM.ledgerOf(v); const w = waiting.splice(0); if (w.length) { let L = ledger; for (const f of w) L = f(L); writeLedger(L); } } });
+    const st = ledgerHold.start(a);
+    if (st === 'held') return null;
+    ledgerHold.stop(); ledgerHold = false;   // read: no hold to keep (false: never read again in this run)
+    return (ledger = VM.ledgerOf(st === 'data' ? a.value : null));
+  };
+  /** a change of the ledger: at once, or (HELD) kept in memory and replayed at its read — a person's act is never stopped by it */
+  const changeLedger = (fn) => { const L = readLedger(); if (!L) { waiting.push(fn); return null; } return writeLedger(fn(L)); };
   /** the dictionary (a read) — proposals never repeat a word it already holds. Lane voice-teach-skips: cached per ACCOUNT
    *  (another sign-in reads again), for a day, and read again after each write (`stale`); + the words the vendor added */
   const whoOf = () => { try { const a = typeof client.account === 'function' ? client.account() : null; return a ? [a.tier, a.name, a.team].join('|') : ''; } catch { return ''; } };
@@ -171,7 +191,8 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       const kn = await known();
       const terms = VM.termsOf({ messages, files, cwd, groupName, known: kn });            // the per-project tier's input
       // the card's: words a person says — minus what the vendor knows AND the evidence a dismissal consumed (rule 1)
-      const candidates = VM.proposalCandidates({ messages, files, cwd, groupName, known: kn, ledger: readLedger() });
+      const held = !readLedger();   // r3333 unit 3: the ledger HELD — no word is proposed (a dismissed one would come again)
+      const candidates = held ? [] : VM.proposalCandidates({ messages, files, cwd, groupName, known: kn, ledger: readLedger() });
       st = await flushPending(st, at, kn);   // lane voice-teach-skips: the words an automatic folder left waiting go first
       const v = model.proposalVerdict(st, { conv, cwd, terms, candidates, now: at, settings: set, kindOf: VM.termKind, autoFrom: VM.autoSourcesOf({ messages, files, cwd }) });
       if (v.auto.length) {
@@ -191,7 +212,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       // dismissal less than a day ago ⇒ no For-you item (the card waits on the sheet); mode settings-only or nothing
       // preselected ⇒ only the card (and the settings list); 「词典建议」 off ⇒ nothing is proposed
       const toItem = v.propose.length > 0 && v.pick.length > 0 && set.mode === 'item';
-      const pace = toItem ? VM.suggestionPace({ open: !!openItem(), ledger: readLedger(), now: at }) : { act: 'card' };
+      const pace = toItem ? VM.suggestionPace({ open: !!openItem(), ledger: readLedger() || VM.ledgerOf(null), now: at }) : { act: 'card' };
       if (v.propose.length && set.suggest) {
         const why = Object.fromEntries(candidates.filter((c) => v.propose.includes(c.term)).map((c) => [c.term, { why: c.why, seen: c.seen, byPerson: c.byPerson }]));
         const p = { id: 'vp' + crypto.randomBytes(5).toString('hex'), conv, cwd, title: String(title).slice(0, 200), terms: v.propose, pick: v.pick, why, at, lang: ['zh', 'ja'].includes(uiLang) ? uiLang : 'en' };
@@ -204,7 +225,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
           p.itemId = fileItem(p);
           if (p.itemId) st.item = { id: p.itemId, terms: v.pick.slice(), lang: p.lang };
         }
-        writeLedger(VM.ledgerSuggested(readLedger(), candidates.filter((c) => v.propose.includes(c.term)), at)); // their occurrences = the evidence a dismissal consumes
+        changeLedger((L) => VM.ledgerSuggested(L, candidates.filter((c) => v.propose.includes(c.term)), at)); // their occurrences = the evidence a dismissal consumes
         st = model.hold(st, conv, v.below, v.propose);
         st.proposals = [...st.proposals.filter((x) => x.conv !== conv), p].slice(-model.TEACH_LIMITS.proposalsMax);
         st.lastProposal[conv] = at;
@@ -264,7 +285,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     st = afterTerms(state(), pick, r, { title: p.title, at });
     st.proposals = st.proposals.filter((x) => x.id !== p.id);
     // lane voice-dictionary-nag: the sent words are KNOWN (they leave the ledger and the open item)
-    writeLedger(VM.ledgerAdded(readLedger(), pick));   // afterTerms knows the ADDED ones and remembers the skipped (lane voice-teach-skips)
+    changeLedger((L) => VM.ledgerAdded(L, pick));   // afterTerms knows the ADDED ones and remembers the skipped (lane voice-teach-skips)
     const sh = p.itemId && st.item && st.item.id === p.itemId ? shrinkItem(st, p.terms) : { st, close: p.itemId }; // the card's words leave the item (its unticked ones were looked at)
     save(sh.st);
     if (sh.close) closeItem({ itemId: sh.close }, 'voice-input'); // the producer closes it — no answer of the person's
@@ -277,7 +298,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     if (!p) throw httpErr(404, 'no-proposal', 'that suggestion is gone');
     st = model.ignore(st, p.terms, now());
     st.proposals = st.proposals.filter((x) => x.id !== p.id);
-    writeLedger(VM.ledgerDismissed(readLedger(), p.terms, now())); // lane voice-dictionary-nag: a dismissal, counted like ✕
+    { const at = now(); changeLedger((L) => VM.ledgerDismissed(L, p.terms, at)); } // lane voice-dictionary-nag: a dismissal, counted like ✕
     const sh = p.itemId && st.item && st.item.id === p.itemId ? shrinkItem(st, p.terms) : { st, close: p.itemId };
     save(sh.st);
     if (sh.close) closeItem({ itemId: sh.close }, 'voice-input'); // the producer closes it — no answer of the person's
@@ -298,7 +319,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     st.proposals = st.proposals.filter((x) => x.itemId !== itemId);
     if (st.item && st.item.id === itemId) st.item = null;
     save(st);
-    writeLedger(VM.ledgerAdded(readLedger(), words));
+    changeLedger((L) => VM.ledgerAdded(L, words));
     return { added: r.added, skipped: r.skipped, skips: r.skips || [] };
   }
   /** ✕ / 忽略 / 全部标为已看: «not now» — the item's words' evidence is CONSUMED (they come back only from a new dictation); nothing leaves.
@@ -306,7 +327,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
   function dismissItem(itemId) {
     let st = state();
     const words = itemWords(itemId, st);
-    writeLedger(VM.ledgerDismissed(readLedger(), words, now()));
+    { const at = now(); changeLedger((L) => VM.ledgerDismissed(L, words, at)); }
     st.proposals = st.proposals.filter((x) => x.itemId !== itemId);
     if (st.item && st.item.id === itemId) st.item = null;
     save(st);
@@ -328,9 +349,9 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       const r = await client.terms([word]);
       const at = now();
       st = afterTerms(state(), [word], r, { at });
-      writeLedger(VM.ledgerAdded(readLedger(), [word]));
+      changeLedger((L) => VM.ledgerAdded(L, [word]));
       result = { added: r.added, skipped: r.skipped, skips: r.skips || [] };
-    } else writeLedger(VM.ledgerDismissed(readLedger(), [word], now()));
+    } else { const at = now(); changeLedger((L) => VM.ledgerDismissed(L, [word], at)); }
     st.proposals = st.proposals.map((p) => ({ ...p, terms: p.terms.filter((x) => !has(x)), pick: (p.pick || []).filter((x) => !has(x)) })).filter((p) => p.terms.length);
     const sh = shrinkItem(st, [word]);
     save(sh.st);

@@ -42,6 +42,9 @@ const fs = require('fs');
 const path = require('path');
 const { writeJsonAtomic } = require('../channel-store.js'); // the ONE atomic data/*.json writer
 const { cliVersionOf } = require('../cli-caps.js'); // PURE: the version's one spelling
+const SR = require('../store-read.js');
+const SRH = require('../store-read-hold.js');   // r3333 unit 3: the memory HELD when it cannot be read
+const NAME = 'cli-unmeasured-notice.json';   // the memory's base name (the wiring hands its path; the family's notice names it by this)
 const ITEM_KEY = 'pool:cli-unmeasured';
 const FACT = 'cliUnmeasured';  // the version an item is ABOUT, stored on the item itself (r3)
 const RECHECK_MS = 15 * 60e3; // a version's roster is re-read only this often
@@ -60,24 +63,32 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
   let inUse = null;             // the version the CLI is on (never evicted)
   let unreadableSaid = false;
   const ours = (x) => !!x && x.sessionKey === ITEM_KEY && typeof x.text === 'string';
+  // r3333 unit 3 (lane lg-group-parents, the store-read family): THE MEMORY IS HELD when it cannot be read — the release took an
+  // unreadable file for damage and rebuilt it from the For-you ledger OVER the file: a notice the owner dismissed (that the ledger no
+  // longer holds) was filed again. HELD: the tick files nothing, resolves nothing and writes nothing; the file is read again off the
+  // loop and the next tick after its read goes on with it. Torn bytes (or a file with no versions map): kept aside ONCE, then the
+  // damaged road as before (rebuilt from the ledger before anything is filed).
+  const memoryValid = (j) => !!j && typeof j === 'object' && !Array.isArray(j) && !!j.versions && typeof j.versions === 'object' && !Array.isArray(j.versions);
+  let hold = null, liftedWith;   // liftedWith: the held file's read again ({ value, setAside }) — the next load takes it
   const load = () => {
     if (memory) return memory;
+    if (hold && hold.held()) return null;   // HELD: no memory (never «none»)
+    let j = null, damage = null;
+    if (file && liftedWith) { j = liftedWith.value; if (liftedWith.setAside) damage = `not JSON (truncated or overwritten) — kept aside as ${liftedWith.setAside}`; liftedWith = undefined; }
+    else if (file && !hold) {
+      let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: memoryValid });
+      hold = SRH.create({ file, valid: memoryValid, aside: (mark) => `${file}.corrupt-${mark}`, words: () => `the unmeasured-CLI item's memory (${NAME}) could not be read — nothing is filed or resolved until it reads; it is read again by itself`,
+        code: 'cli_unmeasured_memory_unread', log: (m) => log(`[oat-file] ${m}`), onLift: (value, f) => { liftedWith = { value, setAside: (f && f.setAside) || null }; } });
+      const st = hold.start(a);
+      if (st === 'held') return null;
+      if (st === 'data') j = a.value;
+    }
     memory = { versions: {} };
     rebuild = true;
-    if (!file) return memory;
-    let raw = null, damage = null;
-    try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') damage = `unreadable (${(e && e.code) || 'error'})`; }
-    if (raw != null && !damage) {
-      let j = null;
-      try { j = JSON.parse(raw); } catch { damage = raw.trim() ? 'not JSON (truncated or overwritten)' : 'empty'; }
-      if (!damage) {
-        const vs = j && typeof j === 'object' && !Array.isArray(j) ? j.versions : undefined;
-        if (!vs || typeof vs !== 'object' || Array.isArray(vs)) damage = 'no versions map';
-        else {
-          for (const [v, r] of Object.entries(vs)) { if (isRec(r)) memory.versions[v] = { ...r }; else damage = 'a record that is not a record'; }
-          if (!damage) rebuild = false;
-        }
-      }
+    if (j) {
+      for (const [v, r] of Object.entries(j.versions)) { if (isRec(r)) memory.versions[v] = { ...r }; else damage = 'a record that is not a record'; }
+      if (!damage) rebuild = false;
     }
     // A DAMAGED MEMORY IS SAID, ONCE, AND REBUILT FROM THE LEDGER BEFORE ANYTHING IS FILED (r3 (a)): b552c972 read
     // garbage as «no memory», said nothing and overwrote it — and an owner-dismissed item the ledger still held came back
@@ -87,6 +98,7 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
   const used = (k) => Number(memory.versions[k].usedAt) || Number(memory.versions[k].filedAt) || 0;
   /** → true when written. The bound never evicts the version in use nor `keep` (the key just written) */
   const save = (keep = null) => {
+    if (hold && !hold.writable('the unmeasured-CLI item\'s memory')) return false;   // r3333 unit 3: never over a held memory
     const keys = Object.keys(memory.versions);
     if (keys.length > VERSIONS_MAX) {
       const pinned = [inUse, keep].filter((k, i, a) => k && memory.versions[k] && a.indexOf(k) === i);
@@ -175,6 +187,7 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
     const t = now();
     const unreadable = !caps.ok && (!caps.known || !caps.cli || caps.cli === 'unparsed');
     const v = unreadable || caps.ok ? null : (cliVersionOf(caps.cli) || String(caps.cli));
+    if (!load()) return null;   // r3333 unit 3: the memory HELD — nothing filed, resolved or written (the pass waits; no person's act is stopped)
     const ledger = byFact(todos);
     learn(todos, ledger, v); // whatever the version read — learning is free, only the filing waits (r3 U4)
     // AN UNREADABLE VERSION IS NOT A VERDICT (acceptance r2 item 1): nothing resolves, nothing is filed, nothing is read

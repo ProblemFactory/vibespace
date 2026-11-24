@@ -106,8 +106,11 @@ const NOT_HELD = {
   proposal_door_not_ready: 'the proposal card not on this instance yet — the job\'s row says what to tick',
   write_never_started: 'a write to a machine that never started — not saved, said',
   write_unknown: 'a write to a machine that did not answer — it may have been saved, said',
-  outbox_unread: 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it',
+  outbox_unread: 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', // r3333 unit 3 (lane lg-group-parents): held stores no route answers (a pass waits; the family's notice names the hold)
   agent_door_unread: 'r3333 unit 1: the agent door\'s record held — the door refuses nobody (a fresh port this run); no route answers it',
+  voice_suggestions_unread: 'r3333 unit 3: the voice suggestions\' ledger held — no word is proposed; a person\'s act goes on and its change waits — no route answers it',
+  cli_unmeasured_memory_unread: 'r3333 unit 3: the unmeasured-CLI item\'s memory held — the tick waits; no route answers it',
+  cli_model_catalog_unread: 'r3333 unit 3: the model catalog\'s ledger held — this run\'s reads stay in memory; no route answers it',
 };
 
 // A LIST HOLD WORDED BY ITS OWN DOOR (r3284: its own class, not «not a hold»): a 503 that IS a held list, whose own door words it — the
@@ -115,6 +118,7 @@ const NOT_HELD = {
 const OWN_DOOR = {
   extract_journal_unread: 'r3333 unit 2: the files page words it by its own code (src/lib/file-explorer-ops.js fsErrorText, zh / ja) — an extraction refused while the journal is held',
   'signin-id-held': 'the data folder\'s own id file (src/auth.js, 主开发 r3336): no route refuses with it — the sign-in page and its 503 word the hold (src/signin-table.js signin-held-id-unread); the family\'s notice names the file by its plain name',
+  maintenance_unread: 'r3333 unit 3: an operator\'s POST /api/maintenance (no page sends it) — the answer carries its own words',
   auto_resume_unread: 'its own door words it BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words',
 };
 function census(codes, table) {
@@ -148,6 +152,8 @@ const LEFT_ALONE = [
   ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
   ['own', 'a store whose own door words its refusal BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words', ['auto_resume_unread']],
   ['own', 'r3333 unit 2: the extraction journal held — the files page words its refusal by its own code (fsErrorText, zh / ja)', ['extract_journal_unread']],
+  ['own', 'r3333 unit 3: an operator\'s POST /api/maintenance refused while the banner\'s record is held — the answer carries its own words (no page sends it)', ['maintenance_unread']],
+  ['not', 'r3333 unit 3: held stores no route answers — a pass waits (the voice proposals, the unmeasured-CLI tick) or the reads stay in memory (the model catalog)', ['voice_suggestions_unread', 'cli_unmeasured_memory_unread', 'cli_model_catalog_unread']],
   ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'designs-unread', 'labels-unread', 'status-unread']],
   ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
   // r3857 (the moved MG1 chain, lane lg-group-parents): the migration ledger's codes, classed by who reads them

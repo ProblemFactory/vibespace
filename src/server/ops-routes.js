@@ -140,7 +140,19 @@ app.get('/api/self-update/status', (req, res) => {
 // AUTO-EXPIRES (default 2h, max 24h) so a forgotten toggle can't linger.
 const MAINT_FILE = path.join(rootDir, 'data', 'maintenance.json');
 let _maintenance = null;
-try { _maintenance = JSON.parse(fs.readFileSync(MAINT_FILE, 'utf-8')); } catch {}
+// r3333 unit 3 (lane lg-group-parents, the store-read family): THE BANNER's RECORD IS HELD when it cannot be read — the release read
+// any failure as «no banner» (the operator-connected banner was lost) and the next POST wrote over it. HELD: GET answers no banner
+// (the page shows none), every POST is refused BY NAME before anything changes (each one rewrites the whole record: an update
+// would end a banner the file holds, an on/off would write over another operator's banner unseen), it is read again off the loop
+// and at its read the banner is back and broadcast. Torn bytes: kept aside ONCE, then no banner.
+const MAINT_WORDS = 'the maintenance banner\'s record (maintenance.json) could not be read — nothing was changed; it is read again by itself, try again in a minute';
+const maintValid = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const maintSay = () => { const json = JSON.stringify({ type: 'maintenance-updated', maintenance: maintState() }); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }); };
+const maintHold = require('../store-read-hold.js').create({ file: MAINT_FILE, valid: maintValid, aside: (mark) => `${MAINT_FILE}.corrupt-${mark}`, words: () => MAINT_WORDS, code: 'maintenance_unread',
+  log: (m) => console.warn(`[maintenance] ${m}`), onLift: (v) => { _maintenance = maintValid(v) ? v : null; try { maintSay(); } catch {} } });
+{ let read; try { read = { text: fs.readFileSync(MAINT_FILE, 'utf-8') }; } catch (error) { read = { error }; }
+  const a = require('../store-read.js').storeAnswer(read, { valid: maintValid });
+  if (maintHold.start(a) === 'data') _maintenance = a.value; }
 function maintState() {
   if (_maintenance?.active && _maintenance.until && Date.now() > _maintenance.until) _maintenance = { active: false };
   return _maintenance?.active ? _maintenance : { active: false };
@@ -149,6 +161,7 @@ app.get('/api/maintenance', (req, res) => res.json(maintState()));
 // B-ba47 shape H (the plan's (b)): what a copy run from a git worktree says on its first screen — its own home, the two doors
 app.get('/api/throwaway', (req, res) => res.json(throwawayView()));
 app.post('/api/maintenance', (req, res) => {
+  if (maintHold.held()) return res.status(503).json({ error: MAINT_WORDS, code: 'maintenance_unread' });   // r3333 unit 3: before anything changes
   const b = req.body || {};
   if (b.update != null && _maintenance?.active) {
     // live progress line ("checking the transcript cache…") — the banner shows
@@ -172,8 +185,7 @@ app.post('/api/maintenance', (req, res) => {
     _maintenance = { active: false };
   }
   try { fs.writeFileSync(MAINT_FILE, JSON.stringify(_maintenance)); } catch {}
-  const json = JSON.stringify({ type: 'maintenance-updated', maintenance: maintState() });
-  wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  maintSay();
   res.json({ success: true, maintenance: maintState() });
 });
 
