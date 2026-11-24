@@ -293,7 +293,6 @@ const ROWS = [
   ["src/server/decision-engine.js", "*", 2, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
   ["src/server/delivery-wake.js", "*", 3, "local-only", "place-8 (piece 7): socketAlive statSync = the resumed session's own attach socket (VibeSpace's wrapper); readRegistryIds readdirSync + readFileSync = REGISTRY_DIR ~/.claude/sessions/<pid>.json (src/peer-messaging.js's folder), ONE shared read a tick"],
   ["src/server/desktop-access.js", "*", 1, "local-only", "knownFile = <dataDir>/desktop-machines.json (server.js passes <checkout>/data)"],
-  ["src/server/desktop-app-keeper.js", "*", 2, "local-only", "remoteFile = <dataDir>/desktop-apps-hosts.json (server.js passes <checkout>/data)"],
   ["src/server/desktop-webrtc.js", "pushMacHelper", 4, "local-only", "bin = helpersDir/vibespace-screen (+ .version, .identity.json — lane apple-signing); helpersDir = HELPERS_DIR = <checkout>/data/bin/helpers; manifestFile = MANIFEST_COPY = <checkout>/data/bin/vibespace-agentd.manifest.json (the release record beside the bundle). The prebuilt's digest is a stream, not a sync read."],
   ["src/server/device-alerts.js", "*", 1, "local-only", "ledgerFile = <dataDir>/device-alerts.json — its read at the start (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the write moved onto the store writer, 3 → 1)"],
   ["src/server/device-upgrade-watch.js", "*", 2, "local-only", "file = <checkout>/data/device-upgrades.json (server.js create dataDir)"],

@@ -14,6 +14,9 @@
 //   ⑥ while a set-aside's rename is out, no read starts. RED: a read starts.
 //   ⑦ desktop-apps-hosts.json: a failed read HELD — a save refused, the file kept; read again at the keeper's tick, its machines join.
 //     RED: written over.  ⑧ its torn bytes set aside, never written over. RED: written over.
+//   ⑨ B-0248 step 2, unit 3 (lane bl-loop-b, r3320): desktop-apps-hosts.json is written by the store writer, off the loop — a placed
+//     400 ms stall in the main thread's writes holds nothing (RED: the release's temp + rename on the loop); a failed write is said
+//     once and written again (RED: unsaid); the keeper's stop writes what is owed (RED: the stop flushes nothing).
 //   line 494's follow (主开发 r2695), each with its red: ⑨ THE MONEY — the same paced wake and the same ended conversation in the file
 //   and in memory: ONE frame, ONE resume (the file's ended wake folds into the resume made while held; the file's older entry first);
 //   ⑩ a stop while held says what memory alone held; ⑪ the adopted entries' bound counts from the lift.
@@ -294,9 +297,10 @@ const keeperRun = async (KM) => {
   const w = keeperWorld(KM, { text: HOSTS, failBoot: 'EIO' });
   const h = w.k._remoteHeld();
   w.k.noteInstalled('dev-x', { platform: 'win32', rows: [{ name: 'Notepad' }], total: 1, truncated: false, listedAt: T0 });   // a save while held
+  await w.k.whenRemoteWritten();   // B-0248 unit 3: the file is the store writer's (off the loop) — on disk once its owed write lands (a save that writes over the file lands before «kept» is read)
   const during = { code: h && h.code, kept: w.onDisk() === HOSTS, off: !!w.k._remote().hosts['dev-off'] };
   w.clock.t = T0 + 31_000;
-  await w.k.tick(); { const p = w.k._remoteReading(); if (p) await p; } await tick();
+  await w.k.tick(); { const p = w.k._remoteReading(); if (p) await p; } await tick(); await w.k.whenRemoteWritten();
   const disk = JSON.parse(w.onDisk());
   return { during, after: { held: !!w.k._remoteHeld(), off: !!w.k._remote().hosts['dev-off'], diskOff: !!(disk.hosts || {})['dev-off'], diskX: !!(disk.installed || {})['dev-x'] } };
 };
@@ -312,7 +316,7 @@ const tornKeeperRun = async (KM) => {
   const w = keeperWorld(KM, { text: TORNK });
   w.k.noteInstalled('dev-x', { platform: 'win32', rows: [], total: 0, truncated: false, listedAt: T0 });   // a save while the set-aside is out: it waits
   const during = !fs.existsSync(w.file) || w.onDisk() === TORNK;   // moved already, or still the torn bytes — never written over
-  { const p = w.k._remoteAsiding && w.k._remoteAsiding(); if (p) await p; } await tick();
+  { const p = w.k._remoteAsiding && w.k._remoteAsiding(); if (p) await p; } await tick(); await w.k.whenRemoteWritten();
   const names = fs.readdirSync(w.kdir).filter((f) => f.startsWith(KM.REMOTE_FILE + '.corrupt-'));
   const disk = fs.existsSync(w.file) ? JSON.parse(fs.readFileSync(w.file, 'utf8')) : {};
   return { during, asides: names.length, keptAside: names.length === 1 && fs.readFileSync(path.join(w.kdir, names[0]), 'utf8') === TORNK, diskX: !!(disk.installed || {})['dev-x'], held: !!w.k._remoteHeld() };
@@ -321,5 +325,80 @@ const k8 = await tornKeeperRun(K0);
 ok(k8.during && k8.keptAside && k8.diskX && !k8.held, 'torn bytes at the keeper\'s start: set aside OFF the loop (their bytes kept), a save made meanwhile waits for it, then the keeper writes a fresh file', k8);
 const k8x = await tornKeeperRun(MUT.load('src/server/desktop-app-keeper.js', anchored(KSRC, "    else if (a.state === 'corrupt') asideRemote(a);\n", '', 'torn bytes written over'), 'mr-keeper-torn'));
 ok(k8x.asides === 0, 'RED CONTROL (torn bytes not set aside, the release\'s road): the next save writes over them — red', k8x);
+
+// ── ⑨ B-0248 step 2, unit 3 (lane bl-loop-b, 主开发 r3320 / r3651): the paired machines' file is written by THE STORE WRITER ─
+// The release wrote it by a synchronous temp + rename on the loop (the 5 s tick while a machine's app or a viewer's input moved):
+// on the tree's slow-storage road that held the loop for the rename's whole delay (the page bl-loop-b/b0248-page.md, row 3)
+console.log('⑨ B-0248 unit 3: desktop-apps-hosts.json written off the loop; a failed write said and written again; the stop writes what is owed');
+{
+  const STALL = require(path.join(REPO, 'scripts/fixtures/fs-stall.cjs'));
+  const SW = require(path.join(REPO, 'src/store-writer.js')), STAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs'));
+  const STALL_MS = 400, TICK_MS = 10;
+  const lateMeter = () => { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last - TICK_MS); last = n; }, TICK_MS); return { stop() { clearInterval(t); return Math.round(worst); } }; };
+  const listed = (n) => ({ platform: 'win32', rows: [{ name: 'App ' + n }], total: 1, truncated: false, listedAt: T0 + n });
+  const installedOn = (text) => { try { return JSON.parse(text).installed || {}; } catch { return {}; } };
+  // (a) THE PLACED STALL: every synchronous write-family call of THIS thread under the keeper's data folder held STALL_MS
+  // (scripts/fixtures/fs-stall.cjs; the writer's thread loads its own fs, never held); four saves 150 ms apart
+  const stallRun = async (KM, n = 4) => {   // n saves under the stall: the red copy needs ONE to hold the loop (the suite's time)
+    const w = keeperWorld(KM, { text: HOSTS });
+    await w.k.whenRemoteWritten();
+    const S = STALL.install({ under: w.kdir, ms: STALL_MS }), meter = lateMeter();
+    let late = null, landed = null;
+    try {
+      for (let i = 0; i < n; i++) { w.k.noteInstalled('dev-s' + i, listed(i)); await new Promise((r) => setTimeout(r, 150)); }
+      landed = await w.k.whenRemoteWritten();
+    } finally { late = meter.stop(); S.restore(); }
+    const last = !!installedOn(w.onDisk())['dev-s' + (n - 1)];
+    try { w.k.shutdown(); } catch { }
+    return { late, landed, last, stalled: S.calls.filter((c) => c.kind === 'write' && c.stalled).length };
+  };
+  const A9 = await stallRun(K0);
+  ok(A9.late < STALL_MS && A9.stalled === 0 && A9.landed === true && A9.last, `⑨a THE PLACED STALL (${STALL_MS} ms in every main-thread write under the keeper's folder): four saves of the paired machines' file, the loop's worst lateness ${A9.late} ms < one stall, NO main-thread write stalled, the last on disk`, A9);
+  const REL9 = MUT.load('src/server/desktop-app-keeper.js', anchored(KSRC, "    remoteDirty = false;\n    try {\n      remoteWriter.dirty(remoteFile, {",
+    "    remoteDirty = false;\n    { const tmp = remoteFile + '.tmp'; fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(tmp, JSON.stringify(remote, null, 2)); fs.renameSync(tmp, remoteFile); }\n    try {\n      if (false) remoteWriter.dirty(remoteFile, {",
+    'the release\'s write on the loop'), 'mr-keeper-sync-write');
+  const A9x = await stallRun(REL9, 1);   // one save held by the release's write on the loop is the red
+  ok(A9x.late >= STALL_MS && A9x.stalled > 0, `⑨a RED control (the release's write: temp + rename on the loop): the loop is held a stall's length or more (${A9x.late} ms; ${A9x.stalled} main-thread writes stalled) (red)`, A9x);
+
+  // (b) A FAILED WRITE IS SAID (once), the file stays owed and is written again at the next save
+  const failRun = async (KM, { full = true } = {}) => {
+    const kdir = path.join(ROOT, `k${++wn}`); fs.mkdirSync(kdir, { recursive: true }); fs.writeFileSync(path.join(kdir, KM.REMOTE_FILE), HOSTS);
+    // the writer's own clock is PLACED: each refusal's retry backoff is stepped past at once (never waited out), and every save
+    // here is asked through whenRemoteWritten() (durable: urgent, so the debounce never waits on the placed clock)
+    const wclock = { t: 1e9 }, S = STAND.make(kdir + '-stand'), wr = SW.create({ log: quiet, workerPath: S.path, now: () => wclock.t }), said = [];
+    const log = { log: (...a) => said.push(a.join(' ')), warn: (...a) => said.push(a.join(' ')), error() { } };
+    const k = KM.create({ dataDir: kdir, env: () => ({ PATH: '/usr/bin:/bin', HOME: kdir }), broadcast: () => { }, serverSetting: () => undefined, display: fakeDisplay, log, serverNotice: () => 1,
+      access: () => ({ call: async () => ({ ok: true, apps: [] }) }), hostLabel: (h) => h, remoteHosts: () => [], now: () => T0, writer: wr });
+    S.failOn(KM.REMOTE_FILE, true);
+    k.noteInstalled('dev-f1', listed(1)); const r1 = await k.whenRemoteWritten();
+    if (!full) { const n = said.filter((l) => /could not write desktop-apps-hosts\.json/.test(l)).length; try { k.shutdown(); } catch { } try { wr.stop(); } catch { } return { r1, failSaid: n }; }   // the red copy: its first refusal only
+    wclock.t += 600000; k.noteInstalled('dev-f2', listed(2)); const r2 = await k.whenRemoteWritten();
+    const failSaid = said.filter((l) => /could not write desktop-apps-hosts\.json/.test(l)).length;
+    S.failOn(KM.REMOTE_FILE, false);
+    wclock.t += 600000; k.noteInstalled('dev-f3', listed(3)); const r3 = await k.whenRemoteWritten();
+    const disk = installedOn(fs.readFileSync(path.join(kdir, KM.REMOTE_FILE), 'utf8'));
+    const again = said.some((l) => /desktop-apps-hosts\.json is written again/.test(l));
+    try { k.shutdown(); } catch { } try { wr.stop(); } catch { }
+    return { r1, r2, failSaid, r3, again, all: ['dev-f1', 'dev-f2', 'dev-f3'].every((h) => !!disk[h]) };
+  };
+  const F9 = await failRun(K0);
+  ok(F9.r1 === false && F9.r2 === false && F9.failSaid === 1 && F9.r3 === true && F9.again && F9.all, '⑨b A FAILED WRITE IS SAID once (two refused writes, one line), kept in memory, and written again: the next save lands all three machines\' lists and says so', F9);
+  const F9x = await failRun(MUT.load('src/server/desktop-app-keeper.js', anchored(KSRC, "          if (!remoteWriteFailed) { remoteWriteFailed = true; log.warn?.(", "          if (false) { remoteWriteFailed = true; log.warn?.(", 'a failed write unsaid'), 'mr-keeper-fail-unsaid'), { full: false });
+  ok(F9x.failSaid === 0, '⑨b RED control (the failure not said): no line names the refused write (red)', F9x);
+
+  // (c) THE STOP WRITES WHAT IS OWED: a save the writer's debounce still holds is on disk when the keeper's shutdown returns
+  const stopRun = async (KM) => {
+    const w = keeperWorld(KM, { text: HOSTS });
+    await w.k.whenRemoteWritten();
+    w.k.noteInstalled('dev-z', listed(9));
+    const before = !!installedOn(w.onDisk())['dev-z'];
+    w.k.shutdown();
+    return { before, after: !!installedOn(w.onDisk())['dev-z'] };
+  };
+  const C9 = await stopRun(K0);
+  ok(!C9.before && C9.after, '⑨c THE STOP WRITES WHAT IS OWED: a save still in the writer\'s debounce is on disk when the keeper\'s shutdown returns (the writer\'s flushSync)', C9);
+  const C9x = await stopRun(MUT.load('src/server/desktop-app-keeper.js', anchored(KSRC, "if (remoteDirty) saveRemote(); flushRemote(); }", "if (remoteDirty) saveRemote(); }", 'the stop flushes nothing'), 'mr-keeper-stop-noflush'));
+  ok(!C9x.after, '⑨c RED control (the stop hands the write and returns): the file does not hold it when the stop returns (red)', C9x);
+}
 
 report();

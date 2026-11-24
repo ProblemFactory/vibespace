@@ -415,6 +415,7 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
   await k.syncHost('dev-a');
   const st = k.streamTarget(L.id);
   ok(st && st.kind === 'xpra' && st.port === 14500 && st.hostId === 'dev-a', 'ready on the device ⇒ the stream target names the DEVICE\'s port and its host (the bridge forwards it)', st);
+  await k.whenRemoteWritten();   // B-0248 unit 3: the file is the store writer's (off the loop) — on disk once its owed write lands
   const onDisk = JSON.parse(fs.readFileSync(path.join(kdir, K.REMOTE_FILE), 'utf8'));
   ok(onDisk.hosts['dev-a'] && onDisk.hosts['dev-a'].apps[L.id] && onDisk.hosts['dev-a'].apps[L.id].hostId === 'local' && !(fs.existsSync(path.join(kdir, DS.STORE_FILE)) && fs.readFileSync(path.join(kdir, DS.STORE_FILE), 'utf8').includes(L.id)), `the hub keeps what it saw in ${K.REMOTE_FILE} (the device's own view, hostId 'local' = D8) — never in this machine's store (it would be judged by this machine's pids)`);
   // windows / fit / keep-alive / noteInput through the op
@@ -431,6 +432,7 @@ console.log('§7 lane C2 — the hub REGISTRY of a paired machine\'s apps (a stu
   k.noteInput(L2.id);
   await k.syncHost('dev-a');
   ok(!dev.calls.some((c) => c.op === 'stop' && c.p.id === L2.id), 'input the BRIDGE reported (hub-side) keeps a remote app from the idle stop the device\'s stale lastInputAt would call');
+  await k.whenRemoteWritten();
   ok(JSON.parse(fs.readFileSync(path.join(kdir, K.REMOTE_FILE), 'utf8')).hosts['dev-a'].hub[L2.id].lastInputAt > Date.now() - 5000, 'the hub-side input row is persisted with the registry (a hub restart does not forget it)');
   const k2 = mkKeeper(); // a fresh hub over the same registry file — the hub-side input row IS persisted, so clear it: no input since
   delete k2._remote().hosts['dev-a'].hub[L2.id];

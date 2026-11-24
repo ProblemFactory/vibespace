@@ -88,11 +88,6 @@ const REMOTE_SETTLE_MS = 45000;
 /** A machine that did not answer is re-asked at most this often (every live record of an offline machine would
  *  otherwise start a connect attempt per tick). */
 const REMOTE_OFFLINE_RETRY_MS = 30000;
-function writeJsonAtomic(file, obj) {
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, file);
-}
 
 /**
  * @param {object} deps
@@ -622,7 +617,15 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (timer.unref) timer.unref();
   }
   /** Timers only — the apps SURVIVE a VibeSpace exit by design. */
-  function shutdown() { if (timer) clearInterval(timer); timer = null; for (const s of viewerSets.values()) clearGrace(s); machine.shutdown(); if (remoteDirty) saveRemote(); }
+  function shutdown() { if (timer) clearInterval(timer); timer = null; for (const s of viewerSets.values()) clearGrace(s); machine.shutdown(); if (remoteDirty) saveRemote(); flushRemote(); }
+  /** B-0248 unit 3: the stop writes what is owed of the paired machines' file (the writer's flushSync); a write that cannot land is said */
+  function flushRemote() {
+    if (typeof remoteWriter.flushSync !== 'function') return;
+    try { const r = remoteWriter.flushSync([remoteFile]); const m = r && !r.deferred && (r.left || []).find((x) => x && x.file === remoteFile); if (m) log.warn?.(`[desktop] ${REMOTE_FILE} could not be written at the stop: ${m.why}`); }
+    catch (e) { log.warn?.(`[desktop] ${REMOTE_FILE} could not be written at the stop: ${e.message}`); }
+  }
+  /** B-0248 unit 3: true once this file's owed write is on disk (nothing owed ⇒ true at once); false when it failed */
+  const whenRemoteWritten = () => (typeof remoteWriter.durable === 'function' ? remoteWriter.durable(remoteFile) : Promise.resolve(true));
 
   // ── LANE C2: the paired machines' apps (docs/design-desktop-apps-seamless §3.5, D5 / D8) ──────────────────────
   // The device's machine keeper holds each record (~/.vibespace/desktop-apps.json there); the hub keeps what it last
@@ -635,6 +638,13 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   //   + `installed` (the installed-apps list, owner 2026-10-11): hostId → { platform, rows, total, truncated, listedAt } — a Windows / macOS
   //   machine's INSTALLED apps as it last listed them (src/installed-apps.js; asked by src/server/desktop-access.js)
   let remoteDirty = false;
+  // B-0248 step 2, unit 3 (lane bl-loop-b, 主开发 r3320): this file is written by THE STORE WRITER — its temp, its write and its rename
+  // on the writer's thread (the release's synchronous temp + rename held the loop for the rename's whole delay, on the 5 s tick while a
+  // paired machine's app or a viewer's input moved). The writer the machine half is handed, else the process's (a suite's null
+  // means the machine's own record is written at the call — never this file's). The bytes are made at the write's moment; a failed
+  // write is said once and stays owed (written again at the next save); the keeper's shutdown writes what is owed
+  const remoteWriter = writer || require('../store-writer.js').storeWriter();
+  let remoteWriteFailed = false;
   const syncing = new Map();   // hostId → the in-flight sync (single flight)
   const judged = new Map();    // id → the sample instant last judged (a device sample is judged once)
   const following = new Set(); // ids a launch/relaunch is following until they settle
@@ -713,8 +723,17 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   }
   function saveRemote() {
     if (remoteHeld || remoteAsiding) { remoteDirty = true; if (remoteHeld && !remoteHeld.said) { remoteHeld.said = true; log.warn?.(`[desktop] ${REMOTE_FILE} not written: it is HELD (it could not be read) — nothing is written over it until it reads`); } return; }
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(remoteFile, remote); remoteDirty = false; }
-    catch (e) { log.warn?.(`[desktop] could not write ${REMOTE_FILE}: ${e.message}`); }
+    remoteDirty = false;
+    try {
+      remoteWriter.dirty(remoteFile, { name: 'desktop-apps-hosts.write', debounceMs: 500, makeDir: true,
+        // held or its torn bytes moving aside by the write's moment: nothing is written over it (owed again, saved at the lift)
+        produce: () => { if (remoteHeld || remoteAsiding) { remoteDirty = true; return null; } return JSON.stringify(remote, null, 2); },
+        onWritten: (ok, e) => {
+          if (ok) { if (remoteWriteFailed) { remoteWriteFailed = false; log.log?.(`[desktop] ${REMOTE_FILE} is written again`); } return; }
+          remoteDirty = true;
+          if (!remoteWriteFailed) { remoteWriteFailed = true; log.warn?.(`[desktop] could not write ${REMOTE_FILE}: ${(e && e.message) || e} — kept in memory, written again at the next save`); }
+        } });
+    } catch (e) { remoteDirty = true; log.warn?.(`[desktop] could not write ${REMOTE_FILE}: ${e.message}`); }
   }
   const acc = () => {
     const a = typeof access === 'function' ? access() : access;
@@ -891,7 +910,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     machine, // lane C1: device #0's machine keeper — src/server/desktop-access.js runs its local rung against THIS object (never a second keeper on the same store)
     held: machine.held, heldWords: machine.heldWords, // r3189: desktop-apps.json's own hold (src/desktop-serve.js) — keeper.local carries it to the window engine's reconcile
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,
-    remoteFile, REMOTE_FILE, _remote: () => remote, // lane C2
+    remoteFile, REMOTE_FILE, _remote: () => remote, whenRemoteWritten, // lane C2; B-0248 unit 3: the paired machines' file on disk
     _remoteHeld: () => (remoteHeld ? { ...remoteHeld } : null), _remoteReading: () => remoteReading, _remoteAsiding: () => remoteAsidingP, // B-f276's remainder: the file held unread, its read again
     installedOf, noteInstalled, // the installed-apps list, owner 2026-10-11
     setBrowserHolders, browserHoldersMoved, onBrowserDisplayStop }; // lane browser-display-holders: a browser's display carries its holders; a person's stop is told

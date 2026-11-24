@@ -209,6 +209,7 @@ const ACC = require(REPO + '/src/server/desktop-access.js');
   if (k) {
     ok(k.installedOf('win-a') && k.installedOf('win-a').rows[0].name === 'JASP' && k.installedOf('lin-x') === null, 'a restarted hub reads the kept list back (and a host record is not a list)');
     k.noteInstalled('mac-b', { platform: 'darwin', rows: [], total: 0, truncated: false, listedAt: 9 });
+    await k.whenRemoteWritten();   // B-0248 unit 3: the file is the store writer's (off the loop) — on disk once its owed write lands
     const onDisk = JSON.parse(fs.readFileSync(path.join(dataDir, K.REMOTE_FILE), 'utf8'));
     ok(onDisk.installed['mac-b'].listedAt === 9 && onDisk.installed['win-a'] && onDisk.hosts['lin-x'] && !onDisk.hosts['mac-b'], 'noteInstalled writes the file: the list beside the host records, never a host row');
     try { k.shutdown?.(); k.stopTimers?.(); } catch { /* none */ }
