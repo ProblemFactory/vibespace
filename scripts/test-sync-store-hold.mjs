@@ -33,6 +33,11 @@
 //      that does not record the send)
 //   ⑮ A HELD REPLY THAT ARRIVES AFTER THE LIFT's SNAPSHOT (placed: the first load's answer gated until after the lift) does not
 //      leave the page unread (RED: a page copy without the check)
+//   ⑯ THE FLUSH OFF THE LOOP (r3321, B-0248's first row), the REAL store writer: (a) a stall placed in every main-thread rename /
+//      fsync, a person typing: the loop's longest turn under half the release's (its red: the write at the call, in a copy); (b) a
+//      person's typing is written in the stop's FIRST pass (rank 0; red: a copy without it); (c) a failed write is SAID once, the
+//      text kept (red: a copy that says nothing); (d) a HELD store asks the writer for nothing, its bytes refuse by name; the lift
+//      asks once when the stop's put-back joins
 //   ⑰ THE ROLLBACK RE-PUSH STANDS for a page that had seen the data (r3972): a torn lift at version 1 keeps every draft of before the
 //      hold (on the hub, in the file, in the box), a unit typed or cleared while held is rule (C)'s alone; a lift at a lower version
 //      keeps the page's newer draft (RED: the guard that skipped an unread page); a page whose last version IS the fresh lift's number
@@ -45,8 +50,9 @@
 //      over the other page's hour of work (a draft rewritten, one sent, a new one — never deleted: a page never restores absence),
 //      and is answered with the hub's value; at the lift, a page's held-time text and an idle page's restore meet in BOTH orders
 //      of arrival (placed): the typed words stand (RED: today's blind set, a page copy; and a hub copy that does not decide)
+// ①–⑮ and ⑰–⑳ hand the store the writer's contract AT THE CALL (scratch.mjs landingWriter): they read the file right after its door.
 // Run: node scripts/test-sync-store-hold.mjs
-import { scratch, anchored } from './scratch.mjs';
+import { scratch, anchored, landingWriter } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -102,7 +108,7 @@ function world(name, { torn = false, readable = false, Store = SyncStore, cls = 
   fs.writeFileSync(file, bytes);
   if (!torn && !readable) REFUSE.add(file);
   const wss = { clients: new Set() };
-  const stores = { [name]: new Store(name, file, wss, { saveDelay: 20 }) };
+  const stores = { [name]: new Store(name, file, wss, { saveDelay: 20, writer: landingWriter() }) };
   const getSyncStore = (n) => stores[n];
   const activeSessions = new Map();
   const handle = CASES ? new Function('getSyncStore', 'activeSessions', 'putbackBelt', `return function handle(data, ws) { switch (data.type) {\n${CASES}\n} };`)(getSyncStore, activeSessions, (b, v) => v) : () => { };
@@ -125,7 +131,7 @@ function world(name, { torn = false, readable = false, Store = SyncStore, cls = 
     return { sock, sync, sent, heard, handle: (d) => handle(d, sock), reconnect: () => { sock.readyState = 1; for (const h of states) h(true); }, drop: () => { sock.readyState = 3; for (const h of states) h(false); },
       hold: () => { queued = queued || []; }, release: () => { const q = queued || []; queued = null; for (const d of q) deliver(d); } };
   };
-  const restart = () => { const old = stores[name]; if (old && old._hold) old._hold.stop(); stores[name] = new Store(name, file, wss, { saveDelay: 20 }); return stores[name]; };   // (a restart: the old process's hold ends with it)
+  const restart = () => { const old = stores[name]; if (old && old._hold) old._hold.stop(); stores[name] = new Store(name, file, wss, { saveDelay: 20, writer: landingWriter() }); return stores[name]; };   // (a restart: the old process's hold ends with it)
   return { dir, file, bytes, get store() { return stores[name]; }, stores, page, wss, restart };
 }
 const heldOf = (st) => (st && typeof st.held === 'function' ? st.held() : null);
@@ -476,6 +482,117 @@ const lateScene = async (cls, tag) => {
   const NOCHECK = pageCopy("        if ((s.snapEpoch || 0) !== epoch) { for (const pb of handed) this._landPutback(storeName, pb, snap.code); return true; }\n", '', 'no-epoch-check');
   const HX = await lateScene(NOCHECK, 'nocheck');
   ok(HX.unread, `CONTROL (a page copy without the check): the late answer leaves the page unread for good (red) (${S(HX)})`);
+}
+
+console.log('⑯ THE FLUSH OFF THE LOOP (r3321) — the REAL store writer: the loop never waits on the storage; typing first at a stop; a failed write said; a held store asks nothing');
+{
+  const SW = require(path.join(REPO, 'src/store-writer.js'));
+  const quiet = { warn() { }, info() { }, log() { }, error() { } };
+  const SRC = read('src/sync-store.js');
+  const M = mutantCopies('sync-hold-writer', REPO);
+  const ASK = "    this._writer().dirty(this.filePath, { name: 'sync-store.write', rank: 0, debounceMs: this.saveDelay, produce: () => this._bytes(), onWritten: (ok, e) => this._written(ok, e) });\n";
+  ok(SRC.split(ASK).length === 2, 'control setup: the store\'s hand-off to the writer is found once');
+  const plainWorld = (tag, Store, writer, saveDelay = 20) => {
+    const dir = scratch('sync-hold-w-' + tag); fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'drafts.json'); fs.writeFileSync(file, S(MADE.drafts, null, 2));
+    return { dir, file, store: new Store('drafts', file, { clients: new Set() }, { saveDelay, writer }) };
+  };
+  const onDisk = (f) => { try { return JSON.parse(realReadSync(f, 'utf8')); } catch { return null; } };
+  const drafted = (f, text) => { const d = onDisk(f); return !!(d && d.data && d.data['chat:sess-a'] === text); };
+
+  // (a) THE LOOP NEVER WAITS — a stall PLACED in every main-thread rename / fsync under the scene's folder (Atomics.wait inside the
+  // call: no load; the writer's thread has its own fs), a person typing a burst. RED: the release's write at the call (a copy)
+  const STALL = 300, SAB = new Int32Array(new SharedArrayBuffer(4));
+  const loopScene = async (Store, tag) => {
+    const w = SW.create({ log: quiet, graceMs: 5000 });
+    const X = plainWorld('loop-' + tag, Store, w);
+    const oRen = fs.renameSync, oFsync = fs.fsyncSync;
+    fs.renameSync = function (a, ...r) { if (String(a).startsWith(X.dir)) Atomics.wait(SAB, 0, 0, STALL); return oRen.call(this, a, ...r); };
+    fs.fsyncSync = function (...r) { Atomics.wait(SAB, 0, 0, STALL); return oFsync.apply(this, r); };
+    let last = performance.now(), gap = 0, on = true;
+    const tick = () => { const t = performance.now(); if (t - last > gap) gap = t - last; last = t; if (on) setTimeout(tick, 1); };
+    setTimeout(tick, 1);
+    const t0 = performance.now(), text = 'typed '.repeat(8).trim();
+    let landed = false;
+    try {
+      for (let i = 1; i <= 8; i++) { X.store.set('chat:sess-a', 'typed '.repeat(i).trim()); await sleep(2); }   // a person typing: a burst inside the debounce, ONE write
+      for (let i = 0; i < 400 && !landed; i++) { await sleep(5); landed = drafted(X.file, text); }   // a wait for WHAT HAPPENED: the last text on disk
+    } finally {
+      // the turn still in progress counts too: a stalled turn can end with the wait's own timer due before the tick's, so the loop
+      // sees the text landed and the figure would be taken before the tick reads that turn (the UTC zone of run
+      // edae0e365-20261125033656-both read the red's 300 ms stall as 9 ms)
+      const tEnd = performance.now(); if (tEnd - last > gap) gap = tEnd - last;
+      fs.renameSync = oRen; fs.fsyncSync = oFsync; on = false;
+    }
+    const out = { gap: Math.round(gap), ms: Math.round(performance.now() - t0), landed };
+    try { w.stop(); } catch { }
+    return out;
+  };
+  const LR = await loopScene(SyncStore, 'real');
+  console.log(`  ⊙ ⑯a the loop's longest turn with ${STALL} ms placed in each main-thread rename / fsync, a person typing: ${LR.gap} ms over ${LR.ms} ms`);
+  const { SyncStore: AtCall } = M.load('src/sync-store.js', anchored(SRC, ASK, "    clearTimeout(this._relT); this._relT = setTimeout(() => { const tmp = `${this.filePath}.tmp`; fs.writeFileSync(tmp, this._bytes()); fs.renameSync(tmp, this.filePath); }, this.saveDelay);   // MUTANT: the release's write at the call, on the loop\n", 'at-call'), 'at-call');
+  const XC = await loopScene(AtCall, 'atcall');
+  console.log(`  ⊙ ⑯a the red's own figure: the release's write at the call ${XC.gap} ms; the tree ${LR.gap} ms`);
+  // (r1053 (5): a fast suite on a busy machine — the bound is the red's own figure: under half of it, never a fixed figure)
+  ok(LR.landed && LR.gap * 2 < XC.gap, `⑯a the loop never waits on the storage: with ${STALL} ms placed in each main-thread rename / fsync the longest turn is ${LR.gap} ms — under half the red's ${XC.gap} ms — and the last text is on disk`, LR);
+  ok(XC.landed && XC.gap >= STALL, `CONTROL (the release's write at the call, in a copy): the loop is held ${XC.gap} ms (≥ ${STALL}) by the rename (red)`, XC);
+
+  // (b) A PERSON's TYPING FIRST AT A STOP — the exit's first pass (server.js: beginExit, then exitFlush({only: 'rank0'})) writes it,
+  // before the stores that can be re-derived. RED: a copy whose hand-off drops `rank: 0`
+  const stopScene = (Store, tag) => {
+    const w = SW.create({ log: quiet, graceMs: 5000 });
+    const X = plainWorld('stop-' + tag, Store, w, 60000);   // no paced write before the stop
+    X.store.set('chat:sess-a', 'typed just before the stop');
+    w.beginExit(); w.exitFlush({ only: 'rank0' });
+    const first = drafted(X.file, 'typed just before the stop');
+    try { w.exitFlush({}); } catch { }
+    const last = drafted(X.file, 'typed just before the stop');
+    try { w.stop(); } catch { }
+    return { first, last };
+  };
+  const SR0 = stopScene(SyncStore, 'real');
+  const { SyncStore: NoRank } = M.load('src/sync-store.js', anchored(SRC, "name: 'sync-store.write', rank: 0, debounceMs", "name: 'sync-store.write', debounceMs", 'no-rank'), 'no-rank');
+  const SRX = stopScene(NoRank, 'norank');
+  ok(SR0.first && SR0.last, `⑯b a person's typing is written in the stop's FIRST pass (rank 0), on the writer's thread (${S(SR0)})`);
+  ok(!SRX.first && SRX.last, `CONTROL (a copy without rank 0): the first pass leaves the typing, only the last pass writes it (red) (${S(SRX)})`);
+
+  // (c) A FAILED WRITE IS SAID — its folder gone (the writer makes no folder but for the one store that may): the write fails
+  // ENOENT, the store says it ONCE, the text stays in memory. RED: a copy that hands no onWritten
+  const failScene = async (Store, tag) => {
+    const w = SW.create({ log: quiet, graceMs: 5000 });
+    const X = plainWorld('fail-' + tag, Store, w);
+    fs.rmSync(X.dir, { recursive: true, force: true });
+    const said = [], oWarn = console.warn;
+    console.warn = (...a) => { said.push(a.map(String).join(' ')); };
+    try {
+      X.store.set('chat:sess-a', 'typed while the folder is gone');
+      for (let i = 0; i < 120 && !said.some((l) => l.startsWith('[sync] drafts.json could not be written')); i++) await sleep(5);
+    } finally { console.warn = oWarn; }
+    try { w.stop(); } catch { }
+    return { said: said.filter((l) => l.startsWith('[sync] drafts.json could not be written (ENOENT)')).length, kept: X.store.get('chat:sess-a') === 'typed while the folder is gone' };
+  };
+  const FR = await failScene(SyncStore, 'real');
+  const { SyncStore: NoWord } = M.load('src/sync-store.js', anchored(SRC, ", onWritten: (ok, e) => this._written(ok, e) });", " });   // MUTANT: no word of a failed write", 'no-word'), 'no-word');
+  const FX = await failScene(NoWord, 'noword');
+  ok(FR.said === 1 && FR.kept, `⑯c a failed write is SAID once («could not be written (ENOENT)»), the text kept in memory (${S(FR)})`);
+  ok(FX.said === 0 && FX.kept, `CONTROL (a copy that hands no onWritten): the failed write is said by nobody of the store (red) (${S(FX)})`);
+
+  // (d) A HELD STORE's WRITER STILL REFUSES — nothing is asked while held (the overlay is written nowhere), its bytes refuse by name
+  // if ever asked; the lift asks
+  {
+    const asked = [];
+    const rec = { dirty: (f, o) => { asked.push(o.name); }, durable: () => Promise.resolve(true), pending: () => false };
+    const dir = scratch('sync-hold-w-held'); fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'drafts.json'); fs.writeFileSync(file, S(MADE.drafts)); REFUSE.add(file);
+    const st = new SyncStore('drafts', file, { clients: new Set() }, { saveDelay: 20, writer: rec });
+    st.set('chat:sess-a', 'queued while held\n\n', null, undefined, { prepended: 'queued while held\n\n'.length });   // the stop's put-back: owed
+    st.flush();
+    let refused = null; try { st._bytes(); } catch (e) { refused = e.code; }
+    ok(asked.length === 0 && refused === 'EHELD' && realReadSync(file, 'utf8') === S(MADE.drafts), `⑯d a HELD store asks the writer for nothing (${asked.length} asked) and its bytes refuse by name (${refused}); the file as it was`);
+    REFUSE.delete(file);
+    const lifted = st._hold ? await st._hold.again() : false;
+    ok(lifted && S(asked) === S(['sync-store.write']), `⑯d …the lift asks the writer once, by the row's name, when the put-back joins (${S(asked)})`);
+  }
 }
 
 console.log('⑰ THE ROLLBACK RE-PUSH STANDS (r3972) — a page that had seen the data keeps its drafts at a torn lift and at a lower-version lift');

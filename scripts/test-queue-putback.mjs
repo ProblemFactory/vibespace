@@ -32,7 +32,7 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { anchored } from './scratch.mjs';
+import { anchored, landingWriter } from './scratch.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -184,7 +184,8 @@ const KEY = 'chat:' + SID;
 function world({ cls = CLASS, cases = CASES, handlerSrc = HANDLER, timerSrc = TIMER, land = landDraft, belt = beltValue, arrival = arrivalVerdict, filePath = null, storeUp = true } = {}) {
   const clock = makeClock();
   const wss = { clients: new Set() };
-  const store = new SyncStore('drafts', filePath, wss, { saveDelay: 60000 });
+  // the store writer's contract AT THE CALL (lane lg-recovery, r3321: the store's flush is the writer's now): ② reads drafts.json after the flush
+  const store = new SyncStore('drafts', filePath, wss, { saveDelay: 60000, writer: landingWriter() });
   const log = [];
   const push = store._pushOp.bind(store); store._pushOp = (op) => { log.push(op); push(op); };
   const stores = { drafts: store };

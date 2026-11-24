@@ -386,7 +386,7 @@ const ROWS = [
   ["src/sock-path.js", "ensureSocketDir", 3, "local-only", "dir = a socket dir pick: mounts rcSocketPath (XDG_RUNTIME_DIR or data dir, network fs refused) / agentd's own socket dir; B-3767 unit 2: HostManager's ssh control folder (os.tmpdir()/vs-cm-<uid>, at construction and while refused) and the codex zst cache (os.tmpdir()/vibespace-zst-<uid>, once)."],
   ["src/sock-path.js", "witnessOrRule", 2, "local-only", "root = VIBESPACE_AGENTD_ROOT or ~/.vibespace/agentd (agentd/client.js:120); p = the daemon's own socket path it wrote."],
   ["src/ssh-key.js", "*", 4, "local-only", "a 0700 scratch dir mkdtemp(os.tmpdir()/vs-key-) per imported key (exit-routes key import): the key body is the request's, every path is the hub's own scratch"],
-  ["src/sync-store.js", "*", 5, "local-only", "filePath = <checkout>/data/{drafts,settings-sync,uploads-sync,stage-sync}.json (server.js new SyncStore, the only constructions)"],
+  ["src/sync-store.js", "*", 3, "local-only", "filePath = <checkout>/data/{drafts,settings-sync,uploads-sync,stage-sync}.json (server.js new SyncStore, the only constructions) · lane lg-recovery (主开发 r3321) −2: the flush's write and rename went to the store writer's thread — what stays: the start's read and its folder made once"],
   ["src/sysinfo.js", "memStat", 1, "local-only", "callers pass /sys/fs/cgroup/memory.stat, /sys/fs/cgroup/memory/memory.stat or /proc/meminfo."],
   ["src/sysinfo.js", "loadHistory", 1, "local-only", "_histFile = <dataDir>/sysinfo-history.json; dataDir = <checkout>/data (server.js:731 startWatch)."],
   ["src/sysinfo.js", "persistHistory", 2, "local-only", "tmp/_histFile = <checkout>/data/sysinfo-history.json (set by loadHistory from server.js:731)."],

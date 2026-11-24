@@ -32,6 +32,21 @@ const HOLD = require('./store-read-hold.js');
 //     stores exists; one would be refused, said once.
 //   AT THE LIFT the hub loads the file and sends ONE snapshot of it; written when torn bytes were set aside (or a put-back lands).
 const OWED_MAX = 20;   // r3890 B: the put-backs owed while held with NO page open (each Stop's text capped by the put-back's own bound); past it the oldest leaves, said
+// THE FLUSH OFF THE LOOP (lane lg-recovery, 主开发 r3321; B-0248's first row, /var/tmp/vibespace-lanes/bl-loop-b/b0248-page.md): the
+// release rewrote the whole file through a rename ON THE MAIN THREAD 2 s after each burst of typing — the hub's loop held for the
+// rename's whole delay (half a second a flush on slow storage, ~300 flushes in ten minutes of typing). Now every change hands the
+// file to THE STORE WRITER (src/store-writer.js), by its own pattern:
+//   · the bytes are made AT the write (`_bytes`, the latest state: a burst of typing is ONE write), on the writer's own thread (temp +
+//     rename); the main loop never waits on the storage;
+//   · a person's typing RANKS FIRST (`rank: 0`): at a stop it is written in the exit's first pass, before the stores that can be
+//     re-derived;
+//   · what an ack or an echo promised is durable as the release's was: written within `saveDelay` (2 s) of the first unsaved change
+//     (the writer's pace), the release's trailing 2 s save at the most; an answered set never waited on the disk, before or now;
+//   · a failed write is SAID (the writer's own line, and the store's once a failing run: what was typed stays in memory and the
+//     writer tries again);
+//   · the stop's and the crash handler's flush write what is owed: the writer's exit flush (server.js) — `flush()` writes nothing
+//     on the loop;
+//   · a HELD store's writer still refuses: nothing is asked while held, and its bytes refuse by name (EHELD) if ever asked.
 const HELD_CODES = { drafts: 'drafts_unread', stage: 'stage_unread', uploads: 'uploads_unread', settings: 'settings_unread' };
 const STORE_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.data === undefined || (!!v.data && typeof v.data === 'object' && !Array.isArray(v.data)));
 const LIST_WORDS = { drafts: 'your saved drafts', stage: 'the Stage layout', uploads: 'the list of recent uploads', settings: 'the synced settings' };
@@ -59,8 +74,9 @@ class SyncStore {
    * @param {number} [opts.maxOps=500] - Max ops in ring buffer
    * @param {boolean} [opts.clientWrites=true] - false: a SERVER-OWNED mirror — a client's `state-set` is refused
    *   (src/ws-handler.js); with filePath null the owner module persists (lane agent-feedback: src/server/feedback-store.js)
+   * @param {object} [opts.writer] - the store writer (a suite's own; default the process's src/store-writer.js storeWriter())
    */
-  constructor(name, filePath, wss, { saveDelay = 2000, maxOps = 500, clientWrites = true } = {}) {
+  constructor(name, filePath, wss, { saveDelay = 2000, maxOps = 500, clientWrites = true, writer = null } = {}) {
     this.name = name;
     this.filePath = filePath;
     this.wss = wss;
@@ -69,7 +85,8 @@ class SyncStore {
     this.version = 0;
     this.ops = []; // ring buffer: [{version, op:'set'|'delete', key, value?}]
     this.data = {};
-    this._saveTimer = null;
+    this._writerOpt = writer;
+    this._failSaid = false;
     this.clientWrites = clientWrites !== false;
     // LAW (E) (r4040): the keys WRITTEN or CLEARED in this life of the hub (since its start or its lift) — a page's restore of one
     // is refused; in memory, small, gone at a restart (a new life has no writes yet). Every store has it, a mirror with no file too
@@ -185,24 +202,38 @@ class SyncStore {
     if (!this._hubRefusedSaid) { this._hubRefusedSaid = true; console.warn(`[sync] a hub write to ${path.basename(this.filePath)} was refused: the file could not be read, and nothing is taken for it until it reads`); }
   }
 
+  _writer() { return this._writerOpt || require('./store-writer.js').storeWriter(); }
+
+  /** A CHANGE's write (r3321): handed to the store writer — its bytes made at the write, on its own thread; a person's typing first
+   *  at a stop (rank 0); due within saveDelay of the first unsaved change. Held: nothing is asked (the hub takes nothing while held;
+   *  the lift asks when a put-back joins or torn bytes were set aside) */
   _scheduleSave() {
     if (!this.filePath) return; // a mirror: its owner persists
-    clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(() => { this._saveTimer = null; this.flush(); }, this.saveDelay);
+    if (this._hold && this._hold.held()) return;
+    this._writer().dirty(this.filePath, { name: 'sync-store.write', rank: 0, debounceMs: this.saveDelay, produce: () => this._bytes(), onWritten: (ok, e) => this._written(ok, e) });
   }
 
-  /** Synchronous save — called on debounce fire and on server shutdown
-   *  (SIGINT/SIGTERM exit immediately; without this, changes made within
-   *  saveDelay of a restart were lost). Atomic via tmp+rename. */
+  /** the bytes, made at the write — a held store's writer still refuses, by name (never the held, empty state over the file) */
+  _bytes() {
+    if (this._hold && !this._hold.writable(`a save of ${this.name}`)) throw Object.assign(new Error(`${path.basename(this.filePath)} is held (its read failed): nothing is written over it until it reads`), { code: 'EHELD' });
+    return JSON.stringify({ version: this.version, data: this.data }, null, 2);
+  }
+
+  /** a failed write is SAID once a failing run (the writer says each attempt in its own line, and tries again); its end is said */
+  _written(ok, e) {
+    const base = path.basename(this.filePath);
+    if (!ok) {
+      if (!this._failSaid) { this._failSaid = true; console.warn(`[sync] ${base} could not be written (${(e && (e.code || e.message)) || 'failed'}): what was typed is kept in memory, and the store writer tries the write again`); }
+      return;
+    }
+    if (this._failSaid) { this._failSaid = false; console.warn(`[sync] ${base} is written again`); }
+  }
+
+  /** THE STOP's FLUSH (server.js: the stop and the crash handler) — what is owed is the writer's: its exit flush writes it (rank 0
+   *  first), on its thread, waited for. Nothing is written here on the loop. Held: refused, said once (src/store-read-hold.js) */
   flush() {
-    if (this._saveTimer) { clearTimeout(this._saveTimer); this._saveTimer = null; }
     if (!this.filePath) return;
-    if (this._hold && !this._hold.writable(`a save of ${this.name}`)) return;   // held: nothing is written over the unread file
-    try {
-      const tmp = `${this.filePath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ version: this.version, data: this.data }, null, 2));
-      fs.renameSync(tmp, this.filePath);
-    } catch {}
+    if (this._hold && !this._hold.writable(`a save of ${this.name}`)) return;
   }
 
   _pushOp(op) {

@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, landingWriter } from './scratch.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -42,7 +42,8 @@ ok(/saveDraft\('doc', draftId, /.test(read('src/lib/doc-window-ui.js')) && /expo
 function world(cases = CASES, { failRead = false, cls = CLASS } = {}) {
   const dir = scratchDir('dcsync');
   const wss = { clients: new Set() };
-  const stores = { drafts: new SyncStore('drafts', path.join(dir, 'drafts.json'), wss, { saveDelay: 5 }) };
+  // the store writer's contract AT THE CALL (lane lg-recovery, r3321: the store's flush is the writer's now): ① reads drafts.json after the flush
+  const stores = { drafts: new SyncStore('drafts', path.join(dir, 'drafts.json'), wss, { saveDelay: 5, writer: landingWriter() }) };
   const getSyncStore = (n) => stores[n];
   const activeSessions = new Map();
   const handle = new Function('getSyncStore', 'activeSessions', `return function handle(data, ws) { switch (data.type) {\n${cases}\n} };`)(getSyncStore, activeSessions);
