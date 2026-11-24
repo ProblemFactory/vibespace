@@ -60,6 +60,12 @@ function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed 
   if (!e || e.code !== 'host-key-changed') return (e && e.message) || '';
   const b = e.body && typeof e.body === 'object' ? e.body : {};
   const fp = typeof b.fp === 'string' && b.fp ? b.fp : '?';
+  if (typeof b.jump === 'string' && b.jump) {   // r3431 (B-7f0b's remainder): the key refused was the machine's JUMP HOST's
+    const jump = b.jump;
+    return b.pinned === true
+      ? tr('{name}\'s jump host {jump} showed an ssh host key that is not the key pinned for it ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the jump host and pin it again in Remote → {name} → Host key…', { name, jump, fp })
+      : tr('{name}\'s jump host {jump} showed an ssh host key that is not the key this VibeSpace saw before ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the jump host and pin the key it shows now in Remote → {name} → Host key…', { name, jump, fp });
+  }
   return b.pinned === true
     ? tr('{name} showed an ssh host key that is not the key pinned for it ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the machine and pin it again in Remote → {name} → Host key…', { name, fp })
     : tr('{name} showed an ssh host key that is not the key this VibeSpace saw before ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the machine and pin the key it shows now in Remote → {name} → Host key…', { name, fp });
@@ -1085,7 +1091,7 @@ export function installSidebarMounts(Sidebar) {
         if (!st) this._patchHostFace(h, hlist);
         api(`/api/hosts/${h.id}/test`, { method: 'POST' })
           .then((r) => { this._hostStatus[h.id] = { ...r, at: Date.now() }; })
-          .catch((e) => { this._hostStatus[h.id] = { error: hostKeyErrorWords(h, e), code: e.code || null, at: Date.now() }; })
+          .catch((e) => { this._hostStatus[h.id] = { error: hostKeyErrorWords(h, e), code: e.code || null, jump: (e.body && e.body.jump) || null, at: Date.now() }; })
           .finally(() => {
             this._hostTesting.delete(h.id);
             this._patchHostFace(h, hlist);
@@ -1102,7 +1108,7 @@ export function installSidebarMounts(Sidebar) {
         dot: (st ? (st.ok ? 'ok' : 'err') : 'off'),
         dotTip: (testing ? tr('Checking the connection…') : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet')),
         badge: (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : ''),
-        chip: testing ? { kind: 'pending', text: tr('testing…'), title: tr('Checking the connection…') } : (st && !st.ok ? { kind: 'error', text: st.code === 'host-key-changed' ? tr('host key changed') : st.code === 'host-key-name' ? tr('pin cannot be used') : tr('unreachable'), title: st.error || '' } : null), // lane lg-remote-hardening units 2–3: a refused host key, an unusable pin, are named, never «unreachable»
+        chip: testing ? { kind: 'pending', text: tr('testing…'), title: tr('Checking the connection…') } : (st && !st.ok ? { kind: 'error', text: st.code === 'host-key-changed' ? (st.jump ? tr('jump host key changed') : tr('host key changed')) : st.code === 'host-key-name' ? tr('pin cannot be used') : tr('unreachable'), title: st.error || '' } : null), // lane lg-remote-hardening units 2–3: a refused host key, an unusable pin, are named, never «unreachable»
         // a FAILED probe surfaced in the row itself (real report: the error lived only in the dot's hover tooltip)
         errline: st && !st.ok ? this._hostErrFacts(h, st) : null,   // + the need line's inputs (the meeting with ui-needs-a-button)
       };
@@ -1239,13 +1245,23 @@ export function installSidebarMounts(Sidebar) {
       // B-7f0b (the coordinator's r1220 (2)): an ssh machine with NO host-key pin SAYS so on its row (it showed only inside the
       // dialog), and ONE PRESS pins the key this hub already trusts for it (its known_hosts line); none ⇒ the dialog's scan-and-confirm
       if (!isDial && !(h.hostKeys && h.hostKeys.length) && !h.hostKeysUnusable && !(st && /^host-key-/.test(st.code || ''))) {   // r1602: a REFUSED pin is not «not pinned»
-        top.appendChild(pinChip('stale', { text: tr('not pinned'), title: tr('VibeSpace trusts the key this machine showed the first time it connected. One press pins it: a different key is refused from then on.') }));
+        top.appendChild(pinChip('stale', { text: tr('not pinned'), title: h.jump ? tr('VibeSpace trusts the keys this machine and its jump host showed the first time they connected. One press pins both: a different key is refused from then on.') : tr('VibeSpace trusts the key this machine showed the first time it connected. One press pins it: a different key is refused from then on.') }));
         const pb = document.createElement('button');
         pb.className = 'mounts-pin-btn';
         pb.textContent = tr('Pin key');
         pb.title = tr('Pin the key this hub already trusts for {name}', { name: h.name });
         pb.onclick = async (ev) => { ev.stopPropagation(); pb.disabled = true; try { await this._pinKnown(h, { one: true }); } finally { pb.disabled = false; } };
         top.appendChild(pb);
+      } else if (!isDial && h.jump && !(h.jumpHostKeys && h.jumpHostKeys.length) && !h.hostKeysUnusable && !(st && /^host-key-/.test(st.code || ''))) {
+        // r3431 (B-7f0b's remainder): a machine pinned behind a JUMP HOST whose key is not pinned SAYS so (nothing pins the hop by itself
+        // at an update); the same one press pins the hop by the key this hub already trusts for it — never a greyed control
+        top.appendChild(pinChip('stale', { text: tr('jump host not pinned'), title: tr('VibeSpace trusts the key {name}\'s jump host showed the first time it connected. One press pins it: a different key is refused from then on.', { name: h.name }) }));
+        const pj = document.createElement('button');
+        pj.className = 'mounts-pin-btn';
+        pj.textContent = tr('Pin key');
+        pj.title = tr('Pin the key this hub already trusts for {name}\'s jump host', { name: h.name });
+        pj.onclick = async (ev) => { ev.stopPropagation(); pj.disabled = true; try { await this._pinKnown(h, { one: true }); } finally { pj.disabled = false; } };
+        top.appendChild(pj);
       }
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
@@ -1274,7 +1290,7 @@ export function installSidebarMounts(Sidebar) {
               const tools = ['dtach', 'node', 'claude', 'codex'].filter(k => t[k]);
               showToast(`${h.name} reachable · ${r.latencyMs}ms · ${tools.length ? tools.join(', ') : 'not set up yet — click Set up'}`);
             }
-          } catch (e) { const said = hostKeyErrorWords(h, e); this._hostStatus[h.id] = { ok: false, error: said, code: e.code || null, at: Date.now() }; throw Object.assign(new Error(said), { code: e.code }); }
+          } catch (e) { const said = hostKeyErrorWords(h, e); this._hostStatus[h.id] = { ok: false, error: said, code: e.code || null, jump: (e.body && e.body.jump) || null, at: Date.now() }; throw Object.assign(new Error(said), { code: e.code }); }
         }),
       );
       if (!isDial) actions.append(ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }));
@@ -2725,7 +2741,8 @@ export function installSidebarMounts(Sidebar) {
         return { kind: 'pinned', words: '' };
       } catch (e) {
         const scan = !!e && ['host-key-not-known', 'host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable'].includes(e.code);   // no certain key from this hub ⇒ the scan-and-confirm
-        const words = e && e.code === 'host-key-not-known' ? tr('This hub trusts no key for {name} yet — check the key it shows now.', { name: h.name }) : (hostKeyErrorWords(h, e) || tr('Failed'));
+        const hopNk = e && e.code === 'host-key-not-known' && e.body && e.body.params && e.body.params.jump;   // r3431: the hop had no known line
+        const words = e && e.code === 'host-key-not-known' ? (hopNk ? tr('This hub trusts no key for {name}\'s jump host yet — check the key it shows now.', { name: h.name }) : tr('This hub trusts no key for {name} yet — check the key it shows now.', { name: h.name })) : (hostKeyErrorWords(h, e) || tr('Failed'));
         if (one) { showToast(words, scan ? {} : { type: 'error' }); if (scan) this._showHostKeyDialog(h, { scanNow: true }); }
         return { kind: scan ? 'unknown' : 'failed', words };
       }
@@ -2773,11 +2790,28 @@ export function installSidebarMounts(Sidebar) {
           body.append(el('p', 'agents-note', tr('Compare it with the key on the machine itself (its command is below).')));
           { const f = techFold([tr('On the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')], { mono: true }); if (f) body.append(f); }
         }
+        // r3431 (B-7f0b's remainder): the machine's JUMP HOST — its pin, what it shows now; ONE press pins both shown keys
+        const j = v.jump || null;
+        const jPinned = !!(j && j.hostKeys && j.hostKeys.length);
+        const jIsPinned = (k) => jPinned && j.hostKeys.some((p) => p.fp === k.fp);
+        if (v.seenWhy) { body.append(el('p', 'agents-note host-key-diff', tr('{name} did not answer, so its own key could not be read now.', { name: h.name }))); const f = techFold([v.seenWhy], { mono: true }); if (f) body.append(f); }
+        if (j) {
+          body.append(el('p', 'agents-note', jPinned ? tr('Its jump host {jump} is pinned: VibeSpace reaches {name} through it only while it shows this key.', { jump: j.host, name: h.name }) : tr('Its jump host {jump} is not pinned: VibeSpace trusts the key it showed the first time it connected.', { jump: j.host })));
+          if (jPinned) for (const k of j.hostKeys) body.append(row(k));
+          if (v.seenJump) {
+            body.append(el('p', 'agents-note', tr('The jump host {jump} shows now:', { jump: j.host })));
+            for (const k of v.seenJump) body.append(row(k, jPinned ? (jIsPinned(k) ? { cls: 'host-key-same', text: tr('the pinned key') } : { cls: 'host-key-diff', text: tr('not the pinned key') }) : null));
+            if (v.seenJumpWhy) { body.append(el('p', 'agents-note host-key-diff', tr('The jump host {jump} did not answer, so its key could not be read now.', { jump: j.host }))); const f = techFold([v.seenJumpWhy], { mono: true }); if (f) body.append(f); }
+          }
+        }
         const acts = el('div', 'dialog-actions');
         acts.append(btn(tr('Close'), 'btn-cancel', async () => close()));
-        if (pinned) acts.append(btn(tr('Remove the pin'), 'btn-cancel', async () => { const r = await api(url, { method: 'DELETE' }); showToast(tr('Host key pin removed')); draw({ ...r, seen: v.seen }); this._renderMounts(); }));
+        if (pinned || jPinned) acts.append(btn(tr('Remove the pin'), 'btn-cancel', async () => { const r = await api(url, { method: 'DELETE' }); showToast(tr('Host key pin removed')); draw({ ...r, seen: v.seen, seenJump: v.seenJump }); this._renderMounts(); }));   // r3431: both pins go
         if (!v.seen) acts.append(btn(tr('Check the key now'), 'btn-create', async () => draw(await api(url + '?scan=1'))));
-        else if (v.seen.length && !v.seen.every(isPinned)) acts.append(btn(pinned ? tr('Pin the key it shows now') : tr('Pin this key'), 'btn-create', async () => { const r = await api(url, { method: 'POST', body: JSON.stringify({ fps: v.seen.map((k) => k.fp) }) }); showToast(tr('Host key pinned')); draw({ ...r, seen: v.seen }); this._renderMounts(); }));
+        else {
+          const needOwn = !!(v.seen.length && !v.seen.every(isPinned)), needHop = !!(v.seenJump && v.seenJump.length && !v.seenJump.every(jIsPinned));
+          if (needOwn || needHop) acts.append(btn(needOwn && needHop ? tr('Pin both keys') : needHop ? tr('Pin the jump host\'s key') : pinned ? tr('Pin the key it shows now') : tr('Pin this key'), 'btn-create', async () => { const r = await api(url, { method: 'POST', body: JSON.stringify({ fps: [...(needOwn ? v.seen : []), ...(needHop ? v.seenJump : [])].map((k) => k.fp) }) }); showToast(tr('Host key pinned')); draw({ ...r, seen: v.seen, seenJump: v.seenJump }); this._renderMounts(); }));
+        }
         body.append(acts);
       };
       try { draw(await api(scanNow ? url + '?scan=1' : url)); } catch (e) { showToast(hostKeyErrorWords(h, e) || tr('Failed'), { type: 'error' }); close(); }

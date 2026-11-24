@@ -63,7 +63,38 @@ function nameWhy(h) {
  *  hosts.json — the pin act refuses one first) → why its pin cannot be used | null */
 // …and a record that CARRIES hostKeys none of which is an ssh key (an imported bundle) is never silently unpinned (accept-new)
 const carriesPin = (h) => !!(h && Array.isArray(h.hostKeys) && h.hostKeys.length);
-const pinUnusable = (h) => (!carriesPin(h) ? null : !pinned(h) ? 'its pinned keys are not ssh host keys' : pinWhy(h));
+const pinUnusable = (h) => (!carriesPin(h) ? hopUnusable(h) : !pinned(h) ? 'its pinned keys are not ssh host keys' : pinWhy(h) || hopUnusable(h));
+
+// ── THE JUMP HOST's PIN (lane lg-remote-hardening, B-7f0b's remainder — 主开发 r3431; the owner's side's standing ruling: nothing
+// pins by itself at an update). A machine behind a jump host is reached through OUR ssh to the bastion (src/hosts.js jumpArgsOf's
+// ProxyCommand). Its record may carry `jumpHostKeys` [{type, key, fp}] (`jumpHostKeysAt`), pinned by the PERSON as the machine's
+// own keys are (its Host key… dialog, or the row's one press — one press pins both): the hop is then dialled
+// StrictHostKeyChecking=yes over data/ssh/known_hosts.jump.d/<id> ALONE, under the hop's own alias. A record without them dials
+// its hop exactly as at the release (accept-new into the hub user's own known_hosts), and its row says the hop is not pinned.
+const { jumpVerdict, jumpParts } = require('./ssh-config-block.js');
+/** the record's hop {user, host, port} | null (no jump host, or one no verdict admits — that record is refused before any dial) */
+function hopOf(h) {
+  if (!h || h.jump == null) return null;
+  const j = jumpVerdict(h.jump);
+  return j && j.ok && j.jump ? jumpParts(j.jump) : null;
+}
+/** the ONE name the hop is looked up by: its host as typed, lowercased (jumpVerdict admits plain host characters only) */
+const hopAliasOf = (h) => { const p = hopOf(h); return p ? String(p.host || '').trim().toLowerCase() : ''; };
+const hopKeysOf = (h) => (h && Array.isArray(h.jumpHostKeys) ? h.jumpHostKeys : []).filter((k) => k && SKF.isHostKey(k.type, k.key));
+const hopPinned = (h) => !!hopAliasOf(h) && hopKeysOf(h).length > 0;
+/** a record that CARRIES jumpHostKeys it cannot use is never silently dialled accept-new: → why | null (pinUnusable says it) */
+const hopUnusable = (h) => (!(h && Array.isArray(h.jumpHostKeys) && h.jumpHostKeys.length) ? null
+  : !hopAliasOf(h) ? 'its jump host key is pinned for no jump host it has' : !hopPinned(h) ? 'its jump host\'s pinned keys are not ssh host keys' : null);
+/** The hop's pin file: data/ssh/known_hosts.jump.d/<id> (its own folder: no record's id can name it). */
+const hopPinFileOf = (sshDir, id) => path.join(sshDir, 'known_hosts.jump.d', String(id).replace(/[^\w.-]/g, '_'));
+const hopPinText = (h) => hopKeysOf(h).map((k) => `${hopAliasOf(h)} ${k.type} ${k.key}\n`).join('');
+/** The ssh options of the HOP's host-key check — words of the ProxyCommand the hub's shell runs (the path in single quotes with
+ *  ssh's own double quotes inside: a data dir with a space). Unpinned ⇒ exactly as at the release. */
+function hopKeyOpts(sshDir, h) {
+  if (!hopPinned(h)) return ['-o', 'StrictHostKeyChecking=accept-new'];
+  const f = hopPinFileOf(sshDir, h.id).replace(/'/g, "'\\''");
+  return ['-o', 'StrictHostKeyChecking=yes', '-o', `HostKeyAlias=${hopAliasOf(h)}`, '-o', `'UserKnownHostsFile="${f}"'`, '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'UpdateHostKeys=no'];
+}
 /** …refused BY NAME (`host-key-name`), never «host key changed», with its door: an address is not edited in place — the
  *  machine is removed and added again with its plain address. */
 const NAME_DOOR = 'Remote → {machine} → Remove host, then Remote → Add machine';
@@ -74,22 +105,21 @@ function pinRefusal(h, why) {
 
 /** Write (or heal) a pinned record's file — 0600 in a 0700 folder, through a temporary name. Unpinned ⇒ removed. */
 function writePinFile(sshDir, h) {
-  const f = pinFileOf(sshDir, h.id);
-  // a pin that cannot be used (pinUnusable) is never written: its file goes and the refusal is said (the caller's log / warning)
+  // a pin that cannot be used (pinUnusable) is never written: its files go and the refusal is said (the caller's log / warning).
+  // r3431: the HOP's file and the machine's, each following the record — ONE writer, a temporary name for each
   const why = pinUnusable(h);
-  if (!pinned(h) || why) {
-    try { fs.unlinkSync(f); } catch { /* none */ }
-    if (why) throw pinRefusal(h, why);
-    return null;
+  const files = [[hopPinFileOf(sshDir, h.id), !why && hopPinned(h) ? hopPinText(h) : null], [pinFileOf(sshDir, h.id), !why && pinned(h) ? pinText(h) : null]];
+  for (const [f, text] of files) {
+    if (text === null) { try { fs.unlinkSync(f); } catch { /* none */ } continue; }
+    fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+    let now = null; try { now = fs.readFileSync(f, 'utf8'); } catch { /* absent */ }
+    if (now === text) continue;
+    const tmp = f + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    fs.renameSync(tmp, f);
   }
-  fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
-  const text = pinText(h);
-  let now = null; try { now = fs.readFileSync(f, 'utf8'); } catch { /* absent */ }
-  if (now === text) return f;
-  const tmp = f + '.' + process.pid + '.tmp';
-  fs.writeFileSync(tmp, text, { mode: 0o600 });
-  fs.renameSync(tmp, f);
-  return f;
+  if (why) throw pinRefusal(h, why);
+  return files[1][1] === null ? null : files[1][0];
 }
 
 /** The ssh options of one record's host-key check (in front of every other option: ssh keeps the FIRST value). */
@@ -135,12 +165,20 @@ function hostKeyWords(stderr) {
   return { fp: fp ? fp[1] : null, said: said.slice(0, 200) };
 }
 /** The refusal BY NAME (`host-key-changed`) for a record, or null. */
+const nameOfSaid = (said) => { const m = /host key for (\S+) has changed|host key is known for (\S+)/i.exec(String(said || '')); return String(m ? (m[1] || m[2]) : '').replace(/^\[([^\]]+)\](?::\d+)?$/, '$1').toLowerCase(); };
 function hostKeyRefusal(h, stderr) {
   const unusable = pinUnusable(h);
   if (unusable) return pinRefusal(h, unusable); // ssh's 255 of a record never dialled (its pin cannot be used) — by name
   const w = hostKeyWords(stderr);
   if (!w) return null;
   const name = (h && (h.name || h.id)) || 'the machine';
+  // r3431: the key ssh refused was the JUMP HOST's (the line names the hop, never the machine) — said as the hop's, its door the same
+  const hop = hopAliasOf(h);
+  if (hop && hop !== aliasOf(h) && nameOfSaid(w.said) === hop) {
+    const hp = hopPinned(h), jh = hopOf(h).host;
+    return Object.assign(new Error(`${name}'s jump host ${jh} showed an ssh host key that is not ${hp ? 'the key pinned for it' : 'the key this VibeSpace saw before'} — VibeSpace did not connect${w.fp ? ` (it showed ${w.fp})` : ''}. If the jump host's key really changed, compare it on the jump host and ${hp ? 'pin it again' : 'pin the key it shows now'} in ${doorOf(name)}`),
+      { code: 'host-key-changed', hostId: (h && h.id) || null, host: name, fp: w.fp, sshLine: w.said, pinned: hp, jump: jh, params: { host: name, fp: w.fp || '', jump: jh } });
+  }
   const pin = pinned(h);
   const whose = pin ? 'the key pinned for it' : 'the key this VibeSpace saw before';
   // a machine never pinned is not told to pin it «again» (主开发's verdict of 2026-11-18); the door is THE phrase (DOOR)
@@ -149,7 +187,10 @@ function hostKeyRefusal(h, stderr) {
 }
 
 /** The page's view of a record's pin (no key text: the fingerprints say it). */
-const pinView = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })), hostKeysAt: h.hostKeysAt || null } : pinUnusable(h) ? { hostKeys: null, hostKeysUnusable: true } : { hostKeys: null });   // r1602: a REFUSED pin is not «not pinned» (no one-press for it)
+const pinView = (h) => ({ ...pinViewOwn(h), ...hopView(h) });
+/** r3431: the hop's part of the view — its host, and its pinned keys' fingerprints (null: the jump host's key is not pinned) */
+const hopView = (h) => { const p = hopOf(h); return !p ? {} : { jump: { host: p.host, port: p.port || null, hostKeys: hopPinned(h) ? hopKeysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })) : null, hostKeysAt: hopPinned(h) ? (h.jumpHostKeysAt || null) : null } }; };
+const pinViewOwn = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })), hostKeysAt: h.hostKeysAt || null } : pinUnusable(h) ? { hostKeys: null, hostKeysUnusable: true } : { hostKeys: null });   // r1602: a REFUSED pin is not «not pinned» (no one-press for it)
 
 /** B-7f0b (the coordinator's r1220 (2)): THE KEYS THIS HUB ALREADY TRUSTS for a record — the hub user's own known_hosts lines
  *  (ssh's accept-new wrote them at the machine's first dial), under the name ssh looks the record up by (`host`, or `[host]:port`
@@ -206,4 +247,4 @@ async function knownKeysOf(h, { file } = {}) {
   return out;
 }
 
-module.exports = { knownKeysOf, revokedKeysOf, KNOWN_FILE_MAX, fingerprintOf, pinFileOf, pinned, aliasOf, namesOf, pinText, aliasWhy, pinWhy, nameWhy, pinUnusable, pinRefusal, NAME_DOOR, DOOR, writePinFile, hostKeyOpts, scanOpts, keysOfScan, hostKeyWords, hostKeyRefusal, pinView, HOSTKEY_RE };
+module.exports = { hopOf, hopAliasOf, hopKeysOf, hopPinned, hopUnusable, hopPinFileOf, hopPinText, hopKeyOpts, hopView, knownKeysOf, revokedKeysOf, KNOWN_FILE_MAX, fingerprintOf, pinFileOf, pinned, aliasOf, namesOf, pinText, aliasWhy, pinWhy, nameWhy, pinUnusable, pinRefusal, NAME_DOOR, DOOR, writePinFile, hostKeyOpts, scanOpts, keysOfScan, hostKeyWords, hostKeyRefusal, pinView, HOSTKEY_RE };

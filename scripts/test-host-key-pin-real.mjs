@@ -87,7 +87,7 @@ else {
   const SRC = read('src/hosts.js');
   // the move onto 6ce6b8124: sshArgs' own lines (B-2ca0's port / jump words; the multiplex guard) — sshCmd holds the same args line,
   // so the anchor runs to the multiplex line, which only sshArgs has
-  const from = "    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];\n    if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');\n    if (multiplex && cmUsable(this)) {";
+  const from = "    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h, this._sshDir)];\n    if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');\n    if (multiplex && cmUsable(this)) {";
   ok(SRC.includes(from), 'control: sshArgs puts the record\'s host-key check first (the anchor)', from.slice(0, 80));
   const M = mutantCopies('host-key-pin-real', REPO);
   const Mut = M.load('src/hosts.js', anchored(SRC, from, from.replace('...HK.hostKeyOpts(this._sshDir, h), ', "'-o', 'StrictHostKeyChecking=accept-new', "), 'pin-ignored'), 'pin-ignored');

@@ -556,7 +556,7 @@ console.log('RED CONTROLS');
 }
 {
   let src = read('src/hosts.js');
-  const a1 = ', ...jumpArgsOf(h)];', a2 = "        const why = refusal ? refusal.message : po.refuse ? po.refuse.message : badKey ? (typeof rec.keyPath === 'string' && CONTROL_RE.test(rec.keyPath) ? 'its key path holds a control character' : 'its key path is not an absolute path') : null;";
+  const a1 = ', ...jumpArgsOf(h, this._sshDir)];', a2 = "        const why = refusal ? refusal.message : po.refuse ? po.refuse.message : badKey ? (typeof rec.keyPath === 'string' && CONTROL_RE.test(rec.keyPath) ? 'its key path holds a control character' : 'its key path is not an absolute path') : null;";
   if (src.split(a1).length !== 3 || src.split(a2).length !== 2) ok(false, 'CONTROL: the hosts.js anchors moved — update this suite');
   else {
     src = src.split(a1).join('];').replace(a2, '        const why = null;   // CONTROL');

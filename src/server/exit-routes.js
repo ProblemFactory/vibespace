@@ -320,7 +320,7 @@ app.post('/api/hosts/key', async (req, res) => {
 });
 app.post('/api/hosts/:id/test', async (req, res) => {
   try { res.json({ success: true, ...(await hosts.test(req.params.id, { by: DAU.byOfReq(req) })) }); }
-  catch (e) { const held = !!e && e.status === 503; res.status(held ? 503 : 400).json({ error: e.message, ...(held && e.code ? { code: e.code } : e && e.code === 'host-key-changed' ? { code: e.code, fp: e.fp || null, pinned: !!e.pinned } : e && e.code === 'host-key-name' ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (bl-jobs, line 124); every other refusal 400 with its words — a changed key (or a pin that cannot be used) with its code and facts (lane lg-remote-hardening)
+  catch (e) { const held = !!e && e.status === 503; res.status(held ? 503 : 400).json({ error: e.message, ...(held && e.code ? { code: e.code } : e && e.code === 'host-key-changed' ? { code: e.code, fp: e.fp || null, pinned: !!e.pinned, ...(e.jump ? { jump: e.jump } : {}) } : e && e.code === 'host-key-name' ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (bl-jobs, line 124); every other refusal 400 with its words — a changed key (or a pin that cannot be used) with its code and facts (lane lg-remote-hardening)
 });
 // lane lg-remote-hardening (B-7f0b, q-042 D6): a machine's ssh HOST-KEY PIN — read it (and, ?scan=1, what the machine shows
 // now), pin the keys the person confirmed, unpin. The person's act only: an agent that could unpin could reopen the
@@ -332,10 +332,17 @@ app.get('/api/hosts/:id/host-keys', async (req, res) => {
   if (hostKeyHumanOnly(req, res)) return;
   try {
     const h = hosts.get(req.params.id);
-    const seen = req.query.scan ? (await hosts.hostKeyScan(h.id)).map(({ type, fp }) => ({ type, fp })) : null;
+    // r3431 (B-7f0b's remainder): a machine behind a JUMP HOST shows the hop's keys too, each scan said apart — a hop or a machine that
+    // does not answer is said in words (seenWhy / seenJumpWhy), never a failed dialog (a changed pinned hop also stops the machine's scan)
+    const hop = HKR.hopOf(h);
+    let seen = null, seenWhy = null, seenJump = null, seenJumpWhy = null;
+    if (req.query.scan) {
+      try { seen = (await hosts.hostKeyScan(h.id)).map(({ type, fp }) => ({ type, fp })); } catch (e) { if (!hop) throw e; seen = []; seenWhy = (e && e.message) || 'no answer'; }
+      if (hop) { try { seenJump = (await hosts.hopKeyScan(h.id)).map(({ type, fp }) => ({ type, fp })); } catch (e) { seenJump = []; seenJumpWhy = (e && e.message) || 'no answer'; } }
+    }
     const pin = HKR.pinView(h);
     const match = seen && pin.hostKeys ? seen.some((k) => pin.hostKeys.some((p) => p.fp === k.fp)) : null;
-    res.json({ ...pin, seen, match });
+    res.json({ ...pin, seen, match, ...(hop ? { seenWhy, seenJump, seenJumpWhy } : {}) });
   } catch (e) { hostKeyFail(res, e); }
 });
 // B-7f0b (the coordinator's r1220 (2)): ONE PRESS pins the key(s) this hub ALREADY trusts for the machine (its known_hosts line);

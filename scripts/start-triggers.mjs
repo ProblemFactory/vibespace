@@ -52,7 +52,7 @@ export const ROWS = Object.freeze([
   ['src/desktop-sound.js', 'ff', 'not-hub', 1, 'the device agent'], ['src/desktop-sound.js', 'h.exe', 'not-hub', 1, 'the device agent'],
   ['src/device-mount.js', 'rcloneBin', 'long', 1, 'the pull mount\'s rclone daemon (the detach unit)'],   // its four timer starts (releaseStale\'s fusermount3 / fusermount, the held-file read loop\'s sh, waitMounted\'s ls) moved by lane bl-machines-b\'s B-323e Disconnect line (3b9625657 + 5880a9459): rows struck
   ['src/exit-shell.js', 'p.file', 'not-hub', 1, 'the Windows device agent'],
-  ['src/hosts.js', "'ssh'", 'press', 6, 'add a machine, its tools, keys, OpenCode on a host, bootstrap'],
+  ['src/hosts.js', "'ssh'", 'press', 7, 'add a machine, its tools, keys, OpenCode on a host, bootstrap, the jump host\'s key scan (r3431: the Host key dialog\'s press)'],
   ['src/hosts.js', "'ssh'", 'start', 1, 'the agent\'s install at a machine\'s first connect'],
   ['src/hosts.js', "'ssh'", 'timer', 2, '_ssh from ctx-sync / goal-sync, the usage harvest — ' + LINK],
   ['src/hosts.js', "'tar'", 'timer', 1, 'the agent bundle\'s tar (ASYNC since B-323e; its bytes cannot cross the starter\'s line pipe) — redone on every connect while an install keeps failing'],

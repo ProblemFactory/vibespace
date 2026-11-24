@@ -160,7 +160,7 @@ console.log('③ THE ROUTE and THE PAGE');
     'the row says «not pinned» with its press; no certain key (none trusted, an ssh-configuration name, the file over its bound or unreadable) opens the scan-and-confirm; «Pin all N» when there are several');
   // r1602: «Pin all N» names each machine that did not pin, in its own words; a REFUSED pin is offered no «not pinned»; the codes worded
   ok(SM.includes("else missed.push(o.words); }") && SM.includes("tr('{n} pinned; not pinned — {list}', { n: pinnedN, list: missed.join(' · ') })")
-    && (SM.match(/!h\.hostKeysUnusable|!x\.hostKeysUnusable/g) || []).length === 2 && ['host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable'].every((c) => SM.includes(`if (e && e.code === '${c}') return tr(`)),
+    && (SM.match(/!h\.hostKeysUnusable|!x\.hostKeysUnusable/g) || []).length === 3 /* r3431: the row's «jump host not pinned» asks it too */ && ['host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable'].every((c) => SM.includes(`if (e && e.code === '${c}') return tr(`)),
     '«Pin all N» lists every machine that did not pin with its own words (never one count under one cause); a record with an unusable pin shows no «not pinned» and is not pressed; each new refusal worded by its code');
   for (const lang of ['zh', 'ja']) {
     const T = read(`src/lib/i18n-${lang}.js`);

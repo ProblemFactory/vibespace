@@ -308,8 +308,8 @@ console.log('— ⑥ an act that tells a person «done» waits for its record (�
 console.log('— the page: the door, the dialog, the words in zh + ja —');
 {
   const sm = read('src/lib/sidebar-mounts.js');
-  ok(/ibtn\(MI\.key, tr\('Host key of "\{name\}"…'/.test(sm) && /_showHostKeyDialog\(h\)/.test(sm) && /st\.code === 'host-key-changed' \? tr\('host key changed'\)/.test(sm), 'the ssh row has the Host key… door (accent while refused) and the chip says «host key changed», never «unreachable», for that refusal');
-  ok((sm.match(/this\._hostStatus\[h\.id\] = \{ (?:ok: false, )?error: (?:hostKeyErrorWords\(h, e\)|said), code: e\.code \|\| null, at: Date\.now\(\) \}/g) || []).length === 2, 'the auto-probe AND the manual Test keep the refusal\'s code and its time (a re-probe never turns «host key changed» back into «unreachable»)');
+  ok(/ibtn\(MI\.key, tr\('Host key of "\{name\}"…'/.test(sm) && /_showHostKeyDialog\(h\)/.test(sm) && /st\.code === 'host-key-changed' \? \(st\.jump \? tr\('jump host key changed'\) : tr\('host key changed'\)\)/.test(sm), 'the ssh row has the Host key… door (accent while refused) and the chip says «host key changed», never «unreachable», for that refusal');
+  ok((sm.match(/this\._hostStatus\[h\.id\] = \{ (?:ok: false, )?error: (?:hostKeyErrorWords\(h, e\)|said), code: e\.code \|\| null, jump: \(e\.body && e\.body\.jump\) \|\| null, at: Date\.now\(\) \}/g) || []).length === 2, 'the auto-probe AND the manual Test keep the refusal\'s code and its time (a re-probe never turns «host key changed» back into «unreachable»)');
   const addAt = sm.indexOf("this._showHostKeyDialog({ id: r.id, name: v.name || v.host, transport: 'ssh' }, { scanNow: true, done: resolve })"), testAt = sm.indexOf('this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`');
   ok(addAt > 0 && testAt > addAt, 'a NEW machine: its key is shown for a pin (a scan, nothing trusted) BEFORE the first test dials it — the first-connection window D6 closes');
   // the pictures' second take (2026-11-18): the row's red line and the Test / Add toasts word a refused key (and a pin that cannot be
@@ -343,6 +343,123 @@ console.log('— ⑦ the move onto c72bbedd2: ONE catch per route carries both u
   const gHeld = await gOf(held), gRef = await gOf(() => Object.assign(new Error('this machine already dials out — Remove dial-out first'), { code: 'already-dial-out' }));
   ok(!!G && gHeld && gHeld.status === 503 && gHeld.code === 'hosts-unread' && gRef && gRef.status === 400 && gRef.code === 'already-dial-out',
     'Upgrade / Remove dial-out (graduate-dial), compiled from its source: a held list ⇒ 503 hosts-unread (line 124); a refusal by name ⇒ 400 with ITS code beside its words (this lane) — one catch', { gHeld, gRef });
+}
+
+console.log('— ⑩ THE JUMP HOST\'s KEY (B-7f0b\'s remainder, 主开发 r3431): pinned by a PERSON only, strict once pinned, refused by name, said on its row —');
+{
+  const KM = blob('ssh-ed25519', 41), KJ = blob('ssh-ed25519', 42), KJ2 = blob('ssh-ed25519', 43);
+  const FM = HK.fingerprintOf(KM), FJ = HK.fingerprintOf(KJ), FJ2 = HK.fingerprintOf(KJ2);
+  const JUMP = 'me@Bastion.Example.test:2200';
+  // ① PURE: the hop's names, options, text, view and refusal
+  const rec = { id: 'host-j1', name: 'behind', host: '10.0.0.5', port: 22, jump: JUMP };
+  const recP = { ...rec, jumpHostKeys: [{ type: 'ssh-ed25519', key: KJ, fp: FJ }] };
+  const qd = "/d s/it's/ssh", hf = HK.hopPinFileOf(qd, 'host-j1');
+  const o0 = HK.hopKeyOpts('/d s/ssh', rec), o1 = HK.hopKeyOpts(qd, recP);
+  ok(JSON.stringify(HK.hopOf(rec)) === JSON.stringify({ user: 'me', host: 'Bastion.Example.test', port: '2200' }) && HK.hopAliasOf(rec) === 'bastion.example.test' && o0.join(' ') === '-o StrictHostKeyChecking=accept-new'
+    && o1.join(' ') === `-o StrictHostKeyChecking=yes -o HostKeyAlias=bastion.example.test -o 'UserKnownHostsFile="${hf.replace(/'/g, "'\\''")}"' -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no` && hf.endsWith('/known_hosts.jump.d/host-j1'),
+    'the hop\'s check: NOT pinned ⇒ exactly as at the release (accept-new); pinned ⇒ strict over the record\'s own hop file alone under the hop\'s alias, the path single-quoted for the shell (a quote in it escaped), ssh\'s double quotes inside', [o0, o1]);
+  ok(HK.hopPinText(recP) === `bastion.example.test ssh-ed25519 ${KJ}\n` && HK.hopPinned(recP) && !HK.hopPinned(rec) && !HK.hopPinned({ ...recP, jump: null })
+    && /pinned for no jump host/.test(HK.hopUnusable({ ...recP, jump: null }) || '') && /jump host/.test(HK.pinUnusable({ ...rec, jumpHostKeys: [{ type: 'ssh-ed25519', key: 'x' }] }) || '') && HK.pinUnusable(recP) === null,
+    'the hop\'s pin file holds its keys under its alias; a record CARRYING hop keys it cannot use (none an ssh key, or no jump host left) is never dialled accept-new in silence — pinUnusable says why');
+  ok(JSON.stringify(HK.pinView(recP).jump) === JSON.stringify({ host: 'Bastion.Example.test', port: '2200', hostKeys: [{ type: 'ssh-ed25519', fp: FJ }], hostKeysAt: null }) && HK.pinView(rec).jump.hostKeys === null && HK.pinView({ id: 'x', host: 'y' }).jump === undefined,
+    'the page\'s view names the hop and its pin by fingerprint (null: the jump host\'s key is not pinned); a record with no jump host has no jump part');
+  const hopBanner = ['@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@', 'The fingerprint for the ED25519 key sent by the remote host is', `${FJ2}.`, 'Host key for bastion.example.test has changed and you have requested strict checking.', 'Host key verification failed.', 'kex_exchange_identification: Connection closed by remote host'].join('\n');
+  const rj = HK.hostKeyRefusal(recP, hopBanner), rm = HK.hostKeyRefusal(recP, hopBanner.replace('Host key for bastion.example.test', 'Host key for 10.0.0.5')), ru = HK.hostKeyRefusal(rec, hopBanner.replace('bastion.example.test has', '[bastion.example.test]:2200 has'));
+  ok(rj && rj.code === 'host-key-changed' && rj.jump === 'Bastion.Example.test' && rj.pinned === true && rj.fp === FJ2 && /^behind's jump host Bastion\.Example\.test showed an ssh host key that is not the key pinned for it/.test(rj.message) && rj.message.endsWith('pin it again in Remote → behind → Host key…')
+    && rm && !rm.jump && /^behind showed an ssh host key/.test(rm.message) && ru && ru.jump === 'Bastion.Example.test' && ru.pinned === false && /pin the key it shows now/.test(ru.message),
+    'a refused key the line names as the HOP\'s is said as the jump host\'s — the same code and door, `jump` set, pinned or not; the machine\'s own stays the machine\'s', [rj && rj.message, ru && ru.message]);
+  // ② the manager: THE UPDATE LAW first — an existing machine behind a jump host pins nothing by itself
+  const dJ = path.join(SCR, 'jump hosts'); fs.mkdirSync(dJ, { recursive: true });
+  const hm = new HostManager({ dataDir: dJ });
+  const pcOf = (args) => args.find((x) => typeof x === 'string' && x.startsWith('ProxyCommand=')) || '';
+  // r3431: no real ssh program in any leg — a pin act's tail tells the record's master to exit (`ssh -O exit`): a stand-in answers it
+  const P0j = process.env.PATH, stubBin = path.join(SCR, 'stub-ssh-bin'); fs.mkdirSync(stubBin, { recursive: true });
+  fs.writeFileSync(path.join(stubBin, 'ssh'), '#!/bin/sh\nexit 255\n', { mode: 0o755 }); process.env.PATH = stubBin;
+  const id = hm.add({ name: 'behind', user: 'ubuntu', host: '10.0.0.5', port: 22 }); hm.get(id).jump = JUMP; hm._save();
+  const p0 = pcOf(hm.sshArgs(hm.get(id)));
+  if (typeof hm.persisted === 'function') await hm.persisted();
+  const hmR = new HostManager({ dataDir: dJ });
+  ok(p0.includes(' -o StrictHostKeyChecking=accept-new ') && !p0.includes('known_hosts.jump.d') && !fs.existsSync(HK.hopPinFileOf(hm._sshDir, id))
+    && hmR.get(id).jump === JUMP && !hmR.get(id).jumpHostKeys && !fs.existsSync(HK.hopPinFileOf(hmR._sshDir, id)) && pcOf(hmR.sshArgs(hmR.get(id))).includes(' -o StrictHostKeyChecking=accept-new '),
+    'AN EXISTING MACHINE with a jump host, the update applied: its hop is dialled exactly as at the release (accept-new), and a start pins nothing either — no jumpHostKeys appear, no hop file is written', p0);
+  // ③ ONE PRESS pins both (the keys this hub already trusts: a stand-in known_hosts file, the route passes none)
+  const kh = path.join(SCR, 'jump-known_hosts');
+  fs.writeFileSync(kh, `10.0.0.5 ssh-ed25519 ${KM}\n[bastion.example.test]:2200 ssh-ed25519 ${KJ}\n`);
+  const v1 = await hm.pinKnownHostKeys(id, { file: kh });
+  const hfile = HK.hopPinFileOf(hm._sshDir, id), p1 = pcOf(hm.sshArgs(hm.get(id)));
+  ok(v1.hostKeys && v1.hostKeys[0].fp === FM && v1.jump && v1.jump.hostKeys && v1.jump.hostKeys[0].fp === FJ && fs.readFileSync(hfile, 'utf8') === `bastion.example.test ssh-ed25519 ${KJ}\n` && (fs.statSync(hfile).mode & 0o777) === 0o600,
+    'ONE PRESS pins BOTH — the machine\'s and its jump host\'s keys this hub already trusts (their own known_hosts lines, the hop under [host]:port), the hop\'s file 0600 under its alias', v1);
+  ok(p1.includes(' -o StrictHostKeyChecking=yes -o HostKeyAlias=bastion.example.test ') && p1.includes(`UserKnownHostsFile="${hfile}"`) && !p1.includes('accept-new'), 'once a person pinned it, the hop is dialled strict over the record\'s own hop file alone — no accept-new left in its command', p1);
+  const id2 = hm.add({ name: 'pinned behind', user: 'ubuntu', host: '10.0.0.6', port: 22 }); Object.assign(hm.get(id2), { jump: JUMP, hostKeys: [{ type: 'ssh-ed25519', key: KM, fp: FM }] }); hm._save(); HK.writePinFile(hm._sshDir, hm.get(id2));
+  fs.writeFileSync(kh, `[bastion.example.test]:2200 ssh-ed25519 ${KJ}\n`);
+  const v2 = await hm.pinKnownHostKeys(id2, { file: kh });
+  const id3 = hm.add({ name: 'no hop line', user: 'ubuntu', host: '10.0.0.7', port: 22 }); Object.assign(hm.get(id3), { jump: JUMP, hostKeys: [{ type: 'ssh-ed25519', key: KM, fp: FM }] }); hm._save();
+  fs.writeFileSync(kh, `10.0.0.7 ssh-ed25519 ${KM}\n`);
+  let e3 = null; try { await hm.pinKnownHostKeys(id3, { file: kh }); } catch (e) { e3 = e; }
+  ok(v2.hostKeys[0].fp === FM && v2.jump.hostKeys && v2.jump.hostKeys[0].fp === FJ && e3 && e3.code === 'host-key-not-known' && e3.params && e3.params.jump === 'Bastion.Example.test' && !hm.get(id3).jumpHostKeys,
+    'a machine already pinned behind an unpinned hop: the same one press pins the HOP alone (its own pin kept); no line this hub trusts for the hop ⇒ refused by name as the jump host\'s (params.jump), nothing pinned', [v2, e3 && e3.message]);
+  // ④ the Host key dialog's press: ONE press pins both shown keys, a hop key alone re-pins the hop, Remove the pin removes both
+  const id4 = hm.add({ name: 'dialog', user: 'ubuntu', host: '10.0.0.8', port: 22 }); hm.get(id4).jump = JUMP; hm._save();
+  hm.hostKeyScan = async () => [{ type: 'ssh-ed25519', key: KM, fp: FM }]; hm.hopKeyScan = async () => [{ type: 'ssh-ed25519', key: KJ, fp: FJ }];
+  const v4 = await hm.pinHostKeys(id4, [FM, FJ]);
+  hm.hopKeyScan = async () => [{ type: 'ssh-ed25519', key: KJ2, fp: FJ2 }];
+  const v5 = await hm.pinHostKeys(id4, [FJ2]);
+  const v6 = await hm.unpinHostKeys(id4);
+  delete hm.hostKeyScan; delete hm.hopKeyScan;
+  ok(v4.hostKeys[0].fp === FM && v4.jump.hostKeys[0].fp === FJ && v5.hostKeys[0].fp === FM && v5.jump.hostKeys.length === 1 && v5.jump.hostKeys[0].fp === FJ2
+    && !v6.hostKeys && v6.jump.hostKeys === null && !fs.existsSync(HK.hopPinFileOf(hm._sshDir, id4)) && !fs.existsSync(HK.pinFileOf(hm._sshDir, id4)) && pcOf(hm.sshArgs(hm.get(id4))).includes(' -o StrictHostKeyChecking=accept-new '),
+    'the Host key dialog: ONE press pins both shown keys (each asked again at that moment); a hop key chosen alone re-pins the hop, the machine\'s pin kept; Remove the pin removes BOTH (the hop accept-new again, both files gone)', [v4, v5, v6]);
+  process.env.PATH = P0j;
+  // ⑤ the hop's scan dials the JUMP HOST itself (a stand-in ssh records its argv and writes the key into the scan's scratch file)
+  const fakeBin = path.join(SCR, 'fake-ssh-hop'), argvLog = path.join(SCR, 'fake-ssh-hop-argv'); fs.mkdirSync(fakeBin, { recursive: true });
+  fs.writeFileSync(path.join(fakeBin, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$@" > '${argvLog}'\nfor a in "$@"; do case "$a" in UserKnownHostsFile=*) f="\${a#UserKnownHostsFile=}"; f="\${f#\\"}"; f="\${f%\\"}"; printf 'bastion.example.test ssh-ed25519 ${KJ}\\n' > "$f";; esac; done\nexit 255\n`, { mode: 0o755 });
+  const P1 = process.env.PATH; let sc = null, scE = null; fs.rmSync(argvLog, { force: true });
+  process.env.PATH = fakeBin; try { sc = await hm.hopKeyScan(id4); } catch (e) { scE = e; } finally { process.env.PATH = P1; }
+  const av = fs.existsSync(argvLog) ? fs.readFileSync(argvLog, 'utf8').split('\n').filter(Boolean) : [];
+  ok(sc && sc.length === 1 && sc[0].fp === FJ && av.at(-2) === 'Bastion.Example.test' && av.at(-1) === 'true' && av.join(' ').includes('-l me -p 2200 Bastion.Example.test true') && !av.some((x) => x.startsWith('ProxyCommand=')) && av.includes('PubkeyAuthentication=no'),
+    'the hop\'s scan dials the JUMP HOST itself (its user and port, a scratch known_hosts, no login, no ProxyCommand) and reads the key it shows — a stand-in ssh, no real program', { sc, scE: scE && scE.message, av });
+  // ⑥ the route: the hop's keys beside the machine's, each scan said apart — a machine that does not answer is words, never a failed dialog
+  const ER = read('src/server/exit-routes.js'), head = "app.get('/api/hosts/:id/host-keys', ", hi = ER.indexOf(head), hj = ER.indexOf('\n});\n', hi);
+  const Gk = hi > 0 && hj > hi ? new Function('hostKeyHumanOnly', 'hosts', 'HKR', 'hostKeyFail', `return (${ER.slice(hi + head.length, hj + 2)});`) : null;   // eslint-disable-line no-new-func
+  const answerOf = async (hostsStub, q) => { let out = null; const res = { status(c) { this.code = c; return this; }, json(b) { out = { status: this.code || 200, ...b }; return this; } }; await Gk(() => false, hostsStub, HK, (r, e) => r.status(400).json({ error: e.message }))({ params: { id: 'x' }, query: q, headers: {} }, res); return out; };
+  const none = async () => { throw Object.assign(new Error('10.0.0.5 showed no ssh host key — Connection closed'), { code: 'host-key-none-seen' }); };
+  const aJ = Gk && await answerOf({ get: () => recP, hostKeyScan: none, hopKeyScan: async () => [{ type: 'ssh-ed25519', key: KJ2, fp: FJ2 }] }, { scan: '1' });
+  const aN = Gk && await answerOf({ get: () => ({ id: 'x', name: 'plain', host: 'p.example.test' }), hostKeyScan: none }, { scan: '1' });
+  ok(!!Gk && aJ && aJ.status === 200 && Array.isArray(aJ.seen) && aJ.seen.length === 0 && /showed no ssh host key/.test(aJ.seenWhy || '') && aJ.seenJump && aJ.seenJump[0].fp === FJ2 && !JSON.stringify(aJ).includes(KJ2) && aJ.jump && aJ.jump.hostKeys[0].fp === FJ
+    && aN && aN.status === 400 && aN.seenJump === undefined,
+    'GET …/host-keys?scan=1 of a machine behind a jump host: the hop\'s keys shown now (fingerprints, never key text) beside the machine\'s, a machine that does not answer said in words (a changed pinned hop also stops its scan); a machine with no jump host fails as before', { aJ, aN });
+  // ⑦ the For-you item and the page's words (zh + ja)
+  const it = HW.itemOf({ machine: 'behind', fp: FJ2, pinned: true, jump: 'Bastion.Example.test' });
+  ok(it.text === "behind: its jump host's ssh host key changed — VibeSpace did not connect" && /behind's jump host Bastion\.Example\.test showed the key/.test(it.detail) && /Compare the key on the jump host itself/.test(it.detail) && it.i18n.text.params.jump === 'Bastion.Example.test'
+    && /jump: \(kind === 'ssh' && err && err\.jump\) \|\| null/.test(read('src/server/host-key-watch.js')),
+    'the For-you item of a refused HOP key says it is the jump host\'s (its own words, the same door), and the watch passes the refusal\'s hop through', it);
+  const sm = read('src/lib/sidebar-mounts.js');
+  ok(/\} else if \(!isDial && h\.jump && !\(h\.jumpHostKeys && h\.jumpHostKeys\.length\)/.test(sm) && /tr\('jump host not pinned'\)/.test(sm) && /pj\.onclick = async \(ev\) => \{ ev\.stopPropagation\(\); pj\.disabled = true; try \{ await this\._pinKnown\(h, \{ one: true \}\); \} finally \{ pj\.disabled = false; \} \};/.test(sm)
+    && /needOwn && needHop \? tr\('Pin both keys'\)/.test(sm) && /fps: \[\.\.\.\(needOwn \? v\.seen : \[\]\), \.\.\.\(needHop \? v\.seenJump : \[\]\)\]/.test(sm) && /if \(pinned \|\| jPinned\) acts\.append\(btn\(tr\('Remove the pin'\)/.test(sm),
+    'the page: a machine pinned behind an unpinned hop SAYS «jump host not pinned» with the same one press (a live control: disabled only while its press is in flight); the dialog\'s ONE press posts both shown keys; Remove the pin shows for either pin');
+  const JW = ["{name}'s jump host {jump} showed an ssh host key that is not the key pinned for it ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the jump host and pin it again in Remote → {name} → Host key…",
+    "{name}'s jump host {jump} showed an ssh host key that is not the key this VibeSpace saw before ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the jump host and pin the key it shows now in Remote → {name} → Host key…",
+    'jump host key changed', 'VibeSpace trusts the keys this machine and its jump host showed the first time they connected. One press pins both: a different key is refused from then on.', 'jump host not pinned',
+    "VibeSpace trusts the key {name}'s jump host showed the first time it connected. One press pins it: a different key is refused from then on.", "Pin the key this hub already trusts for {name}'s jump host",
+    "This hub trusts no key for {name}'s jump host yet — check the key it shows now.", '{name} did not answer, so its own key could not be read now.', 'Its jump host {jump} is pinned: VibeSpace reaches {name} through it only while it shows this key.',
+    'Its jump host {jump} is not pinned: VibeSpace trusts the key it showed the first time it connected.', 'The jump host {jump} shows now:', 'The jump host {jump} did not answer, so its key could not be read now.', 'Pin both keys', "Pin the jump host's key",
+    "{machine}: its jump host's ssh host key changed — VibeSpace did not connect", "{machine}'s jump host {jump} showed the key {fp}, which is not the key pinned for it. Someone may be between this VibeSpace and the jump host, or the jump host was reinstalled.",
+    "{machine}'s jump host {jump} showed the key {fp}, which is not the key this VibeSpace saw before. Someone may be between this VibeSpace and the jump host, or the jump host was reinstalled.",
+    'Compare the key on the jump host itself (its command is under Technical details). If it matches, pin it in Remote → {machine} → Host key…; until then nothing connects to the machine.', 'On the jump host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'];
+  const SMH = read('src/lib/sidebar-mounts.js') + read('src/server/host-key-watch.js');
+  for (const d of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const t = read(d); ok(JW.every((w) => t.includes(JSON.stringify(w) + ':')) && JW.every((w) => SMH.includes(w.replace(/'/g, "\\'")) || SMH.includes(w)), `${d}: every new jump-host word is said in the code and has its row`, JW.filter((w) => !t.includes(JSON.stringify(w) + ':'))); }
+  // ⑧ RED CONTROLS (copies beside the originals)
+  const MJ = mutantCopies('host-key-jump', REPO);
+  const HSJ = read('src/hosts.js'), HKJ = read('src/host-keys.js');
+  const RelHop = MJ.load('src/hosts.js', anchored(HSJ, '...HK.hopKeyOpts(sshDir, h), ', "'-o', 'StrictHostKeyChecking=accept-new', ", 'hop-left-accept-new'), 'hop-left-accept-new').HostManager;
+  const pR = pcOf(new RelHop({ dataDir: dJ }).sshArgs(hm.get(id)));
+  ok(pR.includes('StrictHostKeyChecking=accept-new') && !pR.includes('known_hosts.jump.d'), 'RED CONTROL: a copy whose hop keeps the release\'s accept-new dials a PINNED hop on first-key trust — the strict leg above would go red', pR);
+  const NoHop = MJ.load('src/host-keys.js', anchored(HKJ, '  if (hop && hop !== aliasOf(h) && nameOfSaid(w.said) === hop) {', '  if (false) {', 'refusal-no-hop'), 'refusal-no-hop');
+  const rR = NoHop.hostKeyRefusal(recP, hopBanner);
+  ok(rR && !rR.jump && /^behind showed an ssh host key/.test(rR.message), 'RED CONTROL: a copy without the hop\'s branch says a refused JUMP HOST key as the machine\'s own — the refusal leg above would go red', rR && rR.message);
+  const Default = MJ.load('src/host-keys.js', anchored(HKJ, "  if (!hopPinned(h)) return ['-o', 'StrictHostKeyChecking=accept-new'];", '  if (false) return [];', 'unpinned-hop-strict'), 'unpinned-hop-strict');
+  const oD = Default.hopKeyOpts('/d s/ssh', rec).join(' ');
+  ok(oD !== '-o StrictHostKeyChecking=accept-new' && /StrictHostKeyChecking=yes/.test(oD), 'RED CONTROL: a copy that changes the default (an unpinned hop dialled strict over a file nobody wrote) cuts every existing machine behind a jump host at the update — the update-law leg above would go red', oD);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

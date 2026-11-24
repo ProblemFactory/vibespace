@@ -22,8 +22,8 @@ const nameOf = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f\u
 
 /** The item's words — English text + the same sentences as STRUCTURE (the client words them per device). `kind` 'device'
  *  (lane lg-remote-hardening, D3) = the machine's AGENT answered with another device key (or none) than its record pins. */
-function itemOf({ machine, fp, pinned, kind = 'ssh', code = null, door = 'pairing' }) {
-  const p = { machine: nameOf(machine), fp: String(fp || '').slice(0, 80) || '?' };
+function itemOf({ machine, fp, pinned, kind = 'ssh', code = null, door = 'pairing', jump = null }) {
+  const p = { machine: nameOf(machine), fp: String(fp || '').slice(0, 80) || '?', ...(jump ? { jump: String(jump).slice(0, 120) } : {}) };
   // unit 3's cure: the doors named are the ones the machine's ROW draws (dial-facts pairingDoorOf — the row reads it too):
   // `dial` = the row draws «Pairing command…»; `dials` = the machine dials in with a pairing token (that row, or an ssh row
   // upgraded to dial-out)
@@ -62,6 +62,16 @@ function itemOf({ machine, fp, pinned, kind = 'ssh', code = null, door = 'pairin
     const fillD = (x) => x.replace(/\{(\w+)\}/g, (m, k) => (k in p ? p[k] : m));
     return { text: fillD(TD), detail: ds.map(fillD).join('\n'), i18n: { text: { key: TD, params: p }, detail: ds.map((key) => ({ key, params: p })) } };
   }
+  // r3431 (B-7f0b's remainder): the key ssh refused was the machine's JUMP HOST's — its own words, the same door (the machine's row)
+  if (jump) {
+    const TJ = i18nKey('{machine}: its jump host\'s ssh host key changed — VibeSpace did not connect');
+    const DJ1 = pinned
+      ? i18nKey('{machine}\'s jump host {jump} showed the key {fp}, which is not the key pinned for it. Someone may be between this VibeSpace and the jump host, or the jump host was reinstalled.')
+      : i18nKey('{machine}\'s jump host {jump} showed the key {fp}, which is not the key this VibeSpace saw before. Someone may be between this VibeSpace and the jump host, or the jump host was reinstalled.');
+    const DJ2 = i18nKey('Compare the key on the jump host itself (its command is under Technical details). If it matches, pin it in Remote → {machine} → Host key…; until then nothing connects to the machine.');
+    const fillJ = (x) => x.replace(/\{(\w+)\}/g, (m, k) => (k in p ? p[k] : m));
+    return { text: fillJ(TJ), detail: [DJ1, DJ2].map(fillJ).join('\n'), i18n: { text: { key: TJ, params: p }, detail: [DJ1, DJ2].map((key) => ({ key, params: p })), fold: [{ key: i18nKey('On the jump host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub') }] } };
+  }
   const T = i18nKey('{machine}: its ssh host key changed — VibeSpace did not connect');
   const D1 = pinned
     ? i18nKey('{machine} showed the key {fp}, which is not the key pinned for it. Someone may be between this VibeSpace and the machine, or the machine was reinstalled.')
@@ -92,7 +102,7 @@ function create({ userTodos = null, hosts = null, log = () => {}, bcast = () => 
     const fp = (err && err.fp) || null;
     const kind = err && err.kind === 'device' ? 'device' : 'ssh';
     const machine = nameOf(h.name);
-    const w = itemOf({ machine, fp, pinned: !!(err && err.pinned), kind, code: (err && err.code) || null, door: DF.pairingDoorOf(h) }); // the door the row draws
+    const w = itemOf({ machine, fp, pinned: !!(err && err.pinned), kind, code: (err && err.code) || null, door: DF.pairingDoorOf(h), jump: (kind === 'ssh' && err && err.jump) || null }); // the door the row draws
     const open = ours(h.id, kind);
     if (open.some((it) => it.text === w.text && it.detail === w.detail)) return false; // the same episode: said once (a restart reads the same items)
     for (const it of open) retract(it); // another key / another refusal: the old item goes, ONE new one says this one

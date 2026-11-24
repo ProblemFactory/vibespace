@@ -53,7 +53,7 @@ const { jumpVerdict, jumpParts, jumpTargetOk } = require('./ssh-config-block.js'
 // its third read: the hop's command carries the record's address as ssh's %h (an ssh before 9.6 checks no character of it; a tailnet
 // name's %h is the plugin's IP) — a machine behind a jump host has an address of plain host characters (jumpTargetOk, the page's rule
 // too), at the add, at the import and on every road
-const jumpArgsOf = (h) => {
+const jumpArgsOf = (h, sshDir) => {
   if (!h || h.jump == null) return [];
   const j = jumpVerdict(h.jump);
   if (!j.ok) throw new Error(`"${h.name || h.host}": its jump host is not one [user@]host[:port] — add the machine again`);
@@ -63,9 +63,10 @@ const jumpArgsOf = (h) => {
   // would ask about its host key on no tty, with no BatchMode and no ConnectTimeout. The hop is OUR ssh, with the same options; each of
   // its words is plain host characters (jumpVerdict), `[%h]:%p` quoted for the shell ssh runs a ProxyCommand with
   const p = jumpParts(j.jump);
-  // the move onto 6ce6b8124 (lane lg-remote-hardening): the host-key check left SSH_BASE_OPTS for HK.hostKeyOpts (per record) — the
-  // hop is no record, so it keeps the check it always had: accept-new into the hub user's own known_hosts
-  return ['-o', 'ProxyCommand=' + ['ssh', ...SSH_BASE_OPTS, '-o', 'StrictHostKeyChecking=accept-new', ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), '-W', "'[%h]:%p'", p.host].join(' ')];
+  // the move onto 6ce6b8124 (lane lg-remote-hardening): the host-key check left SSH_BASE_OPTS for HK.hostKeyOpts (per record) — and
+  // r3431 (B-7f0b's remainder): the HOP's check is the record's too (HK.hopKeyOpts): a jump host key the person pinned ⇒ strict over
+  // the record's own hop file; none ⇒ exactly as at the release, accept-new into the hub user's own known_hosts (nothing pins by itself)
+  return ['-o', 'ProxyCommand=' + ['ssh', ...SSH_BASE_OPTS, ...HK.hopKeyOpts(sshDir, h), ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), '-W', "'[%h]:%p'", p.host].join(' ')];
 };
 /** B-2ca0 follow-up (主开发 19:23Z): ONE VERDICT over an ssh machine record's words — the add asks it of a typed machine and the config
  *  import of EVERY record a bundle carries (an imported record is judged as the add judges a typed one: a user beginning with «-» would
@@ -426,7 +427,7 @@ class HostManager {
     this._state = a.state === 'data' ? a.value : { hosts: [] };
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
     // lane lg-remote-hardening: every pinned record's file, as its record says (a restored hosts.json, a deleted file)
-    for (const h of this._state.hosts) if (HK.pinned(h)) { try { HK.writePinFile(this._sshDir, h); } catch (e) { console.warn(`[hosts] the host-key pin file of ${h.name || h.id} was not written: ${e.message}`); } }
+    for (const h of this._state.hosts) if (HK.pinned(h) || HK.hopPinned(h)) { try { HK.writePinFile(this._sshDir, h); } catch (e) { console.warn(`[hosts] the host-key pin file of ${h.name || h.id} was not written: ${e.message}`); } }
     if (a.state === 'data') this._reachChanged('hosts.json read');   // at boot nothing is wired yet (a no-op); a held store read again mid-life brings machines back — re-judged. Its read r3 (Y2): an EMPTY lift (torn bytes set aside, a gone file) re-judges nothing, as a boot does — a prune over the empty list cleared every machine's exit lists
   }
   _asideName() { return this._file + '.corrupt-' + Date.now(); }
@@ -1341,7 +1342,7 @@ class HostManager {
     // the reader of unit 3: a KEPT machine whose pin or address the import changed rides no connection made before it — its
     // master is told to exit and its cached device link (which captured the old ssh options) is rebuilt
     const prevById = new Map(before.filter(Boolean).map((x) => [x.id, x]));
-    for (const r of hosts) { const o = r && prevById.get(r.id); if (o && (o.host !== r.host || JSON.stringify(o.hostKeys || null) !== JSON.stringify(r.hostKeys || null) || JSON.stringify(o.deviceKey || null) !== JSON.stringify(r.deviceKey || null))) this._dropConnections(o); }
+    for (const r of hosts) { const o = r && prevById.get(r.id); if (o && (o.host !== r.host || JSON.stringify(o.hostKeys || null) !== JSON.stringify(r.hostKeys || null) || JSON.stringify(o.jumpHostKeys || null) !== JSON.stringify(r.jumpHostKeys || null) || (o.jump || null) !== (r.jump || null) || JSON.stringify(o.deviceKey || null) !== JSON.stringify(r.deviceKey || null))) this._dropConnections(o); }
     return { warnings };
   }
 
@@ -1354,7 +1355,7 @@ class HostManager {
    *  unrelated sessions), and long-lived pipes pin the master forever. */
   sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
-    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
+    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h, this._sshDir)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (multiplex && cmUsable(this)) {
       args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
@@ -1379,7 +1380,7 @@ class HostManager {
   /** ssh option STRING for tools that take a transport command (rsync -e):
    *  everything sshArgs adds except the destination. */
   sshCmd(h) {
-    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
+    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h, this._sshDir)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
     if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
@@ -2544,7 +2545,7 @@ class HostManager {
     const scratch = path.join(dir, 'known_hosts');
     try {
       // the move onto 6ce6b8124 meets B-2ca0: the scan asks the machine the dials reach — an alias's own Port and User, its jump host
-      const args = [...HK.scanOpts(scratch), ...SSH_BASE_OPTS, ...this._portArgs(h), ...this._tailnetOpts(h), ...jumpArgsOf(h), this.dest(h), 'true'];   // B-2ca0's own words (_portArgs / dest); a jump record's hop logs in to its bastion as the first dial would — the scan's own options stay on the destination
+      const args = [...HK.scanOpts(scratch), ...SSH_BASE_OPTS, ...this._portArgs(h), ...this._tailnetOpts(h), ...jumpArgsOf(h, this._sshDir), this.dest(h), 'true'];   // B-2ca0's own words (_portArgs / dest); a jump record's hop logs in to its bastion as the first dial would — the scan's own options stay on the destination
       const said = await new Promise((resolve) => { execFile('ssh', args, { env: this.sshEnv(), timeout: timeoutMs }, (err, _out, stderr) => resolve(String(stderr || (err && err.message) || ''))); });
       const keys = HK.keysOfScan(await fsp.readFile(scratch, 'utf8').catch(() => ''));
       if (!keys.length) throw Object.assign(new Error(`${h.name} showed no ssh host key — ${(said.trim().split('\n').filter(Boolean).pop() || 'no answer').slice(0, 200)}`), { code: 'host-key-none-seen', hostId: h.id });
@@ -2552,8 +2553,29 @@ class HostManager {
     } finally { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}); }
   }
 
+  /** r3431: the key the record's JUMP HOST shows now — one fresh ssh to the hop itself (its user and port, the hub user's ssh
+   *  config: the road its ProxyCommand dials), a scratch known_hosts, no login (the scan's own options). → [{type, key, fp}] |
+   *  throws host-key-none-seen (with ssh's last line) / host-key-no-jump */
+  async hopKeyScan(id, { timeoutMs = 15000 } = {}) {
+    const h = this.get(id);
+    const p = HK.hopOf(h);
+    if (!p) throw Object.assign(new Error(`"${h.name}" has no jump host`), { code: 'host-key-no-jump', hostId: h.id });
+    const fsp = fs.promises;
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'vs-hostkey-'));
+    const scratch = path.join(dir, 'known_hosts');
+    try {
+      const args = [...HK.scanOpts(scratch), ...SSH_BASE_OPTS, ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), p.host, 'true'];
+      const said = await new Promise((resolve) => { execFile('ssh', args, { env: this.sshEnv(), timeout: timeoutMs }, (err, _out, stderr) => resolve(String(stderr || (err && err.message) || ''))); });
+      const keys = HK.keysOfScan(await fsp.readFile(scratch, 'utf8').catch(() => ''));
+      if (!keys.length) throw Object.assign(new Error(`${h.name}'s jump host ${p.host} showed no ssh host key — ${(said.trim().split('\n').filter(Boolean).pop() || 'no answer').slice(0, 200)}`), { code: 'host-key-none-seen', hostId: h.id, jump: p.host });
+      return keys;
+    } finally { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  }
+
   /** Pin what the person confirmed: the machine is asked AGAIN and only the keys it shows now whose fingerprints the person
-   *  chose are kept (a key nobody was shown is never pinned). → the record's pin view | throws host-key-not-seen. */
+   *  chose are kept (a key nobody was shown is never pinned). → the record's pin view | throws host-key-not-seen.
+   *  r3431 (one press pins both): a fingerprint the machine does not show is looked for among its JUMP HOST's, asked of the hop
+   *  again at this moment; the hop's chosen keys are pinned in the same act (a machine already pinned gets its hop alone). */
   async pinHostKeys(id, fps) {
     const want = new Set([].concat(fps || []).map((x) => String(x).trim()).filter(Boolean));
     const h0 = this.get(id);
@@ -2563,17 +2585,20 @@ class HostManager {
     if (bad) throw HK.pinRefusal(h0, bad);
     const seen = await this.hostKeyScan(id);
     const keep = seen.filter((k) => want.has(k.fp));
+    const seenHop = HK.hopOf(h0) ? await this.hopKeyScan(id).catch(() => []) : [];   // a record with a jump host: its hop is asked again too
+    const keepHop = seenHop.filter((k) => want.has(k.fp));
+    if (keepHop.length) return this._pinTheseKeys(id, keep.length ? keep : null, keepHop);
     if (!keep.length) throw Object.assign(new Error(`${h0.name} does not show the key you chose any more (it shows ${seen.map((k) => k.fp).join(', ')}) — look again before pinning`), { code: 'host-key-not-seen', hostId: h0.id });
     return this._pinTheseKeys(id, keep);
   }
 
   /** ONE pin's tail (a confirmed scan's keys, or the keys this hub already trusts): the record, landed or undone, then its pin file
    *  and its connections. → the record's pin view */
-  async _pinTheseKeys(id, keys) {
+  async _pinTheseKeys(id, keys, hopKeys = null) {
     const h = this.get(id);
-    const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt };
-    h.hostKeys = keys.map(({ type, key, fp }) => ({ type, key, fp }));
-    h.hostKeysAt = Date.now();
+    const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt, jumpHostKeys: h.jumpHostKeys, jumpHostKeysAt: h.jumpHostKeysAt };
+    if (keys) { h.hostKeys = keys.map(({ type, key, fp }) => ({ type, key, fp })); h.hostKeysAt = Date.now(); }
+    if (hopKeys) { h.jumpHostKeys = hopKeys.map(({ type, key, fp }) => ({ type, key, fp })); h.jumpHostKeysAt = Date.now(); }   // r3431
     this._save();
     await this._landedOrUndo(h, was, 'pinned'); // 主开发's hunt (2.369.411's hosts store writes off the loop): told «pinned» only once it landed
     // between the landed record and the pin file below, a start (a hub restart) rewrites the file FROM THE RECORD (_load's heal) —
@@ -2595,7 +2620,9 @@ class HostManager {
   async pinKnownHostKeys(id, { file = null } = {}) {
     const h0 = this.get(id);
     if (h0.transport === 'dial') throw Object.assign(new Error(`${h0.name} dials out — it has no ssh host key to pin`), { code: 'host-key-no-ssh', hostId: h0.id });
-    if (HK.pinned(h0)) return HK.pinView(h0);
+    const hop = HK.hopOf(h0), needHop = !!hop && !HK.hopPinned(h0);   // r3431: ONE press pins both — the hop by its own known line
+    if (HK.pinned(h0) && !needHop) return HK.pinView(h0);
+    if (HK.pinned(h0)) return this._pinKnownHop(h0, hop, file, null);
     const unusable = HK.pinUnusable(h0);
     if (unusable) throw HK.pinRefusal(h0, unusable);
     const bad = HK.nameWhy(h0);
@@ -2605,7 +2632,17 @@ class HostManager {
     try { keys = await HK.knownKeysOf(h0, { file: file || this._knownHostsFile() }); }
     catch (e) { throw Object.assign(new Error(`${h0.name}: ${e.message} — open its Host key… to check the key it shows now`), { code: e.code || 'host-key-known-unreadable', hostId: h0.id, params: { name: h0.name } }); }
     if (!keys.length) throw Object.assign(new Error(`this hub trusts no key for ${h0.name} yet — open its Host key… to check the key it shows now`), { code: 'host-key-not-known', hostId: h0.id, params: { name: h0.name } });
-    return this._pinTheseKeys(h0.id, keys);
+    return needHop ? this._pinKnownHop(h0, hop, file, keys) : this._pinTheseKeys(h0.id, keys);
+  }
+  /** r3431: the hop's half of the one press — the key this hub ALREADY trusts for the jump host (its own known_hosts line, under the
+   *  name ssh looked the hop up by); none and nothing else to pin ⇒ host-key-not-known (the dialog's scan-and-confirm is its road);
+   *  none but the machine's own keys ⇒ the machine is pinned and its row keeps saying the jump host's key is not pinned */
+  async _pinKnownHop(h0, hop, file, keys) {
+    let hk;
+    try { hk = await HK.knownKeysOf({ host: hop.host, port: hop.port }, { file: file || this._knownHostsFile() }); }
+    catch (e) { throw Object.assign(new Error(`${h0.name}'s jump host: ${e.message} — open its Host key… to check the key it shows now`), { code: e.code || 'host-key-known-unreadable', hostId: h0.id, params: { name: h0.name } }); }
+    if (!hk.length && !keys) throw Object.assign(new Error(`this hub trusts no key for ${h0.name}'s jump host ${hop.host} yet — open its Host key… to check the key it shows now`), { code: 'host-key-not-known', hostId: h0.id, jump: hop.host, params: { name: h0.name, jump: hop.host } });
+    return this._pinTheseKeys(h0.id, keys, hk.length ? hk : null);
   }
   /** the hub user's own known_hosts. SSH READS THE PASSWD HOME (getpwuid), whatever $HOME says, so the key a first dial trusted
    *  is in THAT home's file (test-architecture §68's reasoned site): a PATH read for its lines (knownKeysOf), never written. */
@@ -2654,8 +2691,8 @@ class HostManager {
   /** The pin removed: the record is dialled as before (the first key ssh meets is trusted). → the pin view. */
   async unpinHostKeys(id) {
     const h = this.get(id);
-    const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt };
-    delete h.hostKeys; delete h.hostKeysAt;
+    const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt, jumpHostKeys: h.jumpHostKeys, jumpHostKeysAt: h.jumpHostKeysAt };
+    delete h.hostKeys; delete h.hostKeysAt; delete h.jumpHostKeys; delete h.jumpHostKeysAt;   // r3431: the hop's pin goes with it
     this._save();
     await this._landedOrUndo(h, was, 'unpinned');
     HK.writePinFile(this._sshDir, h);

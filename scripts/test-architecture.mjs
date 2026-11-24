@@ -8138,7 +8138,7 @@ await section(async () => {
     ["src/adapters/codex.js", "`vibespace-zst-${uid}`", "per-user", "the zst cache is keyed by uid and judged before use (sock-path ensureSocketDir; a planted name is refused by name, B-3767 unit 2)"],
     ["src/hosts.js", "`vs-cm-${process.getuid", "per-user", "the ssh ControlMaster dir is keyed by uid and judged before use (ensureSocketDir; a planted name turns connection sharing off, said once, B-3767 unit 2)"],
     ["src/hosts.js", "'vs-agentd-stage-'", "unique", "mkdtemp"],
-    ["src/hosts.js", "fsp.mkdtemp(path.join(os.tmpdir(), 'vs-hostkey-'))", "unique", "the host-key scan's scratch known_hosts (lane lg-remote-hardening D6): mkdtemp, removed when the scan ends"],
+    ["src/hosts.js", "fsp.mkdtemp(path.join(os.tmpdir(), 'vs-hostkey-'))", "unique", "the host-key scan's scratch known_hosts (lane lg-remote-hardening D6) and the jump host's scan's (r3431): mkdtemp, removed when the scan ends", 2],
     ["src/server/provider-test.js", "scratchRoot = os.tmpdir()", "unique", "the provider Test's run folder is an mkdtemp under it (vs-pvtest-…), removed after each run (lane lg-providers U4)"],
     ["src/local-index.js", "varTmp = '/var/tmp'", "read", "the index's place verdict (keyed by uid where it is used)"],
     ["src/memory-pressure.js", "tmpfs.mount || '/tmp'} is in RAM", "read", "words about a tmpfs"],
