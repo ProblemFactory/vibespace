@@ -16,8 +16,13 @@
 # reads that index. «Failed» includes a fetch that apt only WARNS about (`--error-on=any`: a mirror that refuses fast exits
 # 0 otherwise and the install runs on missing lists). The first update is bounded tighter (CI_APT_UPDATE_BOUND, 40 s —
 # measured 3–8 s). The INSTALL gets the same one more try (B-3f60): on the second mirror when the index was the runner's,
-# else on the same index. Each step that calls this door is bounded for the worst path (dtach 6 min, zsh 5). The first failure is
-# a ::warning::, the second a red that names it; no third try; the step says which mirror served the index either way.
+# else on the same index. Each step that calls this door is bounded for the worst path (dtach 7 min, zsh 5). The first failure is
+# a ::warning::, the second a red that names it; the step says which mirror served the index either way.
+# ONCE MORE AFTER A PAUSE (lane bl-ci, 主开发 r3181's small — the release mirror run 45164852385: four jobs died at «Install dtach», the
+# second mirror's update past its 80 s bound, exit 124, before any suite ran, a second attempt of about an hour): a second-mirror update that
+# fails or stalls is a ::warning:: and the update goes ONCE more after CI_APT_PAUSE seconds (20 by default — a stalled source often answers
+# again), the same list and bound; that third try failing is the red that names it. Each dtach step's bound is 7 min: the worst path is
+# 40 + 80 + 20 + 80 + 80 + 80 = 380 s.
 set -euo pipefail
 dir=${CI_APT_SOURCES_DIR:-/etc/apt/sources.list.d}
 SECOND=${CI_APT_SECOND_MIRROR:-http://archive.ubuntu.com/ubuntu}
@@ -31,6 +36,7 @@ update=1
 if [ "${1:-}" = --no-update ]; then update=; shift; fi
 [ "$#" -gt 0 ] || { echo "usage: ci-apt.sh [--no-update] <package…>" >&2; exit 2; }
 BOUND=${CI_APT_BOUND:-80}
+PAUSE=${CI_APT_PAUSE:-20}
 FIRST=${CI_APT_UPDATE_BOUND:-${CI_APT_BOUND:-40}}
 apt() {   # apt <bound> <apt-get args…>
   local b=$1; shift
@@ -67,10 +73,14 @@ if [ -n "$update" ]; then
   if apt "$FIRST" "${OPTS[@]}" --error-on=any update; then
     echo "ci-apt: the index is the runner's mirror's"
   else
-    SEV=error
     echo "ci-apt: apt-get update failed on the runner's mirror"
     use_second
-    apt "$BOUND" "${OPTS[@]}" --error-on=any update
+    if ! apt "$BOUND" "${OPTS[@]}" --error-on=any update; then
+      SEV=error
+      echo "ci-apt: the second mirror's update failed — once more in ${PAUSE} s (a stalled source often answers again)"
+      sleep "$PAUSE"
+      apt "$BOUND" "${OPTS[@]}" --error-on=any update
+    fi
     echo "ci-apt: the index is $SECOND's"
   fi
   SEV=error

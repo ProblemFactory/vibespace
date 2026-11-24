@@ -65,8 +65,8 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install dtach (session persistence layer the boot smoke needs)
         run: bash scripts/ci-apt.sh dtach
-        # 6 (B-4a3b, B-3f60): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), the install and its one more try (80 s each)
-        timeout-minutes: 6
+        # 7 (B-4a3b, B-3f60, r3181's small): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), once more after a 20 s pause (80 s), the install and its one more try (80 s each): 380 s
+        timeout-minutes: 7
       # zsh (int378 seam 7): test-cli-env measures REAL zsh + REAL bash because the owner's shell is zsh (lane cli-shell-truth:
       # the person's login shell is the truth for where an agent CLI is); the runner image ships bash only. Its OWN step, so the
       # dtach step stays byte-identical (test-ci-gate pins it). No heavy job runs a real zsh (checked at .378).
@@ -244,8 +244,8 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install dtach (session persistence layer the boot smokes need)
         run: bash scripts/ci-apt.sh dtach
-        # 6 (B-4a3b, B-3f60): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), the install and its one more try (80 s each)
-        timeout-minutes: 6
+        # 7 (B-4a3b, B-3f60, r3181's small): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), once more after a 20 s pause (80 s), the install and its one more try (80 s each): 380 s
+        timeout-minutes: 7
       # CJK fonts (lane-mirror-197, 2.369.198): the runner image ships DejaVu +
       # Liberation and NO CJK family, so every zh / ja glyph the chrome suites
       # measure was DejaVu's fallback box — narrower than the glyph a Chinese or
