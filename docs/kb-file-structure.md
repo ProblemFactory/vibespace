@@ -3,6 +3,7 @@
 Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that file's full operating essay — invariants, incidents, gotchas. **READ the entry BEFORE modifying the file; UPDATE it in the same commit when behavior changes.**
 
 ## INDEX (one line per file; the essay is below)
+scripts/test-decision-store-read.mjs (NEW, fast — B-f276 family) — the paid judge's counter, memo and journal under the store-read law: a placed read refusal, a stand-in vendor that counts; unknown spend refuses by name, nothing written, torn kept aside once
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 scripts/test-vault-job-verify.mjs (NEW in the tiers, heavy — B-a08e L3) — the independent verification of the vault's service secret for jobs: each leg a law of the owner's design on the real road (wrapper, JobManager, door) with stand-in values; ~48 s alone; never edited by a builder
