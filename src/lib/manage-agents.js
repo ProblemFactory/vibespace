@@ -2951,6 +2951,7 @@ export function installManageAgents(App, ctx = {}) {
                   const rowsSaid = Array.isArray(r?.rowsNotLanded) && r.rowsNotLanded.length ? t('a setting did not land: {what}', { what: r.rowsNotLanded.join('; ') }) : '';
                   if (!r || typeof r.error === 'string') showToast([r ? r.error : t('Install failed'), rowsSaid].filter(Boolean).join(' — '), { type: 'error' });   // B-225b r552: a refusal by name (the HELD settings in the hold's words, fetchJson's store_unread mapping; the switch off; a refused write) — never «installed»
                   else if (rowsSaid) showToast(`${t('Task Group context hook installed')} — ${rowsSaid}`, { type: 'error' });
+                  else if (Array.isArray(r.noCli) && r.noCli.length) showToast(t('Nothing registered: no CLI folder on this machine ({dirs})', { dirs: r.noCli.join(', ') }));   // r3784: say what was done
                   else showToast(t('Task Group context hook installed'));
                 }
               } catch { showToast(t('Install failed'), { type: 'error' }); }

@@ -2137,9 +2137,19 @@ class HostManager {
    *  CLI by their reason with their keys, a whole-run failure (the helper's own crash) by its words, a plan's hooks part the helper
    *  printed nothing of (no node there, or it stopped before its first receipt) as «not known», and the root verdict's refusal (no
    *  helper ran there). [] = every part landed. PURE. */
+  /** the CLIs whose hook files carry our entries, and the look at whether our marker is still in each (the status probe's own lines) */
+  static HOOK_FILES = [['claude', '$HOME/.claude/settings.json'], ['codex', '$HOME/.codex/hooks.json']];   // pairs, never an id-keyed branch (test-architecture §78)
+  static HOOK_CLIS = HostManager.HOOK_FILES.map(([c]) => c);
+  static hookLeftProbe(clis) {
+    return HostManager.HOOK_FILES.filter(([c]) => clis.includes(c)).map(([c, file]) => `grep -q vibespace-hook.mjs "${file}" 2>/dev/null && echo "HOOK|${c}|yes" || echo "HOOK|${c}|no"; `).join('');
+  }
   static installNotLanded(receipts, { refused = null, hooks = [] } = {}) {
     if (refused) return [`the hooks and CLI settings were not registered there: ${refused.line || refused.why || 'this server never writes a machine\'s CLI config'}`];
     const rs = Array.isArray(receipts) ? receipts : [], by = new Map();
+    // A STATE THIS HUB DOES NOT KNOW (a newer helper's) is parsed «unknown» and is NOT counted here as failed. On the INSTALL road the
+    // helper is the hub's own (it ships in the same tar just before it runs, so the states agree); on the REMOVE road the machine's
+    // installed helper may be another version, so there a hooks row in an unknown state is no known strip — uninstallAgentTools looks at
+    // that CLI's hook file (r3784: the choice pinned by test-cli-config-runner either way)
     for (const x of rs) {
       if (!x || (x.state !== 'error' && x.state !== 'refused')) continue;
       const k = `${x.harness || '*'}|${x.reason || x.state}`;
@@ -2432,15 +2442,39 @@ class HostManager {
     // in the live list any more — the glob sweeps every generated shim
     // r3064: THE STRIP FIRST, judged by its receipts; the tools are removed only when it landed — a refused strip (a hand-broken
     // settings file) keeps the register helper and the hook script, so the entries left in the file still find their program
-    let stripped = [];
-    if (!this._ownerWriteRefusal()) {
-      const sOut = String(await this._ssh(h, REMOTE_PRELUDE + nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; echo VS-STRIPPED', { timeoutMs: 15000 }));
+    let stripped = [], stripRan = false;
+    // r3784, THE REMOVE ROAD's LAW IN TWO HALVES: the tools are never removed under hooks whose strip is not KNOWN to have landed, and
+    // Remove is never refused for a helper's age. A CLI whose strip printed no hooks receipt in a state this hub knows (an older helper
+    // is silent even when it succeeds; a newer one may print a state this hub does not know; a helper killed before it printed; no node
+    // or no helper at all; a server that never writes a machine's CLI config, so it strips nothing) is LOOKED AT: our marker still in
+    // its hook file ⇒ the tools are kept and that is said, by its cause; gone ⇒ the strip is known, the tools go
+    const look = async (clis, cause) => {
+      const out = String(await this._ssh(h, REMOTE_PRELUDE + HostManager.hookLeftProbe(clis), { timeoutMs: 15000 }));
+      if (!clis.every((c) => new RegExp(`^HOOK\\|${c}\\|(yes|no)$`, 'm').test(out))) throw new Error('unexpected response');
+      const left = clis.filter((c) => new RegExp(`^HOOK\\|${c}\\|yes$`, 'm').test(out));
+      if (!left.length) return null;
+      const nl = left.map((c) => `${c} (hooks): still in its hook file — ${cause}`);
+      return { ok: false, notLanded: nl, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${nl.join('; ')}` };
+    };
+    const refusal = this._ownerWriteRefusal();
+    if (!refusal) {
+      const sOut = String(await this._ssh(h, REMOTE_PRELUDE + nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then echo VS-HELPER-RAN; "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; echo VS-STRIPPED', { timeoutMs: 15000 }));
       if (!sOut.includes('VS-STRIPPED')) throw new Error('unexpected response');
-      stripped = HostManager.installNotLanded(parseReceiptLines(sOut));
+      stripRan = sOut.includes('VS-HELPER-RAN');
+      const sRecs = parseReceiptLines(sOut);
+      stripped = HostManager.installNotLanded(sRecs);
       if (stripped.length) return { ok: false, notLanded: stripped, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${stripped.join('; ')}` };
+      const unsaid = HostManager.HOOK_CLIS.filter((c) => !sRecs.some((x) => x && x.harness === c && x.key === 'hooks' && x.state !== 'unknown'));
+      if (unsaid.length) { const kept = await look(unsaid, stripRan ? 'the helper there said nothing this hub knows of the strip' : 'no helper ran there (no node, or its register helper is gone), so its hooks could not be stripped'); if (kept) return kept; }
+    } else {
+      const kept = await look(HostManager.HOOK_CLIS, `this server never writes a machine's CLI config (${refusal.why || refusal.kind}), so it strips nothing`);
+      if (kept) return kept;
     }
-    const cmd = REMOTE_PRELUDE + `rm -f ${rms} "$HOME"/.vibespace/bin/vibespace-tool-* 2>/dev/null; echo VS-REMOVED`;
+    // r3784: the removal's OWN failure is said (the hooks are gone, the tools could not be removed), never «removed»
+    // no glob: a login shell's «no match» (zsh) would drop the whole line — the shims are found by find (POSIX)
+    const cmd = REMOTE_PRELUDE + `rm -f ${rms} 2>/dev/null && { [ ! -d "$HOME/.vibespace/bin" ] || find "$HOME/.vibespace/bin" -maxdepth 1 -name 'vibespace-tool-*' -exec rm -f {} + 2>/dev/null; } && echo VS-REMOVED || echo VS-NOT-REMOVED`;
     const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
+    if (out.includes('VS-NOT-REMOVED')) return { ok: false, notLanded: [stripRan ? 'the tools: could not be removed (the hooks were removed)' : 'the tools: could not be removed'], error: stripRan ? 'the hooks were removed on that machine, but its tools could not be removed' : 'the tools on that machine could not be removed' };
     if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');
     return { ok: true };
   }

@@ -63,7 +63,9 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
   function installAnswer(results) {
     const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir');
     const rows = Object.entries(results && typeof results === 'object' ? results : {}).flatMap(([k, v]) => (v && Array.isArray(v.rows) ? v.rows : []).map((w) => `${k}.${w}`));
-    return { success: !bad.length, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), ...(rows.length ? { rowsNotLanded: rows } : {}) };
+    // r3784: a machine with NO CLI folder at all registered nothing — the press says what was done, never «installed» over nothing
+    const all = Object.entries(results && typeof results === 'object' ? results : {}), none = all.length > 0 && all.every(([, v]) => v && v.ok === false && v.missing === 'no-dir');
+    return { success: !bad.length, ...(bad.length ? { error: bad.map(([k, v]) => `${k}: ${v.error}`).join('; ') } : {}), ...(rows.length ? { rowsNotLanded: rows } : {}), ...(none ? { noCli: all.map(([k]) => `~/.${k}`) } : {}) };
   }
 
   /** POST /api/cli-config/apply — the "Apply" a missing-file chip offers (human-triggered). */

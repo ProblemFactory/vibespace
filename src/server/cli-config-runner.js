@@ -47,7 +47,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   const hooksHarnessesOf = (planB64, uninstall) => { const plan = decodePlan(planB64); return plan && Array.isArray(plan.files) ? [...new Set(plan.files.filter((f) => f && f.format === 'json' && f.hooks && (uninstall || Array.isArray(f.hooks.events))).map((f) => f.harness))] : []; };
 
   /** ONE helper run (never two at once — the queue below guarantees it). → a landing */
-  async function runOnce(planB64, { reason, uninstall = false, status = false } = {}) {
+  async function runOnce(planB64, { reason, uninstall = false, status = false, onLateExit = null } = {}) {
     const files = status ? [] : filesOf(planB64);
     // r1876: EVERY LOOK UNDER THE PERSON's HOME IS BOUNDED — one that does not come back counts as «not known», said by name
     // r2109: while an earlier read of the home is still out, a look asks NOTHING (no new read): it fails at once, by name
@@ -55,24 +55,25 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const look = async () => { if (!files.length) return { value: [] }; if (homeStuck > 0) return { held: true }; const r = await bounded(() => Promise.all(files.map((f) => exists(f.file)))); return r.timedOut ? { timedOut: true } : { value: r.value }; };
     const heldWhy = (then) => `the home still has not answered an earlier read (${homeStuck} still out) — ${then}`;
     const lb = await look();
-    if (!lb.value) return { at: Date.now(), reason, ok: false, receipts: [], created: [], why: lb.held ? heldWhy('the helper was not run, nothing written by this hub, asked again at the next request') : `the plan's files under the home could not be read within ${timeoutMs} ms (a home that does not answer) — the helper was not run, nothing written by this hub` };
+    if (!lb.value) return { at: Date.now(), reason, ok: false, receipts: [], created: [], why: lb.held ? heldWhy('the helper was not run, nothing written by this hub, asked again at the next request') : `the plan's files under the home could not be read within ${timeoutMs} ms (a home that does not answer) — the helper was not run, nothing written by this hub`, code: lb.held ? 'held' : 'look-timeout' };
     const before = lb.value;
     const args = [helperPath, ...(uninstall ? ['--uninstall'] : []), ...(status ? ['--status'] : [])];
     const envAdd = { VIBESPACE_CLI_CONFIG: String(planB64 || ''), ...(home ? { HOME: home } : {}) };
     // the starter's answer is bounded too (its own bound + its guard): a starter that never answers is «did not answer»
-    const ran = await bounded(() => starter.run(nodeBin, args, { timeoutMs, capture: true, maxBuffer: 1024 * 1024, envAdd }), timeoutMs + STARTER_GUARD_MS, { home: false });
+    const ran = await bounded(() => starter.run(nodeBin, args, { timeoutMs, capture: true, maxBuffer: 1024 * 1024, envAdd, ...(onLateExit ? { onLateExit } : {}) }), timeoutMs + STARTER_GUARD_MS, { home: false });
     const r = ran.timedOut ? { unknown: true, why: `no answer within ${timeoutMs + STARTER_GUARD_MS} ms` } : ran.error ? { unknown: true, why: said(ran.error) } : ran.value;
     const at = Date.now();
-    const failed = (why) => ({ at, reason, ok: false, receipts: [], created: [], why });
-    if (!r || r.unknown) return failed(`the starter did not answer${r && r.why ? ` (${r.why})` : ''} — nothing was written by this hub, asked again at the next change`);
-    if (r.timedOut) return failed(`the helper ran past its ${timeoutMs} ms bound and was ended`);
-    if (r.started === false || r.error) return failed(`the helper could not start (${r.error || 'no start'})`);
+    // r3784: each failure carries a CODE beside its words — a reader keys on the code, never on the English (the status road's backoff)
+    const failed = (why, code) => ({ at, reason, ok: false, receipts: [], created: [], why, code });
+    if (!r || r.unknown) return failed(`the starter did not answer${r && r.why ? ` (${r.why})` : ''} — nothing was written by this hub, asked again at the next change`, 'starter-unknown');
+    if (r.timedOut) return failed(`the helper ran past its ${timeoutMs} ms bound and was ended`, 'timed-out');
+    if (r.started === false || r.error) return failed(`the helper could not start (${r.error || 'no start'})`, 'not-started');
     const receipts = parseReceiptLines(r.stdout || '');
     const whole = receipts.find((x) => x.harness === null && x.state !== 'unknown');
-    if (r.code !== 0) return failed(`the helper exited ${r.code}${r.stderr ? `: ${String(r.stderr).trim().split('\n').pop().slice(0, 200)}` : ''}`);
-    if (whole) return { ...failed(whole.state === 'refused' ? `the helper refused the plan: ${String(whole.reason || whole.state).slice(0, 200)}` : `the helper failed: ${String(whole.reason || whole.state).slice(0, 200)} — nothing is known to have landed`), receipts };   // r3064: a crash inside the helper by its own words
+    if (r.code !== 0) return failed(`the helper exited ${r.code}${r.stderr ? `: ${String(r.stderr).trim().split('\n').pop().slice(0, 200)}` : ''}`, 'exit');
+    if (whole) return { ...failed(whole.state === 'refused' ? `the helper refused the plan: ${String(whole.reason || whole.state).slice(0, 200)}` : `the helper failed: ${String(whole.reason || whole.state).slice(0, 200)} — nothing is known to have landed`, whole.state === 'refused' ? 'refused' : 'helper-failed'), receipts };   // r3064: a crash inside the helper by its own words
     const la = await look();
-    if (!la.value) return { ...failed(la.held ? heldWhy('what landed is not known') : `the plan's files under the home could not be read within ${timeoutMs} ms after the helper ran (a home that does not answer) — what landed is not known`), receipts };
+    if (!la.value) return { ...failed(la.held ? heldWhy('what landed is not known') : `the plan's files under the home could not be read within ${timeoutMs} ms after the helper ran (a home that does not answer) — what landed is not known`, la.held ? 'held' : 'look-timeout'), receipts };
     const after = la.value;
     const created = files.filter((f, k) => !before[k] && after[k]);
     const bad = receipts.filter((x) => x.state === 'error' || x.state === 'refused');
@@ -82,7 +83,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const silent = status ? [] : hooksHarnessesOf(planB64, uninstall).filter((h) => !receipts.some((x) => x.harness === h && x.key === 'hooks'));
     // the failed PARTS, each ONCE ({ harness, key, why }): a reader that says one part (a CLI's hooks answer) leaves it out of the rest
     const parts = [...bad.map((x) => ({ harness: x.harness, key: x.key, why: `${x.key}: ${x.reason || x.state}` })), ...silent.map((h) => ({ harness: h, key: 'hooks', why: 'hooks: not known — the helper printed no word of our hook entries (an older helper)' }))];
-    return { at, reason, ok: parts.length === 0, receipts, created, parts, why: parts.length ? parts.map((p) => `${p.harness}.${p.why}`).join('; ') : null };
+    return { at, reason, ok: parts.length === 0, receipts, created, parts, why: parts.length ? parts.map((p) => `${p.harness}.${p.why}`).join('; ') : null, ...(parts.length ? { code: 'parts' } : {}) };
   }
 
   // the spawn gate's waiters hear the landing that leaves the queue EMPTY (this machine's config as every request asked it)
@@ -109,7 +110,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       pump();
     });
   }
-  const broke = (job, why) => ({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why });
+  const broke = (job, why) => ({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why, code: /still has not answered an earlier read/.test(why) ? 'held' : 'broke' });   // r3784: a code beside the words (the words are this file's own, so the code is read from them HERE, once)
   // one step inside a job, bounded by the run's own bound → { value } | { error } | { timedOut }
   // r2109: A HOME READ ABANDONED AT ITS BOUND STAYS in the hub's file thread pool until the home answers. Each one is counted
   // (`homeStuck`) until it settles; while one is out a job asks the home nothing more — it fails at once, by name — so a hung home
@@ -204,7 +205,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   }
   /** --status: the managed keys read off disk BY THE HELPER (nothing written). Never queued behind an apply's waiter list:
    *  a read beside a write is a read. */
-  function status(planB64) { return runOnce(planB64, { reason: 'status', status: true }); }
+  function status(planB64, { onLateExit = null } = {}) { return runOnce(planB64, { reason: 'status', status: true, onLateExit }); }   // r3784: onLateExit — a child the starter ended at its bound that has not exited yet
   /** the spawn gate's question: has a landing (newer than `since`) come within `ms`? → { landed } | { failed, why } | { late } */
   function landedWithin(ms = boundMs, { since = 0 } = {}) {
     const idle = !inFlight && !queue.length;
@@ -217,7 +218,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       watchers.add(w);
     });
   }
-  return { apply, status, homeRead, landedWithin, last: () => last, busy: () => !!(inFlight || queue.length), BOUND_MS: boundMs };
+  return { apply, status, homeRead, landedWithin, last: () => last, busy: () => !!(inFlight || queue.length), homeStuck: () => homeStuck, BOUND_MS: boundMs };   // homeStuck (r3784 (2)): the status road asks the same guard
 }
 
 module.exports = { createCliConfigRunner, BOUND_MS, RUN_TIMEOUT_MS };

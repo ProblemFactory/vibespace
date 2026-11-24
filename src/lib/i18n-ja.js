@@ -2583,6 +2583,7 @@ export default {
   "a setting did not land: {what}": "書き込めなかった設定があります：{what}",
   "is a link to nowhere — not touched": "は存在しない場所へのリンクです（変更していません）",
   "cannot be read — not touched": "は読み取れません（変更していません）",
+  "Nothing registered: no CLI folder on this machine ({dirs})": "何も登録していません：このマシンに CLI フォルダーがありません（{dirs}）",
   "the helper failed": "ヘルパーが失敗しました",
   "Unregisters the hook from the host's CLIs and deletes the tools. A future remote session on this host re-installs them.": "ホストの CLI からフックを登録解除し、ツールを削除します。今後のリモートセッションで再インストールされます。",
   "Remove VibeSpace integration from {host}?": "{host} から VibeSpace 連携を削除しますか？",

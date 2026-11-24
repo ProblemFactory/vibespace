@@ -29,7 +29,8 @@ import { mutantCopies } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const { ok, report } = checker();
+const { ok, report, counts } = checker();
+const SKIPPED = [];   // r3784 (5): a skip is not a green — each skipped leg is named in the CLOSING line (the house form «ALL PASS (n, 1 skipped — …)»)
 const ROOT = scratch('cli-config-runner');
 fs.mkdirSync(ROOT, { recursive: true });
 const MC = mutantCopies('cli-config-runner', REPO);
@@ -548,7 +549,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const runnerWith = (Rm, helperPath) => Rm.createCliConfigRunner({ starter, helperPath, home, journal: () => {}, warn: () => {} });
       const SNEW = runnerWith(R, HELPER), STODAY = runnerWith(RUNNER_TODAY, OLD_HELPER), SOLD = runnerWith(R, OLD_HELPER);
       for (const plant of ['hand-broken', 'unreadable', 'dangling']) {
-        if (plant === 'unreadable' && isRootR) { console.log(`  SKIP r2844: ${plant} — not read as root (root reads a mode-000 file); read where the suite runs unprivileged`); continue; }
+        if (plant === 'unreadable' && isRootR) { SKIPPED.push(`r2844 ${plant}: not read as root`); console.log(`  SKIP r2844: ${plant} — not read as root (root reads a mode-000 file); read where the suite runs unprivileged`); continue; }
         const h = await hooksRun(SNEW, plant);
         ok(!!(h.ok === false && /claude\.hooks: /.test(h.why || '') && /claude:(refused|error)/.test(h.hooks) && h.gate === 'failed' && h.untouched),
           `r2844: a ${plant} settings file — untouched, and the run is NOT landed, by name («claude.hooks: …»), the spawn gate told «failed»`, h);
@@ -624,13 +625,40 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
         ok(/const r = await hosts\.installAgentTools\(req\.params\.id, AGENT_BIN_DIR\), bad = \(r && r\.notLanded\) \|\| \[\]; res\.json\(\{ success: !bad\.length,/.test(src('src/server/exit-routes.js')) && /notLanded: HostManager\.installNotLanded\(cliConfig, \{ refused, hooks: HostManager\.hooksOfPlan\(this\._cliConfigPlanB64\(\)\) \}\)/.test(src(HOSTS_R)) && /t\('Not everything landed on \{host\}: \{what\}'/.test(src('src/lib/manage-agents.js')),
           'PIN r3064 (4): the install route answers success only when nothing failed (else what did not land, by name), and the machine card\'s toast says it', {});
         // the Remove road (the round's read): a strip that did not land keeps the tools — the entries left in the file still find their program
-        const unOf = async (Hmod, out) => { const calls = []; const H = Object.create(Hmod.HostManager.prototype); H.get = () => ({ id: 'h-0001' }); H._ssh = async (h, cmd) => { calls.push(/--uninstall/.test(cmd) ? 'strip' : /rm -f/.test(cmd) ? 'rm' : 'other'); return /--uninstall/.test(cmd) ? out : 'VS-REMOVED'; }; const r = await H.uninstallAgentTools('h-0001'); return { ok: r.ok, notLanded: r.notLanded || [], calls }; };
-        const STRIP_BAD = line('claude', 'hooks', 'refused', 'settings.json exists but is not valid JSON — not touching it') + '\nVS-STRIPPED\n', STRIP_OK = line('claude', 'hooks', 'applied') + '\nVS-STRIPPED\n';
+        // the stand-in machine: the strip prints `out`; the look at the hook files answers `look`; a removal that FAILS (`rmFails`) prints
+        // what the command echoes on failure (the release's command echoes VS-REMOVED whatever rm did)
+        const unOf = async (Hmod, out, { look = 'HOOK|claude|no\nHOOK|codex|no\n', rmFails = false, refusal = null } = {}) => { const calls = []; const H = Object.create(Hmod.HostManager.prototype); H.get = () => ({ id: 'h-0001' }); if (refusal) H._ownerWriteRefusal = () => refusal; H._ssh = async (h, cmd) => { const k = /--uninstall/.test(cmd) ? 'strip' : /rm -f/.test(cmd) ? 'rm' : /grep -q vibespace-hook\.mjs/.test(cmd) ? 'look' : 'other'; calls.push(k); if (k === 'strip') return out; if (k === 'look') return look; return rmFails && /\|\| echo VS-NOT-REMOVED/.test(cmd) ? 'VS-NOT-REMOVED' : 'VS-REMOVED'; }; const r = await H.uninstallAgentTools('h-0001'); return { ok: r.ok, notLanded: r.notLanded || [], error: r.error || null, calls }; };
+        const STRIP_BAD = 'VS-HELPER-RAN\n' + line('claude', 'hooks', 'refused', 'settings.json exists but is not valid JSON — not touching it') + '\nVS-STRIPPED\n', STRIP_OK = 'VS-HELPER-RAN\n' + line('claude', 'hooks', 'applied') + '\nVS-STRIPPED\n';
         const unB = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_BAD), unG = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_OK);
-        ok(!!(unB.ok === false && unB.notLanded.length === 1 && JSON.stringify(unB.calls) === '["strip"]' && unG.ok === true && JSON.stringify(unG.calls) === '["strip","rm"]' && /success: !\(r && r\.ok === false\)/.test(src('src/server/exit-routes.js'))),
+        ok(!!(unB.ok === false && unB.notLanded.length === 1 && JSON.stringify(unB.calls) === '["strip"]' && unG.ok === true && JSON.stringify(unG.calls) === '["strip","look","rm"]' && /success: !\(r && r\.ok === false\)/.test(src('src/server/exit-routes.js'))),
           'r3064: a paired machine\'s Remove — a refused strip answers NOT removed by name and keeps the tools (no rm); a strip that landed removes them', { unB, unG });
         const unX = await unOf(require(MC.write(HOSTS_R, anchored(src(HOSTS_R), '      if (stripped.length) return { ok: false, notLanded: stripped, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${stripped.join(\'; \')}` };\n', '', 'the tools removed whatever the strip said'), 'hosts-rm-anyway')), STRIP_BAD);
-        ok(!!(unX.ok === true && JSON.stringify(unX.calls) === '["strip","rm"]'), 'RED (the tools removed whatever the strip said): «removed», and the entries left call a program that is gone', unX);
+        ok(!!(unX.ok === true && JSON.stringify(unX.calls) === '["strip","look","rm"]'), 'RED (the tools removed whatever the strip said): «removed», and the entries left call a program that is gone', unX);
+        // r3784, THE REMOVE ROAD's LAW IN TWO HALVES: a strip that printed NO hooks receipt (an older helper, silent even when it succeeds)
+        // is looked at — our marker still in a hook file ⇒ the tools kept, said by name; gone ⇒ removed (never refused for a helper's age)
+        const SILENT = 'VS-STRIPPED\n';
+        const unS = await unOf(require(path.join(REPO, HOSTS_R)), SILENT, { look: 'HOOK|claude|yes\nHOOK|codex|no\n' }), unSg = await unOf(require(path.join(REPO, HOSTS_R)), SILENT);
+        ok(!!(unS.ok === false && JSON.stringify(unS.calls) === '["strip","look"]' && unS.notLanded.length === 1 && /^claude \(hooks\): still in its hook file/.test(unS.notLanded[0]) && unSg.ok === true && JSON.stringify(unSg.calls) === '["strip","look","rm"]'),
+          'r3784: a strip that said nothing of our hooks — the machine is LOOKED at: entries still there ⇒ the tools are kept, by name; gone ⇒ the tools are removed (an older helper is never refused)', { unS, unSg });
+        const unSx = await unOf(require(MC.write(HOSTS_R, anchored(src(HOSTS_R), '      if (unsaid.length) { const kept = await look(', '      if (false) { const kept = await look(', 'the silent strip taken as landed'), 'hosts-silent-landed')), SILENT, { look: 'HOOK|claude|yes\nHOOK|codex|no\n' });
+        ok(!!(unSx.ok === true && JSON.stringify(unSx.calls) === '["strip","rm"]'), 'RED (a silent strip taken as landed — the release\'s Remove): the tools are removed under hooks still in the file', unSx);
+        // each cause in its own words (the round's read): a helper that RAN and said nothing this hub knows; no helper at all; a state from
+        // a newer helper; a server that never writes a machine's CLI config (it strips nothing: the look still guards the tools)
+        const unRan = await unOf(require(path.join(REPO, HOSTS_R)), 'VS-HELPER-RAN\nVS-STRIPPED\n', { look: 'HOOK|claude|yes\nHOOK|codex|no\n' });
+        const unNew = await unOf(require(path.join(REPO, HOSTS_R)), 'VS-HELPER-RAN\nCFG|claude|hooks|a-state-from-the-future|%22%22|%22%22|%22%22\nVS-STRIPPED\n', { look: 'HOOK|claude|yes\nHOOK|codex|no\n' });
+        const unRef = await unOf(require(path.join(REPO, HOSTS_R)), 'unused', { refusal: { kind: 'worktree', why: 'a git worktree of the checkout' }, look: 'HOOK|claude|yes\nHOOK|codex|no\n' });
+        const unRefG = await unOf(require(path.join(REPO, HOSTS_R)), 'unused', { refusal: { kind: 'worktree', why: 'a git worktree of the checkout' } });
+        ok(!!(/no helper ran there/.test(unS.notLanded[0] || '') && unRan.ok === false && /the helper there said nothing this hub knows of the strip/.test(unRan.notLanded[0] || '') && unNew.ok === false && JSON.stringify(unNew.calls) === '["strip","look"]'
+            && unRef.ok === false && JSON.stringify(unRef.calls) === '["look"]' && /never writes a machine's CLI config/.test(unRef.notLanded[0] || '') && unRefG.ok === true && JSON.stringify(unRefG.calls) === '["look","rm"]'),
+          'r3784: each cause in its words — no helper ran; a helper that said nothing this hub knows; a hooks row in a state from a newer helper (looked at, not taken as landed); a server that strips nothing (looked at: entries there keep the tools)', { unS: unS.notLanded, unRan: unRan.notLanded, unNew: unNew.calls, unRef: unRef.calls, unRefG: unRefG.calls });
+        const unR = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_OK, { rmFails: true });
+        ok(!!(unR.ok === false && /its tools could not be removed/.test(unR.error || '') && unR.notLanded.some((w) => /^the tools: could not be removed/.test(w))), 'r3784: the removal\'s OWN failure is said (the hooks removed, the tools not), never «removed»', unR);
+        const unRx = await unOf(require(MC.write(HOSTS_R, anchored(src(HOSTS_R), ' && echo VS-REMOVED || echo VS-NOT-REMOVED`;', '; echo VS-REMOVED`;', 'the release\'s removal echo'), 'hosts-rm-echo')), STRIP_OK, { rmFails: true });   // stale-pins: kept — the red's copy writes the release's own echo back
+        ok(!!(unRx.ok === true), 'RED (the release\'s removal: echo VS-REMOVED whatever rm did): «removed» though the tools are still there', unRx);
+        // r3784 (a should, pinned either way): a receipt state this hub does not know (a newer helper's) is parsed «unknown» and is NOT a
+        // failure — on this road the helper is the hub's own; a hooks row in it counts as printed
+        const unk = HM.installNotLanded(HCJ.parseReceiptLines('CFG|claude|hooks|a-state-from-the-future|%22%22|%22%22|%22%22'), { hooks: ['claude'] });
+        ok(!!(Array.isArray(unk) && unk.length === 0), 'PIN r3784: a receipt state the hub does not know reads «unknown» — not a failure, and a hooks row in it counts as printed (the helper here is the hub\'s own)', unk);
         // (c) ONCE PER CAUSE (r3064): a file left broken re-runs the helper at each start; the gate names the cause and the spell, the start
         //     keys its notice on both (serverNotice burns a key only when a page took it), and a landing on any road starts a new spell
         const REFUSED = line('claude', 'hooks', 'refused', 'settings.json exists but is not valid JSON — not touching it') + '\n' + line('codex', 'hooks', 'missing', '~/.codex not found') + '\n';
@@ -675,7 +703,14 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
           'r3064 (7): the Install press — our hooks landed (codex\'s missing folder no failure, r1518) and the refused row of the same run is named in its answer', { ans, claude: ip && ip.claude });
         const ipO = await pressWith(require(MC.write(GEN_R, anchored(src(GEN_R), 'if (rows.length && results[key]) results[key].rows = rows;', '', 'the answer without the rows'), 'gen-no-rows')));
         const ansO = hlOf(require(MC.write(HL_R, anchored(src(HL_R), "const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir');", "const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false);", 'a missing folder a failure'), 'hl-old-install'))).installAnswer(ipO);
+        // r3784: the two cures each have their own red (one copy took out both)
+        const ansRows = hlOf(require(path.join(REPO, HL_R))).installAnswer(ipO), ansDir = hlOf(require(MC.write(HL_R, anchored(src(HL_R), "const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir');", "const bad = Object.entries(results && typeof results === 'object' ? results : {}).filter(([, v]) => v && v.ok === false);", 'a missing folder a failure, alone'), 'hl-nodir-only'))).installAnswer(ip);
+        ok(!!(ansRows.success === true && !ansRows.rowsNotLanded), 'RED (the answer without the rows, alone): the press says «installed», the refused row nowhere', ansRows);
+        ok(!!(ansDir.success === false && /^codex: /.test(ansDir.error || '')), 'RED (a missing folder a failure, alone — r1518 undone): the press fails on codex\'s missing folder', ansDir);
         ok(!!(ansO.success === false && /^codex: /.test(ansO.error || '') && !ansO.rowsNotLanded), 'RED (today\'s press: a missing folder a failure, no rows): the toast says only «codex: … not found», the refused row nowhere', ansO);
+        // r3784: a machine with NO CLI folder at all registered nothing — the press says what was done
+        const none = hlOf(require(path.join(REPO, HL_R))).installAnswer({ claude: { ok: false, missing: 'no-dir', error: '~/.claude not found' }, codex: { ok: false, missing: 'no-dir', error: '~/.codex not found' } });
+        ok(!!(none.success === true && JSON.stringify(none.noCli) === '["~/.claude","~/.codex"]' && src('src/lib/manage-agents.js').includes("t('Nothing registered: no CLI folder on this machine ({dirs})', { dirs: r.noCli.join(', ') })")), 'r3784: no CLI folder at all — the press answers what was done («nothing registered», the folders named), never «installed»', none);
         ok(/res\.json\(\{ \.\.\.hooksLate\.installAnswer\(results\), results, status: await agentHooksStatus\(\) \}\);/.test(src('server.js')) && /t\('a setting did not land: \{what\}'/.test(src('src/lib/manage-agents.js')), 'PIN r3064 (7): the Install route answers by the one verdict and its toast names a refused row', {});
       }
     } finally { console.warn = warn0; console.log = log0b; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
@@ -813,4 +848,5 @@ console.log('r4027: THE PLAN REACHES THE SHIPPED HELPER ON THE REAL STARTER (its
 }
 
 clearInterval(KEEP);
+if (SKIPPED.length) { console.log(counts.fail ? `\n${counts.fail} FAILED (${counts.pass} passed, ${SKIPPED.length} skipped — ${SKIPPED.join('; ')})` : `\nALL PASS (${counts.pass}, ${SKIPPED.length} skipped — ${SKIPPED.join('; ')})`); process.exit(counts.fail ? 1 : 0); }
 report();

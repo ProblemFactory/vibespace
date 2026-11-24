@@ -25,7 +25,7 @@ export function receiptLine(r, { t, where, lastWriteAt = null, now = Date.now(),
   switch (r && r.state) {
     case 'applied':
     case 'unchanged': {
-      const when = lastWriteAt ? ` · ${t('written {ago}', { ago: ago(now - lastWriteAt, t) })}` : '';
+      const when = (lastWriteAt ? ` · ${t('written {ago}', { ago: ago(now - lastWriteAt, t) })}` : '') + (r.readAt ? ` · ${t('last read {ago}', { ago: ago(now - r.readAt, t) })}` : '');   // r3784: a reused read says its age
       return { tone: 'ok', text: `✓ ${where}: ${target} = ${fmt(r.want)}${when}` };
     }
     case 'differs':

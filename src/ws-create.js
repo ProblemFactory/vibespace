@@ -1872,6 +1872,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (cliLate) {   // (r1407 (a)) said once, by name: the start ran on the CLI config as it stood before — once per CAUSE and spell (r3064)
             const w = SFW.CLI_CONFIG_LATE_WORDS, name = String(session.name || data.name || '').slice(0, 80) || 'This conversation', why = String(cliLate.why || (cliLate.late ? 'late' : 'failed')).slice(0, 200);
             const causeKey = crypto.createHash('sha1').update(String(cliLate.cause || why)).digest('hex').slice(0, 12);
+            // r3784 (said in the note): ONE notice a cause and a spell — the FIRST conversation started on the old config in that spell is named;
+            // a later one in the same spell is not (r1407 / r3064: the person is told the config is late once, not once a conversation)
             try { serverNotice?.(`cli-config-late-${cliLate.spell || 0}-${causeKey}`, w.replace('{name}', () => name).replace('{why}', () => why), { level: 1, i18n: { key: w, params: { name, why } } }); } catch { }
           }
           // B-6c55 (c): the CLI's own catalog gives the locked model no 1M form — SAID here, after the start's refusals (batch 21's cure);
