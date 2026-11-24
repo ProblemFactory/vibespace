@@ -150,6 +150,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE: a file over LINE_FILE_MAX (1 MiB) goes through the agent client's existing fsWriteStream (a window of data frames; the device checks the size and the sha256, then renames into place; overwrite; by system:ctx-sync — the act gated exactly as the one-line write). An older agent lacks fs-write-stream: the client refuses it BEFORE anything is sent and the file goes as one line, as before.
 - LEGS: test-ctx-sync — the big file streamed, a small one kept on the line, an older agent's one line (RED: the stream road cut). test-usage-walk-bounds ⑥ — one record whose raw line is far over a stand-in 4 KiB line (64 KiB of text, a 9 KB model and path) is pushed, acked and never walked again (CONTROL: the producer's name cap cut — refused at every walk, the stall for good). src/usage-walker.js untouched (the leg is green).
 
+### bl-machines-a r2660 (B) — the hub's file pool off the device bundle (for 2.369.417)
+- WHY: src/safe-fs.js (about 23 KB as shipped, measured by lane bl-chat-c) rode the paired machine's single-file agent through the lazy requires of three files the device carries (src/adapters/codex.js, src/transcript-service.js, src/agy-backfill.js); each asked it only when its worker script exists, which the bundle never ships, so no pool was ever built there. (src/accounts.js and src/telemetry.js, also named, are not in the device build's closure at the tip.)
+- THE CURE: NEW src/hub-pool.js `hubPool(script)` answers src/safe-fs.js's exports only when the worker script exists beside the code, else null; its require is a computed path, so esbuild does not follow it. The three sites ask it.
+- LEGS (test-architecture §107): the build's own input list carries src/hub-pool.js and not src/safe-fs.js, RED CONTROL the same build with the helper's require written as a literal (an esbuild onLoad plugin) carries it again; the helper's body lifted: a machine without the worker's script never reaches the require, the hub's checkout reaches it once, RED the existence line cut.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
