@@ -221,6 +221,7 @@
   "test-builtin-plugins.mjs": 1,
   "test-bundle-globals.mjs": 1,
   "test-bypass-auto-allow.mjs": 1,
+  "test-cache-bounds-walks.mjs": 1,
   "test-cache-bounds.mjs": 1,
   "test-cache-warmth-chrome.mjs": 1,
   "test-cache-warmth.mjs": 1,
