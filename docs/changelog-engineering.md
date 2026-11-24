@@ -205,6 +205,9 @@ This file is the engineers' record of every release: the lanes, the verification
 ### lg-group-parents — B-360d part 3 U3's smalls (r2249): a gone file ends its skip; a replace then a write inside one read; the replace's bound
 - r2249's three, from round w7skcarva: a skipped file that is GONE from the listing ends its episode silently (back and still unreadable, it is said again — the map keeps no name the folder no longer has); once a repair's replace is noted during a read, a LATER own write for that name stands outright (the second write no longer forgets the replace, which let the foreign text the read took come back for one refresh); the kb says a replace stands for exactly ONE read and what that costs. LEGS: test-usage-folder-reader (two, each with its red).
 
+### bl-machines-b — B-323e: one lookup program a name at a time (主开发 r2802; lane bl-chat-c's verification of which-kept)
+- src/plugins/which-kept.js: an aborted ask freed the kept lookup's slot while its `which` still ran, so the next ask of the same name started a second beside it. Now the slot is the child's own life (its answer, or the starter's bound); an abort ends only that ask's waiting; a later ask joins the one that runs; an answer no ask waits for is not kept, but a no-reply still arms the back-off (a child on a hung mount can outlive the kill); an ask aborted before it asks starts nothing. Leg: test-starts-via-starter ⑤ (RED the abort frees the slot: two programs for one name).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
