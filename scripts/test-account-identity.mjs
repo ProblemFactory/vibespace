@@ -220,9 +220,18 @@ ok(typeof CL.folderIdentityOf === 'function' && typeof CX.folderIdentityOf === '
     const r2 = am.identityRecordOf(rt);
     ok(r0 && r0.seat === PERSON && r1 && r1.seat === PERSON && r2 && r2.seat === null && r2.org === null && sameAccount(r0, r2) !== 'same',
       'r2779 (A): a config is tied to the credentials by the login session the product\'s sign-in saw — a refresh (its deadline kept, the refresh token rotated) keeps the seat; another login beside the old config (a new deadline) names NO seat and NO organisation, never «same» as the login before', JSON.stringify([r0 && r0.seat, r1 && r1.seat, r2 && r2.seat]));
-    fs.writeFileSync(path.join(d, '.credentials.json'), tok('nodeadline-b', null)); am.finalizeSubscription(rt); fs.writeFileSync(path.join(d, '.credentials.json'), tok('nodeadline-c', null)); await am.displayRefresh(rt);
+    // THE TICK FORCED (主开发 r3610): both files carry ONE mtime, so the keeper's stamp check (B-360d: the same size and mtime ⇒ the
+    // kept facts CONFIRMED, never read again) is decided by the SIZE alone — the leg can no longer lose a race with the clock's tick
+    const cp = path.join(d, '.credentials.json'), T0 = new Date(Math.floor(Date.now() / 1000) * 1000 - 60e3), atT0 = (f) => fs.utimesSync(f, T0, T0);
+    fs.writeFileSync(cp, tok('nodeadline-b', null)); atT0(cp); am.finalizeSubscription(rt); fs.writeFileSync(cp, tok('nodeadline-other', null)); atT0(cp); await am.displayRefresh(rt);
     const r3 = am.identityRecordOf(rt);
-    ok(r3 && r3.seat === null, '…credentials with no deadline: the refresh token the sign-in saw ties them; another refresh token unties them (no seat)', r3 && r3.seat); }
+    ok(r3 && r3.seat === null, '…credentials with no deadline: the refresh token the sign-in saw ties them; another refresh token unties them (no seat)', r3 && r3.seat);
+    // CONTROL — the leg's old form, its race made certain: the other login's file of the SAME size in the SAME tick. The keeper confirms
+    // the sign-in's kept facts and the seat stays named: what the leg lost in one zone under load (r3610). So the cure is the size, not a wait
+    const rc = am.createSubscription({}).id, dc = am.subDir(rc), cc = path.join(dc, '.credentials.json');
+    claudeLogin(dc); fs.writeFileSync(cc, tok('nodeadline-b', null)); atT0(cc); am.finalizeSubscription(rc); fs.writeFileSync(cc, tok('nodeadline-c', null)); atT0(cc); await am.displayRefresh(rc);
+    const rcRec = am.identityRecordOf(rc);
+    ok(rcRec && rcRec.seat === PERSON, 'CONTROL: the old form with its tick forced (one size, one mtime) — the keeper confirms the kept facts and the seat stays named (the race the leg lost; the cure is the size, never a wait)', rcRec && rcRec.seat); }
   // THE IDS STAY IN MEMORY (r1477's standing word): nothing the product shows or sends carries a seat's or an organisation's id
   await am.displaySettled();
   const shown = [JSON.stringify(am.list()), JSON.stringify(am.decisionList({ withinMs: 60e3 })), JSON.stringify(am.rowOf(a1.id)), JSON.stringify(am.rowOf(cx)), JSON.stringify(am.signinFacts(a1.id, { withinMs: 60e3 })), JSON.stringify(am.signinFacts(cx, { withinMs: 60e3 })),
