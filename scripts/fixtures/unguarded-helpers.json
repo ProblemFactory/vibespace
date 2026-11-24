@@ -867,6 +867,7 @@
   "test-still-press.mjs": 1,
   "test-stop-nudge.mjs": 1,
   "test-store-slow-storage.mjs": 1,
+  "test-store-write-census-scenes.mjs": 1,
   "test-store-write-census.mjs": 1,
   "test-store-writer-laws.mjs": 1,
   "test-store-writer-r4.mjs": 1,
