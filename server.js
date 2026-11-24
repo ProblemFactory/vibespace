@@ -1648,7 +1648,7 @@ probeSockets().finally(() => hubForm.then((d) => { hubPort = require('./src/serv
     } catch {}
     if (swept) console.log(`  Swept ${swept} orphaned session-buffer/attach-cfg/chat-frame files (age-based)`);
     // B-5a4d root: the handed records (<buffers>/handed/) go by the same cutoff only when no transcript and no record names them — off the loop
-    require('./src/server/handed-sweep.js').sweep({ buffersDir: BUFFERS_DIR, metaDir: META_DIR, cutoff, activeSessions }).catch((e) => console.warn('[handed] the age sweep failed:', e && e.message));
+    require('./src/server/handed-sweep.js').sweep({ buffersDir: BUFFERS_DIR, metaDir: META_DIR, cutoff, activeSessions }).catch((e) => console.warn('[handed] the age sweep failed:', (e && e.code) || 'an error with no code'));   // a code, never a message (it can carry a path)
   }, 30000);
 
   console.log(`  Ready.\n`);

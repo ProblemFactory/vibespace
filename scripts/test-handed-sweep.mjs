@@ -105,14 +105,20 @@ const R_ANYINDEX = red('anyindex', [['if (!index || index.ok !== true || index.t
 }
 
 say('④ THE LIVE SESSIONS — a conversation id, a fork chain, a hub id');
+const R_PLACEFIRST = red('placefirst', [['  for (const a of aged) { if (!want.has(a.id) || named.has(a.id)) continue; if ((await placeOf(dir, a.base, a.name, cache)) === true) left.push(a); else out.notHere++; }', '  for (const a of aged) { const pl = await placeOf(dir, a.base, a.name, cache); if (!want.has(a.id) || named.has(a.id)) continue; if (pl === true) left.push(a); else out.notHere++; }   // MUTANT: the place read before the filters']]);
 const R_NOLIVE = red('nolive', [['    for (const [id, s] of activeSessions || []) {', '    for (const [id, s] of []) {   // MUTANT: no live session read']]);
 {
   const w = world('live'), cur = uuid(++k), parent = uuid(++k), back = uuid(++k);
   w.file(cur + '.json', 9); w.file(parent + '.json', 9); w.file(back + '.json', 9); w.file('hub-sess-9-100.json', 9); w.file('hub-sess-8-100.json', 9);
   const live = new Map([['sess-1-1', { claudeSessionId: cur }], ['sess-2-1', { forkedFrom: [parent] }], ['sess-3-1', { backendSessionId: back }], ['sess-9-100', {}]]);
-  const r = await w.run(HS, { activeSessions: live });
+  const fsp0 = fs.promises, rf0 = fsp0.readFile, reads = [];
+  fsp0.readFile = function (q, ...rest) { reads.push(String(q)); return rf0.call(this, q, ...rest); };
+  let r, readsRed;
+  try { r = await w.run(HS, { activeSessions: live }); const wq = world('live-order-red'); wq.file(cur + '.json', 9); reads.length = 0; await wq.run(R_PLACEFIRST, { activeSessions: live }); readsRed = reads.slice(); } finally { fsp0.readFile = rf0; }
+  const readsLane = [];   // the lane's reads are judged by name below (a live conversation's file never read for its place)
   ok(w.has(cur + '.json') && w.has(parent + '.json') && w.has(back + '.json') && w.has('hub-sess-9-100.json') && !w.has('hub-sess-8-100.json'),
     'a live session\'s conversation, its fork chain\'s parent, its backend id and a live hub id keep their files; a hub id no session holds goes', r);
+  ok(!r.lines.some((l) => /not provably/.test(l)) && readsRed.some((q) => q.endsWith(cur + '.json')), 'the place is read only for the files the cheap filters leave (a live conversation\'s file is never read for it) — RED: a copy that reads it before the filters reads the live file', { readsRed: readsRed.map((q) => path.basename(q)) });
   const w2 = world('live-red'); w2.file(cur + '.json', 9);
   await w2.run(R_NOLIVE, { activeSessions: live });
   ok(!w2.has(cur + '.json'), 'RED: a copy that reads no live session removes a running conversation\'s file');
@@ -175,20 +181,29 @@ const R_READFAIL = red('readfail', [["catch (e) { if (e && e.code === 'ENOENT') 
 
 say('⑧ WHAT IS NEVER TOUCHED — other names, a link, a folder');
 const R_NOTFILE = red('notfile', [['    if (!st.isFile()) continue;', '    if (false) continue;   // MUTANT: not only plain files']]);
+const R_PLACELINK = red('placelink', [["    try { const st = await fsp.lstat(path.join(dir, f)); if (!st.isFile() || st.size > FILE_MAX) { cache.set(f, null); return null; }", "    try { const st = await fsp.stat(path.join(dir, f)); if (st.size > FILE_MAX) { cache.set(f, null); return null; }   /* MUTANT: the link's target read */"]]);
 {
+  const old = (Date.now() - 30 * DAY) / 1000;
+  const aged = (p) => fs.lutimesSync(p, old, old);
+  // (a) the «a plain file» line: an AGED link named as a torn copy (its target a record of this machine), its conversation's main
+  //     file a plain record of this machine — only that line keeps the link (the place reads the main file)
+  const plantA = (ww) => { const id = uuid(++k), target = path.join(BASE, 'targetA-' + id + '.json'); fs.writeFileSync(target, LOCAL); ww.file(id + '.json', 9); fs.symlinkSync(target, path.join(ww.handed, id + '.json-torn')); aged(path.join(ww.handed, id + '.json-torn')); return { id, target }; };
+  // (b) the place's own facts: an aged plain torn copy whose conversation's MAIN name is a link (to a record of this machine) — the
+  //     place check keeps a main file that is not a plain file, so the torn copy stays
+  const plantB = (ww) => { const id = uuid(++k), target = path.join(BASE, 'targetB-' + id + '.json'); fs.writeFileSync(target, LOCAL); fs.symlinkSync(target, path.join(ww.handed, id + '.json')); aged(path.join(ww.handed, id + '.json')); ww.file(id + '.json-torn', 9); return { id, target }; };
   const w = world('never'), x = uuid(++k);
   for (const n of ['notes.txt', x + '.jsonl', x + '.json.bak', x + '.json-torn.old']) w.file(n, 30);
-  // the link and the folder AGED past the cutoff — the link's OWN time (lutimes), not its target's — so only the «a plain file» line keeps them
-  const old = (Date.now() - 30 * DAY) / 1000, linkName = uuid(++k) + '.json', dirName = uuid(++k) + '.json';
-  const plant = (ww) => { const target = path.join(BASE, 'target-' + ww.handed.split(path.sep).slice(-2, -1)[0] + '.json'); fs.writeFileSync(target, LOCAL); fs.symlinkSync(target, path.join(ww.handed, linkName)); fs.lutimesSync(path.join(ww.handed, linkName), old, old); fs.mkdirSync(path.join(ww.handed, dirName)); fs.utimesSync(path.join(ww.handed, dirName), old, old); return target; };
-  const target = plant(w);
-  const before = fs.readdirSync(w.handed).sort();
+  const dirName = uuid(++k) + '.json'; fs.mkdirSync(path.join(w.handed, dirName)); fs.utimesSync(path.join(w.handed, dirName), old, old);
+  const A = plantA(w), Bb = plantB(w);
   const r = await w.run();
-  ok(JSON.stringify(fs.readdirSync(w.handed).sort()) === JSON.stringify(before) && fs.readFileSync(target, 'utf8') === LOCAL && r.removed.length === 0 && fs.lstatSync(path.join(w.handed, linkName)).mtimeMs < Date.now() - 29 * DAY,
-    'names not of the wrapper\'s own shape stay; an AGED link named as a record (its target a record of this machine) is never removed, an aged folder never touched', { before, r });
-  const w2 = world('never-red'); plant(w2);
+  const has = (ww, n) => fs.readdirSync(ww.handed).includes(n);
+  ok(has(w, A.id + '.json-torn') && !has(w, A.id + '.json') && has(w, Bb.id + '.json') && has(w, Bb.id + '.json-torn') && has(w, dirName) && ['notes.txt', x + '.jsonl', x + '.json.bak', x + '.json-torn.old'].every((n) => has(w, n)) && fs.readFileSync(A.target, 'utf8') === LOCAL && fs.readFileSync(Bb.target, 'utf8') === LOCAL && fs.lstatSync(path.join(w.handed, A.id + '.json-torn')).mtimeMs < Date.now() - 29 * DAY,
+    'names not of the wrapper\'s own shape stay; an AGED link named as a record is never removed (its conversation\'s plain main file goes); a torn copy whose main name is a LINK stays (the place by the link\'s own facts); an aged folder is never touched', { removed: r.removed });
+  const w2 = world('never-red-a'); const A2 = plantA(w2);
   await w2.run(R_NOTFILE);
-  ok(!fs.readdirSync(w2.handed).includes(linkName), 'RED: a copy without the «a plain file» line unlinks the aged link');
+  const w3 = world('never-red-b'); const B3 = plantB(w3);
+  await w3.run(R_PLACELINK);
+  ok(!has(w2, A2.id + '.json-torn') && !has(w3, B3.id + '.json-torn'), 'RED: a copy without the «a plain file» line unlinks the aged link; a copy whose place follows the link removes the torn copy by the link\'s target');
 }
 
 say('⑨ THE FILE LOOKED AT AGAIN before it goes');
@@ -208,13 +223,21 @@ const R_RECHECK = red('recheck', [['    if (!same(a.st, now) || liveNames(active
 }
 
 say('⑪ A CONVERSATION ON ANOTHER MACHINE — a record goes only on a proof that covers where its transcript lives');
-const R_NOPLACE = red('noplace', [['  for (const a of aged) { if ((await placeOf(dir, a.base, a.name, cache)) === true) here.push(a); else out.notHere++; }', '  for (const a of aged) here.push(a);   // MUTANT: every file taken as this machine\'s']]);
+const R_ANYFRAME = red('anyframe', [["    if (text.includes('\"cli\":null')) v = false;   // a frame that names no CLI: kept, no parse needed\n    else { try { const j = JSON.parse(text); v = !!(j && Array.isArray(j.frames) && j.frames.length && j.frames.every(localCli)); } catch { v = null; } }", "    try { const j = JSON.parse(text); v = !!(j && Array.isArray(j.frames) && j.frames.some(localCli)); } catch { v = null; }   /* MUTANT: any frame */"]]);
+const R_NOPLACE = red('noplace', [['  for (const a of aged) { if (!want.has(a.id) || named.has(a.id)) continue; if ((await placeOf(dir, a.base, a.name, cache)) === true) left.push(a); else out.notHere++; }', '  for (const a of aged) { if (!want.has(a.id) || named.has(a.id)) continue; left.push(a); }   // MUTANT: every file taken as this machine\'s']]);
 {
   const w = world('remote'), far = uuid(++k), torn = uuid(++k), near = uuid(++k);
   w.file(far + '.json', 9, REMOTE); w.file(torn + '.json', 9, '{"v":1,"frames":[{"msgId":"x","cl'); w.file(near + '.json', 9);   // no cache entry, no record, aged
   const r = await w.run();
   ok(w.has(far + '.json') && w.has(torn + '.json') && !w.has(near + '.json') && r.notHere === 2 && r.lines.some((l) => /kept 2 file\(s\) past the age whose conversation is not provably this machine's/.test(l)),
     'a REMOTE conversation\'s record (its wrapper ran no CLI here) and one whose frames cannot be read are KEPT though no cache, no record and no age keeps them — said by count; a record of this machine goes', r);
+  // MIXED FRAMES (r3815): one frame names a CLI, one names none — the whole file is kept (every, not any)
+  const MIXED = JSON.stringify({ v: 1, frames: [JSON.parse(LOCAL).frames[0], { msgId: 'm-remote', cli: null, state: 'handed', at: 2 }] });
+  const wm = world('mixed'), mx = uuid(++k); wm.file(mx + '.json', 9, MIXED);
+  const rm = await wm.run();
+  const wmr = world('mixed-red'); wmr.file(mx + '.json', 9, MIXED);
+  await wmr.run(R_ANYFRAME);
+  ok(wm.has(mx + '.json') && rm.notHere === 1 && !wmr.has(mx + '.json'), 'a file with MIXED frames (one names a CLI, one names none) is KEPT — RED: a copy that takes any frame removes it', rm);
   const w2 = world('remote-red'); w2.file(far + '.json', 9, REMOTE);
   await w2.run(R_NOPLACE);
   ok(!w2.has(far + '.json'), 'RED: the sweep before this cure (every file taken as this machine\'s) removes the remote conversation\'s record on the cache\'s silence');
@@ -243,9 +266,10 @@ say('⑩ THE WIRING — server.js\'s boot sweep, its one cutoff');
   ok(block.includes('sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff,') && block.includes("require('./src/server/handed-sweep.js').sweep({ buffersDir: BUFFERS_DIR, metaDir: META_DIR, cutoff, activeSessions })") && /\.catch\(/.test(block.slice(block.indexOf('handed-sweep.js'))),
     'the boot\'s 30 s sweep calls it over BUFFERS_DIR and META_DIR with the wrapper files\' own cutoff and the live sessions — a failure said, never thrown', { found: at >= 0 && end >= 0 });
   ok(!/\b(readFileSync|readdirSync|statSync|lstatSync|unlinkSync|rmSync|existsSync)\b/.test(SRC), 'the sweep runs off the loop: fs.promises only (no sync call in the module)');
+  ok(!/\be && e\.message\b/.test(SRC) && block.includes("console.warn('[handed] the age sweep failed:', (e && e.code) || 'an error with no code')"), 'the journal carries an error\'s code or a fixed word, never its message (a message can carry a path) — the module and the boot\'s call');
 }
 
-for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 11, label: 'B-5a4d sweep ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 14, label: 'B-5a4d sweep ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 WD.clear();
 say(`\n${failed ? failed + ' FAILED' : 'ALL PASS'} (${passed} passed, ${failed} failed)`);
 process.exit(failed ? 1 : 0);
