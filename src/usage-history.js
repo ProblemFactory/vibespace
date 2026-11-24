@@ -2468,7 +2468,7 @@ class UsageHistory {
     const rowSlots = new Set();
     if (from && from % Q) rowSlots.add(Math.floor(from / Q));
     if (to && (to + 1) % Q) rowSlots.add(Math.floor(to / Q));
-    const loS = from ? Math.floor(from / Q) : -Infinity, hiS = to ? Math.floor(to / Q) : Infinity;
+    const loSlot = from ? Math.floor(from / Q) : -Infinity, hiSlot = to ? Math.floor(to / Q) : Infinity;
     const spec = this._cellSpec();
     const rates = new Array(U.n);
     let t0 = Date.now();
@@ -2478,7 +2478,7 @@ class UsageHistory {
       if (Date.now() - t0 >= sliceMs) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); if (this._evCache !== c) throw Object.assign(new Error('the usage ledger was rebuilt during the read'), { code: 'STALE' }); } };
     for (let i = 0; i < U.n; i++) {
       const slot = U.k[i * NKEY];
-      if (slot < loS || slot > hiS || rowSlots.has(slot)) continue;
+      if (slot < loSlot || slot > hiSlot || rowSlots.has(slot)) continue;
       const r = this._cellRate(U, i, spec);
       if (r === null) rowSlots.add(slot); else rates[i] = r;
       if ((i & 4095) === 0) await breathe();
@@ -2488,7 +2488,7 @@ class UsageHistory {
     const n = U.n;   // the cells as they were when the read began (a row taken meanwhile is in the next answer)
     for (let i = 0; i < n; i++) {
       const slot = U.k[i * NKEY];
-      if (slot < loS || slot > hiS || rowSlots.has(slot) || rates[i] === undefined) continue;
+      if (slot < loSlot || slot > hiSlot || rowSlots.has(slot) || rates[i] === undefined) continue;
       this._aggCell(st, U.cell(i), rates[i]);
       if ((i & 4095) === 0) await breathe();
     }
