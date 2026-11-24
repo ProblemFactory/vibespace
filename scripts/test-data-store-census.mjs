@@ -429,6 +429,7 @@ const REMOVERS = Object.freeze([
   { remover: 'the archived members\' unbind', module: 'src/server/migrations.js', read: ['const st = require(\'../store-hold.js\').readNow(path.join(dataDir, \'user-state.json\'),'], verdict: AS, fp: '015a0c3c2a8f', keeps: 'user-state.json, task-groups.json', why: 'held stores throw; an empty list removes nothing' },
   { remover: 'the attachments\' eviction', module: 'src/channel-store.js', read: ['if (total <= budgetBytes) break;'], verdict: AS, fp: '7b7f964da14f', keeps: 'channels/attachments/<account>/lru.json', why: 'evicts only names the ledger holds (a failed read evicts less)' },
   { remover: 'the sign-in witness\'s home copy', module: 'src/signin-witness-worker.js', read: ['netRemove({ path: dir, root }) {', 'if (m.unknown) throw unknownError(m.unknown);'], verdict: AS, fp: '6ceb740e0e12', keeps: 'the sign-in witness (auth.json\'s state)', why: 'netRemove removes the home folder\'s witness copy only on auth\'s own act, held while auth is unread (_held); a machine it cannot tell refuses' },
+  { remover: 'the handed records\' age sweep', module: 'src/server/handed-sweep.js', read: ['if (verdict.anyUnreadable()) return keepAll('], verdict: AS, fp: '6553d024c359', keeps: 'session-meta/<id>.json (every form: .json, .json.stopped, .json.orphan)', why: 'B-5a4d root, line 820 (r3249 / r3714): ONE boot pass removes <buffers>/handed/<conversation>.json (its torn copy, a killed write\'s temp) only on a proof that covers where its transcript lives — the record verdict is ASKED first (any record that could not be read keeps EVERY file, and a record it holds unread is never read here; a record this pass cannot read or parse keeps every file too), no live session and no record in any form names the conversation, every frame names a CLI (a remote conversation\'s file is kept), its transcript is gone from every place the hub looks (the index read whole), and it is past the wrapper files\' seven days; looked at again before its one unlink' },
 ]);
 // the removers reading an empty answer at the census's birth, each with its read and fp. NEVER EDITED.
 const READING_EMPTY_AT_BIRTH = Object.freeze([
@@ -476,7 +477,7 @@ const DELETION_CALLS = Object.freeze({
   'src/server/browser-env.js': 1, 'src/server/browser-installs.js': 1, 'src/server/browser-keeper.js': 5, 'src/server/browser-kept.js': 6,
   'src/server/browser-trace.js': 4, 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
   'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
-  'src/server/engine-distribution.js': 15, 'src/server/home-rename.js': 1, 'src/server/hook-root-watch.js': 1, 'src/server/host-tokens.js': 3,
+  'src/server/engine-distribution.js': 15, 'src/server/handed-sweep.js': 1, 'src/server/home-rename.js': 1, 'src/server/hook-root-watch.js': 1, 'src/server/host-tokens.js': 3,
   'src/server/hub-tmp.js': 1, 'src/server/incident-wiring.js': 2, 'src/server/job-secrets-door.js': 2, 'src/server/jobs-wiring.js': 1,
   'src/server/local-index.js': 1, 'src/server/migrations.js': 5, 'src/server/oat-mint.js': 3, 'src/server/ops-routes.js': 1,
   'src/server/plugin-install.js': 6, 'src/server/plugin-loader.js': 1, 'src/server/provider-spawn.js': 2, 'src/server/provider-test.js': 1,
