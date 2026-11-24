@@ -1136,6 +1136,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-11-kept-browser-notes',
+      note: "THE KEPT BROWSERS' FOLDERS OF TODAY GET THEIR NOTE (主开发 r3786 hold 8, line 821's second form — LAW 5): a kept browser's folder now holds a small note (its key, its conversation, its first time — src/server/browser-kept-note.js) written before its browser starts, and every start reconciles the rows and the bindings from the notes; a folder made before this release has none. ONE STEPPED pass (the boot never waits for it; off the loop): every row the kept list AND a binding both name, while both files read, gets its note; a row only one of them names gets nothing; a failure is not recorded and runs again at the next start",
+      run() { return require('./browser-kept-note.js').noteExisting({ dataDir }).then((rep) => { console.log('[migrate] kept-browser-notes:', JSON.stringify(rep)); return rep; }); },
+    },
   ];
   /** MG1 (r2944) on the train (r3615): THE LIVE LIST STARTED OVER A FILE IT NEVER READ. The accounts list's own hold (heldThrows)
    *  covers a read that failed and torn bytes; it does not cover a start whose read answered «not there» while the file IS there by

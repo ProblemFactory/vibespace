@@ -179,7 +179,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   // serverSetting by default) and which browser keys the kept store names (its directory is spared by the sweep, its
   // key is never minted again) — by default READ OFF data/browser-kept.json (file-based, like the bindings: the two
   // instances of this module in one server, ws-create's and the routes', read the same object)
-  keepOn = null, keptKeys = null } = {}) {
+  keepOn = null, keptKeys = null,
+  // r3786 (LAW 4): the kept store's facts for the boot sweep — the keys whose folder's true note names a conversation (null = unknown;
+  // undefined = no live store in this process: then a folder holding a note file is never removed by age)
+  keptNoted = null } = {}) {
   const ENV_DIR = path.join(dataDir, 'browser-env');        // generated configs + pin symlinks (+ the C rung's `<key>.cwd`)
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles'); // variant C scratch dirs (ours, swept)
   // lane browser-resource-care (B-afeb): THE TMPDIR every agent-browser process VibeSpace launches gets — the CLI mints its
@@ -209,12 +212,25 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   const enabled = () => setting('browser.isolateSessions', true) !== false;
   const keeping = () => { if (typeof keepOn === 'function') { try { return !!keepOn(); } catch { return false; } } return KB.keptLimits((k) => setting(k, undefined)).on; };
   /** The browser keys the kept store names (a set; unreadable ⇒ null, and the callers fail CLOSED: the sweep spares every
-   *  key-named directory, the fresh-key rule counts the key as named). */
+   *  key-named directory, the fresh-key rule counts the key as named).
+   *  r3786 (LAW 4, the attack's finding 2): ONE VERDICT OF THE LIST — the live kept store's own (`keptKeys`: unknown while it is held,
+   *  rebuilding or its notes' reconcile has not finished). With no live store in this process (`keptKeys` absent, or it answers
+   *  undefined) the file is judged by THE STORE's own judge (src/server/browser-kept.js KEPT_SHAPE through the store-read helper): bytes
+   *  that are not the store's shape are torn ⇒ unknown, never «no rows» (the release's own parse made a wrong shape EMPTY). */
   const keptKeySet = () => {
-    if (typeof keptKeys === 'function') { try { const v = keptKeys(); if (v == null) return null; return v instanceof Set ? v : new Set(v); } catch { return null; } }   // r3006: an unknown list stays unknown (null), never an empty set
-    let raw;
-    try { raw = fs.readFileSync(path.join(dataDir, KB.KEPT_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? new Set() : null; }
-    try { return new Set(Object.keys(KB.normalizeKeptStore(JSON.parse(raw)).entries)); } catch { return null; }
+    if (typeof keptKeys === 'function') { try { const v = keptKeys(); if (v === null) return null; if (v !== undefined) return v instanceof Set ? v : new Set(v); } catch { return null; } }   // r3006: an unknown list stays unknown (null), never an empty set
+    let read;
+    try { read = { text: fs.readFileSync(path.join(dataDir, KB.KEPT_FILE), 'utf8') }; } catch (error) { read = { error }; }
+    const a = require('../store-read.js').storeAnswer(read, { valid: require('./browser-kept.js').KEPT_SHAPE });
+    if (a.state === 'missing') return new Set();
+    if (a.state !== 'data') return null;
+    return new Set(Object.keys(KB.normalizeKeptStore(a.value).entries));
+  };
+  /** r3786 (LAW 4, the boot sweep's second rule): the keys whose folder's note names a conversation — the live store's reconcile (null:
+   *  unknown ⇒ every key-named folder spared); undefined = no live store: the sweep then spares any folder that holds a note file */
+  const keptNotedSet = () => {
+    if (typeof keptNoted !== 'function') return undefined;
+    try { const v = keptNoted(); return v === undefined ? undefined : (v === null ? null : (v instanceof Set ? v : new Set(v))); } catch { return null; }
   };
   /** verify F1 (the same class, found fixing it): the directories a REGISTERED named profile names — an in-place
    *  `new --adopt` of a conversation's kept / scratch directory under data/browser-profiles/ makes that directory a
@@ -771,6 +787,12 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // size bound). Its config / link / cwd files still go by the rule above (the next spawn rewrites them). An unreadable
     // store spares EVERY key-named directory (fail closed: a login is never deleted because a file could not be read).
     const keptSet = keptKeySet();
+    // r3786 (LAW 4): the boot sweep's two other rules — it NEVER removes by age a folder whose note names a conversation (the store's
+    // facts; with no live store, any folder holding a note file), and with the BINDINGS UNREAD it removes no key-named folder at all
+    const noted = keptNotedSet();
+    let bindingsUnread = false; try { bindingsUnread = bindings.state() === 'unknown'; } catch { bindingsUnread = true; }
+    const noteHeld = (dir) => { try { fs.lstatSync(path.join(dir, require('./browser-kept-note.js').NOTE_NAME)); return true; } catch (e) { return !e || e.code !== 'ENOENT'; } };
+    let notedSpared = 0;
     const regDirs = registeredDirs();
     // each registered directory's identity ONCE per sweep; an unresolvable one (null) makes every compare unknown ⇒ spared
     const regIds = regDirs ? regDirs.map((d) => dirIdentity(d)) : null;
@@ -788,6 +810,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         if (!B.isBrowserKey(key)) continue;
         if (live.has(key)) { kept++; continue; }
         if (isDir && (!keptSet || keptSet.has(key))) { keptDirs++; continue; }
+        if (isDir && (bindingsUnread || noted === null || (noted instanceof Set ? noted.has(key) : noteHeld(path.join(dir, n))))) { notedSpared++; continue; }   // r3786: the store's facts (or, with none, the note's presence)
         if (isDir && isRegistered(path.join(dir, n))) { regSpared++; continue; } // verify F1: a registered profile's directory is its logins — never swept
         // A create in flight has written its indirection and not yet its meta.
         // Every sweeper in this tree refuses to remove something that young,
@@ -805,9 +828,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       }
     }
     if (swept || spared.length) {
-      try { log.log?.(`[browser] swept ${swept} orphaned browser env object(s); ${kept} live${keptDirs ? `; ${keptDirs} kept browser director${keptDirs === 1 ? 'y' : 'ies'} left to the kept store${keptSet ? '' : ' (its file could not be read — every key-named directory was spared)'}` : ''}${regSpared ? `; ${regSpared} director${regSpared === 1 ? 'y' : 'ies'} a named profile registered in place spared${regDirs ? '' : ' (the profile registry could not be read — every key-named directory was spared)'}` : ''}${spared.length ? `; spared ${spared.length} younger than ${graceMs}ms (a create may still be in flight)` : ''}`); } catch { }
+      try { log.log?.(`[browser] swept ${swept} orphaned browser env object(s); ${kept} live${notedSpared ? `; ${notedSpared} key-named folder(s) spared (${bindingsUnread ? 'the bindings could not be read' : noted === null ? 'the kept folders\' notes are not read to their end yet' : 'a note in the folder names its conversation'})` : ''}${keptDirs ? `; ${keptDirs} kept browser director${keptDirs === 1 ? 'y' : 'ies'} left to the kept store${keptSet ? '' : ' (its file could not be read — every key-named directory was spared)'}` : ''}${regSpared ? `; ${regSpared} director${regSpared === 1 ? 'y' : 'ies'} a named profile registered in place spared${regDirs ? '' : ' (the profile registry could not be read — every key-named directory was spared)'}` : ''}${spared.length ? `; spared ${spared.length} younger than ${graceMs}ms (a create may still be in flight)` : ''}`); } catch { }
     }
-    return { swept, kept, spared, sweptAt, graceMs, keptDirs, keptUnreadable: !keptSet, registeredDirs: regSpared, registryUnreadable: !regDirs };
+    return { swept, kept, spared, sweptAt, graceMs, keptDirs, keptUnreadable: !keptSet, registeredDirs: regSpared, registryUnreadable: !regDirs, notedSpared, bindingsUnread, notesUnknown: noted === null };
   }
 
   /**

@@ -7,6 +7,10 @@
 // noted after it writes nothing over the file. RED: the release's load (the rename) — the folders gone. ② the same over TORN bytes
 // (both reads fail to parse). ③ r3023: a MINT while the store cannot be read takes its first candidate (the kept rule names nothing
 // unknown) — RED: the line before it, 64 tries and 64 walks of every conversation's meta.
+// r3786 (主开发, line 821's second form — LAW 5: the fact lives with the folder): a kept browser's folder holds its NOTE (its key, its
+// conversation, its first time — src/server/browser-kept-note.js), written by the start's gate; every start and lift reconciles from the
+// notes. ⑧ ⑫ ⑮–⑱ moved to that form (the owed offers, the stood set and the recovery mark are gone); ㉑–㉚ are the nine holds and the
+// boot sweep's three rules, each through fresh instances over the same data where a restart is the point, each with its red.
 // In-process, scratch folders only; no browser, no daemon.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,7 +31,22 @@ const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-kept.js'), 'utf
 const MUT = mutantCopies('kept-sweep', REPO);
 const quiet = { log() { }, warn() { }, error() { } };
 const KEYS = ['bk-0000a011', 'bk-0000b012'];   // two kept browsers, each with its profile folder (its sign-ins)
-const stoppedKeeper = () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, list: () => ({ profiles: [] }) });
+const stoppedKeeper = () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [], list: () => ({ profiles: [] }) });   // r3786: the keeper's new door (its registered folders) carried
+const KNM = require(path.join(REPO, 'src/server/browser-kept-note.js'));
+const KNSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-kept-note.js'), 'utf8');
+const BF = require(path.join(REPO, 'src/browser-fact.js'));
+const NOTE = '.vibespace-kept.json';
+let keyN = 0;
+/** r3786: a key no other leg decides (the choke point's memory of which conversation a key was decided for is the process's) */
+const freshKey = () => 'bk-' + (0x00a00000 + (keyN++)).toString(16).padStart(8, '0');
+let convN = 0;
+const freshConv = () => `c-${(0x10000000 + (convN++)).toString(16)}-0000-4000-8000-000000000099`;
+/** r3786: a red copy of the note module and a kept store whose KN is that copy → { KN, KS } */
+const overKN = (knSrc, tag, storeSrc = KSRC) => { const kn = MUT.write('src/server/browser-kept-note.js', knSrc, tag + '-kn'); return { KN: require(kn), KS: MUT.load('src/server/browser-kept.js', anchored(storeSrc, "const KN = require('./browser-kept-note.js');", `const KN = require(${JSON.stringify(kn)});`, 'the store over the copy'), tag + '-store') }; };
+/** r3786: THE SAME DATA FOLDER's bytes for FRESH instances (a restart): copied to a new path, so no memory this process keeps of the old
+ *  path (a hold engaged on its bindings, a lift's listeners) can reach them */
+const restartCopy = (dir) => { const to = path.join(ROOT, `x${++wn}`); fs.cpSync(dir, to, { recursive: true }); return to; };
+const noteOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, NOTE), 'utf8')); } catch { return null; } };
 
 let wn = 0;
 async function scene(KS, { torn = false } = {}) {
@@ -203,7 +222,7 @@ const T6 = await tornRun(KS0);
 console.log(`    facts: ${JSON.stringify(T6)}`);
 ok(T6.rows === 2 && T6.recovered === 2 && T6.n === 2 && T6.copy && T6.copies === 1 && T6.named === 2 && T6.bootRemoved === 0 && T6.ended === 0 && T6.removed === 0 && T6.left === 2,
   'torn bytes: copied aside ONCE (browser-kept.json.corrupt-…), the two kept browsers FOUND AGAIN from their folders (marked recovered; the count said), the list written with both — the boot sweep removes none, the hourly sweep past the grace ends none and removes none: both sign-ins stay', T6);
-const T6x = await tornRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, '    if (!v) { rebuildFromFolders((facts && facts.setAside) || null); return; }\n', '    if (!v) { store = K.normalizeKeptStore(null); save(); changed(); return; }\n', 'r3585 the helper\'s empty start, unrebuilt'), 'kept-sweep-empty'));
+const T6x = await tornRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    if (!v) { Promise.resolve(rebuildFromFolders((facts && facts.setAside) || null)).then((ok) => { if (ok) reconcile('lift').catch(() => { }); }, () => { }); return; }", '    if (!v) { store = K.normalizeKeptStore(null); save(); changed(); return; }', 'r3585 the helper\'s empty start, unrebuilt'), 'kept-sweep-empty'));
 console.log(`    facts (red): ${JSON.stringify(T6x)}`);
 ok(T6x.left === 0 && T6x.bootRemoved === 2, 'RED CONTROL (a torn lift taken as «empty» — the helper\'s plain rule): the empty list is written, the boot sweep REMOVES both kept browsers\' folders, their sign-ins — red', T6x);
 
@@ -217,7 +236,7 @@ async function unfinishedRun(KS) {
   await until(() => asked > 0); await new Promise((r) => setTimeout(r, 30));
   const held = hf(S), same = fs.readFileSync(w.file, 'utf8') === TORN, sw = await S.sweep();
   const boot = w.be.sweep(new Set(), { graceMs: 0 });
-  answer = { ok: true, dirs: KEYS.map((k) => [k, 1000]) };
+  answer = { ok: true, dirs: KEYS.map((k) => ({ name: k, mtimeMs: 1000, id: null, note: 'none', doc: null })), regs: [] };   // r3786: the listing's answer (the folders, their notes, the registered folders)
   await again(S);
   await until(() => !hf(S));
   const out = { held: held && held.code, same, sweepHeld: !!(sw && sw.held), bootRemoved: boot.swept, after: S.list().filter((r) => r.recovered).length, copies: fs.readdirSync(w.dir).filter((n) => n.startsWith(KB.KEPT_FILE + '.corrupt-')).length, left: w.left() };
@@ -232,36 +251,52 @@ const U7x = await unfinishedRun(MUT.load('src/server/browser-kept.js', anchored(
 console.log(`    facts (red): ${JSON.stringify(U7x)}`);
 ok(U7x.left === 0, 'RED CONTROL (a rebuild that fails writes an empty list): the boot sweep removes both kept browsers\' folders — red', U7x);
 
-console.log('⑧ r3585 THE MODEL: a found-again row never ENDS by a silence and is never REMOVED by the size bound (only a Forget)');
+console.log('⑧ r3786 THE MODEL: a found-again row never ENDS by a silence and is OUTSIDE the bound (out of its sum and its order — LAW 3); a row NOT MEASURED is spared and left out of the sum while the measured ordinary rows are still bounded');
 {
   const Mod = require('node:module');
   const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
   const MSRC = fs.readFileSync(path.join(REPO, 'src/browser-kept.js'), 'utf8');
   const verdict = (M) => M.keptEndVerdict({ entry: { browserKey: KEYS[0], recovered: 5, stoppedAt: 1 }, live: false, carried: false, bound: false, now: 10 * 3600e3, graceMs: 3600e3 });
-  const plan = (M) => M.keptRetentionPlan({ entries: [{ key: KEYS[0], bytes: 50 * M.MB, cacheBytes: 0, lastUsedAt: 1, live: false, carried: false, recovered: true }], perConversation: 100 * M.MB, total: M.MB });
-  const v = verdict(KB), pl = plan(KB);
+  // LAW 3 (the attack's MUST C): a 9 GB found-again row beside two 1 MB ordinary rows under a 5 MB total — the ordinary rows fit
+  const l3 = (M) => M.keptRetentionPlan({ entries: [{ key: KEYS[0], bytes: 9000 * M.MB, cacheBytes: 0, lastUsedAt: 1, recovered: true }, { key: KEYS[1], bytes: M.MB, cacheBytes: 0, lastUsedAt: 2 }, { key: 'bk-0000c013', bytes: M.MB, cacheBytes: 0, lastUsedAt: 3 }], perConversation: 100000 * M.MB, total: 5 * M.MB });
+  // THE UNMEASURED-ROW RULE: the oldest row not measured (null) beside two measured 3 MB rows under a 4 MB total
+  const um = (M) => M.keptRetentionPlan({ entries: [{ key: KEYS[0], bytes: null, cacheBytes: 0, lastUsedAt: 1 }, { key: KEYS[1], bytes: 3 * M.MB, cacheBytes: 0, lastUsedAt: 2 }, { key: 'bk-0000c013', bytes: 3 * M.MB, cacheBytes: 0, lastUsedAt: 3 }], perConversation: 100000 * M.MB, total: 4 * M.MB });
   const V0 = asModule('src/browser-kept.js', anchored(MSRC, "  if (entry.recovered) return { end: false, why: 'recovered' };", '', 'r3585 no recovered guard'));
-  const P0 = asModule('src/browser-kept.js', anchored(MSRC, "      if (e.recovered || e.stood) { kept.push(", "      if (false) { kept.push(", 'r3585 no recovered bound guard'));
-  const v0 = verdict(V0), pl0 = plan(P0);
-  ok(v.end === false && v.why === 'recovered' && pl.remove.length === 0 && v0.end === true && pl0.remove.length === 1, 'a found-again row ten hours past the grace with no binding: never ended (why recovered); over the total bound: kept, reported — RED: the model without the two guards ends it and removes it', { v, remove: pl.remove.length, red: { v0, remove0: pl0.remove.length } });
+  // the r3717 plan: the found-again row INSIDE the sum, only skipped in the order (the attack's MUST C)
+  const A2 = "      if (e.carried) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: 'its conversation is running";
+  const P0 = asModule('src/browser-kept.js', anchored(anchored(MSRC, '    if (e.recovered) { outside++; continue; }', '    if (false) { outside++; continue; }', 'r3786 a found-again row inside the sum'), A2, "      if (e.recovered) { kept.push({ key: e.key, used: 0, overBy: 0, why: 'found again (the r3717 plan)' }); continue; }\n" + A2, 'r3717 skipped in the order only'));
+  const U0 = asModule('src/browser-kept.js', anchored(MSRC, '{ unmeasured.push(e.key); continue; }   // spared, out of the sum', '{ unmeasured.push(e.key); }', 'r3786 an unmeasured row counted as nothing'));
+  const v = verdict(KB), v0 = verdict(V0), a = l3(KB), a0 = l3(P0), u = um(KB), u0 = um(U0);
+  ok(v.end === false && v.why === 'recovered' && v0.end === true, 'a found-again row ten hours past the grace with no binding: never ended (why recovered) — RED: the model without the guard ends it', { v, v0 });
+  ok(a.remove.length === 0 && a.used === 2 * KB.MB && a.outside === 1 && a0.remove.some((r) => r.key === 'bk-0000c013'), 'LAW 3: the found-again row is OUTSIDE the bound — out of the sum (2 MB counted, not 9 GB) and the order: the two ordinary rows fit and stay — RED: inside the sum it fills the total and the bound removes the ordinary rows, the newest among them', { a, red: a0.remove });
+  ok(u.unmeasured.includes(KEYS[0]) && u.remove.length === 1 && u.remove[0].key === KEYS[1] && u.used === 3 * KB.MB && u0.remove.some((r) => r.key === KEYS[0]), 'THE UNMEASURED-ROW RULE: the row not measured is spared and left out of the sum; the measured ordinary rows are still bounded (the older one goes) — RED: counted as nothing it is the oldest and the bound removes it', { u, red: u0.remove });
 }
 
-console.log('⑨ r3585 the rebuild\'s folder listing runs in a CHILD with a bound — no folder read on the hub\'s loop');
-{
+console.log('⑨ r3585 / r3786 (hold 9): the folders and their notes are listed by ONE CHILD — bounded in time and in output, the ALLOWLISTED environment (src/agent-env.js serviceEnv), ended only by its own starter — no folder read on the hub\'s loop');
+async function childRun(KS) {
   const w = keptWorld(TORN);
   const calls = [], PDIR = path.resolve(path.join(w.dir, 'browser-profiles'));
   const realDir = fs.readdirSync; let inLoop = 0;
+  process.env.VS_LEG_MADEUP_TOKEN = 'vsst_s1';   // a secret-shaped name in the hub's environment: never the child's
   fs.readdirSync = function (p, ...a) { if (path.resolve(String(p)) === PDIR) inLoop++; return realDir.call(this, p, ...a); };
   let S;
   try {
-    S = mkStore(KS0, w.dir, { execFileImpl: (cmd, args, opts, cb) => { calls.push({ cmd, e: args[0], timeout: opts && opts.timeout }); return realExecFile(cmd, args, opts, cb); } });
+    S = mkStore(KS, w.dir, { listExec: (cmd, args, opts, cb) => { calls.push({ cmd, e: args[0], opts }); return realExecFile(cmd, args, opts, cb); } });
     S.has(KEYS[0]);
     await until(() => !hf(S));
-  } finally { fs.readdirSync = realDir; }
+  } finally { fs.readdirSync = realDir; delete process.env.VS_LEG_MADEUP_TOKEN; }
   const child = calls.find((c) => c.cmd === process.execPath && c.e === '-e');
-  ok(!!child && child.timeout > 0 && inLoop === 0 && S.list().filter((r) => r.recovered).length === 2, 'the listing is ONE child (node -e) with a timeout; the hub\'s own process reads no folder of data/browser-profiles for it', { child, inLoop });
+  const o = (child && child.opts) || {};
+  const allow = new Set(Object.keys(require(path.join(REPO, 'src/agent-env.js')).serviceEnv({ ...process.env, VS_LEG_MADEUP_TOKEN: 'x' })));
+  const out = { child: !!child, timeout: o.timeout, kill: o.killSignal, maxBuffer: o.maxBuffer, env: o.env ? Object.keys(o.env).every((k) => allow.has(k)) && !('VS_LEG_MADEUP_TOKEN' in o.env) : 'the hub\'s whole environment', inLoop, found: S.list().filter((r) => r.recovered).length };
   stopHold(S);
+  return out;
 }
+const C9 = await childRun(KS0);
+console.log(`    facts: ${JSON.stringify(C9)}`);
+ok(C9.child && C9.timeout > 0 && C9.kill === 'SIGKILL' && C9.maxBuffer > 0 && C9.env === true && C9.inLoop === 0 && C9.found === 2, 'the listing is ONE child (node -e): its time bound ends it with SIGKILL through its own execFile (its starter — never a signal by a pid), its pipe is bounded, its environment the allowlist only (the hub\'s made-up token never reaches it); the hub\'s own process reads no folder of data/browser-profiles for it', C9);
+const C9x = await childRun(overKN(anchored(KNSRC, "env: require('../agent-env.js').serviceEnv(process.env), ", '', 'r3786 the child with no env of its own'), 'kept-sweep-child-env').KS);
+ok(C9x.env !== true, 'RED CONTROL (the child started with no env: it inherits the hub\'s whole environment, the made-up token with it) — red', C9x);
 
 console.log('⑩ r3585 the person\'s page and the routes say the hold (each by its lines, with a red copy)');
 {
@@ -322,45 +357,42 @@ const B11x = await bindHeldRun(MUT.load('src/server/browser-bindings.js', anchor
 console.log(`    facts (red): ${JSON.stringify(B11x)}`);
 ok(B11x.more >= 15, 'RED CONTROL (the release: every call reads the failing file again on the loop) — fifteen more reads of a storage that does not answer — red', B11x);
 
-console.log('⑫ r3585 TORN bindings: kept aside once, REBUILT from the conversations\' own records; r3590\'s per-row rule — a kept browser that STOOD at the recovery and that no binding names never ends by that silence; one kept after it is ordinary');
-const STOOD = 'bk-0000d014', LATER = 'bk-0000e015';
-async function bindTornRun(BBmod, KSmod) {
+console.log('⑫ r3786 TORN bindings at a START (fresh bindings, a fresh store over the same data): rebuilt from the conversations\' records; a conversation with NO record (it ended) gets its binding MADE AGAIN from its folder\'s NOTE — not ended; a folder with no note that no binding names ends as ordinary');
+async function bindTornRun(KSmod) {
   let clock = 2_000_000;
-  const w = bindWorld({ bytes: '{"v":1,"byConversation":{"' + CONVS[0] + '":{"key":"bk-00', metas: [
+  const STOOD = freshKey(), LATER = freshKey(), CSTOOD = freshConv();
+  const w = bindWorld({ metas: [
     { browserKey: KEYS[0], claudeSessionId: CONVS[0], browserKeyFor: CONVS[0] },
     { browserKey: KEYS[1], claudeSessionId: CONVS[1], browserKeyFor: CONVS[1] },
     { browserKey: 'bk-0000f016', claudeSessionId: 'c-ffff6666-0000-4000-8000-000000000006', forkSourceId: 'c-ffff6666-0000-4000-8000-000000000006' },   // a fork source: binds nothing
   ] });
-  const bb = BBmod.create({ dataDir: w.dir, log: quiet });
-  const S = KSmod.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
-  for (const k of [...KEYS, STOOD]) { S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); S.noteStop(k, { why: 'idle' }); }
-  try { bb.boundKeys(); } catch { /* the torn read engages the hold */ }
+  // THE RUN BEFORE: every kept browser bound, each one's START writing its folder's note through the real gate — LATER's folder predates the note
+  const bb0 = BB0.create({ dataDir: w.dir, log: quiet });
+  [[CONVS[0], KEYS[0]], [CONVS[1], KEYS[1]], [CSTOOD, STOOD]].forEach(([c, k]) => bb0.record(c, k, { at: clock }));
+  const S0 = KSmod.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb0, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
+  for (const k of [...KEYS, STOOD, LATER]) { fs.mkdirSync(S0.dirOf(k), { recursive: true }); if (k !== LATER) await S0.startGate(k); S0.noteStart(k, { hasDir: true }); fs.writeFileSync(path.join(S0.dirOf(k), 'Cookies'), 'a sign-in'); S0.noteStop(k, { why: 'idle' }); }
+  S0.shutdown();
+  // THE DAMAGE, then A START: the bindings file torn; fresh bindings and a fresh store over the same data
+  const dir = restartCopy(w.dir), bfile = path.join(dir, 'browser-env', 'bindings.json');
+  fs.writeFileSync(bfile, '{"v":1,"byConversation":{"' + CONVS[0] + '":{"key":"bk-00');
+  clock += 3 * 3600e3;
+  const bb = BB0.create({ dataDir: dir, log: quiet });
+  const S = KSmod.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
+  try { bb.boundKeys(); } catch { /* the torn read engages the hold: rebuilt from the records, then the lift reconciles from the notes */ }
   await until(() => !hb(bb) && !!(bb.recoveredFacts && bb.recoveredFacts()));
-  const rec = bb.recoveredFacts ? bb.recoveredFacts() : null;
-  // a kept browser started AFTER the recovery, its binding never written (a made-up loss): ordinary — it ends after its grace
-  clock = Date.now() + 1000;
-  S.noteStart(LATER, { hasDir: true }); fs.mkdirSync(S.dirOf(LATER), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(LATER), 'Cookies'), 'a sign-in'); S.noteStop(LATER, { why: 'idle' });
-  clock += 3 * 3600e3;   // three hours later: all four stopped far past the grace
+  await until(() => S._reconcileState() === 'done', 3000);
   const sw = await S.sweep();
-  const row = (k) => S.list().find((r) => r.browserKey === k) || null;
-  const out = { rebuilt: rec && rec.n, copy: !!(rec && rec.copy), bound: (() => { try { return [...bb.boundKeys()].sort().join(','); } catch (e) { return e.code; } })(),
-    stoodKept: S.has(STOOD), stoodSays: !!(row(STOOD) && row(STOOD).unnamedSinceDamage), laterEnded: !S.has(LATER), keptBound: KEYS.every((k) => S.has(k)), ended: sw && sw.ended };
+  const bound = (() => { try { return [...bb.boundKeys()].sort().join(','); } catch (e) { return e.code; } })();
+  const out = { rebuilt: (bb.recoveredFacts() || {}).n, bound: bound === [...KEYS, STOOD].sort().join(','), stoodKept: S.has(STOOD) && fs.existsSync(path.join(S.dirOf(STOOD), 'Cookies')), laterEnded: !S.has(LATER), keptBound: KEYS.every((k) => S.has(k)), ended: sw && sw.ended };
   try { S.shutdown(); } catch { /* its own */ }
   return out;
 }
-const B12 = await bindTornRun(BBm, KS0);
+const B12 = await bindTornRun(KS0);
 console.log(`    facts: ${JSON.stringify(B12)}`);
-ok(B12.rebuilt === 2 && B12.copy && B12.bound === [...KEYS].sort().join(',') && B12.stoodKept && B12.stoodSays && B12.keptBound && B12.laterEnded && B12.ended === 1,
-  'torn bindings: kept aside once, REBUILT from the two conversations\' records (the fork source binds nothing): both kept browsers bound again; the one that stood at the recovery with no record is NOT ended (its row says «no conversation names it since the bindings were damaged»); the one kept after the recovery with no binding ends as ordinary', B12);
-const KM = fs.readFileSync(path.join(REPO, 'src/browser-kept.js'), 'utf8');
-{
-  const Mod = require('node:module');
-  const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
-  const V = (M) => M.keptEndVerdict({ entry: { browserKey: STOOD, startedAt: 1000, stoppedAt: 2000 }, bound: false, now: 10 * 3600e3, graceMs: 3600e3, bindingsRecoveredAt: 5000 });
-  const V2 = (M) => M.keptEndVerdict({ entry: { browserKey: LATER, startedAt: 6000, stoppedAt: 7000 }, bound: false, now: 10 * 3600e3, graceMs: 3600e3, bindingsRecoveredAt: 5000 });
-  const M0 = asModule('src/browser-kept.js', anchored(KM, "  if (Number(bindingsRecoveredAt) > 0 && (Number(entry.startedAt) || Number(entry.lastUsedAt) || 0) < Number(bindingsRecoveredAt)) return { end: false, why: 'bindings-recovered' };\n", '', 'r3590 no per-row rule'));
-  ok(V(KB).why === 'bindings-recovered' && V2(KB).end === true && V(M0).end === true, 'THE MODEL (r3590): stood at the recovery ⇒ never ended by the silence; kept after it ⇒ ordinary — RED: the model without the rule ends the one that stood', { stood: V(KB), later: V2(KB), red: V(M0) });
-}
+ok(B12.rebuilt === 2 && B12.bound && B12.stoodKept && B12.keptBound && B12.laterEnded && B12.ended === 1, 'torn bindings at a start: rebuilt from the two records (a fork source binds nothing); the conversation with NO record gets its binding made again from its folder\'s note — kept three hours past the grace, its sign-in on disk; the folder with no note that no binding names ends as ordinary', B12);
+const B12x = await bindTornRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "        b = bb && typeof bb.restoreFromNotes === 'function' ? bb.restoreFromNotes(pairs) : { unknown: true };", '        b = { made: 0, movedOn: 0, taken: 0 };', 'r3786 no binding made again from a note'), 'kept-sweep-no-restore'));
+console.log(`    facts (red): ${JSON.stringify(B12x)}`);
+ok(!B12x.stoodKept && B12x.ended === 2, 'RED CONTROL (the reconcile without its bindings half): the conversation whose record is gone is never bound again — its kept browser ENDS with its folder — red', B12x);
 
 console.log('⑬ r3585 a bindings rebuild that does NOT finish leaves the file HELD — nothing ends; the next read again rebuilds it');
 {
@@ -395,13 +427,18 @@ console.log('⑭ r3585 the bindings\' rebuild reads the records in a CHILD with 
   ok(!!child && child.timeout > 0 && inLoop === 0 && !!(bb.recoveredFacts && bb.recoveredFacts() && bb.recoveredFacts().n === 1), 'the records are read by ONE child (node -e) with a timeout; the hub\'s own process lists none of data/session-meta for it', { child, inLoop });
 }
 
-console.log('⑮ r3585 the panel and the words say the bindings\' hold (each by its lines)');
+console.log('⑮ r3585 / r3786 the panel and the words: the bindings\' hold; «not measured» with its age; the found-again browsers outside the limit; a start not kept (each by its lines)');
 {
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-  const TV = src('src/lib/browser-trace-view.js'), UT = src('src/lib/utils.js'), HW = src('src/lib/held-lists-words.js'), BT = src('src/server/browser-trace.js');
-  const R1 = "    } else if (!k.live && k.unnamedSinceDamage) row.appendChild(el('span', 'bprof-cell bprof-kept-unnamed chat-status-dim', t('no conversation names it since the bindings were damaged')));";
-  const rowSays = (x) => x.includes(R1) && x.indexOf(R1) < x.indexOf("    else if (!k.live && !(k.recovered && !k.conversationKnown)) row.appendChild(");
-  ok(rowSays(TV) && !rowSays(anchored(TV, R1 + '   // r3590: its fact, and no Resume where no conversation can open it\n', '', 'r3590 the row as it was')), 'a kept browser no conversation names since the bindings were damaged says so, and offers no Resume hint (RED: the row as it was)', null);
+  const TV = src('src/lib/browser-trace-view.js'), UT = src('src/lib/utils.js'), HW = src('src/lib/held-lists-words.js'), BT = src('src/server/browser-trace.js'), ZH = src('src/lib/i18n-zh.js'), JA = src('src/lib/i18n-ja.js');
+  const NM = "Number(k.unmeasuredSince) > 0 ? t('not measured since {ago}', { ago: agoText(Date.now() - Number(k.unmeasuredSince)) })";
+  const OUT = "t('{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them', { n: nOut })";
+  const NK = "    if (k.notKept) { const c = el('span', 'bprof-chip', t('not kept'));";
+  const said = (line) => TV.includes(line) && !anchored(TV, line, '', 'r3786 the panel without it').includes(line);
+  ok(said(NM) && said(OUT) && said(NK), 'the Agent browser panel says «not measured since …» (its age) in the size cell, that the found-again browsers are kept outside the limit until a Forget (LAW 3), and a start not kept by its chip (each line with a red copy)', null);
+  const keys = ['not measured since {ago}', '{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them', 'not kept', 'Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder', 'A new browser: VibeSpace had not finished reading its kept browsers when this conversation resumed'];
+  ok(keys.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')), 'every new line has its zh and ja words', keys.filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':')));
+  ok(!TV.includes('k.unnamedSinceDamage') && !ZH.includes('"no conversation names it since the bindings were damaged"'), 'the stood set is gone: no row says «no conversation names it since the bindings were damaged» any more (its fact is a folder\'s note now)', null);   // stale-pins: kept (a deliberate absence check)
   ok(TV.includes("    if (v.bindingsUnread) keptSec.appendChild(") && BT.includes("...(bindingsUnread ? { bindingsUnread } : {}), ...(bindingsRecovered ? { bindingsRecovered } : {}), "), 'the panel says the bindings\' hold and their rebuild (the view carries both)', null);
   ok(/\n  bindings_unread: \(\) => t\('VibeSpace cannot read which browser belongs to which conversation right now/.test(UT) && HW.includes("'bindings.json': i18nKey('which browser belongs to which conversation'),"), 'r3488: the page\'s held words (bindings_unread) and the list\'s plain name on the family\'s notice', null);
 }
@@ -416,8 +453,8 @@ const bigDu = (cmd, args, opts, cb) => {
   setImmediate(() => cb(null, ps.map((x) => `${/browser-profiles[\\/]bk-[0-9a-f]{8}$/.test(x) ? 9000000000 : 0}\t${x}`).join('\n'), ''));
   return { kill() { } };
 };
-const PLAN_LINE = ', recovered: !!e.recovered, stood: unnamedSinceDamage.has(e.browserKey) })), perConversation: lim.perConversation, total: lim.total });';
-const BELT_LINE = "    if (!byPerson && (e.recovered || unnamedSinceDamage.has(bk))) return { removed: false, why: 'found again after a damage — removed only by the person\\'s Forget' };\n";
+const PLAN_LINE = ', recovered: !!e.recovered })), perConversation: lim.perConversation, total: lim.total });';
+const BELT_LINE = "    if (!byPerson && e.recovered) return { removed: false, why: 'found again after a damage — removed only by the person\\'s Forget' };\n";
 let planToday = null;
 const todayPlan = () => planToday || (planToday = MUT.load('src/server/browser-kept.js', anchored(anchored(KSRC3, PLAN_LINE, ' })), perConversation: lim.perConversation, total: lim.total });', 'r3717 the plan as it was'), BELT_LINE, '', 'r3717 no belt'), 'kept-sweep-plan-today'));
 
@@ -439,55 +476,82 @@ const M16x = await boundRun(todayPlan());
 console.log(`    facts (red): ${JSON.stringify(M16x)}`);
 ok(M16x.left === 0, 'RED CONTROL (the plan\'s rows as they were, no belt): the least recently used go first — the found-again rows, their sign-ins deleted by a clock — red', M16x);
 
-console.log('⑰ r3717 RULING 3: a kept browser that STOOD at the bindings\' recovery is not removed by the size bound either — through the REAL sweep');
-async function stoodBoundRun(KSmod) {
-  let clock = 2_000_000;
-  const w = bindWorld({ bytes: '{"v":1,"byConversation":{"x' });
+console.log('⑰ r3786 THE UNMEASURED-ROW RULE through the REAL sweep: a folder `du` gives no size for is spared and left out of the sum — the measured ordinary rows are still bounded; «not measured» keeps its age; the measure starts at a different row each pass');
+async function unmeasuredRun(KS) {
+  let clock = 5_000_000;
+  const w = bindWorld({});
   const bb = BB0.create({ dataDir: w.dir, log: quiet });
-  const S = KSmod.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock, execFileImpl: bigDu });
-  for (const k of KEYS) { S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); S.noteStop(k, { why: 'idle' }); }
-  try { bb.boundKeys(); } catch { /* the torn read engages the hold */ }
-  await until(() => !hb(bb) && !!(bb.recoveredFacts && bb.recoveredFacts()));
-  clock = Date.now() + 3 * 3600e3;
-  const sw = await S.sweep();
-  const out = { ended: sw && sw.ended, removed: sw && sw.removed, left: KEYS.filter((k) => fs.existsSync(path.join(S.dirOf(k), 'Cookies'))).length };
+  const ks = [freshKey(), freshKey(), freshKey()], firsts = [];
+  // a stand-in `du`: each measured kept folder 2.5 GB (two pass the 4 GB default total), the FIRST row's folder answered for by none
+  const du = (cmd, args, opts, cb) => {
+    if (cmd !== 'du') return realExecFile(cmd, args, opts, cb);
+    const ps = args.slice(args.indexOf('--') + 1), folders = ps.filter((x) => /browser-profiles[\\/]bk-[0-9a-f]{8}$/.test(x));
+    firsts.push(path.basename(folders[0] || ''));
+    setImmediate(() => cb(null, ps.filter((x) => !x.endsWith(ks[0])).map((x) => `${/browser-profiles[\\/]bk-[0-9a-f]{8}$/.test(x) ? 2500 * KB.MB : 0}\t${x}`).join('\n'), ''));
+    return { kill() { } };
+  };
+  const S = KS.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock, execFileImpl: du });
+  for (const k of ks) { bb.record(freshConv(), k, { at: clock }); clock += 1000; S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); S.noteStop(k, { why: 'idle' }); }
+  clock += 3 * 3600e3;
+  const s1 = await S.sweep();
+  const age1 = (S.list().find((r) => r.browserKey === ks[0]) || {}).unmeasuredSince || 0;
+  clock += 3600e3;
+  const s2 = await S.sweep();
+  const age2 = (S.list().find((r) => r.browserKey === ks[0]) || {}).unmeasuredSince || 0;
+  const out = { unmeasuredKept: S.has(ks[0]) && fs.existsSync(path.join(S.dirOf(ks[0]), 'Cookies')), removed1: s1 && s1.removed, oldestMeasuredGone: !S.has(ks[1]), newestKept: S.has(ks[2]), unmeasured1: s1 && s1.unmeasured, age: age1 > 0 && age1 === age2, firsts, turned: firsts.length >= 2 && firsts[0] !== firsts[1] };
   try { S.shutdown(); } catch { /* its own */ }
   return out;
 }
-const R17 = await stoodBoundRun(KS0);
-console.log(`    facts: ${JSON.stringify(R17)}`);
-ok(R17.ended === 0 && R17.removed === 0 && R17.left === 2, 'the bindings rebuilt from no record: both kept browsers stood at the recovery, three hours past the grace and far past the total bound — NONE ended, NONE removed (what can pile up is what stood at the damage)', R17);
-const R17x = await stoodBoundRun(todayPlan());
-console.log(`    facts (red): ${JSON.stringify(R17x)}`);
-ok(R17x.left === 0, 'RED CONTROL (the plan as it was, no belt): the stood rows go by the bound — red', R17x);
+const U17 = await unmeasuredRun(KS0);
+console.log(`    facts: ${JSON.stringify(U17)}`);
+ok(U17.unmeasuredKept && U17.removed1 === 1 && U17.oldestMeasuredGone && U17.newestKept && U17.unmeasured1 === 1 && U17.age && U17.turned, 'three kept browsers past the 4 GB total, the oldest not measured: it is SPARED and out of the sum, the two measured ones are still bounded (the older goes, 2.5 GB is left); its row keeps «not measured» since the first pass (the same age at the second); the measure began at another row the second pass', U17);
+const U17x = await unmeasuredRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, 'bytes: sizes[e.browserKey] ? sizes[e.browserKey].bytes : null, cacheBytes:', 'bytes: sizes[e.browserKey] ? (sizes[e.browserKey].bytes || 0) : 0, cacheBytes:', 'r3786 an unmeasured row read as 0'), 'kept-sweep-unmeasured-zero'));
+console.log(`    facts (red): ${JSON.stringify(U17x)}`);
+ok(!U17x.unmeasuredKept, 'RED CONTROL (a size not measured read as 0 bytes): the oldest row is in the order and the bound removes it — its sign-ins deleted on a size nobody measured — red', U17x);
+const U17y = await unmeasuredRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, '    const from = rows.length ? (measureTurn++ % rows.length) : 0;', '    const from = 0;', 'r3786 the measure always from the first row'), 'kept-sweep-same-end'));
+ok(!U17y.turned, 'RED CONTROL (the measure always from the same end): both passes begin at the same row — red', U17y);
 
-console.log('⑱ r3717 MUST 2: a binding offered while the file was HELD is written at the lift — nothing ends by a binding refused then');
-async function owedRun(BBmod) {
+console.log('⑱ r3786 LAW 5: a NEW browser\'s binding offered while the bindings file is HELD (nothing of it kept in memory), then a RESTART (fresh bindings, a fresh store over the same data): its conversation is bound to it again from its folder\'s NOTE — the choke point joined the conversation, the start wrote it — not ended');
+async function noteRun(KS, KN = KNM) {
   let clock = 3_000_000;
+  const K = freshKey(), C = freshConv();
   const w = bindWorld({ bytes: JSON.stringify({ v: 1, byConversation: {} }) });
-  const bb = BBmod.create({ dataDir: w.dir, log: quiet });
-  const S = KS0.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
+  const bb0 = BB0.create({ dataDir: w.dir, log: quiet });
+  const S0 = KS.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb0, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
   const realRead = fs.readFileSync;
   fs.readFileSync = function (p, ...a) { if (path.resolve(String(p)) === path.resolve(w.bfile)) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, p, ...a); };
-  let rec;
+  let rec, gate;
   try {
-    try { bb.boundKeys(); } catch { /* the hold engaged */ }
-    rec = bb.record(CONVS[0], KEYS[0], { at: clock });   // a NEW browser's binding, offered while held
-    S.noteStart(KEYS[0], { hasDir: true }); fs.mkdirSync(S.dirOf(KEYS[0]), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(KEYS[0]), 'Cookies'), 'a sign-in'); S.noteStop(KEYS[0], { why: 'idle' });
+    try { bb0.boundKeys(); } catch { /* the hold engaged */ }
+    rec = bb0.record(C, K, { at: clock });   // refused: nothing of it waits in memory
+    KN.join(path.join(w.dir, 'browser-profiles'), K, C);   // the choke point beside it (src/server/session-stdout.js writeSessionMeta)
+    fs.mkdirSync(S0.dirOf(K), { recursive: true });
+    gate = await S0.startGate(K);   // the browser's START: its folder's note, the conversation the choke point decided
+    S0.noteStart(K, { hasDir: true }); fs.writeFileSync(path.join(S0.dirOf(K), 'Cookies'), 'a sign-in'); S0.noteStop(K, { why: 'idle' });
   } finally { fs.readFileSync = realRead; }
-  const h = hbHold(bb); if (h) await h.again();   // the lift WITH data
+  try { S0.shutdown(); } catch { } const h0 = hbHold(bb0); if (h0) h0.stop();
+  // A RESTART over the same data: fresh bindings, a fresh store — three hours later, past the grace
+  const dir = restartCopy(w.dir);
   clock += 3 * 3600e3;
+  const bb = BB0.create({ dataDir: dir, log: quiet });
+  const S = KS.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
   const sw = await S.sweep();
-  const out = { rec, bound: (() => { try { return bb.boundKeys().has(KEYS[0]); } catch (e) { return e.code; } })(), ended: sw && sw.ended, left: fs.existsSync(path.join(S.dirOf(KEYS[0]), 'Cookies')) };
-  if (h) h.stop(); try { S.shutdown(); } catch { /* its own */ }
+  const out = { rec, gate: gate && gate.kept, note: noteOf(path.join(dir, 'browser-profiles', K)), bound: bb.lookup(C) === K, ended: sw && sw.ended, left: fs.existsSync(path.join(S.dirOf(K), 'Cookies')) };
+  try { S.shutdown(); } catch { /* its own */ }
   return out;
 }
-const O18 = await owedRun(BB0);
+const O18 = await noteRun(KS0);
 console.log(`    facts: ${JSON.stringify(O18)}`);
-ok(O18.rec === false && O18.bound === true && O18.ended === 0 && O18.left === true, 'the bindings held (EIO): a new browser\'s binding is refused (nothing written then) but KEPT; the lift with data writes it — three hours later the sweep reads it bound: not ended, its sign-ins kept', O18);
-const O18x = await owedRun(MUT.load('src/server/browser-bindings.js', anchored(BBS3, ' else if (H.owed.size) writeOwed(file, H, v); },', ' },', 'r3717 today\'s lift'), 'kept-sweep-owed-today'));
+ok(O18.rec === false && O18.gate === true && !!O18.note && O18.bound && O18.ended === 0 && O18.left, 'the bindings held (EIO): the new browser\'s binding is refused, nothing of it kept in memory; its start wrote the folder\'s note with the conversation; after a restart the reconcile binds the conversation to it again from the note — not ended three hours later, its sign-in kept', O18);
+const red18 = overKN(anchored(KNSRC, '  if (!decided.has(k)) { decided.set(k, c);', '  if (false) { decided.set(k, c);', 'r3786 the choke point joins nothing'), 'kept-sweep-no-join');
+const O18x = await noteRun(red18.KS, red18.KN);
 console.log(`    facts (red): ${JSON.stringify(O18x)}`);
-ok(O18x.left === false && O18x.ended === 1, 'RED CONTROL (today\'s lift: the refused offer is gone): the browser is never bound and ENDS after the lift, its folder removed — red', O18x);
+ok(!O18x.bound && O18x.ended === 1 && !O18x.left, 'RED CONTROL (the choke point joins nothing: the start\'s note names no conversation while the bindings are held): after the restart nothing binds it — the browser ENDS, its sign-in gone — red', O18x);
+{
+  const SS = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
+  const J = 'if (sid) b.record(sid, meta.browserKey); else b.noteUnbound(meta, sockName); if (sid) keptNoteJoin(meta.browserKey, sid);';
+  ok(SS.includes(J) && SS.includes("require('./browser-kept-note.js').join(path.join(path.dirname(META_DIR), 'browser-profiles'), key, sid)"), 'WIRING: the choke point (writeSessionMeta) joins the conversation into the kept folder\'s note beside the binding\'s record, by the same rule (bindableIdOf)', null);
+}
 
 console.log('⑲ ⑳ r3717 the shoulds: the panel\'s held words over the rows it draws; a row noted while held merges with the file\'s');
 {
@@ -510,5 +574,263 @@ async function mergeRun(KS) {
 const G20 = await mergeRun(KS0);
 const G20x = await mergeRun(MUT.load('src/server/browser-kept.js', anchored(KSRC3, 'store.entries[k] = mergeNoted(store.entries[k], e);', 'store.entries[k] = e;', 'r3717 the noted row laid whole'), 'kept-sweep-merge-today'));
 ok(G20.label === 'Made-up mail' && G20.waiting === 1 && G20x.label !== 'Made-up mail' && G20x.waiting === 0, 'a browser noted while the list was held (it runs again) MERGES at the lift: the file\'s label stays and its kept tab waits to be reopened — RED: the noted row laid whole loses both', { now: G20, red: G20x });
+
+
+// ══ r3786 (主开发, line 821's second form — LAW 5: the fact lives with the folder): THE NINE HOLDS ══
+/** a data folder with kept folders, each `[key, note | null, extra files]`, a bindings file and the kept list (rows) — then a START:
+ *  fresh bindings, a fresh store and a fresh boot sweep (browser-env WIRED to the store's own verdict) over it */
+function noteWorld({ folders = [], bindings = {}, rows = null } = {}) {
+  const dir = path.join(ROOT, `q${++wn}`), home = path.join(dir, 'home');
+  fs.mkdirSync(path.join(home, '.agent-browser'), { recursive: true }); fs.mkdirSync(path.join(dir, 'browser-env'), { recursive: true }); fs.mkdirSync(path.join(dir, 'session-meta'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'browser-env', 'bindings.json'), JSON.stringify({ v: 1, byConversation: bindings }));
+  if (rows) fs.writeFileSync(path.join(dir, KB.KEPT_FILE), JSON.stringify({ version: 1, entries: rows }));
+  for (const [k, note] of folders) { const d = path.join(dir, 'browser-profiles', k); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'Cookies'), 'a sign-in'); if (note) fs.writeFileSync(path.join(d, NOTE), typeof note === 'string' ? note : JSON.stringify(note), { mode: 0o600 }); }
+  return dir;
+}
+function startOver(dir, KS = KS0, extra = {}) {
+  const home = path.join(dir, 'home');
+  const bb = BB0.create({ dataDir: dir, log: quiet });
+  const S = KS.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 0, ...extra });
+  const be = BE.create({ dataDir: dir, homeDir: home, serverSetting: () => undefined, log: quiet, socketDirBase: path.join(dir, 'sock'), keptKeys: () => S.keyVerdict(), keptNoted: () => S.notedKeys() });
+  return { bb, S, be, there: (k) => fs.existsSync(path.join(dir, 'browser-profiles', k, 'Cookies')) };
+}
+
+console.log('㉑ r3786 HOLD 1: a note counts only when TRUE TO ITS FOLDER — a folder a person copied carries another folder\'s note: ignored (a folder with no note); the boot sweep removes the copy by age');
+async function copyRun(KS) {
+  const A = freshKey(), B = freshKey(), CA = freshConv();
+  const dir = noteWorld({ folders: [[A, { key: A, conversation: CA, firstAt: 1000 }], [B, { key: A, conversation: CA, firstAt: 1000 }]], bindings: { [CA]: { key: A, at: 1000 } } });
+  const { S, be, bb, there } = startOver(dir, KS);
+  const r = await S.reconciled();
+  const boot = be.sweep(new Set(), { graceMs: 0 });
+  const out = { done: r.done, rowA: S.has(A), rowB: S.has(B), notedB: !!(S.notedKeys() && S.notedKeys().has(B)), copyGone: !there(B), aKept: there(A), boundA: bb.lookup(CA) === A, swept: boot.swept };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N21 = await copyRun(KS0);
+console.log(`    facts: ${JSON.stringify(N21)}`);
+ok(N21.done && N21.rowA && !N21.rowB && !N21.notedB && N21.copyGone && N21.aKept && N21.boundA, 'a copied folder\'s note (another folder\'s key) is ignored: the copy gets no row and no note counts for it, the boot sweep removes it by age; the true folder is a row, kept, its conversation still bound to it', N21);
+const N21x = await copyRun(overKN(anchored(KNSRC, "  if (!KEY_RE.test(String(name || '')) || doc.key !== name) return null;", "  if (!KEY_RE.test(String(name || ''))) return null;", 'r3786 a note judged without its folder'), 'kept-sweep-copied').KS);
+ok(N21x.rowB && !N21x.copyGone, 'RED CONTROL (a note judged without its folder\'s name): the copy becomes a kept row by another folder\'s note and is never swept — red', N21x);
+
+console.log('㉒ r3786 HOLD 1: a REGISTERED profile\'s folder is never made a kept row by a note (the registered rule wins)');
+async function registeredRun(KS) {
+  const R = freshKey(), CR = freshConv();
+  const dir = noteWorld({ folders: [[R, { key: R, conversation: CR, firstAt: 1000 }]] });
+  const reg = path.join(dir, 'browser-profiles', R);
+  const { S } = startOver(dir, KS, { keeper: () => ({ ...stoppedKeeper(), registeredDirs: () => [reg], profileDirRegistered: (d) => path.resolve(d) === reg }) });
+  const r = await S.reconciled();
+  const out = { done: r.done, row: S.has(R), noted: !!(S.notedKeys() && S.notedKeys().has(R)) };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N22 = await registeredRun(KS0);
+ok(N22.done && !N22.row && !N22.noted, 'a registered profile\'s folder (an adopt in place) with a true note: no kept row, no note counted — the registry rules it', N22);
+const N22x = await registeredRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "      for (const d of r.dirs) if (d.note === 'true' && !r.registered(d)) noted.set(", "      for (const d of r.dirs) if (d.note === 'true') noted.set(", 'r3786 no registered rule'), 'kept-sweep-registered'));
+ok(N22x.row, 'RED CONTROL (the reconcile without the registered rule): the profile\'s folder becomes a kept row — red', N22x);
+
+console.log('㉓ r3786 HOLD 2: a binding is made again only into an EMPTY place — a conversation bound to ANOTHER browser has moved on (never moved back): its older folder is an ordinary row with no holder and ends by the release\'s rules; a key another conversation holds stays its');
+async function movedRun(BBmod) {
+  const OLD = freshKey(), NEW = freshKey(), K2 = freshKey(), C = freshConv(), C2 = freshConv(), C3 = freshConv();
+  // the older folder's note names C; C has moved on to NEW (its binding); NEW's own folder predates the note (its row only); K2's note names C2, but C3 holds K2
+  const dir = noteWorld({ folders: [[OLD, { key: OLD, conversation: C, firstAt: 1000 }], [NEW, null], [K2, { key: K2, conversation: C2, firstAt: 1000 }]], bindings: { [C]: { key: NEW, at: 2000 }, [C3]: { key: K2, at: 1500 } }, rows: { [NEW]: { hasDir: true, startedAt: 2000, stoppedAt: 3000, lastUsedAt: 3000 } } });
+  const bb = BBmod.create({ dataDir: dir, log: quiet });
+  const S = KS0.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 0 });
+  const sw = await S.sweep();
+  const out = { cStays: bb.lookup(C) === NEW, k2Stays: bb.lookup(C3) === K2 && !bb.lookup(C2), oldEnded: !S.has(OLD) && !fs.existsSync(path.join(dir, 'browser-profiles', OLD, 'Cookies')), newKept: S.has(NEW), k2Kept: S.has(K2), ended: sw && sw.ended };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N23 = await movedRun(BB0);
+console.log(`    facts: ${JSON.stringify(N23)}`);
+ok(N23.cStays && N23.k2Stays && N23.oldEnded && N23.newKept && N23.k2Kept, 'a conversation whose binding names its newer browser keeps it (never moved back to the older folder\'s note); the older folder, no holder, ends by the release\'s rules; a key another conversation holds stays that conversation\'s', N23);
+const N23x = await movedRun(MUT.load('src/server/browser-bindings.js', anchored(BBS1, "      if (cur && KEY_RE.test(String(cur.key || ''))) { out.movedOn++; continue; }\n", '', 'r3786 a binding made over one that stands'), 'kept-sweep-moved-back'));
+ok(!N23x.cStays, 'RED CONTROL (a binding made over the one that stands): the conversation is moved BACK onto its older folder — red', N23x);
+
+console.log('㉔ r3786 HOLD 3: THE START\'s ORDER — a resume during the start\'s reconcile WAITS for it (its binding, made again from its folder\'s note, is there when its key is asked); past the reconcile\'s bound it is told by name');
+{
+  const K = freshKey(), C = freshConv();
+  const dir = noteWorld({ folders: [[K, { key: K, conversation: C, firstAt: 1000 }]], rows: { [K]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+  let release; const gateP = new Promise((r) => { release = r; });
+  const { S, be } = startOver(dir, KS0, { listFolders: (d, o) => gateP.then(() => KNM.listFolders(d, o)) });
+  const p = S.reconciled();
+  await new Promise((r) => setTimeout(r, 30));
+  const early = be.priorKeyFor(C);   // a resume that did NOT wait: its key asked before the note was read
+  release();
+  const r = await p;
+  const after = be.priorKeyFor(C);   // the resume that waited
+  try { S.shutdown(); } catch { }
+  ok(early === '' && r.done === true && after === K, 'during the start\'s reconcile the conversation\'s binding is not there yet (a resume asking then would mint a NEW browser over its folder\'s unread note); the create waits for the reconcile — then its key is its folder\'s', { early, r, after });
+  const K2 = freshKey(), N = freshKey();
+  const dir2 = noteWorld({ folders: [[K2, { key: K2, conversation: freshConv(), firstAt: 1000 }]] });
+  const o2 = startOver(dir2, KS0, { listFolders: () => new Promise(() => { }) });
+  const r2 = await o2.S.reconciled(120);   // a listing that never answers: only the bound can end this wait
+  o2.S.noteStartCode(N, r2.code);
+  const b = o2.S.brief(N), words = BF.startNoteWords(BF.browserFactFor({ browserKey: N, variant: BF.MANAGED_RUNGS[0] }, { kept: b, now: Date.now() }));
+  const told = o2.S.takeStartNote(N), again2 = o2.S.takeStartNote(N);
+  try { o2.S.shutdown(); } catch { }
+  ok(r2.done === false && r2.code === 'kept_reconcile_unfinished' && !!b && b.beforeReconcile === true && /A new browser/.test(words) && told === 'kept_reconcile_unfinished' && again2 === null && /kept_reconcile_unfinished/.test(KB.startNoteText(told)), 'past its bound the wait ends (unknown), and the start is TOLD BY NAME: the conversation\'s browser card says it is a new browser, the agent\'s first answer carries the code once', { r2, b, words, told, again2 });
+  const WC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  const W1 = 'keptOrder = await ks.reconciled();', W2 = '? be0.priorKeyFor(data.resumeId) : \'\';';
+  const order = (x) => x.indexOf(W1) >= 0 && x.indexOf(W1) < x.indexOf(W2) && x.indexOf(W2) - x.indexOf(W1) < 1200;
+  ok(order(WC) && !order(anchored(WC, W1, 'keptOrder = null;', 'r3786 the create that does not wait')) && WC.includes("liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code)"), 'WIRING: the create asks the start\'s reconcile BEFORE it asks the conversation\'s prior key, and a resume past the bound is told by its code (RED: the create that does not wait)', null);
+}
+
+console.log('㉕ r3786 HOLD 4: a reconcile CUT AT ITS BOUND is UNKNOWN, never «nothing found» — that pass removes nothing (LAW 2), the next pass asks again, said ONCE by its code');
+async function cutRun(KS) {
+  const A = freshKey(), B = freshKey();
+  const dir = noteWorld({ folders: [[A, null], [B, null]], rows: { [A]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 }, [B]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+  const warns = [], asked = { n: 0 };
+  // the listing child cut at its bound: execFile answers as its timeout's SIGKILL does (killed: true) — no real wait
+  const cut = (cmd, args, opts, cb) => { if (cmd === process.execPath && args[0] === '-e' && String(args[1]).includes('.vibespace-kept.json')) { asked.n++; setImmediate(() => cb(Object.assign(new Error('Command failed: killed'), { killed: true, signal: 'SIGKILL' }), '', '')); return { kill() { } }; } return realExecFile(cmd, args, opts, cb); };
+  const bb = BB0.create({ dataDir: dir, log: quiet });
+  const S = KS.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: { log() { }, warn: (s) => warns.push(String(s)), error() { } }, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 0, listExec: cut });
+  const s1 = await S.sweep(), s2 = await S.sweep();
+  const out = { s1: !!(s1 && s1.held), s2: !!(s2 && s2.held), asked: asked.n, said: warns.filter((w) => /kept_reconcile_unfinished: the kept browsers' folders and their notes were not read to their end/.test(w)).length, kept: [A, B].filter((k) => S.has(k) && fs.existsSync(path.join(dir, 'browser-profiles', k, 'Cookies'))).length, state: S._reconcileState() };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N25 = await cutRun(KS0);
+console.log(`    facts: ${JSON.stringify(N25)}`);
+ok(N25.s1 && N25.s2 && N25.asked === 2 && N25.said === 1 && N25.kept === 2 && N25.state === 'unknown', 'the listing cut at its bound (two passes, each asks again): both passes REMOVE NOTHING — two kept browsers no binding names, past their grace, both stay with their folders; the reconcile is unknown, said once by kept_reconcile_unfinished', N25);
+const N25x = await cutRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    recState = 'unknown';\n    if (!recSaid)", "    recState = 'done'; recFacts = recFacts || { at: 0, noted: new Set(), trueKeys: new Set() }; return true;\n    if (!recSaid)", 'r3786 an unfinished reconcile taken as «nothing found»'), 'kept-sweep-cut-empty'));
+ok(N25x.kept === 0, 'RED CONTROL (an unfinished reconcile taken as «nothing found»): the pass ends both kept browsers and removes their folders — red', N25x);
+{
+  const d = noteWorld({ folders: [[freshKey(), null]] });
+  const r = await KNM.listFolders(path.join(d, 'browser-profiles'), { timeoutMs: 1 });
+  ok(r.ok === false && /bound/.test(String(r.why)), 'the REAL child past a 1 ms bound: its own execFile ends it and the answer is «the listing passed its bound» (never a listing)', r);
+}
+
+console.log('㉖ r3786 HOLD 5: a note that CANNOT BE WRITTEN — off the loop, whole, 0600, BOUNDED: the start is NOT KEPT and BOTH are told (the agent in its tool\'s words, the person on that conversation\'s browser); a landing past the bound is taken back');
+async function unwritableRun(KS, noteFs, { noteWriteMs = 2000, settle = 0 } = {}) {
+  const K = freshKey();
+  const dir = noteWorld({});
+  const S = mkStore(KS, dir, { noteFs, noteWriteMs });
+  fs.mkdirSync(S.dirOf(K), { recursive: true });
+  const t0 = Date.now(), g = await S.startGate(K), ms = Date.now() - t0;
+  if (settle) await new Promise((r) => setTimeout(r, settle));
+  const b = S.brief(K), fact = BF.browserFactFor({ browserKey: K, variant: BF.MANAGED_RUNGS[0] }, { kept: b, now: Date.now() });
+  const told = S.takeStartNote(K), again2 = S.takeStartNote(K);
+  const left = fs.readdirSync(S.dirOf(K));
+  try { S.shutdown(); } catch { }
+  return { kept: g.kept, code: g.code, ms, notKept: b && b.notKept, kind: b && b.kind, card: BF.startNoteWords(fact), agent: told ? KB.startNoteText(told) : null, once: again2 === null, left };
+}
+const refuseTmp = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? Promise.reject(Object.assign(new Error('EACCES: permission denied, open'), { code: 'EACCES' })) : fs.promises.open(p, f, m)) };   // PLACED: the temp's open refused
+const N26 = await unwritableRun(KS0, refuseTmp);
+console.log(`    facts: ${JSON.stringify(N26)}`);
+ok(N26.kept === false && N26.code === 'kept_note_unwritten' && N26.notKept === 'kept_note_unwritten' && N26.kind === 'not-kept' && /^Not kept: its sign-ins end with it/.test(N26.card) && /NOT KEPT/.test(N26.agent) && /ends with it/.test(N26.agent) && N26.once && N26.left.length === 0,
+  'the note\'s temp refused (EACCES): the start is NOT kept; the person\'s card says «Not kept: its sign-ins end with it…»; the agent\'s answer carries its English words ONCE; nothing is left in the folder', N26);
+const N26x = await unwritableRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    startNotes.set(k, { code: r.code, at: now(), said: false });\n", "    return { kept: true };\n", 'r3786 a failed note read as kept'), 'kept-sweep-silent-downgrade'), refuseTmp);
+ok(N26x.kept === true && !N26x.notKept && !N26x.card, 'RED CONTROL (a note that failed read as kept): the browser starts on its folder with nothing protecting its sign-ins, and neither the agent nor the person hears of it — a silent downgrade — red', N26x);
+const stall = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? new Promise(() => { }) : fs.promises.open(p, f, m)) };   // PLACED: the temp's open never answers
+const N26b = await unwritableRun(KS0, stall, { noteWriteMs: 150 });
+ok(N26b.kept === false && N26b.code === 'kept_note_timeout' && N26b.notKept === 'kept_note_timeout', 'the note\'s write that never answers (its open never settles: only the bound can answer): past its bound the start is NOT kept (kept_note_timeout)', N26b);
+const late = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? new Promise((r, j) => setTimeout(() => fs.promises.open(p, f, m).then(r, j), 250)) : fs.promises.open(p, f, m)) };   // PLACED: the temp's open answers past the bound
+const N26c = await unwritableRun(KS0, late, { noteWriteMs: 80, settle: 600 });
+ok(N26c.kept === false && N26c.code === 'kept_note_timeout' && N26c.left.length === 0, 'a write that lands PAST its bound is taken back: the folder of a browser told «not kept» holds no note after it (nothing reads it as kept later)', N26c);
+const N26cx = await unwritableRun(overKN(anchored(anchored(KNSRC, "      if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }\n", '', 'r3786 no cut before the rename'), '      if (cut && takeBack) await fsp.unlink(fin).catch(() => { });\n', '', 'r3786 a late landing left'), 'kept-sweep-late-note').KS, late, { noteWriteMs: 80, settle: 600 });
+ok(N26cx.left.includes(NOTE), 'RED CONTROL (a late landing left in place): a browser told «not kept» has a note in its folder after all — red', N26cx);
+{
+  const d = noteWorld({}), kept = path.join(d, 'browser-profiles', freshKey()), cfg = path.join(d, 'browser-env', 'bk-madeup.json'), other = path.join(d, 'browser-env', 'bk-other.json');
+  fs.writeFileSync(cfg, JSON.stringify({ profile: kept, headed: false, args: ['--quiet'] })); fs.writeFileSync(other, JSON.stringify({ profile: '/var/empty/vs-work-profile' }));
+  const u = await KNM.unkeepConfig(cfg, kept), v = await KNM.unkeepConfig(other, kept);
+  const c = JSON.parse(fs.readFileSync(cfg, 'utf8'));
+  ok(u.ok && u.changed && !('profile' in c) && c.headed === false && Array.isArray(c.args) && (fs.statSync(cfg).mode & 0o777) === 0o600 && v.ok && !v.changed && JSON.parse(fs.readFileSync(other, 'utf8')).profile === '/var/empty/vs-work-profile',
+    'a start NOT KEPT on rung D: the session\'s own generated config loses only the `profile` naming its kept folder (written whole, 0600, before the start); a config naming any other folder is left alone', { u, v, c });
+  const KP = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), RB = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'), CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+  const G1 = '      const g = await ks.startGate(bk);', G2 = "    const browser = await start(p.id, { why: resume === 'user' ? 'resumed by the user' : (created ? 'first verb' : 'verb') });";
+  const gateFirst = (x) => x.indexOf(G1) > 0 && x.indexOf(G1) < x.indexOf(G2) && x.includes("require('./browser-kept-note.js').unkeepConfig(cfg, keptDirFor(bk))") && x.includes("{ ok: false, why: 'its link is its folder' }");
+  ok(gateFirst(KP) && !gateFirst(anchored(KP, G1, '      const g = { kept: true };', 'r3786 the keeper that starts without the gate')) && RB.includes("...(e.startNote ? { notKept: { text: require('../browser-kept.js').startNoteText(e.startNote) } } : {}),") && CLI.includes('if (r.notKept && typeof r.notKept === \'object\' && r.notKept.text) console.error(`note: ${r.notKept.text} [browser_not_kept]`);'),
+    'WIRING: the keeper asks the gate BEFORE the browser starts on its folder (rung D: its config un-kept; rung C, whose link IS the folder: refused by name); the route hands the agent its words, and the tool prints them (RED: the keeper that starts without the gate)', null);
+}
+
+console.log('㉗ r3786 HOLD 6: the note holds THREE things and no more — the browser\'s name, the conversation\'s id, the first time; a note with a fourth field is not a note');
+async function fieldsRun(KS) {
+  const K = freshKey(), C = freshConv(), X = freshKey();
+  const dir = noteWorld({ folders: [[X, { key: X, conversation: freshConv(), firstAt: 1000, site: 'mail.example' }]], bindings: { [C]: { key: K, at: 1000 } } });
+  const { S } = startOver(dir, KS);
+  fs.mkdirSync(S.dirOf(K), { recursive: true });
+  const g = await S.startGate(K);
+  const doc = noteOf(S.dirOf(K)), mode = fs.statSync(path.join(S.dirOf(K), NOTE)).mode & 0o777;
+  await S.reconciled();
+  const out = { kept: g.kept, keys: doc ? Object.keys(doc).sort().join(',') : null, conv: doc && doc.conversation === C, mode, fourth: S.has(X) };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N27 = await fieldsRun(KS0);
+ok(N27.kept && N27.keys === 'conversation,firstAt,key' && N27.conv && N27.mode === 0o600 && !N27.fourth, 'the note a start writes holds exactly its key, its conversation and its first time (no site, no place, no label), mode 0600; a folder whose note carries a fourth field (a site) counts as a folder with no note', N27);
+const N27x = await fieldsRun(overKN(anchored(KNSRC, '  if (ks.length !== NOTE_FIELDS.length || ks.some((k, i) => k !== NOTE_FIELDS[i])) return null;\n', '', 'r3786 a note of any shape'), 'kept-sweep-fourth').KS);
+ok(N27x.fourth, 'RED CONTROL (a note of any shape): the folder whose note carries a site becomes a kept row by it — red', N27x);
+
+console.log('㉘ r3786 HOLD 7: the note sits at the root of the browser\'s own data folder (beside Chromium\'s Local State) — the size measure never counts it, the cache trim never moves it');
+async function placeRun(KS) {
+  const K = freshKey(), C = freshConv();
+  const dir = noteWorld({ bindings: { [C]: { key: K, at: 1000 } } });
+  // a stand-in `du`: the folder 2 GB (past its own 512 MB bound), its cache 1.5 GB
+  const du = (cmd, args, opts, cb) => { if (cmd !== 'du') return realExecFile(cmd, args, opts, cb); const ps = args.slice(args.indexOf('--') + 1); setImmediate(() => cb(null, ps.map((x) => `${x.endsWith(K) ? 2000 * KB.MB : /Cache$/.test(x) ? 1500 * KB.MB : 0}\t${x}`).join('\n'), '')); return { kill() { } }; };
+  const S = KS.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: BB0.create({ dataDir: dir, log: quiet }), log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, execFileImpl: du });
+  fs.mkdirSync(path.join(S.dirOf(K), 'Default', 'Cache'), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(K), 'Default', 'Cache', 'data_0'), 'cached');
+  await S.startGate(K);
+  const before = fs.readFileSync(path.join(S.dirOf(K), NOTE), 'utf8'), size = Buffer.byteLength(before);
+  S.noteStart(K, { hasDir: true }); S.noteStop(K, { why: 'idle' });
+  const m = await S._measure([{ browserKey: K, hasDir: true }]);
+  const sw = await S.sweep();
+  const out = { bytes: m[K] && m[K].bytes, want: 2000 * KB.MB - size, trimmed: sw && sw.trimmed, cacheGone: !fs.existsSync(path.join(S.dirOf(K), 'Default', 'Cache', 'data_0')), noteSame: fs.existsSync(path.join(S.dirOf(K), NOTE)) && fs.readFileSync(path.join(S.dirOf(K), NOTE), 'utf8') === before };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N28 = await placeRun(KS0);
+console.log(`    facts: ${JSON.stringify(N28)}`);
+ok(N28.bytes === N28.want && N28.trimmed === 1 && N28.cacheGone && N28.noteSame, 'the folder\'s bytes are measured WITHOUT its note (its size taken out of the sum); the cache trim of a folder past its own bound removes the cache and leaves the note byte for byte', N28);
+const N28x = await placeRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, 'bytes: Number.isFinite(b) ? Math.max(0, b - (noteBytes.get(e.browserKey) || 0)) : null,', 'bytes: Number.isFinite(b) ? b : null,', 'r3786 the note counted'), 'kept-sweep-note-counted'));   // stale-pins: kept (the red copy writes the line as it was)
+ok(N28x.bytes !== N28x.want, 'RED CONTROL (the note counted in the folder\'s size) — red', N28x);
+
+console.log('㉙ r3786 HOLD 8: THE FOLDERS OF TODAY HAVE NO NOTE — one STEPPED pass of the tree\'s migration runner writes it for every row the kept list AND a binding both name (both read), nothing for a row only one names; an unread list: not run, tried again at the next start');
+async function migRun(noteExisting) {
+  const root = path.join(ROOT, `mg${++wn}`), dir = path.join(root, 'data');
+  const K1 = freshKey(), K2 = freshKey(), K3 = freshKey(), C1 = freshConv(), C3 = freshConv();
+  fs.mkdirSync(path.join(dir, 'browser-env'), { recursive: true });
+  for (const k of [K1, K2, K3]) fs.mkdirSync(path.join(dir, 'browser-profiles', k), { recursive: true });
+  fs.writeFileSync(path.join(dir, KB.KEPT_FILE), JSON.stringify({ version: 1, entries: { [K1]: { hasDir: true, startedAt: 1234, stoppedAt: 2000, lastUsedAt: 2000 }, [K2]: { hasDir: true, startedAt: 1300, stoppedAt: 2000, lastUsedAt: 2000 } } }));
+  fs.writeFileSync(path.join(dir, 'browser-env', 'bindings.json'), JSON.stringify({ v: 1, byConversation: { [C1]: { key: K1, at: 1500 }, [C3]: { key: K3, at: 1500 } } }));
+  const rep = await noteExisting(dir);
+  const n = (k) => noteOf(path.join(dir, 'browser-profiles', k));
+  fs.writeFileSync(path.join(dir, KB.KEPT_FILE), '{"version":1,"entries":{"' + K1 + '":{"hasDir":tr');   // the list torn at the next start
+  let torn = null; try { await noteExisting(dir); torn = 'ran'; } catch (e) { torn = /not run; tried again at the next start/.test(e.message) ? 'refused' : e.message; }
+  return { rep, k1: n(K1), k1ok: !!n(K1) && n(K1).conversation === C1 && n(K1).firstAt === 1234 && n(K1).key === K1, k2: n(K2), k3: n(K3), torn };
+}
+const MIG = require(path.join(REPO, 'src/server/migrations.js'));
+const viaRunner = (dir) => { const m = MIG.create({ rootDir: path.dirname(dir), serverNotice: () => { } }).MIGRATIONS.find((x) => x.id === '2026-11-kept-browser-notes'); return m.run(); };
+const N29 = await migRun(viaRunner);
+console.log(`    facts: ${JSON.stringify(N29)}`);
+ok(N29.rep && N29.rep.noted === 1 && N29.k1ok && N29.k2 === null && N29.k3 === null && N29.torn === 'refused', 'the registry\'s 2026-11-kept-browser-notes (its run a promise: the boot never waits): the row both files name gets its note (its binding\'s conversation, its row\'s first time); the row only the list names and the binding with no row get none; a torn list: not run, tried again at the next start', N29);
+const red29 = overKN(anchored(anchored(KNSRC, '    if (!h || !e.hasDir || !convOf(h.sid)) { only++; continue; }', '    if (!e.hasDir) { only++; continue; }', 'r3786 a row only the list names'), "ensureNote(dir, k, h.sid, { now: () => Number(e.startedAt) || h.at || Date.now(), fsp });", "ensureNote(dir, k, h ? h.sid : '', { now: () => Number(e.startedAt) || Date.now(), fsp });", 'r3786 a row only the list names'), 'kept-sweep-mig');
+const N29x = await migRun((dir) => red29.KN.noteExisting({ dataDir: dir }));
+ok(N29x.k2 !== null, 'RED CONTROL (a note written for a row only the list names): a folder no binding gives to a conversation gets a note — red', N29x);
+
+console.log('㉚ r3786 LAW 4 — THE BOOT SWEEP\'s THREE RULES: it judges the list by THE STORE\'s verdict (a wrong-shape list is torn, never «no rows»); it never removes by age a folder whose note names a conversation; with the bindings unread it removes no key-named folder');
+async function bootRun(BEm, { keptKeys, keptNoted, bindingsBytes = null, listBytes = null }) {
+  const K = freshKey();
+  const dir = noteWorld({ folders: [[K, null]] });
+  if (bindingsBytes !== null) fs.writeFileSync(path.join(dir, 'browser-env', 'bindings.json'), bindingsBytes);
+  if (listBytes !== null) fs.writeFileSync(path.join(dir, KB.KEPT_FILE), listBytes);
+  const be = BEm.create({ dataDir: dir, homeDir: path.join(dir, 'home'), serverSetting: () => undefined, log: quiet, socketDirBase: path.join(dir, 'sock'), ...(keptKeys ? { keptKeys } : {}), ...(keptNoted ? { keptNoted: () => keptNoted(K) } : {}) });
+  const sw = be.sweep(new Set(), { graceMs: 0 });
+  return { removed: !fs.existsSync(path.join(dir, 'browser-profiles', K, 'Cookies')), notedSpared: sw.notedSpared, keptUnreadable: sw.keptUnreadable };
+}
+const BESRC = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+const shapeRun = await bootRun(BE, { listBytes: JSON.stringify({ version: 1, entries: [] }) });   // no live store: the file judged by the store's own judge
+const shapeRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "    if (a.state !== 'data') return null;\n", "    if (a.state !== 'data') return new Set();\n", 'r3786 the boot sweep\'s own parse: a wrong shape is «no rows»'), 'kept-sweep-shape'), { listBytes: JSON.stringify({ version: 1, entries: [] }) });
+ok(!shapeRun.removed && shapeRun.keptUnreadable && shapeRed.removed, 'RULE 1 (the verifier\'s scene 1): a list whose entries are not the store\'s shape is TORN to the boot sweep (judged by the store\'s own judge) — every key-named folder spared — RED: the sweep\'s own parse reads it as «no rows» and removes the folder', { shapeRun, shapeRed });
+const noted = await bootRun(BE, { keptKeys: () => new Set(), keptNoted: (k) => new Set([k]) });
+const notedRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "(bindingsUnread || noted === null || (noted instanceof Set ? noted.has(key) : noteHeld(path.join(dir, n))))", "(bindingsUnread || noted === null)", 'r3786 a noted folder removed by age'), 'kept-sweep-noted-age'), { keptKeys: () => new Set(), keptNoted: (k) => new Set([k]) });
+ok(!noted.removed && noted.notedSpared === 1 && notedRed.removed, 'RULE 2: the store names no row for a folder whose note names its conversation — the boot sweep does NOT remove it by age — RED: removed by its age', { noted, notedRed });
+const unread = await bootRun(BE, { keptKeys: () => new Set(), keptNoted: () => new Set(), bindingsBytes: '{"v":1,"byConversation":{"x' });
+const unreadRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "(bindingsUnread || noted === null ||", "(noted === null ||", 'r3786 the bindings unread ignored'), 'kept-sweep-bind-unread'), { keptKeys: () => new Set(), keptNoted: () => new Set(), bindingsBytes: '{"v":1,"byConversation":{"x' });
+ok(!unread.removed && unread.notedSpared === 1 && unreadRed.removed, 'RULE 3: the bindings unread (torn) — no key-named folder is removed, whatever the list says — RED: removed', { unread, unreadRed });
+{
+  const WC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), MW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(WC.includes("keptKeys: () => { const ks = liveKeptStore(); return ks && typeof ks.keyVerdict === 'function' ? ks.keyVerdict() : undefined; },") && WC.includes("keptNoted: () => { const ks = liveKeptStore(); return ks && typeof ks.notedKeys === 'function' ? ks.notedKeys() : undefined; },") && MW.includes("keptKeys: () => (browserKept ? browserKept.keyVerdict() : undefined), keptNoted: () => (browserKept ? browserKept.notedKeys() : undefined)"),
+    'WIRING: both browser-env instances of the hub (ws-create\'s boot sweep, the routes\') take the live kept store\'s verdict and facts — ONE verdict of the list for every remover', null);
+}
 
 report();

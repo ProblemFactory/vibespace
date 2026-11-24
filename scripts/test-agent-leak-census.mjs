@@ -798,6 +798,7 @@ const CATALOG = {
   'src/server/mounts-plugins-wiring.js:feedbackForward': { kind: 'eval', why: 'the feedback forwarder, real — no collector configured, nothing is sent' },
   'server.js:desktopKeeper': { kind: 'inert', why: 'the desktop-app keeper (a machine\'s windows over xpra / VNC) — no window is open; the window targets engine reads it' },
   'src/server/mounts-plugins-wiring.js:jobBindings': { kind: 'eval', why: 'the jobs\' browser bindings, real (browser-bindings.js) on the scratch data dir' },
+  'src/server/mounts-plugins-wiring.js:browserKept': { kind: 'eval', why: 'the kept browsers\' store, real (browser-kept.js) on the scratch data dir — r3786: the routes\' browser-env asks its verdict; over the absent keeper its notes\' reconcile does not finish (no registry to read), so it starts no child and removes nothing' },
   'src/server/mounts-plugins-wiring.js:browserKeys': { kind: 'eval', why: 'the per-conversation browser keys, real (browser-key.js) — over the absent keeper' },
   'server.js:stashView': { kind: 'eval', why: 'the stash hand-over view, real (stash-handover.js) over the real delivery ladder' },
   'server.js:accounts': { kind: 'inert', why: 'the agent CLI accounts store — no account in the census (nothing signs in)' },

@@ -191,7 +191,8 @@ function normalizeEntry(key, e) {
     waiting: src.stoppedAt === null || src.stoppedAt === undefined ? normalizeWaiting(src.waiting) : null, // lane B: only a RUNNING entry has tabs waiting
     lastUsedAt: num0(src.lastUsedAt),
     bytes: numOrNull(src.bytes), cacheBytes: numOrNull(src.cacheBytes), bytesAt: num0(src.bytesAt), trimmedAt: numOrNull(src.trimmedAt),
-    recovered: numOrNull(src.recovered),   // r3585: FOUND AGAIN from its folder after the list was damaged (the rebuild's time) — its facts are guessed: it ends only by a person's Forget, until its next real use
+    recovered: numOrNull(src.recovered),   // r3585: FOUND AGAIN from its folder after the list was damaged (the rebuild's time) — its facts are guessed: it ends only by a person's Forget, until its next real use (r3786: a folder with NO note only)
+    unmeasuredSince: num0(src.unmeasuredSince),   // r3786: the first sweep that could not measure it (0: measured) — the panel says «not measured» with its age
   };
 }
 /** The whole store, judged on the way out: `{version, entries: {<bk>: entry}}` — a child key or a malformed key is never
@@ -221,16 +222,15 @@ function keptLimits(read = () => undefined) {
  * again). `endsAtTerminate` (default false) is the literal reading of the ruling ("its session is killed"): any entry no
  * live session carries ends. → `{end, why}`.
  */
-function keptEndVerdict({ entry, live = false, carried = false, bound = false, endsAtTerminate = false, now = 0, graceMs = KEPT_END_GRACE_MS, bindingsRecoveredAt = 0 } = {}) {
+function keptEndVerdict({ entry, live = false, carried = false, bound = false, endsAtTerminate = false, now = 0, graceMs = KEPT_END_GRACE_MS } = {}) {
   if (!entry) return { end: false, why: 'no-entry' };
   if (entry.recovered) return { end: false, why: 'recovered' };   // r3585: a row found again from its folder never ends by a silence (its conversation and its stop are not known)
   if (live) return { end: false, why: 'live' };
   if (carried) return { end: false, why: 'carried' };
   if (endsAtTerminate) return { end: true, why: 'conversation-ended' };
   if (bound) return { end: false, why: 'bound' };
-  // r3590 (the bindings rebuilt after they were damaged — PER ROW, no timer, no press): a kept browser that STOOD at the recovery (started
-  // before it) and that no rebuilt binding names never ends by that silence; its next real use writes a true binding (then it is ordinary)
-  if (Number(bindingsRecoveredAt) > 0 && (Number(entry.startedAt) || Number(entry.lastUsedAt) || 0) < Number(bindingsRecoveredAt)) return { end: false, why: 'bindings-recovered' };
+  // r3786: no per-row mark of a bindings recovery any more — a kept browser's conversation is in its folder's NOTE, and the reconcile makes
+  // its binding again (only into an empty place) before any pass can judge it; a pass whose reconcile did not finish ends nothing
   const since = Number(entry.stoppedAt) || Number(entry.lastUsedAt) || 0;
   if (graceMs > 0 && now - since < graceMs) return { end: false, why: 'grace' };
   return { end: true, why: 'conversation-gone' };
@@ -244,9 +244,13 @@ const CACHE_SUBDIRS = Object.freeze(['Default/Cache', 'Default/Code Cache', 'Def
 const NEVER_TRIMMED = Object.freeze(['Default/Cookies', 'Default/Local Storage', 'Default/IndexedDB', 'Default/Login Data', 'Default/Session Storage', 'Default/Web Data', 'Default/Network', 'Default/Preferences', 'Local State']);
 
 /**
- * THE BOUND. `entries` = `[{key, bytes, cacheBytes, lastUsedAt, live, carried}]` (bytes null = not measured: counted as
- * 0 and named), `perConversation` / `total` in bytes. → `{trimCaches:[{key, frees, why}], remove:[{key, frees, why}],
- * kept:[{key, used, overBy, why}], unmeasured:[key], used, limit}` where `used` = the total after the plan.
+ * THE BOUND. `entries` = `[{key, bytes, cacheBytes, lastUsedAt, live, carried, recovered}]`, `perConversation` / `total` in bytes.
+ * → `{trimCaches:[{key, frees, why}], remove:[{key, frees, why}], kept:[{key, used, overBy, why}], unmeasured:[key], used, limit,
+ * outside}` where `used` = the total after the plan.
+ *   · r3786 (THE UNMEASURED-ROW RULE): a row NOT MEASURED this pass (bytes null) is SPARED and LEFT OUT OF THE SUM — the measured
+ *     ordinary rows are still bounded (named in `unmeasured`);
+ *   · r3773 LAW 3: a row FOUND AGAIN (`recovered`, a folder with no note) is OUTSIDE the bound — out of the sum and the order, kept
+ *     until a person's Forget (`outside` counts them; the panel says it);
  *   · per conversation over its bound ⇒ its caches (never while it runs); still over ⇒ REPORTED (its logins are never
  *     trimmed);
  *   · the total over ⇒ whole STOPPED entries of ENDED-OR-IDLE conversations, least recently used first (ties by key —
@@ -261,22 +265,25 @@ function keptRetentionPlan({ entries = [], perConversation = KEPT_PER_DEFAULT_MB
   const rows = (Array.isArray(entries) ? entries : []).filter((e) => e && isParentKey(e.key));
   const est = new Map();
   const trimCaches = [], remove = [], kept = [], unmeasured = [];
+  let outside = 0;
+  const inSum = [];
   for (const e of rows) {
-    if (e.bytes === null || e.bytes === undefined || !Number.isFinite(Number(e.bytes))) unmeasured.push(e.key);
+    if (e.bytes === null || e.bytes === undefined || !Number.isFinite(Number(e.bytes))) { unmeasured.push(e.key); continue; }   // spared, out of the sum
+    if (e.recovered) { outside++; continue; }   // LAW 3: outside the bound (out of the sum and the order; its caches are not trimmed)
+    inSum.push(e);
     let b = num0(e.bytes);
     const cache = Math.min(b, num0(e.cacheBytes));
     if (b > perConversation) {
-      if (!e.live && cache > 0 && !e.recovered) { trimCaches.push({ key: e.key, frees: cache, why: `over its own bound (${b} of ${perConversation} bytes) — its caches go first, its logins never` }); b -= cache; }
+      if (!e.live && cache > 0) { trimCaches.push({ key: e.key, frees: cache, why: `over its own bound (${b} of ${perConversation} bytes) — its caches go first, its logins never` }); b -= cache; }
       if (b > perConversation) kept.push({ key: e.key, used: b, overBy: b - perConversation, why: e.live ? 'running — over its own bound, reported; nothing of a running browser is trimmed' : 'over its own bound even without its caches — its logins are never trimmed; reported' });
     }
     est.set(e.key, b);
   }
   let used = [...est.values()].reduce((s, x) => s + x, 0);
   if (used > total) {
-    const order = rows.filter((e) => !e.live).sort((a, b) => (num0(a.lastUsedAt) - num0(b.lastUsedAt)) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    const order = rows.filter((e) => !e.live).sort((a, b) => (num0(a.lastUsedAt) - num0(b.lastUsedAt)) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).filter((e) => est.has(e.key));   // r3786: only the rows in the sum (never an unmeasured or a found-again one)
     for (const e of order) {
       if (used <= total) break;
-      if (e.recovered || e.stood) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: e.recovered ? 'found again from its folder after the list was damaged — removed only by a person\'s Forget' : 'no conversation names it since the bindings were damaged — removed only by a person\'s Forget' }); continue; }   // r3585 / r3717: the size bound is a clock's act, not the person's
       if (e.carried) { kept.push({ key: e.key, used: est.get(e.key) || 0, overBy: used - total, why: 'its conversation is running (a live session carries it; only its browser stopped) — its logins and tabs are never removed while it runs; reported' }); continue; }
       remove.push({ key: e.key, frees: num0(e.bytes), why: 'the kept browsers passed their total bound — the least recently used goes first' });
       used -= est.get(e.key) || 0;
@@ -285,7 +292,7 @@ function keptRetentionPlan({ entries = [], perConversation = KEPT_PER_DEFAULT_MB
     for (let i = trimCaches.length - 1; i >= 0; i--) if (remove.some((r) => r.key === trimCaches[i].key)) trimCaches.splice(i, 1);
     if (used > total) kept.push({ key: null, used, overBy: used - total, why: 'the running browsers (and the kept browsers of running conversations) alone are over the total bound — reported; neither is ever removed' });
   }
-  return { trimCaches, remove, kept, unmeasured, used, limit: total };
+  return { trimCaches, remove, kept, unmeasured, used, limit: total, outside };
 }
 
 // ═══ lane browser-resume B (§3.9, the owner's ruling 2): RESUME + "HAND BACK AND CONTINUE" ═══════════════════════════
@@ -439,6 +446,12 @@ function restoredNoteText({ why = null, opened = 0, skipped = [], current = null
 function helperNotKeptText() {
   return 'this helper\'s browser keeps nothing: a login made in it ends with it (only the conversation\'s own browser — a command without a handle — keeps its logins and tabs after it closes)';
 }
+/** r3786 (holds 5 and 3): what the AGENT is told ONCE in its command's answer (its tool prints it as a note, `browser_not_kept`) — a
+ *  start that is NOT kept (its folder's note could not be written), or a resume handed a new browser past the start's reconcile */
+function startNoteText(code) {
+  if (code === 'kept_reconcile_unfinished') return 'VibeSpace had not finished reading its kept browsers when this conversation resumed (kept_reconcile_unfinished): its earlier browser, if it had one, was not found in time — this browser is a new one';
+  return `this conversation's browser is NOT KEPT this time: VibeSpace could not write the note in its folder that keeps its sign-ins (${String(code || 'kept_note_unwritten')}), so it runs without its folder for the rest of this session — a sign-in made now ends with it; the conversation's next resume tries again`;
+}
 /** …when its tabs are kept and were NOT reopened (a deliberate stop, D2): the verb that reopens them. */
 function keptNoteText({ why = null, tabs = 0, logins = true } = {}) {
   // B-7a30: «its logins» only when the kept entry said so off a checked folder (a folder not checked yet, fenced, tabs only: not said)
@@ -448,7 +461,7 @@ function keptNoteText({ why = null, tabs = 0, logins = true } = {}) {
 module.exports = {
   CONTINUE_NOTE_MAX, RESUME_REFUSALS, RESUME_BOUND_AGENT_MS, RESUME_BOUND_USER_MS, RESUME_STEP_MS,
   continueNote, resumeTabsOf, resumeVerdict, resumePlan, targetIdOf, stepWhyOf, stopWhyWords, tabsListText, continueFrame, continueCardText,
-  resumedNoteText, restoredNoteText, keptNoteText, helperNotKeptText, normalizeWaiting,
+  resumedNoteText, restoredNoteText, keptNoteText, helperNotKeptText, startNoteText, normalizeWaiting,
   KEPT_VERSION, KEPT_FILE, KEPT_TABS_MAX, KEPT_TITLE_MAX, KEPT_URL_MAX, KEPT_LABEL_MAX,
   KEEP_SETTING, PER_CONVERSATION_SETTING, TOTAL_SETTING, KEPT_PER_DEFAULT_MB, KEPT_PER_FLOOR_MB, KEPT_TOTAL_DEFAULT_MB, KEPT_TOTAL_FLOOR_MB, MB,
   KEPT_END_GRACE_MS, DELIBERATE_WINDOW_MS, KEY_RE, CHILD_RE, RESTORE_ID_RE, STOP_WHYS, AUTO_RESTORE_WHYS, CACHE_SUBDIRS, NEVER_TRIMMED,

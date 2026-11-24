@@ -204,6 +204,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   passkeys_unread: 503,   // r3261: the passkey store is held (unread) — a profile's removal waits for it
   takeovers_unread: 503,   // r3261: the takeover requests are held (unread) — the queue, an ask, a Done and a page verb wait for them
   kept_unread: 503,   // r3585 (lane card-door-in-chat): the list of kept browsers is held (unread, or being found again from its folders)
+  kept_note_unwritten: 503, kept_note_timeout: 503, kept_note_unreadable: 503,   // r3786: a start that could not be kept AND could not start without its folder (rung C) — refused by name, nothing started
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
@@ -1950,7 +1951,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
         // B-9584 U3 follow (主开发 r2932 (1)): the record rides as the AGENT's view here too — every agent door through the one view
         // (its census: test-browser-environment-dialog ⑥, by a request)
-        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: isServerVaultFill ? [] : pairs, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs })), profile: B.agentProfileView(e.profile, agentFactsOf(f), { mediated: !!(e.profile && e.profile.mediated) }), browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
+        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: isServerVaultFill ? [] : pairs, ...(isServerVaultFill ? {} : envBasis(f, { k, pairs })), profile: B.agentProfileView(e.profile, agentFactsOf(f), { mediated: !!(e.profile && e.profile.mediated) }), browser: agentBrowserOf(e.browser), lease: e.lease, created: e.created, ...(e.startNote ? { notKept: { text: require('../browser-kept.js').startNoteText(e.startNote) } } : {}), handles: v.handles, pinTab: false, at: resolvedAt, ...(await dialogAnswerFor(k, f, e.profile && e.profile.id, { verb, arm: !isServerVaultFill, started: true })), ...displayNoteOf(e.browser, resolvedAt), ...keptAnswerOf(e.kept) });
       }
       stampActive(f, '');
       return send({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });

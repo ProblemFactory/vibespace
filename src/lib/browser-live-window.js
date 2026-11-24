@@ -166,7 +166,7 @@ import { shortModeBadge } from './live-bar-layout.js'; // lane I: the bar's neve
 import { createBarFold } from './bar-fold.js'; // lane I: the bar folds into ⋯ by priority — never wraps, never overlaps
 import { fitChipState, fitChipWords, pictureState, zoomAt, pinchStep, panStep, zoomClamp, isZoomed, transformCss, FIT_REPORT_MS, ZOOM_DOUBLE_TAP, ZOOM_NONE } from '../browser-fit.js'; // lane S4: the page is the pane's size, the picture clocks, the phone's pinch (PURE)
 import { browserFactWords, liveFollowPlan } from '../browser-fact.js'; // lane S2: THE browser fact — the view's names, and a view FOLLOWS its session's browser
-import { ownResumable, keptLineWords } from '../browser-fact.js'; // lane browser-resume B (§3.9): may the user Resume its own browser, and the stopped line's words
+import { ownResumable, keptLineWords, startNoteWords } from '../browser-fact.js'; // lane browser-resume B (§3.9): may the user Resume its own browser, and the stopped line's words
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the Restart's refusal by its code (PURE words)
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
@@ -524,6 +524,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const shareLine = document.createElement('div'); shareLine.className = 'browser-live-share-line'; shareLine.dataset.key = 'share'; shareLine.style.display = 'none';
   const shareText = document.createElement('span'); shareText.className = 'browser-live-share-text';
   { const ic = document.createElement('span'); ic.className = 'browser-live-share-icon'; ic.innerHTML = UI_ICONS.info; shareLine.append(ic, shareText); }
+  // r3786 (hold 5): the conversation's own browser started NOT KEPT (its folder's note could not be written) — said here, from THE fact
+  const keptNoteLine = document.createElement('div'); keptNoteLine.className = 'browser-live-share-line browser-live-kept-note'; keptNoteLine.dataset.key = 'kept-note'; keptNoteLine.style.display = 'none';
+  const keptNoteText = document.createElement('span'); keptNoteText.className = 'browser-live-share-text';
+  { const ic = document.createElement('span'); ic.className = 'browser-live-share-icon'; ic.innerHTML = UI_ICONS.info; keptNoteLine.append(ic, keptNoteText); }
   // …and the same act on the TITLE BAR of the standalone window (the design's affordance; hidden with the title bar once grouped)
   const titleBind = document.createElement('button'); titleBind.className = 'win-btn win-bind'; titleBind.innerHTML = BIND_SVG;
   { const controls = winInfo.titleBar?.querySelector('.window-controls'); if (controls) controls.insertBefore(titleBind, controls.firstChild); }
@@ -619,6 +623,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // (the app's ONE copy of the queue); Hand back resolves it (the keeper moves it in the handback's own event)
   const askLine = document.createElement('div'); askLine.className = 'browser-live-ask-line'; askLine.style.display = 'none'; askLine.setAttribute('role', 'status');
   root.append(strip, tabRow, watchLine, bar, addrRow, shareLine, endLine, blockedBar, displayNote, resetNote, confirms, dialogBar, loopBar, body);
+  shareLine.after(keptNoteLine);   // r3786: the start's «not kept» line, under the share line
   bar.after(askLine); // lane browser-takeover-queue: right under the bar (the root's order above stays as the census pins it)
   dialogBar.after(deskDoor); // lane desktop-x-seat-browser: the raw fallback's door, under the dialog card (the root's order above stays as the census pins it)
   if (H) { root.classList.add('human'); addrRow.style.display = ''; urlEl.style.display = 'none'; openBtn.style.display = 'none'; bindBtn.style.display = 'none'; titleBind.style.display = 'none'; closeBtn.style.display = ''; quitBtn.style.display = ''; }
@@ -830,7 +835,17 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (ref === EPHEMERAL_REF || (!ref && !st.target && f && f.using && f.using.kind === 'own')) return ownResumable(f);
     return !!(st.target && st.target.kind === 'attachment' && st.stopped === true);
   }
+  function renderKeptNote() {
+    const f = st.fact || factNow();
+    const ref = curRef();
+    const own = ref === EPHEMERAL_REF || (!ref && !st.target && !!(f && f.using && f.using.kind === 'own'));
+    const words = own ? startNoteWords(f, t) : '';
+    if (keptNoteText.textContent !== words) keptNoteText.textContent = words;
+    const want = words ? '' : 'none';
+    if (keptNoteLine.style.display !== want) keptNoteLine.style.display = want;
+  }
   function renderResume() {
+    renderKeptNote();   // r3786: every move of the fact or the status asks it again
     const offer = resumeOfferNow();
     st.resumeOffer = offer;
     if (offer) {

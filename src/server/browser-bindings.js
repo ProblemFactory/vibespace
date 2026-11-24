@@ -115,11 +115,21 @@ const IMPLICIT_FORK_METRIC = 'browser-binding-implicit-fork'; // r7: the harness
 // r3054 made it (nothing ends, nothing is written over it, readers show no rows) — and the helper reads it again OFF the loop. LIFTED
 // with a list: the calls read the file again, with no restart. LIFTED with NO list (torn bytes kept aside once, or the file gone after
 // a failed read): the map is REBUILT from the conversations' own records (data/session-meta/*.json: browserKey + the conversation it
-// was decided for — the resume's rung 2), read by ONE child with a bound, never on the loop; the rebuilt file carries `recoveredAt`
-// (the per-row rule of r3590: a kept browser that STOOD at the recovery and that no rebuilt binding names never ends by that silence).
-// A rebuild that does not finish holds the file again — never «rebuilt empty».
+// was decided for — the resume's rung 2), read by ONE child with a bound, never on the loop. r3786: a binding the records cannot give (a
+// conversation that ended) is made again from its kept folder's NOTE by the kept store's reconcile (restoreFromNotes, only into an empty
+// place) — nothing of it waits in memory (an offer refused while held is not kept: the note is the fact). A rebuild that does not finish
+// holds the file again — never «rebuilt empty».
 const BINDINGS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && !!v.byConversation && typeof v.byConversation === 'object' && !Array.isArray(v.byConversation);
 const HELD = new Map();   // file → { hold, dataDir, rebuilding, recovered } — one per file, every instance's
+const LIFT_LISTENERS = new Map();   // r3786: file → Set of fns heard after the file's lift (read again, or rebuilt) — the kept store's reconcile
+/** r3786: hear `file`'s lifts → the function that stops hearing them */
+function onLift(file, fn) {
+  if (typeof fn !== 'function') return () => { };
+  const f = String(file || ''); let s = LIFT_LISTENERS.get(f); if (!s) { s = new Set(); LIFT_LISTENERS.set(f, s); }
+  s.add(fn);
+  return () => { const x = LIFT_LISTENERS.get(f); if (x) { x.delete(fn); if (!x.size) LIFT_LISTENERS.delete(f); } };
+}
+const liftHeard = (file) => { for (const fn of [...(LIFT_LISTENERS.get(file) || [])]) { try { fn(); } catch { } } };
 const META_TIMEOUT_MS = 30 * 1000;
 /** the child's script: every data/session-meta/*.json's binding facts → [[browserKey, claudeSessionId, backendSessionId, forkSourceId, browserKeyFor, mtimeMs]] */
 const META_SRC = "const fs=require('fs'),p=require('path');const d=process.argv[1];let n=[];try{n=fs.readdirSync(d)}catch(e){if(e&&e.code==='ENOENT'){process.stdout.write('[]');process.exit(0)}process.stderr.write(String((e&&e.code)||'unreadable'));process.exit(3)}const o=[];const s=(v)=>typeof v==='string'?v.slice(0,200):'';for(const x of n){if(!x.endsWith('.json'))continue;try{const f=p.join(d,x);const m=JSON.parse(fs.readFileSync(f,'utf8'));if(m&&typeof m.browserKey==='string')o.push([s(m.browserKey),s(m.claudeSessionId),s(m.backendSessionId),s(m.forkSourceId),s(m.browserKeyFor),fs.statSync(f).mtimeMs])}catch(e){}}process.stdout.write(JSON.stringify(o))";
@@ -136,12 +146,12 @@ function writeBindingsFile(file, obj) {
 function heldOf(file, { dataDir, log, listMetas, execFileImpl }) {
   let H = HELD.get(file);
   if (H) return H;
-  H = { hold: null, dataDir, rebuilding: null, recovered: null, log, listMetas, execFileImpl, owed: new Map(), gen: 0 };   // owed: r3717 — the offers refused while held (sid → {key, at}, bounded)
+  H = { hold: null, dataDir, rebuilding: null, recovered: null, log, listMetas, execFileImpl, gen: 0 };
   H.hold = HOLD.create({
     file, valid: BINDINGS_SHAPE, code: 'bindings_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `VibeSpace cannot read which browser belongs to which conversation right now (${h.code}); it reads it again by itself every few minutes. Nothing ends and nothing is written over it until it reads`,
     log: (s) => { try { log.warn?.('[browser] ' + s); } catch { } },
-    onLift: (v, facts) => { if (!v) rebuildBindings(file, H, (facts && facts.setAside) || null); else if (H.owed.size) writeOwed(file, H, v); },   // r3717 (MUST 2): the refused offers written at a lift with data
+    onLift: (v, facts) => { if (!v) Promise.resolve(rebuildBindings(file, H, (facts && facts.setAside) || null)).then((ok) => { if (ok) liftHeard(file); }, () => { }); else liftHeard(file); },   // r3786: the kept store reconciles from the notes after a lift
   });
   HELD.set(file, H);
   return H;
@@ -151,41 +161,20 @@ function listMetaFacts(H) {
   if (typeof H.listMetas === 'function') { try { return Promise.resolve(H.listMetas(dir)).catch((e) => ({ ok: false, why: String((e && e.code) || 'failed') })); } catch (e) { return Promise.resolve({ ok: false, why: String((e && e.code) || 'failed') }); } }
   return new Promise((resolve) => {
     try {
-      (H.execFileImpl || require('child_process').execFile)(process.execPath, ['-e', META_SRC, dir], { timeout: META_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+      (H.execFileImpl || require('child_process').execFile)(process.execPath, ['-e', META_SRC, dir], { timeout: META_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: require('../agent-env.js').serviceEnv(process.env) }, (err, stdout) => {   // r3786 (hold 9): the allowlisted environment
         if (err) return resolve({ ok: false, why: err.killed ? 'the records\' listing passed its bound' : String(err.code || 'failed') });
         try { const a = JSON.parse(String(stdout || '[]')); resolve(Array.isArray(a) ? { ok: true, rows: a } : { ok: false, why: 'no listing' }); } catch { resolve({ ok: false, why: 'no listing' }); }
       });
     } catch (e) { resolve({ ok: false, why: String((e && e.code) || 'spawn failed') }); }
   });
 }
-/** r3717 (MUST 2): the offers a held file refused, laid over `doc` by record()'s own rules (a conversation keeps its key; a key is ONE
- *  conversation's — the first holder keeps it) → the number laid; `doc` is changed in place */
-function layOwed(H, doc) {
-  let n = 0;
-  for (const [sid, o] of H.owed) {
-    const cur = doc.byConversation[sid];
-    if (cur && KEY_RE.test(String(cur.key || ''))) continue;   // bound already (to it, or to another key: the first stays)
-    if (Object.entries(doc.byConversation).some(([s2, v]) => s2 !== sid && v && v.key === o.key)) continue;   // another conversation's key
-    doc.byConversation[sid] = { key: o.key, at: o.at }; n++;
-  }
-  H.owed.clear();
-  return n;
-}
 function pruneDoc(doc) {
   const e = Object.entries(doc.byConversation);
   if (e.length > MAX_BINDINGS) { e.sort((a, b) => (b[1].at || 0) - (a[1].at || 0)); doc.byConversation = Object.fromEntries(e.slice(0, MAX_BINDINGS)); }
   return doc;
 }
-/** a lift WITH data after refused offers: they are written now (nothing ends by a binding refused while the file was held) */
-function writeOwed(file, H, v) {
-  const doc = { ...v, byConversation: { ...v.byConversation } };
-  const n = layOwed(H, doc);
-  if (!n) return;
-  try { writeBindingsFile(file, pruneDoc(doc)); H.gen++; try { H.log.warn?.(`[browser] ${FILE_NAME} read again: ${n} binding(s) offered while it was held written now`); } catch { } }
-  catch (e) { try { H.log.warn?.(`[browser] the bindings offered while ${FILE_NAME} was held could not be written (${(e && e.code) || 'failed'}) — each is offered again at its conversation's next record`); } catch { } }
-}
 /** THE REBUILD from the conversations' own records: each record's key bound to the conversation it may bind (bindableIdOf — a fork
- *  source or an implicit fork binds nothing), the newest record winning a key two name; written with `recoveredAt` */
+ *  source or an implicit fork binds nothing), the first holder keeping a key (record()'s rule) */
 function rebuildBindings(file, H, copy) {
   if (H.rebuilding && H.rebuilding.busy) return H.rebuilding.busy;
   H.rebuilding = { since: (H.rebuilding && H.rebuilding.since) || Date.now(), copy: copy || (H.rebuilding && H.rebuilding.copy) || null, busy: null };
@@ -209,8 +198,8 @@ function rebuildBindings(file, H, copy) {
     }
     const byConversation = {};
     for (const [key, v] of byKey) if (!byConversation[v.sid] || v.at < byConversation[v.sid].at) byConversation[v.sid] = { key, at: v.at };   // a conversation keeps its first key
-    const doc = { v: 1, byConversation, recoveredAt: at };
-    layOwed(H, doc); pruneDoc(doc);   // r3717: the offers refused meanwhile are true facts; bounded as record() bounds it
+    const doc = { v: 1, byConversation };
+    pruneDoc(doc);   // bounded as record() bounds it
     try { writeBindingsFile(file, doc); } catch (e) {
       try { H.log.warn?.(`[browser] the rebuilt ${FILE_NAME} could not be written (${(e && e.code) || 'failed'}) — it stays HELD`); } catch { }
       H.rebuilding = null; H.hold.start({ state: 'unreadable', error: { code: 'rebuild-unwritten' } }); return false;
@@ -377,9 +366,8 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
       const rs = readState();
       if (rs.state === 'unknown') {
         sayUnknown(rs.kind);
-        // r3717 (MUST 2): HELD — the offer is KEPT (bounded) and written at the lift: nothing ends by a binding refused while the file was held
-        const H1 = HELD.get(file);
-        if (H1) { H1.owed.delete(sid); H1.owed.set(sid, { key: String(key), at }); while (H1.owed.size > MAX_BINDINGS) H1.owed.delete(H1.owed.keys().next().value); }
+        // r3786 (LAW 5): nothing of the offer waits in memory — the conversation's next record offers it again, and a kept browser's
+        // conversation is in its folder's NOTE (src/server/browser-kept-note.js join, at this same choke point), made again from it
         return false;
       }
       const all = rs.all;
@@ -430,14 +418,34 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
     if (rs.state === 'unknown') { sayUnknown(rs.kind); throw Object.assign(new Error(`${FILE_NAME} could not be read (${rs.kind})`), { code: 'bindings_unknown' }); }
     const out = new Set();
     for (const v of Object.values(rs.all.byConversation)) if (v && KEY_RE.test(String(v.key || ''))) out.add(String(v.key));
-    out.recoveredAt = Number(rs.all.recoveredAt) || 0;   // r3585: the same read says when the file was rebuilt (r3590's per-row rule)
     return out;
   }
   /** 'ok' | 'absent' | 'unknown' — the file's read now (r3054: a one-shot step that would MOVE by «no binding names it» waits). */
   function state() { return readState().state; }
-  /** r3585: the time the file was rebuilt from the conversations' records (0: never) — a kept browser older than it that no binding
-   *  names never ends by that silence (r3590's per-row rule) */
-  function recoveredAt() { const r = readState(); return r.state === 'ok' ? (Number(r.all.recoveredAt) || 0) : 0; }
+  /**
+   * r3786 (hold 2): BINDINGS MADE AGAIN FROM THE KEPT FOLDERS' NOTES — `[[conversation, key, at]]`, each ONLY INTO AN EMPTY PLACE: no
+   * binding names that conversation AND none names that key (record()'s own belts; never over a binding that stands). One read, one
+   * write. → { made, movedOn (the conversation is bound to ANOTHER key: it moved on), taken (the key is another conversation's),
+   * already } | { unknown: true } (the file unread: nothing is written over it)
+   */
+  function restoreFromNotes(pairs) {
+    const rs = readState();
+    if (rs.state === 'unknown') { sayUnknown(rs.kind); return { unknown: true }; }
+    const all = rs.all, out = { made: 0, movedOn: 0, taken: 0, already: 0 };
+    for (const p of Array.isArray(pairs) ? pairs : []) {
+      const sid = Array.isArray(p) && typeof p[0] === 'string' ? p[0] : '', key = Array.isArray(p) ? String(p[1] || '') : '';
+      if (!sid || !KEY_RE.test(key)) continue;
+      const cur = all.byConversation[sid];
+      if (cur && cur.key === key) { out.already++; continue; }
+      if (cur && KEY_RE.test(String(cur.key || ''))) { out.movedOn++; continue; }
+      if (holderOf(all.byConversation, key)) { out.taken++; continue; }
+      all.byConversation[sid] = { key, at: Math.round(Number(p[2])) || Date.now() }; out.made++;
+    }
+    if (!out.made) return out;
+    try { all.byConversation = prune(all.byConversation); writeAll(all); known.clear(); }
+    catch (e) { try { log.warn?.(`[browser] the bindings made again from the kept folders' notes could not be written (${(e && e.code) || 'failed'}) — they are made again at the next reconcile`); } catch { } return { unknown: true }; }
+    return out;
+  }
   /** r3585: the file's hold facts ({ file, code, since } — null: it reads) and this run's rebuild ({ n, copy, at }: a count and the copy's base name) */
   function heldFacts() { const H = HELD.get(file); if (!H) return null; const h = H.hold.held(); return h ? { file: h.file, code: h.code, since: h.since } : H.rebuilding ? { file: FILE_NAME, code: 'rebuilding', since: H.rebuilding.since } : null; }
   function recoveredFacts() { const H = HELD.get(file); return H && H.recovered ? { ...H.recovered } : null; }
@@ -460,7 +468,7 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
   function implicitForks() { return announced.size; }
 
   return { record, lookup, conversationOf, conversationsByKey, keys, boundKeys, state, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS,
-    recoveredAt, heldFacts, recoveredFacts, _hold: () => (HELD.get(file) || {}).hold || null, _rebuild: () => { const H = HELD.get(file); return H ? rebuildBindings(file, H, null) : Promise.resolve(false); } };   // r3585
+    restoreFromNotes, heldFacts, recoveredFacts, _hold: () => (HELD.get(file) || {}).hold || null, _rebuild: () => { const H = HELD.get(file); return H ? rebuildBindings(file, H, null) : Promise.resolve(false); } };   // r3585
 }
 
-module.exports = { create, conversationIdOf, bindableIdOf, keyDecidedFor, FILE_NAME, DIR_REL, MAX_BINDINGS, REFUSAL_METRIC, SHARE_METRIC, IMPLICIT_FORK_METRIC };
+module.exports = { create, onLift, BINDINGS_SHAPE, conversationIdOf, bindableIdOf, keyDecidedFor, FILE_NAME, DIR_REL, MAX_BINDINGS, REFUSAL_METRIC, SHARE_METRIC, IMPLICIT_FORK_METRIC };

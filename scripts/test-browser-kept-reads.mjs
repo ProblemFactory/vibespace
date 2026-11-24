@@ -59,7 +59,7 @@ async function syncCallsUntil(fn) {
   try { await fn(); } finally { for (const k of SYNC) fs[k] = real[k]; }
   return { n, seen: [...new Set(seen)] };
 }
-const stoppedKeeper = () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false });
+const stoppedKeeper = () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [] });   // r3786: the keeper's registered folders carried
 /** A store over `dir` on a stepped clock; `stall` (when given) PLACES a stall in its folder check until released. */
 function world(KEPT, dir, { stall = null } = {}) {
   let clock = 1_000_000; let changes = 0;

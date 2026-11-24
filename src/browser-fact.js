@@ -41,7 +41,7 @@ const PIN_RUNGS = Object.freeze(['D', 'C']);
 const MANAGED_RUNGS = Object.freeze(['D', 'C', 'N']);
 /** How long a "its profile was deleted — pin cleared" notice rides the fact (then the fact is just "no pin"). */
 const PIN_CLEARED_MS = 24 * 3600 * 1000;
-const KEPT_KINDS = Object.freeze(['full', 'fenced', 'tabs-only', 'checking']); // mirrored from src/browser-kept.js keptKindOf (this module imports nothing)
+const KEPT_KINDS = Object.freeze(['full', 'fenced', 'tabs-only', 'checking', 'not-kept']); // mirrored from src/browser-kept.js keptKindOf + r3786's brief (this module imports nothing)
 const DIFFERS = Object.freeze(['pin_gone', 'pin_cleared', 'pin_failed', 'pin_pending', 'agent_elsewhere', 'other_attached', 'pin_unsupported']);
 const USING_STATES = Object.freeze(['running', 'starting', 'stopped', 'failed', 'not-started']);
 
@@ -150,8 +150,11 @@ function browserFactFor(session, view) {
   // and two tabs named "work" would be the study's confusion again)
   // lane browser-resume B (§3.9): what its own browser KEEPS once stopped (the live view's / the card's Resume reads it here)
   const kv = v.kept && typeof v.kept === 'object' ? v.kept : null;
-  const kept = managed && kv ? { tabs: num(kv.tabs), kind: KEPT_KINDS.includes(kv.kind) ? kv.kind : 'tabs-only', why: kv.stoppedWhy ? str(kv.stoppedWhy) : null, restoreBy: kv.restoreBy === 'user' || kv.restoreBy === 'auto' ? kv.restoreBy : null, handedBack: kv.handedBack === true, waiting: num(kv.waiting) } : null;
-  const own = managed ? { label: pinned && PIN_RUNGS.includes(variant) && !atts.some((a) => str(a.profileId) === pinned.id) ? pinned.label : null, state: stateOf(v.own).state, ...(kept ? { kept } : {}) } : null;
+  const kept = managed && kv && kv.kind !== 'none' ? { tabs: num(kv.tabs), kind: KEPT_KINDS.includes(kv.kind) ? kv.kind : 'tabs-only', why: kv.stoppedWhy ? str(kv.stoppedWhy) : null, restoreBy: kv.restoreBy === 'user' || kv.restoreBy === 'auto' ? kv.restoreBy : null, handedBack: kv.handedBack === true, waiting: num(kv.waiting) } : null;
+  // r3786 (holds 5 and 3): what the START of its own browser is told by — not kept (its folder's note could not be written), or a new
+  // browser handed past the start's reconcile — the card and the live view say it (startNoteWords)
+  const startNote = managed && kv ? (kv.notKept ? 'not-kept' : kv.beforeReconcile === true ? 'before-reconcile' : null) : null;
+  const own = managed ? { label: pinned && PIN_RUNGS.includes(variant) && !atts.some((a) => str(a.profileId) === pinned.id) ? pinned.label : null, state: stateOf(v.own).state, ...(kept ? { kept } : {}), ...(startNote ? { startNote } : {}) } : null;
   const fact = { v: 1, key: bk, pinned, pinGone, pinCleared, using, own, lastUsed, differs, input, live: !!liveRef, liveRef: liveRef || null };
   // lane browser-stuck (2026-09-28): the page is held by a dialog / not responding — the dialog watch's fact, carried as
   // the view gives it (`{state: dialog|unresponsive, dialog?, why?, count?, since, profileId}`); null when all is well
@@ -184,7 +187,7 @@ function factDigest(f) {
   const u = f.using || {};
   return [f.key, f.pinned ? `${f.pinned.id}:${f.pinned.label}:${f.pinned.origin}` : '-', f.pinGone ? f.pinGone.id : '-', f.pinCleared ? f.pinCleared.label : '-',
     `${u.kind}:${u.id || ''}:${u.label || ''}:${u.state}:${u.locked ? 'L' : ''}:${u.count || ''}:${u.error ? u.error.length : 0}`,
-    f.own ? `${f.own.label || ''}:${f.own.state}${f.own.kept ? `:k${f.own.kept.tabs}/${f.own.kept.kind}/${f.own.kept.why || ''}/${f.own.kept.restoreBy || ''}${f.own.kept.handedBack ? 'h' : ''}/${f.own.kept.waiting}` : ''}` : '-', // lane browser-resume B
+    f.own ? `${f.own.label || ''}:${f.own.state}${f.own.startNote ? `:n${f.own.startNote}` : ''}${f.own.kept ? `:k${f.own.kept.tabs}/${f.own.kept.kind}/${f.own.kept.why || ''}/${f.own.kept.restoreBy || ''}${f.own.kept.handedBack ? 'h' : ''}/${f.own.kept.waiting}` : ''}` : '-', // lane browser-resume B
     f.lastUsed ? `${f.lastUsed.kind}:${f.lastUsed.id || ''}:${f.lastUsed.label || ''}` : '-', f.differs || '-', f.input || '-', f.liveRef || '-',
     f.stuck ? `${f.stuck.state}:${f.stuck.dialog ? f.stuck.dialog.id || '' : ''}:${f.stuck.why || ''}:${f.stuck.count || 0}:${f.stuck.loop && Array.isArray(f.stuck.loop.urls) ? f.stuck.loop.urls.join(' ') : ''}${f.stuck.loop && f.stuck.loop.targetId ? '@' + f.stuck.loop.targetId : ''}${f.stuck.state === 'blind' ? `:${f.stuck.targetId || ''}/${f.stuck.title || ''}` : ''}${f.stuck.state === 'prompt' && f.stuck.prompt ? `:${f.stuck.prompt.id || ''}${f.stuck.prompt.native ? '/native' : ''}` : ''}${f.stuck.state === 'passkey' && f.stuck.passkey ? `:${f.stuck.passkey.state || ''}/${f.stuck.passkey.id || ''}/${f.stuck.card ? f.stuck.card.id || '' : ''}/${f.stuck.display || ''}` : ''}` : '-'].join('|'); // lane browser-stuck (+ lane site-reset: a loop's cycle, never its hop count; + ui-needs-a-button: the looping tab — the banner's doors act on it)
 }
@@ -285,6 +288,15 @@ function keptLineWords(fact, tIn) {
   return t('Stopped — its {n} tab(s) and its logins are kept. Resume reopens them; the agent’s next command also starts it again', { n });
 }
 
+/** r3786 (hold 5): the words where the person looks at the conversation's own browser (its live view, its newest chat card) when its
+ *  start was NOT KEPT, or was handed a new browser past the start's reconcile ('' otherwise) */
+function startNoteWords(fact, tIn) {
+  const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
+  const n = fact && fact.own && fact.own.startNote;
+  if (n === 'not-kept') return t('Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder');
+  if (n === 'before-reconcile') return t('A new browser: VibeSpace had not finished reading its kept browsers when this conversation resumed');
+  return '';
+}
 /** The ref a live view shows for the browser in use (a profile id, the conversation's own, else none). */
 function refOfUsing(u) {
   if (!u) return null;
@@ -348,5 +360,5 @@ function deletePinnedVerdict({ label = '', pinnedBy = [], unpin = false } = {}) 
 module.exports = {
   EPHEMERAL_REF, PIN_RUNGS, MANAGED_RUNGS, PIN_CLEARED_MS, DIFFERS, USING_STATES, STALE_CODES,
   sessionFactsOf, stateOf, browserFactFor, keylessFact, factDigest, browserFactWords, refOfUsing, liveFollowPlan, deletePinnedVerdict,
-  KEPT_KINDS, ownResumable, keptLineWords, // lane browser-resume B
+  KEPT_KINDS, ownResumable, keptLineWords, startNoteWords, // lane browser-resume B; r3786
 };

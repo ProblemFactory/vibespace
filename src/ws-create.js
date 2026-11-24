@@ -213,6 +213,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   //    means an instance where nobody ever creates a session never touches the
   //    filesystem for this feature at all.
   let _browserEnv;                      // undefined = not asked yet; null = deps missing
+  // r3786: THIS process's kept store (the keeper's), asked lazily — null when there is none
+  const liveKeptStore = () => { try { const k = require('./server/browser-keeper.js').keeper(); return k && typeof k.keptStore === 'function' ? k.keptStore() : null; } catch { return null; } };
   const browserEnvOf = () => {
     if (_browserEnv !== undefined) return _browserEnv;
     try {
@@ -221,6 +223,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
         // rather than added to the ws ctx contract, for the same ratchet reason.
         dataDir: require('path').dirname(BUFFERS_DIR),
         serverSetting, serverNotice, telemetry: ctx.telemetry || null,
+        // r3786 (LAW 4): the boot sweep judges the kept list by THE kept store's own verdict and facts (undefined: none in this process)
+        keptKeys: () => { const ks = liveKeptStore(); return ks && typeof ks.keyVerdict === 'function' ? ks.keyVerdict() : undefined; },
+        keptNoted: () => { const ks = liveKeptStore(); return ks && typeof ks.notedKeys === 'function' ? ks.notedKeys() : undefined; },
       });
     } catch (e) {
       // A degrade path that prints the message VERBATIM is the only reason this
@@ -1421,6 +1426,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           let spawnPinWitness = null;
           {
             const be0 = browserEnvOf();
+            // r3786 (hold 3, THE START's ORDER): no conversation is handed a NEW browser before this start's reconcile of the kept folders'
+            // notes has ended or its bound is over (the kept store's RECONCILE_WAIT_MS) — a resume in the first seconds would otherwise mint
+            // a new key while its own folder's note (and the binding made again from it) is still unread
+            let keptOrder = null;
+            if (be0 && integrationOn) { const ks = liveKeptStore(); if (ks && typeof ks.reconciled === 'function') { try { keptOrder = await ks.reconciled(); } catch { keptOrder = null; } } }
             const prior = (be0 && data.resume && data.resumeId && !data.fork)
               ? be0.priorKeyFor(data.resumeId) : '';
             const bk = browserProfiles.browserKeyFor({
@@ -1546,6 +1556,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // it is SAID rather than inferred later from orphaned dirs.
               if (bk.origin === 'resume-unknown') {
                 console.warn(`[browser] ${id}: resuming ${String(data.resumeId).slice(0, 8)} but no previous browser key was recorded — minted ${bk.key} (this conversation's earlier browser, if any, is not reused)`);
+                // r3786 (hold 3): past the start's reconcile's bound — TOLD BY NAME (its code: the agent's first browser answer, the card)
+                if (keptOrder && !keptOrder.done) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one`); try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }
               }
             }
             if (be.pairs.length) spawnEnvPairs.push(...be.pairs);

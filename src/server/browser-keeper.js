@@ -4044,6 +4044,21 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const wasReady = !!(rec0 && rec0.state === 'ready');
     // lane browser-resume B: what the conversation KEPT, read BEFORE the start (its start moves the kept tabs aside)
     const ks = B.isBrowserKey(bk) ? keptStore() : null;
+    // r3786 (hold 5, LAW 5): THE START's GATE — a conversation's own browser that STARTS on its kept folder first has the folder's NOTE
+    // (the kept store's startGate: off the loop, whole, 0600, bounded). Past the bound or on a failure it starts NOT KEPT: rung D's config
+    // loses its kept `profile` before the start (the binary's own temporary folder); rung C's link IS the folder, so that start is refused
+    // by name — nothing starts on an unprotected folder. Told: the agent in this answer, the person on the conversation's browser card
+    let notKept = null;
+    if (ks && typeof ks.startGate === 'function' && !B.isLiveBrowser(rec0) && !starting.has(p.id) && onKeptDir(p)) {
+      const g = await ks.startGate(bk);
+      if (!g.kept) {
+        const cfg = S0.pairsToEnv(v.pairs)[VERBS.CONFIG_KEY];
+        const viaLink = v.pairs.some((s) => typeof s === 'string' && s.startsWith('AGENT_BROWSER_PROFILE='));
+        const u = !viaLink && typeof cfg === 'string' && cfg.startsWith('/') ? await require('./browser-kept-note.js').unkeepConfig(cfg, keptDirFor(bk)) : { ok: false, why: 'its link is its folder' };
+        if (!u.ok) throw namedError(g.code, `${KB.startNoteText(g.code)} — and it could not start without its folder (${u.why}), so it was not started; ask again`);
+        p.dir = null; commit(); notKept = g.code;
+      }
+    }
     let entry0 = null; try { entry0 = ks ? ks.get(bk) : null; } catch { entry0 = null; }
     const browser = await start(p.id, { why: resume === 'user' ? 'resumed by the user' : (created ? 'first verb' : 'verb') });
     // lane H: a verb on a browser that was ALREADY live (no browser-ready this
@@ -4052,7 +4067,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (resume !== 'user' && wasReady && reg.browsers[p.id] === rec0 && rec0.state === 'ready') await settleArming(emitLease({ kind: 'verb', profileId: p.id, local: true, ...ephEventFields(p.id) }));
     ensureTimer();
     const kept = ks && entry0 ? await keptAtStart(p, entry0, { started: !wasReady, resume }) : null;
-    return { profile: pview(p), browser, lease: leaseView(l), created, ...(kept ? { kept } : {}) };
+    // r3786: a start's code is told ONCE in the answer (a start not kept now, or a resume handed a new browser past the start's reconcile)
+    let startNote = notKept; try { const sn = ks && typeof ks.takeStartNote === 'function' ? ks.takeStartNote(bk) : null; startNote = startNote || sn; } catch { /* the store says its own */ }
+    return { profile: pview(p), browser, lease: leaseView(l), created, ...(kept ? { kept } : {}), ...(startNote ? { startNote } : {}) };
   }
   /**
    * lane browser-resume B (§3.9, the owner's ruling 2): WHAT A START DOES WITH THE KEPT BROWSER, and what the command is
@@ -9538,6 +9555,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
 
     // lane browser-resume (§3.9): the relay's tab list of a conversation's own browser, the CDP read at a stop, the store
     held: () => { if (!loaded) ensureLoaded(); return !!heldReg; }, heldWords, onReadAgain: (fn) => { heldLifts.add(fn); return () => heldLifts.delete(fn); }, owePin, onOwedPin: (fn) => { owedHooks.add(fn); return () => owedHooks.delete(fn); }, pinVerdictForCreate, instanceDefaultRef: () => setting('browser.defaultProfile', ''), owedPending: (k) => owedPins.has(String(k || '')),   // the B-f276 remainder
+    registeredDirs: () => { ensureLoaded(); refuseIfHeld('the folders a profile registered'); return named().filter((p) => p.dir && !p.host).map((p) => String(p.dir)); }, // r3786: the kept store's reconcile compares them by identity in its child (a registered folder is never made a kept row by a note)
     profileDirRegistered: (dir) => { ensureLoaded(); refuseIfHeld('is this folder a profile\'s'); return !!dir && named().some((p) => p.dir && !p.host && (B.sameDir(p.dir, dir) || F.sameRealDir(p.dir, dir) !== false)); }, // lane browser-resume: a kept directory a named profile registered in place is never removed by the kept store — verify F1: by REAL identity, unknown ⇒ registered (fail closed)
     noteTabs, captureKeptTabs: (profileId, seenBy) => { const pp = profile(String(profileId || '')); return captureKeptTabs(pp, pp ? reg.browsers[pp.id] : null, seenBy || 'a read'); }, keptStore: () => keptStore(),
     // lane browser-resume B (§3.9, ruling 2): Resume, the reopen, the hand-back's two halves

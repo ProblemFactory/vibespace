@@ -198,7 +198,7 @@ console.log('— ① PURE: the kept tab list, D2, the limits, D1\'s end, THE BOU
   ok(p5.remove.map((r) => r.key).join() === KEY_B && p5.kept.some((k) => k.key === null && /running/.test(k.why)) && !p5.remove.some((r) => r.key === KEY_A), '…never a running one, even the oldest: still over ⇒ reported', p5);
   const p6 = P([{ key: KEY_A, bytes: 700 * MB, cacheBytes: 200 * MB, lastUsedAt: 1 }, { key: KEY_B, bytes: 100 * MB, lastUsedAt: 10 }], 512 * MB, 300 * MB);
   ok(p6.remove.some((r) => r.key === KEY_A && r.frees === 700 * MB) && !p6.trimCaches.some((t) => t.key === KEY_A), 'an entry removed whole is not trimmed first (and frees all it holds)', p6);
-  ok(P([{ key: KEY_A, bytes: null, lastUsedAt: 1 }, { key: 'bk-junk', bytes: 999 * MB }]).unmeasured.join() === KEY_A, 'an unmeasured directory is named (counted as 0); a malformed key is never an entry');
+  ok(P([{ key: KEY_A, bytes: null, lastUsedAt: 1 }, { key: 'bk-junk', bytes: 999 * MB }]).unmeasured.join() === KEY_A, 'an unmeasured directory is named (r3786: spared and left out of the sum); a malformed key is never an entry');
   // verify F2: LIVE is the CONVERSATION — a key a live session carries (its browser stopped after the turn) is never removed whole
   const p7 = P([{ key: KEY_A, bytes: 300 * MB, cacheBytes: 100 * MB, lastUsedAt: 1, carried: true }, { key: KEY_B, bytes: 300 * MB, lastUsedAt: 10 }, { key: KEY_C, bytes: 300 * MB, lastUsedAt: 20 }], 250 * MB, 500 * MB);
   ok(p7.remove.map((r) => r.key).join() === KEY_B && p7.trimCaches.some((t) => t.key === KEY_A) && p7.kept.some((k) => k.key === KEY_A && /conversation is running/.test(k.why)), 'the total over ⇒ a CARRIED entry (a live session carries its key; only its browser stopped) is passed over even when oldest — its caches may go, its logins and tabs never; it is reported by key (verify F2)', p7);
@@ -326,7 +326,7 @@ async function lateCarriedLeg(KSmod, dir) {
   const keys = [late, ...Array.from({ length: 12 }, (_, i) => 'bk-' + (0x5b000000 + i).toString(16))];
   const bound = new Set(keys);
   const lines = [];
-  const st = KSmod.create({ dataDir: dir, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => (++calls <= 2 ? new Set() : new Set([late])), bindings: { keys: () => bound, conversationOf: () => 'conv' }, serverSetting: (k) => (k === KB.TOTAL_SETTING ? 256 : undefined), log: { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error() { } }, now: () => clock, sweepEveryMs: 0, execFileImpl: du });
+  const st = KSmod.create({ dataDir: dir, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [] }), liveKeys: () => (++calls <= 2 ? new Set() : new Set([late])), bindings: { keys: () => bound, conversationOf: () => 'conv' }, serverSetting: (k) => (k === KB.TOTAL_SETTING ? 256 : undefined), log: { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error() { } }, now: () => clock, sweepEveryMs: 0, execFileImpl: du });
   for (const [i, k] of keys.entries()) { clock = 5_000_000_000 + i * 1000; st.noteStop(k, { why: 'turn-idle', hasDir: true, tabs: [] }); const d = st.dirOf(k); fs.mkdirSync(path.join(d, 'Default'), { recursive: true }); fs.writeFileSync(path.join(d, 'Default/Cookies'), 'x'); sizes.set(d, (i === 0 ? 100 : 20) * MB); }
   clock += 10_000;
   const r = await st.sweep();
@@ -343,7 +343,7 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   const now = () => clock;
   const liveBrowsers = new Set();
   const registered = new Set();
-  const stubKeeper = { ephemeralFor: (bk) => ({ live: liveBrowsers.has(bk), state: liveBrowsers.has(bk) ? 'ready' : 'stopped' }), profileDirRegistered: (d) => registered.has(d) };
+  const stubKeeper = { ephemeralFor: (bk) => ({ live: liveBrowsers.has(bk), state: liveBrowsers.has(bk) ? 'ready' : 'stopped' }), profileDirRegistered: (d) => registered.has(d), registeredDirs: () => [...registered] };   // r3786: the kept store's reconcile asks the registered folders
   const carried = new Set();
   const bound = new Set();
   const bcasts = [];
@@ -633,7 +633,7 @@ console.log('— ⑥ the routes: GET / DELETE /api/browser/kept, the housekeepin
   const R = require('../src/routes/browser.js');
   const RT = require('../src/routes/browser-trace.js');
   const liveSet = new Set();
-  const stubKeeper = { keptStore: () => routeKept, ephemeralFor: (bk) => ({ live: liveSet.has(bk), state: liveSet.has(bk) ? 'ready' : 'stopped' }), profileDirRegistered: () => false, _reg: () => ({ profiles: [], leases: [], browsers: {} }) };
+  const stubKeeper = { keptStore: () => routeKept, ephemeralFor: (bk) => ({ live: liveSet.has(bk), state: liveSet.has(bk) ? 'ready' : 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [], _reg: () => ({ profiles: [], leases: [], browsers: {} }) };
   const routeKept = KS.create({ dataDir: path.join(ROOT, 'r-data'), keeper: () => stubKeeper, liveKeys: () => new Set(), log: quiet, sweepEveryMs: 0 });
   routeKept.noteStop(KEY_A, { why: 'turn-idle', hasDir: true, label: 'Routes', tabs: [{ url: 'https://secret.test/account?id=7', title: 'My account', active: true }] });
   routeKept.noteStop(KEY_C, { why: 'turn-idle', hasDir: true, label: 'Running', tabs: [{ url: 'https://c.test/' }] });
@@ -1207,7 +1207,7 @@ console.log('— ⑬ verify r2: each fix\'s leg catches its broken copy');
   ok(ksSrc.includes(judge), 'control setup: the store\'s judgement of its kept folder is where the control cuts');
   const KSm = M.load('src/server/browser-kept.js', editAnchor(ksSrc, judge, '    return e;\n    const v = presenceFor(e.browserKey);', "src/server/browser-kept.js"), 'fileonly');
   const D13 = path.join(ROOT, 'k13-data'); fs.mkdirSync(D13, { recursive: true });
-  const s13 = KSm.create({ dataDir: D13, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(), log: quiet, sweepEveryMs: 0 });
+  const s13 = KSm.create({ dataDir: D13, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [] }), liveKeys: () => new Set(), log: quiet, sweepEveryMs: 0 });
   fs.mkdirSync(s13.dirOf(KEY_C), { recursive: true }); s13.noteStop(KEY_C, { why: 'turn-idle', hasDir: true, tabs: [{ url: 'https://x.test/' }] }); fs.rmSync(s13.dirOf(KEY_C), { recursive: true, force: true });
   await s13.checkThere(KEY_C); // even after the act's fresh check (B-7a30)
   ok(s13.get(KEY_C).kind === 'full', 'CONTROL: a store that reads hasDir off the file alone says "its logins are kept" over a gone directory, even after the act\'s fresh check — the ④ leg catches it', s13.get(KEY_C).kind);

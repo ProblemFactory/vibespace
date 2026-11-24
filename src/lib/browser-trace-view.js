@@ -1094,13 +1094,14 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     ident.appendChild(el('span', 'bprof-label', String(k.label || k.browserKey || '')));
     if (k.kind === 'checking') ident.appendChild(el('span', 'bprof-chip', t('checking…'))); // B-7a30: its folder not checked since the hub started — redrawn when the check lands
     if (k.recovered) { const c = el('span', 'bprof-chip', t('found again')); c.title = t('Found again from its folder after the list of kept browsers was damaged — its tabs are not known'); ident.appendChild(c); }   // r3585
+    if (k.notKept) { const c = el('span', 'bprof-chip', t('not kept')); c.title = t('Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder'); ident.appendChild(c); }   // r3786 (hold 5)
     if (k.kind !== 'checking' && k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
     ident.title = String(k.browserKey || '');
     row.appendChild(ident);
     const tabs = Array.isArray(k.tabs) ? k.tabs : [];
     const tc0 = cell(row, 'bprof-kept-tabs', t('{n} tab(s)', { n: tabs.length }), tabs.map((x) => (x.active ? t('on show') + ': ' : '') + (x.title ? x.title + ' — ' : '') + x.url).join('\n'));
     tc0.dataset.tabs = String(tabs.length);
-    cell(row, 'bprof-size', k.kind !== 'full' ? '' : (k.bytes === null || k.bytes === undefined ? t('not measured') : bytesText(k.bytes)));
+    cell(row, 'bprof-size', k.kind !== 'full' ? '' : (Number(k.unmeasuredSince) > 0 ? t('not measured since {ago}', { ago: agoText(Date.now() - Number(k.unmeasuredSince)) }) : (k.bytes === null || k.bytes === undefined ? t('not measured') : bytesText(k.bytes))));   // r3786: «not measured» with its age
     const state = k.live ? t('running') : [k.stoppedAt ? t('kept since {ago}', { ago: agoText(Date.now() - Number(k.stoppedAt)) }) : '', keptWhyText(k.stoppedWhy), k.restore && k.restore.mode === 'auto' ? t('its next start reopens its tabs') : ''].filter(Boolean).join(' · ');
     cell(row, 'bprof-state state-' + (k.live ? 'live' : 'kept'), state);
     // lane browser-resume B (§3.9, the owner's ruling 2): RESUME — only while a live session carries the key (the route
@@ -1120,7 +1121,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
         load();
       };
       row.appendChild(rs);
-    } else if (!k.live && k.unnamedSinceDamage) row.appendChild(el('span', 'bprof-cell bprof-kept-unnamed chat-status-dim', t('no conversation names it since the bindings were damaged')));   // r3590: its fact, and no Resume where no conversation can open it
+    }
     else if (!k.live && !(k.recovered && !k.conversationKnown)) row.appendChild(el('span', 'bprof-cell bprof-kept-resume-hint chat-status-dim', t('Resume the conversation to reopen its browser')));   // r3585: a found-again row no conversation names offers no Resume at all
     if (!k.live) {
       const fg = el('button', 'file-tool-btn bprof-btn bprof-kept-forget', t('Forget'));
@@ -1230,11 +1231,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     else if (v.keptRecovered) keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', v.keptRecovered.copy ? t('The list of kept browsers was damaged: {n} kept browser(s) were found again from their folders, without their tabs. The damaged copy is kept as {copy}.', { n: Number(v.keptRecovered.n) || 0, copy: String(v.keptRecovered.copy) }) : t('The list of kept browsers could not be read and is gone: {n} kept browser(s) were found again from their folders, without their tabs.', { n: Number(v.keptRecovered.n) || 0 })));
     if (v.bindingsUnread) keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', t('VibeSpace cannot read which browser belongs to which conversation right now — no kept browser ends meanwhile, and it comes back by itself (it tries again every few minutes).')));   // r3585: the bindings held
     else if (v.bindingsRecovered && v.bindingsRecovered.copy) keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', t("Which browser belongs to which conversation was damaged and found again from the conversations' records ({n} found). The damaged copy is kept as {copy}.", { n: Number(v.bindingsRecovered.n) || 0, copy: String(v.bindingsRecovered.copy) })));
+    // r3773 LAW 3: the found-again rows (a folder with no note) are OUTSIDE the limit — said, with what frees one
+    { const nOut = krows.filter((k) => k && k.recovered).length; if (nOut) keptSec.appendChild(el('div', 'bprof-kept-report chat-status-dim', t('{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them', { n: nOut }))); }
     if (!v.keptUnread && !krows.length) keptSec.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation\'s browser has stopped with something to keep.')));
     const kseen = new Set();
     for (const k of krows) {
       kseen.add(k.browserKey);
-      const sig = JSON.stringify([k, Math.floor((Date.now() - Number(k.stoppedAt || 0)) / 60000)]);
+      const sig = JSON.stringify([k, Math.floor((Date.now() - Number(k.stoppedAt || 0)) / 60000), Math.floor((Date.now() - Number(k.unmeasuredSince || 0)) / 60000)]);
       const had = keptRows.get(k.browserKey);
       let row;
       if (had && had.sig === sig) row = had.row; else { row = keptRow(k); keptRows.set(k.browserKey, { row, sig }); }

@@ -740,6 +740,8 @@ function sessionMetaOwnerConflict(sockName, meta, had = undefined) {
 // session never touches the store.
 let _browserBindings = null;
 const browserBindings = () => _browserBindings || (_browserBindings = require('./browser-bindings.js').create({ dataDir: path.dirname(META_DIR) }));
+/** r3786 (LAW 5): the conversation a key was decided for, JOINED into its kept folder's note at this same choke point (off the loop, bounded) */
+const keptNoteJoin = (key, sid) => { try { require('./browser-kept-note.js').join(path.join(path.dirname(META_DIR), 'browser-profiles'), key, sid); } catch { } };
 /** `{durable: true}` — A BINDING OR A PERSON'S ACT (round 2, law B: the conversation's backend session id after a fork /
  *  resume, a model lock, effort, permission mode, response style, a goal, a rename, a reach level, an editor in
  *  flight; a pool pin's durable half is its own record since B-526c unit 2 — src/pool-pin-record.js): the write is the writer's NEXT (off the loop, rank 0 at a stop) and the returned promise resolves when it is
@@ -818,7 +820,7 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
   // NOT decided for (`browserKeyFor`, an implicit fork adopted by the
   // consumer) — that one is SAID once per (session, id), because the running
   // process keeps the browser it spawned with and nothing else would tell.
-  try { if (meta && meta.browserKey) { const b = browserBindings(); const sid = b.bindableIdOf(meta); if (sid) b.record(sid, meta.browserKey); else b.noteUnbound(meta, sockName); } } catch (e) { console.warn('[browser] binding record failed: ' + (e && e.message)); }
+  try { if (meta && meta.browserKey) { const b = browserBindings(); const sid = b.bindableIdOf(meta); if (sid) b.record(sid, meta.browserKey); else b.noteUnbound(meta, sockName); if (sid) keptNoteJoin(meta.browserKey, sid); } } catch (e) { console.warn('[browser] binding record failed: ' + (e && e.message)); }
   return done;
 }
 function deleteSessionMeta(sockName) {

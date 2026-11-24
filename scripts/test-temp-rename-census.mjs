@@ -245,6 +245,7 @@ const ROWS = [
   ["src/server/browser-clone-run.js", "unsynced", "derived", "a profile copied for one run", "copyProfileDir"],
   ["src/server/browser-display-config.js", "unsynced", "derived", "a generated wrapper, made again when it differs", "create > engineWrapperFor"],
   ["src/server/browser-env.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/browser-kept-note.js", "synced", "self-synced", "r3786 (line 821's second form): a kept folder's NOTE, and a session's generated config without its kept folder before a start that is not kept — each temp written whole, synced and closed before its rename, awaited off the loop; a sync that fails fails the write (the start is then not kept, or refused by name)", "writeNote", "unkeepConfig"],
   ["src/server/browser-keeper.js", "unsynced", "store", "", "writeJsonAtomic", "create > lineageLedger"],
   ["src/server/browser-keeper.js", "synced", "self-synced", "a browser profile's own Preferences and the person's kept geolocation values beside it (B-9584 U2c, r1897): each temp synced before its rename, awaited", "create > geoStoreAt > writeAtomic"],
   ["src/server/browser-keeper.js", "move", "move", "", "create > adoptScratch"],

@@ -147,7 +147,7 @@ console.log('B5 the kept browsers\' retention sweep: held ⇒ it waits (nothing 
   const bound = new Set(), sizes = new Map();
   let clock = 3_000_000_000;
   const fakeDu = (cmd, args, opts, cb) => { const paths = args.slice(args.indexOf('--') + 1); const out = paths.filter((p) => sizes.has(p)).map((p) => `${sizes.get(p)}\t${p}`).join('\n'); setImmediate(() => cb(null, out + '\n', '')); };
-  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(),
+  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [] }), liveKeys: () => new Set(),
     bindings: { keys: () => bound, boundKeys: () => bound, conversationOf: (bk) => (bound.has(bk) ? 'conv-' + bk : null) }, serverSetting: heldView(st), log: quiet, now: () => clock, sweepEveryMs: 0, thereEveryMs: 0, execFileImpl: fakeDu, settingsHeld: () => st.held });
   const kOld = 'bk-00005001', kNew = 'bk-00005002';
   for (const [i, k] of [kOld, kNew].entries()) {
@@ -280,7 +280,7 @@ console.log('B12 the kept sweep: a hold that BEGINS while the sizes are measured
   let clock = 4_000_000_000;
   // the PLACED hold: the settings become held while the measure's du answers (the await between the sweep's start and its plan)
   const fakeDu = (cmd, args, opts, cb) => { const paths = args.slice(args.indexOf('--') + 1); const out = paths.filter((p) => sizes.has(p)).map((p) => `${sizes.get(p)}\t${p}`).join('\n'); st.held = HELD; setImmediate(() => cb(null, out + '\n', '')); };
-  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(),
+  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [] }), liveKeys: () => new Set(),
     bindings: { keys: () => bound, boundKeys: () => bound, conversationOf: (bk) => (bound.has(bk) ? 'conv-' + bk : null) }, serverSetting: heldView(st), log: { log() { }, warn: (l) => lines.push(String(l)), error() { } }, now: () => clock, sweepEveryMs: 0, thereEveryMs: 0, execFileImpl: fakeDu, settingsHeld: () => st.held });
   const kOld = 'bk-00007001', kNew = 'bk-00007002';
   for (const [i, k] of [kOld, kNew].entries()) {
@@ -373,7 +373,7 @@ console.log('B15 the two sweeps say their wait once a hold, not once a pass; the
   const KS = require('../src/server/browser-kept.js'), TR = require('../src/server/browser-trace.js');
   const D = path.join(ROOT, 'kept-once-' + (++worlds)); fs.mkdirSync(D, { recursive: true });
   const st = { held: HELD, settings: {} }, kl = [], tl = [];
-  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false }), liveKeys: () => new Set(), bindings: { keys: () => new Set(), boundKeys: () => new Set() }, serverSetting: heldView(st), log: { log() { }, warn: (l) => kl.push(String(l)), error() { } }, sweepEveryMs: 0, thereEveryMs: 0, settingsHeld: () => st.held });
+  const kept = KS.create({ dataDir: D, keeper: () => ({ ephemeralFor: () => ({ live: false, state: 'stopped' }), profileDirRegistered: () => false, registeredDirs: () => [] }), liveKeys: () => new Set(), bindings: { keys: () => new Set(), boundKeys: () => new Set() }, serverSetting: heldView(st), log: { log() { }, warn: (l) => kl.push(String(l)), error() { } }, sweepEveryMs: 0, thereEveryMs: 0, settingsHeld: () => st.held });
   const W = path.join(ROOT, 'trace-once-' + worlds); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true });
   const tr = TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), serverSetting: heldView(st), log: { log() { }, warn: (l) => tl.push(String(l)), error() { } }, sweepEveryMs: 0 });
   const said = (a, re) => a.filter((l) => re.test(l)).length;

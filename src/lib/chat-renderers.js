@@ -95,7 +95,7 @@ import { isSettingKey } from './settings-schema.js'; // lane setting-doors pick 
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
 import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
-import { ownResumable } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
+import { ownResumable, startNoteWords } from '../browser-fact.js'; // lane browser-resume B (§3.9): the newest end card of the conversation's own browser offers Resume when THE fact says it can
 import { wakeFacts as channelWakeFacts, refOf as channelRefOf, splitLead as channelSplitLead } from '../channel-ref.js'; // B-c127: a channel notice names its conversation (THE NAME LADDER) and opens it with one click
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand drawn as the script it runs (PURE, bundled)
@@ -1343,6 +1343,7 @@ class ChatRenderers {
     title.textContent = t('VibeSpace · {what}', { what: b.phase === 'end' ? endCardText(b) : startCardText(b) });
     head.appendChild(title);
     el.appendChild(head);
+    { const w = this._browserStartNote(b); if (w) { const g = document.createElement('div'); g.className = 'chat-browser-session-note chat-status-dim'; g.textContent = w; el.appendChild(g); } }   // r3786 (hold 5): «not kept» on the card
     if (b.phase === 'end') {
       if (b.framesRemoved) { const g = document.createElement('div'); g.className = 'chat-browser-session-note chat-status-dim'; g.textContent = framesGoneText(b.limit); el.appendChild(g); }
       const resumable = this._browserResumeOffer(b);
@@ -1366,6 +1367,22 @@ class ChatRenderers {
       this._noteBrowserCard(b, el, resume);
     } else this._noteBrowserCard(b, el, null);
     return el;
+  }
+  /** r3786 (hold 5): the conversation's OWN browser's start was NOT KEPT (or handed a new browser past the start's reconcile) — its newest
+   *  card says so, from THE fact (own.startNote); '' otherwise */
+  _browserStartNote(b) {
+    try {
+      if (!b || !this.sessionId) return '';
+      const key = String(b.browserKey || '');
+      if (!/^bk-[0-9a-f]{8}$/.test(key)) return '';
+      if (((this.app && this.app._browserProfiles && this.app._browserProfiles.profiles) || []).some((p) => p && p.id === b.profileId)) return '';
+      const row = (this.app?.sidebar?._allSessions || []).find((x) => x && x.webuiId === this.sessionId) || null;
+      const fact = row && row.browserFact;
+      if (!fact || fact.key !== key) return '';
+      const last = this._browserCardLast;
+      if (last && Number(last.at) > Number(b.at || 0)) return '';
+      return startNoteWords(fact, t);
+    } catch { return ''; }
   }
   /** lane browser-resume B: may THIS end card offer Resume? The conversation's OWN browser (its key, not a helper's, not a
    *  named profile's), the fact says resumable, and no newer card of this conversation's browser was drawn. */
