@@ -4615,6 +4615,8 @@ export default {
   "VibeSpace cannot read its webhook callers right now — nothing was changed, and each caller is told to try again later. It reads them again by itself in a few minutes.": "VibeSpace はいま webhook の呼び出し元を読み込めません — 何も変更されておらず、各呼び出し元には後でもう一度試すよう伝えています。数分のうちに自動で再読み込みします。",
   "VibeSpace cannot read its pending pairing codes right now — no code was made or used. It reads them again by itself in a few minutes.": "VibeSpace はいま保留中のペアリングコードを読み込めません — コードは作成も使用もされていません。数分のうちに自動で再読み込みします。",
   "the webhook callers": "webhook の呼び出し元",
+  "This account's list of people cannot be read right now — nothing was changed. It is read again by itself; names and your own messages are shown again once it reads.": "このアカウントの人物一覧を今読み込めません — 何も変更していません。自動で読み直されます。読み込めたら名前と自分のメッセージが再び表示されます。",
+  "a channel account’s list of people": "チャンネルアカウントの人物一覧",
   "the pending pairing codes": "保留中のペアリングコード",
   "who may receive your two-step codes": "2段階コードを受け取れる相手",
   "the reset marks": "リセットの記録",

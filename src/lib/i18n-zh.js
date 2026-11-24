@@ -4616,6 +4616,8 @@ export default {
   "VibeSpace cannot read its webhook callers right now — nothing was changed, and each caller is told to try again later. It reads them again by itself in a few minutes.": "VibeSpace 暂时读不到它的 webhook 调用方 — 没有更改任何东西，每个调用方都会被告知稍后再试。它会在几分钟内自己再读一次。",
   "VibeSpace cannot read its pending pairing codes right now — no code was made or used. It reads them again by itself in a few minutes.": "VibeSpace 暂时读不到待完成的配对码 — 没有生成或使用任何配对码。它会在几分钟内自己再读一次。",
   "the webhook callers": "webhook 调用方",
+  "This account's list of people cannot be read right now — nothing was changed. It is read again by itself; names and your own messages are shown again once it reads.": "暂时无法读取这个账号的联系人列表 —— 没有更改任何内容。它会自动重新读取；读取后会重新显示名字和你自己的消息。",
+  "a channel account’s list of people": "某个频道账号的联系人列表",
   "the pending pairing codes": "待完成的配对码",
   "who may receive your two-step codes": "谁可以获取你的两步验证码",
   "the reset marks": "重置标记",
