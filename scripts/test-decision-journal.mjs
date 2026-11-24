@@ -189,7 +189,7 @@ const killed = async (Mod) => {
 { const r = await killed(DE);
   ok(r.asked === 1 && r.reserved > 0 && Math.abs(r.b1.usd - r.reserved) < 1e-9 && r.b1.calls === 1, 'a stop between the reservation and the result: the next start counts the call SPENT (its reserved estimate, one call)', r);
   ok(Math.abs(r.b2.usd - r.reserved) < 1e-9 && r.b2.calls === 1, '…ONCE: a start after it reads the same day (no second count)', r); }
-{ const r = await killed(engineCopy([["    const j = M.daySpendByUse(journalTail(), day0, tzOffset);", "    const j = M.daySpendByUse(journalTail().filter((x) => !x || x.outcome !== 'reserved'), day0, tzOffset);"]], 'boot-skips-reservations'));
+{ const r = await killed(engineCopy([["    const j = M.daySpendByUse(rows, day0, tzOffset);", "    const j = M.daySpendByUse(rows.filter((x) => !x || x.outcome !== 'reserved'), day0, tzOffset);"]], 'boot-skips-reservations'));
   ok(r.b1.usd === 0, 'CONTROL (a copy whose boot skips reservations): the stopped call is not counted — the day under-counted — red', r); }
 
 console.log('⑥ law 5: the trim loses nothing the belt reads');
