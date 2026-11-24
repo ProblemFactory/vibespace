@@ -380,9 +380,9 @@ function sendKeptLines(ws, conv, { dataRoot = DATA_ROOT, ...opts } = {}) {
     return lines;
   }, () => []);
 }
-/** THE CONVERSATION ENDED FOR GOOD (src/server/wrapper-files.js removeWrapperFiles — every end path reads it, r2245 (9)): its lines
- *  record goes with it, after any note in flight; its press folders stay for their own seven days (the sweep takes them), so its
- *  folder goes only when nothing else is in it */
+/** A CONVERSATION DELETED: its lines record goes, after any note in flight; its press folders stay for their own seven days (the
+ *  sweep takes them), so its folder goes only when nothing else is in it. NOT a session's end — a resume or an exit keeps the
+ *  conversation and its copies (主开发 r2372 (1)); VibeSpace has no delete road yet (an archive is a flag), so nothing calls it */
 function forgetLines(conv, { dataRoot = DATA_ROOT } = {}) {
   if (typeof conv !== 'string' || !CONV_RE.test(conv) || conv === '.' || conv === '..') return Promise.resolve(false);
   const dir = path.join(dataRoot, conv);

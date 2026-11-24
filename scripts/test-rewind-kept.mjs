@@ -346,17 +346,20 @@ const CA = require(path.join(REPO, 'src/server/chat-attachments.js'));
   await KD.sendKeptLines({ readyState: 1, send: (x) => tSent.push(JSON.parse(x)) }, 'conv-t', { dataRoot: tr, call, now: T0 });
   ok(fs.readFileSync(path.join(tr, 'conv-t', K.LINES_FILE), 'utf8') === torn && !!tl && tl.unrecorded === true && tl.door === true && !!tTold[0] && tTold[0].unrecorded === true && !!tSent[0] && tSent[0].data.torn === true,
     '② A RECORD THAT CANNOT BE READ (r2245 (8)): never treated as empty — not written over; the press\'s line is told live and SAID not recorded; an attach says the record could not be read', { tl, sent: tSent[0] && tSent[0].data });
-  // r2245 (9): the record goes with its conversation — through the one remover every end path reads (src/server/wrapper-files.js)
+  // r2372 (1): A SESSION's END KEEPS THE RECORD (a resume or an exit is not a deletion) — the one remover every end path reads
+  // (src/server/wrapper-files.js) touches no kept line; forgetLines is for a conversation's DELETE (no delete road yet)
   const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const KDnow = require(path.join(REPO, 'src/server/rewind-kept-door.js'));   // the door as loaded now (the restart leg above loaded it afresh)
   const fdata = at2('fdata'), fbuf = path.join(fdata, 'buffers'), froot = path.join(fdata, 'rewind-kept'), fpress = K.pressIdOf(T0, '0000f3f3');
   fs.mkdirSync(fbuf, { recursive: true });
   for (const c of ['conv-f', 'conv-g']) await call('writeLines', { root: path.join(froot, c), lines: [{ press: K.pressIdOf(T0, '0000f2f2'), at: T0, until: T0 + 1, state: 'put-back' }] });
   fs.mkdirSync(path.join(froot, 'conv-g', fpress));   // a press folder of that conversation still standing
-  WF.removeWrapperFiles(fbuf, 'conv-f'); WF.removeWrapperFiles(fbuf, 'conv-g');
-  const KDnow = require(path.join(REPO, 'src/server/rewind-kept-door.js'));   // the door the remover loads (the restart leg above loaded it afresh)
-  await Promise.all(['conv-f', 'conv-g'].map((c) => KDnow.chainOf(c)));
-  ok(!fs.existsSync(path.join(froot, 'conv-f')) && !fs.existsSync(path.join(froot, 'conv-g', K.LINES_FILE)) && fs.existsSync(path.join(froot, 'conv-g', fpress)),
-    '② THE CONVERSATION ENDS FOR GOOD (r2245 (9)): its lines record goes with it, through the one remover every end path reads (a kill, the exit teardown, a duplicate retired at boot); a press folder still standing stays for its own seven days', fs.existsSync(froot) ? fs.readdirSync(froot) : []);
+  WF.removeWrapperFiles(fbuf, 'conv-f');
+  await new Promise((r) => setTimeout(r, 50));
+  const keptAtEnd = fs.existsSync(path.join(froot, 'conv-f', K.LINES_FILE));
+  await KDnow.forgetLines('conv-g', { dataRoot: froot });
+  ok(keptAtEnd && !fs.existsSync(path.join(froot, 'conv-g', K.LINES_FILE)) && fs.existsSync(path.join(froot, 'conv-g', fpress)) && !/rewind-kept/.test(fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8')),
+    '② A SESSION\'s END KEEPS THE RECORD (r2372 (1): the end paths\' one remover touches no kept line, and loads nothing of the kept door); forgetLines — a conversation\'s delete — takes the record, its press folders stay for their own days', { keptAtEnd });
   }
   // THE REAL POOL (no `call`): the «rewind-keep» worker thread does the keep and its read-back
   const poolRoot = fs.mkdtempSync(path.join(SCRATCH, 'pool-'));

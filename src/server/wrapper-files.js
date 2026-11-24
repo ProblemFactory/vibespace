@@ -156,8 +156,6 @@ function removeWrapperFiles(BUFFERS_DIR, id) {
     const f = path.join(BUFFERS_DIR, `${id}.${k}`);
     if (SAME_BREATH.has(k)) { try { fs.unlinkSync(f); } catch { } } else fs.rm(f, { recursive: true, force: true }, () => { });
   }
-  // B-437e U3 (r2245 (9)): the conversation's kept lines (data/rewind-kept/<id>/lines.json, beside the buffers' folder) go with it too
-  try { require('./rewind-kept-door.js').forgetLines(id, { dataRoot: path.join(path.dirname(BUFFERS_DIR), 'rewind-kept') }); } catch { }
 }
 
 /** THE AGE SWEEP OF THE WRAPPERS' FILES (2.89.1's law; moved here out of server.js's boot by ci358-reds round 2 so a
