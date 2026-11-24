@@ -13,7 +13,11 @@
  *       are the read's key; a body, a signal (one caller's abort is never another's), a Request object or any other option is
  *       never shared at all;
  *   (d) WRITES ARE NEVER SHARED: only GET is;
- *   (e) A READ IS JOINED ONLY WHILE YOUNG (JOIN_MS below): a read in flight longer is never joined — an ask again is its own request.
+ *   (e) A READ IS JOINED ONLY WHILE YOUNG (JOIN_MS below): a read in flight longer is never joined — an ask again is its own request;
+ *   (f) A READ ASKED AFTER A WRITE OF THIS PAGE NEVER JOINS A READ THAT BEGAN BEFORE THAT WRITE WAS ANSWERED (主开发 r3697): a write
+ *       is any ask through this fetch whose method is not GET; while one is out no read joins, and a read that began before its
+ *       answer is never joined after it (a page that saves and reads its list again gets the list after its change). Reads with no
+ *       write between them join as before. A change made over the socket is outside this law.
  * The first caller gets the response itself; a joiner gets a copy — so a read nobody joined costs nothing (no copy, no tee).
  * Installed once, at the page's boot (src/client.js), over `window.fetch`: every fetch, fetchJson and api() from then on goes
  * through it. The page's imports run BEFORE it: a fetch at a module's top level goes unshared. A relative URL is resolved
@@ -53,18 +57,33 @@ export function readKeyOf(input, init, base) {
  *  allows its tail read (test-chat-send-landing leg 4). */
 export const JOIN_MS = 1000;
 const clock = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
-/** → a fetch that shares a GET while it is in flight AND YOUNG (laws a–e). `base` resolves a relative URL; none given = the page's
+/** the method of an ask: the init's, else a Request's own, else GET */
+function methodOf(input, init) {
+  const m = (init && init.method) || (input && typeof input === 'object' && typeof input.method === 'string' ? input.method : '') || 'GET';
+  return String(m).toUpperCase();
+}
+
+/** → a fetch that shares a GET while it is in flight AND YOUNG, with no write of the page since it began (laws a–f). `base` resolves a relative URL; none given = the page's
  *  address read as each key is made (never the one at install); `joinMs` / `now` = the window and its clock (a suite's) */
 export function sharedGets(fetchImpl, { base = null, joinMs = JOIN_MS, now = clock } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('sharedGets: the fetch handed in is not a function');   // never «name(» in a string: the bundle check reads it as a call
   const inflight = new Map();   // key → { joiners: [{ resolve, reject }] } — only while the read is in flight
   const baseNow = () => base || (typeof location !== 'undefined' ? location.href : 'http://localhost/');
+  let era = 0, writesOut = 0;   // (f) era moves at every write's send AND its answer; writesOut = this page's writes not yet answered
+  const writeAnswered = () => { writesOut--; era++; };
   const shared = function fetchShared(input, init) {
     const key = readKeyOf(input, init, baseNow());
-    if (key === null) return fetchImpl(input, init);
-    const had = inflight.get(key);
-    if (had && now() - had.at < joinMs) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });   // (e) young: joined
-    const entry = { joiners: [], at: now() };   // (e) none in flight, or the one in flight no longer young: a NEW request (later asks join it)
+    if (key === null) {
+      if (methodOf(input, init) === 'GET') return fetchImpl(input, init);   // an unshared READ (a signal, an option outside the key): no write
+      writesOut++; era++;   // (f) a WRITE: no read asked from now on joins a read begun before its answer
+      let p;
+      try { p = Promise.resolve(fetchImpl(input, init)); } catch (e) { writeAnswered(); throw e; }
+      p.then(writeAnswered, writeAnswered);   // registered before the caller's own: the caller's next read already sees the answer
+      return p;
+    }
+    const had = inflight.get(key), age = had ? now() - had.at : -1;
+    if (had && age >= 0 && age < joinMs && had.era === era && writesOut === 0) return new Promise((resolve, reject) => { had.joiners.push({ resolve, reject }); });   // (e) young, (f) no write since it began: joined
+    const entry = { joiners: [], at: now(), era };   // none in flight, or not young (a negative age too), or a write since it began: a NEW request (later asks join it)
     inflight.set(key, entry);
     return Promise.resolve().then(() => fetchImpl(input, init)).then((res) => {
       if (inflight.get(key) === entry) inflight.delete(key);   // (a) nothing kept after it lands
