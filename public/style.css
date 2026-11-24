@@ -10278,3 +10278,37 @@ button.vw-chip { cursor: pointer; }
   html.vs-split[data-vc="regular"] .window.phone-pane[data-pane="left"] > .window-titlebar { padding-left: 52px; }
 }
 .learn-evidence > summary { list-style: none; cursor: pointer; } .learn-evidence > summary::before { content: '▸ ' / ""; } .learn-evidence[open] > summary::before { content: '▾ ' / ""; } /* lane ui-plain-words closure F8: the chip shows it opens */
+
+/* ── THE SYSTEM's EDGES (B-78db, 主开发 r3933 — the owner's word: the iPhone Duo's side column in the HOME-SCREEN copy) ──
+   The home-screen copy opens with viewport-fit=cover (src/lib/side-column.js — the standalone copy only; a Safari tab keeps
+   «contain», every inset 0): the page draws under the system's own regions, so every edge it pins takes its inset. The Duo
+   reports its side column as a trailing inset of 84 and the home indicator as a bottom inset of 34, on both displays (the
+   simulator, int359/duo-probe/RESULT.md); the system paints only the clock and the status marks at the column's top. */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  /* THE COMPACT CLASS (the outer display): today's arrangement kept — the content clear of the column (and of a sensor housing,
+     either side), the column showing our own ground; the top bar clear of a status bar's inset; the list overlay and every
+     full-width sheet clear of the side insets */
+  html[data-vc="compact"] #main-wrapper { margin-left: env(safe-area-inset-left, 0px) !important; margin-right: env(safe-area-inset-right, 0px) !important; }
+  html[data-vc="compact"] #mobile-nav { padding-top: env(safe-area-inset-top, 0px); }
+  html[data-vc="compact"] .sidebar { padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  html[data-vc="compact"] .context-menu.mobile-sheet, html[data-vc="compact"] .usage-popup, html[data-vc="compact"] .global-settings-popover {
+    left: calc(8px + env(safe-area-inset-left, 0px)) !important; right: calc(8px + env(safe-area-inset-right, 0px)) !important;
+  }
+  html[data-vc="compact"] .ns-tg-menu.ns-tg-sheet { left: env(safe-area-inset-left, 0px) !important; right: env(safe-area-inset-right, 0px); }
+  html[data-vc="compact"] .desktop-picker.desktop-picker-sheet { left: env(safe-area-inset-left, 0px); right: env(safe-area-inset-right, 0px); }
+  html[data-vc="compact"] .bprof-pk-sheet { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+  /* THE REGULAR CLASS: the list column's foot clear of the home indicator */
+  html[data-vc="regular"] .sidebar { padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+@media (orientation: landscape) {
+  /* THE TRAILING BAR, the safe default (any shape whose trailing inset is no side column — a notched iPhone held landscape):
+     its GROUND runs into the inset, its buttons stay clear of it; the conversation column ends where the bar begins */
+  html[data-vc="regular"] #main-wrapper { margin-right: calc(56px + env(safe-area-inset-right, 0px)) !important; }
+  html[data-vc="regular"] #mobile-nav { width: calc(56px + env(safe-area-inset-right, 0px)); padding-right: calc(6px + env(safe-area-inset-right, 0px)); }
+  /* THE DUO's SIDE COLUMN (html[data-sidecol] — src/lib/side-column.js: a trailing inset ≥ 80 with no leading one): the bar MOVES
+     INTO the column — as wide as the column, its buttons starting below the room the clock and the status marks take. That room:
+     76 CSS px measured on the simulator's picture of the inner display (the clock from 12, the status ring and its dots to 76),
+     + 36 for a Live Activity growing the Dynamic Island into the column = 112 */
+  html[data-vc="regular"][data-sidecol] #main-wrapper { margin-right: max(56px, env(safe-area-inset-right, 0px)) !important; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav { width: max(56px, env(safe-area-inset-right, 0px)); padding-right: 6px; padding-top: var(--sidecol-top, 112px); }
+}

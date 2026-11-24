@@ -10,6 +10,8 @@
 //   ④ wiring pins — app.isMobile is the class's answer (never a boot-time matchMedia); the switch watches every query,
 //     settles VC_SETTLE_MS, makes the sidebar / nav / windows what a fresh load builds; the window manager refits and the
 //     rail leaves with its words — RED CONTROL: the base's frozen `this.isMobile = window.matchMedia(...)` is caught
+//   ⑤ THE SYSTEM's EDGES (B-78db): cover for the home-screen copy only; the Duo's side column by its insets; every edge its inset;
+//     RED CONTROL: the release's stylesheet (the trailing bar at right 0, no inset)
 // Run: node scripts/test-viewport-class.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -96,6 +98,49 @@ console.log('④ wiring pins');
   ok(['Task Groups', 'Files', 'Channels', 'Agent browser', 'Background Work'].every((l) => bar.includes(`label: '${l}'`)) && (bar.match(/\{ id: '[a-z]+', label:/g) || []).length === 5, 'slice 2b: the trailing bar\'s bottom section = the owner\'s five global destinations, in this order, then ⚙');
   const ci = read('src/lib/chat-input.js'), door = ci.slice(ci.indexOf('  focus() {'), ci.indexOf('  focus() {') + 900);
   ok(/if \(keyboardOwned\(\)\) return;[\s\S]*if \(isTouchDevice\(\)\) return;\s*\n\s*if \(this\._textarea\) this\._textarea\.focus\(\);/.test(door), 'slice 1: the composer\'s focus door stands down on a touch screen (no keyboard on load) — before it focuses the box');
+}
+
+console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the home-screen copy, the Duo\'s side column, every edge its inset');
+{
+  const { pathToFileURL } = await import('node:url');
+  const SC = await import(pathToFileURL(path.join(REPO, 'src/lib/side-column.js')).href);
+  const fake = (standalone, mq = false, content = 'width=device-width, initial-scale=1.0') => {
+    const meta = { c: content, getAttribute() { return this.c; }, setAttribute(k, v) { this.c = v; } };
+    const doc = { documentElement: { dataset: {} }, querySelector: (q) => (q === 'meta[name="viewport"]' ? meta : null) };
+    const win = { navigator: { standalone }, matchMedia: () => ({ matches: mq }) };
+    return { meta, doc, win };
+  };
+  const tab = fake(false), home = fake(true), homeMq = fake(undefined, true), again = fake(true, false, 'width=device-width, viewport-fit=cover');
+  const r = [SC.coverIfStandalone(tab.doc, tab.win), SC.coverIfStandalone(home.doc, home.win), SC.coverIfStandalone(homeMq.doc, homeMq.win), SC.coverIfStandalone(again.doc, again.win)];
+  ok(!r[0] && tab.meta.c === 'width=device-width, initial-scale=1.0' && r[1] && /, viewport-fit=cover$/.test(home.meta.c) && home.doc.documentElement.dataset.standalone === '1' && r[2] && /viewport-fit=cover/.test(homeMq.meta.c) && r[3] && again.meta.c.split('viewport-fit').length === 2,
+    '⑤ viewport-fit=cover is set for the HOME-SCREEN copy only (navigator.standalone, or display-mode standalone) — a Safari tab keeps «contain»; set once', { tab: tab.meta.c, home: home.meta.c, mq: homeMq.meta.c, again: again.meta.c });
+  const cols = [[{ left: 0, right: 84 }, 'right', 'the Duo, either display (the simulator: right 84, left 0)'], [{ left: 0, right: 80 }, 'right', 'the floor of the heuristic'],
+    [{ left: 59, right: 59 }, null, 'a notched iPhone held landscape (the same inset on both sides)'], [{ left: 0, right: 59 }, null, 'a sensor housing on one side, under 80'], [{ left: 0, right: 0 }, null, 'a Safari tab / no inset'], [{ left: 84, right: 84 }, null, 'insets on both sides']];
+  const bad = cols.filter(([i, want]) => SC.sideColumnOf(i) !== want);
+  ok(bad.length === 0, `⑤ the side column by its insets (a heuristic, named as one: a trailing inset ≥ ${SC.SIDE_COLUMN_MIN} with no leading inset) — ${cols.map(([, w, why]) => `${why} → ${w || 'the safe default'}`).join('; ')}`, bad);
+  const CSS = read('public/style.css');
+  const edgesOk = (css) => {
+    const i = css.indexOf('THE SYSTEM\'s EDGES (B-78db');
+    const block = i < 0 ? '' : css.slice(i);
+    return {
+      compact: /html\[data-vc="compact"\] #main-wrapper \{ margin-left: env\(safe-area-inset-left, 0px\) !important; margin-right: env\(safe-area-inset-right, 0px\) !important; \}/.test(block)
+        && /html\[data-vc="compact"\] #mobile-nav \{ padding-top: env\(safe-area-inset-top, 0px\); \}/.test(block),
+      sheets: ['.context-menu.mobile-sheet', '.ns-tg-menu.ns-tg-sheet', '.desktop-picker.desktop-picker-sheet', '.bprof-pk-sheet', '.usage-popup', '.global-settings-popover'].every((s) => block.includes(`html[data-vc="compact"] ${s}`)),
+      safeDefault: /html\[data-vc="regular"\] #mobile-nav \{ width: calc\(56px \+ env\(safe-area-inset-right, 0px\)\); padding-right: calc\(6px \+ env\(safe-area-inset-right, 0px\)\); \}/.test(block)
+        && /html\[data-vc="regular"\] #main-wrapper \{ margin-right: calc\(56px \+ env\(safe-area-inset-right, 0px\)\) !important; \}/.test(block),
+      column: /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav \{ width: max\(56px, env\(safe-area-inset-right, 0px\)\); padding-right: 6px; padding-top: var\(--sidecol-top, 112px\); \}/.test(block)
+        && /html\[data-vc="regular"\]\[data-sidecol\] #main-wrapper \{ margin-right: max\(56px, env\(safe-area-inset-right, 0px\)\) !important; \}/.test(block),
+      listFoot: /html\[data-vc="regular"\] \.sidebar \{ padding-bottom: env\(safe-area-inset-bottom, 0px\); \}/.test(block),
+      last: i > 0 && !/\n[^\n]*#mobile-nav[^\n]*\{[^}]*\bwidth:\s*56px/.test(block),   // the block stands LAST: nothing after it puts the bar back at 56 px
+    };
+  };
+  const E = edgesOk(CSS);
+  ok(Object.values(E).every(Boolean), '⑤ every edge takes its inset: the compact content and top bar, the list overlay and the six full-width sheets clear of the side insets; the trailing bar\'s safe default (its ground into the inset, its buttons clear); on the Duo\'s column the bar INSIDE it, as wide as it, its buttons from 112 px (76 measured + 36 for a Live Activity); the list column\'s foot clear of the home indicator', E);
+  const R = edgesOk(CSS.slice(0, CSS.indexOf('\n/* ── THE SYSTEM\'s EDGES (B-78db')));
+  ok(!R.safeDefault && !R.column && !R.compact, '⑤ RED CONTROL: the release\'s stylesheet (the trailing bar at right 0, 56 px, no inset) is caught — under cover its buttons would stand inside the system\'s column', R);
+  const CLIENT = read('src/client.js');
+  ok(/try \{ installSideColumn\(\); \} catch \{ \}/.test(CLIENT) && CLIENT.indexOf('installSideColumn();') < CLIENT.indexOf('const exitHop = continueExit();') && !/viewport-fit/.test(read('public/index.html')),
+    '⑤ the client sets cover and reads the column BEFORE the app lays out (src/client.js, at the top); public/index.html carries no viewport-fit (a Safari tab stays «contain»)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

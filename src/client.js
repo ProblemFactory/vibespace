@@ -6,6 +6,7 @@ import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
 import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, installFetchTimingWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, installScreenWatch, installInputStamp, recentCompositorStalls } from './lib/telemetry-client.js';
 import { continueExit } from './lib/mobile-back.js';
+import { installSideColumn } from './lib/side-column.js'; // B-78db: the home-screen copy draws under the system's side column (viewport-fit=cover) and reads it
 import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/page-wake.js'; // B-8165: the wake's kind, and whether the page fell behind (PURE)
 // lane phone-back-reload (round 2): an older VibeSpace page the phone's exit LANDED on goes on back and never boots the
 // app — the promise settles only if this page stays (its ONE named load)
@@ -14,6 +15,7 @@ import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/pag
 // shared (src/lib/shared-gets.js). Installed here, before the exit hop and the App: every fetch from then on goes through it. The
 // imports above run first: a fetch at a module's top level goes unshared
 try { window.fetch = sharedGets(window.fetch.bind(window)); } catch { }
+try { installSideColumn(); } catch { } // B-78db (主开发 r3933): cover for the home-screen copy BEFORE the app lays out; html[data-sidecol] read at every resize
 const exitHop = continueExit();
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 installLongTaskWatch(); // main-thread stall ring — feeds the suspend-vs-block verdict below
