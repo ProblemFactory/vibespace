@@ -346,8 +346,8 @@ console.log('⑯ the browser registry held: the stop and the list refuse BY NAME
   const heldErr = () => Object.assign(new Error('the running browsers: browser-profiles.json in VibeSpace\'s data folder could not be read (EACCES)'), { code: 'store_unread' });
   const CF = require('../src/server/conversation-facts.js');
   const opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8'), cfSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
-  const ROWS_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: args.id }; rows = null; }";
-  const STOP_AT = "catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — ${e.code === 'host_unavailable' ? 'whether it stopped there is not known (the request may have reached the machine)' : 'nothing was stopped'}`, target: row.name || row.id };";   // moved with B-e799 (the machine names beside store_unread)
+  const ROWS_AT = "catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, noticeName: args.id }; rows = null; }";
+  const STOP_AT = "catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — ${e.code === 'host_unavailable' ? 'whether it stopped there is not known (the request may have reached the machine)' : 'nothing was stopped'}`, noticeName: row.name || row.id };";   // moved with B-e799 (the machine names beside store_unread)
   const LIST_AT = "catch (e) { if (e && e.code === 'store_unread') return { why: String(e.message) }; rows = null; }";
   ok(opsSrc.split(ROWS_AT).length === 2 && opsSrc.split(STOP_AT).length === 2 && cfSrc.split(LIST_AT).length === 2, '⑯ control setup: the three named branches are found once each');
   const MH = mutantCopies('browser-stop-held', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'));

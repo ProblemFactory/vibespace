@@ -614,11 +614,12 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       audit({ keyId, subject: subject || 'unknown', verb, args: r.args || extra.args || null, ok: r.ok, code: r.code, ...(extra.ask ? { ask: extra.ask } : {}), ...(extra.once ? { once: extra.once } : {}) });
       // lane vault-window-v2 (design q-047 §3.4): a refusal the owner can act on (locked / not granted / expired) is a 「使用失败」
       // notice in For you — ONE per key per hour (src/server/vault-hooks.js createVaultAttention; the rule PURE in vault-inventory)
-      // lane conversations-archive-verb: the notice names the VERB, the TARGET (its name when the verb found it, else the id the
-      // caller gave, else the caller itself) and the REASON — one notice per key × verb × reason per hour
+      // lane conversations-archive-verb: the notice names the VERB, the TARGET and the REASON — one notice per key × verb × reason per
+      // hour. B-119d (r3457): the target is its NAME when the verb found it (the refusal's `noticeName`, handed here in `extra` by the
+      // act below and NEVER answered, audited or broadcast: a caller gets no more than before), else the id the caller gave, else the caller
       // r3 (B-3190 follow-up): a Task Group the CALLER is not in (open --task / bind) is the caller's own mistake, answered by name;
       // no grant or reach cures it, so the owner gets no card — a NAMED flag (cure 2), never a reach spelling a future kind could reuse
-      if (!r.ok && r.callerMistake !== true && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name, verb, target: (r.target != null ? String(r.target) : null) || (args && args.target != null ? String(args.target) : null) || (caller && caller.name) || null, why: r.why || null, reach: r.reach || null }); } catch { } }   // lane key-instance-scope: a reach refusal names the reach
+      if (!r.ok && r.callerMistake !== true && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name, verb, target: (extra.noticeName != null ? String(extra.noticeName) : null) || (r.target != null ? String(r.target) : null) || (args && args.target != null ? String(args.target) : null) || (caller && caller.name) || null, why: r.why || null, reach: r.reach || null }); } catch { } }   // lane key-instance-scope: a reach refusal names the reach
       return r;
     };
     if (!subject || !A.isSubject(subject)) return done(named('unauthorized', 'the calling conversation has no id yet — send it one message first'));
@@ -709,7 +710,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (verb === 'conversations.open' && result && result.ok && result.sessionId) noteOpened({ keyId: key.id, webuiId: String(result.sessionId), conversationId: result.claudeSessionId ? String(result.claudeSessionId) : null });
     // lane automation-verbs: a refusal keeps what the caller can act on — the spend bucket and when it frees, the field it names
     const keep = result && typeof result === 'object' ? Object.fromEntries(['bucket', 'retryAfter', 'field', 'reach'].filter((k) => result[k] != null).map((k) => [k, result[k]])) : {};   // `reach`: a reach refusal's kind (lane key-instance-scope)
-    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.why), ...keep, args: v0.args }, key.id, asked ? { ask: asked } : {});
+    // B-119d: the verb's noticeName (the target's name) goes to the owner's notice alone — never into `keep`, the answer or the audit
+    const noticeName = result && typeof result === 'object' && result.noticeName != null ? String(result.noticeName).slice(0, 200) : null;
+    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.why), ...keep, args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });
     done({ ok: true, args: v0.args }, key.id, asked ? { ask: asked } : {});
     return { ok: true, keyId: key.id, key: key.name, verb, result, ms: now() - t0 };
   }

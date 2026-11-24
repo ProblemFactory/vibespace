@@ -477,19 +477,19 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
   const RECIPE = { opener: ' This key opened it: pass force (--force) to end it anyway.', self: ' It is this conversation itself: pass force (--force) to end it anyway.' };
   function endGate(t, args, label, { discountAsks = false, propose = null } = {}) {
     const own = t.by === 'opener' || t.by === 'self';
-    if (args.force) return own ? null : { ok: false, code: 'force_not_yours', why: `force is honoured only for a conversation this key opened (or the calling conversation itself); this one is reached ${REACH_WORDS[t.by] || 'by another rule'} — nothing was stopped. ${doorOf(propose)}`, target: label };
+    if (args.force) return own ? null : { ok: false, code: 'force_not_yours', why: `force is honoured only for a conversation this key opened (or the calling conversation itself); this one is reached ${REACH_WORDS[t.by] || 'by another rule'} — nothing was stopped. ${doorOf(propose)}`, noticeName: label };
     const teach = own ? RECIPE[t.by] : '';
     // only a chat conversation whose harness row keeps every sidecar fact can ever be judged idle by the hub — the SAME caps the
     // list builder reads (listFacts.capsOf): anything else is the person's to end, said, so a manager does not retry
     const caps = listFacts && typeof listFacts.capsOf === 'function' ? listFacts.capsOf(t.s.backend || 'claude') : (() => { try { return require('../backend-caps.js').capsOf(t.s.backend || 'claude'); } catch { return null; } })();   // a list that hands none: the builder's own default source (sourcesFrom capsOf)
     const keeps = (caps && caps.sidecarFacts) || {};
-    if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports too little of what an agent's end must know. Nothing was stopped. ${doorOf(propose)}${teach}`, target: label };
+    if (t.s.mode !== 'chat' || !(keeps.background && keeps.timers && keeps.lastRecordAt)) return { ok: false, code: 'person_only', why: `not ended — only a person can end it: ${t.s.mode !== 'chat' ? 'a terminal conversation' : 'its harness'} reports too little of what an agent's end must know. Nothing was stopped. ${doorOf(propose)}${teach}`, noticeName: label };
     const row = listFacts && typeof listFacts.rowOf === 'function' ? listFacts.rowOf(t.id) : null;
-    if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', target: label };
+    if (!row) return { ok: false, code: 'not_ready', why: 'the conversation facts are not wired yet — nothing was stopped', noticeName: label };
     const CF = require('../conversation-facts.js');   // THE end verdict (PURE) — required here: a suite's scratch copy of this file carries no sibling
     // the archive's own recipe (主开发 15:31Z): a call that RESOLVES the conversation's asks is judged with them discounted
     const v = CF.endVerdict(discountAsks ? { ...row, asks: 0, asksWhy: undefined } : row);
-    if (!v.endable) { const ref = CF.refusalOf(v, { propose }); return { ...ref, why: ref.why + teach, target: label }; }
+    if (!v.endable) { const ref = CF.refusalOf(v, { propose }); return { ...ref, why: ref.why + teach, noticeName: label }; }
     return null;
   }
   // WHO ENDED IT, toward an agent (must 5): the kind only — the ending key's id and its belted name only when it is the CALLING key
@@ -504,14 +504,15 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
   // restack 416 (r311 (b)): the ancestors of no group are none — groups with NO reader wired are unknown (a forgotten wiring fails closed)
   const lineageOfIds = (ids) => { if (Array.isArray(ids) && !ids.length) return []; if (typeof lineageOf !== 'function') return null; try { const l = lineageOf(ids); return Array.isArray(l) ? l : null; } catch { return null; } };
   const targetOf = (base, inh) => ({ ...base, inherited: Array.isArray(inh) ? inh : [], ...(Array.isArray(inh) ? {} : { groupsUnreadable: true }) });
-  /** The target, if the key reaches it → [s, id] | a named refusal (carrying the target's name for the owner's notice). */
+  /** The target, if the key reaches it → [s, id] | a named refusal. Its `noticeName` is the target's name for the owner's notice
+   *  ONLY (B-119d): src/server/automation-engine.js reads it for that notice and never answers it, audits it or broadcasts it. */
   function reached(target, { caller, reach }) {
     const hit = findSession(target || caller.conversationId);
-    if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
+    if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', noticeName: target || null };
     const [s, id] = hit;
     const glr = groupsOfLive(s, id), gl = glr || [];
     const v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl)));   // + the hub's hold (lane bl-windows): a reach «… except G» never admits a target whose groups are unknown   // lane lg-group-parents U3d: + the lineage   // ONE rule: opener / self / the grant's reach (B-3190)
-    if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
+    if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', noticeName: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id, by: (v && v.by) || null };   // lane end-obeys-verdict: how the key reached it (`opener` = it opened it)
   }
   return {
@@ -549,7 +550,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       // answer is the rename's own, at once)
       const key = keyOf(t.s);
       if (typeof nameLanded !== 'function' || !key) return done;
-      return Promise.resolve(nameLanded(key, r.name)).then((landed) => (landed ? done : { ok: false, code: 'not-durable', why: 'the conversation is renamed, but the conversation list could not be written to disk yet — it is kept and written again; ask again to know when it is on disk', target: idOf(t.s) || t.id }));
+      return Promise.resolve(nameLanded(key, r.name)).then((landed) => (landed ? done : { ok: false, code: 'not-durable', why: 'the conversation is renamed, but the conversation list could not be written to disk yet — it is kept and written again; ask again to know when it is on disk', noticeName: idOf(t.s) || t.id }));
     },
     'conversations.bind': async (args, ctx) => {   // async (the deferred-save census, lane lg-store-writes): its answer waits for the store
       const t = reached(args.target, ctx);
@@ -593,19 +594,19 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (hit) { const [s, id] = hit; const glr = groupsOfLive(s, id), gl = glr || []; f = { s, id, conversationId: idOf(s), sessionKey: keyOf(s), name: s.name || null, groups: gl, inherited: glr === null ? null : lineageOfIds(gl) }; }   /* lane lg-group-parents U3d */
       else {
         let d = null; try { d = deadOf(args.target); } catch { d = null; }
-        if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target };
+        if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', noticeName: args.target };
         f = { s: null, id: null, conversationId: d.conversationId, sessionKey: d.sessionKey || `claude:${d.conversationId}`, name: d.name || null, groups: Array.isArray(d.groups) ? d.groups : [], ...(d.inherited !== undefined ? { inherited: d.inherited } : {}) };   // lane lg-group-parents U3d (its read, 7): the lineage the stopped target was read with
       }
       const label = f.name || args.target;
-      if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
+      if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', noticeName: label };
       const v = reach(targetOf({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() }, f.inherited !== undefined ? f.inherited : lineageOfIds(f.groups || [])));   // lane lg-group-parents U3d
-      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
+      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', noticeName: label, ...(v.reach ? { reach: v.reach } : {}) };
       // B-225b R3: the archived list HELD — refused by name BEFORE anything is ended (an archive that ended the conversation and then
       // could not write the list would leave it ended and listed); AFTER the reach verdict (主开发 r565): its label is the target's
       // name, so a held list never tells a caller about a conversation it may not see
-      if (isArchived(f.sessionKey) === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — nothing was ended or archived; ask again once it is read', target: label };
-      let asks; try { asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, target: label }; throw e; }   // B-44f3: For you held unread — its asks are unknown, never «none»
-      if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
+      if (isArchived(f.sessionKey) === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — nothing was ended or archived; ask again once it is read', noticeName: label };
+      let asks; try { asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, noticeName: label }; throw e; }   // B-44f3: For you held unread — its asks are unknown, never «none»
+      if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, noticeName: label };
       const discountAsks = !!args.resolveAsks;   // the archive's recipe: the asks it resolves are no reason to refuse
       if (f.s) { const gate = endGate({ s: f.s, id: f.id, by: v.by }, args, label, { discountAsks, propose: Array.isArray(ctx.scopes) ? ctx.scopes.includes('conversations.propose') : null }); if (gate) return gate; }   // the ONE end gate (lane end-obeys-verdict: must 1)
       const cutA = !!(f.s && args.force && endGate({ s: f.s, id: f.id, by: v.by }, { ...args, force: false }, label, { discountAsks }));
@@ -614,15 +615,15 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       let ended = false;
       if (f.s) {
         const r = await O().endConversation({ webuiId: f.id }, { ...byOf(caller, keyId), ...(cutA ? { forced: true } : {}) }, { endTree: true });   // B-c134 cure: an archive ends the background tree
-        if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && r.why) || 'the conversation could not be ended', target: label };
+        if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && r.why) || 'the conversation could not be ended', noticeName: label };
         ended = true;
       }
       const a = archive(f.sessionKey);   // the sidebar's own store write (persistence router archiveSession)
-      if (!a || !a.ok) return { ok: false, code: (a && a.code) || 'failed', why: (a && a.why) || 'the archived list could not be written', target: label };
+      if (!a || !a.ok) return { ok: false, code: (a && a.code) || 'failed', why: (a && a.why) || 'the archived list could not be written', noticeName: label };
       // B-0248 (c): the archived list is the store writer's — «archived» (or «already archived») is told once it is ON DISK: a caller
       // told so never asks again; one told not-durable asks again and hears already_archived once the list landed
-      if (a.landed && !(await a.landed)) return { ok: false, code: 'not-durable', why: 'the archived list could not be written to disk yet — it is kept and written again; ask again: it answers once the list is on disk', target: label };
-      if (a.already && !ended) return { ok: false, code: 'already_archived', why: 'that conversation is already in the archived list', target: label };
+      if (a.landed && !(await a.landed)) return { ok: false, code: 'not-durable', why: 'the archived list could not be written to disk yet — it is kept and written again; ask again: it answers once the list is on disk', noticeName: label };
+      if (a.already && !ended) return { ok: false, code: 'already_archived', why: 'that conversation is already in the archived list', noticeName: label };
       return { ok: true, target: f.conversationId, sessionKey: f.sessionKey, ended, archived: true, already: !!a.already, resolvedAsks: resolved };
     },
     // lane conversation-facts (majordomo piece 2): ONE snapshot of what the key reaches. The builder (src/server/conversation-facts.js)
@@ -662,30 +663,30 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (hit) {   // NOT ENDED: refused by name (a resume that RACED a person's press answers `already` below — inbox-reopen's road)
         const [s, id] = hit;
         const glr = groupsOfLive(s, id), v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: glr || [], ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(glr)));   // the hold's fact (as the end verb's)   // lane lg-group-parents (restack 415): + the lineage, and own groups that could not be read are unreadable (groupsOfLive's null — as the end verb's)
-        if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || args.target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // ONE shape for a live and an ended conversation
+        if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', noticeName: s.name || args.target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // ONE shape for a live and an ended conversation
         const key = keyOf(s);
-        return { ok: false, code: 'not_ended', why: 'there is nothing to resume — message it instead (its link is in this answer)', target: idOf(s) || id, sessionKey: key, sessionId: id, link: key ? `vibespace://conversation/${key}` : null };
+        return { ok: false, code: 'not_ended', why: 'there is nothing to resume — message it instead (its link is in this answer)', noticeName: idOf(s) || id, sessionKey: key, sessionId: id, link: key ? `vibespace://conversation/${key}` : null };
       }
       let d = null; try { d = deadOf(args.target); } catch { d = null; }
-      if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target || null };
+      if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', noticeName: args.target || null };
       const label = d.name || args.target;
       const v = reach(targetOf({ conversationId: d.conversationId, webuiId: null, groups: Array.isArray(d.groups) ? d.groups : [], ...require('./groups-hold.js').fact() }, d.inherited !== undefined ? d.inherited : lineageOfIds(Array.isArray(d.groups) ? d.groups : [])));   // the hold's fact: an ended record's groups are read from the held store too   // lane lg-group-parents (restack 415): + the lineage the wiring read with the record (endedKeyOf — as the archive's)
-      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v && v.reach ? { reach: v.reach } : {}) };
+      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', noticeName: label, ...(v && v.reach ? { reach: v.reach } : {}) };
       const backend = d.sessionKey.slice(0, d.sessionKey.indexOf(':')) || 'claude';
       let facts = null; try { facts = (await resumeFactsOf(d.sessionKey)) || null; } catch { facts = null; }
       let archived = null; try { archived = isArchived(d.sessionKey); } catch { archived = null; }
-      if (archived === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — whether that conversation is archived is not known; ask again once it is read', target: label };   // B-225b R3
+      if (archived === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — whether that conversation is archived is not known; ask again once it is read', noticeName: label };   // B-225b R3
       archived = !!archived;
       let row = null; try { row = resumeRowOf(backend) || null; } catch { row = null; }
       const verdict = require('../resume-line.js').resumeVerdict({ ...(facts || { goal: 'unknown', timerMark: null, mode: null }), archived }, row || { resumeContinues: 'unread', headless: false });
-      if (!verdict.ok) return { ok: false, code: verdict.code, why: verdict.why, target: label };
+      if (!verdict.ok) return { ok: false, code: verdict.code, why: verdict.why, noticeName: label };
       if (!resumeLine) return { ok: false, code: 'not_ready', why: 'the resume line is not wired yet' };
       const q = resumeLine.submit({ target: d.sessionKey, by: ctx.keyId, payload: { cwd: (facts && facts.cwd) || '', hostId: (facts && facts.hostId) || null, actBy: `automation:${ctx.keyId}` } });
-      if (!q.ok) return { ok: false, code: q.code, why: `${q.count} of this key's resumes wait their turn — ask again once one of them has started (conversations status names it live)`, count: q.count, target: label };
+      if (!q.ok) return { ok: false, code: q.code, why: `${q.count} of this key's resumes wait their turn — ask again once one of them has started (conversations status names it live)`, count: q.count, noticeName: label };
       const base = { target: d.conversationId, sessionKey: d.sessionKey, link: `vibespace://conversation/${d.sessionKey}`, desktop: (() => { try { return rowDesktopOf(d.sessionKey) || null; } catch { return null; } })(), note };
       if (q.position > 0) return { ok: true, queued: true, position: q.position, next: `conversations status ${d.sessionKey} answers once it runs; asking again keeps its place`, ...base };
       const r = await q.result;
-      if (!r || !r.ok) return { ok: false, code: 'resume_failed', why: `${(r && r.why) || 'the create gave no reason'} — a person can resume it from its window`, target: label };
+      if (!r || !r.ok) return { ok: false, code: 'resume_failed', why: `${(r && r.why) || 'the create gave no reason'} — a person can resume it from its window`, noticeName: label };
       return { ok: true, sessionId: r.sessionId, ...(r.already ? { already: true } : {}), ...base };
     },
     // lane login-request-card (majordomo piece 3b): an agent PROPOSES ending conversations it can see — ONE For-you card per proposer
@@ -702,10 +703,10 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
     'browsers.stop': async (args, ctx) => {
       if (!browsers || typeof browsers.rows !== 'function' || typeof browsers.stop !== 'function') return { ok: false, code: 'not_ready', why: 'the browser keeper is not wired yet' };
       // piece 6 meets the hold laws: while the browser registry is unread the keeper refuses BY NAME — never «no running browser»
-      let rows = null; try { rows = browsers.rows(); } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, target: args.id }; rows = null; }
+      let rows = null; try { rows = browsers.rows(); } catch (e) { if (e && e.code === 'store_unread') return { ok: false, code: 'store_unread', why: `${e.message} — nothing was stopped`, noticeName: args.id }; rows = null; }
       if (!Array.isArray(rows)) return { ok: false, code: 'not_ready', why: 'the browser keeper did not answer — nothing was stopped' };
       const row = rows.find((r) => r && r.id === args.id) || null;
-      if (!row) return { ok: false, code: 'already_stopped', why: 'no running browser by that id — nothing was stopped', target: args.id };
+      if (!row) return { ok: false, code: 'already_stopped', why: 'no running browser by that id — nothing was stopped', noticeName: args.id };
       // each holder: its conversation (the live session by its webui id) and the key's reach over it; a holder that is not
       // running here is UNKNOWN (its own reason), never «outside your reach»
       const holders = (Array.isArray(row.holders) ? row.holders : []).map((h) => {
@@ -721,11 +722,11 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       const v = require('../browser-profiles.js').stopVerdict({ live: true, holders, kind: row.kind || null, takenOver: typeof row.takenOver === 'boolean' ? row.takenOver : null,
         watched: Number.isInteger(row.viewers) ? row.viewers > 0 : null, personBrowsing: typeof row.personBrowsing === 'boolean' ? row.personBrowsing : null,
         inFlight: row.inFlight || null, tabsKept: row.tabsKept === true, closeTabs: args.closeTabs === true });
-      if (!v.stop) return { ok: false, code: v.code, why: v.why, target: row.name || row.id, ...(v.reach ? { reach: v.reach } : {}) };   // an exception's refusal names the grant's reach, as reached() does
+      if (!v.stop) return { ok: false, code: v.code, why: v.why, noticeName: row.name || row.id, ...(v.reach ? { reach: v.reach } : {}) };   // an exception's refusal names the grant's reach, as reached() does
       let r = null;
-      try { r = await browsers.stop(row.id); } catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — ${e.code === 'host_unavailable' ? 'whether it stopped there is not known (the request may have reached the machine)' : 'nothing was stopped'}`, target: row.name || row.id }; /* B-e799: a paired machine that cannot be asked (unreachable, or its agent predates the structured answer) refuses by name */ return { ok: false, code: 'not_freed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}; nothing was freed`, target: row.name || row.id }; }
+      try { r = await browsers.stop(row.id); } catch (e) { if (e && (e.code === 'store_unread' || e.code === 'stop_facts_unsupported' || e.code === 'host_unavailable')) return { ok: false, code: e.code, why: `${e.message} — ${e.code === 'host_unavailable' ? 'whether it stopped there is not known (the request may have reached the machine)' : 'nothing was stopped'}`, noticeName: row.name || row.id }; /* B-e799: a paired machine that cannot be asked (unreachable, or its agent predates the structured answer) refuses by name */ return { ok: false, code: 'not_freed', why: `the keeper could not stop it — ${(e && e.message) || 'no reason given'}; nothing was freed`, noticeName: row.name || row.id }; }
       // THE ANSWER TELLS THE TRUTH ABOUT WHAT WAS FREED: «not freed» is not ok
-      if (!r || r.freed !== true) return { ok: false, code: 'not_freed', why: `not freed — ${(r && r.why) || 'the keeper did not say it stopped'}`, target: row.name || row.id };
+      if (!r || r.freed !== true) return { ok: false, code: 'not_freed', why: `not freed — ${(r && r.why) || 'the keeper did not say it stopped'}`, noticeName: row.name || row.id };
       const tabs = row.kind === 'own' ? 'Its tabs reopen at the next browser command.' : row.kind === 'helper' ? 'A helper\'s browser keeps nothing: its tabs are closed.' : `Its tabs closed; its sign-ins stay${row.machine ? ` in its folder on ${row.machine}` : ''}.`;
       return { ok: true, id: row.id, kind: row.kind, ...(row.machine ? { machine: row.machine } : {}), freed: true, tabs };
     },

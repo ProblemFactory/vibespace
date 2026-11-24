@@ -98,7 +98,7 @@ console.log('① the end obeys the verdict');
   // RED CONTROL: the verdict switched off
   const MUT = mutantCopies('end-obeys-verdict', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8');
-  const NEEDLE = '    if (!v.endable) { const ref = CF.refusalOf(v, { propose }); return { ...ref, why: ref.why + teach, target: label }; }';   // + { propose }: lane login-request-card (a refusal teaches the propose door only to a key that holds it)
+  const NEEDLE = '    if (!v.endable) { const ref = CF.refusalOf(v, { propose }); return { ...ref, why: ref.why + teach, noticeName: label }; }';   // + { propose }: lane login-request-card (a refusal teaches the propose door only to a key that holds it)
   ok(src.split(NEEDLE).length === 2, 'the verdict\'s refusal is in the end verb once (the mutation anchor)');
   const M = MUT.load('src/server/conversation-ops.js', anchored(src, NEEDLE, '    void v;', 'verdict-cleared'), 'verdict-cleared');
   const red = world({ s: session({ _turn: 'running' }), ops: M });

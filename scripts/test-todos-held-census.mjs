@@ -576,7 +576,7 @@ console.log('③ the scenes — a migration waits for the read, a clear is refus
     ['src/server/vault-paste-door.js', "    if (userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('a paste request') };"],
     ['src/server/vault-paste-door.js', "    if (userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('a words proposal') };"],
     ['src/server/mounts-plugins-wiring.js', "    asksOf: (key) => { if (userTodos.isHeldUnread?.()) throw Object.assign(new Error(userTodos.unreadRefusal('archiving a conversation (its open asks are unread)')), { code: 'todos-unread' });"],
-    ['src/server/conversation-ops.js', "catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, target: label }; throw e; }"],
+    ['src/server/conversation-ops.js', "catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, noticeName: label }; throw e; }"],
     ['src/server/login-expiry-watch.js', "    if (userTodos && userTodos.isHeldUnread?.()) return { n: 0, remaining: recs };"],
     ['src/server/device-upgrade-watch.js', "    if (userTodos && userTodos.isHeldUnread?.()) return false;"],
     ['src/server/dial-health-watch.js', "    else if (rec && DH.clearDue(rec.clearSince, t) && !(userTodos && userTodos.isHeldUnread?.())) {"],

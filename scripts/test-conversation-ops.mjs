@@ -366,7 +366,7 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   const any = { ...ctx, reach: (t) => (t.conversationId === 'nope' ? { ok: false, code: 'not_granted' } : { ok: true, by: 'grant' }) };
   W.activeSessions.get('sess-0-8')._turn = 'running'; W.activeSessions.get('sess-0-8').mode = 'chat';   // a chat conversation (a terminal one is the person's to end)
   const openAsks = await V2['conversations.archive']({ target: 'dd44' }, any);
-  ok(openAsks.code === 'asks_open' && JSON.stringify(openAsks.asks) === '["ut-1","ut-2"]' && /ut-1, ut-2/.test(openAsks.why) && openAsks.target === 'stranger' && !dismissed.length && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'),
+  ok(openAsks.code === 'asks_open' && JSON.stringify(openAsks.asks) === '["ut-1","ut-2"]' && /ut-1, ut-2/.test(openAsks.why) && openAsks.noticeName === 'stranger' && !dismissed.length && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'),
     'archive: the target\'s OPEN For-you asks refuse it by their ids (asks_open — the memory law) before anything is touched; the refusal names the target', openAsks);
   const busy = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true }, any);
   ok(busy.code === 'subject_busy' && busy.busy.some((b) => b.code === 'turn') && asks.has('claude:dd44') && !dismissed.length, 'a running turn ⇒ subject_busy — the ONE end gate, judged before the asks are dismissed (a refusal changes nothing)', busy);

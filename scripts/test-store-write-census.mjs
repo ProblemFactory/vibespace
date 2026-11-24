@@ -2770,10 +2770,10 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
           const no = await V['conversations.archive']({ target: 'gone7' }, { caller, keyId: 'ak-000000000001', reach: () => ({ ok: false, code: 'not_granted', why: 'the key does not reach that conversation' }) });
           const askedForNo = listAsked;
           const yes = await V['conversations.archive']({ target: 'gone7' }, { caller, keyId: 'ak-000000000001', reach: () => ({ ok: true, by: 'opener' }) });
-          return { no: { code: no.code, why: no.why }, askedForNo, yes: { code: yes.code, target: yes.target, why: yes.why }, archived: archived.length };
+          return { no: { code: no.code, why: no.why }, askedForNo, yes: { code: yes.code, noticeName: yes.noticeName, why: yes.why }, archived: archived.length };
         };
         const ha = await heldArchive(require(path.join(REPO, COREL)));
-        ok(ha.no.code === 'not_granted' && ha.askedForNo === 0 && ha.yes.code === 'store_unread' && ha.yes.target === 'a private name' && /nothing was ended or archived/.test(ha.yes.why) && ha.archived === 0,
+        ok(ha.no.code === 'not_granted' && ha.askedForNo === 0 && ha.yes.code === 'store_unread' && ha.yes.noticeName === 'a private name' && /nothing was ended or archived/.test(ha.yes.why) && ha.archived === 0,
           '⑪ (k) (主开发 r565) the archive verb while the conversation list is held: the REACH verdict first — a caller the key does not reach gets the reach refusal and the held list is never asked; a caller it reaches gets the hold BY NAME (store_unread, the target named) — nothing ended or archived', ha);
         const HELD_BLOCK = /^ {6}\/\/ B-225b R3: the archived list HELD[^\n]*\n {6}\/\/[^\n]*\n {6}\/\/[^\n]*\n( {6}if \(isArchived\(f\.sessionKey\) === null\) return \{ ok: false, code: 'store_unread'[^\n]*\n)/m;
         const heldLine = (COSRC.match(HELD_BLOCK) || [])[1] || '';

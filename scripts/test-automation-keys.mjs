@@ -492,7 +492,7 @@ console.log('⑨ THE RENAME SEAM — the ws case\'s body, moved whole; the verb\
   ok(V['conversations.rename']({ name: 'Self' }, ctx(() => ({ ok: true, by: 'self' }))).ok && sessions.get('w1').name === 'Self', 'the verb renames the CALLER by default');
   ok(V['conversations.rename']({ name: 'Other', target: 'conv-2' }, ctx((t) => ({ ok: t.conversationId === 'conv-1' || (t.groups || []).includes('T-9') }))).ok && sessions.get('w2').name === 'Other', 'another conversation the key reaches (here through its Task Group — the engine\'s reach answers the ONE rule\'s verdict) is renamed');
   const no = V['conversations.rename']({ name: 'Nope', target: 'conv-2' }, ctx((t) => (t.conversationId === 'conv-1' ? { ok: true, by: 'self' } : { ok: false, code: 'not_granted', why: 'no' })));
-  ok(no.code === 'not_granted' && no.target === 'Other' && sessions.get('w2').name === 'Other', 'one the key does NOT reach ⇒ not_granted, untouched (the refusal names the target for the owner\'s notice)');
+  ok(no.code === 'not_granted' && no.noticeName === 'Other' && !('target' in no) && sessions.get('w2').name === 'Other', 'one the key does NOT reach ⇒ not_granted, untouched (the refusal carries the target\'s name in noticeName, which the engine reads for the owner\'s notice alone and never answers — B-119d)');
   OPS.provide(null);
   ok(OPS.callOp('rename', {}).code === 'not_ready', 'before the ws handler registered ⇒ not_ready');
 }
@@ -2170,6 +2170,39 @@ console.log('㉒ B-3190 — a key reaches what ITS grant says; the most specific
     && /const pick = A\.pickKey\(\{ keys: db\.keys, grants: liveGrants\(\), want,/.test(ENGS)
     && /pick\.code === 'groups_unreadable' \? `this conversation's Task Groups could not be read just now, so which key it may use for \$\{verb\} could not be judged/.test(ENGS),
     'the engine: reachVerdict without the grant list · a pick refused groups_unreadable says why and «call again in a moment»');
+}
+
+console.log('\nB-119d THE OWNER\'S NOTICE OF A REFUSED VERB NAMES THE TARGET — the verb\'s noticeName, read by the engine for that notice alone');
+{
+  // 主开发 r3457: a caller with an automation sign-in gets nothing more than at the release — no reply and no journal line of the
+  // verb gains the name; only the owner's 使用失败 notice does. Through engine.use; the release's two lines kept in a copy.
+  const PRIV = 'Private target name';
+  const sessN = new Map([['wn1', { name: 'Worker one', backend: 'claude', backendSessionId: 'conv-1', mode: 'chat', status: 'live' }], ['wn2', { name: PRIV, backend: 'claude', backendSessionId: 'conv-n2', mode: 'chat', status: 'live' }]]);
+  const OSRC = fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8');
+  const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
+  const oNeedle = 'noticeName: s.name || target || null';
+  const eNeedle = 'target: (extra.noticeName != null ? String(extra.noticeName) : null) || (r.target != null ? String(r.target) : null)';
+  const kNeedle = "['bucket', 'retryAfter', 'field', 'reach'].filter";
+  ok(OSRC.split(oNeedle).length === 2 && ESRC.split(eNeedle).length === 2 && ESRC.split(kNeedle).length === 2, 'ANCHOR: reached()\'s noticeName, the notice\'s target and a refusal\'s kept fields are each spelled once');
+  const OPS_REL = M.load('src/server/conversation-ops.js', editAnchor(OSRC, oNeedle, 'target: s.name || target || null', 'src/server/conversation-ops.js'), 'b119d-release-ops');   // the release: the name in `target`, which the engine's rebuilt refusal drops (stale-pins: kept — the release's own text, written into a copy)
+  const ENG_REL = M.load('src/server/automation-engine.js', editAnchor(ESRC, eNeedle, 'target: (r.target != null ? String(r.target) : null)', 'src/server/automation-engine.js'), 'b119d-release-engine');   // …and the notice reading the rebuilt refusal (stale-pins: kept — the release's own text, written into a copy)
+  const ENG_LEAK = M.load('src/server/automation-engine.js', editAnchor(ESRC, kNeedle, "['bucket', 'retryAfter', 'field', 'reach', 'noticeName'].filter", 'src/server/automation-engine.js'), 'b119d-answers-name');   // a copy that ANSWERS the name
+  const run = async (O, E, tag) => {
+    const notes = [];
+    const w = await mkWorld('b119d-' + tag);
+    const e = E.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs: O.automationVerbs({ activeSessions: sessN, groupsOf: () => [] }), attention: { useFailed: (q) => { notes.push(q); return null; } } });
+    const k = e.mint({ name: 'renamer', scopes: ['conversations.rename'], by: 'user' });
+    e.grant(k.key.id, ['session:conv-1'], { by: 'user' });
+    const r = await e.use({ caller: caller(), verb: 'conversations.rename', args: { name: 'Nope', target: 'conv-n2' } });
+    return { r, bytes: JSON.stringify(r).split(k.key.id).join('<key>'), notes, journal: JSON.stringify(auditOf(w)) };
+  };
+  const cur = await run(OPS, ENG, 'now'), rel = await run(OPS_REL, ENG_REL, 'release'), leak = await run(OPS, ENG_LEAK, 'leak');
+  ok(cur.r.ok === false && cur.r.code === 'not_granted' && sessN.get('wn2').name === PRIV, 'B-119d: a key that does not reach the target ⇒ not_granted, the target untouched', cur.r);
+  ok(cur.bytes === rel.bytes, 'THE LAW B-119d: the caller\'s reply is BYTE FOR BYTE the release\'s', { now: cur.bytes, release: rel.bytes });
+  ok(!cur.bytes.includes(PRIV) && !cur.journal.includes(PRIV) && cur.journal.includes('not_granted'), 'THE LAW B-119d: …no reply and no journal line carries the target\'s name (the journal holds the refusal)', { reply: cur.bytes, journal: cur.journal });
+  ok(cur.notes.length === 1 && cur.notes[0].target === PRIV && cur.notes[0].code === 'not_granted' && cur.notes[0].verb === 'conversations.rename', 'THE LAW B-119d: the owner\'s notice names the target by its NAME', cur.notes);
+  ok(rel.notes.length === 1 && rel.notes[0].target === 'conv-n2', 'B-119d RED CONTROL (the release\'s two lines, in a copy): the notice named only the id the caller gave — the leg above tells the two apart', rel.notes);
+  ok(leak.bytes.includes(PRIV), 'B-119d RED CONTROL (noticeName kept with a refusal\'s fields, in a copy): the reply carries the name — the «no reply» leg above goes red on it', leak.bytes);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
