@@ -1358,6 +1358,36 @@ console.log('§3c send <agent> = the two-member group');
   f.close();
 }
 
+// fb-f48717393b (主开发 r2235): a JOB's send (create: false) to an agent its owner conversation has no direct group with is refused WITH
+// its target (id and name), the reason (no-pair) and how many direct groups the owner has: a target that WORKS is one of those
+console.log('§3c2 fb-f48717393b a job\'s refused send names its target, the reason and what works');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const drive = async (name, ge) => {
+    const f = fixture(name, ge ? { ge } : {});
+    const none = await f.eng.sendToAgent({ from: A, to: 'beta', text: 'batch finished', create: false });   // a job: no pair yet
+    await f.eng.sendToAgent({ from: A, to: 'beta', text: 'hello beta' });   // the owner conversation opens the pair
+    const works = await f.eng.sendToAgent({ from: A, to: 'beta', text: 'batch finished', create: false });
+    const other = await f.eng.sendToAgent({ from: A, to: 'gamma', text: 'batch finished', create: false });
+    const hidden = await f.eng.sendToAgent({ from: A, to: D, text: 'batch finished', create: false });   // r3606: a session the owner may NOT message, given by its id
+    f.close();
+    return { none, works: !!(works.ok && works.pairCreated === false), other, hidden };
+  };
+  const live = await drive('fbjob');
+  ok(live.none.code === 'job-token' && live.none.why === 'no-pair' && !!live.none.target && live.none.target.conversationId === B && live.none.target.name === 'beta' && live.none.pairs === 0 && live.works
+    && live.other.why === 'no-pair' && !!live.other.target && live.other.target.conversationId === C && live.other.pairs === 1,
+    'fb-f48717393b: a job\'s send with no direct group is refused WITH its target (id and name), the reason and how many direct groups the owner has (0; then 1, the one that works)', JSON.stringify({ none: live.none, works: live.works, other: live.other }));
+  // r3606, THE NAME's CONDITION: a target is named only where the owner conversation's own send would be told that name by the SAME
+  // resolver (groups-engine resolveMember keeps only the sessions the owner may message; sendToAgent asks it, as the owner, first) — a
+  // session the owner may not see gets the uniform refusal with the reference as the job gave it: no target, no reason, no name
+  ok(live.hidden.code === 'unreachable' && !live.hidden.target && !live.hidden.why && String(live.hidden.error).includes(D) && !String(live.hidden.error).includes('delta'),
+    'r3606: a job\'s send to a session its owner may NOT message (by its id) ⇒ the uniform refusal, the id as the job gave it — no target, no reason, never its name («delta»)', JSON.stringify(live.hidden));
+  const NAMED = "      return { ok: false, code: 'job-token', why: 'no-pair', target: { conversationId: r.cid, name: shown }, pairs, error:";
+  ok(src.split(NAMED).length === 2, 'the control finds its line (the named refusal)');
+  const red = await drive('fbjob-red', mutantCopies('fbjob-ge', REPO).load('src/server/groups-engine.js', editAnchor(src, NAMED, "      return { ok: false, code: 'job-token', error:", "src/server/groups-engine.js"), 'unnamed'));
+  ok(red.none.code === 'job-token' && !red.none.why && !red.none.target, 'RED CONTROL (the refusal as before, a copy of the engine): no target and no reason ride the answer — the leg above goes red', JSON.stringify(red.none));
+}
+
 console.log('§3d a shared display name is never guessed (kick / notify)');
 {
   const f = fixture('e3d');

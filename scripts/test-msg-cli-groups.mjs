@@ -328,7 +328,8 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   ok(r.status === 403 && r.body.code === 'job-token', 'jbt_ `group notify` ⇒ job-token too (membership is the conversation\'s own act)');
   const aBefore = auths.length;
   r = await call('POST', '/api/agent/msg/send', { token: 'jbt_owned', body: { to: 'gamma', text: 'batch finished' } });
-  ok(r.status === 403 && r.body.code === 'job-token' && groupCount() === n2, 'jbt_ `send <agent>` with NO existing pair ⇒ job-token, no pair created', JSON.stringify(r.body));
+  ok(r.status === 403 && r.body.code === 'job-token' && groupCount() === n2 && r.body.why === 'no-pair' && !!r.body.target && r.body.target.name === 'gamma' && typeof r.body.target.conversationId === 'string' && r.body.pairs === 0,
+    'jbt_ `send <agent>` with NO existing pair ⇒ job-token, no pair created — and the ROUTE\'s answer names the target, the reason and the owner\'s direct groups (0) (fb-f48717393b)', JSON.stringify(r.body));
   r = await call('POST', '/api/agent/msg/send', { token: TA, body: { to: 'gamma', text: 'hello gamma' } });
   ok(r.status === 200 && r.body.posted && r.body.pairCreated === true && groupCount() === n2 + 1, 'CONTROL: the owner conversation\'s OWN session token makes the pair', JSON.stringify(r.body));
   const pairId = r.body.group.id;

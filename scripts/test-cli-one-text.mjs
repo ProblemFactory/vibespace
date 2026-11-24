@@ -129,7 +129,9 @@ const srv = http.createServer((req, res) => {
     FAKE.calls.push({ method: req.method, path: u.pathname, body, q: Object.fromEntries(u.searchParams) });
     const p = u.pathname;
     let j = { error: 'no such fake route ' + p };
-    if (p === '/api/agent/msg/send') j = { posted: true, group: { id: 'g-1', name: 'G', pair: false }, woke: [], refused: [], nextTurn: [], ...counted(body.text) };
+    if (p === '/api/agent/msg/send' && FAKE.mode === 'job-no-pair') { res.statusCode = 403; j = { error: 'no direct group with "gamma" exists yet, and a job token never creates one', code: 'job-token', why: 'no-pair', target: { conversationId: 'e2e00000-0000-4000-8000-00000000c0c0', name: 'gamma' }, pairs: 2 }; }   // fb-f48717393b
+    else if (p === '/api/agent/msg/send' && FAKE.mode === 'job-other') { res.statusCode = 403; j = { error: 'a job token never creates a group', code: 'job-token' }; }
+    else if (p === '/api/agent/msg/send') j = { posted: true, group: { id: 'g-1', name: 'G', pair: false }, woke: [], refused: [], nextTurn: [], ...counted(body.text) };
     else if (p === '/api/agent/msg/dispatch') j = { dispatched: true, posted: true, group: { id: 'g-1', name: 'G', pair: true }, record: { compacted: false, why: 'idle', wake: { billed: false, reason: 'fake' } }, ...counted(body.text) };
     else if (p === '/api/agent/user-todo' && body.add) j = { success: true, item: { id: 't-1', text: kept(body.add.text), ...(body.add.detail ? { detail: body.add.detail } : {}) }, ...counted(body.add.text), ...(body.add.detail ? { detailChars: T.chars(body.add.detail) } : {}) };
     else if (p === '/api/agent/user-todo') j = { success: true, items: [] };
@@ -321,6 +323,13 @@ console.log('§5 the echo is the ROUTE\'s count');
   const V4 = ['abcdefgh', 'ijklmnop', 'qrst'].join('');   // a value, joined at runtime (a secret-shaped fixture is never a literal)
   const scr = await run(CLI('msg'), ['send', 'g-1', `the session:${V4} and ${['tok', 'en'].join('')}=${V4} end`], { mode: 'scrubbed' });
   ok(scr.code === 0 && scr.out.includes('the secret belt changed 2 spans of it to «redacted», so what arrived is not what you wrote (a value at «session:»)') && !/CUT/.test(scr.out), 'B-4f7f: msg send through a route that counts the changed spans ⇒ the CLI SAYS how many (2)', scr.out);
+  // fb-f48717393b (主开发 r2235): a JOB's send refused because its owner conversation has no direct group with that target yet ⇒ the remedy
+  // SAYS that case (the target, how many direct groups the owner has, how to open one), never «run it from the conversation» alone
+  const jnp = await run(CLI('msg'), ['send', 'gamma', 'batch finished'], { mode: 'job-no-pair' });
+  ok(jnp.code === 1 && jnp.err.includes('this job posts only into a direct group its owner conversation already has (2 now); it has none with "gamma" e2e00000-0000-4000-8000-00000000c0c0 yet') && jnp.err.includes('vibespace-msg send e2e00000-0000-4000-8000-00000000c0c0') && !jnp.err.includes('its own VIBESPACE_SESSION_TOKEN'),
+    'fb-f48717393b: a job send refused for want of a direct group ⇒ the CLI names the target, the owner\'s direct groups (2) and the one step that opens it — not the generic remedy', jnp.err);
+  const jot = await run(CLI('msg'), ['send', 'gamma', 'batch finished'], { mode: 'job-other' });
+  ok(jot.code === 1 && jot.err.includes('run it from the conversation that owns this job (its own VIBESPACE_SESSION_TOKEN)'), 'CONTROL: any other job-token refusal keeps the generic remedy', jot.err);
   const one = await run(CLI('task'), ['backlog-add', 'x'], { mode: 'count' });
   ok(one.code === 0 && /^ {2}sent: 1 character$/m.test(one.out), 'one character ⇒ singular', one.out);
 }

@@ -896,6 +896,10 @@ const PRINTS = {
     'w': 'judged:msgSendAnswer — wokeLine over the belted woke / refused / next-turn names',
     'c.conversationId': `${V}:a candidate's conversation id`, 'c.groupId': `${V}:a candidate's group id`, 'c.name': 'judged:msgRefusalAnswer — a candidate\'s name (stderr)',
     'j.error': 'judged:msgRefusalAnswer — the refusal sentence (it embeds the stored group name; stderr)',
+    // fb-f48717393b: a job's send refused for want of a direct group — the target the route named (its name through msgName) and the
+    // owner's direct-group count, printed in that case's remedy (stderr)
+    'j.target': 'judged:msgRefusalAnswer — the refused send\'s target, {conversationId, name} (stderr)', 't.name': 'judged:msgRefusalAnswer — the target\'s name through msgName (stderr)',
+    't.conversationId': `${V}:the target's conversation id`, 'j.pairs': `${V}:a count (the owner conversation's direct groups)`,
     'g.archived': `${V}:a flag`, 'g.id': `${V}:a group id`, 'g.notify': `${V}:the notify mode`, 'g.pair': `${V}:a flag`, 'g.unread': `${V}:a count`,
     'g.members': 'judged:msgGroupsAnswer / msgGroupOpAnswer — the member rows (each name judged there)',
     'g.name': 'judged:msgGroupsAnswer (list) / msgGroupOpAnswer (the group-op echoes)',

@@ -1502,7 +1502,12 @@ function create({
     const r = resolveMember(to, from);
     if (!r.ok) return endedRefusal(to, from) || r;
     const shown = r.name || to;
-    if (!create && !findPair(from, r.cid)) return { ok: false, code: 'job-token', error: `no direct group with "${shown}" exists yet, and a job token never creates one — start it from the conversation that owns this job (vibespace-msg send "${shown}" "…"), then the job can post into it` };
+    // fb-f48717393b (主开发 r2235): the refusal NAMES the target and the reason, and says what differs from a target that works: a
+    // job posts only into a direct group its owner conversation ALREADY has — `pairs` counts the owner's own (those it can reach)
+    if (!create && !findPair(from, r.cid)) {
+      const pairs = Object.values(all()).filter((g) => !g.archivedAt && g.pair && g.pair.includes(from)).length;
+      return { ok: false, code: 'job-token', why: 'no-pair', target: { conversationId: r.cid, name: shown }, pairs, error: `no direct group with "${shown}" exists yet, and a job token never creates one — start it from the conversation that owns this job (vibespace-msg send "${shown}" "…"), then the job can post into it` };
+    }
     const pair = await findOrCreatePair(from, r.cid, r.name);
     if (!pair.ok) return pair;
     const p = await post({ group: pair.group.id, from, text, wake: w, mayWake, consent, at, awaitReply: aw });

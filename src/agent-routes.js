@@ -150,7 +150,7 @@ const msgGroupOpAnswer = (op, r) => ({ ok: true, op, group: { id: r.group.id, na
 // a member of "<name>"`) and `ambiguous` carries the candidates' names; vibespace-msg prints both on stderr, which the
 // agent's Bash result carries like stdout. The sentence as one piece, every candidate's name as one piece; the codes
 // and ids untouched (an agent repeats a command with an id it was given).
-const msgRefusalAnswer = (r, code) => ({ error: agentText((r && r.error) || 'refused', { kind: 'line', max: 600 }), code: code || (r && r.code) || 'error', ...(r && Array.isArray(r.candidates) ? { candidates: r.candidates.map((c) => ({ ...c, ...(c && c.name != null ? { name: msgName(c.name) } : {}) })) } : {}), ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}) });
+const msgRefusalAnswer = (r, code) => ({ error: agentText((r && r.error) || 'refused', { kind: 'line', max: 600 }), code: code || (r && r.code) || 'error', ...(r && Array.isArray(r.candidates) ? { candidates: r.candidates.map((c) => ({ ...c, ...(c && c.name != null ? { name: msgName(c.name) } : {}) })) } : {}), ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}), ...(r && r.why === 'no-pair' && r.target ? { why: 'no-pair', target: { conversationId: r.target.conversationId, name: msgName(r.target.name || '') }, pairs: Number(r.pairs) || 0 } : {}) });   // fb-f48717393b: a job's refused send names its target and the reason
 /** @returns {{text:string, shown:object[], rest:object[]}} — `shown` are the
  *  entries rendered (emit their cards), `rest` the ones to re-stash. */
 // ── Stay INLINE (verified 2026-07-13 by binary search) ──
