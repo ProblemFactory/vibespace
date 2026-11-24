@@ -12,10 +12,16 @@ function waitEverySave(AM) {
   const save0 = AM.prototype._save;
   AM.prototype._save = function (...a) {
     const r = save0.apply(this, a);
+    let left = null;
     try {
       const W = typeof this._writer === 'function' ? this._writer() : SW.storeWriter();
-      W.flushSync([this._file], { waitedBy: 'a suite: accounts.json read right after an act' });
-    } catch { /* a held list writes nothing: nothing to wait for */ }
+      const f = W.flushSync([this._file], { waitedBy: 'a suite: accounts.json read right after an act' });
+      left = f && Array.isArray(f.left) ? f.left.find((x) => x && x.file === this._file) : null;
+    } catch { left = null; }
+    // r3763 (the should): a flush that leaves the file OWED while the list is not held is a failing write, never silence — the suite
+    // fails by name (a held list writes nothing: nothing to wait for)
+    let held = null; try { held = typeof this.held === 'function' ? this.held() : null; } catch { held = null; }
+    if (left && !held) throw new Error(`accounts.json was not written (${left.why || 'the store writer left it owed'}) — the suite's save could not land`);
     return r;
   };
   Object.defineProperty(AM.prototype, '_saveWaited', { value: true });

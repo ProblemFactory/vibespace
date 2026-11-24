@@ -957,7 +957,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   // only; it persists nothing, no credential leaves it)
   // (row B-87fd identity unit 2: + ./account-identity.js at the top — PURE, imports nothing: the ONE identity record and the ONE
   // «same account?» comparison over facts already in memory; no write door, no credential, no mint)
-  const ACC_EDGES = ['(top) ./account-display-facts.js', '(top) ./account-identity.js', '(top) ./auto-cli-model.js', '(top) ./backend-caps.js', '(top) ./cli-caps.js', '(top) ./harnesses', '(top) ./key-names.js', '(top) ./login-expiry.js', '(top) ./login-state.js', '(top) ./login-tie.js', '(top) ./model-providers.js', '(top) ./oat-identity-model.js', '(top) ./plan-names.js', '(top) ./pool-pin-record.js', '(top) ./run-reads.js', '(top) ./secret-box.js', '(top) ./slot-transitions.js', '(top) ./store-read-hold.js', '(top) ./store-read.js', '(top) crypto', '(top) fs', '(top) os', '(top) path', '_healPoolsAfterRemoval ./account-material.js', '_syncOatFileNow ./account-material.js', '_writer ./store-writer.js', 'constructor ./safe-fs.js', 'ensureSessionPoolLink ./account-material.js', 'importBundle ./account-material.js', 'mergeSubscription ./account-material.js', 'setPoolTarget ./account-material.js', 'sweepSessionPoolLinks ./server/session-meta-verdict.js'];
+  const ACC_EDGES = ['(top) ./account-display-facts.js', '(top) ./account-identity.js', '(top) ./auto-cli-model.js', '(top) ./backend-caps.js', '(top) ./cli-caps.js', '(top) ./harnesses', '(top) ./key-names.js', '(top) ./login-expiry.js', '(top) ./login-state.js', '(top) ./login-tie.js', '(top) ./model-providers.js', '(top) ./oat-identity-model.js', '(top) ./plan-names.js', '(top) ./pool-pin-record.js', '(top) ./run-reads.js', '(top) ./secret-box.js', '(top) ./slot-transitions.js', '(top) ./store-read-hold.js', '(top) ./store-read.js', '(top) async_hooks', '(top) crypto', '(top) fs', '(top) os', '(top) path', '_healPoolsAfterRemoval ./account-material.js', '_syncOatFileNow ./account-material.js', '_writer ./store-writer.js', 'constructor ./safe-fs.js', 'ensureSessionPoolLink ./account-material.js', 'importBundle ./account-material.js', 'mergeSubscription ./account-material.js', 'setPoolTarget ./account-material.js', 'sweepSessionPoolLinks ./server/session-meta-verdict.js'];
   ok(JSON.stringify(c.accEdges) === JSON.stringify(ACC_EDGES), `⑧ accounts.js requires exactly its ${ACC_EDGES.length} named module edges, by function (verify r2 F1: an inline require in an act was a door nobody counted)`, c.accEdges.filter((x) => !ACC_EDGES.includes(x)).concat(ACC_EDGES.filter((x) => !c.accEdges.includes(x)).map((x) => '-' + x)));
   const planted = accSrc.replace("    a.oatEnc = this._enc(token);\n", "    a.oatEnc = this._enc(token);\n    fs.writeFileSync(this.subCredsPath(id), JSON.stringify({ claudeAiOauth: { accessToken: token } }), { mode: 0o600 });\n");
   const cp = planted !== accSrc ? census({ 'src/accounts.js': planted }) : null;
@@ -1099,6 +1099,43 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   }
   ok(Object.values(bRed).every((n) => n && typeof n === 'object' && n.bad + n.disk > 0) && bRed['a token copy in the data dir (r2a3)'].disk > 0, 'RED controls (verify r1 F6 + r2 F1): plants that RUN in the clock — a path-variable write, a rename, a plaintext copy, a remover handed a yes-man "ours?" (stacks not the store\'s actor), a token copy outside every member dir (the whole-disk scan) — are each caught by the behaviour census: ' + JSON.stringify(bRed), bRed);
 }
+console.log('§ r3763 MUST 2 (b) / r3782 — a mint the HUB proved by itself says «saved» only when accounts.json holds the token');
+{
+  // NOT the suite's patched save: a copy of src/accounts.js whose class waitEverySave never touched, on a stand-in writer thread whose
+  // write of accounts.json is HELD (scripts/fixtures/store-stand-writer.cjs); r3782: the token's save is the synchronous road
+  const SWm = require(path.join(REPO, 'src/store-writer.js'));
+  const SANDm = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs')).make(path.join(tmpBase, 'stand-landing'));
+  const Wm = SWm.create({ log: { log() { }, warn() { }, error() { } }, workerPath: SANDm.path, durableMs: 4000 });
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MUTL = mutantCopies('acct-landing', REPO);
+  const ASRCm = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const tokenOnDisk = (dir, rid) => { try { return !!(JSON.parse(fs.readFileSync(path.join(dir, 'accounts.json'), 'utf8')).accounts.find((a) => a.id === rid) || {}).oatEnc; } catch { return false; } };
+  const landingRun = async (AMc) => {
+    const dir = path.join(tmpBase, 'data-landing-' + Math.random().toString(36).slice(2, 8));
+    const amL = new AMc.AccountManager({ dataDir: dir, storeWriter: Wm });
+    const idL = amL.createSubscription({ name: 'Work Max' }).id; amL.setEmail(idL, 'work@example.com'); await amL.persisted();
+    const js = [];
+    const { mint } = spyOn(mk(loadOrch(), 'code', { journal: (j) => js.push(j), accounts: amL }));
+    const st = mint.start({ accountId: idL }); const mid = st.mint.id;
+    await until(() => mint.get(mid)?.phase === 'waiting-code');
+    SANDm.hold('accounts.json', 1200);
+    mint.sendCode(mid, CODE);
+    await until(() => ['saved', 'failed'].includes(mint.get(mid)?.phase), 12000);
+    const atSaved = tokenOnDisk(dir, idL);   // read as soon as the phase says «saved»
+    SANDm.unhold('accounts.json');
+    return { phase: mint.get(mid)?.phase, atSaved, proven: js.some((j) => j.outcome === 'identity-proven') };
+  };
+  const AMc = MUTL.load('src/accounts.js', ASRCm, 'unpatched', { same: true });
+  const r = await landingRun(AMc);
+  ok(r.proven && r.phase === 'saved' && r.atSaved === true, 'MUST 2 (b): a mint proved by identity, the list\'s write HELD on the writer\'s thread: when it says «saved», accounts.json already holds the token (the sign-in save waited for its landing)', r);
+  const cutM = "try { this._save({ now: true, why: 'the long-lived token' }); }";
+  const { anchored: anchoredM } = await import('./scratch.mjs');
+  const AMx = MUTL.load('src/accounts.js', anchoredM(ASRCm, cutM, 'try { this._save(); }', 'off-loop-oat'), 'off-loop-oat');
+  const rx = AMx ? await landingRun(AMx) : null;
+  ok(!!rx && rx.phase === 'saved' && rx.atSaved === false, 'RED CONTROL (the token\'s save off the loop): the mint says «saved» while accounts.json does not hold the token — red', rx);
+  try { Wm.stop(); } catch { }
+}
+
 fs.rmSync(tmpBase, { recursive: true, force: true });
 console.log(`\ntest-oat-mint: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

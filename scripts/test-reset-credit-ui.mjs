@@ -24,6 +24,7 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { writeStub } from './codex-app-server-stub.mjs';
 import { runScenarios, SCENARIOS } from './reset-credit-scenarios.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — a restart world reads what the last life saved
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // The negative control's patched engine is written OUTSIDE the tree
 // (scripts/mutant-copy.mjs, `require` re-bound on line 1 to the real module's
@@ -89,6 +90,7 @@ console.log('\n§2 the roster chip');
 console.log('\n§3 the route over the real engine');
 {
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  waitEverySave(AccountManager);
   const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
   const { registerResetCreditRoutes } = require(path.join(REPO, 'src/routes/reset-credit.js'));
   const roots = [];

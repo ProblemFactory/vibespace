@@ -106,6 +106,12 @@ function localFacetOf(caps, now = Date.now()) {
 // (B-ba7d) the name an account is SHOWN by, and a stored name's mask — ONE function each (src/key-names.js; usage-history asks it too)
 const { publicNameOf, maskDefaultKeyName } = require('./key-names.js');
 
+// B-574d unit 1 (a) cure (主开发 r3763, the should): THE SAVES OF ONE REQUEST — the /api/accounts door runs each write request inside a
+// context, and every save made in its async chain counts there: the reply waits only for ITS act's saves (a pool tick or a reading's
+// save in the same window is no reason to hold it, nor to answer «not on disk» for an act that saved nothing)
+const SAVES = new (require('async_hooks').AsyncLocalStorage)();
+/** run `fn` with `ctx` ({ saves: 0 }) as the saves' context — the count of the saves made in fn's async chain lands in ctx.saves */
+function countingSaves(ctx, fn) { return SAVES.run(ctx, fn); }
 class AccountManager {
   constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null, safeFs = null, displayMaxAgeMs = 60000, storeWriter = null }) {
     this.dataDir = dataDir;
@@ -445,7 +451,7 @@ class AccountManager {
   /** a person's adding or changing act while held: refused BY NAME (accounts_unread, 503) before anything moves */
   _refuseWhileHeld(what = 'changing the accounts') { if (this.held()) throw this._heldRefusal(what); }
 
-  _save() {
+  _save({ now = false, why = 'the change' } = {}) {
     if (this._torn) { if (!this._tornSaveSaid) { this._tornSaveSaid = true; console.warn('[accounts] an accounts change was refused: the file is damaged, and nothing is written over it until it is mended or removed'); } return; }   // THE GUARD for torn bytes held (r3043)
     if (this._hold && !this._hold.writable('an accounts change')) return;   // THE GUARD (r2947 (1)): every one of the 35 sites — nothing written over a file that could not be read
     // B-574d unit 1 (主开发 r3450 / r3455): accounts.json goes through THE STORE WRITER — its thread writes the temp, SYNCS it, renames
@@ -455,18 +461,42 @@ class AccountManager {
     // queued before a hold never lands the held list: the producer refuses (EHELD) and the writer keeps it owed. A person's act
     // answers after its landing (account-usage-routes.js's /api/accounts door, the config import, the mint's save: `persisted()`)
     this._saveSeq = (this._saveSeq || 0) + 1;
+    { const c = SAVES.getStore(); if (c) c.saves++; }   // this request's own save (the door's count)
     const W = this._writer();
     W.dirty(this._file, { name: 'accounts.write', mode: 0o600, produce: () => {
       if (this._torn || (this._hold && this._hold.held())) throw Object.assign(new Error('accounts.json is held (it could not be read, or its bytes are damaged) — nothing is written over it until it reads'), { code: 'EHELD' });
       return JSON.stringify(this._state, null, 2);
     } });
+    // 主开发 r3782 — THE LAW: A SAVE THAT CARRIES A SIGN-IN IS IN THE FILE BEFORE ITS CALL RETURNS, as at the release: `now` (the seven
+    // calls that add, set, move, import, merge or remove a key or a long-lived token, and the two boot migrations that reshape the list)
+    // goes by the store writer's own SYNCHRONOUS road (flushSync: its thread writes, syncs and renames while the loop waits — a small
+    // file, and only when a person or a mint changes a sign-in). By construction the member's own file is then written after the list,
+    // the hub never hands a conversation a value the file does not hold, and a kill loses nothing the release kept. A landing that FAILS
+    // throws `not-durable` by name (the caller rolls the change back where it can: nothing is handed out from memory). Every other save
+    // (the pool's ticks, the display, the billing marks: the many) rides the writer off the loop
+    if (now) {
+      let r = null; try { r = W.flushSync([this._file], { waitedBy: `accounts.json: ${why}` }); } catch (e) { r = { left: [{ file: this._file, why: (e && e.message) || 'the writer threw' }] }; }
+      const miss = !r ? { why: 'the store writer did not answer' } : r.deferred ? { why: 'the hub is stopping — its exit flush writes it' } : (r.left || []).find((x) => x && x.file === this._file);
+      if (miss) throw Object.assign(new Error(`accounts.json could not be written (${miss.why || 'the write failed'}) — ${why} was not saved`), { code: 'not-durable', status: 503, signInSave: true });
+      return true;
+    }
     W.durable(this._file).catch(() => { });
+    return true;
   }
+  /** a sign-in act's memory before it (r3782): restored when its synchronous landing fails — nothing is handed out from memory */
+  _snapshot() { return JSON.parse(JSON.stringify(this._state)); }   // the same bytes the writer would put on disk
+  _restore(snap) { this._state = snap; this._notify(); }
   _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
   /** how many saves this manager has asked for — a door compares it before and after a person's act (B-574d unit 1) */
   saveSeq() { return this._saveSeq || 0; }
   /** accounts.json holds every change saved so far (a HELD or damaged list is never «on disk»: its saves are refused) */
-  persisted() { if (this.held()) return Promise.resolve(false); return this._writer().durable(this._file); }
+  persisted(answer = null) {
+    // (r3763 required 3) `answer(ok)` rides the store writer's OWN answer road (durable's synchronous one): an answer made there goes out
+    // even inside the hub's exit flush — a reply made from a promise's then is never sent at a stop (the exit's flush and the exit run in
+    // one synchronous run)
+    if (this.held()) { if (typeof answer === 'function') { try { answer(false); } catch { } } return Promise.resolve(false); }
+    return this._writer().durable(this._file, typeof answer === 'function' ? { answer } : {});
+  }
   /** why the last save is not on disk yet (the writer's own words) — null when it is */
   whyNotDurable() { const h = this.held(); if (h) return { why: 'held', code: h.code }; const W = this._writer(); return (typeof W.whyNotDurable === 'function' && W.whyNotDurable(this._file)) || null; }
 
@@ -1290,6 +1320,7 @@ class AccountManager {
 
   importBundle(bundle) {
     this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
+    const snap = this._snapshot();   // r3782: undone in memory if its synchronous landing fails
     if (!bundle || !Array.isArray(bundle.accounts)) return { imported: 0, skipped: 0 };
     const FILE_OK = /^[.\w][\w.-]*$/; // whitelist shape — no separators, no traversal
     let imported = 0, skipped = 0;
@@ -1333,7 +1364,7 @@ class AccountManager {
     for (const [k, v] of this._defaultIdFields().map((f) => [f, bundle[f]])) {
       if (v && !this._state[k] && this._state.accounts.some((a) => a.id === v)) this._state[k] = v;
     }
-    if (imported) { this._save(); this._notify(); }
+    if (imported) { try { this._save({ now: true, why: 'the imported accounts' }); } catch (e) { if (e && e.signInSave) this._restore(snap); throw e; } this._notify(); }   // r3782: a sign-in save, in the file before the call returns; a failed landing undone in memory (the imported folders' files stay: said by name)
     return { imported, skipped };
   }
 
@@ -1465,7 +1496,7 @@ class AccountManager {
     if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
     this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
     this._oatFileFacts.delete(fromId);
-    this._save();
+    this._save({ now: true, why: 'the merged sign-in' });   // r3782: the survivor's token in the file before the call returns (the merge's file moves ran before it: no rollback — a failure is said by name)
     this._oatCheckReplaced(fromId, foldedCheck, 'the row was folded into ' + (into.name || intoId));
     if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
     this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)
@@ -1672,6 +1703,7 @@ class AccountManager {
 
   add({ name, key, source = 'manual', originHost = null } = {}) {
     this._refuseWhileHeld();   // r2947 (2) / r3043: an adding or changing act over a list that could not be read is refused by name
+    const snap = this._snapshot();   // r3782: undone in memory if its synchronous landing fails
     key = String(key || '').trim();
     if (!/^sk-ant-/.test(key)) throw new Error('not an Anthropic API key (must start with sk-ant-)');
     const tail = key.slice(-8);
@@ -1693,7 +1725,7 @@ class AccountManager {
       createdAt: Date.now(),
     };
     this._state.accounts.push(a);
-    this._save();
+    try { this._save({ now: true, why: 'the key' }); } catch (e) { if (e && e.signInSave) this._restore(snap); throw e; }   // r3782: a sign-in save, in the file before the call returns; a failed landing undone in memory
     this._notify();
     return { id: a.id, name: publicNameOf(a) };   // no tail in an answer, nor in its name (B-ba7d)
   }
@@ -1728,6 +1760,7 @@ class AccountManager {
     const i = this._state.accounts.findIndex((x) => x.id === id);
     if (i < 0) throw new Error('account not found');
     const a = this._state.accounts[i];
+    const hadSignIn = !!(a && (a.keyEnc || a.oatEnc));   // r3782: its removal goes by the synchronous road
     // (lane pool-provider-latents, q-055 M2) the provider it served, read while the store still knows it: the heal below
     // re-points its conversations only onto THAT provider, and the engine's removal verdicts name it (goneProviderOf)
     let goneProvider = null; try { goneProvider = this.memberProviderOf(id); } catch { }
@@ -1740,14 +1773,14 @@ class AccountManager {
     // creds through a dead link until some spawn happened to heal it).
     // Deleting a member must leave every pool self-consistent NOW.
     if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {
-      this._save(); // poolMembers below must not offer the removed account
+      this._save(hadSignIn ? { now: true, why: 'the removal of the account' } : {}); // poolMembers below must not offer the removed account (r3782: a row that held a sign-in, synchronously)
       this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
     else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
     this._displayForget(a);   // B-360d: the folder's kept facts go with it
-    this._save();
+    this._save(hadSignIn ? { now: true, why: 'the removal of the account' } : {});   // r3782: a row that held a sign-in is gone from the file before the call returns
     this._notify();
   }
 
@@ -1990,6 +2023,7 @@ class AccountManager {
     // sk-ant-oat01-… today; tolerate future oat revisions, refuse everything
     // else (an API key or a pasted access token here would mis-bill silently)
     if (!/^sk-ant-oat\d{2}-[\w-]{20,600}$/.test(token)) throw new Error('that does not look like a long-lived token (expected sk-ant-oat01-…, from `claude setup-token`)');
+    const snap = this._snapshot();   // r3782: undone in memory if its synchronous landing fails
     const now = Date.now(); // ONE instant: the token's mint time and (on a row's first token) its first-token instant
     this._oatSaveIdentity(a, now);
     a.oatEnc = this._enc(token);
@@ -1998,7 +2032,7 @@ class AccountManager {
     // with the row's known identity — the check the previous token held is replaced, its notice resolved
     const prevCheck = a.oatCheck || null;
     a.oatCheck = { state: 'pending', since: a.oatMintedAt, gen: a.oatMintedAt };
-    this._save();
+    try { this._save({ now: true, why: 'the long-lived token' }); } catch (e) { if (e && e.signInSave) this._restore(snap); throw e; }   // r3782: a sign-in save, in the file before the call returns; a failed landing undone in memory
     this._oatCheckReplaced(id, prevCheck, 'a new token was saved');
     // THE SAME TRANSACTION, off the loop's back: the store first (the token's authority — a failed file
     // write leaves today's env spawn working), then the file through the ONE queue. `mint` = record the
@@ -2017,7 +2051,7 @@ class AccountManager {
     // the token's identity goes with it: its check (the notice resolved) and the anchor its pick confirmed
     const prevCheck = a.oatCheck || null;
     delete a.oatCheck; delete a.oatAnchor;
-    this._save();
+    this._save({ now: true, why: 'the removal of the long-lived token' });   // r3782: a removal the person asked for is in the file before the call returns (a kill never brings it back)
     this._oatCheckReplaced(id, prevCheck, 'the token was removed');
     this.syncOatFile(id).catch(() => { }); // no token ⇒ 'none' ⇒ our file (only ours — the mark names this row) goes
     this._notify();
@@ -2035,13 +2069,14 @@ class AccountManager {
     if (!a.oatEnc) throw new Error('this account holds no long-lived token');
     if (!this._credsOf(this._acctBackend(b)).longLivedToken || this._acctType(b) !== 'subscription' || b.pooled) throw new Error('long-lived tokens apply to Claude subscription accounts only');
     if (b.oatEnc && (b.oatMintedAt || 0) + this.OAT_TTL_MS > Date.now()) throw Object.assign(new Error('that account already holds a long-lived token of its own — remove it there first'), { code: 'target_has_token' });
+    const snap = this._snapshot();   // r3782: undone in memory if its synchronous landing fails
     const prevA = a.oatCheck || null, prevB = b.oatCheck || null;
     this._oatSaveIdentity(b, Date.now());
     b.oatEnc = a.oatEnc; b.oatMintedAt = a.oatMintedAt || Date.now();
     delete b.oatShape; delete b.oatShapeSource; delete b.oatShapeAt; delete b.oatShapeReplaced;
     b.oatCheck = { state: 'pending', since: Date.now(), gen: b.oatMintedAt };
     delete a.oatEnc; delete a.oatMintedAt; delete a.oatCheck; delete a.oatAnchor;
-    this._save();
+    try { this._save({ now: true, why: 'the moved long-lived token' }); } catch (e) { if (e && e.signInSave) this._restore(snap); throw e; }   // r3782: a sign-in save, in the file before the call returns; a failed landing undone in memory
     this._oatCheckReplaced(fromId, prevA, 'the token was moved to ' + (b.name || toId));
     this._oatCheckReplaced(toId, prevB, 'another token was moved here');
     this.syncOatFile(fromId).catch(() => { });
@@ -3103,7 +3138,7 @@ class AccountManager {
   renameDefaultKeyNames() {
     const out = [];
     for (const a of this._state.accounts) if (a && a.tail && a.name === 'API key …' + a.tail) { a.name = 'API key'; out.push({ id: a.id }); }
-    if (out.length) { this._save(); this._notify(); }
+    if (out.length) { this._save({ now: true, why: 'the migration of the default key names' }); this._notify(); }   // r3782: a boot migration's reshape lands before its ledger row
     return out;
   }
 
@@ -3128,7 +3163,7 @@ class AccountManager {
       a.auto = true;
       out.push({ id: a.id, name: a.name, priority: order.slice() });
     }
-    if (out.length) { this._save(); this._notify(); }
+    if (out.length) { this._save({ now: true, why: 'the migration of the manual pools' }); this._notify(); }   // r3782: a boot migration's reshape lands before its ledger row
     return out;
   }
 
@@ -3508,4 +3543,4 @@ for (const [name, namers] of LOOK_AGAIN_SLOT_WRITERS) {
   AccountManager.prototype[name] = { [name](...args) { for (const nameOf of namers) { let d = null; try { d = nameOf.apply(this, args); } catch { RR.dropRun(); continue; } if (d) RR.forget(d); } return writer.apply(this, args); } }[name];
 }
 
-module.exports = { AccountManager, publicNameOf, maskDefaultKeyName };
+module.exports = { countingSaves, AccountManager, publicNameOf, maskDefaultKeyName };

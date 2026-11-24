@@ -23,16 +23,23 @@ const pivotsOnly = (a) => ({ pivots: a.pivots || {}, ...(a.asOf ? { asOf: a.asOf
 // ONE place for every /api/accounts write route (registered above them all, here and in the routes this module and usage-routes.js
 // register later): a reply made after the act saved waits for the landing; not on disk ⇒ 503 by name (the change is kept and written
 // again), never a silent «saved». A reply whose act saved nothing is not held. Agents' and machines' saves do not pass here.
-function answerAfterLanding(accounts, res) {
-  if (typeof accounts.saveSeq !== 'function' || typeof accounts.persisted !== 'function') return;
-  const seq0 = accounts.saveSeq(), json = res.json.bind(res);
+function answerAfterLanding(accounts, res, ctx = null) {
+  if (typeof accounts.persisted !== 'function') return;
+  const seq0 = typeof accounts.saveSeq === 'function' ? accounts.saveSeq() : 0, json = res.json.bind(res);
+  // r3763 (the should): THIS request's saves (the door's context counts the saves made in its async chain); without a context (a caller
+  // outside the door) the manager's own count since the request began
+  const savedHere = () => (ctx ? ctx.saves > 0 : typeof accounts.saveSeq === 'function' && accounts.saveSeq() !== seq0);
   res.json = (body) => {
-    if (accounts.saveSeq() === seq0) return json(body);
-    Promise.resolve(accounts.persisted()).then((ok) => ok, () => false).then((ok) => {
+    if (!savedHere()) return json(body);
+    // r3763 REQUIRED 3: THE WRITER's OWN ANSWER ROAD (persisted(answer) → durable(file, {answer})): a reply made there goes out even
+    // inside the hub's exit flush — a reply made from a promise's then is never sent at a stop, and a retry after the restart would add
+    // the same sign-in twice
+    accounts.persisted((ok) => {
       try { require('../store-writer.js').identityAtExit(res); } catch { }   // an answer on the landing's road may be made inside the exit's flush
       if (ok || res.statusCode >= 400) return json(body);
       const w = (typeof accounts.whyNotDurable === 'function' && accounts.whyNotDurable()) || {};
-      res.status(503); return json({ error: `saved here, but accounts.json is not on disk yet${w.why ? ` (${w.why})` : ''} — VibeSpace keeps the change and writes it again`, code: 'not-durable', notOnDisk: true });   // the family's known code: the page says it in the person's words (account-wall-words notOnDiskWords, fetchJson's sayNotOnDisk)
+      // r3763 (the should): the act's own answer kept beside it (a mint's id, a sign-in's start) — never replaced by the words alone
+      res.status(503); return json({ ...(body && typeof body === 'object' && !Array.isArray(body) ? body : {}), error: `saved here, but accounts.json is not on disk yet${w.why ? ` (${w.why})` : ''} — VibeSpace keeps the change and writes it again`, code: 'not-durable', notOnDisk: true });
     });
     return res;
   };
@@ -54,7 +61,7 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   if (typeof app.use === 'function') app.use('/api/accounts', (req, res, next) => {
     let h = null; try { h = typeof accounts.held === 'function' ? accounts.held() : null; } catch { h = null; }
     if (h && !(req.method === 'GET' && (req.path === '/' || req.path === ''))) return res.status(503).json({ error: h.why, code: 'accounts_unread' });
-    if (req.method !== 'GET') answerAfterLanding(accounts, res);
+    if (req.method !== 'GET') { const ctx = { saves: 0 }; answerAfterLanding(accounts, res, ctx); return require('../accounts.js').countingSaves(ctx, next); }   // the request's saves counted in its own context (r3763)
     return next();
   });
   const hosts = mk(getHosts);

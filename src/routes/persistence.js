@@ -2283,7 +2283,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         let r = null, rh = null; try { r = getAccounts?.()?.importBundle?.(sens.accounts); } catch (e) { if (e && e.code === 'accounts_unread') rh = e; else throw e; }   // the B-f276 family (r3129 (3)): held — not imported, said by name
         if (rh) held.push(rh.code); else applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
         const A0 = rh ? null : getAccounts?.();
-        if (A0 && Number(r?.imported) > 0 && typeof A0.persisted === 'function') accountsLanding = { file: 'accounts.json', after: (cb) => { Promise.resolve(A0.persisted()).then((ok) => cb(ok !== false), () => cb(false)); } };
+        // r3763 required 3: on the writer's OWN answer road (persisted(answer)) — an answer made there goes out inside the exit's flush too
+        if (A0 && Number(r?.imported) > 0 && typeof A0.persisted === 'function') accountsLanding = { file: 'accounts.json', after: (cb) => { let said = false; const once = (ok) => { if (said) return; said = true; cb(ok !== false); }; try { const p = A0.persisted(once); if (p && typeof p.then === 'function') p.then(once, () => once(false)); } catch { once(false); } } };
       }
       if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.signinInInterface) {
         // the piped form (the separation's B3b follow): the sign-in table is the interface's — refused BY NAME, before it could throw

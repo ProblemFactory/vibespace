@@ -97,25 +97,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
       const r = accounts.setOat(m.accountId, token);
       m.mintedAt = (r && r.mintedAt) || now();
       note(m, how);
-      // the person's own yes (POST …/confirm) answers through the /api/accounts door, which holds that reply until accounts.json
-      // holds the token (account-usage-routes.js answerAfterLanding) — the phase is its answer's; a PROOF the hub made by itself
-      // (identity-proven / fingerprint-proven) has no reply to hold: «saved» waits for the landing
-      if (how === 'owner-confirmed') end(m, 'saved'); else savedOnLanding(m, 0);
+      end(m, 'saved');
     } catch (e) { end(m, 'failed', String((e && e.message) || 'could not store the token')); }
-  };
-  // B-574d unit 1 (主开发 r3455 hold 1): a MINTED long-lived token is a credential nobody can issue again, and accounts.json is
-  // written by the store writer: a save the hub decided by itself says «saved» (the mint's end, its broadcast) only once the file
-  // holds it. Not on disk yet ⇒ the mint stays in its minting phase, said once in the journal, and asks again a second later.
-  const savedOnLanding = (m, tries) => {
-    const p = typeof accounts.persisted === 'function' ? accounts.persisted() : true;
-    Promise.resolve(p).then((ok) => ok, () => false).then((ok) => {
-      if (!live(m)) return;
-      if (ok) return end(m, 'saved');
-      const h = typeof accounts.held === 'function' ? accounts.held() : null;
-      if (h) return end(m, 'failed', String(h.why || 'the accounts could not be read'));
-      if (!tries) log(`[oat-mint] ${m.id} ${m.accountId}: the token is kept, but accounts.json is not on disk yet — «saved» waits for its landing`);
-      const t = setTimeout(() => savedOnLanding(m, tries + 1), 1000); if (t && t.unref) t.unref();
-    });
   };
   // ── F1: whose token is it ──
   // the row's own login (its dir's .claude.json — the panel-identity read) or
