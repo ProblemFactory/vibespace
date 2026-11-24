@@ -26,6 +26,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - (1) on a CLOSED store the straggler act, «is the index durable» and «fold» answer by the hold after the flush. The flush now returns false for a write refused «appeared», so none of them is told «done» over an index not written. The leg has a red control for each of the three lines.
 - (2) leg 149's control cuts the MARK: the posted wake is kept in the park after the lift. Alone it still posts once, because the landing moved the member's report marker and the next pass reads «carried». The two marks are in series, so the copy cuts both, and the next pass posts the billed wake again.
 
+### lg-rewind B-437e — a person's goal press behind the rewind's fence (主开发 r2682, from lane bl-machines-a's remainders)
+- WHY: the typing path refuses a person's send by name while a rewind is out (src/server/user-input.js), but `set-goal` wrote its frame to the CLI's input with no such check — a /goal set, cleared or resumed in the minute a rewind waits for its answer went in under it.
+- THE CURE: src/server/rewind-requests.js `goalFenceOf` (the same fence, `rewindFenceLeft`); src/ws-handler.js's set-goal case asks it before any write and answers `error {code:'rewind-out', scope:'goal', left}`; reading the goal (`status`) is never stopped. It stops the PERSON's own press only: the agent's goal state read from its records is not a press. The page: the composer's «Setting goal…» line ends and the typed /goal goes back into a free box (src/lib/chat-input.js `refusedGoal`), the view says why with the seconds left (src/lib/chat-view.js `_sayRefusedGoal`; three sentences in en + zh + ja).
+- Legs: scripts/test-checkpoints.mjs §10 — ws-handler's own set-goal case lifted over stand-ins: set, clear and resume refused with nothing written while a files press is out; status answered; free again with none out or past the minute; the composer's and the view's methods lifted; RED: the case unfenced.
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
