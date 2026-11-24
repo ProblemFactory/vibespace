@@ -193,7 +193,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
               if (!msg.mode) { try { if (cid) ours = deliverRef?.noteHandedBack?.(cid, String(msg.text), msg.reason || null) === true; } catch (e) { console.warn(`[deliver] ${id}: hand-back note failed: ${e.message}`); } }
               // the codex twin's rule (channel-jump verify r2): a frame naming a remembered hand-over restores its originals
               let restored = ours ? 1 : 0;
-              try { if (cid && !ours) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
+              try { if (cid && !ours) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null, fromName: msg.fromName || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
               if (!restored) {
                 try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
                 catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }

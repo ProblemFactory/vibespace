@@ -35,7 +35,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let dirN = 0;
 const mk = () => { const d = path.join(scratch('handover-memory-held'), 'd' + (++dirN)); fs.mkdirSync(path.join(d, 'session-buffers'), { recursive: true }); return d; };
 const CID = 'c0ffee00-0000-4000-8000-0000000000c9';
-const FIRST = 'the first hand-over\'s message', SECOND = 'the second hand-over\'s message';
+const FIRST = 'the first hand-over\'s message', SECOND = 'the second hand-over\'s message', THIRD = 'the third hand-over\'s message';
 /** one life of the hub: the REAL deliver ladder and hand-over view, wired as server.js wires them (the frame restorer, the redactor) */
 const rig = (dir, Mod = SH, jobs = null) => {
   const s = { name: 'Agent One', backend: 'claude', backendSessionId: CID, claudeSessionId: CID, mode: 'chat', _isStreaming: false, buffer: '', sockName: 'cw-w1', socketPath: path.join(dir, 'cw-w1') };
@@ -52,7 +52,7 @@ const rig = (dir, Mod = SH, jobs = null) => {
   view = Mod.create({ activeSessions: sessions, getDeliver: () => deliver, getJobs: () => jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash, debounceMs: 10,
     log: { log: (...a) => logs.push(a.join(' ')), warn: (...a) => logs.push(a.join(' ')) }, dataDir: dir });
   deliver.registerFrameRestorer((c, t, m) => view.restoreHandedOver(c, t, m)); deliver.registerRedactor((m, sc) => view.redactDelivered(m, sc));   // server.js's two lines
-  const stop = () => { deliver.flush(); jm.shutdown?.(); };
+  const stop = () => { deliver.flush(); jm.shutdown?.(); view.close(); };   // r3772: the view's stop stops its hold too
   return { deliver, jm, view, logs, stop };
 };
 const fileOf = (dir) => path.join(dir, SH.DELIVERED_FILE);
@@ -77,13 +77,15 @@ console.log('§1 a hand-over memory that could not be read is HELD: nothing is w
   const { R, seen } = heldLife(d);
   R.deliver.stashFor(CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: SECOND });
   const r2 = await R.view.handOver('w1');
+  R.deliver.stashFor(CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: THIRD });
+  const r3 = await R.view.handOver('w1');
   const untouched = fs.readFileSync(fileOf(d), 'utf8') === f.bytes;
   ok(seen === 1 && !!R.view.memoryHeld() && /could not be read/.test(R.view.memoryUnreadWords() || ''), 'HELD: the start\'s one read refused ⇒ the memory is held (its facts and words say so)', R.view.memoryHeld());
-  ok(r2 && r2.ok && untouched, 'HELD: the next hand-over is delivered and NOTHING is written over the file (its bytes as they were)', { r2, untouched });
-  ok(R.logs.filter((l) => /kept in memory only until it reads/.test(l)).length === 1, 'HELD: ONE journal line a hold says the records kept in memory only (a count, no words)', R.logs);
+  ok(r2 && r2.ok && r3 && r3.ok && untouched, 'HELD: the next two hand-overs are delivered and NOTHING is written over the file (its bytes as they were)', { r2, r3, untouched });
+  ok(R.logs.filter((l) => /kept in memory only until it reads/.test(l)).length === 1, 'HELD: TWO hand-overs while held, ONE journal line a hold says the records kept in memory only (a count, no words)', R.logs);
   const lifted = await R.view.memoryReadAgain();
   const j = readJson(fileOf(d)) || {};
-  ok(lifted === true && !R.view.memoryHeld() && !!j[f.id] && !!j[r2.id] && Object.keys(j).indexOf(f.id) < Object.keys(j).indexOf(r2.id), 'LIFTED: both records on disk, the file\'s first, memory\'s after it', Object.keys(j));
+  ok(lifted === true && !R.view.memoryHeld() && !!j[f.id] && !!j[r2.id] && !!j[r3.id] && Object.keys(j).indexOf(f.id) < Object.keys(j).indexOf(r2.id), 'LIFTED: every record on disk, the file\'s first, memory\'s after it', Object.keys(j));
   R.stop();
   const NOHOLD = M.load('src/server/stash-handover.js', anchored(SRC, "    if (memHold && !memHold.writable('a write of the hand-over memory')) {   // HELD: never over a file that could not be read\n", '    if (false) {\n', 'persist-over-unread'), 'persist-over-unread');
   const dr = mk(); const fr = await firstLife(dr);
@@ -121,6 +123,70 @@ console.log('§3 THE ECHO while held: a frame naming a hand-over the memory cann
   H.R.stop();
 }
 
+// r3772's follow — the copies of the tree before it, each a line put back
+const KEEP_TWICE = (src) => anchored(src, "        try { if (typeof d.stashPeek === 'function' && d.stashPeek(cid).some(", "        try { if (false && typeof d.stashPeek === 'function' && d.stashPeek(cid).some(", 'second-echo-kept-again');
+const HAND_OUT_SECOND = (src) => anchored(anchored(src, '        if (ours && rec.restored) {\n', '        if (false) {\n', 'second-echo-not-handled'), '        } else if (ours) {\n', '        } else if (ours && !rec.restored) {\n', 'restored-goes-as-itself');
+const echoOf = (d, id) => ((readJson(fileOf(d)) || {})[id] || {}).text;
+
+console.log('§3b THE SAME FRAME ECHOED TWICE while held (a Stop AND a queue removal both report it): kept once; at the lift the original back ONCE, no frame handed out');
+{
+  const run = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d); const echo = echoOf(d, f.id);
+    const { R } = heldLife(d, Mod);
+    const n1 = R.deliver.restoreFrame(CID, echo, { kind: null }), n2 = R.deliver.restoreFrame(CID, echo, { kind: null });
+    const kept = R.deliver.stashKeptCount(CID);
+    await R.view.memoryReadAgain();
+    const after = R.deliver.stashEntries(CID);
+    const out = { n1, n2, kept, firsts: after.filter((e) => e && e.text === FIRST).length, frames: after.filter((e) => e && e.text === echo).length };
+    R.stop(); return out;
+  };
+  const g = await run();
+  ok(g.n1 === 1 && g.n2 === 1 && g.kept === 1 && g.firsts === 1 && g.frames === 0, `two echoes while held: kept ONCE (${g.kept}); at the lift the original back once (${g.firsts}), no frame handed out (${g.frames})`, g);
+  const r = await run(M.load('src/server/stash-handover.js', HAND_OUT_SECOND(KEEP_TWICE(SRC)), 'echo-twice-release'));
+  ok(r.kept === 2 && r.firsts === 1 && r.frames === 1, `RED: the unit's tip before the follow — kept twice, the second handed out after the restore: the same message twice (${r.firsts} original + ${r.frames} frame)`, r);
+}
+
+console.log('§3c A RESTORE THAT THROWS at the lift: the kept frame is not lost — it goes as itself, said by a count');
+{
+  const run = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d);
+    const j = readJson(fileOf(d)); j[f.id].jobs = [{ jobId: 'jb-r1', jobName: 'nightly', text: 'a job result', at: 5 }]; fs.writeFileSync(fileOf(d), JSON.stringify(j));
+    const echo = j[f.id].text;
+    const jobs = { peekNotifs: () => [], restoreNotifs: () => { throw new Error('the jobs store refused (placed)'); }, afterNotifsLanded: () => { }, shutdown: () => { } };
+    const { R } = heldLife(d, Mod, jobs);
+    R.deliver.restoreFrame(CID, echo, { kind: null });
+    await R.view.memoryReadAgain();
+    const after = R.deliver.stashEntries(CID);
+    const out = { frames: after.filter((e) => e && e.text === echo && !(e.about && e.about.handover)).length, said: R.logs.filter((l) => /1 kept frame whose originals could not all be restored/.test(l)).length, spent: !!(R.view._delivered.get(f.id) || {}).restored };
+    R.stop(); return out;
+  };
+  const g = await run();
+  ok(g.frames === 1 && g.said === 1 && g.spent, `a throw in the restore: the frame stays and goes as itself (${g.frames}), ONE count line, the record spent (never restored in part twice)`, g);
+  const OLD = M.load('src/server/stash-handover.js', anchored(SRC, "          try { k = restoreHandedOver(cid, text, { kind: e.kind || null }); } catch (err) { threw = err; }\n", "          if (typeof d.drainStash === 'function') d.drainStash(cid, new Set([e]));\n          try { k = restoreHandedOver(cid, text, { kind: e.kind || null }); } catch (err) { threw = err; }\n", 'frame-out-before-restore'), 'frame-out-before-restore');
+  const r = await run(OLD);
+  ok(r.frames === 0, `RED: the frame taken out BEFORE its originals are restored — a throw leaves it out: the messages lost (${r.frames})`, r);
+}
+
+console.log('§3d A FRAME FOR A HAND-OVER THE MEMORY DOES NOT KNOW, even after the read: kept while held, then handed out AS ITSELF — its mark dropped on disk too, the wrapper\'s own label');
+{
+  const LABEL = 'VibeSpace notices · the wrapper\'s label';
+  const run = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d);
+    const other = echoOf(d, f.id).split(f.id).join('ho-unknown-1');
+    const { R } = heldLife(d, Mod);
+    const n = R.deliver.restoreFrame(CID, other, { kind: null, fromName: LABEL });
+    await R.view.memoryReadAgain();
+    const seen = R.deliver.stashEntries(CID).filter((e) => e && e.text === other);
+    const disk = ((readJson(path.join(d, 'msg-stash.json')) || {})[CID] || []).filter((e) => e && e.text === other);
+    const out = { n, seen: seen.length, label: seen[0] && seen[0].fromName, marks: seen.filter((e) => e.about && e.about.handover).length, disk: disk.length, diskMarks: disk.filter((e) => e.about && e.about.handover).length };
+    R.stop(); return out;
+  };
+  const g = await run();
+  ok(g.n === 1 && g.seen === 1 && g.marks === 0 && g.disk === 1 && g.diskMarks === 0 && g.label === LABEL, 'kept while held; at the lift, not remembered: visible as itself with the wrapper\'s label, its mark gone in memory AND on disk', g);
+  const r = await run(M.load('src/server/stash-handover.js', anchored(SRC, '        } else { delete e.about; unmarked++;', "        } else { if (typeof d.drainStash === 'function') d.drainStash(cid, new Set([e])); unmarked++;", 'unknown-frame-drained'), 'unknown-frame-drained'));
+  ok(r.seen === 0, `RED: a drain on that road loses the frame (${r.seen})`, r);
+}
+
 console.log('§4 a readable start judges an earlier life\'s kept frame (its lift never came)');
 {
   const d = mk(); const f = await firstLife(d);
@@ -130,6 +196,25 @@ console.log('§4 a readable start judges an earlier life\'s kept frame (its lift
   const done = await waitFor(() => R.deliver.stashEntries(CID).some((e) => e && e.text === FIRST));
   ok(done && !R.deliver.stashEntries(CID).some((e) => e && e.about && e.about.handover), 'a readable start: the original back as itself, the kept frame gone', R.deliver.stashEntries(CID).map((e) => e && e.text));
   R.stop();
+}
+
+console.log('§4b A READABLE START THAT FINDS TWO KEPT COPIES of an earlier life (a tree that kept a second echo): the original back once, no frame handed out');
+{
+  const run = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d); const echo = echoOf(d, f.id);
+    const a = heldLife(d, M.load('src/server/stash-handover.js', KEEP_TWICE(SRC), 'kept-twice-earlier-life'));
+    a.R.deliver.restoreFrame(CID, echo, { kind: null }); a.R.deliver.restoreFrame(CID, echo, { kind: null });
+    const kept = a.R.deliver.stashKeptCount(CID); a.R.stop();
+    const R = rig(d, Mod);
+    await waitFor(() => R.deliver.stashEntries(CID).some((e) => e && e.text === FIRST)); await sleep(50);
+    const after = R.deliver.stashEntries(CID);
+    const out = { kept, firsts: after.filter((e) => e && e.text === FIRST).length, frames: after.filter((e) => e && e.text === echo).length };
+    R.stop(); return out;
+  };
+  const g = await run();
+  ok(g.kept === 2 && g.firsts === 1 && g.frames === 0, `two kept copies at a readable start: the original back once (${g.firsts}), no frame handed out (${g.frames})`, g);
+  const r = await run(M.load('src/server/stash-handover.js', HAND_OUT_SECOND(SRC), 'restored-handed-out'));
+  ok(r.firsts === 1 && r.frames === 1, `RED: the second copy meets a restored record and is handed out as itself (${r.frames})`, r);
 }
 
 console.log('§5 a clear made while held reaches the file\'s record at the lift');
@@ -142,7 +227,7 @@ console.log('§5 a clear made while held reaches the file\'s record at the lift'
   await R.view.memoryReadAgain();
   ok(!fs.readFileSync(fileOf(d), 'utf8').includes(FIRST), 'a clear made while held: at the lift the file\'s record carries none of its words');
   R.stop();
-  const NOCLEAR = M.load('src/server/stash-handover.js', anchored(SRC, '    if (memHeld()) clearsHeld.push({ match, scope });', '', 'clear-not-kept'), 'clear-not-kept');
+  const NOCLEAR = M.load('src/server/stash-handover.js', anchored(SRC, '      clearsHeld.push({ match, scope });\n', '', 'clear-not-kept'), 'clear-not-kept');
   const dr = mk(); await firstLife(dr);
   const H = heldLife(dr, NOCLEAR); H.R.view.redactDelivered(match, {}); await H.R.view.memoryReadAgain();
   ok(fs.readFileSync(fileOf(dr), 'utf8').includes(FIRST), 'RED: a clear not kept for the lift ⇒ the file\'s record keeps the cleared words');
@@ -163,6 +248,26 @@ console.log('§6 a put-back of job notifications the last process left in the fi
   const put = await waitFor(() => calls.length === 1);
   ok(whileHeld === 0 && put && calls[0][0] === CID && calls[0][1] === 1, `the file's put-back: nothing while held (${whileHeld}), put back ONCE at the lift`, calls);
   R.stop();
+}
+
+console.log('§6b the lift puts back ONLY the file\'s put-backs — never memory\'s a second time');
+{
+  const run = async (Mod = SH) => {
+    const d = mk();
+    fs.writeFileSync(fileOf(d), JSON.stringify({ 'ho-x-1': { cid: CID, msg: [], jobs: [{ jobId: 'jb-held1', jobName: 'nightly', text: 'a job result', at: 5 }], jobsOwed: true, at: Date.now(), text: 'a frame (hand-over ho-x-1)' } }));
+    const calls = [];
+    const jobs = { peekNotifs: () => [], restoreNotifs: (c, js) => { calls.push(js.map((n) => n.jobId).join(',')); return js.length; }, afterNotifsLanded: () => { }, shutdown: () => { } };
+    const { R } = heldLife(d, Mod, jobs);
+    // a record memory made while held whose put-back has not landed (its landing never came in this life)
+    R.view._delivered.set('ho-x-2', { cid: CID, msg: [], jobs: [{ jobId: 'jb-mem1', jobName: 'mine', text: 'a result memory keeps', at: 6 }], jobsOwed: true, at: Date.now(), text: 'a frame (hand-over ho-x-2)' });
+    await R.view.memoryReadAgain();
+    await waitFor(() => calls.length >= 1); await sleep(80);
+    R.stop(); return calls;
+  };
+  const g = await run();
+  ok(g.length === 1 && g[0] === 'jb-held1', `the file's put-back once, memory's not again (${g.join(' | ')})`, g);
+  const r = await run(M.load('src/server/stash-handover.js', anchored(SRC, 'r.jobsOwed && r.jobs.length && (!only || only.has(r))', 'r.jobsOwed && r.jobs.length && (true || only)', 'put-back-every-record'), 'put-back-every-record'));
+  ok(r.length === 2, `RED: no «only the file's» filter — memory's record put back at the lift as well (${r.join(' | ')})`, r);
 }
 
 console.log('§7 TORN: kept aside once, byte for byte; the memory starts empty and names its copy');
@@ -186,6 +291,30 @@ console.log('§8 production: server.js hands the hand-over its data folder and w
   const call = sv.slice(sv.indexOf("require('./src/server/stash-handover.js').create({"), sv.indexOf("require('./src/server/stash-handover.js').create({") + 3000);
   ok(/dataDir: path\.join\(__dirname/.test(call) && /deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /deliver\.registerRedactor\(\(match, scope\) => stashView\.redactDelivered\(match, scope\)\)/.test(sv),
     'PRODUCTION: the view reads its file from the data folder; the deliver\'s frame restorer and redactor are the view\'s');
+}
+
+{
+  const sj = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const iDeliver = sj.indexOf("const deliver = require('./src/server/conversation-deliver.js').create("), iView = sj.indexOf("const stashView = require('./src/server/stash-handover.js').create("), iListen = sj.indexOf('hub.listen(PORT, HOST'), iRestore = sj.indexOf('restoreSessions();', iListen);
+  ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen && /  if \(file\) \{\n    let read = null;\n    try \{ read = \{ text: fs\.readFileSync\(file, 'utf-8'\) \}; \} catch \(error\) \{ read = \{ error \}; \}/.test(SRC),
+    'THE BOOT ORDER (a fast pin, r3772): the hand-over memory is read synchronously at create, after the deliver ladder and before hub.listen; restoreSessions runs inside the listen callback', { iDeliver, iView, iListen, iRestore });
+}
+
+console.log('§9 THE STOP STOPS THE HOLD: after close() no read again, no lift, no write');
+{
+  const run = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d);
+    const { R } = heldLife(d, Mod);
+    R.deliver.stashFor(CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: SECOND }); await R.view.handOver('w1');
+    R.view.close();
+    const lifted = await R.view.memoryReadAgain();
+    const out = { lifted, untouched: fs.readFileSync(fileOf(d), 'utf8') === f.bytes };
+    R.stop(); return out;
+  };
+  const g = await run();
+  ok(g.lifted === false && g.untouched, 'closed while held: the read again does nothing, nothing is merged or written', g);
+  const r = await run(M.load('src/server/stash-handover.js', anchored(SRC, '  function close() { closed = true; if (memHold) memHold.stop(); }', '  function close() { closed = true; }', 'stop-leaves-the-hold'), 'stop-leaves-the-hold'));   // stale-pins: kept — the release's stop, put back in the RED's copy
+  ok(r.lifted === true && !r.untouched, 'RED: a stop that leaves the hold — a lift after it merges and writes over the file', r);
 }
 
 report();

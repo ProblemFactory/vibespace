@@ -1751,6 +1751,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'envelope.fromName || null': "the stash storing its caller's",
     'msg.fromName || null': "the wrapper's echo of the ladder's own (acp-events re-stash)",
     'msg.payload.fromName || null': "the wrapper's echo of the ladder's own (codex-events re-stash)",
+    "(meta && typeof meta.fromName === 'string' && meta.fromName) || FROM_NAME": "a frame kept while the hand-over memory is held (stash-handover restoreHandedOver, r3772): the wrapper's echo of the ladder's own label through the restore's meta (codex-events / acp-events), else the ladder's own FROM_NAME",
     'po.name': "the CLI's own transcript record of the ladder's frame (a client card)",
     'dropped.opts.peerFrom || null': "the ACP wrapper's echo of the ladder's own (a dropped queue entry)",
     'q.opts.peerFrom || null': "the ACP wrapper's echo of the ladder's own (its queue)",

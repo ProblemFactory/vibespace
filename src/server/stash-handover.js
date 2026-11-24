@@ -370,6 +370,12 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     log: (l) => log.warn?.(`[stash] ${l}`), onLift: (v, facts) => liftMemory(v, facts) }) : null;
   const memHeld = () => !!(memHold && memHold.held());
   const clearsHeld = [];   // (match, scope) of a clear made while held: it reaches the file's records at the lift
+  // r3772 (should): BOUNDED — clears are a person's acts, CLEARS_HELD_MAX a hold; over it the oldest goes, said. The door's match is kept
+  // as the door gave it (the groups engine's clear names no ids: its match is the clear), in memory only, never on disk. A restart before
+  // the read loses them — said once a hold: the file's record then keeps the cleared words on disk until its 24 h end; they never reach
+  // an agent (every restore judges each original again: conversation-deliver judgeEntry, the jobs store's judge)
+  const CLEARS_HELD_MAX = 32;
+  let clearsSaid = false;
   let heldNewSaid = false;   // the ONE journal line a hold for the records memory keeps
   if (file) {
     let read = null;
@@ -400,7 +406,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  carried the second kept the job's name and words on disk after the clear. */
   const namesJob = (text, id) => new RegExp('(^|[^\\w-])' + String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-])').test(text);
   function redactDelivered(match, scope = {}) {
-    if (memHeld()) clearsHeld.push({ match, scope });   // r3003 (c): HELD — the file's records are judged by this clear at the lift
+    if (memHeld()) {   // r3003 (c): HELD — the file's records are judged by this clear at the lift
+      clearsHeld.push({ match, scope });
+      if (clearsHeld.length > CLEARS_HELD_MAX) { clearsHeld.shift(); log.warn?.(`[stash] more than ${CLEARS_HELD_MAX} clears while the memory of delivered hand-overs is held — the oldest no longer reaches the file's records at the lift (its words stay on disk there until the record's 24 h end; they never reach an agent)`); }
+      if (!clearsSaid) { clearsSaid = true; log.warn?.('[stash] a clear made while the memory of delivered hand-overs is held reaches its records in memory now and the file\'s at the lift — a restart before the read loses it: the file\'s records then keep the cleared words on disk until their 24 h end (they never reach an agent: every restore judges each original again)'); }
+    }
     const ids = new Set(Array.isArray(scope && scope.jobIds) ? scope.jobIds.map(String) : []);
     const ask = (e) => { let r = null; try { r = typeof match === 'function' ? match(e) : null; } catch { r = null; } return r && typeof r === 'object' ? r : null; };
     let n = 0;
@@ -490,29 +500,57 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   const echoGate = (cid, e) => (e && e.about && typeof e.about.handover === 'string' && memHeld() ? { keep: true } : null);
   { const d0 = getDeliver(); if (d0 && typeof d0.registerStashGate === 'function') d0.registerStashGate(echoGate); else schedule(() => { const d = getDeliver(); if (d && typeof d.registerStashGate === 'function') d.registerStashGate(echoGate); }, 0); }
   /** every kept frame judged again (the memory reads): its hand-over remembered, the frame its own and not restored yet ⇒ the
-   *  ORIGINALS restored (each as itself) and the kept frame taken out; else it goes as itself (its mark dropped) — said */
-  function settleEchoes() {
+   *  ORIGINALS restored (each as itself), THEN the kept frame taken out; its own and already restored ⇒ a second echo, handled as the
+   *  release handles one (taken out, never handed out); else it goes as itself (its mark dropped, on disk too) — said.
+   *  r3772 (must 1): two echoes kept while held (or an earlier life's two copies) gave the originals back AND handed the frame out —
+   *  the same messages and job results twice. (must 2): the frame was taken out BEFORE its originals were restored, with no catch: a
+   *  throw left the frame out and only some originals back; now a throw leaves the frame as itself (never lost), said by a count.
+   *  (should) a readable start whose deliver is not wired yet asks again each second, a minute at most */
+  function settleEchoes(tries = 0) {
     const d = getDeliver();
-    if (!d || typeof d.stashCids !== 'function' || typeof d.stashEntries !== 'function') return 0;
-    let n = 0;
+    if (!d || typeof d.stashCids !== 'function' || typeof d.stashEntries !== 'function') {
+      if (closed) return 0;
+      if (tries < 60) schedule(() => settleEchoes(tries + 1), 1000); else log.warn?.('[stash] the kept frames of hand-overs could not be judged — the deliver ladder never came up; they wait for the next start');
+      return 0;
+    }
+    let n = 0, again = 0, failed = 0, unmarked = 0;
     for (const cid of d.stashCids()) {
       for (const e of d.stashEntries(cid).filter((x) => x && x.about && typeof x.about.handover === 'string' && !x.ho)) {
-        const id = e.about.handover, rec = delivered.get(id);
-        if (rec && rec.cid === cid && !rec.restored && sameFrame(rec, String(e.text || ''))) {
+        const id = e.about.handover, rec = delivered.get(id), text = String(e.text || '');
+        const ours = !!rec && rec.cid === cid && sameFrame(rec, text);
+        if (ours && rec.restored) {
           if (typeof d.drainStash === 'function') d.drainStash(cid, new Set([e]));
-          const k = restoreHandedOver(cid, String(e.text || ''), { kind: e.kind || null });
-          log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} while the memory was held — ${k > 0 ? `${k} original${k === 1 ? '' : 's'} restored, each as itself` : 'none to restore: it goes as one notice'}`);
-          if (!(k > 0)) d.stashFor(cid, { source: 'agent', kind: e.kind || null, fromName: FROM_NAME, text: String(e.text || '') });
-        } else { delete e.about; log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} — ${rec ? 'not its frame or already restored' : 'not remembered after the read either'}: it goes as itself`); }
+          again++;
+          log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} came back again — already restored (${rec.restored}): taken out, not handed out`);
+        } else if (ours) {
+          let k = 0, threw = null;
+          try { k = restoreHandedOver(cid, text, { kind: e.kind || null }); } catch (err) { threw = err; }
+          if (threw) {
+            failed++;
+            if (!rec.restored) rec.restored = -1;   // spent: a later echo of the frame never restores a part twice
+            delete e.about; unmarked++;
+            log.warn?.(`[stash] ${cid}: the originals of hand-over ${id} could not all be restored (${(threw && threw.message) || threw}) — the kept frame goes as itself, never lost`);
+          } else if (k > 0) {
+            if (typeof d.drainStash === 'function') d.drainStash(cid, new Set([e]));
+            log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} while the memory was held — ${k} original${k === 1 ? '' : 's'} restored, each as itself, then the frame taken out`);
+          } else {
+            delete e.about; unmarked++;
+            log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} while the memory was held — none to restore: it goes as one notice`);
+          }
+        } else { delete e.about; unmarked++; log.log?.(`[stash] ${cid}: the frame kept for hand-over ${id} — ${rec ? 'not its frame' : 'not remembered after the read either'}: it goes as itself`); }
         n++;
       }
     }
+    if (unmarked && typeof d.flush === 'function') { try { d.flush(); } catch (err) { log.warn?.(`[stash] the kept frames' marks could not be dropped on disk: ${(err && err.message) || err}`); } }   // the mark dropped in memory is dropped on disk too
+    if (failed) log.warn?.(`[stash] ${failed} kept frame${failed === 1 ? '' : 's'} whose originals could not all be restored — each goes as itself`);
+    if (again) log.log?.(`[stash] ${again} kept frame${again === 1 ? '' : 's'} echoed again after the restore — taken out, none handed out`);
     if (n) changed();
     return n;
   }
   if (file && !memHeld()) schedule(() => settleEchoes(), 0);   // an earlier life's kept frames whose lift never came: judged at a readable start
   /** the hold LIFTED: the file's records (null: torn bytes kept aside — none), memory's after them (memory's record wins on an id),
-   *  the clears made while held, the bounds, ONE write; the file's put-backs of job notifications put back; the kept frames judged */
+   *  the clears made while held, the bounds, ONE write (then one more a kept frame restored — each the release's synchronous write, its
+   *  standing debt); the file's put-backs of job notifications put back; the kept frames judged */
   function liftMemory(v, facts) {
     const mine = new Set(delivered.keys());
     const ids = v ? loadRecords(v, mine) : [];
@@ -520,7 +558,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     for (const c of clearsHeld.splice(0)) { try { redactDelivered(c.match, c.scope); } catch (e) { log.warn?.(`[stash] a clear made while the hand-over memory was held could not reach its records: ${(e && e.message) || e}`); } }
     forget();
     persistDelivered();
-    heldNewSaid = false;
+    heldNewSaid = false; clearsSaid = false;
     const owed = new Set(ids.map((id) => delivered.get(id)).filter((r) => r && r.jobsOwed && r.jobs.length));
     if (owed.size) schedule(() => putBackHeld(0, owed), 0);
     log.log?.(`[stash] the memory of delivered hand-overs read again: ${facts && facts.setAside ? `torn bytes, kept aside as ${facts.setAside} — no earlier record could be read` : `${ids.length} record${ids.length === 1 ? '' : 's'} back`}${mine.size ? `, ${mine.size} made meanwhile after them` : ''}`);
@@ -752,7 +790,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (!rec && memHeld()) {
       const d = getDeliver();
       if (d && typeof d.stashFor === 'function') {
-        try { d.stashFor(cid, { source: 'agent', kind: (meta && meta.kind) || null, fromName: FROM_NAME, text: echoed, about: { handover: m[1] } }); }
+        // r3772 (must 1): the same frame for the same hand-over already kept (a Stop AND a queue removal both report it) — handled, kept once
+        try { if (typeof d.stashPeek === 'function' && d.stashPeek(cid).some((x) => x && x.about && x.about.handover === m[1] && String(x.text || '').trim() === echoed.trim())) { log.log?.(`[stash] ${cid}: hand-over ${m[1]}'s frame echoed again while the memory is held — already kept, kept once`); return 1; } } catch { /* the peek is a belt: a failed one keeps the frame again, judged at the lift */ }
+        try { d.stashFor(cid, { source: 'agent', kind: (meta && meta.kind) || null, fromName: (meta && typeof meta.fromName === 'string' && meta.fromName) || FROM_NAME, text: echoed, about: { handover: m[1] } }); }   // r3772 (should): the wrapper's own sender label, as the release's re-stash
         catch (e) { log.warn?.(`[stash] ${cid}: a frame naming hand-over ${m[1]} could not be kept while the hand-over memory is held (${(e && e.message) || e}) — stashed as itself`); return 0; }
         log.log?.(`[stash] ${cid}: a frame names hand-over ${m[1]} while the memory of delivered hand-overs cannot be read — kept as itself, not handed out, until it reads`);
         return 1;
@@ -913,7 +953,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
    *  (the drain after a delivery is on disk before the process exits). */
   /** Shutdown, step one: no hand-over starts from here on (a press during the wait below would be one nobody
    *  waited for — verify r3). Idempotent; `settle()` is step two. */
-  function close() { closed = true; }
+  function close() { closed = true; if (memHold) memHold.stop(); }   // r3772 (must 3): the stop stops the hold — no read again, no lift, no write after it
   function settle(maxMs = 5000) {
     const ps = [...inflight.values()].map((r) => r.p).filter(Boolean);
     if (!ps.length) return Promise.resolve(0);
