@@ -624,10 +624,22 @@ try {
         await pick(ids[0]);
         const asked = await A.waitFor('!!(window.__d5 && window.__d5.asked)', 15000).catch(() => false);
         // the list's own scrollbar, shown for the act (as test-minimap-jump's bare prep does): this suite's Chrome hides scrollbars
-        // (--hide-scrollbars — undone for this page by CDP while the scene runs) and the minimap hides the native one (its class)
-        await A.cdp('Emulation.setScrollbarsHidden', { hidden: false }).catch(() => null);
-        await A.evalJs(`(() => { ${VIEW}._messageList.classList.remove('chat-minimap-active'); return 1; })()`);
+        // (--hide-scrollbars — undone for this page by CDP while the scene runs) and the minimap hides the native one (its class).
+        // r3605 (the train's candidate, box row 636: the drag never happened, the gutter 0 wide): THE SCROLLBAR IS MADE, NEVER ASSUMED —
+        // the emulation call's failure is SAID (never swallowed); the list's bar is REBUILT under the page's new setting (Chrome applies
+        // hide-scrollbars when a scroller's bar is made again: one frame without overflow, one with — its scrollTop kept); the minimap's
+        // class is HELD OFF until the scene ends (a redraw of the strip puts it back: counted); and the facts are read for the
+        // precondition below (the gutter, the overflow, the class, the computed scrollbar-width)
+        const emu = await A.cdp('Emulation.setScrollbarsHidden', { hidden: false }).then(() => null, (e) => String((e && e.message) || e).slice(0, 200));
+        const prep = await A.evalJs(`(() => { const l = ${VIEW}._messageList; const had = l.classList.contains('chat-minimap-active');
+          l.classList.remove('chat-minimap-active');
+          const st = l.scrollTop; l.style.overflowY = 'hidden'; void l.offsetWidth; l.style.overflowY = ''; void l.offsetWidth; if (l.scrollTop !== st) l.scrollTop = st;
+          window.__d5.readded = 0;
+          window.__d5.keep = new MutationObserver(() => { if (l.classList.contains('chat-minimap-active')) { window.__d5.readded++; l.classList.remove('chat-minimap-active'); } });
+          window.__d5.keep.observe(l, { attributes: true, attributeFilter: ['class'] });
+          return { had }; })()`);
         await sleep(200);   // the list re-lays out around its scrollbar (its records' tops are read after it)
+        const bar = await A.evalJs(`(() => { const l = ${VIEW}._messageList, cs = getComputedStyle(l); return { sbw: l.offsetWidth - l.clientWidth - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0), over: l.scrollHeight > l.clientHeight + 1, sh: l.scrollHeight, ch: l.clientHeight, sw: cs.scrollbarWidth, cls: l.classList.contains('chat-minimap-active'), readded: window.__d5.readded || 0 }; })()`);
         const before = await atOf(p0.id);
         const dr = asked ? await gutterDrag(`${VIEW}._messageList`, { dy: -24, steps: 4 }) : { ok: false, why: 'the put-back never asked its hold' };
         const dragged = await atOf(p0.id);
@@ -636,13 +648,18 @@ try {
         // the hold's steps, each asking its stop: let go at once ⇒ its first frame + the three re-anchors (4); held ⇒ twelve frames + three (15)
         await A.waitFor(`(window.__d5.stops || []).length >= ${release ? 15 : 4}`, 5000).catch(() => false);
         const after = await atOf(p0.id), stops = await A.evalJs('(window.__d5.stops || []).slice()'), aim = await A.evalJs('window.__d5.top');
-        await A.evalJs(`(() => { const v = ${VIEW}; delete v._holdReaderTop; if (window.__d5.release) delete v._readerActedSince; if (v._minimap && !v._minimap.classList.contains('hidden')) v._messageList.classList.add('chat-minimap-active'); return 1; })()`);
-        await A.cdp('Emulation.setScrollbarsHidden', { hidden: true }).catch(() => null);
-        return { asked, p0, aim: aim == null ? null : Math.round(aim), before, dr, dragged, stamped, after, stops, movedByDrag: before != null && dragged != null ? dragged - before : null };
+        const readded = await A.evalJs(`(() => { const v = ${VIEW}, n = window.__d5.readded || 0; if (window.__d5.keep) window.__d5.keep.disconnect(); delete v._holdReaderTop; if (window.__d5.release) delete v._readerActedSince; if (v._minimap && !v._minimap.classList.contains('hidden')) v._messageList.classList.add('chat-minimap-active'); return n; })()`);
+        await A.cdp('Emulation.setScrollbarsHidden', { hidden: true }).catch(() => null);   // the suite's own setting back (the scene's end)
+        return { asked, p0, aim: aim == null ? null : Math.round(aim), before, dr, dragged, stamped, after, stops, movedByDrag: before != null && dragged != null ? dragged - before : null, emu, prep, bar, readded };
       };
       const dg = await dragScene();
+      // r3605: THE PRECONDITION, by name — the list's own scrollbar is DRAWN before the drag (a gutter wider than 0, the list overflowing),
+      // else the drag proves nothing and its control cannot go red; the facts say which (the emulation's error, the class, the width rule)
+      const barSaid = (d) => `its gutter ${d.bar ? d.bar.sbw : '?'} px, the list ${d.bar && d.bar.over ? 'overflowing' : 'NOT overflowing'} (${d.bar ? d.bar.sh + ' over ' + d.bar.ch : '?'} px), scrollbar-width ${d.bar ? d.bar.sw : '?'}, the minimap's class ${d.bar && d.bar.cls ? 'ON' : 'off'} (put back ${d.readded || 0}× by a redraw, held off), the emulation call ${d.emu ? 'FAILED: ' + d.emu : 'answered'}`;
+      check(`(d5) PRECONDITION: the list's own scrollbar is drawn before the drag — ${barSaid(dg)}`, !!dg.bar && dg.bar.sbw > 0 && dg.bar.over && !dg.bar.cls, { emu: dg.emu, prep: dg.prep, bar: dg.bar, readded: dg.readded });
       check(`(d5) B-43f3 / r2579: the person drags the list's scrollbar while the put-back's hold is due — its stop is asked (${dg.stops.length}×: ${dg.stops.join(',')}) and it lets go at once: the reader stays where they dragged (${dg.p0.id} at ${dg.after}, dragged to ${dg.dragged}, put back at ${dg.before})`, dg.asked === true && dg.dr.ok === true && !dg.stamped && dg.stops.length >= 1 && dg.stops.every((r) => r === true) && dg.movedByDrag != null && Math.abs(dg.movedByDrag) >= 20 && dg.after != null && Math.abs(dg.after - dg.dragged) <= 4, dg);
       const dgR = await dragScene({ release: true });
+      check(`(d5) PRECONDITION (the red control's scene): the list's own scrollbar is drawn before the drag — ${barSaid(dgR)}`, !!dgR.bar && dgR.bar.sbw > 0 && dgR.bar.over && !dgR.bar.cls, { emu: dgR.emu, prep: dgR.prep, bar: dgR.bar, readded: dgR.readded });
       check(`(d5) RED CONTROL: the release's hold question (only _navigatedSince) — the drag under the guard is no act, the hold's stop says no (${dgR.stops.length}×) and it pulls the reader back to the put-back's place (${dgR.p0.id} at ${dgR.after}, the put-back's aim ${dgR.aim}, dragged to ${dgR.dragged})`, dgR.asked === true && dgR.dr.ok === true && !dgR.stamped && dgR.stops.length >= 12 && dgR.stops.every((r) => r === false) && dgR.movedByDrag != null && Math.abs(dgR.movedByDrag) >= 20 && dgR.after != null && dgR.aim != null && Math.abs(dgR.after - dgR.aim) <= 4 && Math.abs(dgR.dragged - dgR.aim) >= 20, dgR);
       await A.evalJs(`(() => { document.getElementById('hide16')?.remove(); return 1; })()`);
       await TAIL16(null);
