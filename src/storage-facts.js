@@ -8,6 +8,8 @@
  *   get(op, payload) → { pending: true } | { ok: true, result } | { ok: false, code, timedOut[, noWorker] }
  * (`noWorker: true` only when SafeFs's deadline met NO worker ever taken — the reader restarting, row B-422c's line 834 round)
  * `onLanded(op, payload, fact)` runs when a read lands with a fact that differs from the one kept.
+ *   askedAt(op, payload) → when the read whose fact is kept BEGAN (ms), or null before one landed — the fact's own time, for a
+ *   reader that says how old what it shows is (row B-422c's line 834 follow, 主开发 r3809: never the time it was taken)
  */
 function create({ safeFs = () => null, ttlMs = 4000, max = 512, timeoutMs = 5000, onLanded = () => {} } = {}) {
   const facts = new Map(); // key → { at, value, inflight }
@@ -27,11 +29,12 @@ function create({ safeFs = () => null, ttlMs = 4000, max = 512, timeoutMs = 5000
       facts.set(k, f);
     }
     if (!f.inflight && (!f.value || now - f.at >= ttlMs)) {
+      const asked = Date.now();
       f.inflight = read(op, payload)
         .then((result) => ({ ok: true, result }), (e) => ({ ok: false, code: (e && e.code) || (e && e.safeFsTimeout ? 'timeout' : 'error'), timedOut: !!(e && e.safeFsTimeout), ...(e && e.noWorker === true ? { noWorker: true } : {}) }))
         .then((v) => {
           const was = f.value ? JSON.stringify(f.value) : null;
-          f.value = v; f.at = Date.now(); f.inflight = null;
+          f.value = v; f.at = Date.now(); f.from = asked; f.inflight = null;
           if (was !== JSON.stringify(v)) { try { onLanded(op, payload, v); } catch { } }
           return v;
         });
@@ -40,7 +43,8 @@ function create({ safeFs = () => null, ttlMs = 4000, max = 512, timeoutMs = 5000
   }
   /** every read in flight landed (suites; a clean shutdown) */
   const settled = () => Promise.all([...facts.values()].map((f) => f.inflight).filter(Boolean));
-  return { get, settled, size: () => facts.size, clear: () => facts.clear() };
+  const askedAt = (op, payload) => { const f = facts.get(keyOf(op, payload)); return f && f.value && typeof f.from === 'number' ? f.from : null; };
+  return { get, settled, askedAt, size: () => facts.size, clear: () => facts.clear() };
 }
 
 module.exports = { create };

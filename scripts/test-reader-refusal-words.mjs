@@ -50,7 +50,12 @@ console.log('① THE TASK GROUP\'s CONTEXT TABLE: a reader refusal is «not read
   const SRC = read('src/task-groups.js');
   const RELEASE = M.load('src/task-groups.js', editAnchor(SRC, 'const readerDownWhy = (f) => (', 'const readerDownWhy = (f) => false && (', 'src/task-groups.js'), 'b422c-tg-release');   // the release read every refusal as a fact
   // the unit's first form (6f3e594b3): the walk kept only its own cache's hit — the one the facts' landing clears
-  const FIRST = M.load('src/task-groups.js', editAnchor(SRC, 'const kept = hit || (this._lastGood && this._lastGood.get(dir));', 'const kept = hit;', 'src/task-groups.js'), 'b422c-tg-first');
+  const FIRST = M.load('src/task-groups.js', editAnchor(SRC, 'const kept = (this._lastGood && this._lastGood.get(dir)) || hit;', 'const kept = hit;', 'src/task-groups.js'), 'b422c-tg-first');
+  // line 834's follow (主开发 r3809): its cure's form (2c43d13f4) — the kept listing stamped when the walk TOOK the facts' reply, its age
+  // in seconds whatever its size, and an older listing allowed back over a newer one
+  const TAKEN = M.load('src/task-groups.js', editAnchor(editAnchor(editAnchor(SRC, 'this._keepGood(dir, w, this._lastReadFrom != null ? this._lastReadFrom : at);', 'this._keepGood(dir, w, at);', 'src/task-groups.js'),
+    'const readAgo = (ms) => { ', 'const readAgo = (ms) => `${Math.max(0, Math.round(Number(ms) / 1000))} s ago`; const readAgo0 = (ms) => { ', 'src/task-groups.js'),
+    'if (had && had.at > at) return;', 'if (false) return;', 'src/task-groups.js'), 'b422c-tg-taken');
   const NOW = require(path.join(REPO, 'src/task-groups.js'));
   const realNow = Date.now; let SHIFT = 0;
   Date.now = () => realNow() + SHIFT;   // the placed clock (restored below): the facts' and the caches' 4 s pass without a wait
@@ -62,12 +67,12 @@ console.log('① THE TASK GROUP\'s CONTEXT TABLE: a reader refusal is «not read
     return m;
   };
   // a placed answer LANDS: the clock passes the facts' life, a reader asks (the kept fact answers meanwhile), the read lands
-  const landed = async (m, key, answer, ask) => { m.__A.set(key, answer); SHIFT += 5000; ask(); await m._facts.settled(); };
+  const landed = async (m, key, answer, ask) => { m.__A.set(key, answer); SHIFT += 5000; const t0 = Date.now(); ask(); await m._facts.settled(); return t0; };
   const answers = { no: NO_WORKER, slow: TIMED_OUT, eio: EIO, enoent: ENOENT, trying: TRYING, noWorkerDeadline: NO_WORKER_DEADLINE };
   const kinds = async (m) => { const out = []; for (const [k, a] of Object.entries(answers)) { await landed(m, 'stat ' + FILE, a, () => m._kindOf(FILE)); out.push([k, m._kindOf(FILE), m._notReadOf(FILE)]); } return out; };
   const view = async (m) => {
     const listing = [{ path: 'a.md', size: 3, mtime: 1 }, { path: 'b.md', size: 4, mtime: 2 }];
-    await landed(m, 'contextFiles ' + DIR, () => listing, () => m._walk(DIR, { fresh: true }));
+    const t0 = await landed(m, 'contextFiles ' + DIR, () => listing, () => m._walk(DIR, { fresh: true }));   // the read BEGINS here
     const first = m._walk(DIR, { fresh: true });
     await landed(m, 'contextFiles ' + DIR, NO_WORKER, () => m._walk(DIR));
     const clearedByLanding = !(m._walkCache && m._walkCache.get(DIR));   // the facts' OWN landing cleared the walk's cache
@@ -76,7 +81,9 @@ console.log('① THE TASK GROUP\'s CONTEXT TABLE: a reader refusal is «not read
     await landed(m, 'stat ' + FILE, NO_WORKER, () => m._kindOf(FILE));
     const file = m._rowAt({ path: FILE, note: '' }, { abs: FILE, kind: 'file' }, 'names');
     const head = m._rowHead({ path: FILE, note: 'the brief' }, { abs: FILE, kind: m._kindOf(FILE) });
-    return { first, later, clearedByLanding, row: row.lines.join('\n'), file: file.lines.join('\n'), head };
+    const ages = [];   // the same refused folder 10 min, then 3 h, then 3 d later (the placed clock)
+    for (const step of [600000, 3 * 3600000, 3 * 86400000]) { SHIFT += step; ages.push(m._rowAt({ path: DIR, note: '' }, { abs: DIR, kind: 'dir' }, 'names').lines[0] || ''); await m._facts.settled(); }
+    return { t0, first, later, clearedByLanding, row: row.lines.join('\n'), file: file.lines.join('\n'), head, ages };
   };
   const sigs = async (m) => {   // the no-reader road's signature (a suite, a CLI): a fact not read now DEFERS — the seen marks never move
     const t = { id: 'g-b422c', ctx: [] };
@@ -105,6 +112,16 @@ console.log('① THE TASK GROUP\'s CONTEXT TABLE: a reader refusal is «not read
   const vf = await view(mgrOf(FIRST));
   ok(vf.clearedByLanding === true && vf.later.files.length === 0 && vf.later.readAt === null && /no listing read yet/.test(vf.row),
     `RED CONTROL (the unit's first form, 6f3e594b3): the facts' landing cleared the walk's cache and the row said «no listing read yet» — a listing read seconds before (${JSON.stringify(vf.row)})`);
+  // line 834's follow (主开发 r3809): the kept listing is as old as the READ that gave it, and its age reads as the tree's marks do
+  ok(v.later.readAt - v.t0 >= 0 && v.later.readAt - v.t0 < 1000, `① the kept listing is stamped with its READ's own time (when it began), never when a walk took the facts' reply 5 s later (${v.later.readAt - v.t0} ms after the read began)`);
+  ok(/LAST READ one, 10 min ago — 2 files/.test(v.ages[0]) && /LAST READ one, 3 h ago — 2 files/.test(v.ages[1]) && /LAST READ one, 3 d ago — 2 files/.test(v.ages[2]),
+    `① the kept listing's age reads as the tree's marks do: min, h, d (${JSON.stringify(v.ages.map((l) => (l.match(/LAST READ one, [^—]+—/) || [''])[0]))})`);
+  const vt = await view(mgrOf(TAKEN));
+  ok(vt.later.readAt - vt.t0 >= 5000 && /LAST READ one, \d{4,} s ago/.test(vt.ages[1]), `RED CONTROL (line 834's cure, 2c43d13f4): stamped when the walk took the reply (${vt.later.readAt - vt.t0} ms after the read began), and «${(vt.ages[1].match(/\d+ s ago/) || [''])[0]}»`);
+  const keepOrder = (mod) => { const m = mgrOf(mod); m._keepGood('/b422c-k', { files: [{ path: 'new.md', size: 1, mtime: 2 }], over: false }, 2000); m._keepGood('/b422c-k', { files: [{ path: 'old.md', size: 1, mtime: 1 }], over: false }, 1000); return m._lastGood.get('/b422c-k'); };
+  const kn = keepOrder(NOW), kt = keepOrder(TAKEN);
+  ok(kn.w.files[0].path === 'new.md' && kn.at === 2000, `① a signature hit adopted late never puts an OLDER listing back over a newer kept one (${JSON.stringify(kn)})`);
+  ok(kt.w.files[0].path === 'old.md', `RED CONTROL (line 834's cure): the older listing replaced the newer one (${JSON.stringify(kt.w.files)})`);
   Date.now = realNow;
   // the page (src/lib/task-detail.js) words the why in three languages; the agent's table words stay English
   const td = read('src/lib/task-detail.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
@@ -146,7 +163,7 @@ console.log('② THE ASK JUDGE: a refused manifest probe is «not checked now �
 
 // an express app over a files router (the real one, or a red copy), its SafeFs a stand-in
 const express = require('express');
-const serve = async (router, sf) => { const app = express(); app.use(express.json()); app.locals.safeFs = sf; app.use(router); const s = http.createServer(app); await new Promise((r) => s.listen(0, '127.0.0.1', r)); return { s, base: `http://127.0.0.1:${s.address().port}` }; };
+const serve = async (router, sf, locals = {}) => { const app = express(); app.use(express.json()); app.locals.safeFs = sf; Object.assign(app.locals, locals); app.use(router); const s = http.createServer(app); await new Promise((r) => s.listen(0, '127.0.0.1', r)); return { s, base: `http://127.0.0.1:${s.address().port}` }; };
 const FILES_SRC = read('src/routes/files.js');
 
 console.log('③ THE LEGACY GET /api/dir-complete: a refusal is named, its bound is `partial`; a parent that does not exist stays empty');
@@ -182,15 +199,26 @@ console.log('④ AN UPLOAD REFUSED AT FILE k: the reply says what LANDED, the pa
   const DEST = fs.mkdtempSync(path.join(os.tmpdir(), 'b422c-upload-dest-'));
   let copies = 0;
   const sf = { call: async (op, p) => { if (op === 'mkdir') { fs.mkdirSync(p.path, { recursive: true }); return {}; } if (op === 'copy') { copies++; if (copies === 2) throw NO_WORKER(); fs.copyFileSync(p.src, p.dest); return {}; } return {}; } };
-  const post = async (base) => { const fd = new FormData(); for (const n of ['one.txt', 'two.txt', 'three.txt']) fd.append('files', new Blob([n]), n); fd.append('destDir', DEST); fd.append('fileNames', JSON.stringify(['one.txt', 'two.txt', 'three.txt'])); fd.append('sessionId', 's-b422c'); fd.append('uploadDirSet', '1'); const res = await fetch(base + '/api/upload', { method: 'POST', body: fd }); return { status: res.status, body: await res.json() }; };
+  const post = async (base, q = '') => { const fd = new FormData(); for (const n of ['one.txt', 'two.txt', 'three.txt']) fd.append('files', new Blob([n]), n); fd.append('destDir', DEST); fd.append('fileNames', JSON.stringify(['one.txt', 'two.txt', 'three.txt'])); fd.append('sessionId', 's-b422c'); fd.append('uploadDirSet', '1'); const res = await fetch(base + '/api/upload' + q, { method: 'POST', body: fd }); return { status: res.status, body: await res.json() }; };
   const a = await serve(NOW, sf); copies = 0; const x = await post(a.base);
   const notedNow = notes.splice(0);   // this tree's rows only (the release copy below keeps this tree's note line)
   const r = await serve(RELEASE, sf); copies = 0; const y = await post(r.base);
   notes.splice(0);
   const f = await serve(FIRST, sf); copies = 0; await post(f.base);
   const notedFirst = notes.splice(0);
-  AR.noteUploads = realNote; f.s.close();
+  // line 834's follow (主开发 r3809): THE PAIRED MACHINE's refusal road (?host=) — its RemoteFs a stand-in that refuses the second write
+  let writes = 0;
+  const RFS = { write: async (host, dest) => { if (++writes === 2) throw Object.assign(new Error('the device link refused the write'), { code: 'device_refused' }); return { dest }; }, stat: async () => null, home: async () => '/home/r', mkdir: async () => ({}) };
+  const FIRST_R = M.load('src/routes/files.js', editAnchor(FILES_SRC, '      note(landedL);\n      return res.status(400)', '      return res.status(400)', 'src/routes/files.js'), 'b422c-files-up-first-r');
+  const ra = await serve(NOW, sf, { getRemoteFs: () => RFS }); writes = 0; const rx = await post(ra.base, '?host=pair-b422c');
+  const notedRemote = notes.splice(0);
+  const rf = await serve(FIRST_R, sf, { getRemoteFs: () => RFS }); writes = 0; await post(rf.base, '?host=pair-b422c');
+  const notedRemoteFirst = notes.splice(0);
+  AR.noteUploads = realNote; f.s.close(); ra.s.close(); rf.s.close();
   const rowOf = (list) => list.filter((o) => o.sessionId === 's-b422c').flatMap((o) => o.files.map((x) => x.name));
+  ok(rx.status === 400 && Array.isArray(rx.body.landed) && rx.body.landed.length === 1 && rx.body.landed[0].name === 'one.txt' && rowOf(notedRemote).join() === 'one.txt' && notedRemote.every((o) => o.host === 'pair-b422c'),
+    `④ the paired machine's refusal road: the file written before the refused one is in \`landed\` and gets its upload row, with its machine (${JSON.stringify({ status: rx.status, landed: rx.body.landed, rows: notedRemote.map((o) => [o.host, o.files.map((x) => x.name)]) })})`);
+  ok(!rowOf(notedRemoteFirst).includes('one.txt'), `RED CONTROL (the unit's first form, the paired machine's road): no upload row for the written file (${JSON.stringify(rowOf(notedRemoteFirst))})`);
   ok(x.status === 503 && typeof x.body.error === 'string' && Array.isArray(x.body.landed) && x.body.landed.length === 1 && x.body.landed[0].name === 'one.txt' && x.body.landedOf === 3,
     `④ the refusal at file 2 of 3 keeps its error and GAINS landed: [one.txt], landedOf 3 (${JSON.stringify(x)})`);
   ok(rowOf(notedNow).includes('one.txt'), `④ the file that landed before the refusal gets its conversation's upload row (the refusal road notes it) (${JSON.stringify(rowOf(notedNow))})`);

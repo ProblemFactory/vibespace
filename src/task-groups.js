@@ -179,6 +179,8 @@ const READER_DOWN = new Set(['no-worker', 'no-idle-worker', 'no-reader']);
 const readerDownWhy = (f) => (!f || f.ok || f.pending ? null : f.noWorker === true ? 'restarting' : f.timedOut || f.code === 'timeout' || f.code === 'path-trying' ? 'slow' : READER_DOWN.has(f.code) ? 'restarting' : null);
 const NOT_READ_WORDS = { restarting: 'its reader is restarting', slow: 'its storage did not answer in time' };
 const KEPT_GOOD_MAX = 256;   // the folders whose last good listing is kept for a refused read (TaskGroupManager._keepGood)
+// line 834's follow (主开发 r3809): the kept listing's age as the tree's other marks say one — s, min, h, d (never «10800 s ago»)
+const readAgo = (ms) => { const s = Math.max(0, Math.round(Number(ms) / 1000)); return s < 90 ? `${s} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 48 * 3600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
 const TELL_WORDS = { note: 'the path and note only', names: 'file names', index: 'file names + key files', contents: 'full contents' };
 // the unclaimed-HIGH reminder line's TEXT budget in BYTES (CJK = 3 B/char), shared by every group of one injection
 const HIGH_LINE_TEXT_BYTES = 600;
@@ -877,9 +879,11 @@ class TaskGroupManager {
   }
 
   _listContextFiles(dir, cap = 100) {
+    this._lastReadFrom = null;
     if (SP.storageRootOf(dir)) {
       const f = this._facts.get('contextFiles', { path: dir, cap });
-      if (f.ok) return Array.isArray(f.result) ? f.result : [];
+      // line 834's follow (主开发 r3809): a storage listing is as old as the READ that gave it — when that read began, never when it is taken
+      if (f.ok) { this._lastReadFrom = typeof this._facts.askedAt === 'function' ? this._facts.askedAt('contextFiles', { path: dir, cap }) : null; return Array.isArray(f.result) ? f.result : []; }
       if (f.pending || readerDownWhy(f)) { this._lastUnknown = f.pending ? 'pending' : readerDownWhy(f); return null; }   // B-422c: UNKNOWN, never []
       return [];
     }
@@ -911,6 +915,8 @@ class TaskGroupManager {
   // (program-managed) since _listContextFiles skips it. TTL-cached: this runs
   // on EVERY prompt for every belonged group — without the cache a big context
   // dir would put a recursive dir walk on the hook's 3s-timeout path.
+  // NO CALLER IN src/ (row B-422c's line 834 rounds, 主开发 r3771 / r3809): it stays as the suites' door to the LEGACY, notes-relative
+  // signature that renderContextDiff still parses — test-context-diff (the escaped «|») and test-peer-text-census build it here
   contextDirSignature(dir) {
     if (!dir) return '';
     if (!this._sigCache) this._sigCache = new Map();
@@ -1061,20 +1067,23 @@ class TaskGroupManager {
     // B-422c (r3507 hold 1): a listing NOT READ NOW is never cached as empty — the LAST READ one is kept, marked with its why and its age
     // line 834's round (主开发 r3771): the storage facts' landing clears the walk's cache, and a refusal replacing a listing IS such a
     // landing — so the last listing read is taken from _lastGood, which that clear never reaches
-    const kept = hit || (this._lastGood && this._lastGood.get(dir));
+    const kept = (this._lastGood && this._lastGood.get(dir)) || hit;   // the newest READ listing, stamped with its read's own time
     if (files == null) return { ...(kept ? kept.w : { files: [], over: false }), reading: true, notRead: this._lastUnknown || 'pending', readAt: kept ? kept.at : null };
     const w = { files: files.slice(0, WALK_CAP), over: files.length > WALK_CAP };
     if (this._walkCache.size > 256) this._walkCache.clear();
     const at = Date.now();
     this._walkCache.set(dir, { w, at });
-    this._keepGood(dir, w, at);
+    this._keepGood(dir, w, this._lastReadFrom != null ? this._lastReadFrom : at);
     return w;
   }
   /** row B-422c (line 834's round, 主开发 r3771): a folder's LAST GOOD listing and when it was read — written wherever the walk's cache
    *  is set from a read, never cleared by the facts' landing (src/storage-facts.js onLanded), so a refused read can say what was read
-   *  last and how long ago. Bounded: KEPT_GOOD_MAX folders, the oldest dropped first; each good read replaces its folder's. */
+   *  last and how long ago. Bounded: KEPT_GOOD_MAX folders, the oldest dropped first; a NEWER read replaces its folder's (an older one,
+   *  adopted late from a signature hit, is dropped — line 834's follow). `at` is the read's own time (when it began). */
   _keepGood(dir, w, at) {
     if (!this._lastGood) this._lastGood = new Map();
+    const had = this._lastGood.get(dir);
+    if (had && had.at > at) return;   // line 834's follow: a signature hit adopted late never puts an OLDER listing back over a newer one
     this._lastGood.delete(dir);
     if (this._lastGood.size >= KEPT_GOOD_MAX) this._lastGood.delete(this._lastGood.keys().next().value);
     this._lastGood.set(dir, { w, at });
@@ -1256,7 +1265,7 @@ class TaskGroupManager {
     const names = w.files.map((f) => `  - ${agentLine(f.path)} (${kb(f.size)})`);
     if (w.notRead) {   // B-422c (r3507 hold 1): not read now — the last read listing, said as such with its age; no file of it is read
       const why = NOT_READ_WORDS[w.notRead] || 'its first answer has not landed yet', n = w.files.length;
-      const ls = [`${head} — not read now (${why}): ${w.readAt ? `the listing below is the LAST READ one, ${Math.max(0, Math.round((Date.now() - w.readAt) / 1000))} s ago — ${n} file${n === 1 ? '' : 's'}` : 'no listing read yet'}; ask again in a moment`, ...(w.readAt ? names : [])];
+      const ls = [`${head} — not read now (${why}): ${w.readAt ? `the listing below is the LAST READ one, ${readAgo(Date.now() - w.readAt)} — ${n} file${n === 1 ? '' : 's'}` : 'no listing read yet'}; ask again in a moment`, ...(w.readAt ? names : [])];
       return { lines: ls, bytes: B(ls), files: n };
     }
     if (level === 'names') {
@@ -1489,7 +1498,7 @@ class TaskGroupManager {
     const rows = [];
     // lane task-group-fanout: `offLoop` (the agent route, after readWalks) — a folder still being read is listed as last
     // read and SAID (its note), never walked on the main thread
-    const said = (note, w) => (w.notRead ? `${note ? note + ' — ' : ''}(not read now: ${NOT_READ_WORDS[w.notRead] || 'its first answer has not landed yet'} — ${w.readAt ? `the files are the LAST READ listing, ${Math.max(0, Math.round((Date.now() - w.readAt) / 1000))} s ago` : 'no listing read yet'}; ask again in a moment)`   // B-422c
+    const said = (note, w) => (w.notRead ? `${note ? note + ' — ' : ''}(not read now: ${NOT_READ_WORDS[w.notRead] || 'its first answer has not landed yet'} — ${w.readAt ? `the files are the LAST READ listing, ${readAgo(Date.now() - w.readAt)}` : 'no listing read yet'}; ask again in a moment)`   // B-422c
       : (w.reading ? `${note ? note + ' — ' : ''}(still being read: a slow folder — ask again in a moment)` : note));
     for (const it of this._toldRows(t)) {
       if (it.head || it.gone || !it.x || !it.x.abs) continue;
