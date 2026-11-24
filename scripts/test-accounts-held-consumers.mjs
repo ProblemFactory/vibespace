@@ -24,6 +24,7 @@ import { checker } from './lib/check.mjs';
 import { anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ahc-'));
@@ -46,6 +47,7 @@ function refuseReadsOf(file) {
   return () => { fs.readFileSync = RAW.readFileSync; fs.readFile = RAW.readFile; fs.promises.readFile = RAW.pReadFile; fs.promises.open = RAW.pOpen; };
 }
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 // ── THE STAND-IN WORLD: two signed-in subscriptions (A the default), a pool of both (A its current), saved by the store ──
 let n = 0;
 function world(tag) {

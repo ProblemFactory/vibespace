@@ -1116,7 +1116,7 @@ console.log('㉑ a whole credential with no vault: the person\'s only');
   let importCalls = 0;
   const PD = fs.mkdtempSync(path.join(ED, 'p-'));
   P.setup({ dataDir: PD, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null,
-    getAccounts: () => ({ exportBundle: () => ({ accounts: [{ id, key: KEY }] }), importBundle: () => { importCalls++; return { imported: 1, skipped: 0 }; }, list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
+    getAccounts: () => ({ exportBundle: () => ({ accounts: [{ id, key: KEY }] }), importBundle: () => { importCalls++; return { imported: 1, skipped: 0 }; }, persisted: () => Promise.resolve(true) /* B-574d unit 1 (a): the production store's landing */, list: () => ({ accounts: [] }) }), getUsageHistory: () => null, onSettingsWrite: () => { } });
   const expDoor = P.router.stack.find((l) => l.route && l.route.path === '/api/config/export' && l.route.methods.post).route.stack[0].handle;
   const doExport = (headers) => new Promise((resolve) => {
     const out = { status: 200, headers: {} };

@@ -18,6 +18,7 @@ import { createRequire } from 'node:module';
 import { anchored } from './scratch.mjs';   // B-5e0d: the host rungs' RED control
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (d ? '\n      ' + d : '')); } };
@@ -56,6 +57,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
 // ── §2 the PANEL rung through the REAL setupUsage with a fake `claude` ───────
 {
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  waitEverySave(AccountManager);
   const usageMod = require(path.join(REPO, 'src/usage-routes.js'));
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const at = (ms) => { const d = new Date(Date.now() + ms); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCHours() % 12 || 12}${d.getUTCHours() < 12 ? 'am' : 'pm'} (UTC)`; };
@@ -184,6 +186,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
 // which fact failed) — RED controls: the verdict with its profile / measured check cut spawns that row. A planted token-shaped line (built at runtime) never reaches the verdict, the record or the file.
 {
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  waitEverySave(AccountManager);
   const usageMod = require(path.join(REPO, 'src/usage-routes.js'));
   const OAT = ['sk-ant-', 'oat01-', 'Wd4Kp8'.repeat(14)].join('');
   const root = mkd(`vs-probelog-why-${process.pid}-`), dataDir = path.join(root, 'data');

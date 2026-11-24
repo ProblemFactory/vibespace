@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own before any of its code
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, classifyAuthFailure, conversationDisplayName } = require(path.resolve('src/account-pool-auto.js'));
 
 // the byte-identity sweeps below compare DECISIONS against older commits; lane pool-silent-members R2 added four NAMING
@@ -690,6 +691,7 @@ await (async () => {
 
   // ── the REAL engine: two conversations on member A, one cold, one warm ──
   const { AccountManager } = require(path.resolve('src/accounts.js'));
+  waitEverySave(AccountManager);
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolproj'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
@@ -1577,6 +1579,7 @@ await (async () => {
 
   // ── the REAL engine + the REAL members route: three conversations on the member the owner removes ──
   const { AccountManager } = require(path.resolve('src/accounts.js'));
+  waitEverySave(AccountManager);
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolpin-member'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
@@ -2010,6 +2013,7 @@ await (async () => {
 await (async () => {
   const fs = require('node:fs');
   const { AccountManager } = require(path.resolve('src/accounts.js'));
+  waitEverySave(AccountManager);
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolpin-prio'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
@@ -2205,6 +2209,7 @@ await (async () => {
 await (async () => {
   const fs = require('node:fs');
   const { AccountManager } = require(path.resolve('src/accounts.js'));
+  waitEverySave(AccountManager);
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolpin-eng'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
@@ -3531,6 +3536,7 @@ await (async () => {
 
   // THE REAL ENGINE: a pool of A (its Claude subscription) + B (a DeepSeek row), the conversation on A, A spent
   const { AccountManager } = require(path.resolve('src/accounts.js'));
+  waitEverySave(AccountManager);
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('poolprov'); fsx.rmSync(scr, { recursive: true, force: true }); fsx.mkdirSync(scr, { recursive: true });
@@ -3960,6 +3966,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
 {
   const fs = require('node:fs');
   const { AccountManager } = require(path.resolve('src/accounts.js'));
+  waitEverySave(AccountManager);
   const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
   const { scratch } = await import('./scratch.mjs');
   const scr = scratch('pool-roster-r2'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });

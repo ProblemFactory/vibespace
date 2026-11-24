@@ -11,9 +11,11 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { versionsBefore } from './lib/oat-fixture.mjs'; // B-5e52
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-verdicts-'));
 const AccountManager = require('../src/accounts.js');
+waitEverySave(AccountManager.AccountManager || AccountManager);
 const AM = AccountManager.AccountManager || AccountManager;
 const accounts = new AM({ dataDir: tmp, onChange: () => {} });
 

@@ -2223,7 +2223,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // B-0248 (c): the sections this import wrote through the STORE WRITER — every answer below waits for their landing
     // (+ B-0248 (a): the desktops — a person's import is an act: its layouts flushed now and landed, never «imported» on the debounce)
     const layoutsLanding = { file: LAYOUTS_FILE, after: (cb) => flushLayouts({ press: true }, cb) };
-    const movedOf = () => [['customThemes', themesHold], ['layouts', layoutsLanding], ['userState', userStateHold], ['bookmarks', bookmarksHold]].filter(([n]) => applied.includes(n)).map(([, h]) => h);
+    // (+ B-574d unit 1: the accounts section — accounts.json is written by the store writer; the import answers after its landing)
+    let accountsLanding = null;
+    const movedOf = () => [['customThemes', themesHold], ['layouts', layoutsLanding], ['userState', userStateHold], ['bookmarks', bookmarksHold]].filter(([n]) => applied.includes(n)).map(([, h]) => h).concat(accountsLanding ? [accountsLanding] : []);
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;
       fn(file.sections[name]);
@@ -2280,6 +2282,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (includeSensitive.includes('accounts') && sens.accounts) {
         let r = null, rh = null; try { r = getAccounts?.()?.importBundle?.(sens.accounts); } catch (e) { if (e && e.code === 'accounts_unread') rh = e; else throw e; }   // the B-f276 family (r3129 (3)): held — not imported, said by name
         if (rh) held.push(rh.code); else applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
+        const A0 = rh ? null : getAccounts?.();
+        if (A0 && Number(r?.imported) > 0 && typeof A0.persisted === 'function') accountsLanding = { file: 'accounts.json', after: (cb) => { Promise.resolve(A0.persisted()).then((ok) => cb(ok !== false), () => cb(false)); } };
       }
       if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.signinInInterface) {
         // the piped form (the separation's B3b follow): the sign-in table is the interface's — refused BY NAME, before it could throw

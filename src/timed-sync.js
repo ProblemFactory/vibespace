@@ -50,6 +50,7 @@ const STORES = Object.freeze({
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
   'hosts.write': row('write', 'hosts', 'src/hosts.js', ['_save']),   // B-48a4: every save of hosts.json, through the store writer (the coordinator's word (e))
+  'accounts.write': row('write', 'accounts', 'src/accounts.js', ['_save']),   // B-574d unit 1 (lane lg-store-writes, 主开发 r3455 / r3486): every save of accounts.json, through the store writer (a person's act answers after its landing)
   'device-audit.write': row('write', 'device-audit', 'src/device-audit.js', ['askDevice']),   // B-48a4: the device-act ring's appends, through the store writer (THE ONE APPENDER)
   'exit-audit.write': row('write', 'exit-audit', 'src/exit-proxy.js', ['_auditJournal']),   // B-48a4: the exit ring's appends, through the store writer (THE ONE APPENDER)
   // channel-store-off-loop (commit 1): the field-named doors through the store writer (it records each write's time here)

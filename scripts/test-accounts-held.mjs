@@ -25,13 +25,15 @@ import { scratchDir, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ROOT = scratchDir('acct-held');
 const { ok, report } = checker();
 const AM0 = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AM0.AccountManager);
 const ASRC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
 const MUT = mutantCopies('acct-held', REPO);
-const cut = (from, to, why, tag) => MUT.load('src/accounts.js', anchored(ASRC, from, to, why), tag);
+const cut = (from, to, why, tag, src = ASRC) => { const m = MUT.load('src/accounts.js', anchored(src, from, to, why), tag); waitEverySave(m.AccountManager); return m; };   // B-574d unit 1 (a): a copy's own class waits for its saves too
 const quiet = (fn) => { const l = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = l; console.warn = w; } };
 const quietA = async (fn) => { const l = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return await fn(); } finally { console.log = l; console.warn = w; } };
 const stand = (code) => Object.assign(new Error(`${code}: stand-in`), { code });
@@ -164,7 +166,10 @@ const restartRun = (AM) => {
 };
 const s6 = restartRun(AM0);
 ok(s6.held2 === 'EIO' && s6.rows3 === 2, 'a restart while the read still fails: held again; the restart after it reads: both accounts', s6);
-const s6x = restartRun(cut('    if (this._hold && !this._hold.writable(\'an accounts change\')) return;', '    if (false) return;', 'no guard at the save', 'acct-guard'));
+// B-574d unit 1 (a): the save has TWO guards since accounts.json is the store writer's — the save's own check and the producer's
+// refusal at the write (a write queued before a hold lands nothing): «no guard» cuts both
+const PRODUCER_GUARD = `      if (this._torn || (this._hold && this._hold.held())) throw Object.assign(new Error('accounts.json is held (it could not be read, or its bytes are damaged) — nothing is written over it until it reads'), { code: 'EHELD' });\n`;
+const s6x = restartRun(cut('    if (this._hold && !this._hold.writable(\'an accounts change\')) return;', '    if (false) return;', 'no guard at the save', 'acct-guard', anchored(ASRC, PRODUCER_GUARD, '', 'no guard at the save (the producer)')));
 ok(s6x.rows3 === 0, 'RED CONTROL (no guard at the save): the held life wrote its EMPTY list — the next life reads «no accounts» for good — red', s6x);
 
 console.log('⑦ THE MONEY: nothing starts or resumes on another login while held');
@@ -273,7 +278,8 @@ const routeImportAcc = async (Pmod) => {
   const D = path.join(ROOT, 'imp-' + (++wn)); fs.mkdirSync(D, { recursive: true });
   let mode = 'export';
   const accStub = { exportBundle: () => ({ accounts: [{ id: 'acct-x', name: 'Work key' }] }), held: () => (mode === 'held' ? { code: 'EIO', at: 1, why: 'the accounts could not be read (EIO)' } : null),
-    importBundle: () => { if (mode === 'held') throw Object.assign(new Error('importing the accounts: the accounts could not be read (EIO)'), { code: 'accounts_unread', status: 503 }); return { imported: 1, skipped: 0 }; } };
+    importBundle: () => { if (mode === 'held') throw Object.assign(new Error('importing the accounts: the accounts could not be read (EIO)'), { code: 'accounts_unread', status: 503 }); return { imported: 1, skipped: 0 }; },
+    persisted: () => Promise.resolve(true) };   // B-574d unit 1 (a): the production store's landing (the import answers after it)
   Pmod.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => [], getTasks: () => null, getAccounts: () => accStub, getUsageHistory: () => null, onSettingsWrite: () => { } });
   const door = (p) => Pmod.router.stack.find((l) => l.route && l.route.path === p && l.route.methods.post).route.stack[0].handle;
   const call = (p, body) => new Promise((resolve) => { const out = { status: 200 }; const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, get() { return undefined; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); } }; Promise.resolve().then(() => door(p)({ body, headers: { 'sec-fetch-site': 'same-origin' }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out))).catch((e) => { out.status = 'threw'; out.body = { error: String(e && e.message) }; resolve(out); }); });

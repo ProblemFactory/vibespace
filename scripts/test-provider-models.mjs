@@ -24,6 +24,7 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const M = require(path.join(ROOT, 'src/model-providers.js'));
 const PS = require(path.join(ROOT, 'src/server/provider-store.js'));
@@ -146,6 +147,7 @@ ok(store.setListed('pv-ds', [], clock).code === 'not-listed' && store.setListed(
 console.log('④ the routes');
 const express = require(path.join(ROOT, 'node_modules/express'));
 const { AccountManager } = require(path.join(ROOT, 'src/accounts.js'));
+waitEverySave(AccountManager);
 const am = new AccountManager({ dataDir: DATA });
 const sub = am.createSubscription({ name: 'Work Max' }).id;
 const key = am.add({ name: 'Console', key: 'sk-ant-api03-' + 'q'.repeat(40) }).id;

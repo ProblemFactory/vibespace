@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve('.');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
@@ -48,6 +49,7 @@ ck('contract: a non-function classifyServeFailure is refused', /classifyServeFai
 // ── §2 THE PERSISTED RECORD ─────────────────────────────────────────────────
 console.log('§2 the record lives on the account, through the atomic writer');
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 const DATA = path.join(SCR, 'data'); fs.mkdirSync(DATA);
 let changes = 0;
 const am = new AccountManager({ dataDir: DATA, onChange: () => { changes++; } });

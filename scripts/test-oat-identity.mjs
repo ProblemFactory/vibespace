@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { gitEnvFrom } from './git-env.mjs';
 
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const say = console.log.bind(console); // §7 silences the engine's console — the verdict lines still print
@@ -42,6 +43,7 @@ const M = require(path.join(REPO, 'src/oat-identity-model.js'));
 const readingLag = require(path.join(REPO, 'src/reading-lag.js'));
 const { LATE_MS } = require(path.join(REPO, 'src/record-lateness.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const OI = require(path.join(REPO, 'src/server/oat-identity.js'));
 // THE K-RUN IS THE WITNESS RING'S K (verify r1 F2): the engine's own constant, read off its source

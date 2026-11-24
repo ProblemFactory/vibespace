@@ -18,6 +18,26 @@ const AT = require('../routes/account-tails.js');   // B-ee0a: the no-vault cred
 // The only=pivots answer (B-f95d ②): the asked crosses + the words that qualify them (as of / partial).
 const pivotsOnly = (a) => ({ pivots: a.pivots || {}, ...(a.asOf ? { asOf: a.asOf } : {}), ...(a.partial ? { partial: a.partial } : {}) });
 
+// B-574d unit 1 (主开发 r3455 hold 1): accounts.json is written by the store writer, so A PERSON's ACCOUNT ACT (a key, a sign-in, a
+// long-lived token, a pool, a name) answers only once its save is ON DISK, as the release's synchronous write was before its reply.
+// ONE place for every /api/accounts write route (registered above them all, here and in the routes this module and usage-routes.js
+// register later): a reply made after the act saved waits for the landing; not on disk ⇒ 503 by name (the change is kept and written
+// again), never a silent «saved». A reply whose act saved nothing is not held. Agents' and machines' saves do not pass here.
+function answerAfterLanding(accounts, res) {
+  if (typeof accounts.saveSeq !== 'function' || typeof accounts.persisted !== 'function') return;
+  const seq0 = accounts.saveSeq(), json = res.json.bind(res);
+  res.json = (body) => {
+    if (accounts.saveSeq() === seq0) return json(body);
+    Promise.resolve(accounts.persisted()).then((ok) => ok, () => false).then((ok) => {
+      try { require('../store-writer.js').identityAtExit(res); } catch { }   // an answer on the landing's road may be made inside the exit's flush
+      if (ok || res.statusCode >= 400) return json(body);
+      const w = (typeof accounts.whyNotDurable === 'function' && accounts.whyNotDurable()) || {};
+      res.status(503); return json({ error: `saved here, but accounts.json is not on disk yet${w.why ? ` (${w.why})` : ''} — VibeSpace keeps the change and writes it again`, code: 'not-durable', notOnDisk: true });   // the family's known code: the page says it in the person's words (account-wall-words notOnDiskWords, fetchJson's sayNotOnDisk)
+    });
+    return res;
+  };
+}
+
 function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
@@ -33,8 +53,9 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   // EMPTY list; the list itself (GET /api/accounts) answers with `held`
   if (typeof app.use === 'function') app.use('/api/accounts', (req, res, next) => {
     let h = null; try { h = typeof accounts.held === 'function' ? accounts.held() : null; } catch { h = null; }
-    if (!h || (req.method === 'GET' && (req.path === '/' || req.path === ''))) return next();
-    return res.status(503).json({ error: h.why, code: 'accounts_unread' });
+    if (h && !(req.method === 'GET' && (req.path === '/' || req.path === ''))) return res.status(503).json({ error: h.why, code: 'accounts_unread' });
+    if (req.method !== 'GET') answerAfterLanding(accounts, res);
+    return next();
   });
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
@@ -1072,4 +1093,4 @@ app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
 });
 
 }
-module.exports = { create };
+module.exports = { create, answerAfterLanding };

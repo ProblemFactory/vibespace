@@ -11,6 +11,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';   // a control's edit through its anchor (mutant-copy imports scratch.mjs already: no new side effect)
 const REPO_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const { runMigrations } = require('../src/migration-runner.js');
 const { create } = require('../src/server/migrations.js');
 let pass = 0, fail = 0;
@@ -1760,6 +1761,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     console.log('2026-09-pool-manual-priority');
     const ID = '2026-09-pool-manual-priority';
     const { AccountManager } = require('../src/accounts.js');
+    waitEverySave(AccountManager);
     const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
     const mkRoot = (tag) => { const r = path.join(tmp, 'pmp-' + tag); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
     const r1 = mkRoot('live');

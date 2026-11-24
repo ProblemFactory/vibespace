@@ -107,8 +107,9 @@ function localFacetOf(caps, now = Date.now()) {
 const { publicNameOf, maskDefaultKeyName } = require('./key-names.js');
 
 class AccountManager {
-  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null, safeFs = null, displayMaxAgeMs = 60000 }) {
+  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null, safeFs = null, displayMaxAgeMs = 60000, storeWriter = null }) {
     this.dataDir = dataDir;
+    this._storeWriter = storeWriter;   // B-574d unit 1: the store writer accounts.json is written through (a suite hands its own; else the hub's one)
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
     this._platform = platform;
@@ -447,10 +448,27 @@ class AccountManager {
   _save() {
     if (this._torn) { if (!this._tornSaveSaid) { this._tornSaveSaid = true; console.warn('[accounts] an accounts change was refused: the file is damaged, and nothing is written over it until it is mended or removed'); } return; }   // THE GUARD for torn bytes held (r3043)
     if (this._hold && !this._hold.writable('an accounts change')) return;   // THE GUARD (r2947 (1)): every one of the 35 sites — nothing written over a file that could not be read
-    const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, this._file);
+    // B-574d unit 1 (主开发 r3450 / r3455): accounts.json goes through THE STORE WRITER — its thread writes the temp, SYNCS it, renames
+    // it, so a power loss never leaves an empty or torn list (which the store-read law would then hold); the hub's loop never waits on
+    // the data folder for it (before: writeFileSync + renameSync on the loop at every one of ~40 saves, unsynced). The bytes are made
+    // AT the write (a burst of saves is one write) and the write is urgent (`durable`), as the old write was immediate. A write
+    // queued before a hold never lands the held list: the producer refuses (EHELD) and the writer keeps it owed. A person's act
+    // answers after its landing (account-usage-routes.js's /api/accounts door, the config import, the mint's save: `persisted()`)
+    this._saveSeq = (this._saveSeq || 0) + 1;
+    const W = this._writer();
+    W.dirty(this._file, { name: 'accounts.write', mode: 0o600, produce: () => {
+      if (this._torn || (this._hold && this._hold.held())) throw Object.assign(new Error('accounts.json is held (it could not be read, or its bytes are damaged) — nothing is written over it until it reads'), { code: 'EHELD' });
+      return JSON.stringify(this._state, null, 2);
+    } });
+    W.durable(this._file).catch(() => { });
   }
+  _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
+  /** how many saves this manager has asked for — a door compares it before and after a person's act (B-574d unit 1) */
+  saveSeq() { return this._saveSeq || 0; }
+  /** accounts.json holds every change saved so far (a HELD or damaged list is never «on disk»: its saves are refused) */
+  persisted() { if (this.held()) return Promise.resolve(false); return this._writer().durable(this._file); }
+  /** why the last save is not on disk yet (the writer's own words) — null when it is */
+  whyNotDurable() { const h = this.held(); if (h) return { why: 'held', code: h.code }; const W = this._writer(); return (typeof W.whyNotDurable === 'function' && W.whyNotDurable(this._file)) || null; }
 
   _notify() { this._tailsN = (this._tailsN || 0) + 1; try { this._onChange(this.list()); } catch { } }   // every store change moves the tails generation (B-ee0a)
   /** THE TAILS GENERATION (B-ee0a smalls — its reader's MUST: «never a wrong tail»): a word that changes whenever a tail the person's

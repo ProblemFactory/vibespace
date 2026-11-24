@@ -33,6 +33,7 @@ import { scratchDir, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ROOT = scratchDir('rct-held');
 const { ok, report } = checker();
@@ -40,6 +41,7 @@ const quietly = async (fn) => { const l = console.log, w = console.warn; console
 const quiet = (fn) => { const l = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = l; console.warn = w; } };
 
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
 const { registerResetCreditRoutes } = require(path.join(REPO, 'src/routes/reset-credit.js'));
 const RC = require(path.join(REPO, 'src/reset-credit.js'));

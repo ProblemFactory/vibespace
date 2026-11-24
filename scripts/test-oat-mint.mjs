@@ -26,9 +26,11 @@ import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { fakeClaudeCmd } from './fixtures/oat-mint/fake-wrap.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require(path.join(REPO, 'src/oat-mint-model.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 const FAKE = path.join(REPO, 'scripts/fixtures/oat-mint/fake-claude');
 const ORCH = path.join(REPO, 'src/server/oat-mint.js');
 let pass = 0, fail = 0;
@@ -654,7 +656,7 @@ console.log('§7 F3 — orphaned scratch dirs are swept at boot; an orderly exit
     ok(!!odR && odR.ok && odR.made[0] !== OMk.OWNER_FILE && odR.made.includes(OMk.OWNER_FILE), 'RED — the mark written after the opener (its anchors found once; the copy\'s mint still starts): the folder\'s first file is not the mark — the order leg goes red there', { fM, fE, made: odR && odR.made });
   } finally { try { liveKid.kill('SIGKILL'); } catch { } }
   const child = path.join(tmpBase, 'hub-child.cjs');
-  fs.writeFileSync(child, `const O = require(${JSON.stringify(ORCH)}); const { AccountManager } = require(${JSON.stringify(path.join(REPO, 'src/accounts.js'))});
+  fs.writeFileSync(child, `const O = require(${JSON.stringify(ORCH)}); const { AccountManager } = require(${JSON.stringify(path.join(REPO, 'src/accounts.js'))}); require(${JSON.stringify(path.join(REPO, 'scripts/lib/accounts-landed.cjs'))}).waitEverySave(AccountManager);
 const am = new AccountManager({ dataDir: process.argv[2] }); const id = am.createSubscription({ name: 'Child' }).id;
 const mint = O.create({ accounts: am, claudeCmd: process.argv[3], tmpRoot: process.argv[4], log: () => { }, exitHook: process.argv[5] === '1' });
 const st = mint.start({ accountId: id });
@@ -858,7 +860,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   };
   const callsOf = (src, rel) => walkOf(src, rel).calls;
   // every write accounts.js may do, by function — a new row is a new writer and must be judged here
-  const ACC_ROWS = ['constructor rmSync', '_save writeFileSync', '_save renameSync', '_moveLogin renameSync', '_moveLogin unlinkSync', 'importBundle writePrivateFile', 'mergeSubscription chmodSync', 'mergeSubscription writePrivateFile', 'mergeSubscription writePrivateFile', 'mergeSubscription moveCredentialArchives', 'mergeSubscription renameSync', 'mergeSubscription rmSync', 'remove unlinkSync', 'remove rmSync', 'remove rmSync', '_healPoolsAfterRemoval unlinkSync', '_healPoolsAfterRemoval unlinkSync', '_syncOatFileNow archiveCredentialFile', '_syncOatFileNow writeCredentialFile', '_syncOatFileNow removeCredentialFile', 'dropSessionPoolLink unlinkSync', 'sweepSessionPoolLinks unlinkSync', 'captureConsoleLogin rmSync'];
+  const ACC_ROWS = ['constructor rmSync', '_moveLogin renameSync', '_moveLogin unlinkSync', 'importBundle writePrivateFile', 'mergeSubscription chmodSync', 'mergeSubscription writePrivateFile', 'mergeSubscription writePrivateFile', 'mergeSubscription moveCredentialArchives', 'mergeSubscription renameSync', 'mergeSubscription rmSync', 'remove unlinkSync', 'remove rmSync', 'remove rmSync', '_healPoolsAfterRemoval unlinkSync', '_healPoolsAfterRemoval unlinkSync', '_syncOatFileNow archiveCredentialFile', '_syncOatFileNow writeCredentialFile', '_syncOatFileNow removeCredentialFile', 'dropSessionPoolLink unlinkSync', 'sweepSessionPoolLinks unlinkSync', 'captureConsoleLogin rmSync'];
   // every content write account-material holds, by function: its two private writers (sync for a merge / an import,
   // fs.promises for the oat's acts) — the oat helpers reach content only through them
   const MAT_CONTENT = ['copyInto', 'copyIntoSync', 'writePrivateFile', 'writePrivateFileAsync'];   // r2822: + copyIntoSync — the same copy's sync form, for the merge's guarded swap (swapSync)   // r2697 (lane bl-loop-b): + copyInto — the no-hard-link twin of link(2) into an EMPTY name: an exclusive copy (COPYFILE_EXCL, never a replace) of a file already written and synced (the tmp, or the aside put back), 0600, synced (secret-box's mintKeyFile fallback is the same shape)
@@ -955,7 +957,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   // only; it persists nothing, no credential leaves it)
   // (row B-87fd identity unit 2: + ./account-identity.js at the top — PURE, imports nothing: the ONE identity record and the ONE
   // «same account?» comparison over facts already in memory; no write door, no credential, no mint)
-  const ACC_EDGES = ['(top) ./account-display-facts.js', '(top) ./account-identity.js', '(top) ./auto-cli-model.js', '(top) ./backend-caps.js', '(top) ./cli-caps.js', '(top) ./harnesses', '(top) ./key-names.js', '(top) ./login-expiry.js', '(top) ./login-state.js', '(top) ./login-tie.js', '(top) ./model-providers.js', '(top) ./oat-identity-model.js', '(top) ./plan-names.js', '(top) ./pool-pin-record.js', '(top) ./run-reads.js', '(top) ./secret-box.js', '(top) ./slot-transitions.js', '(top) ./store-read-hold.js', '(top) ./store-read.js', '(top) crypto', '(top) fs', '(top) os', '(top) path', '_healPoolsAfterRemoval ./account-material.js', '_syncOatFileNow ./account-material.js', 'constructor ./safe-fs.js', 'ensureSessionPoolLink ./account-material.js', 'importBundle ./account-material.js', 'mergeSubscription ./account-material.js', 'setPoolTarget ./account-material.js', 'sweepSessionPoolLinks ./server/session-meta-verdict.js'];
+  const ACC_EDGES = ['(top) ./account-display-facts.js', '(top) ./account-identity.js', '(top) ./auto-cli-model.js', '(top) ./backend-caps.js', '(top) ./cli-caps.js', '(top) ./harnesses', '(top) ./key-names.js', '(top) ./login-expiry.js', '(top) ./login-state.js', '(top) ./login-tie.js', '(top) ./model-providers.js', '(top) ./oat-identity-model.js', '(top) ./plan-names.js', '(top) ./pool-pin-record.js', '(top) ./run-reads.js', '(top) ./secret-box.js', '(top) ./slot-transitions.js', '(top) ./store-read-hold.js', '(top) ./store-read.js', '(top) crypto', '(top) fs', '(top) os', '(top) path', '_healPoolsAfterRemoval ./account-material.js', '_syncOatFileNow ./account-material.js', '_writer ./store-writer.js', 'constructor ./safe-fs.js', 'ensureSessionPoolLink ./account-material.js', 'importBundle ./account-material.js', 'mergeSubscription ./account-material.js', 'setPoolTarget ./account-material.js', 'sweepSessionPoolLinks ./server/session-meta-verdict.js'];
   ok(JSON.stringify(c.accEdges) === JSON.stringify(ACC_EDGES), `⑧ accounts.js requires exactly its ${ACC_EDGES.length} named module edges, by function (verify r2 F1: an inline require in an act was a door nobody counted)`, c.accEdges.filter((x) => !ACC_EDGES.includes(x)).concat(ACC_EDGES.filter((x) => !c.accEdges.includes(x)).map((x) => '-' + x)));
   const planted = accSrc.replace("    a.oatEnc = this._enc(token);\n", "    a.oatEnc = this._enc(token);\n    fs.writeFileSync(this.subCredsPath(id), JSON.stringify({ claudeAiOauth: { accessToken: token } }), { mode: 0o600 });\n");
   const cp = planted !== accSrc ? census({ 'src/accounts.js': planted }) : null;

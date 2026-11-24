@@ -37,9 +37,11 @@ import { createRequire } from 'node:module';
 import { versionsBefore, RECORD_SHA256 } from './lib/oat-fixture.mjs'; // B-5e52
 const ALL_MEASURED = Object.keys(RECORD_SHA256).join(', '); // B-5e52: every build the fixture measured (test-cli-caps pins the fixture to that table) — a new build edits no leg here
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const LE = require(path.join(REPO, 'src/login-expiry.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 const Module = require('node:module');
 let pass = 0, fail = 0;
 const ok = (c, msg, extra) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 400) : '')); } };

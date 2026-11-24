@@ -8,7 +8,9 @@ import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'
 import { createRequire } from 'node:module';
 import { versionsBefore } from './lib/oat-fixture.mjs'; // B-5e52
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const { AccountManager } = require(path.resolve('src/accounts.js'));
+waitEverySave(AccountManager);
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pool-'));
 let pass = 0, fail = 0;

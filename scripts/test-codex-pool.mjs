@@ -11,6 +11,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // Every patched copy (the R-series negative controls) is written OUTSIDE the
 // tree (scripts/mutant-copy.mjs: this process's scratch dir, `require` re-bound
@@ -29,6 +30,7 @@ let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+waitEverySave(AccountManager);
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxpool-'));
 process.env.CODEX_HOME = path.join(dataDir, 'shared-codex'); // keep _seedCodexDir off the real ~/.codex

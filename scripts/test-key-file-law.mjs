@@ -38,6 +38,7 @@ import { pathToFileURL } from 'node:url';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const acorn = require('acorn');
 let pass = 0, fail = 0;
@@ -457,7 +458,7 @@ const hexShape = (b) => /^[0-9a-f]{64}$/.test(b.toString('utf-8'));
 await storeLegs({
   tag: 'accounts', keyFile: (d) => path.join(d, '.accounts-key'), shape: hexShape, ctFiles: (d) => [path.join(d, 'accounts.json')],
   load: () => require(path.join(REPO, 'src/accounts.js')), baseRule: () => loadBase('src/accounts.js', (s) => s.replace(ACCT_KEY, OLD_ACCT_KEY)),
-  make: (d, m) => new m.AccountManager({ dataDir: d }),
+  make: (d, m) => new (waitEverySave(m.AccountManager))({ dataDir: d }),
   seal: (st, text) => { const k = 'sk-ant-' + text + '-' + crypto.randomBytes(6).toString('hex'); const r = st.add({ name: 'kfl', key: k }); return { id: r.id, k }; },
   open: (st, h) => (st.getKey(h.id) === h.k ? 'secret-one' : null),
   rowCode: (st) => { try { st._key(); return null; } catch (e) { return e.code === 'key-unreadable:malformed' ? 'key-malformed' : (e.code || 'threw'); } }, // accounts' own rows word a bad shape as key-unreadable:malformed (lane oat-census-closure)
@@ -654,7 +655,7 @@ await storeLegs({
 // ── ③b THE BEHAVIOUR BELT (key-file-law-fix, verify r1 F2) ────────────────────────────────────────────────────────────
 console.log('③b the behaviour belt — every key-file fs call while the stores boot and run comes through the law');
 const BOOTS = {
-  accounts: async (d, m = require(path.join(REPO, 'src/accounts.js'))) => { const a = new m.AccountManager({ dataDir: d }); for (const r of a.list().accounts || []) { try { a.getKey(r.id); } catch { /* a refusal is a row */ } } },
+  accounts: async (d, m = require(path.join(REPO, 'src/accounts.js'))) => { const a = new (waitEverySave(m.AccountManager))({ dataDir: d }); for (const r of a.list().accounts || []) { try { a.getKey(r.id); } catch { /* a refusal is a row */ } } },
   mounts: async (d, m = require(path.join(REPO, 'src/mounts.js'))) => { const mm = new m.MountManager({ dataDir: d, broadcast: () => {}, getSetting: () => undefined }); mm.maybeUpgradePinnedRclone = () => {}; await mm.restore(); mm.list(); },
   integrations: async (d) => { const st = IS.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet }); st.publicView('cloud:browserless'); st.resolveIntegration('cloud:browserless'); },
   channels: async (d) => { const e = ENG.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, integrations: IS.create({ dataDir: path.join(d, 'int'), env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet }), fetch: async () => { throw new Error('no network in this suite'); }, log: quiet }); try { const f = path.join(d, 'channels', 'acct-kfl', 'callers.json'); if (fs.existsSync(f)) { try { e.secrets.open(JSON.parse(realRead(f, 'utf-8')).callers[0].tokenEnc); } catch { /* a refusal */ } } } finally { try { await e.stop?.(); } catch { } } },
@@ -879,6 +880,7 @@ try {
   const BK = require(path.join(REPO, 'src/server/browser-keeper.js'));
   const Dm5 = require(path.join(REPO, 'src/server/browser-dialogs.js'));
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  waitEverySave(AccountManager);
   const eng5 = VE.create({ dataDir: d5, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
   const vpw5 = `Birch${crypto.randomInt(1000, 9999)}Key!`;
   await eng5.setup(vpw5);

@@ -37,6 +37,7 @@ import { checker } from './lib/check.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d unit 1 (a): accounts.json is the store writer's — each save waited for (the suite's thread)
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { ok, report } = checker();
 const MJ = mutantCopies('todos-held-census', ROOT);
@@ -682,6 +683,7 @@ console.log('③ the scenes — a migration waits for the read, a clear is refus
   // K readings of a long-lived token that answer with ANOTHER account's window still MARK the member at once — the pool places
   // nothing new on it; only the notice's FILING is owed to the read (filed once then, its id saved on the mark)
   const { AccountManager } = require(path.join(ROOT, 'src/accounts.js'));
+  waitEverySave(AccountManager);
   const OSRC = read('src/server/oat-identity.js');
   const K = 3, nowS = Math.floor(Date.now() / 1000), OWN = nowS + 3 * 86400 + 2 * 3600, THIRD = OWN + 4 * 86400 + 11 * 3600;
   const win = (sevenDay) => ({ sevenDay, fiveHour: null, scoped: {} });
