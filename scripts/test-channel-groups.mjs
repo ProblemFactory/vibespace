@@ -1366,12 +1366,14 @@ console.log('§3c2 fb-f48717393b a job\'s refused send names its target, the rea
   const drive = async (name, ge) => {
     const f = fixture(name, ge ? { ge } : {});
     const none = await f.eng.sendToAgent({ from: A, to: 'beta', text: 'batch finished', create: false });   // a job: no pair yet
-    await f.eng.sendToAgent({ from: A, to: 'beta', text: 'hello beta' });   // the owner conversation opens the pair
+    const opened = await f.eng.sendToAgent({ from: A, to: 'beta', text: 'hello beta' });   // the owner conversation opens the pair
     const works = await f.eng.sendToAgent({ from: A, to: 'beta', text: 'batch finished', create: false });
     const other = await f.eng.sendToAgent({ from: A, to: 'gamma', text: 'batch finished', create: false });
     const hidden = await f.eng.sendToAgent({ from: A, to: D, text: 'batch finished', create: false });   // r3606: a session the owner may NOT message, given by its id
+    await f.eng.leave({ by: A, group: opened.group.id });   // line 826's round: the owner's one direct group is ARCHIVED
+    const afterLeave = await f.eng.sendToAgent({ from: A, to: 'gamma', text: 'batch finished', create: false });
     f.close();
-    return { none, works: !!(works.ok && works.pairCreated === false), other, hidden };
+    return { none, works: !!(works.ok && works.pairCreated === false), other, hidden, afterLeave };
   };
   const live = await drive('fbjob');
   ok(live.none.code === 'job-token' && live.none.why === 'no-pair' && !!live.none.target && live.none.target.conversationId === B && live.none.target.name === 'beta' && live.none.pairs === 0 && live.works
@@ -1382,10 +1384,19 @@ console.log('§3c2 fb-f48717393b a job\'s refused send names its target, the rea
   // session the owner may not see gets the uniform refusal with the reference as the job gave it: no target, no reason, no name
   ok(live.hidden.code === 'unreachable' && !live.hidden.target && !live.hidden.why && String(live.hidden.error).includes(D) && !String(live.hidden.error).includes('delta'),
     'r3606: a job\'s send to a session its owner may NOT message (by its id) ⇒ the uniform refusal, the id as the job gave it — no target, no reason, never its name («delta»)', JSON.stringify(live.hidden));
+  ok(live.afterLeave.why === 'no-pair' && live.afterLeave.pairs === 0, 'line 826\'s round: the count is the owner\'s OPEN direct groups — once its one direct group is archived it is 0', JSON.stringify(live.afterLeave));
   const NAMED = "      return { ok: false, code: 'job-token', why: 'no-pair', target: { conversationId: r.cid, name: shown }, pairs, error:";
   ok(src.split(NAMED).length === 2, 'the control finds its line (the named refusal)');
   const red = await drive('fbjob-red', mutantCopies('fbjob-ge', REPO).load('src/server/groups-engine.js', editAnchor(src, NAMED, "      return { ok: false, code: 'job-token', error:", "src/server/groups-engine.js"), 'unnamed'));
   ok(red.none.code === 'job-token' && !red.none.why && !red.none.target, 'RED CONTROL (the refusal as before, a copy of the engine): no target and no reason ride the answer — the leg above goes red', JSON.stringify(red.none));
+  // line 826's round: the two legs above get REDS of their own (copies of the engine)
+  const OPEN = "      const pairs = Object.values(all()).filter((g) => !g.archivedAt && g.pair && g.pair.includes(from)).length;";
+  const ACL = "    const ok = hits.filter((s) => s.cid !== by && msgAcl.canMessage(reach(by, s.cid)));";
+  ok(src.split(OPEN).length === 2 && src.split(ACL).length === 2, 'the two controls find their lines (the open-groups count, the resolver\'s reach filter)');
+  const redOpen = await drive('fbjob-red-open', mutantCopies('fbjob-ge-open', REPO).load('src/server/groups-engine.js', editAnchor(src, OPEN, OPEN.replace('!g.archivedAt && ', ''), "src/server/groups-engine.js"), 'archived-counted'));
+  ok(redOpen.afterLeave.pairs === 1, 'RED CONTROL (the archived filter removed, a copy): the archived direct group is counted again (1) — the count leg goes red', JSON.stringify(redOpen.afterLeave));
+  const redAcl = await drive('fbjob-red-acl', mutantCopies('fbjob-ge-acl', REPO).load('src/server/groups-engine.js', editAnchor(src, ACL, '    const ok = hits.filter((s) => s.cid !== by);', "src/server/groups-engine.js"), 'reach-unfiltered'));
+  ok(redAcl.hidden.code === 'job-token' && !!redAcl.hidden.target && redAcl.hidden.target.name === 'delta', 'RED CONTROL (the resolver without its reach filter, a copy): the hidden session resolves and the job\'s refusal says its name («delta») — the r3606 leg goes red', JSON.stringify(redAcl.hidden));
 }
 
 console.log('§3d a shared display name is never guessed (kick / notify)');

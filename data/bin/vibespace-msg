@@ -111,8 +111,8 @@ function refused(j, status) {
   // fb-f48717393b: a job's send refused because its owner has no direct group with that target yet — the remedy says THAT case (a job CAN
   // post: into the direct groups its owner already has), never the generic «run it from the conversation» that reads as «jobs cannot send»
   if (code === 'job-token' && j.why === 'no-pair' && j.target) {
-    const t = j.target, n = Number(j.pairs) || 0;
-    console.error(`  → this job posts only into a direct group its owner conversation already has (${n} now); it has none with ${t.name ? `"${t.name}" ` : ''}${t.conversationId || ''} yet — send to it once from the owner conversation (vibespace-msg send ${t.conversationId || t.name} "…"), then this job can post there`);
+    const t = j.target, n = Number(j.pairs) || 0, named = !!t.name && t.name !== t.conversationId;   // a session with no name is named by its id: said ONCE (line 826's round)
+    console.error(`  → this job posts only into a direct group its owner conversation already has (${n} open now); it has none with ${named ? `"${t.name}"` : 'that conversation'} yet — send to it once from the owner conversation (vibespace-msg send ${t.conversationId || t.name} "…"), then this job can post there`);
   } else if (REMEDY[code]) console.error('  → ' + REMEDY[code]);
   process.exit(1);
 }

@@ -899,7 +899,7 @@ const PRINTS = {
     // fb-f48717393b: a job's send refused for want of a direct group — the target the route named (its name through msgName) and the
     // owner's direct-group count, printed in that case's remedy (stderr)
     'j.target': 'judged:msgRefusalAnswer — the refused send\'s target, {conversationId, name} (stderr)', 't.name': 'judged:msgRefusalAnswer — the target\'s name through msgName (stderr)',
-    't.conversationId': `${V}:the target's conversation id`, 'j.pairs': `${V}:a count (the owner conversation's direct groups)`,
+    't.conversationId': `${V}:the target's conversation id`, 'j.pairs': `${V}:a count (the owner conversation's open direct groups)`, 'named': `${V}:a flag (the target has a name of its own, not its id)`,
     'g.archived': `${V}:a flag`, 'g.id': `${V}:a group id`, 'g.notify': `${V}:the notify mode`, 'g.pair': `${V}:a flag`, 'g.unread': `${V}:a count`,
     'g.members': 'judged:msgGroupsAnswer / msgGroupOpAnswer — the member rows (each name judged there)',
     'g.name': 'judged:msgGroupsAnswer (list) / msgGroupOpAnswer (the group-op echoes)',

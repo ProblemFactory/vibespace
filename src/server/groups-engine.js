@@ -1503,7 +1503,8 @@ function create({
     if (!r.ok) return endedRefusal(to, from) || r;
     const shown = r.name || to;
     // fb-f48717393b (主开发 r2235): the refusal NAMES the target and the reason, and says what differs from a target that works: a
-    // job posts only into a direct group its owner conversation ALREADY has — `pairs` counts the owner's own (those it can reach)
+    // job posts only into a direct group its owner conversation ALREADY has — `pairs` counts the owner's OPEN direct groups (a
+    // conversation's end archives its direct groups, so an ended partner's is not counted once its end is recorded)
     if (!create && !findPair(from, r.cid)) {
       const pairs = Object.values(all()).filter((g) => !g.archivedAt && g.pair && g.pair.includes(from)).length;
       return { ok: false, code: 'job-token', why: 'no-pair', target: { conversationId: r.cid, name: shown }, pairs, error: `no direct group with "${shown}" exists yet, and a job token never creates one — start it from the conversation that owns this job (vibespace-msg send "${shown}" "…"), then the job can post into it` };
