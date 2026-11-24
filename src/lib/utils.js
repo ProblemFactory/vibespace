@@ -1986,6 +1986,7 @@ export function pagesHeldWords() { return t('VibeSpace cannot read its list of p
  *  words (r3123). A lane whose cure adds a held store adds its code as a row here; scripts/test-held-words.mjs is the
  *  census (every held 503 of the tree, and every code ending in unread / unreadable whatever its status). */
 const HELD_WORDS = Object.freeze({
+  doc_owners_unread: () => t('VibeSpace cannot read the list of who owns each document window right now — nothing was changed and no comment was sent. It reads the list again by itself every few minutes: send again then.'),   // r3332: data/doc-owners.json (src/server/doc-engine.js)
   storage_unread: () => t('VibeSpace cannot read its storage list right now — nothing was changed. Try again in a few minutes (it reads it again by itself).'),   // mounts.json (src/mounts.js)
   tokens_unread: () => t('VibeSpace cannot read its folder links right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'),   // mount-tokens.json (src/webdav.js)
   plugins_unread: () => pluginsHeldWords(),   // plugins.json (src/plugins.js)

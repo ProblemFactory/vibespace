@@ -23,7 +23,8 @@ function registerDocRoutes(app, { doc }) {
   app.get('/api/doc/owner', (req, res) => {
     if (!ownerOnly(req, res)) return;
     const o = doc.ownerOf(args(req.query || {}));
-    res.json({ owner: o ? { via: o.via, sessionId: o.sessionId } : null });
+    const h = !o && typeof doc.ownersHold === 'function' ? doc.ownersHold() : null;   // r3332: the owners list held (or torn) — said, never a bare «none»
+    res.json({ owner: o ? { via: o.via, sessionId: o.sessionId } : null, ...(h ? { hold: h } : {}) });
   });
   app.post('/api/doc/comments', (req, res) => {
     if (!ownerOnly(req, res)) return;

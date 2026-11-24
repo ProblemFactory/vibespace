@@ -166,7 +166,7 @@ console.log('④ THE NAMES\' CENSUS — every store the helper holds has a plain
 const CALLERS = { 'src/mounts.js': ['mounts.json'], 'src/webdav.js': ['mount-tokens.json'], 'src/plugins.js': ['plugins.json'], 'src/accounts.js': ['accounts.json'], 'src/server/apps-engine.js': ['app-proposals.json'],
   'src/routes/files.js': ['extract-journal.json'],   // r3333 unit 2: the archive extraction journal
   'src/server/auto-resume.js': ['auto-resume.json'], 'src/server/browser-trace.js': ['browser-forgotten.json'], 'src/server/channel-api.js': ['api-proposals.json'], 'src/server/channels-attention.js': ['decision-examples.json'],
-  'src/server/design-engine.js': ['designs.json'], 'src/server/feedback-forward.js': ['feedback-outbox.json'], 'src/server/feedback-store.js': ['feedback.json'], 'src/server/provider-store.js': ['providers.json'],
+  'src/server/design-engine.js': ['designs.json'], 'src/server/feedback-forward.js': ['feedback-outbox.json'], 'src/server/doc-engine.js': ['doc-owners.json'], 'src/server/feedback-store.js': ['feedback.json'], 'src/server/provider-store.js': ['providers.json'],
   'src/server/published-pages.js': ['published-pages.json'], 'src/server/setting-holds.js': ['setting-holds.json'], 'src/server/vault-use-grants.js': ['vault-use-marks.json'], 'src/session-status.js': ['session-status.json'],
   // r3314: the units picked into the hotfix's trial after the chain
   'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],

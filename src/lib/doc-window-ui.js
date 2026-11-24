@@ -1035,7 +1035,8 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (!comments.length && !list.querySelector('.doc-strip-empty')) list.appendChild(mk('div', 'doc-strip-empty', t('Select text in the document, then press Add comment.')));
     if (comments.length) list.querySelector('.doc-strip-empty')?.remove();
     btnSend.hidden = !comments.length; renderSend();
-    ownerLine.textContent = S.owner ? '' : t('No conversation goes with this document — open it from a chat to comment');
+    // r3332: the owners list HELD (or torn) is said here — the hub's sentence in the reader's language — never «no conversation»
+    ownerLine.textContent = S.owner ? '' : S.hold && S.hold.i18n && S.hold.i18n.key ? t(S.hold.i18n.key, S.hold.i18n.params || {}) : t('No conversation goes with this document — open it from a chat to comment');
     ownerLine.hidden = !!S.owner;
     renderStatus();
   }
@@ -1057,7 +1058,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     S.sending = false; S.sendingN = 0; renderSend();
     const w = sendWords(t, r, batch.length);
     if (r && r.ok) drop(batch);
-    else if (r && r.code === 'no_owner') { S.owner = null; renderStrip(); }
+    else if (r && (r.code === 'no_owner' || r.code === 'doc_owners_unread')) { S.owner = null; S.hold = r.i18n ? { code: r.code, i18n: r.i18n } : null; renderStrip(); }   // r3332: the hold keeps the notes here
     else if (w && w.kind === 'partial') drop(batch.slice(0, r.sent)); // part-way: what went out leaves the strip, the rest stays
     if (!w) return;
     say(w.words);
@@ -1065,7 +1066,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   }
   async function resolveOwner() {
     const r = await fetchJson('/api/doc/owner?' + q(host, path) + (S.from ? '&from=' + encodeURIComponent(S.from) : ''));
-    S.owner = r && r.owner ? r.owner : null; renderStrip();
+    S.owner = r && r.owner ? r.owner : null; S.hold = r && !r.owner && r.hold ? r.hold : null; renderStrip();
   }
   winInfo._docAdopt = (sid) => { S.from = sid; if (winInfo._openSpec) winInfo._openSpec = { ...winInfo._openSpec, from: sid }; resolveOwner(); };
   winInfo._docClose = () => { clearInterval(timer); };

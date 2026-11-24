@@ -4606,6 +4606,7 @@ export default {
   "the labels you taught": "你教过的标签",
   "the list of designs": "设计列表",
   "the feedback waiting to be sent": "等待发送的反馈",
+  "the list of who owns each document window": "「每个文档窗口归哪个对话」这份列表", // r3332: doc-owners.json
   "the feedback reports": "反馈报告",
   "the record of unfinished extractions": "未完成解压的记录",
   "the list of model providers": "模型提供方列表",
@@ -9278,6 +9279,8 @@ export default {
   "Add comment": "批注",
   "Select text in the document, then press Add comment.": "在文档里选中文字，再点「批注」。",
   "No conversation goes with this document — open it from a chat to comment": "这份文档没有对应的对话——从聊天里打开它再批注",
+  "VibeSpace cannot read the list of who owns each document window right now — nothing was changed and no comment was sent. It reads the list again by itself every few minutes: send again then.": "VibeSpace 现在读不到「每个文档窗口归哪个对话」这份列表——什么都没改，批注也没发出。它每隔几分钟会自己再读一次：到时再发送。", // r3332: doc-owners.json held / torn (src/server/doc-engine.js)
+  "The list of who owns each document window was damaged; its damaged bytes are kept beside it as {name}. Open this document from its chat again to comment on it.": "「每个文档窗口归哪个对话」这份列表损坏了；损坏的内容另存在它旁边，名为 {name}。从它的聊天里重新打开这份文档再批注。", // r3332: doc-owners.json held / torn (src/server/doc-engine.js)
   // lane doc-editor-ui (design 020): the Doc window's folding bar, its status strip, the table grips, the raw block's head
   "Formatting": "格式",
   "Block style": "段落样式",

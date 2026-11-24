@@ -5,6 +5,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ## INDEX (one line per file; the essay is below)
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
+scripts/test-doc-owners-held.mjs (NEW, fast — r3332) — data/doc-owners.json under the store-read law: a placed refusal of the read: the comment door, the edit note and the owner look say the hold, nothing written over, lifted with no restart; torn bytes kept aside once, said
 scripts/test-browser-kept-sweep.mjs (fast, NEW — r3006 the sweep's fail-closed law; r3054 ④ the bindings) — a kept store whose read was refused at a start: the real boot sweep removes no kept browser's profile folder, nothing is written over the file; red = the release's rename
 scripts/test-accounts-held.mjs (fast, NEW — the B-f276 family, r2947 / r3043) — accounts.json on the helper: held on a failed read, every change refused by name, no start on another login, one notice, the read again adopts it; torn bytes kept aside once and HELD; each with its red
 scripts/test-channel-store-forget.mjs (NEW, fast — B-92fc) — «forget its data» leaves no byte of the account under the channels data; every late writer after the purge makes nothing (a stall in a picture fetch, the people memo owed); the purge makes no synchronous fs call; five reds

@@ -4605,6 +4605,7 @@ export default {
   "the labels you taught": "教えたラベル",
   "the list of designs": "デザインの一覧",
   "the feedback waiting to be sent": "送信待ちのフィードバック",
+  "the list of who owns each document window": "各ドキュメントウィンドウがどの会話のものかの一覧", // r3332: doc-owners.json
   "the feedback reports": "フィードバックの報告",
   "the record of unfinished extractions": "未完了の展開の記録",
   "the list of model providers": "モデルプロバイダーの一覧",
@@ -9277,6 +9278,8 @@ export default {
   "Add comment": "コメント",
   "Select text in the document, then press Add comment.": "ドキュメントで文字を選んでから「コメント」を押してください。",
   "No conversation goes with this document — open it from a chat to comment": "このドキュメントに対応する会話がありません——会話から開いてコメントしてください",
+  "VibeSpace cannot read the list of who owns each document window right now — nothing was changed and no comment was sent. It reads the list again by itself every few minutes: send again then.": "VibeSpace は「各ドキュメントウィンドウがどの会話のものか」の一覧を今読めません——何も変更しておらず、コメントも送っていません。数分ごとに自動で読み直すので、そのときにもう一度送ってください。", // r3332: doc-owners.json held / torn (src/server/doc-engine.js)
+  "The list of who owns each document window was damaged; its damaged bytes are kept beside it as {name}. Open this document from its chat again to comment on it.": "「各ドキュメントウィンドウがどの会話のものか」の一覧が壊れていました。壊れた内容はその横に {name} として保存してあります。このドキュメントを会話からもう一度開いてコメントしてください。", // r3332: doc-owners.json held / torn (src/server/doc-engine.js)
   // lane doc-editor-ui (design 020): the Doc window's folding bar, its status strip, the table grips, the raw block's head
   "Formatting": "書式",
   "Block style": "段落スタイル",

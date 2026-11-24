@@ -118,7 +118,7 @@ console.log('⑧ RED controls');
   m.doc.ownerOf({ path: DOC, from: 'w1' }); stop(m, 'w1');
   const r = m.doc.comments({ path: DOC, from: 'w1', items: items(3) });
   ok(r.code === 'no_owner' && m.deliver.stashPeek(CID).length === 0, 'CONTROL: without the stopped rung the comments are refused as no_owner (① would be red)', r);
-  const noDisk = patched((s) => s.replace('    if (!file) return;\n    try {', '    if (file) return;\n    try {'));
+  const noDisk = patched((s) => s.replace("    if (!file || (hold && !hold.writable('a document owner noted'))) return;   // held: nothing is written over the unread file\n    try {", '    if (file) return;\n    try {'));   // r3332: the save's guard asks the store-read hold too
   const d = world({ engine: noDisk });
   d.doc.ownerOf({ path: DOC, from: 'w1' }); stop(d, 'w1');
   const after = world({ engine: noDisk, dir: d.dir, sessions: new Map() });

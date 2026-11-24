@@ -14,6 +14,7 @@ const NAMES = Object.freeze({
   'decision-examples.json': i18nKey('the labels you taught'),
   'designs.json': i18nKey('the list of designs'),
   'feedback-outbox.json': i18nKey('the feedback waiting to be sent'),
+  'doc-owners.json': i18nKey('the list of who owns each document window'),   // r3332 (lane bl-proposals)
   'feedback.json': i18nKey('the feedback reports'),
   'extract-journal.json': i18nKey('the record of unfinished extractions'),   // r3333 unit 2 (lane lg-group-parents): the archive extraction journal
   'providers.json': i18nKey('the list of model providers'),

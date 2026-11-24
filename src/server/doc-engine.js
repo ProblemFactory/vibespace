@@ -22,16 +22,30 @@ const nodePath = require('path');
 const M = require('../doc-model.js');
 const { toAgentText: agentText } = require('../peer-text.js');
 const { addressableId } = require('../claude-lock-capture.js');
+const SR = require('../store-read.js');
+const HOLD = require('../store-read-hold.js');   // r3332: data/doc-owners.json under the store-read law (the family's helper)
 
 const DOC_COMMENT_FROM = 'Doc comments';
 const SUMMARY_MAX = 400;
-const STATUS = Object.freeze({ bad_path: 400, empty: 400, too_many: 400, bad_summary: 400, no_owner: 409, no_conversation: 409, rewind_out: 409, send_failed: 502 });
+const STATUS = Object.freeze({ bad_path: 400, empty: 400, too_many: 400, bad_summary: 400, no_owner: 409, no_conversation: 409, rewind_out: 409, send_failed: 502, doc_owners_unread: 503 });
 const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
 const hostOf = (h) => (h && h !== 'local' ? String(h) : null);
 const docPath = (p) => typeof p === 'string' && p.startsWith('/') && M.isDocPath(p);
 const NO_OWNER = 'no conversation goes with this document — open it from a chat to comment';
 const MEMO_CAP = 500;
 const HOLDERS_CAP = 20;   // B-b0e3's remainder: the conversations remembered holding one document
+// THE STORE-READ LAW (主开发 r3332; the family's helper src/store-read-hold.js): the release read ANY failure of data/doc-owners.json as an
+// empty memo and the next note — every new holder a lookup sees — wrote it over: who owned each document window was lost, and a
+// comment on a stopped owner's window was refused `no_owner`. Now the memo makes its ONE read at its start: unreadable ⇒ HELD
+// (nothing is written over it; no note, no holder, no trim reaches it; it is read again off the main loop and lifts with no restart);
+// torn bytes ⇒ kept aside ONCE as doc-owners.json.corrupt-<mark>, then it starts empty and says so where a person looks. A lookup
+// that would fall to the memo while it is held answers THE HOLD by name (`doc_owners_unread`, 503), never «no owner».
+// WHO REMOVES BY ITS SILENCE: nobody — the memo's own trim drops its oldest rows past its caps (by age, never by the file's
+// silence), and no other reader of the tree reads this file (searched: src/ names doc-owners.json in this module alone).
+const OWNERS_CODE = 'doc_owners_unread';
+const OWNERS_KEY = 'VibeSpace cannot read the list of who owns each document window right now — nothing was changed and no comment was sent. It reads the list again by itself every few minutes: send again then.';
+const OWNERS_TORN_KEY = 'The list of who owns each document window was damaged; its damaged bytes are kept beside it as {name}. Open this document from its chat again to comment on it.';
+const memoShape = (j) => !!j && typeof j === 'object' && !Array.isArray(j);
 
 /** THE OWNERS A STOP OUTLIVES (lane doc-comments-stopped-owner, B-b51a — measured: an exit takes the session out of
  *  activeSessions AND unlinks its data/session-meta file, src/server/session-stdout.js onExit, so a window opened from a
@@ -42,22 +56,29 @@ const HOLDERS_CAP = 20;   // B-b0e3's remainder: the conversations remembered ho
  *  paths only, never words. A session never seen live stays unknown ⇒ `no_owner`. */
 function ownerMemo({ dataDir = null, log = () => { } } = {}) {
   const file = dataDir ? nodePath.join(dataDir, 'doc-owners.json') : null;
-  let m = null;
-  const load = () => {
-    if (m) return m;
-    m = { s: {}, d: {}, h: {} };
-    if (file) try { const j = JSON.parse(fs.readFileSync(file, 'utf-8')); if (j && typeof j === 'object') m = { s: j.s && typeof j.s === 'object' ? j.s : {}, d: j.d && typeof j.d === 'object' ? j.d : {}, h: j.h && typeof j.h === 'object' ? j.h : {} }; } catch (e) { if (e.code !== 'ENOENT') log('[doc] doc-owners.json unreadable:', e.message); }
-    return m;
-  };
+  const fromRaw = (j) => ({ s: j.s && typeof j.s === 'object' ? j.s : {}, d: j.d && typeof j.d === 'object' ? j.d : {}, h: j.h && typeof j.h === 'object' ? j.h : {} });
+  let m = { s: {}, d: {}, h: {} };
+  // THE ONE READ, at the memo's start (r3332): answered through the store-read law, handed to the family's hold
+  const hold = file ? HOLD.create({
+    file, valid: memoShape, code: 'doc_owners_unread', aside: (mark) => file + '.corrupt-' + mark,
+    words: (h) => `VibeSpace cannot read the list of who owns each document window right now (${h.code}); it reads it again by itself every few minutes — nothing is written over it, and a comment waits for it`,
+    log: (s) => log('[doc] ' + s),
+    onLift: (v) => { m = v ? fromRaw(v) : { s: {}, d: {}, h: {} }; },   // lifted with no restart: the file's rows (torn: empty, its bytes kept aside)
+  }) : null;
+  if (file) { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a0 = SR.storeAnswer(read, { valid: memoShape });
+    if (hold.start(a0) === 'data') m = fromRaw(a0.value); }
+  const isHeld = () => !!(hold && hold.held());
+  const load = () => m;
   const trim = (o) => { const k = Object.keys(o); if (k.length > MEMO_CAP) k.sort((a, b) => (o[a].at || 0) - (o[b].at || 0)).slice(0, k.length - MEMO_CAP).forEach((x) => delete o[x]); };
   const save = () => {
-    if (!file) return;
+    if (!file || (hold && !hold.writable('a document owner noted'))) return;   // held: nothing is written over the unread file
     try { fs.mkdirSync(nodePath.dirname(file), { recursive: true }); fs.writeFileSync(file + '.tmp', JSON.stringify(m)); fs.renameSync(file + '.tmp', file); }
     catch (e) { log('[doc] doc-owners.json not written:', e.message); }
   };
   /** A live owner → remembered (sid → cid; docKey → {cid, sid}). Writes only when something moved. */
   function note({ sessionId, conversationId }, docKey = null, at = Date.now()) {
-    if (!conversationId) return;
+    if (!conversationId || isHeld()) return;   // held: no note reaches the memo (its lift loads the file's own rows)
     load();
     let moved = false;
     if (sessionId && (!m.s[sessionId] || m.s[sessionId].cid !== conversationId)) { m.s[sessionId] = { cid: conversationId, at }; trim(m.s); moved = true; }
@@ -76,7 +97,7 @@ function ownerMemo({ dataDir = null, log = () => { } } = {}) {
    *  own conversation stopped still reaches it when that conversation held the file. Bounded: MEMO_CAP documents, HOLDERS_CAP each. */
   function noteHolders(docKey, cids = [], at = Date.now()) {
     const list = (cids || []).filter(Boolean).map(String);
-    if (!docKey || !list.length) return;
+    if (!docKey || !list.length || isHeld()) return;   // held: the holders a lookup sees are not noted over the unread file
     load();
     const e = m.h[docKey] || (m.h[docKey] = { at, c: {} });
     let moved = false;
@@ -88,7 +109,13 @@ function ownerMemo({ dataDir = null, log = () => { } } = {}) {
   /** The conversation a session id named while it lived (a window's `from`), if this memo saw it. */
   const convOf = (sid) => { load(); const s = sid && m.s[sid]; return s && s.cid ? s.cid : null; };
   const held = (docKey, cid) => { load(); const e = docKey && m.h[docKey]; return !!(e && cid && e.c[cid]); };
-  return { note, of, noteHolders, convOf, held, file };
+  /** THE HOLD where a person looks (r3332): null while the memo reads; held ⇒ { code, words, i18n }; after a torn lift ⇒ { torn, copy, i18n } */
+  function hold_() {
+    if (isHeld()) return { code: OWNERS_CODE, words: hold.words(), i18n: { key: OWNERS_KEY } };
+    const tn = hold && typeof hold.torn === 'function' ? hold.torn() : null;
+    return tn && tn.copy ? { torn: true, copy: nodePath.basename(String(tn.copy)), i18n: { key: OWNERS_TORN_KEY, params: { name: nodePath.basename(String(tn.copy)) } } } : null;
+  }
+  return { note, of, noteHolders, convOf, held, file, hold: hold_, stop: () => { if (hold && typeof hold.stop === 'function') hold.stop(); } };
 }
 
 function create({ activeSessions = new Map(), getDeliver = () => null, sendUserInput = null, artifacts = null, dataDir = null, now = () => Date.now(), log = () => { } } = {}) {
@@ -120,6 +147,14 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
     const was = memo.of({ from: from ? String(from) : '', docKey: docKeyOf(host, path) });
     return was ? { ...was, via: 'stopped' } : null;
   }
+  /** NO OWNER FOUND (r3332): while the memo is HELD the hold BY NAME (503 — the stopped owner may be in the unread file: nothing is
+   *  sent, the strip keeps its notes), never «no owner»; after a torn lift «no owner» says where the damaged bytes are kept */
+  function noOwner() {
+    const h = memo.hold();
+    if (h && h.code) return fail(h.code, h.words, { i18n: h.i18n });
+    if (h && h.torn) return fail('no_owner', `${NO_OWNER} (the list of who owns each document window was damaged; its damaged bytes are kept as ${h.copy})`, { i18n: h.i18n });
+    return fail('no_owner', NO_OWNER);
+  }
   /** The session to type into: the owner's while it lives, else (a resume mints a new id) the conversation's live one, a chat first. */
   function liveSessionFor(owner) {
     if (owner.sessionId && activeSessions.has(owner.sessionId)) return owner.sessionId;
@@ -135,7 +170,7 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
     const v = M.commentsBatches(path, items);
     if (!v.ok) return fail(v.code, v.why);
     const owner = ownerOf({ host, path, from });
-    if (!owner) return fail('no_owner', NO_OWNER);
+    if (!owner) return noOwner();
     const lines = v.batches.map((b) => agentText(b.text, { kind: 'block', max: M.LIMITS.messageBytes }));
     const done = { count: v.count, messages: lines.length, sent: v.count, clipped: v.clipped };
     const sessionId = liveSessionFor(owner);
@@ -169,7 +204,7 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
     const sum = String(summary == null ? '' : summary).replace(/\s+/g, ' ').trim().slice(0, SUMMARY_MAX);
     if (!sum) return fail('bad_summary', 'say what changed');
     const owner = ownerOf({ host, path, from });
-    if (!owner) return fail('no_owner', NO_OWNER);
+    if (!owner) return noOwner();
     if (!artifacts || typeof artifacts.noteEdit !== 'function') return fail('send_failed', 'the edit note is unavailable');
     try {
       const a = { sessionId: liveSessionFor(owner), conversationId: owner.conversationId, host: hostOf(host), path, summary: sum }; // conversationId: a stopped owner's note goes to its stash
@@ -179,7 +214,7 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
       return noted === false || (noted && noted.ok === false) ? fail((noted && noted.code) || 'send_failed', (noted && noted.error) || 'the edit note was not kept') : { ok: true, delivered: 'stashed', row: !!(t && t.ok) };
     } catch (e) { return fail('send_failed', e.message); }
   }
-  return { ownerOf, comments, edited, STATUS, memoFile: memo.file };
+  return { ownerOf, comments, edited, STATUS, memoFile: memo.file, ownersHold: () => memo.hold(), stop: () => memo.stop() };
 }
 
 module.exports = { create, ownerMemo, STATUS, DOC_COMMENT_FROM, NO_OWNER };
