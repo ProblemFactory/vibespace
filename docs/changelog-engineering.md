@@ -9,6 +9,23 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
 - ITS FOLLOW (主开发 r1890, round wl696j3ak — the Disconnect line taken as line 291): the unmount road always settles (a throw in its own body answers by what is known — not detached `unmount_threw`, detached `unmount_unconfirmed`, en/zh/ja — and a throwing `finish` settles it too); a press after the road is a new road; the failure road joined; a Connect while it disconnects says it waits; the eject's word translated — test-mount-act-starts ⑥b with its reds; ⑥'s connect-not-waiting red waits on a fact. Its fresh read (3 SHOULD: finish throwing left it open; the row's own click silent; a throw after the detach said «did not disconnect» — NITs) cured.
 
+### bl-windows — B-f276 unit 1c moved, its round's follow (round wp3niroz5 FULL, three takes, no must; 主开发 r2172, line 349's follow — moved onto the release 2.369.418, r3478 / r3509 / r3577)
+- (1) a journal-only family's queued journal write, refused because its index is held «appeared», is FINAL (`familyHeld`), never retried for the life;
+- (2) the words name the file that came;
+- (3) a rewrite under the own-file law is refused by name;
+- (4) leg 149's red for a wake posted twice;
+- (5) not durable under every hold;
+- (6) a refused write is «failed» in a sync flush;
+- (7) the third reader's legs;
+- (8) the kb's third narrow limit;
+- (9) the paced suite's row reworded.
+- Its gate found two more. A sync flush that answers «failed» for a refused write made the store's flush throw at close for an index the refusal had just held; it now answers false (the hold says why). Leg 149's twice-red needed a copy that posts twice.
+- The dead row of test-record-clear-census-interp (channels-engine's `head`, whose use 1b removed) is taken out, at your r2188.
+
+### bl-windows — B-f276 unit 1c moved, line 395's small follow (round wy3zr6ym5 narrow, two takes, no must; 主开发 r2285 — moved onto the release 2.369.418, r3478 / r3509 / r3577)
+- (1) on a CLOSED store the straggler act, «is the index durable» and «fold» answer by the hold after the flush. The flush now returns false for a write refused «appeared», so none of them is told «done» over an index not written. The leg has a red control for each of the three lines.
+- (2) leg 149's control cuts the MARK: the posted wake is kept in the park after the lift. Alone it still posts once, because the landing moved the member's report marker and the next pass reads «carried». The two marks are in series, so the copy cuts both, and the next pass posts the billed wake again.
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
