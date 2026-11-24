@@ -662,19 +662,26 @@ WD.section('⑩');
   // a scratch process's life read from /proc (gone, or a zombie: no longer running) — never a signal
   const gone10 = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.slice(st.lastIndexOf(')') + 2).split(' ')[0] === 'Z'; } catch { return true; } };
   const waitGone = async (pid) => { for (let i = 0; i < 300 && !gone10(pid); i++) await new Promise((r) => setTimeout(r, 10)); return gone10(pid); };
-  // the leftover a RED leaves (its own scratch `sleep`, proven by its cmdline) — ended by this suite
-  const endLeftover = (pid) => { try { if (/\bsleep\b/.test(fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' '))) process.kill(pid, 'SIGKILL'); } catch { } };
+  // r2917: the leftover a RED leaves (the shell's job, the holder outside the group) waits on ITS OWN fifo, which the shell made and
+  // named; this suite ends it BY THAT HANDLE — the fifo opened for writing and closed ends the wait — never by a number signalled
+  const endByFifo = (f) => { if (!f) return; let fd = null; try { fd = fs.openSync(f, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.writeSync(fd, '\n'); } catch { /* no reader left: it has ended */ } finally { if (fd !== null) try { fs.closeSync(fd); } catch { } } };
+  // each wait's fifo is named HERE and handed in by the run's env (known even when a RED's run never answers); each wait opens it
+  // read-write (no open blocks) and reads ONE line with a 20 s bound of its own, so nothing is left even if this suite stops first
+  let fifos = 0;
+  const fifoName = (tag) => path.join(CWD10 || TMP, `${tag}-fifo.${process.pid}.${++fifos}`);
   const CWD10 = fs.realpathSync(fs.mkdtempSync(path.join(TMP, 'session-')));
-  // bash (the spy watches `sh`): the shell prints its folder and its job's pid, then exits — the job (`sleep 20`) still holds the pipe
-  const LINE = 'sleep 20 & echo "job=$!"; echo "cwd=$(pwd)"; echo answered';
+  // bash (the spy watches `sh`): the shell prints its folder and its job's pid, then exits — the job (a wait on its own fifo) still holds the pipe
+  const LINE = 'mkfifo "$VS_WAIT_FIFO"; bash -c \'exec 3<>"$1"; read -t 20 -u 3 x\' bash "$VS_WAIT_FIFO" & echo "job=$!"; echo "cwd=$(pwd)"; echo answered';
   const read10 = (r) => ({ job: Number((/job=(\d+)/.exec(String((r && r.stdout) || '')) || [])[1]) || 0, cwd: (/cwd=(.*)/.exec(String((r && r.stdout) || '')) || [])[1] || '', answered: /answered/.test(String((r && r.stdout) || '')) });
   const sessionLegs = async (S, road) => {
-    const r = await S.run('/bin/bash', ['-c', LINE], { timeoutMs: 8000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' }, session: { cwd: CWD10 } });
+    const fa = fifoName('job');
+    const r = await S.run('/bin/bash', ['-c', LINE], { timeoutMs: 8000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '', VS_WAIT_FIFO: fa }, session: { cwd: CWD10 } });
     const f = read10(r), jobGone = f.job > 1 ? await waitGone(f.job) : false;
     ok(!!r && r.timedOut !== true && r.code === 0 && f.answered && f.cwd === CWD10 && f.job > 1 && jobGone,
       `(${road}) a SESSION child answers when the shell ends — its job left holding the pipe, the session's group ended by the starter (the job gone: ${jobGone}), in its own folder (${f.cwd === CWD10})`, { r: r && { timedOut: r.timedOut, code: r.code, unknown: r.unknown }, f, jobGone });
-    const red = await S.run('/bin/bash', ['-c', LINE], { timeoutMs: 500, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } });
-    const g = read10(red); endLeftover(g.job);
+    const fr = fifoName('job');
+    const red = await S.run('/bin/bash', ['-c', LINE], { timeoutMs: 500, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '', VS_WAIT_FIFO: fr } });
+    endByFifo(fr);   // the job left holding the pipe — ended by its fifo (r2917: the handle, never its number)
     ok(!!red && red.timedOut === true, `(${road}) RED: the same child with NO session option — its job holds the pipe and nobody ends it: the run reaches its bound (timedOut ${red && red.timedOut})`, red && { timedOut: red.timedOut, code: red.code });
   };
   // (a) THE STARTER's road: a REAL starter process (its own children are real; this process's spy never sees them)
@@ -683,13 +690,16 @@ WD.section('⑩');
   // (a2) a WHOLE env through the REAL starter keeps the login-shell look's MARK (VIBESPACE_SHELL_PROBE, a word a person's rc reads)
   //      and still drops the hub's own names (a planted token) — the gate's own red found the mark dropped (the fake starter skips
   //      the belt); RED: a copy of the starter whose belt keeps no mark
-  const markLegs = async (CSmod) => { const S = CSmod.createChildStarter(); try {
-    const r = await S.run('/bin/bash', ['-c', 'env'], { timeoutMs: 8000, capture: true, maxBuffer: 256 * 1024, wholeEnv: true, session: { cwd: CWD10 }, env: { PATH: process.env.PATH || '', VIBESPACE_SHELL_PROBE: '1', VIBESPACE_SESSION_TOKEN: ['vs', 'planted', 'x'].join('-') } });
+  const markLegs = async (CSmod, { session = true } = {}) => { const S = CSmod.createChildStarter(); try {
+    const r = await S.run('/bin/bash', ['-c', 'env'], { timeoutMs: 8000, capture: true, maxBuffer: 256 * 1024, wholeEnv: true, ...(session ? { session: { cwd: CWD10 } } : {}), env: { PATH: process.env.PATH || '', VIBESPACE_SHELL_PROBE: '1', VIBESPACE_SESSION_TOKEN: ['vs', 'planted', 'x'].join('-') } });
     const names = String((r && r.stdout) || '').split('\n').map((l) => l.split('=')[0]);
     return { mark: names.includes('VIBESPACE_SHELL_PROBE'), token: names.includes('VIBESPACE_SESSION_TOKEN'), n: names.length };
   } finally { S.closePipe(); } };
   const mk1 = await markLegs(CS);
   ok(mk1.mark && !mk1.token && mk1.n > 1, `(a2) a whole env through the REAL starter keeps the login-shell look's mark (${mk1.mark}) and drops the hub's own token (${!mk1.token})`, mk1);
+  // r2917: the mark is kept ONLY for a request that carries the session option (the login-shell look) — a whole env without it drops it
+  const mk0 = await markLegs(CS, { session: false });
+  ok(!mk0.mark && !mk0.token && mk0.n > 1, `(a2) a whole env WITHOUT the session option drops the login-shell look's mark (${!mk0.mark}) as it drops the hub's token (${!mk0.token})`, mk0);
   const NOMARK = M.load('src/server/child-starter.js', anchored(read('src/server/child-starter.js'), 'if (HUB_OWN.test(k) && !(marks && WHOLE_MARKS.has(k))) { n++; continue; }', 'if (HUB_OWN.test(k)) { n++; continue; }', 'no mark kept'), 'no-mark');   // stale-pins: kept (the release's belt — the leg's RED)
   const mk2 = await markLegs(NOMARK);
   ok(!mk2.mark && !mk2.token, `(a2) RED: the starter's belt with no mark kept — the login-shell look's mark is dropped (${mk2.mark})`, mk2);
@@ -708,59 +718,70 @@ WD.section('⑩');
   fs.writeFileSync(PRE, "const fs = require('fs'), k = process.kill; process.kill = function (pid, sig) { if (Number(pid) < 0) fs.appendFileSync(process.env.VS_KILL_LOG, String(pid) + ' ' + String(sig) + '\\n'); return k.apply(this, arguments); };\n");
   // the holder writes its pid from INSIDE its new session, and the shell waits for that file before it ends (by state, bounded): a shell
   // that ended first had its group signal take the holder with it before it left the group (the first gate's REDs read green)
-  const HOLDER = 'F="$PWD/holder-ready.$$"; setsid sh -c \'echo "$$" > "$1"; exec sleep 20\' sh "$F" & for i in $(seq 1 200); do [ -s "$F" ] && break; sleep 0.02; done; echo "job=$(cat "$F" 2>/dev/null)"; echo answered';
+  const HOLDER = 'F="$PWD/holder-ready.$$"; mkfifo "$VS_WAIT_FIFO"; setsid bash -c \'echo "$$" > "$1"; exec 3<>"$2"; read -t 20 -u 3 x\' bash "$F" "$VS_WAIT_FIFO" & for i in $(seq 1 200); do [ -s "$F" ] && break; sleep 0.02; done; echo "job=$(cat "$F" 2>/dev/null)"; echo answered';
   const tick10 = (ms) => new Promise((r) => setTimeout(r, ms));
+  // r2917: the bound is SECONDS (a loaded machine must not turn the green red); the scenes run side by side, each in its own process
+  const BOUND10 = 3000;
   const holderRun = async (script) => {
     const log = path.join(TMP, `group-kills-${path.basename(script)}.log`); fs.writeFileSync(log, '');
     const p = cp.spawn(process.execPath, ['-r', PRE, script], { env: { PATH: process.env.PATH || '', VS_KILL_LOG: log }, stdio: ['pipe', 'pipe', 'inherit'] });
     let buf = ''; const evs = [];
     p.stdout.setEncoding('utf8'); p.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); try { evs.push(JSON.parse(l)); } catch { } } });
-    p.stdin.write(JSON.stringify({ op: 'run', id: 1, cmd: '/bin/bash', args: ['-c', HOLDER], env: { PATH: process.env.PATH || '' }, whole: true, timeoutMs: 700, maxBuffer: 65536, capture: true, session: { cwd: CWD10 } }) + '\n');
+    const t0 = Date.now(), fh = fifoName('holder');
+    p.stdin.write(JSON.stringify({ op: 'run', id: 1, cmd: '/bin/bash', args: ['-c', HOLDER], env: { PATH: process.env.PATH || '', VS_WAIT_FIFO: fh }, whole: true, timeoutMs: BOUND10, maxBuffer: 65536, capture: true, session: { cwd: CWD10 } }) + '\n');
     const exitEv = () => evs.find((e) => e.id === 1 && e.ev === 'exit'), boundEv = () => evs.find((e) => e.id === 1 && e.ev === 'timeout');
-    let ticks = 0;
-    for (; ticks < 300 && !exitEv() && !boundEv(); ticks++) await tick10(10);   // the answer, or the bound — whichever comes first
+    while (Date.now() - t0 < BOUND10 + 3000 && !exitEv() && !boundEv()) await tick10(10);   // the answer, or the bound — whichever comes first
     const answeredFirst = !!exitEv() && !boundEv();
-    for (; ticks < 85; ticks++) await tick10(10);                                // past the bound (700 ms from the start; each tick ≥ 10 ms): what it would send, it has sent
+    while (Date.now() - t0 < BOUND10 + 400) await tick10(10);                            // past the bound: what it would send, it has sent
     p.stdin.end();                                                                // the starter's end: every entry still held
     await new Promise((r) => { const t = setTimeout(r, 3000); p.once('exit', () => { clearTimeout(t); r(); }); });
     const kills = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
     const out = String((exitEv() || {}).stdout || ''), job = Number((/job=(\d+)/.exec(out) || [])[1]) || 0;
-    if (job > 1) endLeftover(job);
+    endByFifo(fh);   // the holder outside the group — ended by its fifo (r2917: the handle, never its number)
     return { answeredFirst, timedOut: !!boundEv(), answered: /answered/.test(out), kills, job, stderr: String((exitEv() || {}).stderr || '').slice(0, 300) };
   };
   const STARTER_PROC = path.join(ROOT, 'src/server/child-starter-proc.js');
-  const hd = await holderRun(STARTER_PROC);
-  ok(hd.answeredFirst && !hd.timedOut && hd.answered && hd.kills === 1,
-    `(d) a holder outside the group (setsid, no redirect): the run is answered at the shell's exit, before its bound (${hd.answeredFirst}); the group signalled ONCE (${hd.kills}) — none at the bound, none at the starter's end (the entry left the held list)`, hd);
   const PSRC10 = read('src/server/child-starter-proc.js');
   const TODAY = anchored(anchored(PSRC10, "{ c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", "{ try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", 'the group end at every call'),
-    "  if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }, SESSION_DRAIN_MS); }); }",
+    "  if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { drainT = null; setImmediate(() => { if (done) return; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }); }, SESSION_DRAIN_MS); }); }",
     "  if (session) { c.vsSession = true; c.on('exit', () => endOwnGroup(c)); }", 'the run ended only at the close');   // stale-pins: kept (35213bad6's text — the leg's RED)
-  const hdR = await holderRun(M.write('src/server/child-starter-proc.js', TODAY, 'today-session'));
-  ok(!hdR.answeredFirst && hdR.timedOut && hdR.kills >= 2,
-    `(d) RED: 35213bad6's starter — the look reaches its bound (${hdR.timedOut}), and the group of a leader already reaped is signalled again (${hdR.kills} group signals: at the exit, at the bound, at the starter's end)`, hdR);
-  // (e) THE OLD ROAD (the direct start after two faults, the hub's own file): the same law, counted in this process
-  const groupKillsIn = async (S) => {
-    const k0 = process.kill, neg = [];
-    process.kill = function (pid, sig) { if (Number(pid) < 0) neg.push(String(pid)); return k0.apply(this, arguments); };
-    try {
-      const r = await S.run('/bin/bash', ['-c', HOLDER], { timeoutMs: 700, capture: true, maxBuffer: 65536, envAdd: { PATH: process.env.PATH || '' }, session: { cwd: CWD10 } });
-      for (let i = 0; i < 85; i++) await tick10(10);   // past the bound (each tick ≥ 10 ms)
-      const job = Number((/job=(\d+)/.exec(String((r && r.stdout) || '')) || [])[1]) || 0;
-      return { timedOut: !!(r && r.timedOut), answered: /answered/.test(String((r && r.stdout) || '')), kills: neg.length, job, stderr: String((r && r.stderr) || '').slice(0, 300) };
-    } finally { process.kill = k0; }
+  // (e) THE OLD ROAD (the direct start after two faults, the hub's own file): the same law, run in a process of its own (the same
+  //     preload counts its group signals) so its two scenes run beside (d)'s
+  const OLD_RUN = path.join(TMP, 'old-road-run.cjs');
+  fs.writeFileSync(OLD_RUN, [
+    "const [csPath, dies, cwd, bound] = process.argv.slice(2);",
+    "const S = require(csPath).createChildStarter({ script: dies, log: { warn() { } } });",
+    "(async () => {",
+    "  for (let i = 0; i < 6 && !S.stats().direct; i++) await S.run('/bin/bash', ['-c', 'true'], { timeoutMs: 500 });",
+    "  const t0 = Date.now();",
+    "  const r = await S.run('/bin/bash', ['-c', process.env.VS_HOLDER], { timeoutMs: Number(bound), capture: true, maxBuffer: 65536, envAdd: { PATH: process.env.PATH || '', VS_WAIT_FIFO: process.env.VS_WAIT_FIFO }, session: { cwd } });",
+    "  while (Date.now() - t0 < Number(bound) + 400) await new Promise((res) => setTimeout(res, 10));",
+    "  process.stdout.write(JSON.stringify({ direct: S.stats().direct, timedOut: !!(r && r.timedOut), stdout: String((r && r.stdout) || '') }) + '\\n');",
+    "  process.exit(0);",
+    "})();", ''].join('\n'));
+  const oldRoadRun = async (csPath) => {
+    const log = path.join(TMP, `group-kills-old-${path.basename(csPath)}.log`); fs.writeFileSync(log, '');
+    const fo = fifoName('holder');
+    const p = cp.spawn(process.execPath, ['-r', PRE, OLD_RUN, csPath, DIES, CWD10, String(BOUND10)], { env: { PATH: process.env.PATH || '', VS_KILL_LOG: log, VS_HOLDER: HOLDER, VS_WAIT_FIFO: fo }, stdio: ['ignore', 'pipe', 'inherit'] });
+    let out = ''; p.stdout.setEncoding('utf8'); p.stdout.on('data', (d) => { out += d; });
+    await new Promise((r) => { const t = setTimeout(r, BOUND10 + 8000); p.once('exit', () => { clearTimeout(t); r(); }); });
+    let a = null; try { a = JSON.parse(out.trim().split('\n').pop()); } catch { a = null; }
+    const kills = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+    endByFifo(fo);   // the holder outside the group — ended by its fifo
+    return { direct: !!(a && a.direct), timedOut: !!(a && a.timedOut), answered: /answered/.test(String((a && a.stdout) || '')), kills };
   };
-  const hx = await groupKillsIn(S2); if (hx.job > 1) endLeftover(hx.job);
-  ok(!hx.timedOut && hx.answered && hx.kills === 1, `(e) the old road: the same holder — answered at the exit (${!hx.timedOut}), the group signalled ONCE (${hx.kills})`, hx);
   const CSRC10 = read('src/server/child-starter.js');
   const TODAY_CS = anchored(anchored(CSRC10, "{ c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", "{ try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }", 'the group end at every call'),
-    "c.on('exit', (code, signal) => { endOwnGroup(c); if (t) { clearTimeout(t); t = null; } setTimeout(() => { if (done) return; done = true; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); }, SESSION_DRAIN_MS); }); }",
+    "c.on('exit', (code, signal) => { endOwnGroup(c); if (t) { clearTimeout(t); t = null; } setTimeout(() => setImmediate(() => { if (done) return; done = true; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); }), SESSION_DRAIN_MS); }); }",
     "c.on('exit', () => endOwnGroup(c)); }", 'the run ended only at the close');   // stale-pins: kept (35213bad6's text — the leg's RED)
-  const OLDCS = M.load('src/server/child-starter.js', TODAY_CS, 'today-old-road');
-  const S2R = OLDCS.createChildStarter({ script: DIES, log: { warn() { } } });
-  for (let i = 0; i < 6 && !S2R.stats().direct; i++) await S2R.run('/bin/bash', ['-c', 'true'], { timeoutMs: 500 });
-  const hxR = await groupKillsIn(S2R); if (hxR.job > 1) endLeftover(hxR.job);
-  ok(S2R.stats().direct === true && hxR.timedOut && hxR.kills >= 2, `(e) RED: 35213bad6's old road — the bound reached (${hxR.timedOut}), the reaped leader's group signalled again (${hxR.kills})`, hxR);
+  const [hd, hdR, hx, hxR] = await Promise.all([holderRun(STARTER_PROC), holderRun(M.write('src/server/child-starter-proc.js', TODAY, 'today-session')),
+    oldRoadRun(path.join(ROOT, 'src/server/child-starter.js')), oldRoadRun(M.write('src/server/child-starter.js', TODAY_CS, 'today-old-road'))]);
+  ok(hd.answeredFirst && !hd.timedOut && hd.answered && hd.kills === 1,
+    `(d) a holder outside the group (setsid, no redirect): the run is answered at the shell's exit, before its bound (${hd.answeredFirst}); the group signalled ONCE (${hd.kills}) — none at the bound, none at the starter's end (the entry left the held list)`, hd);
+  ok(!hdR.answeredFirst && hdR.timedOut && hdR.kills >= 2,
+    `(d) RED: 35213bad6's starter — the look reaches its bound (${hdR.timedOut}), and the group of a leader already reaped is signalled again (${hdR.kills} group signals: at the exit, at the bound, at the starter's end)`, hdR);
+  ok(hx.direct && !hx.timedOut && hx.answered && hx.kills === 1, `(e) the old road: the same holder — answered at the exit (${!hx.timedOut}), the group signalled ONCE (${hx.kills})`, hx);
+  ok(hxR.direct && hxR.timedOut && hxR.kills >= 2, `(e) RED: 35213bad6's old road — the bound reached (${hxR.timedOut}), the reaped leader's group signalled again (${hxR.kills})`, hxR);
   const CSS = read('src/server/child-starter.js'), PROC = read('src/server/child-starter-proc.js');
   const own = (src) => src.includes("function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }");
   ok(own(CSS) && own(PROC) && (PROC.match(/process\.kill\(/g) || []).length === 1 && (CSS.match(/process\.kill\(/g) || []).length === 1,
@@ -772,7 +793,7 @@ WD.section('⑩');
   try {
     const HOME10 = path.join(TMP, 'home10'); fs.mkdirSync(HOME10, { recursive: true });
     const env10 = { PATH: process.env.PATH || '', HOME: HOME10, USER: 'userL', GITHUB_TOKEN: ['gh', 'planted', 'x'].join('-'), VIBESPACE_SESSION_TOKEN: ['vs', 'planted'].join('-') };
-    const ans = [{ unknown: true }, { started: true, timedOut: true }, { started: false, code: null, error: 'ENOENT' }];
+    const ans = [{ unknown: true }, { started: true, timedOut: true }, { started: false, code: null, error: 'ENOENT' }, { started: true, overflow: true, code: null, stdout: '' }];   // r2917: + the overflow word
     const got = [], reqs = [];
     for (const a of ans) {
       answer = (cmd, args) => (cmd === SHN ? a : prev10(cmd, args));
@@ -782,8 +803,8 @@ WD.section('⑩');
     ok(reqs.every(Boolean) && JSON.stringify(q.args.slice(0, 3)) === '["-l","-i","-c"]' && q.o.session && q.o.session.cwd === HOME10 && q.o.wholeEnv === true && q.o.timeoutMs === 3000
       && e.TERM === 'dumb' && e.VIBESPACE_SHELL_PROBE === '1' && e.SHELL === SH10 && e.USER === 'userL' && !('GITHUB_TOKEN' in e) && !('VIBESPACE_SESSION_TOKEN' in e) && directOf(SHN) === 0,
       '(c) the login-shell look asks the starter: `-l -i -c <line>`, its own session in the person\'s HOME, its whole env the allowlist (TERM=dumb, the probe mark, SHELL itself, USER kept; no token), its bound — none from the hub\'s process', { args: q.args.slice(0, 3), o: { session: q.o.session, wholeEnv: q.o.wholeEnv, timeoutMs: q.o.timeoutMs }, envNames: Object.keys(e) });
-    ok(got[0].kind === 'unanswered' && got[0].why === 'no-reply' && got[1].kind === 'unanswered' && got[1].why === 'timeout' && got[2].kind === 'unanswered' && got[2].why === 'spawn:ENOENT' && got.every((x) => x.shell === SH10),
-      '(c) each no-reply says what it is: the starter gave no answer (no-reply), the bound (timeout), a start that failed (spawn:ENOENT) — the provisional path stays, as before (unanswered is never «none»)', got.map((x) => `${x.kind}:${x.why}`));
+    ok(got[0].kind === 'unanswered' && got[0].why === 'no-reply' && got[1].kind === 'unanswered' && got[1].why === 'timeout' && got[2].kind === 'unanswered' && got[2].why === 'spawn:ENOENT' && got[3].kind === 'unanswered' && got[3].why === 'overflow' && got.every((x) => x.shell === SH10),
+      '(c) each no-reply says what it is: the starter gave no answer (no-reply), the bound (timeout), a start that failed (spawn:ENOENT), a printout past the cap (overflow) — the provisional path stays, as before (unanswered is never «none»)', got.map((x) => `${x.kind}:${x.why}`));
     const CCX = read('src/server/cli-cmd.js');
     const OLDSH = anchored(CCX, "require('./child-starter').childStarter().run(shell, ['-l', '-i', '-c', line], req)",
       "new Promise((res) => { const c = require('child_process').spawn(shell, ['-l', '-i', '-c', line], { env: req.env, detached: true }); c.on('error', (e) => res({ started: false, code: null, error: String((e && e.code) || e) })); c.on('close', (code) => res({ started: true, code, stdout: '' })); })", 'the old road');   // stale-pins: kept (the release's road — the leg's RED)

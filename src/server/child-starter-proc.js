@@ -30,7 +30,7 @@ function send(o) { try { process.stdout.write(JSON.stringify(o) + '\n'); } catch
 function endOwnGroup(c) { if (c && c.vsSession && Number.isInteger(c.pid) && c.pid > 1) { c.vsSession = false; try { process.kill(-c.pid, 'SIGKILL'); } catch { } } }
 /** r2862: a session child's run ENDS at its exit, after this short drain (its last output read), its pipes then closed — a holder the
  *  person's rc started outside the group (a `setsid` tool with no redirect) never holds the answer, nor the entry in `held` */
-const SESSION_DRAIN_MS = 100;
+const SESSION_DRAIN_MS = 100;   // …then ONE more turn of the loop before the pipes close (r2917: bytes already in a pipe are read first, even on a stalled loop)
 function bye() {
   if (ending) return;
   ending = true;
@@ -59,7 +59,7 @@ function handle(line) {
   // answers the error, the starter lives)
   const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); if (drainT) clearTimeout(drainT); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
   c.on('error', (e) => end({ code: null, signal: null, error: String((e && e.code) || e) }));
-  if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }, SESSION_DRAIN_MS); }); }   // r2862: the group ended ONCE, the run answered at the exit
+  if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { drainT = null; setImmediate(() => { if (done) return; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }); }, SESSION_DRAIN_MS); }); }   // r2862: the group ended ONCE, the run answered at the exit
   if (capture && c.stdout && c.stderr) {
     c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8');
     // past the bound the child is ENDED, as execFile's maxBuffer did (B-323e smalls, the reader's M2: kept running, a slow listing past
