@@ -651,6 +651,8 @@ function createRunMasker(secrets, streams = ['out', 'err'], opts = {}) {
     end: (cut = false) => endStep(cut),
     get steps() { return st.steps; }, get maxSteps() { return st.maxSteps; }, get runSteps() { return st.runSteps; }, get over() { return st.over; }, get withheld() { return st.withheld; }, get cutSteps() { return st.cutSteps; }, get charge() { return charge; },   // THE SCAN'S BUDGET: the counts, and the mark
     get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, get scanned() { return st.scanned; }, window: W, streams: names,
+    /** r3732 (the job wrapper's own lines): the characters the run holds back now (0: nothing is held — a line of the wrapper's own may go out) */
+    get holding() { let n = 0; for (const e of held) n += e[1].length; return n; },
   };
 }
 /** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. `secrets` = a secrets list or a compiled set

@@ -636,6 +636,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
     const i = src.indexOf(DOOR0), j = src.indexOf('\n', src.indexOf(DOOR1));
     if (i < 0 || j < i) throw new Error('the main door is not found');
     const env = { mainLive: () => true, keptTest: keptFor(src, wrapperPid, ko), child: { pid: mainPid, kill: (s) => { calls.push('kill ' + s); return true; } }, fs: { writeSync: (fd, b) => log.push(String(b)) }, logFd: 9, logOpen: () => 9,   // (B-15ac follow: the wrapper's own lines ask logOpen() — the log's number, reopened when it has none)
+      sayOwn: (t) => log.push(String(t).replace(/^\n+|\n+$/g, '') + '\n'),   // r3732: the wrapper's own lines go out by sayOwn (its queue's line, as written)
       termed: new Map(), termKey: ([p, st]) => `${p}:${st}`, process: { pid: wrapperPid, kill: (p, s) => { calls.push(`signal ${p} ${s}`); } } };
     const d = new Function(...Object.keys(env), `${src.slice(i, j)}\nreturn { termMain, killMain };`)(...Object.values(env));   // eslint-disable-line no-new-func
     const t = d.termMain([mainPid, 101, 4500], 'SIGTERM'), k = d.killMain();
@@ -762,7 +763,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const BLANKET = 'if (e && GONE_LIST.has(e.code)) return []; ';
   const WB = anchored(W, BLANKET, '', 'gone-list-blanket', { count: 2 }), drB = await drainOf(WB, 'ENOENT'), rowsB = rowsOf(WB, 'ENOENT');
   const rowsGone = rowsOf(W, 'ENOENT'), rowsUnread = rowsOf(W, 'EACCES');
-  const sayOf = (src) => { const out = []; const f = new Function('fs', 'logFd', 'logOpen', `let keptSaid = false; ${fnOf(src, 'function sayKept(n, what, unread = false) {')}\nreturn sayKept;`)({ writeSync: (fd, b) => out.push(String(b)) }, 9, () => 9); return (n, w, u) => { f(n, w, u); return out.join(''); }; };   // eslint-disable-line no-new-func
+  const sayOf = (src) => { const out = []; const f = new Function('fs', 'logFd', 'logOpen', 'sayOwn', `let keptSaid = false; ${fnOf(src, 'function sayKept(n, what, unread = false) {')}\nreturn sayKept;`)({ writeSync: (fd, b) => out.push(String(b)) }, 9, () => 9, (t) => out.push(String(t)));   /* r3732: + sayOwn */ return (n, w, u) => { f(n, w, u); return out.join(''); }; };   // eslint-disable-line no-new-func
   const wordsU = sayOf(W)(1, 'its kill', true), wordsK = sayOf(W)(1, 'its kill', false);
   ok(dr.scopeEmpty === false && dr.scopeUnread === 'EACCES' && /could not be read: nothing of it was ended — what the job started may still run/.test(wordsU) && !/ended one by one/.test(wordsU) && /ended one by one/.test(wordsK)
     && W.includes("(drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '')") && W.includes('...(unread ? { scopeUnread: listUnread || true } : {})'),

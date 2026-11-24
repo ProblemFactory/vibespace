@@ -450,7 +450,7 @@ async function besideScene(wrapperText, tag) {
 }
 {
   // SMALLS: the refused stop's words are TRUE (a main that still runs is never said «ended»); the card's two sentences, zh and ja
-  const sayOf = (src, live) => { const out = []; const f = new Function('mainLive', 'fs', 'logOpen', `let hubLeftSaid = 0; ${fnOf4(src, 'const sayHubLeft = (sig) => {')}\nreturn sayHubLeft;`)(() => live, { writeSync: (fd, b) => out.push(String(b)) }, () => 9); f('SIGTERM'); return out.join(''); };   // eslint-disable-line no-new-func
+  const sayOf = (src, live) => { const out = []; const f = new Function('mainLive', 'fs', 'logOpen', 'sayOwn', `let hubLeftSaid = 0; ${fnOf4(src, 'const sayHubLeft = (sig) => {')}\nreturn sayHubLeft;`)(() => live, { writeSync: (fd, b) => out.push(String(b)) }, () => 9, (t) => out.push(String(t)));   /* r3732: + sayOwn */ f('SIGTERM'); return out.join(''); };   // eslint-disable-line no-new-func
   const runs = sayOf(WRAP, true), ended = sayOf(WRAP, false), runsX = sayOf(anchored(WRAP, '  const what = mainLive() ? ', '  const what = false ? ', 'b2c5c-r1263-words-cut'), true);
   ok(/refused — its main process was the VibeSpace hub \(or what started it\) and still runs, though it is no longer recognised as the hub:/.test(runs) && !/server\.pid changed/.test(runs) && !/has ended/.test(runs) && /and has ended: what is left is the hub's/.test(ended),   // stale-pins: kept — a NEGATIVE pin: the words must never name that cause again
     'the words of a stop refused after the latch: a main that still runs (no longer recognised) is said to run, never «ended»; an ended one is said ended', { runs, ended });

@@ -78,8 +78,11 @@ if (process.env.PIPES) {   // 主开发 r2773 (1): a value across the two pipes 
     // line written during that quiet (f); the value split between the pipes across the quiet (g)
     e: [[1, 'e1 ' + v.slice(0, h), 900], [1, v.slice(h) + ' e2' + nl]], f: [[1, 'f1 ' + v.slice(0, h), 900], [2, '[the other pipe]' + nl, 900], [1, v.slice(h) + ' f2' + nl]],
     g: [[1, 'g1 ' + v.slice(0, h), 900], [2, v.slice(h) + ' g2' + nl]] }[k];
-  for (const [p, s, ms] of steps) { fs.writeSync(p, s); still(ms || 150); }
-  still(700);
+  // r3732: PIPES_END_NOW — the job ends right after its last word (no still after it), INSIDE the masker's quiet: the drain's scan
+  // then meets a masker that still holds (the window a hosted runner's load opened, placed)
+  const endNow = !!process.env.PIPES_END_NOW;
+  steps.forEach(([p, s, ms], i) => { fs.writeSync(p, s); if (!(endNow && i === steps.length - 1)) still(ms || 150); });
+  if (!endNow) still(700);
   process.exit(0);
 }
 if (process.env.QUIETSPLIT) {   // round wtlm3ig4w: a marker written in TWO pieces of one line with a quiet between them (the until scan's carry)
@@ -1847,6 +1850,38 @@ ok(!!UNTIL_NOCARRY && noCarryMut.half === true && noCarryMut.d === false, 'CONTR
 ok(!!QUIET_FLUSH && pieces64Mut.masked === false, 'CONTROL — the release\'s quiet flush: the base64 spelling split by the quiet lands whole — RED on the copy', QUIET_FLUSH ? { masked: pieces64Mut.masked } : 'the copy could not be built');
 print('①f NO BYTE OF THE JOB\'S OWN WORDS IS LOST (主开发 r2773 (1))', bytesRows);
 ok(!!SETTLE_DROPS && !!bytesMut.scenes && Object.values(bytesMut.scenes).some((x) => !x.words || !x.bytes), 'CONTROL — a settle that DROPS the run it keeps: a job\'s own words go missing from its log — RED on the copy', SETTLE_DROPS ? bytesMut.scenes : 'the copy could not be built (its anchor is missing)');
+// r3732 / r3735 law 3: THE WRAPPER's OWN LINES never stand inside a line of the job, never between the pieces of a value the masker holds.
+// PLACED, never load: a copy of the REAL wrapper whose escapee scan starts past its 250 ms (the cut said at once), and scenes a, b whose job
+// ends right after its last word (the drain's scan meets a masker that still holds). The job's words whole and in order (judged as ①f
+// does: the wrapper's lines apart), each wrapper line on a line of its own, the cut's notice AFTER the job's words. RED: today's direct write
+const OWN_CUT = "    if (Date.now() - t0 > 250) { out.cut = true; break; }";
+const OWN_ROAD = "function sayOwn(text) { ownQ.push(String(text).replace(/^\\n+|\\n+$/g, '')); drainOwn(); }";
+const WRAP_CUT = WRAP_SRC.split(OWN_CUT).length === 2 ? WRAP_SRC.split(OWN_CUT).join("    if (true) { out.cut = true; break; }   /* PLACED: the scan's window passed at once */") : null;
+const WRAP_DIRECT = WRAP_CUT && WRAP_CUT.split(OWN_ROAD).length === 2 ? WRAP_CUT.split(OWN_ROAD).join("function sayOwn(text) { try { fs.writeSync(logOpen(), Buffer.from(String(text).replace(/^\\n+|\\n+$/g, '') + '\\n')); } catch { } }   /* MUTANT: today's direct write */") : null;
+async function legOwnLines(wrap, tag) {
+  const W = await world(tag, { wrap }), S = SENT(tag), h = Math.floor(S.length / 2);
+  W.put(S);
+  const want = { a: [[1, 'a1 '], [2, ' a2\n']], b: [[2, 'b1 '], [1, ' b2\n']] };
+  const jobs = Object.fromEntries(Object.keys(want).map((k) => [k, W.jm.jobs.get(W.create({ name: 'own-' + k, env: { PIPES: k, PIPES_END_NOW: '1' } }).job.id)]));
+  const ended = await W.untilMs(() => Object.values(jobs).every((j) => ['done', 'failed', 'interrupted'].includes(j.state)), 15000);
+  const out = {};
+  for (const [k, j] of Object.entries(jobs)) {
+    let raw = ''; try { raw = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { }
+    const job = raw.split('\n').filter((l) => !l.startsWith('[job-wrapper]')).join('\n'), bare = job.replace(/\[vault:[^\]]*\]/g, '');
+    const wantText = want[k].map(([, w]) => w).join(''), last = want[k][want[k].length - 1][1].trim();
+    const cutAt = raw.indexOf('[job-wrapper] stop: its scan for what left its group read only part'), lastAt = raw.lastIndexOf(last);
+    out[k] = { cutSaid: cutAt >= 0, ownApart: !/[^\n]\[job-wrapper\]/.test(raw), after: lastAt >= 0 && cutAt > lastAt,
+      // the job's bytes, every one: counted without line ends — a pipe's piece that the other pipe's line overtook (each pipe in its own
+      // order, r2773) ends with no line end, and the wrapper's own line then starts on a line of its own (that line end is the wrapper's)
+      bytes: Buffer.byteLength(bare.replace(/\n/g, '')) === Buffer.byteLength(wantText.replace(/\n/g, '')) && (bare.match(/\n/g) || []).length >= (wantText.match(/\n/g) || []).length, noValue: !raw.includes(S.slice(0, h)) && !raw.includes(S.slice(h)),
+      log: raw.replace(S.slice(0, h), '<H1>').replace(S.slice(h), '<H2>').slice(0, 500) };
+  }
+  W.end();
+  return { ended: ended.ok, out };
+}
+const [ownLines, ownLinesMut] = await Promise.all([WRAP_CUT ? legOwnLines(WRAP_CUT, 'ownlines') : null, WRAP_DIRECT ? legOwnLines(WRAP_DIRECT, 'ownlinesm') : null]);
+ok(!!ownLines && ownLines.ended && Object.values(ownLines.out).every((x) => x.cutSaid && x.ownApart && x.after && x.bytes && x.noValue), 'r3732 — THE WRAPPER\'S OWN LINES: the scan\'s cut placed in scenes a and b (the job ends while the masker still holds) — the job\'s words whole and in order, each wrapper line on a line of its own, the cut\'s notice AFTER the job\'s words, no value', ownLines ? ownLines.out : 'the copy could not be built (its anchor is missing)');
+ok(!!ownLinesMut && Object.values(ownLinesMut.out).some((x) => !x.ownApart || !x.after || !x.bytes), 'CONTROL — today\'s direct write (in a copy): the cut\'s notice stands before or inside the job\'s words — RED on the copy', ownLinesMut ? ownLinesMut.out : 'the copy could not be built (its anchor is missing)');
 console.log(`      7e1674a83's settle (a copy) over the same scenes: ${JSON.stringify(SETTLE_OLD ? Object.fromEntries(Object.entries(bytesOldMut.scenes || {}).map(([k, x]) => [k, { words: x.words, bytes: x.bytes, log: x.log }])) : 'no copy')}`);
 ok(!!SETTLE_NOFLAG && noFlagMut.a === false && noFlagMut.b === false && noFlagMut.c === true, 'CONTROL — MUST ONE cut ALONE (the last line still searched alone, every view\'s first trigger an end): the coloured and the ampersand last lines are NOT whole in the log in time, the completed line still is — RED on the copy', SETTLE_NOFLAG ? { a: noFlagMut.a, b: noFlagMut.b, c: noFlagMut.c } : 'the copy could not be built (its anchor is missing)');
 ok(!!SETTLE_NOLINE && noLineMut.a === true && noLineMut.b === true && noLineMut.c === false, 'CONTROL — MUST TWO cut ALONE (the whole held text searched, the unfinished-piece rule kept): the line that ENDS in the value\'s own first character is NOT whole in the log in time, the coloured and the ampersand lines still are — RED on the copy', SETTLE_NOLINE ? { a: noLineMut.a, b: noLineMut.b, c: noLineMut.c } : 'the copy could not be built (its anchor is missing)');
