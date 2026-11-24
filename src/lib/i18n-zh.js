@@ -15728,6 +15728,8 @@ export default {
   "Sites that may read the place": "可以读取该地点的网站",
   "One web address a line, at most {n}. Only these sites read the place; every other site is denied the location, with no prompt.": "每行一个网址，最多 {n} 个。只有这些网站能读到该地点；其他网站一律被拒绝获取位置，不弹提示。",
   "Every site is denied the location.": "所有网站都被拒绝获取位置。",
+  "This browser cannot find this machine's real location, so it cannot leak to a site: a site reads only a place you set here, or none.": "这个浏览器无法获得本机的真实位置，因此不会泄露给网站：网站只能读到你在这里设置的地点，或者什么都读不到。",
+  "If you allow a site your location in this browser's own settings, that site reads this machine's real location whenever VibeSpace is not holding a place for this profile.": "如果你在这个浏览器自己的设置里允许某个网站获取位置，那么只要 VibeSpace 没有为这个配置保持地点，该网站就会读到本机的真实位置。",
   "{label} takes its environment at its next start": "{label} 下次启动时使用新的环境",
   "{label}'s environment is saved": "{label} 的环境已保存",
   "The time zone is not one this browser knows — write it as a region and a city, like Europe/Paris.": "浏览器不认识这个时区——请写成“地区/城市”，例如 Europe/Paris。",

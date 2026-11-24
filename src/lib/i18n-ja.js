@@ -15727,6 +15727,8 @@ export default {
   "Sites that may read the place": "この場所を読めるサイト",
   "One web address a line, at most {n}. Only these sites read the place; every other site is denied the location, with no prompt.": "1 行に 1 つのウェブアドレス、最大 {n} 件。このサイトだけが場所を読めます。ほかのサイトは確認なしで位置情報を拒否されます。",
   "Every site is denied the location.": "すべてのサイトで位置情報が拒否されます。",
+  "This browser cannot find this machine's real location, so it cannot leak to a site: a site reads only a place you set here, or none.": "このブラウザはこのマシンの実際の位置を取得できないため、サイトに漏れることはありません。サイトが読めるのはここで設定した場所だけで、設定がなければ何も読めません。",
+  "If you allow a site your location in this browser's own settings, that site reads this machine's real location whenever VibeSpace is not holding a place for this profile.": "このブラウザ自身の設定でサイトに位置情報を許可すると、VibeSpace がこのプロファイルの場所を保持していないときは、そのサイトはこのマシンの実際の位置を読み取ります。",
   "{label} takes its environment at its next start": "{label} は次回の起動時に新しい環境になります",
   "{label}'s environment is saved": "{label} の環境を保存しました",
   "The time zone is not one this browser knows — write it as a region and a city, like Europe/Paris.": "このタイムゾーンはブラウザが認識できません。Europe/Paris のように「地域/都市」で書いてください。",

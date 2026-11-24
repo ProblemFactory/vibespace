@@ -7,8 +7,8 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
-import { fieldsOf, bodyOf, checkOf, autoSaidOf, changedFrom, SITES_LIMIT } from './browser-environment-form.js';
-import { envWords, autoWords } from './browser-environment-words.js';
+import { fieldsOf, bodyOf, checkOf, autoSaidOf, changedFrom, placeIsolatedOf, SITES_LIMIT } from './browser-environment-form.js';
+import { envWords, autoWords, placeLeakWords } from './browser-environment-words.js';
 
 const SAVED = new WeakSet();   // as the proxy dialog (B-acb9): a second open RAISES the live form; 'done' only after ITS own save
 const selectOf = (cls, label, options, value) => {
@@ -68,7 +68,15 @@ export function openEnvironmentDialog(app, r, { onDone = null, onClose = null } 
   const blocked = el('div', 'bnew-hint benv-blocked', t('Every site is denied the location.'));
   const lshow = () => { place.style.display = lsel.value === 'value' ? '' : 'none'; blocked.style.display = lsel.value === 'block' ? '' : 'none'; };
   lsel.addEventListener('change', lshow); lshow();
-  lrow.append(lsel, place, blocked);
+  // B-9584, the owner's decision (r2911 / r2916): ONE plain sentence on whether this browser can give a site this machine's real place —
+  // a fact said once, never a greyed control or a refusal. An engine profile asks the engines table once (its kernel's probe fact);
+  // anything else is stock Chrome and says its sentence at once; a table not read says the stock sentence (absent = false); the ask
+  // waits for the form to OPEN (test-architecture §103 r4: a queued form waits behind the open one's ask)
+  const leak = el('div', 'bnew-hint benv-leak', '');
+  const sayLeak = (engines) => { leak.textContent = placeLeakWords(placeIsolatedOf(r, engines), t); };
+  if (r && r.browser && r.browser.kind === 'plugin') shell.ready.then((s) => { if (s) Promise.resolve(fetchJson('/api/browser/engines')).then((x) => sayLeak(x && Array.isArray(x.engines) ? x.engines : null), () => sayLeak(null)); });   // once it opens (r4: a queued form waits behind the open one's ask)
+  else sayLeak(null);
+  lrow.append(lsel, place, blocked, leak);
   body.appendChild(lrow);
   read = () => ({ timezone: readTz(), language: readLang(), location: { mode: lsel.value, latitude: lat.value, longitude: lng.value, accuracy: acc.value, sites: sites.value } });
   const refusal = noteLine('bwho-refusal bnew-refusal', '', { warn: true });

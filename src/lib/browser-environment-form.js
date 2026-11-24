@@ -6,6 +6,15 @@
 import { resolveEnvironment, environmentVerdict, keptExitOf, SITES_MAX } from '../browser-environment.js';
 
 export const ENV_KEYS = Object.freeze(['timezone', 'language', 'location']);
+/** B-9584, the owner's decision (主开发 r2911 / r2916): does this profile's browser have NO source of this machine's real place? Only an
+ *  engine profile whose kernel's probe says so (`geolocationIsolated`, its row of GET /api/browser/engines). Stock Chrome, a Chrome
+ *  build or file, a kernel without the patch, an older plugin, an engine not listed, the table not read: false (absent = false). */
+export function placeIsolatedOf(r, engines) {
+  const b = r && r.browser;
+  if (!b || b.kind !== 'plugin' || !b.id) return false;
+  const row = Array.isArray(engines) ? engines.find((e) => e && e.id === b.id) : null;
+  return !!(row && row.geolocationIsolated === true);
+}
 export const SITES_LIMIT = SITES_MAX;
 const modeOf = (c) => (c && typeof c === 'object' && typeof c.mode === 'string' ? c.mode : 'machine');
 const s = (x) => (x == null ? '' : String(x));

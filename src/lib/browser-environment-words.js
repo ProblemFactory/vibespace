@@ -25,6 +25,15 @@ export function envWords(code, t, { limit = 20 } = {}) {
   }
 }
 
+/** B-9584, THE OWNER's DECISION ON THE PLACE HOLE (主开发 r2911 / r2916): the ONE plain sentence under the location — a fact said once,
+ *  never a greyed control or a refusal. `isolated` (the form model's placeIsolatedOf) = the browser has no source of this machine's
+ *  real place; otherwise (stock Chrome, a kernel without the patch, an older plugin) the person's own «Allow» in the browser's settings
+ *  reads the real place whenever no hold of VibeSpace's stands. */
+export function placeLeakWords(isolated, t) {
+  if (isolated === true) return t('This browser cannot find this machine\'s real location, so it cannot leak to a site: a site reads only a place you set here, or none.');
+  return t('If you allow a site your location in this browser\'s own settings, that site reads this machine\'s real location whenever VibeSpace is not holding a place for this profile.');
+}
+
 /** What «Automatic» means right now, for one setting (the form model's autoSaidOf row). */
 export function autoWords(a, t) {
   if (a && a.value) return t('Automatic now: {value} — from the kept exit', { value: String(a.value) });

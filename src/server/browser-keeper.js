@@ -1562,7 +1562,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
         declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null,
         // lane engine-spi-egress L1b: the kernel's SOURCE ('download' | 'user'), and the core's verdict on the owner's program (never its path)
-        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed, live: liveOfEngine(row.id) }) });
+        source: f.source || 'download', binary: f.userBinary ? { code: f.userBinary.code, why: f.userBinary.why } : null, measureFailed: !!f.measureFailed, geolocationIsolated: f.geolocationIsolated === true, live: liveOfEngine(row.id) }) });   // B-9584 r2916: the kernel's place fact (the Environment dialog's sentence)
     }
     return out;
   }
