@@ -147,10 +147,10 @@
    "file": "src/server/usage-pool-engine.js",
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "reads model-family (catalog families included); +2 lane readings-attribution-2 P2: law 2's request families — which model family a turn asked of which account (noteTurnAsk, turnAskedFamily), compared with a named cap lane, never a version; +1 r3136 (lane login-request-card): the reading's own hold after torn bytes asks whether the file states the conversation's family cap (familyOfScopedBucket of each bucket against the asked family), never a version",
+   "road": "reads model-family (catalog families included); +2 lane readings-attribution-2 P2: law 2's request families — which model family a turn asked of which account (noteTurnAsk, turnAskedFamily), compared with a named cap lane, never a version; +1 r3136 (lane login-request-card): the reading's own hold after torn bytes asks whether the file states the conversation's family cap (familyOfScopedBucket of each bucket against the asked family), never a version; +1 lane lg-providers B-d578 F3a small: the way back's verdict reads its FIRST model's family (fallbackBackVerdict) — a family it cannot read keeps the conversation where it is, said once (family-unknown), never a guess and no release",
    "suite": "test-claude-update-needs-nothing",
    "match": "family-of",
-   "sites": 10
+   "sites": 11
   },
   {
    "id": "auto-resume-cap-family",

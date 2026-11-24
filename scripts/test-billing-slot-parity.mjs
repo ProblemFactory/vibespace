@@ -30,7 +30,7 @@ export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember
   // them — a spawn's member, the default's fallback, the spend identity through the guard (its verdict) and auto-resume, the credit's
   // identity, the reading's slot, the billing chip. «name@file» = a generic name read in that file only; «spendGuard.authorize» = the
   // guard's verdict called through its own handle (another handle is the alias gap)
-  'poolDefaultOf', '_resolveHomeSpawn', 'resolveForSpawn', 'poolChooserForModel', 'fallbackDefaultTarget', 'fallbackBackTarget', '_wallScope', 'cliTarget', 'identityOf@src/server/spend-guard.js',
+  'poolDefaultOf', '_resolveHomeSpawn', 'resolveForSpawn', 'poolChooserForModel', 'fallbackDefaultTarget', 'fallbackBackTarget', 'fallbackBackVerdict', '_wallScope', 'cliTarget', 'identityOf@src/server/spend-guard.js',
   'identityFor@src/server/spend-guard.js', 'fireIdentity@src/server/auto-resume.js', 'identityFor@src/server/auto-resume.js', 'setConversationPin', 'resetCreditOffer',
   'writeResetCredit', 'writeCodexReading', 'demoteWalledAccount', 'refreshCodexForPerson', 'resetCreditPreview', 'projectionBillingIndex', 'claudeBillingIdentity',
   'codexBillingIdentity', 'poolAuth@src/harnesses/claude.js', 'poolAuth@src/harnesses/codex.js', 'billingIdentity@server.js', 'sessionAuth@server.js', 'sessionAuth@src/routes/sessions.js',
@@ -201,11 +201,13 @@ export const ROWS = Object.freeze([
   ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', 'chooseDefault', 'pile', 1],
   ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'memberRemoved', 'pool', 1],
   ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'poolChooserForModel', 'pile', 3],
-  ['poolChooserForModel', 'src/server/usage-pool-engine.js', 'fallbackBackTarget', 'pool', 1],   // B-d578 F3a: the new-conversation verdict of the first model (verdictOnly)
-  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'judgeFallbackReturns', 'pool', 1],   // B-d578 F3a: each pass judges coming back
+  ['poolChooserForModel', 'src/server/usage-pool-engine.js', 'fallbackBackVerdict', 'pool', 1],   // B-d578 F3a: the new-conversation verdict of the first model (verdictOnly)
+  ['poolCurrent', 'src/server/usage-pool-engine.js', 'fallbackBackVerdict', 'pool', 1],   // B-d578 F3a small (r3338 (2)): the pool's default — a lapsed one is said, never a silent stay
+  ['fallbackBackVerdict', 'src/server/usage-pool-engine.js', 'fallbackBackTarget', 'pool', 1],   // the target is the verdict's `to`
+  ['fallbackBackVerdict', 'src/server/usage-pool-engine.js', 'judgeFallbackReturns', 'pool', 1],   // B-d578 F3a: each pass judges coming back
   ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'executeFallbackBack', 'pool', 2],   // B-d578 F3a: re-judged at the move, and again after its record landed
-  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'fallbackMoveBack', 'pool', 1],   // B-d578 F3a: the person's press (F3b's page)
-  ['fallbackBackTarget', 'src/server/usage-pool-engine.js', 'fallbackStatus', 'pool', 1],   // B-d578 F3a: the pool row's count of those that can come back
+  ['fallbackBackVerdict', 'src/server/usage-pool-engine.js', 'fallbackMoveBack', 'pool', 1],   // B-d578 F3a: the person's press (F3b's page)
+  ['fallbackBackVerdict', 'src/server/usage-pool-engine.js', 'fallbackStatus', 'pool', 1],   // B-d578 F3a: the pool row's count of those that can come back
   ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'judgeFallbackReturns', 'pool', 1],   // B-d578 F3a: a conversation held by a fallback provider
   ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'executeFallbackBack', 'pool', 1],
   ['heldPoolMemberFor', 'src/server/usage-pool-engine.js', 'fallbackMoveBack', 'pool', 1],
@@ -294,6 +296,7 @@ export const HOME = Object.freeze({
   "resolveForSpawn": ["src/accounts.js"],
   "poolChooserForModel": ["src/server/usage-pool-engine.js"],
   "fallbackDefaultTarget": ["src/server/usage-pool-engine.js"],
+  "fallbackBackVerdict": ["src/server/usage-pool-engine.js"],   // B-d578 F3a small (r3338 (2)): the way back's verdict WITH its reason (no first model, family unknown, the default lapsed, no member)
   "fallbackBackTarget": ["src/server/usage-pool-engine.js"],   // B-d578 F3a: the member a conversation on the fallback comes BACK to (the chooser's new-conversation verdict, then memberCanServe)
   "_wallScope": ["src/server/usage-pool-engine.js"],
   "cliTarget": ["src/routes/provider-models.js"],

@@ -825,11 +825,57 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await wTw.settle();
   ok(wTw.restarts().length === wTw.eng.FALLBACK_MOVES_PER_MIN && wTw.eng._fbQueue.size === 20 - wTw.eng.FALLBACK_MOVES_PER_MIN,
     'twenty conversations that may come back in ONE pass: the hub queue moves ' + wTw.eng.FALLBACK_MOVES_PER_MIN + ' this minute (its pace), the rest wait their turn', { restarts: wTw.restarts().length, queued: wTw.eng._fbQueue.size });
-  // (7) a stamp in the future is clamped to now (the dwell never outlives its length), and (3) the no-flap map is swept by age
-  const ENGc = read('src/server/usage-pool-engine.js');
-  ok(ENGc.includes('at = Math.min(Date.now(), Number(at) || 0);   // (r3319 (7)) never a stamp in the future') && ENGc.includes('const dw = Math.min(now, Number(s2._poolFallbackDwell)')
-    && ENGc.includes('for (const [k, at] of _fbDwell) if (now - at > FALLBACK_DWELL_MS || at > now) _fbDwell.delete(k);'),
-    '(r3319 (3) (7)) a dwell stamp is never in the future (written and read clamped to now); the no-flap map is swept by age at each move back');
+  // (r3319 (7)) THE READ SIDE, by behaviour: a stamp in the future in a conversation's meta (a clock set back) is written back as NOW
+  // at the pass's first read — the dwell then lasts one length from that read (the write side and the sweep: (r3338 (5)) below)
+  const wSk = world({ cross: 'allow' });
+  wSk.client(); heal(wSk);
+  const skS = wSk.mk('sk1', wSk.P, { claudeSessionId: 'cid-sk1', _lastPtyDataAt: Date.now(), _poolFallbackDwell: Date.now() + 365 * 864e5 });
+  await wSk.pass();
+  wall(wSk);
+  await wSk.pass();
+  const skAt = skS._poolFallbackDwell, skHeld = !wSk.eng._fbQueue.has('sk1') && !wSk.restarts().some((t) => t.serverId === 'sk1');
+  skS._poolFallbackDwell = skAt - wSk.eng.FALLBACK_DWELL_MS - 60e3;   // one dwell after that read
+  await wSk.pass();
+  ok(skHeld && skAt <= Date.now() && (wSk.eng._fbQueue.has('sk1') || wSk.restarts().some((t) => t.serverId === 'sk1')),
+    '(r3319 (7)) a dwell stamp a year ahead in a conversation\'s meta is read back as NOW (held inside its dwell, never for the year) and the conversation goes to the fallback one dwell later — every member out, the pool allowing', { stampAhead: skAt - Date.now(), held: skHeld, queued: wSk.eng._fbQueue.has('sk1') });
+  // ── THE SMALL of round wk877xcow (r3338) ──
+  // (2) THE DEFAULT LAPSED / THE FAMILY UNKNOWN: never a silent stay on the metered provider — ONE line a conversation, counted apart
+  // in the row and in a press's reply (each beside the no-model count)
+  const wLp = world({ cross: 'allow' });
+  wLp.client(); heal(wLp); onFbRec(wLp, 'lp1', { fromModel: 'sonnet' });
+  const realServe = wLp.am.serveStateOf ? wLp.am.serveStateOf.bind(wLp.am) : () => null;
+  wLp.am.serveStateOf = (id) => (id === wLp.A ? { state: 'lapsed', lastFail: Date.now() + 36e5, since: Date.now() } : realServe(id));
+  await wLp.pass(); await wLp.pass();
+  const stLp = wLp.eng.fallbackStatus(wLp.P), prLp = wLp.eng.fallbackMoveBack(wLp.P);
+  const vLp = wLp.eng.fallbackBackVerdict(wLp.P, wLp.sessions.get('lp1')._poolFallback);
+  wLp.am.serveStateOf = realServe;
+  ok(vLp.why === 'default-lapsed' && wLp.restarts().length === 0 && wLp.cards.filter((c) => c.sid === 'lp1' && /cannot come back yet: the pool's default member has lapsed/.test(c.text)).length === 1
+    && stLp.length === 1 && stLp[0].lapsed === 1 && stLp[0].canReturn === 0 && prLp.queued === 0 && prLp.lapsed === 1,
+    '(r3338 (2)) the pool\'s default LAPSED: the conversation stays where it is (no guess) but is never silent — ONE line «… cannot come back yet: the pool\'s default member has lapsed …»; the row counts it (lapsed 1) and a press\'s reply too', { vLp, stLp, prLp });
+  const wFu = world({ cross: 'allow' });
+  wFu.client(); heal(wFu); onFbRec(wFu, 'fu1', { fromModel: 'mystery-model-9' });
+  await wFu.pass(); await wFu.pass();
+  const stFu = wFu.eng.fallbackStatus(wFu.P), prFu = wFu.eng.fallbackMoveBack(wFu.P);
+  ok(wFu.restarts().length === 0 && wFu.cards.filter((c) => c.sid === 'fu1' && c.text === 'DeepSeek keeps this conversation for now — it cannot come back yet: VibeSpace cannot tell which family its first model mystery-model-9 belongs to').length === 1
+    && stFu[0].familyUnknown === 1 && prFu.familyUnknown === 1 && prFu.queued === 0,
+    '(r3338 (2)) the first model\'s FAMILY UNKNOWN: ONE line saying so, counted apart in the row and the press\'s reply', { stFu, prFu });
+  // (4) a press over a conversation whose record names ANOTHER provider: counted in its reply, never skipped in silence
+  const wOr = world({ cross: 'allow' });
+  wOr.client(); heal(wOr); wOr.mk('or1', wOr.P, { claudeSessionId: 'cid-or1', _heldPoolMember: ds.id, _lastPtyDataAt: Date.now(), _poolFallback: { poolId: wOr.P, provider: 'pv-another-one', fromMember: wOr.A, fromModel: 'sonnet', toModel: 'x', at: Date.now() - 16 * 60e3, by: 'pool' } });
+  const prOr = wOr.eng.fallbackMoveBack(wOr.P);
+  ok(prOr.queued === 0 && prOr.otherRecord === 1, '(r3338 (4)) a press over a conversation whose record names ANOTHER provider: nothing queued, counted (otherRecord 1) for its reply', prOr);
+  // (5) THE CLAMP and THE SWEEP, by behaviour: a stamp in the future is written as now; an entry older than one dwell (or in the future) is swept
+  const wCl = world();
+  const clS = wCl.mk('cl1', wCl.P, { claudeSessionId: 'cid-cl1', _lastPtyDataAt: Date.now() });
+  const tCl = Date.now();
+  wCl.eng.stampFallbackDwell(clS, tCl + 365 * 864e5);
+  const dw = wCl.eng._fbDwell; dw.clear(); dw.set('old', Date.now() - wCl.eng.FALLBACK_DWELL_MS - 60e3); dw.set('future', Date.now() + 36e5); dw.set('fresh', Date.now() - 60e3);
+  const sweptCl = wCl.eng.sweepFallbackDwell(Date.now());
+  ok(clS._poolFallbackDwell <= Date.now() && clS._poolFallbackDwell >= tCl && sweptCl === 2 && [...dw.keys()].join() === 'fresh',
+    '(r3338 (5)) a dwell stamp a year ahead is written as NOW (never longer than its length); the no-flap map\'s sweep drops an entry older than one dwell and one in the future, keeps a fresh one', { stamp: clS._poolFallbackDwell - tCl, swept: sweptCl, left: [...dw.keys()] });
+  // (3) the member's own judgement runs under the FIRST model's family, explicit (the session adds only the walls)
+  ok(read('src/server/usage-pool-engine.js').includes('return memberCanServe(poolId, to, s2, sid, now, fam) ? { to, why: null } : { to: null, why: \'no-member\' };'),
+    '(r3338 (3)) the way back\'s member check is handed the FIRST model\'s family explicitly — the session adds only its walls, never its own model\'s family');
   // RED CONTROLS of §5
   const DWELL = "    if (!removed && now - (Number(rec.at) || 0) < FALLBACK_DWELL_MS) continue;   // the DWELL: the pool moves nobody back inside it";
   const wDw = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, DWELL, '', 'no dwell'), 'eng-no-dwell') });
@@ -837,11 +883,12 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await wDw.pass();
   ok(wDw.restarts().length === 1, 'CONTROL: a copy without the dwell moves it back at 5 minutes ⇒ the dwell leg goes RED', wDw.restarts());
   // (r3319) RED: the MUST's three guards cut — the pool moves a record with no first model back, with NO model
-  const NM1 = "  if (!record || !record.fromModel) return null;   // (r3319 MUST) no first model: no verdict — the target is never a guess";
+  const NM1 = "  if (!record || !record.fromModel) return { to: null, why: 'no-first-model' };   // (r3319 MUST) the target is never a guess";
+  const NM1F = "  if (!fam) return { to: null, why: 'family-unknown' };\n";   // (r3338 (2)) with no first model there is no family either: cut with the guard
   const NM2 = " && s2._poolFallback.fromModel ? s2._poolFallback : null;   // (r3319 MUST)";
   const NM3 = "  if (!rec.fromModel) { console.log(`[pool] fallback back ${e.poolId}/${e.sid}: not moved — its first model is unknown (the target would be a guess)`); return { moved: false, why: 'no-first-model' }; }";
   const NM4 = "    if (verdictOnly && (!fam || (!staleDefault && memberServeLapsed(cur)))) return null;";
-  const cutNm = anchored(anchored(anchored(anchored(ENG, NM1, '', 'no first-model guard'), NM2, ' ? s2._poolFallback : null;   // (cut)', 'the judge takes any record'), NM3, '', 'the move back takes any record'), NM4, '', 'the verdict-only ask passes by the early returns');
+  const cutNm = anchored(anchored(anchored(anchored(anchored(ENG, NM1, '', 'no first-model guard'), NM1F, '', 'the verdict\'s family guard'), NM2, ' ? s2._poolFallback : null;   // (cut)', 'the judge takes any record'), NM3, '', 'the move back takes any record'), NM4, '', 'the verdict-only ask passes by the early returns');
   const wNmR = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', cutNm, 'eng-no-first-model') });
   wNmR.client(); heal(wNmR); onFbRec(wNmR, 'nm1', { fromModel: null });
   await wNmR.pass(); await until(wNmR, () => wNmR.restarts().length > 0, 12);
