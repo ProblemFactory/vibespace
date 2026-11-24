@@ -15693,5 +15693,6 @@ export default {
   "VibeSpace cannot read your edited prices right now — nothing was changed and nothing is written over them, and costs are not shown as yours until they read. It reads them again by itself in a few minutes.": "VibeSpace はいま編集された価格を読み込めません — 何も変更されておらず、上書きもされません。読み込めるまで費用はあなたの価格として表示されません。数分のうちに自動で再読み込みします。",
   "prices not known": "価格不明",
   "your edited prices": "編集した価格",
+  "Your edited prices cannot be read right now, so this backup leaves them out — the Usage window says why": "編集した価格をいま読み込めないため、このバックアップには含めません — 理由は使用量ウィンドウに表示されます",
   "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "価格ファイルが壊れていて読み込めませんでした。そのバイトは VibeSpace のデータフォルダ内で隣に {copy} として保存され、VibeSpace の既定の価格に戻りました。「価格…」で価格を設定し直すか、ファイルを手で直して VibeSpace を再起動してください。",
 };

@@ -7,7 +7,7 @@ Chart.register(LineController, BarController, DoughnutController, LineElement, P
 import { escHtml, createPopover, showContextMenu, heldWordsOf } from './utils.js';
 import { t } from './i18n.js';
 import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { costWords, unpricedOf, sumParts, keepUnpriced } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
+import { costWords, unpricedOf, sumParts, keepUnpriced, pricesHeldOf } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
 
 /**
  * Configurable usage dashboard (2.96.0) — Grafana/Posthog-style panels over
@@ -521,6 +521,7 @@ function empty(body) {
 // ── Panel + grid rendering ──
 
 export function renderDashboard(container, data, panels, { onChange, pivotHere = null }) {
+  PRICES_HELD = pricesHeldOf(data);   // r3748 should: set for THIS paint before any figure of it is worded (renderPanel sets it again)
   const grid = document.createElement('div');
   grid.className = 'udash-grid';
   // Attach BEFORE rendering panels: chart color resolution probes computed
@@ -574,7 +575,7 @@ function renderPanel(grid, data, panels, panel, idx, onChange, pivotHere) {
   grid.appendChild(card); // must be IN the document before charts resolve theme colors
   // r3145 unit 2: a COST panel while the person's prices are held draws no figure and no bar (each would be a default price read as
   // theirs): the hold's words in its place
-  PRICES_HELD = !!(data && data.prices && data.prices.held);
+  PRICES_HELD = pricesHeldOf(data);
   if (PRICES_HELD && mlist.some((m) => m.key === 'cost')) { const n = document.createElement('div'); n.className = 'usage-note usage-prices-held'; n.textContent = heldWordsOf({ code: 'prices_unread' }); body.appendChild(n); return; }
   // Split-series route: line/bars with a splitBy render from the 2-D pivot.
   // Other chart types ignore the split (a donut/table of a cross isn't a thing).
@@ -594,9 +595,11 @@ function renderPanel(grid, data, panels, panel, idx, onChange, pivotHere) {
 // provider's model with no price row, the panel says so under its chart (an unknown price never reads as a smaller bill)
 function unpricedNote(card, data, mlist) {
   if (!mlist.some((m) => m.key === 'cost') || !unpricedOf(data && data.totals)) return;
+  const note = costWords(data.totals, t, fmtCost, fmtTok, { pricesHeld: PRICES_HELD }).note;   // r3748 should: the held option here too (held: no note)
+  if (!note) return;
   const n = document.createElement('div');
   n.className = 'usage-note usage-unpriced-note';
-  n.textContent = costWords(data.totals, t, fmtCost, fmtTok).note;
+  n.textContent = note;
   card.appendChild(n);
 }
 

@@ -1098,7 +1098,7 @@ class App {
       mkRow('userState', t('Session metadata'), t('stars, renames, {groups} group(s), per-session configs', { groups: s.userState.groups })),
       mkRow('bookmarks', t('File bookmarks'), t('{count} bookmark(s)', { count: s.bookmarks.count })),
       s.tasks?.unread ? (() => { const row = document.createElement('div'); row.className = 'cfg-row cfg-row-held'; row.innerHTML = `<span class="cfg-row-text"><b>${escHtml(t('Task Groups'))}</b><span>${escHtml(t("Task Groups cannot be read right now, so this backup leaves them out — For you says why"))}</span></span>`; return row; })() : mkRow('tasks', t('Task Groups'), t('{count} group(s) incl. backlogs & activity logs', { count: s.tasks?.count || 0 })),   // THE STORE HELD UNREAD (lane bl-windows — the owner's rule: no greyed control with a hint): the hold as a LINE, no checkbox
-      mkRow('pricing', t('Usage pricing table'), t('{count} model rate(s) / account discount(s)', { count: s.pricing?.count || 0 })),
+      s.pricing?.unread ? (() => { const row = document.createElement('div'); row.className = 'cfg-row cfg-row-held'; row.innerHTML = `<span class="cfg-row-text"><b>${escHtml(t('Usage pricing table'))}</b><span>${escHtml(t('Your edited prices cannot be read right now, so this backup leaves them out — the Usage window says why'))}</span></span>`; return row; })() : mkRow('pricing', t('Usage pricing table'), t('{count} model rate(s) / account discount(s)', { count: s.pricing?.count || 0 })),   // r3748 should (lane bl-ci, r3145 unit 2): the prices HELD — a line, no checkbox, never «0 rates» (as Task Groups')
       mkRow('clientPrefs', t('This browser’s preferences'), t('theme, font, language, usage-view choices')),
     );
     const sensHead = document.createElement('div');

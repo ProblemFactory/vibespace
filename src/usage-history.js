@@ -544,18 +544,19 @@ class UsageHistory {
     this._heldDefaults = null;
     return this._shapePricing(st === 'data' ? a0.value : null);
   }
-  /** the prices the read gave (null: none — a first start writes the defaults), shaped to v2 with the newly shipped tiers filled in */
-  _shapePricing(p) {
+  /** the prices the read gave (null: none — a first start writes the defaults), shaped to v2 with the newly shipped tiers filled in.
+   *  `write: false` (the lift's): shaped in memory only — nothing is written on the loop (r3748 must 5) */
+  _shapePricing(p, { write = true } = {}) {
     if (!p) {
       p = { version: 2, tiers: DEFAULT_PRICING, accounts: {} };
       // atomic like every other pricing write — a crash mid-write tears the
       // file and the next boot's _loadJson fallback silently recreates
       // defaults over user-edited rates
-      try { this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
+      if (write) try { this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
     } else if (!p.tiers) {
       // migrate the old FLAT {opus:{...},...} file to v2 in place
       p = { version: 2, tiers: p, accounts: {} };
-      try { this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
+      if (write) try { this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
     }
     if (!p.accounts) p.accounts = {};
     if (!p.tiers) p.tiers = DEFAULT_PRICING;
@@ -568,11 +569,13 @@ class UsageHistory {
     }
     return p;
   }
-  /** r3145 unit 2: THE LIFT — the read again answered: the person's table (null: gone or torn, kept aside — the defaults, written as on a
-   *  first start) prices everything computed from now on */
+  /** r3145 unit 2: THE LIFT — the read again answered: the person's table (null: gone or torn, kept aside — the defaults) prices
+   *  everything computed from now on. It WRITES NOTHING (r3748 must 5: no sync write on the hub's loop, from a timer, against the storage
+   *  that just failed): the table lives in memory; the person's next save writes the file (their press, the release's road), and a file
+   *  still gone or torn at the next start is that start's own (the constructor's first-start write, or a torn file's copy found again) */
   _pricesLifted(v, facts) {
     this._heldDefaults = null;
-    const p = this._shapePricing(v || null);
+    const p = this._shapePricing(v || null, { write: false });
     this._pricingFile = p; this._pricing = this._withCatalog(p);
     this._pricesLift = { since: facts && facts.was ? facts.was.since : null, at: Date.now(), torn: facts && facts.setAside ? String(facts.setAside) : null };
   }

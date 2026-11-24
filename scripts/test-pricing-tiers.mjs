@@ -511,7 +511,7 @@ try {
       const src = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
       const UW = src('src/lib/usage-window.js'), UD = src('src/lib/usage-dashboard.js'), CSB = src('src/lib/chat-status-bar.js'), SRV = src('server.js'), UH = src('src/usage-history.js'), UIM = src('src/usage-index-model.js');
       const wires = {
-        'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords } from './usage-cost-words.js';"),   // + pricesTornWords (r3145 unit 2: the prices' torn lift said at the window's head)
+        'usage-window imports the words': UW.includes("import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords, pricesHeldOf, usageCsvLines } from './usage-cost-words.js';"),   // + pricesTornWords (r3145 unit 2: the prices' torn lift said at the window's head) + pricesHeldOf, usageCsvLines (its round's musts: the one held reading, the CSV's lines)
         'the cost tile': UW.includes("tile(t('Est. API-equivalent cost'), escHtml(fmtRowCost(T)),"),
         'every bar row': UW.includes("const valStr = metric === 'cost' ? escHtml(fmtRowCost(r)) : fmtNum(r.totalTokens);"),
         'the trend note': UW.includes("const cw = metricKey === 'cost' ? costOfRow(d.totals || {}) : null;"),
@@ -520,7 +520,7 @@ try {
         'Add a price': UW.includes('const unpriced = unpricedModels(state.data).filter(m => !Object.prototype.hasOwnProperty.call(pricing.accounts?.[m.acct]?.tiers || {}, m.key));'),
         'the row is the provider account\'s own': UW.includes('(w.tiers || (w.tiers = {}))[m.key] = Object.fromEntries(rec.inputs.map(([fk, el]) => [fk, Number(el.value)]));'),
         'a bad rate is refused on the page': UW.includes("if (rec.bad) { showToast(t('Add a price for {model}: «{value}» is not a rate"),
-        'the CSV column only when unknown': UW.includes('const anyUnknown = unpricedOf(d.totals || {}) !== null;') && UW.includes("'estCost', ...(anyUnknown ? ['unpricedTokens'] : [])"),
+        'the CSV column only when unknown': src('src/lib/usage-cost-words.js').includes('const anyUnknown = unpricedOf((d && d.totals) || {}) !== null;') && src('src/lib/usage-cost-words.js').includes("'estCost', ...(anyUnknown ? ['unpricedTokens'] : [])") && UW.includes('  const lines = usageCsvLines(d, t);'),   // the lines moved into the PURE module (r3145 unit 2's round: usageCsvLines)   // stale-pins: kept (re-pointed: the CSV lines live in src/lib/usage-cost-words.js, read there)
         'the route says which rate': src('src/server/account-usage-routes.js').includes('res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) });'),
         'a half row is refused': UW.includes("if (typed && typed < rec.inputs.length) { showToast(t('Add a price for {model}: enter all five rates"),
         'a row pricing another unpriced model is refused': UW.includes("const orphan = typed ? rec.also.filter("),

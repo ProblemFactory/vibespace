@@ -38,6 +38,28 @@ export function costWords(r, t, fmtCost, fmtNum, { pricesHeld = false } = {}) {
 /** r3145 unit 2: the prices started again from VibeSpace's defaults after TORN bytes (the usage answer's `prices.torn` {copy}): where the
  *  damaged bytes are kept and what a person can do — never «restore that copy» (they are the damaged bytes) */
 export function pricesTornWords(torn, t) { return torn && torn.copy ? t("Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.", { copy: String(torn.copy) }) : null; }
+/** r3145 unit 2 (round wf_b6ee29e5 must 4): THE ONE READING of «the person's prices are held» off the usage answer — every wire of
+ *  the page asks it (the window's paint, the dashboard's panels, the editor, the trend, the CSV) */
+export function pricesHeldOf(data) { return !!(data && data.prices && data.prices.held); }
+/** a CSV cell, quoted when it must be */
+export function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+/** THE USAGE WINDOW's CSV, its lines (round wf_b6ee29e5 must 1). estCost = the PRICED part: a row whose every request has an unknown
+ *  price leaves it EMPTY (never 0), and the unpricedTokens column says what each row leaves out — that column only when the answer has
+ *  an unknown part (B-d578 P1-b). While the person's prices are HELD every estCost is EMPTY and a `prices` column says «prices not
+ *  known» on each row: the tokens are the person's own figures, so the file is still written, and no cell of it is a dollar figure at
+ *  VibeSpace's defaults. Neither: the release's file exactly (r1131 item 4). */
+export function usageCsvLines(d, t = (s) => s) {
+  const held = pricesHeldOf(d);
+  const anyUnknown = unpricedOf((d && d.totals) || {}) !== null;
+  const lines = [['dimension', 'key', 'name', 'type', 'requests', 'sessions', 'input', 'cacheWrite', 'cacheRead', 'output', 'totalTokens', 'estCost', ...(anyUnknown ? ['unpricedTokens'] : []), ...(held ? ['prices'] : [])].join(',')];
+  for (const [dim, rows] of Object.entries((d && d.groups) || {})) {
+    for (const r of rows) {
+      const u = unpricedOf(r);
+      lines.push([dim, csvq(r.key), csvq(r.name || ''), r.type || '', r.requests, r.sessions, r.input, r.cacheWrite, r.cacheRead, r.output, r.totalTokens, held || (u && u.requests >= r.requests) ? '' : r.cost.toFixed(4), ...(anyUnknown ? [u ? u.tokens : 0] : []), ...(held ? [csvq(t("prices not known"))] : [])].join(','));
+    }
+  }
+  return lines;
+}
 
 /** Several rows' figures added — a slice that folds rows together («Other»): its priced cost and its unknown part. */
 export function sumParts(rows) {

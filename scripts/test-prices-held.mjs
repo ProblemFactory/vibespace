@@ -8,16 +8,23 @@
 //      prices is refused by name; the table the export reads is null (never the defaults passed off as the person's); a price row
 //      shown to a person (the bulk resume's preview) is null — «not priced»; the roads no person reads as theirs keep pricing at
 //      VibeSpace's defaults (r3181 (a)); a START while held holds again; the read again LIFTS with no restart and the person's
-//      prices price at once; torn bytes are kept aside ONCE (0600), then the defaults are written as on a first start and the
-//      copy is named.
+//      prices price at once; torn bytes are kept aside ONCE (0600), then the defaults price from memory and the copy is named.
+//      THE LIFT WRITES NOTHING (round wf_b6ee29e5 must 5): no fs.writeFileSync / renameSync of pricing.json at any lift (the
+//      person's table, a file gone, torn bytes) — the next save writes it.
 //   ② THE ANCHORS (r3181 (1)): while held no NEW quota anchor is recorded (its cost since the last reading would be a dollar figure
 //      at the defaults, stored for good); the anchors it has stand.
 //   ③ THE DOORS: the prices editor's read and save, the usage answer, the config export and import say the hold by name (source
 //      reads of the routes: their own code paths, each beside its leg below); the page words the hold and the torn lift (zh, ja).
-//   ④ RED CONTROL: the store with its hold cut writes the defaults over the unread file at the start (the release's shape).
+//      THE PAGE (round wf_b6ee29e5 musts 1–4), BY BEHAVIOUR over the PURE module (src/lib/usage-cost-words.js): a cost held reads
+//      «prices not known»; the CSV's lines while held carry no dollar cell and say it; the one held reading of the answer. PINS on
+//      every wire of the window and the dashboard (the editor, the trend, the bars, the export, the save toast, the head notice).
+//      The estimator writes no fit to rates.json while held; the export dialog's held row.
+//   ④ RED CONTROLS: the store with its hold cut writes the defaults over the unread file at the start (the release's shape); the
+//      pure module with its held branch cut (costWords, the CSV) is red by name.
 // At the release (the base of this row) the law's legs are RED: that is the harm, as the release has it.
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
@@ -27,6 +34,8 @@ const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(cond, name): the name is not a string'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 500) : '')); } };
 const RAW = fs.readFileSync;
+// r3748 must 5: every SYNC write of a pricing.json (or its .tmp) is counted — a lift must add none
+const SYNC_W = []; { const wf = fs.writeFileSync, rn = fs.renameSync; fs.writeFileSync = function (f, ...a) { if (typeof f === 'string' && /pricing\.json(\.tmp)?$/.test(f)) SYNC_W.push(f); return wf.call(fs, f, ...a); }; fs.renameSync = function (a1, b1) { if (typeof b1 === 'string' && /pricing\.json$/.test(b1)) SYNC_W.push(b1); return rn.call(fs, a1, b1); }; }
 const onDisk = (f) => { try { return RAW.call(fs, f, 'utf8'); } catch { return null; } };
 const refuse = (file) => {
   const rf = fs.readFileSync, rp = fs.promises.readFile, eio = () => Object.assign(new Error(`EIO: i/o error, read '${path.basename(file)}' (placed)`), { code: 'EIO', errno: -5 });
@@ -75,8 +84,11 @@ console.log('① THE STORE: pricing.json held on a failed read — the start wri
   ok(onDisk(f) === before && typeof uh2.pricesHeld === 'function' && !!uh2.pricesHeld(), 'a START while held holds again — nothing written', { same: onDisk(f) === before });
   stopOf(uh2);
   undo();
+  const w0 = SYNC_W.length;
   const lifted = await HOLD.readAgainOf('pricing.json');
+  const liftWrites = SYNC_W.length - w0;
   ok(lifted === true && !(uh.pricesHeld && uh.pricesHeld()) && Math.abs(uh._cost(EV) - atMine) < 1e-9 && uh.pricingTable() && uh.pricingTable().accounts['made-up-key'].discount === 0.5, 'the read again LIFTS with no restart: the person\'s prices price at once and the table is theirs again', { lifted, cost: uh._cost(EV) });
+  ok(liftWrites === 0 && onDisk(f) === before, 'the lift WRITES NOTHING on the loop (no sync write of pricing.json; the file byte for byte) — r3748 must 5', { liftWrites });
   let saved = null; try { uh.setPricing({ accounts: { 'made-up-key-2': { discount: 0.2 } } }); saved = JSON.parse(onDisk(f)); } catch (e) { saved = { error: e.code }; }
   ok(!!saved && saved.tiers && saved.tiers.opus.input === atMine && saved.accounts['made-up-key'].discount === 0.5 && saved.accounts['made-up-key-2'].discount === 0.2, 'the next save keeps every edited price and adds the new one', saved);
   stopOf(uh);
@@ -84,14 +96,32 @@ console.log('① THE STORE: pricing.json held on a failed read — the start wri
 {
   const d = dirOf('torn'); const f = path.join(d, 'usage-history', 'pricing.json'); const TORN = '{"version":2,"tiers":{"opus":{"input":1';
   fs.writeFileSync(f, TORN, { mode: 0o600 });
+  const w0 = SYNC_W.length;
   const uh = make(d);
   await until(() => typeof uh.pricesTorn === 'function' && !!uh.pricesTorn());
   const copies = fs.readdirSync(path.dirname(f)).filter((x) => x.startsWith('pricing.json.corrupt-'));
   const t1 = typeof uh.pricesTorn === 'function' ? uh.pricesTorn() : null;
   ok(copies.length === 1 && onDisk(path.join(path.dirname(f), copies[0])) === TORN && (fs.statSync(path.join(path.dirname(f), copies[0])).mode & 0o777) === 0o600 && !!t1 && t1.copy === copies[0], 'torn bytes are kept aside ONCE (the same bytes, 0600) and named', { copies, torn: t1 });
-  let back = null; try { back = JSON.parse(onDisk(f)); } catch { back = null; }
-  ok(!!back && back.tiers && back.tiers.opus.input === atDefault && Math.abs(uh._cost(EV) - atDefault) < 1e-9, 'then the defaults are written as on a first start (r3181: never held until the person sets prices)', back && back.tiers && back.tiers.opus);
+  ok(!(uh.pricesHeld && uh.pricesHeld()) && Math.abs(uh._cost(EV) - atDefault) < 1e-9 && SYNC_W.length === w0 && onDisk(f) === TORN, 'then the defaults price from memory (r3181: never held until the person sets prices) and the lift writes NOTHING (r3748 must 5: the torn bytes stay the file until the next save)', { syncWrites: SYNC_W.length - w0, file: onDisk(f) === TORN ? 'the torn bytes' : 'changed' });
+  let saved = null; try { uh.setPricing({ accounts: { 'made-up-key': { discount: 0.5 } } }); saved = JSON.parse(onDisk(f)); } catch (e) { saved = { error: e.code }; }
+  ok(!!saved && saved.tiers && saved.tiers.opus.input === atDefault && saved.accounts['made-up-key'].discount === 0.5, 'the person\'s next save writes the whole file (the defaults with their edit)', saved && saved.accounts);
   stopOf(uh);
+}
+{
+  // a file GONE while held: the read again meets «not there» twice and lifts at the defaults — nothing written; the next start writes
+  // the first-start file (the constructor's own road, as the release)
+  const d = dirOf('gone'); const f = plant(d);
+  const undo = refuse(f);
+  const uh = make(d);
+  undo(); fs.unlinkSync(f);
+  const w0 = SYNC_W.length;
+  const first = await HOLD.readAgainOf('pricing.json'); const second = first || await HOLD.readAgainOf('pricing.json');
+  ok(second === true && !(uh.pricesHeld && uh.pricesHeld()) && SYNC_W.length === w0 && onDisk(f) === null && Math.abs(uh._cost(EV) - atDefault) < 1e-9, 'a file gone while held lifts at the defaults after «not there» twice — and the lift writes NOTHING (r3748 must 5)', { first, second, syncWrites: SYNC_W.length - w0, file: onDisk(f) });
+  stopOf(uh);
+  const uh2 = make(d);
+  let fresh = null; try { fresh = JSON.parse(onDisk(f)); } catch { fresh = null; }
+  ok(!!fresh && fresh.tiers && fresh.tiers.opus.input === atDefault, 'the next start writes the first-start file (the constructor, as the release)', fresh && fresh.tiers && fresh.tiers.opus);
+  stopOf(uh2);
 }
 
 console.log('② THE ANCHORS: no new quota anchor while the prices are held (its stored cost would be a default dollar figure)');
@@ -121,6 +151,82 @@ console.log('③ THE DOORS: the editor, the usage answer, the export and the imp
   const zh = onDisk(path.join(REPO, 'src/lib/i18n-zh.js')) || '', ja = onDisk(path.join(REPO, 'src/lib/i18n-ja.js')) || '';
   const keys = [...(cw + utils).matchAll(/t\("((?:VibeSpace cannot read your edited prices|Your prices file was damaged|prices not known)[^"]*)"/g)].map((m) => m[1]);
   ok(/prices_unread: \(\) => t\(/.test(utils) && /export function costWords\(r, t, fmtCost, fmtNum, \{ pricesHeld = false \} = \{\}\)/.test(cw) && keys.length >= 3 && keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')) && !keys.some((k) => /restore/i.test(k)), 'the page words the hold (the family\'s ONE table: prices_unread), every cost while held reads «prices not known» (never a default figure as the person\'s), and the torn lift is said with where the bytes are kept — zh and ja; never «restore that copy»', keys);
+}
+
+console.log('③b THE PAGE (round wf_b6ee29e5 musts 1–4): the held branch BY BEHAVIOUR over the PURE module, and a pin on every wire');
+const CW_FILE = path.join(REPO, 'src/lib/usage-cost-words.js');
+const tE = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] != null ? String(v[k]) : `{${k}}`));
+const fC = (n) => '$' + Number(n).toFixed(2), fN = (n) => String(n);
+const HELD_ANSWER = { prices: { held: { file: 'pricing.json', code: 'EIO', since: 1 }, torn: null, lifted: null }, totals: { cost: 12.3, requests: 2 }, groups: { model: [{ key: 'claude-opus-4-8', name: '', type: '', requests: 2, sessions: 1, input: 10, cacheWrite: 0, cacheRead: 0, output: 5, totalTokens: 15, cost: 12.3 }] } };
+const FREE_ANSWER = { ...HELD_ANSWER, prices: null };
+const RELEASE_HEAD = 'dimension,key,name,type,requests,sessions,input,cacheWrite,cacheRead,output,totalTokens,estCost';
+const pageLaw = (W) => {
+  const out = {};
+  try {
+    out.heldCost = W.costWords({ cost: 12.3, requests: 2 }, tE, fC, fN, { pricesHeld: true }).text;
+    out.freeCost = W.costWords({ cost: 12.3, requests: 2 }, tE, fC, fN).text;
+    out.heldOf = [W.pricesHeldOf(HELD_ANSWER), W.pricesHeldOf(FREE_ANSWER), W.pricesHeldOf({ prices: { held: null, torn: { copy: 'x' } } }), W.pricesHeldOf(null)];
+    out.heldCsv = W.usageCsvLines(HELD_ANSWER, tE); out.freeCsv = W.usageCsvLines(FREE_ANSWER, tE);
+  } catch (e) { out.error = String(e && e.message); }
+  out.ok = {
+    cost: out.heldCost === 'prices not known' && /12\.30/.test(String(out.freeCost)),
+    heldOf: JSON.stringify(out.heldOf) === '[true,false,false,false]',
+    csvHeld: !!out.heldCsv && out.heldCsv[0] === RELEASE_HEAD + ',prices' && out.heldCsv.slice(1).every((l) => l.split(',')[11] === '' && l.endsWith(',prices not known')) && !out.heldCsv.some((l) => /12\.3/.test(l)),
+    csvFree: !!out.freeCsv && out.freeCsv[0] === RELEASE_HEAD && out.freeCsv[1].split(',')[11] === '12.3000',
+  };
+  return out;
+};
+const importCopy = async (src, tag) => { const f = path.join(root, `cw-${tag}.mjs`); fs.writeFileSync(f, src); return import(pathToFileURL(f).href); };
+{
+  const W = await import(pathToFileURL(CW_FILE).href);
+  const law = pageLaw(W);
+  ok(law.ok.cost, 'BEHAVIOUR: a cost while held reads «prices not known»; without the option the same row is its figure', { held: law.heldCost, free: law.freeCost });
+  ok(law.ok.heldOf, 'BEHAVIOUR: the ONE held reading of the answer (pricesHeldOf): held only by `prices.held` — a torn lift or no facts is not held', law.heldOf);
+  ok(law.ok.csvHeld, 'BEHAVIOUR (must 1): the CSV while held has NO dollar cell — every estCost empty, a `prices` column says «prices not known» on each row; its tokens stay', law.heldCsv);
+  ok(law.ok.csvFree, 'BEHAVIOUR: not held, the CSV is the release\'s file exactly (its header, its estCost figure)', law.freeCsv);
+  // RED CONTROLS over copies of the pure module: each held branch cut is red by name
+  const src = RAW.call(fs, CW_FILE, 'utf8');
+  const cutCost = src.includes('  if (pricesHeld) return { text: t("prices not known")') ? src.replace('  if (pricesHeld) return { text: t("prices not known")', '  if (false) return { text: t("prices not known")') : null;
+  const cutCsv = src.includes('  const held = pricesHeldOf(d);\n') ? src.replace('  const held = pricesHeldOf(d);\n', '  const held = false;\n') : null;
+  const c1 = cutCost ? pageLaw(await importCopy(cutCost, 'cut-cost')) : null, c2 = cutCsv ? pageLaw(await importCopy(cutCsv, 'cut-csv')) : null;
+  ok(!!c1 && !c1.ok.cost && !!c2 && !c2.ok.csvHeld && c2.ok.csvFree, 'CONTROL: costWords with its held branch cut, and the CSV with its held reading cut, are each RED (the not-held file unchanged)', { cutCost: c1 && c1.ok, cutCsv: c2 && c2.ok });
+}
+{
+  const win = onDisk(path.join(REPO, 'src/lib/usage-window.js')) || '', dash = onDisk(path.join(REPO, 'src/lib/usage-dashboard.js')) || '', app = onDisk(path.join(REPO, 'src/lib/app.js')) || '';
+  const ed = win.slice(win.indexOf('function renderPricingEditor('), win.indexOf('  const pricing = (state.data && state.data.pricing)'));
+  const tr = win.slice(win.indexOf('function renderTrend('), win.indexOf('function drawBars('));
+  const wires = {
+    costOfRow: win.includes('const costOfRow = (r) => costWords(r, t, fmtCost, fmtNum, { pricesHeld: PRICES_HELD });'),
+    paint: win.includes('    PRICES_HELD = pricesHeldOf(state.data);\n'),
+    head: /const said = pf && pf\.held \? heldWordsOf\(\{ code: 'prices_unread' \}\)/.test(win),
+    editor: ed.includes('  if (pricesHeldOf(state.data)) {') && ed.includes("heldWordsOf({ code: 'prices_unread' })") && ed.includes('    return wrap;') && !ed.includes("t('Save')") && !ed.includes("createElement('input')"),
+    trend: tr.indexOf("if (metricKey === 'cost' && PRICES_HELD)") > 0 && tr.indexOf("if (metricKey === 'cost' && PRICES_HELD)") < tr.indexOf("document.createElement('canvas')"),
+    bars: win.includes("const barVal = (r, metric) => (r ? (metric === 'cost' && !PRICES_HELD ? r.cost : r.totalTokens) : 0) || 0;") && (win.match(/barVal\(/g) || []).length >= 5 && !/metric === 'cost' \? r\.cost : r\.totalTokens/.test(win),   // stale-pins: kept (an absence check: no bar of the window takes a cost length but through barVal)
+    csv: win.includes('  const lines = usageCsvLines(d, t);\n') && !win.includes('r.cost.toFixed(4)'),   // stale-pins: kept (an absence check: the CSV cell is built in the pure module now, never in the window)
+    toast: win.includes("r && r.code === 'prices_unread' ? heldWordsOf(r) :"),
+    dashRow: dash.includes('const rowCost = (r) => costWords(r, t, fmtCost, fmtTok, { pricesHeld: PRICES_HELD }).text;'),
+    dashPaint: (dash.match(/PRICES_HELD = pricesHeldOf\(data\);/g) || []).length === 2,
+    dashPanel: dash.includes("if (PRICES_HELD && mlist.some((m) => m.key === 'cost')) {") && dash.includes("heldWordsOf({ code: 'prices_unread' })"),
+    dashNote: dash.includes('costWords(data.totals, t, fmtCost, fmtTok, { pricesHeld: PRICES_HELD }).note'),
+    exportRow: app.includes("s.pricing?.unread ? (() =>") && app.includes('Your edited prices cannot be read right now, so this backup leaves them out'),
+  };
+  ok(Object.values(wires).every(Boolean), 'PINS (must 4): every wire of the page asks the hold — the window\'s cost words, its paint, its head, the editor (no table, no Save), the trend (no bar, no dollar axis), every bar\'s length (tokens while held), the CSV, the save toast; the dashboard\'s row words, both paints, the cost panel, the totals note; the export dialog\'s held row', wires);
+}
+{
+  // r3748 should: the estimator writes NO fit to rates.json while the prices are held (memory only), and does once they read
+  const UE = require('../src/usage-estimator.js');
+  const ad = path.join(root, 'anchors-held'); fs.mkdirSync(ad, { recursive: true, mode: 0o700 });
+  let heldNow = true;
+  const e = new UE.UsageEstimator({ anchorsDir: ad, usageHistory: { *_events() { }, _cost: () => 0, pricesHeld: () => (heldNow ? { file: 'pricing.json', code: 'EIO', since: 1 } : null) }, resolveIdentity: () => null, lagS: 0 });
+  const rf = path.join(ad, 'rates.json');
+  e._persistRates('acct:made-up-acct', [{ bucket: 'made-up' }], 1); e.flushRates();
+  const whileHeld = onDisk(rf);
+  heldNow = false; e._persistRates('acct:made-up-acct', [{ bucket: 'made-up' }], 1); e.flushRates();
+  let after = null; try { after = JSON.parse(onDisk(rf)); } catch { after = null; }
+  try { e.close(); } catch { }
+  ok(whileHeld === null && !!after && !!after['acct:made-up-acct'], 'the estimator writes NO fit to rates.json while the prices are held (a fit at the defaults, memory only) — and writes it once they read', { whileHeld, after: after && Object.keys(after) });
+  const bf = onDisk(path.join(REPO, 'src/ledger-slot-backfill.js')) || '';
+  ok(/const uh = new UsageHistory\(\{ dataDir, homeDir: path\.join\(dataDir, '\.no-home'\) \}\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(uh\.pricesHeld && uh\.pricesHeld\(\)\) \{[^\n]*throw new Error\(/.test(bf), 'the ledger backfill\'s re-learn throws FIRST while the prices are held (before any estimator is made): its rates are never learned at the defaults', null);
 }
 
 console.log('④ RED CONTROL');

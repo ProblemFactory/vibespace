@@ -11,7 +11,7 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
 import { tailOf } from './account-tails.js'; // B-ba7d: a usage row carries no key tail — the person's read does
-import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
+import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords, pricesHeldOf, usageCsvLines } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -74,6 +74,9 @@ const fmtCost = (n) => '$' + num(n || 0, { minimumFractionDigits: 2, maximumFrac
 let PRICES_HELD = false;   // r3145 unit 2: set at each paint from the answer's `prices.held` — every cost reads «prices not known»
 const costOfRow = (r) => costWords(r, t, fmtCost, fmtNum, { pricesHeld: PRICES_HELD });
 const fmtRowCost = (r) => costOfRow(r).text;
+// r3748 must 3: a bar's length while the person's prices are HELD goes by its tokens — a share of costs priced at the defaults is a
+// default figure too (its words say «prices not known»)
+const barVal = (r, metric) => (r ? (metric === 'cost' && !PRICES_HELD ? r.cost : r.totalTokens) : 0) || 0;
 const fmtPct = (r) => (Math.round((r || 0) * 1000) / 10) + '%';
 
 export function openUsageWindow(app, opts = {}) {
@@ -256,7 +259,7 @@ export function openUsageWindow(app, opts = {}) {
     }
     // r3145 unit 2: the person's prices HELD (the costs say «prices not known») or started again from the defaults after torn bytes —
     // said once, in place, at the window's head (the editor's view too)
-    PRICES_HELD = !!(state.data && state.data.prices && state.data.prices.held);
+    PRICES_HELD = pricesHeldOf(state.data);
     { const pf = state.data && state.data.prices; const said = pf && pf.held ? heldWordsOf({ code: 'prices_unread' }) : pf && pf.torn ? pricesTornWords(pf.torn, t) : null;
       if (said) { const w = document.createElement('div'); w.className = 'usage-warn usage-prices-held'; w.textContent = said; root.appendChild(w); } }
     const body = document.createElement('div'); body.className = 'usage-body';
@@ -498,6 +501,15 @@ function renderControls(app, state, load, rerender) {
 // /api/usage-stats/pricing (merges), then reloads the dashboard so costs update.
 function renderPricingEditor(state, rerender, reload) {
   const wrap = document.createElement('div'); wrap.className = 'usage-pricing';
+  // r3748 must 2: while the person's prices are HELD the answer's table is VibeSpace's defaults — the editor shows NO table as theirs
+  // (no rates, no inputs, no Save): the hold's words in its place, and the way back (a save would be refused by name anyway)
+  if (pricesHeldOf(state.data)) {
+    const n = document.createElement('div'); n.className = 'usage-note usage-prices-held'; n.textContent = heldWordsOf({ code: 'prices_unread' }); wrap.appendChild(n);
+    const back = document.createElement('button'); back.className = 'usage-btn'; back.textContent = t('Cancel');
+    back.onclick = () => { state.view = 'dash'; rerender(); };
+    const actions = document.createElement('div'); actions.className = 'usage-pricing-actions'; actions.appendChild(back); wrap.appendChild(actions);
+    return wrap;
+  }
   const pricing = (state.data && state.data.pricing) || { tiers: {}, accounts: {} };
   // Accounts from the UNFILTERED union — the editor must list every account,
   // not just whatever the currently-active backend/account filter left visible
@@ -647,7 +659,7 @@ function renderPricingEditor(state, rerender, reload) {
     // and stay in the editor (the inputs still hold the edits) on failure.
     const r = await fetchJson('/api/usage-stats/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
     if (!r || r.error) {
-      showToast(t('Prices not saved: {msg}', { msg: r?.error || t('the server did not answer') }), { type: 'error' });
+      showToast(t('Prices not saved: {msg}', { msg: r && r.code === 'prices_unread' ? heldWordsOf(r) : (r?.error || t('the server did not answer')) }), { type: 'error' });   // r3748 should: the held code in the page's words (zh, ja)
       save.disabled = false;
       return;
     }
@@ -700,6 +712,9 @@ function renderTrend(d, state) {
   const sec = section(t('Daily trend'));
   const series = d.series || [];
   const metricKey = state.metric;
+  // r3748 must 3: the cost trend while the person's prices are HELD draws no bar and no dollar axis (each a default price read as
+  // theirs): the hold's words in the chart's place, as the rows say «prices not known»
+  if (metricKey === 'cost' && PRICES_HELD) { const n = document.createElement('div'); n.className = 'usage-note usage-prices-held'; n.textContent = heldWordsOf({ code: 'prices_unread' }); sec.appendChild(n); return sec; }
   const canvas = document.createElement('canvas'); canvas.className = 'usage-canvas';
   sec.appendChild(canvas);
   requestAnimationFrame(() => drawBars(canvas, series, metricKey));
@@ -757,7 +772,7 @@ function renderBilling(d) {
   note.textContent = t('Subscription vs API key are kept separate — subscription usage is covered by your plan; the cost shown is the API-equivalent for reference.');
   sec.appendChild(note);
   const rows = d.groups.billing || [];
-  const max = Math.max(...rows.map(r => r.cost), 1);
+  const max = Math.max(...rows.map(r => barVal(r, 'cost')), 1);
   for (const r of rows) {
     const m = BILLING_META[r.key] || { label: () => r.key, cls: 'global' };
     sec.appendChild(barRow(m.label(), r, max, 'cost', { cls: 'bill-' + m.cls }));
@@ -771,7 +786,7 @@ function renderGroup(title, rows, state, opts = {}) {
   // a row whose price is unknown sorts as $0 among the costs: it stays in view, said, never cut off as the smallest bill (B-d578 P1-b)
   const list = metric === 'cost' ? keepUnpriced(rows, opts.limit || 10) : (rows || []).slice(0, opts.limit || 10);
   if (!list.length) { sec.appendChild(emptyLine()); return sec; }
-  const max = Math.max(...list.map(r => metric === 'cost' ? r.cost : r.totalTokens), 1);
+  const max = Math.max(...list.map(r => barVal(r, metric)), 1);
   for (const r of list) {
     let label = r.key;
     if (opts.badge && r.name) label = r.name;
@@ -791,7 +806,7 @@ function renderGroup(title, rows, state, opts = {}) {
 }
 
 // ── ORIGIN (2026-09-10) ──
-const originVal = (cell, metric) => cell ? (metric === 'cost' ? cell.cost : cell.totalTokens) : 0;
+const originVal = (cell, metric) => barVal(cell, metric);
 const originText = (cell, metric) => metric === 'cost' ? fmtRowCost(cell || {}) : fmtNum(cell ? cell.totalTokens : 0);   // a cell's own words (its unknown part said)
 /** "Conversation $1.20 · Subagents $3.40 · Workflows $0.10" — only the origins
  *  this row actually has, so a plain conversation does not grow two zeroes. */
@@ -823,7 +838,7 @@ function renderOrigin(d, state) {
   const metric = state.metric;
   const cells = Object.fromEntries(rows.map(r => [r.key, r]));
   sec.appendChild(originStack(cells, metric));
-  const max = Math.max(...rows.map(r => metric === 'cost' ? r.cost : r.totalTokens), 1);
+  const max = Math.max(...rows.map(r => barVal(r, metric)), 1);
   for (const key of ORIGIN_ORDER) {
     const r = cells[key];
     if (!r) continue;
@@ -963,7 +978,7 @@ function sectionGrid(sections) {
   return g;
 }
 function barRow(label, r, max, metric, opts = {}) {
-  const v = metric === 'cost' ? r.cost : r.totalTokens;
+  const v = barVal(r, metric);
   const row = document.createElement('div'); row.className = 'usage-bar-row' + (opts.small ? ' small' : '');
   const pct = Math.max(1, (v / max) * 100);
   const valStr = metric === 'cost' ? escHtml(fmtRowCost(r)) : fmtNum(r.totalTokens);
@@ -983,17 +998,11 @@ function emptyLine() { const e = document.createElement('div'); e.className = 'u
 
 function exportCsv(d) {
   if (!d) return;
-  // estCost = the PRICED part; a row whose every request has an unknown price leaves it EMPTY (never 0), and the
-  // unpricedTokens column says what each row leaves out (B-d578 P1-b — a provider's model with no price row) — the column
-  // is there ONLY when the answer has an unknown part: a hub with no provider exports exactly the release's file (r1131 item 4)
-  const anyUnknown = unpricedOf(d.totals || {}) !== null;
-  const lines = [['dimension', 'key', 'name', 'type', 'requests', 'sessions', 'input', 'cacheWrite', 'cacheRead', 'output', 'totalTokens', 'estCost', ...(anyUnknown ? ['unpricedTokens'] : [])].join(',')];
-  for (const [dim, rows] of Object.entries(d.groups || {})) {
-    for (const r of rows) {
-      const u = unpricedOf(r);
-      lines.push([dim, csvq(r.key), csvq(r.name || ''), r.type || '', r.requests, r.sessions, r.input, r.cacheWrite, r.cacheRead, r.output, r.totalTokens, u && u.requests >= r.requests ? '' : r.cost.toFixed(4), ...(anyUnknown ? [u ? u.tokens : 0] : [])].join(','));
-    }
-  }
+  // the lines are PURE usageCsvLines (src/lib/usage-cost-words.js): estCost = the PRICED part, EMPTY for a row whose every request has
+  // an unknown price, the unpricedTokens column only when the answer has an unknown part (B-d578 P1-b, r1131 item 4) — and while the
+  // person's prices are HELD every estCost EMPTY with a `prices` column saying «prices not known» (r3748 must 1: no cell of the file is
+  // a dollar figure at the defaults; the tokens are the person's own figures, so the file is still written)
+  const lines = usageCsvLines(d, t);
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1001,7 +1010,6 @@ function exportCsv(d) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 
 // ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── singleton; no title-bar icon today (unchanged)
 registerWindowType({

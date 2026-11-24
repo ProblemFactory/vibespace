@@ -1233,6 +1233,9 @@ class UsageEstimator {
   // archives and drops this file runs inside the boot's migrations, between server.js's settleRates and reloadRates.
   _persistRates(identityKey, rates, nAnchors) {
     if (this._closed) return; // usage-relearn-stepped round 2 (small 4): an estimator let go writes nothing more
+    // r3748 should (r3145 unit 2): while the person's prices are HELD a fit is learned from costs at VibeSpace's defaults — it stays in
+    // memory (the quota estimate's minutes, re-learned on its TTL after the lift) and is never written to rates.json
+    { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; if (uh && typeof uh.pricesHeld === 'function' && uh.pricesHeld()) return; }
     // lane hub-loop-stalls commit 2: through THE STORE WRITER (its own thread; on the owner's hub this write held the loop
     // twice ≥ 1 s in six hours). The file is read at the first persist after a (re)load and kept here; each persist merges
     // into that copy and the writer takes its latest text. A lost last write costs a re-learn of that identity's rates from
