@@ -313,10 +313,22 @@ ok(!k7x.during.kept && !k7x.after.diskOff, 'RED CONTROL (the release\'s read: a 
 console.log('⑧ desktop-apps-hosts.json — torn bytes set aside, never written over');
 const TORNK = '{"hosts":{"dev-off":{"apps":';
 const tornKeeperRun = async (KM) => {
-  const w = keeperWorld(KM, { text: TORNK });
-  w.k.noteInstalled('dev-x', { platform: 'win32', rows: [], total: 0, truncated: false, listedAt: T0 });   // a save while the set-aside is out: it waits
-  const during = !fs.existsSync(w.file) || w.onDisk() === TORNK;   // moved already, or still the torn bytes — never written over
-  { const p = w.k._remoteAsiding && w.k._remoteAsiding(); if (p) await p; } await tick(); await w.k.whenRemoteWritten();
+  // r3985 (lane bl-loop-b): THE RACE PLACED, never a fixed wait. The keeper sets the torn bytes aside by an async rename; the scene
+  // HOLDS that rename (fs.promises.rename of the keeper's file waits on a gate) until the save has been made and judged, so the save
+  // meets the set-aside out by construction, and «never written over» is ONE read (its bytes; ENOENT once moved) — the scene's old
+  // existsSync-then-read let the rename land between the two (red twice under load in other lanes' runs, green alone)
+  let release; const gate = new Promise((r) => { release = r; });
+  const realRename = fs.promises.rename;
+  fs.promises.rename = async function (a, b) { if (String(a).endsWith(KM.REMOTE_FILE)) await gate; return realRename.call(this, a, b); };
+  let w, during = false;
+  try {
+    w = keeperWorld(KM, { text: TORNK });
+    w.k.noteInstalled('dev-x', { platform: 'win32', rows: [], total: 0, truncated: false, listedAt: T0 });   // a save while the set-aside is out (held): it waits
+    await w.k.whenRemoteWritten();   // whatever that save owes the writer has landed (nothing, when it waits for the set-aside)
+    try { during = w.onDisk() === TORNK; } catch (e) { during = !!(e && e.code === 'ENOENT'); }   // still the torn bytes (or moved) — never written over
+    release();
+    { const p = w.k._remoteAsiding && w.k._remoteAsiding(); if (p) await p; } await tick(); await w.k.whenRemoteWritten();
+  } finally { release(); fs.promises.rename = realRename; }
   const names = fs.readdirSync(w.kdir).filter((f) => f.startsWith(KM.REMOTE_FILE + '.corrupt-'));
   const disk = fs.existsSync(w.file) ? JSON.parse(fs.readFileSync(w.file, 'utf8')) : {};
   return { during, asides: names.length, keptAside: names.length === 1 && fs.readFileSync(path.join(w.kdir, names[0]), 'utf8') === TORNK, diskX: !!(disk.installed || {})['dev-x'], held: !!w.k._remoteHeld() };
@@ -325,6 +337,10 @@ const k8 = await tornKeeperRun(K0);
 ok(k8.during && k8.keptAside && k8.diskX && !k8.held, 'torn bytes at the keeper\'s start: set aside OFF the loop (their bytes kept), a save made meanwhile waits for it, then the keeper writes a fresh file', k8);
 const k8x = await tornKeeperRun(MUT.load('src/server/desktop-app-keeper.js', anchored(KSRC, "    else if (a.state === 'corrupt') asideRemote(a);\n", '', 'torn bytes written over'), 'mr-keeper-torn'));
 ok(k8x.asides === 0, 'RED CONTROL (torn bytes not set aside, the release\'s road): the next save writes over them — red', k8x);
+// r3985: the placed race's own red — a copy whose save does NOT wait for the set-aside (both guards cut: saveRemote's and the
+// producer's): with the rename held, that save writes a fresh file over the torn bytes before they are moved — red
+const k8w = await tornKeeperRun(MUT.load('src/server/desktop-app-keeper.js', anchored(anchored(KSRC, '    if (remoteHeld || remoteAsiding) { remoteDirty = true; if (remoteHeld && !remoteHeld.said) {', '    if (remoteHeld) { remoteDirty = true; if (remoteHeld && !remoteHeld.said) {', 'the save not waiting for the set-aside'), '        produce: () => { if (remoteHeld || remoteAsiding) { remoteDirty = true; return null; }', '        produce: () => { if (remoteHeld) { remoteDirty = true; return null; }', 'the producer not waiting for the set-aside'), 'mr-keeper-torn-nowait'));
+ok(!k8w.during, 'RED CONTROL (the save not waiting for the set-aside, the race placed: the set-aside\'s rename held): the save writes over the torn bytes before they are moved — red', k8w);
 
 // ── ⑨ B-0248 step 2, unit 3 (lane bl-loop-b, 主开发 r3320 / r3651): the paired machines' file is written by THE STORE WRITER ─
 // The release wrote it by a synchronous temp + rename on the loop (the 5 s tick while a machine's app or a viewer's input moved):
@@ -363,8 +379,10 @@ console.log('⑨ B-0248 unit 3: desktop-apps-hosts.json written off the loop; a 
   // (b) A FAILED WRITE IS SAID (once), the file stays owed and is written again at the next save
   const failRun = async (KM, { full = true } = {}) => {
     const kdir = path.join(ROOT, `k${++wn}`); fs.mkdirSync(kdir, { recursive: true }); fs.writeFileSync(path.join(kdir, KM.REMOTE_FILE), HOSTS);
-    // the writer's own clock is PLACED: each refusal's retry backoff is stepped past at once (never waited out), and every save
-    // here is asked through whenRemoteWritten() (durable: urgent, so the debounce never waits on the placed clock)
+    // the writer's own clock is PLACED and stepped past each refusal's backoff before the next save, so that save's urgent write is
+    // due by the writer's own reckoning; every save is asked through whenRemoteWritten() (durable: urgent, so the debounce never
+    // waits on the placed clock). A retry the writer ALREADY ARMED before the step still waits its real time — stepping the clock
+    // re-arms no timer (lane bl-mail's measure, r3931: 1000–1006 ms real) — so each refusal here costs about a second of the suite
     const wclock = { t: 1e9 }, S = STAND.make(kdir + '-stand'), wr = SW.create({ log: quiet, workerPath: S.path, now: () => wclock.t }), said = [];
     const log = { log: (...a) => said.push(a.join(' ')), warn: (...a) => said.push(a.join(' ')), error() { } };
     const k = KM.create({ dataDir: kdir, env: () => ({ PATH: '/usr/bin:/bin', HOME: kdir }), broadcast: () => { }, serverSetting: () => undefined, display: fakeDisplay, log, serverNotice: () => 1,

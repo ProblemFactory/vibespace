@@ -726,7 +726,12 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     remoteDirty = false;
     try {
       remoteWriter.dirty(remoteFile, { name: 'desktop-apps-hosts.write', debounceMs: 500, makeDir: true,
-        // held or its torn bytes moving aside by the write's moment: nothing is written over it (owed again, saved at the lift)
+        // held or its torn bytes moving aside by the write's moment: nothing is written over it (owed again, saved at the lift).
+        // NO ROAD REACHES THIS TODAY (主开发 r3884): a hold begins only at the keeper's create (before any save) or inside a read again
+        // while already held, and a set-aside only at the create's torn read or a read again while held; while either stands,
+        // saveRemote returns before it hands anything. So no handed write ever meets a hold here. Were a road ever to reach it, null
+        // would let the writer settle as on disk (whenRemoteWritten true for a withheld change): answer the writer's LATER mark then,
+        // with a leg that places the hold between the mark and the landing
         produce: () => { if (remoteHeld || remoteAsiding) { remoteDirty = true; return null; } return JSON.stringify(remote, null, 2); },
         onWritten: (ok, e) => {
           if (ok) { if (remoteWriteFailed) { remoteWriteFailed = false; log.log?.(`[desktop] ${REMOTE_FILE} is written again`); } return; }
