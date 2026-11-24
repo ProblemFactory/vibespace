@@ -158,6 +158,9 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-machines-b — test-dir-slice-remote: the four other legs judged by their landing (主开发 r2691; tests only)
 - ② (the home), ③ (~/work), the base-relative ask beside a dead base and the file ask reached through a link judged a healthy typed run by the hub's FIRST reply (its own 200 ms wait) under their hosts' 250 ms bound. Now one helper (landedAsk): wait on the landing in the hub's cache (the hosts' 20 s net), read the order where a hung run is out (the base-relative ask: ~/work/sub landed while ~/net/sub's run is out), ask again and judge that reply, end any stall of its own (asserted; a pid seen dead is never signalled again).
 
+### bl-machines-b — test-dir-slice-remote: legs 4 and 7 judged by their landing (主开发 r2789; tests only)
+- ④'s slow folder (0.3 s plus ls) had to land inside its host's 800 ms bound and a 3 s wait; ⑦'s landing step needed a healthy rest inside 250 ms. Now ④'s host carries the 20 s net and the leg waits on the landing (10 s); ⑦'s landing-step run — started while the no-stall mark is set — carries the net and is waited on (10 s), while ⑦'s hung rests keep 250 ms (their misses are its facts); ⑦ ends every live placed stall; ④'s «never marked» is read off the hub's hung marks.
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
