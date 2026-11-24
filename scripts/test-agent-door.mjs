@@ -8,6 +8,12 @@
 // the files copied there at boot, the generated helpers, the plugin shims) crosses the door — RED: a planted page route ·
 // ④ EVERY tunnel end in the tree takes the door's port (the push mounts named apart) — RED: a planted end · RED: a copy
 // that lets every path through fails ① and ②.
+// ⑤ THE HELD RECORD (r3333 unit 1 / r3337, lane lg-group-parents): data/agent-door.json that cannot be read (a PLACED refusal of
+// its read call — never a mount, never a mode change) is HELD: a fresh port this run, nothing written over it, read again off the
+// loop (the family's own name, SRH.readAgainOf); at its read the door ALSO listens on the kept port (the same loopback address,
+// the same verdict: a request with no sign-in refused there as on the first), new tunnels take it, the conversations that took
+// the fresh port are named; the kept port BUSY: said, the record kept, tried at the next start; a record naming the fresh port:
+// one listener; torn bytes kept aside once and this run's port written. RED: the release's read (a failed read minted over it).
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -112,14 +118,15 @@ console.log('— ④ EVERY tunnel end in the tree takes the door\'s port —');
 const SINK = /\.reverseForward\(|reverse:\s*`/;
 const PUSH = new Map([['src/machine-mounts.js', [/connectLocal: \(\) => net\.connect\(door\.port, '127\.0\.0\.1'\)/, 'a push mount\'s tunnel ends at ITS OWN door (src/server/push-mount-door.js: that mount\'s /dav for its own pass — test-push-mount-door)']]]);
 const sinksOf = (f, text) => text.split('\n').map((l, i) => ({ f, at: i + 1, l })).filter((x) => !/^\s*(?:\/\/|\*)/.test(x.l) && SINK.test(x.l));
-const badOf = (sinks) => sinks.filter((x) => !x.l.includes('tunnelPort(PORT)') && !(PUSH.has(x.f) && PUSH.get(x.f)[0].test(x.l))).map((x) => `${x.f}:${x.at}`);
+const ENDS = /tunnelPort\(PORT(?:, id)?\)/;   // r3333 unit 1: an ssh -R end hands its conversation's id (the ones a restart costs, named at a held record's lift)
+const badOf = (sinks) => sinks.filter((x) => !ENDS.test(x.l) && !(PUSH.has(x.f) && PUSH.get(x.f)[0].test(x.l))).map((x) => `${x.f}:${x.at}`);
 const walk = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);
 {
   const files = ['server.js', ...walk('src')];
   const texts = files.map((f) => [f, read(f)]);
   const sinks = texts.flatMap(([f, t]) => sinksOf(f, t));
   const bad = badOf(sinks);
-  const where = [...new Set(sinks.filter((x) => x.l.includes('tunnelPort(PORT)')).map((x) => x.f))].sort();
+  const where = [...new Set(sinks.filter((x) => ENDS.test(x.l)).map((x) => x.f))].sort();
   ok(sinks.length >= 7 && !bad.length && ['server.js', 'src/server/boot-restore.js', 'src/spawn/dial.js', 'src/spawn/ssh.js'].every((f) => where.includes(f)), `${sinks.length} tunnel sinks in ${files.length} files: the session roads (${where.join(', ')}) end at tunnelPort(PORT); the push mounts in their one form`, bad);
   const pushes = texts.flatMap(([f, t]) => t.split('\n').map((l, i) => ({ f, at: i + 1, l })).filter((x) => /push\(\s*['"]-R['"]/.test(x.l)));
   ok(pushes.length === 1 && pushes[0].f === 'src/hosts.js' && /push\('-R', reverse\)/.test(pushes[0].l), 'the one place an ssh -R goes into an argv (hosts.js sshArgs) passes its caller\'s target', pushes.map((x) => `${x.f}:${x.at}`));
@@ -132,6 +139,102 @@ const walk = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true
   ok(planted.length === 4, 'RED CONTROL: a planted sink with a named connectLocal, one over two lines, an ssh -R to localhost, and a push-mount file\'s sink that is not the push form are each seen', planted);
   ok(/require\('\.\/agent-listener\.js'\)\.start\(\{ app, stateFile: path\.join\(rootDir, 'data', 'agent-door\.json'\), avoid: PORT \}\)/.test(read('src/server/mounts-plugins-wiring.js')), 'the hub starts the door over its own app, with its kept port, never on the hub\'s own');
 }
+
+console.log('— ⑤ THE HELD RECORD: a door whose record cannot be read never mints over it —');
+const SRH = require('../src/store-read-hold.js');
+const realRead = fs.promises.readFile;
+let refused = null;   // the record whose read call is refused (PLACED: the read call answers EIO — the file and its mode untouched)
+fs.promises.readFile = function (p, ...rest) { if (refused && String(p) === refused) return Promise.reject(Object.assign(new Error(`EIO: i/o error, open '${p}'`), { code: 'EIO' })); return realRead.call(this, p, ...rest); };
+const until = async (f, ms = 4000) => { const t0 = Date.now(); while (!f() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20)); return f(); };
+const SIGNED = { Authorization: 'Bearer vsst_' + 'leg' };
+const signedApp = (req, res) => { if (req.headers.authorization !== SIGNED.Authorization) { res.statusCode = 401; res.end('{"error":"no sign-in"}'); return; } res.end('app'); };
+const reach = (port, host) => new Promise((r) => { const c = net.connect(port, host); c.once('connect', () => { c.destroy(); r('open'); }); c.once('error', (e) => r(e.code)); });
+const freePort = async () => { for (;;) { const n = AL.PORT_LO + Math.floor(Math.random() * (AL.PORT_HI - AL.PORT_LO + 1)); const s = net.createServer(); const free = await new Promise((r) => { s.once('error', () => r(false)); s.listen(n, '127.0.0.1', () => r(true)); }); if (free) { await new Promise((r) => s.close(r)); return n; } } };
+/** a door started over a record whose read is refused → { port, logs } (started again while its fresh port is the kept one) */
+const heldStart = async (D, file, keptN) => {
+  for (let i = 0; i < 4; i++) {
+    const logs = [];
+    refused = file;
+    const port = await D.start({ app: signedApp, log: (m) => logs.push(m), stateFile: file });
+    if (port !== keptN) return { port, logs };
+    await D.close();
+  }
+  throw new Error('four fresh ports equal to the kept one');
+};
+const keptRecord = async (label) => { const file = path.join(tmp, `${label}-agent-door.json`); const K = await freePort(); const bytes = JSON.stringify({ port: K }) + '\n'; fs.writeFileSync(file, bytes, { mode: 0o600 }); return { file, K, bytes }; };
+const liftOf = async (file, logs) => { refused = null; const lifted = await SRH.readAgainOf(path.basename(file)); await until(() => logs.some((m) => /its record read again/.test(m))); return lifted; };
+{
+  const { file, K, bytes } = await keptRecord('held');
+  const { port: F, logs } = await heldStart(AL, file, K);
+  const during = { bytes: fs.readFileSync(file, 'utf8'), mode: fs.statSync(file).mode & 0o777, tunnel: AL.tunnelPort(1234), listed: SRH.holds().filter((h) => h.file === path.basename(file) && h.held).length };
+  AL.tunnelPort(1234, 'sess-held-1'); AL.tunnelPort(1234);   // an ssh -R takes it (named); a dialed tunnel asks at a connection (names none)
+  const onF = { a: await get(F, '/api/agent/status', SIGNED), n: await get(F, '/api/agent/status'), l: await get(F, '/login'), wide: await reach(F, '127.0.0.2') };
+  const lifted = await liftOf(file, logs);
+  const after = { bytes: fs.readFileSync(file, 'utf8'), tunnel: AL.tunnelPort(1234), tunnelLater: AL.tunnelPort(1234, 'sess-after') };
+  const onK = { a: await get(K, '/api/agent/status', SIGNED), n: await get(K, '/api/agent/status'), l: await get(K, '/login'), wide: await reach(K, '127.0.0.2') };
+  const onF2 = await get(F, '/api/agent/status', SIGNED);
+  await AL.close();
+  ok(F !== K && during.tunnel === F && during.bytes === bytes && during.mode === 0o600 && during.listed === 1 && logs.some((m) => /could not be read \(EIO\)/.test(m)), 'HELD: a record whose read failed (EIO) — this run\'s door is on a FRESH port, the record\'s bytes and mode are untouched (nothing minted over it), the family\'s list names the hold', { F, K, during, logs });
+  ok(onF.a.body === 'app' && onF.n.status === 401 && onF.l.status === 404 && onF.wide === 'ECONNREFUSED', 'HELD: the fresh port is the door as at the release — an agent route with its sign-in crosses, one with none is refused, the login page is 404, bound to 127.0.0.1 only (127.0.0.2 refused)', onF);
+  ok(lifted === true && onK.a.body === 'app' && onK.n.status === 401 && onK.n.body === onF.n.body && onK.l.status === 404 && onK.l.body === onF.l.body && onK.wide === 'ECONNREFUSED' && onF2.body === 'app', 'LIFTED by the family\'s read again: the door ALSO listens on the KEPT port — the same verdict there (no sign-in refused with the same answer, the login page 404), the same address (127.0.0.2 refused); the fresh port still answers (its tunnels keep their tools this run)', { onK, onF2 });
+  ok(after.tunnel === K && after.tunnelLater === K && after.bytes === bytes, 'LIFTED: new tunnels take the kept port, and the record is never written over (its bytes as before)', after);
+  const line = logs.find((m) => /ALSO listens on its kept port/.test(m)) || '';
+  ok(line.includes(`1 remote conversation(s) took this run's port ${F}`) && line.includes('sess-held-1') && !line.includes('sess-after') && /lose their agent tools/.test(line), 'the lift\'s journal line counts and names the conversations whose ssh -R took the fresh port while it was held (a dialed tunnel\'s ask names none; one after the lift is not counted)', line);
+}
+{
+  const { file, K, bytes } = await keptRecord('busy');
+  const { port: F, logs } = await heldStart(AL, file, K);
+  const squat = net.createServer(); await new Promise((r2) => squat.listen(K, '127.0.0.1', r2));
+  await liftOf(file, logs);
+  const busy = logs.filter((m) => new RegExp(`kept port ${K} is busy`).test(m));
+  const tp = AL.tunnelPort(1234), kept = fs.readFileSync(file, 'utf8');
+  await AL.close(); await new Promise((r2) => squat.close(r2));
+  const again = await AL.start({ app: signedApp, log: () => { }, stateFile: file });
+  await AL.close();
+  ok(busy.length === 1 && /record is kept as it is/.test(busy[0]) && tp === F && kept === bytes && again === K, 'the KEPT PORT BUSY at the lift: said once by name, the door stays on the fresh port, the record KEPT as it is (never rewritten to the fresh port) — the next start listens on the kept port', { busy, tp, F, K, kept, again });
+}
+{
+  const { file, K } = await keptRecord('equal');
+  const { port: F, logs } = await heldStart(AL, file, K);
+  const same = JSON.stringify({ port: F }) + '\n';
+  fs.writeFileSync(file, same, { mode: 0o600 });   // (the leg writes it, never the door: the record read after the hold names the fresh port)
+  await liftOf(file, logs);
+  const r = { F, tp: AL.tunnelPort(1234), bytes: fs.readFileSync(file, 'utf8'), a: await get(F, '/api/agent/status', SIGNED), lines: logs.filter((m) => /its record read again/.test(m)), errs: logs.filter((m) => /busy|failed|EADDRINUSE/.test(m)) };
+  await AL.close();
+  ok(r.lines.length === 1 && /names this run's port/.test(r.lines[0]) && !r.errs.length && r.tp === F && r.bytes === same && r.a.body === 'app', 'a record that reads after the hold naming the FRESH port: one listener, no error, nothing written', r);
+}
+{
+  const file = path.join(tmp, 'torn-agent-door.json');
+  const torn = '{"port": 2';
+  fs.writeFileSync(file, torn, { mode: 0o600 });
+  const logs = [];
+  const F = await AL.start({ app: signedApp, log: (m) => logs.push(m), stateFile: file });
+  await until(() => logs.some((m) => /its record read again/.test(m)));
+  const copiesNow = () => fs.readdirSync(tmp).filter((n) => n.startsWith('torn-agent-door.json.corrupt-'));
+  const copies = copiesNow();
+  const rec = (() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } })();
+  const r = { F, copies, copyBytes: copies.length ? fs.readFileSync(path.join(tmp, copies[0]), 'utf8') : null, rec, mode: fs.statSync(file).mode & 0o777, tp: AL.tunnelPort(1234) };
+  await AL.close();
+  const F2 = await AL.start({ app: signedApp, log: () => { }, stateFile: file }); await AL.close();
+  ok(r.copies.length === 1 && r.copyBytes === torn && r.rec && r.rec.port === F && r.mode === 0o600 && r.tp === F && F2 === F && copiesNow().length === 1, 'TORN BYTES: kept aside ONCE (the same bytes), then this run\'s port is written (0600) — the next start listens on it', { r, F2, logs });
+}
+{
+  // RED: the release's read — any failed read was «no port kept», and the start minted a new port OVER the record
+  const SRC = read('src/server/agent-listener.js');
+  const anchor = "      held = run.hold.start(a) === 'held';";
+  ok(SRC.includes(anchor), 'control: the start\'s hold (the anchor)');
+  const M = mutantCopies('agent-door-release-read', REPO);
+  const Rel = M.load('src/server/agent-listener.js', anchored(SRC, anchor, '      held = false;', 'release-read'), 'release-read');
+  const { file, bytes } = await keptRecord('release');
+  refused = file;
+  const F = await Rel.start({ app: signedApp, log: () => { }, stateFile: file });
+  refused = null;
+  const now = fs.readFileSync(file, 'utf8');
+  await Rel.close();
+  ok(now !== bytes && JSON.parse(now).port === F, 'RED CONTROL: the release\'s read (a failed read is «no port») mints a new port OVER the record — every remote conversation would lose its agent tools', { bytes, now, F });
+}
+fs.promises.readFile = realRead;
+ok(/reverse: `\$\{rport\}:127\.0\.0\.1:\$\{require\('\.\.\/server\/agent-listener\.js'\)\.tunnelPort\(PORT, id\)\}`/.test(read('src/spawn/ssh.js')) && /reverse: `\$\{rport\}:127\.0\.0\.1:\$\{require\('\.\/agent-listener\.js'\)\.tunnelPort\(PORT, id\)\}`/.test(read('src/server/boot-restore.js')), 'the two ssh -R ends (a new remote session, a re-adopted one) hand their conversation\'s id: the ends that bake the port into an argv are the ones a later restart costs');
 
 console.log('— RED: a door that lets every path through —');
 {

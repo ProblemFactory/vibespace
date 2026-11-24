@@ -23,9 +23,23 @@
  * restart reaches its tools again when it restarts.
  * `tunnelPort(fallback)` = this door's port once it listens. Until then (or if it could not listen) it is the hub's own
  * port, as before, said once in the journal: a remote session keeps its tools.
+ * THE RECORD IS HELD WHEN IT CANNOT BE READ (r3333 unit 1 / r3337, lane lg-group-parents, the store-read family): the release read
+ * ANY failure of data/agent-door.json as «no port kept» and minted a new port OVER it — every remote conversation lost its agent
+ * tools until it restarted. Now its one read goes through the family's helper (src/store-read-hold.js):
+ *   · HELD (a read that failed): the door listens on a FRESH port for this run and writes NOTHING (the record is never written
+ *     over); the record is read again off the loop; at its read the door ALSO listens on the kept port — ONE http server, its
+ *     second listening socket hands each connection to it (the same handler and verdict, the same loopback address, never wider)
+ *     — and new tunnels take the kept one. The kept port BUSY at that read: said once by name, the record KEPT as it is, tried
+ *     again at the next start (the door stays on the fresh port). A record that names the fresh port: one listener, no error.
+ *     The conversations whose ssh -R took the fresh port during the hold (`tunnelPort(PORT, id)`) are named in the lift's journal
+ *     line: they lose their tools at the next restart (a cost told apart from a fault); nothing more is built for them.
+ *   · TORN BYTES: kept aside ONCE, then this run's port is written (as a start over no record writes one).
  */
 const http = require('http');
+const net = require('net');
 const fsp = require('fs').promises;
+const SR = require('../store-read.js');
+const SRH = require('../store-read-hold.js');   // r3333 unit 1: the family's hold (one read again off the loop, torn bytes kept aside once)
 const PD = require('../path-dot-segment.js'); // r1317: a path with a dot segment is never a door — the auth layer's and the push mount's door's verdict
 
 const AGENT_PREFIX = '/api/agent/';
@@ -45,20 +59,59 @@ function allowed(url) {
 /** the door's ports: outside Linux's (32768–60999), macOS' and Windows' (49152–65535) ephemeral ranges */
 const PORT_LO = 20000, PORT_HI = 32767;
 const inRange = (n, avoid) => Number.isInteger(n) && n >= PORT_LO && n <= PORT_HI && n !== Number(avoid);
-/** the kept port (0 = none yet, a file that says no port, or one out of the range / the hub's own) */
-async function keptPort(stateFile, avoid) {
-  if (!stateFile) return 0;
-  try { const j = JSON.parse(await fsp.readFile(stateFile, 'utf8')); const n = Number(j && j.port); return inRange(n, avoid) ? n : 0; } catch { return 0; }
+/** the kept port of a record that READ (0 = a record that says no port, or one out of the range / the hub's own) */
+const portOf = (rec, avoid) => { const n = Number(rec && rec.port); return inRange(n, avoid) ? n : 0; };
+const recordValid = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const RECORD = 'agent-door.json';   // the record's base name (the wiring hands its path; the family's notice names it by this — src/lib/held-lists-words.js)
+const RECORD_WORDS = `the agent door's record (${RECORD}) could not be read — a remote conversation started now reaches its tools through a port of this run; nothing is written over the record, and it is read again by itself`;
+/** the record's ONE read (async, as before) → store-read's answer: data | missing | unreadable | corrupt */
+async function readRecord(stateFile) {
+  let read;
+  try { read = { text: await fsp.readFile(stateFile, 'utf8') }; } catch (error) { read = { error }; }
+  return SR.storeAnswer(read, { valid: recordValid });
 }
-async function keepPort(stateFile, port, log) {
+async function keepPort(stateFile, port, log, hold = null) {
   if (!stateFile) return;
+  if (hold && !hold.writable('the agent door\'s port')) return;   // r3333 unit 1: never over a held record (said once by the helper)
   const tmp = `${stateFile}.${process.pid}.tmp`;
   try { await fsp.writeFile(tmp, JSON.stringify({ port }) + '\n', { mode: 0o600 }); await fsp.rename(tmp, stateFile); }
   catch (e) { try { await fsp.unlink(tmp); } catch { } log(`[agent-door] its port could not be kept (${(e && e.code) || e}) — a remote session started now loses its tools at the next restart`); }
 }
 
-let state = { server: null, port: 0, said: false };
+const fresh = () => ({ server: null, port: 0, said: false, hold: null, during: null, kept: null });
+let state = fresh();   // during: the conversations whose tunnel took this run's port while the record was held; kept: the kept port's listener after the lift
 let startP = null;
+/** listen `srv` on 127.0.0.1:`port` (the door's one address) → { port } | { err } */
+const listenOn = (srv, port) => new Promise((resolve) => {
+  const onErr = (e) => resolve({ err: e });
+  srv.once('error', onErr);
+  srv.listen(port, '127.0.0.1', () => { srv.removeListener('error', onErr); resolve({ port: srv.address().port }); });
+});
+/** THE LIFT (r3337): the held record read again — after this run's port is known */
+async function lifted(run, rec, facts, { log, stateFile, avoid }) {
+  const during = run.during ? [...run.during.keys()] : [];
+  run.during = null;
+  if (run !== state || !run.server || !run.port) return;   // closed, or the door never listened (its tunnels end at the hub's own port)
+  const now = run.port, kept = rec ? portOf(rec, avoid) : 0;
+  const named = during.length ? `${during.length} remote conversation(s) took this run's port ${now} while it was held: ${during.join(', ')}` : `no remote conversation took this run's port ${now} while it was held`;
+  if (!kept) {   // torn bytes kept aside, the file gone, or a record with no port of the door's: this run's port is kept (as a start over no record keeps one)
+    await keepPort(stateFile, now, log);
+    log(`[agent-door] its record read again (${facts && facts.setAside ? `torn bytes kept aside as ${facts.setAside}` : 'no port in it'}): this run's port ${now} is kept now — ${named}; they keep their tools at the next restart`);
+    return;
+  }
+  if (kept === now) { log(`[agent-door] its record read again: it names this run's port ${now} — one listener; ${named}`); return; }
+  const keptServer = net.createServer((sock) => run.server.emit('connection', sock));   // the SAME http server answers (one handler, one verdict)
+  const r = await listenOn(keptServer, kept);
+  if (run !== state) { try { keptServer.close(); } catch { } return; }
+  if (!r.port) {
+    log(`[agent-door] its record read again: its kept port ${kept} is busy (${(r.err && r.err.code) || r.err}) — the door stays on ${now} for this run; the record is kept as it is (${kept}) and tried again at the next start; ${named}`);
+    return;
+  }
+  try { keptServer.unref(); } catch { }
+  keptServer.on('error', (e) => log(`[agent-door] ${(e && e.code) || e} on its kept port — the door keeps listening`));
+  run.kept = { server: keptServer, port: kept };
+  log(`[agent-door] its record read again: the door ALSO listens on its kept port ${kept} — a remote conversation started before this run reaches its tools again, and new tunnels end there; ${named}${during.length ? ` — at the next restart they lose their agent tools until they restart (the door listens on ${kept} then)` : ''}`);
+}
 /** Start the door over the hub's own `app` (an express handler) — once per process, on its kept port when it has one
  *  (`stateFile`), never on `avoid` (the hub's own port). → Promise<port | 0> */
 function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid = 0 } = {}) {
@@ -73,35 +126,50 @@ function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid
     app(req, res);
   });
   state.server = server;
-  const listen = (port) => new Promise((resolve) => {
-    const onErr = (e) => resolve({ err: e });
-    server.once('error', onErr);
-    server.listen(port, '127.0.0.1', () => { server.removeListener('error', onErr); resolve({ port: server.address().port }); });
-  });
+  const run = state;   // this start's own state (a close() makes a new one)
+  const listen = (port) => listenOn(server, port);
   startP = (async () => {
-    const want = await keptPort(stateFile, avoid);
+    // r3333 unit 1: the record's one read through the family's helper — HELD when it cannot be read (never «no port kept»)
+    const a = stateFile ? await readRecord(stateFile) : { state: 'missing' };
+    let held = false;
+    if (stateFile && run === state) {
+      run.hold = SRH.create({ file: stateFile, valid: recordValid, aside: (mark) => `${stateFile}.corrupt-${mark}`, words: () => RECORD_WORDS, code: 'agent_door_unread', log: (m) => log(`[agent-door] ${m}`),
+        onLift: (rec, facts) => { const p = startP; Promise.resolve(p).then(() => lifted(run, rec, facts, { log, stateFile, avoid })).catch((e) => log(`[agent-door] its lift failed: ${(e && e.message) || e}`)); } });
+      held = run.hold.start(a) === 'held';
+      if (held) run.during = new Map();
+    }
+    const want = !held && a.state === 'data' ? portOf(a.value, avoid) : 0;
     let r = want ? await listen(want) : { err: null };
     if (want && !r.port) log(`[agent-door] its kept port ${want} is taken (${(r.err && r.err.code) || r.err}) — a new one; a remote session started before this restart reaches its tools again when it restarts`);
     for (let i = 0; !r.port && i < 24; i++) { const n = PORT_LO + Math.floor(Math.random() * (PORT_HI - PORT_LO + 1)); if (inRange(n, avoid)) r = await listen(n); }
     if (!r.port) { log(`[agent-door] no free port in ${PORT_LO}–${PORT_HI} — one the system picks (an outgoing connection could hold it across a restart)`); r = await listen(0); }
-    if (!r.port) { log(`[agent-door] could not listen (${(r.err && r.err.code) || r.err}) — remote tunnels end at the hub's own port, as before`); state.port = 0; return 0; }
+    if (!r.port) { log(`[agent-door] could not listen (${(r.err && r.err.code) || r.err}) — remote tunnels end at the hub's own port, as before`); run.port = 0; return 0; }
     try { server.unref(); } catch { }
     server.on('error', (e) => log(`[agent-door] ${(e && e.code) || e} — the door keeps listening`)); // an accept error (EMFILE) is said, never an uncaught exit
-    state.port = r.port;
-    if (r.port !== want) await keepPort(stateFile, r.port, log);
-    log(`[agent-door] remote conversations' tunnels end at 127.0.0.1:${state.port} (agent routes only${r.port === want ? ', its kept port' : ''})`);
-    return state.port;
+    run.port = r.port;
+    if (!held && r.port !== want) await keepPort(stateFile, r.port, log, run.hold);
+    log(held ? `[agent-door] its record could not be read — remote conversations' tunnels end at 127.0.0.1:${run.port} for this run (agent routes only; nothing written over the record — at its read the door also listens on the port it keeps)`
+      : `[agent-door] remote conversations' tunnels end at 127.0.0.1:${run.port} (agent routes only${r.port === want ? ', its kept port' : ''})`);
+    return run.port;
   })();
   return startP;
 }
 /** resolves once the door has its port (at once when it was never started): a re-adopted session waits for it */
 function ready() { return startP || Promise.resolve(state.port); }
-/** The port a reverse tunnel connects to: the agent door's, else (not listening) the hub's own. */
-function tunnelPort(fallback) {
-  if (state.port) return state.port;
+/** The port a reverse tunnel connects to: the agent door's (its kept port once a held record read and it listens there too), else
+ *  (not listening) the hub's own. `who` = the conversation whose ssh -R takes it into its argv: named at the lift when it took this
+ *  run's port while the record was held (r3337 (4)) — a dialed tunnel asks at each connection and names none */
+function tunnelPort(fallback, who) {
+  const p = state.kept ? state.kept.port : state.port;
+  if (p) { if (state.during && who) state.during.set(String(who), p); return p; }
   if (!state.said) { state.said = true; try { console.log('[agent-door] not listening — this tunnel ends at the hub\'s own port'); } catch { } }
   return fallback;
 }
-function close() { const s = state.server; state = { server: null, port: 0, said: false }; startP = null; return new Promise((r) => { if (!s) return r(); try { s.close(() => r()); } catch { r(); } }); }
+function close() {
+  const { server: s, kept: k, hold: h } = state; state = fresh(); startP = null;
+  if (h) h.stop();
+  const shut = (x) => new Promise((r) => { if (!x) return r(); try { x.close(() => r()); } catch { r(); } });
+  return Promise.all([shut(s), shut(k && k.server)]).then(() => { });
+}
 
 module.exports = { allowed, start, ready, tunnelPort, close, AGENT_PREFIX, EXACT, PORT_LO, PORT_HI };

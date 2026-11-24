@@ -1285,7 +1285,7 @@ async function readoptOrphanKeeperSessions() {
     const metaFileW = path.join(BUFFERS_DIR, id + '.json');
     const inner = `export PATH="$HOME/.vibespace/bin:$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; `
       + `exec node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${meta.keeperSid} __VS_OFFSET__`;
-    const sshArgs = [...hosts.sshArgs(h, rport ? { reverse: `${rport}:127.0.0.1:${require('./agent-listener.js').tunnelPort(PORT)}` } : {}), '-T', '--', inner]; // lane lg-remote-hardening (D8b): the agent door
+    const sshArgs = [...hosts.sshArgs(h, rport ? { reverse: `${rport}:127.0.0.1:${require('./agent-listener.js').tunnelPort(PORT, id)}` } : {}), '-T', '--', inner]; // lane lg-remote-hardening (D8b): the agent door
     let ptyProc;
     try {
       // THE TRANSPORT'S ENV IS BUILT (lane spawn-env-debts, 2026-10-20): agentEnv() as ws-create's r6Env (the server's,
