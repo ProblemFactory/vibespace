@@ -1499,7 +1499,10 @@ console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAK
     const REG10 = require('../src/server/browser-engines.js').create({ loader: LD10, dataDir: path.join(PROOT, 'data') });
     const KP10 = REG10.kernelPath(EID);
     fs.mkdirSync(path.dirname(KP10), { recursive: true });
-    fs.writeFileSync(KP10, `#!/bin/sh\nunset NODE_OPTIONS\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
+    // B-21cc (主开发 r3599 / r3601): the vault fill reads THIS conversation's current tab from the driver's own tab list, which keeps
+    // only Chrome-shaped ids (32 hex) — the kernel here answers as a real Chromium kernel does (VS_FAKE_KERNEL_IDS=chrome: the fixture's
+    // `hexIds`); before, its short ids were all dropped and the fill was refused «no tab is marked current» (the candidate's row 634)
+    fs.writeFileSync(KP10, `#!/bin/sh\nunset NODE_OPTIONS\nexport VS_FAKE_KERNEL_IDS=chrome\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
     const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return pid !== process.pid && (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR)); } catch { return false; } });
     const until10 = async (fn, ms = 8000) => { const t0 = Date.now(); for (;;) { let v; try { v = fn(); } catch { v = false; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(25); } };
     const KEY10 = 'bk-0000f10a', TOKEN10 = 'vsst_mc10_login', SID10 = 'sess-mc10', CID10 = 'conv-mc10';

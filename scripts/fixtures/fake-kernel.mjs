@@ -1053,7 +1053,12 @@ if (asProgram) {
   if (dir) { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'fake-kernel-argv.json'), JSON.stringify(argv)); } catch { /* best effort */ } }
   const first = argv.filter((x) => !x.startsWith('-')).pop() || 'about:blank';
   const feats = flag('vibespace-kernel-features'), proxy = flag('proxy-server'); // lane engine-spi-egress: the egress variant
-  const k = await startFakeKernel({ port: flag('remote-debugging-port') || 0, dir, firstUrl: first, mode: { ...(feats ? { features: feats.split(',').filter(Boolean) } : {}), ...(proxy ? { proxy, proxyBypass: flag('proxy-bypass-list') || '' } : {}) } });
+  // B-21cc (主开发 r3599 / r3601): run as a PROGRAM, the kernel takes Chrome's own target-id shape (32 hex, `hexIds`) when its kernel
+  // script says so (VS_FAKE_KERNEL_IDS=chrome) — a section whose REAL keeper reads the driver's tab list (it keeps only Chrome-shaped
+  // ids, as a real Chromium kernel gives) needs it; the other sections keep the short ids they were written on (an env, never an
+  // argv switch: the kernel's argv is recorded and read by its own legs)
+  const chromeIds = process.env.VS_FAKE_KERNEL_IDS === 'chrome';
+  const k = await startFakeKernel({ port: flag('remote-debugging-port') || 0, dir, firstUrl: first, mode: { ...(feats ? { features: feats.split(',').filter(Boolean) } : {}), ...(proxy ? { proxy, proxyBypass: flag('proxy-bypass-list') || '' } : {}), ...(chromeIds ? { hexIds: true } : {}) } });
   process.stderr.write(`\nDevTools listening on ${k.wsUrl}\n`);
   for (const s of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(s, () => k.close().then(() => process.exit(0)));
 }
