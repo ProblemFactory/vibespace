@@ -17,6 +17,10 @@
 //   ⑨ 主开发 r3788 (round w80b4230f's must): THE START LINE's WALK — every field by four states (absent, empty, of the wrong kind, of the
 //     wrong value): only ABSENT is defaulted, every named value that is not this process's own is refused by name — RED each check cut
 //     (the wrong uid's red OPENS against a witness); what the start took is said once (a defaulted home / uid, a throwaway start)
+//   ⑩ 主开发 r3926 (round w123c6963's must): THE LINE's VALUES ARE CLAIMS, NEVER PLACES — a right value in another spelling (a root with a
+//     trailing slash, a folder with a dot segment and no root, a folder with a trailing slash), a witness at the home and the table lost:
+//     HELD by the folder's own words — RED the raw text handed on (two OPEN, one held by a misleading word); the facts' builder names no
+//     field of the line but the two marks (a static claim)
 import fs from 'node:fs';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -42,11 +46,12 @@ const UID = typeof process.getuid === 'function' ? process.getuid() : null;
 const SIGNIN_SRC = fs.readFileSync(path.join(REPO, 'src/interface/signin.js'), 'utf-8');
 const siCut = (from, to, label) => MUT.load('src/interface/signin.js', anchored(SIGNIN_SRC, from, to, label), `signin-${label}`);
 function install(name) {
-  const base = path.join(ROOT, name), root = path.join(base, 'root'), data = path.join(root, 'data'), home = path.join(base, 'home');
+  fs.mkdirSync(path.join(ROOT, name), { recursive: true });
+  const base = fs.realpathSync(path.join(ROOT, name)), root = path.join(base, 'root'), data = path.join(root, 'data'), home = path.join(base, 'home');   // the real path: the places main.js computes are real
   fs.mkdirSync(data, { recursive: true }); fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   return { base, root, data, home, table: path.join(data, 'auth.json'), id: path.join(data, SW.INSTANCE_FILE) };
 }
-const witnessCfg = (it, extra = {}) => ({ folder: it.data, root: it.root, home: it.home, uid: UID, throwaway: false, declared: false, varTmp: path.join(it.base, 'vartmp'), ...extra });   // varTmp: the install's own scratch rung (never the machine's /var/tmp)
+const witnessCfg = (it, extra = {}) => ({ folder: it.data, root: it.root, throwaway: false, declared: false, scratch: { home: it.home, varTmp: path.join(it.base, 'vartmp') }, ...extra });   // scratch: the install's own home and var-tmp rung (a suite's seam: no start line sets it)g (never the machine's /var/tmp)
 const homeWitness = (it) => path.join(it.home, '.vibespace', 'local', SW.witnessFileOf(it.root));
 const lines = [];
 const log = { log: () => { }, warn: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) };
@@ -157,7 +162,7 @@ console.log('⑦ the start line\'s named fields, judged by name (src/interface/m
   const ill = [{ folder: '' }, { folder: null }, { folder: it.data, root: 'rel/root' }, { folder: it.data, home: 'rel/home' }, { folder: it.data, throwaway: 'yes' }, { folder: it.data, declared: 1 }];
   const illWhy = []; for (const f of ill) illWhy.push(await M.signinWhy({ ...base, ...f }, UID));
   ok(illWhy.every((w) => typeof w === 'string' && /signin\.|data folder/.test(w)), 'every other ill-named field — an empty or null folder, a relative root or home, a throwaway or declared that is not true or false: a bad start BY NAME', illWhy);
-  ok(/not an absolute path/.test(String(bad)) && /not a whole number/.test(String(badUid)) && good === null && older === null && M.witnessOf(base) === null && M.witnessOf({ ...base, folder: it.data }).root === it.root, 'a relative folder or a uid that is no number: a bad start BY NAME; the fields well named, or none at all (an older supervisor): accepted', { bad, badUid, good, older });
+  ok(/not an absolute path/.test(String(bad)) && /not a whole number/.test(String(badUid)) && good === null && older === null && (await M.witnessFor(base)) === null && (await M.witnessFor({ ...base, folder: it.data })).root === it.root, 'a relative folder or a uid that is no number: a bad start BY NAME; the fields well named, or none at all (an older supervisor): accepted', { bad, badUid, good, older });
 }
 
 console.log('⑧ 主开发 r3629 (round w43tjwjp5): the plain form\'s defaults for an unnamed home or uid; the declaration\'s cell is the plain form\'s own');
@@ -166,22 +171,22 @@ console.log('⑧ 主开发 r3629 (round w43tjwjp5): the plain form\'s defaults f
   const OLD = 'vi-0e0e0e0e0e0e', NOW = 'vi-0f0f0f0f0f0f';
   const withEnv = async (k, v, fn) => { const was = process.env[k]; process.env[k] = v; try { return await fn(); } finally { if (was === undefined) delete process.env[k]; else process.env[k] = was; } };
   const plantAt = (file, it, id) => { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); fs.writeFileSync(file, J(SW.witnessDoc({ root: it.root, dataDir: it.data, id }))); };
-  /** must 4: the line names the folder (and `named`), a witness of ANOTHER folder at the place the default reaches — this process's HOME (a
-   *  scratch home for the leg) or the var-tmp rung of this process's uid */
-  const dflt = async (name, { named = {}, at = 'home', Mm = M } = {}) => {
+  /** must 4 (and r3926): the line names the folder; a witness of ANOTHER folder at a place THIS PROCESS reads — its HOME (a scratch home
+   *  for the leg, as a supervisor's HOME would be) or the var-tmp rung of its uid */
+  const dflt = async (name, { at = 'home', Mod = SI } = {}) => {
     const it = install(name); plantId(it, NOW);
-    const home = path.join(it.base, 'process-home'), vt = path.join(it.base, 'vartmp');
+    const home = path.join(it.base, 'process-home'), vt = path.join(it.base, 'vartmp'); fs.mkdirSync(home, { recursive: true, mode: 0o700 });
     plantAt(at === 'home' ? path.join(home, '.vibespace', 'local', SW.witnessFileOf(it.root)) : path.join(vt, `vibespace-${UID}`, SW.witnessFileOf(it.root)), it, OLD);
-    const w = Mm.witnessOf({ file: it.table, folder: it.data, ...named });
-    const t = await withEnv('HOME', home, async () => { const x = tableOf(it, { witness: { ...w, varTmp: vt } }); await x.load(); return x; });
+    const w = await M.witnessFor({ file: it.table, folder: it.data });
+    const t = await withEnv('HOME', home, async () => { const x = tableOf(it, { witness: { ...w, scratch: { varTmp: vt } }, Mod }); await x.load(); return x; });
     return { w, t };
   };
-  const h1 = await dflt('dflt-home'), h2 = await dflt('dflt-uid', { named: { home: path.join(ROOT, 'dflt-uid', 'home') }, at: 'var-tmp' });
-  ok(h1.w.home === undefined && h1.w.uid === undefined && !!h1.t.held && h1.t.held.kind === 'folder' && !!h2.t.held && h2.t.held.kind === 'folder',
-    `the folder named, the home or the uid NOT named: this process's own are read (the plain form's defaults) — a witness of another folder there HOLDS it (${h1.t.held && h1.t.held.kind}, ${h2.t.held && h2.t.held.kind})`);
-  const Mold = MUT.load('src/interface/main.js', anchored(MAIN_SRC, "home: typeof signin.home === 'string' ? signin.home : undefined, uid: Number.isInteger(signin.uid) ? signin.uid : undefined,", "home: signin.home || '', uid: Number.isInteger(signin.uid) ? signin.uid : null,", 'no-place'), 'main-no-place');   // stale-pins: kept — the released «no place», the red's text
-  const r1 = await dflt('dflt-home-red', { Mm: Mold }), r2 = await dflt('dflt-uid-red', { named: { home: path.join(ROOT, 'dflt-uid-red', 'home') }, at: 'var-tmp', Mm: Mold });
-  ok(!r1.t.held && !r2.t.held, 'RED CONTROL: the unnamed home and uid read as «no place» — no witness read, the start OPENS against one');
+  const h1 = await dflt('dflt-home'), h2 = await dflt('dflt-uid', { at: 'var-tmp' });
+  ok(!('home' in h1.w) && !('uid' in h1.w) && !!h1.t.held && h1.t.held.kind === 'folder' && !!h2.t.held && h2.t.held.kind === 'folder',
+    `the witness carries no home or uid: this process's own are read (the plain form's) — a witness of another folder at its home, or at its uid's var-tmp rung, HOLDS it (${h1.t.held && h1.t.held.kind}, ${h2.t.held && h2.t.held.kind})`);
+  const RNP = siCut('    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, env: {},', "    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, home: '', uid: null, env: {},", 'no-place');
+  const r1 = await dflt('dflt-home-red', { Mod: RNP }), r2 = await dflt('dflt-uid-red', { at: 'var-tmp', Mod: RNP });
+  ok(!r1.t.held && !r2.t.held, 'RED CONTROL: the home and the uid read as «no place» (the released form) — no witness read, the start OPENS against one');
 
   // must 5: THE DECLARATION's CELL, the plain form's own — the page's «off» gives way to the line's password, the turn-off is refused
   const onDisk = (it) => { try { return JSON.parse(fs.readFileSync(it.table, 'utf-8')); } catch { return null; } };
@@ -254,16 +259,22 @@ console.log('⑨ 主开发 r3788: the start line\'s walk — only an ABSENT valu
     ...(UID !== 0 ? [['uid', 'wrong value (0)', { ...base, uid: 0 }, 'refused']] : []),
     ['throwaway', 'absent', base, 'default'], ['throwaway', 'empty', { ...base, throwaway: '' }, 'refused'], ['throwaway', 'wrong kind', { ...base, throwaway: 'yes' }, 'refused'],
     ['declared', 'absent', base, 'default'], ['declared', 'empty', { ...base, declared: '' }, 'refused'], ['declared', 'wrong kind', { ...base, declared: 1 }, 'refused'],
+    // 主开发 r3926: A RIGHT VALUE IN ANOTHER SPELLING — accepted, and the witness's places are the COMPUTED ones, never the line's text
+    ['folder', 'another spelling (a trailing slash)', { file: it.table, folder: `${it.data}/` }, 'spelling'],
+    ['folder', 'another spelling (a dot segment)', { file: it.table, folder: `${it.root}/./data` }, 'spelling'],
+    ['root', 'another spelling (a trailing slash)', { ...base, root: `${it.root}/` }, 'spelling'],
+    ['home', 'another spelling (a trailing slash)', { ...base, home: `${os.homedir()}/` }, 'spelling'],
   ];
   const wrong = [];
   for (const [field, state, line, want] of CELLS) {
-    const why = await M.signinWhy(line, UID), w = M.witnessOf(line);
+    const why = await M.signinWhy(line, UID), w = why === null ? await M.witnessFor(line) : null;
     const okCell = want === 'refused' ? typeof why === 'string' && why.includes(`signin.${field}`)
       : want === 'today' ? why === null && w === null
+      : want === 'spelling' ? why === null && !!w && w.folder === it.data && w.root === it.root && !('home' in w) && !('uid' in w)
       : why === null && !!w && (field === 'root' ? w.root === it.root : field === 'home' || field === 'uid' ? w[field] === undefined : w[field] === false);
     if (!okCell) wrong.push({ field, state, want, why, w });
   }
-  ok(wrong.length === 0, `the walk's ${CELLS.length} cells: an absent root / home / uid / throwaway / declared is DEFAULTED (the folder's parent, this process's home and uid, false); every empty, ill-kinded or wrong value is refused BY NAME (exit 2); a line naming no field keeps today's reading`, wrong);
+  ok(wrong.length === 0, `the walk's ${CELLS.length} cells: an absent root / home / uid / throwaway / declared is DEFAULTED (the folder's parent, this process's home and uid, false); every empty, ill-kinded or wrong value is refused BY NAME (exit 2); a right value in another spelling is accepted and the witness carries the COMPUTED places; a line naming no field keeps today's reading`, wrong);
   // THE MUST's SCENE: a start line naming ANOTHER account's uid — refused; RED the check cut: the line is taken and the table OPENS against a witness
   const mustLine = { ...base, uid: OTHER_UID };
   const why = await M.signinWhy(mustLine, UID);
@@ -276,12 +287,12 @@ console.log('⑨ 主开发 r3788: the start line\'s walk — only an ABSENT valu
   const muLine = { file: mu.table, folder: mu.data, uid: OTHER_UID };
   const taken = await Mu.signinWhy(muLine, UID);
   const was = process.env.HOME; process.env.HOME = uhome;
-  let tu; try { tu = tableOf(mu, { witness: { ...Mu.witnessOf(muLine), varTmp: path.join(mu.base, 'vartmp') } }); await tu.load(); } finally { process.env.HOME = was; }
-  ok(taken === null && !tu.held, 'RED CONTROL: the uid check cut — the line is TAKEN and the table OPENS though this account\'s home holds a witness of another folder (the round\'s scene)');
+  let tu; try { tu = tableOf(mu, { witness: { ...(await Mu.witnessFor(muLine)), scratch: { varTmp: path.join(mu.base, 'vartmp') } } }); await tu.load(); } finally { process.env.HOME = was; }
+  ok(taken === null && !!tu.held && tu.held.kind === 'folder', 'RED CONTROL: the uid check cut — the line is TAKEN, and the table STILL HOLDS: the places are this process\'s own, the line\'s uid moves no place (r3926: the claim is only compared)');
   const reds = [
-    ['home-own-cut', "    if (signin.home !== undefined && !(await sameFolder(signin.home, os.homedir()))) return", "    if (false) return", { ...base, home: it.home }],
-    ['root-own-cut', "    if (signin.root !== undefined && path.resolve(signin.root) !== path.dirname(folder)) return", "    if (false) return", { ...base, root: other.root }],
-    ['folder-own-cut', "    if (folder !== path.dirname(path.resolve(signin.file))) return", "    if (false) return", { file: it.table, folder: other.data }],
+    ['home-own-cut', "    if (signin.home !== undefined && (await realForm(signin.home)) !== (await realForm(os.homedir()))) return", "    if (false) return", { ...base, home: it.home }],
+    ['root-own-cut', "    if (signin.root !== undefined && (await realForm(signin.root)) !== at.root) return", "    if (false) return", { ...base, root: other.root }],
+    ['folder-own-cut', "    if ((await folderForm(signin.folder)) !== at.folder) return", "    if (false) return", { file: it.table, folder: other.data }],
     ['stray-cut', "    if (stray.length) return", "    if (false) return", { file: it.table, root: it.root, uid: UID }],
   ];
   const acceptedCut = [];
@@ -290,12 +301,46 @@ console.log('⑨ 主开发 r3788: the start line\'s walk — only an ABSENT valu
   // what the start TOOK is said once — a defaulted home and uid, a throwaway start
   const said = (re) => lines.filter((l) => re.test(l)).length;
   const sd = install('walk-said'); plantId(sd, 'vi-0c1d2e3f4a5b'); lines.length = 0;
-  const td = tableOf(sd, { witness: { ...M.witnessOf({ file: sd.table, folder: sd.data }), varTmp: path.join(sd.base, 'vartmp') } }); await td.load(); await td.ensure({});
+  const td = tableOf(sd, { witness: { ...(await M.witnessFor({ file: sd.table, folder: sd.data })), scratch: { varTmp: path.join(sd.base, 'vartmp') } } }); await td.load(); await td.ensure({});
+  const placesSaid = said(/the sign-in witness is read at this process's own places — the data folder .* the uid \d+ \(a folder, root, home or uid the start line names is compared, never used\)/);
   const st = install('walk-throwaway'); plantId(st, 'vi-0d1e2f3a4b5c');
   const tt = tableOf(st, { witness: witnessCfg(st, { throwaway: true }) }); await tt.load();
-  ok(said(/names no home and uid \(signin\.home \/ signin\.uid\): this process's own are read/) === 1 && said(/a throwaway start \(signin\.throwaway\): no sign-in witness is read or written/) === 1,
-    'what the start took is SAID ONCE in the journal: the home and the uid defaulted (which ones it read), and a throwaway start (no witness read)', lines.slice(-4));
+  ok(placesSaid === 1 && said(/a throwaway start \(signin\.throwaway\): no sign-in witness is read or written/) === 1,
+    'what the start took is SAID ONCE in the journal: the places it read (this process\'s own data folder, home and uid), and a throwaway start (no witness read)', lines.slice(-4));
   ok(!SIGNIN_SRC.includes("'required'"), 'src/interface/signin.js spells no value of the declaration (the stand-in environment is gone; the cell is the shared module\'s)');   // stale-pins: kept — a deliberate absence check
+}
+
+console.log('⑩ 主开发 r3926: the start line\'s values are CLAIMS, never places — every place is computed by this process from the table\'s own folder');
+{
+  const MAIN_SRC = fs.readFileSync(path.join(REPO, 'src/interface/main.js'), 'utf-8');
+  const OLD = 'vi-1a2b3c4d5e6f', NOW = 'vi-6f5e4d3c2b1a';
+  const SPELLINGS = [
+    ['a root with a trailing slash', (it) => ({ file: it.table, folder: it.data, root: `${it.root}/` })],
+    ['a folder with a dot segment and no root', (it) => ({ file: it.table, folder: `${it.root}/./data` })],
+    ['a folder with a trailing slash', (it) => ({ file: it.table, folder: `${it.data}/` })],
+  ];
+  /** the replaced folder's scene: its own id, the table LOST, a witness of ANOTHER folder at this process's home (a scratch HOME) */
+  const scene = async (name, lineOf, Mm = M) => {
+    const it = install(name); plantId(it, NOW);
+    const home = path.join(it.base, 'process-home'), hw = path.join(home, '.vibespace', 'local', SW.witnessFileOf(it.root));
+    fs.mkdirSync(path.dirname(hw), { recursive: true, mode: 0o700 }); fs.writeFileSync(hw, J(SW.witnessDoc({ root: it.root, dataDir: it.data, id: OLD })));
+    const line = lineOf(it), why = await Mm.signinWhy(line, UID), w = await Mm.witnessFor(line);
+    const was = process.env.HOME; process.env.HOME = home;
+    let t; try { t = tableOf(it, { witness: { ...w, scratch: { varTmp: path.join(it.base, 'vartmp') } } }); await t.load(); } finally { process.env.HOME = was; }
+    return { why, held: t.held ? { kind: t.held.kind, unread: !!t.held.unread } : null, idNow: idIn(it.id) };
+  };
+  const got = []; for (const [label, lineOf] of SPELLINGS) got.push([label, await scene(`spell-${got.length}`, lineOf)]);
+  ok(got.every(([, g]) => g.why === null && g.held && g.held.kind === 'folder' && !g.held.unread && g.idNow === NOW),
+    `each right value in another spelling is TAKEN, and the table is HELD by the folder's own words (another folder's witness at this process's home), never open, nothing minted — ${got.map(([l, g]) => `${l}: ${g.held ? g.held.kind + (g.held.unread ? ' (unread)' : '') : 'OPEN'}`).join('; ')}`, got);
+  const RAW = MUT.load('src/interface/main.js', anchored(MAIN_SRC, '  return witnessOf(at, signin);', '  return witnessOf({ folder: signin.folder, root: signin.root || path.dirname(signin.folder) }, signin);', 'raw-text'), 'main-raw-text');
+  const red = []; for (const [label, lineOf] of SPELLINGS) red.push([label, await scene(`spell-red-${red.length}`, lineOf, RAW)]);
+  ok(!red[0][1].held && !red[1][1].held && !!red[2][1].held && red[2][1].held.unread,
+    `RED CONTROL: the line's raw text handed on as the places — the two first spellings name another witness file and the start OPENS, the third finds the file and holds by a word that misleads («not this folder's witness») — ${red.map(([l, g]) => `${l}: ${g.held ? g.held.kind + (g.held.unread ? ' (unread)' : '') : 'OPEN'}`).join('; ')}`, red);
+  // the facts' builder names no field of the line but the two marks; the table's facts read no home, uid or place of the line
+  const builder = (MAIN_SRC.split('\n').find((l) => l.startsWith('const witnessOf = ')) || '');
+  const marksOnly = /^const witnessOf = \(places, \{ throwaway, declared \} = \{\}\) => \(\{ folder: places\.folder, root: places\.root, throwaway: throwaway === true, declared: declared === true \}\);$/.test(builder);
+  ok(marksOnly && !/signin\./.test(builder) && !/witness\.(home|uid|varTmp)\b/.test(SIGNIN_SRC) && MAIN_SRC.includes('  return witnessOf(at, signin);'),
+    'the facts\' builder (src/interface/main.js witnessOf) takes the COMPUTED places and the line\'s two marks only; the table\'s facts read no home, uid or place of the line (only a suite\'s scratch seam)', builder.slice(0, 200));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

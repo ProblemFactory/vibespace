@@ -54,11 +54,20 @@ async function ownFolderWhy(dir, what, uid = typeof process.getuid === 'function
 }
 /** the link's folder judged → null (this account's alone) | the words of why not. `uid` = this process's account. */
 const linkFolderWhy = (link, uid) => ownFolderWhy(path.dirname(path.resolve(link)), "the link's folder", uid);
-/** two paths name the same folder: equal resolved, else equal real paths (a link to the home is the home); one that cannot be read is not */
-async function sameFolder(a, b) {
-  if (path.resolve(a) === path.resolve(b)) return true;
-  try { return (await fsp.realpath(a)) === (await fsp.realpath(b)); } catch { return false; }
+/** THE WITNESS's PLACES, COMPUTED BY THIS PROCESS (主开发 r3926) exactly as the plain form computes them: the data folder is the one the
+ *  table itself lives in, under its install root's REAL path (the plain form's root is server.js's own folder, which node resolves),
+ *  its own last segment kept (a data folder that is a link stays one, as the plain form's); the home and the uid are this process's own
+ *  (src/signin-witness.js startFactsSync's defaults — the system's word for this account, which honours the HOME the process was
+ *  started with, exactly as the plain form: a supervisor that starts it with another HOME moves both forms alike) → { folder, root } | { why } */
+async function placesOf(file) {
+  const folderRaw = path.dirname(path.resolve(file));
+  let root; try { root = await fsp.realpath(path.dirname(folderRaw)); } catch (e) { return { why: `the sign-in table's install folder ${path.dirname(folderRaw)} cannot be read (${(e && e.code) || 'error'})` }; }
+  return { folder: path.join(root, path.basename(folderRaw)), root };
 }
+/** a claimed path in ONE normal form, to be compared: a folder resolved, its parent's real path, its own last segment kept; a root or a
+ *  home resolved to its real path (one that cannot be read keeps its resolved text, and so differs) */
+async function folderForm(p) { const r = path.resolve(p); try { return path.join(await fsp.realpath(path.dirname(r)), path.basename(r)); } catch { return r; } }
+async function realForm(p) { const r = path.resolve(p); try { return await fsp.realpath(r); } catch { return r; } }
 /** the start line's sign-in table judged → null | the words of why it is no start (piece B3b-1) */
 async function signinWhy(signin, uid) {
   if (!signin || typeof signin !== 'object' || Array.isArray(signin)) return 'the start line names no sign-in table (signin.file) — the interface holds the table and never guesses its path';
@@ -75,23 +84,34 @@ async function signinWhy(signin, uid) {
     const stray = WITNESS_FIELDS.filter((k) => signin[k] !== undefined);
     if (stray.length) return `the start line names ${stray.map((k) => `signin.${k}`).join(', ')} but no data folder (signin.folder) — a misspelled or lost folder is no start`;
   } else {
+    // 主开发 r3926: THE LINE's VALUES ARE CLAIMS, NEVER PLACES — each is checked for its kind, then COMPARED, in one normal form, with
+    // what this process computed (placesOf: the table's own folder, its root, this process's home and uid); a claim that differs is a
+    // bad start by name. Nothing after this reads the line's folder, root, home or uid: the witness is built from the computed places
     if (typeof signin.folder !== 'string' || !path.isAbsolute(signin.folder)) return `the sign-in table's data folder (signin.folder) is not an absolute path (${JSON.stringify(String(signin.folder).slice(0, 120))})`;
-    const folder = path.resolve(signin.folder);
-    if (folder !== path.dirname(path.resolve(signin.file))) return `the sign-in table's data folder (signin.folder) ${folder} is not the folder of its table ${signin.file}`;
     for (const k of ['root', 'home']) if (signin[k] !== undefined && (typeof signin[k] !== 'string' || !path.isAbsolute(signin[k]))) return `the sign-in table's ${k} (signin.${k}) is not an absolute path`;
-    if (signin.root !== undefined && path.resolve(signin.root) !== path.dirname(folder)) return `the sign-in table's root (signin.root) ${signin.root} is not its data folder's own (${path.dirname(folder)})`;
-    if (signin.home !== undefined && !(await sameFolder(signin.home, os.homedir()))) return `the sign-in table's home (signin.home) ${signin.home} is not this account's home (${os.homedir()})`;
-    const own = uid !== undefined ? uid : (typeof process.getuid === 'function' ? process.getuid() : null);
     if (signin.uid !== undefined && !Number.isInteger(signin.uid)) return 'the sign-in table\'s uid (signin.uid) is not a whole number';
-    if (signin.uid !== undefined && signin.uid !== own) return `the sign-in table's uid (signin.uid) ${signin.uid} is not this process's own (${own})`;
     for (const k of ['throwaway', 'declared']) if (signin[k] !== undefined && typeof signin[k] !== 'boolean') return `the sign-in table's ${k} (signin.${k}) is not true or false`;
+    const at = await placesOf(signin.file);
+    if (at.why) return at.why;
+    if ((await folderForm(signin.folder)) !== at.folder) return `the sign-in table's data folder (signin.folder) ${signin.folder} is not the folder of its table (${at.folder})`;
+    if (signin.root !== undefined && (await realForm(signin.root)) !== at.root) return `the sign-in table's root (signin.root) ${signin.root} is not its data folder's own (${at.root})`;
+    if (signin.home !== undefined && (await realForm(signin.home)) !== (await realForm(os.homedir()))) return `the sign-in table's home (signin.home) ${signin.home} is not this account's home (${os.homedir()})`;
+    const own = uid !== undefined ? uid : (typeof process.getuid === 'function' ? process.getuid() : null);
+    if (signin.uid !== undefined && signin.uid !== own) return `the sign-in table's uid (signin.uid) ${signin.uid} is not this process's own (${own})`;
   }
   return ownFolderWhy(path.dirname(signin.file), "the sign-in table's folder", uid);
 }
-/** B-dc3f (1): the start line's named fields → the table's witness (null: none named — today's reading, said once by the table). A home or
- *  uid NOT named is left undefined: the facts' own defaults apply (this process's home and uid), EXACTLY as the plain form's — never
- *  «no place», which read no witness and opened against one (主开发 r3629 must 4: defaulted, not refused) */
-const witnessOf = (signin) => (signin && typeof signin.folder === 'string' ? { folder: signin.folder, root: signin.root || path.dirname(signin.folder), home: typeof signin.home === 'string' ? signin.home : undefined, uid: Number.isInteger(signin.uid) ? signin.uid : undefined, throwaway: signin.throwaway === true, declared: signin.declared === true } : null);
+/** B-dc3f (1): THE TABLE's WITNESS FACTS — built from the places THIS PROCESS computed and the line's two MARKS only (主开发 r3926): it takes
+ *  no folder, root, home or uid of the line (the home and the uid are the facts' own defaults: this process's) */
+const witnessOf = (places, { throwaway, declared } = {}) => ({ folder: places.folder, root: places.root, throwaway: throwaway === true, declared: declared === true });
+/** the start line's sign-in fields (judged by signinWhy first) → the table's witness | null (the line names no folder: today's reading, said
+ *  once by the table) */
+async function witnessFor(signin) {
+  if (!signin || signin.folder === undefined) return null;
+  const at = await placesOf(signin.file);
+  if (at.why) throw Object.assign(new Error(at.why), { badStart: true });   // never «no witness»: a place that cannot be computed is no start
+  return witnessOf(at, signin);
+}
 
 /** → { iface, ready: Promise<{ port, link }>, stop() } — `pipe` = a suite's stream handed in AS the start pipe (else the
  *  descriptor VIBESPACE_START_FD names); `exit(code)` ends the process (a suite hands a spy); `startMs` the start line's bound. */
@@ -106,7 +126,7 @@ function main({ pipe = null, env = process.env, exit = (c) => process.exit(c), l
     if (folder) { const e = new Error(folder); e.badStart = true; throw e; }
     const table = await signinWhy(line.signin);       // the sign-in table is named, never guessed (piece B3b-1)
     if (table) { const e = new Error(table); e.badStart = true; throw e; }
-    const t = signinTable.create({ file: line.signin.file, clerk: line.signin.clerk || null, log, witness: witnessOf(line.signin) });
+    const t = signinTable.create({ file: line.signin.file, clerk: line.signin.clerk || null, log, witness: await witnessFor(line.signin) });
     await t.load();
     const { generated } = await t.ensure({ password: typeof line.signin.password === 'string' ? line.signin.password : '', generate: line.signin.generate === true });
     line.signin = { file: line.signin.file };   // the boot's password is not kept past its resolution
@@ -162,4 +182,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, listenAt, linkFolderWhy, signinWhy, witnessOf };
+module.exports = { main, listenAt, linkFolderWhy, signinWhy, witnessOf, witnessFor, placesOf };
