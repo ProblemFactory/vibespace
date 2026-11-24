@@ -126,6 +126,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - WHY: the release mirror run 45164852385 lost four jobs at «Install dtach»: the second mirror's apt update passed its 80 s bound (a stalled source), exit 124, before any suite ran — a second attempt of about an hour.
 - WHAT: scripts/ci-apt.sh warns on a failed second-mirror update and tries it ONCE more after CI_APT_PAUSE (20 s), the same list and bound; that third failure is the red that names it. Both dtach steps are bounded at 7 min (the worst path 380 s). test-ci-gate §2f: a leg where the paused try serves, the all-stall leg's new sequence, both bounds read.
 
+### bl-browser-a — B-dbb4 M3's smalls (the coordinator's r2435, held until lines 341 / 355 / 437 / 555 shipped in 2.369.418) + B-3dbd's kb sentence (r3331)
+- ITS SMALLS (the coordinator's r2435, round wytmkw3vi «take / take»): the agent manual and the kb scope «a key or a text never moves the keyboard» to the APP's own handle with no aim, beside where keys and text DO give the focus (a window's own handle, a showing dialog, a tree ref — as at the release), in one place; the manual names `inject_failed` for a click whose window closed between the screenshot and the click (the chained focus fails, nothing clicked); the kb says a takeover that arrives while the one call runs can leave the focus moved without the click (said, not cured). Docs only.
+- B-3dbd (r3331, «one sentence owed in the kb at your next touch»): the kb's late-look clause now says that when the put-back's look ITSELF hangs, a late ask waits up to PUT_BACK_LOOK_MS (ten seconds) past its one bound, and the journal says so.
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
