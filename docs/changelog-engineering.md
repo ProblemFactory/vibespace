@@ -407,6 +407,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - ROUND w8h1bg04h's cure (主开发 r2915, one must born of the tie: every row signed in before the update would ask at its first sign-in again): SEED THE TIE at the press from the row's own credentials (the residue's deadline included) and in the move's search for another account's untied row; the merge carries it onto the survivor. With it: a second press joins the run still out; on the lost road only this attempt's success vouches and a stale one ties nothing; a hold that cannot be made is a refusal the page shows and stops on; both refusals translated (zh / ja).
 - ITS FOLLOW (主开发 r2972, line 589's smalls): an unvouched outcome drops the row's tie (the next press seeds from the folder), never on an ask (a failed hold keeps it: its unproven sign-in is never a seed); a join onto a run whose success sits unjudged judges it first; the folded row's fingerprint leaves with the merge; the merge, join and stale-success legs gain their reds, and the refused hold on the restart road its leg and red; two said sentences in the kb.
 
+### lg-rewind B-437e files tier — row 773's cure: a session's end keeps the kept record (主开发 r2372 (1); test-egress-census)
+- The follow's r2245 (9) hook made src/server/wrapper-files.js removeWrapperFiles load the kept door, so test-wrapper-files reached src/cli-identity.js through its import graph and test-egress-census (heavy) found its carried list stale. r2372 (1) asks the hook away anyway: a session's end (a resume, an exit) is not a conversation's deletion. wrapper-files.js is the release's again, byte for byte; forgetLines stays for a delete road (none yet).
+- Leg: test-rewind-kept — the end paths' remover keeps the record and names nothing of the kept door; forgetLines takes it (its press folders stay).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)
