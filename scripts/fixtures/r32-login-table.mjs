@@ -41,8 +41,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // `tab list` (the row marked active). These worlds have no driver session, so each watch made here gets a keeper whose
 // `currentTabOf` answers the tab that watch's scene made current (`noteActiveTab`, on the watch or through the route), and refuses
 // by name when none was made current — never a guess. Every other keeper member is the world's own.
+// (主开发 r3611, row 648 at the candidate 91217121e: the MUTANTS' worlds were built from the bare module — their watch asked the REAL
+// keeper's current-tab read, which has no live browser here, and the first one threw at its setup fill; every mutant world now
+// takes the same wrapper as the table's own pass. Wrapping twice is wrapping once)
+const CURRENT_TAB_WRAPPED = Symbol('r32 current tab');
 function withCurrentTab(DmMod) {
-  return { ...DmMod, create(opts = {}) {
+  if (DmMod && DmMod[CURRENT_TAB_WRAPPED]) return DmMod;
+  return { ...DmMod, [CURRENT_TAB_WRAPPED]: true, create(opts = {}) {
     const cur = new Map();
     const k0 = opts.keeper || null;
     const keeper = k0 ? Object.assign({}, k0, { currentTabOf: async ({ profileId = '', browserKey = '' } = {}) => { const id = cur.get(String(profileId || '') + '|' + String(browserKey || '')); return id ? { ok: true, targetId: id } : { ok: false, code: 'current_tab_unreadable', error: 'VibeSpace could not read which tab this conversation is on (this world made none current) — nothing was filled; try again' }; } }) : k0;
@@ -2550,13 +2555,13 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   // address move inside the document retires a guard) above count where they fit; the laws
   // they do not reach get their own here, each RED by name on the table's cells or on the leg that states the law, and each FAILS BY
   // NAME when its anchor is gone.
-  const legMods = (DmX) => ({ req, express, WebSocket, WebSocketServer, LF, VE, GS, BK, Lm, CM, Rm, Dm: DmX, startFakeKernel });
+  const legMods = (DmX) => ({ req, express, WebSocket, WebSocketServer, LF, VE, GS, BK, Lm, CM, Rm, Dm: withCurrentTab(DmX), startFakeKernel });   // r3611: the table's own world
   const silent = () => true;
   const cellMutant = async (label, tag, apply, slice) => {
     const src = apply(bdSrc);
     if (!src || src === bdSrc) { ok(false, `MUTANT ${label}: its anchor is gone in src/server/browser-dialogs.js`); return; }
     const DmX = MUT.load('src/server/browser-dialogs.js', src, tag);
-    const res = await executeCellSet(slice, { ...baseMods, Dm: DmX });
+    const res = await executeCellSet(slice, { ...baseMods, Dm: withCurrentTab(DmX) });   // r3611: the table's own world
     const red = res.filter((r) => !r.pass).map((r) => r.cell.id);
     ok(slice.length > 0 && red.length === slice.length, `MUTANT ${label} RED on the table (${red.length}/${slice.length} cells RED)`, res.filter((r) => r.pass).map((r) => r.cell.id));
   };
@@ -2614,7 +2619,7 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
     const srcD = once(bdSrc, 'function agentDialogOf(d) { return d && d.fencedAt ? {', 'function agentDialogOf(d) { return d; /* MUTANT Q3-DIALOG */ return d && d.fencedAt ? {');
     if (srcD) {
       const DmD = MUT.load('src/server/browser-dialogs.js', srcD, 'r32-q3-dialog-words-told');
-      const r = await runR32DialogLeg({ mods: { req, Dm: DmD }, repoDir, ok: silent });
+      const r = await runR32DialogLeg({ mods: { req, Dm: withCurrentTab(DmD) }, repoDir, ok: silent });   // r3611: the table's own world
       ok(r && r.ok === false && r.leaked > 0 && r.control === true, `MUTANT Q3-DIALOG (a fenced tab's dialog told with its words) RED on the dialog leg (the typed value in ${r ? r.leaked : '?'} of its 5 views)`, r);
     } else {
       ok(false, 'MUTANT Q3-DIALOG: its anchor is gone in src/server/browser-dialogs.js (agentDialogOf)');
