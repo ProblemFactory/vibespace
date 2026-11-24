@@ -172,6 +172,29 @@ console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail 
   try { SSh = mutantCopies('transcript-door-no-handoff', REPO).load(SS_REL, anchored(SS_SRC, '  if (_jsonlCache.get(id) === entry) { _warmHandoff.delete(id); return; }\n', '  return;\n', 'the warm drops what the cache did not admit'), 'nohandoff'); } catch (e) { whyh = e.message; }
   const hox = SSh ? await handoff(SSh) : null;
   ok(!!hox && hox.rows > 0 && hox.opens >= 1 && hox.held === 0, `RED CONTROL (the warm drops what the cache did not admit): its reader opened the transcript ${hox ? hox.opens : '?'} time(s) on this thread — the parse on the loop`, hox || whyh);
+  // 主开发 r3562 (2): THE HANDOFF'S BOUND WHEN EVERY WARM ROAD HANDS OVER. The release's three warm roads (the warm, its storage
+  // retry, the sliced read when the pool is gone) put through ONE function (putUnlessNewer, its put the cure's _warmPut), so the
+  // handoff is ONE map under ONE bound whichever road hands over: seven warms whose tails the cache does not admit leave
+  // WARM_HANDOFF_MAX (4) held, the oldest pushed out (counted). RED: a copy without the bound
+  const bounded = async (M) => {
+    M._warmHandoffTestSeam({ liveMaxBytes: 1 });
+    try {
+      M.jsonlCacheClear();   // the cache and the handoff both start empty
+      const h0 = M.warmHandoffStats();
+      for (let n = 20; n < 27; n++) { const X = small(n); await M.warmSessionJsonlAsync(X.id, CWD); }
+      const h1 = M.warmHandoffStats();
+      return { holding: h1.holding, held: h1.held - h0.held, pushedOut: h1.pushedOut - h0.pushedOut };
+    } finally { M._warmHandoffTestSeam({ liveMaxBytes: null }); M.jsonlCacheClear(); }
+  };
+  const roads = (SS_SRC.match(/\bputUnlessNewer\(claudeSessionId, /g) || []).length;
+  const onePut = /const putUnlessNewer = \(id, entry\) => \{[^\n]*\)\) _warmPut\(id, entry\); \};/.test(SS_SRC);
+  const hb = await bounded(SS);
+  ok(roads === 3 && onePut && hb.held >= 5 && hb.holding === 4 && hb.pushedOut === hb.held - 4,
+    `r3562 (2) — the handoff holds at most 4 whichever warm road hands over: the three roads put through ONE function (${roads} callers of putUnlessNewer, its put _warmPut: ${onePut}); ${hb.held} hand-overs left ${hb.holding} held, ${hb.pushedOut} pushed out`, { roads, onePut, ...hb });
+  let SSb = null, whyb = null;
+  try { SSb = mutantCopies('transcript-door-no-bound', REPO).load(SS_REL, anchored(SS_SRC, '  while (_warmHandoff.size > WARM_HANDOFF_MAX) {', '  while (false) {', 'the handoff without its bound'), 'nobound'); } catch (e) { whyb = String((e && e.message) || e); }
+  const hbx = SSb ? await bounded(SSb) : null;
+  ok(!!hbx && hbx.held >= 5 && hbx.holding === hbx.held && hbx.pushedOut === 0, `RED CONTROL (the handoff without its bound): ${hbx ? hbx.held : '?'} hand-overs left ${hbx ? hbx.holding : '?'} held — every one`, hbx || whyb);
   // ── 主开发 r2195 (round wll8bb3rr): the handed tail serves EVERY reader of its warm; the door carries the bulk word and asks «still
   // wanted» after the warm; handed tails go at their time; a handed tail read from the first byte says so ──
   const ssCopy = (tag, from, to, what) => { try { return { M: mutantCopies(`transcript-door-${tag}`, REPO).load(SS_REL, anchored(SS_SRC, from, to, what), tag) }; } catch (e) { return { why: e.message }; } };
