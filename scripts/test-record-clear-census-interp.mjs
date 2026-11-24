@@ -475,7 +475,7 @@ const I_RECV = {
   'src/lib/manage-agents.js|a': ['account', 'an account'], 'src/lib/manage-agents.js|c.account': ['account', 'an account'], 'src/lib/manage-agents.js|fin.account': ['account', 'an account'],
   'src/lib/manage-agents.js|fin.movedTo': ['account', 'an account'], 'src/lib/manage-agents.js|last.account': ['account', 'an account'], 'src/lib/manage-agents.js|last': ['account', 'an account'],
   'src/lib/manage-agents.js|p': ['account', 'a pool'], 'src/lib/manage-agents.js|r2.account': ['account', 'an account'],
-  'src/lib/manage-agents.js|r.account': ['account', 'an account'], 'src/lib/manage-agents.js|r.retargeted': ['account', 'an account'], 'src/lib/manage-agents.js|r': ['account', 'an account'], 'src/lib/manage-agents.js|sa': ['account', 'an account'], 'src/lib/manage-agents.js|x': ['account', 'an account (B-360d: each row the same-account fold could not compare, named in its toast)'],
+  'src/lib/manage-agents.js|r.account': ['account', 'an account'], 'src/lib/manage-agents.js|r.retargeted': ['account', 'an account'], 'src/lib/manage-agents.js|r': ['account', 'an account'], 'src/lib/manage-agents.js|sa': ['account', 'an account'],
   'src/lib/open-with.js|fv': ['file', 'a viewer verdict\'s app label'], 'src/lib/open-with.js|OFFICE_MODULES[fv.module]': ['file', 'an office module label'],
   'src/lib/plugin-client.js|def': ['plugin', 'a plugin window\'s label'], 'src/lib/plugin-client.js|d': ['plugin', 'a plugin\'s own notify text'],
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
@@ -524,6 +524,11 @@ const I_RECV = {
   'src/claude-oat-probe.js|r': ['words', 'a variant\'s verdict line — the measurement\'s own words (journal, the forked child)'],
   'src/server/cli-self-measure.js|full': ['words', 'the ledger record the hub just kept — its state + reason CODE (cli-caps words them), never an item\'s text'],
   'src/server/usage-pool-engine.js|ck': ['words', 'the pool card\'s calm line while a check runs (PURE account-pool-auto poolCheckingNotice) — the source of the notice, never a copy of a record'],
+  // 主开发 r3575 / r3588 (the train 2.369.418's content): two receivers its lines added; two rows gone dead (manage-agents.js x — the fold's
+  // could-not-compare names now gathered into a local before the toast, B-360d; browser-switcher.js st.view?.profile — the switch's words now a
+  // local `said` before the toast, B-7aef's follow line 607): their words still reach those toasts through the locals, account names and a label
+  'src/accounts.js|into': ['account', 'the same-account merge\'s TARGET row (B-360d accounts list): its own name in the merge\'s [accounts] journal lines — the credential file kept or not written over, the folded sign-in kept beside it; an account, never a cleared record'],
+  'src/store-writer.js|f': ['path', 'the store writer\'s write in flight (l.inflight: its `name` is the store\'s own data file, s.file) — its base name in the [store-write] journal line of a dropped temp (B-574d); a data file, never a record\'s words'],
   // 主开发 r3411 (the hotfix's mirror): two receivers its lines added
   'src/lib/held-lists.js|w': ['words', 'B-f276 unit B (line 700): «Read again now»\'s answer in the page\'s words — a PURE outcome\'s sentence (src/lib/held-lists-words.js heldPressWords: the press\'s refusal code, a count of lists still held, its tone); never a record\'s words, never the hub\'s English'],
   'src/server/delivery-wake.js|q': ['words', 'lines 664 + 699 (the usage reading file, commit 2): the pool engine\'s quota verdict for the delivery\'s payer (quotaVerdictFor) — its `reason` is the engine\'s OWN sentence (src/server/usage-pool-engine.js: «its usage reading could not be read — unknown until it reads again», or «… started again after damaged bytes — not stated again yet: <the limit lanes>»): a reading\'s state and lane names, never a record\'s words'],
@@ -690,7 +695,7 @@ const I_RECV = {
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes/status.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
-  'src/install-slot.js|s': ['desktop app', 'an install spec\'s label (packageInstallPlan, moved from desktop-apps.js — lane dc-apps-rows)'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],
+  'src/install-slot.js|s': ['desktop app', 'an install spec\'s label (packageInstallPlan, moved from desktop-apps.js — lane dc-apps-rows)'],
   'src/lib/sidebar-mounts.js|cfg': ['mount', 'a storage mount\'s name'], 'src/lib/telemetry-client.js|e': ['error', 'an unhandled rejection\'s reason'],
   'src/lib/workflow-detail.js|opts': ['workflow', 'a workflow run\'s name'], 'src/routes/desktop-apps.js|req.query': ['caller', 'the install the caller asked for (a closed set, echoed clipped)'],
   'src/server/groups-engine.js|r': ['session', 'a resolved member\'s name'], 'src/window-reach.js|probe': ['window', 'an accessibility probe\'s reason'],
