@@ -236,6 +236,23 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CUT (tests only): a file's sites, and its prefilter answer, are kept by the file and then by the text OBJECT, and handed on. A patched copy re-parses only the file it patched. What each census judges is untouched; no leg added, removed or weakened; no wait in the suite.
 - THE PAIRED READING (the kit's lane, r2502; alone on the first test machine, both zones, 3 rounds interleaved), run b7c6894e4-20261122224153-both: the uncut copy 6502 / 6559 ms → the cut 1195 / 1162 ms (CPU 8.6 → 1.9 s). The 14 marks are IDENTICAL in both zones (digits and /tmp paths normalised). The row is restated 6.6 → 1.2 s; it had no over left (bl-release's restatement), so the ratchet does not move.
 
+### lg-recovery — the sub-agent read cannot be aimed (the coordinator's r2865; lane bl-machines-a's verification; for 2.369.417)
+- THE FIND: src/server/subagent-transcript.js joined the agent id and the conversation id into a path with no test of their shape and no check that the file lay inside that conversation's subagents folder. An id holding parent steps returned another conversation's sub-agent words, or a file outside every conversation; a conversation id with a parent step opened another conversation's folder; the answer's size told whether a file existed. The route joined the same values the same way since the viewer began; both doors ride the owner's cookie.
+- THE LAW, in the helper (both doors and the live watcher's finder go through it):
+  - ids of the CLI's shape, else refused by name before any file call (the route 400, the attach `loadRefused`; the attach's remote pull asks first);
+  - every candidate judged by its REAL path inside `<real projects root>/<a folder>/<this conversation>/subagents/[workflows/<a run>/]`, a link leading out answering as a missing file;
+  - the meta file read only when its real path is itself;
+  - the reader reads only a path the helper judged.
+- GATED by test-subagent-transcript ⑧ (the verifier's table on the route and the attach, the size oracle, a link out, a linked meta, a handed path, the honest asks; RED: a copy without the law). The verifier's suite (scripts/test-subagent-viewer-verify.mjs, not edited here) re-reads its legs against the tip.
+- ITS SECOND COMMIT (the coordinator's r2874, two more of the verifier's finds), src/server/stdout/claude-stream-json.js:
+  - THE CUT: the live watcher's read returned while the file was shorter than its offset, then read from the old offset into the middle of the new text (after a cut and 14 new records it told 8). A read now never starts from an offset the file no longer has: a shorter file, another inode, or other bytes in the 64 before the offset start over from the beginning, said once in the journal. Records already told are passed over by uuid. A replaced file re-arms the watch on the name.
+  - OFF THE LOOP: the five kinds of synchronous call on the watcher's road (existsSync in the finder; statSync, openSync, readSync, closeSync in each read) are gone. The finder goes wholly through the helper; the read goes through fs.promises, one at a time a watcher.
+  - test-helper-ask ㉒ waits for the first read; test-subagent-transcript ⑦ asserts zero synchronous calls; the new ⑨ places a cut between two looks, a rename over the name and a cut grown past the old size (RED: the release's read).
+- ITS THIRD COMMIT (the coordinator's r2881, the verifier's last find): THE FIND'S BOUND. The read chain was bounded; the find before it was not. On a projects folder that stopped answering, the route never answered and each ask could hold one of the runtime's file threads.
+  - Every file call of a find is now a look counted by its folder (one out a folder, the next one there waits for it).
+  - The find answers within 10 s, else it is refused by name; the folder of a look that did not answer stays marked until that look returns (no second look; refused at once), and the first ask after it is served.
+  - test-subagent-transcript ⑩: the projects folder's listing stalled by placement (RED: today's finder never answers and stacks a second look).
+
 ## 2.369.417 — 2026-11-23
 
 ### bl-loop-b — data/setting-holds.json under the store-read law (主开发 r3004 / r3019, for 2.369.417)

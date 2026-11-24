@@ -16,6 +16,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a card puts you back where you were reading, dragging the scrollbar no longer snaps you back.
 - With two tabs open, an agent's vault sign-in now fills the tab the agent is on, instead of being refused as phishing for the other tab's site.
 - Removing a Slack account now also deletes its authors' pictures and its saved notes from this server, not only its messages and files.
+- A sub-agent's log now opens only from that conversation's own sub-agent files, whatever a request names.
+- A sub-agent's live view no longer misses messages when its log is cut and written again or replaced.
+- Opening a sub-agent's log whose folder stops answering now says so after a short wait, instead of loading forever.
 
 ## 2.369.417 — 2026-11-23
 
