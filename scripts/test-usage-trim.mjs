@@ -438,7 +438,8 @@ try {
     // A REQUEST ID MET AGAIN ACROSS SHARDS (the first copy wins), a third of them RE-ATTRIBUTED (another account) — some later, some earlier
     const firsts = rows.filter((e) => e.rid && !e.host).slice(0, 600);
     const repeats = firsts.map((e, k) => ({ ...e, ts: e.ts + (k % 2 ? 3 * DAY : -2 * DAY), acct: k % 3 ? e.acct : 'acc-z', i: (e.i || 0) + 1 }));
-    // ROWS OUT OF ORDER IN TIME: each shard shuffled, and old rows written into the newest shard
+    // ROWS OUT OF ORDER IN TIME: each shard shuffled (this carries a row read after a pass's cut that is older than it), and old rows
+    // written into the newest shard (50–65 days: below the window, so they only go cold at their read — what the release already did)
     const all = rows.concat(repeats);
     for (let k = all.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [all[k], all[j]] = [all[j], all[k]]; }
     writeRowsTo(base, all);
@@ -455,21 +456,27 @@ try {
     const DROPS = M.load('src/usage-history.js', editAnchor(src, STAGE, '        if (i !== undefined) { const loc = c.locs[i]; if (!(globalThis.__cut3Drop && globalThis.__cut3Drop-- === 1)) c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); }\n', 'src/usage-history.js'), 'drops').UsageHistory;
     const DOUBLES = M.load('src/usage-history.js', editAnchor(src, STAGE, '        if (i !== undefined) { const loc = c.locs[i]; c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); if (globalThis.__cut3Twice && globalThis.__cut3Twice-- === 1) c.cold.stage(ev, Math.floor(loc / 4294967296), loc % 4294967296, c.hrh[i]); }\n', 'src/usage-history.js'), 'doubles').UsageHistory;
     const MAX = 400 * 1024;   // the hot ceiling, far under the window's ~3 MB of rows: the pass passes it many times
-    const ridsOf = [...new Set(all.concat(late).map((e) => e.rid).filter(Boolean))];
+    const ridsOf = [...new Set(all.concat(late).map((e) => e.rid).filter(Boolean))], midsOf = [...new Set(all.concat(late).map((e) => e.mid).filter(Boolean))];
     const dump = (u) => {
       const c = u._evCache; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
       const n = c.cold.n, sl = (a) => Array.from(a.subarray ? a.subarray(0, n) : a.slice(0, n), (x) => (Number.isNaN(x) ? 'NaN' : x));
       return JSON.stringify({ hot: c.events.map((e) => JSON.stringify(e)), sizes: c.sizes, locs: c.locs.map(String), hrh: c.hrh.map(String), hotBytes: c.hotBytes, cutoff: c.cutoff,
-        rids: [...c.rids], mids: [...c.mids], coldN: n, ts: sl(c.cold.ts), rh: sl(c.cold.rh), sh: sl(c.cold.sh), off: sl(c.cold.off), tok: c.cold.tok.map(sl), nm: c.cold.nm.map(sl), names: c.cold.names.map((t) => t.vals),
+        rids: [...c.rids], mids: [...c.mids], coldN: n, ts: sl(c.cold.ts), rh: sl(c.cold.rh), sh: sl(c.cold.sh), off: sl(c.cold.off), tok: c.cold.tok.map(sl), names: c.cold.nm.map((col, k) => Array.from(col.subarray(0, n), (id) => c.cold.names[k].vals[id])),   // DECODED: a name's id may be numbered otherwise on another road; readers decode by value
+        midAt: midsOf.map((m) => [...c.cold.idx.mid.findSorted(CB.idHash(m))].map(String).sort().join('/')), srcWm: [...c.srcWm].sort(), hostAcct: [...(c.hostAcct || new Map())].map(([h, m]) => [h, [...m].map(([a, l]) => [a, l.ts.slice().sort((x, y) => x - y)])]).sort(),
         ridAt: ridsOf.map((r) => [...c.cold.idx.rid.findSorted(CB.idHash(r))].map(String).sort().join('/')), consumed: [...c.consumed] });
     };
     const run = (U, slice) => {
       const u = new U({ dataDir: path.dirname(base), homeDir: tmp }); u.ledgerWindowMs = 40 * DAY; u.ledgerHotMaxBytes = MAX; u.tailStepBytes = slice; u.passTrim = true;   // the fold worker's road (a worker thread), here in-process
       let trims = 0, peak = 0; const cuts = []; const own = u._trimHot; u._trimHot = function () { trims++; peak = Math.max(peak, this._evCache.events.length); const r = own.call(this); if (this._evCache.lastTrim && Number.isFinite(this._evCache.lastTrim.cut)) cuts.push(this._evCache.lastTrim.cut); return r; };
+      // r3668's SHOULD: count the repeats that CROSS A TRIM — the first copy taken hot, its id gone from the hot set (trimmed cold) by
+      // the time the repeat is read; a re-attributed repeat (another account) counted apart
+      const firstAt = new Map(); let crossed = 0, crossedRe = 0; const take0 = u._take;
+      u._take = function (cc, ev, ...rest) { const id = ev.rid, f = id && repeatIds.has(id) ? firstAt.get(id) : null; if (f && f.hot && !cc.rids.has(id)) { crossed++; if ((ev.acct || null) !== f.acct) crossedRe++; } const r = take0.call(this, cc, ev, ...rest); if (id && repeatIds.has(id) && !firstAt.has(id)) firstAt.set(id, { hot: r === 1, acct: ev.acct || null }); return r; };
       u._loadEvents();
       const d = dump(u), c = u._evCache, byRid = new Map(); for (const e of c.events) if (e.rid) byRid.set(e.rid, (byRid.get(e.rid) || 0) + 1);   // after dump's settle: an id's hot rows + its places in the cold rid index
-      return { trims, peak, cuts, once: firsts.map((e) => (byRid.get(e.rid) || 0) + [...c.cold.idx.rid.findSorted(CB.idHash(e.rid))].length), dump: d, sig: sig(u), counts: JSON.stringify(counts(u)), totals: JSON.stringify(u.aggregate({ to: T + DAY }).totals) };
+      return { trims, peak, cuts, crossed, crossedRe, once: firsts.map((e) => (byRid.get(e.rid) || 0) + [...c.cold.idx.rid.findSorted(CB.idHash(e.rid))].length), dump: d, sig: sig(u), counts: JSON.stringify(counts(u)), totals: JSON.stringify(u.aggregate({ to: T + DAY }).totals) };
     };
+    const repeatIds = new Set(firsts.map((e) => e.rid));
     const r0 = run(RELEASE, 64 * 1024), r1 = run(UsageHistory, 64 * 1024), r2 = run(UsageHistory, 4 * 1024), r3 = run(UsageHistory, 1024 * 1024);
     console.log(`      the release: ${r0.trims} trim(s), at most ${r0.peak} hot rows · this pass at 64 KiB: ${r1.trims} trims, at most ${r1.peak} · at 4 KiB: ${r2.trims}, ${r2.peak} · at 1 MiB: ${r3.trims}, ${r3.peak} — ${JSON.parse(r1.dump).coldN} rows cold, ${JSON.parse(r1.dump).hot.length} hot`);
     const same = (a, b) => a.dump === b.dump && a.sig === b.sig && a.counts === b.counts && a.totals === b.totals;
@@ -479,6 +486,7 @@ try {
     ok(same(r0, r1) && same(r0, r2) && same(r0, r3), 'THE SAME LEDGER TO THE BYTE: the release\'s pass and this pass at three slice sizes leave the same hot rows (in order, with their sizes, places and hashes), the same two id sets, the same cold columns and indexes after their settle, the same cutoff — and every reader\'s figure (each row\'s fields, the counts by time, the money\'s totals) equal');
     ok(r1.peak * 2 < r0.peak && r2.peak * 2 < r0.peak, `the hot set as the pass reads: at most ${r1.peak} / ${r2.peak} rows against the release's ${r0.peak} (the rows inside the window waited for its one end trim)`);
     const onceAll = (r) => r.once.length === 600 && r.once.every((x) => x === 1);
+    ok([r1, r2, r3].every((r) => r.crossed > 0 && r.crossedRe > 0), `A REPEAT CROSSES A TRIM on every slice size (its first copy taken hot, its id trimmed out of the hot set before the repeat was read): 64 KiB ${r1.crossed} (re-attributed ${r1.crossedRe}) · 4 KiB ${r2.crossed} (${r2.crossedRe}) · 1 MiB ${r3.crossed} (${r3.crossedRe}) · the release ${r0.crossed} (${r0.crossedRe}) — the pass's own seen set catches each`);
     ok([r0, r1, r2, r3].every(onceAll), `A REQUEST ID MET AGAIN is ONE row after the pass on every road (600 ids read twice, across shards, a third re-attributed): the release ${r0.once.filter((x) => x === 1).length} · 64 KiB ${r1.once.filter((x) => x === 1).length} · 4 KiB ${r2.once.filter((x) => x === 1).length} · 1 MiB ${r3.once.filter((x) => x === 1).length} of 600 — the pass's own seen set catches a repeat whose first copy went cold at an earlier trim`);
     // rows of one time on either side of the pass's own cuts: REACHED (the same-time groups nearest a cut, within 12 h, below it and at or above it)
     const near = (r) => { let below = 0, above = 0, at = 0; for (const t of groupTs) for (const ct of r.cuts) { if (t === ct) at++; else if (t < ct && ct - t <= 12 * 3600e3) below++; else if (t > ct && t - ct <= 12 * 3600e3) above++; } return { below, above, at }; };
