@@ -11,7 +11,12 @@
 //   ⑤ the id file unreadable (six codes): with a witness HELD, never open; with none open, NOTHING minted over it
 //   ⑥ the declaration: named in the line, held with no password; NEVER read from the environment
 //   ⑦ the start line's named fields judged by name (main.js), additive
+//   ⑧ 主开发 r3629 (round w43tjwjp5): a line naming the folder but not the home or uid gets the plain form's defaults (held, never «no
+//     place») — RED the old «no place»; the declaration's cell is the plain form's own (SW.declaredCell): the page's «off» gives way to
+//     the line's password, the page's turn-off refused 409 — RED each call cut; the turn-off removes the witness at once — RED cut
 import fs from 'node:fs';
+import http from 'node:http';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -41,7 +46,7 @@ const witnessCfg = (it, extra = {}) => ({ folder: it.data, root: it.root, home: 
 const homeWitness = (it) => path.join(it.home, '.vibespace', 'local', SW.witnessFileOf(it.root));
 const lines = [];
 const log = { log: () => { }, warn: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) };
-const tableOf = (it, { witness = witnessCfg(it), Mod = SI } = {}) => Mod.create({ file: it.table, log, witness });
+const tableOf = (it, { witness = witnessCfg(it), Mod = SI, hashOf } = {}) => Mod.create({ file: it.table, log, witness, ...(hashOf ? { hashOf } : {}) });
 const plantWitness = (it, id) => { fs.mkdirSync(path.dirname(homeWitness(it)), { recursive: true, mode: 0o700 }); fs.writeFileSync(homeWitness(it), J(SW.witnessDoc({ root: it.root, dataDir: it.data, id }))); };
 const plantId = (it, id) => fs.writeFileSync(it.id, J({ v: 1, id, createdAt: 1 }));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -65,7 +70,7 @@ console.log('① a missing table + a witness of another folder: HELD by the fold
   ok(!!t.held && t.held.kind === 'folder' && /not the one/.test(t.held.why) && !!w && w.fix.includes(homeWitness(it)) && t.stateLine().held === t.held.why, 'the piped form\'s table: the sign-in table missing, the witness names another folder — HELD, its words name the witness file to delete (the plain form\'s own)', t.held);
   const it2 = install('missing-older'); plantId(it2, 'vi-111111111111'); plantWitness(it2, 'vi-222222222222');
   lines.length = 0; const t2 = tableOf(it2, { witness: null }); await t2.load();
-  ok(!t2.held && lines.some((l) => /names no data folder/.test(l)), 'RED CONTROL (an older supervisor\'s line: no folder named) — today\'s reading, BY NAME: it opens, and the journal says why once', { held: t2.held, lines });
+  ok(!t2.held && lines.some((l) => /names no data folder/.test(l)), 'BY DESIGN (an older supervisor\'s line: no folder named) — today\'s reading, BY NAME: it opens, and the journal says why once (the red control is the next claim)', { held: t2.held, lines });
   const RV = siCut("    else if (v.hold) hold(v.hold.why, v.hold.kind, v.hold);", "    else if (false) hold(v.hold.why, v.hold.kind, v.hold);", 'verdict-unheard');
   const it3 = install('missing-red'); plantId(it3, 'vi-111111111111'); plantWitness(it3, 'vi-222222222222');
   const t3 = tableOf(it3, { Mod: RV }); await t3.load();
@@ -85,7 +90,8 @@ console.log('② a table that says off: another folder\'s witness holds it; the 
 console.log('③ no witness anywhere: it opens; the folder\'s id minted ONCE, off the loop');
 {
   const it = install('fresh'); const t = tableOf(it); await t.load(); await t.witnessed();
-  ok(!t.held && !t.enabled && SW.ID_RE.test(String(idIn(it.id))) && !fs.existsSync(homeWitness(it)), `a new instance opens as before; its id written once (${idIn(it.id)}); no witness with no password`);
+  const first = idIn(it.id), t2 = tableOf(it); await t2.load(); await t2.witnessed();   // a SECOND start over the same folder
+  ok(!t.held && !t.enabled && SW.ID_RE.test(String(first)) && !fs.existsSync(homeWitness(it)) && !t2.held && idIn(it.id) === first, `a new instance opens as before; its id written ONCE (${first}) — the next start keeps it (${idIn(it.id)}); no witness with no password`);
 }
 
 console.log('④ a password: the witness written OFF THE LOOP — no synchronous disk call once loaded');
@@ -118,6 +124,13 @@ console.log('⑤ the id file unreadable — every failed read holds with a witne
   }
   ok(heldBy.length === codes.length, `with the folder's own witness there, each failed read holds (${heldBy.join(', ')}) — no error class opens the instance`);
   ok(untouched.length === codes.length, `with no witness anywhere it opens as before, and the unreadable id file is NOT written over (${untouched.join(', ')})`);
+  const SW_SRC = fs.readFileSync(path.join(REPO, 'src/signin-witness.js'), 'utf-8');
+  const SWcut = MUT.load('src/signin-witness.js', anchored(SW_SRC, "  try { await fs.promises.lstat(file); return null; } catch (e) { if (!e || e.code !== 'ENOENT') return null; }", '  void 0;', 'no-lstat-guard'), 'sw-no-lstat-guard');
+  const keepEnsure = SW.ensureInstanceAsync, rn = install('none-red'); plantId(rn, 'vi-777777777777'); const beforeR = bytesOf(rn.id);
+  SW.ensureInstanceAsync = SWcut.ensureInstanceAsync;   // the interface asks the module's own name: the cut writer, for this one start
+  const undoR = refuseRead(rn.id, 'EIO');
+  try { const tr = tableOf(rn); await tr.load(); await tr.witnessed(); } finally { undoR(); SW.ensureInstanceAsync = keepEnsure; }
+  ok(bytesOf(rn.id) !== beforeR, 'RED CONTROL: the async id writer\'s look cut — the unreadable id file IS written over (a new id)');
 }
 
 console.log('⑥ the declaration: named in the start line — never read from the environment');
@@ -127,13 +140,94 @@ console.log('⑥ the declaration: named in the start line — never read from th
   const was = process.env.VIBESPACE_SIGNIN; process.env.VIBESPACE_SIGNIN = 'required';
   let tn; try { const n = install('declared-env'); tn = tableOf(n); await tn.load(); await tn.ensure({}); } finally { if (was === undefined) delete process.env.VIBESPACE_SIGNIN; else process.env.VIBESPACE_SIGNIN = was; }
   ok(!tn.held, 'VIBESPACE_SIGNIN=required in the ENVIRONMENT and not in the line: not held — the interface reads no environment for sign-in');
+  const RE = siCut('  const declared = (extra = {}) => SW.declaredCell({ declared: !!(witness && witness.declared),', '  const declared = (extra = {}) => SW.declaredCell({ declared: !!(witness && witness.declared) || SW.declaredOf(process.env),', 'reads-env');
+  process.env.VIBESPACE_SIGNIN = 'required';
+  let te; try { const n = install('declared-env-red'); te = tableOf(n, { Mod: RE }); await te.load(); await te.ensure({}); } finally { if (was === undefined) delete process.env.VIBESPACE_SIGNIN; else process.env.VIBESPACE_SIGNIN = was; }
+  ok(!!te.held && te.held.kind === 'declared', 'RED CONTROL: an interface that reads the environment — held «declared» by an env it was never handed');
 }
 
 console.log('⑦ the start line\'s named fields, judged by name (src/interface/main.js), additive');
 {
   const it = install('line'), base = { file: it.table };
   const bad = await M.signinWhy({ ...base, folder: 'relative/data' }, UID), badUid = await M.signinWhy({ ...base, folder: it.data, uid: 'x' }, UID), good = await M.signinWhy({ ...base, folder: it.data, root: it.root, home: it.home, uid: UID, throwaway: false, declared: false }, UID), older = await M.signinWhy(base, UID);
+  const ill = [{ folder: '' }, { folder: null }, { folder: it.data, root: 'rel/root' }, { folder: it.data, home: 'rel/home' }, { folder: it.data, throwaway: 'yes' }, { folder: it.data, declared: 1 }];
+  const illWhy = []; for (const f of ill) illWhy.push(await M.signinWhy({ ...base, ...f }, UID));
+  ok(illWhy.every((w) => typeof w === 'string' && /signin\.|data folder/.test(w)), 'every other ill-named field — an empty or null folder, a relative root or home, a throwaway or declared that is not true or false: a bad start BY NAME', illWhy);
   ok(/not an absolute path/.test(String(bad)) && /not a whole number/.test(String(badUid)) && good === null && older === null && M.witnessOf(base) === null && M.witnessOf({ ...base, folder: it.data }).root === it.root, 'a relative folder or a uid that is no number: a bad start BY NAME; the fields well named, or none at all (an older supervisor): accepted', { bad, badUid, good, older });
+}
+
+console.log('⑧ 主开发 r3629 (round w43tjwjp5): the plain form\'s defaults for an unnamed home or uid; the declaration\'s cell is the plain form\'s own');
+{
+  const MAIN_SRC = fs.readFileSync(path.join(REPO, 'src/interface/main.js'), 'utf-8');
+  const OLD = 'vi-0e0e0e0e0e0e', NOW = 'vi-0f0f0f0f0f0f';
+  const withEnv = async (k, v, fn) => { const was = process.env[k]; process.env[k] = v; try { return await fn(); } finally { if (was === undefined) delete process.env[k]; else process.env[k] = was; } };
+  const plantAt = (file, it, id) => { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); fs.writeFileSync(file, J(SW.witnessDoc({ root: it.root, dataDir: it.data, id }))); };
+  /** must 4: the line names the folder (and `named`), a witness of ANOTHER folder at the place the default reaches — this process's HOME (a
+   *  scratch home for the leg) or the var-tmp rung of this process's uid */
+  const dflt = async (name, { named = {}, at = 'home', Mm = M } = {}) => {
+    const it = install(name); plantId(it, NOW);
+    const home = path.join(it.base, 'process-home'), vt = path.join(it.base, 'vartmp');
+    plantAt(at === 'home' ? path.join(home, '.vibespace', 'local', SW.witnessFileOf(it.root)) : path.join(vt, `vibespace-${UID}`, SW.witnessFileOf(it.root)), it, OLD);
+    const w = Mm.witnessOf({ file: it.table, folder: it.data, ...named });
+    const t = await withEnv('HOME', home, async () => { const x = tableOf(it, { witness: { ...w, varTmp: vt } }); await x.load(); return x; });
+    return { w, t };
+  };
+  const h1 = await dflt('dflt-home'), h2 = await dflt('dflt-uid', { named: { home: path.join(ROOT, 'dflt-uid', 'home') }, at: 'var-tmp' });
+  ok(h1.w.home === undefined && h1.w.uid === undefined && !!h1.t.held && h1.t.held.kind === 'folder' && !!h2.t.held && h2.t.held.kind === 'folder',
+    `the folder named, the home or the uid NOT named: this process's own are read (the plain form's defaults) — a witness of another folder there HOLDS it (${h1.t.held && h1.t.held.kind}, ${h2.t.held && h2.t.held.kind})`);
+  const Mold = MUT.load('src/interface/main.js', anchored(MAIN_SRC, "home: typeof signin.home === 'string' ? signin.home : undefined, uid: Number.isInteger(signin.uid) ? signin.uid : undefined,", "home: signin.home || '', uid: Number.isInteger(signin.uid) ? signin.uid : null,", 'no-place'), 'main-no-place');   // stale-pins: kept — the released «no place», the red's text
+  const r1 = await dflt('dflt-home-red', { Mm: Mold }), r2 = await dflt('dflt-uid-red', { named: { home: path.join(ROOT, 'dflt-uid-red', 'home') }, at: 'var-tmp', Mm: Mold });
+  ok(!r1.t.held && !r2.t.held, 'RED CONTROL: the unnamed home and uid read as «no place» — no witness read, the start OPENS against one');
+
+  // must 5: THE DECLARATION's CELL, the plain form's own — the page's «off» gives way to the line's password, the turn-off is refused
+  const onDisk = (it) => { try { return JSON.parse(fs.readFileSync(it.table, 'utf-8')); } catch { return null; } };
+  // a QUICK hash for these tables (create's own `hashOf` seam): the declaration's cell is under test here, not the hash — the real scrypt is ④'s
+  // and test-interface-signin's; sixteen real hashes made this suite 0.4 → 1.1 s and the fast tier's sum met its cap (test-ci-gate)
+  const QUICK = async (pw, salt) => crypto.createHash('sha256').update(`${salt}:${pw}`).digest('hex');
+  const pwIs = async (it, pw) => { const r = onDisk(it); return !!(r && r.passwordHash && T.hashMatches(await QUICK(pw, r.salt), r.passwordHash)); };
+  const offLine = async (name, Mod = SI) => {
+    const it = install(name); plantId(it, NOW); fs.writeFileSync(it.table, J({ userSet: true, tokens: {} }));
+    const t = tableOf(it, { witness: witnessCfg(it, { declared: true }), Mod, hashOf: QUICK }); await t.load(); await t.ensure({ password: 'pw-line-0001' }); await t.flushed();
+    return { it, t };
+  };
+  const o1 = await offLine('declared-off-line');
+  ok(!o1.t.held && o1.t.enabled && await pwIs(o1.it, 'pw-line-0001') && onDisk(o1.it).userSet === false, 'declared, the page turned the sign-in off earlier, the line names a password: NOT held — guarded by it (the held words\' act works, as the plain form\'s r2152 (d))');
+  const o2 = await offLine('declared-off-line-red', siCut('    if (d.keepOff) return {};\n', '    if (state?.userSet) return {};\n', 'userset-first'));   // stale-pins: kept — the first form's early return, the red's text
+  ok(!!o2.t.held && o2.t.held.kind === 'declared', 'RED CONTROL: the page\'s «off» first — the line\'s password ignored, held «declared» at every start');
+  const serve = async (t) => {
+    const srv = http.createServer((req, res) => { const facts = { secure: false, addr: req.socket.remoteAddress, port: req.socket.remotePort }; if (t.road(req, res, facts)) return; req.resume(); res.writeHead(299); res.end(); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    return { port: srv.address().port, close: () => new Promise((r) => srv.close(r)) };
+  };
+  const post = (port, p, body, cookie = '') => new Promise((resolve) => {
+    const data = Buffer.from(J(body));
+    const q = http.request({ host: '127.0.0.1', port, method: 'POST', path: p, agent: false, headers: { 'content-type': 'application/json', 'content-length': data.length, 'sec-fetch-site': 'same-origin', ...(cookie ? { cookie } : {}) } }, (r) => { let d = ''; r.setEncoding('utf8'); r.on('data', (c) => { d += c; }); r.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: r.statusCode, json: j, cookies: [].concat(r.headers['set-cookie'] || []) }); }); });
+    q.on('error', (e) => resolve({ status: 0, error: e.code, cookies: [] })); q.write(data); q.end();
+  });
+  /** the page's «turn sign-in off» as a person does it: signed in first (its cookie), then the route with the current password */
+  const removeAsk = async (port, current) => {
+    const inn = await post(port, '/api/login', { password: current });
+    const tok = inn.cookies.map((c) => /^vs_token=([a-f0-9]+);/.exec(c)).find(Boolean);
+    if (!tok) return { status: -1, json: { error: `no sign-in (${inn.status})` } };
+    return post(port, '/api/auth/set-password', { remove: true, current }, `vs_token=${tok[1]}`);
+  };
+  const turnOff = async (name, { declared = true, Mod = SI } = {}) => {
+    const it = install(name); plantId(it, NOW);
+    const t = tableOf(it, { witness: witnessCfg(it, { declared }), Mod, hashOf: QUICK }); await t.load(); await t.ensure({ password: 'pw-line-0002' }); await t.flushed(); await t.witnessed();
+    const had = await until(() => fs.existsSync(homeWitness(it)), 2000), s = await serve(t);   // the set's witness, written after its table landed
+    try { const a = await removeAsk(s.port, 'pw-line-0002'); await t.flushed(); await t.witnessed(); return { it, t, a, had, left: fs.existsSync(homeWitness(it)) }; } finally { await s.close(); }
+  };
+  const d1 = await turnOff('declared-turn-off');
+  ok(d1.a.status === 409 && d1.a.json && d1.a.json.error === 'signin-required' && d1.t.enabled && await pwIs(d1.it, 'pw-line-0002'), `declared: the page's «turn sign-in off» REFUSED by name, as the plain form's route (${d1.a.status} ${d1.a.json && d1.a.json.error})`);
+  const d2 = await turnOff('declared-turn-off-red', { Mod: siCut('        const off = declared().turnOff; if (off) return json(res, 409', '        const off = null; if (off) return json(res, 409', 'no-turn-off-guard') });
+  ok(d2.a.status === 200 && !d2.t.enabled, `RED CONTROL: the turn-off's check cut — the sign-in IS turned off under the declaration (${d2.a.status})`);
+  const n1 = await turnOff('turn-off-witness', { declared: false });
+  ok(n1.a.status === 200 && n1.had && !n1.left, `no declaration: the page's turn-off works and the witness is REMOVED at once, as the plain form's (it was there: ${n1.had}; after: ${n1.left})`);
+  const n2 = await turnOff('turn-off-witness-red', { declared: false, Mod: siCut('        writeWitnesses();   // the sign-in turned off', '        void 0;   // the sign-in turned off', 'no-turn-off-witness') });
+  ok(n2.a.status === 200 && n2.had && n2.left, 'RED CONTROL: the turn-off\'s witness removal cut — the copy stays until the next start');
+  // ONE IMPLEMENTATION (r3629 must 5): the interface asks the shared cell and writes nothing of its rule
+  const calls = SIGNIN_SRC.split('SW.declaredCell(').length - 1;
+  ok(calls === 1 && !SIGNIN_SRC.includes('=required is set') && !SIGNIN_SRC.includes("'signin-required'"), `src/interface/signin.js asks SW.declaredCell (${calls} call) and holds none of the declaration's words or codes`);   // stale-pins: kept — a deliberate absence check (the words live in the shared cell)
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -241,13 +241,13 @@ console.log('⑧ the declaration (opt-in): VIBESPACE_SIGNIN=required');
   d2.registerRoutes(fakeApp);
   const rr = res0(); quiet(() => H['POST /api/auth/set-password']({ body: { remove: true, current: 'env-pw-0004' }, socket: { remoteAddress: '127.0.0.1' }, headers: {} }, rr));
   ok(rr.code === 409 && rr.body && rr.body.error === 'signin-required' && d2.passwordEnabled, `the page's «turn sign-in off» through the route's own handler: 409 signin-required (${rr.code})`, rr.body);
-  let cutRemove = null; const d2R = start(it2, { env }, authCut('    if (this._declaredNow()) throw Object.assign(new Error(', '    if (false) throw Object.assign(new Error(', 'no-remove-guard'), 'env-pw-0004').v;
+  let cutRemove = null; const d2R = start(it2, { env }, authCut('    const off = this._declared().turnOff; if (off) throw', '    const off = null; if (off) throw', 'no-remove-guard'), 'env-pw-0004').v;
   try { quiet(() => d2R.removePassword()); } catch (e) { cutRemove = e.code; }
   ok(cutRemove === null && !d2R.passwordEnabled, 'RED CONTROL: the remove guard cut — the sign-in IS turned off while the declaration is set');
   const it3 = install('declared-none');
   ok(!start(it3).v.held, 'with no declaration (the default everywhere): no password is no hold');
   const itC = install('declared-cut');
-  const dC = start(itC, { env }, authCut('    if (!this._held && this._declaredNow() && ', '    if (!this._held && false && ', 'no-declared-check')).v;
+  const dC = start(itC, { env }, authCut('    const d = this._declared(); if (!this._held && d.hold)', '    const d = this._declared(); if (!this._held && false && d.hold)', 'no-declared-check')).v;
   ok(!dC.held && !dC.passwordEnabled, 'RED CONTROL: the declaration\'s check cut — required and no password is a new OPEN instance');
   // 主开发 r2152 (d): the sign-in turned off from the page earlier, then the declaration — the words' act («set VIBESPACE_PASSWORD») works
   const itD = install('declared-off');
@@ -258,8 +258,21 @@ console.log('⑧ the declaration (opt-in): VIBESPACE_SIGNIN=required');
   ok(!o2.held && o2.passwordEnabled && o2.verifyPassword('env-pw-0005'), '…and THE ACT DONE (VIBESPACE_PASSWORD set, a restart): guarded by it — the page\'s «off» gives way to the declaration');
   const itD2 = install('declared-off-red');
   const q = start(itD2).v; quiet(() => q.setPassword('pw-off-0002', { userSet: true })); quiet(() => q.removePassword());
-  const q2 = start(itD2, { env }, authCut('    if (this._state?.userSet && !declaredNoPw) return {};\n', '    if (this._state?.userSet) return {};\n', 'userset-first'), 'env-pw-0006').v;   // stale-pins: kept — the first form's early return, the red's text
+  const q2 = start(itD2, { env }, authCut('    if (d.keepOff) return {};\n', '    if (this._state?.userSet) return {};\n', 'userset-first'), 'env-pw-0006').v;   // stale-pins: kept — the first form's early return, the red's text
   ok(!!q2.held && q2.held.kind === 'declared', 'RED CONTROL: the page\'s «off» first (the first form) — the act named does not leave the hold');
+  // 主开发 r3629 must 5: THE CELL is ONE function both forms call (SW.declaredCell; the piped form's legs: test-interface-signin-witness ⑧)
+  const C = (o) => J(SW.declaredCell(o));
+  const cells = [
+    [{}, { keepOff: false, clearUserSet: false, hold: null, turnOff: null }],
+    [{ userSet: true }, { keepOff: true, clearUserSet: false, hold: null, turnOff: null }],
+    [{ declared: true, set: true, userSet: true }, { keepOff: true, clearUserSet: false, hold: null }],
+    [{ declared: true, userSet: true, offered: true }, { keepOff: false, clearUserSet: true }],
+    [{ declared: true, userSet: true }, { keepOff: false, clearUserSet: false }],
+    [{ declared: true, sso: true }, { hold: null }],
+  ];
+  const wrong = cells.filter(([i, want]) => Object.entries(want).some(([k, v]) => J(SW.declaredCell(i)[k]) !== J(v))).map(([i]) => C(i));
+  const dh = SW.declaredCell({ declared: true }), dt = SW.declaredCell({ declared: true, set: true });
+  ok(wrong.length === 0 && dh.hold && dh.hold.kind === 'declared' && dt.turnOff && dt.turnOff.code === 'signin-required' && !dt.hold, 'the declaration\'s cell, ONE function: the page\'s «off» stands unless declared with no password and a password offered; held with no password and no single sign-on; the turn-off refused whenever declared', wrong);
 }
 
 console.log('⑨ a failed witness write never fails the person\'s act (law 3)');

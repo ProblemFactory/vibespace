@@ -175,6 +175,22 @@ function verdictOf({ auth = 'present', dataLink = null, instance = null, idUnrea
 const foreignAt = (found, startId) => (found || []).some((w) => !w.doc || !startId || w.doc.id !== startId);
 /** THE DECLARATION (opt-in): `VIBESPACE_SIGNIN=required` and no password, no env password, no single sign-on ⇒ held */
 const declaredOf = (env) => !!env && String(env[DECLARE_ENV] || '').trim().toLowerCase() === 'required';
+/** THE DECLARATION's CELL — ONE implementation; the plain form (src/auth.js: declared = its env) and the piped form (src/interface/signin.js:
+ *  declared = its start line's `declared`) both call it, nothing of it is written twice (主开发 r3629 must 5; r2152 (d)):
+ *    declared (the declaration stands), set (a password hash in the table), userSet (the page turned the sign-in off earlier), offered
+ *    (the start offers a password: the env's / the line's, or a generated one), sso (single sign-on on)
+ *  → keepOff: the page's «off» stands, the start's road writes nothing · clearUserSet: under the declaration with no password the «off»
+ *    GIVES WAY to the offered password, so the held words' act («set VIBESPACE_PASSWORD and restart») lifts the hold · hold: {why, kind}
+ *    after the road, when declared with no password and no single sign-on · turnOff: the page's turn-off refused by name under it */
+function declaredCell({ declared = false, set = false, userSet = false, offered = false, sso = false } = {}) {
+  const noPw = !!declared && !set;
+  return {
+    keepOff: !!userSet && !noPw,
+    clearUserSet: noPw && !!userSet && !!offered,
+    hold: noPw && !sso ? { why: `${DECLARE_ENV}=required is set and no password is set`, kind: 'declared' } : null,
+    turnOff: declared ? { code: 'signin-required', why: `${DECLARE_ENV}=required is set for this VibeSpace: its sign-in cannot be turned off here — remove that setting and restart first` } : null,
+  };
+}
 
 /**
  * THE START's FACTS — read once, beside the shipped read of data/auth.json: the folder (a link to nothing?), its id file, the
@@ -263,4 +279,4 @@ function removeWitness({ file }) {
   try { fs.unlinkSync(file); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; throw e; }
 }
 
-module.exports = { writePlan, ensureInstanceAsync, writeWitnessAsync, removeWitnessAsync, V, INSTANCE_FILE, ID_RE, instanceValid, idAsideOf, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };
+module.exports = { declaredCell, writePlan, ensureInstanceAsync, writeWitnessAsync, removeWitnessAsync, V, INSTANCE_FILE, ID_RE, instanceValid, idAsideOf, DECLARE_ENV, KINDS, START_NEW, netHomeOf, netAnswerOf, digestOf, witnessFileOf, instanceOf, newInstance, witnessOf, witnessDoc, placeOf, readPlacesOf, witnessAt, verdictOf, foreignAt, declaredOf, startFactsSync, ensureInstance, writeWitness, removeWitness };

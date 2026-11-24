@@ -69,8 +69,10 @@ async function signinWhy(signin, uid) {
   }
   return ownFolderWhy(path.dirname(signin.file), "the sign-in table's folder", uid);
 }
-/** B-dc3f (1): the start line's named fields → the table's witness (null: none named — today's reading, said once by the table) */
-const witnessOf = (signin) => (signin && typeof signin.folder === 'string' ? { folder: signin.folder, root: signin.root || path.dirname(signin.folder), home: signin.home || '', uid: Number.isInteger(signin.uid) ? signin.uid : null, throwaway: signin.throwaway === true, declared: signin.declared === true } : null);
+/** B-dc3f (1): the start line's named fields → the table's witness (null: none named — today's reading, said once by the table). A home or
+ *  uid NOT named is left undefined: the facts' own defaults apply (this process's home and uid), EXACTLY as the plain form's — never
+ *  «no place», which read no witness and opened against one (主开发 r3629 must 4: defaulted, not refused) */
+const witnessOf = (signin) => (signin && typeof signin.folder === 'string' ? { folder: signin.folder, root: signin.root || path.dirname(signin.folder), home: typeof signin.home === 'string' ? signin.home : undefined, uid: Number.isInteger(signin.uid) ? signin.uid : undefined, throwaway: signin.throwaway === true, declared: signin.declared === true } : null);
 
 /** → { iface, ready: Promise<{ port, link }>, stop() } — `pipe` = a suite's stream handed in AS the start pipe (else the
  *  descriptor VIBESPACE_START_FD names); `exit(code)` ends the process (a suite hands a spy); `startMs` the start line's bound. */

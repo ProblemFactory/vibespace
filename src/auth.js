@@ -360,6 +360,8 @@ class Auth {
   }
   /** B-dc3f (1): the opt-in declaration (VIBESPACE_SIGNIN=required, set nowhere by default) — read from the start's inputs */
   _declaredNow() { return !!(this._witnessCfg && SW.declaredOf(this._witnessCfg.env || {})); }
+  /** the declaration's cell (SW.declaredCell — the ONE implementation both forms call, 主开发 r3629 must 5) over this table now */
+  _declared(extra = {}) { return SW.declaredCell({ declared: this._declaredNow(), set: !!(this._state && this._state.passwordHash), sso: !!this._clerk?.enabled, ...extra }); }
 
 
   _load() {
@@ -488,7 +490,7 @@ class Auth {
   /** Disable auth entirely (user choice — env won't re-enable on next boot). */
   removePassword() {
     if (this._held) throw heldError(this._held);
-    if (this._declaredNow()) throw Object.assign(new Error(`${SW.DECLARE_ENV}=required is set for this VibeSpace: its sign-in cannot be turned off here — remove that setting and restart first`), { code: 'signin-required' });
+    const off = this._declared().turnOff; if (off) throw Object.assign(new Error(off.why), { code: off.code });   // the declaration's cell
     this._state = { userSet: true, tokens: {} };
     this._save();
     this._syncWitness();   // B-dc3f (1): the sign-in turned off — the witness removed
@@ -538,7 +540,7 @@ class Auth {
     if (this._held && this._held.idUnread) { this._idEnsure = opts; return {}; }   // r3336: …and for the id file's read, replayed at its lift
     const r = this._ensurePassword(opts);
     // B-dc3f (1): THE DECLARATION (opt-in, set nowhere by default) — required, and no password and no single sign-on ⇒ held
-    if (!this._held && this._declaredNow() && !(this._state && this._state.passwordHash) && !this._clerk?.enabled) this._hold(`${SW.DECLARE_ENV}=required is set and no password is set`, 'declared');
+    const d = this._declared(); if (!this._held && d.hold) this._hold(d.hold.why, d.hold.kind);   // the declaration's cell (SW.declaredCell)
     return r;
   }
   _ensurePassword({ generateIfMissing = false } = {}) {
@@ -546,10 +548,10 @@ class Auth {
     // B-dc3f (1), 主开发 r2152 (d): the sign-in turned OFF from the page earlier stays off — but NOT under the declaration
     // (VIBESPACE_SIGNIN=required) with no password: there the env password (or a generated one) applies, so the held words'
     // act («set VIBESPACE_PASSWORD and restart») leaves the hold; the page's «off» gives way, and the env password is the env's
-    const declaredNoPw = this._declaredNow() && !(this._state && this._state.passwordHash);
-    if (this._state?.userSet && !declaredNoPw) return {};
     const envPw = process.env.VIBESPACE_PASSWORD;
-    if (declaredNoPw && this._state && this._state.userSet && (envPw || generateIfMissing)) this._state.userSet = false;
+    const d = this._declared({ userSet: !!this._state?.userSet, offered: !!(envPw || generateIfMissing) });   // the declaration's cell (SW.declaredCell)
+    if (d.keepOff) return {};
+    if (d.clearUserSet) this._state.userSet = false;
     if (envPw) {
       if (!this.passwordEnabled || this._hash(envPw, this._state.salt) !== this._state.passwordHash) {
         this.setPassword(envPw);
@@ -772,7 +774,7 @@ class Auth {
       }
       if (remove) {
         if (!this.passwordEnabled) return res.json({ success: true, enabled: this.enabled });
-        if (this._declaredNow()) return res.status(409).json({ error: 'signin-required', why: `${SW.DECLARE_ENV}=required is set for this VibeSpace: its sign-in cannot be turned off here — remove that setting and restart first` });   // B-dc3f (1)
+        const off = this._declared().turnOff; if (off) return res.status(409).json({ error: off.code, why: off.why });   // B-dc3f (1): the declaration's cell
         this.removePassword();
         res.setHeader('Set-Cookie', CLEAR_COOKIE);
         return res.json({ success: true, enabled: this.enabled }); // Clerk may keep auth on

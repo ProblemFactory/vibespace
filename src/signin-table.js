@@ -79,7 +79,8 @@ function judgeRead({ error = null, text = null, linkGone = false } = {}) {
  *  `held` = the held state: a folder / link / declared hold (B-dc3f (1)) says its own line, whose act IS the page's en words
  *  (主开发 r2152: the journal and the page can never name different acts) */
 /** THE HELD OBJECT (B-dc3f (1)): a hold's why and kind, and for a folder kind the data folder and every witness file the verdict
- *  named (the act's own) — the piped form's interface builds it here; the plain form's src/auth.js `_hold` builds the same shape */
+ *  named (the act's own) — the PIPED form's builder. The plain form's src/auth.js `_hold` still builds its own: the same fields, plus
+ *  `net` (a network copy unread — the piped form reads none) and, once the id file's own hold is in, its fields (ONE builder then: a named follow) */
 function heldOf({ why, kind = 'file', verdict = null, dataDir = '' } = {}) {
   const files = verdict && Array.isArray(verdict.files) ? verdict.files : [];
   const h = { why, kind, ...(kind !== 'file' ? { dir: dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };

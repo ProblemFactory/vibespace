@@ -181,14 +181,20 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
   /** THE BOOT'S RESOLUTION, as the plain form's ensurePassword (src/auth.js): a user-set state is kept; `password` (the
    *  supervisor's VIBESPACE_PASSWORD, on the start pipe only) is set when it does not match; `generate` (a container's first
    *  start) makes one and answers it ONCE, for the journal → { generated? } */
-  /** B-dc3f (1): THE DECLARATION (named in the start line, never read from the environment): required, no password, no single sign-on ⇒ held */
+  /** B-dc3f (1): THE DECLARATION (named in the start line, never read from the environment) — its cell is the plain form's own
+   *  (SW.declaredCell, 主开发 r3629 must 5: one implementation): the page's «off» gives way to the line's password under it, the hold
+   *  after the road, the page's turn-off refused by name — nothing of the rule is written here, only what this table holds now */
+  const declared = (extra = {}) => SW.declaredCell({ declared: !!(witness && witness.declared), set: !!(state && state.passwordHash), sso: sso(), ...extra });
   async function ensure(opts = {}) {
     const r = await ensureRoad(opts);
-    if (!held && witness && witness.declared && !passwordEnabled() && !sso()) { hold(`${SW.DECLARE_ENV}=required is set and no password is set`, 'declared'); changed(); }
+    const d = declared(); if (!held && d.hold) { hold(d.hold.why, d.hold.kind); changed(); }
     return r;
   }
   async function ensureRoad({ password = '', generate = false } = {}) {
-    if (held || state?.userSet) return {};
+    if (held) return {};
+    const d = declared({ userSet: !!state?.userSet, offered: !!(password || generate) });
+    if (d.keepOff) return {};
+    if (d.clearUserSet) state.userSet = false;
     if (password) { if (!passwordEnabled() || T.hashMatches(await scrypt(password, state.salt), state.passwordHash) === false) await setPassword(password); return {}; }
     if (passwordEnabled() || !generate) return {};
     const pw = crypto.randomBytes(9).toString('base64url');
@@ -358,9 +364,11 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
       } else release();
       if (remove) {
         if (!passwordEnabled()) return json(res, 200, { success: true, enabled: enabled() }, cookies);
+        const off = declared().turnOff; if (off) return json(res, 409, { error: off.code, why: off.why }, cookies);   // the declaration's cell, as the plain form's route
         state = { userSet: true, tokens: {} }; slid.clear();
         const w = save(); changed();
         try { await w; } catch (e) { return writeFailed(res, e, cookies); }
+        writeWitnesses();   // the sign-in turned off: its witness removed at once, as the plain form's (off the loop)
         return json(res, 200, { success: true, enabled: enabled() }, [T.CLEAR_COOKIE]);   // single sign-on may keep sign-in on
       }
       const pw = String(newPassword ?? '');
