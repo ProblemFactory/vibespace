@@ -1147,7 +1147,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       // then the per-session pass moves it to Mira — past the 180 s dwell belt (a wall is a fact on the belt too) — and the
       // notice says why. With no wall the conversation stays on Hale (judged as any unknown member)
       const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
-      const poolWorld = (engMod, { wall = true } = {}) => {
+      const poolWorld = (engMod, { wall = true, unread = null } = {}) => {
         const root = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-si-pool-')));
         const dataDir = path.join(root, 'data'), am = new AccountManager({ dataDir });
         if (!am.poolSupported()) return null;
@@ -1158,6 +1158,10 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
         const nS = Math.floor(Date.now() / 1000), INST = nS + 4 * 86400 + 7 * 3600 + 17;
         for (const k of [H, Z]) {
+          // r3630: Hale held ONLY by its own file (no shared instant): torn BEFORE the wall (the wall's own write then starts the file again:
+          // «started again», its caps unstated) or AFTER it (the file cannot be read at the move)
+          if (unread === 'before' && k === H) { fs.writeFileSync(path.join(cacheDir, k + '.json'), '{"fetchedAt": 1, "fiveHour": {'); continue; }
+          if (unread === 'after' && k === H) { fs.writeFileSync(path.join(cacheDir, k + '.json'), J({ fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.2, resetsAt: nS + 3600 }, sevenDay: { utilization: 0.3, resetsAt: nS + 3 * 86400 } })); continue; }
           fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(k)), stampOf(INST, 60e3, false));
           fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(k)), witOf(INST, 60e3));
           fs.writeFileSync(path.join(cacheDir, k + '.json'), J({ fetchedAt: Date.now() - 60e3, source: 'cli-usage', fiveHour: { utilization: 0.2, resetsAt: nS + 3600 }, sevenDay: { utilization: 0.3, resetsAt: INST } }));
@@ -1182,9 +1186,11 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         eng._poolSwitchAt.set(P + ':' + sid, Date.now() - 5000);   // it moved 5 s ago: inside the 180 s dwell belt
         const heldAtStart = !!(eng.poolReadCache(P)(H) || {}).held;
         if (wall) quiet(() => eng.demoteWalledAccount(sx, [{ key: H, bucket: 'fiveHour', slot: true, resetsAtMs: (nS + 3600) * 1000, at: Date.now() }]));
+        if (unread === 'after') { const fH = path.join(cacheDir, H + '.json'), later = new Date(Date.now() + 2000); fs.writeFileSync(fH, '{"fetchedAt": 1, "fiveHour": {'); fs.utimesSync(fH, later, later); }   // r3630: torn after the wall (a later mtime: no reader keeps the wall's bytes)
+        const heldAtMove = !!(eng.poolReadCache(P)(H) || {}).held || !!(eng.poolReadCache(P)(H) || {}).startedAgain;
         const walled = eng._sessionWalls.get(sid);
         quiet(() => eng.maybePoolAutoSwitchForPool(P, { force: true }));
-        return { on: am.poolCurrentFor(P, sid), H, M, heldAtStart, walledH: !!(walled && walled.has(H)), notices };
+        return { on: am.poolCurrentFor(P, sid), H, M, heldAtStart, heldAtMove, walledH: !!(walled && walled.has(H)), notices };
       };
       const PW = poolWorld(realEng), PWq = poolWorld(realEng, { wall: false });
       const APesc = MUT.write(APF, anchored(apsrc, "...(curHeldWalled ? { escape: 'held-walled' } : {}), ...scrapsInfo(best)", '...scrapsInfo(best)', 'b6a92-si-held-wall-belt'), 'b6a92-si-held-wall-belt');
@@ -1197,10 +1203,23 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
           PW.heldAtStart && PW.walledH && PW.on === PW.M && !!heldNote && /Hale/.test(heldNote), { heldAtStart: PW.heldAtStart, walledH: PW.walledH, on: PW.on === PW.M ? 'Mira' : PW.on === PW.H ? 'Hale' : PW.on, heldNote, notices: PW.notices.slice(-3) });
         ok('B-6a92 r2923 …WITH NO WALL the conversation stays on the held Hale (judged as any unknown member: nothing moves it)', !!PWq && PWq.heldAtStart && !PWq.walledH && PWq.on === PWq.H, { on: PWq && (PWq.on === PWq.H ? 'Hale' : PWq.on) });
         ok('B-6a92 RED CONTROL (r2923 1: the held wall\'s move carries no escape, in a copy): the 180 s dwell belt holds the walled conversation on Hale — the leg above can fail', !!PWx && PWx.walledH && PWx.on === PWx.H, { on: PWx && (PWx.on === PWx.H ? 'Hale' : PWx.on === PWx.M ? 'Mira' : PWx.on) });
+        // r3630 (round wnv7929nx's must): the escape rides EVERY held cause (the chooser's one predicate), so the notice names the cause it
+        // HAS — a member held only because its usage file cannot be read is never said to be on another account's instant (the wrong fix)
+        const PU = poolWorld(realEng, { unread: 'after' }), PS = poolWorld(realEng, { unread: 'before' });
+        const engAlways = require(MUT.write(ENG, anchored(esrc, '(${heldWallWhy(curFor, readCache)})', "(held on another account's weekly instant)", 'b6a92-r3630-cause-always'), 'b6a92-r3630-cause-always'));   // stale-pins: kept (the red control puts the unconditional clause back)
+        const PUx = poolWorld(engAlways, { unread: 'after' });
+        const noteOf = (w) => (w && w.notices.find((t) => /answered it with a limit while its own numbers are unknown/.test(t))) || null;
+        const unreadNote = noteOf(PU), startedNote = noteOf(PS), unreadNoteX = noteOf(PUx);
+        const SAME = /another account's weekly instant/;
+        ok('B-6a92 r3630 THE NOTICE NAMES THE CAUSE IT HAS (a file that cannot be read): Hale, held only because its usage file is torn AFTER its wall, moves the conversation to Mira, and the notice says its usage reading could not be read, never «another account\'s weekly instant»; the same-instant world above still says the instant',
+          !!PU && PU.heldAtMove && PU.walledH && PU.on === PU.M && !!unreadNote && /its usage reading could not be read/.test(unreadNote) && !SAME.test(unreadNote) && SAME.test(heldNote || ''), { heldAtMove: PU && PU.heldAtMove, walledH: PU && PU.walledH, on: PU && (PU.on === PU.M ? 'Mira' : PU.on === PU.H ? 'Hale' : PU.on), unreadNote, heldNote, notices: PU && PU.notices.slice(-3) });
+        ok('B-6a92 r3630 …AND (a file started again): Hale\'s file torn BEFORE its wall: the wall\'s own write starts it again with its caps unstated, the move goes to Mira and the notice says no whole usage reading has come since, never another account\'s instant',
+          !!PS && PS.heldAtStart && PS.walledH && PS.on === PS.M && !!startedNote && /no whole usage reading has come since its reading file started again/.test(startedNote) && !SAME.test(startedNote), { on: PS && (PS.on === PS.M ? 'Mira' : PS.on === PS.H ? 'Hale' : PS.on), startedNote });
+        ok('B-6a92 RED CONTROL (r3630: the clause unconditional, in a copy): the unread member\'s move is said to be on another account\'s weekly instant — the legs above can fail', !!PUx && PUx.on === PUx.M && !!unreadNoteX && SAME.test(unreadNoteX), { unreadNoteX });
       }
       // (r2923 4) THE REMOVAL'S JOURNAL SAYS THE TRUE REASON: the removed default's only other listed member is held — the parking pick
       // passes it over, the default stays, and the line names the hold (never «no member is signed in and active»)
-      const rmWorld = (engMod) => {
+      const rmWorld = (engMod, { unread = false } = {}) => {
         const root = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-si-rm-')));
         const dataDir = path.join(root, 'data'), am = new AccountManager({ dataDir });
         if (!am.poolSupported()) return null;
@@ -1210,7 +1229,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         am.setPoolTarget(P, D); am.updatePool(P, { auto: true, hot: true });
         const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
         const nS = Math.floor(Date.now() / 1000), INST = nS + 3 * 86400 + 5 * 3600 + 41;
-        for (const k of [H, Z]) { fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(k)), stampOf(INST, 60e3, false)); fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(k)), witOf(INST, 60e3)); }
+        if (unread) fs.writeFileSync(path.join(cacheDir, H + '.json'), '{"fetchedAt": 1, "fiveHour": {');   // r3630: Hale's usage file cannot be read (torn bytes), no shared instant
+        else for (const k of [H, Z]) { fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(k)), stampOf(INST, 60e3, false)); fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(k)), witOf(INST, 60e3)); }
         const eng = engMod.create({ app: { get() { }, post() { }, put() { }, patch() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
           serverNotice() { }, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter }, getAutoResume: () => null, getQuotaProbe: () => null });
         quiet(() => eng.repairIdentityAnchors('boot'));
@@ -1221,12 +1241,18 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         return said.filter((l) => /removed-member evict .*\/default/.test(l));
       };
       const rmL = rmWorld(realEng);
-      const engRmOld = require(MUT.write(ENG, anchored(esrc, "          const heldN = (accounts.poolMembers(poolId) || []).filter((m) => m && m.id !== def && membership.includes(m.id) && heldForPool(m.id)).length;\n", '          const heldN = 0;\n', 'b6a92-si-rm-reason'), 'b6a92-si-rm-reason'));
+      const engRmOld = require(MUT.write(ENG, anchored(esrc, "          const heldN = othersL.filter((m) => heldForPool(m.id)).length;\n", '          const heldN = 0;\n', 'b6a92-si-rm-reason'), 'b6a92-si-rm-reason'));
+      const rmU = rmWorld(realEng, { unread: true });
+      const engRmSame = require(MUT.write(ENG, anchored(esrc, "if (heldForPool(m.id)) return false; const r = rcH(m.id); return !!(r && typeof r === 'object' && typeof r.held === 'string');", 'return false;', 'b6a92-r3630-rm-unread'), 'b6a92-r3630-rm-unread'));
+      const rmUx = rmWorld(engRmSame, { unread: true });
       const rmX = rmWorld(engRmOld);
       if (rmL) {
         ok('B-6a92 r2923 THE REMOVAL\'S JOURNAL SAYS THE TRUE REASON: the removed default\'s only other listed member is held — the default stays and the line names the hold (1 held on another account\'s weekly instant), never «no member the pool lists is signed in and active»',
           rmL.length === 1 && /stays — no member the pool lists can take it: 1 held on another account's weekly instant/.test(rmL[0]) && !/is signed in and active/.test(rmL[0]), rmL);
         ok('B-6a92 RED CONTROL (r2923 4: the hold not counted, in a copy): the line gives the untrue reason — the leg above can fail', !!rmX && rmX.length === 1 && /is signed in and active/.test(rmX[0]), rmX);
+        ok('B-6a92 r3630 THE REMOVAL\'S JOURNAL COUNTS ANY HELD MARK: the only other listed member\'s usage file cannot be read — the default stays and the line says so in its own words (1 whose usage reading could not be read), never «another account\'s weekly instant» nor «signed in and active»',
+          !!rmU && rmU.length === 1 && /stays — no member the pool lists can take it: 1 whose usage reading could not be read/.test(rmU[0]) && !/weekly instant|is signed in and active/.test(rmU[0]), rmU);
+        ok('B-6a92 RED CONTROL (r3630: only the same-instant hold counted, in a copy): the line gives the untrue reason — the leg above can fail', !!rmUx && rmUx.length === 1 && /is signed in and active/.test(rmUx[0]), rmUx);
       }
       const engSrc = read(ENG);
       // THE CHECK STARTS NO READ — by its own text, able to fail: holdSameInstants calls nothing on the read road

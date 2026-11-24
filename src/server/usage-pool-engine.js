@@ -638,6 +638,17 @@ function withBareDoor(fn) { const was = _bareDoor; _bareDoor = true; try { retur
 // { held: 'same-instant' }, so the chooser tells it apart from a member never read (never proved, never a target, never a reason
 // for a start to stay); no identity sibling's file and no estimate stands in for it
 const heldForPool = (id) => { const h = _heldWin.get(id); return !!(h && h.by === 'same-instant'); };
+// r3630 (round wnv7929nx's must): the chooser's ONE predicate holds ANY held mark, so a held member that walled a conversation
+// leaves for every held cause (the escape 'held-walled'). The move's notice names the cause it HAS: the same-instant words only
+// where the pool's same-instant test says so — for a reading file that could not be read they would send the person to the
+// wrong fix. `readCache` is the pass's own reader (poolReadCache): its mark is the one the chooser decided on
+function heldWallWhy(id, readCache) {
+  if (heldForPool(id)) return "held on another account's weekly instant";
+  const r = typeof readCache === 'function' ? readCache(id) : null;
+  if (r && typeof r === 'object' && r.held === 'same-instant') return "held on another account's weekly instant";
+  if (r && typeof r === 'object' && typeof r.held === 'string') return 'its usage reading could not be read';
+  return 'no whole usage reading has come since its reading file started again';
+}
 const HELD_READING = Object.freeze({ held: 'same-instant' });   // the held row's reading: a mark, no numbers
 const _heldPlacedSaid = new Set();   // `${pool}|${default}` a held default's start move was said for (once, bounded)
 function poolReadReading({ group = true } = {}) {
@@ -8802,9 +8813,12 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool', rosters 
         if (fb) {
           try { accounts.setPoolTarget(poolId, fb, { why }); out.defaultMoved = { from: def, to: fb, fallback: true }; console.log(`[pool] removed-member evict ${poolId}/default: ${def} → ${fb} — no member can take over; new conversations start on the one usable soonest`); } catch (e) { console.warn('[pool] removed-member default re-point failed:', e.message); }
         } else {
-          // B-6a92 (r2923): the TRUE reason — the parking pick passes over a member held on another account's instant
-          const heldN = (accounts.poolMembers(poolId) || []).filter((m) => m && m.id !== def && membership.includes(m.id) && heldForPool(m.id)).length;
-          if (heldN) console.log(`[pool] removed-member evict ${poolId}/default: ${def} stays — no member the pool lists can take it: ${heldN} held on another account's weekly instant (their numbers unknown until their own read), and a member signed out, inactive or of another provider is never the pick`);
+          // B-6a92 (r2923): the TRUE reason — the parking pick passes over a member held on another account's instant; r3630: and over
+          // ANY held mark (a reading file that could not be read), each cause counted in its own words
+          const othersL = (accounts.poolMembers(poolId) || []).filter((m) => m && m.id !== def && membership.includes(m.id)), rcH = poolReadCache(poolId);
+          const heldN = othersL.filter((m) => heldForPool(m.id)).length;
+          const unreadN = othersL.filter((m) => { if (heldForPool(m.id)) return false; const r = rcH(m.id); return !!(r && typeof r === 'object' && typeof r.held === 'string'); }).length;
+          if (heldN || unreadN) console.log(`[pool] removed-member evict ${poolId}/default: ${def} stays — no member the pool lists can take it: ${[heldN ? `${heldN} held on another account's weekly instant (their numbers unknown until their own read)` : '', unreadN ? `${unreadN} whose usage reading could not be read` : ''].filter(Boolean).join(', ')}, and a member signed out, inactive or of another provider is never the pick`);
           else console.log(`[pool] removed-member evict ${poolId}/default: ${def} stays — no member the pool lists is signed in and active`);
         }
       }
@@ -9281,7 +9295,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         else if (ds.pinExhausted) pinNotice(poolId, sid, s2, ds.pinWhy, { member: ds.pinned, target: ds.to }, !a.hot); // the pin cannot serve: running on the automatic pick, the pin kept
         else if (ds.reason === 'priority-return') priorityReturnNotice(poolId, sid, s2, ds, !a.hot); // manual priority: back on the higher-ranked member at its stop
         else if (ds.reason === 'spare-lane' && ds.to !== linkCur) spareLaneNotice(poolId, sid, s2, ds, curFor); // B-8a65 S5: an idle conversation moved off a member rich in a cap it does not use
-        else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${ds.escape === 'held-walled' ? ` — ${memberWord(poolId, curFor)} answered it with a limit while its own numbers are unknown (held on another account's weekly instant)` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
+        else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${ds.escape === 'held-walled' ? ` — ${memberWord(poolId, curFor)} answered it with a limit while its own numbers are unknown (${heldWallWhy(curFor, readCache)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
         if (moveByClaim) console.log(`[pool] per-session switch ${poolId}/${sid}: moved onto ${nameOf(ds.to)} on your reset claim (${moveByClaim}) — unconfirmed until its first reading`);
         // a hot re-point does not move an idle limit-blocked session by itself

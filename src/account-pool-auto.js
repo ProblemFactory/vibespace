@@ -646,9 +646,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // conversation on it is judged as on any unknown member — but A WALL IS A FACT ABOUT THE MEMBER: a held current that walled
   // THIS conversation (`exclude`) leaves as from any walled member. One predicate for ANY held mark (B-6a92's reviewed rule, .417)
   // — and ON THE BELT TOO (B-6a92 r2923): the move carries `escape: 'held-walled'`, the per-session dwell belt's escape (a known
-  // walled member passes it by its 0 %, a held one has no percent to show)
+  // walled member passes it by its 0 %, a held one has no percent to show). The escape rides EVERY held cause, so the engine's
+  // notice names the cause it has (r3630: heldWallWhy — the same-instant words only where the pool's same-instant test says so)
   const restartedUnknown = (r) => { const sa = r && typeof r === 'object' ? r.startedAgain : null; return !!(sa && typeof sa === 'object' && !sa.enumerated); };
   const markedHeld = (r) => !!(r && typeof r === 'object' && (typeof r.held === 'string' || restartedUnknown(r)));
+  // `held(id)` (B-6a92 r2688) is passed by TESTS only: no engine call passes it — the engine's hold reaches here as the reading's mark
   const isHeld = (id) => (typeof held === 'function' && !!held(id)) || markedHeld(readCache(id)) || (typeof readReading === 'function' && markedHeld(readReading(id)));
   const curHeldStart = !!placing && isHeld(currentId);
   const curHeldWalled = !!excluded && excluded.has(currentId) && isHeld(currentId);
