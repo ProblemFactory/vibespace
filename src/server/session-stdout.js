@@ -33,6 +33,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   agentEnv, // the SANITIZED spawn env (spawn-hygiene law) — the ONE local re-attach uses it, as ws-handler's detector always did
   onLocalReattach = null, // lane-dead-bridge: told after EVERY local re-attach (the watch, the broken-stdin detector, the probe) — ends the socket's orphans, counts the catch-up
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver, getPages, getPermissionRules, getBrain = () => null, getExitProxy = () => null,
+  patchClock = null, // r3302: a suite's clock for the patch chain ({ linkMs, againMs }); the hub's own: the 10 s bound and the tries below
   getSyncStore = () => null }) {   // lane stop-refills-composer: the drafts store, read at record time (server.js builds it later); every other create() caller relies on the null default
   const hosts = mk(getHosts);
   const exitProxyRef = mk(getExitProxy);                // verify-r2 A3-r2 / ask-a: a dead conversation's exit pairs + waiting asks end with it
@@ -509,20 +510,64 @@ const metaPatchChain = new Map();   // fp → the newest patch in flight: the pa
  *  is the owner check's (`prev` — no second read); a socket with no meta of its own gets none (never a stub); the patches
  *  of one file are CHAINED (ON then OFF pressed fast: OFF lands last, whichever read answers first); never rejects.
  *  → Promise<boolean> */
-const PATCH_LINK_MS = 10 * 1000;   // a link whose read never answers (a hung mount) lets the chain move on after this; its late answer writes nothing
+const PATCH_LINK_MS = (patchClock && patchClock.linkMs) || 10 * 1000;   // a link whose read never answers (a hung mount) lets the chain move on after this; its late answer writes nothing
 // A PATCH THE STORE GAVE UP ON IS NOT LOST (主开发 10:30Z, «as if a must»: a dropped clear of a stop fact let a restart restore
 // the old stop, and the restored-reset arm could continue a finished conversation — a turn nobody typed): it is kept here,
 // merged (the newest keys win), and written WITH the next patch of that file; the next patch's own keys win over it
 const owedPatch = new Map();   // fp → the owed keys
+// r3302 (the money lens: a person's «automatic continue OFF» dropped by a stalled link, a restart before any later patch, the
+// conversation back ON and continued — a turn nobody typed): AN OWED PATCH NEVER WAITS FOR SOMEBODY ELSE's WRITE. It is written
+// AGAIN BY ITSELF — these tries, off the loop, through the same chain (a newer patch merges it, its own keys winning) — and the
+// record's store entry carries it, so ANY write of that record carries it and THE STOP's FLUSH writes it (rank 0: the record read
+// then, the owed keys over it); a record unread (r3137), with no record of its own or another live session's gets nothing
+const PATCH_AGAIN_MS = (patchClock && Array.isArray(patchClock.againMs) && patchClock.againMs.length && patchClock.againMs) || [2000, 5000, 15000, 30000, 60000];
+const owedTries = new Map(), owedOwner = new Map(), writingOwed = new Map();   // fp → {n, timer, said} · the patcher's id · the owed keys a write carries
+const STORE_LATER = Symbol.for('vibespace.store-writer.later');   // the store writer's «not ready» (by name: src/store-writer.js LATER)
+function doneOwing(fp) { const o = owedTries.get(fp); if (o && o.timer) clearTimeout(o.timer); owedTries.delete(fp); owedOwner.delete(fp); }
+function oweAgain(sockName, fp, owner) {
+  if (owner) owedOwner.set(fp, owner);
+  try { storeWriter().dirty(fp, { name: 'session-meta.write', debounceMs: META_DEBOUNCE_MS, rank: 0, produce: (o) => metaBytes(fp, o), onWritten: (ok) => metaWritten(fp, ok) }); } catch { }
+  const o = owedTries.get(fp) || { n: 0, timer: null, said: false }; owedTries.set(fp, o);
+  if (o.timer) return;
+  if (o.n >= PATCH_AGAIN_MS.length) {
+    if (!o.said) { o.said = true; console.warn(`[session] ${sockName}: a change of its record (${Object.keys(owedPatch.get(fp) || {}).join(', ')}) could not be written in ${o.n} tries of its own — it is kept and written with the next write of that record, or at the hub's stop`); }
+    return;
+  }
+  o.timer = setTimeout(() => { o.timer = null; o.n++; patchSessionMeta(sockName, {}, { owner: owedOwner.get(fp) || owner }); }, PATCH_AGAIN_MS[o.n]);
+  if (o.timer.unref) o.timer.unref();
+}
+/** a record's bytes for the store writer: its pending copy as before; an OWED patch over it, and with no pending copy only on a
+ *  synchronous flush (the stop's: the record read then) — else not ready yet (its own tries write it off the loop) */
+function metaBytes(fp, o) {
+  const t = pendingMeta.get(fp), owed = owedPatch.get(fp);
+  const plain = () => { if (t === undefined) return null; writingMeta.set(fp, t); return t; };
+  if (!owed || SMV.isMarked(path.basename(fp, '.json'))) return plain();   // an unread record: what waits is saved at its read (r3137)
+  let base = null;
+  if (t !== undefined) { try { base = JSON.parse(t); } catch { base = null; } }
+  else if (o && o.sync) { try { base = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch { base = null; } }   // the stop's flush (sync by nature)
+  else return STORE_LATER;
+  const who = owedOwner.get(fp) || null;
+  if (!metaValid(base) || !Object.keys(base).length || (who && base.webuiSessionId && base.webuiSessionId !== who && activeSessions && typeof activeSessions.has === 'function' && activeSessions.has(base.webuiSessionId))) return plain();   // never a stub; never into another live session's record
+  writingMeta.set(fp, t); writingOwed.set(fp, owed);
+  return JSON.stringify({ ...base, ...owed });
+}
+function metaWritten(fp, ok) {
+  const t = writingMeta.get(fp); writingMeta.delete(fp); if (ok && pendingMeta.get(fp) === t) pendingMeta.delete(fp);
+  const ow = writingOwed.get(fp); writingOwed.delete(fp);
+  if (ok && ow && owedPatch.get(fp) === ow) { owedPatch.delete(fp); doneOwing(fp); }
+}
 function patchSessionMeta(sockName, patch, { owner = null } = {}) {
   const fp = path.join(META_DIR, sockName + '.json');
   const link = () => {
     const owed = owedPatch.get(fp) || null;
+    if (!owed && !Object.keys(patch || {}).length) return Promise.resolve(true);   // r3302: a try of its own that a newer patch already wrote
     const full = owed ? { ...owed, ...patch } : patch;   // never an older value over a newer one: this patch's keys last
     const tok = { dead: false }; let t = null;
-    return Promise.race([patchMetaOnce(sockName, fp, full, 3, owner, tok), new Promise((r) => { t = setTimeout(() => { tok.dead = true; console.warn(`[session] ${sockName}: a meta patch's read gave no answer in ${PATCH_LINK_MS / 1000} s — dropped (its keys ride the next patch)`); r(false); }, PATCH_LINK_MS); if (t.unref) t.unref(); })])
+    return Promise.race([patchMetaOnce(sockName, fp, full, 3, owner, tok), new Promise((r) => { t = setTimeout(() => { tok.dead = true; console.warn(`[session] ${sockName}: a meta patch's read gave no answer in ${PATCH_LINK_MS / 1000} s — dropped (its keys are kept: written again by its own tries, by the record's next write, or at the stop)`); r(false); }, PATCH_LINK_MS); if (t.unref) t.unref(); })])
       .finally(() => clearTimeout(t))
-      .then((ok) => { if (ok) { if (owedPatch.get(fp) === owed) owedPatch.delete(fp); } else owedPatch.set(fp, full); return ok; });
+      .then((ok) => { if (ok) { if (owedPatch.get(fp) === owed) { owedPatch.delete(fp); doneOwing(fp); } }
+    else { owedPatch.set(fp, full); oweAgain(sockName, fp, owner); }
+    return ok; });
   };
   const p = (metaPatchChain.get(fp) || Promise.resolve()).then(link, link);
   metaPatchChain.set(fp, p);
@@ -705,16 +750,14 @@ function writeSessionMeta(sockName, meta, { durable = false, sync = false, prev 
     // (round 2 forgot the flying write, whose landing was then unlinked: the file this write had just made was deleted)
     pendingMeta.set(fp, text);
     storeWriter().dirty(fp, { name: 'session-meta.write', debounceMs: 0,
-      produce: () => { const t = pendingMeta.get(fp); if (t === undefined) return null; writingMeta.set(fp, t); return t; },
-      onWritten: (ok) => { const t = writingMeta.get(fp); writingMeta.delete(fp); if (ok && pendingMeta.get(fp) === t) pendingMeta.delete(fp); } });
+      produce: (o) => metaBytes(fp, o), onWritten: (ok) => metaWritten(fp, ok) });   // r3302: the owed keys ride it
     const r = storeWriter().flushSync([fp]);
     if (r.left.length) console.warn(`[session] ${sockName}: its meta could not be written before its rename (${r.left[0].why}) — kept in memory, retried`);
     knownMeta.add(fp);
   } else {
     pendingMeta.set(fp, text);
     storeWriter().dirty(fp, { name: 'session-meta.write', debounceMs: META_DEBOUNCE_MS, ...(durable ? { rank: 0 } : {}),
-      produce: () => { const t = pendingMeta.get(fp); if (t === undefined) return null; writingMeta.set(fp, t); return t; },
-      onWritten: (ok) => { const t = writingMeta.get(fp); writingMeta.delete(fp); if (ok && pendingMeta.get(fp) === t) pendingMeta.delete(fp); } });
+      produce: (o) => metaBytes(fp, o), onWritten: (ok) => metaWritten(fp, ok) });   // r3302: the owed keys ride it
     if (durable) done = storeWriter().durable(fp).then((ok) => { if (!ok) { let wn = null; try { wn = storeWriter().whyNotDurable(fp); } catch { } console.warn(`[session] ${sockName}: a binding / a person's choice is in memory but not on disk yet (${wn && wn.why === 'queued' ? `its write is still queued${wn.ahead > 0 ? ` behind at least ${wn.ahead} other write${wn.ahead === 1 ? '' : 's'}` : ''} — the storage is slow; kept, written in its turn` : 'its write failed — kept, retried'})`); } return ok; });
   }
   // A FLAG PATCH skips the identity work (the U2 cure's read: a pooled hub's attribution scans every session with a sync
@@ -745,7 +788,7 @@ function deleteSessionMetaNow(sockName) {
   _metaTombstones.set(sockName, Date.now());
   if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   const fp = path.join(META_DIR, sockName + '.json');
-  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp); owedPatch.delete(fp);   // (the patch's counter and owed keys go with the file)
+  pendingMeta.delete(fp); knownMeta.delete(fp); metaSeq.delete(fp); owedPatch.delete(fp); doneOwing(fp);   // (the patch's counter, owed keys and own tries go with the file)
   try { storeWriter().forget(fp); } catch {}   // its pending write dropped; one in flight lands BEFORE the unlink, never after
   try { fs.unlinkSync(fp); } catch {}
 }

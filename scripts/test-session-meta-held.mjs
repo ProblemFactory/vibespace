@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { checker } from './lib/check.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
@@ -43,6 +44,10 @@ const land = (sock) => { try { SW.flushSync([path.join(META_DIR, sock + '.json')
 const HOLD = require(path.join(REPO, 'src/store-read-hold.js'));
 let SMV = null; try { SMV = require(path.join(REPO, 'src/server/session-meta-verdict.js')); } catch { SMV = null; }
 const unread = (m) => !!(SMV && SMV.isUnread(m));
+// the copy is DONE when the record's own row says so (the production list the notice reads), never when its file first appears:
+// the helper sets the fact once the copy's write has ended (a lane's read under load, 11-24: the file was there, the fact not yet)
+const copyOf = (s) => ((SMV && typeof SMV.rows === 'function' ? SMV.rows() : []).find((r) => r.file === s + '.json') || {}).copy || null;
+const copied = async (s) => { for (let i = 0; i < 160 && !(fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')) && copyOf(s)); i++) await sleep(25); return !!copyOf(s); };
 const RECORD = (n) => ({ webuiSessionId: 'sess-made-up-' + n, name: 'a made-up conversation ' + n, cwd: '/made/up/folder-' + n, accountId: 'acct-made-up', groups: ['g-made-up'], lockedModel: 'made-up-model', claudeSessionId: 'cid-made-up-' + n });
 const born = (n) => { const sock = 'vs-smheld-sock-' + n; SS.writeSessionMeta(sock, RECORD(n)); land(sock); return sock; };
 const readAgain = async (sock) => { if (typeof HOLD.readAgainOf === 'function') { for (let i = 0; i < 20; i++) { if (await HOLD.readAgainOf(sock + '.json')) return true; await sleep(20); } } return false; };
@@ -183,7 +188,7 @@ console.log('⑨ r3199 — a torn record the person removes is «not there» aga
   const s = 'vs-smheld-sock-torn-2', f = path.join(META_DIR, s + '.json');
   fs.writeFileSync(f, '{"name":"the torn conversation","cwd":"/made/up');
   SS.readSessionMeta(s);
-  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')); i++) await sleep(25);
+  await copied(s);
   const rows = SMV && typeof SMV.rows === 'function' ? SMV.rows() : [];
   const named = rows.find((r) => r.file === s + '.json');
   fs.unlinkSync(f);
@@ -206,7 +211,7 @@ console.log('⑩ r3245 — the copy FIRST: a whole write before the torn bytes a
   SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the live conversation, too early', cwd: '/made/up/early' }, { durable: true, whole: true });   // the same turn as the read: no copy yet
   land(s);
   const early = realReadSync.call(fs, f, 'utf8');
-  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')); i++) await sleep(25);
+  await copied(s);
   const copies = fs.readdirSync(META_DIR).filter((n) => n.startsWith(s + '.json.corrupt-'));
   ok(!!(early === TORN3 && copies.length === 1 && realReadSync.call(fs, path.join(META_DIR, copies[0]), 'utf8') === TORN3),
     `a whole write in the very turn of a torn read (before its copy) restates NOTHING — the torn bytes stay where they are until their copy is made (${copies.length} copy, byte for byte) — RED: the restatement wrote over the only copy`);
@@ -218,7 +223,7 @@ console.log('⑪ r3245 — the whole restatement carries the LIVE conversation\'
   fs.writeFileSync(f, '{"name":"the fourth torn conversation","cwd":"/made/up');
   ACTIVE.set('sess-made-up-live-4', { sockName: s, name: 'the fourth live conversation', _accountId: 'acct-made-up-live', host: 'a-made-up-machine', _initialGroupId: 'g-made-up-live', _poolPin: { pool: 'pool-made-up', member: 'm-made-up' } });
   SS.readSessionMeta(s);
-  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')); i++) await sleep(25);
+  await copied(s);
   await sleep(20);
   SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the fourth live conversation', cwd: '/made/up/live-4', webuiSessionId: 'sess-made-up-live-4' }, { durable: true, whole: true });
   land(s); await sleep(50); land(s);
@@ -279,5 +284,47 @@ console.log('⑫ r3245 (1) — a live conversation whose record is unread at a s
     `its Stop reaches its socket (the kill body's ${'`'}if (session.socketPath)${'`'} ends the process holding ${Lc.socketPath}) and its record: the removal is REMEMBERED for its read (${back}, removal owed ${row && row.removalOwed}), the record itself still there — RED: without the line the kill body has no socket to end and no record to name (${!!L.socketPath} / ${!!L.sockName})`,
     { row });
 }
+
+console.log('⑬ r3302 — an owed patch is written AGAIN BY ITSELF and the stop writes what is owed: a person\'s «automatic continue OFF» survives a restart');
+{
+  // (LAST in this suite: its stop is the store writer's own exit flush.) The chain's clock, scaled for a suite: the hub's bound is
+  // 10 s and its own tries 2 / 5 / 15 / 30 / 60 s — here ONE bound and ONE try
+  const CLOCK = { linkMs: 1000, againMs: [1000] };
+  const STALL = new Map();   // file → off-loop reads HELD (a PLACED stall of the chain's read: it never answers)
+  const before = fs.promises.readFile;
+  fs.promises.readFile = function (p, ...a) { const k = typeof p === 'string' ? path.resolve(p) : null; const n = k ? STALL.get(k) || 0 : 0; if (n > 0) { STALL.set(k, n - 1); return new Promise(() => { }); } return before.call(fs.promises, p, ...a); };
+  const SSP = path.join(REPO, 'src/server/session-stdout.js'), SSsrc = fs.readFileSync(SSP, 'utf8');
+  const AGAIN = '    else { owedPatch.set(fp, full); oweAgain(sockName, fp, owner); }';
+  const mk = (mod) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null, patchClock: CLOCK });
+  const cured = mk(require(SSP));
+  const today = SSsrc.includes(AGAIN) ? mk(mutantCopies('smheld', REPO).load('src/server/session-stdout.js', SSsrc.replace(AGAIN, '    else owedPatch.set(fp, full);   // TODAY: owed to the NEXT patch only'), 'owed')) : null;
+  const press = (SSx, s, held) => {   // a stopped conversation; the person turns automatic continue OFF; its link's read is held
+    fs.writeFileSync(path.join(META_DIR, s + '.json'), JSON.stringify({ name: 'a stopped conversation', webuiSessionId: 'sess-' + s, autoResume: true }));
+    STALL.set(path.resolve(path.join(META_DIR, s + '.json')), held);
+    return SSx.patchSessionMeta(s, { autoResume: false }, { owner: 'sess-' + s });
+  };
+  const autoOf = (s) => { const d = onDisk(s); return d && typeof d === 'object' ? d.autoResume : d; };
+  const t0 = Date.now();
+  // (a) the storage answers again after the held read; (b) it stays held for every off-loop read until the stop
+  const firsts = await Promise.all([press(cured, 'vs-owed-a', 1), press(cured, 'vs-owed-b', Infinity), ...(today ? [press(today, 'vs-owed-a-today', 1), press(today, 'vs-owed-b-today', Infinity)] : [])]);
+  // until the cured (a) is on disk and the cured (b) has spent its tries: its bound, the try's wait, the try's bound
+  const spent = CLOCK.linkMs + CLOCK.againMs[0] + CLOCK.linkMs;
+  while (Date.now() - t0 < spent + CLOCK.linkMs && !(autoOf('vs-owed-a') === false && Date.now() - t0 > spent)) await sleep(50);
+  const beforeStop = { a: autoOf('vs-owed-a'), aToday: autoOf('vs-owed-a-today'), b: autoOf('vs-owed-b'), bToday: autoOf('vs-owed-b-today'), at: Date.now() - t0 };
+  // THE STOP: the hub's exit flushes what cannot be re-derived first (rank 0)
+  const SWx = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  SWx.exitFlush({ only: 'rank0' });   // (its keeper thread is not armed here: this is the flush alone)
+  // THE NEW START: a fresh store over the same records
+  const fresh = require(path.join(REPO, 'src/server/session-stdout.js')).create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: new Map(), engine: {}, getHosts: () => null });
+  const after = Object.fromEntries(['vs-owed-a', 'vs-owed-b', 'vs-owed-a-today', 'vs-owed-b-today'].map((s) => [s, fresh.readSessionMeta(s).autoResume]));
+  fs.promises.readFile = before;
+  ok(!!(firsts[0] === false && firsts[1] === false && beforeStop.a === false && after['vs-owed-a'] === false),
+    `the person's press whose link the held read dropped (${firsts[0]}) is written AGAIN BY ITSELF, off the loop, with no later patch: on disk before any stop (${beforeStop.a} at ${beforeStop.at} ms) and the new start reads automatic continue OFF (${after['vs-owed-a']})`, { firsts, beforeStop, after });
+  ok(!!(beforeStop.b === true && after['vs-owed-b'] === false),
+    `storage that never answers an off-loop read: the press stays owed through its own tries (${beforeStop.b} on disk) and THE STOP's flush writes it — the new start reads OFF (${after['vs-owed-b']}), never a conversation continued against the person's word`, { beforeStop, after });
+  ok(!!(today && beforeStop.aToday === true && after['vs-owed-a-today'] === true && after['vs-owed-b-today'] === true),
+    `RED (today's owed-to-the-next rule): with no later patch the press lives in memory only — nothing writes it again (${beforeStop.aToday}) and the stop writes nothing: the new start reads automatic continue ON again (${after['vs-owed-a-today']} / ${after['vs-owed-b-today']}), and its reset continues the conversation — a turn nobody typed`, { beforeStop, after });
+}
+
 clearInterval(KEEP);
 report();
