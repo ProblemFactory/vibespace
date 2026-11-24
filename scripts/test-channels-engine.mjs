@@ -2602,11 +2602,13 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   R14.bodies.length = 0;
   await R14.close();
   // CONTROL (r5): a routes copy without the account-verb courtesy answers the agent's cancel 200 (and its status poll)
+  // the account verbs that carry the courtesy, FIVE since b807f7fd7 (B-92fc) added the purge-left retry: duplicate, delete, purge-left
+  // retry, disconnect, edit (PUT) — the copy below cuts every one of them, so the agent's cancel / status legs prove the courtesy still
   const ACCT = "if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return;";
   // lane gmail-connect-wall r4: the cancel names its sign-in (`flowIdOf(req.body)`) — the anchor follows the route's line
   const CANCEL = "if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id, { flowId: flowIdOf(req.body) }));";
   const STATUS = "    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r5: the consent URL (its state) is the owner's\n";
-  ok(rsrc.split(ACCT).length === 5 && rsrc.split(CANCEL).length === 2 && rsrc.split(STATUS).length === 2, 'CONTROL setup: the r5 courtesy is present on the four account verbs, cancel and status');
+  ok(rsrc.split(ACCT).length === 6 && rsrc.split(CANCEL).length === 2 && rsrc.split(STATUS).length === 2, `CONTROL setup: the r5 courtesy is present on the five account verbs (duplicate, delete, purge-left retry, disconnect, edit), cancel and status (${rsrc.split(ACCT).length - 1} account verbs found)`);
   const p15 = patchPath('src/routes', 'channels');
   writeCopy(p15, rsrc.split(ACCT).join('').replace(CANCEL, 'res.json(await engine().cancelAuth(req.params.id, { flowId: flowIdOf(req.body) }));').replace(STATUS, ''));
   const R15 = await serveWith(require(p15), eng);
