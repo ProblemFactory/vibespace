@@ -8,8 +8,12 @@
 //     its card; beside the long title the NAME yields (its ellipsis), the short names stay whole. CONTROL: chat.css with the old
 //     chip rule (margin-left only) — the long card's chip stands two lines (one character a line)
 //   ② THE AGENTS DIALOG'S BODY NEVER RUNS PAST THE DIALOG (public/style.css `.dialog.agents-dialog .agents-dialog-body`): the
-//     dialog's own classes (the modal 92vw wide, its head «本机账号与配额 · 全部刷新», its cards) — the body, «全部刷新» and every card
-//     inside the dialog's right edge, nothing scrolls sideways. CONTROL: the old 380 px floor — the body and the button run past
+//     dialog's own classes (the modal 95vw wide at 390 — the phone's width for every dialog: since ef10f5db9 the four edges' cap,
+//     `.dialog-overlay > .dialog { max-width: 100% !important; }`, outranks this dialog's own 92vw; it was 359 px, it is 371 — its
+//     head «本机账号与配额 · 全部刷新», its cards) — the body, «全部刷新» and every card inside the dialog's right edge, the head as far
+//     off that edge as off the left one, nothing scrolls sideways. CONTROL: the old 380 px floor — the body runs past the dialog's
+//     right edge, its right padding cut (in the 371 px dialog the head stands ~4 px off that edge, ~15 off the left; in the 359 px
+//     one «全部刷新» itself ran past — the control states what the floor does to the dialog as it is)
 //   ③ A POP-UP IS BOUNDED BY THE SCREEN WITH THE USUAL MARGIN (src/lib/utils.js showContextMenu over menu-place.js menuPlace,
 //     MENU_PAD): the Agents dialog's «+ 添加账号…» rows opened from a button at x 205 (where the 11-13 picture had it) keep their
 //     natural width, every row on one line, 4 px off the screen's right edge; a menu wider than the screen is capped at the
@@ -172,18 +176,21 @@ const AGENTS = `(() => {
   document.body.appendChild(ov);
   const R = (e) => e.getBoundingClientRect(), d = R(ov.querySelector('.dialog')), body = ov.querySelector('.agents-dialog-body'), b = R(body), ra = R(ov.querySelector('.agents-refresh-all'));
   const past = [...ov.querySelectorAll('.dialog *')].filter((e) => e.getClientRects().length && R(e).right > d.right + 0.5).map((e) => String(e.className || e.tagName).slice(0, 40));
+  const oh = R(ov.querySelector('.agents-overview-head')), gapL = Math.round((oh.left - d.left) * 10) / 10, gapR = Math.round((d.right - oh.right) * 10) / 10;
   const ro = ov.querySelector('.acct-roster'), rc = getComputedStyle(ro), rr = R(ro), cl = rr.left + parseFloat(rc.borderLeftWidth) + parseFloat(rc.paddingLeft), cr = rr.right - parseFloat(rc.borderRightWidth) - parseFloat(rc.paddingRight);
   const hd = R(ro.querySelector('.acct-roster-head')), ti = R(ro.querySelector('.acct-roster-head b')), li = R(ro.querySelector('.acct-list'));
   const roster = { contentLeft: Math.round(cl), contentRight: Math.round(cr), headLeft: Math.round(hd.left), headRight: Math.round(hd.right), titleLeft: Math.round(ti.left), listLeft: Math.round(li.left), listRight: Math.round(li.right), alignItems: rc.alignItems };
-  return { dialog: Math.round(d.width), dialogRight: Math.round(d.right), body: Math.round(b.width), bodyRight: Math.round(b.right), refreshRight: Math.round(ra.right), sideways: body.scrollWidth - body.clientWidth, past, roster };
+  return { dialog: Math.round(d.width), dialogRight: Math.round(d.right), body: Math.round(b.width), bodyRight: Math.round(b.right), refreshRight: Math.round(ra.right), gapL, gapR, sideways: body.scrollWidth - body.clientWidth, past, roster };
 })()`;
 console.log('② the Agents dialog at 390 — its body never runs past it');
 {
   const now = await page(), was = await page({ old: true });
   const A = await now.ev(AGENTS), B = await was.ev(AGENTS);
-  console.log(`      now: dialog ${A.dialog} px (right ${A.dialogRight}), body ${A.body} px (right ${A.bodyRight}), «全部刷新» right ${A.refreshRight}, ${A.past.length} past · the old floor: body ${B.body} px (right ${B.bodyRight}), «全部刷新» right ${B.refreshRight}, ${B.past.length} past`);
-  ok(A.dialog < 380 && A.bodyRight <= A.dialogRight + 0.5 && A.refreshRight <= A.dialogRight + 0.5 && !A.past.length && A.sideways <= 1, `the body (${A.body} px), «全部刷新» and every card inside the ${A.dialog} px dialog — nothing past its right edge`, A);
-  ok(B.bodyRight > B.dialogRight + 0.5 && B.refreshRight > B.dialogRight + 0.5 && B.past.length > 0, `CONTROL: the old 380 px floor — the body ends at ${B.bodyRight}, «全部刷新» at ${B.refreshRight}, past the dialog's ${B.dialogRight}`, B);
+  console.log(`      now: dialog ${A.dialog} px (right ${A.dialogRight}), body ${A.body} px (right ${A.bodyRight}), «全部刷新» right ${A.refreshRight}, the head ${A.gapL} / ${A.gapR} px off the dialog's left / right edge, ${A.past.length} past · the old floor: body ${B.body} px (right ${B.bodyRight}), «全部刷新» right ${B.refreshRight}, the head ${B.gapL} / ${B.gapR} px off, ${B.past.length} past`);
+  ok(A.dialog < 380 && A.bodyRight <= A.dialogRight + 0.5 && A.refreshRight <= A.dialogRight + 0.5 && !A.past.length && A.sideways <= 1 && Math.abs(A.gapL - A.gapR) <= 1, `the body (${A.body} px), «全部刷新» and every card inside the ${A.dialog} px dialog — nothing past its right edge, the head as far off it as off the left one (${A.gapR} / ${A.gapL} px)`, A);
+  // the CONTROL states what the floor does to the dialog AS IT IS (ef10f5db9 made it 371 px at 390, it was 359 — there «全部刷新» itself ran
+  // past): the 380 px body runs past the dialog's right edge and the edge cuts its right padding, the head pressed toward that edge
+  ok(B.dialog === A.dialog && B.bodyRight > B.dialogRight + 0.5 && B.past.length > 0 && B.gapL - B.gapR > 5, `CONTROL: the old 380 px floor — the body ends at ${B.bodyRight}, past the dialog's ${B.dialogRight}: its right padding cut, the head ${B.gapR} px off that edge, ${B.gapL} off the left («全部刷新» at ${B.refreshRight})`, B);
   // ②b the roster's head spans the roster (主开发 r531: «Anthropic 账号» and its button stood ~50 px in — the column centred them)
   const nr = await page({ old: 'roster' }), C = (await nr.ev(AGENTS)).roster, H = A.roster;
   console.log(`      the roster now: content ${H.contentLeft}–${H.contentRight}, head ${H.headLeft}–${H.headRight}, title at ${H.titleLeft}, list ${H.listLeft}–${H.listRight} (align-items ${H.alignItems}) · without its rule: head ${C.headLeft}–${C.headRight}, title at ${C.titleLeft}, list ${C.listLeft}–${C.listRight} (align-items ${C.alignItems})`);
