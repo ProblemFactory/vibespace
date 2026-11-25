@@ -264,9 +264,9 @@ try {
       return { during, up, copies: fs.readdirSync(d).filter((n) => n.startsWith('z.json.corrupt-')).length };
     };
     const fl = await inFlight(H, 'busy');
-    ok(fl.during === 1 && fl.up && fl.copies === 1, 'while the copy\'s listing hangs, two more tries start NO second read (one pool thread a store, one copy of one content)', fl);
+    ok(fl.during === 2 && fl.up && fl.copies === 1, 'while the copy\'s listing hangs, two more tries start NO second read (one pool thread a store, one copy of one content) — the try\'s own reads are 2: its read and the FILE\'s second look (r3986)', fl);
     const flx = await inFlight(mutant('src/store-read-hold.js', [['    if (busy || active >= CEILING) return false;', '    if (active >= CEILING) return false;']]), 'busy-ctl');
-    ok(flx.during > 1, 'RED CONTROL (round w9jhivwdo (5)) — the in-flight mark cut: the tries start a second read while the copy hangs', flx);
+    ok(flx.during > 2, 'RED CONTROL (round w9jhivwdo (5)) — the in-flight mark cut: the tries start a second read while the copy hangs', flx);
   }
   {
     // 2b (主开发 r3648 / r3790): the two laws hosts.json and machine-mounts.json proved on their own roads (test-store-read-law M2/X5
@@ -368,6 +368,50 @@ try {
     ok(HSRC2.split(LATEJ).length === 2, 'control setup: the let-go read\'s late answer is judged on one line (found once)');
     const bdy = await boundScene(mutant('src/store-read-hold.js', [[LATEJ, '']]), 'bound-late-ctl');
     ok(!!bdy && bdy.first === false && !bdy.up, 'RED CONTROL — the late answer not judged (in a copy): the storage answers after the bound and the hold stands', bdy);
+  }
+  {
+    // r3986 (the verifier of 2b, row WAKE — in the release too): «TORN» IS A VERDICT ABOUT THE FILE, NEVER ABOUT ONE READ. By PLACED answers
+    // of the read call only (the file on disk is the scene's): a WHOLE file whose read again answers zero bytes (ordinary, and late) or a
+    // SHORT read stays HELD — nothing copied as torn — and the next true read brings its records; a file that IS torn on disk lifts as
+    // today with the FILE's own bytes kept; a file truly of size zero lifts (its own size states it). RED: the release's verdict on one read
+    console.log('⑤ the helper (r3986): «torn» is a verdict about the FILE — a read that answers bytes the file does not hold lifts nothing');
+    const HSRC3 = fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8');
+    const CONFIRM = "        const fileBytes = await fileConfirms(read.buf);   // r3986: the FILE confirms the torn verdict, or the read failed\n";
+    ok(HSRC3.split(CONFIRM).length === 2, 'control setup: the torn verdict asks the file once (found once)');
+    const RELEASE = mutant('src/store-read-hold.js', [[CONFIRM, '        const fileBytes = read.buf;   /* MUTANT: the release — the verdict on ONE read, its own bytes kept */\n']]);
+    const body = '{"rows": [1, 2]}';
+    const tornScene = async (Mod, tag, { onDisk = body, answer = null, late = false } = {}) => {
+      const d = dirOf(tag), f = path.join(d, 'w.json'); fs.writeFileSync(f, onDisk);
+      const rf = fs.promises.readFile; let placed = answer !== null, release = null, value = null;
+      fs.promises.readFile = function (p, ...a) {
+        if (String(p) === f && placed) { placed = false; return late ? new Promise((res) => { release = () => res(answer); }) : Promise.resolve(answer); }
+        return rf.call(fs.promises, p, ...a);
+      };
+      const keep = setInterval(() => { }, 1000);   // (a let-go read's bound timer is unref'd)
+      let h = null, out = null;
+      try {
+        h = Mod.create({ file: f, code: 'w', aside: (m) => f + '.corrupt-' + m, words: () => 'w', onLift: (v) => { value = v; }, readMs: () => 30 });
+        h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed (placed)' });
+        const first = await h.again();
+        if (late) { for (let k = 0; k < 200 && !release; k++) await new Promise((r) => setImmediate(r)); if (release) release(); await until(() => !h.held() || (h.held() && h.held().code === 'a read unlike the file'), 2000); }
+        const copies = () => fs.readdirSync(d).filter((x) => x.startsWith('w.json.corrupt-'));
+        const afterAnswer = { held: !!h.held(), code: h.held() ? h.held().code : null, copies: copies().length, copyBytes: copies().map((c) => fs.readFileSync(path.join(d, c), 'utf8')).join('|') };
+        fs.promises.readFile = rf;
+        if (h.held()) await h.again();   // the next TRUE read
+        out = { first, afterAnswer, lifted: !h.held(), rows: value && Array.isArray(value.rows) ? value.rows.join() : null, onDisk: fs.readFileSync(f, 'utf8') };
+      } finally { fs.promises.readFile = rf; clearInterval(keep); if (h) h.stop(); }
+      return out;
+    };
+    const zero = await tornScene(H, 'torn-zero', { answer: Buffer.alloc(0) }), zeroLate = await tornScene(H, 'torn-zero-late', { answer: Buffer.alloc(0), late: true });
+    const shortR = await tornScene(H, 'torn-short', { answer: Buffer.from('{"rows": [') });
+    ok(zero.afterAnswer.held && zero.afterAnswer.copies === 0 && zero.lifted && zero.rows === '1,2' && zero.onDisk === body, 'a WHOLE file whose read again answers ZERO BYTES stays HELD — nothing copied as torn — and the next true read brings its records', zero);
+    ok(zeroLate.afterAnswer.held && zeroLate.afterAnswer.copies === 0 && zeroLate.lifted && zeroLate.rows === '1,2', 'the same for the LATE answer of a let-go read (past its bound): held, nothing copied, the next true read brings the records', zeroLate);
+    ok(shortR.afterAnswer.held && shortR.afterAnswer.code === 'a read unlike the file' && shortR.afterAnswer.copies === 0 && shortR.lifted && shortR.rows === '1,2', 'a SHORT read of a whole file (fewer bytes than the file holds) is a FAILED read: held, nothing copied, the records back at the next true read', shortR);
+    const tornDisk = await tornScene(H, 'torn-disk', { onDisk: '{"rows": [', answer: null }), emptyDisk = await tornScene(H, 'torn-empty', { onDisk: '', answer: null });
+    ok(!tornDisk.afterAnswer.held && tornDisk.afterAnswer.copies === 1 && tornDisk.afterAnswer.copyBytes === '{"rows": [' && tornDisk.rows === null, 'a file that IS torn on disk lifts as today — empty, the FILE\'s own bytes kept aside (one copy)', tornDisk);
+    ok(!emptyDisk.afterAnswer.held && emptyDisk.afterAnswer.copies === 1 && emptyDisk.afterAnswer.copyBytes === '', 'a file truly of size ZERO (its own size states it) lifts as torn — its zero bytes kept', emptyDisk);
+    const zeroX = await tornScene(RELEASE, 'torn-zero-ctl', { answer: Buffer.alloc(0) }), shortX = await tornScene(RELEASE, 'torn-short-ctl', { answer: Buffer.from('{"rows": [') });
+    ok(!zeroX.afterAnswer.held && zeroX.afterAnswer.copies === 1 && zeroX.afterAnswer.copyBytes === '' && !shortX.afterAnswer.held && shortX.afterAnswer.copyBytes === '{"rows": [', 'RED CONTROL — the release\'s verdict on ONE read (in a copy): the zero-byte answer lifts the whole file EMPTY with a copy of nothing, the short read lifts it with a copy of its half — the next save would write over every record', { zeroX, shortX });
   }
   {
     console.log('⑤ the helper: the family\'s ceiling on the shared pool');
@@ -497,10 +541,12 @@ try {
     hl.stop();
     // no place for the copy: the hold stands (the live file is the torn bytes' only copy)
     const dn = dirOf('no-place'), fn = path.join(dn, 'n.json'); fs.writeFileSync(fn, 'torn {');
-    const hn = H.create({ file: fn, code: 'n', aside: (m) => path.join(dn, 'no-such-folder', 'n.json.corrupt-' + m), words: () => 'n' }); hn.start({ state: 'corrupt', why: 'did not parse' });
+    const saidN = [];
+    const hn = H.create({ file: fn, code: 'n', aside: (m) => path.join(dn, 'no-such-folder', 'n.json.corrupt-' + m), words: () => 'n', log: (l) => saidN.push(l) }); hn.start({ state: 'corrupt', why: 'did not parse' });
     await new Promise((r) => setTimeout(r, 100));
     const rn = H.holds().find((x) => x.file === 'n.json');
     ok(!!hn.held() && !!rn && rn.code === 'torn bytes, not copied' && rn.torn === true && fs.readFileSync(fn, 'utf8') === 'torn {', 'NO PLACE for the copy: the hold stands, said as torn bytes not copied — the live file is their only copy, untouched', rn);
+    ok(saidN.filter((l) => /n\.json: its torn bytes could not be kept aside \(ENOENT\) — it stays held, nothing is written over it, and it is read again/.test(l)).length === 1, 'r3986 (3): a copy that cannot be made is SAID in the journal by name (its error\'s code, never a path), once', saidN);
     hn.stop();
     // the preMount should: a mount refused while the tokens are held reconnects after the lift — the sweep's remount waits for the
     // PERSON only on auth words, and a held refusal carries none
@@ -850,6 +896,24 @@ try {
         for (let k = 0; k < 3; k++) { const H = new HMb.HostManager({ dataDir: d }); for (let j = 0; j < 5000 && H.unreadWords(); j++) await new Promise((r) => setImmediate(r)); named.push(H.tornCopy()); H._hold.stop(); }
         return { copies: fs.readdirSync(d).filter((n) => n.startsWith('hosts.json.corrupt-')).length, named }; })();
       ok(h6.copies === 1 && h6.named.every((x) => x && x === h6.named[0]), 'H6 (r3451, 2b): a torn hosts.json that stays torn — three starts, ONE kept copy (the helper\'s keep, off the loop), and every start names it', h6);
+      // r3986 (the verifier's WAKE row, the machines list's own scene; its red is the helper's ⑤ «the release's verdict on ONE read»): a
+      // WHOLE hosts.json held at its start whose read again answers ZERO BYTES stays held — no copy of nothing — and the next true read
+      // brings every machine; the file on disk is as it was (no save can write over it while held)
+      const wake = await (async () => {
+        const d = dirOf('wake-empty-read'), f = path.join(d, 'hosts.json');
+        const whole = JSON.stringify({ hosts: [{ id: 'host-made10', name: 'made-up', host: 'made.example.invalid', user: 'u' }, { id: 'host-dial-made11', name: 'made-up dial', transport: 'dial', deviceId: 'made11', dialTokenHash: 'e'.repeat(64) }] });
+        fs.writeFileSync(f, whole);
+        const un = refuse(f); let Hw = null; try { Hw = new HMb.HostManager({ dataDir: d }); } finally { un(); }
+        const rf = fs.promises.readFile; let once = true;
+        fs.promises.readFile = function (p, ...a) { if (String(p) === f && once) { once = false; return Promise.resolve(Buffer.alloc(0)); } return rf.call(fs.promises, p, ...a); };
+        try { await Hw.readAgain(); } finally { fs.promises.readFile = rf; }
+        const afterEmpty = { held: !!Hw.unreadWords(), copies: fs.readdirSync(d).filter((n) => n.startsWith('hosts.json.corrupt-')).length };
+        await Hw.readAgain();
+        const back = Hw.list().map((h) => h.id).sort().join();
+        Hw._hold.stop();
+        return { afterEmpty, back, onDisk: fs.readFileSync(f, 'utf8') === whole };
+      })();
+      ok(wake.afterEmpty.held && wake.afterEmpty.copies === 0 && wake.back === 'host-dial-made11,host-made10' && wake.onDisk, 'r3986 (the verifier\'s WAKE, the machines list): a whole hosts.json held at its start whose read again answers ZERO BYTES stays held — no copy of nothing — and the next true read brings every machine; the file is as it was', wake);
       ok(ER.includes("...(typeof hosts.tornCopy === 'function' && hosts.tornCopy() ? { torn: hosts.tornCopy() } : {})") && SM.includes("if (hd && typeof hd.torn === 'string' && hd.torn) hlist.appendChild(") && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && m.hostInCopy') && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy && !m.hostUnknown') && SM.includes('!liveHostIds.has(m.hostId) && !m.hostInCopy && m.hostUnknown') && SM.includes(`tr('${SEC}')`) && SM.includes(`tr('${ROWW}')`) && [SEC, ROWW].every((w) => zh.includes(`"${w}":`) && ja.includes(`"${w}":`)) && SM.includes(`tr('${H1}'`) && zh.includes(`"${H1}":`) && ja.includes(`"${H1}":`), 'THE MOVE (pins): GET /api/hosts carries the torn copy; the page says it (zh, ja) and keeps a flagged mount out of «removed machines», in its own section where the person\'s unmount stays theirs'); }
   }
 } catch (e) {

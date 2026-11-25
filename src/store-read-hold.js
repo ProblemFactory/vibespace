@@ -79,7 +79,7 @@ function onHoldsChange(fn) { if (typeof fn !== 'function') return () => {}; CHAN
 function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob)
   if (!file || typeof aside !== 'function' || typeof words !== 'function' || !code) throw new Error('store-read-hold: file, aside, words and code are required');
   const name = path.basename(file);
-  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0, waitingSince = 0, waitSaid = false;   // waitingSince: a read past its bound (2b)   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
+  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0, waitingSince = 0, waitSaid = false, unlikeSaid = false, keepFailSaid = false;   // r3986: said once a hold each   // waitingSince: a read past its bound (2b)   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
   const prefix = path.basename(aside(''));   // the copies' common head (`<file>.corrupt-`)
   const onErr = (e) => { log(`${name}: a read again failed: ${(e && e.message) || e}`); arm(); };
   function arm() {
@@ -103,9 +103,23 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
       const to = aside(String(now()) + (k ? '-' + k : ''));
       const w = await writeWhole(to, buf, log);   // r3144: whole under a part name, synced, put in place only when whole
       if (w.ok) { const c = COPIES.get(file + '\n' + prefix); if (c) c.invalidate(); return path.basename(to); }   // (a copy added: its store's copies' answer read again)
-      if (!w.error || w.error.code !== 'EEXIST') return null;
+      if (!w.error || w.error.code !== 'EEXIST') { keepWhy = (w.error && (w.error.code || w.error.name)) || 'not written'; return null; }
     }
-    return null;
+    keepWhy = 'no free name'; return null;
+  }
+  let keepWhy = null;   // r3986 (3): why the last copy could not be made (its error's code — never a path), for the journal's one line
+  /** r3986 — THE LAW: «TORN» IS A VERDICT ABOUT THE FILE, NEVER ABOUT ONE READ. Before a hold lifts as torn, ONE more look at the file
+   *  (off the loop): its size and its bytes. → the FILE's own bytes when both looks agree and the file's size states them (a size of zero
+   *  that the file's own size also states, too); null when they disagree, the answer is shorter than the file, or the file did not answer:
+   *  that is a FAILED READ — the store stays held and is read again on the ladder. Its cost: one stat and one read, at a torn answer only */
+  async function fileConfirms(buf) {
+    try {
+      if (!Buffer.isBuffer(buf)) return null;
+      const st = await fs.promises.stat(file);
+      if (!st.isFile() || st.size !== buf.length) return null;
+      const again2 = await fs.promises.readFile(file);
+      return Buffer.isBuffer(again2) && again2.length === st.size && again2.equals(buf) ? again2 : null;
+    } catch { return null; }
   }
   /** THE START: store-read's answer of the caller's one read → 'data' | 'missing' | 'held' */
   function start(a) {
@@ -149,14 +163,26 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
       if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; return false; }
       if (a.state === 'missing' && !missingAt) { missingAt = now(); return false; }
       if (a.state === 'corrupt') {
+        const fileBytes = await fileConfirms(read.buf);   // r3986: the FILE confirms the torn verdict, or the read failed
+        if (!held || stopped) return false;
+        if (!fileBytes) {
+          held.code = 'a read unlike the file';
+          if (!unlikeSaid) { unlikeSaid = true; log(`${name}: a read answered bytes the file does not hold (its size or a second look disagrees) — it stays held and is read again; nothing is copied or written`); }
+          return false;
+        }
         held.torn = true;
-        const kept = await keep(read.buf);
+        keepWhy = null;
+        const kept = await keep(fileBytes);   // what is kept aside is THE FILE as it stands, never one read's answer
         if (!held || stopped) return false;
         a = SR.afterSetAside(a, kept);
-        if (a.state === 'unreadable') { held.code = 'torn bytes, not copied'; return false; }
+        if (a.state === 'unreadable') {
+          held.code = 'torn bytes, not copied';
+          if (!keepFailSaid) { keepFailSaid = true; log(`${name}: its torn bytes could not be kept aside (${keepWhy || 'not written'}) — it stays held, nothing is written over it, and it is read again`); }   // r3986 (3): said by name
+          return false;
+        }
       }
     } finally { busy = false; active--; }
-    const was = held; held = null; tries = 0; missingAt = 0; saveSaid = false; waitSaid = false;
+    const was = held; held = null; tries = 0; missingAt = 0; saveSaid = false; waitSaid = false; unlikeSaid = false; keepFailSaid = false;
     if (timer) { clearTimeout(timer); timer = null; }
     if (a.setAside) tornLift = { copy: a.setAside, since: was.since, at: now() };
     log(`${name} read again (held since ${new Date(was.since).toISOString()}, ${was.code}): ${a.state === 'data' ? 'its records are back' : a.setAside ? `torn bytes, kept aside as ${a.setAside} — it starts empty` : 'the file is gone — it starts empty'}`);
