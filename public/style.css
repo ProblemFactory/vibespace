@@ -10324,7 +10324,10 @@ button.vw-chip { cursor: pointer; }
    view (the strip's Browser door, «Open live view»), Agent browser and Background Work (Global settings ▸ Tools ▸). A window
    with no strip wears its ⋯ (a terminal) and its ✕ (a viewer) at its own head's end. The column stands above the window on
    show (its head's buttons are its children), below menus, sheets and dialogs (99998+). */
-html[data-sidecol] #mobile-nav > .col-yield { display: none !important; }
+/* a yielded door (trailing-bar.js fitColumn): hidden wherever the law runs — the side column and (r4185) the regular class's
+   trailing bar held landscape. Its ids are named (:is) so it outranks the regular class's For-you rule (two ids, !important),
+   which a class-only selector lost to: a yielded For you stayed drawn (line 914's latent miss, below ~200 px of room) */
+html[data-vc] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, .mnav-dest).col-yield { display: none !important; }
 /* the inner display */
 @media (orientation: landscape) {
   html[data-vc="regular"][data-sidecol] #mobile-nav { z-index: 95000; }

@@ -77,10 +77,16 @@ export const COLUMN_BUTTONS = Object.freeze({
   inner: Object.freeze(['todos', 'tasks', 'files', 'channels', 'desktops', 'gear']),
   outer: Object.freeze(['menu', 'todos', 'new', 'tasks', 'files', 'channels', 'desktops', 'gear']),
 });
-/** THE YIELD ORDER — the first named leaves first, each into its own row of Global settings */
+/** THE YIELD ORDER — the first named leaves first, each into its own row of Global settings.
+ *  `bar` (主开发 r4185, for «.420»): the regular class's trailing bar held landscape with NO side column — an ordinary iPhone
+ *  held landscape, the Duo's Safari tab. It held more doors than its height since the release (at 390 tall: about 558 px of
+ *  doors for 361, the gear cut). It yields by the same order, its two extra global doors first (Background Work, Agent browser).
+ *  The conversation's own doors there (Artifacts, the search, ⋯, the live view, ✕) never yield: they are not Global settings'
+ *  things. WHICH doors stand in that bar is unchanged: that is the owner's open question. */
 export const COLUMN_YIELDS = Object.freeze({
   inner: Object.freeze(['desktops', 'channels', 'files', 'tasks', 'todos']),
   outer: Object.freeze(['desktops', 'channels', 'files', 'tasks', 'new', 'todos', 'menu']),
+  bar: Object.freeze(['jobs', 'browser', 'desktops', 'channels', 'files', 'tasks', 'todos']),
 });
 /** the room above the first button (page px): the status cluster's end measured on the simulator's pictures (inner 76 —
  *  3-webapp-cover-inner.png; outer 130 — owner-o1.png, the marks at device rows 260–452 of a 3× shot whose page starts at 21)
@@ -93,6 +99,16 @@ export function columnShape(doc = document, win = window) {
   if (!h || !h.dataset.sidecol) return null;
   if (h.dataset.vc === 'compact') return 'outer';
   try { if (h.dataset.vc === 'regular' && win.matchMedia('(orientation: landscape)').matches) return 'inner'; } catch { }
+  return null;
+}
+
+/** Where the yield law runs → 'inner' | 'outer' (the side column) | 'bar' (the regular class's trailing bar held landscape with no
+ *  side column) | null */
+export function yieldShape(doc = document, win = window) {
+  const col = columnShape(doc, win);
+  if (col) return col;
+  const h = doc.documentElement;
+  try { if (h && h.dataset.vc === 'regular' && win.matchMedia('(orientation: landscape)').matches) return 'bar'; } catch { }
   return null;
 }
 

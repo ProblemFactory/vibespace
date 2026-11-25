@@ -494,7 +494,7 @@ try {
   // probe b214928c8): insets MANDATORY; top / topMax / left / leftMax / bottom / bottomMax / right / rightMax optional integers; an
   // unset one leaves env() undefined (its fallback); env() follows it with or without viewport-fit=cover (the product's own cover
   // and column verdicts are test-viewport-class ⑤ / ⑤b). RED CONTROL: the release's stylesheet (the bar at right 0, 56 px).
-  console.log('④b–④d THE SYSTEM\'s EDGES (B-78db: insets PLACED — the Duo\'s side column inner 951×648 / outer 466×657; an ordinary notched iPhone 390×844 / 844×390; the sheets\' order under a custom theme)');
+  console.log('④b–④f THE SYSTEM\'s EDGES (B-78db: insets PLACED — the Duo\'s side column inner 951×648 / outer 466×657; an ordinary notched iPhone 390×844 / 844×390; the sheets\' order under a custom theme)');
   {
     const place = (insets) => cdp('Emulation.setSafeAreaInsetsOverride', { insets });
     // THE TEST SEAM (主开发 r4115's reach order — named in the line): the product asks cover and reads the column ONLY in an iPhone's
@@ -609,7 +609,7 @@ try {
     await waitFor(`document.documentElement.dataset.vc === 'regular'`, 5000); await sleep(300);
     const land = await evalJs(PHONE), landPanel = await panelRoom();
     const cut = land.btns.filter((b) => b.bottom > land.h - 21).map((b) => b.id);
-    console.log(`  · ④c landscape 844×390: today's trailing bar (no column) holds ${land.btns.length} buttons; past its room (the release's own overflow, not judged here): ${cut.length ? cut.join(', ') : 'none'}`);
+    console.log(`  · ④c landscape 844×390: today's trailing bar (no column) holds ${land.btns.length} drawn buttons; past its room: ${cut.length ? cut.join(', ') : 'none'} (the bar's own yield is ④f's to judge)`);
     check('④c a notched iPhone held landscape 844×390 (both sides 59, bottom 21): the trailing bar\'s buttons clear of the right inset and above the bottom one, the list\'s rows after the left inset, the message box and the strip above the bottom inset, NO side column (the leading inset is not 0); a strip panel keeps its room (more than the 120 px floor) under a vertical bar',
       landscapeOk(land) && !!landPanel && landPanel.vertical && landPanel.room > 120, { why: landscapeWhy(land), landPanel, chips: land.chips, input: land.input, tab: land.tab, drawn: drawn(land).map((b) => `${b.id}:${b.right}`) });
     // the list column hidden (☰): the conversation column starts after the left inset, never under the sensor housing
@@ -644,6 +644,33 @@ try {
     await cdp('Emulation.clearDevicePostureOverride');
     check('④e the book pose with the list hidden keeps the seam\'s margin (the conversation right of the seam, in a home-screen copy at inset 0)', book.fold === 'book' && book.hidden && book.standalone === '1' && book.left >= book.edge, book);
     check('④e RED CONTROL: f4499e926\'s unscoped list-hidden rule draws the conversation over the list half (its margin 0)', bookRed.left < bookRed.edge, bookRed);
+    // ④f THE BAR's OWN YIELD (主开发 r4185, for «.420»): the regular class's trailing bar held landscape with NO side column (an
+    // ordinary iPhone at 844×390, insets placed; and 667×375, none) — every global door either drawn inside the bar's box or
+    // YIELDED into its own row of Global settings (by id); the conversation's doors drawn or off; ⚙ in the bar. Which doors stand
+    // there is unchanged (the owner's open question). RED CONTROL: the release's overflow — the law's marks taken off in the same frame.
+    const GLOBAL = { 'mobile-nav-desktops': 'desktops', 'mobile-nav-todos': 'todos', 'mobile-nav-dest-tasks': 'tasks', 'mobile-nav-files': 'files', 'mobile-nav-dest-channels': 'channels', 'mobile-nav-dest-browser': 'browser', 'mobile-nav-dest-jobs': 'jobs' };
+    const CONV = ['mobile-nav-artifacts', 'mobile-nav-search', 'mobile-nav-more'];
+    const barState = (strip) => `(() => { const nav = document.getElementById('mobile-nav'), r = nav.getBoundingClientRect(), cs = getComputedStyle(nav);
+      const top = r.top + parseFloat(cs.paddingTop), bottom = r.bottom - parseFloat(cs.paddingBottom);
+      ${strip ? "document.querySelectorAll('#mobile-nav > .col-yield').forEach((e) => e.classList.remove('col-yield'));" : ''}
+      const door = (id) => { const e = document.getElementById(id); if (!e) return { id, absent: true }; const shown = e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none'; const b = e.getBoundingClientRect();
+        return { id, shown, inside: shown && b.top >= top - 0.5 && b.bottom <= bottom + 0.5, yielded: e.classList.contains('col-yield') }; };
+      return { sidecol: document.documentElement.dataset.sidecol || null, vc: document.documentElement.dataset.vc, yieldAttr: nav.dataset.colYield || '', bottom: Math.round(bottom),
+        global: ${JSON.stringify(Object.keys(GLOBAL))}.map(door), conv: ${JSON.stringify(CONV)}.map(door), gear: door('mobile-nav-gear') }; })()`;
+    const barOk = (b, rows) => b.vc === 'regular' && !b.sidecol && b.gear.inside && b.conv.every((d) => d.absent || !d.shown || d.inside)
+      && b.global.every((d) => !d.absent && (d.inside || (d.yielded && !d.shown && rows.includes('gear/column-' + GLOBAL[d.id]))));
+    const gearRows = async () => { await tap('#mobile-nav-gear'); await waitFor(`!!document.querySelector('.gs-menu')`, 4000); const r = await evalJs(ROWS_JS);
+      await evalJs(`document.querySelectorAll('.context-menu, .global-settings-popover, .gs-menu').forEach((m) => m.remove()); 1`); return r; };
+    for (const [w, h, insets] of [[844, 390, { left: 59, leftMax: 59, right: 59, rightMax: 59, bottom: 21, bottomMax: 21 }], [667, 375, {}]]) {
+      await device(w, h); await place(insets); await load(); await attachBoth();
+      await waitFor(`document.documentElement.dataset.vc === 'regular' && !!document.getElementById('mobile-nav').dataset.colYield`, 6000);
+      const b = await evalJs(barState(false)), rows = await gearRows();
+      check(`④f the bar held landscape at ${w}×${h}: every global door drawn inside the bar or a row of Global settings by its id (yielded: ${b.yieldAttr || 'none'}), the conversation's doors drawn, ⚙ in the bar`,
+        barOk(b, rows), { yieldAttr: b.yieldAttr, rows, global: b.global.map((d) => `${d.id}:${d.inside ? 'in' : d.yielded ? 'yield' : 'OUT'}`), conv: b.conv.map((d) => `${d.id}:${d.shown ? (d.inside ? 'in' : 'OUT') : 'off'}`), gear: b.gear.inside });
+      const red = await evalJs(barState(true));
+      await evalJs(`(window.dispatchEvent(new Event('resize')), 1)`); await waitFor(`!!document.getElementById('mobile-nav').dataset.colYield`, 4000);
+      check(`④f RED CONTROL at ${w}×${h}: the release's bar (no yield) leaves global doors past its room — neither drawn inside nor a row`, !barOk(red, rows), { global: red.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), gear: red.gear.inside });
+    }
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: seam.identifier });
     await place({}); await device(951, 585); await load();
   }

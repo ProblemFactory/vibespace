@@ -28,7 +28,7 @@ import { openFilesDoor } from './phone-files.js';
 import { SESSION_STATE_META } from './sidebar-tasks.js';
 import { uiScale } from './utils.js';
 import { registerMenuItem } from './contributions.js';
-import { columnShape, columnFit, COLUMN_YIELDS } from './side-column.js';
+import { columnShape, yieldShape, columnFit, COLUMN_YIELDS } from './side-column.js';
 
 /** The destination each bottom button opens and how it knows it is on show. */
 const DESTS = [
@@ -48,24 +48,27 @@ const DESTS = [
  *  Background Work (Global settings ▸ Tools). A window with no strip wears its own ⋯ (a terminal) and its ✕ (a viewer) at its
  *  head's end. THE LAW (r3948 3 (a)): the column never overflows — fitColumn measures it and what does not fit yields, in
  *  COLUMN_YIELDS' order, into a row of Global settings (the rows below). */
-const COLUMN_EL = Object.freeze({ menu: 'mobile-nav-menu', todos: 'mobile-nav-todos', new: 'mobile-nav-new', tasks: 'mobile-nav-dest-tasks', files: 'mobile-nav-files', channels: 'mobile-nav-dest-channels', desktops: 'mobile-nav-desktops', gear: 'mobile-nav-gear' });
+const COLUMN_EL = Object.freeze({ menu: 'mobile-nav-menu', todos: 'mobile-nav-todos', new: 'mobile-nav-new', tasks: 'mobile-nav-dest-tasks', files: 'mobile-nav-files', channels: 'mobile-nav-dest-channels', desktops: 'mobile-nav-desktops', browser: 'mobile-nav-dest-browser', jobs: 'mobile-nav-dest-jobs', gear: 'mobile-nav-gear' });
 const KEY_OF_EL = Object.freeze(Object.fromEntries(Object.entries(COLUMN_EL).map(([k, id]) => [id, k])));
 const COLUMN_YIELDED = new Set();   // the keys fitColumn took out of the column now — each a row of Global settings
 const forYouCount = () => Number(document.querySelector('#mobile-nav-todos .mnav-one')?.textContent) || 0;
 const COLUMN_LABEL = Object.freeze({
   menu: () => t('Sessions'), todos: () => (forYouCount() ? t('For you · {n}', { n: forYouCount() }) : t('For you')), new: () => t('Create or open…'),
   tasks: () => t('Task Groups'), files: () => t('Files'), channels: () => t('Channels'), desktops: () => t('Desktops'),
+  browser: () => t('Agent browser'), jobs: () => t('Background Work'),   // the bar's two extra doors (r4185: the bar's own yield)
 });
-for (const [i, k] of ['menu', 'todos', 'new', 'tasks', 'files', 'channels', 'desktops'].entries()) {
+for (const [i, k] of ['menu', 'todos', 'new', 'tasks', 'files', 'channels', 'desktops', 'browser', 'jobs'].entries()) {
   registerMenuItem({ menu: 'gear', group: '0_column', order: 10 + i, id: `gear/column-${k}`, when: () => COLUMN_YIELDED.has(k), label: COLUMN_LABEL[k], run: () => document.getElementById(COLUMN_EL[k])?.click() });
 }
 
 /** THE LAW, measured: the column's content height against every drawn child (the gap at its least, 8 px), the verdict applied
- *  as .col-yield (style.css hides it) and remembered for Global settings' rows. Outside the column: nothing yields. */
+ *  as .col-yield (style.css hides it) and remembered for Global settings' rows. In the side column, and (主开发 r4185) in the
+ *  regular class's trailing bar held landscape with no column, whose doors overflowed a short screen since the release.
+ *  Anywhere else nothing yields. */
 export function fitColumn(nav = document.getElementById('mobile-nav')) {
   for (const id of Object.values(COLUMN_EL)) document.getElementById(id)?.classList.remove('col-yield');
   COLUMN_YIELDED.clear();
-  const shape = nav ? columnShape() : null;
+  const shape = nav ? yieldShape() : null;
   if (!shape || !nav.getClientRects().length) { if (nav) delete nav.dataset.colYield; return null; }
   const cs = getComputedStyle(nav);
   const room = nav.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);

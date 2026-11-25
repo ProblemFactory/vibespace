@@ -174,13 +174,26 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
     `⑤b a short column yields in the stated order, the fewest that fit: outer at 300 px → ${z.yielded.join(' · ')} (${z.need}); inner at 210 px → ${z2.yielded.join(' · ')} (${z2.need})`, { z, z2 });
   const floor = SC.columnFit({ room: 58, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer }), under = SC.columnFit({ room: 57, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
   ok(floor.fits && floor.shown.join() === 'gap,gear' && !under.fits && under.shown.join() === 'gap,gear', '⑤b ⚙ never yields (every other row is reached through it): its floor is 58 px (⚙ 44 + the gap 8 + 6) — below it the verdict says «does not fit», never a lie', { floor, under });
-  const ys = [...SC.COLUMN_YIELDS.inner, ...SC.COLUMN_YIELDS.outer];
+  const ys = [...SC.COLUMN_YIELDS.inner, ...SC.COLUMN_YIELDS.outer, ...SC.COLUMN_YIELDS.bar];   // r4185: the bar's yields need their rows too
   ok(!ys.includes('gear') && ['inner', 'outer'].every((k) => SC.COLUMN_BUTTONS[k].at(-1) === 'gear' && SC.COLUMN_YIELDS[k].every((y) => SC.COLUMN_BUTTONS[k].includes(y)) && SC.COLUMN_BUTTONS[k].slice(0, -1).every((b) => SC.COLUMN_YIELDS[k].includes(b))),
     '⑤b the order is total: every column button but ⚙ is named in its display\'s yield order, ⚙ last and never yielding', SC.COLUMN_YIELDS);
+  // r4185 (for «.420»): THE BAR's OWN YIELD — the regular class's trailing bar held landscape with NO column. At 844×390 (the
+  // bottom inset 21) and 667×375 (none) its room is 361 / 359 px; with a chat on show its doors are Artifacts · search · ⋯ | gap |
+  // Desktops · For you · Task Groups · Files · Channels · Agent browser · Background Work · ⚙ (558 px — the release's overflow)
+  const barItems = ['artifacts', 'search', 'more'].map((key) => ({ key, px: 44 })).concat([{ key: 'gap', px: 8 }],
+    ['desktops', 'todos', 'tasks', 'files', 'channels', 'browser', 'jobs', 'gear'].map((key) => ({ key, px: 44 })));
+  const b390 = SC.columnFit({ room: 390 - 8 - 21, items: barItems, gap: 6, yields: SC.COLUMN_YIELDS.bar });
+  const b375 = SC.columnFit({ room: 375 - 16, items: barItems, gap: 6, yields: SC.COLUMN_YIELDS.bar });
+  const bRel = SC.columnFit({ room: 361, items: barItems, gap: 6, yields: [] });
+  ok(b390.fits && b390.yielded.join() === 'jobs,browser,desktops,channels' && b390.need === 358 && b375.fits && b375.yielded.join() === b390.yielded.join()
+    && !bRel.fits && bRel.need === 558 && !SC.COLUMN_YIELDS.bar.some((k) => ['artifacts', 'search', 'more', 'live', 'close', 'gear'].includes(k)),
+    `⑤b the bar's own yield (r4185): at 844×390 and 667×375 it yields ${b390.yielded.join(' · ')} (${b390.need} of 361 / 359 px); never a conversation door, never ⚙ — RED CONTROL: the release's bar needs ${bRel.need}`, { b390, b375, bRel });
   const doc = (vc, sidecol) => ({ documentElement: { dataset: { vc, ...(sidecol ? { sidecol } : {}) } } });
   const win = (land) => ({ matchMedia: () => ({ matches: land }) });
   const shapes = [SC.columnShape(doc('compact', 'right'), win(false)), SC.columnShape(doc('regular', 'right'), win(true)), SC.columnShape(doc('regular', 'right'), win(false)), SC.columnShape(doc('regular'), win(true)), SC.columnShape(doc('compact'), win(false)), SC.columnShape(doc('desktop', 'right'), win(true))];
   ok(shapes.join() === 'outer,inner,,,,', '⑤b the column\'s shape: the outer display (compact + the column), the inner held landscape (regular + the column); a portrait regular page, no column, a desktop: none', shapes);
+  const yShapes = [SC.yieldShape(doc('regular'), win(true)), SC.yieldShape(doc('regular', 'right'), win(true)), SC.yieldShape(doc('regular'), win(false)), SC.yieldShape(doc('compact'), win(true)), SC.yieldShape(doc('desktop'), win(true))];
+  ok(yShapes.join() === 'bar,inner,,,', '⑤b where the law runs: the regular class held landscape with no column is the BAR; the column keeps its own shape; a portrait page, a compact page with no column, a desktop: nowhere', yShapes);
 
   const CSS = read('public/style.css'), i = CSS.indexOf('THE COLUMN HOLDS GLOBAL THINGS ONLY, AND NEVER OVERFLOWS'), B = i < 0 ? '' : CSS.slice(i);
   const outIn = /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav :is\(#mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-search, #mobile-nav-dest-browser, #mobile-nav-dest-jobs\) \{ display: none !important; \}/.test(B);
@@ -192,9 +205,19 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   ok(innerOrder && outerOrder && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav-gear \{ order: 20; \}/.test(B) && /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav \.mnav-gap \{ order: 19; \}/.test(B),
     '⑤b IN the column, in COLUMN_BUTTONS\' order: inner For you · Task Groups · Files · Channels · Desktops · ⚙ last; outer ☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙ last', { innerOrder, outerOrder });
   const tops = new RegExp(`padding: var\\(--sidecol-top, ${SC.COLUMN_TOP.outer}px\\) 0 max\\(8px, env\\(safe-area-inset-bottom, 0px\\)\\) !important;`).test(B) && CSS.includes(`padding-top: var(--sidecol-top, ${SC.COLUMN_TOP.inner}px);`);
-  ok(tops && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav \{\s*position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: max\(56px, env\(safe-area-inset-right, 0px\)\);[^}]*flex-direction: column;/.test(B) && /html\[data-sidecol\] #mobile-nav > \.col-yield \{ display: none !important; \}/.test(B)
+  ok(tops && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav \{\s*position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: max\(56px, env\(safe-area-inset-right, 0px\)\);[^}]*flex-direction: column;/.test(B) && /html\[data-vc\] #mobile-nav > :is\(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, \.mnav-dest\)\.col-yield \{ display: none !important; \}/.test(B)
     && /html\[data-vc="compact"\]\[data-sidecol\] \.window\.window-active > \.window-titlebar \{\s*display: flex !important;/.test(B),
     `⑤b the outer column: the bar fixed in the column under its top room (${SC.COLUMN_TOP.outer} — the module's number, the inner ${SC.COLUMN_TOP.inner} too), the bottom inset counted, a yielded button hidden, the window's own head the name's row`);
+  // r4185: a yielded For you must HIDE — the hide rule outranks the regular class's For-you rule (two ids, !important); the old
+  // class-only rule did not (line 914's latent miss). Specificity of these simple forms, :is() as its heaviest argument
+  const spec = (sel) => { let ids = 0, cls = 0, typ = 0; const one = (x) => { ids += (x.match(/#[\w-]+/g) || []).length; cls += (x.match(/\.[\w-]+|\[[^\]]+\]|:(?!is\()[\w-]+/g) || []).length; typ += (x.match(/(^|[\s>])[a-z]+(?=[\[.#:\s]|$)/g) || []).length; };
+    const isArgs = sel.match(/:is\(([^)]*)\)/); const rest = sel.replace(/:is\([^)]*\)/, ''); one(rest);
+    if (isArgs) { const best = isArgs[1].split(',').map((a) => a.trim()).map((a) => [(a.match(/#/g) || []).length, (a.match(/[.[]/g) || []).length]).sort((p, q) => q[0] - p[0] || q[1] - p[1])[0]; ids += best[0]; cls += best[1]; }
+    return [ids, cls, typ]; };
+  const beats = (a, b) => a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
+  const FORYOU = 'html[data-vc="regular"] #mobile-nav #mobile-nav-todos', HIDE = 'html[data-vc] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, .mnav-dest).col-yield', OLDHIDE = 'html[data-sidecol] #mobile-nav > .col-yield';  // stale-pins: kept — OLDHIDE is a red control's form: line 914's class-only rule
+  ok(CSS.includes(FORYOU + ' {') && CSS.includes(HIDE + ' { display: none !important; }') && beats(spec(HIDE), spec(FORYOU)) && !beats(spec(OLDHIDE), spec(FORYOU)),
+    `⑤b a yielded For you HIDES: the hide rule ${JSON.stringify(spec(HIDE))} outranks the regular class's For-you rule ${JSON.stringify(spec(FORYOU))} — RED CONTROL: line 914's class-only rule ${JSON.stringify(spec(OLDHIDE))} lost to it`);
   const R = CSS.slice(0, i);
   ok(i > 0 && !/data-sidecol\] #mobile-nav :is\(#mobile-nav-artifacts/.test(R) && !/col-yield/.test(R), '⑤b RED CONTROL: the stylesheet before this block (slice 1) keeps the conversation\'s buttons in the column and knows no yield');
 
