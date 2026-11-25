@@ -28,6 +28,9 @@
 //                                  it, measured: no line, its stdin unread, 0 % CPU — only a signal ends it; logged {parked, pid});
 //                                  a capture that runs when it appears ends cfg.lockEnds (default display_gone — ScreenCaptureKit
 //                                  interrupts it, the helper names that stop display_gone). Every run's argv line carries its pid
+//                                  r4456 (the flake census): cfg.lockReadHold = a token file: a capture that STARTS while it exists
+//                                  logs {lockHeld, pid} and waits on its own thread (5 ms naps) until it is gone, then reads the lock
+//                                  as above — a leg places the late lock read at will (between the argv line and the park)
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
 //   writeFakeCodesign(dir)         lane apple-signing: a fake /usr/bin/codesign for the daemon legs (the bundle copy's literal is
 //                                  pointed at it): `--verify` / `-dv` / `-dr -` judge a file by a marker line
@@ -73,6 +76,7 @@ const count = (f) => { try { const n = Number(fs.readFileSync(f, 'utf8')) || 0; 
 if (a[0] === 'facts' && cfg.factsFail && count(cfg.factsFail)) { process.stderr.write('fake facts: the shareable content could not be read\\n'); process.exit(1); }
 const isLocked = () => !!(cfg.lockFile && fs.existsSync(cfg.lockFile)); // lane mac-locked-capture
 if (a[0] === 'facts') { process.stdout.write(JSON.stringify({ t: 'facts', version: cfg.reports || cfg.version, disclaimed: true, ...cfg.facts, ...(cfg.lockFile ? { locked: isLocked() } : {}), tcc: cfg.tcc }) + '\\n'); process.exit(0); }
+if (a[0] === 'capture' && cfg.lockReadHold && fs.existsSync(cfg.lockReadHold)) { log({ lockHeld: true, pid: process.pid }); const nap = new Int32Array(new SharedArrayBuffer(4)); while (fs.existsSync(cfg.lockReadHold)) Atomics.wait(nap, 0, 0, 5); } // r4456: the lock read HELD
 if (a[0] === 'input') {
   process.stdout.write('ready\\n');
   const answer = () => { if (!cfg.inputLive) return cfg.inputAnswer || 'ok'; try { return JSON.parse(fs.readFileSync(${JSON.stringify(cfgFile)}, 'utf8')).inputAnswer || 'ok'; } catch { return cfg.inputAnswer || 'ok'; } };

@@ -267,30 +267,68 @@ console.log(at() + '§3 RED CONTROLS — the base\'s rule (the lock is no state)
   lock(false);
   await sleep(QR.everyMs * 6);
   ok(a.ended === 'locked' && a.aus.length === 0, 'RED CONTROL (the lane\'s helper): the base\'s rule ENDS the session `locked` — the unlock brings nothing back (the window falls to its ending ladder)', { ended: a.ended, aus: a.aus.length });
+  // r4456 (the flake census, round 2): EACH CONTROL's UNLOCK WAITS ON THE PARK ITSELF (the helper's own line), never a guess of the
+  // child's pace: a capture that reads the lock only after the unlock captures normally and the control reads green for the
+  // fault. PLACED first, each run under the same HOLD (cfg.lockReadHold: the capture held between its argv line and its lock read,
+  // let go at the old wait's end): the OLD wait unlocks unparked and the picture comes back; the wait on the park reads the control
+  const HOLD = path.join(hS, 'lock-read-hold'), parkedN = () => logs().filter((l) => l.parked === true).length, heldN = () => logs().filter((l) => l.lockHeld === true).length;
+  const held = async (n0, what) => { const t = await until(() => heldN() > n0, 3000); if (!t) ok(false, `harness: ${what}: the capture never reached the placed hold within 3 s`); return t; };
+  const parks = async (n0, what) => { const t = await until(() => parkedN() > n0, 3000); if (!t) ok(false, `harness: ${what}: the capture never parked on the locked screen within 3 s of its hold's end`); return t; };
   // (b) the old helper, locked at the offer: BLACK for good
-  FK.set({ lockMode: 'park' });
-  lock(true);
+  FK.set({ lockMode: 'park', lockReadHold: HOLD });
+  {   // PLACED: the old wait (twice the start bound) under the hold
+    const p0 = parkedN(), h0 = heldN();
+    lock(true); fs.writeFileSync(HOLD, '');
+    const bOld = await open(mk(QR, m.exports));
+    const wasHeld = await held(h0, '(b) placed');
+    await sleep(QR.startMs * 2);   // the old wait
+    lock(false); fs.rmSync(HOLD, { force: true });
+    const back = await until(() => bOld.aus.length > 0, 3000);
+    ok(wasHeld && back && parkedN() === p0, `PLACED (b): the capture held before its lock read, the OLD ${QR.startMs * 2} ms wait unlocks unparked — the picture comes back (${bOld.aus.length}) and the control would read green for the incident`, { aus: bOld.aus.length, parked: parkedN() - p0 });
+    bOld.src.ok && bOld.src.stop();
+  }
+  const pB0 = parkedN(), hB0 = heldN();
+  lock(true); fs.writeFileSync(HOLD, '');
   const b = await open(mk(QR, m.exports));
-  await sleep(QR.startMs * 2);
+  await held(hB0, '(b)');
+  await sleep(QR.startMs * 2);   // the same hold as the placed run
+  fs.rmSync(HOLD, { force: true });
+  await parks(pB0, '(b)');   // the unlock waits on the park itself
   lock(false);
   await sleep(QR.everyMs * 8);
   const parked = logs().filter((l) => l.parked === true).pop();
   ok(!b.ended && b.aus.length === 0 && parked && alive(parked.pid) && pausedOf(b) === null, 'RED CONTROL (the old helper — THE INCIDENT): the capture waits in ScreenCaptureKit for good — no picture after the unlock, no ending, nothing said (the black window)', { ended: b.ended, aus: b.aus.length, alive: parked && alive(parked.pid) });
   b.src.ok && b.src.stop();
   // (c) mid-stream: the capture again is spawned BLIND onto the locked screen
+  {   // PLACED: the old wait (the start bound after the capture's argv line) under the hold
+    const cOld = await open(mk(QR, m.exports));
+    await until(() => cOld.aus.length >= 20, 3000);
+    const k0 = capsOf(), p0 = parkedN(), h0 = heldN();
+    fs.writeFileSync(HOLD, ''); lock(true);
+    await until(() => capsOf() > k0, 3000);
+    const wasHeld = await held(h0, '(c) placed');
+    await sleep(QR.startMs);   // the old wait
+    lock(false); fs.rmSync(HOLD, { force: true });
+    const n0 = cOld.aus.length, back = await until(() => cOld.aus.length > n0, 3000);
+    ok(wasHeld && back && parkedN() === p0, `PLACED (c): the blind capture held before its lock read, the OLD ${QR.startMs} ms wait unlocks unparked — the picture comes back (${cOld.aus.length - n0} more) and the control would read green for the fault`, { more: cOld.aus.length - n0, parked: parkedN() - p0 });
+    cOld.src.ok && cOld.src.stop();
+  }
   const c = await open(mk(QR, m.exports));
   await until(() => c.aus.length >= 20, 3000);
-  const c0 = capsOf();
-  lock(true);
+  const c0 = capsOf(), pC0 = parkedN(), hC0 = heldN();
+  fs.writeFileSync(HOLD, ''); lock(true);
   await until(() => capsOf() > c0, 3000);
-  await sleep(QR.startMs);
+  await held(hC0, '(c)');
+  await sleep(QR.startMs);   // the same hold as the placed run
+  fs.rmSync(HOLD, { force: true });
+  await parks(pC0, '(c)');   // the unlock waits on the park itself
   lock(false);
   await sleep(QR.everyMs * 6);
   const n = c.aus.length;
   await sleep(300);
   ok(capsOf() > c0 && !c.ended && c.aus.length === n && logs().filter((l) => l.parked === true).length >= 2, 'RED CONTROL (mid-stream): the base\'s rule captures again IN PLACE onto the LOCKED screen (blind) — that capture waits there, the picture never comes back', { caps: capsOf() - c0, ended: c.ended, aus: c.aus.length - n });
   c.src.ok && c.src.stop();
-  FK.set({ lockMode: null });
+  FK.set({ lockMode: null, lockReadHold: null });
   await until(() => capturesOf(logS).every((p) => !alive(p)), 3000);
 }
 
