@@ -707,7 +707,8 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
       fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
       const said = [], cw = console.warn, cl = console.log;
       console.warn = (...a) => said.push(a.join(' ')); console.log = (...a) => said.push(a.join(' '));
-      let s21 = null, out = null;
+      let s21 = null, out = null, turned = false, owed = null;
+      const SWf = require(path.join(REPO, 'src/store-writer.js')).storeWriter(), actsFile = path.join(d, 'index-acts.ndjson');
       try {
         s21 = mk({ dir: d, log: { warn: (...a) => said.push(a.join(' ')), log() {}, info() {} } });
         await s21.index.update(() => { s21.index.entry('fake', 'f1').title = 'one'; }, { durable: true });   // index.json made whole (its exclusive create)
@@ -715,15 +716,23 @@ console.log('§2b a torn groups.json is HELD (damaged), never set aside at a sta
         const ixf = path.join(d, 'index.json');
         fs.writeFileSync(ixf + '.other', IX); fs.renameSync(ixf + '.other', ixf);   // another index.json takes the name
         try { s21.index.flush(); } catch { }   // the index's whole write meets it: held «appeared»
-        await new Promise((z) => setTimeout(z, 1600));   // the queued journal write's turn, and a retry's
+        // r4363 (B-7e49; r4340 law 1): never a 1.6 s span. FIRST FACT: the queued journal write's turn came, its outcome SAID. SECOND FACT,
+        // what decides «never retrying»: the process's store writer OWES nothing for the journal (pending false: no retry can come),
+        // else its retry is SAID («not written (…) — kept in memory, retrying», the copy's). Each wait bounded 10 s, its expiry named
+        { const t0w = Date.now(), said1 = () => said.some((l) => /channels-acts\.write not written/.test(l)), retried = () => said.some((l) => /channels-acts\.write not written \(/.test(l));
+          while (!said1() && Date.now() - t0w < 10000) await new Promise((z) => setTimeout(z, 5)); turned = said1();
+          const t1w = Date.now(); while (turned && !retried() && SWf.pending(actsFile) && Date.now() - t1w < 10000) await new Promise((z) => setTimeout(z, 5));
+          owed = SWf.pending(actsFile) && !retried(); }
         const q = (s21.quarantined || []).find((x) => x.file === 'index.json' && x.kind === 'appeared') || {};
-        out = { kind: q.kind || null, retrying: said.filter((l) => /channels-acts\.write not written \(/.test(l)).length, final: said.filter((l) => /channels-acts\.write not written: its file appeared/.test(l)).length };
+        out = { turned, owed, kind: q.kind || null, retrying: said.filter((l) => /channels-acts\.write not written \(/.test(l)).length, final: said.filter((l) => /channels-acts\.write not written: its file appeared/.test(l)).length };
       } finally { console.warn = cw; console.log = cl; try { s21 && s21.close(); } catch { } }
       return out;
     };
     const fn1 = await finalRun(createChannelStore, 'head');
+    ok(fn1.turned && fn1.owed === false, 'HARNESS (its round wp3niroz5 (1)): the queued journal write\'s outcome was said within 10 s, and then the store writer owed nothing for the journal (no retry can come) — the leg below is judged at that', JSON.stringify(fn1));
     ok(fn1.kind === 'appeared' && fn1.retrying === 0 && fn1.final >= 1, 'its round wp3niroz5 (1): the queued journal write of a journal-only family whose index came is refused BY NAME and FINAL — never «kept in memory, retrying»', JSON.stringify(fn1));
     const fn1x = await finalRun(MC.load('src/channel-store.js', anchored(SSRC, "{ code: 'EEXIST', familyHeld: true });   // familyHeld (its round", "{ code: 'EEXIST' });   // familyHeld (its round", 'the journal\'s refusal unmarked'), 'f-jfinal').createChannelStore, 'cut');
+    ok(fn1x.turned && fn1x.owed === false, 'HARNESS (its round wp3niroz5 (1) CONTROL): the queued journal write\'s outcome was said within 10 s, and its retry said within 10 s more while the writer owed it', JSON.stringify(fn1x));
     ok(fn1x.retrying >= 1, 'its round wp3niroz5 (1) CONTROL (the refusal unmarked): the writer takes it as an ordinary failure and retries for the life, «kept in memory, retrying» — red', JSON.stringify(fn1x));
     // its round wp3niroz5 (7): THE ACT'S FAILURE WORDS BY THE HOLD, whatever the writer's own record says (a stand-in writer whose record
     // reads EIO while the index's write met a file that came)
@@ -1518,7 +1527,12 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     return b;
   };
   // the warm-up has ENDED its reads: every async read FINISHED (its spy's finally), or the sync reads counted — then turns for its last count
-  const settle = async (b, want) => { for (let k = 0; k < 400 && b.seen.done + b.seen.sync < want; k++) await new Promise((r) => setTimeout(r, 5)); for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r)); };
+  // r4363 (the flake census of 2.369.419, row 68: «a 2 s fixed span, silent»): a bound of 10 s, and its expiry fails BY NAME; the five
+  // immediates after it only drain the last read's own promise chain (microtasks), never a wait on another party
+  const settle = async (b, want) => { const t0s = Date.now(); while (b.seen.done + b.seen.sync < want && Date.now() - t0s < 10000) await new Promise((r) => setTimeout(r, 5)); if (b.seen.done + b.seen.sync < want) ok(false, `HARNESS (settle): ${b.seen.done + b.seen.sync} of ${want} warm read(s) ended within 10 s — the leg after it is not judged on them`); for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r)); };
+  // r4363 (row 69: «N setImmediate turns, the warm-up's end»): the warm-up's END is the engine's own onWarmed (its finally: the end is said
+  // in the same turn), awaited with a 10 s bound whose expiry fails BY NAME
+  const warmedOf = () => { let done = false; return { onWarmed: () => { done = true; }, wait: async (what) => { const t0e = Date.now(); while (!done && Date.now() - t0e < 10000) await new Promise((r) => setTimeout(r, 5)); if (!done) ok(false, `HARNESS (${what}): the warm-up did not end within 10 s — the leg after it is not judged on its end`); return done; } }; };
   // (a) THE WARM-UP: no sync read; ONE async read per group (the owner and both members counted from it), in 64 KB windows
   const b1 = boot(GE);
   await settle(b1, NG);
@@ -1541,11 +1555,11 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
   const COLD = "    if (!log && ((coldIds && coldIds.has(g.id)) || stuckIds.has(g.id))) { if (!(lastAt > since)) return 0; coldAsked.add(g.id); return null; }\n";
   const early = async (ge) => {
-    const said = [];
-    const b = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') said.push(m); });
+    const said = [], we = warmedOf();
+    const b = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') said.push(m); }, { onWarmed: we.onWarmed });
     const l0 = b.eng.list(), f0 = b.eng.listFor(B), sync0 = b.seen.sync;   // the start's own turn
     await settle(b, NG);
-    for (let k = 0; k < 50 && !said.length; k++) await new Promise((r) => setImmediate(r));   // the warm-up's end (a turn or two after its last read)
+    await we.wait('§3g2 (e) the warm-up\'s end');   // the warm-up's END (its said list comes in the same turn), never a count of turns
     const last = said[said.length - 1], bad = [];
     for (const g of (last ? last.groups : [])) { const want = truth(b.st, g.id, G.OWNER, 0); if (g.unread !== want) bad.push(`${g.id}:${g.unread}≠${want}`); }
     const s1 = b.seen.sync, l1 = b.eng.list(), syncAfter = b.seen.sync - s1;
@@ -1570,7 +1584,8 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
       let ends = null; const end = new Promise((r) => { ends = r; });
       const b = boot(ge, async (bb, gid) => { if (gid === stuckG) await hang; }, (m) => { if (m && m.type === 'channel-groups-updated') { said.push(m); if (said.length === 1) ends(); } }, { warmReadBoundMs: 40, log: { info() {}, log() {}, warn: (l) => warns.push(String(l)) } });
       b.eng.list();   // a reader in the start's turn: every count «not counted yet»
-      await Promise.race([end, new Promise((r) => setTimeout(r, 3000))]);   // the warm-up's said end (a bound: the control never says it)
+      const endSaid = await Promise.race([end.then(() => true), new Promise((r) => setTimeout(() => r(false), 3000))]);   // the warm-up's said end (bounded)
+      if (!endSaid) ok(false, 'HARNESS (§3g2 (f)): the warm-up\'s end was not said within 3 s — the leg after it is not judged on its end');
       const l1 = b.eng.list();
       return { b, said, warns, l1 };
     };
@@ -1579,7 +1594,8 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     const named = f1.warns.filter((l) => l.includes(stuckG) && /could not read the log of group/.test(l));
     let landed = null; const landSaid = new Promise((r) => { landed = r; }); const watch = setInterval(() => { if (f1.said.length >= 2) landed(); }, 2);
     landNow();   // the read lands at last
-    await Promise.race([landSaid, new Promise((r) => setTimeout(r, 3000))]); clearInterval(watch);
+    const landedSaid = await Promise.race([landSaid.then(() => true), new Promise((r) => setTimeout(() => r(false), 3000))]); clearInterval(watch);
+    if (!landedSaid) ok(false, 'HARNESS (§3g2 (f)): the late read\'s landing was not said within 3 s — the leg after it is not judged on it');
     const g1b = f1.b.eng.list().find((g) => g.id === stuckG), want1 = truth(f1.b.st, stuckG, G.OWNER, 0), wantOthers = others.every((g) => g.unread === truth(f1.b.st, g.id, G.OWNER, 0));
     f1.b.st.close();
     ok(g1 && g1.unread === null && others.length === NG - 1 && wantOthers && named.length === 1 && f1.said[0] && !f1.said[0].changed.includes(stuckG) && g1b && g1b.unread === want1 && f1.said[1] && f1.said[1].changed.length === 1 && f1.said[1].changed[0] === stuckG,
@@ -1589,11 +1605,12 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     ok(geSrc.split(BND).length === 2 && noBound !== geSrc, 'CONTROL (no bound on a warm read): its plant — the bounded await — is spelled exactly once');
     let landNow2 = null; const hang2 = new Promise((r) => { landNow2 = r; });
     const said2 = [];
-    const b2c = boot(MUTWU.load('src/server/groups-engine.js', noBound, 'nobound'), async (bb, gid) => { if (gid === stuckG) await hang2; }, (m) => { if (m && m.type === 'channel-groups-updated') said2.push(m); }, { warmReadBoundMs: 40 });
+    const w2c = warmedOf();
+    const b2c = boot(MUTWU.load('src/server/groups-engine.js', noBound, 'nobound'), async (bb, gid) => { if (gid === stuckG) await hang2; }, (m) => { if (m && m.type === 'channel-groups-updated') said2.push(m); }, { warmReadBoundMs: 40, onWarmed: w2c.onWarmed });
     b2c.eng.list();
     await new Promise((r) => setTimeout(r, 400));   // ten times the bound
     const nulls2 = b2c.eng.list().filter((g) => g.unread === null).length, said2n = said2.length;   // read BEFORE the read lands
-    landNow2(); await settle(b2c, NG); for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+    landNow2(); await settle(b2c, NG); await w2c.wait('§3g2 (f) CONTROL (no bound): the warm-up after the read lands');
     b2c.st.close();
     ok(nulls2 >= NG - 2 && !said2n, `CONTROL (no bound): the warm-up waits on the one read — ${nulls2} of ${NG} counts still «not counted yet» after ten bounds, ${said2n} end said ⇒ RED`);
   }
@@ -1650,19 +1667,16 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   const modeScene = async (ge) => {
     await modeTo('mention');
     let saidEnd = null; const end5 = new Promise((r) => { saidEnd = r; });
-    const b5 = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') saidEnd(m); });
+    const w5 = warmedOf();
+    const b5 = boot(ge, null, (m) => { if (m && m.type === 'channel-groups-updated') saidEnd(m); }, { onWarmed: w5.onWarmed });
     b5.eng.list(); for (const who of [A, B, C]) b5.eng.listFor(who);   // the readers before the warm-up's first turn (the release's memoised every count)
     const pre = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread;   // B-b17f's remainder: null — a cold count is never memoised by a reader
     // the state setNotify leaves (a mode moved, no record), set in the same turn — before the warm-up's first turn, so it
     // meets every group with the change in place (an awaited setNotify would race the warm-up's turns)
     const mB = b5.st.groups.live().groups[g5].members.find((x) => x.member === B);
     const was = mB.notify; mB.notify = 'next-turn';
-    await settle(b5, 0);
-    for (let k = 0; k < NG * 3; k++) await new Promise((r) => setImmediate(r));   // the warm-up's turns, one per group
-    // B-b17f's remainder: a reader answered null memoised nothing — the warm-up then READS every group (async) and says its
-    // end (one broadcast); the release's reader memoised every count — its warm-up reads only the changed group
-    if (pre === null) await Promise.race([end5, new Promise((r) => { setTimeout(r, 5000);   /* holds the loop: the warm-up's own turns are unref'd */ })]);   // should 4: the said end, awaited (bounded: a regression fails the leg by name, never hangs)
-    else await settle(b5, 1);       // the release's reader memoised every count: its warm-up reads only the changed group (one read)
+    // r4363: the warm-up's END (onWarmed) is the fact — the said end comes in that same turn; never NG × 3 counted turns nor a 5 s race
+    await w5.wait('§3g2 (d) the mode scene\'s warm-up');
     const got = (b5.eng.listFor(B).find((x) => x.id === g5) || {}).unread, want = truth(b5.st, g5, B, sinceOf(b5.st, g5, B));
     b5.st.close();
     return { ok: was === 'mention', got, want, pre };
@@ -1680,11 +1694,12 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   {
     const holdG = ids[0]; let let7 = null; const hold7 = new Promise((r) => { let7 = r; });
     const made = async (ge) => {
-      const b7 = boot(ge, async (bb, gid) => { if (gid === holdG) await hold7; }, null, { warmReadBoundMs: 60000 });
+      const w7 = warmedOf();
+      const b7 = boot(ge, async (bb, gid) => { if (gid === holdG) await hold7; }, null, { warmReadBoundMs: 60000, onWarmed: w7.onWarmed });
       const g7 = await b7.eng.create({ by: A, name: 'made after the start', members: [B], quiet: true });
       await b7.eng.post({ group: g7.group.id, from: A, text: 'a post in a group made after the start' });
       const c7 = (b7.eng.listFor(B).find((x) => x.id === g7.group.id) || {}).unread, cold7 = b7.eng.listFor(B).filter((x) => x.unread === null).length;
-      return { b7, c7, cold7 };
+      return { b7, c7, cold7, w7 };
     };
     const m1 = await made(GE);
     const ALLCOLD = '(coldIds && coldIds.has(g.id))';
@@ -1692,7 +1707,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
     ok(geSrc.split(ALLCOLD).length === 2 && allCold !== geSrc, 'CONTROL (every group cold while the warm-up runs): its plant — the start set\'s own test — is spelled exactly once');
     const m2 = await made(MUTWU.load('src/server/groups-engine.js', allCold, 'all-cold'));
     let7();
-    for (const m of [m1, m2]) { await settle(m.b7, NG); for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r)); m.b7.st.close(); }
+    for (const m of [m1, m2]) { await settle(m.b7, NG); await m.w7.wait('§3g2 (g) the warm-up after its held read lands'); m.b7.st.close(); }
     ok(m1.c7 === 1 && m1.cold7 >= 1, `§3g2 (g) a group made after the start (a post by another member in it): its count ${m1.c7} at once — never «not counted yet» — while ${m1.cold7} group(s) of the start still are (the warm-up held open)`);
     ok(m2.c7 === null, `CONTROL (every group cold while warming): the group made after the start says «not counted yet» (${m2.c7}) ⇒ RED`);
   }
