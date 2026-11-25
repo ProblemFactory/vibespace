@@ -3576,15 +3576,20 @@ class TaskGroupManager {
     return fm.join('\n') + body.join('\n');
   }
 
-  // Write a task to an absolute file path (creating parent dirs). Returns path.
-  exportToFile(id, absPath) {
+  // Write a task to an absolute file path (creating parent dirs). → Promise<path>. B-ddf3 (lane bl-vault, r4361): OFF THE HUB's LOOP
+  // (the path is any folder the person names, a slow or network one too) — the folder made, the file written, SYNCED and renamed
+  // through the thread pool; a failed write or sync is a failed export, said by name (nothing renamed, the temp removed)
+  async exportToFile(id, absPath) {
     const t = this.get(id);
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
-    const dir = path.dirname(absPath);
-    fs.mkdirSync(dir, { recursive: true });
+    const text = this.renderRepoFile(t);
+    await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
     const tmp = absPath + '.tmp';
-    fs.writeFileSync(tmp, this.renderRepoFile(t));
-    fs.renameSync(tmp, absPath);
+    let h = null, fault = null;
+    try { h = await fs.promises.open(tmp, 'w'); await h.writeFile(text); await h.sync(); } catch (e) { fault = e; }
+    if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; }
+    if (fault) { await fs.promises.unlink(tmp).catch(() => { }); throw new Error(`${path.basename(absPath)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not exported, nothing was replaced`); }
+    await fs.promises.rename(tmp, absPath);
     return absPath;
   }
 

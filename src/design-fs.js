@@ -119,6 +119,7 @@ async function writeUser(dir, text) {
   try {
     fh = await fsp.open(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o644);
     await fh.writeFile(String(text));
+    await fh.sync();   // B-ddf3 (lane bl-vault, r4361): on disk before its name points at it — a failed sync is a failed write, said below (write_failed)
     await fh.close(); fh = null;
     await fsp.rename(tmp, file);
     let mtime = null;

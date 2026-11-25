@@ -472,7 +472,7 @@ const DELETION_CALLS = Object.freeze({
   'src/kept-copies.js': 2, 'src/machine-probes.js': 2, 'src/mounts.js': 5, 'src/node-runtime.js': 3,
   'src/opencode-serve.js': 2, 'src/opslog.js': 1, 'src/owner-mark.js': 5, 'src/plugins/frp.js': 6,
   'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 18,   /* r4828 (lane nl-journals): + the extraction journal's temp removed on a failed write */
-  'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 9, 'src/search-index-worker.js': 1,
+  'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 7, 'src/search-index-worker.js': 1,
   'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-listener.js': 1, 'src/server/agent-tool-generators.js': 2,
   'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 9, 'src/server/browser-attach-launch.js': 1,
   'src/server/browser-builds-keeper.js': 8, 'src/server/browser-cli-install.js': 3, 'src/server/browser-clone-run.js': 2, 'src/server/browser-display-config.js': 2,
@@ -488,14 +488,14 @@ const DELETION_CALLS = Object.freeze({
   'src/server/hub-tmp.js': 1, 'src/server/incident-wiring.js': 2, 'src/server/job-secrets-door.js': 2, 'src/server/jobs-wiring.js': 1,
   'src/server/local-index.js': 1, 'src/server/migrations.js': 5, 'src/server/oat-mint.js': 3, 'src/server/otel-ingest.js': 1, 'src/server/ops-routes.js': 1,
   'src/server/plugin-install.js': 6, 'src/server/plugin-loader.js': 2, 'src/server/provider-spawn.js': 2, 'src/server/provider-test.js': 1,
-  'src/server/published-pages.js': 2, 'src/server/rewind-keep-worker.js': 7, 'src/server/rewind-kept-door.js': 2, 'src/server/sealed-json.js': 1,
+  'src/server/published-pages.js': 5, 'src/server/rewind-keep-worker.js': 7, 'src/server/rewind-kept-door.js': 2, 'src/server/sealed-json.js': 1,
   'src/server/session-stdout.js': 5, 'src/server/spend-guard.js': 3, 'src/server/sync-fs-witness-worker.js': 2, 'src/server/usage-index-retire.js': 1,
   'src/server/usage-pool-engine.js': 2, 'src/server/vault-engine.js': 7, 'src/server/vault-run-door.js': 6, 'src/server/vault-totp.js': 1,
   'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 3,   /* B-574d (lane nl-journals): + the off-loop write's temp removed on a failed write; + the exit's removal of a write's temp still in flight */ 'src/signin-witness-worker.js': 2,
   'src/signin-witness.js': 2, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 3,
-  'src/store-read-hold.js': 6, 'src/store-writer-worker.js': 6, 'src/store-writer.js': 2, 'src/task-groups.js': 1,
+  'src/store-read-hold.js': 6, 'src/store-writer-worker.js': 6, 'src/store-writer.js': 2, 'src/task-groups.js': 2,
   'src/transcript-service.js': 3, 'src/usage-cache-write.js': 1, 'src/usage-hold-road.js': 1, 'src/usage-ledger-dedup.js': 4,
-  'src/user-todos.js': 1, 'src/vnc.js': 1, 'src/webdav.js': 5, 'src/ws-create.js': 2,
+  'src/user-todos.js': 1, 'src/vnc.js': 1, 'src/webdav.js': 6, 'src/ws-create.js': 2,
   'src/ws-handler.js': 4,
 });
 

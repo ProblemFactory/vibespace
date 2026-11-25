@@ -154,7 +154,7 @@ console.log('— reloaded history: SendUserFile links (round-4 verifier)');
   });
   const ABS = '/tmp/vs-ucf/report.md';        // what `files: ['absolute or relative to cwd']` documents
   const REL_ABS = '/repo/wt/notes.md';        // published from a RELATIVE path the CLI resolved
-  const pubAbs = publish(ABS), pubRel = publish(REL_ABS);
+  const pubAbs = await publish(ABS), pubRel = await publish(REL_ABS);
   ok('the real publisher stores both pages under the channel key namespace, with their PATH recorded alongside it',
     pubAbs.page.srcKey === `userfile:${CONV}:${ABS}` && pubAbs.page.srcPath === ABS && pubRel.page.srcPath === REL_ABS,
     JSON.stringify([pubAbs.page.srcKey, pubAbs.page.srcPath]));

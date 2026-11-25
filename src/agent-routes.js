@@ -2783,7 +2783,7 @@ const express = require('express');
 // Group's shared file published by two conversations hands B A's words through `vibespace-page list` (reproduced over the real
 // store). The §6 row declared the title the agent's own; the route's answers are the door — every name a line piece.
 const pageAnswer = (p) => (p && typeof p === 'object' && typeof p.name === 'string' ? { ...p, name: agentText(p.name, { kind: 'line', max: 120 }) } : p);
-app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25mb' }), (req, res) => {
+app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25mb' }), async (req, res) => {   // B-ddf3 (r4361): the page's content is written off the loop
   const a = pageAuth(req, res); if (!a) return;
   const publishedPages = getPublishedPages(); // lazy: created later in server.js than this wiring (TDZ otherwise — caught by the design-flow E2E)
   if (!publishedPages) return res.status(503).json({ error: 'published pages not available on this server' });
@@ -2797,7 +2797,7 @@ app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25m
   // request's Host (a CLI on the hub sends Host: 127.0.0.1 / the box's own
   // hostname — both resolve nowhere else; 2.366.0 shipped exactly that link
   // to the owner). publicUrl or the relative path, and the CLI says so.
-  const r = publishedPages.publishContent({ html: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), name: String(q.title || q.name || ''), srcKey, makePublic, sessionId: a.sessionId, conversationId: a.conversationId });
+  const r = await publishedPages.publishContent({ html: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), name: String(q.title || q.name || ''), srcKey, makePublic, sessionId: a.sessionId, conversationId: a.conversationId });
   if (r.error) return res.status(r.status === 503 ? 503 : 400).json(r);   // r3107: a held list is «try again», never a bad request
   res.json({ ...r, page: pageAnswer(r.page) }); // no origin: an agent has no browser, and the server must not guess one (2.366.1); the name through the belt (verify r6 F3)
 });

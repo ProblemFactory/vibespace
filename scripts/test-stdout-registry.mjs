@@ -1396,7 +1396,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     const negSrc = path.join(filesDir, 'neg.html');
     fs.writeFileSync(negSrc, '<h1>mine</h1>');
     const negMine = pages.publish({ srcPath: negSrc, name: 'neg', makePublic: true });
-    const negChan = pages.publishContent({ html: Buffer.from('<h1>agent</h1>'), name: 'neg.html', srcKey: 'local:' + negSrc, makePublic: false, sessionId: 'w-neg', conversationId: 'conv-N', mediaType: '' });
+    const negChan = await pages.publishContent({ html: Buffer.from('<h1>agent</h1>'), name: 'neg.html', srcKey: 'local:' + negSrc, makePublic: false, sessionId: 'w-neg', conversationId: 'conv-N', mediaType: '' });
     const negAfter = pages.list({}).find((x) => x.id === negMine.page.id);
     ok("NEGATIVE CONTROL: the pre-fix `srcKey: local:<abs>` + `makePublic:false` DOES take over the user's page and flip it private -- the asserts above measure the fix",
       negChan.page.id === negMine.page.id && negAfter.public === false && negAfter.conversationId === 'conv-N',

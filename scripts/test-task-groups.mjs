@@ -466,7 +466,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     s4.importBundle({ tasks: [{ id: 'T-kid', title: 'Kid', parents: [...gone, A.id], createdAt: 9 }] }, { log: () => { } });
     ok(same(s4.get('T-kid').parents, [A.id]), 'read 4: the cap of eight is applied AFTER the gone ids are dropped (the real parent kept)', s4.get('T-kid').parents);
     const f = path.join(SCR, 'repo-file.md');
-    s4.exportToFile(Bq.id, f);
+    await s4.exportToFile(Bq.id, f);
     s4.importFromFile(f);
     ok(same(s4.get(Bq.id).parents, [A.id]), 'read 5: the .md repo export / import never erases the lineage (it is the store\'s, as the table is)', s4.get(Bq.id).parents);
     const no = (fn) => { try { fn(); return 'written'; } catch (e) { return e.code || e.message; } };

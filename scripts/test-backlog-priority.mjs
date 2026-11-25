@@ -129,7 +129,7 @@ const g = tasks.create({ title: 'prio', objective: 'obj', folders: [cwd], contex
   check('TASK.md lists open items in sortBacklog order with the markers (high `!`, low `↓`)', lines.length === 4 && / ! a /.test(lines[0] + ' ') && / c /.test(lines[1] + ' ') && / b /.test(lines[2] + ' ') && / ↓ d /.test(lines[3] + ' '), lines.join(' | '));
   // repo-file round-trip
   const file = path.join(tmp, 'repo', 'task.md');
-  tasks.exportToFile(g.id, file);
+  await tasks.exportToFile(g.id, file);
   const txt = fs.readFileSync(file, 'utf8');
   check('repo file carries the markers after the id', /\] \[B-[0-9a-f]+\] ! a$/m.test(txt) && /\] \[B-[0-9a-f]+\] ↓ d$/m.test(txt) && /\] \[B-[0-9a-f]+\] c$/m.test(txt), txt);
   tasks.update(g.id, { backlog: out.map((b) => ({ ...b, priority: 'normal' })) });
@@ -160,14 +160,14 @@ console.log('(2b) repo-file marker-like text');
   const TEXTS = [['! not urgent, just exclaiming', 'normal'], ['↓ arrow text normal', 'normal'], ['! shouting and high', 'high'], ['\\! already escaped', 'low'], ['!bang no space', 'normal'], ['plain', 'high']];
   const elsewhere = path.join(tmp, 'elsewhere'); fs.mkdirSync(elsewhere, { recursive: true }); // not the route session's cwd — never a second membership
   const g2 = tasks.create({ title: 'esc', objective: 'o', folders: [elsewhere] });
-  const roundTrip = (mgr) => {
+  const roundTrip = async (mgr) => {
     mgr.update(g2.id, { backlog: TEXTS.map(([text, priority], i) => ({ text, priority, addedAt: i + 1 })) });
     const f = path.join(tmp, 'repo', `esc-${patchN++}.md`);
-    mgr.exportToFile(g2.id, f);
+    await mgr.exportToFile(g2.id, f);
     mgr.update(g2.id, { backlog: [] });
     return { txt: fs.readFileSync(f, 'utf8'), back: mgr.importFromFile(f).backlog.map((b) => [b.text, b.priority]) };
   };
-  const { txt, back } = roundTrip(tasks);
+  const { txt, back } = await roundTrip(tasks);
   check('every text + priority survives the export/import round trip (a normal "! …" / "↓ …" stays normal, its prefix kept)', JSON.stringify(back) === JSON.stringify(TEXTS), JSON.stringify(back));
   check('the writer declares `backlog_priority: markers` and escapes a marker-like normal text as `\\! …`', /^backlog_priority: markers$/m.test(txt) && /\] \\! not urgent/.test(txt) && /\] \\↓ arrow/.test(txt) && /\] ! \\! shouting/.test(txt), txt);
   // a file written BEFORE priorities (no frontmatter key, no escaping) is read verbatim
@@ -189,7 +189,7 @@ console.log('(2b) repo-file marker-like text');
   const badMgr = new Bad({ dataDir: fs.mkdtempSync(path.join(tmp, 'bad-')), onChange: () => {} });
   const bg = badMgr.create({ title: 'esc', objective: 'o', folders: [cwd] });
   badMgr.update(bg.id, { backlog: TEXTS.map(([text, priority], i) => ({ text, priority, addedAt: i + 1 })) });
-  const bf = path.join(tmp, 'repo', 'bad.md'); badMgr.exportToFile(bg.id, bf); badMgr.update(bg.id, { backlog: [] });
+  const bf = path.join(tmp, 'repo', 'bad.md'); await badMgr.exportToFile(bg.id, bf); badMgr.update(bg.id, { backlog: [] });
   const badBack = badMgr.importFromFile(bf).backlog.map((b) => [b.text, b.priority]);
   check('negative control: the pre-fix writer/reader flips "! not urgent…" to high and drops its prefix', JSON.stringify(badBack) !== JSON.stringify(TEXTS) && badBack[0][1] === 'high' && badBack[0][0] === 'not urgent, just exclaiming', JSON.stringify(badBack));
 }
