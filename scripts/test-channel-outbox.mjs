@@ -480,8 +480,14 @@ console.log('§3 P4: idempotency + reconcile');
   // r2268 (主开发: AN ITEM ABOUT A MESSAGE's OUTCOME NEVER OUTLIVES THE OUTCOME) — the corpse as the boot leg makes it
   const corpse = (q, t) => { q.state = 'sending'; q.approvedBy = 'user'; q.attemptAt = t; q.wire = { text: q.text, honestyLine: false, at: t }; q.history.push({ state: 'sending', at: t, by: 'user' }); };
   // THE WINDOW: «Check outcome» pressed while the boot sweep's state flip has not landed (the corpse reads `unknown`, no
-  // audit line, no item yet) — the press waits for the sweep's whole step, so the audit reads in order and no item is left
-  async function bootWindow(ENGmod, name) {
+  // audit line, no item yet) — the press waits for the sweep's whole step, so the audit reads in order and no item is left.
+  // r4301 (主开发: A CONTROL REPRODUCES ITS FAULT BY A PLACED HOLD IN THE WINDOW, NEVER BY A CLOCK): `untilSettled` is the
+  // CONTROL's window — the sweep's step stays HELD until the copy's press has settled (a copy whose sweep runs outside the queue
+  // settles while it is held, on any machine under any load), so its red no longer rests on the press settling inside 80 ms.
+  // The LEG's window is unchanged (the press must not settle in it). Every wait for an event is the event itself, or a poll
+  // whose bound (SCENE_BOUND_MS) only names a scene that never got there — a bound never decides a reading
+  const SCENE_BOUND_MS = 30000;
+  async function bootWindow(ENGmod, name, { untilSettled = false } = {}) {
     const { registry } = spyRegistry();
     const W = mkEngine({ name, registry, engine: ENGmod });
     await prime(W.eng);
@@ -496,25 +502,29 @@ console.log('§3 P4: idempotency + reconcile');
     // the leg opens it — judged inside that write's change, never by a later read (another write landing with it would
     // read `unknown` too and be held in its place)
     const real = W2.eng.store.outbox.update;
-    let open = null, held = 0, opened = false;
+    let open = null, held = 0, opened = false, heldNow = null;
     const gate = new Promise((r) => { open = r; });
+    const holding = new Promise((r) => { heldNow = r; });   // r4301: the hold's own moment — awaited, never polled for
     W2.eng.store.outbox.update = (fn, ...a) => {
       let flip = false;
       const run = real((ob) => { const was = ob.proposals[id] && ob.proposals[id].state; const r = fn(ob); flip = was === 'sending' && !!ob.proposals[id] && ob.proposals[id].state === 'unknown'; return r; }, ...a);
-      return run.then((v) => { if (flip && !held) { held++; return gate.then(() => v); } return v; });
+      return run.then((v) => { if (flip && !held) { held++; heldNow(); return gate.then(() => v); } return v; });
     };
+    const bound = () => new Promise((r) => { const tm = setTimeout(r, SCENE_BOUND_MS, 'bound'); tm.unref?.(); });
     W2.eng.start();
-    for (let i = 0; i < 300 && !held; i++) await new Promise((r) => setTimeout(r, 10));
+    await Promise.race([holding, bound()]);
     const pressed = W2.eng.reconcile(id);   // a person presses «Check outcome» in the window
     let settledInWindow = false;
-    pressed.then(() => { if (!opened) settledInWindow = true; }, () => {});
-    await new Promise((r) => setTimeout(r, 80));
+    const settled = pressed.then(() => { if (!opened) settledInWindow = true; return 'settled'; }, () => 'refused');
+    // THE WINDOW's END: the leg's — the press had 80 ms to settle and must not have; the control's — a PLACED hold: the step
+    // stays held until the copy's press settled (its fault, reproduced on any machine), the bound naming a copy that never did
+    const windowEnd = untilSettled ? await Promise.race([settled, bound()]) : await new Promise((r) => setTimeout(r, 80, 'leg window'));
     const inWindow = W2.eng.store.outbox.snapshot().proposals[id].state;
     opened = true; open();
     const rz = await pressed;
-    for (let i = 0; i < 300 && !ops().includes('outcome'); i++) await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < SCENE_BOUND_MS / 10 && !ops().includes('outcome'); i++) await new Promise((r) => setTimeout(r, 10));   // the sweep's OUTCOME line, once it is let go
     await new Promise((r) => setTimeout(r, 30));
-    const out = { held, settledInWindow, inWindow, rz: { ok: !!rz.ok, state: rz.state }, ops: ops(), open: openUnknown().length, sends: log2.sends.length, state: W2.eng.store.outbox.snapshot().proposals[id].state };
+    const out = { held, settledInWindow, windowEnd, inWindow, rz: { ok: !!rz.ok, state: rz.state }, ops: ops(), open: openUnknown().length, sends: log2.sends.length, state: W2.eng.store.outbox.snapshot().proposals[id].state };
     W2.eng.stop();
     return out;
   }
@@ -622,8 +632,8 @@ console.log('§3 P4: idempotency + reconcile');
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const MW = mutantCopies('chan-outbox-r2268', REPO);
     const unqueued = MW.load('src/server/channels-engine.js', esrc.replace(Q, '    for (const p of stuck) await sweepOne(p);'), 'sweep-unqueued');
-    const wr = await bootWindow(unqueued, 'r2268-window-red');
-    ok(wr.held === 1 && wr.settledInWindow && wr.ops.indexOf('reconcile-outcome') < wr.ops.indexOf('outcome'), 'CONTROL: a copy whose boot sweep runs OUTSIDE the queue settles in the window and writes the sweep\'s OUTCOME line AFTER the settle — the window legs would go red', JSON.stringify(wr));
+    const wr = await bootWindow(unqueued, 'r2268-window-red', { untilSettled: true });   // r4301: the window held until the copy's press settles
+    ok(wr.held === 1 && wr.windowEnd === 'settled' && wr.settledInWindow && wr.ops.includes('outcome') && wr.ops.indexOf('reconcile-outcome') < wr.ops.indexOf('outcome'), 'CONTROL: a copy whose boot sweep runs OUTSIDE the queue settles in the window (held open by a placed hold until its press settles, never a clock) and writes the sweep\'s OUTCOME line AFTER the settle — the window legs would go red', JSON.stringify(wr));
     const noHeal = MW.load('src/server/channels-engine.js', esrc.replace(H, H + ' return 0;'), 'no-heal');
     const hr = await healAndName(noHeal, 'r2268-heal-red');
     ok(hr.boot.a === 'open' && hr.boot.b === 'open', 'CONTROL: a copy without the heal leaves both leftover items open for proposals already sent — the heal leg would go red', JSON.stringify(hr.boot));
