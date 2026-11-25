@@ -91,7 +91,8 @@ console.log('(h) C2: steady stamps across several snapshots — the journal stay
 {
   const dir = path.join(ROOT, 'h'); fs.mkdirSync(dir, { recursive: true });
   const w = SW.create({ log: quiet, workerPath: STAND });
-  const st = CS.createChannelStore({ dir, log: quiet, writer: w, stampsFlushMs: 50 });
+  // B-360d: the side file is the journal's COMPACTION — a 200-byte bound here makes one every few stamps (was a 50 ms timer)
+  const st = CS.createChannelStore({ dir, log: quiet, writer: w, stampsBound: { min: 200, max: 200 } });
   const KEYS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
   await st.index.update(() => { for (const c of KEYS) st.index.entry('acct', c, { create: true }); });
   hold('poll-stamps.json', 150);   // each snapshot's write in flight 150 ms: stamps keep coming during it
@@ -110,7 +111,8 @@ console.log('(h) C2: steady stamps across several snapshots — the journal stay
   // few stamps appended between the landing and this read
   ok(snaps >= 2 && atLanding.length >= 2 && atLanding.every((x) => x <= KEYS.length + 4) && atEnd < n / 2, `(h1) ${n} stamps across ${snaps} snapshot(s), each written while stamps kept coming: right after each landing the journal held ${JSON.stringify(atLanding)} line(s) (≤ ${KEYS.length} keys + the stamps since) — bounded by one period's stamps (worst ${worst}, at the end ${atEnd}), never all ${n}`, { n, snaps, atLanding, worst, atEnd });
   unhold('poll-stamps.json');
-  for (let k = 0; k < 400 && (st.stamps.isDirty() || w.pending(st.stamps.file)); k++) await sleep(25);   // the last snapshot lands
+  for (let k = 0; k < 400 && w.pending(st.stamps.file); k++) await sleep(25);   // a compaction in flight lands
+  st.stamps.flush();   // B-360d: the journal under its bound stays the record — the suite's synchronous flush writes the last snapshot
   for (let k = 0; k < 40 && lines() > 0; k++) await sleep(25);
   ok(lines() === 0, `(h2) a snapshot that lands with no stamp set after its bytes leaves the journal EMPTY (${lines()} line(s))`, { left: lines() });
   const reborn = CS.createChannelStore({ dir, log: quiet, writer: SW.create({ log: quiet, workerPath: STAND }) });   // what a kill leaves
@@ -183,7 +185,7 @@ console.log('(k) the two ORDER laws of test-channel-store ⑭ on the writer\'s t
   const CS_FILE = path.join(REPO, 'src/channel-store.js');
   const SRC = fs.readFileSync(CS_FILE, 'utf8');
   const HEAL_J = ['    if (took.length) journal(took);', '    if (took.length && false) journal(took);'];
-  const FOLD_OK = ['    if (!ok) { stampsDirty = true; return; }', '    if (!ok) { stampsDirty = true; foldJournal(null); return; }'];
+  const FOLD_OK = ['    if (!ok) { stampsDirty = true; stampsCompactOwed = true; return; }', '    if (!ok) { stampsDirty = true; stampsCompactOwed = true; foldJournal(null); return; }'];   // B-360d: the failed write keeps the compaction owed
   ok(SRC.split(HEAL_J[0]).length === 2 && SRC.split(FOLD_OK[0]).length === 2, '(k0) CONTROL setup: the heal\'s journal append and the failed side-file write\'s branch are each spelled once');
   const T = Date.UTC(2026, 9, 3, 2, 0, 0);
   const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
@@ -226,7 +228,7 @@ console.log('(k) the two ORDER laws of test-channel-store ⑭ on the writer\'s t
   const k2 = async (tag, cut, { heal = true } = {}) => {
     const dir = path.join(ROOT, `k2-${tag}`); fs.mkdirSync(dir, { recursive: true });
     const w = SW.create({ log: quiet, workerPath: STAND });
-    const st = load(cut).createChannelStore({ dir, log: quiet, writer: w, stampsFlushMs: 50 });
+    const st = load(cut).createChannelStore({ dir, log: quiet, writer: w });   // B-360d: no side file yet ⇒ the first stamp asks the compaction
     await st.index.update(() => { for (const c of KEYS) st.index.entry('acct', c, { create: true }); });
     failOn('poll-stamps.json', true);
     KEYS.forEach((c, i) => st.stamps.set(`acct/${c}`, { lastPollAt: T + i }));
