@@ -7270,6 +7270,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * → {ok:true, request, reasserted, cut} | {ok:false, code, error, remedy}
    */
   function requestTakeover({ browserKey, profileId = null, sessionId = null, conversationKey = null, conversationName = '', text = '', url = '', title = '' } = {}) {
+    url = TBS.markOutText(String(url || '')); title = TBS.markOutText(String(title || '')); // row B-0e4a (r4339 follow): the request's page is kept out of the mark at the WRITE (it is stored and broadcast)
     ensureLoaded(); loadRequests();
     if (tqHold.held()) return tqRefusal('asking a person to take over');   // r3261: HELD — nothing is filed over requests that could not be read
     const p = profileId ? profile(profileId) : null;

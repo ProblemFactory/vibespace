@@ -619,7 +619,7 @@ function rebindPick({ targets = null, holders = [], key = '' } = {}) {
   const owners = tabOwners({ targets, holders: (Array.isArray(holders) ? holders : []).filter((h) => isObj(h) && str(h.key) !== str(key)) });
   if (owners.get(only.targetId) && owners.get(only.targetId) !== 'orphan') return null;
   const raw = targets.find((x) => isObj(x) && idKey(x.targetId) === only.targetId) || {}; // pageTargets keeps no url — the note names the page
-  return { targetId: only.targetId, url: str(raw.url) || 'about:blank' };
+  return { targetId: only.targetId, url: markOutText(str(raw.url)) || 'about:blank' }; // row B-0e4a (r4339 follow): kept out at the WRITE — the rebound note and the journal line are made from it
 }
 /** Row B-0e4a (主开发 r4252 / r4264): A LEASE's OWN TAB, KNOWN AGAIN AFTER A RESTART. The keeper births the lease's root tab at a
  *  hub-made address — about:blank with the lease's own random mark as its fragment — and Chrome's own restore («continue where you
@@ -681,7 +681,7 @@ function aloneVerdict({ take = '', windows = null } = {}) {
  * cut short — reads as the plain blank a person would see (Chrome titles a blank page `about:blank`). `markOut` walks a reply
  * (copy-on-write: a value with no mark comes back AS IT IS, the same object); `markOutText` one serialized record. PURE.
  */
-const MARK_ANY_RE = /about:blank#vs-own-[0-9a-f]*/gi;
+const MARK_ANY_RE = /about:blank#vs-own-[0-9a-f]{0,24}(?![0-9a-z])/gi; // the mark whole or cut short — never a longer word that only begins like it (a page's own `?q=…#vs-own-zz` stays as it is)
 const MARK_HINT_RE = /#vs-own-/i; // one cheap scan first: a record with no mark (every frame) comes back as it is
 function markOutText(s) { return typeof s === 'string' && MARK_HINT_RE.test(s) ? s.replace(MARK_ANY_RE, 'about:blank') : s; }
 function markOut(v, depth = 0) {

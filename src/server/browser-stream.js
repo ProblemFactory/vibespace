@@ -212,7 +212,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
 
   // row B-0e4a (主开发 r4319, L2): EVERY record to a viewer leaves through this ONE send, and through the ONE door (TBS.markOutText):
   // a lease's marked blank reads as the plain blank — in a hub-made record (the tab row's titles, a mode's url) as in a relayed one
-  const send = (ws, obj) => { try { if (ws.readyState === 1) ws.send(TBS.markOutText(typeof obj === 'string' ? obj : JSON.stringify(obj))); } catch { /* closing */ } };
+  const wsOut = (ws, text) => { try { if (ws.readyState === 1) ws.send(text); } catch { /* closing */ } };
+  const send = (ws, obj) => wsOut(ws, TBS.markOutText(typeof obj === 'string' ? obj : JSON.stringify(obj)));
+  // r4339 follow: a PICTURE FRAME (base64 pixels and the screencast's metrics, built only from a record of class 'frame') can never
+  // hold an address — it leaves by its own send, with no scan (the relay's frames, its kept last frame, a polled tab's picture)
+  const sendFrame = (ws, frameText) => wsOut(ws, frameText);
   /** BROWSE YOURSELF (B-6ae8): a relay of the USER's own browsing window (`?browse=hu-<hex>`) — his own tab, his own
    *  session; its controls are the keeper's `human*` verbs (never a takeover: nothing of any agent is paused), no tab
    *  anchor (every tab change on it is his), and his forwarded input becomes ACTS on its taps (the recorder's). */
@@ -450,7 +454,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     noteViewers(relay);
     send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder, platform }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0 });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
-    if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
+    if (relay.lastFrame) { sendFrame(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
     if (relay.viewport) send(ws, relay.viewport); // lane J: the page's viewport reading, replayed like the last frame
     if (relay.lastFit) send(ws, relay.lastFit); // lane S4: what the page's size is and whose pane it follows (the chip's words)
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: whose each tab is (the tab row's controls), replayed like the tabs record
@@ -490,7 +494,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     noteViewers(relay);
     send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder, platform }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0, human: true });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
-    if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
+    if (relay.lastFrame) { sendFrame(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
     if (relay.viewport) send(ws, relay.viewport);
     if (relay.lastFit) send(ws, relay.lastFit);
     if (relay.lastOwners) send(ws, relay.lastOwners); // lane browser-resume C: his window's tab row
@@ -530,7 +534,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const relay = {
       // a HELPER's relay is keyed and answered under ITS key and pairs (the session's are its parent's): lane P's view
       // target by handle (pairs from the keeper), lane H's tap target (its own browserKey + pairs on the target)
-      key, sessionId, target, browserKey: child ? target.handle : target.kind === 'human' ? target.key : (target.browserKey || f.browserKey || null), envPairs: child ? childPairs : target.kind === 'human' ? null : (target.envPairs || f.envPairs || null), viewers: new Map(), upstream: null, connecting: null, last: {}, lastFrame: null,
+      key, sessionId, target, browserKey: child ? target.handle : target.kind === 'human' ? target.key : (target.browserKey || f.browserKey || null), envPairs: child ? childPairs : target.kind === 'human' ? null : (target.envPairs || f.envPairs || null), viewers: new Map(), upstream: null, connecting: null, last: {}, lastRaw: {}, // r4339 follow: lastRaw = the url / tabs records as the driver sent them, for lastUrlOf alone (never sent: the viewport lookup finds the page by its own address) lastFrame: null,
       // P5 (§4.5): server-side TAPS — the action-trace recorder listens to the
       // same upstream (every record, frames included) and keeps the relay
       // alive with no viewer at a low fps; a tap never drives, never counts
@@ -622,7 +626,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       fanOutFrame(relay, text, t);
     } else {
       relay.stats.ordered++;
-      if (S.REPLAYED_TYPES.includes(msg.type)) relay.last[msg.type] = outText;
+      if (S.REPLAYED_TYPES.includes(msg.type)) { relay.last[msg.type] = outText; if (msg.type === 'url' || msg.type === 'tabs') relay.lastRaw[msg.type] = text; }
       for (const v of relay.viewers.values()) send(v.ws, outText);
     }
     applyBackpressure(relay);
@@ -680,8 +684,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     noteXSeats(relay); // lane browser-x-in-window: the X picture's input side follows the takeover at once
   }
   function lastUrlOf(relay) {
-    try { const u = relay.last.url ? JSON.parse(relay.last.url) : null; if (u && typeof u.url === 'string') return u.url; } catch { /* */ }
-    try { const t = relay.last.tabs ? JSON.parse(relay.last.tabs) : null; const act = t && Array.isArray(t.tabs) ? t.tabs.find((x) => x && x.active) : null; if (act && typeof act.url === 'string') return act.url; } catch { /* */ }
+    // r4339 follow: the RAW copy (the replay store holds the masked record) — this fallback feeds the viewport lookup by address
+    try { const u = relay.lastRaw.url ? JSON.parse(relay.lastRaw.url) : null; if (u && typeof u.url === 'string') return u.url; } catch { /* */ }
+    try { const t = relay.lastRaw.tabs ? JSON.parse(relay.lastRaw.tabs) : null; const act = t && Array.isArray(t.tabs) ? t.tabs.find((x) => x && x.active) : null; if (act && typeof act.url === 'string') return act.url; } catch { /* */ }
     return '';
   }
   /** Take over / hand back — through the keeper when it has the P3 surface,
@@ -796,7 +801,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function fanOutFrame(relay, text, t) {
     for (const v of relay.viewers.values()) {
       if (v.watch) continue; // lane browser-windows (U3): a viewer watching another tab gets THAT tab's frames only
-      if (S.frameGate({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, t, limits)) { send(v.ws, text); v.lastFrameAt = t; v.sent++; v.sentSeq = relay.frameSeq; }
+      if (S.frameGate({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, t, limits)) { sendFrame(v.ws, text); v.lastFrameAt = t; v.sent++; v.sentSeq = relay.frameSeq; }
       else { v.dropped++; relay.stats.dropped++; armTrail(relay, v); }
     }
   }
@@ -809,7 +814,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       v.trailTimer = null;
       if (relays.get(relay.key) !== relay || !relay.viewers.has(v.id) || !relay.lastFrame || v.sentSeq >= relay.frameSeq || v.watch) return;
       const t = now();
-      if (S.frameGate({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, t, limits)) { send(v.ws, relay.lastFrame); v.lastFrameAt = t; v.sent++; v.sentSeq = relay.frameSeq; relay.stats.trailed++; }
+      if (S.frameGate({ maxFps: v.maxFps, lastFrameAt: v.lastFrameAt, bufferedAmount: v.ws.bufferedAmount }, t, limits)) { sendFrame(v.ws, relay.lastFrame); v.lastFrameAt = t; v.sent++; v.sentSeq = relay.frameSeq; relay.stats.trailed++; }
       else armTrail(relay, v);
     }, wait === null ? RESUME_POLL_MS : Math.max(1, wait));
     if (v.trailTimer.unref) v.trailTimer.unref();
@@ -1432,7 +1437,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (w.timer) clearTimeout(w.timer);
     if (typeof w.stop === 'function') { try { w.stop(); } catch { /* ended */ } }
     send(viewer.ws, { type: 'watching', targetId: null, ...(why ? { ended: why } : {}) });
-    if (relay.lastFrame) { send(viewer.ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sentSeq = relay.frameSeq; } // back on the agent's picture at once
+    if (relay.lastFrame) { sendFrame(viewer.ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sentSeq = relay.frameSeq; } // back on the agent's picture at once
   }
   function viewerWatch(relay, viewer, targetId) {
     const say = (o) => send(viewer.ws, { type: 'watching', ...o });
@@ -1679,7 +1684,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       return;
     }
     if (v.kind === 'refresh') {
-      if (viewer.sentSeq < relay.frameSeq && relay.lastFrame) { send(viewer.ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
+      if (viewer.sentSeq < relay.frameSeq && relay.lastFrame) { sendFrame(viewer.ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
       if (now() - relay.lastRefreshAt >= FIT.REFRESH_EVERY_MS) { relay.lastRefreshAt = now(); captureFresh(relay, 'refresh'); }
       return;
     }

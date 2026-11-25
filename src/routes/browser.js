@@ -131,7 +131,7 @@ const router = express.Router();
 // this router is mounted app-wide, so the door wraps its own paths only (every route of it is under /api/browser or /api/agent/browser)
 const BROWSER_PATH_RE = /^\/api\/(?:agent\/)?browser(?:\/|$)/;
 const { markOut } = require('../browser-tabs.js');
-router.use((req, res, next) => { if (BROWSER_PATH_RE.test(req.path)) { const json = res.json.bind(res); res.json = (body) => json(markOut(body)); } next(); });
+router.use((req, res, next) => { if (BROWSER_PATH_RE.test(req.path) && !res.markOutDoor) { res.markOutDoor = true; const json = res.json.bind(res); res.json = (body) => json(markOut(body)); } next(); }); // the two routers are mounted in turn: the door wraps a reply once
 
 let ctx = null;
 const vaultFillTickets = new Map();

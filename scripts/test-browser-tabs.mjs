@@ -1255,7 +1255,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     // the keeper's own take-back (the rebind's call, through its suite seam) over the fake browser: Chrome's restore stood in by two
     // pages nobody roots — R1 carries the lease's mark (its first entry), R2 does not; their windows as the scene places them. The
     // runtime RECORDS every command the keeper sends (law A: in the shared and unread scenes nothing reaches the carrier)
-    const takeLeg = async (Kmod, tag, wins, { carries = new Map([[R1, true]]), reopen = false, twice = false, liveRoot = false } = {}) => {
+    const takeLeg = async (Kmod, tag, wins, { carries = new Map([[R1, true]]), reopen = false, twice = false, liveRoot = false, ask = false } = {}) => {
       const opened = []; // the birth address of every window the keeper asks for (the stand-in opens none: its first command opens the tab)
       const sent = []; const rtBase = F.createBrowserRuntime({ env });
       const rtRec = { ...rtBase, exec: async (ns, argv, o) => { sent.push((argv || []).map(String).join(' ')); return rtBase.exec(ns, argv, o); } };
@@ -1278,6 +1278,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       const l2 = B.findLease(kw._reg().leases, pw.id, KA) || {};
       const inst = WINm.instanceOf(kw._reg().browsers[pw.id]);
       const out = { back: back ? back.targetId : null, own: !!inst && l2.windowIn === inst, hasWindowIn: 'windowIn' in l2, windowId: l2.windowId == null ? null : l2.windowId, roots: l2.tabRoots, toCarrier, remarked: !!l2.ownMark && l2.ownMark !== mark0, markOk: TBS0.OWN_MARK_RE.test(String(l2.ownMark || '')), facts: liveRoot ? null : (kw._takeBackFacts().slice(-1)[0] || null) };
+      if (ask) { const rq = kw.requestTakeover({ browserKey: KA, profileId: pw.id, sessionId: 'x-0e4a-' + tag, text: 'Please sign in for me', url: U0, title: U0 }); const row = (kw.takeoverRequests() || []).find((x) => x && x.browserKey === KA) || null; out.ask = { ok: !!(rq && rq.ok), url: row ? row.url : null, title: row ? row.title : null }; }
       if (twice) { const m1 = l2.ownMark; await kw._takeBack(pw.id, KA); const l3 = B.findLease(kw._reg().leases, pw.id, KA) || {}; out.second = { remint: !!(kw._takeBackFacts().slice(-1)[0] || {}).remint, same: l3.ownMark === m1 }; }
       // the switch's / a site's re-open (openInLease) afterwards: the birth address of the window it asks for
       if (reopen) { const n0 = opened.length; await kw.openInLease({ profileId: pw.id, browserKey: KA, url: 'https://next.example/' }); const l4 = B.findLease(kw._reg().leases, pw.id, KA) || {}; out.reopenAt = opened.slice(n0).map((u) => (u === TBS0.ownMarkUrl(l4.ownMark) ? 'its mark' : u)); }
@@ -1288,7 +1289,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const ROOT_ANCH = "        if (at !== 'about:blank' && liveRoots.length) { const tl = await tabTargetsOf(rec.cdpUrl); if (!tl || TBS.pageTargets(tl).some((x) => liveRoots.includes(x.targetId))) at = 'about:blank'; }\n";
     if (!ksrc.includes(ROOT_ANCH)) ok(false, 'the anchor of the control «a marked birth beside a live root» is not in the source (src/server/browser-keeper.js)');
     const Kl = ksrc.includes(ROOT_ANCH) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, ROOT_ANCH, '        // (the control: a marked birth beside a live root)\n', 'src/server/browser-keeper.js'), 'b0e4a-birth-beside-root') : null;
-    const [tAlone, tShared, tUnread, tSwCtl, tMany, tUnknown, tNone, tRoot, tCtlL] = await Promise.all([takeLeg(K, 'alone', new Map([[R1, 11], [R2, 12]])), takeLeg(K, 'shared', new Map([[R1, 11], [R2, 11]]), { twice: true }),
+    const [tAlone, tShared, tUnread, tSwCtl, tMany, tUnknown, tNone, tRoot, tCtlL] = await Promise.all([takeLeg(K, 'alone', new Map([[R1, 11], [R2, 12]]), { ask: true }), takeLeg(K, 'shared', new Map([[R1, 11], [R2, 11]]), { twice: true }),
       takeLeg(K, 'unread', new Map([[R1, 11]])), Ksw ? takeLeg(Ksw, 'sw-ctl', new Map([[R1, 11], [R2, 11]])) : Promise.resolve(null),
       takeLeg(K, 'many', new Map(), { carries: many }), takeLeg(K, 'unknown', new Map(), { carries: unknown }), takeLeg(K, 'none', new Map(), { carries: none, reopen: true }),
       takeLeg(K, 'root', new Map(), { liveRoot: true, reopen: true }), Kl ? takeLeg(Kl, 'ctl-l', new Map(), { liveRoot: true, reopen: true }) : Promise.resolve(null)]);
@@ -1330,7 +1331,13 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       const bad = [];
       const st = src.stream.split('\n');
       const wsSends = st.filter((l) => /\bws\.send\(/.test(l));
-      if (wsSends.length !== 1 || !wsSends[0].includes('TBS.markOutText(')) bad.push(`browser-stream: ${wsSends.length} viewer send(s), each must be the one send through TBS.markOutText — ${wsSends.map((l) => l.trim().slice(0, 90)).join(' | ')}`);
+      if (wsSends.length !== 1 || !/const wsOut = \(ws, text\) =>/.test(wsSends[0])) bad.push(`browser-stream: ${wsSends.length} socket send(s) — the ONE is wsOut — ${wsSends.map((l) => l.trim().slice(0, 90)).join(' | ')}`);
+      const outs = st.filter((l) => /\bwsOut\(/.test(l) && !/const wsOut = /.test(l));
+      if (outs.length !== 2 || !outs.some((l) => /const send = \(ws, obj\) => wsOut\(ws, TBS\.markOutText\(/.test(l)) || !outs.some((l) => /const sendFrame = \(ws, frameText\) => wsOut\(ws, frameText\)/.test(l))) bad.push(`browser-stream: wsOut is reached past the door or the frame send — ${outs.map((l) => l.trim().slice(0, 90)).join(' | ')}`);
+      const frames = st.filter((l) => /\bsendFrame\(/.test(l) && !/const sendFrame = /.test(l));
+      const badFrames = frames.filter((l) => !/sendFrame\((?:ws|viewer\.ws|v\.ws), relay\.lastFrame\)/.test(l) && !(/sendFrame\(v\.ws, text\)/.test(l) && /frameGate/.test(l)));
+      if (badFrames.length) bad.push(`browser-stream: the frame send carries a record that is not a picture frame — ${badFrames.map((l) => l.trim().slice(0, 90)).join(' | ')}`);
+      if (st.some((l) => /lastRaw/.test(l) && /\bsend(Frame)?\(/.test(l))) bad.push('browser-stream: the raw copy (lastRaw) is sent');
       const outLine = st.filter((l) => /const outText = /.test(l));
       if (outLine.length !== 1 || !outLine[0].includes('TBS.markOutText(text)')) bad.push('browser-stream: the driver\'s record leaves the relay with no door (no outText through TBS.markOutText)');
       if (!st.some((l) => l.includes('fn(outMsg, outText, relay)'))) bad.push('browser-stream: the recorder\'s taps take the raw record');
@@ -1355,6 +1362,24 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     ok(exitsNow.length === 0, 'L2 CENSUS: every hub exit of a tab\'s address passes the ONE door — the live view\'s one send, what leaves the relay (the recorder\'s taps, the keeper\'s notes, the replay store; the relay\'s own picture state keeps the page\'s address), the keeper\'s broadcasts, both browser routers\' replies (their files sent are pictures and recordings, no address)', exitsNow);
     const planted = { ...exitSrc, stream: exitSrc.stream.replace('  const broadcast = (relay, obj) =>', '  const rawSend = (ws, t) => ws.send(t); // planted\n  const broadcast = (relay, obj) =>') };
     ok(planted.stream !== exitSrc.stream && exitsCensus(planted).length > 0, 'CONTROL (one raw site planted: a viewer send past the door): the census is RED by name', exitsCensus(planted));
+    const plantedF = { ...exitSrc, stream: exitSrc.stream.replace('  const broadcast = (relay, obj) =>', "  const leak = (ws, rec) => sendFrame(ws, JSON.stringify(rec)); // planted\n  const broadcast = (relay, obj) =>") };
+    ok(plantedF.stream !== exitSrc.stream && exitsCensus(plantedF).some((b) => /frame send/.test(b)), 'CONTROL (a record that is no picture planted on the frame send — past the door): the census is RED by name', exitsCensus(plantedF));
+    // ═══ 主开发 r4339 FOLLOW: the mark is kept out at the WRITE too — the kept tabs (their ONE row normalizer: the relay's record
+    //     and a CDP read alike), the rebind's pick (the lease's stored rebound note, the journal line), a takeover request's page;
+    //     the trace's only input is the relay's tap, which takes the masked record. The door's match is anchored ═══
+    const pick0 = TBS0.rebindPick({ targets: [{ targetId: P1, type: 'page', url: U0, title: U0 }], holders: [], key: KA });
+    const note0 = TBS0.reboundNoteText({ how: 'switched', url: pick0 && pick0.url, why: 'life' });
+    const ksT = require('../src/server/browser-kept.js').create({ dataDir: path.join(ROOT, 'data-0e4a-kept'), log: quiet });
+    ksT.noteTabs(KA, [{ targetId: P1, url: U0, title: U0, active: true }], 'cdp');
+    const keptRow = (ksT.latestOf(KA) || { tabs: [] }).tabs[0] || null;
+    try { ksT.shutdown(); } catch { /* none */ }
+    const anchoredDoor = { query: TBS0.markOutText('https://x.example/?q=about:blank#vs-own-zz'), longer: TBS0.markOutText(`${U0}0`), cut: TBS0.markOutText(`about:blank#vs-own-${MARK.slice(0, 7)}`) };
+    ok(!!pick0 && pick0.url === 'about:blank' && !note0.includes('vs-own') && !!keptRow && keptRow.url === 'about:blank' && !/vs-own/i.test(keptRow.title) && !!tAlone.ask && tAlone.ask.ok && tAlone.ask.url === 'about:blank' && !/vs-own/i.test(String(tAlone.ask.title))
+      && anchoredDoor.query === 'https://x.example/?q=about:blank#vs-own-zz' && anchoredDoor.longer === `${U0}0` && anchoredDoor.cut === 'about:blank',
+      'r4339 FOLLOW: kept out at the WRITE — the kept tabs\' row (a CDP read\'s), the rebind\'s pick and its note, a takeover request\'s page hold the plain blank; the door\'s match is anchored (a page\'s own «?q=…#vs-own-zz», a longer hex run stay as they are; a cut-short mark is the blank)', { pick: pick0, keptRow, ask: tAlone.ask, anchoredDoor });
+    const stSrc = exitSrc.stream;
+    ok(/function lastUrlOf\(relay\) \{[\s\S]{0,400}relay\.lastRaw\.url[\s\S]{0,300}relay\.lastRaw\.tabs/.test(stSrc) && stSrc.includes("relay.last[msg.type] = outText; if (msg.type === 'url' || msg.type === 'tabs') relay.lastRaw[msg.type] = text;"),
+      'r4339 FOLLOW: the replay store holds the masked record; the url fallback that feeds the viewport lookup reads the RAW copy (never sent)', null);
     // the HUB's own reads of a blank (the keeper's settling read, the spare-blank fold) know the marked one: ONE shape, any case
     const blank = { re: TBS0.BLANK_URL_RE.test(U0), tab: TBS0.isBlankTab({ url: U0 }), own: TBS0.isOwnBlank(U0), upper: TBS0.isOwnBlank(U0.replace(MARK, MARK.toUpperCase())) && TBS0.BLANK_URL_RE.test(U0.replace(MARK, MARK.toUpperCase())), plain: TBS0.BLANK_URL_RE.test('about:blank') && TBS0.BLANK_URL_RE.test('chrome://newtab/') && TBS0.BLANK_URL_RE.test(''),
       notOwn: [`about:blank#vs-own-${'g'.repeat(24)}`, `https://a.example/#vs-own-${MARK}`, `${U0}x`, 'about:blank'].map((u) => TBS0.isOwnBlank(u)), page: TBS0.BLANK_URL_RE.test('https://a.example/') };

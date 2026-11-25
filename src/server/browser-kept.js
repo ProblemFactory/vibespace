@@ -37,6 +37,7 @@ const K = require('../browser-kept.js');
 const SR = require('../store-read.js');
 const HOLD = require('../store-read-hold.js');   // r3585 (B-f276 family's leftover): the list under the store-read law
 const KN = require('./browser-kept-note.js');      // r3786: the note in each kept folder, its bounded child, its start gate's write
+const { markOutText } = require('../browser-tabs.js'); // row B-0e4a (r4339 follow): a lease's marked blank is kept out of the kept tabs at the WRITE
 
 const FILE_MODE = 0o600;
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
@@ -182,7 +183,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     try { return !!k.profileDirRegistered(dir); } catch { return true; }
   }
   const rowTabs = (tabs) => (Array.isArray(tabs) ? tabs : []).filter((t) => t && typeof t === 'object').slice(0, 64)
-    .map((t) => ({ targetId: typeof t.targetId === 'string' ? t.targetId.slice(0, 64) : '', url: typeof t.url === 'string' ? t.url.slice(0, K.KEPT_URL_MAX * 4) : '', title: typeof t.title === 'string' ? t.title.slice(0, 1000) : '', active: t.active === true, type: typeof t.type === 'string' ? t.type : 'page' }));
+    .map((t) => ({ targetId: typeof t.targetId === 'string' ? t.targetId.slice(0, 64) : '', url: typeof t.url === 'string' ? markOutText(t.url).slice(0, K.KEPT_URL_MAX * 4) : '', title: typeof t.title === 'string' ? markOutText(t.title).slice(0, 1000) : '', active: t.active === true, type: typeof t.type === 'string' ? t.type : 'page' }));
 
   // ── the browser's life (the keeper's calls) ──
   /** The conversation's browser is ready: its entry exists (live — `stoppedAt: null`) with what it keeps. */
