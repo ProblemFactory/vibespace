@@ -228,12 +228,22 @@ try {
   await D.ev(view(SID_RED));
   await until(() => D.ev(`(() => { const f = ${barFacts(SID_RED)}; return f && !f.account && f.btns.length ? f : null; })()`), 30000);
   await until(() => tagWin(SID_RED), 5000, 100);
-  await pressIn(SID_RED, '.chat-resume-btn');
-  const red = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /Account error/.test(x)); return t ? { toast: t, creates: window.__creates.length } : null; })()`), 30000, 200);
-  await sleep(4000); // longer than the press's bounded re-read: a page with no verdict never draws the refusal
-  const redBar = await D.ev(`(() => { const f = ${barFacts(SID_RED)}; return f ? { account: f.account, btns: f.btns.map((b) => b.text) } : null; })()`);
-  check(`RED: with no verdict the press goes to the create ⇒ a red toast and the plain Resume bar — "${(red?.toast || '').slice(0, 90)}"`, !!red && red.creates === 1 && /subscription not logged in: Account B/.test(red.toast) && !!redBar && redBar.account === false, { red, redBar });
-  check('the last-resort toast now names both doors (Manage agents, Session Properties)', !!red && /Manage agents/.test(red.toast) && /Session Properties/.test(red.toast), red?.toast);
+  // hosted run 45584145109 (主开发 r4209): the control's ONE press is SHOWN to land before its 30 s wait — the element under the press
+  // point is the tagged window's own Resume button, and the press recorded a create for SID_RED; a press that did not land is the
+  // HARNESS's, said by its own name apart from the control's verdict (which then has nothing to judge, and the suite stays red)
+  const RSEL = `.vs-rad-${SID_RED.slice(-4)} .chat-resume-btn`;
+  const aim = await D.ev(`(() => { const e = document.querySelector(${JSON.stringify(RSEL)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2, at = document.elementFromPoint(x, y); return { x, y, under: at ? (at.closest(${JSON.stringify(RSEL)}) ? 'the button' : String(at.className || at.tagName || '?').slice(0, 60)) : null }; })()`);
+  const pressed = !!aim && aim.under === 'the button' ? await pressIn(SID_RED, '.chat-resume-btn') : false;
+  const went = pressed ? await until(() => D.ev(`(() => { const c = window.__creates.find((x) => x.resumeId === ${JSON.stringify(SID_RED)}); return c ? { reqId: c.reqId, creates: window.__creates.length } : null; })()`), 15000, 100) : null;
+  if (!went) check('HARNESS (the RED control\'s press, not its verdict): the press point is the tagged window\'s own Resume button and the press recorded a create', false, { aim, pressed, creates: await D.ev('window.__creates.length') });
+  else {
+    const red = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /Account error/.test(x)); return t ? { toast: t, creates: window.__creates.length } : null; })()`), 30000, 200);
+    await sleep(4000); // longer than the press's bounded re-read: a page with no verdict never draws the refusal
+    const redBar = await D.ev(`(() => { const f = ${barFacts(SID_RED)}; return f ? { account: f.account, btns: f.btns.map((b) => b.text) } : null; })()`);
+    check(`RED: with no verdict the press goes to the create ⇒ a red toast and the plain Resume bar — "${(red?.toast || '').slice(0, 90)}"`, !!red && red.creates === 1 && /subscription not logged in: Account B/.test(red.toast) && !!redBar && redBar.account === false, { red, redBar });
+    check('the last-resort toast now names both doors (Manage agents, Session Properties)', !!red && /Manage agents/.test(red.toast) && /Session Properties/.test(red.toast), red?.toast);
+    { const ans = await D.ev(`(window.__answers.find((x) => x.reqId === ${JSON.stringify(went.reqId)}) || null)`), endN = await D.ev('window.__creates.length'); console.log(`  [probe] RED press: under the point ${aim.under}; creates right after the press ${went.creates}, when the wait ended ${endN}; the create's answer ${JSON.stringify(ans)}`); }   // print-only (r4209): a slow hub from a missed press
+  }
   const pRed = await shot(D.S, 'red-toast.png');
   // the verdict back; a resume that never asks (the sidebar card's resumeSession) ⇒ the create refuses ⇒ the rescued
   // window's bar says it with its doors
