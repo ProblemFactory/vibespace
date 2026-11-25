@@ -335,6 +335,9 @@ function noteLine(conv, patch, opts = {}) {
     }
     const lines = read.lines;
     const i = lines.findIndex((l) => l && l.press === patch.press);
+    // r4512: a PATCH (a put-back's try) is laid over its press's line — it never makes a line of its own: a record with no line for
+    // that press keeps none (a stateless line would never be drawn and would say nothing true of a copy)
+    if (i < 0 && !patch.state) { try { console.warn(`[rewind-kept] a patch for ${patch.press} of ${conv}, which has no line — not recorded`); } catch { } return null; }
     const line = { ...(i >= 0 ? lines[i] : {}), ...patch };
     await hub.writeLines(i >= 0 ? lines.map((l, k) => (k === i ? line : l)) : cappedOf(lines.concat([line]), Number(opts.now) || Date.now()));
     return line;
