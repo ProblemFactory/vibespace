@@ -167,6 +167,7 @@ class AccountManager {
     this._display = DISPLAY.create({ safeFs: door, onLanded: () => { this._landedN = (this._landedN || 0) + 1; this._notifyRowsSoon(); } });
     this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
+    this._finishHeldMoves();   // r4177 (1): an asking row whose sign-in never reached the hold — set aside before anything starts on it
     // Console-login scratch dirs (con-*) are transient; drop any abandoned by a
     // login that never completed before a prior restart.
     try { for (const d of fs.readdirSync(this._subsDir)) if (/^con-/.test(d)) fs.rmSync(path.join(this._subsDir, d), { recursive: true, force: true }); } catch { }
@@ -435,6 +436,7 @@ class AccountManager {
     }
     this._torn = null;
     this._state = v && this._accountsValid(v) ? v : { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };   // a lift ADOPTS the file
+    this._finishHeldMoves();   // r4177 (1): the list's first read of this life — as at the start
     try { this._displayAll(); } catch { }   // the start's folder reads, now over the list (off the loop)
     this._closeHeldNotice();
     this._notify();
@@ -920,7 +922,13 @@ class AccountManager {
   // Read-only parse of a subscription account's creds. NEVER writes/refreshes
   // (rotation would break the account, issue #20). Returns loggedIn + identity
   // + the access token IF currently valid (for the usage poll).
-  readSubCreds(id) { return this._credsOf('claude').parseAuth(this.subDir(id)); } // parser lives on the claude harness descriptor (S2)
+  readSubCreds(id) {   // the parser lives on the claude harness descriptor (S2)
+    const r = this._credsOf('claude').parseAuth(this.subDir(id));
+    // 主开发 r4177 (1): WHILE A ROW ASKS IT READS SIGNED OUT — a sign-in still in its own folder (its move into the hold could not
+    // finish) is the question's, never a login a conversation starts on: a spawn refuses it by name («not logged in»), a pool routes round it
+    const a = r && r.loggedIn ? this.get(id) : null;
+    return a && a.reloginAsk ? { ...r, loggedIn: false } : r;
+  }
   /** A LOOK-AGAIN READ (B-403e): the member's sign-in folder asked of the mount ITSELF — never the synchronous run's earlier
    *  answer (src/run-reads.js) — for a check whose purpose is «look again before I write»; its answer is the run's from then on.
    *  The callers, each before a write: pendingSignin and discardPendingSignin (a row handed to a sign-in or removed),
@@ -1082,6 +1090,31 @@ class AccountManager {
     }
     return moved;
   }
+  /** 主开发 r4177 (1) — THE MOVE FINISHED: a row that ASKS whose hold is empty while its own folder holds a sign-in (a stop of the hub
+   *  between the question's landing and the move: r2734 (c)) sets that sign-in aside now, at its first read after a start — the store's
+   *  start, a held list's lift, a reply — before anything can start on it. Our own long-lived-token file is never moved (it is not the
+   *  question's sign-in). → the number of files moved (0: nothing to finish) */
+  _finishHeldMove(id) {
+    const a = this.get(id);
+    if (!a || !a.reloginAsk || this._acctType(a) !== 'subscription') return 0;
+    const where = this._heldSignInAt(id);
+    if (where !== 'row') return 0;
+    let moved = 0;
+    try { moved = this._moveLogin(this.subDir(id), path.join(this.subDir(id), RELOGIN_HELD)); } catch { moved = 0; }
+    try { RR.forget(this.subDir(id)); } catch { }
+    if (moved) console.warn('[accounts] a row that asks about its new sign-in still held it in its own folder (the hub stopped before the move): set aside now, before anything starts on it');
+    else console.warn('[accounts] a row that asks about its new sign-in still holds it in its own folder and it could not be set aside — the row reads signed out until the question is answered');
+    return moved;
+  }
+  _finishHeldMoves() { for (const a of this._state.accounts || []) if (a && a.reloginAsk) { try { this._finishHeldMove(a.id); } catch { } } }
+  /** where an asking row's sign-in sits: 'hold' (set aside), 'row' (still in its own folder), or null (neither) — read fresh */
+  _heldSignInAt(id) {
+    const dir = this.subDir(id), hold = path.join(dir, RELOGIN_HELD), parse = (d) => { try { return this._credsOf('claude').parseAuth(d) || {}; } catch { return {}; } };
+    try { RR.forget(dir); } catch { }
+    if (parse(hold).loggedIn) return 'hold';
+    const own = parse(dir);
+    return own.loggedIn && !own.oatFile ? 'row' : null;
+  }
   reloginResolve(id) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
@@ -1166,19 +1199,29 @@ class AccountManager {
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
     if (answer !== 'same' && answer !== 'another') throw new Error('answer must be «same» or «another»');
     if (!a.reloginAsk) return { outcome: 'none' };
+    // 主开发 r4177: a reply is a first read — a sign-in that never reached the hold is set aside first (1); one whose move cannot finish
+    // is found in the row's own folder (2): «another account» takes it from there, never «gone» while it sits in this row
+    this._finishHeldMove(id);
+    const at = this._heldSignInAt(id);
     const asked = a.reloginAsk;
-    delete a.reloginAsk; this._save();
+    delete a.reloginAsk;
     const held = path.join(this.subDir(id), RELOGIN_HELD);
     if (answer === 'same') {
+      // r3782 (主开发 r4177): the question comes off ON DISK before the sign-in moves back — a stop after the move never finds the
+      // question again and sets the answered sign-in aside once more; a landing that fails keeps the question, said by name
+      try { this._save({ now: true, why: 'the answer to the question about the new sign-in' }); }
+      catch (e) { if (e && e.signInSave) { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }
+      if (at === 'row') return { outcome: 'same', account: this.finalizeSubscription(id) };   // already in place (its move never finished)
       if (!this._moveLogin(held, this.subDir(id))) { this._notify(); return { outcome: 'gone' }; }
       return { outcome: 'same', account: this.finalizeSubscription(id) };
     }
+    this._save();   // «another»: the new row's synchronous landing below carries the question's removal with it (both land, or neither)
     // 主开发 r4168 (MUST 2): WHILE A SIGN-IN SITS IN THE HOLD ITS ROW ASKS — a new row whose landing fails (it undoes itself) puts the
     // question back before the refusal goes out (the queued write then carries it; nothing left the hold)
     let created = null;
     try { created = this.createSubscription({ name: 'Subscription' }); }
     catch (e) { if (e && e.code === 'not-durable') { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }
-    if (!this._moveLogin(held, this.subDir(created.id))) { this.remove(created.id); this._notify(); return { outcome: 'gone' }; }
+    if (!this._moveLogin(at === 'row' ? this.subDir(id) : held, this.subDir(created.id))) { this.remove(created.id); this._notify(); return { outcome: 'gone' }; }
     const finalized = this.finalizeSubscription(created.id);
     this._notify();
     return { outcome: 'split', account: finalized, keptName: a.name };

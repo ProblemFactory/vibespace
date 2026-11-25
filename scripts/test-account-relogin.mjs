@@ -147,7 +147,7 @@ try {
     ok(g.r0 === 'ask' && g.again === 'ask-open' && g.r1 === 'ask' && g.asks && g.heldIs === 'at-b33@example.invalid', 'MUST 2: on an asking row a sign-in press is REFUSED by name (ask-open), a resolve answers the SAME question and moves nothing — C is not adopted, the mark and the held sign-in stay', JSON.stringify(g));
     const ans = am2.reloginAnswer(g.s, 'same'), held = path.join(am2.subDir(g.s), '.vibespace-relogin-held', '.credentials.json');
     ok(ans.outcome === 'same' && !fs.existsSync(held), '…every road that clears the mark gives the held sign-in back (or a new row takes it): no held sign-in outlives its question', ans.outcome); }
-  { const Old = copyAM("    if (a.reloginAsk) return { outcome: 'ask', keptName: a.name, ...(a.reloginAsk.lost ? { lost: true } : {}) };\n", '', 'an asking row whose resolve moves on (RED)'); // stale-pins: kept — the RED takes the one-open-question check out
+  { const Old = copyAMs([["    if (a.reloginAsk) return { outcome: 'ask', keptName: a.name, ...(a.reloginAsk.lost ? { lost: true } : {}) };\n", ''], ['    return a && a.reloginAsk ? { ...r, loggedIn: false } : r;', '    return r;']], 'an asking row whose resolve moves on (RED) — and reads signed in: r4177\'s signed-out read is the check\'s second guard'); // stale-pins: kept — the RED takes the one-open-question check out
     const Old2 = !Old.err ? copyAM("    if (a.reloginAsk) return 'ask-open';\n", '', 'an asking row whose press is taken (RED)') : Old; // stale-pins: kept
     ok(!Old.err && !Old2.err, 'RED CONTROLS built: no ask check in the resolve; no ask check at the press', (Old.err || Old2.err) || '');
     if (!Old.err) { const g = asking(new Old({ dataDir: path.join(tmp, 'red-ask') })); ok(g.heldIs !== 'at-b33@example.invalid', 'RED: without the resolve\'s check the asking row moves on — the question\'s own sign-in is replaced by C\'s', JSON.stringify(g)); }
@@ -336,6 +336,72 @@ try {
       ok(MA.loginExpiryChipHtml({ id: 'sub-made-up', type: 'subscription', reloginAsk: { at: 1 }, loginState: { state: 'logged-out' } }) === '', 'MUST 2: a row that asks offers NO sign-in press beside its question (the chip is not drawn)');
       ok(MA.subIdentHtml({ id: 'sub-made-up', loggedIn: false, facts: { state: 'read' }, reloginAsk: { at: 1 } }, {}).startsWith('<span class="acct-relogin-ask">'), 'the row\'s identity line shows the question first');
     } }
+  // ── 主开发 r4177 (B-87fd unit 3's remainder): A STOP BETWEEN THE QUESTION's LANDING AND THE MOVE INTO THE HOLD (r2734 (c)) — the REAL
+  // kill at that point (a child of this suite: scripts/fixtures/accounts-relogin-held-kill.cjs), then a FRESH start over the same data.
+  // (1) WHILE A ROW ASKS IT READS SIGNED OUT: the move finishes at its first read after a start, before anything can start on it;
+  // (2) «another account» takes that sign-in into its new row, never «gone» while it sits in this row; «the same account» puts it back.
+  // The REDs are the release's order (no finish, no signed-out read, the answer looking only in the hold, a queued removal) ──
+  { const { spawnSync } = require('node:child_process');
+    const KILL = path.join(REPO, 'scripts/fixtures/accounts-relogin-held-kill.cjs'), ACCP = path.join(REPO, 'src/accounts.js');
+    const who = (dir) => { try { const t = JSON.parse(fs.readFileSync(credsAt(dir), 'utf8')).claudeAiOauth.accessToken || ''; return t.startsWith('at-') ? t.slice(3) : null; } catch { return null; } };
+    const inHold = (dir) => fs.existsSync(path.join(dir, '.vibespace-relogin-held', '.credentials.json'));
+    let kn = 0;
+    const killed = () => {
+      const d = path.join(tmp, 'kill-' + (++kn)), out = d + '.json'; fs.mkdirSync(d, { recursive: true });
+      const c = spawnSync(process.execPath, [KILL, ACCP, d, 'kill-at-move', out], { encoding: 'utf8', timeout: 60000 });
+      let o = {}; try { o = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { }
+      return { d, row: o.row, signal: c.signal, notKilled: o.notKilled || null };
+    };
+    const started = (Cls, k) => {   // a FRESH start over the killed process's data
+      const M = new Cls({ dataDir: k.d }), dir = M.subDir(k.row);
+      let spawn = null; try { M.resolveForSpawn(k.row); spawn = 'started'; } catch (e) { spawn = String((e && e.message) || e).slice(0, 80); }
+      return { M, dir, asks: !!(M.get(k.row) || {}).reloginAsk, signedIn: !!M.readSubCreds(k.row).loggedIn, held: inHold(dir), inRow: who(dir), spawn };
+    };
+    const tick = () => new Promise((r) => setImmediate(r));   // the run's reads end (src/run-reads.js: one ask per file per synchronous run) — the child wrote meanwhile
+    const sameThenKill = (mod, k) => {
+      const out = k.d + '-same.json';
+      const c = spawnSync(process.execPath, [KILL, mod, k.d, 'same-then-kill', out, k.row], { encoding: 'utf8', timeout: 60000 });
+      let o = {}; try { o = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { }
+      return { signal: c.signal, answered: o.answered || null };
+    };
+    const finishSet = (f) => f.asks && !f.signedIn && f.held && f.inRow === null && /not logged in/.test(f.spawn || '');
+    // (1) + (2) «another account»
+    { const k = killed(), f = started(AccountManager, k);
+      ok(k.signal === 'SIGKILL' && !k.notKilled && f.asks, '(c) the REAL kill at the move into the hold (a child: the question on disk, the move never ran) — after a fresh start the row ASKS', JSON.stringify({ signal: k.signal, notKilled: k.notKilled, asks: f.asks }));
+      ok(finishSet(f), 'r4177 (1): WHILE IT ASKS IT READS SIGNED OUT — the store\'s start FINISHED THE MOVE (the sign-in in the hold, none in the row\'s folder) and a conversation on the row is refused by name', JSON.stringify({ signedIn: f.signedIn, held: f.held, inRow: f.inRow, spawn: f.spawn }));
+      const n0 = f.M.list().accounts.length, r = f.M.reloginAnswer(k.row, 'another'), nw = r.account && r.account.id;
+      ok(r.outcome === 'split' && !!nw && who(f.M.subDir(nw)) === 'b40@example.invalid' && who(f.dir) === null && f.M.list().accounts.length === n0 + 1 && !f.M.get(k.row).reloginAsk, 'r4177 (2): «another account» then takes that sign-in into its NEW row (this row keeps no sign-in, the question gone)', JSON.stringify({ outcome: r.outcome, inNew: nw ? who(f.M.subDir(nw)) : null, inRow: who(f.dir) })); }
+    // «the same account»
+    { const k = killed(), f = started(AccountManager, k), r = f.M.reloginAnswer(k.row, 'same');
+      ok(r.outcome === 'same' && who(f.dir) === 'b40@example.invalid' && !inHold(f.dir) && f.M.readSubCreds(k.row).loggedIn && !f.M.get(k.row).reloginAsk, '«the same account» after that start puts the sign-in back into this row, as today (signed in, no question)', JSON.stringify({ outcome: r.outcome, inRow: who(f.dir), held: inHold(f.dir) })); }
+    // a move that CANNOT finish (the hold's place is a file): still signed out while it asks; «another» takes it from the row's own folder
+    { const k = killed(), hold = path.join(k.d, 'subs', String(k.row), '.vibespace-relogin-held');
+      fs.rmSync(hold, { recursive: true, force: true }); fs.writeFileSync(hold, 'a file where the hold would be');
+      const f = started(AccountManager, k);
+      ok(f.asks && !f.signedIn && f.inRow === 'b40@example.invalid' && /not logged in/.test(f.spawn || ''), 'r4177 (1): a move that CANNOT finish (the hold\'s place is a file) — the row still asks and reads SIGNED OUT; a conversation on it is refused by name', JSON.stringify({ asks: f.asks, signedIn: f.signedIn, inRow: f.inRow, spawn: f.spawn }));
+      const r = f.M.reloginAnswer(k.row, 'another'), nw = r.account && r.account.id;
+      ok(r.outcome === 'split' && !!nw && who(f.M.subDir(nw)) === 'b40@example.invalid' && who(f.dir) === null, 'r4177 (2): …and «another account» takes it from the row\'s own folder into its new row — never «gone» while it sits in this row', JSON.stringify({ outcome: r.outcome, inNew: nw ? who(f.M.subDir(nw)) : null, inRow: who(f.dir) }));
+      const k2 = killed(), hold2 = path.join(k2.d, 'subs', String(k2.row), '.vibespace-relogin-held');
+      fs.rmSync(hold2, { recursive: true, force: true }); fs.writeFileSync(hold2, 'a file where the hold would be');
+      const f2 = started(AccountManager, k2), r2 = f2.M.reloginAnswer(k2.row, 'same');
+      ok(r2.outcome === 'same' && who(f2.dir) === 'b40@example.invalid' && f2.M.readSubCreds(k2.row).loggedIn, '…and «the same account» finds it in place (same, signed in)', JSON.stringify({ outcome: r2.outcome, inRow: who(f2.dir) })); }
+    // r3782 (主开发 r4177): «the same account»'s removal of the question is ON DISK before the move back
+    { const k = killed(); started(AccountManager, k);   // the start sets it aside (as above)
+      const c = sameThenKill(ACCP, k); await tick(); const f = started(AccountManager, k);
+      ok(c.signal === 'SIGKILL' && c.answered === 'same' && !f.asks && f.signedIn && f.inRow === 'b40@example.invalid', 'r3782 (r4177): a stop RIGHT AFTER «the same account» (the same turn) — the next start does NOT ask again: the question came off on disk before the sign-in moved back', JSON.stringify({ signal: c.signal, answered: c.answered, asks: f.asks, signedIn: f.signedIn, inRow: f.inRow })); }
+    // REDS: the release's order
+    const NOFIN = ["    this._finishHeldMoves();   // r4177 (1): an asking row whose sign-in never reached the hold — set aside before anything starts on it\n", ''];
+    const NOBELT = ['    return a && a.reloginAsk ? { ...r, loggedIn: false } : r;', '    return r;'];
+    const NOROW = ['    this._finishHeldMove(id);\n    const at = this._heldSignInAt(id);', '    const at = null;'];
+    const QUEUED = ["      try { this._save({ now: true, why: 'the answer to the question about the new sign-in' }); }\n      catch (e) { if (e && e.signInSave) { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }\n", '      this._save();\n'];
+    { const R1 = copyAMs([NOFIN], 'no finish at the start'), R2 = copyAMs([NOFIN, NOBELT], 'the release: no finish, no signed-out read'), R3 = copyAMs([NOFIN, NOBELT, NOROW], 'the release\'s answer: only the hold');
+      ok(!R1.err && !R2.err && !R3.err, 'RED CONTROLS built: no finish at the start; …and no signed-out read; …and the answer looking only in the hold', [R1.err, R2.err, R3.err].filter(Boolean).join(' ; '));
+      if (!R1.err) { const f = started(R1, killed()); ok(f.asks && !f.held && f.inRow === 'b40@example.invalid', 'RED: with no finish at the start the sign-in is still in the row\'s folder while it asks (the hold empty)', JSON.stringify({ held: f.held, inRow: f.inRow })); }
+      if (!R2.err) { const f = started(R2, killed()); ok(f.asks && f.signedIn && f.spawn === 'started', 'RED (the release): the row ASKS and yet READS SIGNED IN — a conversation on it STARTS on the unproven sign-in', JSON.stringify({ signedIn: f.signedIn, spawn: f.spawn })); }
+      if (!R3.err) { const k = killed(), f = started(R3, k), r = f.M.reloginAnswer(k.row, 'another'); ok(r.outcome === 'gone' && who(f.dir) === 'b40@example.invalid', 'RED (the release): «another account» answers «gone» and LEAVES the other account\'s sign-in in this row', JSON.stringify({ outcome: r.outcome, inRow: who(f.dir) })); } }
+    { const P = (() => { try { return MUT.write('src/accounts.js', anchored(accSrc, QUEUED[0], QUEUED[1], 'the release\'s queued removal'), 'queued-same'); } catch (e) { return { err: e.message }; } })();
+      ok(typeof P === 'string', 'RED CONTROL built: «the same account» with its removal queued (the release\'s `this._save()`)', P && P.err);
+      if (typeof P === 'string') { const k = killed(); started(AccountManager, k); const c = sameThenKill(P, k); await tick(); const f = started(AccountManager, k); ok(c.signal === 'SIGKILL' && f.asks && !f.signedIn, 'RED: with the removal queued, a stop right after «the same account» ASKS AGAIN at the next start (the answered sign-in set aside once more)', JSON.stringify({ signal: c.signal, answered: c.answered, asks: f.asks, signedIn: f.signedIn })); } } }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
