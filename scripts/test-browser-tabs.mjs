@@ -760,13 +760,14 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   const { WebSocketServer: WSS } = require('ws');
   const standIn = async ({ report = null } = {}) => {
     const winOf = new Map([[TA0, 1], [TA, 1], [TB, 2], [TB0, 2]]), vis = new Map([[TA0, 'hidden'], [TA, 'visible'], [TB, 'visible'], [TB0, 'hidden']]);
-    const st = { last: null, acts: [], made: [], blind: new Set(), creates: [], urls: new Map() }; // blind: the tabs whose window read gets no answer (a busy Chrome)
+    const st = { last: null, acts: [], made: [], blind: new Set(), creates: [], urls: new Map(), muteVis: new Set() }; // blind: the tabs whose window read gets no answer (a busy Chrome)
     const wss = new WSS({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss.once('listening', r));
     wss.on('connection', (sock) => sock.on('message', (raw) => {
       let m; try { m = JSON.parse(String(raw)); } catch { return; }
       const p = m.params || {}; const re = (result) => { try { sock.send(JSON.stringify({ id: m.id, result })); } catch { /* closed */ } };
       if (m.method === 'Target.getTargets') return re({ targetInfos: [TA0, TA, TB, TB0].map((t) => ({ targetId: t, type: 'page', title: '', url: t === TA0 || t === TB0 ? 'about:blank' : `https://${t === TA ? 'a' : 'b'}.example/`, attached: false })) });
       if (m.method === 'Target.attachToTarget') return re({ sessionId: 'S' + p.targetId });
+      if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState' && st.muteVis.has(String(m.sessionId || '').slice(1))) return;   // r4088: a loaded Chrome — this read never answers
       if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') return re({ result: { type: 'string', value: vis.get(String(m.sessionId || '').slice(1)) || 'hidden' } });
       if (m.method === 'Browser.getWindowForTarget') return st.blind.has(p.targetId) ? re({}) : re({ windowId: winOf.has(p.targetId) ? winOf.get(p.targetId) : null });
       if (m.method === 'Target.activateTarget') { st.last = p.targetId; st.acts.push(p.targetId); return re({}); }
@@ -862,6 +863,34 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       'B-98f5 / B-bcf8 THE GUARD: an EMPTY birth address (the driver\'s filter TAKES an empty one) ⇒ never frozen, said once', g2);
     ok(g3.fz && g3.fz.ok && g3.th && g3.th.thawed && g3.fz2 && g3.fz2.ok === false && g3.fz2.why === 'flip_tab_taken' && g3.flipTaken === 'taken' && g3.said.length === 1,
       'B-98f5 / B-bcf8 THE GUARD AT EVERY FLIP: the check passed, then a thaw\'s own flip tab is born at an address a driver takes ⇒ the browser is not frozen again, said once', g3);
+    // ── r4088 (B-98f5): THE FREEZE REMEMBERS EVERY FRONT OR FREEZES NOTHING — A's front whose visibility read does not answer is
+    //    UNKNOWN: that freeze refuses by its reason (front_unread) and the next one freezes and shows it; RED: the tip before it
+    //    (ab1696c4c), where an unanswered read was «not in front» — the page frozen unremembered, the thaw shows nothing ──
+    const FRONT_ANCH = "    if (unread) return { ok: false, why: 'front_unread', unread };";
+    if (!dsrc.includes(FRONT_ANCH)) ok(false, 'the anchor of the control «an unanswered front read taken as not in front» is not in the source (src/server/browser-dialogs.js)');
+    const DDv = dsrc.includes(FRONT_ANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, FRONT_ANCH, '    // ab1696c4c: an unanswered read is «not in front»', 'src/server/browser-dialogs.js'), 'b98f5-front-unread') : null;
+    const frontLeg = async (Dmod) => {
+      const SI = await standIn(); const PID = 'bp-0000c23e';
+      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 2,
+        tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) });
+      const shownOf2 = (x) => (x && Array.isArray(x.shown) ? x.shown.map((s2) => s2.targetId) : []);
+      try {
+        await D.arm(PID, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(PID), 3000);
+        SI.st.muteVis.add(TA);   // A's front: its visibility read never answers at this freeze
+        const fz = opened ? await D.freezePaint(PID) : null;
+        const frozenAfter = !!(D.paintFacts(PID) || {}).frozen;
+        const th = fz && fz.ok ? shownOf2(await D.thawPaint(PID, { holder: { ...H.a, profileId: PID } })) : null;
+        SI.st.muteVis.clear();
+        const fz2 = opened && !(fz && fz.ok) ? await D.freezePaint(PID) : null;
+        const th2 = fz2 && fz2.ok ? shownOf2(await D.thawPaint(PID, { holder: { ...H.a, profileId: PID } })) : null;
+        return { opened, fz, frozenAfter, th, fz2, th2 };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    const [fv, fvc] = await Promise.all([frontLeg(DD), DDv ? frontLeg(DDv) : Promise.resolve(null)]);
+    ok(!!fv.fz && fv.fz.ok === false && fv.fz.why === 'front_unread' && fv.fz.unread === 1 && !fv.frozenAfter && !!fv.fz2 && fv.fz2.ok === true && J(fv.th2) === J([TA]),
+      'r4088 (B-98f5): a front whose visibility read does not answer is UNKNOWN — that freeze freezes nothing, by its reason (front_unread); the next freeze remembers it and the thaw shows it', fv);
+    if (DDv) ok(!!fvc && !!fvc.fz && fvc.fz.ok === true && fvc.frozenAfter && J(fvc.th) === J([]), 'CONTROL (the tip before it, ab1696c4c: an unanswered read is «not in front»): the page is frozen unremembered and the thaw shows nothing — the live view blank — RED', fvc);
   }
   // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
   //     left its tab busy ~2 min, the person saw a crashed page; opening the sign-in page again recovered it at once) — PLACED over

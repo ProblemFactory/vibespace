@@ -328,11 +328,15 @@ try {
   const bornG = spy.born.length, gRuns = [];
   const holderA = { ok: true, profileId: prof.id, ephemeral: false, sessionId: 'sess-a', browserKey: KA };   // the route's own (dialogTargetFor)
   for (let i = 0; i < G_FLIPS; i++) {
+    const b0 = spy.born.length;   // r4088: the flip tabs born in THIS sample, by whichever thaw (the leg's, or the sweep's own: the switch is off)
     const f1 = await dialogs.freezePaint(prof.id);
     const th = f1 && f1.ok ? await dialogs.thawPaint(prof.id, { holder: holderA }) : null;
     const na = await A(['get', 'url']);
     const t1 = Date.now(); const nu = await uX(['get', 'url']); const nuMs = Date.now() - t1;
-    gRuns.push({ froze: !!(f1 && f1.ok), why: (f1 && f1.why) || null, shown: th && Array.isArray(th.shown) ? th.shown.length : 0, aMs: na.ms, aOwn: String(na.out + na.err).includes(U('/a')), uMs: nuMs, uOwn: String((nu && nu.stdout) || '').includes(U('/a')) });
+    const bornHere = spy.born.slice(b0).filter((b) => !sameId(b.targetId, secondG)).map((b) => String(b.url || ''));
+    const shownByLeg = th && Array.isArray(th.shown) ? th.shown.length : 0;
+    let aVis = null; if (shownByLeg !== 1 && tAg) { try { const v = await VP.visibilityOf(recG.cdpUrl, tAg.targetId); aVis = v && v.ok ? v.visibility : `? ${v && v.error}`; } catch (e) { aVis = `? ${e && e.message}`; } }
+    gRuns.push({ i: i + 1, froze: !!(f1 && f1.ok), why: (f1 && f1.why) || null, shown: shownByLeg, bornFlip: bornHere.filter((u) => u === BI.FLIP_TAB_URL).length, bornOther: bornHere.filter((u) => u !== BI.FLIP_TAB_URL).length, aVis, aMs: na.ms, aOwn: String(na.out + na.err).includes(U('/a')), uMs: nuMs, uOwn: String((nu && nu.stdout) || '').includes(U('/a')) });
     await sleep(200);
   }
   const flipBirths = spy.born.slice(bornG).filter((b) => !sameId(b.targetId, secondG)).map((b) => String(b.url || ''));
@@ -349,9 +353,13 @@ try {
   for (const id of [probeG, secondG]) { if (id) { try { await spy.send('Target.closeTarget', { targetId: id }); } catch { /* gone */ } } }
   try { await uX(['close']); } catch { /* U's own connection only (a CDP session's close leaves the pages) */ }
   await sleep(500);
-  const flipsG = gRuns.filter((x) => x.shown >= 1).length, slowG = gRuns.filter((x) => x.aMs > 2000 || x.uMs > 2000);
-  const gWhy = { flips: flipsG, of: G_FLIPS, refused: gRuns.filter((x) => !x.froze).map((x) => x.why), births: [...new Set(flipBirths)], u: { agentIndex: iAg, secondIndex: iSg, counter: { before: maxU0, probe: noU } }, a: { counter: { before: maxA0, probe: noA }, tabs: { before: aBefore.length, after: aAfter.length, same: JSON.stringify(aBefore) === JSON.stringify(aAfter), flipListed: aFlipListed } } };
-  ok(flipsG === G_FLIPS && flipBirths.length >= G_FLIPS && flipBirths.every((u) => u === BI.FLIP_TAB_URL), `g: ${flipsG} of ${G_FLIPS} thaws flipped, every flip tab born at ${BI.FLIP_TAB_URL} (the address no driver takes)`, gWhy);
+  // r4088: a flip is counted by the flip tabs BORN in its sample (a thaw of the keeper's sweep, which the switch-off sweep runs on a frozen
+  // page, flips it as well as the leg's own); every sample that froze must have flipped; the refused ones counted by their reason; a floor
+  const G_FLOOR = 25, frozeG = gRuns.filter((x) => x.froze), flipsG = frozeG.filter((x) => x.bornFlip >= 1).length, slowG = gRuns.filter((x) => x.aMs > 2000 || x.uMs > 2000);
+  const refusedG = gRuns.filter((x) => !x.froze).reduce((m, x) => { m[x.why || 'no reason'] = (m[x.why || 'no reason'] || 0) + 1; return m; }, {});
+  const bySweepG = frozeG.filter((x) => x.shown === 0 && x.bornFlip >= 1).map((x) => x.i), oddG = gRuns.filter((x) => x.shown !== 1 || x.bornFlip !== 1 || x.bornOther || !x.froze);
+  const gWhy = { flips: flipsG, froze: frozeG.length, of: G_FLIPS, refused: refusedG, flippedBySweep: bySweepG, odd: oddG.slice(0, 8), births: [...new Set(flipBirths)], birthCount: flipBirths.length, u: { agentIndex: iAg, secondIndex: iSg, counter: { before: maxU0, probe: noU } }, a: { counter: { before: maxA0, probe: noA }, tabs: { before: aBefore.length, after: aAfter.length, same: JSON.stringify(aBefore) === JSON.stringify(aAfter), flipListed: aFlipListed } } };
+  ok(frozeG.length >= G_FLOOR && flipsG === frozeG.length && flipBirths.length >= flipsG && flipBirths.every((u) => u === BI.FLIP_TAB_URL), `g: every freeze that froze was flipped back (${flipsG} of ${frozeG.length} froze, of ${G_FLIPS}; refused by reason ${JSON.stringify(refusedG)}; ${bySweepG.length} flipped by the keeper's own sweep, not the leg's thaw), every flip tab born at ${BI.FLIP_TAB_URL} (the address no driver takes)`, gWhy);
   ok(iAg >= 0 && iSg > iAg && gRuns.every((x) => x.uOwn) && gRuns.every((x) => x.aOwn), `g: after every flip the UNPINNED session (a second tab after A's in its list) and the agent read their own page — the moved tab of today's blank flip never happens`, { ...gWhy, notOwn: gRuns.map((x, i) => (!x.uOwn || !x.aOwn ? i + 1 : null)).filter(Boolean) });
   ok(slowG.length === 0, `g: no command over 2 s in ${G_FLIPS} flips (the 30 s hold of the blank a driver prepared and lost)`, { slow: slowG.slice(0, 4) });
   // RED for a flip tab a driver takes (probe 10 row 725's control: the about:blank flip was registered by the unpinned session — its

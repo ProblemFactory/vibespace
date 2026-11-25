@@ -1109,8 +1109,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.flipTaken) return { ok: false, why: 'flip_tab_taken' };
     if (!w.flipChecked) { const tc = now(); if (!(await flipCheck(w))) return { ok: false, why: 'flip_tab_taken' }; if (w.paint === 'frozen' || w.thawing || w.open.size || (w.lastVerbAt || 0) >= tc) return { ok: false }; }
     const tabs = [...w.targets.values()].filter((e) => e.sid);
-    const fronts = []; const t0 = now();
-    for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); if (v && v.result && v.result.result && v.result.result.value === 'visible') fronts.push(e.targetId); }
+    const fronts = []; const t0 = now(); let unread = 0;
+    for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); const vis = v && v.result && v.result.result ? v.result.result.value : undefined; if (vis === 'visible') fronts.push(e.targetId); else if (typeof vis !== 'string') unread += 1; }
+    // r4088 (B-98f5): a tab whose visibility read did not answer is UNKNOWN, never «not in front» — frozen unremembered it would stay
+    // hidden (no thaw shows a front it was not told of: the live view blank). The freeze remembers every front or freezes nothing:
+    // this pass acts on nothing, by its reason, and the next sweep asks again (the family's law: a pass that lacks a fact acts on nothing)
+    if (unread) return { ok: false, why: 'front_unread', unread };
     // B-1626 cure 3 (its readers): each front's window, read ONCE here — a viewer's thaw then knows at once whether a front sits in
     // its holder's own window (no round of window reads for a front that is another holder's)
     // (cure 4: the reads at once — each its own 1 s cap, so the freeze waits at most ~1 s for them, never a second per front)
