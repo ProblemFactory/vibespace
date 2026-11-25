@@ -77,6 +77,7 @@
  *   Recording on once more for it (helper_changed_regrant — the Machines card says so).
  */
 const SP = require('../stream-plan.js');
+const DFILE = require('./durable-file.js');   // B-93e7: the device's one door — the helper's state and version take their name only after ONE sync
 const SRC = require('./mac-helper-source.js');
 const MI = require('../mac-helper-identity.js'); // lane apple-signing: who signed a pushed helper, and whether it goes to the fixed path
 const SND = require('../sound-model.js'); // lane speaker-passthrough-v1: the sound's limits + the Opus packet's samples
@@ -107,7 +108,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return false; } };
   const installed = () => { try { return fs.readFileSync(P.version, 'utf8').trim() || null; } catch { return null; } };
   const readState = () => { try { const o = JSON.parse(fs.readFileSync(P.state, 'utf8')); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
-  const writeState = (o) => { try { fs.mkdirSync(P.dir, { recursive: true }); fs.writeFileSync(P.state + '.tmp', JSON.stringify(o)); fs.renameSync(P.state + '.tmp', P.state); } catch (e) { log(`[stream] mac helper state not written (${e && e.code})`); } };
+  const writeState = (o) => { try { fs.mkdirSync(P.dir, { recursive: true }); DFILE.writeDurable({ fs, file: P.state, tmp: P.state + '.tmp', data: JSON.stringify(o), log, what: 'the mac screen helper\'s state' }); } catch (e) { log(`[stream] mac helper state not written (${e && e.code})`); } };
   const sha256Of = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
   /** A refusal / a pending judgment is a fact about BYTES of THIS helper version judged by THIS agent (round 3) — any other is stale.
    *  Round 4: a refusal born of unanswered codesign runs (`until`) stands only in the process that recorded it and before its time. */
@@ -154,6 +155,14 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
       if (bad) return named('no_helper', `the screen helper did not build here (${(bad.stderr.trim().split('\n').find((l) => /error/.test(l)) || (bad.err && bad.err.message) || '').slice(0, 200)}) — ${RECIPE}`);
       for (const s of plan.after) { const r = await run(s.file, s.args, 30000); if (r.err) return named('no_helper', `the screen helper did not build here (${s.file}: ${(r.stderr.trim() || r.err.message).slice(0, 160)})`); }
       fs.chmodSync(out, 0o755);
+      // B-93e7: the binary's bytes ON DISK before its name — the version file written after it vouches for them. A sync that FAILS
+      // keeps it out (built again at the next check); a sync not offered is said once and it goes in as before
+      { let bfd = null, bErr = null, cErr = null;
+        try { bfd = fs.openSync(out, DFILE.SYNC_OPEN); fs.fsyncSync(bfd); } catch (e) { bErr = e; }
+        if (bfd != null) { try { fs.closeSync(bfd); } catch (e) { cErr = e; } }
+        const bad = cErr || (bErr && DFILE.syncRefusal(bErr) === 'failed' ? bErr : null);
+        if (bad) return named('no_helper', `the screen helper was built but could not be synced to disk (${bad.code || 'error'}) — it is not put in place; the next check builds it again`);
+        if (bErr) DFILE.sayOnce('mac-helper-sync-not-offered', `[stream] this folder offers no sync of the screen helper (${bErr.code}) — it is put in place as before`, log); }
       fs.renameSync(out, P.bin);
       return { ok: true, ms: now() - t0 };
     } catch (e) { return named('no_helper', `the screen helper did not build here (${(e && (e.code || e.message)) || e})`); }
@@ -197,7 +206,17 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
             pending = null;
             const sv = MI.swapVerdict({ installed: have ? { version: have, identity: from } : null, incoming: { version, identity: v }, teamIds });
             if (sv.take) {
-              try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // a Developer ID identity carries the requirement READ from the file (identityOf) — what tccd keys the grant on rides the state
+              try {
+                fs.chmodSync(pushed, 0o755);
+                // B-93e7: the pushed binary's bytes ON DISK before its name (as the built one's)
+                let bfd = null, bErr = null, cErr = null;
+                try { bfd = fs.openSync(pushed, DFILE.SYNC_OPEN); fs.fsyncSync(bfd); } catch (e) { bErr = e; }
+                if (bfd != null) { try { fs.closeSync(bfd); } catch (e) { cErr = e; } }
+                const bad = cErr || (bErr && DFILE.syncRefusal(bErr) === 'failed' ? bErr : null);
+                if (bad) throw bad;
+                if (bErr) DFILE.sayOnce('mac-helper-sync-not-offered', `[stream] this folder offers no sync of the screen helper (${bErr.code}) — it is put in place as before`, log);
+                fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v;
+              } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // a Developer ID identity carries the requirement READ from the file (identityOf) — what tccd keys the grant on rides the state
             } else {
               try { fs.unlinkSync(pushed); } catch { /* gone already */ }
               if (sv.code) { refused = { version, sha256: sha, code: sv.code, why: sv.why, at: now(), agent: agentVersion }; log(`[stream] mac screen helper ${version}: a pushed helper was refused (${sv.code} — ${sv.why})`); }
@@ -217,7 +236,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
         keep();
         return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, ...miss };
       }
-      try { fs.writeFileSync(P.version + '.tmp', version); fs.renameSync(P.version + '.tmp', P.version); } catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
+      try { DFILE.writeDurable({ fs, file: P.version, tmp: P.version + '.tmp', data: version, log, what: 'the mac screen helper\'s version' }); }   /* B-93e7 */ catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
       const regrant = MI.regrantVerdict({ wasGranted, from, to: identity });
       writeState({ version, how, buildMs: ms, at: now(), granted: false, regrant, rowAsked: null, identity, ...(refused ? { refused } : {}) });
       const replaced = have ? ` (replaces ${have}${have === version ? ', the ad-hoc build of the same version' : ''}${regrant ? (identity && identity.kind === 'developer-id' ? ' — its Screen Recording grant does not carry over ONE LAST time: helper_signed_regrant (a Developer ID helper keeps it from now on)' : ' — its Screen Recording grant does not carry over: helper_changed_regrant') : wasGranted ? ' — the same Developer ID identity: the grant carries over' : ''})` : '';

@@ -236,7 +236,7 @@ console.log('--no-check writes them; the right token installs and dials in');
       const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
       const M = mutantCopies('installreexec', REPO);
       const asrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-      const unguarded = editAnchor(asrc, '    if (cfg.token) { try { const tmp = DIAL_FILE', '    if (true) { try { const tmp = DIAL_FILE', "src/agentd/agentd.js");
+      const unguarded = editAnchor(asrc, '    if (cfg.token) { try { DFILE.writeDurable({ fs, file: DIAL_FILE', '    if (true) { try { DFILE.writeDurable({ fs, file: DIAL_FILE', "src/agentd/agentd.js");
       ok(unguarded !== asrc, '(o) the patch applies');
       const cp = M.write('src/agentd/agentd.js', unguarded, 'unguarded');
       const cd = reexecShape(cp);

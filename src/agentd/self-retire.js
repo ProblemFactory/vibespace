@@ -14,6 +14,7 @@
  */
 const path = require('path');
 const { logonTaskName } = require('./hidden-start.js');
+const DFILE = require('./durable-file.js');   // B-93e7: the device's one door — the hook rewritten takes its name only after ONE sync
 
 /** the installer's KEY for a root (install.sh: `basename "$ROOT" | tr -c 'A-Za-z0-9.-' '-' | sed 's/-*$//'`): its folder name,
  *  each unit outside [A-Za-z0-9.-] a '-', trailing '-' trimmed. The unit is the tr's: GNU tr (Linux) works on BYTES (a two-byte
@@ -69,7 +70,7 @@ function retireSteps({ root, platform, home, uid = null }) {
 }
 
 /** run steps → { done: [what], left: [{what, why}] } — never throws; a step that fails is LEFT with its why, the next still runs */
-async function runRetire(steps, { fs, supervisor, uid = null, present = null }) {
+async function runRetire(steps, { fs, supervisor, uid = null, present = null, log = null }) {
   const done = [], left = [];
   // a step `onlyIf` a file runs only when that file was there BEFORE the steps began (`present`: the caller's earlier reading —
   // the last step runs after the unit file is gone; else read here)
@@ -87,9 +88,7 @@ async function runRetire(steps, { fs, supervisor, uid = null, present = null }) 
         const r = dropHookBlock(fs.readFileSync(real, 'utf8'), s.key);
         if (r.open) { left.push({ what: s.what, why: 'its begin has no end — left as it is' }); continue; }
         if (!r.changed) continue;
-        const tmp = `${real}.vs-tmp.${process.pid}`;
-        fs.writeFileSync(tmp, r.text, { mode: 0o600 });
-        try { fs.chmodSync(tmp, st.mode & 0o777); fs.renameSync(tmp, real); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }   // the hook's own mode (never the umask's)
+        DFILE.writeDurable({ fs, file: real, tmp: `${real}.vs-tmp.${process.pid}`, data: r.text, mode: 0o600, chmod: st.mode & 0o777, log, what: s.what });   // the hook's own mode (never the umask's); B-93e7: one sync before its name
         done.push(s.what);
       } else if (s.kind === 'exec') {
         const ok = await supervisor(s.cmd, s.args);
