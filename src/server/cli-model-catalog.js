@@ -315,15 +315,17 @@ function noteBinary({ cmd, version = null, dataDir = null, which = null, event =
     // after a boot (law A loads the ledger and sets the key; before lane level-signal-2b this early return skipped that re-read, so a
     // reader's new fact — the plan values at 2, the level signal at 3 — never reached the binary in use until the CLI updated)
     if (st.key === key && l.current === key && l.binaries[key] && l.binaries[key].reader === CMC.READER_VERSION && !l.binaries[key].retry) return l.binaries[key];
-    let e = l.binaries[key];
+    let e = l.binaries[key], kept = false;
     const known = !!(e && e.reader === CMC.READER_VERSION && !e.retry); // an I/O failure is tried again (law E); a verdict stays
     if (!known) {
       e = await readBinary(real, { version, expect: { dev: s.dev, ino: s.ino }, timeoutMs, open });
       if (st.ledger && st.ledger !== l && st.dataDir === dataDir) l = st.ledger;   // r3770: a held ledger's lift replaced it during the read — the read lands in the ledger in force
-      l.binaries[key] = e;
+      const had = l.binaries[key];
+      if (e && e.retry && had && had.reader === CMC.READER_VERSION && !had.retry) { e = had; kept = true; }   // r3947: a read that failed (an I/O moment) never replaces this build's good entry the lift brought back — its own prices stay in the price layer
+      else l.binaries[key] = e;
     }
     l.current = key; st.key = key;
-    if (!known) {
+    if (!known && !kept) {
       if (e.state === 'read') {
         const unseen = e.models.filter((m) => !CMC.KNOWN_CATALOG_IDS.includes(m.id));
         once('cli-model-catalog-read', `claude ${e.cli} · built ${String(e.builtAt || '?').slice(0, 10)} · ${e.models.length} models${unseen.length ? ' · new: ' + unseen.map((m) => m.id).join(', ') : ''}${e.refused.length ? ` · ${e.refused.length} refused` : ''}`, key);

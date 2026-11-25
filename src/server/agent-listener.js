@@ -32,7 +32,8 @@
  *     — and new tunnels take the kept one. The kept port BUSY at that read: said once by name, the record KEPT as it is, tried
  *     again at the next start (the door stays on the fresh port). A record that names the fresh port: one listener, no error.
  *     The conversations whose ssh -R took the fresh port during the hold (`tunnelPort(PORT, id)`) are named in the lift's journal
- *     line: they lose their tools at the next restart (a cost told apart from a fault); nothing more is built for them.
+ *     line: they lose their tools at the next restart (a cost told apart from a fault); nothing more is built for them — and after a
+ *     lift that found the kept port BUSY each later one is named in the journal as it takes this run's port (r3764).
  *   · TORN BYTES: kept aside ONCE, then this run's port is written (as a start over no record writes one).
  */
 const http = require('http');

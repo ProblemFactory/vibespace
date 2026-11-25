@@ -256,6 +256,51 @@ console.log('④ the model catalog\'s ledger');
     const rb = await layerLeg(Before);
     ok(rb.after === 'claude-current-1', 'r3770 RED the guard of before (the readers handed the ledger only when no build was read): after the lift the price layer still lacks the old build\'s row', rb);
   }
+  // r3947 (line 873's tests follow): A READ OF THE BINARY IN FLIGHT ACROSS THE LIFT — the ledger is held, noteBinary's read waits on
+  // its open (a placed stall), the lift lands meanwhile: (a) the read lands in the LIVE ledger and in the file (its red: the re-take
+  // after the read removed); (b) a read that fails (an I/O moment) never replaces this build's good entry the lift brought back — its
+  // own prices stay in the price layer (its red: the one write of before)
+  const CMCV = require(path.join(REPO, 'src/claude-model-catalog.js')).READER_VERSION;
+  const binFile = path.join(ROOT, 'bin-claude-inflight'); fs.writeFileSync(binFile, 'a stand-in file, never a binary');
+  const keyOf = (v) => { const st = fs.statSync(binFile); return `${v}|${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}`; };
+  const inflight = async (Mod, { goodInFile = false, failRead = false } = {}) => {
+    const dir = dataDir('catalog-inflight'), file = path.join(dir, 'cli-model-catalog.json'), KEY = keyOf('2.1.777');
+    const binaries = { [OLD]: priced(OLD, 'claude-legacy-only-9', '2026-09-01T00:00:00Z') };
+    if (goodInFile) binaries[KEY] = { ...priced(KEY, 'claude-inflight-good-1', '2026-11-21T00:00:00Z'), reader: CMCV };
+    fs.writeFileSync(file, JSON.stringify({ schema: 1, current: OLD, binaries, said: [] }));
+    const real = UH.setCatalogPricing; let layer = null;
+    UH.setCatalogPricing = function (L) { layer = L; return real.apply(this, arguments); };
+    try {
+      REFUSED.add(file);
+      Mod._reset();
+      let release; const gate = new Promise((r) => { release = r; });
+      const open = async (f) => { await gate; if (failRead) throw Object.assign(new Error('EIO: a placed refusal of the open'), { code: 'EIO' }); return fs.promises.open(f, 'r'); };
+      const p = Mod.noteBinary({ cmd: binFile, version: '2.1.777', dataDir: dir, which: () => binFile, open, log: () => { }, event: () => { } });
+      await new Promise((r) => setTimeout(r, 30));   // the read is in flight: its open waits on the gate
+      await liftOf(file);
+      release();
+      await p;
+      const live = Mod._load(dir), disk = JSON.parse(realSync(file, 'utf8'));
+      const ids = Object.values((layer && layer.rows) || {}).map((r) => r.id).sort().join();
+      return { KEY, liveHas: !!live.binaries[KEY], liveCur: live.current === KEY, diskHas: !!(disk.binaries && disk.binaries[KEY]), diskCur: disk.current === KEY, liveState: live.binaries[KEY] && live.binaries[KEY].state, liveRetry: !!(live.binaries[KEY] && live.binaries[KEY].retry), old: !!live.binaries[OLD], ids };
+    } finally { UH.setCatalogPricing = real; REFUSED.delete(file); Mod._reset(); try { real(null); } catch { } }
+  };
+  {
+    const CAT = require(path.join(REPO, CAT_PATH));
+    const a = await inflight(CAT);
+    ok(a.liveHas && a.liveCur && a.diskHas && a.diskCur && a.old, 'r3947 (a) A READ IN FLIGHT ACROSS THE LIFT lands in the ledger in force and in the file: the build read is there and current, the old build\'s row beside it', a);
+    const b = await inflight(CAT, { goodInFile: true, failRead: true });
+    ok(b.liveState === 'read' && !b.liveRetry && b.ids.includes('claude-inflight-good-1'), 'r3947 (b) the read FAILS (an I/O moment) while the lifted file holds this build\'s good entry: the good entry is kept, and its own prices stay in the price layer', b);
+    const SRC = read(CAT_PATH);
+    const retake = "      if (st.ledger && st.ledger !== l && st.dataDir === dataDir) l = st.ledger;   // r3770: a held ledger's lift replaced it during the read — the read lands in the ledger in force\n";
+    const NoRetake = M.load(CAT_PATH, anchored(SRC, retake, '', 'catalog-no-retake'), 'catalog-no-retake');
+    const ra = await inflight(NoRetake);
+    ok(!ra.liveHas, 'r3947 RED (a) without the re-take after the read: the read lands in the ledger the lift dropped — the live ledger lacks the build read', ra);
+    const keep = "      const had = l.binaries[key];\n      if (e && e.retry && had && had.reader === CMC.READER_VERSION && !had.retry) { e = had; kept = true; }   // r3947: a read that failed (an I/O moment) never replaces this build's good entry the lift brought back — its own prices stay in the price layer\n      else l.binaries[key] = e;\n";
+    const Before = M.load(CAT_PATH, anchored(SRC, keep, '      l.binaries[key] = e;\n', 'catalog-retry-replaces'), 'catalog-retry-replaces');   // stale-pins: kept (the one write of before, planted back as the red)
+    const rb2 = await inflight(Before, { goodInFile: true, failRead: true });
+    ok(rb2.liveRetry && !rb2.ids.includes('claude-inflight-good-1'), 'r3947 RED (b) the one write of before: the failed read replaces the good entry — that build\'s own prices leave the price layer', rb2);
+  }
   {
     const SRC = read(CAT_PATH);
     const anchor = "    if (st.hold.start(a) === 'data') l = a.value;";
