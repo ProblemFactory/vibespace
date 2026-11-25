@@ -380,7 +380,7 @@ console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears th
   ok(out.includes('<html lang="en" style="background:#fafafa">') && /<div id="loading-screen" style="[^"]*background:#fafafa;/.test(out) && out.split('#0c0c18').length - 1 === lit - 2 && LG.withGround(IDX, null) === IDX && LG.withGround(IDX, 'white') === IDX && LG.withGround(IDX, LG.DARK) === IDX,
     `⑤e on public/index.html the remembered ground replaces exactly its two launch grounds (of ${lit} dark literals); no cookie, a word or the dark ground leave the page as it is`);
   // THE WIRING: the index route writes it before it sends; a theme that applies remembers its ground
-  const routeOk = (src) => /html = launchGround\.withGround\(html, launchGround\.groundOf\(req\.headers\.cookie\)\);[^\n]*\n\s*res\.set\('Cache-Control', 'no-cache'\)/.test(src);
+  const routeOk = (src) => /const ground = launchGround\.groundOf\(req\.headers\.cookie\);[^\n]*\n(?:\s*html = launchImage\.withLinks\(html, ground\);[^\n]*\n)?\s*html = launchGround\.withGround\(html, ground\);[^\n]*\n\s*res\.set\('Cache-Control', 'no-cache'\)/.test(src);
   ok(routeOk(SRV) && /app\.get\(\['\/', '\/index\.html'\], \(req, res, next\) => \{[\s\S]{0,700}const launchGround = require\('\.\/src\/launch-ground\.js'\);/.test(SRV) && /import \{ cookieFor \} from '\.\.\/launch-ground\.js';/.test(TH) && /const c = cookieFor\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); if \(c\) document\.cookie = c;/.test(TH),
     '⑤e the index route writes the remembered ground into the page before it sends it; ThemeManager.apply remembers the applied theme\'s ground (a custom or plugin theme\'s as the page computes it)');
   ok(!routeOk(SRV.replace(/\n\s*html = launchGround\.withGround\([^\n]*/, '')), '⑤e RED CONTROL: 26d571cdb\'s route (no rewrite) — a light theme\'s launch stays dark');
@@ -440,11 +440,11 @@ console.log('⑤f the launch image (主开发 r4481 — the owner: can the launc
     return W === (o === 'portrait' ? w : h) * r && H === (o === 'portrait' ? h : w) * r && LI.SIZES.includes(`${W}x${H}`); };
   ok(links.length === LI.SCREENS.length * 2 && links.every(linkOk) && links.every((l) => l.endsWith('?g=%23f0f0f5">')) && none.every((l) => l.endsWith('?g=%230c0c18">')) && LI.linksFor('url(x)').join() === none.join(),
     `⑤f the links: ${links.length} (each screen, both orientations, its media exact), ONE set in the remembered ground — none remembered (or no colour): today's dark`, links.filter((l) => !linkOk(l)));
-  ok(page.split('rel="apple-touch-startup-image"').length - 1 === links.length && page.indexOf(links.at(-1)) < page.indexOf('</head>') && page.replace(`  ${links.join('\n  ')}\n`, '') === IDX && !IDX.includes('apple-touch-startup-image'),
-    '⑤f the page wears the links at the end of its head and is otherwise unchanged (index.html itself holds none: the index route writes them)');
+  ok(page.split('rel="apple-touch-startup-image"').length - 1 === links.length && page.indexOf(links.at(-1)) < page.indexOf('</head>') && page.replace(`  ${links.join('\n  ')}\n`, '') === IDX && !IDX.includes('rel="apple-touch-startup-image"'),
+    '⑤f the page wears the links at the end of its head and is otherwise unchanged (index.html itself holds no such link — its comment names the mechanism: the index route writes them)');
   // THE WIRING: the index route writes the links (inside the route: test-csp-report runs it from its text); the image's own route
   const SRV = read('server.js');
-  const linksOk = (src) => /const launchImage = require\('\.\/src\/launch-image\.js'\);[^\n]*\n\s*html = launchImage\.withLinks\(html, launchGround\.groundOf\(req\.headers\.cookie\)\);/.test(src);
+  const linksOk = (src) => /const launchImage = require\('\.\/src\/launch-image\.js'\);[^\n]*\n\s*const ground = launchGround\.groundOf\(req\.headers\.cookie\);[^\n]*\n\s*html = launchImage\.withLinks\(html, ground\);/.test(src);
   const routeOk = (src) => /app\.get\('\/launch-image\/:size', \(req, res\) => \{\n\s*require\('\.\/src\/launch-image\.js'\)\.imageFor\(req\.params\.size, req\.query\.g\)\.then\(\(png\) => \{\n\s*if \(!png\) return res\.status\(404\)\.end\(\);/.test(src);
   ok(linksOk(SRV) && routeOk(SRV) && SRV.indexOf("app.get('/launch-image/:size'") > SRV.indexOf("app.get(['/', '/index.html']"), '⑤f the index route writes the links in the remembered ground; /launch-image/<W>x<H>.png answers from launch-image.js, a 404 off its list (a page behind the sign-in, no door)');
   ok(!linksOk(SRV.replace(/\n\s*html = launchImage\.withLinks\([^\n]*/, '')) && !routeOk(SRV.replace("app.get('/launch-image/:size'", "app.get('/launch-image-gone/:size'")), '⑤f RED CONTROLS: effa5382a\'s route (no links) and a server without the image\'s route are caught');

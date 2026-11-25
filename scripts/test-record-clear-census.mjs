@@ -898,6 +898,11 @@ const STORAGE = {
   'src/lib/utils.js|localStorage|\'vibespace.toastHistory\'': ['ref', 'THE toast history: {m: the head, ref: {kind, id}} for a toast about a record — never its words (r4); a legacy entry is cut at load'],
 };
 const STORAGE_CLASSES = new Set(['pref', 'ids', 'owner', 'ref', 'plugin', 'telemetry', 'marker']);
+// THE LAUNCH GROUND's ONE COOKIE (B-78db, 主开发 r4467): a colour or nothing by src/launch-ground.js's one strict rule — never an act,
+// a record's words, an id or a theme's name; declared by its exact statement in src/lib/themes.js, its writer imported from
+// launch-ground.js. Any other cookie write, in that file or another, stays red
+const GROUND_COOKIE = "try { const c = cookieFor(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); if (c) document.cookie = c; }";
+const groundCookieOnly = (rel, text) => rel === 'src/lib/themes.js' && text.split('document.cookie').length === 2 && text.split(GROUND_COOKIE).length === 2 && /^import \{ cookieFor \} from '\.\.\/launch-ground\.js';/m.test(text);
 const storageWrites = (srcs) => {
   const rows = [], other = [];
   for (const [rel, text] of srcs) {
@@ -919,8 +924,13 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
   const historyCalls = (text) => text.match(/\bhistory\s*\.\s*(pushState|replaceState)\b[^;]*/g) || [];
   const SENTINEL_WRITES = ["history.pushState({ vs: 1 }, '')", "history.replaceState(null, '')"];
   const sentinelOnly = (rel, text) => rel === 'src/lib/mobile-back.js' && historyCalls(text).join('\n') === SENTINEL_WRITES.join('\n');
-  const otherWrites = other.filter((o) => !(['src/lib/mobile-back.js: history.pushState', 'src/lib/mobile-back.js: history.replaceState'].includes(o) && sentinelOnly('src/lib/mobile-back.js', read('src/lib/mobile-back.js'))));
-  ok(otherWrites.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot (the phone\'s back sentinel {vs: 1} aside)', otherWrites);
+  const otherWrites = other.filter((o) => !(['src/lib/mobile-back.js: history.pushState', 'src/lib/mobile-back.js: history.replaceState'].includes(o) && sentinelOnly('src/lib/mobile-back.js', read('src/lib/mobile-back.js')))
+    && !(o === 'src/lib/themes.js: document.cookie =' && groundCookieOnly('src/lib/themes.js', read('src/lib/themes.js'))));
+  ok(otherWrites.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot (the phone\'s back sentinel {vs: 1} and the launch ground\'s one colour cookie aside)', otherWrites);
+  { const T = read('src/lib/themes.js');
+    ok(groundCookieOnly('src/lib/themes.js', T) && !groundCookieOnly('src/lib/themes.js', T + "\ndocument.cookie = 'theme=' + name;") && !groundCookieOnly('src/lib/sidebar.js', T)
+      && !groundCookieOnly('src/lib/themes.js', T.replace(GROUND_COOKIE, GROUND_COOKIE.replace('cookieFor(', 'String('))),
+      'H1 the launch ground\'s cookie is ONE statement in src/lib/themes.js through launch-ground.js\'s cookieFor (a colour or nothing) — CONTROL: a second cookie there, the same statement in another file, or a value not cookieFor\'s is red'); }
   ok(!sentinelOnly('src/lib/mobile-back.js', "const push = () => history.pushState({ vs: 1, id: rec.id }, '');\nhistory.replaceState(null, '');") && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState({ vs: 1 }, '', '/s/' + id);")
     && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');\nhistory.replaceState(null, '');")
     && !sentinelOnly('src/lib/other.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');")

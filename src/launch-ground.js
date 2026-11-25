@@ -13,8 +13,9 @@ const CH = '(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';   // one rgb channel, 0–25
 /** THE ONE STRICT PATTERN (主开发 r4467): a hex of 3, 4, 6 or 8 digits, or rgb() / rgba() of three 0–255 channels (and an alpha 0–1) — nothing else */
 const COLOR_RE = new RegExp(`^(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgba?\\(\\s*${CH}\\s*,\\s*${CH}\\s*,\\s*${CH}\\s*(,\\s*(0|1|0?\\.\\d{1,4})\\s*)?\\))$`);
 
-/** a colour the page may wear, or null */
-function cleanGround(v) { const s = String(v == null ? '' : v).trim(); return s.length <= 40 && COLOR_RE.test(s) ? s : null; }
+/** a colour the page may wear, or null — only spaces and tabs are trimmed: a newline (or any other byte) beside a colour is NO colour
+ *  (r4467: anything else writes nothing; test-viewport-class ⑤e's «#fff\n» row) */
+function cleanGround(v) { const s = String(v == null ? '' : v).replace(/^[ \t]+|[ \t]+$/g, ''); return s.length <= 40 && COLOR_RE.test(s) ? s : null; }
 
 /** the Cookie header → the remembered ground, or null */
 function groundOf(cookieHeader) {
@@ -36,7 +37,8 @@ function withGround(html, ground) {
     .replace(/(<div id="loading-screen" style="[^"]*?)background:#0c0c18;/, `$1background:${g};`);
 }
 
-/** the cookie the client writes when a theme applies (a year, the whole origin, never sent cross-site) */
-function cookieFor(ground) { const g = cleanGround(ground); return g ? `${COOKIE}=${encodeURIComponent(g)}; path=/; max-age=31536000; SameSite=Lax` : null; }
+/** the cookie the client writes when a theme applies (a year, the whole origin, never sent cross-site) — its input is the page's
+ *  computed --bg-root, whose whitespace (a stylesheet's line break) is the style's own: trimmed whole here, the cookie holds the colour */
+function cookieFor(ground) { const g = cleanGround(String(ground == null ? '' : ground).trim()); return g ? `${COOKIE}=${encodeURIComponent(g)}; path=/; max-age=31536000; SameSite=Lax` : null; }
 
 module.exports = { COOKIE, DARK, COLOR_RE, cleanGround, groundOf, withGround, cookieFor };

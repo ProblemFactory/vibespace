@@ -940,6 +940,11 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
     return out.sort();
   };
   const notOnMaster = (list) => { const left = new Map(); for (const x of MASTER_STORAGE_WRITES) left.set(x, (left.get(x) || 0) + 1); const out = []; for (const x of list) { if (left.get(x) > 0) left.set(x, left.get(x) - 1); else out.push(x); } return out; };
+  // THE LAUNCH GROUND's ONE COOKIE (B-78db, 主开发 r4467): a colour or nothing by src/launch-ground.js's one strict rule — never an act,
+  // a record's words, an id or a theme's name; declared by its exact statement in src/lib/themes.js, its writer imported from
+  // launch-ground.js. Any other cookie write, in that file or another, stays red
+  const GROUND_COOKIE = "try { const c = cookieFor(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); if (c) document.cookie = c; }";
+  const groundCookieOnly = (rel, text) => rel === 'src/lib/themes.js' && text.split('document.cookie').length === 2 && text.split(GROUND_COOKIE).length === 2 && /^import \{ cookieFor \} from '\.\.\/launch-ground\.js';/m.test(text);
   const DISPLAY = ['starredSessions', 'archivedSessions', 'archivedFolders', 'sessionCustomNames', 'sessionModes', 'sessionConfigs', 'sessionGroups', 'groupFolders'];
   const censusMemo = new Map();
   const censusOf = (texts) => {
@@ -949,7 +954,7 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
       const at = (i) => `${f}:${src.slice(0, i).split('\n').length}`;
       // a Web Lock, a BroadcastChannel, IndexedDB, a cookie or a bracket write to a browser store anywhere (master has none in
       // src/lib): a page keeping or telling another page about its acts — a second store of acts
-      for (const m of src.matchAll(/new\s+BroadcastChannel\s*\(|navigator\s*(?:&&[^;\n]*?)?\.\s*locks\b|\blocks\s*\.\s*request\s*\(|\bindexedDB\b|\.\s*objectStore\s*\(|\bdocument\s*\.\s*cookie\s*=|\b(?:localStorage|sessionStorage)\s*\[[^\]]*\]\s*=(?!=)/g)) red.push(`${at(m.index)}: ${m[0].slice(0, 60)}`);
+      for (const m of src.matchAll(/new\s+BroadcastChannel\s*\(|navigator\s*(?:&&[^;\n]*?)?\.\s*locks\b|\blocks\s*\.\s*request\s*\(|\bindexedDB\b|\.\s*objectStore\s*\(|\bdocument\s*\.\s*cookie\s*=|\b(?:localStorage|sessionStorage)\s*\[[^\]]*\]\s*=(?!=)/g)) if (!(/^document\s*\.\s*cookie/.test(m[0]) && groundCookieOnly(f, src0))) red.push(`${at(m.index)}: ${m[0].slice(0, 60)}`);
       if (f === 'src/user-state-ops.js') {   // the ops module is PURE: no browser store, no store-shaped door
         for (const m of src.matchAll(/\b(localStorage|sessionStorage)\b|\.\s*(setItem|getItem|removeItem)\s*\(/g)) red.push(`${at(m.index)}: ${m[0]} in the ops module`);
         continue;
@@ -977,13 +982,14 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
     'a bracket write': plantIn('src/lib/sidebar.js', "localStorage['userStatePending'] = JSON.stringify(ops);"),
     'an IndexedDB put': plantIn('src/lib/sidebar.js', "const tx = indexedDB.open('acts'); tx.onsuccess = () => tx.result.transaction('a', 'readwrite').objectStore('a').put(ops);"),
     'a cookie': plantIn('src/lib/sidebar.js', "document.cookie = 'batch=' + id;"),
+    'a second cookie beside the launch ground\'s': plantIn('src/lib/themes.js', "document.cookie = 'batch=' + id;"),
     'a sessionStorage seq in another file': plantIn('src/lib/sidebar.js', "sessionStorage.setItem('vs-seq', String(seq));"),
     'a counter spelled vsSeq in a NEW file': [...texts, ['src/lib/us-seq.js', "export function bump(n) { sessionStorage.setItem('vsSeq', String(n)); }\n"]],
     'a store under another name': plantIn('src/lib/sidebar.js', "const st = window.sessionStorage; st.setItem('x', '1');"),
   };
   const moreRed = Object.fromEntries(Object.entries(more).map(([k, v]) => [k, censusOf(v).length]));
   ok(censusOf(planted).length >= 1 && censusOf(plantedOps).length >= 1 && censusOf(plantedWrap).length >= 1 && Object.values(moreRed).every((n) => n >= 1),
-    'CONTROL: a planted record of acts in sidebar-state.js, round 2\'s variable-key wrapper, a BroadcastChannel in the ops module, a bracket write, an IndexedDB put, a cookie, a sessionStorage seq in another file, a counter spelled vsSeq in a NEW file and a store under another name are each RED by name', moreRed);
+    'CONTROL: a planted record of acts in sidebar-state.js, round 2\'s variable-key wrapper, a BroadcastChannel in the ops module, a bracket write, an IndexedDB put, a cookie, a second cookie beside the launch ground\'s, a sessionStorage seq in another file, a counter spelled vsSeq in a NEW file and a store under another name are each RED by name', moreRed);
 }
 
 // ════════ §10 ROUND 2, LAW 2 — A WRITE THAT DOES NOT ANSWER IS A FAILED WRITE, NOT A WAIT ════════

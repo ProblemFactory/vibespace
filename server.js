@@ -175,8 +175,9 @@ app.get(['/', '/index.html'], (req, res, next) => {
     });
     const launchGround = require('./src/launch-ground.js'); // PURE (B-78db, r4463 fault 2) — required INSIDE the route: test-csp-report runs this route from its own text
     const launchImage = require('./src/launch-image.js'); // PURE (B-78db (B), r4481) — inside the route for the same reason
-    html = launchImage.withLinks(html, launchGround.groundOf(req.headers.cookie)); // the home-screen copy's launch image, in the colour the page itself paints first
-    html = launchGround.withGround(html, launchGround.groundOf(req.headers.cookie)); // the launch wears the stored theme's ground from the first paint
+    const ground = launchGround.groundOf(req.headers.cookie); // the launch ground's OWN cookie (vs_ground: a colour or nothing) — never the session's; test-auth declares this one read
+    html = launchImage.withLinks(html, ground); // the home-screen copy's launch image, in the colour the page itself paints first
+    html = launchGround.withGround(html, ground); // the launch wears the stored theme's ground from the first paint
     res.set('Cache-Control', 'no-cache'); res.set(...cspReports.header()); // the app page: Content-Security-Policy-Report-Only (never the enforcing header — a later lane's switch)
     res.type('html').send(html);
   } catch { next(); }
