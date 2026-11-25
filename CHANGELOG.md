@@ -21,6 +21,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An account whose weekly window is exactly another account's now shows as unknown until its own usage is read; press refresh on its row.
 - A very large page in an agent's browser no longer freezes VibeSpace while the vault's values are taken out of it; what cannot be checked in time is held back.
 - If VibeSpace cannot read the passkeys saved in your agent browsers, it now says so and keeps them instead of writing over them, so no passkey is lost.
+- After an agent's own browser sits idle for half a minute, its next command no longer waits 30 seconds or acts on another tab, and its live view is not blank.
 
 ## 2.369.418 — 2026-11-24
 
