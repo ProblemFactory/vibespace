@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - A notice about a refused agent action now names the conversation or browser it was about, while the agent itself still learns nothing more.
+- When the list of plugins you turned on and trusted cannot be read, VibeSpace keeps it: no plugin is turned off, removed or asked to consent again.
 
 ## 2.369.418 — 2026-11-24
 
