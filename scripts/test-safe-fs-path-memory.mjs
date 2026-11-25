@@ -38,6 +38,38 @@ const MI = ['22 1 8:1 / / rw - ext4 /dev/sda1 rw', '40 22 0:40 / /scratch-b23e5/
 const mountsText = async () => MI;
 const K = 6;
 
+/** r4213: A WORKER BOOT HELD UNTIL THE SCENE LETS IT GO (the hosted run of 2.369.419: a fixed 400 ms from the spawn raced the main
+ *  thread). The held script claims the next boot number (boot-<k>, made exclusively), waits on its own thread for go-<k> or open (5 ms
+ *  naps in Atomics.wait, never load), marks loaded-<k>, then loads the real worker. Its bound is HOLD_BOUND_MS: a hold that runs out
+ *  marks expired-<k> and loads (the scene says it by name, never a hang). Each hold has a fresh folder of its own. */
+const HOLD_LET_MS = 400, HOLD_BOUND_MS = 60000;
+function heldBoot(tag) {
+  const dir = fs.mkdtempSync(path.join(scratchDir('safe-fs-path-memory-boot'), tag + '-'));
+  const script = path.join(dir, 'held-boot-worker.js');
+  fs.writeFileSync(script, [
+    "const fs = require('fs'), path = require('path');",
+    `const DIR = ${JSON.stringify(dir)}, BOUND_MS = ${HOLD_BOUND_MS};`,
+    "let k = 1;",
+    "for (;; k++) { try { fs.closeSync(fs.openSync(path.join(DIR, 'boot-' + k), 'wx')); break; } catch (e) { if (e.code !== 'EEXIST') throw e; } }",
+    "const nap = new Int32Array(new SharedArrayBuffer(4)), t0 = Date.now();",
+    "while (!fs.existsSync(path.join(DIR, 'go-' + k)) && !fs.existsSync(path.join(DIR, 'open'))) {",
+    "  if (Date.now() - t0 > BOUND_MS) { fs.writeFileSync(path.join(DIR, 'expired-' + k), ''); break; }",
+    "  Atomics.wait(nap, 0, 0, 5);",
+    "}",
+    "fs.writeFileSync(path.join(DIR, 'loaded-' + k), '');",
+    `require(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});`,
+    '',
+  ].join('\n'));
+  const has = (f) => fs.existsSync(path.join(dir, f));
+  return {
+    script, warms: 0,
+    let: (k) => fs.writeFileSync(path.join(dir, 'go-' + k), ''),
+    open: () => fs.writeFileSync(path.join(dir, 'open'), ''),
+    state: (k) => (has('loaded-' + k) ? 'loaded' : has('boot-' + k) ? 'held' : 'not started'),
+    expired: () => fs.readdirSync(dir).filter((f) => f.startsWith('expired-')).map((f) => tag + ' boot ' + f.slice(8)),
+  };
+}
+
 /** Wait for every worker of the pool to be live again (a respawn after an end), bounded and said by name at the bound. */
 async function untilLive(pool, n, boundMs = 10000) {
   const t0 = Date.now();
@@ -271,26 +303,41 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
   // THE FACT THE TIMED PRESSES WAIT FOR (主开发 r3409, the hosted mirror of 2.369.417 on Node 24.22.3): a pool marks a worker LIVE at its
   // construction, before its script has loaded — the scene's 300 ms deadline must be the op's own, never the boot's: the worker has
   // ANSWERED once (a 1 ms sleep on a path of its own, with the pool's long deadline) before a timed press is asked
-  const ready = async (pool, warm) => { await untilLive(pool, 1); if (warm) await pool.call('__sleep', { path: '/scratch-b23e5/ready/x', ms: 1 }, { timeoutMs: 15000 }).catch(() => { }); };
-  const run = async (Mod, { workerPath = null, warm = true } = {}) => {
+  const ready = async (pool, warm, hold = null) => {
+    await untilLive(pool, 1);
+    if (!warm) return null;
+    // r4213: a HELD boot (the slow leg) is let go only HOLD_LET_MS after this first call is SENT — the boot provably outlives the 300 ms
+    // deadline of a timed press, whatever the main thread did between the spawn and this call (the time it took is the leg's print)
+    const t0 = performance.now(), k = hold ? ++hold.warms : 0;
+    if (hold) setTimeout(() => hold.let(k), HOLD_LET_MS);
+    await pool.call('__sleep', { path: '/scratch-b23e5/ready/x', ms: 1 }, { timeoutMs: 15000 }).catch(() => { });
+    return Math.round(performance.now() - t0);
+  };
+  const run = async (Mod, { workerPath = null, warm = true, hold = null } = {}) => {
     let shift = 0; const clock = () => performance.now() + shift;
     const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-press', timeouts: { default: 15000, __sleep: 300 }, hungMs: 30000, mountsText, clock, ...(workerPath ? { workerPath } : {}) });
     const out = {};
     try {
-      await ready(pool, warm);
+      out.warmMs = [await ready(pool, warm, hold)];
       const word = (p) => p.then(() => 'answered', (e) => (e && e.code === 'path-hung' ? (e.tried ? 'path-hung, tried' : 'path-hung') : e && e.safeFsTimeout ? 'deadline' : String(e && e.code)));
       // THE PRESS AFTER A RECOVERY: a path remembered dead, then mended — the person's press is asked at once, answers, and is forgiven
       await pool._noteHung({ path: '/scratch-b23e5/mended/x' }, 'stat', 15000);
       out.unmarked0 = await word(pool.call('__sleep', { path: '/scratch-b23e5/mended/x', ms: 1 }));
       out.press = await word(pool.call('__sleep', { path: '/scratch-b23e5/mended/x', ms: 1 }, { attended: true }));
+      // r4213 (the RED control's hold): the press has SETTLED — its 300 ms deadline fired while boot 1 was still held (the scene lets no
+      // boot of this pool go before this line); every later boot goes at once. The press after it is sent in the same turn's microtasks:
+      // the pool's respawn (a timer) cannot have run, so the dead press below finds NO live worker by construction (aliveAtDeadPress)
+      if (hold && !warm) { out.bootAtPress = hold.state(1); hold.open(); }
       out.after = await word(pool.call('__sleep', { path: '/scratch-b23e5/mended/x', ms: 1 }));
       // THE PRESS ON A STILL-DEAD PATH: tried once — it ends ONE worker, the memory is renewed, and its words say so
       await pool._noteHung({ path: '/scratch-b23e5/still/x' }, 'stat', 15000);
       const ends0 = pool.stats().timeouts, until0 = (pool._hung.get('/scratch-b23e5/still/x') || {}).until;
+      out.aliveAtDeadPress = pool.stats().alive;
       out.deadPress = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: 4000 }, { attended: true }));
       out.deadEnds = pool.stats().timeouts - ends0;
       out.renewed = ((pool._hung.get('/scratch-b23e5/still/x') || {}).until || 0) > (until0 || 0);
-      await ready(pool, warm);   // the worker the dead press ended comes back: its first op after a fresh boot is a timed one too
+      out.warmMs.push(await ready(pool, warm, hold));   // the worker the dead press ended comes back: its first op after a fresh boot is a timed one too
+      if (hold) hold.open();   // the leg's held boots are done: any later boot goes at once
       out.unmarked = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: 4000 }));
       out.unmarkedEnds = pool.stats().timeouts - ends0;
       // r316 MUST 1: a LISTING's entry (the path itself) is forgiven only by a listing that replies at exactly that path — never by the
@@ -314,11 +361,14 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
     return out;
   };
   const nowP = run(SF);   // the scene and its RED copies run side by side (each its own pool)
-  // r3409: THE HOSTED RED, PLACED — a worker whose boot is slow (its script waits 400 ms in Atomics.wait before it loads the real worker;
-  // a sleep on the worker's own thread, never load): with the wait on the fact the scene holds; without it the hosted red comes back
-  const SLOW = path.join(scratchDir('safe-fs-path-memory-boot'), 'slow-boot-worker.js');
-  fs.writeFileSync(SLOW, `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);\nrequire(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});\n`);
-  const slowP = run(SF, { workerPath: SLOW }), slowRedP = run(SF, { workerPath: SLOW, warm: false });
+  // r3409: THE HOSTED RED, PLACED — a worker whose boot is slow: with the wait on the fact the scene holds; without it the hosted red
+  // comes back. r4213 (the hosted run of 2.369.419: the control came back as the healthy scene): the boot was a FIXED 400 ms from the
+  // spawn, raced against the main thread's work before the first press (the mutant copies below, the other scenes' starts) — now the
+  // boot is HELD until the scene lets it go (a file the held script waits for, on the worker's own thread, never load): the RED
+  // control lets boot 1 go only after its first timed press has settled; the slow leg lets each boot go HOLD_LET_MS after its first
+  // call was sent. A hold whose bound (HOLD_BOUND_MS) runs out says so by a named line below, never a hang
+  const slowHold = heldBoot('slow'), redHold = heldBoot('red');
+  const slowP = run(SF, { workerPath: slowHold.script, hold: slowHold }), slowRedP = run(SF, { workerPath: redHold.script, warm: false, hold: redHold });
   // RED CONTROLS, each over the copy without its rule
   const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
   const ATT = '    if (hp && !opts.attended) return Promise.reject(pathHungRefusal(hp.path, hp.ms));\n', FGV = '    this._forgive(call.payload, call.op);   // r275 / r316: the path answered — what its entry\'s kind lets this reply clear leaves\n';
@@ -327,8 +377,12 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
   const WIDE_FGV = "        if (p === h && m.self) for (const sk of Object.keys(m.self)) if (sk === key || (wide && WIDE_OPS.has(sk))) { delete m.self[sk]; changed = true; }\n";
   const tooWide = src.split(WIDE_FGV).length === 2 ? mutantCopies('safe-fs-path-memory-wide', REPO).load('src/safe-fs.js', anchored(src, WIDE_FGV, "        if (p === h || p.startsWith(h.endsWith('/') ? h : h + '/')) { this._hung.delete(h); continue; }\n", 'forgiven-too-wide'), 'forgiven-too-wide') : null;   // stale-pins: kept (r275's wide rule, the RED's copy)
   const [now, r1, r2, r3, slow, slowRed] = await Promise.all([nowP, noAtt ? run(noAtt) : null, noFgv ? run(noFgv) : null, tooWide ? run(tooWide) : null, slowP, slowRedP]);
-  ok(slow.press === 'answered' && slow.after === 'answered' && slow.deadPress === 'path-hung, tried' && slow.deadEnds === 1 && slow.renewed, `a worker whose boot is SLOW (placed: 400 ms before its script listens): the scene waits for its first answer — the press answers (${slow.press}), the dead press ends ONE worker (${slow.deadEnds}), the memory renewed (${slow.renewed})`, slow);
-  ok(slowRed.press === 'path-hung, tried' && slowRed.deadPress === 'no-worker' && slowRed.deadEnds === 0 && !slowRed.renewed, `RED CONTROL (no wait on the fact): the HOSTED RED's own answers, reproduced by placement — the first timed press carries the worker's boot and overruns its 300 ms (${slowRed.press}), then the dead press falls in the pool's respawn window (${slowRed.deadPress}), ${slowRed.deadEnds} worker ended, the memory renewed: ${slowRed.renewed}`, slowRed);
+  ok(slow.press === 'answered' && slow.after === 'answered' && slow.deadPress === 'path-hung, tried' && slow.deadEnds === 1 && slow.renewed, `a worker whose boot is SLOW (held: let go ${HOLD_LET_MS} ms after the scene's first call was sent): the scene waits for its first answer — the press answers (${slow.press}), the dead press ends ONE worker (${slow.deadEnds}), the memory renewed (${slow.renewed})`, slow);
+  ok(slow.warmMs.length === 2 && slow.warmMs.every((ms) => ms > 300), `the slow leg's HELD WINDOW: each boot (the first, and the one after the dead press) outlived a timed press's 300 ms deadline — the scene's first call waited ${slow.warmMs.join(' ms, ')} ms`, slow.warmMs);
+  ok(slowRed.bootAtPress !== 'loaded' && slowRed.aliveAtDeadPress === 0, `the RED control's HELD WINDOW: when the first timed press settled, boot 1 was ${slowRed.bootAtPress} (never loaded); the dead press was sent with ${slowRed.aliveAtDeadPress} live worker (in the pool's respawn window)`, { bootAtPress: slowRed.bootAtPress, aliveAtDeadPress: slowRed.aliveAtDeadPress });
+  ok(slowRed.press === 'path-hung, tried' && slowRed.deadPress === 'no-worker' && slowRed.deadEnds === 0 && !slowRed.renewed, `RED CONTROL (no wait on the fact): the HOSTED RED's own answers, reproduced by a HELD boot — the first timed press carries the worker's boot and overruns its 300 ms (${slowRed.press}), then the dead press falls in the pool's respawn window (${slowRed.deadPress}), ${slowRed.deadEnds} worker ended, the memory renewed: ${slowRed.renewed}`, slowRed);
+  const expired = [...slowHold.expired(), ...redHold.expired()];
+  ok(expired.length === 0, `no held boot ran out its bound (${HOLD_BOUND_MS / 1000} s): the scene let each one go itself${expired.length ? ' — RAN OUT: ' + expired.join(', ') : ''}`, expired);
   console.log(`  [measure] ${JSON.stringify(now)}`);
   ok(now.unmarked0 === 'path-hung' && now.press === 'answered' && now.after === 'answered', `the press after a recovery: an unmarked call is refused (${now.unmarked0}); the person's press is asked at once (${now.press}); answered, the path is forgiven — the next unmarked call is asked too (${now.after})`, now);
   ok(now.deadPress === 'path-hung, tried' && now.deadEnds === 1 && now.renewed && now.unmarked === 'path-hung' && now.unmarkedEnds === 1, `the press on a still-dead path is tried once — ONE worker ends (${now.deadEnds}), the memory renewed (${now.renewed}), its words the memory's own (${now.deadPress}); an unmarked caller after it is refused, no worker (${now.unmarked})`, now);
