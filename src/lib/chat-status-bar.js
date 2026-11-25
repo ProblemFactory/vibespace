@@ -33,6 +33,7 @@ import { openAccountModelsDialog } from './account-models.js';
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
 import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper, in the device's words
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { columnShape } from './side-column.js'; // B-78db slice 1b: the bar in the system's side column — the conversation's search and menu come here
 import { contextOf } from '../lock-context.js'; // B-6c55: a pick's 1M ask (PURE)
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
@@ -1719,6 +1720,24 @@ export class ChatStatusBar {
             this._onClick({ target: { closest: (q) => (q === sel ? setEl : null) }, stopPropagation() {}, preventDefault() {} });
           };
           dropdown.appendChild(item);
+        }
+        // THE CONVERSATION'S OWN THINGS AT THE BOTTOM (B-78db slice 1b — 主开发 r3949, the owner: «针对当前对话的还是放在底部，全局的才
+        // 放在右侧栏»): where the bar stands in the system's side column (side-column.js columnShape) the column holds global things
+        // only — this conversation's search and its window's menu (the ⋯ that stood there) are this door's last two rows
+        const mineWin = columnShape() ? [...(this._app?.sessions || [])].find(([, v]) => v?._statusBar === this) : null;
+        if (mineWin) {
+          const [, view] = mineWin, held = this._app?.wm?.windows?.get?.(mineWin[0]);   // the WINDOW held — its id read when the row acts
+          const act = (cls, label, run) => {
+            const item = document.createElement('div');
+            item.className = `chat-status-dropdown-item chat-status-settings-row chat-status-clickable ${cls}`;
+            const lab = document.createElement('span'); lab.className = 'chat-status-settings-label'; lab.textContent = label;
+            const val = document.createElement('span'); val.className = 'chat-status-settings-value'; val.textContent = '›';
+            item.append(lab, val);
+            item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); run(); };
+            dropdown.appendChild(item);
+          };
+          if (view?._search?.open) act('chat-status-col-search', t('Search this conversation'), () => view._search.open());
+          if (held) act('chat-status-col-window', t('This window'), () => this._app?._mobileNav?.bar?.windowMenuAt?.(held.id, setEl));
         }
         return;
       }

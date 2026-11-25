@@ -54,3 +54,45 @@ export function installSideColumn(doc = document, win = window) {
   read();
   try { win.addEventListener('resize', read); win.addEventListener('orientationchange', () => win.setTimeout(read, 300)); } catch { }
 }
+
+// ── THE COLUMN HOLDS GLOBAL THINGS ONLY, AND NEVER OVERFLOWS (B-78db slice 1b — 主开发 r3948 3 (a) + r3949, the owner: «针对当前对话的
+// 还是不要和全局的混在一起吧，这样比较让人困惑，针对当前对话的还是放在底部，全局的才放在右侧栏»). Where the bar stands IN the system's
+// column — the inner display held landscape (the regular class) and the outer display (the compact class) — it holds the global
+// destinations only, Global settings last; what acts on the conversation on show stands at the bottom with it (style.css).
+// What does not fit the column's height (the top room under the clock and the status marks, the bottom inset, every button and
+// gap counted) yields into a row of Global settings, in the stated order below; ⚙ itself never yields (one 44 px button fits).
+
+/** the column's buttons by key, top to bottom, on each display (trailing-bar.js COLUMN_EL names their elements) */
+export const COLUMN_BUTTONS = Object.freeze({
+  inner: Object.freeze(['todos', 'tasks', 'files', 'channels', 'desktops', 'gear']),
+  outer: Object.freeze(['menu', 'todos', 'new', 'tasks', 'files', 'channels', 'desktops', 'gear']),
+});
+/** THE YIELD ORDER — the first named leaves first, each into its own row of Global settings */
+export const COLUMN_YIELDS = Object.freeze({
+  inner: Object.freeze(['desktops', 'channels', 'files', 'tasks', 'todos']),
+  outer: Object.freeze(['desktops', 'channels', 'files', 'tasks', 'new', 'todos', 'menu']),
+});
+/** the room above the first button (page px): the status cluster's end measured on the simulator's pictures (inner 76 —
+ *  3-webapp-cover-inner.png; outer 130 — owner-o1.png, the marks at device rows 260–452 of a 3× shot whose page starts at 21)
+ *  + 36 for a Live Activity growing the Dynamic Island into the column. style.css reads the same numbers. */
+export const COLUMN_TOP = Object.freeze({ inner: 112, outer: 166 });
+
+/** Is the bar in the system's column now → 'inner' | 'outer' | null (the class and html[data-sidecol] — the stylesheet's facts) */
+export function columnShape(doc = document, win = window) {
+  const h = doc.documentElement;
+  if (!h || !h.dataset.sidecol) return null;
+  if (h.dataset.vc === 'compact') return 'outer';
+  try { if (h.dataset.vc === 'regular' && win.matchMedia('(orientation: landscape)').matches) return 'inner'; } catch { }
+  return null;
+}
+
+/** PURE: the column's verdict. room = its content height (its height − the top room − the bottom inset); items = [{ key, px }],
+ *  every drawn child in the column (a key the order never names — the gap, ⚙ — never yields); gap = the px between two;
+ *  yields = the order. → { shown, yielded, need, fits }: the fewest yields, taken in order, that make it fit */
+export function columnFit({ room = 0, items = [], gap = 0, yields = [] } = {}) {
+  const out = new Set();
+  const need = () => { const kept = items.filter((i) => !out.has(i.key)); return kept.reduce((s, i) => s + (Number(i.px) || 0), 0) + gap * Math.max(0, kept.length - 1); };
+  for (const k of yields) { if (need() <= room) break; if (items.some((i) => i.key === k)) out.add(k); }
+  const n = need();
+  return { shown: items.filter((i) => !out.has(i.key)).map((i) => i.key), yielded: [...out], need: n, fits: n <= room };
+}

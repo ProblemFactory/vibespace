@@ -10,6 +10,7 @@ import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
 import { installNavFilesDoor, filesDoorWindow, filesDoorName } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
+import { columnShape } from './side-column.js'; // B-78db: the bar in the system's side column (the outer display too)
 import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
 import { openDesktopSheet, untilGone, patchDesktopSheet, doorWaiting } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
 import { doorState, followDesktops, windowWaits } from '../desktop-switch.js';
@@ -137,6 +138,13 @@ export class MobileNav {
       if (pressedAside) { pressedAside = false; return; }
       if (head && !e.target.closest('button, input, textarea, select, .window-controls, .tab-bar-tabs')) this._showWindowSwitcher(head); // a tab in the head is its own (lane phone-six)
     });
+    // B-78db slice 1b (主开发 r3948 2): on the OUTER display's column the bar stands in the system's column and the window's own head
+    // is the name's row (style.css) — a tap on it opens the same switcher, as the inner display's head does
+    document.getElementById('workspace')?.addEventListener('click', (e) => {
+      if (columnShape() !== 'outer') return;
+      const head = e.target.closest?.('.window.window-active > .window-titlebar');
+      if (head && !e.target.closest('button, input, textarea, select, .window-controls, .tab-bar-tabs')) this._showWindowSwitcher(head);
+    });
     // THE SEARCH'S HOME (lane mask-value-shape, the strip's step two — page §4 «search → the window's title bar»; the design's
     // author 2026-11-17: search lives where the conversation's NAME lives, never on the strip): a ≥ 36 px magnifier at the bar's
     // right end, before the ⋯ — shown while the window on show is a conversation with a search bar; the compact class never folds
@@ -245,7 +253,7 @@ export class MobileNav {
     if (this._held) { this._heldMissed = true; return; }
     const nav = document.getElementById('mobile-nav'), root = document.documentElement;
     const nb = nav && this.app.viewportClass?.() === 'compact' && nav.getClientRects().length ? nav.getBoundingClientRect().bottom : 0;
-    const v = nb > 0 ? `${Math.round(nb / (uiScale() || 1)) + 4}px` : '';
+    const v = nb > 0 && !columnShape() ? `${Math.round(nb / (uiScale() || 1)) + 4}px` : '';   // B-78db: in the side column the bar is no top row — the stylesheet's 48 (the head's 44 + 4)
     if (root.style.getPropertyValue('--phone-sheet-top') === v) return;
     if (v) root.style.setProperty('--phone-sheet-top', v); else root.style.removeProperty('--phone-sheet-top');
   }
@@ -266,7 +274,7 @@ export class MobileNav {
     if (todos?.dataset.badges) delete todos.dataset.badges;
     more.classList.remove('on');
     let folded = [];
-    if (this.app.isMobile && this.app.viewportClass?.() === 'compact' && nav.getClientRects().length) {
+    if (this.app.isMobile && this.app.viewportClass?.() === 'compact' && !columnShape() && nav.getClientRects().length) {   // B-78db: the side column folds by HEIGHT (trailing-bar.js fitColumn), never by width
       const w = (el) => el.getBoundingClientRect().width;
       const items = kids.filter((el) => el.getClientRects().length).map((el) => {
         const key = NAV_KEYS[el.id] || el.id || el.className;
@@ -310,6 +318,8 @@ export class MobileNav {
     this._paintWaitingMore(); // lane phone-take-photo: ⋯ standing in for a folded Desktops door says what it would say
     this._barMo?.takeRecords(); // the pass's own writes are no change of the bar's inputs
     this._publishUnder(); // r4: every phone surface under the bar as it stands now
+    this.bar?.fitColumn?.(); // B-78db: a button that came or left (Desktops, a lock): the side column's law runs again (trailing-bar.js)
+    this._barMo?.takeRecords(); // …and its yields are no change of the bar's inputs either
     if (this._moreMenu?.isConnected) this._syncMore(); // r3: an open ⋯ is PATCHED by key — never rebuilt under a finger
   }
 

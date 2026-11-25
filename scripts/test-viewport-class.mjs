@@ -12,6 +12,8 @@
 //     rail leaves with its words — RED CONTROL: the base's frozen `this.isMobile = window.matchMedia(...)` is caught
 //   ⑤ THE SYSTEM's EDGES (B-78db): cover for the home-screen copy only; the Duo's side column by its insets; every edge its inset;
 //     RED CONTROL: the release's stylesheet (the trailing bar at right 0, no inset)
+//   ⑤b THE COLUMN (B-78db slice 1b): global things only, the conversation's at the bottom; the law — it never overflows — at the
+//     simulator's real column heights; RED CONTROLS: the release's eleven overflow, the slice-1 stylesheet, a bar without the law's call
 // Run: node scripts/test-viewport-class.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -141,6 +143,71 @@ console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the ho
   const CLIENT = read('src/client.js');
   ok(/try \{ installSideColumn\(\); \} catch \{ \}/.test(CLIENT) && CLIENT.indexOf('installSideColumn();') < CLIENT.indexOf('const exitHop = continueExit();') && !/viewport-fit/.test(read('public/index.html')),
     '⑤ the client sets cover and reads the column BEFORE the app lays out (src/client.js, at the top); public/index.html carries no viewport-fit (a Safari tab stays «contain»)');
+}
+
+console.log('⑤b the column holds global things only, and never overflows (B-78db slice 1b, 主开发 r3948 3 (a) / r3949)');
+{
+  const { pathToFileURL } = await import('node:url');
+  const SC = await import(pathToFileURL(path.join(REPO, 'src/lib/side-column.js')).href);
+  // THE LAW at the simulator's real columns (int359/duo-probe/RESULT.md): inner 648 tall, outer 657, bottom inset 34 on both; the
+  // top room COLUMN_TOP (inner 76 + 36, outer 130 + 36); every button 44, the gap between two 6, the gap element at its least 8
+  const col = (shape, extra = []) => [...SC.COLUMN_BUTTONS[shape].slice(0, -1), ...extra].map((key) => ({ key, px: 44 })).concat([{ key: 'gap', px: 8 }, { key: 'gear', px: 44 }]);
+  const roomOf = (h, shape) => h - SC.COLUMN_TOP[shape] - 34;
+  const inner = SC.columnFit({ room: roomOf(648, 'inner'), items: col('inner'), gap: 6, yields: SC.COLUMN_YIELDS.inner });
+  const outer = SC.columnFit({ room: roomOf(657, 'outer'), items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
+  ok(inner.fits && !inner.yielded.length && inner.need === 308 && outer.fits && !outer.yielded.length && outer.need === 408,
+    `⑤b at the real columns every default button stands: inner ${inner.need} of ${roomOf(648, 'inner')} px (For you · Task Groups · Files · Channels · Desktops · ⚙), outer ${outer.need} of ${roomOf(657, 'outer')} px (☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙)`, { inner, outer });
+  // RED CONTROL: the release's column — the owner's picture (11 buttons, ⚙ cut at the bottom) — overflows the same room; the law yields
+  const release = col('inner', ['artifacts', 'more', 'browser', 'jobs', 'search']);
+  const rel = SC.columnFit({ room: roomOf(648, 'inner'), items: release, gap: 6, yields: [] });
+  const relLaw = SC.columnFit({ room: roomOf(648, 'inner'), items: release, gap: 6, yields: SC.COLUMN_YIELDS.inner });
+  ok(!rel.fits && rel.need === 558 && roomOf(648, 'inner') === 502 && relLaw.fits && relLaw.yielded.join() === 'desktops,channels',
+    `⑤b RED CONTROL: the release's eleven at the inner column need ${rel.need} px of ${roomOf(648, 'inner')} — the overflow the owner saw (⚙ cut); the law alone would take ${relLaw.yielded.join(' · ')} out and keep the conversation's five — r3949 takes THOSE out instead`, { rel, relLaw });
+  // a zoomed page / a short column: the stated order, the fewest yields
+  const z = SC.columnFit({ room: 300, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
+  const z2 = SC.columnFit({ room: 210, items: col('inner'), gap: 6, yields: SC.COLUMN_YIELDS.inner });
+  ok(z.fits && z.yielded.join() === 'desktops,channels,files' && z.need === 258 && z2.fits && z2.yielded.join() === 'desktops,channels' && z2.need === 208,
+    `⑤b a short column yields in the stated order, the fewest that fit: outer at 300 px → ${z.yielded.join(' · ')} (${z.need}); inner at 210 px → ${z2.yielded.join(' · ')} (${z2.need})`, { z, z2 });
+  const floor = SC.columnFit({ room: 58, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer }), under = SC.columnFit({ room: 57, items: col('outer'), gap: 6, yields: SC.COLUMN_YIELDS.outer });
+  ok(floor.fits && floor.shown.join() === 'gap,gear' && !under.fits && under.shown.join() === 'gap,gear', '⑤b ⚙ never yields (every other row is reached through it): its floor is 58 px (⚙ 44 + the gap 8 + 6) — below it the verdict says «does not fit», never a lie', { floor, under });
+  const ys = [...SC.COLUMN_YIELDS.inner, ...SC.COLUMN_YIELDS.outer];
+  ok(!ys.includes('gear') && ['inner', 'outer'].every((k) => SC.COLUMN_BUTTONS[k].at(-1) === 'gear' && SC.COLUMN_YIELDS[k].every((y) => SC.COLUMN_BUTTONS[k].includes(y)) && SC.COLUMN_BUTTONS[k].slice(0, -1).every((b) => SC.COLUMN_YIELDS[k].includes(b))),
+    '⑤b the order is total: every column button but ⚙ is named in its display\'s yield order, ⚙ last and never yielding', SC.COLUMN_YIELDS);
+  const doc = (vc, sidecol) => ({ documentElement: { dataset: { vc, ...(sidecol ? { sidecol } : {}) } } });
+  const win = (land) => ({ matchMedia: () => ({ matches: land }) });
+  const shapes = [SC.columnShape(doc('compact', 'right'), win(false)), SC.columnShape(doc('regular', 'right'), win(true)), SC.columnShape(doc('regular', 'right'), win(false)), SC.columnShape(doc('regular'), win(true)), SC.columnShape(doc('compact'), win(false)), SC.columnShape(doc('desktop', 'right'), win(true))];
+  ok(shapes.join() === 'outer,inner,,,,', '⑤b the column\'s shape: the outer display (compact + the column), the inner held landscape (regular + the column); a portrait regular page, no column, a desktop: none', shapes);
+
+  const CSS = read('public/style.css'), i = CSS.indexOf('THE COLUMN HOLDS GLOBAL THINGS ONLY, AND NEVER OVERFLOWS'), B = i < 0 ? '' : CSS.slice(i);
+  const outIn = /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav :is\(#mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-search, #mobile-nav-dest-browser, #mobile-nav-dest-jobs\) \{ display: none !important; \}/.test(B);
+  const outOut = /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav :is\(#mobile-nav-title, #mobile-nav-state, #mobile-nav-search, #mobile-nav-close, #mobile-nav-overflow, #mobile-nav-usage, #mobile-nav-vault, #mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-dest-browser, #mobile-nav-dest-jobs\) \{ display: none !important; \}/.test(B);
+  const head = ['regular', 'compact'].every((vc) => B.includes(`html[data-vc="${vc}"][data-sidecol][data-onshow="chat"] #mobile-nav #mobile-nav-more { display: none !important; }`) && B.includes(`html[data-vc="${vc}"][data-sidecol] #mobile-nav :is(#mobile-nav-viewer-close, #mobile-nav-more).on {`));
+  ok(outIn && outOut && head, '⑤b OUT of the column on both displays: Artifacts, the live view, this conversation\'s search, Agent browser, Background Work (and on the outer the name row\'s controls, the width-fold ⋯, Usage, the lock); a chat\'s ⋯ is its strip\'s; a viewer\'s ✕ and a terminal\'s ⋯ stand at the head\'s end', { outIn, outOut, head });
+  const innerOrder = ['#mobile-nav-todos', '#mobile-nav-dest-tasks', '#mobile-nav-files', '#mobile-nav-dest-channels', '#mobile-nav-desktops'].map((id, k) => new RegExp(`html\\[data-vc="regular"\\]\\[data-sidecol\\] (#mobile-nav )?${id} \\{ order: ${11 + k}; \\}`).test(B)).every(Boolean);
+  const outerOrder = ['#mobile-nav-menu', '#mobile-nav-todos', '#mobile-nav-new', '#mobile-nav-dest-tasks', '#mobile-nav-files', '#mobile-nav-dest-channels', '#mobile-nav-desktops'].map((id, k) => new RegExp(`html\\[data-vc="compact"\\]\\[data-sidecol\\] (#mobile-nav )?${id} \\{ order: ${1 + k}[;]`).test(B)).every(Boolean);
+  ok(innerOrder && outerOrder && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav-gear \{ order: 20; \}/.test(B) && /html\[data-vc="regular"\]\[data-sidecol\] #mobile-nav \.mnav-gap \{ order: 19; \}/.test(B),
+    '⑤b IN the column, in COLUMN_BUTTONS\' order: inner For you · Task Groups · Files · Channels · Desktops · ⚙ last; outer ☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙ last', { innerOrder, outerOrder });
+  const tops = new RegExp(`padding: var\\(--sidecol-top, ${SC.COLUMN_TOP.outer}px\\) 0 max\\(8px, env\\(safe-area-inset-bottom, 0px\\)\\) !important;`).test(B) && CSS.includes(`padding-top: var(--sidecol-top, ${SC.COLUMN_TOP.inner}px);`);
+  ok(tops && /html\[data-vc="compact"\]\[data-sidecol\] #mobile-nav \{\s*position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: max\(56px, env\(safe-area-inset-right, 0px\)\);[^}]*flex-direction: column;/.test(B) && /html\[data-sidecol\] #mobile-nav > \.col-yield \{ display: none !important; \}/.test(B)
+    && /html\[data-vc="compact"\]\[data-sidecol\] \.window\.window-active > \.window-titlebar \{\s*display: flex !important;/.test(B),
+    `⑤b the outer column: the bar fixed in the column under its top room (${SC.COLUMN_TOP.outer} — the module's number, the inner ${SC.COLUMN_TOP.inner} too), the bottom inset counted, a yielded button hidden, the window's own head the name's row`);
+  const R = CSS.slice(0, i);
+  ok(i > 0 && !/data-sidecol\] #mobile-nav :is\(#mobile-nav-artifacts/.test(R) && !/col-yield/.test(R), '⑤b RED CONTROL: the stylesheet before this block (slice 1) keeps the conversation\'s buttons in the column and knows no yield');
+
+  const BAR = read('src/lib/trailing-bar.js'), MN = read('src/lib/mobile-nav.js'), CSB = read('src/lib/chat-status-bar.js');
+  const rows = (BAR.match(/for \(const \[i, k\] of \[([^\]]+)\]\.entries\(\)\) \{\s*\n\s*registerMenuItem\(\{ menu: 'gear', group: '0_column'/) || [])[1] || '';
+  const rowKeys = rows.split(',').map((x) => x.trim().replace(/'/g, ''));
+  ok(ys.every((k) => rowKeys.includes(k)) && /when: \(\) => COLUMN_YIELDED\.has\(k\)/.test(BAR) && /run: \(\) => document\.getElementById\(COLUMN_EL\[k\]\)\?\.click\(\)/.test(BAR),
+    `⑤b every button that may yield has its row of Global settings, shown only while it is out of the column, its press the button's own (${rowKeys.join(' · ')})`, rowKeys);
+  const updateOf = (bar) => { const a = bar.indexOf('  function update() {'), b = bar.indexOf('\n  update();', a); return a > 0 && b > a ? bar.slice(a, b) : ''; };
+  const fitWired = (bar) => updateOf(bar).includes('\n    fitColumn(nav);\n') && /new ResizeObserver\(\(\) => fitColumn\(nav\)\)\.observe\(nav\)/.test(bar);
+  ok(fitWired(BAR) && /this\.bar\?\.fitColumn\?\.\(\);/.test(MN) && !fitWired(BAR.replace('\n    fitColumn(nav);\n', '\n')),
+    '⑤b the law runs at every update of the bar, at every size of the column and after every pass of the bar\'s buttons (RED CONTROL: a bar without the update\'s call is caught)');
+  ok(/this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(MN) && /const v = nb > 0 && !columnShape\(\) \?/.test(MN) && /if \(columnShape\(\) !== 'outer'\) return;\s*\n\s*const head = e\.target\.closest\?\.\('\.window\.window-active > \.window-titlebar'\);/.test(MN),
+    '⑤b the outer column: no width fold of the compact bar there (its law is the height\'s), no sheet top from a bar that is no top row, the head\'s tap opens the switcher');
+  const door = CSB.slice(CSB.indexOf("const setEl = e.target.closest('.chat-status-settings');"), CSB.indexOf('// ── the doors end ──'));
+  ok(/const mineWin = columnShape\(\) \?/.test(door) && /act\('chat-status-col-search', t\('Search this conversation'\), \(\) => view\._search\.open\(\)\)/.test(door) && /if \(held\) act\('chat-status-col-window', t\('This window'\), \(\) => this\._app\?\._mobileNav\?\.bar\?\.windowMenuAt\?\.\(held\.id, setEl\)\)/.test(door) && /held = this\._app\?\.wm\?\.windows\?\.get\?\.\(mineWin\[0\]\);/.test(door) && /windowMenuAt, fitColumn/.test(BAR),
+    '⑤b AT THE BOTTOM: in the column, the strip\'s «Conversation settings» door ends with this conversation\'s search and its window\'s menu (opened above the door)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

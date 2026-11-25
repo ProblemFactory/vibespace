@@ -10312,3 +10312,75 @@ button.vw-chip { cursor: pointer; }
   html[data-vc="regular"][data-sidecol] #main-wrapper { margin-right: max(56px, env(safe-area-inset-right, 0px)) !important; }
   html[data-vc="regular"][data-sidecol] #mobile-nav { width: max(56px, env(safe-area-inset-right, 0px)); padding-right: 6px; padding-top: var(--sidecol-top, 112px); }
 }
+
+/* ── THE COLUMN HOLDS GLOBAL THINGS ONLY, AND NEVER OVERFLOWS (B-78db slice 1b — 主开发 r3948 / r3949, the owner: «针对当前对话的还是
+   不要和全局的混在一起吧，这样比较让人困惑，针对当前对话的还是放在底部，全局的才放在右侧栏») — where the bar stands IN the system's column
+   (html[data-sidecol]): the inner display held landscape (the regular class) and the outer display (the compact class).
+   IN the column: For you (its count), Task Groups, Files, Channels, Desktops (no row of Global settings holds it, so it stays),
+   Global settings last — the outer display first the list of conversations and «+» (create or open). What does not fit yields
+   into a row of Global settings in a stated order (src/lib/side-column.js COLUMN_YIELDS; trailing-bar.js fitColumn writes
+   .col-yield). OUT of the column, on both displays: Artifacts (the strip's own door — once), this conversation's search and
+   its window's menu (the strip's «Conversation settings» door, its last two rows — chat-status-bar.js), a held browser's live
+   view (the strip's Browser door, «Open live view»), Agent browser and Background Work (Global settings ▸ Tools ▸). A window
+   with no strip wears its ⋯ (a terminal) and its ✕ (a viewer) at its own head's end. The column stands above the window on
+   show (its head's buttons are its children), below menus, sheets and dialogs (99998+). */
+html[data-sidecol] #mobile-nav > .col-yield { display: none !important; }
+/* the inner display */
+@media (orientation: landscape) {
+  html[data-vc="regular"][data-sidecol] #mobile-nav { z-index: 95000; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav :is(#mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-search, #mobile-nav-dest-browser, #mobile-nav-dest-jobs) { display: none !important; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav #mobile-nav-todos { order: 11; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav-dest-tasks { order: 12; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav-files { order: 13; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav-dest-channels { order: 14; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav-desktops { order: 15; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav .mnav-gap { order: 19; }
+  html[data-vc="regular"][data-sidecol] #mobile-nav :is(#mobile-nav-viewer-close, #mobile-nav-more).on {
+    display: inline-flex; position: fixed; top: env(safe-area-inset-top, 0px); right: max(56px, env(safe-area-inset-right, 0px)); width: 44px !important; height: 44px !important;
+  }
+  html[data-vc="regular"][data-sidecol] #mobile-nav #mobile-nav-viewer-close.on ~ #mobile-nav-more.on { right: calc(max(56px, env(safe-area-inset-right, 0px)) + 44px); }
+  html[data-vc="regular"][data-sidecol][data-onshow="chat"] #mobile-nav #mobile-nav-more { display: none !important; }
+  html[data-vc="regular"][data-sidecol]:is(:has(#mobile-nav-viewer-close.on), :not([data-onshow="chat"]):has(#mobile-nav-more.on)) .window.window-active > .window-titlebar { padding-right: 60px; }
+  html[data-vc="regular"][data-sidecol]:has(#mobile-nav-viewer-close.on):not([data-onshow="chat"]):has(#mobile-nav-more.on) .window.window-active > .window-titlebar { padding-right: 104px; }
+}
+/* the outer display: the compact top bar becomes the column (its controls one vertical bar under the clock and the status
+   marks: 130 page px measured on owner-o1.png + 36 for a Live Activity = 166); the window's OWN head is the name's row (its
+   name + its state word, as the inner display's head — trailing-bar.js writes the word; a tap on it opens the switcher) */
+html[data-vc="compact"][data-sidecol] #mobile-nav {
+  position: fixed !important; top: 0; right: 0; bottom: 0; left: auto; width: max(56px, env(safe-area-inset-right, 0px)); height: auto; z-index: 95000;
+  flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px;
+  padding: var(--sidecol-top, 166px) 0 max(8px, env(safe-area-inset-bottom, 0px)) !important;
+  border-bottom: none; border-left: 1px solid var(--border); overflow: hidden;
+}
+html[data-vc="compact"][data-sidecol] #mobile-nav > * { order: 50; }
+html[data-vc="compact"][data-sidecol] #mobile-nav > :is(#mobile-nav-menu, #mobile-nav-todos, #mobile-nav-new, #mobile-nav-files, #mobile-nav-desktops, #mobile-nav-gear, .mnav-dest) {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+}
+html[data-vc="compact"][data-sidecol] #mobile-nav-menu { order: 1; }
+html[data-vc="compact"][data-sidecol] #mobile-nav #mobile-nav-todos { order: 2; flex-wrap: wrap; align-content: center; gap: 1px 2px; }
+html[data-vc="compact"][data-sidecol] #mobile-nav #mobile-nav-todos > svg { flex: 0 0 100%; height: 18px; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-new { order: 3; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-dest-tasks { order: 4; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-files { order: 5; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-files .mnav-word { display: none !important; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-dest-channels { order: 6; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-desktops { order: 7; }
+html[data-vc="compact"][data-sidecol] #mobile-nav .mnav-gap { display: block; order: 19; flex: 1 1 auto; min-height: 8px; align-self: stretch; }
+html[data-vc="compact"][data-sidecol] #mobile-nav-gear { order: 20; }
+html[data-vc="compact"][data-sidecol] #mobile-nav :is(#mobile-nav-title, #mobile-nav-state, #mobile-nav-search, #mobile-nav-close, #mobile-nav-overflow, #mobile-nav-usage, #mobile-nav-vault, #mobile-nav-artifacts, #mobile-nav-live, #mobile-nav-dest-browser, #mobile-nav-dest-jobs) { display: none !important; }
+html[data-vc="compact"][data-sidecol] #mobile-nav :is(#mobile-nav-viewer-close, #mobile-nav-more).on {
+  display: inline-flex; align-items: center; justify-content: center; position: fixed; top: env(safe-area-inset-top, 0px); right: max(56px, env(safe-area-inset-right, 0px)); width: 44px; height: 44px; padding: 0;
+}
+html[data-vc="compact"][data-sidecol] #mobile-nav #mobile-nav-viewer-close.on ~ #mobile-nav-more.on { right: calc(max(56px, env(safe-area-inset-right, 0px)) + 44px); }
+html[data-vc="compact"][data-sidecol][data-onshow="chat"] #mobile-nav #mobile-nav-more { display: none !important; }
+html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar {
+  display: flex !important; flex-shrink: 0; align-items: center; height: calc(44px + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) 16px 0;
+  cursor: pointer; touch-action: auto; background: var(--bg-titlebar-active); border-bottom: 1px solid var(--border);
+}
+html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar > :not(.window-title):not(.tab-bar-tabs) { display: none !important; }
+html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar .window-title { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; font-size: 0 !important; overflow: hidden; }
+html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar .window-title::before { content: attr(data-name); flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; color: var(--text); }
+html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar .window-title::after { content: attr(data-state); flex: none; margin-left: 10px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); }
+html[data-vc="compact"][data-sidecol]:is(:has(#mobile-nav-viewer-close.on), :not([data-onshow="chat"]):has(#mobile-nav-more.on)) .window.window-active > .window-titlebar { padding-right: 60px; }
+html[data-vc="compact"][data-sidecol]:has(#mobile-nav-viewer-close.on):not([data-onshow="chat"]):has(#mobile-nav-more.on) .window.window-active > .window-titlebar { padding-right: 104px; }
+html[data-vc="compact"][data-sidecol] .mobile-win-switcher { right: max(56px, env(safe-area-inset-right, 0px)) !important; } /* the switcher from the head: the conversation's width, the column clear */

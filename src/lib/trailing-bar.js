@@ -1,8 +1,10 @@
 // THE TRAILING BAR of the regular class (lane duo-build-1 slice 2 + 2b — SPEC-v3 rev 3.3 §2.2 + the owner, 2026-10-25:
 // 「因为 duo 有那个特殊的侧栏，可以考虑把一些电脑版的侧边按钮放过去，比普通手机版访问容易一些效率高一些 … 你自己综合考虑吧」).
 // On the iPhone Duo's inner display (the regular class, src/viewport-class.js) the phone's own #mobile-nav stands on the
-// trailing edge as ONE vertical bar of 44 px buttons — our bar, never Apple's system vertical bar (no status cluster, no
-// 84 pt, no system material). Apple's order for a vertical bar (HIG «Vertical controls»: toolbar above, tab bar below):
+// trailing edge as ONE vertical bar of 44 px buttons — our bar. In a Safari tab (and on a shape with no side column) it stands
+// beside the page, our own 56 px; in the HOME-SCREEN copy it stands INSIDE the system's side column, under the system's clock
+// and status marks (B-78db, src/lib/side-column.js — the column then holds GLOBAL things only: see THE COLUMN below).
+// Apple's order for a vertical bar (HIG «Vertical controls»: toolbar above, tab bar below):
 //   · TOP — THIS conversation's actions: ✕ (only while a window other than a conversation covers the column: a viewer,
 //     a panel — it closes and the conversation is back) → Artifacts (its count as a badge) → ⋯ (the window's menu, the
 //     one More of this conversation) → Agent browser — live view (only while the conversation holds a browser)
@@ -26,6 +28,7 @@ import { openFilesDoor } from './phone-files.js';
 import { SESSION_STATE_META } from './sidebar-tasks.js';
 import { uiScale } from './utils.js';
 import { registerMenuItem } from './contributions.js';
+import { columnShape, columnFit, COLUMN_YIELDS } from './side-column.js';
 
 /** The destination each bottom button opens and how it knows it is on show. */
 const DESTS = [
@@ -36,6 +39,46 @@ const DESTS = [
   { id: 'browser', label: 'Agent browser', icon: () => RAIL_ICONS.browser, on: (app, w) => w?.type === 'browser-profiles', run: (app) => app.openBrowserProfiles?.() },
   { id: 'jobs', label: 'Background Work', icon: () => RAIL_ICONS.jobs, on: (app, w) => w?.type === 'jobs', run: (app) => openJobsWindow(app) },
 ];
+/** THE COLUMN (B-78db slice 1b — 主开发 r3949, the owner: the side column holds GLOBAL things only; what acts on the conversation
+ *  on show stands at the BOTTOM with it). Where the bar stands in the system's column (side-column.js columnShape): For you, Task
+ *  Groups, Files, Channels, Desktops (it has no row in Global settings, so it stays), Global settings last — and on the outer
+ *  display before them the list of conversations and «+» (create or open). OUT of the column (style.css): Artifacts (the strip's
+ *  own door — once), this conversation's search and its window's menu (the strip's «Conversation settings» door, its last two
+ *  rows — chat-status-bar.js), a held browser's live view (the strip's Browser door, «Open live view»), Agent browser and
+ *  Background Work (Global settings ▸ Tools). A window with no strip wears its own ⋯ (a terminal) and its ✕ (a viewer) at its
+ *  head's end. THE LAW (r3948 3 (a)): the column never overflows — fitColumn measures it and what does not fit yields, in
+ *  COLUMN_YIELDS' order, into a row of Global settings (the rows below). */
+const COLUMN_EL = Object.freeze({ menu: 'mobile-nav-menu', todos: 'mobile-nav-todos', new: 'mobile-nav-new', tasks: 'mobile-nav-dest-tasks', files: 'mobile-nav-files', channels: 'mobile-nav-dest-channels', desktops: 'mobile-nav-desktops', gear: 'mobile-nav-gear' });
+const KEY_OF_EL = Object.freeze(Object.fromEntries(Object.entries(COLUMN_EL).map(([k, id]) => [id, k])));
+const COLUMN_YIELDED = new Set();   // the keys fitColumn took out of the column now — each a row of Global settings
+const forYouCount = () => Number(document.querySelector('#mobile-nav-todos .mnav-one')?.textContent) || 0;
+const COLUMN_LABEL = Object.freeze({
+  menu: () => t('Sessions'), todos: () => (forYouCount() ? t('For you · {n}', { n: forYouCount() }) : t('For you')), new: () => t('Create or open…'),
+  tasks: () => t('Task Groups'), files: () => t('Files'), channels: () => t('Channels'), desktops: () => t('Desktops'),
+});
+for (const [i, k] of ['menu', 'todos', 'new', 'tasks', 'files', 'channels', 'desktops'].entries()) {
+  registerMenuItem({ menu: 'gear', group: '0_column', order: 10 + i, id: `gear/column-${k}`, when: () => COLUMN_YIELDED.has(k), label: COLUMN_LABEL[k], run: () => document.getElementById(COLUMN_EL[k])?.click() });
+}
+
+/** THE LAW, measured: the column's content height against every drawn child (the gap at its least, 8 px), the verdict applied
+ *  as .col-yield (style.css hides it) and remembered for Global settings' rows. Outside the column: nothing yields. */
+export function fitColumn(nav = document.getElementById('mobile-nav')) {
+  for (const id of Object.values(COLUMN_EL)) document.getElementById(id)?.classList.remove('col-yield');
+  COLUMN_YIELDED.clear();
+  const shape = nav ? columnShape() : null;
+  if (!shape || !nav.getClientRects().length) { if (nav) delete nav.dataset.colYield; return null; }
+  const cs = getComputedStyle(nav);
+  const room = nav.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+  const items = [...nav.children].filter((el) => el.getClientRects().length && getComputedStyle(el).position !== 'fixed').map((el) => ({
+    key: KEY_OF_EL[el.id] || (el.classList.contains('mnav-gap') ? 'gap' : el.id || 'other'),
+    px: el.classList.contains('mnav-gap') ? (parseFloat(getComputedStyle(el).minHeight) || 0) : el.offsetHeight,
+  }));
+  const v = columnFit({ room, items, gap: parseFloat(cs.rowGap) || 0, yields: COLUMN_YIELDS[shape] });
+  for (const k of v.yielded) { document.getElementById(COLUMN_EL[k])?.classList.add('col-yield'); COLUMN_YIELDED.add(k); }
+  if (v.yielded.length) nav.dataset.colYield = v.yielded.join(' '); else delete nav.dataset.colYield;
+  return v;
+}
+
 /** The window types that ARE a conversation (a session window) — anything else covering the column wears the ✕. */
 const isConversation = (app, w) => !!w && app.sessions?.has?.(w.id);
 
@@ -87,7 +130,7 @@ export function installTrailingBar(app) {
     // the menu opens INTO the conversation column, its top on the button's (SPEC-v3 §2.2): its RIGHT edge beside a vertical
     // bar (a menu that grows after it is measured grows leftwards, never over the bar), under a horizontal one
     const Z = uiScale();
-    if (menu && getComputedStyle(nav).flexDirection === 'column') { menu.style.left = 'auto'; menu.style.right = ((innerWidth - r.left + 8) / Z) + 'px'; }
+    if (menu && getComputedStyle(nav).flexDirection === 'column' && !columnShape()) { menu.style.left = 'auto'; menu.style.right = ((innerWidth - r.left + 8) / Z) + 'px'; }
     else if (menu) { menu.style.top = ((r.bottom + 4) / Z) + 'px'; menu.style.bottom = ''; menu.style.left = 'auto'; menu.style.right = (Math.max(4, innerWidth - r.right) / Z) + 'px'; }
   };
   live.onclick = () => { const w = activeWin(); const s = sessionForWin(app, w); if (w && s?.webuiId) app.openBrowserLiveBeside?.(w, s.webuiId); };
@@ -98,7 +141,7 @@ export function installTrailingBar(app) {
   let tip = null, tipTimer = null;
   nav.addEventListener('contextmenu', (e) => {
     const b = e.target.closest?.('.mnav-bar-btn, .mnav-dest, #mobile-nav-gear, .mnav-state[data-form="dot"]');   // the state's dot says its word too (主开发 r1344)
-    if (!b || !regular()) return;
+    if (!b || (!regular() && !columnShape())) return;
     e.preventDefault(); e.stopPropagation();
     if (!tip) { tip = document.createElement('div'); tip.className = 'mnav-tip'; tip.setAttribute('role', 'status'); document.body.appendChild(tip); }
     tip.textContent = b.getAttribute('aria-label') || b.title || '';
@@ -122,10 +165,14 @@ export function installTrailingBar(app) {
     badge.textContent = n > 99 ? '99+' : String(n); badge.classList.toggle('hidden', !n);
     // ⋯ STANDS ONLY WHEN IT HOLDS A ROW (主开发 2026-11-18 23:09Z): this class has no window-manager verb, so a files window's
     // menu holds none — and ⚙ folds only into a ⋯ that stands (style.css). Its coming or going moves the head's room: re-fit.
-    const holds = !!w && regular() && windowMenuHolds(app, w.id), moved = holds !== more.classList.contains('on');   // judged only where ⋯ is drawn
+    const holds = !!w && (regular() || !!columnShape()) && windowMenuHolds(app, w.id), moved = holds !== more.classList.contains('on');   // judged only where ⋯ is drawn (the outer column: at the head's end)
     more.classList.toggle('on', holds);
     live.classList.toggle('on', conv && holdsBrowser(app, sessionForWin(app, w)));
     for (const { d, b } of dests) { const sel = !!d.on(app, w); b.classList.toggle('selected', sel); b.setAttribute('aria-pressed', sel ? 'true' : 'false'); }
+    // what is on show, for the column's stylesheet (B-78db): a chat's ⋯ is its strip's; a viewer's ✕ and a terminal's ⋯ stand at its head
+    const onshow = !w ? 'none' : !conv ? 'viewer' : w.type === 'chat' ? 'chat' : 'session';
+    if (document.documentElement.dataset.onshow !== onshow) document.documentElement.dataset.onshow = onshow;
+    fitColumn(nav);
     // the conversation's head = its name + its state word (SPEC-v3 §2.4): the title bar in landscape, the bar's title in portrait
     const s = conv ? sessionForWin(app, w) : null;
     const st = s ? app.sidebar?.getSessionStatus?.(s) : null;
@@ -152,7 +199,21 @@ export function installTrailingBar(app) {
     listSeen = key;
     update();
   }
-  return { update, onList, el: nav, state: stateEl };   // the head's state word (mobile-nav.js _paintState reads it here)
+  /** THE WINDOW'S MENU FROM THE BOTTOM (B-78db, r3949): the strip's «Conversation settings» door, in the column, opens window
+   *  `id`'s menu above the strip's door `anchor` — the conversation's own overflow, at the bottom with it */
+  function windowMenuAt(id, anchor) {
+    if (!id || !app.wm?.windows?.get(id)) return null;
+    const r = anchor.getBoundingClientRect();
+    const menu = showWindowContextMenu(app, id, r.left, r.top);
+    const Z = uiScale();
+    if (menu) { menu.style.top = 'auto'; menu.style.bottom = (Math.max(4, innerHeight - r.top + 4) / Z) + 'px'; menu.style.right = 'auto'; menu.style.left = (Math.max(4, r.left) / Z) + 'px'; }
+    return menu;
+  }
+  // the column's height or its shape moved (a rotation, the sidecol read again, a zoom): the law runs again
+  try { new ResizeObserver(() => fitColumn(nav)).observe(nav); } catch { }
+  window.addEventListener('resize', () => fitColumn(nav));
+  window.addEventListener('vs-viewport-class', () => update());
+  return { update, onList, el: nav, state: stateEl, windowMenuAt, fitColumn: () => fitColumn(nav) };   // the head's state word (mobile-nav.js _paintState reads it here)
 }
 
 // ⚙ folded into ⋯ (lane phone-six r2 — the name keeps 8 em, mobile-nav.js _paintHead's 'gear' step): ⋯'s last row is it

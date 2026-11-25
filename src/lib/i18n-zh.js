@@ -1865,6 +1865,7 @@ export default {
   "The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.": "已做出更改，但尚未保存到磁盘：存储较慢或出现故障。存储可用时会写入；在此之前重启会丢失这次更改。", // B-0248 (lane bl-loop-b)
   "Dismiss (not going to act on this)": "忽略(不打算处理)",
   "For you": "待你处理",
+  "For you · {n}": "待你处理 · {n}",
   "For-you inbox": "待你处理收件箱",
   "Go to this session": "跳转到该会话",
   "Handled — mark done": "已处理——标记完成",

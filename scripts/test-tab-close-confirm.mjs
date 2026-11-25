@@ -300,7 +300,8 @@ const DOORS = [
   { file: 'src/lib/mobile-nav.js', re: /showWindowContextMenu\(this\.app, win\.id, r\.left, r\.bottom \+ 2, \{ onAction:/, scope: 'tab', door: "a phone switcher row's ⋯ — the same menu as its long press (that window; lane ui-controls-and-bugs)" },
   { file: 'src/lib/session-props.js', re: /app\.wm\.requestClose\(winInfo\.id\); else app\.wm\.closeWindow\(winInfo\.id\);/, scope: 'tab', door: 'Esc in the properties window (itself)' },
   { file: 'src/lib/trailing-bar.js', re: /if \(w && !isConversation\(app, w\)\) app\.wm\.requestClose\(w\.id\);/, scope: 'tab', door: "the regular class's trailing-bar ✕ (lane duo-build-1: the viewer / panel on show over the conversation — never a conversation)" },
-  { file: 'src/lib/trailing-bar.js', re: /const menu = showWindowContextMenu\(app, w\.id, r\.left, r\.top\);/, scope: 'tab', door: "the trailing bar's ⋯ (lane duo-build-1: the window on show)" },  { file: 'src/lib/layout.js', re: /^\s*this\.app\.wm\.requestClose\(id\);\s*$/, scope: 'tab', door: "a «Session unavailable» tile's «Remove» / its ✕, after the confirm (lane layout-stopped-window r3: that one window)" },
+  { file: 'src/lib/trailing-bar.js', re: /const menu = showWindowContextMenu\(app, w\.id, r\.left, r\.top\);/, scope: 'tab', door: "the trailing bar's ⋯ (lane duo-build-1: the window on show)" },
+  { file: 'src/lib/trailing-bar.js', re: /const menu = showWindowContextMenu\(app, id, r\.left, r\.top\);/, scope: 'tab', door: "the conversation's own menu from the strip's «Conversation settings» door, in the Duo's side column (B-78db r3949: that conversation's window, opened above the door)" },  { file: 'src/lib/layout.js', re: /^\s*this\.app\.wm\.requestClose\(id\);\s*$/, scope: 'tab', door: "a «Session unavailable» tile's «Remove» / its ✕, after the confirm (lane layout-stopped-window r3: that one window)" },
 ];
 const DOOR_CALL = /\.requestCloseGroup\(|\.requestClose\(|showWindowContextMenu\(/;
 function doorCensus(texts) {

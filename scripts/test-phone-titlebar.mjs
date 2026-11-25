@@ -337,7 +337,7 @@ console.log('§5 the wiring');
     && /more\.addEventListener\('click', [^\n]*\{ signal: ctl\.signal \}\);/.test(mn), 'the bar\'s watchers (the tier signal, the ⋯\'s press, the subtree + width observers, r4: what stands above it) live on the controller the bar owns');
   ok(/this\._barMo\.observe\(nav, \{ subtree: true, childList: true, characterData: true \}\);/.test(mn) && /this\._barMo\?\.takeRecords\(\); \/\/ the pass's own writes/.test(mn) && /\n    this\._scheduleFit\?\.\(\);\n  \}\n/.test(mn),
     're-decided on a chip\'s change (the subtree — never the pass\'s own writes) and on the title\'s (updateTitle)');
-  ok(/if \(this\.app\.isMobile && this\.app\.viewportClass\?\.\(\) === 'compact' && nav\.getClientRects\(\)\.length\) \{/.test(mn) && /for \(const el of kids\) el\.classList\.remove\(FOLDED\);\n    if \(todos\?\.dataset\.badges\) delete todos\.dataset\.badges;\n    more\.classList\.remove\('on'\);/.test(mn),
+  ok(/if \(this\.app\.isMobile && this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(mn) && /for \(const el of kids\) el\.classList\.remove\(FOLDED\);\n    if \(todos\?\.dataset\.badges\) delete todos\.dataset\.badges;\n    more\.classList\.remove\('on'\);/.test(mn),
     'the fold is the compact class\'s alone: every pass starts unfolded — the regular class and the desktop keep the base\'s bar');
   ok(/more\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); if \(this\._moreMenu\?\.isConnected\) \{ this\._moreMenu\.remove\(\); return; \} this\._openMore\(\); \}/.test(mn) && /menu\._closeExclude\?\.push\(this\.moreBtn\);/.test(mn) && !/more\.addEventListener\('pointerdown'/.test(mn),
     'the ⋯ is its menu\'s anchor: exempt from the menu\'s outside-press closer, so its second press — a finger\'s or a mouse\'s — closes the menu (r2)');
@@ -539,7 +539,7 @@ console.log('§5 the wiring');
   const roads = (files) => files.filter(([, t]) => /setProperty\('--phone-sheet-top'/.test(t)).map(([f]) => f);
   const underOf = (src) => { const a = src.indexOf('  _publishUnder() {'); return a < 0 ? '' : src.slice(a, src.indexOf('\n  }\n', a)); };
   const pub = underOf(mn);
-  ok(openerFailures(writers).length === 0 && roads(writers).join() === 'src/lib/mobile-nav.js' && /if \(this\._held\) \{ this\._heldMissed = true; return; \}/.test(pub) && /const v = nb > 0 \? `\$\{Math\.round\(nb \/ \(uiScale\(\) \|\| 1\)\) \+ 4\}px` : '';/.test(pub) && /if \(v\) root\.style\.setProperty\('--phone-sheet-top', v\); else root\.style\.removeProperty\('--phone-sheet-top'\);/.test(pub)
+  ok(openerFailures(writers).length === 0 && roads(writers).join() === 'src/lib/mobile-nav.js' && /if \(this\._held\) \{ this\._heldMissed = true; return; \}/.test(pub) && /const v = nb > 0 && !columnShape\(\) \? `\$\{Math\.round\(nb \/ \(uiScale\(\) \|\| 1\)\) \+ 4\}px` : '';/.test(pub) && /if \(v\) root\.style\.setProperty\('--phone-sheet-top', v\); else root\.style\.removeProperty\('--phone-sheet-top'\);/.test(pub)
     && /this\._publishUnder\(\); \/\/ r4: every phone surface under the bar as it stands now/.test(fitOf(mn)),
     `G4: every OPENER of a phone surface (${OPENERS.map(([f, , c]) => `${f.replace('src/lib/', '')} ${c}`).join(' · ')}) opens a surface whose rule takes its top AND its room from the variable, and writes no inline !important top / max-height; ONE function writes it (mobile-nav.js _publishUnder, each fit pass — the bar's measured bottom + 4, never under a held press)`, { openers: openerFailures(writers), roads: roads(writers) });
   const r3Under = put(mn, "    menu.classList.add('mobile-sheet'); // under the bar as it stands: style.css --phone-sheet-top (_publishUnder, r4)\n", "    menu.classList.add('mobile-sheet');\n    menu.style.setProperty('top', `${Math.round(nb / (uiScale() || 1)) + 4}px`, 'important');\n");
@@ -598,18 +598,19 @@ console.log('§5 the wiring');
   // value a rotation left) — the regular class and the desktop write NOTHING. CONTROL: the term dropped ⇒ the column's 589px, RED by name
   const runPub = (src) => tryv(() => {
     const body = underOf(src); if (!body) return null;
-    const f = new Function('document', 'uiScale', body.slice(body.indexOf('{') + 1));
-    return ({ vc, bottom, was = '' }) => {
+    const f = new Function('document', 'uiScale', 'columnShape', body.slice(body.indexOf('{') + 1));
+    return ({ vc, bottom, was = '', col = null }) => {
       const props = new Map(was ? [['--phone-sheet-top', was]] : []);
       const style = { getPropertyValue: (k) => props.get(k) || '', setProperty: (k, v) => { props.set(k, v); }, removeProperty: (k) => { props.delete(k); } };
       const nav = { getClientRects: () => (bottom ? [1] : []), getBoundingClientRect: () => ({ bottom }) };
-      f.call({ _held: false, app: { viewportClass: () => vc } }, { getElementById: (id) => (id === 'mobile-nav' ? nav : null), documentElement: { style } }, () => 1);
+      f.call({ _held: false, app: { viewportClass: () => vc } }, { getElementById: (id) => (id === 'mobile-nav' ? nav : null), documentElement: { style } }, () => 1, () => col);
       return props.get('--phone-sheet-top') || '';
     };
   });
   const PUB = [['the compact bar at the page\'s top', { vc: 'compact', bottom: 44 }, '48px'], ['the compact bar under the lock strip', { vc: 'compact', bottom: 158 }, '162px'],
     ['the regular class: a Duo\'s landscape, the bar a column to the screen\'s bottom', { vc: 'regular', bottom: 585 }, ''], ['the regular class: a Duo\'s portrait, the bar a row', { vc: 'regular', bottom: 44 }, ''],
-    ['the regular class after a rotation (a stale 162px on <html>)', { vc: 'regular', bottom: 585, was: '162px' }, ''], ['the desktop (no bar drawn)', { vc: 'desktop', bottom: 0, was: '48px' }, '']];
+    ['the regular class after a rotation (a stale 162px on <html>)', { vc: 'regular', bottom: 585, was: '162px' }, ''], ['the desktop (no bar drawn)', { vc: 'desktop', bottom: 0, was: '48px' }, ''],
+    ['the compact class IN the Duo\'s side column (B-78db: the outer display\'s bar is the column, no top row — the stylesheet\'s 48)', { vc: 'compact', bottom: 657, was: '661px', col: 'outer' }, '']];
   const pubFailures = (src) => { const f = runPub(src); return typeof f !== 'function' ? [`no runnable _publishUnder (${f})`] : PUB.filter(([, c, want]) => tryv(() => f(c)) !== want).map(([what, c, want]) => `${what}: want «${want}», got «${tryv(() => f(c))}»`); };
   const noTerm = put(mn, "const nb = nav && this.app.viewportClass?.() === 'compact' && nav.getClientRects().length ? ", 'const nb = nav && nav.getClientRects().length ? ');
   const l2 = noTerm === null ? ['(the term not found)'] : pubFailures(noTerm);

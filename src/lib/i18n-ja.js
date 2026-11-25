@@ -1864,6 +1864,7 @@ export default {
   "The change is made, but it is not saved to disk yet: the storage is slow or failing. It is written when the storage can; a restart before then loses it.": "変更は行われましたが、まだディスクに保存されていません。ストレージが遅いか故障しています。ストレージが使えるようになると書き込まれます。それまでに再起動するとこの変更は失われます。", // B-0248 (lane bl-loop-b)
   "Dismiss (not going to act on this)": "無視(対応しない)",
   "For you": "あなた宛て",
+  "For you · {n}": "あなた宛て · {n}",
   "For-you inbox": "あなた宛て受信箱",
   "Go to this session": "このセッションへ移動",
   "Handled — mark done": "対応済み — 完了にする",
