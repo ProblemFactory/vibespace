@@ -1127,12 +1127,15 @@ function mkReal(opts = {}) {
   if (place) fs.readFileSync = function (f, ...a) { if (place && typeof f === 'string' && path.resolve(f) === held) { place = false; throw Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' }); } return realRead.call(this, f, ...a); };
   let real = null;
   try { real = (opts.ladderMod || DEL).create({ dataDir, activeSessions: new Map(), log: () => {} }); } finally { fs.readFileSync = realRead; }
+  const liftTells = [], landTells = [];
   const ladder = {
     delay: 0,
     async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (ladder.delay) await sleep(ladder.delay); if (o.noWake === true) return { ok: false, reason: 'no free lane', refused: 'no-wake' }; return { ok: true, lane: 'message' }; },
     stashFor: real.stashFor, drainStash: real.drainStash, stashPeek: real.stashPeek, onStash: real.onStash, stashCount: real.stashCount, flush: real.flush,
-    onStashLift: real.onStashLift,   // r3919: the lift's listeners, as server.js wires the real ladder (the reconcile at the lift clears a receipt's «not on disk»)
-    onStashLanded: real.onStashLanded, stashOnDisk: real.stashOnDisk,   // r3988 (A): the stash's own word that an entry is in the file, and who hears a write land
+    // r3919 / r3988 (A): the lift's listeners and the landing's, as server.js wires the real ladder — r4037: each call's own promise (the
+    // reconcile's end) is KEPT, so a leg waits on that fact, never on a sleep
+    onStashLift: (fn) => real.onStashLift(() => { const r = fn(); if (r && typeof r.then === 'function') liftTells.push(r); return r; }),
+    onStashLanded: (fn) => real.onStashLanded(() => { const r = fn(); if (r && typeof r.then === 'function') landTells.push(r); return r; }), stashOnDisk: real.stashOnDisk,
     ...(opts.noTornAt ? {} : { stashTornAt: real.stashTornAt }),   // r3003 (a): the stash's torn instant, as server.js wires the real ladder (noTornAt: the RED — a reconcile that cannot see it)
   };
   const reg = CH.createChannelRegistry();
@@ -1152,7 +1155,7 @@ function mkReal(opts = {}) {
     userTodos, deliver: ladder, now, serverSetting: () => undefined, log: opts.log || { log() {}, warn() {}, error() {} },
     liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }],
   });
-  return { eng: e, events, delivered, userTodos, ladder, real, send, advance: (ms) => { offset += ms; }, dataDir };
+  return { eng: e, events, delivered, userTodos, ladder, real, send, advance: (ms) => { offset += ms; }, dataDir, liftTells, landTells };
 }
 const fateOf = (W, id) => { const f = P.receiptFateOf(W.eng.store.outbox.snapshot().proposals[id]); return { kind: f && f.kind, text: f ? P.receiptFateText(f) : '' }; };
 const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
@@ -1340,10 +1343,10 @@ async function takenLeg(ladderMod, name) {
     const realW = fs.writeFileSync; let place = true;
     fs.writeFileSync = function (f, ...a) { if (place && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) { place = false; throw Object.assign(new Error('ENOSPC: no space left on device (placed)'), { code: 'ENOSPC' }); } return realW.call(this, f, ...a); };
     let lifted = null; try { lifted = await W.real.stashReadAgain(); } finally { fs.writeFileSync = realW; }
-    await sleep(60);
+    await Promise.all(W.liftTells); await eng.store.outbox.update(() => { });   // r4037 — facts: the lift's reconcile ended, the outbox's chain settled
     const afterLift = { ...(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}) };
     let afterLand = null;
-    if (land) { W.real.flush(); await sleep(60); afterLand = { ...(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}) }; }
+    if (land) { W.real.flush(); await new Promise((r) => setImmediate(r)); await Promise.all(W.landTells); await eng.store.outbox.update(() => { }); afterLand = { ...(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}) }; }   // the landing's tell ran, its reconcile ended
     eng.stop();
     let restart = null;
     if (!land) {   // the restart BEFORE the retry lands: the file holds the old list, without the receipt
@@ -1376,21 +1379,48 @@ async function takenLeg(ladderMod, name) {
     fs.writeFileSync = function (f, ...a) { if (failing && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) throw Object.assign(new Error('ENOSPC: no space left on device (placed)'), { code: 'ENOSPC' }); return realW.call(this, f, ...a); };
     try {
       await W.real.stashReadAgain();   // the list reads; its one write FAILS: the mark stays, the landing is owed
-      await sleep(40);
+      await Promise.all(W.liftTells);   // r4037 — a FACT: the lift's own reconcile has ended
       const mark0 = !!(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}).notOnDisk;
       if (door === 'drain') { failing = false; W.real.drainStash('agent-1'); }   // the disk healed: the agent's next prompt takes it, that write LANDS
       else { for (let i = 0; i < 30; i++) { if (i === 29) failing = false; W.real.stashFor('agent-1', { source: 'agent', kind: 'peer', fromName: 'Ada', text: `a peer message ${i}` }); } }   // the cap evicts it in the write that lands
-      await sleep(120);
+      // r4037 — FACTS, never a guess: the landing's tell has RUN (it is told on the loop's next turn, or — the red's road — inside the write),
+      // its reconcile has ENDED, and the outbox's own chain has settled (a no-op update queued last resolves after every change before it)
+      await new Promise((r) => setImmediate(r));
+      const told = W.landTells.length;
+      await Promise.all(W.landTells);
+      await eng.store.outbox.update(() => { });
       const q = eng.store.outbox.snapshot().proposals[p.proposal.id];
-      return { mark0, kind: (P.receiptFateOf(q) || {}).kind, lost: q.receiptLostAt || null, saidLost: logs.some((l) => /LOST \(not on disk when VibeSpace stopped\)/.test(l)) };
+      return { mark0, told, kind: (P.receiptFateOf(q) || {}).kind, lost: q.receiptLostAt || null, saidLost: logs.some((l) => /LOST \(not on disk when VibeSpace stopped\)/.test(l)) };
     } finally { fs.writeFileSync = realW; eng.stop(); }
   };
   for (const door of ['drain', 'evict']) {
     const want = door === 'drain' ? 'handed' : 'evicted';
     const g = await doorRun(`door-${door}`, door);
-    ok(g.mark0 && g.kind === want && !g.lost && !g.saidLost, `r4023 (D)(i): after a failed lift write, the ${door === 'drain' ? 'DRAIN' : 'cap\'s EVICTION'} whose write lands — the fate is «${g.kind}», never «lost» (nothing judged inside the write)`, g);
+    ok(g.mark0 && g.told >= 1 && g.kind === want && !g.lost && !g.saidLost, `r4023 (D)(i): after a failed lift write, the ${door === 'drain' ? 'DRAIN' : 'cap\'s EVICTION'} whose write lands — the fate is «${g.kind}», never «lost» (nothing judged inside the write)`, g);
     const r = await doorRun(`door-${door}-red`, door, TELLS_INSIDE);
-    ok(r.saidLost && r.kind === want && !r.lost, `RED: the landing told inside the write — the reconcile judges «lost» before the door's word (said in the journal); (D)(ii) the door's own record takes it away: «${r.kind}»`, r);
+    ok(r.told >= 1 && r.saidLost && r.kind === want && !r.lost, `RED: the landing told inside the write — the reconcile judges «lost» before the door's word (said in the journal); (D)(ii) the door's own record takes it away: «${r.kind}»`, r);
+  }
+  {
+    // r4037 (3): A STOP BETWEEN A LANDING AND ITS DEFERRED TELL — after a failed lift write, a write LANDS (its tell owed to the loop's next
+    // turn) and the hub stops in the same turn: the tell finds a stopped engine and decides nothing; at the NEXT START the landed entry reads
+    // «waiting» with no mark — from the file's own read (the new process's stash word: the entry is in the file it read)
+    const dir = path.join(ROOT, 'door-stop-before-tell'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'msg-stash.json'), '{}');
+    const W = mkReal({ name: 'door-stop-before-tell', dataDir: dir, holdRead: true }); const { eng } = W; await prime(eng);
+    const p = await eng.propose(AGENT, A, C, { text: 'a receipt whose landing is told after the stop' }); await eng.approve(p.proposal.id, {});
+    const realW = fs.writeFileSync; let failing = true;
+    fs.writeFileSync = function (f, ...a) { if (failing && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) throw Object.assign(new Error('ENOSPC: no space left on device (placed)'), { code: 'ENOSPC' }); return realW.call(this, f, ...a); };
+    try { await W.real.stashReadAgain(); } finally { fs.writeFileSync = realW; failing = false; }
+    await Promise.all(W.liftTells);
+    W.real.flush();   // the write LANDS: its landing's tell is owed to the loop's next turn
+    eng.stop();       // …and the hub stops before it
+    await new Promise((r) => setImmediate(r)); await Promise.all(W.landTells);
+    const inFile = ((JSON.parse(fs.readFileSync(path.join(dir, 'msg-stash.json'), 'utf8'))['agent-1']) || []).some((e) => e && String(e.ref || '') === String(p.proposal.id));
+    const W2 = mkReal({ name: 'door-stop-before-tell', dataDir: dir });
+    await W2.eng.reconcileReceiptFates();
+    const q = W2.eng.store.outbox.snapshot().proposals[p.proposal.id];
+    const out = { inFile, kind: (P.receiptFateOf(q) || {}).kind, mark: !!(q.receiptDelivery || {}).notOnDisk, lost: q.receiptLostAt || null, text: cardOf(P, q) };
+    W2.eng.stop();
+    ok(out.inFile && out.kind === 'waiting' && !out.mark && !out.lost, `r4037 (3): a stop between a landing and its tell — at the next start the landed entry reads «${out.text}» (waiting, no mark: the file's own read), never lost`, out);
   }
   {
     const both = { receipt: 'a receipt', receiptDelivery: { stashed: true, notOnDisk: true, at: 1, choice: 'next-turn' }, receiptLostAt: 5, receiptLostHow: 'not-on-disk', receiptDrainedAt: 6, receiptDrainedHow: 'drained', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' } };

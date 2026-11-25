@@ -1503,7 +1503,7 @@ function create(engineCtx) {
   // round wozyl97qk (e): the reconcile decided nothing while the stash was held (its peek refused): it runs again at the stash's lift
   try { if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(() => { reconcileReceiptFates().catch((err) => log.warn(`[channels] the receipt-fate reconcile at the stash's lift failed: ${(err && err.message) || err}`)); }); } catch { }
   // r3988 (A): …and when a write of the list LANDS after none did (the lift's own, or its retry's): the one clearer of the mark asks the stash's word
-  try { if (deliver && typeof deliver.onStashLanded === 'function') deliver.onStashLanded(() => { reconcileReceiptFates().catch((err) => log.warn(`[channels] the receipt-fate reconcile at a landed write failed: ${(err && err.message) || err}`)); }); } catch { }
+  try { if (deliver && typeof deliver.onStashLanded === 'function') deliver.onStashLanded(() => reconcileReceiptFates().catch((err) => log.warn(`[channels] the receipt-fate reconcile at a landed write failed: ${(err && err.message) || err}`))); } catch { }   // r4037: the listener returns the reconcile's own promise — its end is a fact a caller may wait on
   async function reconcileReceiptFates() {
     if (!deliver || typeof deliver.stashPeek !== 'function' || engineCtx.stopped) return [];
     const ob = store.outbox.snapshot();
@@ -1526,14 +1526,17 @@ function create(engineCtx) {
     }
     if (lostIds.length) {   // r3988 (C): its fate by name — not on disk when VibeSpace stopped; the agent did not get it
       const tl = now();
-      await store.outbox.update((ob2) => { for (const id of lostIds) { const q = ob2.proposals[id]; if (q && !q.receiptDrainedAt && !q.receiptEvictedAt && !q.receiptLostAt) { q.receiptLostAt = tl; q.receiptLostHow = 'not-on-disk'; } } });
-      notifyOutbox(lostIds);
-      log.log(`[channels] ${lostIds.length} receipt(s) taken while the list of waiting messages was unread are not in it now that it reads — LOST (not on disk when VibeSpace stopped), said on their cards: ${lostIds.join(', ').slice(0, 400)}`);
+      const wrote = [];   // r4037: only what the update REALLY wrote (its own re-check of the doors' fields) is said — never an id a door took meanwhile
+      await store.outbox.update((ob2) => { for (const id of lostIds) { const q = ob2.proposals[id]; if (q && !q.receiptDrainedAt && !q.receiptEvictedAt && !q.receiptLostAt) { q.receiptLostAt = tl; q.receiptLostHow = 'not-on-disk'; wrote.push(id); } } });
+      if (wrote.length) {
+        notifyOutbox(wrote);
+        log.log(`[channels] ${wrote.length} receipt(s) taken while the list of waiting messages was unread are not in it now that it reads — LOST (not on disk when VibeSpace stopped), said on their cards: ${wrote.join(', ').slice(0, 400)}`);
+      }
     }
     if (onDisk.length) {   // r3919 must 1 / r3988 (A): the stash's word — the entry is in the file: the card's «not on disk» leaves
-      await store.outbox.update((ob2) => { for (const id of onDisk) { const q = ob2.proposals[id]; if (q && q.receiptDelivery && q.receiptDelivery.notOnDisk) delete q.receiptDelivery.notOnDisk; } });
-      notifyOutbox(onDisk);
-      log.log(`[channels] ${onDisk.length} stashed receipt(s) taken while the list of waiting messages was unread are on disk now (the list read) — their cards no longer say «not on disk»`);
+      const cleared = [];   // r4037: the same — only the marks the update really took away are said
+      await store.outbox.update((ob2) => { for (const id of onDisk) { const q = ob2.proposals[id]; if (q && q.receiptDelivery && q.receiptDelivery.notOnDisk) { delete q.receiptDelivery.notOnDisk; cleared.push(id); } } });
+      if (cleared.length) { notifyOutbox(cleared); log.log(`[channels] ${cleared.length} stashed receipt(s) taken while the list of waiting messages was unread are on disk now (the list read) — their cards no longer say «not on disk»`); }
     }
     if (tornIds.length) {
       const t0 = now();
