@@ -79,6 +79,7 @@ function tableOf(src) {
 const NOT_HELD = {
   exit_answer_unreadable: 'a browser\'s exit check whose answer could not be read (src/server/browser-keeper.js, the profile\'s own proxy road) — not a list VibeSpace keeps; it is caught since that file holds the takeover requests through the store-read hold (r3261\'s second unit: the hold-create scan reads a nearby `.create({ allow … })` with this code) — its own sentence',
   unavailable: 'a door whose engine is not on this server (a feature off / not wired) — its own sentence',
+  scrub_refused: 'row B-360d (lane mask-value-shape, 主开发 r4523): a browser command\'s output the hub\'s scrub worker could not answer (lost, silent past its bound, past its ceiling or its work bound) — refused whole, never a held list; the CLI words it itself (data/bin/vibespace-browser: what happened, run it again, read less at once)',
   'not-durable': 'a person\'s act kept in memory, not on disk yet — channel-words / ws words «not on disk yet» (written later)',
   'todos-not-on-disk': 'B-0248 (lane bl-loop-b): a For-you act made, its write not on disk yet (the store writer still to land it) — the For-you handlers word it (src/lib/user-todos-actions.js, -panel.js), en / zh / ja',
   not_durable: 'the same as not-durable (the exit routes\' spelling)',

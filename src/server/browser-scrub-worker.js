@@ -12,6 +12,10 @@
 // - Each «frame» is answered once, by its seq, with the scrubbed frame and what the loop notes (the request ids that carried a
 //   credential, a cut, an unparseable frame). A frame before any values, or a scrub that throws, is answered «withheld»: the loop
 //   withholds that frame WHOLE, by name — the raw frame never leaves.
+// - Each «text» (row B-360d, lane mask-value-shape, 主开发 r4523: one half of a browser COMMAND's output past the on-loop figure) is
+//   answered once, by its seq, in the SAME queue as the frames, with the text scrubbed by THE SAME compiled scrubber (the loop's
+//   scrubText). A text before any values, a scrub that throws, or one that passed the text budget (the scrubber's `overs` moved) is
+//   answered «withheld»: the hub refuses that command's output by name — nothing of it is printed.
 const { isMainThread, parentPort } = require('worker_threads');
 if (isMainThread) throw new Error('src/server/browser-scrub-worker.js runs as a worker only (src/server/browser-dialogs.js starts it)');
 const { answerMemory } = require('../worker-memory.js');
@@ -31,6 +35,15 @@ parentPort.on('message', (msg) => {
       budgetMs = Number(msg.budgetMs) > 0 ? Number(msg.budgetMs) : 250;
       ready = true;
     } catch { ready = false; fn = null; sigs = []; }
+    return;
+  }
+  if (msg.type === 'text') {   // row B-360d: one half of a command's output
+    if (!ready || !fn) { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub worker had no values' }); return; }
+    const before = fn.overs;
+    let out;
+    try { out = fn(String(msg.text)); } catch { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub failed' }); return; }
+    if (fn.overs !== before || typeof out !== 'string') { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub passed its work bound (scrub_work_bound)' }); return; }
+    parentPort.postMessage({ type: 'done', seq: msg.seq, r: { out } });
     return;
   }
   if (msg.type !== 'frame') return;

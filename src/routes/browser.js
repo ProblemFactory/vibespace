@@ -2187,7 +2187,13 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     let scrubbed = null;
     if (profileId && req.body?.output && typeof req.body.output === 'object' && ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function') {
       const t = dialogTargetFor(k, f, profileId);
-      if (t.ok) { const sc = ctx.dialogs.scrubOutput(t, req.body.output); if (sc && sc.changed) scrubbed = { out: sc.out, err: sc.err }; }
+      // row B-360d (主开发 r4523): a half past the on-loop figure is scrubbed off the loop and AWAITED; a refusal answers by name (a code
+      // and the sizes, never a value or a piece of the output) — the CLI then refuses [login_fill_live] and prints nothing
+      if (t.ok) {
+        const sc = await ctx.dialogs.scrubOutput(t, req.body.output);
+        if (sc && sc.refused) return res.status(503).json({ error: `the browser output could not be scrubbed off the hub's loop (${sc.refused})`, code: 'scrub_refused', why: String(sc.refused), sizes: sc.sizes || null });
+        if (sc && sc.changed) scrubbed = { out: sc.out, err: sc.err };
+      }
     }
     res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(otherSiteFrame ? { otherSiteFrame } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubbed ? { scrubbed } : {}) });
   } catch (e) { fail(res, e); }

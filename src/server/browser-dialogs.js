@@ -3700,27 +3700,31 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!fn && !sigs.length) return masked;   // nothing to scrub
     return scrubOffLoop(pid, masked, fn, sigs);
   }
-  function scrubOffLoop(pid, frameStr, fn, sigs) {
+  function scrubOffLoop(pid, frameStr, fn, sigs, kind = 'frame', waited = false) {   // kind 'text' (row B-360d): one half of a command's output, refused by name
+    const refuse = kind === 'text' ? outputRefused : withheldFor;
     let s = scrubWorkers.get(pid);
     if (!s) {
       const last = scrubStartedAt.get(pid);
-      if (last != null && now() - last < SCRUB_FIG.floorMs) return Promise.resolve(withheldFor(pid, 'the scrub worker restarts after a floor'));
+      // r4528 (1): a command's half that meets the floor between starts WAITS for its end (5 s, inside the 60 s ceiling) and is posted
+      // then — refused only if the floor still stands after that wait; a frame is withheld at once, as before
+      if (kind === 'text' && !waited && last != null && now() - last < SCRUB_FIG.floorMs) return new Promise((resolve) => { const t = setTimeout(() => resolve(scrubOffLoop(pid, frameStr, fn, sigs, kind, true)), Math.max(0, SCRUB_FIG.floorMs - (now() - last))); t.unref?.(); });
+      if (last != null && now() - last < SCRUB_FIG.floorMs) return Promise.resolve(refuse(pid, 'the scrub worker restarts after a floor'));
       s = startScrubWorker(pid);
-      if (!s) return Promise.resolve(withheldFor(pid, 'no scrub worker could start'));
+      if (!s) return Promise.resolve(refuse(pid, 'no scrub worker could start'));
     }
     const ver = scrubValuesVer.get(pid) || 0;
     if (s.fn !== fn || s.ver !== ver) {   // the values changed since the worker last got them (the counter both writers move, r3342 (4)): by message, before the frame
       s.fn = fn; s.ver = ver;
-      try { s.w.postMessage({ type: 'values', pairs: fn ? scrubPairsOf(pid) : [], sigs, minB: VR().MIN_MASK_BYTES || 8, budgetMs: SCRUB_FIG.walkMs }); } catch { endScrubWorker(pid, 'the values could not be handed over'); return Promise.resolve(withheldFor(pid, 'the values could not be handed over')); }
+      try { s.w.postMessage({ type: 'values', pairs: fn ? scrubPairsOf(pid) : [], sigs, minB: VR().MIN_MASK_BYTES || 8, budgetMs: SCRUB_FIG.walkMs }); } catch { endScrubWorker(pid, 'the values could not be handed over'); return Promise.resolve(refuse(pid, 'the values could not be handed over')); }
     }
     const seq = ++s.seq;
     armScrubIdle(pid, s);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { const p = s.pend.get(seq); if (!p) return; s.pend.delete(seq); p.resolve(withheldFor(pid, `no answer within ${SCRUB_FIG.ceilingMs} ms of its post`)); }, SCRUB_FIG.ceilingMs);   // THE CEILING: this frame alone
+      const timer = setTimeout(() => { const p = s.pend.get(seq); if (!p) return; s.pend.delete(seq); p.resolve(refuse(pid, `no answer within ${SCRUB_FIG.ceilingMs} ms of its post`)); }, SCRUB_FIG.ceilingMs);   // THE CEILING: this frame alone
       timer.unref?.();
-      s.pend.set(seq, { resolve, timer });
+      s.pend.set(seq, { resolve, timer, kind });
       if (s.answered === seq - 1) armScrubTurn(pid, s);   // the worker was idle: this frame's turn starts at its post
-      try { s.w.postMessage({ type: 'frame', seq, frame: frameStr }); } catch { endScrubWorker(pid, 'the frame could not be handed over', s); }
+      try { s.w.postMessage(kind === 'text' ? { type: 'text', seq, text: frameStr } : { type: 'frame', seq, frame: frameStr }); } catch { endScrubWorker(pid, 'the frame could not be handed over', s); }
     });
   }
   /** THE BOUND (r2445 law 5, timed from the TURN — 主开发 r3342 (3)): the frame the worker is on has boundMs; silent past it, the worker is ENDED */
@@ -3745,6 +3749,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const p = s.pend.get(msg.seq);
       if (!p) return;   // its ceiling withheld it already
       s.pend.delete(msg.seq); clearTimeout(p.timer);
+      if (p.kind === 'text') { p.resolve(msg.r && typeof msg.r === 'object' && typeof msg.r.out === 'string' ? { out: msg.r.out } : outputRefused(pid, String(msg.withheld || 'no answer'))); return; }   // row B-360d: a command's half
       p.resolve(msg.r && typeof msg.r === 'object' ? frameDone(pid, msg.r, SCRUB_FIG.walkMs) : withheldFor(pid, String(msg.withheld || 'no answer')));
     });
     w.on('error', () => endScrubWorker(pid, 'the scrub worker failed', s));
@@ -3759,7 +3764,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     scrubWorkers.delete(pid);
     if (s.idle) clearTimeout(s.idle);
     if (s.turn) clearTimeout(s.turn);
-    for (const p of s.pend.values()) { clearTimeout(p.timer); p.resolve(withheldFor(pid, why)); }
+    for (const p of s.pend.values()) { clearTimeout(p.timer); p.resolve(p.kind === 'text' ? outputRefused(pid, why) : withheldFor(pid, why)); }   // row B-360d: a command's half is refused
     s.pend.clear();
     try { s.w.terminate(); } catch { /* gone */ }
   }
@@ -3778,12 +3783,45 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (t - c.saidAt >= 60000) { try { log.warn?.(`[browser-dialog] ${scrubLabel(pid)}: ${c.n} CDP frame(s) withheld whole — the vault scrub could not answer (${why})`); } catch { /* */ } c.n = 0; c.saidAt = t; }
     return { withheld: why };
   }
+  // ── A BROWSER COMMAND's OUTPUT OFF THE LOOP (row B-360d, lane mask-value-shape, 主开发 r4523) ──
+  // The CLI (data/bin/vibespace-browser) posts a verb's whole output to the audit route when the profile holds scrub values; each half
+  // (`out`, `err`) is up to 16 MiB. A half past THE ON-LOOP FIGURE (the frames' own, 64 KiB) is ONE «text» job on the profile's scrub
+  // worker, in the same queue as its frames (so the halves and the commands come back in the order asked), with THE SAME compiled
+  // scrubber and values; a half of 64 KiB or less stays on the loop, as a frame does. NEVER RAW, NEVER A FALLBACK TO THE LOOP: a lost
+  // worker, a silence past its bound, the floor between starts, the ceiling, or the text budget's overrun REFUSES the whole output
+  // (`{ refused }`): the route answers it by name and the CLI prints nothing ([login_fill_live]). The journal gets the profile's label
+  // and a count — never a value or a piece of the output.
+  const scrubOutputRefused = new Map();   // pid → { n, total, saidAt }
+  function outputRefused(pid, why) {
+    let c = scrubOutputRefused.get(pid);
+    if (!c) { c = { n: 0, total: 0, saidAt: -Infinity }; scrubOutputRefused.set(pid, c); }
+    c.n++; c.total++;
+    const t = now();
+    if (t - c.saidAt >= 60000) { try { log.warn?.(`[browser-dialog] ${scrubLabel(pid)}: ${c.n} browser command output(s) refused — the vault scrub could not answer (${why})`); } catch { /* */ } c.n = 0; c.saidAt = t; }
+    return { refused: why };
+  }
+  /** ONE half of a command's output past the figure → a promise of { out } | { refused }: a «text» job on the profile's worker, through
+   *  the frames' own poster (scrubOffLoop, kind 'text': the same queue, values, turn, bound, floor and ceiling) */
+  const scrubTextOffLoop = (pid, text, fn) => scrubOffLoop(pid, text, fn, credSigsByProfile.get(pid) || [], 'text');
   const scrubWorkerFacts = (pid = null) => (pid == null ? { live: scrubWorkers.size } : { live: scrubWorkers.has(String(pid)), withheld: (scrubWithheld.get(String(pid)) || { total: 0 }).total, startedAt: scrubStartedAt.get(String(pid)) ?? null });
   function scrubOutput(target, raw) {
     const pid = String((target && target.profileId) || '');
     if (!pid || !raw || typeof raw !== 'object') return { out: '', err: '', changed: false };
     const o0 = typeof raw.out === 'string' ? raw.out : '';
     const e0 = typeof raw.err === 'string' ? raw.err : '';
+    // row B-360d: a half past the on-loop figure is scrubbed by the profile's worker (above); both halves of 64 KiB or less stay on the
+    // loop, as the release scrubbed them
+    const big = (x) => !!x && Buffer.byteLength(x, 'utf8') > SCRUB_FIG.onLoopMax;
+    if (big(o0) || big(e0)) {
+      const fn = scrubberForProfile(pid);
+      if (!fn) return { out: o0, err: e0, changed: false };   // no values to scrub with: as scrubText answers
+      const half = (x) => (!x ? Promise.resolve({ out: '' }) : big(x) ? scrubTextOffLoop(pid, x, fn) : Promise.resolve({ out: scrubText(pid, x) }));
+      const po = half(o0), pe = half(e0);   // `out` first, then `err`: the queue answers them in that order
+      return Promise.all([po, pe]).then(([a, b]) => {
+        if (a.refused || b.refused) return { refused: String(a.refused || b.refused), sizes: { out: Buffer.byteLength(o0, 'utf8'), err: Buffer.byteLength(e0, 'utf8') } };
+        return { out: a.out, err: b.out, changed: a.out !== o0 || b.out !== e0 };
+      });
+    }
     const out = o0 ? scrubText(pid, o0) : '';
     const err = e0 ? scrubText(pid, e0) : '';
     return { out, err, changed: out !== o0 || err !== e0 };
