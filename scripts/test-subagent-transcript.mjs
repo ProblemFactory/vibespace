@@ -336,10 +336,21 @@ console.log('⑦ THE LIVE WATCHER\'S FINDER — the kept place and the cwd\'s fo
   const s6 = await stopInLook(H, 6);
   ok(H.told(EL) > 0 && !s6.subagentWatchers.has(`tu-${EL}`), `a stop that lands while the look runs: the helper's lines are read ONCE when the look returns (${H.told(EL)} told), no watch left armed`);
   // r2594 (4): the shared listing is read again after its age (no red today)
+  // r4362 (row B-3dbd's family; SEEN red once in a gate): the listing's age is the real Date.now (src/server/subagent-transcript.js),
+  // so «two looks inside 100 ms» was a race a loaded machine could lose (the second look came after the age and listed again). The
+  // clock is PLACED: held still for the two looks, then stepped 150 ms past the age — the leg judges the age, never a machine's speed.
+  // CONTROL (主开发 r4340 law 3): the old leg's loss made at will — 150 ms placed BETWEEN the two looks: the second lists again.
   T._resetForTest(); T._setListingMaxAgeForTest(100);
   const look = () => T.findAgentTranscript({ claudeSessionId: SID, agentId: 'ffffffffffffff01', exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ, workflows: false, shared: true });
-  await look(); await look(); const once = T.stats().listings; await sleep(150); await look();
-  ok(once === 1 && T.stats().listings === 2 && T.stats().listingsShared === 1, `the hub's listing is read again after its age (${once} listing for two looks inside it, ${T.stats().listings} after it)`);
+  const realNow = Date.now; let placedAt = realNow();
+  try {
+    Date.now = () => placedAt;
+    await look(); await look(); const once = T.stats().listings; placedAt += 150; await look();
+    ok(once === 1 && T.stats().listings === 2 && T.stats().listingsShared === 1, `the hub's listing is read again after its age (${once} listing for two looks inside it, ${T.stats().listings} after it — the clock placed, never the machine's)`);
+    T._resetForTest(); T._setListingMaxAgeForTest(100);
+    await look(); placedAt += 150; await look();
+    ok(T.stats().listings === 2 && T.stats().listingsShared === 0, `CONTROL (r4340 law 3): 150 ms placed between the two looks — as a loaded machine could — the second lists again (${T.stats().listings} listings): the leg on the real clock could lose; on the placed clock it cannot`);
+  } finally { Date.now = realNow; }
   T._resetForTest();
   H.close();
   // RED: the release's finder, planted in a copy of the parser module
