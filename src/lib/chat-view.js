@@ -8254,13 +8254,22 @@ class ChatView {
     // WHILE A SLAB SETTLES ABOVE THE READER the rebuild keeps THE CARD BEING READ still — the settle watch's card (B-3e8b's
     // remainder, 主开发 r3822: the topmost element kept still moved the read card by what the rebuild changed between them);
     // outside a slab's life, or with no card (a navigation forgot it, the list let it go), the topmost element as below (B-f1f0)
+    // …and ONLY WHILE THAT CARD IS IN VIEW (line 960's round, its must: a continuous scroll — a fling, a scroll-bar drag, a smooth
+    // page-up — is ONE burst, so the card from before it can lie a viewport away when the rebuild runs; keeping that one moved what
+    // the person was looking at): a card out of view ⇒ the topmost element, the release's rule
     const card = this._gapSettle?.card?.();
-    if (card) {
-      const out = { el: card, delta: card.offsetTop - st, h: card.offsetHeight, below: [], read: true };
+    if (card && this._readCardInView(card, st, end)) {
+      const out = { el: card, delta: card.offsetTop - st, h: card.offsetHeight, below: [], others: [], read: true };
       for (let el = card.nextElementSibling; el; el = el.nextElementSibling) {
         if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
         if (el.offsetTop >= end) break;
         if (el.offsetHeight > 0) out.below.push([el, el.offsetTop - st]);
+      }
+      // what stands in view ABOVE the kept card is under the pointer too (B-ef04's stamp, `_runsMovedUnder`; the round's should)
+      for (let el = card.previousElementSibling; el; el = el.previousElementSibling) {
+        if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
+        if (el.offsetTop + el.offsetHeight <= st) break;
+        if (el.offsetHeight > 0) out.others.push([el, el.offsetTop - st]);
       }
       return out;
     }
@@ -8281,6 +8290,9 @@ class ChatView {
    *  stays put; the fold closes above it); nothing below it still shows ⇒ the anchor's own top when it still shows, else as
    *  before: back to its run header (directly above, where the folded content was — a press on it restores the view), forward
    *  only when nothing visible precedes it */
+  /** B-3e8b's remainder, line 960's must: does the watch's card stand in view (any part of it between the list's top and bottom)? */
+  _readCardInView(el, st, end) { return el.offsetTop < end && el.offsetTop + el.offsetHeight > st; }
+
   /** B-ef04 cure: what a pass can change in the view — how many members it folded, cards it compacted, headers it drew (three
    *  counts; a pass that changes none of them and moves no element of the view moved nothing under the pointer) */
   _runsSig(list) {
@@ -8290,7 +8302,7 @@ class ChatView {
   /** B-ef04 cure: did the pass move an element the view showed (its distance changed, or it folded)? — after the restore */
   _runsMovedUnder(list, anchor) {
     if (!anchor) return false;
-    return [[anchor.el, anchor.delta], ...anchor.below].some(([e, d]) => e.isConnected && (e.offsetParent === null || Math.abs(e.offsetTop - list.scrollTop - d) > 1));
+    return [[anchor.el, anchor.delta], ...anchor.below].concat(anchor.others || []).some(([e, d]) => e.isConnected && (e.offsetParent === null || Math.abs(e.offsetTop - list.scrollTop - d) > 1));
   }
 
   _runsRestore(list, anchor) {

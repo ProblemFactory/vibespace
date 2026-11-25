@@ -789,7 +789,36 @@ const GROW_UNTIL = `(() => { const G = window.__grow; if (!G) return false; G.ar
     if (!G.row) { G.row = 'none'; return true; }
     const pad = document.createElement('div'); pad.style.height = '209px'; G.row.appendChild(pad); G.at = performance.now(); G.rowAt = Math.round(G.row.offsetTop - st); return false; }
   return G.row === 'none' || performance.now() - G.at > 150; })()`;
+// LINE 960's ROUND, its must (主开发 r4273): A CONTINUOUS SCROLL IS ONE BURST, so the watch's card (the one from before it) can lie a
+// viewport away when a runs rebuild runs. PLACED: once the hold's slab landed and the slab's own first rebuild ran (the first notch
+// held), a drag up of 1200 px (30 steps 16 ms apart: one burst), then — the burst over — a 27 px run header
+// painted right under the topmost element in view, and a real rebuild that takes it away. The topmost element in view (what the
+// person looks at) must keep its place; the control blinds the in-view test (line 960 as taken: the off-screen card kept).
+const FLING_PLANTED = (control) => RUNS_PLANTED(control).replace("return { installed: true }; })()", "R.fling = 1; return { installed: true }; })()");
+const FLING_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.armed = 1; if (!R.landed) return false;
+  const v = window.__v, list = v._messageList, now = performance.now();
+  if (R.step === 0 && !R.natural && now - R.landedAt < 1500) return false;
+  if (R.step === 0) { R.st0 = list.scrollTop; R.lastScroll = now; list.addEventListener('scroll', () => { R.lastScroll = performance.now(); R.scrolls = (R.scrolls || 0) + 1; }, { passive: true });
+    // a DRAG of the scroll bar's shape: 30 steps of 40 px, 16 ms apart (a smooth scrollBy was cut short after 277 px by the
+    // product's own writes during the settle — measured; a drag is not)
+    let k = 0; const step = () => { if (k++ >= 30) return; list.scrollTop = list.scrollTop - 40; setTimeout(step, 16); }; step();
+    R.step = 1; R.at = now; return false; }
+  if (R.step === 1) { if (now - R.at < 250 || now - R.lastScroll < 150) return false;   // the burst is over (no scroll for 150 ms)
+    const st = list.scrollTop, ch = list.clientHeight, c = v._gapSettle && v._gapSettle.card ? v._gapSettle.card() : null; let t = null;
+    for (const el of list.children) { if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue; if (el.offsetTop + el.offsetHeight <= st) continue; t = el; break; }
+    R.travelled = Math.round(R.st0 - st); R.cardBelow = c && c.isConnected ? Math.round(c.offsetTop - st - ch) : null; R.alive = !!v._gapSettleRO;
+    if (!t || !c || R.cardBelow == null || R.cardBelow <= 0) { R.step = -1; return true; }   // no scene (named by the leg): the card is not out of view
+    const h = document.createElement('div'); h.className = 'chat-run-header'; h.style.flex = 'none'; h.style.height = '27px'; h.style.minHeight = '27px'; t.after(h);
+    R.t = t; R.step = 2; R.at = now; return false; }
+  if (R.step === 2) { if (now - R.at < 120) return false;
+    if (R.control) v._readCardInView = () => true;   // the control: line 960 as taken — the off-screen card kept
+    const lt = list.getBoundingClientRect().top, t0 = R.t.getBoundingClientRect().top - lt;
+    R.forcing = 1; v._updateRuns(); R.forcing = 0;
+    R.topMoved = Math.round(R.t.getBoundingClientRect().top - lt - t0); R.step = 3; R.at = now; return false; }
+  return R.step < 0 || now - R.at > 120; })()`;
 const BLIND = {
+  'fling placed': FLING_PLANTED(false),
+  'fling placed, control': FLING_PLANTED(true),
   'grow placed': GROW_PLACED(false),
   'grow placed, control': GROW_PLACED(true),
   'runs placed': RUNS_PLANTED(false),
@@ -799,15 +828,15 @@ const BLIND = {
   '(2) twice': `(() => { const v = window.__v, w = v._watchGapSettle; v._watchGapSettle = function (...a) { const r = w.apply(this, a); this._messageList.style.overflowAnchor = ''; return r; }; return { blinded: '(2) answered beside the browser anchoring' }; })()`,
 };
 const STORE = (o, set) => `(() => { ${Object.keys(o).map((k) => set ? `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(o[k])});` : `localStorage.removeItem(${JSON.stringify(k)});`).join(' ')} return 1; })()`;
-const firstHold = async (label, blind, { store = null, after = null } = {}) => {
+const firstHold = async (label, blind, { store = null, after = null, cadence = 'hold' } = {}) => {
   if (store) await evaljs(STORE(store, true));   // a person's own setting, read by the page at its boot (the product's own road)
-  try { return await firstHoldOn(label, blind, after); } finally { if (store) await evaljs(STORE(store, false)).catch(() => 0); }
+  try { return await firstHoldOn(label, blind, after, cadence); } finally { if (store) await evaljs(STORE(store, false)).catch(() => 0); }
 };
-const firstHoldOn = async (label, blind, after) => {
+const firstHoldOn = async (label, blind, after, cadence = 'hold') => {
   if (!(await pageReady(PORT, 'first hold ' + label))) return { label, law: { ok: false, why: 'no page' } };
   await sleep(1500);
   globalThis.__notchReads = [];
-  const r = await runGestures([...(blind ? [['blind ' + blind, 'eval', BLIND[blind]]] : []), ['gap-jump', 'jump', 0], ['gap-up-hold-1', 'up', 'hold']], 'first hold ' + label);
+  const r = await runGestures([...(blind ? [['blind ' + blind, 'eval', BLIND[blind]]] : []), ['gap-jump', 'jump', 0], ['gap-up-hold-1', 'up', cadence]], 'first hold ' + label);
   const reads = globalThis.__notchReads; globalThis.__notchReads = null;
   const afterOut = after && r.opened?.ok ? await evaljs(after) : null;
   const row = (r.rows || []).find((x) => x.name === 'gap-up-hold-1');
@@ -963,7 +992,7 @@ const searchScene = async (tail, stopFirst = false) => {
   const RAL = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, cardMoved: R.cardMoved ?? null, topMoved: R.topMoved ?? null, alive: !!R.alive } : null; })()';
   const placedHold = async (label, control, after = RAL) => {
     globalThis.__firstNotchUntil = RUNS_UNTIL;
-    try { return await firstHold(label, control ? 'runs placed, control' : 'runs placed', { after }); } finally { globalThis.__firstNotchUntil = null; }
+    try { return await firstHold(label, control ? 'runs placed, control' : 'runs placed', { after, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; }
   };
   const placed = [], placedCtl = [];
   for (let k = 1; k <= 3; k++) placed.push(await placedHold(`a runs rebuild inside the first notch, ${k} of 3`, false, k === 1 ? BOTH_RULES : RAL));
@@ -980,13 +1009,28 @@ const searchScene = async (tail, stopFirst = false) => {
   const both = placed[0] && placed[0].after && placed[0].after.both;
   check(`§4h BOTH RULES: ${both && both.ok ? '' : 'PRECONDITION NOT MET (' + ((both && both.why) || 'no scene') + ') — '}a rebuild inside the slab's life keeps the card being read (it moved ${both?.inside?.card} px, the topmost element ${both?.inside?.top} px); the same rebuild after the watch ended keeps the topmost element (it moved ${both?.after?.top} px, the card ${both?.after?.card} px; ± ${NOTCH_TOL_PX})`,
     !!both && both.ok && Math.abs(both.inside.card) <= NOTCH_TOL_PX && Math.abs(both.inside.top) > NOTCH_TOL_PX && Math.abs(both.after.top) <= NOTCH_TOL_PX && Math.abs(both.after.card) > NOTCH_TOL_PX, JSON.stringify(both || null));
+  // LINE 960's MUST (r4273): a continuous scroll (one burst) carries the view a viewport and a half away from the watch's card; a runs
+  // rebuild then keeps what the person looks at (the topmost element in view), never the off-screen card
+  const FL = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, travelled: R.travelled ?? null, cardBelow: R.cardBelow ?? null, scrolls: R.scrolls || 0, topMoved: R.topMoved ?? null, alive: !!R.alive } : null; })()';
+  const flingHold = async (label, control) => {
+    globalThis.__firstNotchUntil = FLING_UNTIL;
+    try { return await firstHold(label, control ? 'fling placed, control' : 'fling placed', { after: FL, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; }
+  };
+  const fl = await flingHold('a continuous scroll away from the card, then a runs rebuild', false), flc = await flingHold('a continuous scroll away from the card, then a runs rebuild, control', true);
+  // the scene: the card OUT OF VIEW (below the view's bottom: more than a viewport from its top) when the rebuild runs — measured on
+  // the kit, the drag travels ~520 px of its 1200 (the settle's own writes answer part of it), and the card sits ~460 px below the view
+  const flScene = (h) => !!h.after && h.after.landed === 1 && h.after.step === 3 && h.after.alive && h.after.cardBelow > 0;
+  check(`§4h A CONTINUOUS SCROLL AWAY FROM THE WATCH's CARD, THEN A RUNS REBUILD (line 960's must, r4273): ${flScene(fl) ? '' : 'PRECONDITION NOT MET (inside the watch, one burst of ' + (fl.after?.scrolls ?? '?') + ' scroll events left the card out of view: ' + (fl.after?.cardBelow ?? '?') + ' px below it) — '}what the person looks at keeps its place: the topmost element moved ${fl.after?.topMoved} px (the view travelled ${fl.after?.travelled} px in ${fl.after?.scrolls} scroll events, the card ${fl.after?.cardBelow} px below the view; ± ${NOTCH_TOL_PX})`,
+    flScene(fl) && Math.abs(fl.after.topMoved) <= NOTCH_TOL_PX, JSON.stringify(fl.after));
+  check(`§4h CONTROL: the in-view test blinded (line 960 as taken: the off-screen card kept) ⇒ what the person looks at moves by what the rebuild took away (${flc.after?.topMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red`,
+    flScene(flc) && Math.abs(flc.after.topMoved) > NOTCH_TOL_PX, JSON.stringify(flc.after));
   // THE SECOND MOVER (主开发 r3898): a row between the viewport's top and the card being read grows inside the held first notch, before
   // any scroll — the watch answers it (its line is the landing reader card's until the first scroll); at the default size and at a
   // chat font of 16; the control (the watch started with no reader card: the viewport's top as its line) misses by the growth
   const GROWN = '(() => { const G = window.__grow; return G ? { landed: G.landed, row: G.row === "none" ? "none" : !!G.row, rowAt: G.rowAt ?? null } : null; })()';
   const growHold = async (label, control, store = null) => {
     globalThis.__firstNotchUntil = GROW_UNTIL;
-    try { return await firstHold(label, control ? 'grow placed, control' : 'grow placed', { store, after: GROWN }); } finally { globalThis.__firstNotchUntil = null; }
+    try { return await firstHold(label, control ? 'grow placed, control' : 'grow placed', { store, after: GROWN, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; }
   };
   const gr = [await growHold('a row grows between the top and the card inside the first notch', false), await growHold('a row grows between the top and the card inside the first notch, at chat font 16', false, { termFontSize: '16' })];
   const grc = await growHold('a row grows between the top and the card inside the first notch, control', true);
