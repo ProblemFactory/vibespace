@@ -5811,6 +5811,8 @@ export default {
   "Authorizing the batch…": "一括分を承認しています…",
   "Resuming… {done} of {n} continued": "再開中… {n} 件中 {done} 件を続行",
   "The whole batch was refused — nothing was resumed: {detail}": "一括分がすべて拒否されました — 何も再開されていません：{detail}",
+  // row B-9a24 R9 F1 (主开发 r4555 (2)): a bulk row the storage refused — said by its row
+  "«{name}» was not resumed: the storage is busy and its record could not be written — try again in a moment.": "「{name}」は再開されませんでした：ストレージが混み合っていて記録を書き込めませんでした — 少し待ってからもう一度お試しください。",
   "Could not read the sessions — reopen Settings to retry.": "セッションを読み込めませんでした — 設定を開き直して再試行してください。",
   "Auto-continue is on for {n} more sessions": "さらに {n} 件のセッションで自動続行をオンにしました",
   "Auto-continue is off for {n} sessions": "{n} 件のセッションで自動続行をオフにしました",

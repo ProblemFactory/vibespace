@@ -255,6 +255,9 @@ export async function openResumeStoppedDialog(app, { plan = null, onDone = null 
       if (rec && Array.isArray(rec.skipped) && rec.skipped.length) { const nb = skippedList(rec.skipped); if (nb) { if (skBox) skBox.replaceWith(nb); else body.insertBefore(nb, status); skBox = nb; } }
       status.textContent = line;
       status.classList.add('done');
+      // F1 (主开发 r4555 (2)): a row the storage refused under the one-wait rule says WHY by its row — never a bare «could not deliver»
+      const busyRows = (rec && rec.failed || []).filter((f) => f && f.why === 'storage-busy');
+      if (busyRows.length) { const bp = el('p', 'resume-stopped-refused', busyRows.map((f) => t('«{name}» was not resumed: the storage is busy and its record could not be written — try again in a moment.', { name: f.name || '?' })).join(' ')); body.insertBefore(bp, status.nextSibling); }
       if (rec && rec.refused) {
         const why = el('p', 'resume-stopped-refused', t('The whole batch was refused — nothing was resumed: {detail}', { detail: batchRefusalWords(rec.refused) }));
         toastWordsInto(why, why.textContent);   // the row a refusal names: its link drawn as its door

@@ -554,13 +554,22 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  record back (a delivery that did not happen), or null: the record could not land — the caller delivers NOTHING (it gives its
    *  hold back; the arm and the breaker stand as they were, the tick tries again). A kill after the landing and before the delivery
    *  leaves the conversation not continued (never twice). */
+  // F1 (主开发 r4551): AT MOST ONE BOUNDED WAIT A TICK — once a landing of this tick is refused (its bound spent, or its write failed),
+  // every further landing refuses at once until the next tick starts (tick() clears it): the other due arms stay as they were. fireNow
+  // and the bulk resume, outside a tick, share it until then. `refusedWhy` is the last refusal's code, for the journal
+  let landingRefused = false, refusedWhy = null;
   function landRecord(why) {
-    if (hold.held()) return false;   // held: nothing is written over its file (no record, so no continue — r3004 already refuses there)
+    if (hold.held()) { refusedWhy = 'held'; return false; }   // held: nothing is written over its file (no record, so no continue — r3004 already refuses there)
+    if (landingRefused) return false;
+    const W = writer();
+    if (typeof W.laneHeld === 'function' && W.laneHeld(file)) { landingRefused = true; refusedWhy = 'lane-held'; return false; }   // F1: the writer already reports that lane held — refused at once, without the wait
     const was = saveHeld; saveHeld = 0;   // a bulk flip's batching never holds back the record a delivery waits on
     try { save(); } finally { saveHeld = was; }
     let r = null;
-    try { r = writer().flushSync([file], { waitedBy: `auto-resume.json: ${why}` }); } catch (e) { r = { left: [{ file, why: (e && e.message) || 'the writer threw' }] }; }
-    return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === file);
+    try { r = W.flushSync([file], { waitedBy: `auto-resume.json: ${why}` }); } catch (e) { r = { left: [{ file, why: (e && e.message) || 'the writer threw' }] }; }
+    const landed = !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === file);
+    if (!landed) { landingRefused = true; refusedWhy = r && r.deferred ? 'stopping' : 'not-durable'; }
+    return landed;
   }
   function recordBeforeDelivery(id, key, kind, origin = null) {
     const arm = armed.has(id) ? armed.get(id) : undefined;
@@ -569,8 +578,17 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     armed.delete(id);
     noteFired(id, key, kind, Date.now(), origin);
     if (!landRecord(`the continue of ${id}`)) { back(); save(); return null; }
-    return () => { back(); save(); };
+    // F2 (主开发 r4551): THE PUT-BACK IS ON DISK, OR SAID — a delivery that failed after a good landing lands the arm and the breaker back
+    // by the same bounded road (under F1); when it cannot, the put-back stays queued (the writer writes it again) and ONE journal line
+    // says it, a count and a code, no account: a restart before it is written leaves that conversation stopped at its wall (its mark kept)
+    return () => {
+      back();
+      if (landRecord(`the wait of ${id} put back`)) return;
+      save(); putBacksOwed++;
+      log(`[auto-resume] ${putBacksOwed} continue${putBacksOwed === 1 ? '' : 's'} not delivered had the wait put back in memory only (${refusedWhy || 'not-durable'}) — written when the storage answers; a restart before it leaves that conversation stopped at its wall`);
+    };
   }
+  let putBacksOwed = 0;
   function save() {   // (a declaration: test-architecture §72 finds the store's site by its name)
     if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file
     if (saveHeld) { saveOwed = true; return; }
@@ -875,14 +893,18 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const stopped = new Promise((r) => { wakeStop = r; });
     stopWakers.set(batchId, () => wakeStop('stopped'));
     (async () => {
+      // F1 + 主开发 r4555 (2): A PERSON's PRESS IS ANSWERED AT ONCE when the storage refuses — once a continue's record could not land,
+      // every row after it is answered at once (no pace, no landing tried: never a second wait), each said by its row (storage-busy)
+      let busy = false;
       for (let i = 0; i < chosen.length; i++) {
-        if (i > 0) await Promise.race([sleep(bulkPaceMs), stopped]);
+        if (i > 0 && !busy) await Promise.race([sleep(bulkPaceMs), stopped]);
         if (rec.stopAsked) { stopRest(i); break; }   // looked at before EVERY conversation
         const e = chosen[i];
         let h = holdOf.get(e.id) || null;
         renew();   // every hold not reached yet lives on while this one waits its turn (U2 cure: a batch outlives one hold's TTL)
         const giveBack = () => { open.delete(e.id); holdOf.delete(e.id); if (h && releaseSpend) { try { releaseSpend(e.id, null, h.hold); } catch (err) { log('[auto-resume] releasing a batch hold failed: ' + err.message); } } h = null; };
         const skip = (why, until = null, reason = null, member = null) => { giveBack(); rec.skipped.push({ id: e.id, name: e.name, kind: e.kind, at: e.at, why, until, ...(reason ? { reason: String(reason).slice(0, 60) } : {}), ...(member ? { member: String(member).slice(0, 80) } : {}) }); };
+        if (busy) { giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'storage-busy' }); continue; }   // F1: answered at once, said by its row
         const session = activeSessions.get(e.id);
         if (!session) { skip('gone'); continue; }
         if (session._isStreaming || session._arFiring) { skip('running'); continue; }   // working, or its own continue is in flight
@@ -964,7 +986,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const carried = { note: e.kind === 'overload' ? '模型过载后的批量恢复' : '因用量停止后的批量恢复' };
         let ok = false;
         const wasArmed = armed.has(e.id), putBack = recordBeforeDelivery(e.id, ident2 ? ident2.key : null, 'timed');   // R9: the record on disk BEFORE the delivery
-        if (!putBack) { log(`[auto-resume] ${e.id}: the record of this continue could not be written to auto-resume.json — nothing was sent (the bulk resume ${batchId})`); giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
+        if (!putBack) { log(`[auto-resume] ${e.id}: the record of this continue could not be written to auto-resume.json — nothing was sent (the bulk resume ${batchId})`); giveBack(); if (refusedWhy === 'held') rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); else { busy = true; rec.failed.push({ id: e.id, name: e.name, why: 'storage-busy' }); } continue; }
         try { ok = deliverContinue(session, verb, prompt, (s2, text) => sentNoted(s2, text, sendToSession(e.id, s2, text, carried))); }   // B-3d90: the batch's continue has its own record too
         catch (err) { log(`[auto-resume] ${e.id}: the '${verb.form}' resume verb threw in the bulk resume: ${err.message}`); ok = false; }
         if (!ok) { putBack(); giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
@@ -1715,6 +1737,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 
   /** One tick: fire everything due whose session is alive and idle. */
   function tick(now = Date.now()) {
+    landingRefused = false;   // F1: each tick may wait once on a landing
     let fired = 0;
     // B-3437: the Workflow run a usage wall cut short is judged NEAR THE FIRE, never once at the arm (the run goes on after
     // the walled turn — its agents' retries, a hot switch); asked every two minutes in the six minutes before a wall's TIMED

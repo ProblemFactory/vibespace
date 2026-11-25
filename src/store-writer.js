@@ -635,7 +635,8 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       const r = writeWaiting(s, p, since, deadline, waitedBy);
       if (r === 'ok') written.push(s.name);
       else if (r === 'failed') left.push({ name: s.name, file: s.file, why: `the write failed (${(s.notDurable && s.notDurable.code) || 'an error'}; ${s.failures} attempt${s.failures === 1 ? '' : 's'})` });   // round 6's amend: its own code
-      else { held.add(l); s.dirty = true; s.dirtySince = since; left.push({ name: s.name, file: s.file, why: `its write was still held by the storage at the bound (${((now() - (l.inflight ? l.inflight.startedAt : t0)) / 1000).toFixed(1)} s)` }); }
+      else { held.add(l); l.heldBy = l.inflight; s.dirty = true; s.dirtySince = since;   // F1 (row B-9a24 R9's follow, r4551): laneHeld() reads it
+        left.push({ name: s.name, file: s.file, why: `its write was still held by the storage at the bound (${((now() - (l.inflight ? l.inflight.startedAt : t0)) / 1000).toFixed(1)} s)` }); }
     };
     const writeOne = (s) => {
       if (held.has(laneGuess(s)) || now() >= deadline) { left.push({ name: s.name, file: s.file, why: held.has(laneGuess(s)) ? `the ${threadWord(laneGuess(s))} was still held by the storage` : 'the bound was spent' }); return; }
@@ -821,8 +822,11 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   /** suites: a handed buffer's bytes checked at its piece (byRef's promise) — a buffer written into fails its write (EBYREF) */
   const verifyByRefOn = (on = true) => { verify = !!on; };
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
-  const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, flushDeadline, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, modes, verifyByRef: verifyByRefOn, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
+  const waits = () => ({ timedOut: waitsTimedOut });
+  /** (row B-9a24 R9's follow F1, 主开发 r4551) the lane that writes `file` still holds the very job a synchronous flush already gave up
+   *  on at its bound: a caller that would wait on it again asks first and refuses at once (its next try after the job settles) */
+  const laneHeld = (file) => { const s = stores.get(file); const l = s && s.lane === 'A' ? LA : LW; return !!(l && l.inflight && l.heldBy && l.heldBy === l.inflight); };   // round 6's amend: waits that ended by their poll, not the write's end
+  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, flushDeadline, laneHeld, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, modes, verifyByRef: verifyByRefOn, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
 }
 
 /** THE process's writer (one thread, one queue for every store) */

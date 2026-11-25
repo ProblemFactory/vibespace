@@ -5812,6 +5812,8 @@ export default {
   "Authorizing the batch…": "正在为这一批授权…",
   "Resuming… {done} of {n} continued": "正在恢复… 已继续 {done}/{n}",
   "The whole batch was refused — nothing was resumed: {detail}": "整批被拒绝 —— 一个都没有恢复：{detail}",
+  // row B-9a24 R9 F1 (主开发 r4555 (2)): a bulk row the storage refused — said by its row
+  "«{name}» was not resumed: the storage is busy and its record could not be written — try again in a moment.": "「{name}」未恢复：存储正忙，它的记录写不进去 —— 请稍后再试。",
   "Could not read the sessions — reopen Settings to retry.": "读取会话失败 —— 重新打开设置再试。",
   "Auto-continue is on for {n} more sessions": "又为 {n} 个会话开启了自动继续",
   "Auto-continue is off for {n} sessions": "已为 {n} 个会话关闭自动继续",

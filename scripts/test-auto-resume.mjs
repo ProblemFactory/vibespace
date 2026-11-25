@@ -2456,7 +2456,7 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
   ok('19a RED control (the save not held — the release): the new arm writes the file over — the other conversation\'s promise and its loop-breaker record are GONE from it (red)', !HX.fileSame && !axf.armed.w1 && !(axf.fires || {}).w1, JSON.stringify(axf));
   // (row B-9a24 R9: the record a continue lands before its delivery is refused while held too — recordBeforeDelivery's landRecord — so the
   // fault's form is BOTH guards gone)
-  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'), "    if (hold.held()) return false;   // held: nothing is written over its file (no record, so no continue \u2014 r3004 already refuses there)\n", '', 'auto-resume.js'));
+  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'), "    if (hold.held()) { refusedWhy = 'held'; return false; }   // held: nothing is written over its file (no record, so no continue \u2014 r3004 already refuses there)\n", '', 'auto-resume.js'));
   const HF = heldScene(mFire.create);
   ok('19a RED control (the fire not held): a continue goes on a guess while the loop-breaker\'s memory is unread (red)', HF.timed + (HF.now2 ? 1 : 0) > 0 && HF.a.sent.length > 0, JSON.stringify({ timed: HF.timed, now: HF.now2, sent: HF.a.sent.length }));
   // 19c. a RECOVERY while held: the conversation armed only in the unread file recovers — its promise must not come back at the lift
