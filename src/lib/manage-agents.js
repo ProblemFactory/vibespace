@@ -2411,7 +2411,7 @@ export function installManageAgents(App, ctx = {}) {
       };
       const doDelete = async () => {
         if (!(await showConfirmDialog({ title: t('Remove account'), confirmText: t('Remove'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
-        try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
+        try { const r = await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(r && r.keptFolder ? t('Removed “{name}” — its sign-in folder is kept: a pool could not be moved off it', { name: a?.name || '' }) : t('Removed “{name}”', { name: a?.name || '' })); }   // B-e381: a kept folder is said
         catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       };
@@ -2537,7 +2537,7 @@ export function installManageAgents(App, ctx = {}) {
       };
       const doDelete = async () => {
         if (!(await showConfirmDialog({ title: t('Remove account'), confirmText: t('Remove'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
-        try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
+        try { const r = await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(r && r.keptFolder ? t('Removed “{name}” — its sign-in folder is kept: a pool could not be moved off it', { name: a?.name || '' }) : t('Removed “{name}”', { name: a?.name || '' })); }   // B-e381: a kept folder is said
         catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       };
@@ -4016,7 +4016,7 @@ export function installManageAgents(App, ctx = {}) {
           ? t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name })
           : t('Remove "{name}"? The roster is one shared list — this deletes the MASTER key copy held by VibeSpace (it disappears from every machine’s view) and sweeps the per-session working copies it placed on hosts. The Anthropic Console cannot re-show an existing key’s value, so make sure it’s saved elsewhere first. Running sessions keep working.', { name: a?.name });
         if (!(await showConfirmDialog({ title: t('Remove account'), confirmText: t('Remove'), message: msg }))) return;
-        try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
+        try { const r = await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(r && r.keptFolder ? t('Removed “{name}” — its sign-in folder is kept: a pool could not be moved off it', { name: a?.name || '' }) : t('Removed “{name}”', { name: a?.name || '' })); }   // B-e381: a kept folder is said
         catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       };
