@@ -284,6 +284,8 @@ setTimeout(() => {
       const oldB = typedB();
       ok(oldB === 0, `⑦ PLACED: with the writer held past it, the OLD 6.5 s wait reads the input ${oldB}× — the control on a clock would read red with the fault present`);
     }
+    // r4510 (the round's should): the new attach is UP while the wrapper is still held (its client spoke its first bytes) before the hold ends
+    if (!(await until(() => b2.bytes() > 0, 5000))) ok(false, `⑦ harness (${tag}): the new attach's client never spoke within 5 s`);
     fs.rmSync(flag, { force: true });   // the hold ends: the wrapper's synchronous op is over
     try { b2.p.write('VSSENT-B\r'); } catch { }   // an ORDER FACT: everything typed before it lands before it
     if (!(await until(() => sentB(), 15000))) ok(false, `⑦ harness (${tag}): the order mark typed after the hold never reached the program within 15 s`);
@@ -549,18 +551,25 @@ const stubRead = () => {
 const stubN = () => { const r = stubRead(); return r.state === 'ok' ? r.n : NaN; };
 /** r4456 (the flake census, round 2): THE MASTER's STALL, waited on — the wrapper's .buf (persisted at most every 2 s while it
  *  runs) unchanged for 2.5 s while the CLI keeps writing; a 60 s bound whose expiry is a named harness line, never a fixed 9 s. */
+const bufMtimeOf = (bufFile) => { try { return fs.statSync(bufFile).mtimeMs; } catch { return null; } };
+/** r4510: a buffer file that is not there is said by a named harness line (never a thrown stat) → its mtime or null */
+const bufMtime = (bufFile, what) => { const m = bufMtimeOf(bufFile); if (m == null) ok(false, `harness: ${what}: the wrapper's buffer file ${path.basename(bufFile)} is not there`); return m; };
 const stallOf = async (bufFile, what, boundMs = 60000) => {
-  const mt = () => { try { return fs.statSync(bufFile).mtimeMs; } catch { return null; } };
   const t0 = Date.now(); let win = null;
   while (Date.now() - t0 < boundMs) {
-    const m = mt(), n = stubN();
-    if (!win || m !== win.m) win = { m, n, at: Date.now() };
+    const m = bufMtimeOf(bufFile), n = stubN();
+    if (m == null) win = null;   // r4510: no buffer file yet — never a stall
+    else if (!win || m !== win.m) win = { m, n, at: Date.now() };
     else if (Date.now() - win.at >= 2500 && n > win.n) return true;
     await sleep(250);
   }
-  ok(false, `harness: ${what}: the master never stalled on the orphan within ${boundMs / 1000} s (the .buf kept changing, or the CLI stopped)`);
+  ok(false, `harness: ${what}: the master never stalled on the orphan within ${boundMs / 1000} s (${bufMtimeOf(bufFile) == null ? 'no buffer file' : 'the .buf kept changing, or the CLI stopped'})`);
   return false;
 };
+/** THE FIX's rule (§2), one helper (r4510): a restored session STREAMS when its client saw records past every anchor + 20 — the
+ *  anchors include one read AFTER the stall: what the CLI wrote after it waits in the CLI's memory, never in the buffer file the
+ *  attach replays as its history slab, so the slab alone can never pass it */
+const streamsPast = (c, anchors) => c.maxRec > Math.max(...anchors) + 20;
 // the sentence a stopped stub fails with: its counter, its pid, its exit
 const stubState = () => {
   const r = stubRead(), pid = stubLast && stubLast.pid;
@@ -621,14 +630,15 @@ e2e: {
   ok(clientA && alive(clientA) && ppidOf(clientA) !== A.pid, `after SIGKILL the old attach client ${clientA} is an ORPHAN (alive, reparented to ${ppidOf(clientA)} ${commOf(ppidOf(clientA))})`);
   const s1 = stubN(); await sleep(1500); const s2 = stubN();
   ok(s2 > s1, `…and the CLI keeps WORKING meanwhile (the stub's record ${s1} → ${s2}) — its non-blocking stdout queues in memory`);
-  { const p1 = fs.statSync(BUF).mtimeMs; await sleep(2500); const p2 = fs.statSync(BUF).mtimeMs;
+  { const p1 = bufMtime(BUF, '§2 placed'); await sleep(2500); const p2 = bufMtime(BUF, '§2 placed');
     ok(p1 !== p2, `PLACED: with the stall held back (the CLI slowed), the OLD 9 s wait measures a .buf still being written (${p1} → ${p2}) — the MEASURED leg on a clock would read red with nothing wrong`); }
   fs.rmSync(STUB_SLOW, { force: true });   // the CLI at its full pace again: the orphan fills
   await stallOf(BUF, '§2 (A\'s orphan)');   // THE CURE: the leg waits on the stall itself
-  const bufM1 = fs.statSync(path.join(wt, 'data', 'session-buffers', SID + '.buf')).mtimeMs;
+  const sStall = stubN();   // r4510: THE FIX's anchor read AFTER the stall (the slab the next attach replays holds nothing past it)
+  const bufM1 = bufMtime(BUF, '§2 MEASURED');
   await sleep(2500);
-  const bufM2 = fs.statSync(path.join(wt, 'data', 'session-buffers', SID + '.buf')).mtimeMs;
-  ok(bufM1 === bufM2, 'MEASURED: the wrapper\'s buffer FILE is frozen while the master stalls (its synchronous TTY write blocks its whole event loop — the .buf witness is blind to THIS shape; the OTel witness is not)');
+  const bufM2 = bufMtime(BUF, '§2 MEASURED');
+  ok(bufM1 != null && bufM1 === bufM2, 'MEASURED: the wrapper\'s buffer FILE is frozen while the master stalls (its synchronous TTY write blocks its whole event loop — the .buf witness is blind to THIS shape; the OTel witness is not)');
 
   const B = boot();
   ok(await ready(B), 'boot B (post-fix) is Ready');
@@ -636,24 +646,29 @@ e2e: {
   ok(swept && !alive(clientA), `the BOOT SWEEP ended the orphan ${clientA} (journal: ${JSON.stringify((B.jr.match(/\[bridge\] boot:[^\n]*/) || [''])[0].slice(0, 160))})`);
   const c2 = await connect();
   c2.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
-  const flows = await until(() => c2.maxRec > Math.max(before, s2) + 20, 15000);
-  ok(flows, `THE FIX: the restored session streams with ZERO input (record ${c2.maxRec}, past ${Math.max(before, s2)} at the kill)`);
+  const flows = await until(() => streamsPast(c2, [before, s2, sStall]), 15000);
+  ok(flows, `THE FIX: the restored session streams with ZERO input (record ${c2.maxRec}, past ${Math.max(before, s2, sStall)}: the kill, and the stall — its history slab holds nothing past it)`);
   c2.ws.close();
 
   // ═══ §3 the CONTROL: the same restart on the pre-fix copy stays dark ═══
   console.log('\n§3 CONTROL — the same restart without the sweep and the watch stays DARK');
+  const sEarly3 = stubN();   // r4510: an EARLY anchor (read before the stall, B still live: every record from here to the stall is in the slab)
   const j2 = await startHolder('holder-b');   // B's own attach master must outlive B too (a job B spawned after its attach)
   ok(j2 && j2.job, 'control setup: server B started its own long-lived job after its attach');
   await sleep(1200);
   const clientB = attachClientsOf(SOCK).find((p) => ppidOf(p) === B.pid);
   await stop(B, 'SIGKILL');
-  await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§3 (B\'s orphan)');   // r4456: the control's dark restore needs the stall itself, never a fixed 9 s
+  await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§3 (B\'s orphan)');
+  const sStall3 = stubN();   // …and the one read after it   // r4456: the control's dark restore needs the stall itself, never a fixed 9 s
   ok(clientB && alive(clientB), `control setup: B's attach client ${clientB} is an orphan too`);
   const C = boot(CONTROL_SERVER);
   ok(await ready(C), 'boot C (the pre-fix copy) is Ready');
   const c3 = await connect();
   c3.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
   await sleep(4000);                               // the attach slab (history from the wrapper's buffer file) lands first
+  // r4510 RED CONTROL (THE FIX's anchor, over this DARK restore — the pre-fix copy never streams): judged by the early anchor alone,
+  // the history slab passes it — «streams» read green with the session dark; judged by THE FIX's rule (an anchor after the stall), RED
+  ok(streamsPast(c3, [sEarly3]) && !streamsPast(c3, [sEarly3, sStall3]), `RED CONTROL (THE FIX's anchor): over a restore that never streams, the slab alone passes the early anchor (${c3.maxRec} > ${sEarly3} + 20) and never the anchor read after the stall (${c3.maxRec} ≤ ${sStall3} + 20)`, JSON.stringify({ slabMax: c3.maxRec, sEarly3, sStall3 }));
   // the precondition is EVIDENCE, not a sleep: the stub writes 500 more records (≤ 25 s), and the silence is judged over that span
   const n0 = stubN(), live0 = c3.maxRec, t0 = Date.now();
   const wrote = await until(() => stubN() > n0 + 500, 25000, 250);
