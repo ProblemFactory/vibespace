@@ -849,11 +849,18 @@ let work, solo, shop;
   k.humanRelease({ key: HS, viewerId: 21, cause: 'viewer-left' });
   ok(k.humanOf(solo.id).state === 'away', 'his window closes ⇒ AWAY (his tab kept)');
   clock += 11 * 3600e3; await k.tick();
-  ok(k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready', '11 h away: he is still kept and the browser has NOT idled out (15 min idle — his holder row counts)', k.browserOf(solo.id).state);
+  // r4596 (should): «has NOT idled out» is a NEVER claim — read only once a stop this tick began would have SHOWN: its first act is the
+  // CLI's close-all on the browser's own session (the fake CLI logs it), waited for within the keeper's own stop grace (K.STOP_GRACE_MS,
+  // the product's bound for a begun stop: the window of a never-claim, NOT a settle); none came ⇒ no stop began
+  const ns11 = k.browserOf(solo.id).ns, closes11 = () => cmdsOf(ns11).filter((c) => /^close/.test(c)).length, c11 = closes11();
+  const stopShown11 = await until(() => closes11() > c11, K.STOP_GRACE_MS);
+  ok(!stopShown11 && k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready', '11 h away: the person is still kept and the browser has NOT idled out (15 min idle — the person\'s holder row counts): no stop began within the keeper\'s own stop grace', { state: k.browserOf(solo.id).state, stopShown11 });
   const c1 = cmdsOf('vs-' + HS).length;
   clock += 3600e3 + 1000; await k.tick();
   ok(!k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready' && cmdsOf('vs-' + HS).slice(c1).includes('close') && leaseEvents.some((e) => e.kind === 'human-end' && e.key === HS && e.reason === 'left'), 'past 12 h: he ends `left` (his tab closes), the browser stays one more idle period');
-  clock += 16 * 60000; await k.tick(); await sleep(50);
+  clock += 16 * 60000; await k.tick();
+  // r4596 (should): the idle stop the tick STARTS lands after the CLI's close-all and the pid's end — waited for (its own fact), never 50 ms
+  if (!(await until(() => k.browserOf(solo.id).state === 'stopped', 20000))) markTimedOut(k.browserOf(solo.id).state, 20000, 'the Solo browser\'s idle stop');
   ok(k.browserOf(solo.id).state === 'stopped' && k.browserOf(solo.id).stoppedBy === 'idle', '…and then idles out by the keeper\'s rule (nobody holds it)', k.browserOf(solo.id));
 }
 {
@@ -1187,7 +1194,7 @@ let work, solo, shop;
   // the wait is ON THE FACT the control judges: the idle stop landed (a generous bound; its expiry is said by THE ONE MARK)
   const stoppedX = await until(() => kx.browserOf(xp.id).state === 'stopped', 20000);
   const readX = stoppedX ? kx.browserOf(xp.id).state : markTimedOut(kx.browserOf(xp.id).state, 20000, 'CONTROL: the idle stop of the copy whose clock reads the leases only');
-  ok(readX === 'stopped', 'CONTROL: a keeper copy whose idle clock reads the leases only STOPS the browser 2 h into his 12 h keep — the keep leg above can go red', readX);
+  ok(readX === 'stopped', 'CONTROL: a keeper copy whose idle clock reads the leases only STOPS the browser 2 h into the person\'s 12 h keep — the keep leg above can go red', readX);
   await sleep(50); const oldRead = kh.browserOf(hp.id).state;   // the OLD wait, over the held twin
   letGo();
   const landed = await until(() => kh.browserOf(hp.id).state === 'stopped', 20000);

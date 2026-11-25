@@ -87,6 +87,7 @@ function fakeChromes() {
   srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => { ws._bpath = new URL(req.url, 'http://x').pathname; wss.emit('connection', ws); }));
   const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
   wss.on('connection', (ws) => {
+    ws._at = Date.now();   // r4596: when this client (a world's dialogs watch) connected — watchedTab counts the CURRENT world's sessions only
     const b = of(ws._bpath); b.clients.add(ws); ws.on('close', () => b.clients.delete(ws));
     ws.on('message', (d) => {
       const m = JSON.parse(d); const reply = (o) => send(ws, { id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o });
@@ -146,7 +147,8 @@ function fakeChromes() {
 const chrome = await fakeChromes().listen();
 // r4456: A TAB THE HUB's DIALOGS WATCH HAS ATTACHED AND ENABLED (the fake sends its page events only to such a session): the wait is on that
 // fact, never a fixed 80 ms after the tab was added; its expiry is said by THE ONE MARK
-const watchedTab = async (bpath, id, ms = 10000) => { const on = () => [...chrome.of(bpath).sessions.values()].some((s) => s.targetId === id && s.enabled); const w = await until(on, ms); return w ? true : markTimedOut(false, ms, `the hub's watch enabling tab ${id}`); };
+let worldAt = 0;   // r4596: when the CURRENT world began (swap() builds a new one; an older world's watch stays connected, never counted)
+const watchedTab = async (bpath, id, ms = 10000) => { const on = () => [...chrome.of(bpath).sessions.values()].some((s) => s.targetId === id && s.enabled && s.ws && (s.ws._at || 0) >= worldAt); const w = await until(on, ms); return w ? true : markTimedOut(false, ms, `the hub's watch enabling tab ${id}`); };
 servers.add(chrome.srv);
 
 // ═══ the scratch world: the REAL keeper, watch, runner, routes; three conversations ═══
@@ -325,7 +327,7 @@ try {
   closeCalls = chrome.of(OWNP).calls.slice(cmark).filter((c) => c.method === 'Target.closeTarget' || c.method === 'Target.createTarget');
   ok(r.code === 0 && /^closed the looping tab/.test(r.out) && /It was the browser's only tab, so a blank one was opened in its place/.test(r.out) && closeCalls.map((c) => c.method).join() === 'Target.createTarget,Target.closeTarget' && closeCalls[1].params.targetId === 'T1B', 'a bare `tab close` while it loops goes DIRECT: a blank tab first (it was the only one), then Target.closeTarget on the looping tab', { r, closeCalls });
   chrome.addTab(OWNP, 'T2', 'https://app.bank.test/home');
-  await sleep(100);
+  await watchedTab(OWNP, 'T2');   // r4596: the ninth-shape site — the watch enabled it, never a fixed 100 ms
   // the agent MOVED ON (another tab of its appeared after the loop began): a bare `tab close` / a `screenshot` are its
   // current tab's again — the browser CLI's own verbs (the direct route answers no_loop), never the looping tab by surprise
   await chrome.replay(OWNP, 'T2', LOOP);
@@ -549,7 +551,7 @@ try {
     // ghost-only scope read as attributed: `stop` said "nothing of yours was loading" while the conversation had no tab at all.
     // A watch's first look at its browser prunes the witness to the tabs the browser HAS; the keeper's replacement drops it whole
     {
-      chrome.addTab(SP, 'S12', 'https://app.bank.test/live'); await sleep(60);
+      chrome.addTab(SP, 'S12', 'https://app.bank.test/live'); await watchedTab(SP, 'S12');
       keeper.noteOwnTab(shared.id, sA._browserKey, 'GHOST1'); keeper.noteOwnTab(shared.id, sA._browserKey, 'S12'); keeper.noteOwnTab(shared.id, sB._browserKey, 'GHOST2');
       const before = { a: keeper.holderTabs(shared.id, sA._browserKey), b: keeper.holderTabs(shared.id, sB._browserKey) };
       // (主开发 r183/r215: a RESTART states its stop — the store as the running keeper left it LANDS first, never left to the next keeper's load)
@@ -599,7 +601,7 @@ try {
       ok(rb.code === 0 && binds.length === 2 && binds[1].id === ob2.targetId && binds[1].bk === sB._browserKey, 'verify r4 #1: …and in `--json` form the binary\'s own ack (data.targetId) is read — no second spawn', { rb: rb.code, err: rb.err.slice(0, 300), out: rb.out.slice(0, 200), ob2, binds });
       // the watch binds a tab it HAS: the fake chrome gets the next id the fake binary will print, then B's `tab new` during A's verb
       const nsOf = ob.ns, nNext = Number(ob2.targetId.split('-').pop()) + 1;
-      chrome.addTab(SP, `t-${nsOf}-${nNext}`, 'https://app.bank.test/b-three'); await sleep(60);
+      chrome.addTab(SP, `t-${nsOf}-${nNext}`, 'https://app.bank.test/b-three'); await watchedTab(SP, `t-${nsOf}-${nNext}`);   // r4596: the watch HAS the tab before B's ack binds it
       const scN0 = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
       rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-three'], { bin: binU });
       const scN = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
@@ -618,7 +620,7 @@ try {
       const binC = MUT.write('data/bin/vibespace-browser', editAnchor(editAnchor(cliSrc0, ackNeedle, '', "data/bin/vibespace-browser"), fenceNeedle, 'const tabFenced = false;', "data/bin/vibespace-browser"), 'r4-no-ack', { esm: false });
       await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['open', 'https://app.bank.test/slow'], wrapper: true }, as(sA));
       await sleep(215);
-      const nC = nNext + 1; chrome.addTab(SP, `t-${nsOf}-${nC}`, 'https://app.bank.test/b-four'); await sleep(60);
+      const nC = nNext + 1; chrome.addTab(SP, `t-${nsOf}-${nC}`, 'https://app.bank.test/b-four'); await watchedTab(SP, `t-${nsOf}-${nC}`);   // r4596: the NEGATIVE CONTROL below reads a tab the watch HAS (a slow watch made it green for no reason)
       rb = await cli(sB, ['tab', 'new', 'https://app.bank.test/b-four'], { bin: binC });
       const scC = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
       ok(rb.code === 0 && !scC.has(`t-${nsOf}-${nC}`), 'CONTROL: a CLI that hands no ack over leaves the tab born under two verbs nobody\'s — the row above reddens on it', { scope: [...scC] });
@@ -689,7 +691,7 @@ try {
   // ═══ ⑥ CONTROLS (a patched copy each) ═══
   console.log('— ⑥ controls: each rule removed alone reddens its row');
   const rel = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
-  const swap = async (Dmod, PRmod, RTmod, fn) => { try { srv.close(); } catch { } W = mkWorld({ Dmod, PRmod, RTmod }); srv = await new Promise((r2) => { const s = W.app.listen(0, '127.0.0.1', () => r2(s)); }); servers.add(srv); API = `http://127.0.0.1:${srv.address().port}`; try { return await fn(); } finally { try { srv.close(); } catch { } } };
+  const swap = async (Dmod, PRmod, RTmod, fn) => { try { srv.close(); } catch { } worldAt = Date.now(); W = mkWorld({ Dmod, PRmod, RTmod }); srv = await new Promise((r2) => { const s = W.app.listen(0, '127.0.0.1', () => r2(s)); }); servers.add(srv); API = `http://127.0.0.1:${srv.address().port}`; try { return await fn(); } finally { try { srv.close(); } catch { } } };
   // ⑤c (e) — placed here because it uses the swap helper
   // (e) the quiet rule: a loop whose page stops hopping by itself clears without a stop (a world with the quiet clock at 300 ms)
   worldQuietMs = 300;

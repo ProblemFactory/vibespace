@@ -480,21 +480,34 @@ console.log('— ⑤ the bridge controls: each fix removed in a patched copy tur
   const T2 = '      const own = FIT.ownViewportRecord(msg, p, t);\n'; // verify r1 (continuation): the pending + prevOwn slots share the one recognition
   ok(src.includes(T2), 'control setup: the own-mirror recognition is found');
   const noOwn = M.load('src/server/browser-stream.js', editAnchor(src, T2, '      const own = { own: false };\n', "src/server/browser-stream.js"), 'no-own');
-  {
+  // the control's own read, over a copy: the echo of the 700 waited for (its fact), then the 720 sent and its «never» clauses read only once
+  // the PRODUCT could have acted on it — r4596: the bridge acts on a fit report after its own debounce (FIT.FIT_DEBOUNCE_MS) plus the set's
+  // round trip (the stub's set: 5 ms + its mirror + 5 ms): this is the window of a «never happens» claim, taken from the product, NOT a settle
+  const NEVER_WINDOW_MS = FIT.FIT_DEBOUNCE_MS + 450;
+  const ownRead = async (BSmod) => {
     const U = await fakeUpstream(); cleanups.push(() => U.close());
     const { k, calls } = stubKeeper(U);
-    const B = await bridgeOn(noOwn, k);
+    const B = await bridgeOn(BSmod, k);
     const A = viewer(B.P); await A.ready();
     A.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true });
-    // r4456: the waits are ON THE FACTS this control judges — the fake upstream's echo of the bridge's first set reached viewer A (its
-    // «command viewport», and the fit read as the agent's), then the bridge's answer to the 720 request — never a fixed 400 / 700 ms
     await until(() => calls.set.length >= 1, 3000);
     await until(() => A.msgs.some((m) => m.type === 'command' && m.action === 'viewport') && A.fits().some((x) => x.state === 'agent'), 15000);
-    const fits0 = A.fits().length;
     A.send({ type: 'fit', width: 720, height: 900, dpr: 1, visible: true });
-    await until(() => A.fits().length > fits0, 15000);
-    ok(A.msgs.some((m) => m.type === 'command' && m.action === 'viewport') && A.fits().some((x) => x.state === 'agent') && calls.set.length <= 2 && !calls.set.some((c) => c[0] === 720), 'NEGATIVE CONTROL: without the own-mirror recognition our OWN set reaches the viewer and is read as the AGENT\'s — the next pane change is letterboxed and never fitted (verify r1: the mutant also "puts back" the size it took for the agent\'s, once)', JSON.stringify({ fits: A.fits().map((x) => x.state), calls: calls.set }));
+    await sleep(NEVER_WINDOW_MS);   // the never-claim's window (above): the bridge's debounce has fired and its set came back
+    const out = { viewport: A.msgs.some((m) => m.type === 'command' && m.action === 'viewport'), agent: A.fits().some((x) => x.state === 'agent'), sets: calls.set.slice() };
+    out.good = out.viewport && out.agent && out.sets.length <= 2 && !out.sets.some((c) => c[0] === 720);
     await A.close(); await B.close(); await U.close();
+    return out;
+  };
+  {
+    const o = await ownRead(noOwn);
+    ok(o.good, 'NEGATIVE CONTROL: without the own-mirror recognition our OWN set reaches the viewer and is read as the AGENT\'s — the next pane change is letterboxed and never fitted (verify r1: the mutant also "puts back" the size it took for the agent\'s, once)', JSON.stringify(o));
+    // ITS RED (r4596): a copy that loses the recognition AND still sets 720 at its debounce (its verdict reads no agent) — the same read sees
+    // the 720 set inside the never-claim's window: the control goes red
+    const VF = "    const v = FIT.fitVerdict({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, agent: fs.agent,";
+    const noOwnSets = M.load('src/server/browser-stream.js', editAnchor(editAnchor(src, T2, '      const own = { own: false };\n', "src/server/browser-stream.js"), VF, VF.replace('agent: fs.agent,', 'agent: null,'), "src/server/browser-stream.js"), 'no-own-sets-720');
+    const r = await ownRead(noOwnSets);
+    ok(!r.good && r.sets.some((c) => c[0] === 720), 'ITS RED (r4596): a copy without the recognition that still sets 720 at its debounce — the control\'s read sees the 720 set inside the never-claim\'s window, red', JSON.stringify(r));
   }
   // r4456 (law 3): THE RACE PLACED — the same copy with the fake upstream's echo of the bridge's set HELD (the late thing): the old fixed
   // 400 ms wait reads no «command viewport» at viewer A — the control red with nothing wrong, at will — and the wait on the fact reads it
