@@ -103,6 +103,10 @@ const world = (hk) => {
   if (!WORLD.has(hk)) WORLD.set(hk, { L: { home: hk ? '' : LOCAL.home, machine: hk || null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} }, self: null, recent: null, error: '' });
   return WORLD.get(hk);
 };
+/* r4184 — THE ROWS THE PAGE DRAWS FOLLOW EVERY MERGED REPLY's FACTS: every write of a machine's listing moves its world's revision, and
+   each field's rows memo reads it (keyed on the folders' COUNT, a quiet reply that only added a listed kid's git drew the old rows) */
+const moved = (W) => { W.rev = (W.rev || 0) + 1; };
+const mergeInto = (W, listing) => { mergeListing(W.L, listing); moved(W); };
 const LOCAL = { home: '' };
 /* this machine's home, read through the model's PURE homeReader (LAW 2: a failed read is read again, bounded) */
 const HOME_READ = homeReader(() => fetchJson('/api/home'));
@@ -365,8 +369,12 @@ export function pathField(input, opts = {}) {
   let memo = { key: '', m: null };
   function model(text = textNow()) {
     const inp = inputsNow();
-    const dead = !!(hk() && world(hk()).unreachable); // a machine that cannot be reached is offered nothing (no «not on my-mac» guesses)
-    const key = JSON.stringify([text, hk(), inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.bases.map((b) => b.path), Object.keys(inp.listing.dirs).length, inp.recent.length, !!inp.self, dead]);
+    const W = world(hk());
+    const dead = !!(hk() && W.unreachable); // a machine that cannot be reached is offered nothing (no «not on my-mac» guesses)
+    // r4184: keyed on what the rows read, never a count of it — the world's revision (a merged reply's folders, their facts, the groups'
+    // absent/unknown/unsaid/held marks and «self» are all written beside a merge), its home (set outside one), the recents by what they
+    // say (their own reply re-counts them in place); a group's own fields are the door's (its refresh() clears this memo)
+    const key = JSON.stringify([text, hk(), inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.bases.map((b) => b.path), W.rev || 0, inp.listing.home, inp.recent.map((r) => [r.path, r.count, r.when]), !!inp.self, dead]);
     if (memo.key !== key) { const m = rankCandidates(text, inp); memo = { key, m: dead ? { ...m, rows: [], sections: [], best: null, nameRows: [] } : m, inp }; }
     // B-d833 (its fourth shape, R-e — the coordinator's ruling 03:24Z): THE ONE RESOLVER. The line, Tab, Enter, the tick and the form's
     // state read the VERDICT IN HAND for (text, machine, bases): the model's answer for the field's key. The page's memory feeds the
@@ -454,7 +462,7 @@ export function pathField(input, opts = {}) {
   function traceReply(h, my, d, how) { const W = world(h); st.trace.push({ h: h || null, my, cur: st.seq, how, listing: !!(d && d.listing), home: !!W.L.home, dirs: Object.keys(W.L.dirs || {}).length, at: Date.now() }); if (st.trace.length > 12) st.trace.shift(); }
   function mergeReply(W, h, d, probe, key = null) {
     if (d && d.listing) {
-      mergeListing(W.L, d.listing);
+      mergeInto(W, d.listing);
       W.L.machine = h || null;
       if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs); if (d.listing.unchecked) Object.assign(W.L.unchecked = W.L.unchecked || {}, d.listing.unchecked);   // B-99b9
       if (d.self) W.self = d.self;
@@ -726,7 +734,7 @@ export function pathField(input, opts = {}) {
       st.probeCtl = st.probeCtl || new AbortController();   // r1399 (1): the probe ends with its field (destroy() aborts it: a queued one leaves the gate unsent)
       const go = () => gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`, { signal: st.probeCtl.signal }, { field: pickKey + ':chips', by: 'door' }).then((d) => {
         if (!d || !d.listing || st.destroyed) return;
-        mergeListing(W.L, d.listing);
+        mergeInto(W, d.listing);
         if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs); if (d.listing.unchecked) Object.assign(W.L.unchecked = W.L.unchecked || {}, d.listing.unchecked);   // B-99b9
         if (d.self) W.self = d.self;
         W.asked = W.asked || new Map(); for (const p of askedOf(want, d)) W.asked.set(p, Date.now());   // B-0f3d: never a late probe
@@ -796,10 +804,10 @@ export function pathField(input, opts = {}) {
     const r = await fetchJson('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: v.path, host: v.host || undefined }) });
     if (!r || r.error) { if (st.valueAt) st.valueAt = { ...st.valueAt, voided: true }; fire({ type: 'ensureFailed', words: t('Could not create {path}: {err}', { path: v.display, err: (r && r.error) || t('server unreachable') }) }); return false; }   // B-5736: a create that failed is no value
     st.committed = { ...v, exists: true, create: false };
-    const L = world(hk()).L; const par = parentOf(v.display);
+    const W = world(hk()), L = W.L; const par = parentOf(v.display);
     L.dirs[v.display] = { kids: [], fileCount: 0, mtime: Date.now() };
     if (par && L.dirs[par] && Array.isArray(L.dirs[par].kids) && !L.dirs[par].kids.includes(baseName(v.display))) L.dirs[par].kids.push(baseName(v.display));
-    paint();
+    moved(W); paint();
     return true;
   }
 
@@ -876,7 +884,7 @@ export function pathField(input, opts = {}) {
     const h = hk(); const W = world(h);
     const qs = `?path=${encodeURIComponent(p === '~' ? '~/' : p + '/')}&bases=${encodeURIComponent('[]')}&kind=file`;
     const d = await gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, { signal: st.treeCtl ? st.treeCtl.signal : undefined }, { field: `${pickKey}:tree:${h || ''}:${p}`, by: 'person' });   // its listings end with the picker (a closed picker's queued ones never jump the field's next ask)   // ONE id a folder of the tree: two folders' listings never supersede each other
-    if (d && d.listing) { mergeListing(W.L, d.listing); W.L.machine = h || null; if (d.self) W.self = d.self; }
+    if (d && d.listing) { mergeInto(W, d.listing); W.L.machine = h || null; if (d.self) W.self = d.self; }
   }
   async function openPicker() {
     // lane dialog-yield r3: THE PRESS THAT ASKED, read before any await — a remote machine's home listing takes seconds, and
@@ -1057,7 +1065,7 @@ export async function pathSuggest(text, { limit = 8 } = {}) {
   const inp = () => ({ bases: [{ path: '~', label: t('home') }], groups: groups.map((g) => groupOn(g, W.L)), recent, listing: W.L, name: '', machine: '', files: false, self: W.self });
   const q = String(text || '').trim();
   const d = await gatedFetch(`/api/dir-complete?path=${encodeURIComponent(q)}&bases=${encodeURIComponent('["~"]')}&probe=${encodeURIComponent('[]')}&q=&kind=folder`, {}, { field: 'palette', by: 'person' });   // the palette's /path: the person typing
-  if (d && d.listing) { mergeListing(W.L, d.listing); if (d.self) W.self = d.self; }
+  if (d && d.listing) { mergeInto(W, d.listing); if (d.self) W.self = d.self; }
   const m = rankCandidates(q, inp());
   const rows = m.resolved.map((r) => ({ path: r.path, chip: { key: 'dir', params: {} } })).concat(m.rows);
   const seen = new Set(); const out = [];
