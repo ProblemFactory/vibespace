@@ -399,7 +399,21 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
       if (left.length) ok(false, `THE HARNESS's BOUND (never the product's answer): ${what} — every move it started past its refusal check within ${ms / 1e3} s`, left);
       return !left.length;
     };
-    const pass = async (pool = poolIds[0], { guess = false } = {}) => { mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); }); await settle(); if (!guess) await moved('a pass'); };
+    // (r4418) THE PASS READ ON ITS FACTS, never a fixed settle: one turn of the loop for its own continuations, then the door (every
+    // move it started past its refusal check) and the world's accounts display landings in (what the old 25 ms settle let land:
+    // measured, 101 passes held 2.6 s of fixed settles while the door waited 2 ms); at most 10 s each, a named expiry. The door cut
+    // keeps the settle it stood on (the placed holds' red reads the pass as it stood)
+    const landings = async (what, ms = 10e3) => {
+      let t; const done = await Promise.race([wam.displaySettled().then(() => true), new Promise((r) => { t = setTimeout(() => r(false), ms); })]);
+      clearTimeout(t);
+      if (!done) ok(false, `THE HARNESS's BOUND (never the product's answer): ${what} — the world's accounts display landings in within ${ms / 1e3} s`);
+    };
+    const pass = async (pool = poolIds[0], { guess = false } = {}) => {
+      mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); });
+      if (guess) { await settle(); return; }
+      await new Promise((r) => setImmediate(r));
+      await moved('a pass'); await landings('a pass');
+    };
     const answer = async (askId, body) => { const r = mute(() => eng.answerCrossProviderAsk(askId, body)); await settle(); await moved('a person\'s answer (' + body.answer + ')'); return r; };
     const stop = async (s) => { mute(() => eng.maybePoolAutoSwitch(s, { stop: true })); await settle(); await moved('a turn\'s stop'); };
     const restarts = () => sent.filter((m) => m.type === 'pool-auto-switched').flatMap((m) => m.affected);
