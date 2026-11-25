@@ -84,6 +84,16 @@ for (const [n, over, re] of envCases) { const e = goodEnv(); for (const [k, v] o
   ok(/^env: CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: the checkpoint switch rides the ckpt-on variant only/.test(other || '') && /rides the ckpt-on variant only/.test(none || '') && /^env: CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: the checkpoint switch takes `true` only/.test(one || ''),
     'G3 RED: the switch on any other launch (an oat variant, the --version read) or with any other value ⇒ refused by name', { other, none, one });
 }
+// 主开发 r4483: the entry label rides the entry-on variant's launch ONLY, and only as a name the setting's own rule takes
+{
+  const asVariant = (env, variant) => { try { P.assertEnv(env, { base: BASE, root: ROOT, oat: OAT, proxied: true, variant }); return null; } catch (e) { return e.refusal ? `${e.refusal}: ${e.detail}` : 'threw ' + e.message; } };
+  const en = { ...goodEnv(), CLAUDE_CODE_ENTRYPOINT: 'vibespace' };
+  ok(asVariant(en, 'entry-on') === null && asVariant({ ...goodEnv(), CLAUDE_CODE_ENTRYPOINT: 'my-team' }, 'entry-on') === null, 'G3: the entry label (a name the setting takes) passes the allowlist on the entry-on variant\'s launch');
+  const other = asVariant(en, 'entry-off'), none = refusedEnv(en), ckpt = asVariant(en, 'ckpt-on'), cli = asVariant({ ...goodEnv(), CLAUDE_CODE_ENTRYPOINT: 'cli' }, 'entry-on'), vendor = asVariant({ ...goodEnv(), CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, 'entry-on');
+  ok(/^env: CLAUDE_CODE_ENTRYPOINT: the entry label rides the entry-on variant only/.test(other || '') && /rides the entry-on variant only/.test(none || '') && /rides the entry-on variant only/.test(ckpt || '')
+    && /^env: CLAUDE_CODE_ENTRYPOINT: a name the setting itself refuses/.test(cli || '') && /a name the setting itself refuses/.test(vendor || ''),
+    'G3 RED: the entry label on any other launch (the run without it, the checkpoint pair, the --version read) or as a name the setting refuses (cli, a vendor name) ⇒ refused by name', { other, none, ckpt, cli, vendor });
+}
 const stub = (name, body) => { const f = path.join(tmp, name); fs.writeFileSync(f, '#!/bin/sh\n' + body + '\n', { mode: 0o755 }); return f; };
 const straceOk = stub('strace-ok', 'case "$1" in -V) echo "strace -- version 6.19";; esac\nexit 0'), straceNo = stub('strace-denied', 'case "$1" in -V) echo "strace -- version 6.19"; exit 0;; esac\nexit 1');
 fs.mkdirSync(ROOT, { recursive: true });
@@ -747,17 +757,18 @@ console.log('§10 ROUND 5: a clean build can pass; the launcher as shipped; a li
     && /^for \(const name of want\) \{\n\s*if \(ESCAPED\.length\) break;\n\s*if \(!launcherAsShipped\(\)\) \{ launcherChanged = name;[^\n]*break; \}/.test(src.slice(src.indexOf('for (const name of want) {'), src.indexOf('const voided = ', src.indexOf('for (const name of want) {'))))
     && /const voided = VERSION_RUN\.void \? \{ void: VERSION_RUN\.void \} : launcherChanged \? \{ void: 'launcher-changed' \}/.test(src)
     && (src.match(/(?<!function )\blaunch\(\{/g) || []).length === 3 && (src.match(/(?<!function )\bstartCli\(\{/g) || []).length === 3
-    // row B-437e U0: the third startCli call is the checkpoint pair's (runCkpt) — called ONLY from the variant loop, after its launcher check
-    && (src.match(/\brunCkpt\(/g) || []).length === 2 && /if \(CKPT_VARIANTS\.includes\(name\)\) \{\n\s*const r = await runCkpt\(name\);/.test(src.slice(src.indexOf('for (const name of want) {'), src.indexOf('const voided = ', src.indexOf('for (const name of want) {'))))
+    // row B-437e U0: the third startCli call is the pairs' (runPair — the checkpoint pair and, 主开发 r4483, the entry pair) — called ONLY from the variant loop, after its launcher check
+    && (src.match(/\brunPair\(/g) || []).length === 2 && /if \(PAIR_VARIANTS\.includes\(name\)\) \{\n\s*const r = await runPair\(name\);/.test(src.slice(src.indexOf('for (const name of want) {'), src.indexOf('const voided = ', src.indexOf('for (const name of want) {'))))
     // lane oat-add-door: the third launch is the mint's (runMint) — called ONLY from the variant loop, after its launcher check
     && (src.match(/\brunMint\(\)/g) || []).length === 2 && /if \(name === MINT_VARIANT\) \{\n\s*const r = await runMint\(\);/.test(src.slice(src.indexOf('for (const name of want) {'), src.indexOf('const voided = ', src.indexOf('for (const name of want) {'))));
   // row B-437e U0 (主开发 r1107): the checkpoint pair's two homes carry ONE made-up device id (a fresh home would mint a random one),
   // and a void run without the switch leaves the run with it a FAIL — pinned on the module's own code
-  const ckptRun = PS5.slice(PS5.indexOf('async function runCkpt('), PS5.indexOf('const afterPass = '));
+  const ckptRun = PS5.slice(PS5.indexOf('async function runPair('), PS5.indexOf('const afterPass = '));
   ok(ckptRun.length > 0 && /homeConfig\(home, \{ userID: CKPT_DEVICE \}\);/.test(ckptRun) && (PS5.match(/homeConfig\(home, \{ userID: CKPT_DEVICE \}\)/g) || []).length === 1
-    && /if \(name === 'ckpt-on' && RESULTS\['ckpt-off'\] && RESULTS\['ckpt-off'\]\.r\.void\) \{ r\.verdict = 'FAIL';/.test(ckptRun),
-    'PIN (r1107): the checkpoint pair\'s homes carry the one made-up device id (written by runCkpt alone); a void run without the switch makes the run with it FAIL');
-  ok(shape2(PS5) && vr.length > 0 && loop.length > 0, 'PIN 2: the trampoline\'s shipped bytes are read once and written into the scratch; before the --version run and before EACH variant (one launch each: 3 launch sites — the version run, startCli once per variant (runVariant, runOat, the checkpoint pair\'s runCkpt — row B-437e U0), the mint\'s inside the loop — lane oat-add-door) the copy is compared byte for byte — a difference (or a copy gone) VOIDS `launcher-changed` and nothing more starts');
+    && /const entry = ENTRY_VARIANTS\.includes\(name\), offName = entry \? 'entry-off' : 'ckpt-off', onName = entry \? 'entry-on' : 'ckpt-on';/.test(ckptRun)
+    && /if \(name === onName && RESULTS\[offName\] && RESULTS\[offName\]\.r\.void\) \{ r\.verdict = 'FAIL';/.test(ckptRun),
+    'PIN (r1107; r4483 the entry pair): the pairs\' homes carry the one made-up device id (written by runPair alone); a void run without the switch or the name makes the run with it FAIL');
+  ok(shape2(PS5) && vr.length > 0 && loop.length > 0, 'PIN 2: the trampoline\'s shipped bytes are read once and written into the scratch; before the --version run and before EACH variant (one launch each: 3 launch sites — the version run, startCli once per variant (runVariant, runOat, the pairs\' runPair — row B-437e U0, r4483), the mint\'s inside the loop — lane oat-add-door) the copy is compared byte for byte — a difference (or a copy gone) VOIDS `launcher-changed` and nothing more starts');
   ok(!shape2(PS5.replace(/\n\s*if \(!launcherAsShipped\(\)\) \{ launcherChanged = name;[^\n]*\n/, '\n')) && !shape2(PS5 + '\nfunction again() { return launch({ args: [] }); }\n'), 'RED CONTROL: the loop\'s check removed, or a third launch site, is caught');
   ok(!!C.REASONS['launcher-changed'] && !!C.REASONS['trace-oversize'] && /^const OWN_REASONS = new Set\(\[[^\n]*'trace-oversize', 'launcher-changed'/m.test(read('src/server/cli-self-measure.js')), 'PIN 2/4: the two voids are the hub\'s own reasons (said by name, never «setup»)');
   // PIN 3 — a link's / a rename's SOURCE is judged like an open

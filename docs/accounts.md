@@ -143,10 +143,17 @@ of this — those change only via the explicit "Log in on host…" button.
 VibeSpace is designed to be a convenience layer over the official CLIs, not a
 way around Anthropic's terms. The relevant choices:
 
-- **Only the official CLI, run interactively.** Sessions launch the real
-  `claude` / `codex` binaries. VibeSpace never uses `-p`/`--print` or the Agent
-  SDK for subscription sessions (those are the modes Anthropic documents as
-  belonging on the paid API), and never spoofs the CLI's identity.
+- **Only the official CLI.** Sessions launch the real `claude` / `codex`
+  binaries. A terminal conversation runs the CLI interactively in a PTY; a
+  chat conversation runs the CLI's own non-interactive stream start on pipes
+  (`--input-format` / `--output-format stream-json`), which the CLI itself
+  labels `sdk-cli` on its requests. VibeSpace adds no inference road of its
+  own (no Agent SDK, no separate one-shot run) and never spoofs the CLI's
+  identity. The one label a person may change is the entry label a chat
+  conversation reports — Settings → Claude → «Entry label of chat
+  conversations», off by default (the CLI's own label); Anthropic has not said
+  how it treats a name other than its own, so the choice, and any risk in it,
+  are the person's, and nothing is promised about cost or limits.
 - **No background use of subscription credentials.** Usage is read passively
   from what the CLI itself already reports (above) — there is no timer that
   calls Anthropic's API with a subscription token, which is the behavior most

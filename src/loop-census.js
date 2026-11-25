@@ -128,6 +128,8 @@ const OWNERS = Object.freeze([
       name('utf8-stream'),   // B-b968: ONE UTF-8 decoder per terminal / conversation output stream (PURE; pty-duck, the re-attach shim, the agent's chat tail)
       name('helper-fact'),   // B-bc9f: a Claude settings file's key-helper fact — ONE rule for the create and a paired machine's probe (PURE)
       name('ckpt-switch'),   // row B-437e U0: the checkpoint switch's PURE verdict (the probe, the release road, their suites)
+      name('claude-entry-label'),   // 主开发 r4483: the entry label's PURE rule (the Claude adapter's chat env, the Settings words, the probe)
+      name('entry-measure'),   // 主开发 r4483: the entry pair's PURE verdict (the probe, the release road, their suites)
       name('claude-route-names'),   // B-e7c0 cure: the CLI's route / credential names (PURE) the managed rule and the merge both read
       name('conversation-env'),   // B-ba47's follow-up: the names the create and the spawns write into a conversation's child (PURE; the suites' scratch import and §112 read it — no hub path loads it, so no helper slot: 主开发 r863's should)
       name('home-verdict|home-links'),   // B-ba47 pick B + shape H: whose home a process runs on and the env a re-homed one hands on (PURE), and the re-home's file-system half (the resolver, the linker) — the suites' scratch import and the hub's boot first act (src/server/throwaway-root.js, its owner the boot's)

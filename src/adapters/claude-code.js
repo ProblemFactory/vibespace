@@ -22,6 +22,7 @@ const { claudeAllowRules, claudeAskRulesFor, spawnPermissionMode } = require('..
 // second spelling of "did I see the whole set" is the twin class this store has
 // already paid for six times.
 const quotaModel = require('../quota-model.js');
+const ENTRY = require('../claude-entry-label.js'); // 主开发 r4483: the entry label a CHAT start reports (claude.entryLabel; PURE, no words)
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -376,6 +377,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // data/bin/chat-wrapper.js reads them (no backstop counts while a prompt hook runs: the Stop window and an owed turn
     // wait for the init the hook precedes) and keeps them out of the chat. Pure observability, chat only, like the state events above.
     if (mode === 'chat') env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS = '1';
+    // THE ENTRY LABEL (主开发 r4483, the owner's word; the row claude.entryLabel, OFF by default): a CHAT start reports the name the
+    // person chose on its requests — the CLI keeps a CLAUDE_CODE_ENTRYPOINT already set. Off, an empty typed field or a name the
+    // vendor's rule refuses (src/claude-entry-label.js) pass NOTHING: the CLI's own label stands. A TERMINAL start never carries
+    // it — the CLI's interactive start, whose own label (cli) is the true one. This env rides every road with the rest of it
+    // (ws-create's spawn pairs: the local dtach line, the ssh ladder's quoted parts, the device agent's pipe session).
+    { const en = ENTRY.entryNameFor({ mode, value: S.entryLabel }); if (en) env[ENTRY.ENTRY_VAR] = en; }
     // Per-session apiKeyHelper neutralization (2.236.0, userN's "can't
     // switch to my subscription" on a keyHelper machine): a configured
     // apiKeyHelper in the merged settings UNCONDITIONALLY overrides claude.ai

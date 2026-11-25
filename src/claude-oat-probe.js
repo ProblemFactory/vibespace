@@ -47,6 +47,10 @@ const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const { OAT_VARIANTS, OAT_IN_FILE_GATE, MINT_VARIANT, cliVersionOf, mintScopesIn } = require('./cli-caps.js');
 const { CKPT_VARIANTS, CKPT_SWITCH, CKPT_DEVICE, systemHeadOf, ckptVerdict } = require('./ckpt-switch.js'); // row B-437e U0: the checkpoint switch's pair + its PURE verdict
+const { ENTRY_VARIANTS, ENTRY_DEFAULT_NAME, eventShapeOf, entryVerdict } = require('./entry-measure.js'); // 主开发 r4483: the entry label's pair + its PURE verdict
+const { ENTRY_VAR, nameVerdict: entryNameVerdict } = require('./claude-entry-label.js'); // the setting's own naming rule judges the measured name
+// THE PAIRS (主开发 r4483, law 4 of r4340: a second pair is ONE runner, runPair): the same short turn without and with one env name
+const PAIR_VARIANTS = Object.freeze([...CKPT_VARIANTS, ...ENTRY_VARIANTS]);
 
 // the measurement's own version: a change to what it measures bumps it, and a hub re-runs a FAIL once (a PASS stays)
 const PROBE_VERSION = 2; // 2 (the incident of 2026-11-11): the hub's run lives outside every guarded root — a cannot-run measured by 1 runs again
@@ -62,7 +66,8 @@ const ENV_ALLOW = Object.freeze(['PATH', 'HOME', 'TMPDIR', 'USER', 'LANG', 'TERM
   'CLAUDE_CODE_ENABLE_TELEMETRY', 'OTEL_METRICS_EXPORTER', 'OTEL_LOGS_EXPORTER', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_LOGS_EXPORT_INTERVAL', 'CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS',
   'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN',
   'BROWSER', // BROWSER (lane oat-add-door): the mint variant's only — the `false` binary (assertEnv), so `setup-token` never runs the box's opener
-  'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING']); // row B-437e U0: the ckpt-on variant's only — the checkpoint switch, `true` (assertEnv), the measurement's subject
+  'CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING', // row B-437e U0: the ckpt-on variant's only — the checkpoint switch, `true` (assertEnv), the measurement's subject
+  'CLAUDE_CODE_ENTRYPOINT']); // 主开发 r4483: the entry-on variant's only — the entry label, a name the setting's own rule takes (assertEnv), the measurement's subject
 
 const BASE_KEYS = ['ANTHROPIC_BASE_URL', 'CLAUDE_LOCAL_OAUTH_API_BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE', 'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE'];
 const PROXY_KEYS = ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy'];
@@ -181,6 +186,8 @@ function assertEnv(env, { base, root, oat, proxied, variant = null }) {
   if (env.BROWSER !== undefined && env.BROWSER !== NO_BROWSER) bad('BROWSER', 'an opener that could open the URL');
   if (env[CKPT_SWITCH] !== undefined && env[CKPT_SWITCH] !== 'true') bad(CKPT_SWITCH, 'the checkpoint switch takes `true` only (the measured value)');
   if (env[CKPT_SWITCH] !== undefined && variant !== 'ckpt-on') bad(CKPT_SWITCH, 'the checkpoint switch rides the ckpt-on variant only');
+  if (env[ENTRY_VAR] !== undefined && variant !== 'entry-on') bad(ENTRY_VAR, 'the entry label rides the entry-on variant only');
+  if (env[ENTRY_VAR] !== undefined && !entryNameVerdict(env[ENTRY_VAR]).ok) bad(ENTRY_VAR, 'a name the setting itself refuses (src/claude-entry-label.js nameVerdict)');
   if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC !== '1') bad('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'the CLI\'s optional traffic is on');
 }
 
@@ -446,6 +453,9 @@ async function measure(o = {}) {
   const GAP = Number(o.gapMs ?? 65000);
   const FLUSH_MS = Number(o.flushMs ?? 2500);   // the OTel batch's flush wait after the last turn
   const NEAR_MS = Number(o.nearMs ?? 30000);    // oat-file-near: expiresAt = start + this
+  // the entry pair's name (主开发 r4483): ours unless the run names another — judged by the setting's own rule BEFORE anything starts
+  const ENTRY_NAME = o.entryName == null || o.entryName === '' ? ENTRY_DEFAULT_NAME : String(o.entryName);
+  { const v = entryNameVerdict(ENTRY_NAME); if (!v.ok) throw refusal('entry-name', `${JSON.stringify(ENTRY_NAME.slice(0, 40))} is a name the setting refuses (${v.code})`); }
   const ROOT = o.root || `/tmp/vs-hotsw-${process.pid}`;
   fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
   // THE FENCES BEFORE ANYTHING RUNS (lane cli-self-measure, law 3 G2 / G6 / G7): refused by name, nothing started
@@ -1025,9 +1035,12 @@ async function measure(o = {}) {
     walk(top, 0);
     return out.sort();
   };
-  async function runCkpt(name) {
+  // THE ENTRY PAIR (主开发 r4483; src/entry-measure.js ENTRY_VARIANTS / entryVerdict) runs the SAME turn in the same fences, without
+  // the name (entry-off) and with CLAUDE_CODE_ENTRYPOINT=<ENTRY_NAME> (entry-on); its summary carries the first stream events' shape
+  async function runPair(name) {
     VARIANT = name;
-    const dir = path.join(ROOT, name === 'ckpt-on' ? 'ckpt-b' : 'ckpt-a');   // equal-length paths: every byte count the two runs send compares
+    const entry = ENTRY_VARIANTS.includes(name), offName = entry ? 'entry-off' : 'ckpt-off', onName = entry ? 'entry-on' : 'ckpt-on';
+    const dir = path.join(ROOT, `${entry ? 'entry' : 'ckpt'}-${name === onName ? 'b' : 'a'}`);   // equal-length paths: every byte count the two runs send compares
     fs.rmSync(dir, { recursive: true, force: true });
     const home = path.join(dir, 'home'), O = path.join(dir, 'subs', 'sub-O');
     const linkDir = path.join(dir, 'pool-links', 'pool-t'), link = path.join(linkDir, 'sess-1');
@@ -1043,7 +1056,7 @@ async function measure(o = {}) {
       { tool: { name: 'Read', input: { file_path: note } } },
       { tool: { name: 'Edit', input: { file_path: note, old_string: 'before', new_string: 'after' } } },
     ] };
-    const env = { ...cliEnv(home), ...PROXY_ENV, CLAUDE_SECURESTORAGE_CONFIG_DIR: link, ...(name === 'ckpt-on' ? { [CKPT_SWITCH]: 'true' } : {}) };
+    const env = { ...cliEnv(home), ...PROXY_ENV, CLAUDE_SECURESTORAGE_CONFIG_DIR: link, ...(name === 'ckpt-on' ? { [CKPT_SWITCH]: 'true' } : {}), ...(name === 'entry-on' ? { [ENTRY_VAR]: ENTRY_NAME } : {}) };
     const cli = startCli({ dir, env, variant: name, extraArgs: ['--permission-mode', 'acceptEdits'] });
     const m0 = mark(cli.out), o0 = M.otel.length;
     const t = await cli.turn('edit the note');
@@ -1064,16 +1077,26 @@ async function measure(o = {}) {
     let edited = false; try { edited = fs.readFileSync(note, 'utf8').includes('after'); } catch { }
     const files = filesUnder(path.join(home, '.claude', 'file-history'));
     const pick = (h) => ({ path: h.path, headers: h.headers, body: h.body });
-    const summary = { heads: heads.map(pick), countHeads: countHeads.map(pick), calls, files: files.length, edited, turnOk };
+    const summary = { heads: heads.map(pick), countHeads: countHeads.map(pick), calls, files: files.length, edited, turnOk, events: eventShapeOf(cli.out) };
     const lines = cli.record();
     const r = {
-      variant: name, version, switch: name === 'ckpt-on' ? `${CKPT_SWITCH}=true` : 'unset',
+      variant: name, version, switch: name === 'ckpt-on' ? `${CKPT_SWITCH}=true` : name === 'entry-on' ? `${ENTRY_VAR}=${ENTRY_NAME}` : 'unset',
       result: t && typeof t.result === 'object' ? { subtype: t.result.subtype, is_error: !!t.result.is_error } : t && t.result,
       requests: heads.length, countRequests: countHeads.length, calls, edited, turnOk, checkpointFiles: files.slice(0, 20), checkpointCount: files.length,
       heads: heads.map((h) => ({ path: h.path, headers: h.headers, body: h.body })),
       outboundConnects: afterPass(lines), stderrTail: cli.stderr().slice(-400), events: eventsOf(name, []),
     };
-    if (name === 'ckpt-off') {
+    if (name === 'entry-off') {
+      r.verdict = edited && heads.length > 0 && turnOk ? 'RAN' : 'FAIL';
+      r.note = `${heads.length} request(s), the turn ${turnOk ? 'finished' : 'did NOT finish'}, the note ${edited ? 'edited' : 'NOT edited'} without the name — entry-on is compared with it`;
+    } else if (name === 'entry-on') {
+      const off = RESULTS['entry-off'];
+      const v = entryVerdict(off && off.summary, summary, ENTRY_NAME);
+      r.entry = v;
+      r.verdict = v.verdict === 'PASS' ? 'PASS' : 'FAIL';
+      const ua = v.marks ? ` · user agent ${JSON.stringify(v.marks.off.uas)} without, ${JSON.stringify(v.marks.on.uas)} with it` : '';
+      r.note = `${v.verdict}: ${v.findings.join('; ') || (v.marks ? `the billing line said «${ENTRY_NAME}» on every request with the name, ${JSON.stringify(v.marks.off.labels)} without it; the first stream events kept their shape (${v.events.on.length})` : '')}${ua}${v.elsewhere.length ? ` · recorded, not judged: ${v.elsewhere.join('; ')}` : ''}`.slice(0, 1500);
+    } else if (name === 'ckpt-off') {
       r.verdict = edited && heads.length > 0 && turnOk ? 'RAN' : 'FAIL';
       r.note = `${heads.length} request(s), the turn ${turnOk ? 'finished' : 'did NOT finish'}, the note ${edited ? 'edited' : 'NOT edited'}, ${files.length} checkpoint file(s) without the switch — ckpt-on is compared with it`;
     } else {
@@ -1088,8 +1111,8 @@ async function measure(o = {}) {
     if (r.foreignTokens || r.guardedReads.length) { r.void = r.foreignTokens ? 'foreign-token' : 'guarded-read'; r.note += ` · VOID: ${r.foreignTokens ? `${r.foreignTokens} request(s) carried a token this run did not make` : `it read ${r.guardedReads.join(', ')}`}`; }
     else if (lines.gap) { r.void = lines.gap.void; r.traceGap = lines.gap.why; r.note += ` · VOID: ${lines.gap.why}`; }
     else { const doors = doorsOpenedOf(lines); if (doors.length) { r.void = 'door'; r.doors = doors; r.note += ` · VOID: a door the trace cannot see through opened (${doors.join(', ')})`; } }
-    if (r.void && name === 'ckpt-on') r.verdict = 'FAIL';   // a void run proves nothing either way
-    if (name === 'ckpt-on' && RESULTS['ckpt-off'] && RESULTS['ckpt-off'].r.void) { r.verdict = 'FAIL'; r.note += ` · the run without the switch is VOID (${RESULTS['ckpt-off'].r.void}): nothing is compared`; }   // r1107
+    if (r.void && name === onName) r.verdict = 'FAIL';   // a void run proves nothing either way
+    if (name === onName && RESULTS[offName] && RESULTS[offName].r.void) { r.verdict = 'FAIL'; r.note += ` · the run without the ${entry ? 'name' : 'switch'} is VOID (${RESULTS[offName].r.void}): nothing is compared`; }   // r1107 (the entry pair: r4483)
     r.traceJoined = lines.joined || 0; r.ioUringSetups = lines.filter((x) => x.call === 'io_uring_setup').length; r.cutCalls = (lines.cut || []).map((c) => c.call);   // the evidence the oat runs keep
     RESULTS[name] = { r, summary };
     return r;
@@ -1243,7 +1266,7 @@ async function measure(o = {}) {
 
   // ── the run: the gate first (law 1, ruling R1 — the hub places on the gate's verdict; the record completes behind it) ──
   const want0 = VERSION_RUN.void ? [] : orderOf(o.variants || []);
-  const want = [...want0.filter((v) => !CKPT_VARIANTS.includes(v)), ...CKPT_VARIANTS.filter((v) => want0.includes(v))];   // row B-437e U0: the pair last, off before on
+  const want = [...want0.filter((v) => !PAIR_VARIANTS.includes(v)), ...PAIR_VARIANTS.filter((v) => want0.includes(v))];   // row B-437e U0 (+ r4483's entry pair): each pair last, off before on
   if (VERSION_RUN.void) log(`[measure] VOID before any variant: the --version run ${VERSION_RUN.void === 'guarded-read' ? `read ${VERSION_RUN.guardedReads.join(', ')}` : VERSION_RUN.void === 'launcher-changed' ? 'found the launcher changed' : 'left a trace line the fence cannot read'}\n`);
   const results = [];
   let gateSaid = false;
@@ -1260,11 +1283,11 @@ async function measure(o = {}) {
       if (!gateSaid && OAT_IN_FILE_GATE.every((g) => results.some((x) => x.variant === g))) { gateSaid = true; if (typeof o.onGate === 'function') { try { o.onGate(gateOf(results, { cli: cliVersionOf(version), binary: BINARY, aborted: ESCAPED.length > 0, ms: Date.now() - T0, void: VERSION_RUN.void })); } catch { } } }
       continue;
     }
-    if (CKPT_VARIANTS.includes(name)) {
-      const r = await runCkpt(name);
+    if (PAIR_VARIANTS.includes(name)) {
+      const r = await runPair(name);
       VARIANT = null;
       results.push(r);
-      log(`[ckpt] ${name}: ${r.verdict} — ${r.note}\n`);
+      log(`[${ENTRY_VARIANTS.includes(name) ? 'entry' : 'ckpt'}] ${name}: ${r.verdict} — ${r.note}\n`);
       continue;
     }
     if (name === MINT_VARIANT) {

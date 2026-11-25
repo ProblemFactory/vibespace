@@ -3,6 +3,7 @@ import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_AD
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved, storeHeldWords } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
+import { entryFactText } from './entry-label-words.js'; // 主开发 r4483: the entry label's fact line (what the next chat start passes)
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { kernelDoors, kernelDownloadWords, kernelPollStep, kernelSaidStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
 import { engineFactText, engineFactDoor, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
@@ -548,6 +549,7 @@ class SettingsUI {
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
     if (schema.fact === 'browser-engine') this._renderEngineFact(info, row, path); // lane engine-plugin: where the default engine comes from + the engines here
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
+    if (schema.fact === 'entry-label') this._renderEntryLabelFact(info, row, path);   // 主开发 r4483: what the stored value makes the next chat start pass
     if (schema.fact === 'kept-files') this._renderKeptFiles(info);   // lane chat-attachments-persist: what the dropped files take, and the orphans' Remove door
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
@@ -901,6 +903,16 @@ class SettingsUI {
   /** lane engine-plugin: the FACT beside the default-engine PREFERENCE — where the value in effect comes from (a cluster preset
    *  says so: «由集群预设») and each engine plugin's kernel on this computer (GET /api/browser/engines, asked when the row draws).
    *  Lane engine-spi-egress: the SAME answer draws the row's options (engineOptions — no engine id named in the schema). */
+  /** 主开发 r4483: the entry label's fact line — the verdict of the STORED value (off, the name the next chat start reports, or a
+   *  refused typed name with its reason), drawn again after every change of the row's select or typed field. */
+  _renderEntryLabelFact(info, row, path) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact settings-entry-label-fact';
+    const paint = () => { line.textContent = entryFactText(this.settings.get(path)); };
+    paint();
+    info.appendChild(line);
+    if (row) row.addEventListener('change', () => setTimeout(paint, 0));
+  }
   _renderEngineFact(info, row = null, path = '') {
     const line = document.createElement('div');
     line.className = 'settings-row-fact settings-engine-fact';
@@ -1221,7 +1233,7 @@ class SettingsUI {
         select.appendChild(customOpt);
         const input = document.createElement('input');
         input.type = 'text'; input.className = 'settings-input-text';
-        input.placeholder = 'e.g. claude-opus-4-6-20250414';
+        input.placeholder = schema.placeholder || 'e.g. claude-opus-4-6-20250414';   // r4483: a row says what its typed field takes (the entry label's name)
         // Determine initial state
         const knownValues = schema.options.map(o => o.value);
         const isCustom = value && !knownValues.includes(value);

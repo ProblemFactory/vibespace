@@ -96,6 +96,19 @@ const HARNESS_SETTINGS_WORDS = {
         how: 'CLAUDE_CODE_NO_FLICKER / CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN',
         options: { [""]: t("Auto (CLI preference)"), ["fullscreen"]: t("Fullscreen (flicker-free)"), ["classic"]: t("Classic (main screen)") },
       },
+      // 主开发 r4483: what it changes, that the vendor has not said how it treats other names, that the choice and its risk are the
+      // person's, no promise of saving, and when a running conversation takes it
+      entryLabel: {
+        label: t("Entry label of chat conversations (Claude)"),
+        description: t("The name a chat conversation's Claude CLI reports to Anthropic on each of its requests as the place it was started from. Off (the default) keeps the CLI's own label. Anthropic has not said how it treats other names: the choice, and any risk in it, are yours, and nothing is promised about cost or limits. A running conversation takes a change at its next start."),
+        details: [
+          t("\"vibespace\" reports VibeSpace's name; Custom… reports a name you type. Terminal conversations always keep the CLI's own label."),
+          t("A typed name is 1 to 32 characters of a–z, 0–9, _ and -, starting with a letter. Refused: cli (the CLI rewrites it on a chat start), names starting with sdk or remote, the CLI's own names (mcp, claude-vscode, claude-desktop and the others it uses) and local_projects. A refused name passes nothing — the CLI's own label stands, and the line under this setting says why."),
+        ],
+        placeholder: t("a name, e.g. my-team"),
+        how: 'CLAUDE_CODE_ENTRYPOINT',
+        options: { ["off"]: t("Off (the CLI's own label)"), ["vibespace"]: "vibespace" },
+      },
     },
   },
   codex: {
@@ -211,7 +224,7 @@ function withWords(table, words = table && HARNESS_SETTINGS_WORDS[table.prefix])
     rows: (table.rows || []).map((r) => {
       const w = own(words.rows, r.key) ? words.rows[r.key] : null;
       if (!w) return r;
-      const row = { ...r, ...(own(w, 'label') ? { label: w.label } : {}), ...(own(w, 'description') ? { description: w.description } : {}), ...(own(w, 'details') ? { details: w.details } : {}) };
+      const row = { ...r, ...(own(w, 'label') ? { label: w.label } : {}), ...(own(w, 'description') ? { description: w.description } : {}), ...(own(w, 'details') ? { details: w.details } : {}), ...(own(w, 'placeholder') ? { placeholder: w.placeholder } : {}) };   // placeholder (r4483): the typed field's hint is a person's word too
       if (Array.isArray(r.options)) row.options = r.options.map((o) => (o && own(w.options, o.value) ? { ...o, label: w.options[o.value] } : o));
       if (r.apply && own(w, 'how')) row.apply = { ...r.apply, how: w.how };
       return row;
@@ -234,8 +247,9 @@ function wordsCensus(tables, words = HARNESS_SETTINGS_WORDS) {
       if (typeof rw.label !== 'string' || !rw.label) out.push(`${at}: no label`);
       if (typeof rw.description !== 'string') out.push(`${at}: no description`);
       if (own(rw, 'details') && !(Array.isArray(rw.details) && rw.details.every((d) => typeof d === 'string' && d))) out.push(`${at}: details are not a list of words`);
+      if (own(rw, 'placeholder') && (typeof rw.placeholder !== 'string' || !rw.placeholder || !r.combobox)) out.push(`${at}: a placeholder is words for a typed field (a combobox row's)`);
       // the device's table keeps NO word of a person's (one table owns each fact — a word left in it is red by name)
-      for (const f of ['label', 'description', 'details']) if (own(r, f)) out.push(`${at}: «${f}» is still in the device's table`);
+      for (const f of ['label', 'description', 'details', 'placeholder']) if (own(r, f)) out.push(`${at}: «${f}» is still in the device's table`);
       if (r.apply && own(r.apply, 'how')) out.push(`${at}: «apply.how» is still in the device's table`);
       if ((r.options || []).some((o) => o && own(o, 'label'))) out.push(`${at}: an option label is still in the device's table`);
       for (const o of Array.isArray(r.options) ? r.options : []) if (!own(rw.options, o.value) || typeof rw.options[o.value] !== 'string') out.push(`${at}: option ${JSON.stringify(o.value)} has no label`);

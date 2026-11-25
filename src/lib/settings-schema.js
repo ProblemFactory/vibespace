@@ -1747,6 +1747,8 @@ function deriveHarnessRow(tbl, r) {
   const entry = { type: r.type, default: r.default, label: t(r.label), description: t(r.description), category: t(tbl.category), liveApply: true, harness: tbl.prefix, apply: r.apply };
   if (r.options) entry.options = r.options.map((o) => ({ value: o.value, label: t(o.label) }));
   if (Array.isArray(r.details)) entry.details = r.details.map((d) => t(d)); // lane ui-plain-words: a harness row's long rule folds too
+  if (typeof r.placeholder === 'string') entry.placeholder = t(r.placeholder);   // r4483: a combobox row's typed field says what it takes
+  if (typeof r.fact === 'string') entry.fact = r.fact;                           // r4483: the row's fact line (settings-ui draws it by this tag)
   for (const k of ['combobox', 'min', 'max', 'step', 'storeDefault', 'unsetFollows']) if (r[k] !== undefined) entry[k] = r[k];   // + the U2 pair (src/harness-settings.js unsetValue): the store keeps the person's own default; a row nobody set follows
   // the view fields (settings-view.js): the row's own tier, and the TABLE's `when` on every row of it
   // (`when: { harness: 'codex' }` hides the whole Codex section where that CLI is not installed)

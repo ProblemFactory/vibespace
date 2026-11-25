@@ -59,6 +59,13 @@
 //   ckpt-noedit   the same, but its Edit never lands (must say INCOMPLETE: nothing to compare)
 //   every ckpt mode sends the CLI's own identity shape: `x-claude-code-session-id` and metadata.user_id = the device id from
 //   $HOME/.claude.json's userID (a random one where it has none — as the CLI does), the account, the session
+// …and THE ENTRY LABEL (主开发 r4483 — the probe's entry-off / entry-on pair): the ckpt turn (Read, then Edit the note), each request
+// with a user agent and a first system block that carry the label — CLAUDE_CODE_ENTRYPOINT as it stands, sdk-cli when unset (the
+// shape the vendor's billing line has: `cc_entrypoint=<label>;`):
+//   entry         takes the name (the measurement must say PASS: the billing line names it, the events keep their shape)
+//   entry-ignore  never takes it — always sdk-cli (must say FAIL: the name did not reach the billing line)
+//   entry-shape   takes it, and its first event (system/init) gains a key with the name set (must say FAIL: the events' shape)
+//   entry-extra   takes it, and sends ONE more header with the name set (PASS: recorded «elsewhere», never judged)
 // `--version` says 9.9.9 (Fake Claude), so a fixture it produces never names a real CLI.
 // It talks only to $ANTHROPIC_BASE_URL (the measurement's loopback mock).
 import fs from 'node:fs';
@@ -174,6 +181,11 @@ let misbehaved = false, dropped = false;
 const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 // THE CHECKPOINT MODES (header): one turn = the mock's plan run step by step; a backup only where the vendor would keep one
 const CKPT = /^ckpt(?:-header|-always|-devid|-noedit)?$/.test(KIND);
+const ENTRYM = /^entry(?:-ignore|-shape|-extra)?$/.test(KIND);   // the entry modes run the same turn
+const NAMED = typeof process.env.CLAUDE_CODE_ENTRYPOINT === 'string' && process.env.CLAUDE_CODE_ENTRYPOINT !== '';
+const LABEL = KIND === 'entry-ignore' || !NAMED ? 'sdk-cli' : process.env.CLAUDE_CODE_ENTRYPOINT;
+const entryHeaders = () => (ENTRYM ? { 'user-agent': `claude-cli/9.9.9 (external, ${LABEL})`, ...(KIND === 'entry-extra' && NAMED ? { 'x-fake-entry': '1' } : {}) } : {});
+const entrySystem = () => (ENTRYM ? { system: [{ type: 'text', text: `x-anthropic-billing-header: cc_version=9.9.9.fak; cc_entrypoint=${LABEL}; cch=00000;` }, { type: 'text', text: 'You are a fake.' }] } : {});
 const SESSION = crypto.randomUUID();
 const DEVICE = (() => { if (KIND === 'ckpt-devid') return crypto.randomBytes(32).toString('hex'); try { const c = JSON.parse(fs.readFileSync(path.join(process.env.HOME || '/', '.claude.json'), 'utf8')); if (typeof c.userID === 'string' && c.userID) return c.userID; } catch { } return crypto.randomBytes(32).toString('hex'); })();
 const SWITCHED = process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === 'true';
@@ -199,8 +211,8 @@ async function ckptTurn(c) {
   const messages = [{ role: 'user', content: [{ type: 'text', text: 'turn' }] }];
   let last = { status: 0 };
   for (let i = 0; i < 4; i++) {
-    const headers = { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20', 'x-claude-code-session-id': SESSION, ...(KIND === 'ckpt-header' && SWITCHED ? { 'x-fake-ckpt': '1' } : {}) };
-    last = await post('/v1/messages?beta=true', headers, { model: 'claude-fake', max_tokens: 64, stream: true, tools, messages, metadata: { user_id: `user_${DEVICE}_account_acct-HOME_session_${SESSION}` } });
+    const headers = { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20', 'x-claude-code-session-id': SESSION, ...(KIND === 'ckpt-header' && SWITCHED ? { 'x-fake-ckpt': '1' } : {}), ...entryHeaders() };
+    last = await post('/v1/messages?beta=true', headers, { model: 'claude-fake', max_tokens: 64, stream: true, tools, messages, ...entrySystem(), metadata: { user_id: `user_${DEVICE}_account_acct-HOME_session_${SESSION}` } });
     if (last.status !== 200) return last;
     const tool = toolOf(last.body);
     if (!tool) return last;
@@ -221,7 +233,7 @@ async function onTurn() {
   const c = current();
   if (!c || !c.accessToken) return emit({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' });
   if (c.refreshToken && c.expiresAt && Date.now() + 300e3 >= c.expiresAt) await post('/v1/oauth/token', {}, { grant_type: 'refresh_token', refresh_token: c.refreshToken });
-  if (CKPT) { const rc = await ckptTurn(c); return emit({ type: 'result', subtype: 'success', is_error: rc.status !== 200, result: rc.status === 200 ? 'ok' : `API Error: ${rc.status}` }); }
+  if (CKPT || ENTRYM) { const rc = await ckptTurn(c); return emit({ type: 'result', subtype: 'success', is_error: rc.status !== 200, result: rc.status === 200 ? 'ok' : `API Error: ${rc.status}` }); }
   const r = await post('/v1/messages?beta=true', { authorization: 'Bearer ' + c.accessToken, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20' }, { model: 'claude-fake', max_tokens: 64, stream: false, messages: [{ role: 'user', content: 'x' }] }, mode === 'keepalive-drop' && !dropped && (dropped = true));
   if (r.status === 401 && mode === 'rewrite401' && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     const o = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -233,7 +245,7 @@ async function onTurn() {
   emit({ type: 'result', subtype: 'success', is_error: r.status !== 200, result: r.status === 200 ? 'ok' : `API Error: ${r.status}` });
 }
 
-emit({ type: 'system', subtype: 'init' });
+emit({ type: 'system', subtype: 'init', ...(KIND === 'entry-shape' && NAMED ? { entry: LABEL } : {}) });
 let chain = Promise.resolve();
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => {
