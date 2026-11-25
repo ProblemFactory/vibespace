@@ -2288,7 +2288,7 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
 {
   // a stand-in writer the legs land by hand (one entry a file, the version a waiter wants, a refusal by EIO)
   const gatedJobsWriter = ({ fifo = false } = {}) => {   // fifo: the real writer's order — a write's bytes made when IT starts, a later hand-off queued behind it (never merged into it)
-    const S = new Map();
+    const S = new Map(), armed = new Map();
     const st = (f) => { if (!S.has(f)) S.set(f, { v: 0, wv: 0, o: null, waiters: [], rides: [], dirty: false, flight: null }); return S.get(f); };
     const startF = (s) => { if (s.flight || !s.dirty) return; s.dirty = false; const b = s.o.produce(); s.flight = { v: s.v, bytes: Array.isArray(b) ? b.join('') : String(b) }; };
     function land(f, ok = true) {
@@ -2316,19 +2316,23 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
       durable(f, { answer = null } = {}) { const s = S.get(f); const done = (ok) => { if (answer) answer(ok); return ok; }; if (!s || (!s.dirty && !s.flight)) return Promise.resolve(done(true)); const want = s.v; return new Promise((res) => s.waiters.push({ want, cb: (ok) => res(done(ok)) })); },
       whenDurable(files, o, answer) { let left = files.length, all = true; const one = (ok) => { all = all && ok; if (--left === 0 && answer) answer(all); }; for (const f of files) W.durable(f, { answer: one }); return Promise.resolve(true); },
       whyNotDurable: () => ({ why: 'failed', code: 'EIO' }),
+      // r4362 (the flake census): two facts a leg waits on instead of a count of turns — the durability waits asked of a file, and the
+      // reply bounds armed on it (an answer AT a bound can only come where one is armed)
+      waitersOf: (f) => { const s = S.get(f); return s ? s.waiters.length : 0; },
+      boundsOf: (f) => armed.get(f) || 0,
       // the writer's afterLanding: `step` at the REAL landing (never at a bound), `answer` once — at the landing, or false at `timeoutMs`
       afterLanding(f, step, { timeoutMs = null, answer = null } = {}) {
         const s = S.get(f); let replied = false; const reply = (ok) => { if (replied) return; replied = true; if (answer) answer(ok); };
         const go = () => { step(); reply(true); };
         if (!s || (!s.dirty && !s.flight)) { go(); return Promise.resolve({ landed: true }); }
         s.rides.push({ version: s.v, go });
-        if (Number.isFinite(timeoutMs) && timeoutMs > 0) { const t = setTimeout(() => reply(false), timeoutMs); if (t.unref) t.unref(); }
+        if (Number.isFinite(timeoutMs) && timeoutMs > 0) { armed.set(f, (armed.get(f) || 0) + 1); const t = setTimeout(() => reply(false), timeoutMs); if (t.unref) t.unref(); }
         return Promise.resolve({ landed: null });
       },
       flushSync(files) { for (const f of files || [...S.keys()]) land(f, true); return { written: [], left: [] }; },
       forget: (f) => { S.delete(f); },
     };
-    return { W, land, landAll: () => { for (const f of [...S.keys()]) land(f, true); }, ridesOf: (f) => { const s = S.get(f); return s ? s.rides.length : 0; } };   // r3796: what still rides a file's landing
+    return { W, land, landAll: () => { for (const f of [...S.keys()]) land(f, true); }, ridesOf: (f) => { const s = S.get(f); return s ? s.rides.length : 0; }, waitersOf: W.waitersOf, boundsOf: W.boundsOf };   // r3796: what still rides a file's landing
   };
   // r3796 (B-7e49): a scene's own count of the reads of ONE file in flight — each ended a turn after it settles, so the reader's own
   // .then chain has run: what a wait on «the read again has answered» ends on
@@ -2582,6 +2586,13 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
   ok(JSRC.split(GN_A).length === 2, 'control setup: the ✕\'s hand-off arming logsGone is found once');
   const GNX = await goneScene(MJb.load('src/jobs.js', anchored(JSRC, GN_A, "    /* MUTANT: not armed at the hand-off */ handed.then(", 'archive-gone-unarmed'), 'archive-gone-unarmed'), 'gonex');
   ok(GNX.inFlight && GNX.inFlight.gone === true, 'CONTROL (not armed at the hand-off, in a copy): logsGone() says «gone» while the ✕ is in flight and its folder was never handed to the remover (red)', GNX);
+  // r4362 (row B-3dbd's family, the flake census at 2.369.419): the waits below end on the FACT each leg reads, never on a count of
+  // turns standing in for it. factOf polls the fact (every 5 ms) under a generous bound whose expiry is a NAMED failed line. drained()
+  // is used only where the answer is IN MEMORY (an already-settled promise and its thens): one macrotask runs after EVERY pending
+  // microtask — the event loop's own order, which no load reorders (never «a few turns» for work on a disk).
+  const FACT_MS = 20000;
+  const factOf = async (fact, what) => { const t0 = Date.now(); while (!fact() && Date.now() - t0 < FACT_MS) await new Promise((r) => setTimeout(r, 5)); const there = !!fact(); if (!there) ok(false, `the leg's fact never came: ${what} — waited ${FACT_MS} ms`); return there; };
+  const drained = () => new Promise((r) => setImmediate(r));
   // (11b) r2001: a ✕ whose removal the STORAGE HELD is OWED — logsGone() says «still being deleted» whenever it is asked, never the map's
   // default «gone» once the held answer settled (the heavy suite's three held legs asked late). RED: the owed answer cut
   const heldScene = async (Mod, tag) => {
@@ -2591,12 +2602,28 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     J._logsRm = { whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: async () => ({}), settled: () => Promise.resolve(), busy: () => false, held: () => true, state: async () => ({}), forget: () => { }, stop() { } };   // the storage holds the removal
     J._logsKeepOwed = () => { };   // the owed RECORD's write is the heavy suite's leg; this one reads the answer
     J.rmArchived(id, () => { }); g.land(AF);
-    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // the held answer settles
+    await factOf(() => J._logsOwed.has(id) && !J._logsGone.has(id), `${tag}: the held answer settled (the ✕ owed, its hand-off ended)`);   // r4362: the held answer settles — waited on it
     const late = await J.logsGone(id, 1000), owed = J._logsOwed.has(id);
     try { J.shutdown(); } catch { }
     return { late, owed };
   };
   const HL = await heldScene({ JobManager }, 'held');
+  // r4362 (主开发 r4340 law 3): THE RACE MADE RED AT WILL — the storage's held answer comes 40 turns after the ask (a placed hold in the
+  // remover's stand-in): the OLD wait (20 turns) reads the ✕ NOT owed yet — a leg judged then read the map's default; the wait on the
+  // fact reads it owed
+  {
+    const { g, J, AF } = scene({ JobManager }, 'held-placed');
+    J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
+    const id = J.archivedList()[0].id;
+    J._logsRm = { whole: async () => { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)); return { error: 'held', held: true, gone: [] }; }, sweep: async () => ({}), settled: () => Promise.resolve(), busy: () => false, held: () => true, state: async () => ({}), forget: () => { }, stop() { } };
+    J._logsKeepOwed = () => { };
+    J.rmArchived(id, () => { }); g.land(AF);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // the OLD wait, as it stood
+    const owedAtTurns = J._logsOwed.has(id);
+    const owedAtFact = await factOf(() => J._logsOwed.has(id) && !J._logsGone.has(id), 'held-placed: the held answer settled');
+    try { J.shutdown(); } catch { }
+    ok(owedAtTurns === false && owedAtFact === true, 'PLACED (r4340 law 3): the storage\'s held answer 40 turns after the ask — the old wait (20 turns) read the ✕ NOT owed yet (red at will for a leg judged then); the wait on the fact read it owed', { owedAtTurns, owedAtFact });
+  }
   ok(HL.owed && HL.late && HL.late.pending === true, 'a ✕ the storage held is OWED, and logsGone() asked after its answer settled still says «still being deleted» — never «gone»', HL);
   const HL_A = "if (!p) return Promise.resolve(this._logsOwed && this._logsOwed.has(id) ? { pending: true } : { gone: true });";
   ok(JSRC.split(HL_A).length === 2, 'control setup: logsGone\'s owed answer is found once');
@@ -2800,14 +2827,18 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     const id = J.archivedList()[0].id;
     const RCs = RCmod.create({ getJobs: () => J, log: () => { } });
     let ans = null; RCs.clearMany([{ kind: 'job', id }], { caller: { role: 'owner' }, answer: (r) => { ans = r; } });
-    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // the clear's own awaits
-    g.land(path.join(d, 'jobs.json')); g.land(path.join(d, 'job-notifications.json'));
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-    const beforeArchive = ans;
+    const JF = path.join(d, 'jobs.json'), NF = path.join(d, 'job-notifications.json');
+    // r4362: the clear's own awaits end when it ASKS its writes' durability (a wait on jobs.json and the notices: the fact), never 20 turns
+    await factOf(() => g.waitersOf(JF) >= 1 && g.waitersOf(NF) >= 1, `${tag}: the clear asked its writes' durability`);
+    g.land(JF); g.land(NF);
+    // then: the two durability answers ran INSIDE land() and the clear's answer to them is in memory — drained, never 5 turns; a clear
+    // that waits for its archive has asked the archive's durability too (said beside the verdict: waitsOnArchive)
+    await drained();
+    const beforeArchive = ans, waitsOnArchive = g.waitersOf(AF);
     g.land(AF);
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    if (beforeArchive === null) await factOf(() => ans !== null, `${tag}: the clear answered at the archive's landing`);
     try { J.shutdown(); } catch { }
-    return { beforeArchive, atLanding: ans && { ok: ans.ok, cleared: ans.cleared, notOnDisk: !!ans.notOnDisk } };
+    return { beforeArchive, waitsOnArchive, atLanding: ans && { ok: ans.ok, cleared: ans.cleared, notOnDisk: !!ans.notOnDisk } };
   };
   const DR = await doorScene(require(path.join(ROOT, 'src/server/record-clear.js')), 'door');
   ok(DR.beforeArchive === null && DR.atLanding && DR.atLanding.ok && DR.atLanding.cleared === 1 && !DR.atLanding.notOnDisk, 'a person\'s «Clear content…» of an ARCHIVED job is answered only once the archive holding the clear landed — not when jobs.json and the notices did', DR);
@@ -2842,14 +2873,16 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     const { g, J, AF } = scene(Mod, tag); J.d.rmReplyMs = 60;
     J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
     const id = J.archivedList()[0].id; let ans = null;
+    const bounds0 = g.boundsOf(AF);   // r4362: the reply bounds armed before this ✕ (the scene's own sweeps)
     J.rmArchived(id, (x) => { ans = x; });
     // r3796 (B-7e49): the bound's OWN TURN is the fact — a timer of the bound's length set after the ✕ fires after the bound's timer (Node
     // runs timers of one length in the order they were set), then the answer's own turns: the answer is there (r2255 (4)), or a copy
     // with no bound has given none — read at the bound, never at a 1 s clock
-    await new Promise((r) => setTimeout(r, J.d.rmReplyMs)); for (let i = 0; i < 10 && ans === null; i++) await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setTimeout(r, J.d.rmReplyMs));
+    await factOf(() => ans !== null || g.boundsOf(AF) === bounds0, `${tag}: the ✕'s answer at its bound (its bound armed answers; none armed for it, none can)`);   // r4362: the fact, never 10 turns
     const atBound = ans;
     let later = null; J.logsGone(id, 60e3).then((x) => { later = x; });   // r1963: a later ask, the write still not landed
-    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));   // answered AT ONCE (a few turns), or it waits with the write
+    await drained();   // answered AT ONCE from memory (logsGone's map), or it waits with the write — r4362: every microtask run, never «10 turns»
     const laterAtOnce = later;
     g.land(AF); try { J.shutdown(); } catch { }
     return { atBound, later: laterAtOnce };
@@ -2871,9 +2904,9 @@ console.log('§B-0248 step 3: the archive through the store writer (bytes at the
     J.archiveSweep({ now: T0 + 25 * H }); g.landAll(); g.landAll();
     const id = J.archivedList()[0].id;
     J.rmArchived(id, () => { }); J.shutdown(); g.land(AF);
-    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));   // r2001: asked LATE, after every promise of the landing settled
+    await drained();   // r2001: asked LATE, after every promise of the landing settled (the landing's steps ran in land(); r4362: drained, never «20 turns»)
     let lg = null; J.logsGone(id, 60e3).then((x) => { lg = x; });
-    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));   // answered at once, never a wait
+    await drained();   // answered at once from memory, never a wait (r4362: drained, never «10 turns»)
     return { said: logs.filter((l) => l.includes(id) && /its removal landed after the jobs engine ended/.test(l)).length, logsGone: lg };
   };
   const EN = await endedScene({ JobManager }, 'ended');
