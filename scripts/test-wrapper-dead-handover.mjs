@@ -20,6 +20,8 @@
 //   ⑦ TWO WRITERS: another writer's records in the file are kept (the merge by the record's own id; states only move forward)
 //   ⑧ THE DRAWER's READ: four replies — none, ok, refused (a folder), torn — a refused or torn file draws nothing, said once
 //   ⑨ A LIVE wrapper's frame in flight is never drawn «Not confirmed»; the page's words and chips (en / zh / ja), the chip table
+//   ㉖ (r4372) ONE BUBBLE where the hub's own send record (the live ring) meets a drawn copy of the same message — in BOTH orders,
+//      each placed by its records' dates (never this run's clock); RED: the drawer before the cure draws a second bubble copy-first
 import { stopWrapper, anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -647,6 +649,41 @@ ok(U25.rec?.state === 'handed' && /compacted at or after the send — its absenc
   `a whole transcript compacted after the send, the frame's record not in it: left «${U25.rec?.state}» and said — RED: a copy without the guard calls it «${U25r.rec?.state}»`);
 ok(U25t.rec?.state === 'undelivered' && U25tr.rec?.state === 'handed',
   `a TITLE summary line (no time) is no compaction: the whole transcript still proves the frame «${U25t.rec?.state}» — RED: a guard that takes any summary line leaves it «${U25tr.rec?.state}» (send it again quietly off)`);
+
+say('㉖ ONE BUBBLE where the hub\'s own send record meets a drawn copy of the same message — both orders, placed by dates (r4372)');
+WD.section('㉖');
+{
+  // FIXED DATES, never this run's clock: the transcript's start T0, the hub's send record in the live ring at TS (the claude adapter's
+  // userMsg: _fromWebui + msgId + its time, no webui_copy), the record handed and settled 30 s before TS (a paired machine's clock behind
+  // the hub's: the copy is placed FIRST) or 30 s after it (one clock: the send record first, as today)
+  const T0 = Date.parse('2026-11-25T10:00:00.000Z'), TS = T0 + 60000;
+  const HR_OLD = M.write('src/handed-records.js', anchored(HR_SRC, '(m.webui_copy || m._fromWebui))) continue;', 'm.webui_copy)) continue;   /* MUTANT: the drawer before r4372 */', 'the drawer RED meet'), 'meet-old');
+  const SS_OLD = ssRed('meet-old', "const HANDED = require('./handed-records.js');", 'const HANDED = require(' + J(HR_OLD) + ');   /* MUTANT: the drawer before r4372 */').SS;
+  let n = 0;
+  const meet = async (Store, tag, recAt, state) => {
+    const MS = 'msg-meet-' + tag;
+    const c = conversation('meet-' + tag, { transcript: [{ type: 'user', uuid: uuid(960 + ++n), timestamp: new Date(T0).toISOString(), message: { role: 'user', content: 'start the long task' } }] });
+    place(c, [recordOf(MS, null, { state, at: recAt, settledAt: state === 'handed' ? 0 : recAt + 1000 })]);
+    await Store.warmSessionJsonlAsync(c.conv, c.cwd, { handedDir: c.buffers });   // the store's OWN warm (its records cache is the copy's own)
+    const ring = J({ type: 'user', message: { role: 'user', content: words(MS) }, msgId: MS, timestamp: new Date(TS).toISOString(), _fromWebui: true }) + '\n';
+    const sm = new Store.SessionMessages({ backendSessionId: c.conv, claudeSessionId: c.conv, cwd: c.cwd, buffer: ring }, 'view', { buffersDir: c.buffers });
+    const raw = sm.raw(), mm = new MessageManager('dead-handover-suite'); mm.convertHistory(raw);
+    const bubbles = mm.messages.filter((m) => m.role === 'user' && m.webuiMsgId === MS);
+    return { bubbles: bubbles.length, chip: bubbles.length ? bubbles[0].queueState || null : 'none', copyAt: raw.findIndex((r) => r && r.msgId === MS && r.webui_copy), sendAt: raw.findIndex((r) => r && r.msgId === MS && r._fromWebui && !r.webui_copy) };
+  };
+  const cf = await meet(SS, 'copy-first', TS - 30000, 'undelivered'), cfU = await meet(SS, 'copy-first-unconfirmed', TS - 30000, 'handed');
+  const sf = await meet(SS, 'send-first', TS + 30000, 'undelivered');
+  const rcf = await meet(SS_OLD, 'copy-first-red', TS - 30000, 'undelivered'), rcfU = await meet(SS_OLD, 'copy-first-unconfirmed-red', TS - 30000, 'handed');
+  const rsf = await meet(SS_OLD, 'send-first-old', TS + 30000, 'undelivered');
+  ok(rcf.copyAt >= 0 && rcf.sendAt > rcf.copyAt && rsf.sendAt >= 0 && rsf.copyAt > rsf.sendAt,
+    `the two orders are PLACED by the records' dates (the drawer before the cure, which draws the copy in both): copy first ${rcf.copyAt} < ${rcf.sendAt}, send first ${rsf.sendAt} < ${rsf.copyAt}`, { rcf, rsf });
+  ok(cf.bubbles === 1 && cf.copyAt === -1 && cf.sendAt >= 0 && cfU.bubbles === 1 && cfU.copyAt === -1,
+    `the copy dated BEFORE the hub's send record («Not delivered» and «Not confirmed» alike): ONE bubble — the drawer counts the hub's own send record as the history holding the frame (no copy drawn)`, { cf, cfU });
+  ok(sf.bubbles === 1 && rsf.bubbles === 1 && sf.chip === rsf.chip && cf.chip === rsf.chip,
+    `the send record first: ONE bubble, as before the cure; and the copy-first bubble's chip is the send-first one's (${J(cf.chip)} = ${J(rsf.chip)}): what the live ring says`, { sf, rsf, cf });
+  ok(rcf.bubbles === 2 && rcfU.bubbles === 2,
+    `RED: the drawer before the cure draws a SECOND bubble when the copy is dated first (${rcf.bubbles} «Not delivered», ${rcfU.bubbles} «Not confirmed») — the message manager's drop by msgId holds only after a send record`, { rcf, rcfU });
+}
 
 say('⑦b TWO WRITERS — the merge and the forward-only state, each with its control');
 WD.section('⑦b');

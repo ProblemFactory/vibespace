@@ -106,7 +106,10 @@ function insertDrawn(all, drawn) {
   if (!drawn.length) return all;
   const out = all.slice();
   for (const d of drawn) {
-    if (out.some((m) => m && m.msgId === d.rec.msgId && m.webui_copy)) continue;   // the history already holds this copy (a live ring)
+    // the history already holds this frame: a live ring's wrapper copy (webui_copy), or the hub's OWN send record of it (r4372: a copy
+    // dated before that record drew a SECOND bubble — message-manager.js drops a later record by its msgId only after a send record,
+    // and a paired machine's clock behind the hub's places the copy first; the chip is then the live ring's, as in the send-first order)
+    if (out.some((m) => m && m.msgId === d.rec.msgId && (m.webui_copy || m._fromWebui))) continue;
     // before the first record dated AFTER its send; with none, at the end (its send time among the transcript's records)
     let at = out.findIndex((m) => { const t = Date.parse(m && m.timestamp); return !!t && t > d.at; });
     if (at < 0) at = out.length;
