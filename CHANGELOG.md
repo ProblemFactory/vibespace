@@ -8,6 +8,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A browser profile's ⋯ menu has «Environment…» to set the time zone, the language and the location its browser tells the sites it opens.
 - With a place set, only the sites on the profile's list read it; every other site is denied the location, with no prompt.
 
+### Changed
+- A usage history VibeSpace had kept for two different accounts as one is set apart, and each account learns its own usage again.
+- Two seats in one organisation are no longer treated as one account: each is judged on its own usage, never on the other seat's.
+- Two rows VibeSpace cannot prove are one account (an address alone, or a long-lived token) now each read their own usage instead of sharing it.
+
 ### Fixed
 - A notice about a refused agent action now names the conversation or browser it was about, while the agent itself still learns nothing more.
 - When the list of plugins you turned on and trusted cannot be read, VibeSpace keeps it: no plugin is turned off, removed or asked to consent again.
