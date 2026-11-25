@@ -175,7 +175,7 @@ import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces:
 import { createLoopBanner, loopTabRowOf, loopDoorsShown } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords, retryReplyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
-import { displayFactOf, displayFactText, stoppedText, displayMarkOf, runLineVerdict } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
+import { displayFactOf, displayFactText, stoppedText, displayMarkOf, runLineVerdict, paintLineOf /* B-bcf8 (r4256) */ } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf, pictureForView, BG_SETTLE_MS } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
 import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
@@ -1499,6 +1499,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   let tabRaf = 0, tabRo = null; const tabRoSeen = new WeakSet(); // r1111: the row's ONE observer (made below the fit) + the chips and dividers it already watches
   function renderTabRow() {
     if (st.closed) return;
+    try { if (paintLineNow() !== (st.paintShown || '')) renderDisplay(); } catch { /* the view is still being built */ } // B-bcf8 (r4256): the shown tab moved — its still-picture line with it
     const driving = st.mode === 'takeover' && st.mine;
     const m = tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable, titles: st.tabTitles, windows: st.tabWindows, leases: tabLeasesNow(), names: tabNamesNow(), front: st.tabFront, made: st.tabMade }, t);
     st.tabRow = m;
@@ -2103,6 +2104,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // tip the full sentence; its LINE is said once a browser run — for DISPLAY_SAY_MS from the first time this view shows that run
   // (keyed by its record's start), then the mark alone. A run started again says it again; every other fact keeps its line.
   const saidRuns = new Map(); // `${profileId}:${startedAt}` → when this view first said it
+  // B-bcf8 (r4256): the tab this view SHOWS (the one it watches, else the agent's current tab) and its still-picture line from the
+  // digest's `paint` (the keeper's codes) — said on the display line WHILE it stands (it takes the line; the mark stays on the bar)
+  function shownTabId() { return (st.watch && st.watch.targetId) || ((st.tabs || []).find((x) => x && x.active) || {}).targetId || null; }
+  function paintLineNow() { const r = (st.rows || []).find((x) => x && x.ref === curRef()) || null; const pid = (r && r.profileId) || (st.target && st.target.profileId) || null; const d = app._browserProfiles; return paintLineOf(d && d.browsers && pid ? d.browsers[pid] : null, shownTabId()); }
+  // (the line said now is st.paintShown — renderTabRow re-renders the display when the shown tab's line moved: a tab switch, a watch)
   const renderDisplay = () => {
     const r = (st.rows || []).find((x) => x && x.ref === curRef()) || null;
     const pid = (r && r.profileId) || (st.target && st.target.profileId) || null;
@@ -2116,6 +2122,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       if (said.first) { saidRuns.set(run, said.at); setTimeout(() => { if (!st.closed) renderDisplay(); }, said.leftMs + 50); }
       if (!said.say) line = '';
     }
+    st.paintShown = paintLineNow(); if (st.paintShown) line = st.paintShown; // B-bcf8 (r4256): a still picture is said while it stands
     if (displayNote.textContent !== line) displayNote.textContent = line;
     displayNote.style.display = line ? '' : 'none';
     const mw = mark ? mark.word : '', mt = mark ? mark.tip : '';

@@ -179,6 +179,8 @@ const LEFT_ALONE = [
   ['not', 'the idle-paint freeze\'s own refusal reason (a tab\'s visibility read did not answer: that pass freezes nothing) — internal to the keeper\'s sweep, no route answers it', ['front_unread']],  // r4134 (the train 2.369.419's third pick, 7ad68a517): line 823 (lane bl-chat-c, r3245 (1)) brought it
   ['own', 'a LISTED live conversation\'s row state (its record could not be read at the hub\'s start; src/server/boot-restore.js gives the row `_remoteState: record-unread`) — the session card draws it with its OWN chip and tip (src/lib/session-card.js, «its record could not be read», zh / ja); no route answers it as a refusal (that row\'s attach and acts refuse by session-meta-unread, a classed code)', ['record-unread']],
   ['own', 'r3786: a kept browser\'s folder NOTE that could not be read at its start — not a list: the start is not kept and its own words say so (src/browser-kept.js startNoteText, the card\'s «Not kept…»)', ['kept_note_unreadable']],
+  // B-bcf8 (r4256): a still-tab code of the digest's `paint` field — the live view words it in its own line; no route answers it
+  ['not', 'a still-tab code of the keeper\'s digest field `paint` (the idle-paint watch: a page that did not answer its wake) — the live view words it in its own line (src/lib/browser-display-words.js paintLineOf); no route answers it, no list hold', ['thaw-unread']],
 ];
 const LEFT = new Map(LEFT_ALONE.flatMap(([kind, why, codes]) => codes.map((c) => [c, { kind, why }])));
 function endingsOf(sources, pattern) {

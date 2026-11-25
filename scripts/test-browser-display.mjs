@@ -852,5 +852,102 @@ console.log('— B-346d law 1: the live view of a stopped browser says why, from
   ok(miss.length === 0, `every key stoppedText asks for (${keys.length}) has a zh and a ja row`, miss);
 }
 
+// ═══ B-bcf8 (主开发 r4256): A STILL PICTURE OF THE LIVE VIEW IS TOLD TO THE PERSON — the words (PURE), the live view's wiring, and the
+//     REAL keeper's digest field `paint` (codes and target ids only; pushed when it moves, never on a tick that changed nothing) ═══
+console.log('— B-bcf8 (r4256): a still picture of the live view is told to the person — the words, the wiring, the keeper\'s digest field');
+{
+  const J = (x) => JSON.stringify(x);
+  const W = await import('../src/lib/browser-display-words.js');
+  const TA = '0081' + 'C'.repeat(28), TB = '0082' + 'C'.repeat(28), TC = '0083' + 'C'.repeat(28);
+  const EN = {
+    'thaw-unread': 'This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.',
+    'show-owed': 'This page has not come back to the front yet. VibeSpace tries again shortly.',
+    'show-left': 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.',
+  };
+  const recOf = (paint) => ({ profileId: 'bp-1', state: 'ready', ...(paint === undefined ? {} : { paint }) });
+  const wordsBad = [];
+  for (const [code, line] of Object.entries(EN)) {
+    if (typeof W.paintLineOf !== 'function') { wordsBad.push('no paintLineOf in src/lib/browser-display-words.js'); break; }
+    if (W.paintLineOf(recOf({ [TA]: code }), TA) !== line) wordsBad.push(code + ': the shown tab not said in its words');
+    if (W.paintLineOf(recOf({ [TA]: code }), TA.toLowerCase()) !== line) wordsBad.push(code + ': a lower-case id of the shown tab not said');
+    if (W.paintLineOf(recOf({ [TB]: code }), TA) !== '') wordsBad.push(code + ': ANOTHER tab\'s code said');
+  }
+  if (typeof W.paintLineOf === 'function') {
+    for (const [name, r, id] of [['the record as it is today (no paint)', recOf(undefined), TA], ['paint null', recOf(null), TA], ['front_unread (that browser draws)', recOf({ [TA]: 'front-unread' }), TA],
+      ['a code it does not know', recOf({ [TA]: 'gone' }), TA], ['no shown tab', recOf({ [TA]: 'show-left' }), null], ['no record', null, TA], ['a prototype key', recOf({}), '__proto__']]) if (W.paintLineOf(r, id) !== '') wordsBad.push(name + ': said');
+  }
+  ok(wordsBad.length === 0, 'B-bcf8 (r4256) (1)/(3): each of the three codes gives its line for the tab the view SHOWS — never another tab\'s, never front_unread (that browser draws), never a record without `paint` (today\'s says nothing)', wordsBad);
+  const zhB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const missB = Object.values(EN).filter((k) => !(zhB.includes('  ' + JSON.stringify(k) + ': ') && jaB.includes('  ' + JSON.stringify(k) + ': ')));
+  ok(missB.length === 0 && Object.values(EN).every((x) => !/[{}]|https?:/.test(x)), 'B-bcf8 (r4256) (3): the three lines have zh and ja rows, and no line has a slot (no title, no address can ride it)', missB);
+  // the live view's wiring (src/lib/browser-live-window.js), each line ONCE: the shown tab (the watched one, else the agent's current tab),
+  // its line from the digest's record, said AFTER the once-a-run drop (a still picture is said while it stands, not 20 s a run) and
+  // before the line is drawn; renderTabRow re-renders the display when the shown tab's line moved (a tab switch, a watch)
+  const LWB = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8'); const nB = (x) => LWB.split(x).length - 1;
+  const PINSB = [
+    ['the words module\'s function imported', "runLineVerdict, paintLineOf /* B-bcf8 (r4256) */ } from './browser-display-words.js';"],
+    ['the shown tab', "function shownTabId() { return (st.watch && st.watch.targetId) || ((st.tabs || []).find((x) => x && x.active) || {}).targetId || null; }"],
+    ['its line from the shown browser\'s record', 'return paintLineOf(d && d.browsers && pid ? d.browsers[pid] : null, shownTabId()); }'],
+    ['…said while it stands (it takes the line)', 'st.paintShown = paintLineNow(); if (st.paintShown) line = st.paintShown;'],
+    ['…re-rendered when the shown tab moved', "try { if (paintLineNow() !== (st.paintShown || '')) renderDisplay(); } catch { /* the view is still being built */ }"],
+  ];
+  const missW = PINSB.filter(([, x]) => nB(x) !== 1).map(([w, x]) => ({ w, n: nB(x) }));
+  const iDrop = LWB.indexOf("if (!said.say) line = '';"), iSay = LWB.indexOf('st.paintShown = paintLineNow();'), iDraw = LWB.indexOf('if (displayNote.textContent !== line) displayNote.textContent = line;');
+  ok(missW.length === 0 && iDrop > 0 && iDrop < iSay && iSay < iDraw, `B-bcf8 (r4256) (1): the live view says it on its OWN display line, for the tab it shows, after the once-a-run drop (${PINSB.length} pins, each once)`, { missW, iDrop, iSay, iDraw });
+  // THE REAL KEEPER's digest over a stand-in paint watch: `stillTabs` is the watch's answer; the sweep's tick pushes the digest
+  // (`browser-profiles-updated`) only when a browser's `paint` moved; a left tab's mark dropped by the recheck (a viewer watches) is
+  // pushed at once, between ticks
+  const NOW_P = Date.parse('2026-11-25T12:00:00Z'); let paintSeq = 0;
+  const paintKeeper = async (Kmod, steps, { viewers = 0 } = {}) => {
+    const root = path.join(ROOT, `paint-digest-${++paintSeq}`), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
+    (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-000000c2', label: 'STILL', dir: path.join(root, 'prof'), createdAt: NOW_P - 3600e3 }],
+      browsers: { 'bp-000000c2': { profileId: 'bp-000000c2', ns: 'vs-bp-000000c2', state: 'ready', pid: null, hostId: null, external: false, display: { headed: true, fallback: { rung: 'hidden-window' } } } } }));
+    const quiet = { log() {}, info() {}, warn() {}, error() {} }, sent = [];
+    const kk = Kmod.create({ dataDir, homeDir: root, env: () => ({ PATH: path.join(root, 'nobin'), HOME: root }), install: false, log: quiet, now: () => NOW_P, tickMs: 3600e3,
+      serverSetting: (k) => (k === 'browser.idlePaintFreeze' ? true : undefined), daemonTable: async () => [], broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') sent.push(m); } });
+    let still = {}, later = null; const asked = [];
+    kk.setPaintWatch({ paintFacts: () => ({ lastVerbAt: NOW_P - 5000, busy: false, frozen: false }), freezePaint: async () => ({ ok: false }), thawPaint: async () => ({ ok: true }),
+      stillTabs: () => still, recheckLeft: (pid) => { asked.push(pid); const l = later; later = null; return new Promise((res) => setTimeout(() => { if (l) still = l; res({ ok: true, cleared: l ? 1 : 0 }); }, 20)); } });
+    const seenP = !!kk.profile('bp-000000c2');   // the registry read first, as a hub's boot has it (a keeper loads it at its first read; a sweep before that sees no browser)
+    if (viewers) kk.noteViewers('vs-bp-000000c2', 'bp-000000c2', viewers);
+    const rows = [];
+    try {
+      for (const s of steps) {
+        still = s.still; later = s.later || null; const n0 = sent.length;
+        await kk.sweepIdlePaint(NOW_P); await new Promise((r) => setTimeout(r, 60));
+        const b = kk.list().browsers['bp-000000c2'] || {};
+        rows.push({ pushed: sent.length - n0, paint: b.paint === undefined ? 'NO FIELD' : b.paint, pushedPaint: sent.length > n0 ? ((sent[sent.length - 1].browsers || {})['bp-000000c2'] || {}).paint || null : null });
+      }
+    } finally { kk.shutdown(); }
+    return { rows, asked: asked.length, seen: seenP };
+  };
+  const STEPS = [{ still: {} }, { still: { [TA]: 'show-left' } }, { still: { [TA]: 'show-left' } }, { still: { [TA]: 'show-left', [TB]: 'thaw-unread' } }, { still: {} }, { still: {} }];
+  const PRIV = [{ still: { [TA.toLowerCase()]: 'show-owed', 'https://bank.example/login': 'show-owed', [TB]: 'Inbox (3) — mail', title: 'show-left', AB12: 'show-left', [TC]: 'front-unread' } }];
+  const judgeSteps = (r) => !!r && r.rows.length === 6 && r.rows.map((x) => x.pushed).join() === '0,1,0,1,1,0' && r.rows[0].paint === null && J(r.rows[1].paint) === J({ [TA]: 'show-left' }) && J(r.rows[1].pushedPaint) === J({ [TA]: 'show-left' })
+    && J(r.rows[3].paint) === J({ [TA]: 'show-left', [TB]: 'thaw-unread' }) && r.rows[4].paint === null && r.rows[5].paint === null;
+  const judgePriv = (r) => !!r && J(r.rows[0].paint) === J({ [TA]: 'show-owed' }) && !/example|https?:|Inbox|title|front/i.test(J(r.rows[0].paint));
+  const KP = require('../src/server/browser-keeper.js');
+  const [pd, pv, pw, pn] = await Promise.all([paintKeeper(KP, STEPS), paintKeeper(KP, PRIV), paintKeeper(KP, [{ still: { [TA]: 'show-left' }, later: {} }], { viewers: 1 }), paintKeeper(KP, [{ still: { [TA]: 'show-left' }, later: {} }])]);
+  ok(judgeSteps(pd), 'B-bcf8 (r4256) (2): the REAL keeper\'s digest carries `paint` — the still tabs by code, keyed by target id — pushed when it MOVES (a code appears, another joins, all clear: 1 push each) and NEVER on a tick that changed nothing (0)', pd.rows);
+  ok(judgePriv(pv), 'B-bcf8 (r4256) (2): CODES AND TARGET IDS ONLY — whatever the watch hands, an address, a page title, a key not of a target id\'s shape and a code not of the three are dropped, never carried', pv.rows);
+  ok(pw.asked === 1 && pw.rows[0].pushed === 2 && pw.rows[0].paint === null && pn.asked === 0 && pn.rows[0].pushed === 1 && J(pn.rows[0].paint) === J({ [TA]: 'show-left' }),
+    'B-bcf8 (r4256): a LEFT tab brought forward while a person watches — the sweep asks the recheck (reads only) and its dropped mark is pushed at once, between ticks; with nobody watching, never asked', { watched: pw, alone: pn });
+  // the reds: today's record (no `paint`), a keeper that pushes at every tick, a keeper that carries the watch's map as it comes
+  const MPB = mutantCopies('browser-display-paint', REPO), ksrcB = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const PANCH = ', paint: paintOf(rec.profileId) /* B-bcf8 (r4256): the still tabs, codes and ids only */', TANCH = '    pushPaintIfMoved(); // B-bcf8 (r4256)', RANCHB = "if (/^[0-9A-Fa-f]{16,64}$/.test(id) && (code === 'thaw-unread' || code === 'show-owed' || code === 'show-left')) out[id.toUpperCase()] = code;";
+  const anchB = [[PANCH, 'the digest field'], [TANCH, 'the push when it moved'], [RANCHB, 'codes and ids only']].filter(([a]) => !ksrcB.includes(a)).map(([, n]) => n);
+  ok(anchB.length === 0, 'the anchors of the B-bcf8 keeper controls are in the source (src/server/browser-keeper.js)', anchB);
+  const KnoP = anchB.length ? null : MPB.load('src/server/browser-keeper.js', anchored(ksrcB, ', paint: paintOf(rec.profileId) /* B-bcf8 (r4256): the still tabs, codes and ids only */', '', 'B-bcf8 control: the record as it is today (no paint)'), 'bcf8-no-paint');
+  const Ktick = anchB.length ? null : MPB.load('src/server/browser-keeper.js', anchored(ksrcB, '    pushPaintIfMoved(); // B-bcf8 (r4256)', '    notify(); // B-bcf8 control: pushed at every tick', 'B-bcf8 control: a push at every tick'), 'bcf8-every-tick');
+  const Kraw = anchB.length ? null : MPB.load('src/server/browser-keeper.js', anchored(ksrcB, "if (/^[0-9A-Fa-f]{16,64}$/.test(id) && (code === 'thaw-unread' || code === 'show-owed' || code === 'show-left')) out[id.toUpperCase()] = code;", 'out[id] = code;', 'B-bcf8 control: the watch\'s map carried as it comes'), 'bcf8-raw');
+  if (!anchB.length) {
+  const [cP, cT, cR] = await Promise.all([paintKeeper(KnoP, STEPS), paintKeeper(Ktick, STEPS), paintKeeper(Kraw, PRIV)]);
+  ok(!judgeSteps(cP) && cP.rows.every((x) => x.paint === 'NO FIELD'), 'CONTROL (the record as it is today): no `paint` in the digest — the live view has nothing to say for a still picture — RED', cP.rows.map((x) => x.paint));
+  ok(!judgeSteps(cT) && cT.rows[2].pushed === 1 && cT.rows[5].pushed === 1, 'CONTROL (the digest pushed at every tick): a push on ticks that changed nothing — RED', cT.rows.map((x) => x.pushed));
+  ok(!judgePriv(cR), 'CONTROL (the watch\'s map carried as it comes): an address and a page title ride the digest — RED', cR.rows[0].paint);
+  for (const r of copiesCensus(MPB.files, MPB.dir, REPO, { label: 'B-bcf8 control: ' })) ok(r.pass, r.name, r.detail);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

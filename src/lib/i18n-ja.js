@@ -7605,6 +7605,9 @@ export default {
   "its connection was lost": "接続が切れています", // B-346d r1505: a press always gets its reply
   "no watch could open": "監視を始められませんでした", // B-346d r1505: a press always gets its reply
   "Hidden window": "非表示ウィンドウ", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
+  "This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.": "このページは描画されていません：再開の呼びかけに応答がありませんでした。表示中は VibeSpace が呼びかけ続けます。", // B-bcf8 (r4256): the live view's still-picture line
+  "This page has not come back to the front yet. VibeSpace tries again shortly.": "このページはまだ前面に戻っていません。VibeSpace がまもなく再試行します。", // B-bcf8 (r4256): the live view's still-picture line
+  "VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.": "VibeSpace はこのページを前面に戻せませんでした。上のタブをクリックすると前面に出せます。", // B-bcf8 (r4256): the live view's still-picture line
   "Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer": "ブラウザー「{label}」がパスキーを待っています（{rp}）。切り替えて応答してください", // lane passkey-browse-yourself (acceptance r1)
   "Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer": "この会話の別のブラウザーがパスキーを待っています（{rp}）。切り替えて応答してください", // lane passkey-browse-yourself (acceptance r1)
   "The passkey wait had already ended": "このパスキーの待機はすでに終わっていました", // lane passkey-browse-yourself (acceptance r1)

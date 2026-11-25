@@ -50,6 +50,17 @@ export function runLineVerdict(firstAt, now, sayMs = DISPLAY_SAY_MS) {
 }
 
 /** One sentence for a browser's launch fact — '' when there is nothing to say (a window as asked, or none asked). */
+/** B-bcf8 (r4256): the live view's display line while the tab it SHOWS draws nothing — by the keeper's code for that tab (the
+ *  record's `paint`: codes and target ids only, src/server/browser-keeper.js paintOf). '' for no code, another tab's code, or a code
+ *  it does not know (front_unread is never one: that browser draws). Said while the code stands; gone when it clears. */
+export function paintLineOf(record, targetId) {
+  const id = String(targetId || '').toUpperCase(); const p = record && record.paint && typeof record.paint === 'object' ? record.paint : null;
+  const c = id && p && Object.prototype.hasOwnProperty.call(p, id) ? p[id] : null;
+  if (c === 'thaw-unread') return t('This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.');
+  if (c === 'show-owed') return t('This page has not come back to the front yet. VibeSpace tries again shortly.');
+  if (c === 'show-left') return t('VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.');
+  return '';
+}
 export function displayFactText(fact) {
   const c = factCode(fact);
   // B-d635: beside VibeSpace's own VNC desktop the words say where the browser is NOT — never "no desktop session"

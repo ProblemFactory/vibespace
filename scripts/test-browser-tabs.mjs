@@ -1126,6 +1126,64 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     ok(J(al.failed1) === J([[TA, 'window unread']]) && J(al.already2) === J([TA]) && J(al.shown2) === J([]) && al.flips === 1 && al.hidden2 === 1,
       'the round\'s should: a show counted failed that did happen (its flip tab\'s window unread) is read first at the next thaw — «visible», forgotten, never flipped again', al);
     if (DDo2) ok(!!oc2 && J(oc2.th1) === J([TA]) && !(oc2.th2 || []).length && oc2.hidden1 === 1, 'CONTROL (3623606d5: a front forgotten before it is shown): the failed show forgets it — still hidden, nothing shows it again — RED', oc2);
+    // ═══ B-bcf8 (主开发 r4256): THE STILL TABS BY CODE — the watch's own marks as the keeper's digest carries them (stillTabs), over
+    //     the same stand-in Chrome: each of the three appears while its fact stands and clears when it ends; a LEFT tab is dropped only
+    //     when its read says «visible» (recheckLeft: reads only), kept while hidden or when the read does not answer; the watch's
+    //     decisions are the ones above (its flips counted) ═══
+    const stillOf = (D, PID) => (typeof D.stillTabs === 'function' ? D.stillTabs(PID) : null);   // a watch without it (the base) reads as nothing said
+    const recheckOf = async (D, PID) => (typeof D.recheckLeft === 'function' ? D.recheckLeft(PID) : { cleared: null });
+    const stillLeg = async (Dmod, sfx) => {
+      const out = {};
+      { // thaw-unread: A's front's activation never answers ⇒ still (frozen); the next thaw answered ⇒ gone
+        const SI = await standIn(); const PID = 'bp-0000c25' + sfx; const D = mkD(Dmod, SI, []);
+        try {
+          await D.arm(PID, { budgetMs: 3000 }); const opened = await until(() => !!D.paintFacts(PID), 3000);
+          const fz = opened ? await D.freezePaint(PID) : null; const s0 = stillOf(D, PID);
+          SI.st.muteAct.add(TA); if (fz && fz.ok) await D.thawPaint(PID, { holder: hA2(PID) }); const s1 = stillOf(D, PID);
+          SI.st.muteAct.clear(); if (fz && fz.ok) await D.thawPaint(PID, { holder: hA2(PID) }); const s2 = stillOf(D, PID);
+          out.thaw = { fz: !!(fz && fz.ok), s0, s1, s2 };
+        } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+      }
+      { // show-owed: the thaw's flip create fails (Chrome's own error) ⇒ still (A's front owed); the next thaw shows it ⇒ gone
+        const SI = await standIn({ failCreate: (n) => n === 2 }); const PID = 'bp-0000c26' + sfx; const D = mkD(Dmod, SI, []);
+        try {
+          await D.arm(PID, { budgetMs: 3000 }); const opened = await until(() => !!D.paintFacts(PID), 3000);
+          const fz = opened ? await D.freezePaint(PID) : null;
+          if (fz && fz.ok) await D.thawPaint(PID, { holder: hA2(PID) }); const s1 = stillOf(D, PID);
+          if (fz && fz.ok) await D.thawPaint(PID, { holder: hA2(PID) }); const s2 = stillOf(D, PID);
+          out.owed = { fz: !!(fz && fz.ok), s1, s2 };
+        } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+      }
+      { // show-left: A's flip lands in another window three thaws in a row ⇒ left (still); a recheck while it is hidden keeps it, a
+        // read with no answer keeps it; brought forward (the person's press on its chip, the agent's own switch) ⇒ the recheck drops it
+        const SI = await standIn({ flipWin: (n) => (n >= 2 ? 9 : null) }); const PID = 'bp-0000c27' + sfx; const D = mkD(Dmod, SI, []);
+        try {
+          await D.arm(PID, { budgetMs: 3000 }); const opened = await until(() => !!D.paintFacts(PID), 3000);
+          const fz = opened ? await D.freezePaint(PID) : null; const seq = [];
+          for (let k = 0; k < 4 && fz && fz.ok; k++) { await D.thawPaint(PID, { holder: hA2(PID) }); seq.push((stillOf(D, PID) || {})[TA] || null); }
+          const r1 = await recheckOf(D, PID); const s1 = stillOf(D, PID);
+          SI.st.muteVis.add(TA); const r2 = await recheckOf(D, PID); const s2 = stillOf(D, PID); SI.st.muteVis.clear();
+          SI.bring(TA); const r3 = await recheckOf(D, PID); const s3 = stillOf(D, PID);
+          out.left = { fz: !!(fz && fz.ok), seq, r1, s1, r2, s2, r3, s3, flips: SI.st.creates.filter((c) => !c.newWindow).length };
+        } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+      }
+      return out;
+    };
+    const judgeStill = (x) => !!x && !!x.thaw && x.thaw.fz && J(x.thaw.s0) === J({}) && J(x.thaw.s1) === J({ [TA]: 'thaw-unread' }) && J(x.thaw.s2) === J({})
+      && !!x.owed && x.owed.fz && J(x.owed.s1) === J({ [TA]: 'show-owed' }) && J(x.owed.s2) === J({});
+    const judgeLeft = (x) => !!x && !!x.left && x.left.fz && J(x.left.seq) === J(['show-owed', 'show-owed', 'show-left', 'show-left']) && x.left.flips === 3
+      && x.left.r1.cleared === 0 && J(x.left.s1) === J({ [TA]: 'show-left' }) && x.left.r2.cleared === 0 && J(x.left.s2) === J({ [TA]: 'show-left' }) && x.left.r3.cleared === 1 && J(x.left.s3) === J({});
+    // the reds, each built through anchored() (an anchor gone or spelled twice throws by name): the left tab never kept by id (the
+    // watch as it was: a flag a browser), and a recheck that drops a left tab on any answer (a hidden one too)
+    const NLANCH = '    (w.showLeft || (w.showLeft = new Set())).add(tid);', ANYANCH = "if (vis[i] === 'visible' && w.showLeft";
+    for (const [a, n] of [[NLANCH, 'the left tab kept by id'], [ANYANCH, 'a left tab dropped only when it reads visible']]) if (!dsrc.includes(a)) ok(false, `the anchor of the B-bcf8 control «${n}» is not in the source (src/server/browser-dialogs.js)`);
+    const DDnl = dsrc.includes(NLANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, NLANCH, '    /* B-bcf8 control: the tab left is not kept */', 'B-bcf8: the left tab kept by id'), 'bcf8-left-not-kept') : null;
+    const DDany = dsrc.includes(ANYANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, ANYANCH, "if (vis[i] !== undefined && w.showLeft", 'B-bcf8: a left tab dropped only when it reads visible'), 'bcf8-left-any-answer') : null;
+    const [stl, stlNl, stlAny] = await Promise.all([stillLeg(DD, '0'), DDnl ? stillLeg(DDnl, '1') : Promise.resolve(null), DDany ? stillLeg(DDany, '2') : Promise.resolve(null)]);
+    ok(judgeStill(stl), 'B-bcf8 (r4256): the watch\'s still tabs by code — a thaw that got no reply from A\'s front: «thaw-unread» while it stands, gone at the thaw that answers; a failed show: «show-owed», gone when it is shown', { thaw: stl.thaw, owed: stl.owed });
+    ok(judgeLeft(stl), 'B-bcf8 (r4256): a front whose flip landed in another window three thaws in a row is «show-left» (owed before it; three flips, as the watch decides) — kept while hidden and when its read does not answer (unknown is never «not»), dropped when it comes forward', stl.left);
+    if (DDnl) ok(!judgeLeft(stlNl) && !(stlNl.left.seq || []).includes('show-left'), 'CONTROL (the watch as it was: the tab left is not kept by id): the page left hidden for good is said to nobody — RED', stlNl.left && stlNl.left.seq);
+    if (DDany) ok(!judgeLeft(stlAny) && stlAny.left.r1.cleared === 1, 'CONTROL (a recheck that drops a left tab on ANY answer): a page still hidden is called come forward — RED', stlAny.left && stlAny.left.r1);
   }
   // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
   //     left its tab busy ~2 min, the person saw a crashed page; opening the sign-in page again recovered it at once) — PLACED over

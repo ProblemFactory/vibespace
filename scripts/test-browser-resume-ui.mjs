@@ -816,6 +816,46 @@ else await (async () => {
         console.log(`    ⑩ ${lang}: the gate held ${await ev('const g = app.ws.__b346dGate; return g ? g.total : -1;')} push(es) of the hub's digest during the reads`);
         await feedPk(null);
       }
+      // ⑪ B-bcf8 (主开发 r4256): A STILL PICTURE OF THE LIVE VIEW IS TOLD TO THE PERSON — the digest's `paint` (the keeper's codes by
+      // target id, src/server/browser-keeper.js paintOf) planted on the shown browser's record: the view's OWN display line says the
+      // shown tab's code in the person's words WHILE it stands (it takes the line; the hidden-window MARK stays on the bar), says
+      // nothing for another tab's code, and is gone when it clears. The pictures the owner accepts (each line, en at 1280 and zh at 390)
+      // are printed as PICTURE lines, as ⑩'s are
+      console.log('— ⑪ B-bcf8: a still picture of the live view, told on its display line — en + zh, 1280 + 390');
+      const PAINT_WORDS = {
+        en: { 'thaw-unread': 'This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.', 'show-owed': 'This page has not come back to the front yet. VibeSpace tries again shortly.', 'show-left': 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.' },
+        zh: { 'thaw-unread': '此页面没有在绘制：唤醒时它没有回应。你观看时 VibeSpace 会继续唤醒它。', 'show-owed': '此页面还没有回到前台，VibeSpace 稍后会再试。', 'show-left': 'VibeSpace 无法把此页面带回前台。点击上方它的标签即可将其带到前面。' },
+      };
+      for (const code of Object.keys(PAINT_WORDS.en)) { ASKED.add(`bcf8-still-${code}-en-1280.png`); ASKED.add(`bcf8-still-${code}-zh-390.png`); }
+      // `whose`: 'shown' = the tab the view shows (its row marked active), 'other' = a tab it does not show, null = no paint (it cleared)
+      const plantPaint = (code, whose) => ev(`const s = L().state(); const rows = (s.tabRow && s.tabRow.rows) || []; const shown = (rows.find((r) => r.active) || {}).targetId || null; const d = JSON.parse(JSON.stringify(app._browserProfiles || { profiles: [] })); d.browsers = d.browsers || {}; const ids = new Set(Object.keys(d.browsers)); if (s.target && s.target.profileId) ids.add(s.target.profileId); const key = ${S(whose)} === 'shown' ? shown : 'F'.repeat(32); const paint = ${S(whose)} && key ? { [key]: ${S(code)} } : null; for (const id of ids) d.browsers[id] = { ...(d.browsers[id] || {}), display: ${S(hidFact)}, startedAt: 1, paint }; const m = { type: 'browser-profiles-updated', ...d }; app._onBrowserProfilesUpdated(m); ${relayBroadcastJs('m')} return { shown, ids: [...ids] };`);
+      for (const lang of ['en', 'zh']) {
+        const w = WORDS[lang], PW = PAINT_WORDS[lang], said = Object.values(PW);
+        await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
+        if (!ok(await boot(), `⑪ ${lang}: the app booted again in ${lang}`)) continue;
+        await sleep(600);
+        await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
+        await until(() => ev('return !!chatWin();'), 10000);
+        await ev(`if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
+        await until(() => ev('const l = L(); return !!(l && l.state().connected && l.state().target && l.state().target.profileId && (l.state().tabRow.rows || []).some((r) => r.active));'), 30000);   // the tabs record reaches a rebooted page when the stream sends it (its connection, then a change): measured past 12 s at the base run
+        await ev(gateJs);   // the suite's gate on this page load's socket road (⑩): the hub's own digest held while a read is planted and made
+        const got = {};
+        for (const code of Object.keys(PW)) {
+          got[code] = {};
+          for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { got[code].at = await plantPaint(code, 'shown'); await sleep(150); got[code][wpx] = await bars(); await shoot(`bcf8-still-${code}-${lang}-${wpx}.png`, got[code][wpx], wpx); }); }
+          ok(!!got[code].at && !!got[code].at.shown && [1280, 390].every((x) => got[code][x].note === PW[code] && markOk(got[code][x], w)),
+            `⑪ ${lang}: «${code}» on the tab the view shows — its line said on the display line («${PW[code]}»), the hidden-window mark still on the bar, at 1280 and 390`, S(got[code]));
+        }
+        const other = {}, gone = {};
+        for (const wpx of [1280, 390]) {
+          await sizeTo(wpx);
+          await readHeld(async () => { await plantPaint('show-left', 'other'); await sleep(150); other[wpx] = await bars(); });
+          await readHeld(async () => { await plantPaint('show-left', 'shown'); await sleep(150); await plantPaint('show-left', null); await sleep(150); gone[wpx] = await bars(); });
+        }
+        ok([1280, 390].every((x) => !said.includes(other[x].note) && markOk(other[x], w)), `⑪ ${lang}: a code on ANOTHER tab (one this view does not show) — no line of it here`, S(other));
+        ok([1280, 390].every((x) => !said.includes(gone[x].note) && markOk(gone[x], w)), `⑪ ${lang}: the code cleared — its line gone with it (said while it stands, never after)`, S(gone));
+        await readHeld(async () => { await plantPaint('show-left', null); });
+      }
       await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });

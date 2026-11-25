@@ -947,7 +947,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!rec) return null;
     const l = live.get(rec.profileId) || null;
     return { ...rec, cdpUrl: undefined, remoteCdpUrl: undefined, envPairs: undefined, tailnet: require('../tailnet-reach.js').stampView(rec.tailnet), live: l ? { ...l } : null, runningBuild: BB.runningBuildOf(rec.cdpBrowser), // lane browser-admin 2a: the build the browser itself reports; lane tailnet-names r4: the tailnet stamp's {on, mode, why} — never its arg (the PAC token)
-      cli: rec.cli ? { ...rec.cli, ...(cliFactOf(rec) || {}) } : null }; // verify r2 (H1): the CLI it runs (+ `gone` words when that version left this machine)
+      cli: rec.cli ? { ...rec.cli, ...(cliFactOf(rec) || {}) } : null, paint: paintOf(rec.profileId) /* B-bcf8 (r4256): the still tabs, codes and ids only */ }; // verify r2 (H1): the CLI it runs (+ `gone` words when that version left this machine)
   }
   /** verify r1 (F5): a browser record for an AGENT — never its launch view (`launchEnv` carries the executable's path) and
    *  a path choice by kind only; the running build (the browser's own answer) stays. */
@@ -6602,6 +6602,28 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const viewerSeen = new Map(); // inputKey → {pid: profileId | 'eph:<browserKey>', n, at}
   let paintWatch = null;
   function setPaintWatch(api) { paintWatch = api && typeof api.paintFacts === 'function' ? api : null; }
+  /** B-bcf8 (r4256): the digest's `paint` field — the tabs whose picture is still for a person who watches, CODES AND TARGET IDS ONLY:
+   *  an id of a CDP target id's shape, a code of the three; anything else the watch hands is dropped, never carried (a title, an address).
+   *  null: none (or no watch). Never throws (browserView reads it for every record). */
+  function paintOf(profileId) {
+    try {
+      if (!paintWatch || typeof paintWatch.stillTabs !== 'function') return null;
+      const m = paintWatch.stillTabs(profileId); const out = {};
+      if (m && typeof m === 'object') for (const [id, code] of Object.entries(m)) if (/^[0-9A-Fa-f]{16,64}$/.test(id) && (code === 'thaw-unread' || code === 'show-owed' || code === 'show-left')) out[id.toUpperCase()] = code;
+      return Object.keys(out).length ? out : null;
+    } catch { return null; }
+  }
+  /** B-bcf8 (r4256): the digest is PUSHED when a browser's `paint` moved — compared at the sweep's tick (and when a left tab's mark is
+   *  dropped), never on a tick that changed nothing. → moved */
+  let paintSaid = new Map(); // profileId → the `paint` last pushed (JSON)
+  function pushPaintIfMoved() {
+    const nowP = new Map();
+    for (const rec of Object.values(reg.browsers)) { const p = paintOf(rec.profileId); if (p) nowP.set(rec.profileId, JSON.stringify(p)); }
+    const moved = nowP.size !== paintSaid.size || [...nowP].some(([k, v]) => paintSaid.get(k) !== v);
+    paintSaid = nowP;
+    if (moved) notify();
+    return moved;
+  }
   /** The page an unseen browser draws (the runaway report names it): `{hidden, title, who}` | null. */
   function drawingOf(rec, p) {
     if (!rec || !BIdle.unseenRung(rec.display)) return null;
@@ -6629,8 +6651,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         if (v.act === 'freeze') { const r = await paintWatch.freezePaint(rec.profileId); if (r && r.ok) log.info?.(`[browser] ${rec.profileId}: nobody watches or drives it for ${Math.round(BIdle.IDLE_PAINT_MS / 1000)} s — its ${r.tabs} tab(s) stop drawing until the next verb or viewer`); }
         else if (v.act === 'thaw') await paintWatch.thawPaint(rec.profileId);
         else if (vw.n > 0 && f.owedShows > 0 && !f.busy && typeof paintWatch.retryOwedShows === 'function') { const pid = rec.profileId, pr = paintWatch.retryOwedShows(pid); if (pr && typeof pr.catch === 'function') pr.catch((e) => log.warn?.(`[browser] ${pid}: idle paint retry of a failed show failed: ${e && e.message}`)); } // r4176 (b) / r4186 (1): a viewer watching a front whose show failed — tried again, never while a verb runs or a dialog is open (busy), never awaited by the tick
+        if (vw.n > 0 && !f.busy && !f.frozen && typeof paintWatch.recheckLeft === 'function') { const pid = rec.profileId; Promise.resolve(paintWatch.recheckLeft(pid)).then((r) => { if (r && r.cleared) pushPaintIfMoved(); }, (e) => log.warn?.(`[browser] ${pid}: the still-picture recheck failed: ${e && e.message}`)); } // B-bcf8 (r4256): a left tab come forward while a viewer watches — reads only, its own statement (the chain above is untouched), never awaited by the tick
       } catch (e) { log.warn?.(`[browser] ${rec.profileId}: idle paint ${v.act || 'retry'} failed: ${e && e.message}`); }
     }
+    pushPaintIfMoved(); // B-bcf8 (r4256): the digest pushed when a still tab's code moved this tick — never on a tick that changed nothing
   }
   function idleReleaseAfterMs() { return B.idleReleaseMs(setting('browser.idleReleaseAfterTurnMs', B.DEFAULT_IDLE_RELEASE_MS, 0)); }   // B-50e7: held, nothing known ⇒ 0 — no release by the clock
   /** The tick's release arm: every LIVE managed ephemeral / helper browser whose conversation's turn has been idle ≥ the setting.

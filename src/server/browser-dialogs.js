@@ -629,6 +629,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (!e) return;
         moveTab('page-gone', { profileId: w.profileId }); // B-21cc (r2849): the driver's tab closed moves it to another
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
+        if (w.showLeft) w.showLeft.delete(tid);   // B-bcf8 (r4256): a gone tab is no longer a still picture
         if (e.quiet) clearTimeout(e.quiet);
         const closedCtxId = e.liveFill ? (e.liveFill.isoContextId || 0) : 0;
         clearPostLiftOnTab(e);
@@ -1145,6 +1146,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
     w.frontWin = new Map([...[...(w.frontWin || new Map())].filter(([tid]) => owed.includes(tid)), ...wins]);
     w.paint = 'frozen'; w.fronts = fronts; w.hiddenFronts = new Set([...owed, ...fronts]); w.frozenAt = now(); w.frontUnread = null;
+    if (w.showLeft) for (const tid of [...w.showLeft]) if (fronts.includes(tid) || !w.targets.has(tid)) w.showLeft.delete(tid);   // B-bcf8 (r4256): a left tab read in FRONT at this freeze came forward (its thaw shows it like any front)
     // r4176 (the round's should): the freeze's lifecycle calls at once too, each its own bound; the show marks of tabs gone are dropped
     await Promise.all(tabs.map((e) => settle(call(w, 'Page.setWebLifecycleState', { state: 'frozen' }, e.sid, 1000))));
     for (const m of [w.showOwed, w.otherWin]) if (m) for (const tid of [...m.keys()]) if (!w.targets.has(tid)) m.delete(tid);
@@ -1265,6 +1267,31 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     })();
     return w.thawing;
   }
+  /** B-bcf8 (r4256): the tabs whose picture is STILL for a person who watches, each by its CODE — never a title, never an address:
+   *  'thaw-unread' (a thaw got no reply from it: it stays frozen), 'show-owed' (a front the freeze hid whose show failed: tried again),
+   *  'show-left' (its flip tab landed in another window SHOW_TRIES times: left hidden until it comes forward). A read of the watch's
+   *  own marks — no call, no decision. → { [targetId]: code } (empty: nothing is still). front_unread is never one: that browser draws. */
+  function stillTabs(profileId) {
+    const w = watches.get(String(profileId || '')); const out = {};
+    if (!w || w.state !== 'open') return out;
+    for (const tid of w.showOwed || []) if (w.targets.has(tid) && w.hiddenFronts && w.hiddenFronts.has(tid)) out[tid] = 'show-owed';
+    for (const tid of w.showLeft || []) if (w.targets.has(tid)) out[tid] = 'show-left';
+    if (w.paint === 'frozen' && w.thawUnread && w.unthawed) for (const tid of w.unthawed) if (w.targets.has(tid)) out[tid] = 'thaw-unread';
+    return out;
+  }
+  /** B-bcf8 (r4256): a LEFT tab brought forward since (a press on its chip, the agent's own switch) is no longer still: while a viewer
+   *  watches, the keeper's sweep asks this — each left tab's visibility read (at once, each its own bound): «visible» ⇒ dropped, a tab
+   *  gone ⇒ dropped, a read with no answer ⇒ kept (unknown is never «not»). READS ONLY: nothing activated, flipped or frozen here.
+   *  → {ok, left, cleared} (cleared: the marks dropped — the keeper pushes its digest then) */
+  async function recheckLeft(profileId) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open' || w.paint === 'frozen' || w.thawing || !w.showLeft || !w.showLeft.size) return { ok: true, left: 0, cleared: 0 };
+    let cleared = 0; const ids = [];
+    for (const tid of [...w.showLeft]) if (w.targets.has(tid)) ids.push(tid); else { w.showLeft.delete(tid); cleared += 1; }
+    const vis = await Promise.all(ids.map((tid) => visibilityOf(w, tid)));
+    ids.forEach((tid, i) => { if (vis[i] === 'visible' && w.showLeft && w.showLeft.delete(tid)) cleared += 1; });
+    return { ok: true, left: w.showLeft ? w.showLeft.size : 0, cleared };
+  }
   /** The CDP window a tab sits in (Browser.getWindowForTarget), null when Chrome does not say. */
   async function windowOfTarget(w, id) { const r = await settle(call(w, 'Browser.getWindowForTarget', { targetId: id }, null, 1000)); return r && r.result && r.result.windowId != null ? r.result.windowId : null; }
   /** One frozen front shown again IN ITS OWN WINDOW: activated first (its window becomes the last activated one — where a
@@ -1312,6 +1339,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (why !== 'another window') { w.showOwed.add(tid); w.otherWin.delete(tid); return true; }
     const n = (w.otherWin.get(tid) || 0) + 1;
     if (n < SHOW_TRIES) { w.showOwed.add(tid); w.otherWin.set(tid, n); return true; }
+    (w.showLeft || (w.showLeft = new Set())).add(tid);   // B-bcf8 (r4256): the tab LEFT kept by its id — the live view says it while it stands; no decision of the watch reads it
     if (!w.showGaveUp) { w.showGaveUp = true; try { log.warn?.(`[browser-dialogs] ${w.profileId}: [idle_paint_show_failed] a frozen front's flip tab landed in another window ${SHOW_TRIES} thaws in a row — left as it is; said once`); } catch { /* */ } }
     return false;
   }
@@ -5868,6 +5896,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     retryOwedShows, // r4176 (b): the idle-paint thaw's failed shows tried again — the keeper's sweep asks it while a viewer watches
+    stillTabs, recheckLeft, // B-bcf8 (r4256): the tabs whose picture is still, by code (the keeper's digest carries them) / a left tab come forward
     personWindows, personPromptStateOf, // B-b56d (the owner's ruling B, 2026-11-18): the person's own windows hook a sign-in; what they say beside it
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
