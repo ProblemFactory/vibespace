@@ -342,10 +342,28 @@ function endingOf(root, pid, rest) {
   const me = typeof process.getuid === 'function' ? process.getuid() : -1;
   if (me < 0 || Number(field('Uid')) !== me) return null;
   if (Number(rest && rest[6]) & 0x4) return { ending: 'exiting' };
+  // the masks are the LEADER's (<pid>/status is the main thread's): a SIGTERM blocked there but deliverable to another thread reads «not
+  // ending» — the conservative side, the old word («could not be read … may be left») kept
   const low = (k) => (parseInt(field(k).slice(-8) || '0', 16) || 0) >>> 0, pending = low('SigPnd') | low('ShdPnd');
   if (pending & 0x100) return { ending: 'killed' };
+  // r4324: a STOPPED or TRACED process (T / t) holds its SIGTERM until it is let go — held, not ending: no SIGTERM rung while stopped
+  if (rest && (rest[0] === 'T' || rest[0] === 't')) return null;
   if ((pending & 0x4000) && !((low('SigBlk') | low('SigIgn') | low('SigCgt')) & 0x4000)) return { ending: 'terminated' };
   return null;
+}
+/** r4324 (主开发): THE WALK's WORDS — the ONE builder of what a walk's counts say (the unread of ours, the others', the ending). Every
+ *  road that says them builds them HERE: the engine's forced end, its clear before a service's next start, the doubt's stop, and the
+ *  wrapper's own scan. test-marked-walk's census reads each road and goes red on one that builds them itself or reads the counts
+ *  without this. `others` not given (the wrapper's scan reads no owner) ⇒ the unread is not called «of ours» */
+function walkWords(s) {
+  const num = (v) => (Number(v) > 0 ? Math.floor(Number(v)) : 0), es = (k) => (k === 1 ? '' : 'es');
+  const known = !!s && s.others !== undefined, others = num(s && s.others), ours = Math.max(0, num(s && s.unreadable) - others), ending = num(s && s.ending);
+  return {
+    ours, others, ending,
+    unread: ours ? `${ours} process${es(ours)}${known ? ' of ours' : ''} (in uninterruptible sleep, inside an exec, or not dumpable)` : '',
+    othersUnread: others ? `${others} of other users` : '',
+    stillEnding: ending ? `${ending} process${es(ending)} of ours still ending at its last look (the kernel is ending ${ending === 1 ? 'it' : 'them'})` : '',
+  };
 }
 // ── SHIPPED TWIN (B-c134) END ──
 /** WHAT NO STOP OWNS (B-c134 cure, MUST A — the kill law: a stop never reaches the hub's own subtree). Each road that HOLDS a
@@ -584,7 +602,7 @@ function birthReading(pid, { start = '', boot = '' } = {}, opts) {
 module.exports = {
   childTreeOf, keptByChain, hubChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
-  hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, ppidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
+  hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, ppidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, walkWords, reportOnce, startToken,
   bootToken, tokenVerdict, tokenVerdicts, processListing, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   wallStartOf, birthReading,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },

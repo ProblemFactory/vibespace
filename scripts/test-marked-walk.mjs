@@ -285,11 +285,11 @@ try {
     {
       const me = process.getuid(), root3 = path.join(T, 'proc3'); fs.mkdirSync(path.join(root3, 'sys/kernel/random'), { recursive: true }); fs.writeFileSync(path.join(root3, 'sys/kernel/random/boot_id'), 'placed-boot\n');
       const Z16 = '0000000000000000';
-      const put3 = (pid, { state = 'S', flags = 0, env = '', cmd = '', uid = me, pnd = Z16, cgt = Z16, envDir = false } = {}) => {
+      const put3 = (pid, { state = 'S', flags = 0, env = '', cmd = '', uid = me, pnd = Z16, shd = Z16, blk = Z16, cgt = Z16, envDir = false } = {}) => {
         const d = path.join(root3, String(pid)); fs.mkdirSync(d, { recursive: true });
         const f = [state, '1', String(pid), ...Array(16).fill('0'), '2000', '0', '0']; f[6] = String(flags);
         fs.writeFileSync(path.join(d, 'stat'), `${pid} (x) ${f.join(' ')}`);
-        fs.writeFileSync(path.join(d, 'status'), `Name:\tx\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nSigPnd:\t${pnd}\nShdPnd:\t${Z16}\nSigBlk:\t${Z16}\nSigIgn:\t${Z16}\nSigCgt:\t${cgt}\n`);
+        fs.writeFileSync(path.join(d, 'status'), `Name:\tx\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nSigPnd:\t${pnd}\nShdPnd:\t${shd}\nSigBlk:\t${blk}\nSigIgn:\t${Z16}\nSigCgt:\t${cgt}\n`);
         if (envDir) fs.mkdirSync(path.join(d, 'environ')); else fs.writeFileSync(path.join(d, 'environ'), env);
         fs.writeFileSync(path.join(d, 'cmdline'), cmd);
       };
@@ -299,12 +299,28 @@ try {
       put3(7304, { state: 'R', flags: 0x4, uid: me + 1 });                                   // ANOTHER user's, exiting
       put3(7305, { env: ['PATH=/usr/bin', MARK].join('\0'), cmd: 'sleep\0' });              // a member
       put3(7306, { state: 'T', envDir: true, pnd: '0000000000004000', cgt: '0000000000004000' });   // ours, a SIGTERM pending that it CATCHES
+      // r4324 (the round's shoulds): every rung of endingOf placed — a SIGTERM pending to a RUNNING one (ending); SIGKILL in ShdPnd only
+      // (ending); a SIGTERM pending that it BLOCKS (not ending). 7302 above (STOPPED, a SIGTERM pending) is HELD, not ending: unread
+      put3(7307, { state: 'S', envDir: true, pnd: '0000000000004000' });                     // ours, a SIGTERM pending, not stopped: ending
+      put3(7308, { state: 'S', envDir: true, shd: '0000000000000100' });                     // ours, SIGKILL pending in ShdPnd only: ending
+      put3(7309, { state: 'S', envDir: true, pnd: '0000000000004000', blk: '0000000000004000' });   // ours, a SIGTERM pending that it BLOCKS
       const scan3 = (Mod) => { const m = Mod.membersOf({ mark: MARK, since: 1000 }, { procRoot: root3 }); return { rows: pids(m), ...m.scan }; };
       const e3 = scan3(PI);
-      okP(JSON.stringify(e3.rows) === '[7305]' && e3.ending === 2 && e3.unreadable === 3 && e3.others === 1, 'r4302: the walk\'s own reader — an EXITING process of ours and one HELD with a SIGTERM pending (unreadable) are «still ending» (2), never «could not be read»; the one truly unread (D, nothing pending) and the one that CATCHES its SIGTERM still count unread; another user\'s exiting process is never ours (others); the member is read as always', e3);
+      okP(JSON.stringify(e3.rows) === '[7305]' && e3.ending === 3 && e3.unreadable === 5 && e3.others === 1, 'r4302 / r4324: the walk\'s own reader — EXITING (7301), a SIGTERM pending to a running one (7307) and SIGKILL in ShdPnd (7308) are «still ending» (3), never «could not be read»; a STOPPED one holding its SIGTERM (7302: held, not ending), the truly unread (D), the one that CATCHES and the one that BLOCKS its SIGTERM still count unread; another user\'s exiting process is never ours (others); the member is read as always', e3);
       const noEnding = MC.load('src/proc-identity.js', anchored(PISRC, 'function endingOf(root, pid, rest) {\n', 'function endingOf() { return null; }   /* MUTANT: the release — no ending verdict */\nfunction endingOfCut(root, pid, rest) {\n', 'red-no-ending'), 'red-no-ending');
       const e3x = scan3(noEnding);
-      okP(!e3x.ending && e3x.unreadable === 5 && e3x.unreadable - e3x.others === 4, 'RED: the release\'s rule (no ending verdict, in a copy) — the two ENDING processes of ours are counted «could not be read» (4 of ours where 2 truly are)', e3x);
+      okP(!e3x.ending && e3x.unreadable === 8 && e3x.unreadable - e3x.others === 7, 'RED: the release\'s rule (no ending verdict, in a copy) — the three ENDING processes of ours are counted «could not be read» (7 of ours where 4 truly are)', e3x);
+      const noHold = MC.load('src/proc-identity.js', anchored(PISRC, "  if (rest && (rest[0] === 'T' || rest[0] === 't')) return null;\n", '  /* MUTANT: a stopped process\'s SIGTERM read as ending */\n', 'red-stopped-ending'), 'red-stopped-ending');
+      const e3h = scan3(noHold);
+      okP(e3h.ending === 4 && e3h.unreadable === 4, 'RED: no rung skipped while STOPPED (in a copy) — the stopped process holding its SIGTERM (7302) is called «still ending (the kernel is ending it)» though nothing ends it until it is let go', e3h);
+      // r4324 (the round's should): PAST THE BOUND — the second look out of time still counts what read ENDING as ending, never unread
+      const all3 = [7301, 7302, 7303, 7304, 7305, 7306, 7307, 7308, 7309];
+      const late3 = (Mod) => { const m = Mod.membersOf({ mark: MARK, since: 1000, first: all3, maxMs: -1 }, { procRoot: root3 }); return { rows: pids(m), ...m.scan }; };
+      const eL = late3(PI);
+      okP(JSON.stringify(eL.rows) === '[7305]' && eL.ending === 3 && eL.unreadable === 5 && eL.others === 1, 'r4324: the second look PAST its bound (placed: a bound of -1 ms, every row read first as a candidate) — what read ENDING is counted ending, never unread', eL);
+      const lateCut = MC.load('src/proc-identity.js', anchored(PISRC, '  for (const e of again) { if (Date.now() - t1 > maxMs) { if (endingSeen.has(e)) ending++; else unread(e); } else check(e, true); }\n', '  for (const e of again) { if (Date.now() - t1 > maxMs) unread(e); else check(e, true); }   /* MUTANT: past the bound, all unread */\n', 'red-late-ending'), 'red-late-ending');
+      const eLx = late3(lateCut);
+      okP(!eLx.ending && eLx.unreadable === 8, 'RED: past the bound read back as unread (in a copy) — the ending ones become «could not be read»', eLx);
       if (escText && envText) {
         const pfs3 = { readdirSync: (q, ...a) => fs.readdirSync(String(q).replace(/^\/proc/, root3), ...a), readFileSync: (q, ...a) => fs.readFileSync(String(q).replace(/^\/proc/, root3), ...a) };
         const statOf3 = (pid) => { try { const s = pfs3.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
@@ -313,6 +329,12 @@ try {
         okP(JSON.stringify(w3.found) === '[7305]' && w3.ending === e3.ending && w3.unread === e3.unreadable, 'r4302: THE WRAPPER\'s TWIN, its own text over the same rows — the same members, «still ending» 2 and unread 3, as membersOf (the scan\'s words say the ending ones by their own sentence)', w3);
         const w3x = wrap3(envText, escText.replace(/\n    if \(v\.ending\) \{[^\n]*/, ''));
         okP(w3x.ending === 0 && w3x.unread === e3.unreadable, 'RED: the wrapper\'s scan without its ending count (in a copy) — the two ending processes are DROPPED SILENTLY (neither ending nor unread)', w3x);
+        // r4324: the wrapper's second look PAST its bound (placed in a copy: that loop's bound reads as passed) — ending stays ending
+        const LATE_W = 'if (Date.now() - t0 > 250) { if (endingSeen.has(e)) out.ending = (out.ending || 0) + 1; else out.unread = (out.unread || 0) + 1; continue; }';
+        const wLate = escText.includes(LATE_W) ? wrap3(envText, escText.replace(LATE_W, LATE_W.replace('Date.now() - t0 > 250', 'true'))) : null;
+        const wLateX = escText.includes(LATE_W) ? wrap3(envText, escText.replace(LATE_W, 'if (true) { out.unread = (out.unread || 0) + 1; continue; }')) : null;
+        okP(!!wLate && wLate.ending === 3 && wLate.unread === 5, 'r4324: the wrapper\'s second look past its bound (placed) — what read ENDING is counted ending, never unread', wLate || 'the anchor is gone');
+        okP(!!wLateX && wLateX.ending === 0 && wLateX.unread === 8, 'RED: past the bound read back as unread (in a copy) — the ending ones become «could not read»', wLateX || 'the anchor is gone');
       }
     }
   }
@@ -325,7 +347,7 @@ try {
     const OTH = { started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 9, total: 9, unreadable: 2, others: 2, cut: false } }) + '\n', stderr: '' };
     const uo = await forced(realJM, 'unread-others', OTH);
     okP(!/could not be read|unreadable|of other users/.test(uo.said), 'round whnhv7lcb (e): unread rows that are all OTHER users\' (refused reads) — the forced end says nothing of them (on a shared machine every forced end would say it)', { said: uo.said });
-    const mute = MC.load('src/jobs.js', anchored(JSRC, '      + ((mscan.unreadable || 0) - (mscan.others || 0) > 0 ? ', '      + (false && (mscan.unreadable || 0) - (mscan.others || 0) > 0 ? ', 'red-unread-unsaid'), 'red-unread-unsaid');
+    const mute = MC.load('src/jobs.js', anchored(JSRC, '      + (ww.unread ? ', '      + (false && ww.unread ? ', 'red-unread-unsaid'), 'red-unread-unsaid');
     const ux = await forced(mute, 'unread-said-red', UNR);
     okP(!/could not be read/.test(ux.said), 'RED: the words cut — the forced end silent about what it could not read (the release\'s)', { said: ux.said });
     // r4302: the forced end says an ENDING process by its true word, with its count — never «could not be read», never silently
@@ -333,10 +355,75 @@ try {
     const en = await forced(realJM, 'ending-said', ENDG);
     const MIX = { started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 9, total: 9, unreadable: 2, others: 1, ending: 1, cut: false } }) + '\n', stderr: '' };
     const em = await forced(realJM, 'ending-mixed', MIX);
-    okP(/its forced end — 2 processes of ours still ending at its walk's last look \(the kernel is ending them\)/.test(en.said) && !/could not be read/.test(en.said) && /could not be read in 1 process of ours/.test(em.said) && /1 process of ours still ending at its walk's last look \(the kernel is ending it\)/.test(em.said), 'r4302: the forced end says the processes its walk met ENDING as «still ending» with their count — never «could not be read»; one truly unread beside them is still said', { ending: en.said, mixed: em.said });
-    const endMute = MC.load('src/jobs.js', anchored(JSRC, "      + ((mscan.ending || 0) > 0 ? ", "      + (false && (mscan.ending || 0) > 0 ? ", 'red-ending-unsaid'), 'red-ending-unsaid');
+    okP(/its forced end — 2 processes of ours still ending at its last look \(the kernel is ending them\)/.test(en.said) && !/could not be read/.test(en.said) && /could not be read in 1 process of ours/.test(em.said) && /1 process of ours still ending at its last look \(the kernel is ending it\)/.test(em.said), 'r4302: the forced end says the processes its walk met ENDING as «still ending» with their count — never «could not be read»; one truly unread beside them is still said', { ending: en.said, mixed: em.said });
+    const endMute = MC.load('src/jobs.js', anchored(JSRC, "      + (ww.stillEnding ? ", "      + (false && ww.stillEnding ? ", 'red-ending-unsaid'), 'red-ending-unsaid');
     const enx = await forced(endMute, 'ending-said-red', ENDG);
     okP(!/still ending|could not be read/.test(enx.said), 'RED: the ending words cut (in a copy) — the forced end silent about the processes still ending', { said: enx.said });
+    // r4324 (THE ROUND'S MUST): the service CLEAR before a next start reads the same walk — a walk of ONE ending process is said there, with
+    // its count (the base said it «unreadable: 1 of ours»; 79adb4e7b's clear dropped it). The REAL clear (_clearBefore) over a kept run
+    const scanLine = (sc) => ({ started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 9, total: 9, cut: false, ...sc } }) + '\n', stderr: '' });
+    const clearSaid = async (Mod, tag, sc) => {
+      const s = keptSvc(Mod, tag); answer = scanLine(sc); runs.length = 0; sent.length = 0; s.stub();
+      try { await s.jm._clearBefore(s.job, s.run, 'manual'); } finally { s.unstub(); }
+      const said = [...s.logs, ...s.jm.events.filter((e) => e.jobId === s.job.id).map((e) => e.what)].join(' | ');
+      try { s.jm.shutdown(); } catch { }
+      return { said, gone: !!s.run.left.gone };
+    };
+    const ce = await clearSaid(realJM, 'clear-ending', { unreadable: 0, others: 0, ending: 1 });
+    const cm = await clearSaid(realJM, 'clear-mixed', { unreadable: 3, others: 1, ending: 2 });
+    okP(/\(its mark searched in 9 processes; 1 process of ours still ending at its last look \(the kernel is ending it\)\)/.test(ce.said) && /unreadable: 1 of other users, 2 processes of ours \(in uninterruptible sleep, inside an exec, or not dumpable\); 2 processes of ours still ending at its last look \(the kernel is ending them\)/.test(cm.said), 'r4324: the service CLEAR says what its walk met ENDING, with its count (one ending: said; beside the unread of ours and the others\' — all three from the ONE builder)', { ending: ce.said, mixed: cm.said });
+    const clearCut = MC.load('src/jobs.js', anchored(JSRC, "${ww.stillEnding ? `; ${ww.stillEnding}` : ''})` : '';", "${''})` : '';   /* MUTANT: the clear's ending clause cut */", 'red-clear-ending'), 'red-clear-ending');
+    const cex = await clearSaid(clearCut, 'clear-ending-red', { unreadable: 0, others: 0, ending: 1 });
+    okP(!/still ending/.test(cex.said), 'RED: the clear\'s ending clause cut (in a copy) — the ending process dropped from its words (79adb4e7b\'s clear)', { said: cex.said });
+    // r4324 (the stop's doubt, brought under the builder — the lane's reading: the person stops a run not proven gone and is told «it may
+    // start again»; what its walk could not read, and what it met still ending, are what may still hold the run's port or files)
+    const doubtSaid = async (Mod, tag, sc) => {
+      const { jm, job, logs } = engine(Mod, tag); answer = scanLine(sc); runs.length = 0; stubPI();
+      try { jm._runScope = () => null; jm._graceMs = () => 0; await jm._stopDoubt(job, job.runs[0]); } finally { restorePI(); }
+      try { jm.shutdown(); } catch { }
+      return { said: logs.join(' | ') };
+    };
+    const dd = await doubtSaid(realJM, 'doubt-counts', { unreadable: 2, others: 1, ending: 1 });
+    okP(/stopped by its owner — the previous run was not proven gone: .*; its mark could not be read in 1 process of ours \(in uninterruptible sleep, inside an exec, or not dumpable\); 1 process of ours still ending at its last look \(the kernel is ending it\); it may start again/.test(dd.said), 'r4324: the DOUBT\'s stop says what its walk could not read of ours and what it met still ending (the base said neither)', dd);
+    const doubtCut = MC.load('src/jobs.js', anchored(JSRC, "${ww.unread ? `; its mark could not be read in ${ww.unread}` : ''}${ww.stillEnding ? `; ${ww.stillEnding}` : ''}${marked.ended ?", "${marked.ended ?", 'red-doubt-counts'), 'red-doubt-counts');
+    const ddx = await doubtSaid(doubtCut, 'doubt-counts-red', { unreadable: 2, others: 1, ending: 1 });
+    okP(!/could not be read|still ending/.test(ddx.said), 'RED: the doubt\'s clauses cut (in a copy) — the base\'s silence', ddx);
+  }
+
+  console.log('§10 ONE builder of the walk\'s words (主开发 r4324): every road that says the walk\'s counts says them through proc-identity\'s walkWords — a fourth road cannot be missed by reading');
+  {
+    const WTS = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8');
+    const PHRASES = ['(in uninterruptible sleep', 'still ending', 'of other users'];
+    const outsideTwin = (s) => { const a = s.indexOf('// ── SHIPPED TWIN (B-c134) BEGIN'), b = s.indexOf('// ── SHIPPED TWIN (B-c134) END ──'); return a >= 0 && b > a ? s.slice(0, a) + s.slice(b) : s; };
+    // what is no walk's count (named): the job-logs sweep's kept-unreadable set
+    const EXEMPT = ['keep.unreadable'];
+    const census = (js, wt) => {
+      const heads = [...js.matchAll(/\n {2}(?:async )?([_A-Za-z]\w*)\([^\n]*\) \{/g)].map((m) => ({ at: m.index, name: m[1] }));   // a method's header (a one-line method too)
+      const roads = [...js.matchAll(/this\._walkMarked\(/g)].map((m) => { const h = heads.filter((x) => x.at < m.index).pop(), next = heads.find((x) => x.at > m.index); const body = js.slice(h ? h.at : 0, next ? next.at : js.length); return { road: h ? h.name : '?', builder: body.includes('PI.walkWords(') }; });
+      const phrasesJS = PHRASES.filter((ph) => js.includes(ph)), out = outsideTwin(wt), phrasesW = PHRASES.filter((ph) => out.includes(ph));
+      const countReads = js.split('\n').map((l, i) => ({ l, i: i + 1 })).filter(({ l }) => [...l.matchAll(/(\w+)\??\.(unreadable|ending|others)\b/g)].some((m) => m[1] !== 'ww') && !EXEMPT.some((x) => l.includes(x))).map(({ l, i }) => `${i}: ${l.trim().slice(0, 100)}`);   // a read off the builder's answer (`ww.`) is the builder's
+      const wrapperRaw = out.split('\n').filter((l) => /sayOwn\(/.test(l) && /\bo\.(unread|ending)\b/.test(l)).map((l) => l.trim().slice(0, 100));
+      const wrapperBuilder = /walkWords\(\{ unreadable: o && o\.unread, ending: o && o\.ending \}\)/.test(out);
+      return { roads, phrasesJS, phrasesW, countReads, wrapperRaw, wrapperBuilder, pass: roads.length >= 3 && roads.every((r) => r.road !== '?' && r.builder) && !phrasesJS.length && !phrasesW.length && !countReads.length && !wrapperRaw.length && wrapperBuilder };
+    };
+    const real = census(JSRC, WTS);
+    okP(real.pass, `r4324 THE CENSUS: the engine's ${real.roads.length} walking roads (${real.roads.map((r) => r.road).join(', ')}) each build the walk's words through PI.walkWords; no road of the engine or the wrapper says them itself or reads the walk's counts (the one exemption named: the job-logs sweep's kept-unreadable set, no walk); the wrapper's scan says them through its twin's walkWords`, real);
+    // RED 1: the clear's words built by hand again (79adb4e7b's two lines)
+    const HAND = "    const others = (seen && seen.others) || 0, ours = seen ? Math.max(0, (seen.unreadable || 0) - others) : 0;\n    const scanned = others || ours ? ` (its mark searched in ${seen.scanned} processes; unreadable: ${[others ? `${others} of other users` : '', ours ? `${ours} of ours (in uninterruptible sleep, inside an exec, or not dumpable)` : ''].filter(Boolean).join(', ')})` : '';\n";
+    const BUILT = JSRC.slice(JSRC.indexOf('    const ww = PI.walkWords(seen);'), JSRC.indexOf('\n', JSRC.indexOf('    const scanned = ww.othersUnread')) + 1);
+    const r1 = census(BUILT && JSRC.includes(BUILT) ? JSRC.replace(BUILT, HAND) : JSRC, WTS);
+    okP(!r1.pass && r1.phrasesJS.length > 0 && r1.countReads.length > 0, 'RED: the clear\'s words built by hand again (in a copy) — the census names the phrases and the count reads', { phrases: r1.phrasesJS, reads: r1.countReads });
+    // RED 2: a FOURTH road — a method that walks and says a count without the builder
+    const r2 = census(JSRC.replace('\n  markWalksSettled() {', "\n  async _fourthRoad(job) {\n    const m = await this._walkMarked({ mark: `VIBESPACE_JOB_ID=${job.id}` });\n    return m.scan && m.scan.unreadable;\n  }\n  markWalksSettled() {"), WTS);   // the fourth road, a method as the engine writes them: its header, its body, its close
+    okP(!r2.pass && r2.roads.some((r) => r.road === '_fourthRoad' && !r.builder), 'RED: a FOURTH walking road (in a copy) that reads the counts without the builder — named by the census', { roads: r2.roads, reads: r2.countReads });
+    // RED 3: the wrapper's scan saying its unread by hand (the base's line)
+    const WHAND = '    if (o && o.unread && !saidUnread) { saidUnread = true; sayOwn(`[job-wrapper] stop: its scan for what left its group could not read ${o.unread} process${o.unread === 1 ? \'\' : \'es\'} twice (in uninterruptible sleep, or inside an exec) — what they carry is unknown: they may be left running\\n`); }\n';
+    const WB = WTS.slice(WTS.indexOf('    const ww = walkWords({ unreadable: o && o.unread'), WTS.indexOf('\n', WTS.indexOf('    if (ww.unread && !saidUnread)')) + 1);
+    const r3 = census(JSRC, WB && WTS.includes(WB) ? WTS.replace(WB, WHAND) : WTS);
+    okP(!r3.pass && r3.wrapperRaw.length > 0 && !r3.wrapperBuilder, 'RED: the wrapper\'s scan saying its count by hand (in a copy) — named by the census', { raw: r3.wrapperRaw });
+    // the builder's own words (the wrapper's twin text = proc-identity's, byte for byte — test-stop-tree pins it)
+    const w1 = PI.walkWords({ unreadable: 3, others: 1, ending: 1 }), w2 = PI.walkWords({ unreadable: 2, ending: 0 });
+    okP(w1.unread === '2 processes of ours (in uninterruptible sleep, inside an exec, or not dumpable)' && w1.othersUnread === '1 of other users' && w1.stillEnding === '1 process of ours still ending at its last look (the kernel is ending it)' && w2.unread === '2 processes (in uninterruptible sleep, inside an exec, or not dumpable)' && !w2.stillEnding, 'r4324: the ONE builder — the unread of ours, the others\', the ending, each with its count; where no owner was read (the wrapper\'s scan) the unread is never called «of ours»', { w1, w2 });
   }
 } catch (e) {
   fail++; console.error('  ✗ the suite threw: ' + ((e && e.stack) || e));

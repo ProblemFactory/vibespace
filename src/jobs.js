@@ -2450,7 +2450,7 @@ class JobManager {
     // tree above is ended NOW, and nothing but this stop waits for the walk
     const n = killed.length;
     const finish = (marked) => {   // the mark's kill and the stop's line: when the walk answers (none asked: at once, as before)
-    const mscan = marked.scan || {};
+    const mscan = marked.scan || {}, ww = PI.walkWords(mscan);   // r4324: the walk's words from the ONE builder
     let escaped = 0;
     for (const id of marked) {
       if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || (!group && PI.pgidOf(id.pid) === Number(stamp.pid)) || hubs(id.pid) || ko.has(id.pid)) continue;   // the group's own die with the group's SIGKILL — unless the hub is in it (never signalled: each one here)
@@ -2460,10 +2460,10 @@ class JobManager {
     // a refused signal named, a cut walk said; and in the hub's log as before
     const es = (k) => (k === 1 ? '' : 'es'), what = [...(n ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])], line = `its forced end${what.length ? ` killed ${what.join(' and ')}` : ''}`   // B-d8f4 (主开发 r902): nothing killed never opens with «killed 0»
       + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '') + (mscan.unread ? ` — its mark's scan could not list the processes (${mscan.unread}): what left its group may be left` : '')   // B-d8f4 (10, its read's S1: the errno, never a guess at the machine)
-      + ((mscan.unreadable || 0) - (mscan.others || 0) > 0 ? ` — its mark could not be read in ${(mscan.unreadable || 0) - (mscan.others || 0)} process${(mscan.unreadable || 0) - (mscan.others || 0) === 1 ? '' : 'es'} of ours (in uninterruptible sleep, inside an exec, or not dumpable): what carries its mark there may be left` : '')   // B-d8f4 (主开发 r2215): a still-unread member SAID here too, in the clear's words
-      + ((mscan.ending || 0) > 0 ? ` — ${mscan.ending} process${mscan.ending === 1 ? '' : 'es'} of ours still ending at its walk's last look (the kernel is ending ${mscan.ending === 1 ? 'it' : 'them'})` : '')   // r4302: an ENDING process by its true word — never «could not be read», never silently
+      + (ww.unread ? ` — its mark could not be read in ${ww.unread}: what carries its mark there may be left` : '')   // B-d8f4 (主开发 r2215): a still-unread member SAID here too, in the clear's words
+      + (ww.stillEnding ? ` — ${ww.stillEnding}` : '')   // r4302: an ENDING process by its true word — never «could not be read», never silently
       + (marked.ended ? ` — ${require('./server/marked-walk.js').endedWords(marked.ended)}: what left its group may be left` : '');   // B-d8f4 (9): an ended walk SAID, the stop going on with what it found
-    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut || mscan.unread || (mscan.unreadable || 0) - (mscan.others || 0) > 0 || (mscan.ending || 0) > 0 || marked.ended) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
+    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut || mscan.unread || ww.ours > 0 || ww.ending > 0 || marked.ended) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
     return n + escaped;
     };
     const done = marks ? this._walkMarked({ mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`, since: Number(stamp.starttime) || 0 }).then(finish) : Promise.resolve(finish([]));
@@ -2924,8 +2924,8 @@ class JobManager {
       return;
     }
     delete l.cut;
-    const others = (seen && seen.others) || 0, ours = seen ? Math.max(0, (seen.unreadable || 0) - others) : 0;
-    const scanned = others || ours ? ` (its mark searched in ${seen.scanned} processes; unreadable: ${[others ? `${others} of other users` : '', ours ? `${ours} of ours (in uninterruptible sleep, inside an exec, or not dumpable)` : ''].filter(Boolean).join(', ')})` : '';
+    const ww = PI.walkWords(seen);   // r4324 (the round's MUST): the walk's words from the ONE builder — an ENDING process is said here too, never dropped silently
+    const scanned = ww.othersUnread || ww.unread || ww.stillEnding ? ` (its mark searched in ${seen.scanned} processes${ww.othersUnread || ww.unread ? `; unreadable: ${[ww.othersUnread, ww.unread].filter(Boolean).join(', ')}` : ''}${ww.stillEnding ? `; ${ww.stillEnding}` : ''})` : '';
     this._dirty = true;
     if (!n) {
       l.gone = now();
@@ -3030,7 +3030,7 @@ class JobManager {
     const scope = this._runScope(job, run);
     const ownW = this._runWrapper(job, run);   // B-2c5c r2: the run's own wrapper ends the hub test's walk
     const killed = scope && scope.dir ? await this._within(this._killScope(scope, {}, ownW), this.d.reapReadMs ?? REAP_READ_MS) : null;
-    const marked = await this._walkMarked({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, hubs = this._hubTest(ownW), found = marked.filter((id) => !hubs(id.pid));   // B-2c5c: a hub started inside the job carries its mark
+    const marked = await this._walkMarked({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = marked.scan || {}, ww = PI.walkWords(scan), hubs = this._hubTest(ownW), found = marked.filter((id) => !hubs(id.pid));   // B-2c5c: a hub started inside the job carries its mark
     for (const id of found) PI.signalIdentity(id, 'SIGTERM');
     const until = now() + this._graceMs();
     let live = [...found];
@@ -3041,7 +3041,7 @@ class JobManager {
     // round 9 (the ruling of choice 5): the person's word ends it — a cut scan is said, never a doubt with no way out (the
     // notice tells them «stop it, then start it again»)
     run.doubtOver = { by: 'stop', at: now() }; this._dirty = true;
-    const what = `stopped by its owner — the previous run was not proven gone: ${did}${scan.cut ? `; could not check ${scan.total - scan.scanned} of ${scan.total} processes` : ''}${marked.ended ? `; ${require('./server/marked-walk.js').endedWords(marked.ended)}` : ''}; it may start again`;   // B-d8f4 (9): an ended walk said
+    const what = `stopped by its owner — the previous run was not proven gone: ${did}${scan.cut ? `; could not check ${scan.total - scan.scanned} of ${scan.total} processes` : ''}${ww.unread ? `; its mark could not be read in ${ww.unread}` : ''}${ww.stillEnding ? `; ${ww.stillEnding}` : ''}${marked.ended ? `; ${require('./server/marked-walk.js').endedWords(marked.ended)}` : ''}; it may start again`;   // B-d8f4 (9): an ended walk said
     this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
   }
   /** what a service's next start waits for (round 6): processes its last run KEPT and not yet stopped; a reap of its scope in

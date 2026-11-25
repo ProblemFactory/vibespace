@@ -834,10 +834,28 @@ function endingOf(root, pid, rest) {
   const me = typeof process.getuid === 'function' ? process.getuid() : -1;
   if (me < 0 || Number(field('Uid')) !== me) return null;
   if (Number(rest && rest[6]) & 0x4) return { ending: 'exiting' };
+  // the masks are the LEADER's (<pid>/status is the main thread's): a SIGTERM blocked there but deliverable to another thread reads «not
+  // ending» — the conservative side, the old word («could not be read … may be left») kept
   const low = (k) => (parseInt(field(k).slice(-8) || '0', 16) || 0) >>> 0, pending = low('SigPnd') | low('ShdPnd');
   if (pending & 0x100) return { ending: 'killed' };
+  // r4324: a STOPPED or TRACED process (T / t) holds its SIGTERM until it is let go — held, not ending: no SIGTERM rung while stopped
+  if (rest && (rest[0] === 'T' || rest[0] === 't')) return null;
   if ((pending & 0x4000) && !((low('SigBlk') | low('SigIgn') | low('SigCgt')) & 0x4000)) return { ending: 'terminated' };
   return null;
+}
+/** r4324 (主开发): THE WALK's WORDS — the ONE builder of what a walk's counts say (the unread of ours, the others', the ending). Every
+ *  road that says them builds them HERE: the engine's forced end, its clear before a service's next start, the doubt's stop, and the
+ *  wrapper's own scan. test-marked-walk's census reads each road and goes red on one that builds them itself or reads the counts
+ *  without this. `others` not given (the wrapper's scan reads no owner) ⇒ the unread is not called «of ours» */
+function walkWords(s) {
+  const num = (v) => (Number(v) > 0 ? Math.floor(Number(v)) : 0), es = (k) => (k === 1 ? '' : 'es');
+  const known = !!s && s.others !== undefined, others = num(s && s.others), ours = Math.max(0, num(s && s.unreadable) - others), ending = num(s && s.ending);
+  return {
+    ours, others, ending,
+    unread: ours ? `${ours} process${es(ours)}${known ? ' of ours' : ''} (in uninterruptible sleep, inside an exec, or not dumpable)` : '',
+    othersUnread: others ? `${others} of other users` : '',
+    stillEnding: ending ? `${ending} process${es(ending)} of ours still ending at its last look (the kernel is ending ${ending === 1 ? 'it' : 'them'})` : '',
+  };
 }
 // ── SHIPPED TWIN (B-c134) END ──
 // B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under this wrapper, read at the stop BEFORE its first signal — the members
@@ -1155,8 +1173,9 @@ async function drainGroup() {
   // this drain (the late stop's rescan, the kill pass), each said once
   let saidCut = false, saidNone = false, saidUnread = false, saidEnding = false;
   const sayScan = (o) => {
-    if (o && o.unread && !saidUnread) { saidUnread = true; sayOwn(`[job-wrapper] stop: its scan for what left its group could not read ${o.unread} process${o.unread === 1 ? '' : 'es'} twice (in uninterruptible sleep, or inside an exec) — what they carry is unknown: they may be left running\n`); }   // B-d8f4 (r2215): said, never silently «not carrying»
-    if (o && o.ending && !saidEnding) { saidEnding = true; sayOwn(`[job-wrapper] stop: its scan for what left its group met ${o.ending} process${o.ending === 1 ? '' : 'es'} of ours still ending at its last look (the kernel is ending ${o.ending === 1 ? 'it' : 'them'})\n`); }   // r4302: said by its true word, never «could not read», never silently
+    const ww = walkWords({ unreadable: o && o.unread, ending: o && o.ending });   // r4324: the walk's words from the ONE builder (the twin's); this scan reads no owner — `others` not given
+    if (ww.unread && !saidUnread) { saidUnread = true; sayOwn(`[job-wrapper] stop: its scan for what left its group could not read ${ww.unread} twice — what they carry is unknown: they may be left running\n`); }   // B-d8f4 (r2215): said, never silently «not carrying»
+    if (ww.stillEnding && !saidEnding) { saidEnding = true; sayOwn(`[job-wrapper] stop: its scan for what left its group met ${ww.stillEnding}\n`); }   // r4302: said by its true word, never «could not read», never silently
     if (o && o.cut && !saidCut) { saidCut = true; sayOwn(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`); }
     if (o && o.none && stopping && !saidNone) { saidNone = true; const why = o.none === 'ENOENT' ? 'this machine has no process file system (/proc)' : `it could not list the processes in /proc (${o.none})`; sayOwn(`[job-wrapper] stop: ${why} — what left its group cannot be found, and may be left running\n`); }
   };
