@@ -206,9 +206,11 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       usage = USAGE_SHAPE(v) ? v : { day: null, byUse: {} };
       if (journalUnread) { if (!anyHeld()) heldSaid = false; return; }   // the journal still held: ITS lift raises the counter, from its own read
       const rows = bootRows; bootRows = null;
-      if (!rows) {   // r4121 law 2: the journal's rows of the day not known at a lift ⇒ the spend STAYS UNKNOWN (never zero, never «raised by nothing»):
-        // the journal's own hold reads it off the loop (no reservation can be on its way: every paid call was refused while the counter was held)
-        journalUnread = { code: 'its rows not kept', since: now() }; holdLog('the counter read again, but no read of the journal is kept for its raise — the spend stays unknown until the journal is read again off the loop'); journalArm(); return;
+      if (!rows) {   // r4121 law 2: the journal's rows of the day not known at a lift ⇒ the spend STAYS UNKNOWN (never zero, never «raised by nothing»).
+        // NOT REACHABLE TODAY (r4201): a hold begins only at a start, and the start either keeps the rows (the counter held, the journal read)
+        // or holds the journal; the journal's own lift refills them while the counter is held. Kept as the fail-closed default: the journal's
+        // own hold reads it off the loop (and no paid call is on its way here — every one was refused while the counter was held)
+        journalUnread = { code: 'rows-not-kept', since: now() }; holdLog('the counter read again, but no read of the journal is kept for its raise — the spend stays unknown until the journal is read again off the loop'); journalArm(); return;
       }
       if (!anyHeld()) heldSaid = false;
       if (rebuildFromJournal(rows)) saveUsage();
@@ -530,7 +532,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   /** the journal's hold as the family's held list reads an older hold (src/server/held-lists.js `older`): its facts, its read again, its lift */
   const heldRow = Object.freeze({
     key: 'decision-journal.jsonl',
-    facts: () => (journalUnread ? { since: journalUnread.since, next: jNextAt || null, ...(jWaiting ? { waiting: jWaiting } : {}) } : null),
+    facts: () => (journalUnread ? { since: journalUnread.since, next: jNextAt || null } : null),   // the list carries since and next only (r4201): a read that waits is said in status().today.unknown.waiting
     readAgain: () => journalAgain(),
     onLift: (fn) => { if (typeof fn !== 'function') return false; jLifts.add(fn); return true; },
   });
@@ -708,10 +710,11 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const cred = credential();
     const d = today();
     const held = stopOf(cred);
+    const unknown = spendUnknown();   // once an answer (r4201)
     return {
       configured: !!cred, provider: cred ? cred.provider : null, providerLabel: cred ? M.PROVIDER_LABEL[cred.provider] : null, model: cred ? cred.model : null, keySource: cred ? cred.source : null,
       features: s.features, dailyBudgetCents: s.dailyBudgetCents, threshold: s.threshold,
-      today: { day: d.day, byUse: d.byUse, total: totalOf(d), reserved: Math.round(reservedUsd() * 1e8) / 1e8, inFlight: open.size, ...(spendUnknown() ? { unknown: spendUnknown() } : {}) },   // r4121: the spend NOT KNOWN is said where the figure stands (never «spent today: 0»)
+      today: { day: d.day, byUse: d.byUse, total: totalOf(d), reserved: Math.round(reservedUsd() * 1e8) / 1e8, inFlight: open.size, ...(unknown ? { unknown } : {}) },   // r4121: the spend NOT KNOWN is said where the figure stands (never «spent today: 0»)
       month: monthSoFar(),
       backoffUntil: backoff.until > now() ? backoff.until : 0, reconnect: held === 'reconnect' ? { status: stop.status, at: stop.at } : null, last: lastOutcome,
       stop: held ? { why: held, status: stop.status, at: stop.at } : null,   // lane decision-vendor-hygiene: the row stop that holds (reconnect | plan | shape)

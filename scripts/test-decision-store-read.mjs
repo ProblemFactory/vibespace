@@ -29,6 +29,8 @@
 //   L12 the page: status() says the spend is NOT KNOWN where the figure stands, and the line never says a number
 //   L13 the owner's Test answers the drafter card's sentence (never the bare code); L14 told ONCE a hold of the judge (red: a memo's lift
 //      resets it); L15 the journal's hold is a row of the family's held list, and the list's press reaches it
+// THE FOLLOW (主开发 r4201), two legs for what holds by construction: L16 the day turns while the counter is held ⇒ nothing of yesterday is
+//   raised into today; L17 nothing is appended between the journal's two «not there» tries
 // Run: node scripts/test-decision-store-read.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -251,7 +253,7 @@ try {
     placed.delete(w.F.journal); plans.set(w.F.journal, ['hang']);
     const a0 = asyncReads.get(w.F.journal) || 0;
     const press = await within(e.readAgain(), 600);
-    const f = e.heldRow.facts();
+    const f = e.heldRow.facts(), u = e.status().today.unknown;   // the read that waits is said where the figure stands (r4201: the list carries since and next)
     const press2 = await within(e.readAgain(), 600);
     const reads = (asyncReads.get(w.F.journal) || 0) - a0;
     const before = await judge(e, 41);
@@ -259,7 +261,7 @@ try {
     for (const end = Date.now() + 3000; e.heldRow.facts() && Date.now() < end;) await sleep(10);
     const after = await judge(e, 42);
     plans.delete(w.F.journal);
-    return { press: press.hung ? 'hung' : 'answered', waiting: !!(f && f.waiting), next: !!(f && f.next > T), press2: press2.hung ? 'hung' : 'answered', reads, before: before.ok ? 'answered' : before.why, after: after.ok ? 'answered' : after.why, asked: asked - n };
+    return { press: press.hung ? 'hung' : 'answered', waiting: !!(u && u.waiting), next: !!(f && f.next > T), press2: press2.hung ? 'hung' : 'answered', reads, before: before.ok ? 'answered' : before.why, after: after.ok ? 'answered' : after.why, asked: asked - n };
   };
   const g10 = await run10(E, 'l10'), r10 = await run10(engineCopy([[BOUND, '    const first = await p;\n']], 'no-bound'), 'l10r');
   ok(g10.press === 'answered' && g10.waiting && g10.next && g10.press2 === 'answered' && g10.reads === 1 && g10.before === 'spend-unread' && g10.after === 'daily-budget' && g10.asked === 0,
@@ -329,6 +331,37 @@ try {
   const WIRE = fs.readFileSync(path.join(repo, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok(l0.length === 1 && l0[0].what === 'decision-journal.jsonl' && l0[0].readAgain === true && pr.ok === true && l1.length === 0 && WIRE.includes('    decisionEngine.heldRow,'),
     `the journal held is ONE row of the list («${l0[0] && l0[0].what}», read again: ${l0[0] && l0[0].readAgain}); the list's press reads it again and the row is gone (${l1.length} left); the hub's list is wired with it`, { l0, pr: pr.ok, l1 });
+  console.log('— L16 the day turns while the counter is held (r4201)');
+  {
+    let clock = T;
+    const w = world('l16'); fs.writeFileSync(w.F.usage, usageDoc(0.001)); fs.writeFileSync(w.F.journal, killedJournal());
+    placed.add(w.F.usage);
+    const e = w.engine({ now: () => clock });
+    clock = T + 24 * 3600e3;   // past midnight (the zone is UTC here): a new day while the counter is held
+    placed.delete(w.F.usage); await e.readAgain();
+    const st = e.status().today, n = asked;
+    const r = await judge(e, 61);
+    ok(st.day === M.dayOf(clock, 0) && st.day !== DAY && ((st.total && st.total.usd) || 0) === 0 && !st.unknown && r.ok && asked === n + 1,
+      `the counter lifts on a NEW day: yesterday's killed reservation (0.05 USD) is not raised into today (${st.day}: ${((st.total && st.total.usd) || 0)} USD spent), so today's judgment is sent (${asked - n} asked)`, { day: st.day, total: st.total, r });
+  }
+
+  console.log('— L17 nothing is appended between the journal\'s two «not there» tries (r4201)');
+  {
+    const w = world('l17'); fs.writeFileSync(w.F.usage, usageDoc(0.001)); fs.writeFileSync(w.F.journal, journalOf(0.05));
+    placed.add(w.F.journal);
+    const e = w.engine(), n = asked;
+    placed.delete(w.F.journal); plans.set(w.F.journal, ['enoent']);
+    const before = bytes(w.F.journal);
+    await e.readAgain();   // the first «not there»: only the next try is armed
+    const r1 = await judge(e, 71), r2 = await judge(e, 72);   // refusals: each would journal a line were the journal not held
+    const quiet17 = await settled([w.F.journal]);
+    const between = bytes(w.F.journal);
+    await e.readAgain();   // the true file
+    const r3 = await judge(e, 73);
+    plans.delete(w.F.journal);
+    ok(quiet17 && between === before && r1.why === 'spend-unread' && r2.why === 'spend-unread' && r3.why === 'daily-budget' && asked === n,
+      `between the two «not there» tries the refusals append NOTHING (the journal's bytes unchanged, nothing pending at the store writer); the true file read next ⇒ «${r3.ok ? 'answered' : r3.why}»`, { quiet17, same: between === before, r1, r2, r3 });
+  }
 } catch (e) { fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e)); }
 
 fs.readFileSync = realRF; fs.openSync = realOpen; fs.promises.readFile = realPRF;
