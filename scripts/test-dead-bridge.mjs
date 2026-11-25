@@ -125,7 +125,7 @@ const prog = process.argv[2]; const every = Number(process.argv[3] || 5); const 
 let n = 0; const pad = 'x'.repeat(400);
 if (inlog) process.stdin.on('data', (d) => { try { fs.appendFileSync(inlog, String(d)); } catch {} });   // verify r1 ⑥: what reached the program's stdin
 setInterval(() => {
-  if (blockFlag && fs.existsSync(blockFlag)) { const t0 = Date.now(); while (Date.now() - t0 < 8000) {} try { fs.unlinkSync(blockFlag); } catch {} }   // verify r2 ⑦: a wrapper blocked 8 s in a synchronous op reads no stdin and prints nothing
+  if (blockFlag && fs.existsSync(blockFlag)) { try { fs.writeFileSync(blockFlag + '.blocked', String(n)); } catch {} const nap = new Int32Array(new SharedArrayBuffer(4)); while (fs.existsSync(blockFlag)) Atomics.wait(nap, 0, 0, 5); try { fs.unlinkSync(blockFlag + '.blocked'); } catch {} }   // verify r2 ⑦: a wrapper blocked in a synchronous op reads no stdin and prints nothing — r4456: HELD until the test lifts its flag (never a fixed 8 s), «.blocked» marks the hold
   n++; process.stdout.write(JSON.stringify({ type: 'rec', n, t: Date.now(), pad }) + '\\n'); fs.writeFileSync(prog, n + ' ' + Date.now());
 }, every);
 `);
@@ -148,8 +148,8 @@ console.log('\n§1 the premise — the leak, the orphan, the dead attach, the cu
 {
   const sock = path.join(ROOT, 'cw-raw');
   const prog = path.join(ROOT, 'raw.prog');
-  const INLOG = path.join(ROOT, 'raw.in');
-  execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, prog, '5', INLOG]);
+  const INLOG = path.join(ROOT, 'raw.in'), RAWBLOCK = path.join(ROOT, 'raw.block');   // r4456: ⑥'s program can be HELD (its block flag)
+  execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, prog, '5', INLOG, RAWBLOCK]);
   await until(() => fs.existsSync(sock), 3000);
   const healthy = attach(sock); await sleep(600); healthy.kill(); await sleep(200);
   ok(healthy.maxN() > 20, `precondition: a healthy attach streams the writer's records (${healthy.maxN()} seen)`);
@@ -237,13 +237,24 @@ setTimeout(() => {
   c1.p.write('VSTYPED-two\r'); c1.p.write('{"type":"_frame_file","path":"/x/VSPTR.json"}\r'); await sleep(3000);   // verify r2: a second message and an image paste's pointer line typed INSIDE the window
   ok(typed('VSTYPED-once') === 0 && typed('VSTYPED-two') === 0 && typed('VSPTR') === 0, '⑥ setup: 5 s later none of the three inputs has reached the program (the master never read the unattached client)');
   c1.kill(); const c2 = attach(sock);                        // the heal's order: kill the old client, spawn the new one
-  await until(() => c2.maxN() > 0, 4000); await sleep(1500);
+  await until(() => c2.maxN() > 0, 4000);
+  // r4456 (the flake census, round 2): each landing below is judged once it HAS landed (a 15 s bound, its expiry a named line), never at
+  // a guessed 1.5 s; a duplicate is ruled out by an ORDER FACT (the control's later re-send lands after all of the dead client's queue)
+  if (!(await until(() => typed('VSTYPED-once') >= 1 && typed('VSTYPED-two') >= 1 && typed('VSPTR') >= 1, 15000))) ok(false, '⑥ harness: the dead client\'s queued inputs never reached the program within 15 s of the heal');
   ok(typed('VSTYPED-once') === 1, `⑥ the queued input landed ONCE through the dead client's socket queue (${typed('VSTYPED-once')}×) — nothing to re-send`);
   const inOrder = (() => { try { return fs.readFileSync(INLOG, 'utf8').replace(/\r/g, '\n'); } catch { return ''; } })();
   ok(typed('VSTYPED-two') === 1 && typed('VSPTR') === 1 && /VSTYPED-once\nVSTYPED-two\n\{"type":"_frame_file","path":"\/x\/VSPTR.json"\}\n/.test(inOrder),
     `⑥ …and so did the second message and the frame-file pointer line, in order, once each (two=${typed('VSTYPED-two')}× ptr=${typed('VSPTR')}×) — one image, not two`, JSON.stringify(inOrder.slice(0, 160)));
-  c2.p.write('VSTYPED-once\r'); await sleep(1500);
+  // PLACED (law 1): the program HELD (its block flag: it reads no stdin) — the OLD 1.5 s wait reads the re-send not landed
+  fs.writeFileSync(RAWBLOCK, '1');
+  if (!(await until(() => fs.existsSync(RAWBLOCK + '.blocked'), 5000))) ok(false, '⑥ harness: the program never took its hold within 5 s');
+  c2.p.write('VSTYPED-once\r'); await sleep(1500);   // the old wait, read under the hold
+  const oldOnce = typed('VSTYPED-once');
+  ok(oldOnce === 1, `⑥ PLACED: with the program held, the OLD 1.5 s wait reads the re-send not landed (${oldOnce}×) — the control on a clock would read red with the fault present`);
+  fs.rmSync(RAWBLOCK, { force: true });   // the hold ends
+  if (!(await until(() => typed('VSTYPED-once') >= 2, 15000))) ok(false, '⑥ harness: the re-send through the new attach never reached the program within 15 s of its hold\'s end');
   ok(typed('VSTYPED-once') === 2, `⑥ CONTROL: re-sending it through the new attach — what the detector did before verify r1 — delivers it TWICE (${typed('VSTYPED-once')}×)`);
+  ok(typed('VSTYPED-two') === 1 && typed('VSPTR') === 1, `⑥ …and the second message and the pointer line are still once each after it landed (an order fact: nothing of the dead client's queue came later) (two=${typed('VSTYPED-two')}× ptr=${typed('VSPTR')}×)`);
   c2.kill();
   try { process.kill(old3.client, 'SIGKILL'); } catch { } try { process.kill(old3.holder, 'SIGKILL'); } catch { }
   try { process.kill(old.holder, 'SIGKILL'); } catch { } try { process.kill(old2.holder, 'SIGKILL'); } catch { }
@@ -259,15 +270,25 @@ setTimeout(() => {
     execFileSync(DTACH, ['-n', sockB, '-E', '-r', 'none', process.execPath, WRITER, progB, '5', inB, flag]);
     await until(() => fs.existsSync(sockB), 3000);
     const b1 = attach(sockB); await until(() => b1.maxN() > 5, 4000);
-    fs.writeFileSync(flag, '1'); await sleep(400);               // the wrapper is blocked for 8 s from its next tick
+    fs.writeFileSync(flag, '1');   // the wrapper is blocked from its next tick, HELD until the flag is lifted (r4456)
+    if (!(await until(() => fs.existsSync(flag + '.blocked'), 5000))) ok(false, `⑦ harness (${tag}): the writer never took its hold within 5 s`);
     const f1 = progressOf(progB).n; await sleep(500); const f2 = progressOf(progB).n;
     const typedB = () => { try { return (fs.readFileSync(inB, 'utf8').match(/VSTYPED-B/g) || []).length; } catch { return 0; } };
+    const sentB = () => { try { return /VSSENT-B/.test(fs.readFileSync(inB, 'utf8')); } catch { return false; } };
     b1.p.write('VSTYPED-B\r'); await sleep(5000);               // the detector's 5 s
     const quietSetup = f1 === f2 && typedB() === 0 && b1.maxN() > 5;
     b1.kill(); const b2 = attach(sockB);
-    if (resend) setTimeout(() => { try { b2.p.write('VSTYPED-B\r'); } catch { } }, 500);   // what the detector did before verify r1
-    await sleep(6500);
-    if (!resend) ok(quietSetup && typedB() === 1 && b2.maxN() > 0, `⑦ a HEALTHY master, the wrapper blocked (writer ${f1}→${f2}, nothing typed reached it in 5 s): the fix's sequence lands the input ONCE (${typedB()}×) and the new attach streams`);
+    if (resend) { await sleep(500); try { b2.p.write('VSTYPED-B\r'); } catch { } }   // what the detector did before verify r1
+    if (resend) {   // PLACED (law 1): the old wait (6.5 s after the attach), read while the writer is still held
+      await sleep(6000);
+      const oldB = typedB();
+      ok(oldB === 0, `⑦ PLACED: with the writer held past it, the OLD 6.5 s wait reads the input ${oldB}× — the control on a clock would read red with the fault present`);
+    }
+    fs.rmSync(flag, { force: true });   // the hold ends: the wrapper's synchronous op is over
+    try { b2.p.write('VSSENT-B\r'); } catch { }   // an ORDER FACT: everything typed before it lands before it
+    if (!(await until(() => sentB(), 15000))) ok(false, `⑦ harness (${tag}): the order mark typed after the hold never reached the program within 15 s`);
+    const streams = await until(() => b2.maxN() > 0, 15000);
+    if (!resend) ok(quietSetup && typedB() === 1 && streams, `⑦ a HEALTHY master, the wrapper blocked (writer ${f1}→${f2}, nothing typed reached it in 5 s): the fix's sequence lands the input ONCE (${typedB()}×) and the new attach streams`);
     else ok(quietSetup && typedB() === 2, `⑦ CONTROL: the old re-send through the new attach lands it TWICE here too (${typedB()}×) — the rule is right in both shapes`);
     b2.kill(); for (const p of attachClientsOf(sockB)) { try { process.kill(p, 'SIGKILL'); } catch { } }
     try { execFileSync('pkill', ['-9', '-f', sockB]); } catch { }
@@ -300,6 +321,9 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
       getTelemetry: () => null, getNoConvoRef: () => null, getDeliver: () => null, getPages: () => null, getPermissionRules: () => null });
     return { eng, activeSessions, frames };
   };
+  // r4456 (the flake census, round 2 — the same shape as ⑥/⑦): each scene below waits for the landing its verdict counts (a 15 s
+  // bound, its expiry a named line), never a guessed span; the old span stays only as the FLOOR of its absence / «once» reading
+  const landed = async (what, done, t0, floorMs) => { if (done && !(await until(done, 15000))) ok(false, `§5 harness: ${what} — not landed within 15 s`); const rest = floorMs - (Date.now() - t0); if (rest > 0) await sleep(rest); };
   const deadDuck = () => { const d = { _daemon: true, pid: -1, wrote: [], onData: () => ({ dispose() { } }), onExit: () => ({ dispose() { } }), write: (x) => d.wrote.push(x), resize() { }, kill() { } }; return d; };
   const adapterRegistry = { get: () => ({ formatChatInput: (t) => ({ stdinPayload: JSON.stringify({ type: 'user', text: t }), userMsg: null }) }) };
   const twoMessages = async (SSmod, UImod, tag) => {
@@ -316,7 +340,8 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
       reattachLocalPty: eng.reattachLocalPty, ptyQuietSince: eng.ptyQuietSince, writeSessionInput: eng.writeSessionInput, log() { } }).send;
     const r1 = send(id, 'VSC20D-one'); await sleep(2000);
     const r2 = send(id, 'VSC20D-two');                       // INSIDE the first message's 5 s
-    await sleep(8500);                                        // detector 1 heals at 5 s (+0.5 s replay), detector 2 judges at 7 s
+    const t8 = Date.now(), seen8 = (m) => { try { return (fs.readFileSync(inlog, 'utf8').match(new RegExp(m, 'g')) || []).length; } catch { return 0; } };
+    await landed(`⑧ (${tag}) the replay`, () => seen8('VSC20D-one') >= 1 && (tag !== 'fix' || seen8('VSC20D-two') >= 1), t8, 8500);   // detector 1 heals at 5 s (+0.5 s replay), detector 2 judges at 7 s: the floor
     const text = (() => { try { return fs.readFileSync(inlog, 'utf8'); } catch { return ''; } })();
     const n = (m) => (text.match(new RegExp(m, 'g')) || []).length;
     const out = { sent: !!(r1.ok && r2.ok), deadGot: dead.wrote.length, healed: session.pty !== dead, one: n('VSC20D-one'), two: n('VSC20D-two'), inOrder: text.indexOf('VSC20D-one') >= 0 && text.indexOf('VSC20D-one') < text.indexOf('VSC20D-two') };
@@ -340,8 +365,9 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
     activeSessions.set(id, session);
     eng.setupSessionPty(session, id, deadDuck());
     const healed = eng.reattachLocalPty(id, session, 'test: the watch heals a terminal');
-    await sleep(1000);
-    const out = { healed, painted: frames.some((f) => f.type === 'output' && /^\x1b\[2J\x1b\[3J\x1b\[H/.test(f.data || '') && /VSHOLE-swallowed-by-the-dead-client/.test(f.data || '')), buffer: /VSHOLE-swallowed/.test(session.buffer) };
+    const painted = () => frames.some((f) => f.type === 'output' && /^\x1b\[2J\x1b\[3J\x1b\[H/.test(f.data || '') && /VSHOLE-swallowed-by-the-dead-client/.test(f.data || ''));
+    await landed(`⑨ (${tag}) the repaint`, tag === 'fix' ? () => painted() && /VSHOLE-swallowed/.test(session.buffer) : null, Date.now(), 1000);
+    const out = { healed, painted: painted(), buffer: /VSHOLE-swallowed/.test(session.buffer) };
     activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
     try { execFileSync('pkill', ['-9', '-f', sock]); } catch { }
     return out;
@@ -369,7 +395,8 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
       reattachLocalPty: eng.reattachLocalPty, ptyQuietSince: eng.ptyQuietSince, writeSessionInput: eng.writeSessionInput, log() { } }).send;
     const r = send(id, 'VSC20DX-one'); await sleep(1500);
     for (const cb of [...exits]) cb({ exitCode: 0 });   // the bridge exits having forwarded nothing
-    await sleep(8000);
+    const seen10 = () => { try { return (fs.readFileSync(inlog, 'utf8').match(/VSC20DX-one/g) || []).length; } catch { return 0; } };
+    await landed(`⑩ (${tag}) the carried input`, tag === 'fix' ? () => seen10() >= 1 : null, Date.now(), 8000);
     const text = (() => { try { return fs.readFileSync(inlog, 'utf8'); } catch { return ''; } })();
     const out = { sent: r.ok, reattached: !!session.pty && session.pty !== dead, one: (text.match(/VSC20DX-one/g) || []).length };
     activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
@@ -397,7 +424,8 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
       reattachLocalPty: eng.reattachLocalPty, ptyQuietSince: eng.ptyQuietSince, writeSessionInput: eng.writeSessionInput, log() { } }).send;
     let r = null, first = null;
     await new Promise((res) => setImmediate(() => { eng.attachToDtach(id, sock, session); first = session.pty; r = send(id, 'VSC20DS-one'); const t0 = Date.now(); while (Date.now() - t0 < 6000) { } res(); }));
-    await sleep(7000);
+    const seen11 = () => { try { return (fs.readFileSync(inlog, 'utf8').match(/VSC20DS-one/g) || []).length; } catch { return 0; } };
+    await landed(`⑪ (${tag}) the input`, () => seen11() >= (tag === 'fix' ? 1 : 2), Date.now(), 7000);
     const text = (() => { try { return fs.readFileSync(inlog, 'utf8'); } catch { return ''; } })();
     const out = { sent: !!(r && r.ok), healed: session.pty !== first, one: (text.match(/VSC20DS-one/g) || []).length };
     activeSessions.delete(id); try { session.pty?.kill?.(); } catch { }
@@ -432,6 +460,7 @@ const PROJ = path.join(ROOT, 'proj');
 fs.mkdirSync(BIN, { recursive: true }); fs.mkdirSync(PROJ, { recursive: true });
 const STUB_PROG = path.join(ROOT, 'stub.prog');
 const STUB_EXIT = path.join(ROOT, 'stub.exit');
+const STUB_SLOW = path.join(ROOT, 'stub.slow');   // r4456: while it exists the stub writes one record in 20 ticks (the master's stall held back)
 const STUB_SID = crypto.randomUUID();   // a random conversation id — no transcript is ever written under it
 // THE STUB CLI: stamps every assistant record at EMISSION (as claude 2.1.281 does), a rate_limit_event every 50, an
 // OTel api_request a second (the witness), and — once — asks the server to start a long-lived Background Work job,
@@ -446,8 +475,9 @@ const sid = ${JSON.stringify(STUB_SID)};
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'system', subtype: 'hook_started', session_id: sid, hook_name: 'SessionStart' });
 out({ type: 'system', subtype: 'init', session_id: sid, cwd: process.cwd(), model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
-let n = 0; const pad = 'x'.repeat(700);
+let n = 0, tick = 0; const pad = 'x'.repeat(700);
 setInterval(() => {
+  if ((tick++ % 20) && fs.existsSync(${JSON.stringify(STUB_SLOW)})) return;   // r4456: SLOWED while the leg's flag exists
   n++;
   out({ type: 'assistant', timestamp: new Date().toISOString(), session_id: sid, uuid: require('crypto').randomUUID(), message: { id: 'msg_vsrec_' + n, type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'VSREC ' + n + ' ' + pad }], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } });
   if (n % 50 === 0) out({ type: 'rate_limit_event', session_id: sid, uuid: require('crypto').randomUUID(), rate_limit_info: { status: 'allowed_warning', rateLimitType: 'five_hour', resetsAt: Math.floor(Date.now() / 1000) + 3600, utilization: 0.5 } });
@@ -517,6 +547,20 @@ const stubRead = () => {
   return (stubLast = { state: 'ok', n: Number(m[1]), t: Number(m[2]), pid: Number(m[3]) });
 };
 const stubN = () => { const r = stubRead(); return r.state === 'ok' ? r.n : NaN; };
+/** r4456 (the flake census, round 2): THE MASTER's STALL, waited on — the wrapper's .buf (persisted at most every 2 s while it
+ *  runs) unchanged for 2.5 s while the CLI keeps writing; a 60 s bound whose expiry is a named harness line, never a fixed 9 s. */
+const stallOf = async (bufFile, what, boundMs = 60000) => {
+  const mt = () => { try { return fs.statSync(bufFile).mtimeMs; } catch { return null; } };
+  const t0 = Date.now(); let win = null;
+  while (Date.now() - t0 < boundMs) {
+    const m = mt(), n = stubN();
+    if (!win || m !== win.m) win = { m, n, at: Date.now() };
+    else if (Date.now() - win.at >= 2500 && n > win.n) return true;
+    await sleep(250);
+  }
+  ok(false, `harness: ${what}: the master never stalled on the orphan within ${boundMs / 1000} s (the .buf kept changing, or the CLI stopped)`);
+  return false;
+};
 // the sentence a stopped stub fails with: its counter, its pid, its exit
 const stubState = () => {
   const r = stubRead(), pid = stubLast && stubLast.pid;
@@ -567,12 +611,20 @@ e2e: {
   const holders = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)).map(Number).filter((p) => p !== A.pid && ptsA != null && ptmxIndexes(p).includes(ptsA));
   ok(holders.length > 0, `THE LEAK in the product: the server's attach pty master (tty ${ptsA}) is held by ${holders.length} other process(es) it spawned later (${holders.slice(0, 4).map((p) => `${p} ${commOf(p)}`).join(', ')})`);
   const before = c1.maxRec;
+  const BUF = path.join(wt, 'data', 'session-buffers', SID + '.buf');
+  // r4456 PLACED (law 1): the stall HELD BACK (the CLI slowed: the orphan's buffers fill ~20× slower) — the OLD 9 s wait then measures
+  // a .buf still being written, and the MEASURED leg would read red with nothing wrong
+  fs.writeFileSync(STUB_SLOW, '1');
   c1.ws.close();
   await stop(A, 'SIGKILL');
-  await sleep(9000);   // the orphan's buffers fill at ~35 KB/s; the master stalls on it
+  await sleep(9000);   // the OLD wait (the orphan's buffers fill at ~35 KB/s at the CLI's full pace)
   ok(clientA && alive(clientA) && ppidOf(clientA) !== A.pid, `after SIGKILL the old attach client ${clientA} is an ORPHAN (alive, reparented to ${ppidOf(clientA)} ${commOf(ppidOf(clientA))})`);
   const s1 = stubN(); await sleep(1500); const s2 = stubN();
   ok(s2 > s1, `…and the CLI keeps WORKING meanwhile (the stub's record ${s1} → ${s2}) — its non-blocking stdout queues in memory`);
+  { const p1 = fs.statSync(BUF).mtimeMs; await sleep(2500); const p2 = fs.statSync(BUF).mtimeMs;
+    ok(p1 !== p2, `PLACED: with the stall held back (the CLI slowed), the OLD 9 s wait measures a .buf still being written (${p1} → ${p2}) — the MEASURED leg on a clock would read red with nothing wrong`); }
+  fs.rmSync(STUB_SLOW, { force: true });   // the CLI at its full pace again: the orphan fills
+  await stallOf(BUF, '§2 (A\'s orphan)');   // THE CURE: the leg waits on the stall itself
   const bufM1 = fs.statSync(path.join(wt, 'data', 'session-buffers', SID + '.buf')).mtimeMs;
   await sleep(2500);
   const bufM2 = fs.statSync(path.join(wt, 'data', 'session-buffers', SID + '.buf')).mtimeMs;
@@ -595,7 +647,7 @@ e2e: {
   await sleep(1200);
   const clientB = attachClientsOf(SOCK).find((p) => ppidOf(p) === B.pid);
   await stop(B, 'SIGKILL');
-  await sleep(9000);
+  await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§3 (B\'s orphan)');   // r4456: the control's dark restore needs the stall itself, never a fixed 9 s
   ok(clientB && alive(clientB), `control setup: B's attach client ${clientB} is an orphan too`);
   const C = boot(CONTROL_SERVER);
   ok(await ready(C), 'boot C (the pre-fix copy) is Ready');
@@ -631,7 +683,7 @@ watch: {
   const paused = attach(SOCK, { paused: true });
   await sleep(1500);
   await stop(D, 'SIGTERM');   // the clean shutdown ends D's attach: the paused client is the only one left, and it fills
-  await sleep(12000);
+  await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§4 (the paused client)');   // r4456: the stall itself, never a fixed 12 s
   const w1 = stubN();
   ok(alive(paused.pid) && w1 > 0, `setup: the paused client ${paused.pid} is attached and full; the CLI keeps writing (record ${w1})`);
   const E = boot();
