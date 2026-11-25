@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.419 — 2026-11-24
+## 2.369.419 — 2026-11-25
 
 ### Added
 - A browser profile's ⋯ menu has «Environment…» to set the time zone, the language and the location its browser tells the sites it opens.
