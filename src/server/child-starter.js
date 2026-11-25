@@ -33,6 +33,10 @@
  *    judged (opened for append there), its answer AT THE SPAWN: {started, pid} or its start error; `timeoutMs` bounds only that
  *    answer. NO ANSWER IS NO VERDICT: `unknown` — the caller's own look decides whether one lives (a reply lost is not «no start»).
  *    The old road (after two faults) starts it the same way from this process.
+ *  · THE ENDING AT THE BOUND (line 1004's follow, 主开发 r4444): a start past its bound is ended by SIGKILL — unless its site asks
+ *    `termFirst: <grace ms>`: then SIGTERM first (a parent that RELAYS it — sudo, to the mount or unmount program under it — passes it
+ *    on; a SIGKILL it cannot relay would leave a root program running after the hub said «failed»), SIGKILL only after the grace. On
+ *    both roads; the answer is «timed out» at the bound either way (signal SIGTERM). Every other site's ending is unchanged.
  */
 const fs = require('fs');
 const path = require('path');
@@ -86,7 +90,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     if (!m || typeof m !== 'object') return;   // only an object is an answer (a stray `null` / number never throws in the pipe's handler)
     const q = pending.get(m.id); if (!q) return;
     if (m.ev === 'started') { q.started = true; q.pid = Number(m.pid) || 0; if (q.detach && m.logClose) log.warn(`[child-starter] a detached start's log descriptor did not close in the starter: ${m.logClose}`); if (q.detach) settle(m.id, { started: true, detached: true, starttime: m.starttime == null ? null : m.starttime, code: null, signal: null, stdout: '', stderr: '', error: null }); return; }   // B-323e: a detached start answers at its spawn
-    if (m.ev === 'timeout') { settle(m.id, { started: true, timedOut: true, overflow: !!m.overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }); return; }
+    if (m.ev === 'timeout') { settle(m.id, { started: true, timedOut: true, overflow: !!m.overflow, code: null, signal: m.signal === 'SIGTERM' ? 'SIGTERM' : 'SIGKILL', stdout: '', stderr: '' }); return; }
     if (m.ev === 'exit') {
       if (q.settled) { pending.delete(m.id); refs(); try { q.onLateExit?.(); } catch { } return; }   // a timed-out child that ended at last
       settle(m.id, { started: q.started || m.code != null, timedOut: !!m.timedOut, overflow: !!m.overflow, code: m.code, signal: m.signal || null, stdout: m.stdout || '', stderr: m.stderr || '', error: m.error || null });
@@ -104,7 +108,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       if (!said) { said = true; try { log.warn?.(`[child-starter] the starter failed twice (${why}) — the timer sites start their programs from the hub's process again (the old road)`); } catch { } }
     }
   }
-  /** run(cmd, args, {timeoutMs, maxBuffer, capture, env, envAdd, onLateExit, session}) → {started, timedOut, overflow, unknown, code, signal, stdout, stderr, error} (overflow: the output passed maxBuffer and the child was ended, as execFile did).
+  /** run(cmd, args, {timeoutMs, maxBuffer, capture, env, envAdd, onLateExit, session, termFirst}) → {started, timedOut, overflow, unknown, code, signal, stdout, stderr, error} (overflow: the output passed maxBuffer and the child was ended, as execFile did).
    *  `env` is read ONLY with `wholeEnv` (below); `envAdd` the names it sets, the only ones sent to the starter, on both roads —
    *  or, with `wholeEnv: true`, `env` IS the child's whole env (built through serviceEnv), sent whole (B-323e). */
   function run(cmd, args = [], o = {}) {
@@ -129,7 +133,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { });   // a pipe the starter closed is never an uncaught 'error' (§101)
       try { p.stdin.write(JSON.stringify(o.detach
         ? { op: 'detach', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), log: String(o.detach.log || '') }   // B-323e: never held there
-        : { op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), ...(o.session ? { session: { cwd: typeof o.session.cwd === 'string' ? o.session.cwd : '' } } : {}), timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture }) + '\n'); }
+        : { op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), ...(o.session ? { session: { cwd: typeof o.session.cwd === 'string' ? o.session.cwd : '' } } : {}), timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture, ...(o.termFirst > 0 ? { termFirst: Number(o.termFirst) } : {}) }) + '\n'); }
       catch { fault('the pipe to the starter broke'); }
     });
   }
@@ -158,8 +162,9 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       c.on('spawn', () => { if (said) return; said = true; try { c.unref(); } catch { } resolve({ started: true, detached: true, pid: c.pid, starttime: (() => { try { return require('../proc-identity.js').starttimeOf(c.pid); } catch { return null; } })(), code: null, signal: null, stdout: '', stderr: '', error: null }); });
     });
     return new Promise((resolve) => {
-      let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false, t = null;
+      let c, out = '', err = '', done = false, timedOut = false, outN = 0, errN = 0, overflow = false, t = null, g = null;
       const max = o.maxBuffer || 1048576;
+      const termFirst = o.termFirst > 0 ? Number(o.termFirst) : 0;   // line 1004's follow (r4444): the same ending on this road
       const over = () => { if (overflow) return; overflow = true; try { c.stdout?.destroy(); c.stderr?.destroy(); c.kill('SIGTERM'); } catch { } };   // past the bound: ended, as execFile did (the pipes first)
       try { c = spawn(cmd, args, { env: directEnv(o), stdio: ['ignore', o.capture ? 'pipe' : 'ignore', o.capture ? 'pipe' : 'ignore'], ...(o.session ? { detached: true, cwd: (typeof o.session.cwd === 'string' && o.session.cwd) || undefined } : {}) }); }
       catch (e) { resolve({ started: false, code: null, error: String((e && e.code) || e) }); return; }
@@ -167,8 +172,8 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       c.on('error', (e) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: false, code: null, error: String((e && e.code) || e), stdout: out, stderr: err }); } });
       if (o.session && c) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (t) { clearTimeout(t); t = null; } setTimeout(() => setImmediate(() => { if (done) return; done = true; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); }), SESSION_DRAIN_MS); }); }   // B-323e's remainder (r2689 / r2862): as the starter's own session branch — the group ended once, the run answered at the exit
       if (o.capture && c.stdout && c.stderr) { c.stdout.setEncoding('utf8'); c.stderr.setEncoding('utf8'); c.stdout.on('data', (d) => { if (out.length < max) out += d; outN += Buffer.byteLength(d); if (outN > max) over(); }); c.stderr.on('data', (d) => { if (err.length < max) err += d; errN += Buffer.byteLength(d); if (errN > max) over(); }); }
-      t = o.timeoutMs > 0 ? setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); if (!done) { done = true; try { o.onTimeout?.(c.pid || 0); } catch { } resolve({ started: true, timedOut: true, overflow, code: null, signal: 'SIGKILL', stdout: '', stderr: '', pid: c.pid || 0 }); } }, o.timeoutMs) : null;
-      c.on('close', (code, signal) => { if (t) clearTimeout(t); if (!done) { done = true; resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); } else if (timedOut) { try { o.onLateExit?.(); } catch { } } });
+      t = o.timeoutMs > 0 ? setTimeout(() => { timedOut = true; if (termFirst) { try { c.kill('SIGTERM'); } catch { } g = setTimeout(() => { g = null; if (c.exitCode !== null || c.signalCode !== null) return; try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); }, termFirst); } else { try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); } if (!done) { done = true; try { o.onTimeout?.(c.pid || 0); } catch { } resolve({ started: true, timedOut: true, overflow, code: null, signal: termFirst ? 'SIGTERM' : 'SIGKILL', stdout: '', stderr: '', pid: c.pid || 0 }); } }, o.timeoutMs) : null;
+      c.on('close', (code, signal) => { if (t) clearTimeout(t); if (g) { clearTimeout(g); g = null; } if (!done) { done = true; resolve({ started: true, timedOut, overflow, code, signal, stdout: out, stderr: err }); } else if (timedOut) { try { o.onLateExit?.(); } catch { } } });
     });
   }
   /** the hub's end of the pipe closed (a test's «the hub is gone»): the starter ends by itself — nothing is signalled */

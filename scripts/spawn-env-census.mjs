@@ -441,7 +441,6 @@ export const WHOLE_ROWS = Object.freeze([
   ['src/agy-discover.js', 'runViaStarter', 1, "B-323e's remainder (lane bl-chat-b, 主开发 r2681): the agy index child through the starter the hub hands (src/routes/sessions.js) — its env BUILT whole of PATH and LANG (C.UTF-8) alone, exactly the env runIndexChild hands on the device road: nothing of the hub's, no login, no token (it reads only the roots it is handed)"],
   ['src/server/marked-walk.js', 'walkMarked', 1, "B-d8f4 (9), 主开发 r1745 (lane bl-jobs): the walk for what carries a job's mark, ONE child through the starter (never the hub's thread, never the file threadpool) — its env BUILT whole of PATH alone: never the service env, never the hub's secrets"],
   ['src/mounts.js', '_rcloneProbeRun', 1, "the mount sweep's rclone probes (the backend access probe, the OAuth read probe) and a connect's (the root-denied probe, the s3 signing probe — B-323e): their env from _rcloneFor = rcloneEnv = serviceEnv + the egress door + the provider's RCLONE_CONFIG_VS_* (ENV_FUNCS above); the hub's own secret prefixes refused by the starter"],
-  ['src/mounts.js', 'ask', 1, "B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): _rcStats's rc socket ask (core/stats, vfs/queue) through the starter — its env from rcloneEnv = serviceEnv + the egress door + the provider's RCLONE_CONFIG_VS_* (ENV_FUNCS above), the env the direct start gave it"],
 ]);
 
 /** judge(scan) → { red: [sentences], table: [{ site, class }] } */

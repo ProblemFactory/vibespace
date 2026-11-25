@@ -313,7 +313,7 @@ const PROC_REL = 'src/server/child-starter-proc.js';
 // the REAL starter process with ONE planted change: at a run's bound it does not end the child (as a read asleep in the kernel
 // outlives SIGKILL) and then the starter itself ends — so the REAL child-starter.js's fault() drops the settled entry without its
 // late-exit call (its `else pending.delete(id)`), and the child's end, when it comes, is told to no one
-const HOLDS = MC.write(PROC_REL, anchored(src(PROC_REL), "try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); send({ id, ev: 'timeout', overflow }); }", "held.delete(id); send({ id, ev: 'timeout', overflow }); setTimeout(() => process.exit(0), 100); }", 'a child that outlives its kill, then the starter ends'), 'proc-holds-then-ends');
+const HOLDS = MC.write(PROC_REL, anchored(src(PROC_REL), "if (termFirst) { try { c.kill('SIGTERM'); } catch { } graceT = setTimeout(() => { graceT = null; if (done) return; try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); }, termFirst); } else { try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); } send({ id, ev: 'timeout', overflow, signal: termFirst ? 'SIGTERM' : 'SIGKILL' }); }", "held.delete(id); send({ id, ev: 'timeout', overflow }); setTimeout(() => process.exit(0), 100); }", 'a child that outlives its kill, then the starter ends'), 'proc-holds-then-ends');
 async function faultLeg(modPath) {
   const home = mkHome(`home-fault-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   const file = path.join(home, '.claude', 'settings.json');

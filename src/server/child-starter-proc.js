@@ -47,7 +47,10 @@ function handle(line) {
   const cmd = String(m.cmd || ''), args = Array.isArray(m.args) ? m.args.map(String) : [];
   const env = m.whole === true ? {} : { ...process.env };   // B-323e: a whole env is the child's env as its site built it
   for (const [k, v] of Object.entries(m.env || {})) { if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }   // null: the site's env lacks it
-  let c, out = '', err = '', done = false, timedOut = false, timer = null, outN = 0, errN = 0, overflow = false, drainT = null;
+  let c, out = '', err = '', done = false, timedOut = false, timer = null, outN = 0, errN = 0, overflow = false, drainT = null, graceT = null;
+  // line 1004's follow (主开发 r4444): `termFirst` — the ending at the bound as execFile's: SIGTERM first (a parent that relays it, as sudo
+  // does to a mount program under it, passes it on), SIGKILL only after this grace (ms). Absent: SIGKILL at the bound, as before.
+  const termFirst = Number(m.termFirst) > 0 ? Number(m.termFirst) : 0;
   // B-323e's remainder (r2689): a SESSION request — the child in its own session (detached) and folder; at its exit and at the bound
   // this process ends that session's group (a shell whose rc left a job holding the pipe answers when the shell itself has ended)
   const session = m.session && typeof m.session === 'object' ? { cwd: typeof m.session.cwd === 'string' && m.session.cwd ? m.session.cwd : undefined } : null;
@@ -57,7 +60,7 @@ function handle(line) {
   // the error listener FIRST (ckpt61): a start that fails at once (EMFILE / ENFILE) returns with no pipes and its 'error' queued for
   // the next tick — answered as the child's end, never an uncaught exception (this process's own table full: the hub's request
   // answers the error, the starter lives)
-  const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); if (drainT) clearTimeout(drainT); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
+  const end = (o) => { if (done) return; done = true; if (timer) clearTimeout(timer); if (drainT) clearTimeout(drainT); if (graceT) clearTimeout(graceT); held.delete(id); send({ id, ev: 'exit', timedOut, overflow, stdout: out.slice(0, max), stderr: err.slice(0, max), ...o }); };
   c.on('error', (e) => end({ code: null, signal: null, error: String((e && e.code) || e) }));
   if (session) { c.vsSession = true; c.on('exit', (code, signal) => { endOwnGroup(c); if (timer) { clearTimeout(timer); timer = null; } drainT = setTimeout(() => { drainT = null; setImmediate(() => { if (done) return; try { c.stdout?.destroy(); c.stderr?.destroy(); } catch { } end({ code, signal }); }); }, SESSION_DRAIN_MS); }); }   // r2862: the group ended ONCE, the run answered at the exit
   if (capture && c.stdout && c.stderr) {
@@ -70,7 +73,7 @@ function handle(line) {
   }
   c.on('spawn', () => send({ id, ev: 'started', pid: c.pid }));
   c.on('close', (code, signal) => end({ code, signal }));
-  if (Number(m.timeoutMs) > 0) timer = setTimeout(() => { timedOut = true; try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); send({ id, ev: 'timeout', overflow }); }, Number(m.timeoutMs));   // an overflow kept: the bound past the cut is not «hung»
+  if (Number(m.timeoutMs) > 0) timer = setTimeout(() => { timedOut = true; if (termFirst) { try { c.kill('SIGTERM'); } catch { } graceT = setTimeout(() => { graceT = null; if (done) return; try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); }, termFirst); } else { try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); } send({ id, ev: 'timeout', overflow, signal: termFirst ? 'SIGTERM' : 'SIGKILL' }); }, Number(m.timeoutMs));   // an overflow kept: the bound past the cut is not «hung»
 }
 
 /** B-323e (主开发 r1299): THE DETACHED START — never in `held`, never signalled, never counted; the env dropped once started */

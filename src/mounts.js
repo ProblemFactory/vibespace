@@ -49,6 +49,10 @@ const unasked = (st) => !!st && !!st.unknown && (st.why === 'no starter' || st.w
 const viaStarter = (cmd, args, o) => Promise.resolve().then(() => require('./server/child-starter').childStarter().run(cmd, args, o)).catch((e) => ({ started: false, error: (e && e.message) || String(e) }));
 const endedOk = (r) => !!r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && r.code === 0;
 const noAnswer = (r) => !r || !!r.unknown || !!r.timedOut;
+// line 1004's follow (主开发 r4444): a sudo start past its bound ends as the release's execFile ended it — SIGTERM first, which sudo
+// RELAYS to the mount / umount program under it; SIGKILL only after this grace (a SIGKILL sudo cannot relay would leave a root mount
+// running after the hub said «failed», and the next reconnect pass could stack a second one beside it)
+const SUDO_TERM_GRACE_MS = 2000;
 const failWords = (r) => String((r && (r.error || (r.overflow ? 'its output passed its bound' : r.code != null ? `exit ${r.code}` : ''))) || 'not started').split('\n')[0];
 const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on «can't tell» (a sleeper it cannot read may be ANY rclone: a pull mount's, another instance's) — then it connects, said
 const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
@@ -2380,7 +2384,7 @@ class MountManager {
   /** A KERNEL mount's unmount (no fuse daemon to stop) — the cephfs row's `unmount` hook. */
   _kernelUnmount(m, mp, finish) {
     return new Promise((resolve) => {
-      viaStarter('sudo', ['-n', 'umount', '-l', mp], { timeoutMs: 10000, envAdd: { PATH: process.env.PATH || '' } }).then(() => { let v = false; try { v = finish(!this.isMounted(m)); } catch (e) { console.warn(`[mounts] unmount of ${mp}: its finish threw (${(e && e.message) || e})`); } resolve(v); });   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
+      viaStarter('sudo', ['-n', 'umount', '-l', mp], { timeoutMs: 10000, termFirst: SUDO_TERM_GRACE_MS, envAdd: { PATH: process.env.PATH || '' } }).then(() => { let v = false; try { v = finish(!this.isMounted(m)); } catch (e) { console.warn(`[mounts] unmount of ${mp}: its finish threw (${(e && e.message) || e})`); } resolve(v); });   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
     });
   }
 
@@ -2401,8 +2405,8 @@ class MountManager {
     return new Promise((resolve) => {
       // B-323e's part 3 remainder: asked of the starter (the secret rides its argv as before — the starter writes no argv anywhere). An
       // ended failure is cephfs_failed as before; a start with NO ANSWER is judged by the mount table alone (mounted ⇒ mounted)
-      viaStarter('sudo', ['-n', 'mount', '-t', 'ceph', src, mp, '-o', opts], { timeoutMs: 30000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }).then((r) => {
-        const err = endedOk(r) ? null : { message: noAnswer(r) ? 'no answer from the starter' : failWords(r) }, stderr = r && r.stderr;
+      viaStarter('sudo', ['-n', 'mount', '-t', 'ceph', src, mp, '-o', opts], { timeoutMs: 30000, termFirst: SUDO_TERM_GRACE_MS, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '' } }).then((r) => {   // the buffer: execFile's own default, as the release had it
+        const err = endedOk(r) ? null : { message: r && r.timedOut ? 'no answer in 30000 ms' : noAnswer(r) ? 'no answer from the starter' : failWords(r) }, stderr = r && r.stderr;   // past its bound: the starter DID answer
         if ((err && !noAnswer(r)) || !this.isMounted(m)) {
           this._errors.set(id, this._sayW(id, 'cephfs_failed', { detail: String(stderr || err?.message || 'unknown').slice(0, 200 - 'CephFS mount failed: '.length) }));
           this._notify();
@@ -2466,8 +2470,9 @@ class MountManager {
     if (!pick.path) return { error: pick.why };
     try { if (!(await fs.promises.stat(pick.path)).isSocket()) return { error: `${pick.path} is not a socket` }; }
     catch { return { error: `no rc socket at ${pick.path}` }; }
-    // B-323e's part 3 remainder: asked of the starter with the record's WHOLE rclone env (wholeEnv, as line 141's probes)
-    const ask = (cmd) => viaStarter(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { wholeEnv: true, env: rcloneEnv(), timeoutMs, capture: true, maxBuffer: 1024 * 1024 }).then((r) => {
+    // B-323e's part 3 remainder: asked of the starter. The rc client over a unix socket needs none of the provider's sign-in values
+    // (line 1004's follow, r4444 (f)): the starter's service env and PATH, never the record's whole rclone env
+    const ask = (cmd) => viaStarter(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { timeoutMs, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '' } }).then((r) => {
       if (!endedOk(r)) return { error: `${cmd}: ${r && r.timedOut ? `no answer in ${timeoutMs} ms` : noAnswer(r) ? 'no answer from the starter' : String((r && r.stderr) || failWords(r)).trim().split('\n').pop()}` };
       try { return { v: JSON.parse(String(r.stdout || '')) }; } catch { return { error: `${cmd}: not JSON` }; }
     });
@@ -2568,7 +2573,7 @@ class MountManager {
     return new Promise((resolve) => {
       // B-323e's part 3 remainder: asked of the starter; NO ANSWER reads as a walk past its bound (unread, fail closed, retried at its bound)
       viaStarter(process.execPath, ['-e', CACHE_META_CHILD, require.resolve('./vfs-cache-place.js'), dir], { timeoutMs, capture: true, maxBuffer: 64 * 1024 }).then((r) => {
-        if (!endedOk(r)) return resolve(noAnswer(r) ? { timedOut: true } : null);
+        if (!endedOk(r)) return resolve(noAnswer(r) || (r && r.overflow) ? { timedOut: true } : null);   // output past its buffer: as the release read it (the retry memo armed)
         try { resolve(JSON.parse(String(r.stdout || ''))); } catch { resolve(null); }
       });
     });

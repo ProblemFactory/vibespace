@@ -20,7 +20,9 @@
 //   ⑪ (r4379, B-323e's part 3 remainder) the mount auto-reconnect's own six starts — the CephFS shim, mount and unmount, the rc
 //      socket's ask (its whole rclone env), the cache's witness and the old cache's removal — through the starter; a no-reply worded
 //      by each (the mount by the mount table, the witness fail-closed, the old dir kept); FENCE: stand-in records, no mount program
-//      run or copied, the real mount table never read (RED: the release's road in a copy — every one a start from the hub)
+//      run or copied, the real mount table never read (RED: a mutant of the helper on the release's road — every one a start from the hub)
+//   ⑪b (r4444) the end signal: a start past its bound with termFirst ends SIGTERM first, so a relaying parent (as sudo) ends its child,
+//      on the starter and on its direct road (RED: SIGKILL at the bound leaves the child running); a stand-in parent, no sudo, no mount
 // r1381 (6): every moved reader is also read with a starter that gives NO REPLY (what it then says), and the env + the bound each
 // site hands are pinned.
 //   ⑧ (主开发 r2030) a host with NO `which` program finds tmux the release's way (RED: the reader without the fallback); a NO-REPLY
@@ -856,14 +858,15 @@ WD.section('⑪');
   const askedA = asked.slice(A0), directA = SIX.map(directOf).reduce((n, v, i) => n + v - D0[i], 0);
   const one = (cmd, pred) => askedA.filter((x) => x.cmd === cmd && pred(x));
   const shim = one('sh', (x) => x.args[0] === '-c' && /\/sbin\/modprobe/.test(x.args[1]) && x.o.timeoutMs === 10000);
-  const um = one('sudo', (x) => x.args.join(' ') === `-n umount -l ${MP}` && x.o.timeoutMs === 10000);
-  const mt = one('sudo', (x) => x.args.slice(0, 4).join(' ') === '-n mount -t ceph' && x.o.timeoutMs === 30000 && x.o.capture === true);
-  const rcs = one('rclone', (x) => x.args[0] === 'rc' && x.args[2] === SOCK && x.o.wholeEnv === true && x.o.env && typeof x.o.env === 'object' && x.o.timeoutMs === 2000 && x.o.capture === true);
+  const um = one('sudo', (x) => x.args.join(' ') === `-n umount -l ${MP}` && x.o.timeoutMs === 10000 && x.o.termFirst === 2000);
+  const mt = one('sudo', (x) => x.args.slice(0, 4).join(' ') === '-n mount -t ceph' && x.o.timeoutMs === 30000 && x.o.termFirst === 2000 && x.o.capture === true && x.o.maxBuffer === 1024 * 1024);
+  const rcs = one('rclone', (x) => x.args[0] === 'rc' && x.args[2] === SOCK && !x.o.wholeEnv && !x.o.env && x.o.timeoutMs === 2000 && x.o.capture === true);
   const wit = one(NODE, (x) => x.args[0] === '-e' && x.o.timeoutMs === MM.MountManager.CACHE_WITNESS_MS && x.o.maxBuffer === 64 * 1024 && x.o.capture === true);
   const rmv = one('rm', (x) => x.args.join(' ') === `-rf --one-file-system -- ${path.join(CACHE, 'old', rec.id)}` && x.o.timeoutMs === MM.MountManager.CACHE_RM_MS);
-  const pathAdd = [...shim, ...um, ...mt, ...rmv].every((x) => x.o.envAdd && typeof x.o.envAdd.PATH === 'string' && !x.o.wholeEnv);
-  ok(!a.threw && shim.length === 2 && um.length === 1 && mt.length === 1 && rcs.length === 2 && wit.length === 1 && rmv.length === 1 && pathAdd && directA === 0,
-    `the six starts asked of THE STARTER — the shim (by itself and at the mount), the umount, the ceph mount, the rc ask ×2 (core/stats, vfs/queue: the record's WHOLE rclone env), the cache's witness, the old cache's removal — each with its bound; none from the hub's process (${directA} direct)`,
+  const pathAdd = [...shim, ...um, ...mt, ...rcs, ...rmv].every((x) => x.o.envAdd && typeof x.o.envAdd.PATH === 'string' && !x.o.wholeEnv);
+  const termOnly = askedA.filter((x) => x.o.termFirst).every((x) => x.cmd === 'sudo');   // r4444: termFirst is the two sudo starts' alone
+  ok(!a.threw && shim.length === 2 && um.length === 1 && mt.length === 1 && rcs.length === 2 && wit.length === 1 && rmv.length === 1 && pathAdd && termOnly && directA === 0,
+    `the six starts asked of THE STARTER — the shim (by itself and at the mount), the umount and the ceph mount (each with termFirst 2000: SIGTERM first; the mount's buffer execFile's 1 MiB default), the rc ask ×2 (core/stats, vfs/queue: the service env and PATH, never the provider's sign-in values), the cache's witness, the old cache's removal — each with its bound; none from the hub's process (${directA} direct)`,
     { threw: a.threw, asked: askedA.map((x) => [x.cmd, x.args.slice(0, 3).join(' '), x.o.timeoutMs]), directA });
   ok(a.umount === true && a.mount === true && !a.mountErr && !!a.rc.stats && a.rc.stats.ok === 11 && !!a.meta && a.meta.exists === false && a.cacheOldKept === false,
     'each answer read as before: the unmount judged by the mount table, the mount done, the rc stats parsed, the witness read, the old cache dir forgotten once removed', a);
@@ -877,7 +880,21 @@ WD.section('⑪');
   ok(!b.threw && b.mount === true && bNotMounted === false && !!bErr && bErr.code === 'cephfs_failed' && /no answer from the starter/.test(bErr.detail)
     && /^core\/stats: no answer from the starter$/.test(String(b.rc.error)) && !!b.meta && b.meta.timedOut === true && b.cacheOldKept === true && /^core\/stats: no answer in 2000 ms$/.test(String(c.error)),
     `a NO-REPLY is no verdict: the ceph mount judged by the mount table alone (mounted ⇒ ${b.mount}; not mounted ⇒ cephfs_failed «${bErr && bErr.detail}»), the rc ask «${b.rc.error}» (past its bound «${c.error}»), the witness unread as past its bound (fail closed), the old cache dir kept and named (retried after the next mount)`, { b, bErr, c });
-  // RED — the release's road in a copy: the helper starts each program from the hub's own process (execFile, as 2.369.419 had them)
+  // r4444 (a)–(d): what held only by reading, each a scene
+  const scene = async (ans, mountedNow, fn) => { answer = ans; const st = { v: mountedNow }, m = mk(MM, st); return fn(m, st); };
+  const tMount = await scene((c) => (c === 'sudo' ? { started: true, timedOut: true } : { started: true, code: 0, stdout: '' }), false, async (m) => ({ v: await m._mountCephfs(rec.id), e: m._errors.get(rec.id) || null }));
+  const tMounted = await scene((c) => (c === 'sudo' ? { started: true, timedOut: true } : { started: true, code: 0, stdout: '' }), true, async (m) => ({ v: await m._mountCephfs(rec.id), e: m._errors.get(rec.id) || null }));
+  const eMounted = await scene((c) => (c === 'sudo' ? { started: true, code: 1, stderr: 'mount error 5 = Input/output error' } : { started: true, code: 0, stdout: '' }), true, async (m) => ({ v: await m._mountCephfs(rec.id), e: m._errors.get(rec.id) || null }));
+  const uStill = await scene(() => ({ unknown: true }), true, async (m) => m._kernelUnmount(rec, MP, (gone) => gone));
+  const A2 = asked.length;
+  const live = await scene(() => ({ started: true, code: 0 }), false, async (m) => { m._cacheDirOf = () => path.join(CACHE, 'live', rec.id); const d = m._cacheDirOf(rec); rec.cacheOld = d;   // the LIVE cache's own folder (its name the record's)
+    m._dropCacheDir(rec, d); for (let i = 0; i < 3; i++) await turn(); return { kept: rec.cacheOld === d, asked: asked.slice(A2).filter((x) => x.cmd === 'rm').length }; });
+  const wOver = await scene((c) => (c === NODE ? { started: true, overflow: true, code: null, stdout: '' } : { started: true, code: 0, stdout: '' }), false, async (m) => m._readCacheMeta(path.join(CACHE, 'meta')));
+  ok(tMount.v === false && !!tMount.e && /^no answer in 30000 ms$/.test(String(tMount.e.detail)) && tMounted.v === true && eMounted.v === false && !!eMounted.e && /Input\/output error/.test(String(eMounted.e.detail)),
+    `the ceph mount past its bound: not mounted ⇒ cephfs_failed «${tMount.e && tMount.e.detail}» (the starter DID answer); the table mounted ⇒ mounted; an ENDED failure with the table mounted ⇒ cephfs_failed, as the release`, { tMount, tMounted, eMounted });
+  ok(uStill === false && live.asked === 0 && live.kept === true && !!wOver && wOver.timedOut === true,
+    `the unmount's no-reply with the mount still in the table reads «still mounted» (${uStill}); the removal is never ASKED for the live cache's own folder (${live.asked} asked); a witness past its buffer reads as past its bound (the retry memo armed, as the release)`, { uStill, live, wOver });
+  // RED — a MUTANT of the helper (the road the release took: each program started from the hub's own process by execFile)
   const SRC = read('src/mounts.js');
   const REL = require(M.write('src/mounts.js', anchored(SRC, "const viaStarter = (cmd, args, o) => Promise.resolve().then(() => require('./server/child-starter').childStarter().run(cmd, args, o)).catch((e) => ({ started: false, error: (e && e.message) || String(e) }));",
     "const viaStarter = (cmd, args, o) => new Promise((resolve) => execFile(cmd, args, { timeout: o.timeoutMs, maxBuffer: o.maxBuffer || 1024 * 1024, ...(o.wholeEnv ? { env: o.env } : {}) }, (err, stdout, stderr) => resolve(err ? { started: true, code: 1, stdout, stderr, error: err.message } : { started: true, code: 0, stdout, stderr })));   // MUTANT: the release's road, a direct start", 'mount-starts-direct'), 'mount-starts-direct'));
@@ -885,9 +902,47 @@ WD.section('⑪');
   const A1 = asked.length, D1 = SIX.map(directOf);
   const stR = { v: false }, r = await six(mk(REL, stR), stR).catch((e) => ({ threw: String(e && e.message || e) }));
   const askedR = asked.slice(A1).filter((x) => SIX.includes(x.cmd)).length, directR = SIX.map(directOf).reduce((n, v, i) => n + v - D1[i], 0);
-  ok(directR === 8 && askedR === 0, `RED CONTROL (the release's road in a copy): ${directR} starts from the hub's own process (the shim ×2, the umount, the mount, the rc ask ×2, the witness, the removal), ${askedR} asked of the starter`, { directR, askedR, threw: r && r.threw });
+  ok(directR === 8 && askedR === 0, `RED CONTROL (a mutant of the helper on the release's road): ${directR} starts from the hub's own process (the shim ×2, the umount, the mount, the rc ask ×2, the witness, the removal), ${askedR} asked of the starter`, { directR, askedR, threw: r && r.threw });
   answer = prev11; for (const n of added11) WATCH.delete(n);
   await new Promise((res) => srv.close(res));
+}
+
+say('⑪b THE END SIGNAL (line 1004\'s follow, 主开发 r4444): a start past its bound asked with termFirst is ended SIGTERM first, so a parent that relays it (as sudo does to a mount program) ends its child; RED: today\'s ending (SIGKILL) leaves that child running — on BOTH roads of the starter');
+WD.section('⑪b');
+{
+  // FENCE (r4379): no real sudo, no mount — a stand-in PARENT (sh) that relays SIGTERM to its child (a sleep), as sudo relays it
+  const PARENT = path.join(TMP, 'vs-standin-relay');
+  fs.writeFileSync(PARENT, '#!/bin/sh\nsleep 30 &\nkid=$!\necho "$$ $kid" > "$1"\ntrap \'kill -TERM "$kid" 2>/dev/null; exit 143\' TERM\nwait "$kid"\n', { mode: 0o755 });
+  const alive = (pid) => { if (!(pid > 1)) return false; try { process.kill(pid, 0); } catch (e) { return e.code === 'EPERM'; } try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.slice(st.lastIndexOf(')') + 2).split(' ')[0] !== 'Z'; } catch { return false; } };
+  const waitFor = async (what, pred, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await new Promise((r) => setTimeout(r, 15)); } throw new Error(`⑪b HARNESS: ${what} — not seen in ${ms} ms`); };   // r4340 law 1: on the fact, a named expiry
+  const pidsOf = (f) => { try { const [p, k] = fs.readFileSync(f, 'utf8').trim().split(/\s+/).map(Number); return { parent: p || 0, kid: k || 0 }; } catch { return { parent: 0, kid: 0 }; } };
+  const realStarter = CS.createChildStarter({ log: { warn: () => { } } });
+  const SILENT11 = path.join(TMP, 'silent-starter11.js'); fs.writeFileSync(SILENT11, 'process.stdin.resume();\n');
+  const directStarter = CS.createChildStarter({ script: SILENT11, guardMs: 30, log: { warn: () => { } } });
+  await directStarter.run('true', [], { timeoutMs: 20 }); await directStarter.run('true', [], { timeoutMs: 20 });   // two faults: the old road (the starter's own law)
+  const onDirect = !!directStarter.stats().direct;
+  const roads = [], strays = [];
+  for (const [road, S] of [['the starter', realStarter], ['the direct road', directStarter]]) {
+    for (const term of [150, 0]) {
+      const pf = path.join(TMP, `relay-${roads.length}.pids`);
+      const r = await S.run(PARENT, [pf], { timeoutMs: 150, ...(term ? { termFirst: term } : {}) });
+      let p = { parent: 0, kid: 0 }, ended = null, stillRuns = null, harness = null;
+      try {
+        await waitFor(`${road}: the stand-in's pids`, () => (p = pidsOf(pf)).kid > 0, 5000);
+        if (term) ended = await waitFor(`${road}: the child ended after the relayed SIGTERM`, () => !alive(p.kid), 10000);
+        else { await waitFor(`${road}: the parent gone (SIGKILL)`, () => !alive(p.parent), 10000); stillRuns = alive(p.kid); }
+      } catch (e) { harness = String(e && e.message || e); }
+      if (alive(p.kid)) strays.push(p.kid);
+      roads.push({ road, term, timedOut: !!(r && r.timedOut), signal: r && r.signal, ended, stillRuns, harness });
+    }
+  }
+  for (const k of strays) { try { process.kill(k, 'SIGKILL'); } catch { } }   // the red's orphans, ended by this suite
+  try { realStarter.closePipe(); } catch { } try { directStarter.closePipe(); } catch { }
+  const withT = roads.filter((x) => x.term), without = roads.filter((x) => !x.term);
+  ok(onDirect && withT.length === 2 && withT.every((x) => x.timedOut && x.signal === 'SIGTERM' && x.ended === true && !x.harness),
+    `with termFirst, on the starter AND on the direct road: «timed out» at the bound, signal SIGTERM, and the relaying parent's CHILD is ended (${JSON.stringify(withT)})`, { onDirect, roads });
+  ok(without.length === 2 && without.every((x) => x.timedOut && x.stillRuns === true && !x.harness),
+    `RED CONTROL (today's ending, SIGKILL at the bound, on both roads): the parent is gone and its child STILL RUNS — a root mount left behind (${JSON.stringify(without)})`, { roads });
 }
 
 for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 16, label: 'B-323e starts ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
