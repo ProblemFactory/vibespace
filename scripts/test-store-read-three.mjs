@@ -79,6 +79,11 @@ const STORES = [
 const tryCode = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 const stopOf = (s) => { try { s && s._hold && s._hold.stop(); } catch { } };
 const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 10)); return !!fn(); };
+// r4213 (the early hosted run of 2.369.419: a red then green): A TORN START IS READ ONLY ONCE ITS HOLD HAS LIFTED — waited on the lift
+// itself (the hold's held() null), never on a count of turns standing in for it (5000 turns are tens of ms while the copy's I/O is
+// pending, and the lift's copy is synced); the bound is generous, and its expiry is a NAMED failed line, never a parse of the torn fixture
+const LIFT_MS = 20000;
+const liftedOrSaid = async (s, what) => { const up = await lifted(s, LIFT_MS); if (!up) ok(false, `the torn start never lifted (${what}) — waited ${LIFT_MS} ms on its lift`, { held: s._hold.held() }); return up; };
 const lifted = async (s, ms = 3000) => { const t0 = Date.now(); while (s._hold.held() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20)); return !s._hold.held(); };
 
 try {
@@ -912,7 +917,7 @@ try {
         if (!noLegacy) fs.writeFileSync(LEG, JSON.stringify({ mounts: [{ id: 'old-made08', hostId: 'host-made08', folder: '/srv/old', mountpoint: '/mnt/old' }] }));
         const mkM = () => { const M = new MMX({ dataDir: d, hosts: { get: () => null, findByDeviceId: () => null, held: () => false }, mountTokens: { list: () => [], revoke() { } }, broadcast() { }, log() { } }); clearInterval(M._sweep); return M; };
         const M1 = mkM();
-        for (let k = 0; k < 5000 && M1.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // the torn start: held while its copy is made, then the lift
+        if (!(await liftedOrSaid(M1, `the legacy ingest's torn start, ${tag}`))) { M1._hold.stop(); return { liftMissed: tag }; }   // the torn start: held while its copy is made, then the lift (r4213: waited on the lift)
         const afterLift = { legacyLeft: fs.existsSync(LEG), owed: !!(JSON.parse(fs.readFileSync(f, 'utf8')).legacyOwed) };
         if (dup) { M1._state.mounts.push({ id: 'mm-same08', dir: 'push', hostId: 'host-made08', folder: '/srv/same', mountpoint: '/mnt/old', tokenId: 'tok-same08', createdAt: 2 }); M1._save(); }   // a person's mount on that mount point meanwhile
         M1._hold.stop();
@@ -950,7 +955,7 @@ try {
       // out of «removed machines» (zh, ja beside)
       const dT = dirOf('move-torn'), fT = path.join(dT, 'hosts.json'); fs.writeFileSync(fT, '{"hosts": [{"id": "host-made05"');
       const HT = new HMb.HostManager({ dataDir: dT });
-      for (let k = 0; k < 5000 && HT.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // 2b: HELD while its bytes are copied aside off the loop (turns, never a clock)
+      await liftedOrSaid(HT, 'the torn hosts.json at boot');   // 2b: HELD while its bytes are copied aside off the loop — waited on the lift itself (r4213)
       const tc = HT.tornCopy();
       const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8'), SM = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
       const H1 = 'VibeSpace could not use its list of machines (the file was damaged), so it started empty. The old bytes are kept beside it as {name}. The mounts below are kept and their records are not removed. A device that pairs again gets its mounts back; an ssh machine added again counts as a new machine, so its old mounts stay below until you unmount them.';
@@ -961,7 +966,7 @@ try {
       // law, its red the helper's own (② «a second start over the SAME torn bytes makes no second copy», the comparison cut)
       const h6 = await (async () => { const d = dirOf('h6-once'), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, '{"hosts": [{"id": "host-made06", "dialTokenHash": "' + 'f'.repeat(64) + '"');
         const named = [];
-        for (let k = 0; k < 3; k++) { const H = new HMb.HostManager({ dataDir: d }); for (let j = 0; j < 5000 && H.unreadWords(); j++) await new Promise((r) => setImmediate(r)); named.push(H.tornCopy()); H._hold.stop(); }
+        for (let k = 0; k < 3; k++) { const H = new HMb.HostManager({ dataDir: d }); await liftedOrSaid(H, `H6, start ${k + 1} of the same torn hosts.json`); named.push(H.tornCopy()); H._hold.stop(); }   // r4213: waited on the lift
         return { copies: fs.readdirSync(d).filter((n) => n.startsWith('hosts.json.corrupt-')).length, named }; })();
       ok(h6.copies === 1 && h6.named.every((x) => x && x === h6.named[0]), 'H6 (r3451, 2b): a torn hosts.json that stays torn — three starts, ONE kept copy (the helper\'s keep, off the loop), and every start names it', h6);
       // r3986 (the verifier's WAKE row, the machines list's own scene; its red is the helper's ⑤ «the release's verdict on ONE read»): a
