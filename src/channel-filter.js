@@ -1284,9 +1284,20 @@ function memberOffer({ access = [], eligibleAbove = [], except = [], roster = []
   }
   return out;
 }
+/** B-fbd6 line 999's MUST (主开发 r4431): THE ROWS A VIA WATCHER's RE-PICK MAY JUDGE — the rows its own SAVE reads, keyed on the
+ *  item's grain (effectiveGrants' `source`): a conversation item every row; a rule's item that rule's rows, the account's rows and
+ *  the account-scope grants; an account item the account's rows and the account-scope grants — never a finer grain's row (an
+ *  account watcher re-picked through one conversation's own row woke a session its save at the account would refuse).
+ *  `access` = effectiveGrants' rows ({row, source, patternId}); `grantRows` = the conversation's visible grant rows (`via` 'account'
+ *  for an account-scope grant). */
+function repickRowsOf(item, access = [], grantRows = []) {
+  const acc = Array.isArray(access) ? access : [], gr = Array.isArray(grantRows) ? grantRows : [];
+  if (!item || !item.source || item.source === 'conversation') return [...acc, ...gr];
+  return [...acc.filter((r) => r && (r.source === 'account' || (item.source === 'pattern' && r.source === 'pattern' && r.patternId === item.patternId))), ...gr.filter((r) => r && r.via === 'account')];
+}
 /** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
  *  this rule's to judge (true). */
-function memberStill(row, members = [], { rows = null, except = [] } = {}) {   // the chain's cure (D): + the grain's access rows (the wake's re-judge reads the via row's «仅本组» and the lineage)
+function memberStill(row, members = [], { rows = null, except = [], repickRows = rows } = {}) {   // B-fbd6 line 999: `repickRows` = the rows the item's own SAVE reads (repickRowsOf)   // the chain's cure (D): + the grain's access rows (the wake's re-judge reads the via row's «仅本组» and the lineage)
   if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
   const viaEnt = (Array.isArray(rows) ? rows : []).find((r) => { const pr = principalOfRow(r); return pr && pr.kind === 'group' && str(pr.id) === str(row.via); });   // the cure's cure (1): the via row WITH its own «除了»
@@ -1297,7 +1308,8 @@ function memberStill(row, members = [], { rows = null, except = [] } = {}) {   /
     // B-fbd6 item 3 (主开发 r4365): the STORED group's row refuses (its «除了», its «仅本组») — the wake RE-PICKS over every group
     // row as the save does (viaJudge: the first row per group, each with its own «除了»): a member another row admits is still
     // woken; one no row admits is not
-    const v = viaJudge(new Set(viaRowOf(rows).map((p) => `group:${p.id}`)), s, row.principal.id, rows, except);
+    // line 999's MUST (主开发 r4431): over the rows its own SAVE reads (repickRowsOf: never a finer grain's row)
+    const v = viaJudge(new Set(viaRowOf(repickRows).map((p) => `group:${p.id}`)), s, row.principal.id, repickRows, except);
     return !!(v && v.ok && v.entry && v.entry.kind === 'group');
   }
   return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }).ok;   // lane lg-group-parents (the U3c read, MAJOR 4): own groups only, as memberVia
@@ -1991,6 +2003,6 @@ module.exports = {
   MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, HELD_AGE_WINDOWS, heldWindowMinutes, heldTooOld, heldSinceWords, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
-  memberVia, memberStill, memberOffer, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
+  memberVia, memberStill, memberOffer, repickRowsOf, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
   splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, rankPatterns, effectiveAccess, effectiveWatchers, rowNames, rowVerdict, expectedWakesTotal, othersLine,
 };

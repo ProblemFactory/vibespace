@@ -579,7 +579,7 @@ function pacedOutsideModule(kind, world, { unitsPerAttach = 20, unitsPerOlder = 
       const meter = deps.meter || (() => {});
       const pace = deps.pace || (async () => {});
       const rec = (id, m) => makeRecord({ adapterId, convId: id, vendorId: m.vendorId, at: m.at, author: { ...m.author, isSelf: false, isBot: false }, text: m.text, mentions: [], attachments: m.attachments || [], replyTo: null, threadKey: id, raw: {} });
-      const send = async (kindOf, units) => { await pace(units); meter(units); world.sends.push({ at: performance.now(), units, kind: kindOf }); };
+      const send = async (kindOf, units) => { world.entered = (world.entered || 0) + 1; await pace(units); meter(units); world.sends.push({ at: performance.now(), units, kind: kindOf }); };   // `entered`: the callers that reached the vendor's pace (line 999 (c): a fact the remove-under-queue leg waits for)
       return {
         auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
         async listConversations() { await send('list', 1); const all = [...world.convs.values()]; return { conversations: all.map((x) => makeConversation({ id: x.id, vendorId: x.id, title: x.title, kind: x.kind, participants: x.participants, lastAt: x.recs[x.recs.length - 1].at })), cursor: null, complete: true }; },
@@ -663,23 +663,26 @@ async function outsideThePass(ENGmod, label) {
     await er.pass('pr', { force: true });
     await sleep(1100);
     const br = Wr.sends.length;
+    const in0 = Wr.entered || 0;
     const ps = Array.from({ length: 12 }, (_, k) => er.attachment('pr', 'c0000', `att${k}`, { msg: cr.recs[cr.recs.length - 1].vendorId }));
-    // two left at once, the third sleeps, nine queue — waited for as a FACT (two vendor calls out), never a fixed 150 ms (B-fbd6,
-    // 主开发 r4365: the flake census of 2.369.419); its bound fails by a named harness line
+    // two left at once, the third sleeps, nine queue — waited for as FACTS, never a fixed 150 ms (B-fbd6, 主开发 r4365: the flake census
+    // of 2.369.419; line 999 (c): ALL TWELVE callers reached the vendor's pace, and two calls are out — so ten wait in it when the
+    // remove fires); its bound fails by a named harness line
     let two = false;
-    for (let k = 0; k < 500 && !(two = Wr.sends.length - br >= 2); k++) await sleep(10);
-    if (!two) ok(false, `HARNESS (remove under a full queue, ${label}): two attachment calls never left within 5 s (${Wr.sends.length - br} left)`);
+    for (let k = 0; k < 500 && !(two = (Wr.entered || 0) - in0 >= 12 && Wr.sends.length - br >= 2); k++) await sleep(10);
+    if (!two) ok(false, `HARNESS (remove under a full queue, ${label}): within 5 s ${(Wr.entered || 0) - in0} of the twelve callers reached the pace and ${Wr.sends.length - br} calls left (wanted 12 and 2)`);
+    const waitingAtRemove = (Wr.entered || 0) - in0 - (Wr.sends.length - br);
     const tr = performance.now();
     await er.remove('pr');
     const rs = await Promise.race([Promise.all(ps), sleep(9000).then(() => null)]);
     const after = Wr.sends.slice(br).filter((s) => s.at >= tr);
-    const out = { hung: rs === null, sentBefore: Wr.sends.length - br - after.length, after: after.length, unitsAfter: after.reduce((a, s) => a + s.units, 0), within50ms: after.filter((s) => s.at - tr <= 50).length, aborted: rs ? rs.filter((x) => !x.ok && x.code === 'transport' && /account changed/.test(x.error)).length : 0, okAfter: rs ? rs.filter((x) => x.ok).length : 0 };
+    const out = { waitingAtRemove, hung: rs === null, sentBefore: Wr.sends.length - br - after.length, after: after.length, unitsAfter: after.reduce((a, s) => a + s.units, 0), within50ms: after.filter((s) => s.at - tr <= 50).length, aborted: rs ? rs.filter((x) => !x.ok && x.code === 'transport' && /account changed/.test(x.error)).length : 0, okAfter: rs ? rs.filter((x) => x.ok).length : 0 };
     try { er.stop(); } catch {}
     return out;
   }
   {
     const r3 = await removeUnderQueue(ENG, 'real');
-    ok(!r3.hung && r3.after === 0 && r3.aborted === 12 - r3.sentBefore && r3.okAfter === r3.sentBefore, `remove() under a full queue: ${r3.sentBefore} had left, 0 vendor calls after the removal, the ${r3.aborted} queued callers aborted by name ("the account changed")`, JSON.stringify(r3));
+    ok(!r3.hung && r3.waitingAtRemove === 12 - r3.sentBefore && r3.after === 0 && r3.aborted === 12 - r3.sentBefore && r3.okAfter === r3.sentBefore, `remove() under a full queue (all twelve callers in the pace at the remove: ${r3.waitingAtRemove} waiting): ${r3.sentBefore} had left, 0 vendor calls after the removal, the ${r3.aborted} queued callers aborted by name ("the account changed")`, JSON.stringify(r3));
     const Mr = mutantCopies('chan-agg-remove', REPO);
     const cwr = closedWorld(Mr, 'pre-r3-pace', { engine: [
       ['    if (!e0) throw gone();', '    if (!e0) return;'],
@@ -687,7 +690,7 @@ async function outsideThePass(ENGmod, label) {
     ] });
     ok(cwr.setup, 'CONTROL setup: the r2 build\'s paceWait (a gone entry = "nothing to pace against" = return) is reconstructed', cwr.missing);
     const c3 = await removeUnderQueue(cwr.mod, 'ctl');
-    ok(c3.after >= 8 && c3.unitsAfter >= 160, `CONTROL: ${c3.after} calls = ${c3.unitsAfter} units leave AFTER the remove, counted (the queued callers let through; ${c3.within50ms} of them within 50 ms, printed, never judged: B-fbd6, a control is judged on its fault, never a window) — the leg above would go red`, JSON.stringify(c3));
+    ok(c3.waitingAtRemove >= 8 && c3.after >= 8 && c3.unitsAfter >= 160, `CONTROL (${c3.waitingAtRemove} callers waiting in the pace at the remove): ${c3.after} calls = ${c3.unitsAfter} units leave AFTER the remove, counted (the queued callers let through; ${c3.within50ms} of them within 50 ms, printed, never judged: B-fbd6, a control is judged on its fault, never a window) — the leg above would go red`, JSON.stringify(c3));
     for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
   }
   // CONTROL: the R5 build's paceWait — no arrival order, no reservation (the two are one fix: with the FIFO alone the

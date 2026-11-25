@@ -363,8 +363,10 @@ function create(engineCtx) {
     const hasVia = e0.watchers.some((it) => it && it.watcher && it.watcher.via);
     const anyExcept = CG.hasAnyExcept();
     const members = hasVia || anyExcept ? membersNow() : null;
-    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grants)] : null;   // B-1e96: + the grant rows (after the grains' rows: the store's precedence) — the save judged them, so does the wake
-    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: viaRows })) } : e0;   // the chain's cure (D): the grain's access rows (a via row's «仅本组», the lineage)
+    const grantRows = hasVia ? visibleRowsOf(grants) : null;
+    const viaRows = hasVia ? [...e0.access, ...grantRows] : null;   // B-1e96: + the grant rows (after the grains' rows: the store's precedence) — the save judged them, so does the wake
+    // B-fbd6 line 999's MUST (主开发 r4431): the stored row judged over every row (as the release); the RE-PICK over the rows the item's own save reads
+    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: viaRows, repickRows: F.repickRowsOf(it, e0.access, grantRows) })) } : e0;   // the chain's cure (D): the grain's access rows (a via row's «仅本组», the lineage)
     // lane grants-unify: with an exception anywhere, a NAMED watcher that is running is re-judged too (wakeAdmitOf: may it
     // still see this conversation) — one not running is judged when it runs (its held hits wait, never dropped here)
     const admitOf = new Map();
