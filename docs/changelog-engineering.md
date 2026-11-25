@@ -77,6 +77,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - READ, NOT BUILT: a daemon pipe session (agentd.localPipeSessions, off by default) re-opens with an EMPTY ring (src/server/boot-restore.js restoreAgentdPipeSessions `buffer: ''`, then the daemon's .out replayed from an offset) — the wrapper's file, the only home of a held copy, is never read into it. Not one line: reading it in needs the kept-pictures preload, the turn state the dtach road restores from it, and an offset that does not replay lines the file already holds.
 - ITS FOLLOW (主开发 r3959): the groups record the freshest reading's owner by its MEMBER id (`cacheOwner`; a machine login's is its pseudo id, empty as an account id), and poolReadReading compares that — the machine's own login rows keep the law too. test-engine-identity-groups 11: a machine login's own missing file reads «no usage data» (red: the owner by its account id); it still stands in for a named sibling; the sibling half has a red of its own (no group reading at all).
 
+### bl-ci — the mirror verdict's exit code (主开发 r4344)
+- WHY: `ci.mjs --heavy-verdict` printed a GREEN verdict and wrote its marker, then fell through to «REFUSED … undefined — nothing written» and exited 3: its `return exitFlushed(0)` had stood inside a trailing comment since 1f763b01c (2026-11-20). Every mirror since was failed and pushed by named waivers; the first green one (2.369.419's) stopped the push.
+- WHAT: the return on its own line. test-ci-heavy-verdict-real §6b runs the real command as a child against a scratch repository whose commit holds the running ci.mjs, with a stand-in gh on PATH: green exits 0 with one line, failed exits 3 with its reason; RED CONTROL: the release's line. THE CLASS: test-ci-heavy-verdict's census of the dispatcher (main): no line holds a statement inside its trailing comment (69 lines, 19 commented, 0), its control the release's line.
+
 ## 2.369.419 — 2026-11-25
 
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
