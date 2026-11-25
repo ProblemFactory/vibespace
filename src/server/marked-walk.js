@@ -35,7 +35,7 @@ function walkMarked({ mark = '', since = 0, pgid = 0, first = [], deadlineMs = D
     if (!a || typeof a !== 'object' || !Array.isArray(a.rows)) return { rows: [], scan: null, ended: 'no answer' };
     const rows = a.rows.filter((x) => Array.isArray(x) && Number.isInteger(x[0]) && x[0] > 1 && Number.isFinite(x[1])).slice(0, ROWS_MAX).map(([pid, starttime]) => ({ pid, starttime }));
     const s = a.scan && typeof a.scan === 'object' ? a.scan : null, num = (v) => (Number.isFinite(v) ? v : 0);
-    const scan = s ? { scanned: num(s.scanned), total: num(s.total), unreadable: num(s.unreadable), others: num(s.others), cut: !!s.cut, ...(typeof s.unread === 'string' ? { unread: s.unread.slice(0, 20) } : {}) } : null;   // numbers and an errno only
+    const scan = s ? { scanned: num(s.scanned), total: num(s.total), unreadable: num(s.unreadable), others: num(s.others), ending: num(s.ending), cut: !!s.cut, ...(typeof s.unread === 'string' ? { unread: s.unread.slice(0, 20) } : {}) } : null;   // numbers and an errno only
     return { rows, scan, ended: null };
   }, () => ({ rows: [], scan: null, ended: 'unknown' }));
 }

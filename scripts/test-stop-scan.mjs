@@ -89,7 +89,7 @@ try {
     const rows = [{ pid: 6001, state: 'D', pgrp: 6001, start: START + 5, environ: 'BLOCK' }, { pid: 6002, state: 'S', pgrp: 6002, start: START + 5, environ: env(true) }];
     const s = scan(WRAP, rows);
     okP(s.blocked.length === 0 && !s.reads.includes(6001) && s.out.some((r) => r.pid === 6002), 'a D-state process is skipped before its environ is read (no wait on its memory map) — the scan goes on to the next and finds it', { blocked: s.blocked, read: s.reads, found: s.out.map((r) => r.pid) });
-    const red = scan(anchored(WRAP, "  if (rest[0] === 'D') return { unread: 'D' };\n", '', 'red-reads-d'), rows);   // r2215: the D skip's home is the twin's envOf now
+    const red = scan(anchored(WRAP, "  if (rest[0] === 'D') return endingOf(root, pid, rest) || { unread: 'D' };\n", '', 'red-reads-d'), rows);   // r2215: the D skip's home is the twin's envOf now
     okP(red.blocked.includes(6001), 'RED: no D skip — the scan reads the D-state process\'s environ (in life: the stop waits on its memory map)', { blocked: red.blocked });
   }
 } catch (e) {

@@ -9,4 +9,4 @@ const PI = require('../proc-identity.js');
 const [mark = '', since = '0', pgid = '0', first = '', procRoot = ''] = process.argv.slice(2);
 const found = PI.membersOf({ mark, since: Number(since) || 0, pgid: Number(pgid) || 0, first: String(first).split(',').map(Number).filter((n) => n > 0) }, procRoot ? { procRoot } : undefined);
 const s = found.scan || null;
-process.stdout.write(JSON.stringify({ rows: found.map((id) => [Number(id.pid), Number(id.starttime)]), scan: s ? { scanned: s.scanned, total: s.total, unreadable: s.unreadable, others: s.others, cut: !!s.cut, ...(s.unread ? { unread: String(s.unread) } : {}) } : null }) + '\n');
+process.stdout.write(JSON.stringify({ rows: found.map((id) => [Number(id.pid), Number(id.starttime)]), scan: s ? { scanned: s.scanned, total: s.total, unreadable: s.unreadable, others: s.others, ending: s.ending || 0, cut: !!s.cut, ...(s.unread ? { unread: String(s.unread) } : {}) } : null }) + '\n');

@@ -813,15 +813,31 @@ function hubChain(hub, { procRoot = '/proc', maxHops = 64, stop = 0, stopStart =
  *  EACCES / EPERM) is unread for good (`final`); any other failed read is unread; a gone one carries none */
 function envOf(root, pid, rest) {
   if (!rest || rest[0] === 'Z' || (Number(rest[6]) & 0x00200000)) return { none: 'no process to carry one' };
-  if (rest[0] === 'D') return { unread: 'D' };
+  if (rest[0] === 'D') return endingOf(root, pid, rest) || { unread: 'D' };
   const read = (name) => { try { return { text: fs.readFileSync(`${root}/${pid}/${name}`, 'latin1') }; } catch (err) { return { err: err || {} }; } };
   const gone = (r) => !!r.err && (r.err.code === 'ENOENT' || r.err.code === 'ESRCH');
   const env = read('environ');
-  if (env.err) return gone(env) ? { none: 'gone' } : { unread: env.err.code || 'error', final: env.err.code === 'EACCES' || env.err.code === 'EPERM' };
+  if (env.err) return gone(env) ? { none: 'gone' } : endingOf(root, pid, rest) || { unread: env.err.code || 'error', final: env.err.code === 'EACCES' || env.err.code === 'EPERM' };
   if (env.text.length) return { env: env.text.split('\0') };
   const cmd = read('cmdline');
-  if (cmd.err) return gone(cmd) ? { none: 'gone' } : { unread: cmd.err.code || 'error' };
-  return cmd.text.length ? { env: [] } : { unread: 'exec' };
+  if (cmd.err) return gone(cmd) ? { none: 'gone' } : endingOf(root, pid, rest) || { unread: cmd.err.code || 'error' };
+  return cmd.text.length ? { env: [] } : endingOf(root, pid, rest) || { unread: 'exec' };
+}
+/** r4302 (主开发): THE KERNEL SAYS IT IS ENDING — a process of OURS (its uid) whose mark could not be read, that is exiting
+ *  (PF_EXITING: its memory given back, its environ reads empty) or holds a signal that ends it (SIGKILL pending; a SIGTERM pending that
+ *  it neither blocks, ignores nor catches) → { ending } — never «could not be read». The walk looks at it once more at its end and says it
+ *  «still ending» if it stands there (an exit can hang). null: not ending, or not ours — the read goes on as before (a LIVING process's
+ *  mark is read as it always was; nothing here signals anything) */
+function endingOf(root, pid, rest) {
+  let s = ''; try { s = fs.readFileSync(`${root}/${pid}/status`, 'latin1'); } catch { return null; }
+  const field = (k) => { const m = new RegExp(`^${k}:\\s*(\\S+)`, 'm').exec(s); return m ? m[1] : ''; };
+  const me = typeof process.getuid === 'function' ? process.getuid() : -1;
+  if (me < 0 || Number(field('Uid')) !== me) return null;
+  if (Number(rest && rest[6]) & 0x4) return { ending: 'exiting' };
+  const low = (k) => (parseInt(field(k).slice(-8) || '0', 16) || 0) >>> 0, pending = low('SigPnd') | low('ShdPnd');
+  if (pending & 0x100) return { ending: 'killed' };
+  if ((pending & 0x4000) && !((low('SigBlk') | low('SigIgn') | low('SigCgt')) & 0x4000)) return { ending: 'terminated' };
+  return null;
 }
 // ── SHIPPED TWIN (B-c134) END ──
 // B-c134 A STOP ENDS THE WHOLE TREE IT STARTED: the tree under this wrapper, read at the stop BEFORE its first signal — the members
@@ -1106,7 +1122,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
   let ents = [];
   if (!MARK) return out;
   try { ents = fs.readdirSync('/proc').filter((e) => /^\d+$/.test(e)).sort((a, b) => Number(b) - Number(a)); } catch (err) { out.none = (err && err.code) || 'error'; return out; }   // newest pid first: inside the bound on a busy machine; B-d8f4 (10): a listing that failed — said by the stop, with its errno
-  const t0 = Date.now(), again = [];
+  const t0 = Date.now(), again = [], endingSeen = new Set();   // r4302: what read ENDING is looked at once more at the end
   // B-d8f4 (主开发 r2215): the engine's rule by ONE text (envOf, the shipped twin) — a process in uninterruptible sleep never read, an exec's
   // empty window unread, a kernel thread or a start with no environment none; what read unread for a moment is read ONCE more at the
   // end, inside the bound; still unread is COUNTED (`out.unread`) and said — never silently «not carrying». A refusal (another user's
@@ -1114,6 +1130,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
   const look = (e, r, second) => {
     const v = envOf('/proc', e, r);
     if (v.env) { if (v.env.includes(MARK)) out.push([Number(e), Number(r[19]), !!MARK_RUN && v.env.includes(MARK_RUN)]); return; }
+    if (v.ending) { if (second) out.ending = (out.ending || 0) + 1; else { endingSeen.add(e); again.push(e); } return; }   // r4302: the kernel says it is ending — never «could not read»; standing at the last look ⇒ counted
     if (v.unread && !v.final) { if (second) out.unread = (out.unread || 0) + 1; else again.push(e); }
   };
   for (const e of ents) {
@@ -1127,7 +1144,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
   // round whnhv7lcb (a): the second read repeats the FIRST pass's skips on its fresh stat — its own group, an ancestor of a kept hub,
   // and a kept hub by a FRESH test (the first pass's memo was made from a command line read empty inside the exec: a hub mid-exec passed)
   const kept2 = again.length ? keptTest() : null, anc2 = again.length ? keptAncestors() : null;
-  for (const e of again) { if (Date.now() - t0 > 250) { out.unread = (out.unread || 0) + 1; continue; } const r = statOf(e); if (!r || r[0] === 'Z' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime || (kept2 && kept2(e)) || anc2.has(Number(e))) continue; look(e, r, true); }
+  for (const e of again) { if (Date.now() - t0 > 250) { if (endingSeen.has(e)) out.ending = (out.ending || 0) + 1; else out.unread = (out.unread || 0) + 1; continue; } const r = statOf(e); if (!r || r[0] === 'Z' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime || (kept2 && kept2(e)) || anc2.has(Number(e))) continue; look(e, r, true); }
   return out;
 }
 async function drainGroup() {
@@ -1136,9 +1153,10 @@ async function drainGroup() {
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's; B-d8f4 (10, its read's S2): a listing that failed too — for EVERY scan of
   // this drain (the late stop's rescan, the kill pass), each said once
-  let saidCut = false, saidNone = false, saidUnread = false;
+  let saidCut = false, saidNone = false, saidUnread = false, saidEnding = false;
   const sayScan = (o) => {
     if (o && o.unread && !saidUnread) { saidUnread = true; sayOwn(`[job-wrapper] stop: its scan for what left its group could not read ${o.unread} process${o.unread === 1 ? '' : 'es'} twice (in uninterruptible sleep, or inside an exec) — what they carry is unknown: they may be left running\n`); }   // B-d8f4 (r2215): said, never silently «not carrying»
+    if (o && o.ending && !saidEnding) { saidEnding = true; sayOwn(`[job-wrapper] stop: its scan for what left its group met ${o.ending} process${o.ending === 1 ? '' : 'es'} of ours still ending at its last look (the kernel is ending ${o.ending === 1 ? 'it' : 'them'})\n`); }   // r4302: said by its true word, never «could not read», never silently
     if (o && o.cut && !saidCut) { saidCut = true; sayOwn(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`); }
     if (o && o.none && stopping && !saidNone) { saidNone = true; const why = o.none === 'ENOENT' ? 'this machine has no process file system (/proc)' : `it could not list the processes in /proc (${o.none})`; sayOwn(`[job-wrapper] stop: ${why} — what left its group cannot be found, and may be left running\n`); }
   };

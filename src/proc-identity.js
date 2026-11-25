@@ -187,10 +187,11 @@ const MEMBERS_ROWS = 4096, MEMBERS_MS = 250;
 function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBERS_ROWS, maxMs = MEMBERS_MS } = {}, opts) {
   const root = rootOf(opts), out = [];
   let ents = [];
-  try { ents = fs.readdirSync(root); } catch (err) { out.scan = { scanned: 0, total: 0, unreadable: 0, others: 0, cut: false, unread: (err && err.code) || 'error' }; return out; }   // B-d8f4 (10): the listing failed — the caller says so, with its errno
+  try { ents = fs.readdirSync(root); } catch (err) { out.scan = { scanned: 0, total: 0, unreadable: 0, others: 0, ending: 0, cut: false, unread: (err && err.code) || 'error' }; return out; }   // B-d8f4 (10): the listing failed — the caller says so, with its errno
   const bootId = bootIdOf(opts), me = typeof process.getuid === 'function' ? process.getuid() : -1;
   const pids = ents.filter((e) => /^\d+$/.test(e) && Number(e) !== process.pid).map(Number).sort((a, b) => b - a); // newest first
-  let scanned = 0, unreadable = 0, others = 0, cut = false;
+  let scanned = 0, unreadable = 0, others = 0, ending = 0, cut = false;
+  const endingSeen = new Set();   // r4302: read ENDING at the first look — looked at once more at the walk's end
   const ownerOf = (e) => { try { const m = /^Uid:\s+(\d+)/m.exec(fs.readFileSync(`${root}/${e}/status`, 'utf8')); return m ? Number(m[1]) : -1; } catch { return -1; } };
   const unread = (e) => { unreadable++; const u = ownerOf(e); if (u >= 0 && u !== me) others++; };
   const again = [];   // B-d8f4 (主开发 r2215): read unread for a moment (uninterruptible sleep, an exec's empty window) — read ONCE more at the end
@@ -202,6 +203,7 @@ function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBE
     if (!hit && mark) {
       const v = envOf(root, e, r);   // the shipped twin's ONE rule (the wrapper's escapee scan reads the same text)
       if (v.env) hit = v.env.includes(mark);
+      else if (v.ending) { if (second) ending++; else { endingSeen.add(e); again.push(e); } }   // r4302: still ending at the last look ⇒ counted «still ending», never «could not be read»
       else if (v.unread) { if (v.final || second) unread(e); else again.push(e); }   // an access refusal is final; unread twice is counted
     }
     if (hit) out.push({ pid: e, starttime: Number(r[19]), bootId });
@@ -224,8 +226,8 @@ function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBE
   }
   // B-d8f4 (主开发 r2215): THE SECOND READ — at the walk's end, INSIDE its own bound, of ONLY those read unread for a moment; what it then
   // reads decides (the mark ⇒ a member, its start time read again; none ⇒ not counted); still unread ⇒ counted. No third read, no wait
-  for (const e of again) { if (Date.now() - t1 > maxMs) unread(e); else check(e, true); }
-  out.scan = { scanned, total: pids.length, unreadable, others, cut };
+  for (const e of again) { if (Date.now() - t1 > maxMs) { if (endingSeen.has(e)) ending++; else unread(e); } else check(e, true); }
+  out.scan = { scanned, total: pids.length, unreadable, others, ending, cut };
   return out;
 }
 
@@ -319,15 +321,31 @@ function hubChain(hub, { procRoot = '/proc', maxHops = 64, stop = 0, stopStart =
  *  EACCES / EPERM) is unread for good (`final`); any other failed read is unread; a gone one carries none */
 function envOf(root, pid, rest) {
   if (!rest || rest[0] === 'Z' || (Number(rest[6]) & 0x00200000)) return { none: 'no process to carry one' };
-  if (rest[0] === 'D') return { unread: 'D' };
+  if (rest[0] === 'D') return endingOf(root, pid, rest) || { unread: 'D' };
   const read = (name) => { try { return { text: fs.readFileSync(`${root}/${pid}/${name}`, 'latin1') }; } catch (err) { return { err: err || {} }; } };
   const gone = (r) => !!r.err && (r.err.code === 'ENOENT' || r.err.code === 'ESRCH');
   const env = read('environ');
-  if (env.err) return gone(env) ? { none: 'gone' } : { unread: env.err.code || 'error', final: env.err.code === 'EACCES' || env.err.code === 'EPERM' };
+  if (env.err) return gone(env) ? { none: 'gone' } : endingOf(root, pid, rest) || { unread: env.err.code || 'error', final: env.err.code === 'EACCES' || env.err.code === 'EPERM' };
   if (env.text.length) return { env: env.text.split('\0') };
   const cmd = read('cmdline');
-  if (cmd.err) return gone(cmd) ? { none: 'gone' } : { unread: cmd.err.code || 'error' };
-  return cmd.text.length ? { env: [] } : { unread: 'exec' };
+  if (cmd.err) return gone(cmd) ? { none: 'gone' } : endingOf(root, pid, rest) || { unread: cmd.err.code || 'error' };
+  return cmd.text.length ? { env: [] } : endingOf(root, pid, rest) || { unread: 'exec' };
+}
+/** r4302 (主开发): THE KERNEL SAYS IT IS ENDING — a process of OURS (its uid) whose mark could not be read, that is exiting
+ *  (PF_EXITING: its memory given back, its environ reads empty) or holds a signal that ends it (SIGKILL pending; a SIGTERM pending that
+ *  it neither blocks, ignores nor catches) → { ending } — never «could not be read». The walk looks at it once more at its end and says it
+ *  «still ending» if it stands there (an exit can hang). null: not ending, or not ours — the read goes on as before (a LIVING process's
+ *  mark is read as it always was; nothing here signals anything) */
+function endingOf(root, pid, rest) {
+  let s = ''; try { s = fs.readFileSync(`${root}/${pid}/status`, 'latin1'); } catch { return null; }
+  const field = (k) => { const m = new RegExp(`^${k}:\\s*(\\S+)`, 'm').exec(s); return m ? m[1] : ''; };
+  const me = typeof process.getuid === 'function' ? process.getuid() : -1;
+  if (me < 0 || Number(field('Uid')) !== me) return null;
+  if (Number(rest && rest[6]) & 0x4) return { ending: 'exiting' };
+  const low = (k) => (parseInt(field(k).slice(-8) || '0', 16) || 0) >>> 0, pending = low('SigPnd') | low('ShdPnd');
+  if (pending & 0x100) return { ending: 'killed' };
+  if ((pending & 0x4000) && !((low('SigBlk') | low('SigIgn') | low('SigCgt')) & 0x4000)) return { ending: 'terminated' };
+  return null;
 }
 // ── SHIPPED TWIN (B-c134) END ──
 /** WHAT NO STOP OWNS (B-c134 cure, MUST A — the kill law: a stop never reaches the hub's own subtree). Each road that HOLDS a
