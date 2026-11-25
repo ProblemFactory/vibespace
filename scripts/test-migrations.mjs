@@ -16,6 +16,9 @@ const { runMigrations } = require('../src/migration-runner.js');
 const { create } = require('../src/server/migrations.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
+// r4456 (the flake census, round 2): a wait on the FACT a leg judges — its bound generous, its expiry a NAMED harness row (red), never a
+// silent read of whatever is there
+const untilFact = async (fn, what, ms = 10000) => { const t0 = Date.now(); for (;;) { let v = false; try { v = fn(); } catch { v = false; } if (v) return Date.now() - t0; if (Date.now() - t0 >= ms) { ok(false, `harness: ${what} — the state never came within ${ms / 1000} s (the row after it judges nothing)`); return -1; } await new Promise((r) => setTimeout(r, 15)); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -863,10 +866,33 @@ try {
       const led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
       ok(res?.status === 'ran' && !!led.applied[ID] && fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8') === before && live.writeOwed(),
         'CONTROL: the pre-fix run left the file UNCHANGED with the ledger row already written (a crash now would lose the reshaping for good) — the flush leg above fails on it');
-      await new Promise((r) => setTimeout(r, 700));
+      // r4456: the second half reads the file once the store's OWN write has landed (writeOwed() false: its 500 ms debounce, then the
+      // store writer off the main thread — late on a loaded machine), never after a fixed 700 ms
+      await untilFact(() => !live.writeOwed(), 'the store\'s own write LANDED (writeOwed() false)');
       const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
       ok(disk.filter((x) => /^ut-old/.test(x.id)).every((x) => x.status === 'done'), 'CONTROL: …and the change reached the file only when the debounce fired');
       live.stop();
+      // r4456 (1) PLACED: what runs late is the store's debounced write. While that write is HELD (the leg's own hold on the store's
+      // writer seam, src/user-todos.js `writer`: its hand-over is KEPT until the leg lets it go; every other ask goes to the hub's one
+      // writer), the control's old fixed 700 ms reads the OLD file — a red with nothing wrong, at will; the wait on the store's own
+      // landing reads the change once the held write has landed
+      {
+        const { root: rootH, d: dH } = setup('inst-spend-noflush-held');
+        const realW = require(path.join(srcDir, 'store-writer.js')).storeWriter();
+        let holding = true; const kept = [];
+        const heldW = { dirty: (f, o) => (holding ? void kept.push([f, o]) : realW.dirty(f, o)), pending: (f) => (holding && kept.some(([k]) => k === f)) || realW.pending(f),
+          durable: (f, o) => realW.durable(f, o), flushSync: (n, o) => realW.flushSync(n, o) };
+        const liveH = new UserTodoManager({ dataDir: dH, expirySweepMs: 0, writer: heldW });
+        const resH = pre.create({ rootDir: rootH, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: liveH }).runLocalMigrations().find((r) => r.id === ID);
+        await new Promise((r) => setTimeout(r, 700));   // the control's old wait, replayed under the hold: what it reads is the hold's doing, not the clock's
+        const doneOf = () => JSON.parse(fs.readFileSync(path.join(dH, 'user-todos.json'), 'utf-8')).items.filter((x) => /^ut-old/.test(x.id)).every((x) => x.status === 'done');
+        const oldDone = doneOf(), heldN = kept.length;
+        holding = false; for (const [f, o] of kept.splice(0)) realW.dirty(f, o);   // the leg lets the write go
+        await untilFact(() => !liveH.writeOwed(), 'the held store write LANDED once let go (writeOwed() false)');
+        const newDone = doneOf();
+        ok(resH?.status === 'ran' && heldN >= 1 && !oldDone && newDone, 'PLACED (r4456): while the store\'s write is HELD, the control\'s old fixed 700 ms reads the OLD file (a red with nothing wrong); the wait on the store\'s own landing reads the change once the held write lands', { status: resH && resH.status, heldN, oldDone, newDone });
+        liveH.stop();
+      }
       // (d2) THE RUNNER's BELT: the copy with ONLY the live-path flush behind `if (priv)` — the store writer's landing puts the
       // list's owed write on disk before the runner stamps applied[id]
       const { root: root2, d: d2 } = setup('inst-spend-noflush-landed');
