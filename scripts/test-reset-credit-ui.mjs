@@ -1168,6 +1168,25 @@ console.log('\n§3 the route over the real engine');
       const depsFor = (engine = engMod) => ({ world: (o) => world({ engine, ...o }), stubEnv: stubEnv4, STUB, RC, until, past: past4, boot: boot4(engine), quietly: quietly4, sleep, makeTorn });
       const rows = await runScenarios(depsFor());
       for (const r of rows) ok(`r4 T1 ${r.id}: ${r.title}`, r.agree.engine && r.agree.table && r.agree.oracle, (r.why.join('; ') || '') + ' | chain ' + r.chain);
+      // ── r4316: S26's RACE PLACED BY A HOLD (hosted runs 45584145109 and 45620134828, red on try 1). The engine's handling of the
+      // helper's result is HELD (the hop between the helper's resolve and the engine's words: `.then(onResetCreditHelperDone)`). In
+      // fail-read mode the read BEFORE the consume fails and the engine says so at once, while the helper still runs. Line 936's wait
+      // ended on ANY new notice ⇒ under the hold S26 is judged before the consume's answer is handled: RED at will. The cure waits on
+      // the chain's own record (the attempt's outcome, set in the same handler as the «used» words) ⇒ green through the same hold,
+      // the «used» word said once the result is handled: the product never loses it ──
+      { const HMh = require(path.join(REPO, 'src/codex-reset-helper.js')), holdOrig = HMh.consumeResetCreditViaAppServer, HOLD_MS = 1500;
+        const rcsSrc = fs.readFileSync(path.join(REPO, 'scripts/reset-credit-scenarios.mjs'), 'utf8');
+        const CURED = "const resolved = await this.d.until(() => (this.e() || {}).at !== at0 && !!(this.e() || {}).outcome, waitMs);";
+        const W936 = "const resolved = await this.d.until(() => this.w.notices.length > n0 || ((this.e() || {}).at !== at0 && !!(this.e() || {}).outcome), waitMs);";
+        let OLD = null; try { OLD = await import(MUTRC.write('scripts/reset-credit-scenarios.mjs', editAnchor(rcsSrc, CURED, W936, 'scripts/reset-credit-scenarios.mjs'), 'wait936', { esm: true })); } catch (e) { OLD = { err: String((e && e.message) || e).slice(0, 160) }; }
+        HMh.consumeResetCreditViaAppServer = (o) => Promise.resolve(holdOrig(o)).then((r) => new Promise((res) => setTimeout(() => res(r), HOLD_MS)));
+        let held936 = null, heldCured = null;
+        try {
+          if (OLD && typeof OLD.runScenarios === 'function') held936 = (await OLD.runScenarios(depsFor(), { only: ['S26'] }))[0] || null;
+          heldCured = (await runScenarios(depsFor(), { only: ['S26'] }))[0] || null;
+        } finally { HMh.consumeResetCreditViaAppServer = holdOrig; }
+        ok('r4316 RED (line 936\'s wait, the helper\'s result HELD 1.5 s): S26 is judged on the pre-consume read\'s notice, before the engine handled the consume — «used» not said yet', !!held936 && !held936.agree.engine && held936.why.some((w) => /engine never said/.test(w)), held936 ? held936.why.join('; ') + ' | chain ' + held936.chain : (OLD && OLD.err) || 'no copy');
+        ok('r4316: S26 under the SAME hold, waiting on the chain\'s own record — engine, table and oracle agree; «reset credit used on Cx Alpha» said once the result is handled (the product never loses it)', !!heldCured && heldCured.agree.engine && heldCured.agree.table && heldCured.agree.oracle, heldCured ? heldCured.why.join('; ') + ' | chain ' + heldCured.chain : 'no row'); }
       const agreed = rows.filter((r) => r.agree.engine && r.agree.table && r.agree.oracle).length;
       // verify r5: ≥ 44 — thirteen scenarios from the pool's reality (a grant between the send and the reading, the carried cache
       // file, a late record, a pool move, a lagging slot, keys crossing, the read-first seam, a replayed answer)

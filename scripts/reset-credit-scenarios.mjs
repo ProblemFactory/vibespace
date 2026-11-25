@@ -106,8 +106,8 @@ class Sim {
    *  long one (a read that falls outside it under load is a harness artefact, not the product — verify r4 saw one) */
   async helper(tag, { mode = 'answer', readCount = 1, wallMs = null, codexCmd = null, events = null, waitMs = null, readResetsAt = null } = {}) {
     // hosted run 45584145109 (主开发 r4209): an ANSWERING mode's wall is the real one (30 s) — a slow child start on a loaded runner
-    // never beats it — and the scene is judged after the helper has really RESOLVED (its attempt carries an outcome, or its words
-    // were said), waited on as that fact with a bound above the wall; a bound that still runs out is said as a HARNESS TIMEOUT by
+    // never beats it — and the scene is judged after the helper has really RESOLVED (its attempt carries an outcome: r4316, never
+    // «any new notice»), waited on as that fact with a bound above the wall; a bound that still runs out is said as a HARNESS TIMEOUT by
     // name (the stage the stub reached, the ms), never as the product's disagreement
     if (wallMs === null) wallMs = ['hang-consume', 'exit-on-consume'].includes(mode) ? 400 : 30000;
     if (waitMs === null) waitMs = wallMs + 15000;
@@ -126,7 +126,10 @@ class Sim {
     if (r.code === 200 && mode === 'hang-read') { await this.d.until(() => rpc().some((x) => x.method === 'account/rateLimits/read'), waitMs); this.helperConsumes += 0; } // parked in its read-first: the record stays open, the table gets nothing
     else if (r.code === 200) {
       const t0w = Date.now();
-      const resolved = await this.d.until(() => this.w.notices.length > n0 || ((this.e() || {}).at !== at0 && !!(this.e() || {}).outcome), waitMs);
+      // r4316: THE WAIT IS ON THE FACT THE SCENE JUDGES — the chain's own record: the attempt's outcome, set by the engine in the SAME
+      // handler that says its words (the «used» line, a skip, a failure); never «any new notice» (a fail-read press says «could not be
+      // read before the request» while the helper still runs, before the consume's answer: line 936 ended its wait there — the race)
+      const resolved = await this.d.until(() => (this.e() || {}).at !== at0 && !!(this.e() || {}).outcome, waitMs);
       if (!resolved) this.harness = `HARNESS TIMEOUT: the helper had not resolved ${Date.now() - t0w} ms after the press (its wall ${wallMs} ms; the stub heard ${rpc().map((x) => String(x.method).replace('account/', '')).join(' → ') || 'nothing'})`;
       const L = rpc(); this.helperConsumes += L.filter((x) => x.method === 'account/rateLimitResetCredit/consume').length;
       if (events) for (const e of events(this)) this.step(e);
