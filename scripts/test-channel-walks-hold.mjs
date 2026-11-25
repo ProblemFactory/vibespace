@@ -11,6 +11,7 @@
 //      one a conversation row of its own names: each ≤ 50 ms a turn
 //   RED: the release's walk (src/server/channels-access.js with the by-account entries cut, in a copy over the same engine): its
 //   list and its list with the directory hold a turn over the bound for the asker no row names — the meter sees what it is about
+//   PRINTED: the kept copy's size (主开发 r4526 (2): bytes a kept row; a slot = place, lastAt, single chat — nothing else of a row)
 //   PRINTED, never judged (the found holders, named in the line — not this unit's): the index's write after a burst over every
 //   row; the per-account map rebuilt WHOLE in one turn (keysOf after a void); a rule whose row applies to the asker (its account
 //   judged per row); the store's own search over a logged account (its wanted set over the ids it is handed)
@@ -39,7 +40,7 @@ const MB = mutantCopies('channel-walks-hold', REPO);
 let RSRC = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
 RSRC = anchored(RSRC, "    const byAccount = ctx && ctx.kind === 'agent' ? reachCountByAccount(ctx, recs) : undefined;   // B-360d item 4\n", "    const byAccount = undefined;   // THE RELEASE's walk\n", 'release: the count');
 RSRC = anchored(RSRC, "    let sel = ctx && ctx.kind === 'agent' ? newestSelector(LIST_FOR_MAX, placeBefore) : null;\n", "    let sel = null;   // THE RELEASE's walk\n", 'release: the list');
-RSRC = anchored(RSRC, '  const WALK_STEP = 10000;\n', '  const WALK_STEP = 50000;\n', 'release: the step');
+RSRC = anchored(RSRC, '  const WALK_STEP = 5000;\n', '  const WALK_STEP = 50000;\n', 'release: the step');
 const REL = MB.load('src/server/channels-access.js', RSRC, 'release');
 
 /** THE METER: the loop's longest turn while `fn` runs (its own awaits included) — the gap between two beats of a setImmediate
@@ -127,6 +128,26 @@ console.log('① the per-account map after a whole-map touch: built in slices, s
   await ix.durable();
   const w = await holdOf(() => ix.keysOf(A[0]).length);
   console.log(`  · PRINTED (found holder 2, not this unit's): the per-account map rebuilt WHOLE by keysOf after a whole-map touch: one turn of ${w.turn} ms`);
+}
+// PRINTED (主开发 r4526 (2)): THE KEPT COPY's SIZE — the per-account map at the stand-in, the heap read after a full collection
+// before and after its whole build; beside it a slot alone and a map of the same keys holding a number (what the place cost)
+{
+  require('node:v8').setFlagsFromString('--expose-gc');
+  const gc = require('node:vm').runInNewContext('gc');
+  const heap = () => { gc(); gc(); return process.memoryUsage().heapUsed; };
+  const MB = (b) => Math.round(b / 1048576 * 10) / 10;
+  await ix.update((x) => { delete x.conversations[`${A[0]}/c${String(SIZES[0] - 3).padStart(6, '0')}`]; });
+  await ix.durable();
+  const keys = Object.keys(ix.live()), n = keys.length;
+  const h0 = heap();
+  ix.keysOf(A[0]);   // the map whole, every key's slot with it
+  const h1 = heap();
+  const plain = new Map(); for (const k of keys) plain.set(k, 1);
+  const h2 = heap();
+  const slots = new Array(n); for (let i = 0; i < n; i++) slots[i] = { place: i + 1, at: T - i * 1000, dm: i % 3 === 0 };
+  const h3 = heap();
+  console.log(`  · PRINTED (r4526 (2)): the per-account map at ${n} rows: ${MB(h1 - h0)} MB, ${Math.round((h1 - h0) / n)} B a kept row (its key in its account's map and in the key → account map, and its slot) — a slot alone ${Math.round((h3 - h2) / n)} B ({ place, at, dm }: no other field of a row is copied); a map of the same keys holding a number ${Math.round((h2 - h1) / n)} B a key`);
+  slots.length = 0; plain.clear();
 }
 
 // ═══ ② THE ROADS ══════════════════════════════════════════════════════════════════════════════════════════════════════════

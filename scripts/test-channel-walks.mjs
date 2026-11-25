@@ -57,7 +57,7 @@ RSRC = anchored(RSRC, "    const byAccount = ctx && ctx.kind === 'agent' ? reach
 RSRC = anchored(RSRC, "    let sel = ctx && ctx.kind === 'agent' ? newestSelector(LIST_FOR_MAX, placeBefore) : null;\n", "    let sel = null;   // THE RELEASE's walk\n", 'release: the list');
 RSRC = anchored(RSRC, "    const view = ctx && ctx.kind === 'agent' ? accountViewOf(ctx) : null;\n    let ownByAcct = null;\n", "    const view = null;   // THE RELEASE's walk\n    let ownByAcct = null;\n", 'release: the search');
 RSRC = anchored(RSRC, "      const kept = store.index.keysKept(rec.id);\n      const rows = kept ? (function* () { for (const k of kept.keys.keys()) yield live[k]; for (const k of kept.odd.keys()) yield live[k]; })() : Object.values(live);\n", "      const rows = store.index.rowsOf(rec.id);   // THE RELEASE's road\n", 'release: the dead sign-ins');
-RSRC = anchored(RSRC, '  const WALK_STEP = 10000;\n', '  const WALK_STEP = 50000;\n', 'release: the step');
+RSRC = anchored(RSRC, '  const WALK_STEP = 5000;\n', '  const WALK_STEP = 50000;\n', 'release: the step');
 RSRC = anchored(RSRC, "        const gone = new Set();\n        for (const x0 of r.results) { const cid = x0.convId; if (visible.has(cid) && !gone.has(cid) && !stillSees(ctx, rec.id, cid)) gone.add(cid); }\n        for (const cid of gone) visible.delete(cid);\n", "        for (const cid of [...visible.keys()]) if (!stillSees(ctx, rec.id, cid)) visible.delete(cid);\n", 'release: the identity check after the await');
 const REL = MB.load('src/server/channels-access.js', RSRC, 'release');
 ok(typeof REL.create === 'function', 'setup: the release\'s walk loads from a copy (four by-account entries cut, its step back at 50 000, its identity check over every visible conversation)');
@@ -167,6 +167,21 @@ const diffOf = (m, r) => { const d = []; for (const n of Object.keys(m)) for (co
 const nOf = (a, n, k = 'list') => (a[n] && a[n][k] && Array.isArray(a[n][k].conversations) ? a[n][k].conversations.length : -1);
 const allOf = (a, n, k = 'listAll') => nOf(a, n, k) + ((a[n] && a[n][k] && (a[n][k].more || 0) + (a[n][k].moreRequestable || 0)) || 0);   // listed + counted
 const compares = (a) => Object.values(a).reduce((s, x) => s + Object.keys(x).length, 0);
+/** ⑦ (主开发 r4526 (1)) THE KEPT COPY NEVER STALE: every kept key's slot against its row as it stands — its lastAt (|| 0) and
+ *  whether it is a single chat; a key kept with no row is stale too. → the keys whose slot differs (an empty list = none) */
+function staleOf(Wx) {
+  const live = Wx.ix.live(), bad = [];
+  const ids = Wx.eng.adapterRecords().adapters.map((r) => r.id);
+  let odd = null;
+  for (const id of ids) {
+    const k = Wx.ix.keysKept(id);
+    if (!k) continue;
+    odd = k.odd;
+    for (const [key, slot] of k.keys) { const en = live[key]; if (!en || slot.at !== (en.lastAt || 0) || slot.dm !== (en.kind === 'dm')) bad.push(key); }
+  }
+  if (odd) for (const [key, slot] of odd) { const en = live[key]; if (!en || slot.at !== (en.lastAt || 0) || slot.dm !== (en.kind === 'dm')) bad.push(key); }
+  return bad;
+}
 
 // ═══ ① LAW (b): every road, every asker — the walk by account == the release's walk ═══════════════════════════════════════
 console.log('① law (b): who may see what does not change — every road of every asker equals the release\'s walk (its text in a copy, over the same engine)');
@@ -241,8 +256,8 @@ for (const [name, write, effect] of STEPS) {
   await write();
   await W.ix.durable();
   const after = await answersOf(W.eng, W), rel = await answersOf(RELW, W);
-  const d = diffOf(after, rel);
-  ok(effect(before, after) === true && d.length === 0, `② ${name}: its effect at the next ask, and every answer the release's (${compares(after)} compared)`, d.length ? d.slice(0, 4) : 'the effect is not there');
+  const d = diffOf(after, rel), stale = staleOf(W);
+  ok(effect(before, after) === true && d.length === 0 && stale.length === 0, `② ${name}: its effect at the next ask, every answer the release's (${compares(after)} compared), and ⑦ every kept fact its row's`, d.length ? d.slice(0, 4) : stale.length ? { stale: stale.slice(0, 4) } : 'the effect is not there');
   before = after;
 }
 
@@ -258,7 +273,7 @@ const redOf = (anchor, to, tag) => MB.load('src/server/channels-access.js', anch
   const R1 = redOf("            if (CG.ruleGrants(pa.id, '').some((g) => ACL.principalApplies(ctx, g))) { applies = true; break; }\n", '            /* RED: the rule check cut */\n', 'no-rule-check');
   const r1 = diffOf(await answersOf(R1, W, { only: ['count', 'list', 'hits'] }), await answersOf(RELW, W, { only: ['count', 'list', 'hits'] }));
   ok(r1.some((x) => x.startsWith('rule·')), 'RED: a copy that never asks whether a rule\'s row applies to the asker answers the rule\'s member otherwise (the account\'s answer for a row the rule opens)', r1.slice(0, 3));
-  const R2 = redOf("          const reach = v === null || (ownN && own.has(key)) ? reachOf(rec, en) : v;\n", '          const reach = v === null ? reachOf(rec, en) : v;   // RED: a row of its own given the account\'s answer\n', 'no-own-rows');
+  const R2 = redOf("          if (ownN && own.has(key)) { const en = live[key]; if (en && en.adapterId === id) { offer(rec, en, reachOf(rec, en), key, slot); floor = sel.floor(kind); } return; }\n", '          // RED: a row of its own given the account\'s answer (judged as every other row of it)\n', 'no-own-rows');
   const r2 = diffOf(await answersOf(R2, W, { only: ['list'] }), await answersOf(RELW, W, { only: ['list'] }));
   ok(r2.some((x) => x.startsWith('teamB·') || x.startsWith('wide·')), 'RED: a copy that gives a conversation with a row of its own its account\'s answer lists it otherwise (team b\'s visible row in a requestable account)', r2.slice(0, 3));
   const R3 = redOf('    let sel = ctx && ctx.kind === \'agent\' ? newestSelector(LIST_FOR_MAX, placeBefore) : null;\n', '    let sel = ctx && ctx.kind === \'agent\' ? newestSelector(LIST_FOR_MAX) : null;   // RED: the tie order cut\n', 'no-tie-order');
@@ -319,6 +334,12 @@ console.log('⑥ the list reads from the index only the rows it can list (2 000 
   eng.listFor(asker());   // the map kept (a small index: built at its first read)
   const r = readsBy(() => eng.listFor(asker()));
   ok(!!(w && w.ok !== false) && r.out.conversations.length === 200 && r.out.more === N - 200 && r.n <= 200, `⑥ the list of 200 over ${N} rows read ${r.n} rows from the index (≤ the 200 it lists: a row the selector would leave out is dropped from the facts kept beside its key, never read)`, { listed: r.out.conversations.length, more: r.out.more, read: r.n });
+  // the search walks the account's kept keys and reads each row as it reaches it: it never copies every row out in one turn
+  // (rowsOf); the release's walk, created over the same engine, is the control
+  const RELr = REL.create(lastCtx);
+  const rowsOfCalls = async (R) => { const ro = ix.rowsOf; let n = 0; ix.rowsOf = (...a) => { n++; return ro(...a); }; try { await R.searchFor(asker(), 'thread', { limit: 50 }); } finally { ix.rowsOf = ro; } return n; };
+  const mineR = await rowsOfCalls(eng), relR = await rowsOfCalls(RELr);
+  ok(mineR === 0 && relR > 0, `⑥ the agent's search over ${N} rows calls rowsOf ${mineR} times (its rows read as the walk reaches each; the release's walk: ${relR}, a copy of every row in one turn)`, { mine: mineR, release: relR });
 }
 
 // ═══ ③ THE MAP VOID: built in slices, never whole in a road's turn ═════════════════════════════════════════════════════════
@@ -362,10 +383,93 @@ console.log('③ the per-account map void: its sliced build starts at the first 
   ok(!!relDuring && relDuring.kept && slices < Object.keys(W2.ix.live()).length - 1, `CONTROL: the release's search during the build finished it in its own turn (kept at once; ${slices} seams, the slices stopped short)`, relDuring);
   // RED: the store handing a PARTIAL map (half of each account's keys) — the walk by account answers otherwise
   const kk = W2.ix.keysKept;
-  W2.ix.keysKept = (id) => { const k = kk(id); return k && { keys: new Set([...k.keys].filter((_, i) => i % 2 === 0)), odd: k.odd }; };
+  W2.ix.keysKept = (id) => { const k = kk(id); return k && { keys: new Map([...k.keys].filter((_, i) => i % 2 === 0)), odd: k.odd }; };   // half of each account's kept keys, with their slots
   let rp;
   try { rp = diffOf(await answersOf(W2.eng, W2, { only: ['count', 'list'] }), await answersOf(REL2, W2, { only: ['count', 'list'] })); } finally { W2.ix.keysKept = kk; }
   ok(rp.length > 0, `RED: a partial map handed to the roads shows in the differential (${rp.length} answers differ) — the roads never read one: while the map builds they walk the release's way`, rp.slice(0, 2));
+}
+
+// ═══ ⑧ THE CENSUS OF THE KEPT FACTS' WRITERS (主开发 r4526 (1)) ════════════════════════════════════════════════════════════════
+console.log('⑧ every writer of a row\'s lastAt or kind writes it through entry() inside an update — the touch that refreshes its slot');
+{
+  // every assignment `<name>.lastAt =` / `<name>.kind =` in the channel files, and every `en.lastAt =` / `en.kind =` anywhere in src/;
+  // each found site is a row here, by file and its line's own words: an INDEX ROW written through `store.index.entry(` (within
+  // twenty lines above, the update's own entry), or a named object that is no index row
+  const CHANNEL_FILES = ['src/channel-store.js', 'src/server/channels-engine.js', 'src/server/channels-access.js', 'src/server/channels-outbound.js', 'src/server/channels-auth.js', 'src/routes/webhook.js', 'src/routes/channels.js'];
+  const INDEX_ROW = [
+    ['src/routes/webhook.js', "en.kind = live.length > 1 ? 'group' : 'dm';"],   // the webhook's row: its kind by its participants (dm ↔ group)
+    ['src/server/channels-engine.js', 'en.vendorId = c.vendorId; en.kind = c.kind;'],   // admitListed: a listing names the kind again
+    ['src/server/channels-engine.js', 'if (c.lastAt && (!en.lastAt || c.lastAt > en.lastAt)) en.lastAt = c.lastAt;'],   // admitListed
+    ['src/server/channels-engine.js', "en.kind = 'dm'; en.title = null; en.bornBy = 'feed'; en.bornAt = t;"],   // feedPage: a row the feed bears
+    ['src/server/channels-engine.js', 'if (b.created && (!en.lastAt || b.created > en.lastAt)) en.lastAt = b.created;'],   // feedPage
+    ['src/server/channels-engine.js', "if (d && d.kind && en.bornBy === 'feed') en.kind = d.kind;"],   // describeFeedBorn: the feed-born row's kind, described
+    ['src/server/channels-engine.js', 'if (newest && (!en.lastAt || newest > en.lastAt)) en.lastAt = newest;', 2],   // landById and threadRefresh
+    ['src/server/channels-engine.js', 'if (lastAt && (!en.lastAt || lastAt > en.lastAt)) en.lastAt = lastAt;'],   // ingest
+    ['src/server/channels-engine.js', 'if (b.lastAt && (!en.lastAt || b.lastAt > en.lastAt)) en.lastAt = b.lastAt;'],   // onPushEvent
+  ];
+  const NOT_A_ROW = [
+    ['src/server/channels-auth.js', 'case \'kind\': dup.kind = src.kind; break;'],   // an account record's copy (duplicate), no index row
+    ['src/server/channels-engine.js', 'd.lastAt = now(); await keepDisc(rec, d)'],   // the discovery state of an account
+    ['src/server/channels-engine.js', '    d.lastAt = now();'],   // the same, at the walk's end
+    ['src/server/channels-engine.js', 'if (w.lastAt && (!b.lastAt || w.lastAt > b.lastAt)) b.lastAt = w.lastAt;'],   // a push batch being folded
+    ['src/server/channels-engine.js', 'place.thread.count = m.count; place.threa'],   // a thread's stats in its placement
+    ['src/server/channels-engine.js', 'x.firstAt = x.firstAt || t; x.lastAt = t;'],   // a counter's own window
+  ];
+  const BROAD = /\b[A-Za-z_$][\w$]*\.(lastAt|kind)\s*=(?!=)/, EN = /\ben\.(lastAt|kind)\s*=(?!=)/;
+  const census = (textOf, srcFiles) => {
+    const found = [];
+    for (const f of srcFiles) { const L = String(textOf(f) || '').split('\n'); L.forEach((l, i) => { if ((CHANNEL_FILES.includes(f) ? BROAD : EN).test(l) && !/^\s*(\/\/|\*)/.test(l)) found.push({ f, i, l, L }); }); }
+    const claimed = new Set(), unlisted = [], roadless = [], gone = [];
+    for (const [f, anchor, n = 1] of [...INDEX_ROW, ...NOT_A_ROW]) {
+      const hits = found.filter((x) => x.f === f && x.l.includes(anchor));
+      if (hits.length !== n) gone.push(`${f}: «${anchor.slice(0, 60)}» found ${hits.length} times (${n} meant)`);
+      for (const h of hits) claimed.add(h);
+    }
+    for (const [f, anchor] of INDEX_ROW) for (const h of found.filter((x) => x.f === f && x.l.includes(anchor))) {
+      const above = h.L.slice(Math.max(0, h.i - 20), h.i + 1).join('\n');
+      if (!/(store|e\.store)\.index\.entry\(|\bix\.entry\(/.test(above)) roadless.push(`${f}:${h.i + 1}`);
+    }
+    for (const x of found) if (!claimed.has(x)) unlisted.push(`${x.f}:${x.i + 1}: ${x.l.trim().slice(0, 100)}`);
+    return { found: found.length, unlisted, roadless, gone };
+  };
+  const SRC = (() => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = `${d}/${e.name}`; if (e.isDirectory()) walk(r); else if (/\.(js|cjs|mjs)$/.test(e.name)) out.push(r); } }; walk('src'); return out; })();
+  const texts = new Map();   // each file read once for the census and both controls
+  const read = (f) => { if (!texts.has(f)) { let t = null; try { t = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { t = null; } texts.set(f, t); } return texts.get(f); };
+  const c0 = census(read, SRC);
+  ok(c0.unlisted.length === 0 && c0.roadless.length === 0 && c0.gone.length === 0 && c0.found === INDEX_ROW.reduce((n, r) => n + (r[2] || 1), 0) + NOT_A_ROW.length, `⑧ ${c0.found} writers of a lastAt or a kind found in src/ (${SRC.length} files): ten write an index row through entry() inside its update, ${NOT_A_ROW.length} another object — none unlisted`, c0);
+  // CONTROLS: a new writer beside them (a planted line in a text copy, never the tree); one that reaches its row by live()
+  const ENGF = 'src/server/channels-engine.js', ENGT = read(ENGF);
+  const planted = anchored(ENGT, '    en.vendorId = c.vendorId; en.kind = c.kind;\n', '    en.vendorId = c.vendorId; en.kind = c.kind;\n    en.lastAt = Date.now();   // PLANTED: a writer beside the census\n', 'a new writer');
+  const c1 = census((f) => (f === ENGF ? planted : read(f)), SRC);
+  ok(c1.unlisted.length === 1, 'CONTROL: a new writer of lastAt planted beside the listed ones is found unlisted ⇒ the census leg goes RED', c1.unlisted);
+  const roadless = anchored(ENGT, '    const en = store.index.entry(rec.id, c.id);\n', '    const en = store.index.live()[`${rec.id}/${c.id}`];   // PLANTED: the row reached by live(), never touched\n', 'a writer off the touch');
+  const c2 = census((f) => (f === ENGF ? roadless : read(f)), SRC);
+  ok(c2.roadless.length >= 1, 'CONTROL: a listed writer whose row is reached by live() instead of entry() is named roadless ⇒ RED', c2.roadless);
+}
+
+// ═══ ⑨ THE TOUCH ADDS NO WALK (主开发 r4526 (3)) ═════════════════════════════════════════════════════════════════════════════
+console.log('⑨ a row\'s write refreshes ITS slot only: one touch, one refresh, no account walked');
+{
+  const SRCS = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
+  const one = async (S, tag) => {
+    const st = S.createChannelStore({ dir: path.join(ROOT, `touch-${tag}`), log: quiet });
+    await st.index.update(() => { for (let i = 0; i < 3000; i++) Object.assign(st.index.entry(i % 3 ? 'acct-a' : 'acct-b', `t${i}`), { title: `t ${i}`, kind: i % 2 ? 'group' : 'dm', lastAt: T - i * 1000 }); });
+    st.index.keysOf('acct-a');   // kept now (a small store: built at its first read)
+    const s0 = st.index.keysStats();
+    await st.index.update(() => { Object.assign(st.index.entry('acct-a', 't1', { create: false }), { lastAt: T + 777, kind: 'dm' }); });   // a message arrives; its kind named again
+    const s1 = st.index.keysStats(), slot = st.index.keysKept('acct-a').keys.get('acct-a/t1');
+    const out = { refreshes: s1.refreshes - s0.refreshes, builds: s1.builds - s0.builds, moves: s1.moves - s0.moves, slot: slot && { at: slot.at, dm: slot.dm } };
+    st.close();
+    return out;
+  };
+  const S = require(path.join(REPO, 'src/channel-store.js'));
+  const real = await one(S, 'real');
+  ok(real.refreshes === 1 && real.builds === 0 && real.moves === 0 && !!real.slot && real.slot.at === T + 777 && real.slot.dm === true, `⑨ one row's write over 3 000 kept rows: ${real.refreshes} slot refreshed (its own: lastAt and kind as written), ${real.builds} builds, ${real.moves} moves`, real);
+  const REFRESH = "if (slot) { slotFacts(slot, row); acctStats.refreshes++; }";
+  const walked = await one(MB.load('src/channel-store.js', anchored(SRCS, REFRESH, "if (slot) { for (const [k2, s2] of m) { const r2 = ix.conversations[k2]; if (r2) { slotFacts(s2, r2); acctStats.refreshes++; } } } /* RED: the account's rows walked */", 'red: a refresh that walks the account'), 'refresh-walks'), 'walks');
+  ok(walked.refreshes > 1000, `RED: a copy whose refresh walks the account's rows reads ${walked.refreshes} slots for one row's write`, walked);
+  const none = await one(MB.load('src/channel-store.js', anchored(SRCS, REFRESH, 'if (slot) { acctStats.refreshes++; } /* RED: the facts never read again */', 'red: a refresh that reads nothing'), 'refresh-none'), 'none');
+  ok(!!none.slot && none.slot.at !== T + 777, `RED: a copy whose touch does not read the row again keeps a STALE slot (lastAt ${none.slot && none.slot.at}) — ⑦ names it`, none);
 }
 
 // ═══ ⑤ THE HOOK: asked at every prompt, nothing kept ══════════════════════════════════════════════════════════════════════
@@ -382,5 +486,5 @@ console.log('⑤ the prompt hook keeps no memo: channelsTaughtFor asks the count
   ok(!keepsNothing(planted), 'CONTROL: the release\'s 60 s memo planted back in the text is seen');
 }
 
-for (const r of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 6, label: 'B-360d walks ' })) ok(r.pass, r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 8, label: 'B-360d walks ' })) ok(r.pass, r.name, r.pass ? undefined : r.detail);
 report();

@@ -862,14 +862,20 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // changed); a whole-map touch drops the sets (rebuilt at the next read). A row whose key does not begin with its own
   // account (only a damaged act line applied as written) is kept in `oddKeys` and handed to EVERY account — each walk
   // still judges every key it is handed by its own test, so the kept keys are a superset of what any walk read before.
-  let byAcct = null;              // Map<adapterId, Map<key, place>> — null = build at the next read (boot, a whole-map touch)
+  let byAcct = null;              // Map<adapterId, Map<key, slot>> — null = build at the next read (boot, a whole-map touch)
   const acctOfKey = new Map();    // key → the account whose set holds it ('' = oddKeys)
-  const oddKeys = new Map();      // key → place
-  // B-360d item 4 (lane bl-loop-a): each kept key's PLACE in the map's own order (the order `live()` walks: a key placed at a
-  // build in Object.keys order, a birth after every key there is, a key that moves account keeps its place) — the channel walks
-  // by account break a tie of two accounts' rows by it exactly as the release's walk over every row did, with no copy of the order
+  const oddKeys = new Map();      // key → slot
+  // B-360d item 4 (lane bl-loop-a): each kept key's SLOT { place, at, dm } — its PLACE in the map's own order (the order `live()`
+  // walks: a key placed at a build in Object.keys order, a birth after every key there is, a key that moves account keeps its
+  // place: the channel walks by account break a tie of two accounts' rows by it exactly as the release's walk over every row did),
+  // and (主开发 r4520 / r4526) the TWO FACTS the agents' list drops a row by — `at` = the row's `lastAt || 0` and `dm` = it is a
+  // single chat (`kind === 'dm'`, the directory's test) — so the list reads a row from the index only when it can be listed. The
+  // facts are refreshed by the very touch that moves the place (`fire(key)` → acctPlace: ONE slot, never an account's rows); no
+  // other field of a row is copied. Every writer of a row's lastAt or kind writes it through `entry()` inside an update (the
+  // touch): scripts/test-channel-walks.mjs ⑧ is the census of those writers.
   let acctSeq = 0;
-  const acctStats = { builds: 0, moves: 0, sliced: 0 };
+  const acctStats = { builds: 0, moves: 0, sliced: 0, refreshes: 0 };
+  const slotFacts = (slot, row) => { slot.at = row.lastAt || 0; slot.dm = row.kind === 'dm'; return slot; };
   // B-dfa4 cut 3: A BIG INDEX'S PER-ACCOUNT KEYS ARE BUILT IN SLICES FROM THE LOAD (walkSliced) — the first keysOf() of a
   // 96 500-row index built them in the boot's held turn (acctPlace ← keysOf, measured). The stated snapshot: the keys at the
   // load, placed in the map's order; a key touched meanwhile is placed again at the landing (a birth joins its account's
@@ -881,16 +887,20 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const row = hasOwn(ix.conversations, key) ? ix.conversations[key] : null;
     const a = row && typeof row.adapterId === 'string' ? row.adapterId : null;
     const next = !row ? undefined : (a !== null && key.startsWith(`${a}/`) ? a : '');
-    if (prev === next) return;
-    let place;
-    if (prev === '') { place = oddKeys.get(key); oddKeys.delete(key); }
-    else if (prev !== undefined) { const set = byAcct.get(prev); if (set) { place = set.get(key); set.delete(key); if (!set.size) byAcct.delete(prev); } }
+    if (prev === next) {   // the same account (or both absent): the row's two kept facts, read again — this key's slot only
+      if (row) { const m = next === '' ? oddKeys : byAcct.get(next), slot = m && m.get(key); if (slot) { slotFacts(slot, row); acctStats.refreshes++; } }
+      return;
+    }
+    let slot;
+    if (prev === '') { slot = oddKeys.get(key); oddKeys.delete(key); }
+    else if (prev !== undefined) { const set = byAcct.get(prev); if (set) { slot = set.get(key); set.delete(key); if (!set.size) byAcct.delete(prev); } }
     acctStats.moves++;
     if (next === undefined) { acctOfKey.delete(key); return; }
-    if (place === undefined) place = ++acctSeq;   // a key new to the map: after every key there is (a move keeps its place)
+    if (slot === undefined) slot = { place: ++acctSeq, at: 0, dm: false };   // a key new to the map: after every key there is (a move keeps its place)
+    slotFacts(slot, row);
     acctOfKey.set(key, next);
-    if (next === '') oddKeys.set(key, place);
-    else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Map())); set.set(key, place); }
+    if (next === '') oddKeys.set(key, slot);
+    else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Map())); set.set(key, slot); }
   }
   /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array, in the
    *  map's own order (a birth joins both at the end); the caller reads each row from `live()` and keeps its own test.
@@ -926,9 +936,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       .then((r) => { if (r.done && acctWarm === job) acctLand(job); else job.resolve(); }, (e) => { job.resolve(); if (acctWarm === job) acctWarm = null; warn('[channels] the per-account keys build failed:', (e && e.message) || e, '— the next read builds them whole'); });
   }
   /** B-360d item 4 (lane bl-loop-a, 主开发 r4317 / r4325): THE CHANNEL WALKS' READ of ONE account's keys — a road (the agents' reach
-   *  count, list and search) NEVER builds the per-account map whole in its own turn. → { keys: the KEPT Map itself, key → its place in the
-   *  map's order (read-only: the caller reads it within one synchronous run and never changes it), odd: the keys whose row and
-   *  account disagree (every account's, as keysOf answers them; key → place) } — or null while the map is VOID or being built in slices on a big index: the road then
+   *  count, list and search) NEVER builds the per-account map whole in its own turn. → { keys: the KEPT Map itself, key → its slot { place, at,
+   *  dm } (read-only: the caller reads it within one synchronous run and never changes it), odd: the keys whose row and account
+   *  disagree (every account's, as keysOf answers them; key → slot) } — or null while the map is VOID or being built in slices on a big index: the road then
    *  answers by the release's walk (slow and right, never by a partial map). A void map's sliced build is started here (the roads'
    *  need, nothing more: keysOf and the index's writers keep their own road); a small index (≤ LAYOUT_SYNC_ROWS rows) is built at
    *  once, as keysOf builds it. Inside an update: null (the kept set may not hold a row the update touched yet). */

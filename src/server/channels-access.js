@@ -562,8 +562,9 @@ function create(engineCtx) {
   }
   /** L3 (lane grants-read-is-a-lookup, docs/kb-design-lessons.md §19's 250 ms): an ASYNC walk over the whole index gives the loop
    *  back every WALK_STEP conversations scanned — a count, never a clock. B-360d item 4 (主开发 r4325: under 50 ms a turn at the
-   *  owner's size): 50 000 rows held about 75 ms a turn of a search's scan; a fifth of that now. */
-  const WALK_STEP = 10000;
+   *  owner's size): 50 000 rows held about 75 ms a turn of a search's scan; 10 000 read 29–36 ms a turn on the hub box (主开发 r4520,
+   *  row 875: over the 35 ms aim) — 5 000 now; the search's callers await it, so the loop is given back where they wait already. */
+  const WALK_STEP = 5000;
   /** ONE WALK'S READER of reach (lane grants-read-is-a-lookup — L3: a walk over every conversation stays one bounded loop
    *  turn at the owner's order of sizes, about two hundred thousand): what is the same for the whole walk WHILE THE ROWS ARE — the conversations a row of their
    *  own names, whether a rule holds a row, each account's own answer — is judged once per generation of the rows, asked at
@@ -749,8 +750,11 @@ function create(engineCtx) {
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
       if (view && searchKnowsNothing(ctx, rec, view, reachOf, () => ownByAcct || (ownByAcct = ownKeysByAccount()))) continue;
-      let rowsRead = null;   // kept (checked again in THIS run, after the await) ⇒ rowsOf reads them; else every row as before cut 1
-      if (view) { await keysKeptFor(rec.id); if (!store.index.keysKept(rec.id)) rowsRead = Object.values(store.index.live()); }
+      // kept (checked again in THIS run, after the await) ⇒ the account's kept keys, a SNAPSHOT of keys, each row read as the walk
+      // reaches it (主开发 r4520: rowsOf copied every row of the account out of the index in one turn — 15–17 ms of the search's longest
+      // turn at 173 306 rows); not kept ⇒ every row as before cut 1
+      let rowsRead = null;
+      if (view) { await keysKeptFor(rec.id); const k = store.index.keysKept(rec.id); rowsRead = k ? keptRows([...k.keys.keys(), ...k.odd.keys()]) : Object.values(store.index.live()); }
       // REACH FIRST, per conversation: what it may read (`visible`, the title through the belt — verify r1 F2) and what it
       // may NOT (`kept`, for the existence answer) — an account it neither reads nor may request anything of is skipped
       const visible = new Map(), kept = new Map();
@@ -800,6 +804,9 @@ function create(engineCtx) {
     const saidKind = SR.searchSaidKind({ hitsSeen: results.length, hiddenMatch: hidden.match, capped: hidden.capped && !hidden.match, accounts });   // lane search-no-group-log: a KEY, never the caller's query
     return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind), ...signinNoteOf(dead) };
   }
+  /** B-360d item 4: one account's kept keys (a snapshot, in rowsOf's order) as its rows, each read from the index as the walk reaches
+   *  it — a key gone since is skipped, as rowsOf skips it */
+  function* keptRows(keys) { const live = store.index.live(); for (const k of keys) { const en = live[k]; if (en) yield en; } }
   /** B-360d item 4: an async road's wait for ONE account's kept keys — the sliced build of a void map, awaited (bounded: a map
    *  voided again and again meanwhile ⇒ null after three waits, and then the release's road) → the kept keys or null */
   async function keysKeptFor(adapterId) {
@@ -1956,6 +1963,10 @@ function create(engineCtx) {
         dropped[kind]++;
         return true;
       },
+      /** B-360d item 4 (主开发 r4520): the `lastAt` a row of `kind` must reach to be kept once its heap is full (the row listed last's)
+       *  — -Infinity while it is not; a row below it is dropped exactly as drops() drops it (the walk reads it again after each offer
+       *  and adds what it dropped to `dropped`) */
+      floor(kind) { const h = heaps[kind]; return h.length < max ? -Infinity : at(h[0]); },
       rows() { return [...heaps.visible, ...heaps.hidden].sort((a, b) => (before(a, b) ? -1 : 1)).map((x) => x.c); },
       dropped,
     };
@@ -2036,34 +2047,48 @@ function create(engineCtx) {
     for (const rec of byId.values()) { if (!rec || rec.enabled === false) continue; const k = store.index.keysKept(rec.id); if (!k) return false; kept.set(rec.id, k); }
     const live = store.index.live(), own = CG.ownConversationKeys(), view = accountViewOf(ctx);
     const rowOf = (key) => (hasOwnKey(live, key) ? live[key] : null);
-    const offer = (rec, en, reach, key, place) => { if (reach.level === 'hidden' && !(all && directoryLists(rec, en))) return; sel.offer({ en, rec, reach, key, place: place === undefined ? Number.MAX_SAFE_INTEGER : place }); };
+    // a slot is always there for a row the walk offers (every kept key has one); MAX_SAFE_INTEGER is the order of a row it never met
+    const offer = (rec, en, reach, key, slot) => { if (reach.level === 'hidden' && !(all && directoryLists(rec, en))) return; sel.offer({ en, rec, reach, key, place: slot ? slot.place : Number.MAX_SAFE_INTEGER }); };
     let odd = null;
     for (const k of kept.values()) { odd = k.odd; break; }
-    if (odd) for (const [key, place] of odd) { const en = rowOf(key), rec = en && byId.get(en.adapterId); if (rec && rec.enabled !== false) offer(rec, en, reachOf(rec, en), key, place); }
+    if (odd) for (const [key, slot] of odd) { const en = rowOf(key), rec = en && byId.get(en.adapterId); if (rec && rec.enabled !== false) offer(rec, en, reachOf(rec, en), key, slot); }
     let ownByAcct = null;   // adapterId → the keys a row of their own names (built once, when an account needs only those)
     const oddN = odd ? odd.size : 0, ownN = own.size;
     for (const [id, k] of kept) {
       const rec = byId.get(id), v = view(rec), places = k.keys;
-      if (v === null || v.level !== 'hidden' || (all && directoryListsAny(rec))) {   // its rows: each offered (its answer, or the release's reader)
-        // THE HOT LOOP (every row of a big account): directoryLists' own test (channel-acl directoryListable) with the account's
-        // switches read once; a row the selector would leave out at once builds nothing; a kept key is always a row of the map
-        // (keysKept: never inside an update)
-        const dir = all && !msgAclAdapter(rec) ? ACL.directoryOf(rec) : null;
-        const dirDm = !!dir && dir.singles === true, dirGroups = !!dir && dir.groups === true;
-        for (const key of places.keys()) {
+      if (v === null) {   // a rule's row can apply to the asker here, or the msg-acl account: every row by the release's reader
+        for (const [key, slot] of places) {
           if (oddN && odd.has(key)) continue;
           const en = live[key];
-          if (!en || en.adapterId !== id) continue;
-          const reach = v === null || (ownN && own.has(key)) ? reachOf(rec, en) : v;
-          if (reach.level === 'hidden' && !(en.kind === 'dm' ? dirDm : dirGroups)) continue;
-          if (sel.drops(reach.level, en.lastAt || 0)) continue;
-          sel.offer({ en, rec, reach, key, place: places.get(key) });
+          if (en && en.adapterId === id) offer(rec, en, reachOf(rec, en), key, slot);
         }
+        continue;
+      }
+      if (v.level !== 'hidden' || (all && directoryListsAny(rec))) {   // ONE answer for every row no row of its own names
+        // THE HOT LOOP (every row of a big account, 主开发 r4520: the box read its one turn at 55 ms): the row's two kept facts (its
+        // slot: lastAt, a single chat) decide it — directoryLists' own test with the account's switches read once, and a row below
+        // the selector's floor dropped as drops() drops it — so a row is read from the index only when it can be listed; a row of
+        // its own is judged by the release's reader. A kept key is always a row of the map (keysKept: never inside an update).
+        const dir = all && !msgAclAdapter(rec) ? ACL.directoryOf(rec) : null;
+        const dirDm = !!dir && dir.singles === true, dirGroups = !!dir && dir.groups === true;
+        const hiddenV = v.level === 'hidden', kind = hiddenV ? 'hidden' : 'visible';
+        let floor = sel.floor(kind), below = 0;
+        places.forEach((slot, key) => {
+          if (oddN && odd.has(key)) return;
+          if (ownN && own.has(key)) { const en = live[key]; if (en && en.adapterId === id) { offer(rec, en, reachOf(rec, en), key, slot); floor = sel.floor(kind); } return; }
+          if (hiddenV && !(slot.dm ? dirDm : dirGroups)) return;
+          if (slot.at < floor) { below++; return; }
+          const en = live[key];
+          if (!en || en.adapterId !== id) return;
+          sel.offer({ en, rec, reach: v, key, place: slot.place });
+          floor = sel.floor(kind);
+        });
+        sel.dropped[kind] += below;
         continue;
       }
       // its answer hides every row and it lists no directory: only the rows a row of their own names can be offered
       if (!ownByAcct) { ownByAcct = new Map(); for (const key of own) { const en = rowOf(key); if (en) { const a = ownByAcct.get(en.adapterId); if (a) a.push(key); else ownByAcct.set(en.adapterId, [key]); } } }
-      for (const key of ownByAcct.get(id) || []) { if (oddN && odd.has(key)) continue; const en = rowOf(key); if (en && en.adapterId === id) offer(rec, en, reachOf(rec, en), key, places.get(key)); }
+      for (const key of ownByAcct.get(id) || []) { if (oddN && odd.has(key)) continue; const en = rowOf(key); if (en && en.adapterId === id) offer(rec, en, reachOf(rec, en), key, places.get(key)); }   // its slot
     }
     return true;
   }
