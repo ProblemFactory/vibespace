@@ -125,7 +125,9 @@ const proj = path.join(fakeHome, '.claude', 'projects', cwd.replace(/[/._]/g, '-
 const sid = fixtureSid('5c01');
 await writeHugeTranscript({ file: path.join(proj, `${sid}.jsonl`), sid, cwd, targetBytes: 3 * 1048576 });
 const stub = scratch('cno-hub-claude'); dirs.add(stub);
-// the stub CLI: its init for the resumed id, then idles on stdin. VS_BIG n=<n> answers with n tool results of 400 KB; VS_ONE with one line of text.
+const holdFile = stub + '.go'; dirs.add(holdFile);   // r4340: VS_HELD's reply waits until this file says go (the placed hold)
+// the stub CLI: its init for the resumed id, then idles on stdin. VS_BIG n=<n> answers with n tool results of 400 KB; VS_ONE with one line of text;
+// VS_HELD <label> with «held <label>», HELD until the test writes holdFile (a reply that lands when the test says, never by a clock).
 fs.writeFileSync(stub, `#!/bin/sh
 SID=""; prev=""
 for a in "$@"; do case "$a" in --version) echo "2.1.274 (Claude Code) stub"; exit 0;; --help) echo "Usage: claude [options]"; exit 0;; esac; [ "$prev" = "--resume" ] && SID="$a"; prev="$a"; done
@@ -135,6 +137,8 @@ while IFS= read -r line; do
   R=$((R+1))
   case "$line" in
     *VS_ONE*) printf '{"type":"assistant","parent_tool_use_id":null,"session_id":"%s","message":{"id":"msg_one_%s","role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"one line"}]}}\\n' "$SID" "$R" ;;
+    *VS_HELD*) L=$(printf '%s' "$line" | sed -n 's/.*VS_HELD \\([a-z]*\\).*/\\1/p'); while [ ! -f '${holdFile}' ]; do sleep 0.05; done; rm -f '${holdFile}'
+      printf '{"type":"assistant","parent_tool_use_id":null,"session_id":"%s","message":{"id":"msg_held_%s","role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"held %s"}]}}\\n' "$SID" "$R" "$L" ;;
     *VS_BIG*) N=$(printf '%s' "$line" | sed -n 's/.*VS_BIG n=\\([0-9][0-9]*\\).*/\\1/p'); i=0
       while [ $i -lt $N ]; do i=$((i+1))
         printf '{"type":"assistant","parent_tool_use_id":null,"session_id":"%s","message":{"id":"msg_big_%s_%s","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"toolu_big_%s_%s","name":"Read","input":{"file_path":"notes.txt"}}]}}\\n' "$SID" "$R" "$i" "$R" "$i"
@@ -204,6 +208,7 @@ const INSTALL = `(() => {
   app.ws.globalHandlers.unshift((m) => { if (m.type === 'attached' && m.sessionId === sid) S.attached.push({ t: Date.now(), held: m.slab === 'held', replay: Array.isArray(m.replay) ? m.replay.length : 0 }); });
   new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes) if (n.classList?.contains('global-toast') || n.querySelector?.('.global-toast')) { S.toasts++; S.toastWords.push(String(n.textContent).slice(0, 120)); } }).observe(document.body, { childList: true, subtree: true });
   window.__view = () => [...app.sessions.values()].find((v) => v && v.sessionId === sid);
+  window.__has = (s) => { const v = window.__view(); return !!v && (JSON.stringify(v._messages || []).includes(s) || v._messageList.textContent.includes(s)); };   // r4340: a message's landing, by its own words
   window.__rows = () => [...document.querySelectorAll('.chat-msg-system .chat-system')].filter((e) => /Disconnected from server|Reconnected|Connection unstable|已与服务器断开|已重新连接|连接不稳定/.test(e.textContent)).map((e) => e.textContent);
   window.__facts = () => { const v = window.__view(); return { start: v._windowStart, end: v._windowEnd, total: v._total, cards: v._messageList.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)').length, rows: window.__rows(), attached: S.attached.length, toasts: S.toasts, flips: S.flips.length, n: v._connNotice?.state?.n ?? 0, lastHeld: S.attached.at(-1)?.held ?? null, toastWords: S.toastWords }; };
   return true;
@@ -302,7 +307,11 @@ await shot('flap-10-phone.png');
 console.log('① a message between two cycles');
 sayToStub('VS_ONE');
 const totalBefore = f1.total;
-ok('a live message lands', await until(() => ev(`window.__view()._total > ${totalBefore}`), 15000));
+// r4340 (the mirror of 2.369.419, run 45633627765, heavy 5/7): VS_ONE is a TURN of two messages — the person's line, then the stub's reply.
+// The wait read the first only (the total moved once); a reply that lands AFTER the next reconnect is, by the notice's own law, what the
+// drop after it reads as new: the mirror's third row. The wait is on the FACT the cycles below are judged on — the turn landed WHOLE —
+// and its bound's expiry fails BY NAME here (placed below: the reply held past a reconnect)
+ok('a live message lands — the turn WHOLE: the person\'s line and the stub\'s reply «one line» (else the cycles below are not judged on what they say)', await until(() => ev(`window.__view()._total > ${totalBefore} && window.__has('one line')`), 15000));
 await flap();
 const f2 = await ev('window.__facts()');
 ok('the next cycle starts a second notice', f2.rows.length === 2, f2.rows);
@@ -313,6 +322,29 @@ ok('…and the one after that patches the second', f3.rows.length === 2 && /drop
 const look2 = await ev(`(() => { const v = window.__view(), all = document.querySelectorAll('.chat-conn-notice'), n = all[all.length - 1]; if (!n) return null; const nr = n.getBoundingClientRect(), lr = v._messageList.getBoundingClientRect(); return { inView: nr.top >= lr.top - 1 && nr.bottom <= lr.bottom + 1, top: Math.round(nr.top), bottom: Math.round(nr.bottom), listBottom: Math.round(lr.bottom), pinned: !!v._pinned }; })()`);
 ok('…and the row is whole on screen, not cut off under the composer (a pinned view follows it)', !!look2?.inView, look2);
 await shot('flap-message-between.png');
+// THE PLACED FORM (r4340 laws 2–3): the stub HOLDS its reply until holdFile says go, so the race is red at will with the old wait and green
+// with the new one — each judged by its own run, no clock. (a) the OLD wait (the person's line only), the reply released AFTER the next
+// reconnect: the cycle after it starts a NEW row instead of patching — the leg's verdict on that scene is red, as the mirror read.
+// (b) the NEW wait (the turn whole): the reply is still held when the person's line has landed, the wait goes on until it lands, and
+// the cycle after the next one patches as the leg says
+{
+  const lineOf = async (label) => { const t0 = (await ev('window.__facts()')).total; sayToStub('VS_HELD ' + label); return until(() => ev(`window.__view()._total > ${t0}`), 15000); };
+  const replyOf = (label) => until(() => ev(`window.__has('held ${label}')`), 15000);
+  const okA = await lineOf('a'), heldA = !(await ev(`window.__has('held a')`)), ra0 = (await ev('window.__facts()')).rows.length;
+  await flap();                                    // a message since the last row: a new stretch
+  fs.writeFileSync(holdFile, 'go');                // the reply lands AFTER that reconnect
+  const landedA = await replyOf('a');
+  await flap();
+  const ra = await ev('window.__facts()');
+  ok('PLACED, THE OLD WAIT — RED AT WILL: the person\'s line landed (the old wait met) with the reply still held; released after the next reconnect, the cycle after it starts a THIRD row instead of patching the second — the leg\'s verdict on that scene is red, as the mirror of 2.369.419 read', okA && heldA && landedA && ra.rows.length === ra0 + 2 && !/dropped 2 times/.test(ra.rows.at(-1) || ''), { okA, heldA, landedA, rows: ra.rows.slice(ra0) });
+  const okB = await lineOf('b'), heldB = !(await ev(`window.__has('held b')`));
+  fs.writeFileSync(holdFile, 'go');                // the hold ends only now: the new wait below is what waits for it
+  const landedB = await replyOf('b');              // THE NEW WAIT: the turn whole
+  const rb0 = (await ev('window.__facts()')).rows.length;
+  await flap(); const rb1 = await ev('window.__facts()');
+  await flap(); const rb2 = await ev('window.__facts()');
+  ok('PLACED, THE NEW WAIT — GREEN: the person\'s line landed with the reply still held, the wait went on until the reply landed (the turn whole); the next cycle starts ONE new row and the one after that patches it', okB && heldB && landedB && rb1.rows.length === rb0 + 1 && rb2.rows.length === rb0 + 1 && /dropped 2 times/.test(rb2.rows.at(-1) || ''), { okB, heldB, landedB, rows: rb2.rows.slice(rb0 - 1) });
+}
 
 // BEFORE any reload: a reload leaves a stray socket, a silent path gets it cut as well, and that read as this leg's cut (with a reload ahead
 // of it, one cut by a port neither the page's socket nor the control's; none without the reload — probably the old document's socket, not chased here).
