@@ -3277,7 +3277,7 @@ the failure this design argues against.
   least one conversation the user connected (`list` / `search "<words>"` / `read <conv>`, a reply is a proposal, look
   here BEFORE any other connector or file, `vibespace-docs channels`), or only REQUEST some (`list --all` + `request`).
   The reach is the engine's `reachCountFor` (listFor's walk, counted; the built-in Agents adapter never counts), read
-  through a 60 s per-session memo on prompts, fresh at SessionStart. No reach / integration off / no engine ⇒ the
+  at every prompt and at SessionStart, nothing kept (B-360d item 4: judged by account). No reach / integration off / no engine ⇒ the
   injection is byte-identical. A shell read of data/channels/ as files gets the bypass card line. Gate:
   test-channels-teach; bytes in scripts/measure-prompt-context.mjs (test-prompt-budget).
 
