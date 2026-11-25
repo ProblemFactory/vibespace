@@ -170,8 +170,9 @@ const placedRight = (r) => r.rows['gmail/thr_1'].title === 'changed after its ch
   // a promise the LEG owns, let go only once the fold has answered (its produce asked, the copy's «null» taken) — never a 300 ms timer
   // — and the leg's update and fold start only once the warm-up stands at that hold: the fold meets the layout still being built
   // however late it runs. A hold the fold never answers is a named harness row
-  let letGo = null; const heldUp = new Promise((z) => { const t = setTimeout(() => { ok(false, 'harness: the fold never answered while the warm-up was held — the state never came within 10 s (the red control after it judges nothing)'); z(); }, 10000); letGo = () => { clearTimeout(t); z(); }; });
-  const rn = await layoutLeg(SN, 'b3-red', () => heldUp, { beforeUpdate: async (s, seen) => { await until('the warm-up standing at its first slice (the leg\'s hold)', () => seen.placedAt !== null); }, onFolded: () => letGo() });
+  // (line 1021's round, a should) the hold's harness bound starts AT the hold — never at the promise's making, before the store opens
+  let letGo = null, held = null; const heldUp = () => held || (held = new Promise((z) => { const t = setTimeout(() => { ok(false, 'harness: the fold never answered while the warm-up was held — the state never came within 10 s (the red control after it judges nothing)'); z(); }, 10000); letGo = () => { clearTimeout(t); z(); }; }));
+  const rn = await layoutLeg(SN, 'b3-red', () => heldUp(), { beforeUpdate: async (s, seen) => { await until('the warm-up standing at its first slice (the leg\'s hold)', () => seen.placedAt !== null); }, onFolded: () => { if (letGo) letGo(); } });
   ok(rn.landed === true && rn.rows['gmail/thr_1'].unread !== 9, `(b3) RED CONTROL: a store answering the writer «nothing to write» (null) while its layout is built — durable() resolves TRUE with the changed row NOT on disk — the leg above would go red`, { landed: rn.landed, unread: rn.rows['gmail/thr_1'].unread });
   // r4456 (1) PLACED: what runs late is the leg's own update and fold. Held until the warm-up has LANDED (its sliced layout counted),
   // the control's old 300 ms hold loses its race at will: the red copy's fold meets no layout in build, writes whole, and its red reads

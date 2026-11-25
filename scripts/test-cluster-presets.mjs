@@ -198,6 +198,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   ok(st.items.some((i) => i.kind === 'gdrive' && i.source === 'release' && i.n === 1) && st.items.some((i) => i.kind === 'gdrive' && i.source === 'cluster' && i.n === 2) && Number.isInteger(st.updatedAt), `status(): counted by layer, updatedAt = the files' mtime (${JSON.stringify(st.items)})`);
 
   // a swap that changes nothing fires nothing
+  await r.reload();   // (line 1021's round, a should) no reload in flight when the mark is taken: a late one cannot move it over the old tree
   const before = changes.length, read0 = r.status().loadedAt;
   project(dir, { 'gdrive-clients.json': [g('org1', SECRET_B, 'Org'), g('channels', SECRET_A), g('org2', SECRET_A)], 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }], 'override/gdrive-clients.json': [g('channels', SECRET_U, 'Mine')] });
   await untilFact(() => r.status().loadedAt !== read0, 'the reader READ the same-content swap (its loadedAt moved)');   // r4456: never a fixed 600 ms
@@ -214,6 +215,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   ok(r.status().errors.length === 1 && r.status().errors[0].kept === true && r.status().errors[0].code === 'unparseable', 'status() carries the typed error (kept: true)');
   ok(changes[changes.length - 1].kinds.length === 0, 'the error transition still notifies (kinds []) — the summary line must say it');
   // persisting malformed + another swap: no second line
+  await r.reload();   // (line 1021's round, a should) no reload in flight when the mark is taken
   const read1 = r.status().loadedAt;
   project(dir, { 'gdrive-clients.json': leak, 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }], 'override/gdrive-clients.json': [g('channels', SECRET_U, 'Mine')], 'override/integrations.json': '[]' });
   await untilFact(() => r.status().loadedAt !== read1, 'the reader READ the next swap of the malformed file (its loadedAt moved)');   // r4456: never a fixed 600 ms

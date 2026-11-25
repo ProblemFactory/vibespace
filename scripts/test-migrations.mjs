@@ -18,7 +18,9 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 // r4456 (the flake census, round 2): a wait on the FACT a leg judges — its bound generous, its expiry a NAMED harness row (red), never a
 // silent read of whatever is there
-const untilFact = async (fn, what, ms = 10000) => { const t0 = Date.now(); for (;;) { let v = false; try { v = fn(); } catch { v = false; } if (v) return Date.now() - t0; if (Date.now() - t0 >= ms) { ok(false, `harness: ${what} — the state never came within ${ms / 1000} s (the row after it judges nothing)`); return -1; } await new Promise((r) => setTimeout(r, 15)); } };
+// waitFact: the wait alone (→ its ms, or -1 at its bound) — for a wait inside a hushed span, its expiry named once the span is over
+const waitFact = async (fn, ms = 10000) => { const t0 = Date.now(); for (;;) { let v = false; try { v = fn(); } catch { v = false; } if (v) return Date.now() - t0; if (Date.now() - t0 >= ms) return -1; await new Promise((r) => setTimeout(r, 15)); } };
+const untilFact = async (fn, what, ms = 10000) => { const t = await waitFact(fn, ms); if (t < 0) ok(false, `harness: ${what} — the state never came within ${ms / 1000} s (the row after it judges nothing)`); return t; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -1704,7 +1706,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const warns = [];
       const resE = runMigrations({ ledgerPath: path.join(dE, 'migrations.json'), migrations: create({ rootDir: rE, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eE }).MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: (m) => warns.push(String(m)) }).find((x) => x.id === ID);
       const lg = answer ? await waitLedger(dE, ID) : null;
-      for (let i = 0; !answer && i < 250 && !warns.some((w) => w.includes(ID)); i++) await new Promise((r) => setTimeout(r, 20));
+      if (!answer) await untilFact(() => warns.some((w) => w.includes(ID)), 'the stepped run SAID its failure (a warn naming it)');   // r4456 (主开发's word): its fact, its expiry named (was a silent 250 × 20 ms)
       let applied = false; try { applied = !!(JSON.parse(fs.readFileSync(path.join(dE, 'migrations.json'), 'utf-8')).applied || {})[ID]; } catch { applied = false; }
       eE.store.index.durable = real;
       try { eE.stop(); } catch { }
@@ -2908,11 +2910,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const dB = path.join(tmp, 'toast-stepped', 'data');
     fs.mkdirSync(path.join(dB, 'usage-history'), { recursive: true });
     fs.writeFileSync(path.join(dB, 'usage-history', 'events-2026-10.ndjson'), ['{"rid":"r-1"}', '{"rid":"r-1"}', '{"rid":"r-1"}', '{"rid":"r-2"}'].join('\n') + '\n');
-    const toastsB = []; let resB = null;
+    const toastsB = []; let resB = null, tookB = -1;
     const saidB = await hush(async () => {
       resB = create({ rootDir: path.dirname(dB), homeDir: scratchHomeDir, serverNotice: (k, t) => toastsB.push([k, t]), usageHistory: { dedupShard: () => Promise.reject(new Error('the shard could not be rewritten: ' + TOKN)) } }).runLocalMigrations({ only: [LID] }).find((x) => x.id === LID);
-      for (let i = 0; i < 400 && !toastOf(toastsB, LID); i++) await new Promise((r) => setTimeout(r, 5));
+      tookB = await waitFact(() => !!toastOf(toastsB, LID));   // r4456 (主开发's word): its fact; its expiry named below, once the hush is over (was a silent 400 × 5 ms)
     });
+    if (tookB < 0) ok(false, 'harness: the stepped migration\'s late toast — the state never came within 10 s (the row after it judges nothing)');
     const tB = toastOf(toastsB, LID);
     ok(resB?.status === 'started' && tB.includes(LID) && /the shard could not be rewritten/.test(tB) && visible(TOKN, tB) === 0 && saidB.some((l) => l.includes(TOKN)),
       'a STEPPED migration that rejects after the boot (onLate): 0 chars of the token in its `migration-failed:` toast; the journal keeps the line whole', { status: resB?.status, toast: !!tB, visible: visible(TOKN, tB), journal: saidB.filter((l) => l.includes(TOKN)).length });
@@ -4056,7 +4059,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       try {
         const res = quietly(() => mod.create({ rootDir: w.r, homeDir: scratchHomeDir, serverNotice: (k) => notices.push(k) }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID));
         let led = {};
-        for (let i = 0; i < 100; i++) { await new Promise((z) => setTimeout(z, 10)); try { led = JSON.parse(fs.readFileSync(path.join(w.d, 'migrations.json'), 'utf8')); } catch { led = {}; } if ((led.applied && led.applied[ID]) || notices.includes('migration-failed:' + ID)) break; }
+        // r4456 (主开发's word): the run's END on its fact — its ledger row or its failure notice — with a named expiry (was a silent 100 × 10 ms)
+        await untilFact(() => { try { led = JSON.parse(fs.readFileSync(path.join(w.d, 'migrations.json'), 'utf8')); } catch { led = {}; } return !!((led.applied && led.applied[ID]) || notices.includes('migration-failed:' + ID)); }, `the stepped run's end (its ledger row or its failure notice) — ${name}`);
         return { res, notices, recorded: !!(led.applied && led.applied[ID]) };
       } finally { undo(); }
     };
@@ -4163,12 +4167,9 @@ console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
 /** B-a09e: a STEPPED migration's ledger row — polled on the scratch folder's own migrations.json (bounded: 10 s) until the runner
  *  records it at its write's landing → { applied, report } (both undefined when it never did) */
-async function waitLedger(dataDir, id) {
+async function waitLedger(dataDir, id) {   // r4456 (主开发's word): on its fact, its expiry a named harness row (was a silent 500 × 20 ms)
   const read = () => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'migrations.json'), 'utf-8')); } catch { return {}; } };
-  for (let i = 0; i < 500; i++) {
-    const l = read();
-    if (l.applied && l.applied[id]) return { applied: l.applied[id], report: l.reports && l.reports[id] };
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  return { applied: undefined, report: undefined };
+  let l = {};
+  await untilFact(() => { l = read(); return !!(l.applied && l.applied[id]); }, `the stepped migration's ledger row ${id} (recorded at its write's landing)`);
+  return l.applied && l.applied[id] ? { applied: l.applied[id], report: l.reports && l.reports[id] } : { applied: undefined, report: undefined };
 }
