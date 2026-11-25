@@ -60,6 +60,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { anchored } from './scratch.mjs';
+import { stopScenes } from './lib/stop-scenes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require('../src/job-model.js');
@@ -94,6 +95,15 @@ const scratch = () => {
   dirs.push(d);
   return d;
 };
+// r4341 (主开发: the 2.369.419 mirror, red-then-green on Node 24 — «a service on a rung without a scope keeps it too: its stop stops it» read
+// stopped false): THE FORCED-STOP FAMILY's FACT (scripts/lib/stop-scenes.mjs, line 975). A read after a stop or a run's end waits until each
+// process is GONE or QUIET (asleep, no signal pending, not exiting), its stop's own answer (its journal line, its exit record, an empty
+// scope) waited for FIRST. Never a fixed span, never a short bound read as «false». Every wait is generous (20 s) and its expiry is a NAMED
+// line in `expired`, judged by one HARNESS leg at the end
+const SS = stopScenes({ D: scratch(), mine: [], ROOT: REPO }), PI = require(path.join(REPO, 'src/proc-identity.js'));
+const settled = async (pids, what) => { for (const p of pids) { const id = Number(p) > 1 ? PI.identityOf(Number(p)) : null; if (id) await SS.settleOn(id, `${what} (pid ${p})`); } };
+const goneAll = async (pids, what) => { await settled(pids, what); return pids.every((p) => !alive(p)); };
+const fact = async (fn, what, ms = 20000) => { if (await until(fn, ms, 10)) return true; SS.expired.push(`${what}: not met in ${ms / 1000} s`); return false; };
 // a FAKE tool in a leg's <dataDir>/bin — first on the job's PATH (the engine puts it there), so the wrapper meets it
 const fake = (dir, name, body) => fs.writeFileSync(path.join(dir, 'bin', name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 const realOf = (cmd) => String(spawnSync('sh', ['-c', `command -v ${cmd}`], { encoding: 'utf8' }).stdout || '').trim();
@@ -205,7 +215,7 @@ leg('§3 REAL ① the cgroup rung — proven before the job runs, the bound enfo
   ok(/stopped: used more than 256 MB/.test(run.lastLine || ''), 'cgroup: the card\'s last line names it too (the wrapper\'s exit line)', run.lastLine);
   const snap = A.snapshot(j);
   ok(LF('memoryChip')(snap, (k) => k) === '256 MB · cgroup' && snap.memorySource === 'job', 'cgroup: the snapshot gives the card «256 MB · cgroup» (its own bound)', { chip: LF('memoryChip')(snap, (k) => k), src: snap.memorySource });
-  ok(await until(() => { const b = readJson(path.join(ctlOf(j2), 'bound.json')); return b && b.confirmed; }, 3000, 10), 'cgroup: a running job\'s rung is confirmed while it runs (bound.json)');
+  ok(await fact(() => { const b = readJson(path.join(ctlOf(j2), 'bound.json')); return b && b.confirmed; }, 'cgroup: bound.json confirmed while it runs'), 'cgroup: a running job\'s rung is confirmed while it runs (bound.json)');
   await A._sweep();
   ok(lastRun(j2).memoryBound && lastRun(j2).memoryBound.by === 'cgroup' && LF('memoryChip')(A.snapshot(j2), (k) => k) === '256 MB · cgroup', 'cgroup: the card says «256 MB · cgroup» WHILE it runs');
   A.stop(j2);
@@ -354,10 +364,10 @@ leg('§3 REAL ⑦ a stop ENDS THE JOB, never just its holder — systemd < 253 (
     const up = await running(E, j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
     const before = scopeProcs(b.unit);
     E.stop(j);
-    await until(() => !E._verifyAlive(E._readStamp(j)), 3000, 10);
+    await fact(() => !E._verifyAlive(E._readStamp(j)), '(deaf) its wrapper\'s end after the stop');
     const atEnd = scopeProcs(b.unit);
     await E._sweep(); // the engine's own tick: a requested stop's kill step (222f7f5d: gated on the wrapper's life — it is gone)
-    await until(() => !scopeProcs(b.unit).length, 1500, 25);
+    await fact(() => !scopeProcs(b.unit).length, '(deaf) its scope empty after the engine\'s step');
     return { E, j, up, b, before, atEnd, after: scopeProcs(b.unit), ex: readJson(path.join(ctlOf(j), 'exit.json')) || {}, run: lastRun(j) };
   };
   // ⓑ the engine's kill step never hangs on the wrapper's life: a wrapper killed ALONE (its job left in its scope — the real
@@ -367,11 +377,11 @@ leg('§3 REAL ⑦ a stop ENDS THE JOB, never just its holder — systemd < 253 (
     const k = E.jobs.get((E.create({ kind: 'task', name: 'orphan', cmd: { argv: DEAF }, memoryMb: 256, owner }, caller).job || {}).id);
     const up = await running(E, k), b = readJson(path.join(ctlOf(k), 'bound.json')) || {};
     try { process.kill(E._readStamp(k).pid, 'SIGKILL'); } catch { } // the wrapper alone — not its group
-    await until(() => !E._verifyAlive(E._readStamp(k)), 2000, 10);
+    await fact(() => !E._verifyAlive(E._readStamp(k)), '(orphan) its wrapper killed alone');
     const orphaned = scopeProcs(b.unit);
     E.stop(k);
     await E._sweep();
-    await until(() => !scopeProcs(b.unit).length && !!lastRun(k).forced, 2000, 25); // (round 6: the reap goes on beside the judgment)
+    await fact(() => !scopeProcs(b.unit).length && !!lastRun(k).forced, '(orphan) its scope empty and the force said'); // (round 6: the reap goes on beside the judgment)
     return { E, k, up, b, orphaned, left: scopeProcs(b.unit) };
   };
   const [A, B] = await Promise.all([deaf(), orphan()]);
@@ -520,7 +530,7 @@ leg('§5 REAL ⓐ the boot\'s judge: the instance\'s OOM count ROSE and the job 
   const id = (D1.create({ kind: 'service', name: 'pod-killer', cmd: { argv: [NODE, '-e', HOLD] }, owner }, caller).job || {}).id;
   const cycle = async (E, n) => {
     const j = E.jobs.get(id);
-    const seen = await until(() => { const p = readJson(path.join(ctlOf(j), 'pressure.json')); return p && (p.jobAnonMb >= 90 || p.jobMb >= 100); }, 6000, 10);
+    const seen = await fact(() => { const p = readJson(path.join(ctlOf(j), 'pressure.json')); return p && (p.jobAnonMb >= 90 || p.jobMb >= 100); }, `pressure ${n}: pressure.json sampled`);
     ok(seen, `pressure ${n}: the wrapper samples the instance's anon and the job's share (pressure.json)`);
     bumpGroupKill(cg); // the container's own OOM kill — memory.oom.group: every process of it at once
     await killGroup(E, j);
@@ -550,7 +560,7 @@ leg('§5 REAL ⓑ a rolling update of a pod full of cache — no OOM kill ⇒ en
   const R1 = engine(deps);
   const id = (R1.create({ kind: 'service', name: 'healthy-svc', cmd: { argv: [NODE, '-e', HOLD] }, owner }, caller).job || {}).id;
   let j = R1.jobs.get(id);
-  ok(await until(() => { const p = readJson(path.join(ctlOf(j), 'pressure.json')); return p && (p.jobAnonMb >= 90 || p.jobMb >= 100); }, 6000, 10), 'rolling: the wrapper samples the instance (95 % of its limit in use)');
+  ok(await fact(() => { const p = readJson(path.join(ctlOf(j), 'pressure.json')); return p && (p.jobAnonMb >= 90 || p.jobMb >= 100); }, 'rolling: pressure.json sampled'), 'rolling: the wrapper samples the instance (95 % of its limit in use)');
   await killGroup(R1, j); // the update's restart: no OOM kill in the instance's count
   dieEngine(R1);
   const R2 = engine(deps);
@@ -601,7 +611,7 @@ leg('§3 REAL ⑪ a stop\'s GRACE is the stop\'s own — a tick never cuts it sh
   const g = E.jobs.get(E.create({ kind: 'task', name: 'graceful', cmd: { argv: [NODE, '-e', "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 150)); console.log('ready'); setInterval(() => {}, 1e5)"] }, memoryMb: 1024, owner }, caller).job.id);
   const d = E.jobs.get(E.create({ kind: 'task', name: 'deaf-pod', cmd: { argv: ['sh', '-c', 'trap "" TERM; echo ready; exec sleep 9'] }, memoryMb: 1024, owner }, caller).job.id);
   const ready = (j) => { try { return fs.readFileSync(lastRun(j).log, 'utf8').includes('ready'); } catch { return false; } };
-  await until(() => ready(g) && ready(d), 4000, 10);
+  await fact(() => ready(g) && ready(d), 'the job\'s «ready» before the leg acts (wait 1 of 10)');
   const stamps = [E._readStamp(g), E._readStamp(d)], t0 = Date.now(), goneAt = [0, 0], esc = [];
   const e0 = E._escalate.bind(E);
   E._escalate = (...a) => { esc.push(Date.now() - t0); return e0(...a); }; // every kill step the engine takes, and when
@@ -629,7 +639,7 @@ leg('§3 REAL ⑫ what a job LEAVES running (the ruling of 2026-10-27): a task\'
     const j = E.jobs.get(E.create({ kind: 'task', name: 'nohup-task', cmd: { argv: NOHUP }, memoryMb: 256, owner }, caller).job.id);
     await settle(E, j);
     const ex = readJson(exitOf(j)) || {}, pids = leftPids(j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {}, run = lastRun(j), snap = E.snapshot(j);
-    const out = { E, j, ex, pids, run, snap, b, gone: await gone(pids, 500), procs: procsOfCg(b.cgroup) };
+    const out = { E, j, ex, pids, run, snap, b, gone: await goneAll(pids, '(a) the task\'s sleeper at its run\'s end'), procs: procsOfCg(b.cgroup) };
     for (const p of pids) { try { process.kill(p, 'SIGKILL'); } catch { } }
     killScopeOf(b.unit);
     return ['a', out];
@@ -640,10 +650,12 @@ leg('§3 REAL ⑫ what a job LEAVES running (the ruling of 2026-10-27): a task\'
     const j = E.jobs.get(E.create({ kind: 'service', name: 'nohup-svc', cmd: { argv: NOHUP }, restart: 'never', memoryMb: 256, owner }, caller).job.id);
     await settle(E, j);
     const ex = readJson(exitOf(j)) || {}, pid = leftPids(j)[0], b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
-    await sleep(200); // past the drain bound (0.15 s from its end): a task's would be gone
+    await settled([pid], '(b) the service\'s sleeper at its run\'s end'); // r4341: the drain has answered (its exit record) — read on the fact: a task's would be gone, a service's is quiet
     const kept = alive(pid);
     E.stop(j);
-    const stopped = await gone([pid], 1500) && await until(() => journal(E, j, /stopped what its last run left running \(1 process\)/), 500, 10);
+    const answered = await fact(() => journal(E, j, /stopped what its last run left running \(1 process\)/), '(b) its stop\'s journal line'); // r4341: the stop's answer first
+    await settled([pid], '(b) the kept sleeper after its stop');
+    const stopped = answered && !alive(pid);
     try { process.kill(pid, 'SIGKILL'); } catch { }
     killScopeOf(b.unit);
     return ['b', { E, j, ex, kept, stopped, pid }];
@@ -676,7 +688,7 @@ leg('§3 REAL ⑫ what a job LEAVES running (the ruling of 2026-10-27): a task\'
     await settle(E, j);
     const pg = E._readStamp(j).pid;
     const ex = readJson(exitOf(j)) || {}, pids = leftPids(j);
-    const out = { E, j, ex, pids, gone: await gone(pids, 500), run: lastRun(j) };
+    const out = { E, j, ex, pids, gone: await goneAll(pids, '(c) the pod task\'s leftovers at its run\'s end'), run: lastRun(j) };
     try { process.kill(-pg, 'SIGKILL'); } catch { } // a RED run's leftovers never outlive the suite
     return ['c', out];
   })());
@@ -686,12 +698,35 @@ leg('§3 REAL ⑫ what a job LEAVES running (the ruling of 2026-10-27): a task\'
     const j = E.jobs.get(E.create({ kind: 'service', name: 'nohup-svc-pod', cmd: { argv: NOHUP }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
     await settle(E, j); // (it ends at once: no `running` to wait for)
     const pg = E._readStamp(j).pid, ex = readJson(exitOf(j)) || {}, pid = leftPids(j)[0];
-    await sleep(250);
+    await settled([pid], '(d) the pod service\'s sleeper at its run\'s end'); // r4341: the drain has answered — read on the fact, never after 250 ms
     const kept = alive(pid);
     E.stop(j);
-    const stopped = await gone([pid], 1500) && await until(() => journal(E, j, /stopped what its last run left running/), 500, 10);
+    const answered = await fact(() => journal(E, j, /stopped what its last run left running/), '(d) its stop\'s journal line'); // r4341 (THE MIRROR's RED): the stop's answer first
+    await settled([pid], '(d) the kept sleeper after its stop');
+    const stopped = answered && !alive(pid);
     try { process.kill(-pg, 'SIGKILL'); } catch { }
     return ['d', { E, j, ex, pid, kept, stopped }];
+  })());
+  // r4341 THE RACE, PLACED (no clock): scene d with the clear's walk HELD by the leg (the engine's markWalk seam). The stop's SIGTERM lands at
+  // once (the clear signals what it recorded before it walks); its journal line only when the walk answers. The RELEASE's read (gone in
+  // 1.5 s, then the line in 0.5 s) is taken while the walk is held: «stopped» false — the mirror's red, at will. Released by the leg, the
+  // NEW read (the stop's answer first, then the process on its fact) reads it stopped
+  if (realOf('prlimit')) tasks.push((async () => {
+    let release = null; const held = new Promise((r) => { release = r; });
+    const ANSWER = { started: true, code: 0, signal: null, stdout: JSON.stringify({ rows: [], scan: { scanned: 1, total: 1, unreadable: 0, others: 0, ending: 0, cut: false } }) + '\n', stderr: '' };
+    const E = engineIn(scratch())({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 150 }, markWalk: { runImpl: () => held.then(() => ANSWER) } });
+    const j = E.jobs.get(E.create({ kind: 'service', name: 'nohup-svc-pod-held', cmd: { argv: NOHUP }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
+    await settle(E, j);
+    const pg = E._readStamp(j).pid, pid = leftPids(j)[0];
+    await settled([pid], '(d, held) the pod service\'s sleeper at its run\'s end');
+    E.stop(j);
+    const oldRead = await gone([pid], 1500) && await until(() => journal(E, j, /stopped what its last run left running/), 500, 10); // the release's wait, taken while the walk is held
+    release();
+    const answered = await fact(() => journal(E, j, /stopped what its last run left running/), '(d, held) its stop\'s journal line after the release');
+    await settled([pid], '(d, held) the kept sleeper after its stop');
+    const newRead = answered && !alive(pid);
+    try { process.kill(-pg, 'SIGKILL'); } catch { }
+    return ['dh', { E, j, pid, oldRead, newRead }];
   })());
   const R = Object.fromEntries(await Promise.all(tasks));
   const TASK_WORDS = 'the job left 1 process running — it was stopped; to keep a daemon, run it as a service job';
@@ -720,6 +755,7 @@ leg('§3 REAL ⑫ what a job LEAVES running (the ruling of 2026-10-27): a task\'
     const { E, j, ex } = R.d;
     ok(ex.left && ex.left.kept === true && Array.isArray(ex.left.pids) && ex.left.pids.some((p) => p[0] === R.d.pid) && R.d.kept && R.d.stopped && journal(E, j, /stopped what its last run left running \(1 process\)/), 'a service on a rung without a scope keeps it too — named by identity (pid, start); its stop stops it (b8d2a3a0: kept for ever, its stop reached nothing)', { left: ex.left, kept: R.d.kept, stopped: R.d.stopped });
   }
+  if (R.dh) ok(R.dh.oldRead === false && R.dh.newRead === true, 'r4341 THE RACE, PLACED (the clear\'s walk held by the leg, no clock): the release\'s read (gone in 1.5 s, then the journal line in 0.5 s) reads the stop as NOT stopped while its walk is held — the mirror\'s red at will; the new read (the stop\'s answer first, then the process on its fact) reads it stopped once the walk answers', { oldRead: R.dh.oldRead, newRead: R.dh.newRead });
   if (!R.a && !R.c) { skip++; ok.say('  - SKIP the leftovers legs: neither a user systemd nor prlimit here'); }
   for (const r of Object.values(R)) stopEngine(r.E);
 });
@@ -795,13 +831,13 @@ leg('§3 REAL ㉑ A KILL TIMER BELONGS TO ITS RUN — a service stopped, ended o
   if (!realOf('prlimit')) { skip++; ok.say('  - SKIP the stale-timer leg: no prlimit here'); return; }
   const E = engineIn(scratch())({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 300 } }); // the grace (10 s) is the seam: 0.3 s
   const j = E.jobs.get(E.create({ kind: 'service', name: 'web', cmd: { argv: ['sh', '-c', 'echo ready; exec sleep 30'] }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
-  await until(() => ready(j), 4000, 10);
+  await fact(() => ready(j), 'the job\'s «ready» before the leg acts (wait 2 of 10)');
   const t0 = Date.now();
   E.stop(j);
   await ended(E, j);
   await E._sweep(); // judged: down
   const st = E.start(j), second = lastRun(j);
-  await until(() => ready(j), 3000, 10);
+  await fact(() => ready(j), 'the job\'s «ready» before the leg acts (wait 3 of 10)');
   const stamp2 = E._readStamp(j), startedIn = Date.now() - t0;
   await sleep(Math.max(0, 1600 - (Date.now() - t0))); // past the first stop's grace AND the engine's backstop a second later
   await E._sweep();
@@ -817,7 +853,7 @@ leg('§3 REAL ㉒ A STOP DRAINS THE GROUP THE WAY AN END DOES — a pod\'s rung:
   const one = async (kind) => {
     const E = engineIn(scratch())({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 300 } });
     const j = E.jobs.get(E.create({ kind, name: `deaf-left-${kind}`, cmd: { argv: DEAF }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
-    await until(() => ready(j), 4000, 10);
+    await fact(() => ready(j), 'the job\'s «ready» before the leg acts (wait 4 of 10)');
     const pid = leftPids(j)[0], pg = E._readStamp(j).pid;
     E.stop(j);
     await ended(E, j);
@@ -975,7 +1011,7 @@ leg('§3 REAL ㉘ A KEPT SCOPE\'S STOP UNDER A READ PAST ITS BOUND — SIGTERM b
   const real = E._scopeProcs.bind(E);
   E._scopeProcs = (s) => (s.dir === oldDir ? Promise.resolve(null) : real(s)); // this scope's read: past its bound, every time
   E.stop(j);
-  const words = await until(() => journal(E, j, /stopped what its last run left running/), 2500, 10);
+  const words = await fact(() => journal(E, j, /stopped what its last run left running/), '(a scope read past its bound) its stop\'s journal line');
   const what = (E.events.filter((e) => e.jobId === j.id && /stopped what its last run left running/.test(e.what || ''))[0] || {}).what || '';
   E._scopeProcs = real;
   ok(ex.left && ex.left.kept === true && Array.isArray(ex.left.pids) && ex.left.pids.some((p) => p[0] === pid) && words && fs.existsSync(flag) && /SIGTERM \(sent to what it recorded: its scope did not answer a read\)/.test(what),
@@ -994,14 +1030,14 @@ leg('§3 REAL ㉙ EVERY START OF A SERVICE WAITS FOR WHAT IS PENDING — the own
   const real = E._scopeProcs.bind(E);
   E._scopeProcs = (s) => (s.dir === oldDir ? Promise.resolve(null) : real(s)); // the old scope's read: past its bound
   const st = E._readStamp(j); try { process.kill(st.pid, 'SIGKILL'); } catch { } // the wrapper alone dies; its job stays in its scope
-  await until(() => !E._verifyAlive(st), 3000, 10);
+  await fact(() => !E._verifyAlive(st), '(the old scope\'s read past its bound) the wrapper killed alone');
   await E._sweep();
   let atSpawn = null;
   const sp = E._spawn.bind(E);
   E._spawn = (job, trig) => { if (atSpawn === null) atSpawn = procsOfCg(b1.cgroup); return sp(job, trig); };
   const r = E.start(j);
   const sync = atSpawn !== null;
-  await until(() => atSpawn !== null, 3000, 10);
+  await fact(() => atSpawn !== null, '(the old scope\'s read past its bound) the new spawn');
   E._spawn = sp; E._scopeProcs = real;
   const b2 = readJson(path.join(ctlOf(j), 'bound.json')) || {};
   ok(r.ok && !sync && Array.isArray(atSpawn) && !atSpawn.length, `the start waited for the old scope (its read never answered — killed all the same, its own run's): [${(atSpawn || []).join(' ')}] at the new spawn (ef0012b5: spawned at once, beside it — both scopes held a sleep)`, { answer: r, sync, atSpawn });
@@ -1017,7 +1053,7 @@ leg('§3 REAL ㉟ A STOP\'S INTENT IS WRITTEN BEFORE ITS SIGNAL — a pod\'s ser
   const DEAF = ['sh', '-c', '(trap "" TERM; exec sleep 30) >/dev/null 2>&1 & echo "left $!"; echo ready; exec sleep 30'];
   const E = engineIn(scratch())({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 300 } });
   const j = E.jobs.get(E.create({ kind: 'service', name: 'intent', cmd: { argv: DEAF }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
-  await until(() => ready(j), 4000, 10);
+  await fact(() => ready(j), 'the job\'s «ready» before the leg acts (wait 5 of 10)');
   const pid = leftPids(j)[0], st = E._readStamp(j);
   const main = Number(fs.readFileSync(`/proc/${st.pid}/task/${st.pid}/children`, 'utf8').trim().split(/\s+/)[0]);
   // THE RACE, made certain: the engine's SIGTERM reaches the job first, the wrapper's group 0.1 s later — the wrapper handles its
@@ -1043,7 +1079,7 @@ leg('§3 REAL ㊱ A STOP HAS ONE CLOCK — a pod\'s service whose main is deaf t
     const ESC = `setsid sh -c 'echo $$ > ${pidF}; trap "date +%s%N >> ${termF}" TERM; while :; do sleep 30 & wait $!; done' >/dev/null 2>&1 </dev/null &`;
     const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: grace } }); // ONE grace: the wrapper's and the engine's
     const j = E.jobs.get(E.create({ kind: 'service', name: `deaf-main-${grace}`, cmd: { argv: ['sh', '-c', `${ESC} trap "" TERM; echo ready; exec sleep 60`] }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
-    await until(() => ready(j) && fs.existsSync(pidF), 4000, 10);
+    await fact(() => ready(j) && fs.existsSync(pidF), 'the job\'s «ready» before the leg acts (wait 6 of 10)');
     const esc = Number(fs.readFileSync(pidF, 'utf8')), st = E._readStamp(j), step = E._killStepMs();
     // round 11: THE ORDER, BY EVENTS — the engine's kill step (its SIGKILL to the wrapper's group) reaching the wrapper ALIVE
     // before its exit record exists (e7147b71's red: killed mid-drain) — never the leg's poll of when it SAW the record (under
@@ -1102,7 +1138,7 @@ leg('§3 REAL ㊾ A STOP HEARD IS A STOP HEARD — what got less than the full g
       : ['sh', '-c', `trap 'while [ ! -e ${go} ]; do sleep 0.02; done; ${NODE} ${H} & while [ ! -s ${hPid} ]; do sleep 0.02; done; exit 0' TERM; echo ready; sleep 60 & wait $!`];
     const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: grace } }); // ONE grace: the wrapper's and the engine's
     const j = E.jobs.get(E.create({ kind, name: `heard-${how}`, cmd: { argv }, memoryMb: 1024, ...(kind === 'service' ? { restart: 'never' } : {}), owner }, caller).job.id);
-    await until(() => ready(j) && (how !== 'deaf' || pidIn(hPid) > 0), 4000, 10);
+    await fact(() => ready(j) && (how !== 'deaf' || pidIn(hPid) > 0), 'the job\'s «ready» before the leg acts (wait 7 of 10)');
     const st = E._readStamp(j), t0 = Date.now();
     E.stop(j);
     if (how !== 'deaf') { await until(() => /\[job-wrapper\] stop: /.test(fs.readFileSync(lastRun(j).log, 'utf8')), 30000, 5); fs.writeFileSync(go, ''); }
@@ -1191,12 +1227,12 @@ leg('§3 REAL ㊸ A SIGNAL GOES TO A PROVEN IDENTITY — a pod\'s task whose MAI
   const dir = scratch(), termF = path.join(dir, 'main.term');
   const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 2000 } });
   const j = E.jobs.get(E.create({ kind: 'task', name: 'setsid-main', cmd: { argv: ['setsid', 'sh', '-c', `trap 'date +%s%N > ${termF}; exit 0' TERM; echo ready; while :; do sleep 0.1; done`] }, memoryMb: 1024, owner }, caller).job.id);
-  await until(() => ready(j), 4000, 10);
+  await fact(() => ready(j), 'the job\'s «ready» before the leg acts (wait 8 of 10)');
   const st = E._readStamp(j), main = Number((() => { try { return fs.readFileSync(`/proc/${st.pid}/task/${st.pid}/children`, 'utf8').trim().split(/\s+/)[0]; } catch { return 0; } })());
   const mainPgrp = (() => { try { const t = fs.readFileSync(`/proc/${main}/stat`, 'utf8'); return Number(t.slice(t.lastIndexOf(')') + 2).split(' ')[2]); } catch { return 0; } })();
   const t0 = Date.now();
   E.stop(j);
-  await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 5000, 10);
+  await fact(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 'the job\'s end after its stop (termAt)');
   const termAt = (() => { try { return Math.round(Number(fs.readFileSync(termF, 'utf8').trim()) / 1e6); } catch { return 0; } })();
   const ex = readJson(exitOf(j)) || {}, said = (fs.readFileSync(lastRun(j).log, 'utf8').match(/\[job-wrapper\] stop: [^\n]*/) || [''])[0];
   if (alive(main)) { try { process.kill(main, 'SIGKILL'); } catch { } }
@@ -1218,10 +1254,10 @@ leg('§3 REAL ㊹ ONE SIGNAL PER PID PER STOP STEP — a main that cleans up 0.3
     if (rung === 'cgroup') fake(dir, 'systemctl', `printf '%s\\n' "$*" >> ${calls}\nexec ${CTL} "$@"`);
     const E = engineIn(dir)({ memoryRungs: [rung], memorySample: { stopMs: 2000 } });
     const j = E.jobs.get(E.create({ kind: 'task', name: `one-${how}`, cmd: { argv: [NODE, '-e', SIGMAIN(f)] }, memoryMb: 1024, owner }, caller).job.id);
-    await until(() => ready(j), 6000, 10);
+    await fact(() => ready(j), 'the job\'s «ready» before the leg acts (wait 9 of 10)');
     const st = E._readStamp(j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
     if (how === 'engine') E.stop(j); else process.kill(st.pid, how); // the engine's stop — or the wrapper ALONE
-    await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 5000, 10);
+    await fact(() => fs.existsSync(exitOf(j)) && !alive(st.pid), `(${rung}, ${how}) the job's end after its stop`);
     const heard = (() => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').map((l) => l.split(' ')[1]); } catch { return []; } })();
     const ex = readJson(exitOf(j)) || {};
     const scopeKills = (() => { try { return fs.readFileSync(calls, 'utf8').split('\n').filter((l) => /^--user kill --signal=SIG(TERM|INT|HUP) /.test(l)).length; } catch { return 0; } })();
@@ -1247,12 +1283,12 @@ leg('§3 REAL ㊹c B-c134 A STOP ENDS THE WHOLE TREE, ONE SIGNAL A PROCESS — a
     fs.writeFileSync(kid, SIGKID(f, pf));
     const E = engineIn(dir)({ memoryRungs: [rung], memorySample: { stopMs: 2000 } });
     const j = E.jobs.get(E.create({ kind: 'task', name: `tree-${rung}`, cmd: { argv: ['sh', '-c', `setsid env -i ${NODE} ${kid} & wait`] }, memoryMb: 1024, owner }, caller).job.id);
-    await until(() => ready(j) && fs.existsSync(pf), 6000, 10);
+    await fact(() => ready(j) && fs.existsSync(pf), 'the job\'s «ready» before the leg acts (wait 10 of 10)');
     const st = E._readStamp(j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
     const kp = Number(fs.readFileSync(pf, 'utf8')) || 0;
     E.stop(j);
-    await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 5000, 10);
-    await until(() => !alive(kp), 3000, 10);
+    await fact(() => fs.existsSync(exitOf(j)) && !alive(st.pid), `(㊹c ${rung}) the job's end after its stop`);
+    await fact(() => !alive(kp), `(㊹c ${rung}) the setsid child's own end`); // r4341: it cleans up 0.3 s after its signal (quiet, but ending by itself) — its END is the fact
     const heard = (() => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').map((l) => l.split(' ')[1]); } catch { return []; } })();
     const left = alive(kp);
     try { if (left) process.kill(kp, 'SIGKILL'); } catch { }
@@ -1365,6 +1401,7 @@ try {
     try { await g.body(rec); } catch (e) { g.rows.push(['row', false, `${g.title.slice(0, 14)}: the leg threw`, String(e && e.stack || e).slice(0, 400)]); }
   }));
   for (const g of legs) { console.log(g.title); for (const [k, a, b, c] of g.rows) if (k === 'say') console.log(a); else ok(a, b, c); }
+  ok(!SS.expired.length, 'r4341 HARNESS: every wait after a stop or a run\'s end met its fact inside its bound — a process read gone or quiet, the stop\'s answer first; an expiry is NAMED here, never read silently', SS.expired);
 } finally {
   // nothing this suite started outlives it — a live job group (a RED run on a base that replays blind) is killed by its stamp
   for (const E of engines) for (const j of E.jobs.values()) { try { const st = E._readStamp(j); if (E._verifyAlive(st)) process.kill(-st.pid, 'SIGKILL'); } catch { } }
