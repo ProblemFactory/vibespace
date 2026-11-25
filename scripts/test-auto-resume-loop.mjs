@@ -203,6 +203,16 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
     if (session._arFiring) ok('tickFire: the pre-fire gate settled within its 600 looks (it never did — the race B-b4af is about)', false);
     return fired.length > before;
   };
+  // flake census round 2 (主开发 r4456): an IMMEDIATE continue (fireNow, reached from a wall the pool switched past) is waited for
+  // by its OWN settle, as tickFire's is (B-b4af): at least ONE turn, then until the in-flight flag is down AND the leg's continues
+  // are there, a bounded COUNT of looks, never a fixed 40 ms (the real gate yields twice through gateTurn and the probe: on a
+  // loaded loop a 40 ms timer ran first and read «no continue»). Its expiry is a NAMED red line, never a silent read
+  w.fireSettled = async (want, label = 'the immediate continue') => {
+    let k = 0;
+    do { await new Promise((r) => setTimeout(r, 5)); } while ((session._arFiring || fired.length < want) && ++k < 600);
+    if (session._arFiring || fired.length < want) { ok(`${label}: the pre-fire gate settled with ${want} continue(s) within its 600 looks (it did not: ${fired.length} continue(s), in flight ${!!session._arFiring})`, false); return false; }
+    return true;
+  };
   return w;
 }
 
@@ -350,9 +360,30 @@ if (!probe) {
   const w = mkWorld();
   w.eng.noteWallSignal(w.session, { resetsAtMs: w.R5 * 1000, bucket: 'fiveHour', key: w.linkNow(), slot: true });
   w.eng.noteTurnEnd(w.session);
-  await new Promise((r) => setTimeout(r, 40));
+  await w.fireSettled(1, 'CONTROL (c)');   // on the gate's own settle (flake census round 2), never a fixed 40 ms
   ok('CONTROL (injected signal, no early pool eval): the switch lands with the session already armed and fireNow DOES continue it immediately', w.fired.length === 1 && w.linkNow() === w.SPARE, JSON.stringify({ fires: w.fired.length, link: w.nameOf(w.linkNow()) }));
   ok('…which is why (a)/(b) cannot be written this way: the same world, the same wall, a different producer, a different outcome', true);
+}
+{
+  // (c) PLACED (flake census round 2, 主开发 r4456): control (c)'s immediate continue with its gate HELD past the old 40 ms (the
+  // world's real beforeAutoResumeFire waits for the leg's word, as B-b4af's plant holds it). The OLD read — 40 ms, then the
+  // continues — reads NONE while the gate still decides: the red-then-green the census found. The NEW read waits on the gate's
+  // own settle through the same hold and sees the one continue. (The hold ends on the leg's word, after a stall PLACED past the
+  // old 40 ms window — a placement, never a verdict bound.)
+  const held = (w) => { let open = null; const gate = new Promise((r) => { open = r; }); let entered = 0; const real = w.eng.beforeAutoResumeFire; w.eng.beforeAutoResumeFire = async (...a) => { entered++; await gate; return real.apply(w.eng, a); }; return { open: () => open(), entered: () => entered }; };
+  const wall = (w) => { w.eng.noteWallSignal(w.session, { resetsAtMs: w.R5 * 1000, bucket: 'fiveHour', key: w.linkNow(), slot: true }); w.eng.noteTurnEnd(w.session); };
+  const w0 = mkWorld(), h0 = held(w0);
+  wall(w0);
+  await new Promise((r) => setTimeout(r, 40));
+  const oldRead = w0.fired.length, entered0 = h0.entered();
+  h0.open(); await w0.fireSettled(1, 'CONTROL (c) PLACED, after the old read');
+  ok('CONTROL (c) PLACED: with the gate held past 40 ms the OLD read (40 ms, then the continues) reads NO continue although the gate was entered — and the late gate then continues it: the old shape\'s red, placed', oldRead === 0 && entered0 >= 1 && w0.fired.length === 1, JSON.stringify({ oldRead, entered: entered0, fires: w0.fired.length }));
+  const w1 = mkWorld(), h1 = held(w1);
+  wall(w1);
+  const settled = w1.fireSettled(1, 'CONTROL (c) PLACED, the new read');
+  await new Promise((r) => setTimeout(r, 40)); h1.open();
+  const got = await settled;
+  ok('CONTROL (c) PLACED: the NEW read waits on the gate\'s own settle through the same hold and sees the ONE continue, onto the spare', got === true && h1.entered() >= 1 && w1.fired.length === 1 && w1.linkNow() === w1.SPARE, JSON.stringify({ got, entered: h1.entered(), fires: w1.fired.length, link: w1.nameOf(w1.linkNow()) }));
 }
 {
   // (d) THE IMMEDIATE PATH'S REAL JOB (c1206711): the pool has nowhere to go
