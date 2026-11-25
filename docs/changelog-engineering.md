@@ -361,6 +361,7 @@ This file is the engineers' record of every release: the lanes, the verification
   - heavy test-browser-hidden-paint g: 30 product flips. An unpinned session with a second tab after A's reads its own page every time, no command runs over 2 s, every birth is chrome://version/, and neither session's own tab counter moves.
   - A DRIVER UPDATE THAT CHANGES ITS FILTER turns these red (the note at src/browser-verbs.js AGENT_BROWSER_CLI).
 - NOT IN IT: row B-bcf8 (the relaunch's 15-30 s first command, with Chrome's own restore) is not placed (0 of 15 relaunches) and stays open.
+- ROW B-346d, test-browser-resume-ui ⑩ (3) (主开发 r4191; placed by lane card-door-in-chat's deciding read, page-r4169-deciding.md): its one red try was the LEG's race — a push of the browsers' digest from the hub itself (the keeper's 5 s tick) fell between the leg's plant and its read at 390. Tests only: the suite's gate holds the hub's digest frames at app.ws.heard while each ⑩ read is planted, made and pictured, and delivers them after; the red made on purpose once (en, 390): the hub's own digest pushed down the socket's road between plant and read — held, the read is the plant's; without the gate, the mark gone (RED). Its gate: the suite alone on the box, three in a row.
 
 ## 2.369.418 — 2026-11-24
 
