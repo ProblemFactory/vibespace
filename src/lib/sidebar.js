@@ -153,6 +153,10 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // (chat-view _onActiveSessions); carried so the MERGED row holds it too (the census: published ⇒ carried or read by name) —
   // no sidebar surface draws it, so it re-renders nothing
   resumedBy: { digest: null },
+  // B-d578 (line 955, the conversation's own press): {on | can} — the conversation's fallback fact. Its status strip reads it from the
+  // RAW list (chat-view _onActiveSessions: each broadcast, and the sidebar's last copy when a window opens); carried so the MERGED
+  // row holds it too (the census: published ⇒ carried or read by name) — no sidebar surface draws it, so it re-renders nothing
+  poolFallback: { digest: null },
   // lane bypass-no-prompts: how many of the CLI's own asks the bypass door answered this run (server.js `autoAllowed`) —
   // CARRIED-ONLY: Session Properties reads the merged row when it opens; no card draws it
   autoAllowed: { digest: null },
