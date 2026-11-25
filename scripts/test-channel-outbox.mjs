@@ -1132,6 +1132,7 @@ function mkReal(opts = {}) {
     async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (ladder.delay) await sleep(ladder.delay); if (o.noWake === true) return { ok: false, reason: 'no free lane', refused: 'no-wake' }; return { ok: true, lane: 'message' }; },
     stashFor: real.stashFor, drainStash: real.drainStash, stashPeek: real.stashPeek, onStash: real.onStash, stashCount: real.stashCount, flush: real.flush,
     onStashLift: real.onStashLift,   // r3919: the lift's listeners, as server.js wires the real ladder (the reconcile at the lift clears a receipt's «not on disk»)
+    onStashLanded: real.onStashLanded, stashOnDisk: real.stashOnDisk,   // r3988 (A): the stash's own word that an entry is in the file, and who hears a write land
     ...(opts.noTornAt ? {} : { stashTornAt: real.stashTornAt }),   // r3003 (a): the stash's torn instant, as server.js wires the real ladder (noTornAt: the RED — a reconcile that cannot see it)
   };
   const reg = CH.createChannelRegistry();
@@ -1297,9 +1298,9 @@ async function takenLeg(ladderMod, name) {
   const { anchored } = await import('./scratch.mjs');
   const MH = mutantCopies('chan-outbox-r3919', REPO);
   const polSrc = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf8');
-  const PR = MH.load('src/channel-policy.js', anchored(polSrc, "      return f.notOnDisk ? t('{line} — not on disk:", "      return false ? t('{line} — not on disk:", 'card-without-the-mark'), 'card-without-the-mark');
+  const PR = MH.load('src/channel-policy.js', anchored(polSrc, "  return line && f && f.notOnDisk ? t('{line} — not on disk:", "  return false ? t('{line} — not on disk:", 'card-without-the-mark'), 'card-without-the-mark');
   const outPath = require.resolve(path.join(REPO, 'src/server/channels-outbound.js'));
-  const MO = MH.load('src/server/channels-outbound.js', anchored(fs.readFileSync(outPath, 'utf8'), '      if (!still && d.notOnDisk) continue;', '      if (false) continue;', 'reconcile-blind-to-the-mark'), 'reconcile-blind-to-the-mark');
+  const MO = MH.load('src/server/channels-outbound.js', anchored(fs.readFileSync(outPath, 'utf8'), '      if (!still && d.notOnDisk) { lostIds.push(q.id); continue; }', '      if (false) { lostIds.push(q.id); continue; }', 'reconcile-blind-to-the-mark'), 'reconcile-blind-to-the-mark');
   const savedOut = require.cache[outPath];
   let ENG_BLIND = null;
   require.cache[outPath] = { id: outPath, filename: outPath, loaded: true, exports: MO };
@@ -1318,13 +1319,66 @@ async function takenLeg(ladderMod, name) {
     const q = W2.eng.store.outbox.snapshot().proposals[p.proposal.id];
     const cardAfter = cardOf(P, q);
     W2.eng.stop();
-    return { heldNow, stashed: !!d0.stashed, notOnDisk: !!d0.notOnDisk, refused: d0.refused || null, choice: d0.choice || null, card, cardRed, cardAfter, drained: q.receiptDrainedHow || null, how: q.receiptEvictedHow || null };
+    return { heldNow, stashed: !!d0.stashed, notOnDisk: !!d0.notOnDisk, refused: d0.refused || null, choice: d0.choice || null, card, cardRed, cardAfter, kindAfter: (P.receiptFateOf(q) || {}).kind, drained: q.receiptDrainedHow || null, how: q.receiptEvictedHow || null, lost: q.receiptLostHow || null };
   };
   const g = await heldReceiptRun('held-receipt'), r = await heldReceiptRun('held-receipt-red', ENG_BLIND);
-  ok(g.heldNow && g.stashed && g.notOnDisk && g.refused === 'no-wake' && g.choice === 'next-turn' && g.drained === null && g.how === null, `r3720 / r3919: a receipt taken while the list is held (the default next-turn choice) carries its mark in its OWN field — \`refused\` keeps the ladder's own code (${g.refused}); lost by the stop, the next reconcile reads it as UNKNOWN — never handed, never not sent`, JSON.stringify(g));
-  ok(/^Waiting for .+'s next message — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again \(the receipt stays on this card\)$/.test(g.card) && g.card === g.cardAfter, `r3919 must 1: THE CARD says it, beside the wait — «${g.card}» (and after the restart, unknown, still)`, g);
+  ok(g.heldNow && g.stashed && g.notOnDisk && g.refused === 'no-wake' && g.choice === 'next-turn' && g.drained === null && g.how === null && g.lost === 'not-on-disk' && g.kindAfter === 'lost', `r3720 / r3919 / r3988 (C): a receipt taken while the list is held (the default next-turn choice) carries its mark in its OWN field — \`refused\` keeps the ladder's own code (${g.refused}); lost by the stop, the next reconcile (the list READS) ends it LOST by name — never handed, never waiting for good`, JSON.stringify(g));
+  ok(/^Waiting for .+'s next message — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again \(the receipt stays on this card\)$/.test(g.card) && /^Not delivered — it was not on disk when VibeSpace stopped .+ did not get it; the receipt is kept here — tell .+ in its chat$/.test(g.cardAfter), `r3919 must 1 / r3988 (C): THE CARD says it beside the wait — «${g.card}»; after the restart that lost it — «${g.cardAfter}»`, g);
   ok(/^Waiting for .+'s next message$/.test(g.cardRed), `RED: the fate text without its branch — the card says a plain «${g.cardRed}» (the person never told)`, g.cardRed);
-  ok(r.drained === 'reconciled', `RED: the reconcile without its line for the mark reads the lost receipt as handed (${r.drained})`, r);
+  ok(r.drained === 'reconciled' && r.lost === null, `RED: the reconcile without its line for the mark reads the lost receipt as handed (${r.drained})`, r);
+  // r3988 (A) ONE CLEARER — THE LIFT WHOSE WRITE FAILS (the same sick storage: ENOSPC placed on the list's one write at the lift): the mark
+  // STAYS (the stash's word: not in the file); the retry LANDS: it leaves; a RESTART between: the fate is LOST by name, never «handed».
+  // RED: the tip's clearer that asked only «the list reads» (bc171ff6e) — the mark gone over an entry in memory only, then «handed»
+  const CLEARS_ON_READ = MH.load('src/server/channels-outbound.js', anchored(fs.readFileSync(outPath, 'utf8'), "if (d.notOnDisk && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(q.draftedBy.id, q.id)) onDisk.push(q.id);", 'if (d.notOnDisk) onDisk.push(q.id);', 'clears-when-the-list-reads'), 'clears-when-the-list-reads');   // stale-pins: kept — the RED puts the tip's early clearer back
+  let ENG_EARLY = null;
+  require.cache[outPath] = { id: outPath, filename: outPath, loaded: true, exports: CLEARS_ON_READ };
+  try { ENG_EARLY = MH.load('src/server/channels-engine.js', fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8'), 'engine-over-the-early-clearer', { same: true }); } finally { require.cache[outPath] = savedOut; }
+  const failedLift = async (name, engine = null, { land = false } = {}) => {
+    const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'msg-stash.json'), '{}');
+    const W = mkReal({ name, dataDir: dir, holdRead: true, ...(engine ? { engine } : {}) }); const { eng } = W; await prime(eng);
+    const p = await eng.propose(AGENT, A, C, { text: 'a receipt whose lift cannot write' }); await eng.approve(p.proposal.id, {});
+    const realW = fs.writeFileSync; let place = true;
+    fs.writeFileSync = function (f, ...a) { if (place && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) { place = false; throw Object.assign(new Error('ENOSPC: no space left on device (placed)'), { code: 'ENOSPC' }); } return realW.call(this, f, ...a); };
+    let lifted = null; try { lifted = await W.real.stashReadAgain(); } finally { fs.writeFileSync = realW; }
+    await sleep(60);
+    const afterLift = { ...(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}) };
+    let afterLand = null;
+    if (land) { W.real.flush(); await sleep(60); afterLand = { ...(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}) }; }
+    eng.stop();
+    let restart = null;
+    if (!land) {   // the restart BEFORE the retry lands: the file holds the old list, without the receipt
+      const W2 = mkReal({ name, dataDir: dir, ...(engine ? { engine } : {}) });
+      await W2.eng.reconcileReceiptFates();
+      const q = W2.eng.store.outbox.snapshot().proposals[p.proposal.id];
+      restart = { kind: (P.receiptFateOf(q) || {}).kind, drained: q.receiptDrainedHow || null, lost: q.receiptLostHow || null, text: cardOf(P, q) };
+      W2.eng.stop();
+    }
+    return { lifted, markAfterLift: !!afterLift.notOnDisk, markAfterLand: afterLand ? !!afterLand.notOnDisk : null, restart };
+  };
+  const fl = await failedLift('held-receipt-lift-fails'), fland = await failedLift('held-receipt-lift-fails-then-lands', null, { land: true });
+  ok(fl.lifted === true && fl.markAfterLift === true && fl.restart && fl.restart.kind === 'lost' && fl.restart.lost === 'not-on-disk' && fl.restart.drained === null, `r3988 (A)+(C): the lift's write FAILS — the mark STAYS (the entry is in memory only); a restart before the retry lands — the fate is LOST by name, never handed («${fl.restart && fl.restart.text}»)`, fl);
+  ok(fland.markAfterLift === true && fland.markAfterLand === false, 'r3988 (A): …and when a write LANDS after it (the retry, here the stop\'s flush), the stash says the entry is in the file — the mark leaves', fland);
+  const fr = await failedLift('held-receipt-lift-fails-red', ENG_EARLY);
+  ok(fr.markAfterLift === false && fr.restart && fr.restart.kind === 'handed' && fr.restart.drained === 'reconciled', `RED: the clearer that asks only «the list reads» — the mark gone over memory, then after the restart «${fr.restart && fr.restart.text}»: handed, which the agent never got`, fr);
+  // r3988 (B) ONE SAYER — every kind the fate line knows (its `case` labels, read from the source: a kind added later is walked too) says the
+  // mark beside its own words when the receipt was taken while the list was unread; the drafter GONE and a REFUSED WAKE say both.
+  // RED: the sayer the cure had (the mark only beside «waiting»)
+  {
+    const polNow = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf8');
+    const body = polNow.slice(polNow.indexOf('function fateLine('), polNow.indexOf('\n}\n', polNow.indexOf('function fateLine(')));
+    const kinds = [...body.matchAll(/^\s+case '([a-z-]+)':/gm)].map((m) => m[1]);
+    const MARK = / — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again \(the receipt stays on this card\)$/;
+    const said = (Pm) => kinds.filter((k) => MARK.test(Pm.receiptFateText({ kind: k, who: 'Worker', at: 1, collected: true, notOnDisk: true })));
+    const gone = { receipt: 'a receipt', receiptDelivery: { stashed: true, gone: true, notOnDisk: true, at: 1, choice: 'next-turn' }, draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' } };
+    const woke = { receipt: 'a receipt', receiptDelivery: { stashed: true, woke: true, refused: 'spend', notOnDisk: true, at: 1, choice: 'wake-now' }, draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' } };
+    const CAPSx = require(path.join(REPO, 'src/channel-caps.js'));   // (the suite's own CAPS is declared further down)
+    const tx = (Pm, rec) => { const f = Pm.receiptFateOf(rec); return f ? Pm.receiptFateText(f, { refusalText: (c) => CAPSx.wakeRefusalText(c) }) : ''; };
+    const g = { kinds, said: said(P), gone: tx(P, gone), woke: tx(P, woke) };
+    ok(kinds.length >= 9 && g.said.length === kinds.length && /is gone — receipt kept — not on disk/.test(g.gone) && /waking it was refused: the spend budget refused it — not on disk/.test(g.woke), `r3988 (B): every kind (${kinds.join(', ')}) says the mark beside its own words; the drafter gone «${g.gone}»; a refused wake «${g.woke}»`, g);
+    const PW = MH.load('src/channel-policy.js', anchored(polNow, "  return line && f && f.notOnDisk ? t('{line} — not on disk:", "  return line && f && f.notOnDisk && f.kind === 'waiting' ? t('{line} — not on disk:", 'mark-beside-waiting-only'), 'mark-beside-waiting-only');
+    const r = { said: said(PW), gone: tx(PW, gone) };
+    ok(r.said.length === 1 && r.said[0] === 'waiting' && !/not on disk/.test(r.gone), `RED: the mark beside «waiting» only — ${kinds.length - r.said.length} kinds say nothing, the drafter gone «${r.gone}»`, r);
+  }
   // AT THE LIFT: the list reads, the reconcile (the lift's listener) finds the receipt in the written list — its card no longer says «not on disk»
   {
     const liftDir = path.join(ROOT, 'held-receipt-lift'); fs.mkdirSync(liftDir, { recursive: true }); fs.writeFileSync(path.join(liftDir, 'msg-stash.json'), '{}');   // the list ON DISK (a missing file is not lifted at its first read again)

@@ -5045,7 +5045,7 @@ export default {
   "the spend budget refused it": "支出予算が拒否しました",
   "its wake could not be recorded (the store write failed) — kept for its next turn": "起こす記録ができませんでした（ストアの書き込み失敗）— 次のターンまで保持",
   "it could not be stored for the next turn (the disk write failed) — the receipt stays on this card": "次のターン用に保存できませんでした（ディスク書き込み失敗）— 受領はこのカードに残ります",
-  "handed to its next turn, not on disk: the list of messages waiting could not be read — it is lost if VibeSpace restarts before that list reads again (the receipt stays on this card)": "次のターンに渡しましたが、ディスクには書かれていません。待っているメッセージの一覧が今は読み込めないためです。一覧がもう一度読み込まれる前に VibeSpace が再起動すると失われます（受領はこのカードに残ります）",
+  "Not delivered — it was not on disk when VibeSpace stopped (the list of messages waiting could not be read), so {agent} did not get it; the receipt is kept here — tell {agent} in its chat": "未配信 — VibeSpace が停止したとき、ディスクに書かれていませんでした（待っているメッセージの一覧が読み込めなかったため）。{agent} には届いていません。受領はここに残ります — {agent} のチャットで伝えてください",
   "{line} — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again (the receipt stays on this card)": "{line} — ディスクには書かれていません。待っているメッセージの一覧が今は読み込めないためです。一覧がもう一度読み込まれる前に VibeSpace が再起動すると失われます（受領はこのカードに残ります）",
   "this session's agent predates notification steering — delivering mid-turn would open a billed turn; kept for its next turn (restart the session to receive them mid-turn)": "このセッションのエージェントは通知ステアリングより前のものです — ターン中に配信すると課金ターンが始まります；次のターンまで保持（ターン中に受け取るにはセッションを再起動）",
   "no turn was running to join — delivering now would open a billed turn; kept for its next turn": "参加できる実行中のターンがありません — 今配信すると課金ターンが始まります；次のターンまで保持",

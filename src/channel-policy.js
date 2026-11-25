@@ -1546,6 +1546,8 @@ function receiptFateOf(p) {
   // the cap dropped it before any message picked it up (recorded when it happened, so it wins over a later guess)
   // round wozyl97qk (g): the list of messages waiting for the agent was DAMAGED while this receipt waited in it (its bytes kept aside) — its end, said
   if (q.receiptEvictedAt && q.receiptEvictedHow === 'torn') return { kind: 'torn', who, at: Number(q.receiptEvictedAt) || null, woke: false };
+  // r3988 (C) ONE END: taken while the list of waiting messages was unread, and not in it once it read — LOST (not on disk when VibeSpace stopped)
+  if (q.receiptLostAt) return { kind: 'lost', who, at: Number(q.receiptLostAt) || null, woke: false };
   if (q.receiptEvictedAt) return { kind: 'evicted', who, at: Number(q.receiptEvictedAt) || null, woke: false, held: Number(q.receiptEvictedHeld) || null };
   // `reconciled` (verify): its stash entry was found gone at a boot — handed
   // by an earlier message, at a time nobody recorded (no `at`)
@@ -1561,7 +1563,14 @@ function receiptFateOf(p) {
 /** The fate line's words. `stamp(ms)` = the card's own clock format;
  *  `refusalText(code)` = channel-caps' wake-refusal words (injected, so this
  *  module keeps importing nothing but channel-record). */
-function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms)).toISOString().slice(11, 16), refusalText = () => '' } = {}) {
+function receiptFateText(f, opts = {}) {
+  // r3988 (B) ONE SAYER: every kind's line passes HERE, and the receipt taken while the list of waiting messages is unread says so beside it —
+  // whatever the kind (waiting, the drafter gone, a refused wake, any kind added later): a new kind cannot forget the mark
+  const line = fateLine(f, opts);
+  const t = opts.t || defaultT;
+  return line && f && f.notOnDisk ? t('{line} — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again (the receipt stays on this card)', { line }) : line;
+}
+function fateLine(f, { t = defaultT, stamp = (ms) => new Date(Number(ms)).toISOString().slice(11, 16), refusalText = () => '' } = {}) {
   if (!f || !f.kind) return '';
   const agent = f.who || t('the agent');
   switch (f.kind) {
@@ -1570,22 +1579,19 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
       if (f.queued) return t('Queued for {agent} at {time} — it runs when its current turn ends', { agent, time: stamp(f.at) });
       return f.woke ? t('Handed to {agent} at {time} — it was woken for it', { agent, time: stamp(f.at) }) : t('Handed to {agent} at {time}', { agent, time: stamp(f.at) });
     case 'waiting':
-      { const line = ((f) => {
-        // lane paced-wake-retry: the decider's wake the pace holds, and its fall (D6): the card says where the wake stands
-        if (f.wakeFell === 'may-have-landed') return t('Waiting for {agent}\'s next message — the wake may have reached it (the server stopped while it was on its way)', { agent });
-        if (f.wakeFell === 'paced-out') return t('Waiting for {agent}\'s next message — the wake could not land within its hour', { agent });
-        if (f.wakeFell === 'not-running') return t('Waiting for {agent}\'s next message — its conversation is not running, so it was not woken', { agent });
-        if (f.wakeFell === 'spend-cap') return t('Waiting for {agent}\'s next message — the spend ceiling refused the wake', { agent });
-        if (liveFallText(f.wakeFell, t)) return t('Waiting for {agent}\'s next message — {why}, so it was not woken', { agent, why: liveFallText(f.wakeFell, t) });
-        if (f.wakeFell) return t('Waiting for {agent}\'s next message — the wake did not reach it', { agent });
-        if (f.wakePaced) return t('The wake pace holds this — {agent} is woken for it shortly', { agent });
-        return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
-      })(f);
-      // r3919 must 1: TAKEN WHILE THE LIST WAS UNREAD — said beside the wait whatever the choice (the wake's own refusal keeps its place)
-      return f.notOnDisk ? t('{line} — not on disk: the list of messages waiting could not be read; it is lost if VibeSpace restarts before that list reads again (the receipt stays on this card)', { line }) : line; }
+      // lane paced-wake-retry: the decider's wake the pace holds, and its fall (D6): the card says where the wake stands
+      if (f.wakeFell === 'may-have-landed') return t('Waiting for {agent}\'s next message — the wake may have reached it (the server stopped while it was on its way)', { agent });
+      if (f.wakeFell === 'paced-out') return t('Waiting for {agent}\'s next message — the wake could not land within its hour', { agent });
+      if (f.wakeFell === 'not-running') return t('Waiting for {agent}\'s next message — its conversation is not running, so it was not woken', { agent });
+      if (f.wakeFell === 'spend-cap') return t('Waiting for {agent}\'s next message — the spend ceiling refused the wake', { agent });
+      if (liveFallText(f.wakeFell, t)) return t('Waiting for {agent}\'s next message — {why}, so it was not woken', { agent, why: liveFallText(f.wakeFell, t) });
+      if (f.wakeFell) return t('Waiting for {agent}\'s next message — the wake did not reach it', { agent });
+      if (f.wakePaced) return t('The wake pace holds this — {agent} is woken for it shortly', { agent });
+      return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
     case 'gone': return t('{agent} is gone — receipt kept', { agent });
     case 'evicted': return t('Not delivered — {agent}\'s queue was full; the receipt is kept here', { agent });
     case 'torn': return t('Not delivered — the list of messages waiting for {agent} was damaged; the receipt is kept here', { agent });
+    case 'lost': return t('Not delivered — it was not on disk when VibeSpace stopped (the list of messages waiting could not be read), so {agent} did not get it; the receipt is kept here — tell {agent} in its chat', { agent });   // r3988 (C)
     case 'undelivered': return t('Receipt not delivered: {why}', { why: (f.refused && refusalText(f.refused)) || f.why || '' });
     case 'inline': return f.collected ? t('{agent} read the receipt with its own command', { agent }) : t('Being read by {agent} inline', { agent });
     case 'recorded': return t('Receipt recorded');

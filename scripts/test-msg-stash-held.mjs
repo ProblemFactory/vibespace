@@ -67,7 +67,7 @@ console.log('§1 a stash that could not be read is HELD: nothing is written over
     'LIFTED: both conversations\' entries are back, the two taken while held after them — ONE write to the list (0600), peek answers again', after);
   // RED: a held write that writes the list over (the release's shape: no hold)
   const SRC0 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
-  const OVER = M.load('src/server/conversation-deliver.js', anchored(SRC0, "    if (!stashHold.writable('a write of the messages waiting for conversations')) return false;", '', 'list-written-over-while-held'), 'list-written-over-while-held');
+  const OVER = M.load('src/server/conversation-deliver.js', anchored(SRC0, "    if (!stashHold.writable('a write of the messages waiting for conversations')) { landingOwed = true; return false; }", '', 'list-written-over-while-held'), 'list-written-over-while-held');
   const r = heldStart(OVER);
   r.D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'a message stashed while held' });
   ok(!both(readJson(r.F)), 'RED: a write that does not ask the hold — the list is written over with memory alone (both conversations\' entries gone)', readJson(r.F));
@@ -424,7 +424,7 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
     await D.stashReadAgain(); await sleep(20);
     const after = D.stashEntries(CC).filter((e) => RN.isRefreshEntry(e)).map((e) => e.text);
     jm.shutdown?.();
-    return { queued: q.queued, notOnDisk: q.notOnDisk || 0, after, disk: ((readJson(F) || {})[CC] || []).filter((e) => RN.isRefreshEntry(e)).length };
+    return { queued: q.queued, notOnDisk: q.notOnDisk === true ? (q.takenCount || 0) : 0, after, disk: ((readJson(F) || {})[CC] || []).filter((e) => RN.isRefreshEntry(e)).length };
   };
   const g = await runR(SH);
   ok(g.queued === 1 && g.notOnDisk === 1 && g.after.length === 1 && /refresh note B/.test(g.after[0]), `the refresh note pressed while the list is unread: TAKEN and said (notOnDisk ${g.notOnDisk}); at the lift the newest stays, the older goes («${g.after.join(' | ')}»)`, g);
@@ -457,14 +457,17 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
 }
 {
   // (f) THE CENSUS OF CALLERS (r3919): every call of the stash's accept (`stashFor(`) and of its peek (`stashPeek(`) in src and server.js has
-  // a ROW — what it does with «taken, not on disk» and with a refused peek. A caller born without a row is RED until it is judged
+  // a ROW — what it does with «taken, not on disk» and with a refused peek. A caller born without a row is RED until it is judged.
+  // ITS REACH (r3988 should): it counts the TEXT of a call, per file — a caller that reaches the accept through a wrapper (end-proposals'
+  // tellText, artifact-registry's note, a `deliver['stashFor']` spelling) is counted where the wrapper calls, not where it is called: a
+  // mistake-guard over the doors, never a proof of every road
   const CALLERS = {
     // file: { accept: n, peek: n, plainPeek: n — the peeks that DECIDE from silence (refused while held, decide nothing) }
     'src/agent-routes.js': { accept: 1 },                 // says it: «queued in memory only — taken, not on disk …» to the sender
     'src/server/apps-engine.js': { accept: 1 },           // says it: the journal; the outcome waits in memory
     'src/server/artifact-registry.js': { accept: 1 },     // ignores it, rightly: a stored:false that is not queued:false is told
     'src/server/browser-handback.js': { accept: 4, peek: 1 },   // 177 / 418 say it (durable:false, why); 203 the journal; 480 told 'stashed' (true: it waits in memory); 407 peeks MEMORY (a hit is evidence)
-    'src/server/channel-api-cards.js': { accept: 1, peek: 1, plainPeek: 1 },   // 82 marks the receipt «not on disk» (r3919); the lift's peek clears it only on a HIT (a refused peek keeps the mark)
+    'src/server/channel-api-cards.js': { accept: 1 },     // 82 marks the receipt «not on disk» (r3919); r3988: its clearer asks the stash's own word (stashOnDisk), no peek
     'src/server/channels-engine.js': { accept: 6, peek: 1 },    // 6613 / 7126 / 8849 ignore it rightly (notes; memory holds them); 9145 / 9410 / 9853 read it right — not durable: the kept rows stay for a restart (errs toward again, never lost); 6606 peeks MEMORY for the digest's caps
     'src/server/channels-outbound.js': { accept: 1, peek: 1, plainPeek: 1 },   // 2413 the receipt's mark in its own field (r3919 must 1); 1516 the reconcile: a refused peek decides nothing
     'src/server/conversation-deliver.js': { accept: 3 },  // the ladder's own (a paced-out fall, the park's fall, a held-back hand-back): its journal counts them
@@ -498,9 +501,54 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
   for (const f of [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js')]) { const t = fs.readFileSync(f, 'utf8'); if (/\bstash(For|Peek)\b/.test(t)) texts.set(path.relative(REPO, f).split(path.sep).join('/'), t); }
   const bad = census(texts);
   const n = Object.values(CALLERS).reduce((a, r) => a + (r.accept || 0) + (r.peek || 0), 0);
-  ok(bad.length === 0 && n === 31, `THE CENSUS: ${n} calls of the accept and the peek in ${Object.keys(CALLERS).length} files, each with its row (27 accepts; 4 peeks — two of memory, two plain that decide nothing from a refusal)`, bad);
+  ok(bad.length === 0 && n === 30, `THE CENSUS: ${n} calls of the accept and the peek in ${Object.keys(CALLERS).length} files, each with its row (27 accepts; 3 peeks — two of memory, one plain that decides nothing from a refusal)`, bad);
   const planted = new Map(texts); planted.set('src/server/a-new-producer.js', "deliver.stashFor(cid, { text: 'x' });");
   const planted2 = new Map(texts); planted2.set('src/server/channels-engine.js', texts.get('src/server/channels-engine.js').replace('deliver.stashPeek(cid, { memory: true })', 'deliver.stashPeek(cid)'));   // stale-pins: kept — the RED puts the plain peek back
   ok(census(planted).some((b) => /a-new-producer\.js: 1 accept/.test(b)) && census(planted2).some((b) => /channels-engine\.js: 1 plain peek/.test(b)), 'RED: a caller born without a row, and a memory peek turned into a plain one, are each named');
+}
+{
+  // (g) r3988 (A) THE STASH's OWN WORD: an entry with a ref is IN THE FILE only after a write that LANDED holding it (stashOnDisk); a lift whose
+  // write FAILS says no, and tells no landing listener; the next write that lands says yes and tells them ONCE.
+  // RED: a write path that notes a FAILED write as landed — the word says «in the file» over memory
+  const runW = async (Mod) => {
+    const { D, F } = heldStart(Mod);
+    let lands = 0; D.onStashLanded(() => { lands++; });
+    D.stashFor(CC, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'a receipt taken while held', ref: 'p-9' });
+    const whileHeld = D.stashOnDisk(CC, 'p-9');
+    const realW = fs.writeFileSync; let place = true;
+    fs.writeFileSync = function (f, ...a) { if (place && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) { place = false; throw Object.assign(new Error('ENOSPC (placed)'), { code: 'ENOSPC' }); } return realW.call(this, f, ...a); };
+    try { await D.stashReadAgain(); } finally { fs.writeFileSync = realW; }
+    const afterFailed = { onDisk: D.stashOnDisk(CC, 'p-9'), lands, inFile: ((readJson(F) || {})[CC] || []).some((e) => e && e.ref === 'p-9') };
+    D.flush();
+    const afterLanded = { onDisk: D.stashOnDisk(CC, 'p-9'), lands, inFile: ((readJson(F) || {})[CC] || []).some((e) => e && e.ref === 'p-9') };
+    D.flush();
+    return { whileHeld, afterFailed, afterLanded, landsAfterSecond: lands };
+  };
+  const g = await runW(CD);
+  ok(g.whileHeld === false && g.afterFailed.onDisk === false && g.afterFailed.lands === 0 && !g.afterFailed.inFile && g.afterLanded.onDisk === true && g.afterLanded.lands === 1 && g.afterLanded.inFile && g.landsAfterSecond === 1, 'THE STASH\'s WORD: taken while held — not in the file; the lift\'s write FAILS — still not (no landing told); the next write LANDS — in the file, the landing told ONCE (not again for a write after it)', g);
+  const r = await runW(M.load('src/server/conversation-deliver.js', anchored(SRC10, '    catch (e) {\n      landingOwed = true;\n', '    catch (e) {\n      noteLanded();\n      landingOwed = true;\n', 'failed-write-noted-as-landed'), 'failed-write-noted-as-landed'));
+  ok(r.afterFailed.onDisk === true && !r.afterFailed.inFile, 'RED: a failed write noted as landed — the word says «in the file» over an entry in memory only', r);
+}
+{
+  // (h) r3988 (A) ONE CLEARER, A CENSUS PIN: the mark leaves a record in exactly the two clearers (the Outbox's reconcile, the API cards'), and
+  // each asks the stash's own word; no other line in src deletes the mark or writes it false. RED: a third clearer planted
+  const walk2 = (dir, out = []) => { for (const n of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, n.name); if (n.isDirectory()) walk2(f, out); else if (/\.(c|m)?js$/.test(n.name)) out.push(f); } return out; };
+  const clearersOf = (texts) => {
+    const found = {};
+    for (const [rel, t] of texts) {
+      const dels = (t.match(/delete\s+[\w.$\[\]'"]*\.notOnDisk\b/g) || []).length, falses = (t.match(/(?:\.notOnDisk\s*=\s*false|\bnotOnDisk\s*:\s*false)\b/g) || []).length;   // the MARK written false (a property), never a local of that name
+      if (dels || falses) found[rel] = { dels, falses, asks: /\bstashOnDisk\s*\(/.test(t) };
+    }
+    return found;
+  };
+  const texts2 = new Map();
+  for (const f of [...walk2(path.join(REPO, 'src')), path.join(REPO, 'server.js')]) { const t = fs.readFileSync(f, 'utf8'); if (/notOnDisk/.test(t)) texts2.set(path.relative(REPO, f).split(path.sep).join('/'), t); }
+  const c = clearersOf(texts2);
+  const want = ['src/server/channel-api-cards.js', 'src/server/channels-outbound.js'];
+  const okSet = JSON.stringify(Object.keys(c).sort()) === JSON.stringify(want) && want.every((k) => c[k].dels === 1 && c[k].falses === 0 && c[k].asks);
+  ok(okSet, `ONE CLEARER: the mark is deleted in exactly ${want.length} places (${want.join(', ')}), once each, each asking the stash's own word (stashOnDisk) — no line writes it false`, c);
+  const planted = new Map(texts2); planted.set('src/server/a-third-clearer.js', 'if (rec.receiptDelivery) delete rec.receiptDelivery.notOnDisk;');
+  const pc = clearersOf(planted);
+  ok(!!pc['src/server/a-third-clearer.js'] && !pc['src/server/a-third-clearer.js'].asks && Object.keys(pc).length === 3, 'RED: a third clearer (one that does not ask the stash) is named', pc['src/server/a-third-clearer.js']);
 }
 report();

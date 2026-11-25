@@ -1501,6 +1501,8 @@ function create(engineCtx) {
    */
   // round wozyl97qk (e): the reconcile decided nothing while the stash was held (its peek refused): it runs again at the stash's lift
   try { if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(() => { reconcileReceiptFates().catch((err) => log.warn(`[channels] the receipt-fate reconcile at the stash's lift failed: ${(err && err.message) || err}`)); }); } catch { }
+  // r3988 (A): …and when a write of the list LANDS after none did (the lift's own, or its retry's): the one clearer of the mark asks the stash's word
+  try { if (deliver && typeof deliver.onStashLanded === 'function') deliver.onStashLanded(() => { reconcileReceiptFates().catch((err) => log.warn(`[channels] the receipt-fate reconcile at a landed write failed: ${(err && err.message) || err}`)); }); } catch { }
   async function reconcileReceiptFates() {
     if (!deliver || typeof deliver.stashPeek !== 'function' || engineCtx.stopped) return [];
     const ob = store.outbox.snapshot();
@@ -1509,19 +1511,25 @@ function create(engineCtx) {
     // were kept aside at `tornAt` (the stash remembers the instant across restarts): a receipt stashed before it is UNKNOWN — never
     // read as handed; it stays as it is until a person decides (the card keeps «waiting»)
     let tornAt = null; try { tornAt = typeof deliver.stashTornAt === 'function' ? deliver.stashTornAt() : null; } catch { tornAt = null; }
-    const tornIds = [], onDisk = [];
+    const tornIds = [], onDisk = [], lostIds = [];
     for (const q of Object.values(ob.proposals || {})) {
       const d = q.receiptDelivery;
-      if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
+      if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || q.receiptLostAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
       let held = null;
       try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
       const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));
-      if (!still && d.notOnDisk) continue;   // r3720: taken in memory only while the list was held — a restart may have lost it: UNKNOWN, never «handed», never «not sent»
-      if (still) { if (d.notOnDisk) onDisk.push(q.id); continue; }   // r3663 (the round's should): a receipt the stash still holds WAITS, whatever a torn instant says (a torn copy beside the list never ends what the list still holds); r3919: the peek ANSWERED (the list reads) and holds it — on disk now: its mark leaves
+      if (!still && d.notOnDisk) { lostIds.push(q.id); continue; }   // r3988 (C) ONE END: the list READS (the peek answered) and the receipt taken in memory only is not in it — it was LOST (not on disk when VibeSpace stopped): said by name, never «handed», never «waiting» for good
+      if (still) { if (d.notOnDisk && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(q.draftedBy.id, q.id)) onDisk.push(q.id); continue; }   // r3988 (A) ONE CLEARER: the mark leaves only on the stash's own word that the entry is IN THE FILE (a write that landed holding it) — a lift whose write failed clears nothing   // r3663 (the round's should): a receipt the stash still holds WAITS, whatever a torn instant says (a torn copy beside the list never ends what the list still holds); r3919: the peek ANSWERED (the list reads) and holds it — on disk now: its mark leaves
       if (tornAt != null && !(Number(d.at) > tornAt)) { if (d.at != null && Number.isFinite(Number(d.at))) tornIds.push(q.id); continue; }   // stashed before torn bytes and gone: «torn», never «handed»; a legacy row with no instant: unknown, as before (never «torn», never «handed»)   // stashed before the torn bytes: never «handed» — round wozyl97qk (g): it ENDS «torn» (its entry was in the damaged list, kept aside)
       gone.push(q.id);
     }
-    if (onDisk.length) {   // r3919 must 1: the lift wrote what memory took — the card's «not on disk» leaves (a receipt lost by a restart keeps it: unknown)
+    if (lostIds.length) {   // r3988 (C): its fate by name — not on disk when VibeSpace stopped; the agent did not get it
+      const tl = now();
+      await store.outbox.update((ob2) => { for (const id of lostIds) { const q = ob2.proposals[id]; if (q && !q.receiptDrainedAt && !q.receiptEvictedAt && !q.receiptLostAt) { q.receiptLostAt = tl; q.receiptLostHow = 'not-on-disk'; } } });
+      notifyOutbox(lostIds);
+      log.log(`[channels] ${lostIds.length} receipt(s) taken while the list of waiting messages was unread are not in it now that it reads — LOST (not on disk when VibeSpace stopped), said on their cards: ${lostIds.join(', ').slice(0, 400)}`);
+    }
+    if (onDisk.length) {   // r3919 must 1 / r3988 (A): the stash's word — the entry is in the file: the card's «not on disk» leaves
       await store.outbox.update((ob2) => { for (const id of onDisk) { const q = ob2.proposals[id]; if (q && q.receiptDelivery && q.receiptDelivery.notOnDisk) delete q.receiptDelivery.notOnDisk; } });
       notifyOutbox(onDisk);
       log.log(`[channels] ${onDisk.length} stashed receipt(s) taken while the list of waiting messages was unread are on disk now (the list read) — their cards no longer say «not on disk»`);

@@ -824,7 +824,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       ids.push(id);
     }
     log.log?.(`[stash] refresh note queued for ${ids.length} live conversation(s) (${replaced} replaced, ${plan.skipped.length} skipped, ${failed} failed)${notOnDisk ? ` — ${notOnDisk} taken, not on disk: the list of messages waiting could not be read (an earlier note waiting in it is replaced when it reads)` : ''}`);
-    return { ok: true, queued: ids.length, replaced, skipped: plan.skipped.length, failed, ids, ...(notOnDisk ? { notOnDisk } : {}) };
+    return { ok: true, queued: ids.length, replaced, skipped: plan.skipped.length, failed, ids, ...(notOnDisk ? { notOnDisk: true, takenCount: notOnDisk } : {}) };   // r3988 (should): `notOnDisk` the boolean the page's and the CLI's «not on disk» test reads; the count beside it
   }
 
   /** Shutdown: wait (bounded) for every hand-over in flight — a SIGTERM restart is then exactly-once by construction

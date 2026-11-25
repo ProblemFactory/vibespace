@@ -64,15 +64,17 @@ function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js'),
   };
   const todos = [], answered = [];
   const userTodos = { add: (key, it) => { const x = { id: `t-${todos.length + 1}`, key, ...it, status: 'open' }; todos.push(x); return x; }, resolveAnswered: (ids, by, fact) => { for (const id of ids) { const x = todos.find((t) => t.id === id); if (x && x.status === 'open') { x.status = 'done'; x.resolvedBy = by; x.resolvedFact = fact; answered.push(id); } } return ids; } };
-  const delivered = [], stash = [], lifts = []; let refuse = false, taken = false;
+  const delivered = [], stash = [], lifts = [], lands = []; let refuse = false, taken = false, landed = false;
   // r3919: the ladder's answer while its list is unread (`taken`), its peek and its lift's listeners — as the real ladder answers them
   const deliver = { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return refuse ? { ok: false } : { ok: true }; }, stashFor: (cid, env) => { stash.push({ cid, env }); return taken ? { stored: false, taken: true, why: 'taken, not on disk: the list of messages waiting for conversations could not be read' } : { stored: true, why: null }; },
-    stashPeek: (cid) => stash.filter((x) => x.cid === cid).map((x) => ({ ...x.env })), onStashLift: (fn) => { lifts.push(fn); } };
+    stashPeek: (cid) => stash.filter((x) => x.cid === cid).map((x) => ({ ...x.env })), onStashLift: (fn) => { lifts.push(fn); },
+    // r3988 (A): the stash's own word — an entry is IN THE FILE only after a write that LANDED holding it (`landed`)
+    stashOnDisk: (cid, ref) => landed && stash.some((x) => x.cid === cid && x.env.ref === ref), onStashLanded: (fn) => { lands.push(fn); } };
   const { create } = require(cardsPath);
   const names = (adapterId, convId) => (adapterId === 'lark-1' && convId === 'oc_known' ? 'Product room' : null);   // the channel store's name ladder
   const cards = create({ dataDir: dir, api, userTodos, deliver, names, now: () => clock, timer: false, log: { warn() {}, log() {} }, ...(opts.collectWindowMs ? { collectWindowMs: opts.collectWindowMs } : {}) });
   const add = (o) => { const p = base({ bodySha: undefined, headers: undefined, tier: undefined, shape: undefined, ...o }); props[p.id] = p; writeFrozen(); return p; };
-  return { dir, api, cards, add, todos, answered, delivered, stash, creds, granted, setClock: (t) => { clock = t; }, refuse: (v) => { refuse = v; }, taken: (v) => { taken = v; }, lift: () => { for (const fn of lifts) fn(); } };
+  return { dir, api, cards, add, todos, answered, delivered, stash, creds, granted, setClock: (t) => { clock = t; }, refuse: (v) => { refuse = v; }, taken: (v) => { taken = v; }, lift: ({ wrote = true } = {}) => { landed = wrote; for (const fn of lifts) fn(); }, land: () => { landed = true; for (const fn of lands) fn(); } };
 }
 async function orchRows(h) {
   const R = {};
@@ -103,12 +105,14 @@ async function orchRows(h) {
   h.refuse(true); h.taken(true); h.add({ id: 'api-7', at: T0 + 24 * H }); await h.cards.sync(); h.api.ran('api-7'); await h.cards.sync(); h.taken(false); h.refuse(false);
   const r7 = () => (h.cards.records().find((r) => r.id === 'api-7') || {}).receipt || {};
   R.takenMarked = r7().how === 'stashed' && r7().notOnDisk === true;
-  h.lift();
+  h.lift({ wrote: false });   // r3988 (A): the list reads, but its one write at the lift FAILS — the entry is in memory only
+  R.markStaysOnFailedWrite = r7().notOnDisk === true;
+  h.land();   // …the retry LANDS: the stash says the entry is in the file
   R.markLeavesAtLift = r7().how === 'stashed' && !r7().notOnDisk;
   R.persisted = (() => { const j = JSON.parse(fs.readFileSync(path.join(h.dir, 'channels/api-cards.json'), 'utf8')); return j.items['api-1'].todoId === 't-1' && j.items['api-1'].receipt.how === 'delivered'; })();
   return R;
 }
-const OWORDS = { takenMarked: 'r3919: an API receipt TAKEN while the list of waiting messages is unread carries «not on disk» on its record (how stashed)', markLeavesAtLift: 'r3919: at the lift the written list holds it (by its ref) — the mark leaves', objectNamed: 'a call\'s chat is NAMED from the channel store (+ the conversation it opens); an unknown one keeps its 8-char id chip', oneItem: 'a pending proposal files ONE For-you item (key/origin channels), never twice', record: 'the record carries the frozen headers, the body sha256, the tier, the shape', decisionResolves: 'a decision answers the For-you item WITH the outcome (one record, three surfaces)', receipt: 'the agent is told on its next turn — no wake, spendReason channel-receipt', receiptOnce: 'the receipt is handed once', expired: '24 h unanswered ⇒ expired: nothing ran, item answered, the receipt stashed when the ladder refuses', withdrawnTier: 'the tier withdrawn ⇒ withdrawn by name, the agent told', withdrawnAccount: 'the account removed ⇒ withdrawn "the account was removed"', persisted: 'the item / receipt bookkeeping survives a restart (api-cards.json)' };
+const OWORDS = { markStaysOnFailedWrite: 'r3988 (A): a lift whose write FAILED clears nothing — the API receipt keeps «not on disk» (its entry in memory only)', takenMarked: 'r3919: an API receipt TAKEN while the list of waiting messages is unread carries «not on disk» on its record (how stashed)', markLeavesAtLift: 'r3919 / r3988 (A): when a write LANDS holding it (the stash\'s own word) — the mark leaves', objectNamed: 'a call\'s chat is NAMED from the channel store (+ the conversation it opens); an unknown one keeps its 8-char id chip', oneItem: 'a pending proposal files ONE For-you item (key/origin channels), never twice', record: 'the record carries the frozen headers, the body sha256, the tier, the shape', decisionResolves: 'a decision answers the For-you item WITH the outcome (one record, three surfaces)', receipt: 'the agent is told on its next turn — no wake, spendReason channel-receipt', receiptOnce: 'the receipt is handed once', expired: '24 h unanswered ⇒ expired: nothing ran, item answered, the receipt stashed when the ladder refuses', withdrawnTier: 'the tier withdrawn ⇒ withdrawn by name, the agent told', withdrawnAccount: 'the account removed ⇒ withdrawn "the account was removed"', persisted: 'the item / receipt bookkeeping survives a restart (api-cards.json)' };
 console.log('② ORCH over fakes (src/server/channel-api-cards.js)');
 const O = await orchRows(harness());
 for (const k of Object.keys(OWORDS)) ok(O[k], OWORDS[k], O);
@@ -196,7 +200,8 @@ await om("if (st.todoId || !userTodos", 'if (!userTodos', 'oneItem');
 await om("{ await receiptFor(p, st); dirty = true; }", '{ dirty = true; }', 'receipt');
 await om("try { const st0 = deliver.stashFor(p.conv,", 'try { const st0 = 0 && deliver.stashFor(p.conv,', 'expired');
 await om("fate: C.fateOf(p), ...(r && r.notOnDisk ? { notOnDisk: true } : {}) };", 'fate: C.fateOf(p) };', 'takenMarked');   // r3919: the record without its mark
-await om("if (held && held.some((e) => e && String(e.ref || '') === id)) { delete st.receipt.notOnDisk; n++; }", '', 'markLeavesAtLift');   // r3919: a lift that never clears it
+await om("for (const [id, st] of marked) { const p = byId.get(id); if (p && p.conv && deliver.stashOnDisk(p.conv, id)) { delete st.receipt.notOnDisk; n++; } }", '', 'markLeavesAtLift');   // r3919: a clearer that never clears
+await om("if (p && p.conv && deliver.stashOnDisk(p.conv, id)) { delete st.receipt.notOnDisk; n++; }", 'if (p && p.conv) { delete st.receipt.notOnDisk; n++; }', 'markStaysOnFailedWrite');   // r3988: a clearer that does not ask the stash's word
 {
   // RED CONTROL (the base): without the hold a decision its CLI waits on is ALSO filed as a receipt message
   const f = mutant('src/server/channel-api-cards.js', ' && heldInline(p)) continue;', ' && false) continue;');

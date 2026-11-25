@@ -194,12 +194,28 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // producer must hear the truth — see stashFor)
   // verify r5 (2026-09-27): the LAST failure is remembered (`stashHealth`) and a failed write is RETRIED on its own
   // clock — a transient refusal (a full disk cleared a minute later) heals without waiting for the next mutation
+  // r3988 (A) THE STASH's OWN WORD THAT AN ENTRY IS IN THE FILE: the (conversation, ref) pairs the LAST write that LANDED held — read only
+  // through stashOnDisk (THE ONE CLEARER of a receipt's «not on disk» asks it). A refused write (held) or a failed one changes nothing: the
+  // last landed list still says what is on disk. `landListeners` hear a write that lands after a spell of none landing (held, or failing) —
+  // the lift's write that lands, or its retry's: never a lift whose write failed
+  const refsOf = (o) => { const m = new Map(); for (const c of Object.keys(o || {})) if (isConvName(c) && Array.isArray(o[c])) m.set(c, new Set(o[c].filter((e) => e && e.ref).map((e) => String(e.ref)))); return m; };
+  let onDiskRefs = stashHold.held() ? new Map() : refsOf(stash);
+  let landingOwed = !!stashHold.held();
+  const landListeners = new Set();
+  const stashOnDisk = (cid, ref) => { const s0 = onDiskRefs.get(String(cid)); return !!(s0 && s0.has(String(ref))); };
+  const noteLanded = () => {
+    onDiskRefs = refsOf(stash);
+    if (!landingOwed) return;
+    landingOwed = false;
+    for (const fn of landListeners) { try { fn(); } catch (err) { log('[deliver] a landing listener failed:', err && err.message); } }
+  };
   let lastWriteError = null, retryTimer = null;
   const STASH_RETRY_MS = 30 * 1000;
   const writeStashNow = () => {
-    if (!stashHold.writable('a write of the messages waiting for conversations')) return false;   // HELD: never over a file that could not be read — what comes is kept in memory (r3720); the lift writes
-    try { fs.writeFileSync(stashFile + '.tmp', stashBody(), { mode: 0o600 }); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; return true; }
+    if (!stashHold.writable('a write of the messages waiting for conversations')) { landingOwed = true; return false; }   // HELD: never over a file that could not be read — what comes is kept in memory (r3720); the lift writes
+    try { fs.writeFileSync(stashFile + '.tmp', stashBody(), { mode: 0o600 }); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; noteLanded(); return true; }   // r3988 (A): what LANDED is the stash's word
     catch (e) {
+      landingOwed = true;
       lastWriteError = { at: Date.now(), message: String(e && e.message || e) };
       log('[deliver] stash persist failed:', e.message);
       if (!retryTimer) { retryTimer = setTimeout(() => { retryTimer = null; writeStashNow(); }, STASH_RETRY_MS); retryTimer.unref?.(); }   // an empty queue is written too: a stale file would re-deliver at boot
@@ -2673,7 +2689,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // r3003 (a): the stash's hold — its facts (null: read), the person's words, a torn lift's copy and its instant, one read again
     stashHeld: () => { const h = heldHold(); return h ? h.held() : null; }, stashUnreadWords: () => { const h = heldHold(); return h ? h.words() : null; }, stashTorn: () => stashHold.torn(), stashTornAt: () => tornAt, stashReadAgain, stashRefusal: (what) => (heldHold() || stashHold).refusal(what),
     stashTornActed: (cid) => tornActed.has(cid),
-    onStashLift: (fn) => { if (typeof fn !== 'function') return () => { }; liftListeners.add(fn); return () => liftListeners.delete(fn); }, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
+    onStashLift: (fn) => { if (typeof fn !== 'function') return () => { }; liftListeners.add(fn); return () => liftListeners.delete(fn); },
+    // r3988 (A): the stash's own word that an entry is IN THE FILE (the last write that landed held it), and who hears a write land after none did
+    stashOnDisk, onStashLanded: (fn) => { if (typeof fn !== 'function') return () => { }; landListeners.add(fn); return () => landListeners.delete(fn); }, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     // lane queued-is-not-woke (law 1): the wrapper's queue and turn edges, and a queued frame handed back — read off its records

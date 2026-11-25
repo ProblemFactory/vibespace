@@ -85,18 +85,19 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
     }
     st.receipt = { at: now(), how: r && r.ok ? (r.stashed ? 'stashed' : 'delivered') : 'undelivered', fate: C.fateOf(p), ...(r && r.notOnDisk ? { notOnDisk: true } : {}) };
   }
-  // r3919: the list read again — a receipt the WRITTEN list holds (by its ref) is on disk now: its mark leaves; one the list does not hold
-  // keeps it (lost by a restart before the read, or handed at a prompt meanwhile: unknown — never said «on disk»)
-  try { if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(() => { try {
+  // r3919 / r3988 (A) ONE CLEARER: a receipt's mark leaves only on the stash's own word that its entry is IN THE FILE (stashOnDisk: a write
+  // that LANDED holding it) — asked when the list reads again and when a write lands after none did; a lift whose write failed clears nothing
+  const clearMarks = () => { try {
+    if (!deliver || typeof deliver.stashOnDisk !== 'function') return;
+    const marked = Object.entries(state.items).filter(([, st]) => st && st.receipt && st.receipt.notOnDisk);
+    if (!marked.length) return;
+    const byId = new Map(records().map((r) => [r.id, r]));   // ONE read of the records (never one a receipt)
     let n = 0;
-    for (const [id, st] of Object.entries(state.items)) {
-      if (!st || !st.receipt || !st.receipt.notOnDisk) continue;
-      const p = records().find((x) => x.id === id);
-      let held = null; try { held = p && p.conv && typeof deliver.stashPeek === 'function' ? deliver.stashPeek(p.conv) : null; } catch { held = null; }
-      if (held && held.some((e) => e && String(e.ref || '') === id)) { delete st.receipt.notOnDisk; n++; }
-    }
+    for (const [id, st] of marked) { const p = byId.get(id); if (p && p.conv && deliver.stashOnDisk(p.conv, id)) { delete st.receipt.notOnDisk; n++; } }
     if (n) save();
-  } catch (e) { log.warn(`[channel-api-cards] the receipts' marks at the stash's lift: ${(e && e.message) || e}`); } }); } catch { }
+  } catch (e) { log.warn(`[channel-api-cards] the receipts' marks: ${(e && e.message) || e}`); } };
+  try { if (deliver && typeof deliver.onStashLift === 'function') deliver.onStashLift(clearMarks); } catch { }
+  try { if (deliver && typeof deliver.onStashLanded === 'function') deliver.onStashLanded(clearMarks); } catch { }
 
   // ── lane inline-receipts-compose-api: THE CLI READS IT INLINE (the owner: a command that performs an action answers
   // with its outcome; a message carries only what the actor could not learn from its own command) ──────────────────
