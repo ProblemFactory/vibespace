@@ -985,6 +985,8 @@ class AccountManager {
     this._tieSeeded.add(id);
     a.loginTieSeeded = true;   // the mark on the row (r3311 (1)): never a second seed
     if (rte) a.loginTie = { rte, seeded: true };
+    // ONE MANAGER A DATA FOLDER (r4262): this save writes this manager's WHOLE state at a row's first display landing — a second
+    // AccountManager on the same folder (a hub builds one: server.js) would write its own, older state over the first one's file here
     this._save();
   }
   /** the tie's kind for row `id`: 'proven' (a sign-in through the product), 'seeded' (its folder trusted: r3022 (2)(d)) or null */

@@ -54,8 +54,19 @@ const lab = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0
 // B-574d (line 832 on the 2.369.418 train): accounts.json is the store writer's — a second store over the same data (a restart, a re-read)
 // reads what the first one's saves wrote: each save waited for here (the suite's thread), the copies' classes too
 const { waitEverySave } = require(path.join(REPO, 'scripts/lib/accounts-landed.cjs'));
+// (r4262) ONE DATA FOLDER, SEVERAL MANAGERS: a manager's FIRST display landing seeds a row's tie and saves its WHOLE state
+// (accounts _seedTieAt, B-87fd unit 4) — so every manager this suite builds on DATA is registered, and after each is built the
+// suite waits for every one's landings (the fact itself; its bound's expiry is a named line): no stale save lands later over a
+// scene's file (test-pool-fallback's crash scene read one, once, in the box zone)
+const LIVE_ON_DATA = [];
+const quiet = async (where, ms = 5000) => {
+  let t; const done = await Promise.race([Promise.all(LIVE_ON_DATA.map((m) => m.displaySettled())).then(() => true), new Promise((r) => { t = setTimeout(() => r(false), ms); })]);
+  clearTimeout(t);
+  if (!done) ok(false, `every live accounts manager on the suite's data folder settled its display landings within ${ms / 1000} s — ${where} (the harness's bound)`);
+};
 const wireAm = (AM, dir = DATA) => {
   const am = new (waitEverySave(AM))({ dataDir: dir });
+  if (dir === DATA) LIVE_ON_DATA.push(am);
   am.setProviderLookup((a) => store.forAccount(a));
   am.setProviderSpawn(PSP.create({ providers: store, dataDir: dir }), (id, be, model) => PSP.modelFor(store, id, model, be));
   return am;
@@ -65,13 +76,14 @@ const am = wireAm(AccountManager);
 const A = am.createSubscription({ name: 'Team Max' }).id; login(am, A);
 const B = am.createSubscription({ name: 'Spare' }).id;   // never signed in
 const P = am.createPool({ name: 'Team', members: [A] }).id;
+await quiet('after the suite\'s own manager signed A in');
 const rowOf = (x, id) => x.list().accounts.find((r) => r.id === id);
 
 console.log('— §1 the list: kept, listed by label, refused by name');
 {
   ok(!('fallbackProviders' in am.get(P)) && eq(rowOf(am, P).fallbackProviders, []) && eq(am.poolFallbacksOf(P), []), 'a new pool lists no fallback provider: no field on the record (absent = none), an empty list on its row', { rec: am.get(P).fallbackProviders, row: rowOf(am, P).fallbackProviders });
   am.updatePool(P, { fallbackProviders: [ds.id, ds.id] });
-  const reread = wireAm(AccountManager);
+  const reread = wireAm(AccountManager); await quiet('after §1\'s reread');
   ok(eq(am.get(P).fallbackProviders, [ds.id]) && eq(am.poolFallbacksOf(P), [ds.id]) && eq(rowOf(am, P).fallbackProviders, [{ id: ds.id, label: 'DeepSeek' }]) && eq(reread.get(P).fallbackProviders, [ds.id]),
     'a person\'s save keeps the list deduped, the row names each by its LABEL, and it survives a reload of the store', { rec: am.get(P).fallbackProviders, row: rowOf(am, P).fallbackProviders, reread: reread.get(P).fallbackProviders });
   const nine = [ds.id, ds2.id];
@@ -109,7 +121,7 @@ console.log('— §1 the list: kept, listed by label, refused by name');
   const refusedPri = tried(() => am.updatePool(P, { fallbackProviders: [ds.id], crossProvider: 'allow', hot: true, priority: ['not-a-member'] }));
   const memNow = { fb: am.get(P).fallbackProviders, cross: am.get(P).crossProvider, hot: am.get(P).hot };
   am.updatePool(P, {});
-  const diskNow = wireAm(AccountManager).get(P);
+  const diskNow = wireAm(AccountManager).get(P); await quiet('after §1\'s read of the refused write');
   ok(refusedPri === 'not a member of this pool: not-a-member' && memNow.fb === undefined && memNow.cross === 'never' && memNow.hot === false && diskNow.fallbackProviders === undefined && diskNow.crossProvider === 'never' && diskNow.hot === false,
     'a write REFUSED for its priority changes nothing: the list, the switch and hot named with it are not on the record — in memory, nor on disk after the next unrelated save', { refusedPri, memNow, disk: { fb: diskNow.fallbackProviders, cross: diskNow.crossProvider, hot: diskNow.hot } });
   const NOBACK = '    } catch (e) { for (const k of Object.keys(a)) delete a[k]; Object.assign(a, was); throw e; }';
@@ -130,11 +142,12 @@ console.log('— §2 a provider removed leaves every pool\'s list in the same ac
   const P2 = am.createPool({ name: 'Second', members: [A] }).id;
   am.updatePool(P, { fallbackProviders: [ds.id, ds2.id] }); am.updatePool(P2, { fallbackProviders: [ds2.id] });
   const bare = new AccountManager({ dataDir: DATA });   // no provider store wired: every record would read as gone
+  LIVE_ON_DATA.push(bare); await quiet('after §2\'s bare manager');
   await store.remove(ds2.id);
   bare.providersChanged();
   ok(eq(bare.get(P).fallbackProviders, [ds.id, ds2.id]) && eq(bare.get(P2).fallbackProviders, [ds2.id]), 'with NO provider store wired nothing is pruned (every record would read as gone)', { p: bare.get(P).fallbackProviders, p2: bare.get(P2).fallbackProviders });
   am.providersChanged();
-  const reread = wireAm(AccountManager);
+  const reread = wireAm(AccountManager); await quiet('after §2\'s reread');
   ok(eq(am.get(P).fallbackProviders, [ds.id]) && !('fallbackProviders' in am.get(P2)) && eq(reread.get(P).fallbackProviders, [ds.id]) && !('fallbackProviders' in reread.get(P2)),
     'the removed provider leaves EVERY pool\'s list (the field goes where none is left) — on disk too', { p: am.get(P).fallbackProviders, p2: am.get(P2).fallbackProviders });
   // ONE PRUNE AT A START (round wokm0ktwv (2)): a crash between the removal's two files leaves a pool naming a gone provider on disk —
@@ -144,6 +157,32 @@ console.log('— §2 a provider removed leaves every pool\'s list in the same ac
   await store.remove(crash.id);   // the provider's file written … and the hub dies before providersChanged
   const boot = wireAm(AccountManager);
   ok(eq(boot.get(P).fallbackProviders, [ds.id]) && eq(wireAm(AccountManager).get(P).fallbackProviders, [ds.id]), 'a crash between the removal\'s two writes: the next START (the store\'s lookup wired) prunes the gone provider — on disk too', boot.get(P).fallbackProviders);
+  await quiet('after the crash scene\'s two starts');
+  // (r4262) THE PLACED LANDING — the crash scene's red made on demand, on a folder of its own: a STALE manager (its pool with no list)
+  // whose first display landing is HELD (its file door gated); the cure's order — every live manager's landings settled BEFORE the
+  // scene writes — reads the scene's list; the wait cut — the landing let go AFTER the writes — reads the stale manager's whole state
+  const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
+  const placedLanding = async (waitFirst) => {
+    const D = scratchDir('pool-fallback-landing-' + (waitFirst ? 'wait' : 'cut'));
+    const own = wireAm(AccountManager, D);
+    const X = own.createSubscription({ name: 'Held' }).id; login(own, X);
+    const Q = own.createPool({ name: 'Held pool', members: [X] }).id;
+    let open; const gate = new Promise((r) => { open = r; }); const real = new SafeFs({ poolSize: 1, name: 'held-landing' });
+    const stale = new AccountManager({ dataDir: D, safeFs: { call: async (...a) => { await gate; return real.call(...a); } } });   // its pool: no list; its row: no tie yet
+    stale.setProviderLookup((a) => store.forAccount(a));
+    await own.displaySettled();   // the owner's own first landing (its own seed saved)
+    const gone = (await store.add({ preset: 'deepseek', key: KEY, label: 'Placed away' })).provider;
+    if (waitFirst) { open(); await stale.displaySettled(); }   // THE CURE's ORDER
+    own.updatePool(Q, { fallbackProviders: [ds.id, gone.id] });
+    await store.remove(gone.id);   // the provider's file written … and the hub dies before providersChanged
+    if (!waitFirst) { open(); await stale.displaySettled(); }   // the wait cut: the stale landing lands AFTER the scene's writes
+    const fb = wireAm(AccountManager, D).get(Q).fallbackProviders;
+    try { real.close?.(); } catch { }
+    return fb;
+  };
+  const withWait = await placedLanding(true), cut = await placedLanding(false);
+  ok(eq(withWait, [ds.id]), '(r4262) THE PLACED LANDING, the cure\'s order: a stale manager\'s HELD first landing settled BEFORE the scene writes — the next start reads the scene\'s list, the gone provider pruned', withWait);
+  ok(cut === undefined, 'CONTROL (r4262, placed): the same held landing let go AFTER the scene\'s writes (the wait cut) — the stale manager\'s whole-state save lands over the scene\'s file and the next start reads NO list: the box zone\'s red, made on demand', { cut });
   am.updatePool(P, { fallbackProviders: [ds.id] });
   const AUR = read('src/server/account-usage-routes.js'), PR = read('src/routes/providers.js');
   ok(AUR.includes("if (typeof accounts.providersChanged === 'function') accounts.providersChanged();") && PR.includes("const r = await providers.remove(String(req.params.id)") && PR.includes("    changed('remove', r.id);")
