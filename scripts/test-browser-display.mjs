@@ -254,7 +254,7 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
     // sweep over a stand-in paint watch on ONE idle hidden-window browser, the setting unset / '' / false / true. A default
     // never rewrites a stored value: explicitly false stays off.
     const NOW_I = Date.parse('2026-10-20T12:00:00Z'); let idleSeq = 0;
-    const idleSweep = async (Kmod, stored, facts = {}) => {
+    const idleSweep = async (Kmod, stored, facts = {}, { viewers = 0 } = {}) => {
       const root = path.join(ROOT, `idle-default-${++idleSeq}`), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
       (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-000000c1', label: 'IDLE', dir: path.join(root, 'prof'), createdAt: NOW_I - 3600e3 }],
         browsers: { 'bp-000000c1': { profileId: 'bp-000000c1', ns: 'vs-bp-000000c1', state: 'ready', pid: null, hostId: null, external: false, display: { headed: true, fallback: { rung: 'hidden-window' } } } } }));
@@ -262,7 +262,9 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
       const kk = Kmod.create({ dataDir, homeDir: root, env: () => ({ PATH: path.join(root, 'nobin'), HOME: root }), install: false, log: quiet, now: () => NOW_I, tickMs: 3600e3,
         serverSetting: (k) => (k === 'browser.idlePaintFreeze' ? stored : undefined), daemonTable: async () => [] });
       kk.setPaintWatch({ paintFacts: () => ({ lastVerbAt: NOW_I - 600000, busy: false, frozen: false, ...facts }),
-        freezePaint: async (pid) => { acts.push(`freeze ${pid}`); return { ok: true, tabs: 1 }; }, thawPaint: async (pid) => { acts.push(`thaw ${pid}`); return { ok: true }; } });
+        freezePaint: async (pid) => { acts.push(`freeze ${pid}`); return { ok: true, tabs: 1 }; }, thawPaint: async (pid) => { acts.push(`thaw ${pid}`); return { ok: true }; },
+        retryOwedShows: async (pid) => { acts.push(`retry ${pid}`); return { ok: true }; } });
+      if (viewers) kk.noteViewers('vs-bp-000000c1', 'bp-000000c1', viewers);   // r4176 (b): a person watching
       const seen = !!kk.profile('bp-000000c1'); await kk.sweepIdlePaint(NOW_I); kk.shutdown();
       return seen ? acts.join(',') : 'no profile';
     };
@@ -275,6 +277,14 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
     const P = BI.IDLE_PAINT_PROOF.fleet;
     ok(P && P.image === 'vibespace:3.7.0' && /^\d{4}-\d\d-\d\d$/.test(P.measured) && P.dashboard.gpu > 50 && P.dashboard.frozenGpu === 0 && P.light.frozenGpu === 0 && P.dashboard.frozenFrames10s === 0 && P.dashboard.resumeMs < 100 && P.light.resumeMs < 100 && P.dashboard.fpsAfter === 60,
       'lane idle-paint-default-on: the default\'s reason is dated beside it — the fleet image: a dashboard\'s GPU process 99.8 % → frozen 0 %, 0 frames; back in 31–43 ms at 60 fps', P);
+    // r4176 (b): while a viewer watches, the sweep asks the watch to try the failed shows again (owedShows) — never without a viewer, never
+    // when nothing is owed; RED: the keeper without that branch (the person waits for the agent's next verb)
+    const RETRY_LINE = "        else if (vw.n > 0 && f.owedShows > 0 && typeof paintWatch.retryOwedShows === 'function') await paintWatch.retryOwedShows(rec.profileId);";
+    const rtry = (x) => x.split(',').includes('retry bp-000000c1');
+    const rw = { watched: await idleSweep(K0, true, { owedShows: 1 }, { viewers: 1 }), alone: await idleSweep(K0, true, { owedShows: 1, lastVerbAt: NOW_I - 5000 }), none: await idleSweep(K0, true, {}, { viewers: 1 }) };
+    ok(ksrc0.includes(RETRY_LINE) && rtry(rw.watched) && !rtry(rw.alone) && !rtry(rw.none), 'r4176 (b): a viewer watching a browser with a failed show owed ⇒ the sweep asks retryOwedShows; no viewer, or nothing owed ⇒ never', rw);
+    const Knr = ksrc0.includes(RETRY_LINE) ? MI.load('src/server/browser-keeper.js', editAnchor(ksrc0, RETRY_LINE, '', 'src/server/browser-keeper.js'), 'r4176-no-retry') : null;
+    if (Knr) { const rc = await idleSweep(Knr, true, { owedShows: 1 }, { viewers: 1 }); ok(!rtry(rc), 'CONTROL (3ae970836: the sweep never retries a failed show): the person watching waits for the agent\'s next verb — RED', rc); }
     const ksrc1 = ksrc0, readLine = "setting('browser.idlePaintFreeze', BIdle.IDLE_PAINT_DEFAULT) === true";
     const Klit = MI.load('src/server/browser-keeper.js', ksrc1.replace(readLine, "setting('browser.idlePaintFreeze', false) === true"), 'literal-default');
     const c = { unset: await idleSweep(Klit, undefined), on: await idleSweep(Klit, true) };

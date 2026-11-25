@@ -120,7 +120,7 @@ let BIm = null;
 const BI = () => BIm || (BIm = require('../browser-idle.js'));
 const FLIP_RECHECK_MS = 60 * 1000;   // r4058: an UNREAD flip-tab birth is asked again at the first freeze this long after
 const FLIP_LATE_MS = 60 * 1000;      // r4058 (1): a flip create with no reply owes its late tab's close this long
-const SHOW_TRIES = 3;                // r4095 (3): a frozen front whose show failed is shown again at the next thaws — this many in a row at most
+const SHOW_TRIES = 3;                // r4176: a frozen front whose flip tab lands in ANOTHER window is tried this many thaws in a row, then left
 const PROMPT_FY_KEY = 'prompt-auth:'; // B-ebb7: a sign-in's For-you item is keyed — a past hub life's open ones are swept when a watch starts
 const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
 const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
@@ -178,6 +178,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, pageAnswerMs = ST.PAGE_ANSWER_MS, closeGoneMs = 2000 /* lane browser-shared-profile-freeze */, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null, rearmMs = REARM_MS /* lane passkey-browse-yourself */,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
+  boundScale = 1, // r4176 (c): a fast gate's seam — every call bound of this watch × this, so a leg judges the product's own lines in milliseconds
   passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, drainMs = PK_DRAIN_MS /* r6; r7: the slow mark */, holdBeatMs = PK_HOLD_BEAT_MS, holdMaxMs = PK_HOLD_MAX_MS /* r7 */, leftMax = 3 /* B-97ae round 2: per browser, the leftover items past which ONE counts the rest */, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
   logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines */, conversationOf = null /* lane browser-login: sessionId → {cid, name} */,
   liveFillMaxMs = 10 * 60 * 1000 /* ceiling before an un-navigated live-fill fence wipes inputs and lifts */,
@@ -380,7 +381,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return new Promise((resolve) => {
       if (!w.ws || w.ws.readyState !== 1) return resolve({ error: { message: 'the watch is not connected' } });
       const id = ++w.id;
-      const t = setTimeout(() => { if (w.waiting.delete(id)) resolve({ timeout: true }); }, timeoutMs);
+      const t = setTimeout(() => { if (w.waiting.delete(id)) resolve({ timeout: true }); }, timeoutMs * boundScale);
       if (t.unref) t.unref();
       w.waiting.set(id, (m) => { clearTimeout(t); resolve(m); });
       try { w.ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); } catch (e) { w.waiting.delete(id); clearTimeout(t); resolve({ error: { message: String(e && e.message) } }); }
@@ -530,7 +531,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // r4058 (1): a create whose reply came after its bound left its tab open — born at the flip address while no flip runs and a late
     // flip is owed, it is the hub's own: closed by its id when its event arrives (the address read last: the idle module is required
     // only while a late flip is owed — a suite's copy of this file in a folder of its own has none, test-browser-passkey's mutant)
-    if (!w.flipping && w.flipLate && w.flipLate.n > 0 && now() < w.flipLate.until && !info.openerId && String(info.url || '') === BI().FLIP_TAB_URL) { w.flipLate.n -= 1; closeLateFlip(w, String(info.targetId)); return Promise.resolve(); }
+    if (!w.flipping && w.flipLate && w.flipLate.n > 0 && now() < w.flipLate.until && !info.openerId && !(w.flipMade && w.flipMade.has(String(info.targetId))) && String(info.url || '') === BI().FLIP_TAB_URL) { w.flipLate.n -= 1; closeLateFlip(w, String(info.targetId)); return Promise.resolve(); }
     if (w.flipping) { if (!w.flipBirths) w.flipBirths = new Map(); const tb = String(info.targetId); if (!w.flipBirths.has(tb) && w.flipBirths.size < 64) w.flipBirths.set(tb, String(info.url == null ? '' : info.url)); }
     if (w.flipping && !info.openerId && (/^(about:blank)?$/.test(String(info.url || '')) || String(info.url || '') === BI().FLIP_TAB_URL)) return Promise.resolve();
     if (!w.kernel && w.mode !== 'person') decideAhead(w, info.browserContextId || null); // acceptance r1: never on the person's watch (Chrome asks him, his saved grants stand) // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
@@ -1105,7 +1106,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // (a verb of any holder still RUNNING on this browser is busy: the idle stop never freezes a page under a verb — an agent's
     // feedback 2026-11-18: a fresh profile's first open of a large web app froze 30 s after its verb STARTED and waited out the
     // verb's own timeout, ~2 min, with nothing said; the next verb's thaw recovered it at once)
-    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing || verbRunningOn(profileId), frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, flipTaken: w.flipTaken || null, frontUnread: w.frontUnread ? w.frontUnread.passes : 0, thawUnread: w.thawUnread ? w.thawUnread.tabs : 0, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
+    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing || verbRunningOn(profileId), frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, flipTaken: w.flipTaken || null, frontUnread: w.frontUnread ? w.frontUnread.passes : 0, thawUnread: w.thawUnread ? w.thawUnread.tabs : 0, owedShows: w.showOwed ? [...w.showOwed].filter((tid) => w.hiddenFronts && w.hiddenFronts.has(tid)).length : 0, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
   }
   /** Every tab of the browser FROZEN (measured: the only act that stops an Xvfb window drawing — IDLE_PAINT_PROOF). The tabs
    *  in front are remembered: a frozen page is hidden, and only its tab strip shows it again (thawPaint). */
@@ -1142,7 +1143,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
     w.frontWin = new Map([...[...(w.frontWin || new Map())].filter(([tid]) => owed.includes(tid)), ...wins]);
     w.paint = 'frozen'; w.fronts = fronts; w.hiddenFronts = new Set([...owed, ...fronts]); w.frozenAt = now(); w.frontUnread = null;
-    for (const e of tabs) await settle(call(w, 'Page.setWebLifecycleState', { state: 'frozen' }, e.sid, 1000));
+    // r4176 (the round's should): the freeze's lifecycle calls at once too, each its own bound; the show marks of tabs gone are dropped
+    await Promise.all(tabs.map((e) => settle(call(w, 'Page.setWebLifecycleState', { state: 'frozen' }, e.sid, 1000))));
+    for (const m of [w.showOwed, w.otherWin]) if (m) for (const tid of [...m.keys()]) if (!w.targets.has(tid)) m.delete(tid);
     return { ok: true, tabs: tabs.length, fronts: fronts.length };
   }
   /** Undo freezePaint BEFORE a verb runs / when a live view attaches: every tab active again (a hidden page then still draws
@@ -1175,7 +1178,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         // every tab answered (a tab left frozen under an «active» watch had nothing to thaw it: a verb's thaw found nothing to do). Until
         // then it stays «frozen», said once: this thaw still shows the fronts, and the next thaw (a verb, a viewer, the sweep) asks again
         let unthawed = 0;
-        if (w.paint === 'frozen') { const ts = [...w.targets.values()].filter((e) => e.sid); const ar = await Promise.all(ts.map((e) => settle(call(w, 'Page.setWebLifecycleState', { state: 'active' }, e.sid, 1000)))); unthawed = ar.filter((m) => !cdpReplied(m)).length; if (unthawed) thawUnread(w, unthawed); else { w.paint = 'active'; w.thawedAt = now(); w.thawUnread = null; } }
+        // r4176 (a): while a tab has not answered, the next thaw asks ONLY the tabs that did not (a verb no longer waits out every tab's bound)
+        if (w.paint === 'frozen') { const ts = [...w.targets.values()].filter((e) => e.sid && (!w.unthawed || w.unthawed.has(e.targetId))); const ar = await Promise.all(ts.map((e) => settle(call(w, 'Page.setWebLifecycleState', { state: 'active' }, e.sid, 1000)))); const left = ts.filter((e, i) => !cdpReplied(ar[i])).map((e) => e.targetId); unthawed = left.length; if (unthawed) { w.unthawed = new Set(left); thawUnread(w, unthawed); } else { w.unthawed = null; w.paint = 'active'; w.thawedAt = now(); w.thawUnread = null; } }
         // B-1626 cure 3 (its readers): the stamp is never trusted alone — a mediated lease keeps a previous run's windowId, and a
         // window id is a small number per Chrome run (it can name ANOTHER holder's window now). The window is the holder's only
         // while a tab the keeper names the holder's (its scope: its root, its witnessed tabs) sits in it at this thaw
@@ -1191,15 +1195,39 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             for (const tid of byWindow) if (w.targets.has(tid) && fw.get(tid) === ownWin) need.push(tid);
           }
         }
-        // r4095 (3): a front is forgotten once it IS shown, or its tab is gone — a show that failed (no flip tab, the front's last
-        // activation unanswered, its window or the flip tab's unread, the flip tab in another window) keeps it owed: the next thaw shows
-        // it. SHOW_TRIES failed shows in a row (a front in a popup window: Chrome puts every flip tab in a normal window) and it is left
-        // as it is, said once a watch — never a flip and a journal line at every verb
-        const shown = [], failed = [];
-        for (const tid of need) { const s = w.targets.has(tid) ? await showFront(w, tid) : null; if (s && s.failed) { failed.push(s); if (showFailed(w, tid, s.failed)) continue; } else if (s) shown.push(s); w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.showFails) w.showFails.delete(tid); }
-        return { ok: true, thawed: true, shown, ...(failed.length ? { failed } : {}), ...(unthawed ? { unthawed } : {}) };
+        return { ok: true, thawed: true, ...(await showNeed(w, need)), ...(unthawed ? { unthawed } : {}) };
       } finally { w.fronts = []; w.thawing = null; }
     })();
+    return w.thawing;
+  }
+  /** Show each front of `need` again. r4095 (3): a front is forgotten once it IS shown, or its tab is gone — a show that failed (no flip
+   *  tab, the front's last activation unanswered, its window or the flip tab's unread, the flip tab in another window) keeps it owed
+   *  and the next thaw shows it, with NO cap (主开发 r4176: it ends when it is shown or its tab is gone) — but for the ONE reason the hub
+   *  measures itself at that show: the flip tab landed in ANOTHER window than the front's, both known (a front in a popup window, as
+   *  the measure shows it). SHOW_TRIES of that in a row for one front and it is left as it is, said once a watch. A front whose earlier
+   *  show failed is read first (r4176, the round's should): «visible» ⇒ that show did happen — forgotten, never flipped again. */
+  async function showNeed(w, need) {
+    const shown = [], failed = [], already = [];
+    for (const tid of need) {
+      if (w.targets.has(tid) && w.showOwed && w.showOwed.has(tid) && (await visibilityOf(w, tid)) === 'visible') { already.push(tid); forgetFront(w, tid); continue; }
+      const s = w.targets.has(tid) ? await showFront(w, tid) : null;
+      if (s && s.failed) { failed.push(s); if (showFailed(w, tid, s.failed)) continue; } else if (s) shown.push(s);
+      forgetFront(w, tid);
+    }
+    return { shown, ...(failed.length ? { failed } : {}), ...(already.length ? { already } : {}) };
+  }
+  function forgetFront(w, tid) { if (w.hiddenFronts) w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.showOwed) w.showOwed.delete(tid); if (w.otherWin) w.otherWin.delete(tid); }
+  /** A tab's document.visibilityState, its own bound; undefined = unread. */
+  async function visibilityOf(w, tid) { const e = w.targets.get(tid); if (!e || !e.sid) return undefined; const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); return v && v.result && v.result.result ? v.result.result.value : undefined; }
+  /** r4176 (b): a person watching a front whose show failed does not wait for the agent's next verb — while a viewer is there the
+   *  keeper's sweep asks this: the owed shows (those that failed) are tried again, nothing else (another holder's front stays owed). */
+  function retryOwedShows(profileId) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open' || w.paint === 'frozen' || w.thawing || !w.showOwed || !w.showOwed.size) return Promise.resolve({ ok: true, shown: [] });
+    const need = [...w.showOwed].filter((tid) => w.hiddenFronts && w.hiddenFronts.has(tid));
+    for (const tid of [...w.showOwed]) if (!need.includes(tid)) w.showOwed.delete(tid);
+    if (!need.length) return Promise.resolve({ ok: true, shown: [] });
+    w.thawing = (async () => { try { return { ok: true, retried: need.length, ...(await showNeed(w, need)) }; } finally { w.thawing = null; } })();
     return w.thawing;
   }
   /** The CDP window a tab sits in (Browser.getWindowForTarget), null when Chrome does not say. */
@@ -1241,13 +1269,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w.thawUnread) { try { log.warn?.(`[browser-dialogs] ${w.profileId}: [idle_paint_thaw_unread] ${n} tab(s) did not answer the thaw — still marked frozen; the next verb, viewer or sweep asks again, said once until every tab answers`); } catch { /* */ } }
     w.thawUnread = { tabs: n };
   }
-  /** r4095 (3): a front whose show failed stays owed (true) — until SHOW_TRIES failed shows in a row: then it is left as it is (false),
-   *  said once a watch by its code (the reason, never an address or a title). */
+  /** r4095 (3) / r4176: a front whose show failed stays owed (true), whatever the reason — but SHOW_TRIES shows in a row whose flip tab
+   *  landed in ANOTHER window (measured at the show, both windows known) leave it as it is (false), said once a watch by its code. */
   function showFailed(w, tid, why) {
-    if (!w.showFails) w.showFails = new Map();
-    const n = (w.showFails.get(tid) || 0) + 1;
-    if (n < SHOW_TRIES) { w.showFails.set(tid, n); return true; }
-    if (!w.showGaveUp) { w.showGaveUp = true; try { log.warn?.(`[browser-dialogs] ${w.profileId}: [idle_paint_show_failed] a frozen front could not be shown again in ${SHOW_TRIES} thaws in a row (${why}) — left as it is; said once`); } catch { /* */ } }
+    if (!w.showOwed) w.showOwed = new Set();
+    if (!w.otherWin) w.otherWin = new Map();
+    if (why !== 'another window') { w.showOwed.add(tid); w.otherWin.delete(tid); return true; }
+    const n = (w.otherWin.get(tid) || 0) + 1;
+    if (n < SHOW_TRIES) { w.showOwed.add(tid); w.otherWin.set(tid, n); return true; }
+    if (!w.showGaveUp) { w.showGaveUp = true; try { log.warn?.(`[browser-dialogs] ${w.profileId}: [idle_paint_show_failed] a frozen front's flip tab landed in another window ${SHOW_TRIES} thaws in a row — left as it is; said once`); } catch { /* */ } }
     return false;
   }
   /** A CDP call Chrome answered (a result, or its own error reply) — not a timeout, not a watch that is down. */
@@ -1257,10 +1287,32 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function noteLateFlip(w) {
     const was = w.flipLate && now() < w.flipLate.until ? w.flipLate.n : 0;
     w.flipLate = { n: Math.min(8, was + 1), until: now() + FLIP_LATE_MS };
-    for (const [tid, u] of [...(w.flipBirths || new Map())]) if (u === BI().FLIP_TAB_URL && w.flipLate.n > 0) { w.flipLate.n -= 1; w.flipBirths.delete(tid); closeLateFlip(w, tid); }
+    closeLateBirths(w);
+  }
+  /** Every birth still at the flip address that no flip of this watch made, while a late flip is owed: the hub's own late tab —
+   *  closed by its id (r4058 (1)). */
+  function closeLateBirths(w) {
+    if (!w.flipLate || !(w.flipLate.n > 0) || now() >= w.flipLate.until || !w.flipBirths) return;
+    for (const [tid, u] of [...w.flipBirths]) if (w.flipLate.n > 0 && !(w.flipMade && w.flipMade.has(tid)) && u === BI().FLIP_TAB_URL) { w.flipLate.n -= 1; w.flipBirths.delete(tid); closeLateFlip(w, tid); }
+  }
+  /** A flip ends. r4176 (its must): a late birth can arrive WHILE a flip runs (Chrome answers in order: a create's birth before the
+   *  reply to the next call) — kept in the births, never closed by track. So when the count reaches zero and a late flip is owed,
+   *  every birth still at the flip address is closed by its id BEFORE the births are cleared. */
+  function flipEnd(w) {
+    w.flipping -= 1;
+    if (w.flipping) return;
+    closeLateBirths(w);   // r4176: before the clear
+    if (w.flipBirths) w.flipBirths.clear();
+  }
+  /** The ids this watch's own flips made (the last 16): never taken for a late tab. */
+  function madeFlip(w, id) {
+    if (!id) return;
+    if (!w.flipMade) w.flipMade = new Set();
+    w.flipMade.add(String(id));
+    if (w.flipMade.size > 16) w.flipMade.delete(w.flipMade.values().next().value);
   }
   /** The flip's own birth: read and claimed; a create with no reply within its bound owes a late flip (r4058 (1)). */
-  async function flipBorn(w, b, bid) { if (bid) { await flipBirthLeft(w, bid); if (w.flipBirths) w.flipBirths.delete(String(bid)); } else if (b && b.timeout) noteLateFlip(w); }
+  async function flipBorn(w, b, bid) { if (bid) { madeFlip(w, bid); await flipBirthLeft(w, bid); if (w.flipBirths) w.flipBirths.delete(String(bid)); } else if (b && b.timeout) noteLateFlip(w); }
   function closeLateFlip(w, tid) { w.flipLateClosed = (w.flipLateClosed || 0) + 1; settle(call(w, 'Target.closeTarget', { targetId: tid }, null, 2000)); }
   /** Before a browser's FIRST freeze: the flip tab born once in a window of its own (unfocused: no window's front moves), its birth
    *  address read, the tab closed. false ⇒ flipTaken: the browser is never frozen. */
@@ -1275,6 +1327,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     try {
       const c = await settle(call(w, 'Target.createTarget', { url: BI().FLIP_TAB_URL, newWindow: true, focus: false }, null, 2000));
       id = c && c.result && c.result.targetId ? c.result.targetId : null;
+      madeFlip(w, id);
       if (!id) { if (c && c.timeout) noteLateFlip(w); flipTaken(w, null); return false; }
       const left = await flipBirthLeft(w, id);   // its birth read first, then claimed
       if (w.flipBirths) w.flipBirths.delete(String(id));
@@ -1283,7 +1336,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return true;
     } finally {
       if (id) await settle(call(w, 'Target.closeTarget', { targetId: id }, null, 2000));
-      w.flipping -= 1; if (!w.flipping && w.flipBirths) w.flipBirths.clear();
+      flipEnd(w);
     }
   }
   async function showFront(w, tid) {
@@ -1302,7 +1355,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (bid && want != null && got != null && got !== want) { try { log.warn?.(`[browser-dialogs] ${w.profileId}: the idle-paint thaw's blank tab opened in window ${got}, not the tab's window ${want} — closed at once`); } catch { /* */ } }
       const failed = !bid ? 'no flip tab' : !cdpReplied(back) ? 'activation unanswered' : want == null || got == null ? 'window unread' : got !== want ? 'another window' : null;
       return { targetId: tid, window: want, blankIn: got, ...(failed ? { failed } : {}) };
-    } finally { w.flipping -= 1; if (!w.flipping && w.flipBirths) w.flipBirths.clear(); }
+    } finally { flipEnd(w); }
   }
 
   // ── which conversation a tab's dialog is for ──
@@ -5777,6 +5830,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     passkeysHeld: () => { if (pks) pkRead(); return pkHeldFacts(); }, _passkeyHold: pkStoreHold, // r3261: the store's hold, asked by the keeper (a profile's removal) and the digest; the suite's read again
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
+    retryOwedShows, // r4176 (b): the idle-paint thaw's failed shows tried again — the keeper's sweep asks it while a viewer watches
     personWindows, personPromptStateOf, // B-b56d (the owner's ruling B, 2026-11-18): the person's own windows hook a sign-in; what they say beside it
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
     answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block

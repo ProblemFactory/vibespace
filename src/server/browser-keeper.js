@@ -6567,6 +6567,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       try {
         if (v.act === 'freeze') { const r = await paintWatch.freezePaint(rec.profileId); if (r && r.ok) log.info?.(`[browser] ${rec.profileId}: nobody watches or drives it for ${Math.round(BIdle.IDLE_PAINT_MS / 1000)} s — its ${r.tabs} tab(s) stop drawing until the next verb or viewer`); }
         else if (v.act === 'thaw') await paintWatch.thawPaint(rec.profileId);
+        else if (vw.n > 0 && f.owedShows > 0 && typeof paintWatch.retryOwedShows === 'function') await paintWatch.retryOwedShows(rec.profileId); // r4176 (b): a viewer watching a front whose show failed — tried again now, not at the agent's next verb
       } catch (e) { log.warn?.(`[browser] ${rec.profileId}: idle paint ${v.act} failed: ${e && e.message}`); }
     }
   }

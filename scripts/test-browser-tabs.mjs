@@ -758,9 +758,9 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   //     root (A's blank, B's blank) — A's page by no witness and no grant. The thaw must still show A's page, and only A's
   const TA0 = T(0x80), TA = T(0x81), TB = T(0x82), TB0 = T(0x83);
   const { WebSocketServer: WSS } = require('ws');
-  const standIn = async ({ report = null, delayCreate = null, lateEvent = null, silent = null, failCreate = null } = {}) => {
+  const standIn = async ({ report = null, delayCreate = null, lateEvent = null, silent = null, failCreate = null, holdBack = false, flipWin = null, blindMade = null } = {}) => {
     const winOf = new Map([[TA0, 1], [TA, 1], [TB, 2], [TB0, 2]]), vis = new Map([[TA0, 'hidden'], [TA, 'visible'], [TB, 'visible'], [TB0, 'hidden']]);
-    const st = { last: null, acts: [], made: [], blind: new Set(), creates: [], urls: new Map(), muteVis: new Set(), closed: [], muteAct: new Set(), life: new Map(), visAt: [] }; // blind: the tabs whose window read gets no answer (a busy Chrome)
+    const st = { last: null, acts: [], made: [], blind: new Set(), creates: [], urls: new Map(), muteVis: new Set(), closed: [], muteAct: new Set(), life: new Map(), visAt: [], hid: new Set(), flipOf: new Map(), actAsks: new Map(), pendingLate: 0, heldActs: [] }; // blind: the tabs whose window read gets no answer (a busy Chrome)
     const wss = new WSS({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss.once('listening', r));
     wss.on('connection', (sock) => sock.on('message', (raw) => {
       let m; try { m = JSON.parse(String(raw)); } catch { return; }
@@ -769,20 +769,22 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       if (m.method === 'Target.attachToTarget') return re({ sessionId: 'S' + p.targetId });
       if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') st.visAt.push(Date.now());   // r4095 (2): when each read arrived
       if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState' && st.muteVis.has(String(m.sessionId || '').slice(1))) return;   // r4088: a loaded Chrome — this read never answers
-      if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') return re({ result: { type: 'string', value: vis.get(String(m.sessionId || '').slice(1)) || 'hidden' } });
+      // r4176: a frozen tab reads hidden until a flip in its own window shows it (the thaw's own measured note: «active» alone leaves it hidden)
+      if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') { const tb = String(m.sessionId || '').slice(1); return re({ result: { type: 'string', value: st.hid.has(tb) ? 'hidden' : vis.get(tb) || 'hidden' } }); }
       if (m.method === 'Browser.getWindowForTarget') return st.blind.has(p.targetId) ? re({}) : re({ windowId: winOf.has(p.targetId) ? winOf.get(p.targetId) : null });
-      if (m.method === 'Target.activateTarget') { st.last = p.targetId; st.acts.push(p.targetId); return re({}); }
+      // r4176 (the must's order): `holdBack` holds an activation's reply while a late create is pending — until just after its birth
+      if (m.method === 'Target.activateTarget') { st.last = p.targetId; st.acts.push(p.targetId); if (holdBack && st.pendingLate > 0) { st.heldN = (st.heldN || 0) + 1; st.heldActs.push(() => re({})); return; } return re({}); }
       // r4095 (3): each tab's lifecycle as Chrome applied it; an activation of a tab in `muteAct` never answers (and is not applied);
       // a create `failCreate` names answers Chrome's own error (no tab made)
-      if (m.method === 'Page.setWebLifecycleState') { const tb = String(m.sessionId || '').slice(1); if (p.state === 'active' && st.muteAct.has(tb)) return; st.life.set(tb, p.state); return re({}); }
+      if (m.method === 'Page.setWebLifecycleState') { const tb = String(m.sessionId || '').slice(1); if (p.state === 'active') st.actAsks.set(tb, (st.actAsks.get(tb) || 0) + 1); if (p.state === 'active' && st.muteAct.has(tb)) return; st.life.set(tb, p.state); if (p.state === 'frozen') st.hid.add(tb); return re({}); }
       if (m.method === 'Target.createTarget' && failCreate && failCreate(st.creates.length + 1)) { st.creates.push({ url: String(p.url == null ? '' : p.url), newWindow: !!p.newWindow, focus: p.focus, failed: true }); try { sock.send(JSON.stringify({ id: m.id, error: { code: -32000, message: 'Failed to open a new tab' } })); } catch { /* closed */ } return; }
       // rows B-98f5 / B-bcf8: every create recorded with its address; its BIRTH event sent first (as Chrome does), at the address
       // the leg makes Chrome report (`report`: another browser family, a policy, a later build), and Target.getTargetInfo answers it
-      if (m.method === 'Target.createTarget') { const id = 'BLANK' + (st.made.length + 1); st.made.push(id); winOf.set(id, winOf.get(st.last)); const url = String(p.url == null ? '' : p.url); st.creates.push({ url, newWindow: !!p.newWindow, focus: p.focus }); const n = st.creates.length, born = report ? report(url, n) : url, mute = !!(silent && silent(n)), delay = delayCreate ? delayCreate(n) : 0, late = !!(lateEvent && lateEvent(n)); if (!mute) st.urls.set(id, born);
+      if (m.method === 'Target.createTarget') { const id = 'BLANK' + (st.made.length + 1); st.made.push(id); st.flipOf.set(id, st.last); winOf.set(id, flipWin && flipWin(st.made.length) != null ? flipWin(st.made.length) : winOf.get(st.last)); if (blindMade && blindMade(st.made.length)) st.blind.add(id); const url = String(p.url == null ? '' : p.url); st.creates.push({ url, newWindow: !!p.newWindow, focus: p.focus }); const n = st.creates.length, born = report ? report(url, n) : url, mute = !!(silent && silent(n)), delay = delayCreate ? delayCreate(n) : 0, late = !!(lateEvent && lateEvent(n)); if (!mute) st.urls.set(id, born);
         // r4058: a Chrome that answers a create after the watch's bound (`delayCreate`), its birth event at once or with the late reply (`lateEvent`), or never told (`silent`)
         const ev = () => { if (!mute) { try { sock.send(JSON.stringify({ method: 'Target.targetCreated', params: { targetInfo: { targetId: id, type: 'page', url: born, title: '', attached: false } } })); } catch { /* closed */ } } };
-        if (!late) ev(); if (delay) { setTimeout(() => { if (late) ev(); re({ targetId: id }); }, delay); return; } if (late) ev(); return re({ targetId: id }); }
-      if (m.method === 'Target.closeTarget') { st.closed.push(p.targetId); return re({}); }
+        if (!late) ev(); if (delay) { st.pendingLate += 1; setTimeout(() => { if (late) ev(); re({ targetId: id }); st.pendingLate -= 1; if (!st.pendingLate) for (const f of st.heldActs.splice(0)) f(); }, delay); return; } if (late) ev(); return re({ targetId: id }); }
+      if (m.method === 'Target.closeTarget') { st.closed.push(p.targetId); const f = st.flipOf.get(p.targetId); if (f != null && winOf.get(p.targetId) === winOf.get(f)) st.hid.delete(f); return re({}); }
       if (m.method === 'Target.getTargetInfo') return st.urls.has(p.targetId) ? re({ targetInfo: { targetId: p.targetId, type: 'page', url: st.urls.get(p.targetId) } }) : re({});
       return re({});
     }));
@@ -846,9 +848,9 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const FANCH = "      const b = await settle(call(w, 'Target.createTarget', { url: BI().FLIP_TAB_URL }, null, 2000));";
     if (!dsrc.includes(FANCH)) ok(false, 'the anchor of the control «the release\'s about:blank flip» is not in the source (src/server/browser-dialogs.js)');
     const DDf = dsrc.includes(FANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, FANCH, "      const b = await settle(call(w, 'Target.createTarget', { url: 'about:blank' }, null, 2000)); // the release: the blank a driver takes", 'src/server/browser-dialogs.js'), 'b98f5-blank-flip') : null;
-    const guardLeg = async (Dmod, report, { stand = {}, clock = null, settleMs = 0 } = {}) => {
+    const guardLeg = async (Dmod, report, { stand = {}, clock = null, settleMs = 0, bounds = 1 } = {}) => {
       const SI = await standIn({ report, ...stand }); const PID = 'bp-0000c23c'; const said = [];
-      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2, ...(clock ? { now: () => clock.t } : {}),
+      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2, boundScale: bounds, ...(clock ? { now: () => clock.t } : {}),
         tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) });
       try {
         await D.arm(PID, { budgetMs: 3000 });
@@ -859,7 +861,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
         if (clock) clock.t += 61 * 1000;   // r4058: past the unread verdict's re-ask
         const fz2 = opened ? await D.freezePaint(PID) : null;
         const f = D.paintFacts(PID);
-        return { opened, fz, th: th ? { thawed: !!th.thawed, shown: (th.shown || []).length } : null, fz2, flipTaken: f ? f.flipTaken : undefined, creates: SI.st.creates.slice(), made: SI.st.made.slice(), closed: SI.st.closed.slice(), said: said.filter((x) => x.includes('[idle_paint_flip_tab_taken]')) };
+        return { opened, fz, th: th ? { thawed: !!th.thawed, shown: (th.shown || []).length } : null, fz2, flipTaken: f ? f.flipTaken : undefined, creates: SI.st.creates.slice(), made: SI.st.made.slice(), closed: SI.st.closed.slice(), held: SI.st.heldN || 0, said: said.filter((x) => x.includes('[idle_paint_flip_tab_taken]')) };
       } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
     };
     const [g0, gc, g1, g2, g3] = await Promise.all([guardLeg(DD, null), DDf ? guardLeg(DDf, null) : Promise.resolve(null),
@@ -882,7 +884,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const DDv = dsrc.includes(FRONT_ANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, FRONT_ANCH, '    // ab1696c4c: an unanswered read is «not in front»', 'src/server/browser-dialogs.js'), 'b98f5-front-unread') : null;
     const frontLeg = async (Dmod) => {
       const SI = await standIn(); const PID = 'bp-0000c23e';
-      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 2,
+      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 2, boundScale: 0.3,
         tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) });
       const shownOf2 = (x) => (x && Array.isArray(x.shown) ? x.shown.map((s2) => s2.targetId) : []);
       try {
@@ -909,9 +911,18 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const LANCH = '      await flipBorn(w, b, bid);';
     if (!dsrc.includes(LANCH)) ok(false, 'the anchor of the control «the late flip tab left open» is not in the source (src/server/browser-dialogs.js)');
     const DDl = dsrc.includes(LANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, LANCH, '      if (bid) await flipBirthLeft(w, bid); // 363e3ae01: a create with no reply is dropped', 'src/server/browser-dialogs.js'), 'b98f5-late-flip') : null;
-    const lateLeg = (Dmod, lateEvent) => guardLeg(Dmod, null, { stand: { delayCreate: (n) => (n === 2 ? 2500 : 0), lateEvent: (n) => lateEvent && n === 2 }, settleMs: 1200 });
-    const [l1, l2, lc, u1] = await Promise.all([lateLeg(DD, false), lateLeg(DD, true), DDl ? lateLeg(DDl, true) : Promise.resolve(null),
-      guardLeg(DD, null, { stand: { silent: (n) => n === 1 }, clock: { t: 1795000000000 } })]);
+    const lateLeg = (Dmod, lateEvent, holdBack = false) => guardLeg(Dmod, null, { stand: { delayCreate: (n) => (n === 2 ? 900 : 0), lateEvent: (n) => lateEvent && n === 2, holdBack }, settleMs: 600, bounds: 0.3 });   // r4176 (c): the bounds × 0.3
+    // r4176 (its must, in the product's own order): the create held past its bound, its birth sent just before the late reply, and the
+    // stand-in holding the flip's «back» activation reply until after that birth — the birth arrives WHILE the flip runs; RED: the
+    // flip's end as it stood at 3ae970836 (the births cleared, a late one never closed)
+    const MANCH = '    closeLateBirths(w);   // r4176: before the clear';
+    if (!dsrc.includes(MANCH)) ok(false, 'the anchor of the control «the births cleared, a late one never closed» is not in the source (src/server/browser-dialogs.js)');
+    const DDm = dsrc.includes(MANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, MANCH, '    // 3ae970836: the births cleared, a late one never closed', 'src/server/browser-dialogs.js'), 'r4176-late-in-flip') : null;
+    const [l1, l2, lc, u1, l3, l3c] = await Promise.all([lateLeg(DD, false), lateLeg(DD, true), DDl ? lateLeg(DDl, true) : Promise.resolve(null),
+      guardLeg(DD, null, { stand: { silent: (n) => n === 1 }, clock: { t: 1795000000000 } }), lateLeg(DD, true, true), DDm ? lateLeg(DDm, true, true) : Promise.resolve(null)]);
+    ok(l3.held >= 1 && l3.closed.includes('BLANK2') && l3.said.length === 0,
+      'r4176 (its must): a late flip tab whose birth arrives WHILE the flip still runs (the «back» activation answered after it, as Chrome answers in order) is closed by its id at the flip\'s end, before the births are cleared', { held: l3.held, closed: l3.closed, made: l3.made });
+    if (DDm) ok(!!l3c && l3c.held >= 1 && !l3c.closed.includes('BLANK2'), 'CONTROL (3ae970836: the births cleared at the flip\'s end, a late one never closed): the tab stays open for the browser\'s life — RED', l3c && { held: l3c.held, closed: l3c.closed, made: l3c.made });
     ok(l1.closed.includes('BLANK2') && l2.closed.includes('BLANK2') && l1.said.length === 0 && l2.said.length === 0,
       'r4058 (1): a flip create Chrome answers AFTER the watch\'s bound leaves no tab open — the hub\'s own late flip tab is closed by its id, its birth seen during the flip or arriving after it', { l1: { closed: l1.closed, made: l1.made }, l2: { closed: l2.closed, made: l2.made } });
     if (DDl) ok(!!lc && !lc.closed.includes('BLANK2'), 'CONTROL (the unit as lined, 363e3ae01: a create with no reply is dropped): the late flip tab stays open — RED', lc && { closed: lc.closed, made: lc.made });
@@ -936,21 +947,21 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     //    thaw), and a front whose show failed stays owed (shown by the next thaw). RED: each line as it stood at 3623606d5 ──
     const VANCH = "    const vr = await Promise.all(tabs.map((e) => settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000))));";
     const SANCH = "    if (unread) frontUnread(w, unread);   // r4095 (2): said once a stretch — the browser's id and a count, never an address or a title";
-    const AANCH = "unthawed = ar.filter((m) => !cdpReplied(m)).length; if (unthawed) thawUnread(w, unthawed); else { w.paint = 'active'; w.thawedAt = now(); w.thawUnread = null; } }";
+    const AANCH = "if (unthawed) { w.unthawed = new Set(left); thawUnread(w, unthawed); } else { w.unthawed = null; w.paint = 'active'; w.thawedAt = now(); w.thawUnread = null; } }";
     const OANCH = 'if (s && s.failed) { failed.push(s); if (showFailed(w, tid, s.failed)) continue; } else if (s) shown.push(s);';
     for (const [a, n] of [[VANCH, 'the reads one after another'], [SANCH, 'front_unread never said'], [AANCH, '«active» whatever the replies'], [OANCH, 'a front forgotten before it is shown']]) if (!dsrc.includes(a)) ok(false, `the anchor of the control «${n}» is not in the source (src/server/browser-dialogs.js)`);
     const DDv2 = dsrc.includes(VANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, VANCH, "    const vr = []; for (const e of tabs) vr.push(await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000))); // 3623606d5: one after another", 'src/server/browser-dialogs.js'), 'r4095-reads-serial') : null;
     const DDs2 = dsrc.includes(SANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, SANCH, '    // 3623606d5: never said', 'src/server/browser-dialogs.js'), 'r4095-never-said') : null;
-    const DDa2 = dsrc.includes(AANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, AANCH, "unthawed = 0; w.paint = 'active'; w.thawedAt = now(); } // 3623606d5: «active» whatever the replies", 'src/server/browser-dialogs.js'), 'r4095-active-anyway') : null;
+    const DDa2 = dsrc.includes(AANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, AANCH, "w.unthawed = null; w.paint = 'active'; w.thawedAt = now(); } // 3623606d5: «active» whatever the replies", 'src/server/browser-dialogs.js'), 'r4095-active-anyway') : null;
     const DDo2 = dsrc.includes(OANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, OANCH, 'if (s) shown.push(s); /* 3623606d5: forgotten before it is shown */', 'src/server/browser-dialogs.js'), 'r4095-forgot-first') : null;
-    const mkD = (Dmod, SI, said) => Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2,
+    const mkD = (Dmod, SI, said, bounds = 1) => Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2, boundScale: bounds,
       tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) });
     const ids2 = (x) => (x && Array.isArray(x.shown) ? x.shown.map((s2) => s2.targetId) : null);
     const hA2 = (PID) => ({ ...H.a, profileId: PID });
     // (2) TWO tabs that never answer (A's front and B's): refused twice, said once, the reads at once; then a freeze, a thaw — and a
     //     new stretch is said again
     const sayLeg = async (Dmod) => {
-      const SI = await standIn(); const PID = 'bp-0000c23f'; const said = []; const D = mkD(Dmod, SI, said);
+      const SI = await standIn(); const PID = 'bp-0000c23f'; const said = []; const D = mkD(Dmod, SI, said, 0.3);   // r4176 (c): the bounds × 0.3 (a read 300 ms)
       try {
         await D.arm(PID, { budgetMs: 3000 });
         const opened = await until(() => !!D.paintFacts(PID), 3000);
@@ -968,7 +979,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     };
     // (3) A's activation does not answer at the thaw, then answers: the watch stays «frozen» and the next thaw thaws it
     const actLeg = async (Dmod) => {
-      const SI = await standIn(); const PID = 'bp-0000c240'; const said = []; const D = mkD(Dmod, SI, said);
+      const SI = await standIn(); const PID = 'bp-0000c240'; const said = []; const D = mkD(Dmod, SI, said, 0.3);
       try {
         await D.arm(PID, { budgetMs: 3000 });
         const opened = await until(() => !!D.paintFacts(PID), 3000);
@@ -977,7 +988,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
         const th1 = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null; const f1 = D.paintFacts(PID) || {}; const life1 = SI.st.life.get(TA) || null;
         SI.st.muteAct.clear();
         const th2 = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null; const f2 = D.paintFacts(PID) || {};
-        return { opened, fz: fz && { ok: fz.ok, why: fz.why }, th1: th1 && { thawed: th1.thawed, unthawed: th1.unthawed, shown: ids2(th1) }, frozen1: f1.frozen, thawUnread1: f1.thawUnread, life1, th2: th2 && { thawed: th2.thawed, unthawed: th2.unthawed }, frozen2: f2.frozen, life2: SI.st.life.get(TA) || null, said: said.filter((x) => x.includes('[idle_paint_thaw_unread]')) };
+        return { opened, fz: fz && { ok: fz.ok, why: fz.why }, th1: th1 && { thawed: th1.thawed, unthawed: th1.unthawed, shown: ids2(th1) }, frozen1: f1.frozen, thawUnread1: f1.thawUnread, life1, th2: th2 && { thawed: th2.thawed, unthawed: th2.unthawed }, frozen2: f2.frozen, life2: SI.st.life.get(TA) || null, asks: Object.fromEntries([TA0, TA, TB, TB0].map((t) => [t, SI.st.actAsks.get(t) || 0])), said: said.filter((x) => x.includes('[idle_paint_thaw_unread]')) };
       } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
     };
     // (3) the thaw's flip create fails (Chrome's own error: no tab): A's front stays owed — and the next thaw shows it
@@ -992,34 +1003,73 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
         return { opened, fz: fz && { ok: fz.ok, fronts: fz.fronts }, th1: ids2(th1), failed1: th1 && th1.failed ? th1.failed.map((x) => [x.targetId, x.failed]) : [], hidden1: h1, th2: ids2(th2), hidden2: h2, creates: SI.st.creates.map((c) => (c.failed ? 'failed' : c.newWindow ? 'check' : 'flip')) };
       } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
     };
-    // (3) every thaw's flip create fails: the front is shown again at the next thaws — SHOW_TRIES (3) in a row — then left, said once
-    const giveLeg = async (Dmod) => {
-      const SI = await standIn({ failCreate: (n) => n >= 2 }); const PID = 'bp-0000c242'; const said = []; const D = mkD(Dmod, SI, said);
+    // r4176 (its ruling on the cap): a failed show of ANY kind stays owed with no cap — but three shows in a row whose flip tab landed in
+    // ANOTHER window than the front's (both windows known: measured at the show) leave the front as it is, said once. `stand` names the
+    // stand-in's failure; each leg runs `n` thaws for A and reads A's front owed or not after each
+    const CANCH2 = 'const SHOW_TRIES = 3;';
+    if (!dsrc.includes(CANCH2)) ok(false, 'the anchor of the control «no cap» is not in the source (src/server/browser-dialogs.js)');
+    const DDn2 = dsrc.includes(CANCH2) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, CANCH2, 'const SHOW_TRIES = Infinity; // no cap', 'src/server/browser-dialogs.js'), 'r4176-no-cap') : null;
+    const capLeg = async (Dmod, stand, n, pid) => {
+      const SI = await standIn(stand); const said = []; const D = mkD(Dmod, SI, said);
+      try {
+        await D.arm(pid, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(pid), 3000);
+        const fz = opened ? await D.freezePaint(pid) : null; const hidden = [], failedN = [], shownN = [];
+        for (let k = 0; k < n && fz && fz.ok; k++) { const th = await D.thawPaint(pid, { holder: hA2(pid) }); hidden.push((D.paintFacts(pid) || {}).hidden); failedN.push(th && th.failed ? th.failed.map((x) => x.failed).join() : ''); shownN.push((ids2(th) || []).length); }
+        return { opened, fz: fz && fz.ok, hidden, failed: failedN, shown: shownN, flips: SI.st.creates.filter((c) => !c.newWindow).length, said: said.filter((x) => x.includes('[idle_paint_show_failed]')) };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    // (b) the keeper's sweep asks retryOwedShows while a viewer watches: the failed show of A's front is tried again — and only it
+    const retryLeg = async (Dmod) => {
+      const SI = await standIn({ failCreate: (n) => n === 2 }); const PID = 'bp-0000c243'; const said = []; const D = mkD(Dmod, SI, said);
       try {
         await D.arm(PID, { budgetMs: 3000 });
         const opened = await until(() => !!D.paintFacts(PID), 3000);
-        const fz = opened ? await D.freezePaint(PID) : null; const hidden = [], failedN = [];
-        for (let k = 0; k < 4 && fz && fz.ok; k++) { const th = await D.thawPaint(PID, { holder: hA2(PID) }); hidden.push((D.paintFacts(PID) || {}).hidden); failedN.push(th && th.failed ? th.failed.length : 0); }
-        return { opened, fz: fz && fz.ok, hidden, failed: failedN, flips: SI.st.creates.filter((c) => !c.newWindow).length, said: said.filter((x) => x.includes('[idle_paint_show_failed]')) };
+        const fz = opened ? await D.freezePaint(PID) : null;
+        const th1 = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null; const f1 = D.paintFacts(PID) || {};
+        const r = fz && fz.ok ? await D.retryOwedShows(PID) : null; const f2 = D.paintFacts(PID) || {};
+        return { opened, th1: ids2(th1), owed1: f1.owedShows, hidden1: f1.hidden, retried: r && r.retried, shown: ids2(r), owed2: f2.owedShows, hidden2: f2.hidden };
       } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
     };
-    const [sv, sv2, ss2, av, ac2, ov, oc2, gv] = await Promise.all([sayLeg(DD), DDv2 ? sayLeg(DDv2) : Promise.resolve(null), DDs2 ? sayLeg(DDs2) : Promise.resolve(null),
-      actLeg(DD), DDa2 ? actLeg(DDa2) : Promise.resolve(null), showLeg(DD), DDo2 ? showLeg(DDo2) : Promise.resolve(null), giveLeg(DD)]);
+    // the round's should: a show counted failed that DID happen (the flip tab's window unread, the flip done) — at the next thaw A's front
+    // is read first: «visible» ⇒ forgotten, never flipped again (a retry would activate it over the agent's own tab)
+    const alreadyLeg = async (Dmod) => {
+      const SI = await standIn({ blindMade: (n) => n === 2 }); const PID = 'bp-0000c244'; const said = []; const D = mkD(Dmod, SI, said);
+      try {
+        await D.arm(PID, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(PID), 3000);
+        const fz = opened ? await D.freezePaint(PID) : null;
+        const th1 = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null;
+        const th2 = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null;
+        return { opened, failed1: th1 && th1.failed ? th1.failed.map((x) => [x.targetId, x.failed]) : [], already2: th2 && th2.already, shown2: ids2(th2), flips: SI.st.creates.filter((c) => !c.newWindow).length, hidden2: (D.paintFacts(PID) || {}).hidden };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    const [sv, sv2, ss2, av, ac2, ov, oc2, slow5, other4, otherC, rt, al] = await Promise.all([sayLeg(DD), DDv2 ? sayLeg(DDv2) : Promise.resolve(null), DDs2 ? sayLeg(DDs2) : Promise.resolve(null),
+      actLeg(DD), DDa2 ? actLeg(DDa2) : Promise.resolve(null), showLeg(DD), DDo2 ? showLeg(DDo2) : Promise.resolve(null),
+      capLeg(DD, { failCreate: (n) => n >= 2 && n <= 5 }, 5, 'bp-0000c242'), capLeg(DD, { flipWin: (n) => (n >= 2 ? 9 : null) }, 4, 'bp-0000c245'), DDn2 ? capLeg(DDn2, { flipWin: (n) => (n >= 2 ? 9 : null) }, 4, 'bp-0000c246') : Promise.resolve(null),
+      retryLeg(DD), alreadyLeg(DD)]);
     const plain = (x) => !/example|https?:/.test(x);
     ok(!!sv.fz1 && sv.fz1.why === 'front_unread' && sv.fz1.unread === 2 && !!sv.fz2 && sv.fz2.why === 'front_unread' && sv.passes1 === 2 && sv.said1.length === 1 && sv.said1[0].includes('bp-0000c23f') && sv.said1[0].includes('2 tab(s)') && sv.said1.every(plain)
       && !!sv.fz3 && sv.fz3.ok === true && sv.passes2 === 0 && !!sv.fz4 && sv.fz4.why === 'front_unread' && sv.said2.length === 2,
       'r4095 (2): a browser not frozen because two tabs never answer is SAID once a stretch — its id and the count, never an address or a title — the passes counted; the stretch ends at a freeze, the next one is said again', sv);
-    ok(sv.reads1 === 4 && sv.spanMs != null && sv.spanMs < 900, `r4095 (2): the freeze's visibility reads run at once, each its own bound — all 4 asked within ${sv.spanMs} ms, two never answering (one after another: a second each)`, { reads: sv.reads1, spanMs: sv.spanMs });
-    if (DDv2) ok(!!sv2 && sv2.reads1 === 4 && sv2.spanMs >= 1000, 'CONTROL (3623606d5: the reads one after another): the reads span two bounds — a tab that never replies costs every keeper tick a second — RED', sv2 && { reads: sv2.reads1, spanMs: sv2.spanMs });
+    ok(sv.reads1 === 4 && sv.spanMs != null && sv.spanMs < 250, `r4095 (2): the freeze's visibility reads run at once, each its own bound — all 4 asked within ${sv.spanMs} ms, two never answering (one after another: a bound each, 300 ms here)`, { reads: sv.reads1, spanMs: sv.spanMs });
+    if (DDv2) ok(!!sv2 && sv2.reads1 === 4 && sv2.spanMs >= 500, 'CONTROL (3623606d5: the reads one after another): the reads span two bounds — a tab that never replies costs every keeper tick a second — RED', sv2 && { reads: sv2.reads1, spanMs: sv2.spanMs });
     if (DDs2) ok(!!ss2 && ss2.fz1 && ss2.fz1.why === 'front_unread' && ss2.said2.length === 0, 'CONTROL (3623606d5: never said): the browser keeps drawing for good and nothing says so — RED', ss2 && { said: ss2.said2.length });
     ok(!!av.th1 && av.th1.unthawed === 1 && av.frozen1 === true && av.thawUnread1 === 1 && av.life1 === 'frozen' && J(av.th1.shown) === J([TA]) && av.said.length === 1 && av.said[0].includes('1 tab(s)') && av.said.every(plain)
-      && !!av.th2 && av.th2.thawed === true && !av.th2.unthawed && av.frozen2 === false && av.life2 === 'active',
-      'r4095 (3): a tab whose activation did not answer is UNKNOWN — the watch stays «frozen» (said once, the fronts still shown) and the next thaw asks again: the tab is active', av);
+      && !!av.th2 && av.th2.thawed === true && !av.th2.unthawed && av.frozen2 === false && av.life2 === 'active' && J(av.asks) === J({ [TA0]: 1, [TA]: 2, [TB]: 1, [TB0]: 1 }),
+      'r4095 (3) / r4176 (a): a tab whose activation did not answer is UNKNOWN — the watch stays «frozen» (said once, the fronts still shown) and the next thaw asks again ONLY that tab: it is active', av);
     if (DDa2) ok(!!ac2 && ac2.frozen1 === false && !!ac2.th2 && ac2.th2.thawed === false && ac2.life2 === 'frozen', 'CONTROL (3623606d5: «active» whatever the replies): the watch says active, the next thaw finds nothing to do — the tab stays frozen — RED', ac2);
     ok(!!ov.fz && ov.fz.ok && J(ov.th1) === J([]) && J(ov.failed1) === J([[TA, 'no flip tab']]) && ov.hidden1 === 2 && J(ov.th2) === J([TA]) && ov.hidden2 === 1,
       'r4095 (3): a show that failed (Chrome made no flip tab) leaves A\'s front owed — the next thaw shows it (B\'s stays owed to B)', ov);
-    ok(gv.fz === true && J(gv.hidden) === J([2, 2, 1, 1]) && J(gv.failed) === J([1, 1, 1, 0]) && gv.flips === 3 && gv.said.length === 1 && gv.said[0].includes('3 thaws') && gv.said.every(plain),
-      'r4095 (3): a front whose show fails every time (a popup window\'s front: Chrome puts each flip tab in a normal window) is shown again at the next thaws — three in a row — then left as it is, said once: never a flip and a journal line at every verb', gv);
+    ok(slow5.fz === true && J(slow5.hidden) === J([2, 2, 2, 2, 1]) && J(slow5.failed) === J(['no flip tab', 'no flip tab', 'no flip tab', 'no flip tab', '']) && J(slow5.shown) === J([0, 0, 0, 0, 1]) && slow5.said.length === 0,
+      'r4176 (the ruling): a front whose flip tab Chrome did not make, four thaws in a row (a loaded Chrome), is NEVER given up — owed until the fifth thaw shows it, nothing said', slow5);
+    ok(other4.fz === true && J(other4.hidden) === J([2, 2, 1, 1]) && J(other4.failed) === J(['another window', 'another window', 'another window', '']) && other4.flips === 3 && other4.said.length === 1 && other4.said[0].includes('another window') && other4.said.every(plain),
+      'r4176 (the ruling): three shows in a row whose flip tab landed in ANOTHER window than the front\'s (both known — the measure, as a popup window\'s front shows it) leave the front as it is, said once; never a flip at every verb', other4);
+    if (DDn2) ok(!!otherC && J(otherC.hidden) === J([2, 2, 2, 2]) && otherC.flips === 4 && otherC.said.length === 0, 'CONTROL (no cap): a front whose flip always lands in another window is flipped at every thaw for good — RED', otherC);
+    ok(J(rt.th1) === J([]) && rt.owed1 === 1 && rt.hidden1 === 2 && rt.retried === 1 && J(rt.shown) === J([TA]) && rt.owed2 === 0 && rt.hidden2 === 1,
+      'r4176 (b): a failed show is retried by retryOwedShows (the keeper\'s sweep asks it while a viewer watches) — A\'s front shown without the agent\'s next verb, B\'s still owed to B', rt);
+    ok(J(al.failed1) === J([[TA, 'window unread']]) && J(al.already2) === J([TA]) && J(al.shown2) === J([]) && al.flips === 1 && al.hidden2 === 1,
+      'the round\'s should: a show counted failed that did happen (its flip tab\'s window unread) is read first at the next thaw — «visible», forgotten, never flipped again', al);
     if (DDo2) ok(!!oc2 && J(oc2.th1) === J([TA]) && !(oc2.th2 || []).length && oc2.hidden1 === 1, 'CONTROL (3623606d5: a front forgotten before it is shown): the failed show forgets it — still hidden, nothing shows it again — RED', oc2);
   }
   // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
