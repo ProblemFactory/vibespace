@@ -695,10 +695,28 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   ok(swept2.some((x) => x && Array.isArray(x.removed) && x.removed.includes(ds.id)), 'CONTROL: a copy of the stale-member sweep without the fallback\'s exemption takes the conversation on DeepSeek for a removed member ⇒ the sweep leg goes RED', swept2);
   ok(BR.poolFallbackOf({ poolFallback: { poolId: 'p', provider: 'acct-1' } }) === null && BR.poolFallbackOf({ poolFallback: 'x' }) === null && BR.poolFallbackOf({}) === null, 'boot-restore reads a malformed record — another kind of id, a string, none — as NO record (nothing guessed)');
   const FIRST = '  const saved = await writeFallbackRecord(j.s2, record);';
-  const wRec = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FIRST, '  const saved = (writeFallbackRecord(j.s2, record), true);', 'restart before the record'), 'eng-no-record-first') });
-  wRec.client(); wRec.meta.mode = 'fail'; wRec.mk('r1');
-  await wRec.pass();
-  ok(wRec.restarts().length === 1, 'CONTROL: a copy that restarts without waiting for the record moves the conversation with NO record on disk ⇒ the record-first legs go RED', wRec.restarts().length);
+  // THE COPY (the record not waited for), its world's record write REFUSED (meta 'fail'); `stall` places a stall in the copy's AWAITED
+  // refusal check (the window the box zone's load widened, run bf075c6b4-20261125015229-both: the copy's «cross-provider switch …/r1»
+  // printed after the leg read 0); `wait`: the count is read once the copy's move has landed (at most 2 s), else after the pass alone
+  const STALL_AT = '  const refused = await fallbackRefusal(e.to, x.toModel, convBackend(j.s2));';
+  const recScene = async ({ stall = 0, wait = true, tag }) => {
+    let text = anchored(ENG, FIRST, '  const saved = (writeFallbackRecord(j.s2, record), true);', 'restart before the record');
+    if (stall) text = anchored(text, STALL_AT, `  const refused = await new Promise((r) => setTimeout(r, ${stall})).then(() => fallbackRefusal(e.to, x.toModel, convBackend(j.s2)));`, 'a placed stall in the awaited refusal check');
+    const w = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', text, tag) });
+    w.client(); w.meta.mode = 'fail'; w.mk('r1');
+    await w.pass();
+    if (wait) for (let i = 0; i < 80 && w.restarts().length === 0; i++) await w.settle();
+    const m = w.metas.get('cw-r1');
+    return { moved: w.restarts().length, record: !!(m && m.poolFallback) };
+  };
+  const rec0 = await recScene({ tag: 'eng-no-record-first' });
+  ok(rec0.moved === 1 && rec0.record === false, 'CONTROL: a copy that restarts without waiting for the record moves the conversation with NO record on disk ⇒ the record-first legs go RED', rec0);
+  // (r4002) THE CURE PROVEN BY ITS WINDOW: a PLACED 300 ms stall in the copy's awaited refusal check — the control still reads the
+  // move and still shows no record on disk; its red: the same stalled copy read after the pass alone (the wait cut) reads 0, as the box zone did
+  const recS = await recScene({ stall: 300, tag: 'eng-no-record-first-stalled' });
+  ok(recS.moved === 1 && recS.record === false, '(r4002) the control through a PLACED 300 ms stall in the copy\'s awaited refusal check: it still reads the copy\'s move, and still no record on disk', recS);
+  const recCut = await recScene({ stall: 300, wait: false, tag: 'eng-no-record-first-stalled-nowait' });
+  ok(recCut.moved === 0, 'CONTROL (r4002): the same stalled copy read after the pass alone (the wait cut) reads 0 — the box zone\'s red, made on demand', recCut);
   const ONE = "        if (ds && ds.crossOffer && ds.crossOffer.fallbackOnly && /^pv-/.test(String(ds.crossOffer.id))) {";
   const wCards = world({ engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, ONE, '        if (false) {', 'a card a conversation'), 'eng-card-each') });
   wCards.client(); for (const sid of ['c1', 'c2', 'c3', 'c4']) wCards.mk(sid);
