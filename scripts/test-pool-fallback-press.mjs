@@ -23,9 +23,12 @@ const { ok, report } = checker();
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const M = mutantCopies('pool-fallback-press', REPO);
-// a press's move lands after its awaited refusal check (the managed settings read): read the moves once the queue and the moves
-// in flight are EMPTY — the fact itself, at most 3 s (a fixed settle raced the load on the box: line 893's lesson)
-const landed = async (w, ms = 3000) => { for (let t = 0; t < ms && (w.eng._fbQueue.size || w.eng._fbInFlight.size); t += 25) await w.settle(); await w.settle(); };
+// a press's move is MADE after its awaited refusal check (the managed settings read): the moves are read once the queue is empty
+// and every move in flight has sent its restart — the fact itself, at most 3 s (a fixed settle raced the load on the box: line
+// 893's lesson). A person's slot stays «in flight» until its restart LANDS (r3041 — never seen in this world), so the in-flight map
+// alone is no fact here: it would wait the whole bound every time
+const made = (w) => !w.eng._fbQueue.size && [...w.eng._fbInFlight.keys()].every((sid) => w.restarts().some((t) => t.serverId === sid));
+const landed = async (w, ms = 3000) => { for (let t = 0; t < ms && !made(w); t += 25) await w.settle(); await w.settle(); };
 
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const PS = require(path.join(REPO, 'src/server/provider-store.js'));
@@ -53,7 +56,7 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
   const nowS = () => Math.floor(Date.now() / 1000);
   const cacheOf = (u5) => JSON.stringify({ fetchedAt: Date.now() - 60e3, source: 'on-demand', fiveHour: { utilization: u5, resetsAt: nowS() + 7200 }, sevenDay: { utilization: 0.4, resetsAt: nowS() + 3 * 86400 } });
   const EMPTY_MANAGED = path.join(scratchDir('pool-fallback-press-managed-none'), 'none');   // the machine's managed Claude settings folder, stood in EMPTY (never the test machine's own)
-  const world = ({ engM = null, cross = null, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED, landingMs = 90e3, fb = null } = {}) => {
+  const world = ({ engM = null, cross = null, aHealthy = false, bHealthy = false, pools = 1, managedDir = EMPTY_MANAGED, landingMs = 90e3, fb = null } = {}) => {
     const dir = scratchDir('pool-fallback-press-eng'), root = fs.mkdtempSync(path.join(dir, 'w-')), dataDir = path.join(root, 'data');
     const wam = wireAm(AccountManager, dataDir);
     wam.setProviderRows(() => MP.rosterRowsOf(store.thirdParty(), { usable: (p) => vault.state() === 'unlocked' && store.hasKey(p.id) }));
@@ -66,7 +69,7 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
       poolIds.push(id);
     }
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
-    fs.writeFileSync(path.join(cacheDir, WA + '.json'), cacheOf(1)); fs.writeFileSync(path.join(cacheDir, WB + '.json'), cacheOf(bHealthy ? 0.1 : 1));
+    fs.writeFileSync(path.join(cacheDir, WA + '.json'), aHealthy ? JSON.stringify({ ...JSON.parse(cacheOf(0.1)), fetchedAt: Date.now() - 30e3 }) : cacheOf(1)); fs.writeFileSync(path.join(cacheDir, WB + '.json'), cacheOf(bHealthy ? 0.1 : 1));   // aHealthy: A serves from its FIRST reading — never a walled reading turned healthy mid-scene (an unproven reset to the engine)
     const sessions = new Map(), notices = [], sent = [], items = [], cards = [], metas = new Map(), clients = new Set(), statusFns = [];
     const meta = { mode: 'ok', held: [] }, lists = { n: 0 };   // lists: the session list's ONE notify point, asked (r3918 (e))
     const metaStore = {
@@ -105,14 +108,15 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
     };
     const mute = (f) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return f(); } finally { console.log = o; console.warn = w; } };
     const settle = () => new Promise((r) => setTimeout(r, 25));
-    const pass = async (pool = poolIds[0]) => { mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); }); await settle(); };
+    // the members' sign-in DISPLAY LANDINGS settle first and after (B-87fd unit 4: a member's reading is read through its identity group,
+    // judged from those landings — before them two rows can share one group and the other's walled reading can stand for A)
+    const pass = async (pool = poolIds[0]) => { await wam.displaySettled(); mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); }); await settle(); await wam.displaySettled(); };
     const restarts = () => sent.filter((m) => m.type === 'pool-auto-switched').flatMap((m) => m.affected);
     const client = () => clients.add({ readyState: 1, send: (p) => sent.push(JSON.parse(p)) });
     return { am: wam, eng, A: WA, B: WB, P: poolIds[0], P2: poolIds[1], pools: poolIds, cacheDir, sessions, notices, sent, items, cards, metas, meta, mk, pass, settle, mute, restarts, client, todos, lists, dataDir };
   };
   const fbItems = (w) => w.items.filter((x) => x.action && x.action.type === 'pool-cross-provider' && x.action.fallback === true);
-  const heal = (w) => fs.writeFileSync(path.join(w.cacheDir, w.A + '.json'), cacheOf(0.1));
-  const wall = (w) => fs.writeFileSync(path.join(w.cacheDir, w.A + '.json'), cacheOf(1));
+  const wall = (w) => fs.writeFileSync(path.join(w.cacheDir, w.A + '.json'), JSON.stringify({ ...JSON.parse(cacheOf(1)), fetchedAt: Date.now() - 10e3 }));   // A walls AGAIN: a reading FRESHER than every one before it (the engine keeps the newest)
   const onFbRec = (w, sid, rec) => w.mk(sid, w.P, { claudeSessionId: 'cid-' + sid, _heldPoolMember: ds.id, _lastPtyDataAt: Date.now(), _poolFallback: { poolId: w.P, provider: ds.id, fromMember: w.A, toModel: 'deepseek-chat', at: Date.now() - 16 * 60e3, by: 'pool', ...rec } });
   const ENG = read('src/server/usage-pool-engine.js');
   // (B-d578 r3918) THE CONVERSATION's OWN PRESS: its fact (fallbackFactOf) and the two routes naming ONE conversation — through the REAL
@@ -156,8 +160,8 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
       '(r3918 (a) (f)) «Move to» BY REQUESTS: an agent\'s bearer is refused (the For-you road\'s own guard); a conversation not waiting is refused by name; the page\'s own request is the ask\'s Allow once for THAT conversation — it alone moves, the pool\'s other two still wait and the ask stays open for them', tc);
     // «Move back»: two conversations on the fallback, a member can take them NOW
     const backScene = async (MOD = AURc) => {
-      const wD = world(); const rt = mountRoutes(wD, MOD);
-      wD.client(); heal(wD); for (const sid of ['cb0', 'cb1']) onFbRec(wD, sid, { fromModel: 'sonnet' }); await wD.pass();
+      const wD = world({ aHealthy: true }); const rt = mountRoutes(wD, MOD);
+      wD.client(); for (const sid of ['cb0', 'cb1']) onFbRec(wD, sid, { fromModel: 'sonnet' }); await wD.pass();
       const fOn = wD.eng.fallbackFactOf('cb0');
       const bearer = await rt.call('POST /api/accounts/:poolId/fallback/move-back', { poolId: wD.P }, { sids: ['cb0'] }, { authorization: BEARc });
       const notOn = await rt.call('POST /api/accounts/:poolId/fallback/move-back', { poolId: wD.P }, { sids: ['nope'] }, PAGEc);
@@ -222,7 +226,7 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
     // (r4204) «ALREADY» ONLY OF THE PLACE THE PRESS NAMED: a conversation moved BACK to a member a minute ago, not waiting, pressed
     // «Move to» from a stale page — where the ask is gone (the route) and where it is open for another conversation (the engine's answer)
     const staleScene = async (engM = null) => {
-      const w = world(engM ? { engM } : {}); const rt = mountRoutes(w); w.client(); heal(w);
+      const w = world({ aHealthy: true, ...(engM ? { engM } : {}) }); const rt = mountRoutes(w); w.client();
       onFbRec(w, 'cs0', { fromModel: 'sonnet' }); await w.pass();
       const back = await rt.call('POST /api/accounts/:poolId/fallback/move-back', { poolId: w.P }, { sids: ['cs0'] }, PAGEc);
       await landed(w);
@@ -240,16 +244,20 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
     // (r4199 (6)) «Move back» while that conversation's move back is QUEUED (in a turn: it waits for the stop): the fact offers no second
     // press and says where it is going; the strip's facts are pushed after the press
     const queuedBack = async () => {
-      const w = world(); const rt = mountRoutes(w); w.client(); heal(w);
-      onFbRec(w, 'cq0', { fromModel: 'sonnet' }); const s = w.sessions.get('cq0'); s._isStreaming = true; s._turnState = 'running';
-      await w.pass(); const sig0 = w.eng._fbFactSig.get(w.P), before = w.eng.fallbackFactOf('cq0');
+      // A MOVE BACK ALREADY QUEUED: its queue entry placed as a press makes it (the engine's own queueFallbackMove, by the person, to
+      // member A — not pumped), so the fact is read with no verdict between; then the page's press on it — the strip's facts pushed
+      const w = world({ aHealthy: true }); const rt = mountRoutes(w); w.client();
+      onFbRec(w, 'cq0', { fromModel: 'sonnet' });
+      await w.pass(); const before = w.eng.fallbackFactOf('cq0'), sig0 = w.eng._fbFactSig.get(w.P);
+      w.eng.queueFallbackMove(w.P, 'cq0', w.A, 'person');
+      const after = w.eng.fallbackFactOf('cq0');
       const press = await rt.call('POST /api/accounts/:poolId/fallback/move-back', { poolId: w.P }, { sids: ['cq0'] }, PAGEc);
-      const after = w.eng.fallbackFactOf('cq0'), sig1 = w.eng._fbFactSig.get(w.P);
-      return { before: !!(before && before.on && before.on.back && !before.on.queued), press: press.code + ':' + (press.body && press.body.queued), after, pushed: sig1 !== sig0 };
+      const sig1 = w.eng._fbFactSig.get(w.P);
+      return { before: !!(before && before.on && !before.on.queued), press: press.code, after, pushed: sig1 !== sig0 };
     };
     const qb = await queuedBack();
-    ok(!!(qb.before && qb.press === '200:1' && qb.after && qb.after.on && qb.after.on.queued === true && qb.after.on.back && qb.pushed),
-      '(r4199 (6)) a conversation whose move back is QUEUED (its turn first) carries {on, back, queued} — the strip offers no second «Move back» and says it is on its way; the press pushed the strip\'s facts', qb);
+    ok(!!(qb.before && qb.press === 200 && qb.after && qb.after.on && qb.after.on.queued === true && qb.after.on.back && qb.after.on.back.id && qb.pushed),
+      '(r4199 (6)) a conversation whose move back is QUEUED carries {on, back, queued} — the strip offers no second «Move back» and says it is on its way; the press pushed the strip\'s facts', qb);
     // (r3918 (e)) A CHANGE REACHES EVERY PAGE BY THE PAYLOAD's OWN PUSH — the strip's facts told through the session list's ONE notify
     // point (server.js: broadcastActiveSessions, the /ws frame carrying poolFallback), debounced, only when they move
     const quiet = () => new Promise((r) => setTimeout(r, 360));   // past the engine's one debounce (300 ms)
