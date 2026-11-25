@@ -78,6 +78,13 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     for (let i = 0; i < N; i++) { const m = am13.createSubscription({ name: 'C' + i }).id; put(am13, m, login(NOW, { dead: true })); ids.push(m); }
     for (const m of ids) { const a = am13.get(m); a.oatEnc = am13._enc(OAT); a.oatMintedAt = Date.now(); a.oatShape = SHAPE; }
     am13._save();
+    // LIKE WITH LIKE (hosted run 45584145109, 主开发 r4209): each new row's FIRST display landing seeds its tie and saves the list
+    // (B-87fd identity unit 4's _seedTieAt — a whole accounts.json write); those landings answer off the loop on LATER turns, so
+    // unsettled they fell inside the timed sweep window and never inside the control's. They are settled HERE, before either window;
+    // the saves each window still holds are counted and printed with the stall figure (the law's number does not move)
+    await am13.displaySettled();
+    let saves = 0;
+    am13._save = function (...a) { saves++; return Object.getPrototypeOf(this)._save.apply(this, a); };
     const subs = path.join(am13.dataDir, 'subs') + path.sep;
     const syncHits = [];
     const SYNC = ['readFileSync', 'writeFileSync', 'openSync', 'renameSync', 'unlinkSync', 'fsyncSync', 'statSync', 'lstatSync', 'existsSync', 'chmodSync', 'mkdirSync', 'readdirSync'];
@@ -89,24 +96,24 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     for (const k of SYNC) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (!inList && String(p).startsWith(subs)) syncHits.push(k); return keep[k].call(this, p, ...r); }; }
     const meter = loopMeter(), starts = [];
     am13.syncOatFile = function (...a) { starts.push(meter.turn()); return Object.getPrototypeOf(this).syncOatFile.apply(this, a); };
-    let first, steady, run, ctl;
+    let first, steady, run, ctl, savesSweep = 0, savesCtl = 0;
     try {
       const t0 = performance.now();
-      first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); run = meter.stop();
+      first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); run = meter.stop(); savesSweep = saves;
       const took = performance.now() - t0;
       // the CONTROL: as long as the sweeps, their one broadcast each, not one act — over the rows they wrote
       const c = loopMeter();
       for (let k = 0; k < 2; k++) { const until = performance.now() + took / 2; do await new Promise((res) => setImmediate(res)); while (performance.now() < until); am13._notify(); }
-      ctl = c.stop();
-    } finally { if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; for (const k of SYNC) fs[k] = keep[k]; }
+      ctl = c.stop(); savesCtl = saves - savesSweep;
+    } finally { if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; delete am13._save; for (const k of SYNC) fs[k] = keep[k]; }
     const counts = {}; for (const v of Object.values(first)) counts[v] = (counts[v] || 0) + 1;
     const perTurn = {}; for (const t of starts) perTurn[t] = (perTurn[t] || 0) + 1;
-    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)] };
+    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), saves: { sweep: savesSweep, control: savesCtl }, turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)] };
   };
   const r13 = await f13();
   ok(r13.counts.materialize === 200 && r13.steady.join() === 'written', 'F13: 200 fake rows — the first sweep materializes every one (archive + write), the next finds every one written', r13.counts);
   ok(r13.starts === 400 && r13.rowsPerTurn === 1, `F13: ONE row per loop turn — the two sweeps start ${r13.starts} row acts over ${r13.turns} turns of the loop, never more than ${r13.rowsPerTurn} between two turns`, r13);
-  ok(r13.maxGap <= 3 * r13.ctlGap, `F13: the event loop's longest stall across both sweeps is ${r13.maxGap} ms ≤ 3 × the control's ${r13.ctlGap} ms (as long as the sweeps, no act, each half ending in the store's own roster broadcast over the rows they wrote — measured right after, in this process)`, r13);
+  ok(r13.maxGap <= 3 * r13.ctlGap, `F13: the event loop's longest stall across both sweeps is ${r13.maxGap} ms ≤ 3 × the control's ${r13.ctlGap} ms (as long as the sweeps, no act, each half ending in the store's own roster broadcast over the rows they wrote — measured right after, in this process; the display landings settled before both windows — list saves in the sweep window ${r13.saves.sweep}, in the control ${r13.saves.control})`, r13);
   ok(r13.syncHits.length === 0, 'F13: not one synchronous fs call on a member path from the sweep\'s acts (every read / write / rename / fsync is fs.promises; the one roster broadcast after it is the store\'s existing list())', r13.syncHits);
   const mF13 = mutantStore({ mat: [['    await fh.sync();\n', '    require(\'fs\').fsyncSync(fh.fd);\n    require(\'fs\').statSync(dest + \'.never\', { throwIfNoEntry: false });\n']] });
   const r13m = mF13 ? await f13(mF13, 20) : null;
