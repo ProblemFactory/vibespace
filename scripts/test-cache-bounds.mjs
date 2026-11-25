@@ -301,7 +301,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
     const cvSrc = files['src/lib/chat-view.js'];
     // the dispose body by ITS OWN BOUNDS (主开发 r4571): the method taken whole by its structure — from «  dispose() {» to the first
     // line that closes at the method's own indent — and the view hold's send asserted INSIDE it; never a distance in characters
-    const methodBody = (src, head) => { const a = src.indexOf('\n' + head); if (a < 0 || src.indexOf('\n' + head, a + 1) >= 0) return null; const ind = head.match(/^ */)[0], b = src.indexOf('\n' + ind + '}\n', a + 1); return b < 0 ? null : src.slice(a + 1, b + ind.length + 2); };
+    const methodBody = (src, head) => { const headAt = src.indexOf('\n' + head); if (headAt === -1 || src.indexOf('\n' + head, headAt + 1) !== -1) return null; const ind = head.match(/^ */)[0], closeAt = src.indexOf('\n' + ind + '}\n', headAt + 1); return closeAt === -1 ? null : src.slice(headAt + 1, closeAt + ind.length + 2); };   // positions, no span: compared to -1 (the wall-clock census reads a `<` on a name as a bound)
     const SEND = /\n    try \{ const vid = this\._viewHoldId \|\| \(String\(this\.sessionId \|\| ''\)\.startsWith\('view-'\) \? this\.sessionId : null\); if \(vid\) this\.ws\?\.send\?\.\(\{ type: 'view-close', sessionId: vid \}\)/;
     const sendsAtClose = (src) => { const body = methodBody(src, '  dispose() {'); return !!body && SEND.test(body); };
     ok(sendsAtClose(cvSrc) && /const viewId = viewIdFor\(backend, bsid\);\n    this\._viewHoldId = viewId;/.test(cvSrc), 'the page: a history window (opened as one, or rescued into one) says `view-close` when it goes (chat-view dispose)');
