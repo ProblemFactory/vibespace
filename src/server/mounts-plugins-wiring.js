@@ -478,6 +478,7 @@ const heldLists = require('./held-lists.js').create({
     { key: 'task-groups', facts: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; const u = tg && typeof tg.unreadState === 'function' ? tg.unreadState() : null; return u ? { since: u.at || null } : null; },
       readAgain: () => { const tg = typeof getTasks === 'function' ? getTasks() : null; return tg && typeof tg.readAgain === 'function' ? tg.readAgain() : Promise.resolve(false); },
       onLift: (fn) => { const tg = typeof getTasks === 'function' ? getTasks() : null; if (!tg || typeof tg.onLift !== 'function') return false; tg.onLift(fn); return true; } },   // r3212: the manager's own lift signal (armed once it exists)
+    decisionEngine.heldRow,   // B-f276 family (r4121): the paid judge's journal — its own hold (the counter and the memo are the helper's)
   ],
 });
 app.delete('/api/hosts/:id/hub-pin', async (req, res) => {

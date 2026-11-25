@@ -562,6 +562,7 @@ function judgedRoadOf(row, use) {
   if (row.missing) return { live: false, why: 'plugin-off' };
   const d = row.decision || {};
   const today = d.today || {};
+  if (today.unknown) return { live: false, why: 'spend-unknown' };   // B-f276 family (r4121): the day's spend not known ⇒ every judgment refused by name
   const cap = (Number.isFinite(Number(d.dailyBudgetCents)) ? Number(d.dailyBudgetCents) : DM.DAILY_BUDGET_CENTS_DEFAULT) / 100;
   const spent = (Number(today.total && today.total.usd) || 0) + (Number(today.reserved) || 0);
   const provider = DM.PROVIDERS.includes(d.provider) ? d.provider : DM.PROVIDERS[0];
@@ -570,7 +571,7 @@ function judgedRoadOf(row, use) {
 }
 function roadChipWords(st) {
   if (st.live) return t('judged: live');
-  return ({ 'plugin-off': t('off: LLM plugin'), 'rules-off': t('off: rules switch'), 'routing-off': t('off: routing switch'), 'no-key': t('off: no key'), 'budget-spent': t('paused: budget spent'), 'hour-cap': t('paused: hourly limit') })[st.why] || t('off: LLM plugin');
+  return ({ 'plugin-off': t('off: LLM plugin'), 'rules-off': t('off: rules switch'), 'routing-off': t('off: routing switch'), 'no-key': t('off: no key'), 'budget-spent': t('paused: budget spent'), 'spend-unknown': t('paused: spend not known'), 'hour-cap': t('paused: hourly limit') })[st.why] || t('off: LLM plugin');
 }
 function paintRoadChip(chip, st) {
   chip.hidden = !st;
@@ -578,8 +579,9 @@ function paintRoadChip(chip, st) {
   chip.textContent = roadChipWords(st);
   chip.dataset.road = st.live ? 'live' : st.why;
   chip.classList.toggle('chan-chip-live', !!st.live);
-  chip.classList.toggle('chan-road-paused', !st.live && (st.why === 'budget-spent' || st.why === 'hour-cap'));
-  chip.classList.toggle('chan-chip-off', !st.live && st.why !== 'budget-spent' && st.why !== 'hour-cap');
+  const paused = st.why === 'budget-spent' || st.why === 'hour-cap' || st.why === 'spend-unknown';
+  chip.classList.toggle('chan-road-paused', !st.live && paused);
+  chip.classList.toggle('chan-chip-off', !st.live && !paused);
 }
 function decisionBlock(rule, { principals, changed }) {
   const box = el('div', 'chan-af-decision');

@@ -1039,6 +1039,13 @@ function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd =
   const spentUsd = (u.total && u.total.usd !== undefined ? num0(u.total.usd) : sum('usd')) + num0(u.reserved);
   const hits = sum('hits');
   const cap = Number.isFinite(Number(capUsd)) && Number(capUsd) >= 0 ? Number(capUsd) : DAILY_BUDGET_CENTS_DEFAULT / 100;
+  if (on && u.unknown) {   // B-f276 family (r4121): the counter or its journal could not be read — the day's spend is NOT KNOWN: never a number
+    const capT = '$' + cap.toFixed(2), what = t('not known');
+    const spend = t('Spent today: not known (limit {cap}) — nothing is judged until the plugin reads its spending record again', { cap: capT });
+    const mo = monthUsd === null || monthUsd === undefined ? '—' : moneyText(num0(monthUsd), num0(monthUsd) > 0);
+    return { on: true, unknown: true, calls: 0, hits: 0, spentUsd: null, capUsd: cap, warn: true, money: what, cap: capT, spend, title: '',
+      short: t('Today: not known (limit {cap}) · paused', { cap: capT }), text: spend, month: t('LLM · today not known / {cap} · this month {month}', { cap: capT, month: mo }) };
+  }
   if (!on) {
     const off = t('The LLM plugin is off — it spends nothing');
     return { on: false, calls: 0, hits: 0, spentUsd: 0, capUsd: cap, warn: false, money: '', cap: '', short: off, spend: off, text: off, title: '', month: off };

@@ -52,6 +52,7 @@ const NAMES = Object.freeze({
   // B-f276 family (form 3 rank 6, lane bl-loop-a, r3175): the paid judge's counter and memo
   'decision-usage.json': i18nKey('the language model plugin’s spending record'),
   'decision-memo.json': i18nKey('the language model plugin’s saved answers'),
+  'decision-journal.jsonl': i18nKey('the language model plugin’s journal of calls'),   // r4121: the journal's own hold, an older row of the list (the engine's heldRow)
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);

@@ -3,7 +3,7 @@
 Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that file's full operating essay — invariants, incidents, gotchas. **READ the entry BEFORE modifying the file; UPDATE it in the same commit when behavior changes.**
 
 ## INDEX (one line per file; the essay is below)
-scripts/test-decision-store-read.mjs (NEW, fast — B-f276 family) — the paid judge's counter, memo and journal under the store-read law: a placed read refusal, a stand-in vendor that counts; unknown spend refuses by name, nothing written, torn kept aside once
+scripts/test-decision-store-read.mjs (NEW, fast — B-f276 family) — the paid judge's counter, memo and journal under the store-read law: placed read refusals, a counting vendor; unknown spend refuses by name, nothing written, torn kept aside once; a lift raises from the boot's rows
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 scripts/test-vault-job-verify.mjs (NEW in the tiers, heavy — B-a08e L3) — the independent verification of the vault's service secret for jobs: each leg a law of the owner's design on the real road (wrapper, JobManager, door) with stand-in values; ~48 s alone; never edited by a builder
@@ -1608,6 +1608,7 @@ src/server/hook-root-watch.js — ORCH an unjudgeable server root's consequences
   server/channels-attention.js — ORCH (lane decision-attention) the first screen's JUDGED rows: one record per call via decision-engine (≤ 3 in flight, re-asked per call), the facts line (engine facts() once per scan), data/decision-examples.json (one writer), labels + implicit (learn), the draft
   server/decision-engine.js — ORCH (lane decision-core) the ONE decisions-API caller `judge()`: memo, USD reserve → settle, one fetch (one-shot body), backoff, row stops + scrubbed questions (decision-vendor-hygiene), journal (data/decision-journal.jsonl, `p`, reserved first), roadFacts / notePaused
     B-f276 family (r3175): counter + memo under the store-read law, the journal's own hold; spend unknown ⇒ every paid judgment and the drafter refused «spend-unread» before any reservation, memo ⇒ «memo-unread»; nothing written while held; readAgain() — test-decision-store-read
+    r4121: a held counter's lift raises from the boot's own journal rows (no second read on the loop); the journal's hold keeps the helper's rules (not there twice, a 60 s bound, one read) and is a held-list row (heldRow); status().today.unknown
   msg-acl.js — PURE reach ACL for agent messaging (Channels v1, 2.362.0): 组内互通 / 组externalVisibility / 会话override只放宽 / 多组并集 / 无组singleton. ⇒ kb-file-structure.md
   turn-state.js — PURE 权威回合状态(B3, design-harness-features §2.5/§3.5): isTurnState(未知态绝不塌成 idle) · turnStateEffect(state,{hasLabel})=一个态对 `_isStreaming` 与 spinner label 的含义(`requires_action`=turn 没结束只是停在用户身上; 裸 `running` 不覆盖活着的工具 label … ⇒ kb-file-structure.md
   rewind-ops.js — PURE 撤回语义(B3 §2.10/§3.2): claude `tombstone`(上游原话"渲染或持久化本流的消费者应当移除被指名的消息", 而我们两样都做⇒半截消息永远留着) 与 codex `thread_rolled_back{num_turns}`(ThreadRolledBackEvent 只有一个字段, 0.153.4 serde dump; 从 TUI 做的回溯在这里彻底隐形, 幽灵 turn 一直挂着) … ⇒ kb-file-structure.md

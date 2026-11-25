@@ -78,6 +78,17 @@ const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
 // B-0248 (r2417 law 2): a call's RESERVATION line is on disk within this bound, or the judgment is refused by name (nothing is asked)
 const RESERVE_LAND_MS = 20000;
+// B-f276 family (r4121 (a), (b)): the hold's words — the ONE notice (its i18n key is its English sentence; zh / ja in the dictionaries),
+// and the owner's Test answers the drafter card's sentence for each code (src/lib/learn-card.js), never the bare code
+const UNREAD_NOTICE = Object.freeze({
+  'spend-unread': 'The language model plugin is paused: VibeSpace cannot read its record of what it spent today right now. Nothing is judged and nothing is spent until it reads again — it tries again by itself.',
+  'memo-unread': 'The language model plugin is paused: VibeSpace cannot read its saved answers right now. Nothing is judged and nothing is spent until it reads again — it tries again by itself.',
+});
+const HELD_TEST_WORDS = Object.freeze({
+  'spend-unread': 'the LLM plugin\'s record of what it spent today could not be read — nothing was spent; try again in a few minutes (it reads it again by itself)',
+  'memo-unread': 'the LLM plugin\'s saved answers could not be read — nothing was spent; try again in a few minutes (it reads them again by itself)',
+});
+const HELD_READ_MS = 60_000;   // B-f276 family (r4121 must 2): the journal's read again is BOUNDED as the family's helper's (READ_MS): past it the hold says a read waits
 // r2581 (3): the Test's words for that refusal — the storage, not the provider (the Integrations window shows them in the person's language)
 const TEST_RESERVATION_WORDS = 'the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes';
 const QUIET_MS = 5 * 60 * 1000;
@@ -88,7 +99,7 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(),
   tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000, writer = null,
-  settingsHeld = () => null, reserveLandMs = RESERVE_LAND_MS } = {}) {
+  settingsHeld = () => null, reserveLandMs = RESERVE_LAND_MS, heldReadMs = HELD_READ_MS } = {}) {
   // B-225b R3/R11 (the persistence holds): data/settings.json HELD — the plugin's rows (its daily dollar cap among them) read their
   // DEFAULTS, so no billed call may lean on them: NOT NOW by name ('settings-unread'), nothing reserved, nothing spent
   const settingsUnread = () => { try { return !!settingsHeld(); } catch { return false; } };
@@ -155,7 +166,6 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     } catch (e) { return { unread: SR.codeOf(e) }; } finally { try { fs.closeSync(fd); } catch (e) { holdLog(`the journal's descriptor could not be closed (${SR.codeOf(e)}) — what was read is used`); } }
   }
   const idxOf = (off, len, r) => ({ off, len, at: r ? Number(r.at) : NaN, call: r && typeof r.call === 'string' ? r.call : null, out: r && typeof r.outcome === 'string' ? r.outcome : null });
-  function journalTail() { return journalRead().rows || []; }
   let rebuiltAtBoot = false;   // B-a85f: the boot raised the day's counter from the journal — written once saveUsage exists
   // A LOAD READS WHAT THIS PROCESS STILL OWES: an engine made again in the same process (a suite's restart) lands the
   // write the last one handed the writer BEFORE it reads the files — a hub's boot owes nothing (no wait)
@@ -179,15 +189,33 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const memoLoad = (v) => { memo.clear(); for (const e of ((v && v.entries) || []).filter((x) => Array.isArray(x) && x.length === 2).slice(-M.MEMO_MAX)) memo.set(e[0], e[1]); };
   let usage = { day: null, byUse: {} };
   let journalUnread = null;   // {code, since} — the journal could not be read: the day's spend is unknown until a read again answers
+  // r4121 MUST 1 — THE RAISE AT A LIFT COMES FROM WHAT THIS LIFE's OWN READ OF THE JOURNAL GAVE: the rows the boot read (or the journal's
+  // own read again) are KEPT while the counter is held — no paid call can join the journal meanwhile (every one is refused before its
+  // reservation), so they are the whole truth of that day; the counter's lift raises from them and drops them. No second read of the
+  // journal is made on the loop in mid-life, and its index is never replaced there. A day that turned while held starts at what was
+  // paid since: nothing (rebuildFromJournal counts the rows of TODAY only)
+  let bootRows = null;
+  /** a hold of the judge is on (the counter, the memo or the journal) — the person was told once, and is told again only after none is */
+  function anyHeld() { return !!(usageHold.held() || memoHold.held() || journalUnread); }
   const memoHold = HOLD.create({ file: F.memo, valid: MEMO_SHAPE, code: 'memo-unread', aside: (mark) => `${F.memo}.corrupt-${mark}`, log: holdLog,
     words: (h) => `the language model plugin's saved answers (decision-memo.json) could not be read (${h.code}): nothing is judged until they read again — none is asked of the provider twice`,
-    onLift: (v) => { memoLoad(v); heldSaid = false; } });
+    onLift: (v) => { memoLoad(v); if (!anyHeld()) heldSaid = false; } });
   const usageHold = HOLD.create({ file: F.usage, valid: USAGE_SHAPE, code: 'spend-unread', aside: (mark) => `${F.usage}.corrupt-${mark}`, log: holdLog,
     words: (h) => `the language model plugin's spending record for today (decision-usage.json) could not be read (${h.code}): nothing is judged until it reads again — never on a spend of zero`,
-    onLift: (v) => { usage = USAGE_SHAPE(v) ? v : { day: null, byUse: {} }; heldSaid = false; if (!journalUnread) { const r = rebuildFromJournal(journalTail()); if (r) saveUsage(); } } });
+    onLift: (v) => {
+      usage = USAGE_SHAPE(v) ? v : { day: null, byUse: {} };
+      if (journalUnread) { if (!anyHeld()) heldSaid = false; return; }   // the journal still held: ITS lift raises the counter, from its own read
+      const rows = bootRows; bootRows = null;
+      if (!rows) {   // r4121 law 2: the journal's rows of the day not known at a lift ⇒ the spend STAYS UNKNOWN (never zero, never «raised by nothing»):
+        // the journal's own hold reads it off the loop (no reservation can be on its way: every paid call was refused while the counter was held)
+        journalUnread = { code: 'its rows not kept', since: now() }; holdLog('the counter read again, but no read of the journal is kept for its raise — the spend stays unknown until the journal is read again off the loop'); journalArm(); return;
+      }
+      if (!anyHeld()) heldSaid = false;
+      if (rebuildFromJournal(rows)) saveUsage();
+    } });
   { const a = SR.storeAnswer(readOf(F.memo), { valid: MEMO_SHAPE }); if (memoHold.start(a) === 'data') memoLoad(a.value); }
   { const a = SR.storeAnswer(readOf(F.usage), { valid: USAGE_SHAPE }); if (usageHold.start(a) === 'data') usage = a.value; }
-  let heldSaid = false;   // the person told ONCE a hold (a server notice), said again only after a lift and a new hold
+  let heldSaid = false;   // the person told ONCE a hold of the judge (a server notice), said again only after NONE is held and a new hold begins (r4121 (c))
   // B-a85f — THE DAY'S COUNTER IS REBUILT FROM THE JOURNAL AT BOOT (the money crash window of B-0248 U1): a kill between a billed
   // call's journal line and its counter's landing left the counter short (its reservation line is on disk before the ask) — the next
   // calls would spend past the daily budget by that much. Each use is raised to AT LEAST the journal's sum for today, never
@@ -214,6 +242,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const jr = journalRead();
     if (jr.unread) { journalUnread = { code: jr.unread, since: now() }; holdLog(`the journal (decision-journal.jsonl) could not be read (${jr.unread}) — the day's spend is unknown: nothing is judged, nothing is written to it, and it is read again off the main loop`); }
     else if (!usageHold.held()) rebuiltAtBoot = rebuildFromJournal(jr.rows);
+    else bootRows = jr.rows;   // r4121 must 1: the counter held — its lift raises from THESE rows (no second read)
   }
   let backoff = { step: 0, until: 0 };
   const open = new Map();                              // reservation id → {use, usd}: estimates of the calls in flight
@@ -431,34 +460,80 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const why = usageHold.held() || journalUnread ? 'spend-unread' : withMemo && memoHold.held() ? 'memo-unread' : null;
     if (why && !heldSaid) {
       heldSaid = true;
-      const what = why === 'memo-unread' ? 'its saved answers' : 'its record of what it spent today';
-      try { serverNotice?.('decision-unread', `The language model plugin is paused: VibeSpace cannot read ${what} right now. Nothing is judged and nothing is spent until it reads again — it tries again by itself.`, { level: 'warn' }); } catch { }
+      const text = UNREAD_NOTICE[why];   // r4121 (a): its i18n form, as the stop notices carry theirs (zh / ja in the dictionaries)
+      try { serverNotice?.('decision-unread', text, { level: 'warn', i18n: { key: text } }); } catch { }
     }
     return why;
   }
-  // THE JOURNAL's READ AGAIN (B-f276 family): off the main loop, ONE in flight, on store-read's ladder (30 s doubling to 5 min). The
-  // family's helper parses a whole file as JSON, so the journal (one JSON line a call) keeps this small hold of its own
-  let jTries = 0, jTimer = null, jBusy = false;
+  // THE JOURNAL's OWN HOLD (B-f276 family; r4121 MUST 2: it follows the family's helper, src/store-read-hold.js as it stands at
+  // 5ed0769ee, in these points — the helper parses a whole file as JSON, so the journal of lines keeps this small hold of its own):
+  //   the next try is armed FIRST at each try (store-read's ladder: 30 s doubling to 5 min), ONE read in flight;
+  //   a «not there» right after an unread answer only arms the next try, and lifts as an empty journal on a SECOND such answer (a storage
+  //   coming back answers ENOENT first);
+  //   the read is BOUNDED (heldReadMs, the helper's READ_MS): past it the hold SAYS a read waits (once a hold), no second read starts
+  //   while it hangs, and its answer is judged the moment it comes.
+  // LIFTED: the counter still held keeps these rows for ITS lift (must 1); else the counter is raised from them. It is a row of the
+  // family's held list (heldRow below: the person's «Read again now» reaches it).
+  let jTries = 0, jTimer = null, jBusy = false, jMissingAt = 0, jWaiting = 0, jWaitSaid = false, jNextAt = 0;
+  const jLifts = new Set();   // the held list's lift signal
+  const SLOW = Symbol('a read past its bound');
   function journalArm() {
     if (jTimer || !journalUnread) return;
-    jTimer = setTimeout(() => { jTimer = null; journalAgain().catch(() => { }); }, SR.retryDelay(++jTries));
+    const ms = SR.retryDelay(++jTries);
+    jNextAt = now() + ms;
+    jTimer = setTimeout(() => { jTimer = null; journalAgain().catch((e) => { holdLog(`the journal's read again failed (${(e && e.message) || e})`); journalArm(); }); }, ms);
     if (jTimer.unref) jTimer.unref();
   }
+  /** ONE read again of the journal, off the loop → true when it lifted */
   async function journalAgain() {
-    if (!journalUnread || jBusy) return false;
+    if (!journalUnread) return false;
+    journalArm();   // the next try armed FIRST: a try that meets one in flight, a read that hangs, or a read that fails never ends the tries
+    if (jBusy) return false;
     jBusy = true;
+    const p = fs.promises.readFile(F.journal).then((buf) => ({ buf }), (error) => ({ error }));
+    let tm = null;
+    const first = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r(SLOW), heldReadMs); if (tm.unref) tm.unref(); })]);
+    clearTimeout(tm);
+    if (first !== SLOW) return journalJudge(first);
+    jWaiting = now();
+    if (!jWaitSaid) { jWaitSaid = true; holdLog(`the journal (decision-journal.jsonl): a read again has not answered in ${heldReadMs / 1000} s — its answer is used the moment it comes; no second read starts meanwhile`); }
+    p.then((late) => journalJudge(late)).catch((e) => { jBusy = false; holdLog(`the journal's late answer could not be judged (${(e && e.message) || e})`); });
+    return false;
+  }
+  /** one read's answer (a try's, or a late one's) — lifts the journal's hold, or keeps it; the read's turn ends here */
+  function journalJudge(r) {
+    let rows = null;
     try {
-      let buf;
-      try { buf = await fs.promises.readFile(F.journal); } catch (e) { if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) { journalUnread.code = SR.codeOf(e); journalArm(); return false; } buf = Buffer.alloc(0); }
-      const tail = buf.length > 2 * 1024 * 1024 ? buf.subarray(buf.length - 2 * 1024 * 1024) : buf;
-      journalUnread = null; jTries = 0; heldSaid = false;
-      jTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a;   // the next append starts on a new line; the index stays unknown (no trim this start)
-      holdLog('the journal (decision-journal.jsonl) is read again — the day\'s spend is known');
-      if (!usageHold.held() && rebuildFromJournal(tailRows(tail, buf.length))) saveUsage();
-      return true;
-    } finally { jBusy = false; }
+      jWaiting = 0;
+      if (!journalUnread) return false;
+      if (r.error) {
+        const c = r.error.code;
+        if (c !== 'ENOENT' && c !== 'ENOTDIR') { journalUnread.code = SR.codeOf(r.error); jMissingAt = 0; return false; }
+        if (!jMissingAt) { jMissingAt = now(); return false; }   // «not there» right after an unread answer: read once more first
+        rows = []; jTorn = false;
+      } else {
+        const buf = r.buf, tail = buf.length > 2 * 1024 * 1024 ? buf.subarray(buf.length - 2 * 1024 * 1024) : buf;
+        rows = tailRows(tail, buf.length);
+        jTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a;   // the next append starts on a new line; the index stays unknown (no trim this start)
+      }
+    } finally { if (rows === null) jBusy = false; }
+    journalUnread = null; jTries = 0; jMissingAt = 0; jWaitSaid = false; jNextAt = 0; jBusy = false;
+    if (jTimer) { clearTimeout(jTimer); jTimer = null; }
+    if (!anyHeld()) heldSaid = false;
+    holdLog(`the journal (decision-journal.jsonl) is read again${rows.length ? '' : ' (not there twice: an empty journal)'} — the day's spend is known`);
+    if (usageHold.held()) bootRows = rows;   // the counter still held: ITS lift raises from these rows (must 1)
+    else if (rebuildFromJournal(rows)) saveUsage();
+    for (const fn of [...jLifts]) { try { fn(); } catch { /* a listener's own */ } }
+    return true;
   }
   if (journalUnread) journalArm();
+  /** the journal's hold as the family's held list reads an older hold (src/server/held-lists.js `older`): its facts, its read again, its lift */
+  const heldRow = Object.freeze({
+    key: 'decision-journal.jsonl',
+    facts: () => (journalUnread ? { since: journalUnread.since, next: jNextAt || null, ...(jWaiting ? { waiting: jWaiting } : {}) } : null),
+    readAgain: () => journalAgain(),
+    onLift: (fn) => { if (typeof fn !== 'function') return false; jLifts.add(fn); return true; },
+  });
   /** a read again of every held file of the judge, now (a person's act, a suite) → the held set after it: {spend, memo} (false = known) */
   async function readAgain() {
     await Promise.all([usageHold.held() ? usageHold.again() : null, memoHold.held() ? memoHold.again() : null, journalUnread ? journalAgain() : null]);
@@ -585,7 +660,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   /** The registry row's Test (human-triggered, one fixed sentence, one predicate) — it counts like any call. */
   async function testRunner({ resolved } = {}) {
     const r = await judge('test', { body: TEST_SENTENCE }, { questions: [TEST_QUESTION], resolved });
-    if (!r.ok) return { ok: false, error: r.why === 'no-key' ? 'no provider + key saved (or the provider is not openai / openrouter)' : r.why === 'reservation-unwritten' ? TEST_RESERVATION_WORDS : r.status ? `the provider answered HTTP ${r.status}` : r.why };
+    if (!r.ok) return { ok: false, error: r.why === 'no-key' ? 'no provider + key saved (or the provider is not openai / openrouter)' : r.why === 'reservation-unwritten' ? TEST_RESERVATION_WORDS : r.status ? `the provider answered HTTP ${r.status}` : HELD_TEST_WORDS[r.why] || r.why };   // r4121 (b): a held store's sentence, never its bare code
     const [first] = r.answers;
     const refused = !!first.refused;
     return { ok: !refused, error: refused ? 'the judge refused the question' : null, detail: { p: refused ? null : first.probability, inputTokens: r.usage.inputTokens, usd: r.usd } };
@@ -598,7 +673,8 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // The status answers the month it holds (null until the first read — the readout says no figure, as for a journal not read yet)
   // and refreshes it OFF the loop (fs.promises, the threadpool), one read at a time, 60 s apart; the engine starts that read at
   // once, so the figure is there by the time a person opens Settings › Spending. The BOOT's rebuild of the day's counter keeps its
-  // own read at the call (journalTail, above): once, before any call can spend (B-a85f's money law).
+  // own read at the call (journalRead, above): once, before any call can spend (B-a85f's money law) — and a held counter's lift raises
+  // from THAT read's rows, never from a second one (r4121 must 1).
   let monthMemo = { at: -Infinity, v: null }, monthP = null;
   async function journalTailOffLoop() {
     let fh = null;
@@ -620,6 +696,13 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   }
   monthSoFar();   // the read starts with the engine (off the loop): the figure is there when a person first asks
 
+  /** r4121 (the page): while the counter or the journal is held the day's spend is NOT KNOWN — which file, why, since when (null: known) */
+  function spendUnknown() {
+    const h = usageHold.held();
+    if (h) return { why: 'spend-unread', file: 'decision-usage.json', code: h.code, since: h.since };
+    if (journalUnread) return { why: 'spend-unread', file: 'decision-journal.jsonl', code: journalUnread.code, since: journalUnread.since, ...(jWaiting ? { waiting: jWaiting } : {}) };
+    return null;
+  }
   function status() {
     const s = settings();
     const cred = credential();
@@ -628,7 +711,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     return {
       configured: !!cred, provider: cred ? cred.provider : null, providerLabel: cred ? M.PROVIDER_LABEL[cred.provider] : null, model: cred ? cred.model : null, keySource: cred ? cred.source : null,
       features: s.features, dailyBudgetCents: s.dailyBudgetCents, threshold: s.threshold,
-      today: { day: d.day, byUse: d.byUse, total: totalOf(d), reserved: Math.round(reservedUsd() * 1e8) / 1e8, inFlight: open.size },
+      today: { day: d.day, byUse: d.byUse, total: totalOf(d), reserved: Math.round(reservedUsd() * 1e8) / 1e8, inFlight: open.size, ...(spendUnknown() ? { unknown: spendUnknown() } : {}) },   // r4121: the spend NOT KNOWN is said where the figure stands (never «spent today: 0»)
       month: monthSoFar(),
       backoffUntil: backoff.until > now() ? backoff.until : 0, reconnect: held === 'reconnect' ? { status: stop.status, at: stop.at } : null, last: lastOutcome,
       stop: held ? { why: held, status: stop.status, at: stop.at } : null,   // lane decision-vendor-hygiene: the row stop that holds (reconnect | plan | shape)
@@ -768,7 +851,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const textModel = require('./text-model-client.js').create({ integrations, ledger, fetchImpl, now, log, baseUrl: baseUrlFor && baseUrlFor.openrouter ? baseUrlFor.openrouter : null });
 
   if (rebuiltAtBoot) saveUsage();   // B-a85f: the raised counter is written (an act, rank 0)
-  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel, roadFacts, notePaused, readAgain };
+  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel, roadFacts, notePaused, readAgain, heldRow };
 }
 
 module.exports = { create, ROW_ID, FEATURE_OF, TEST_SENTENCE };

@@ -349,7 +349,8 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
   testBtn.title = v.testDescribe ? t(v.testDescribe) : '';
   const result = el('div', 'integ-test-result');
   // B-0248's next part (r2581 (3)): the decision Test's own sentence for a reservation that did not land (src/server/decision-engine.js TEST_RESERVATION_WORDS)
-  const TEST_WORDS = () => ({ 'the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes': t('the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes') });
+  const TEST_WORDS = () => ({ 'the LLM plugin\'s record of what it spent today could not be read — nothing was spent; try again in a few minutes (it reads it again by itself)': t('the LLM plugin\'s record of what it spent today could not be read — nothing was spent; try again in a few minutes (it reads it again by itself)'), 'the LLM plugin\'s saved answers could not be read — nothing was spent; try again in a few minutes (it reads them again by itself)': t('the LLM plugin\'s saved answers could not be read — nothing was spent; try again in a few minutes (it reads them again by itself)'),   // B-f276 family (r4121 (b)): the judge's held stores, the drafter card's sentence
+    'the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes': t('the call was not sent: its spending line could not be written to the data folder — nothing was charged; test again once the storage writes') });
   const drawVerdict = (ok, testedAt, error) => {
     result.textContent = '';
     if (ok === null || ok === undefined) { result.appendChild(el('span', 'plugin-detail', t('Not tested yet'))); }
