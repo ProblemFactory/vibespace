@@ -1167,9 +1167,18 @@ class HostManager {
       try { this.onHostKeyPinned?.(h); this.onHostKeyPinned?.(h, 'device', { notice: true }); } catch { } // …and its host-key items (never an urgent item about a machine that is gone)
       // The host's remote-transcript cache is dead weight once the host is gone
       // (files up to 64MB each accumulated forever — audit round-3).
-      try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
-      this._removed(id);
-      return true;
+      // r4006 law E: the machine's owed copies and records leave the writer first (forget: one not in flight is dropped, one IN FLIGHT
+      // lands and is unlinked again). The folder goes only once every write of it in flight has landed (bounded), so no owed write
+      // makes the folder again after this removal (the writer's thread makes a missing folder for the write it runs)
+      let inFlight = [];
+      try { const W = this._W(), base = path.join(this.dataDir, 'remote-jsonl', id) + path.sep, until = Date.now() + CACHE_LAND_MS;
+        for (const st of (typeof W.stats === 'function' ? W.stats() : [])) if (st && typeof st.file === 'string' && st.file.startsWith(base)) { this._letCacheGo(W, st.file); if (st.inflight && typeof W.durable === 'function') inFlight.push(this._cacheLanded(W, st.file, until)); }   // forget FIRST (it answers every waiter at once), then wait for the in-flight write's landing
+      } catch { }
+      return Promise.all(inFlight).then(() => {
+        try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
+        this._removed(id);
+        return true;
+      });
     }, () => false);
   }
   /** (2b): the removal of `id` is on disk — asked again while the writer still owes it (its read r1, S1: never given up — the writer
@@ -3027,7 +3036,6 @@ class HostManager {
     // read as "blank/gone". After one timeout, serve the cache instantly for
     // 60s instead of re-probing per request.
     if (Date.now() < (this._hostDownUntil?.get(id) || 0) && fs.existsSync(cachePath)) return cachePath;
-    const dir = path.dirname(cachePath);
     const metaPath = cachePath + '.meta';
     let meta = null;
     try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch {}
@@ -3366,7 +3374,7 @@ class HostManager {
         // from the SAME remote file (see the cache-slot note above)
         const usable = cacheUsable(remotePath, size);   // ONE verdict per poll AND per rung: the whole-file scan behind it is memoized against the bytes it judged (round 7)
         if (meta && meta.size === size && meta.mtime === mtime && usable && (() => { try { return fs.statSync(cachePath).size === size; } catch { return false; } })()) { stampVerified(remotePath, size, mtime); return cachePath; }
-          // B-0248 unit 4: no mkdir here (a round trip on the loop each fetch): the whole copy's folder is made by the store writer (makeDir); a delta and the heal paths write only into a copy that is there
+        // B-0248 unit 4: no mkdir here (a round trip on the loop each fetch): the whole copy's folder is made by the store writer (makeDir); a delta and the heal paths write only into a copy that is there
         let localSize = 0;
         try { localSize = fs.statSync(cachePath).size; } catch { }
         // …and BEFORE the delta legality test, the one-time over-stamp heal
@@ -3424,10 +3432,11 @@ class HostManager {
           // no/invalid prefix (or remote rotated smaller) — full streamed fetch
           const whole = await dm.fsReadRange(remotePath, 0, size);
           if (whole.data.length !== size) throw new Error(`short read-range: ${whole.data.length} of ${size}`);
-          await this._landCacheWhole(cachePath, whole.data);   // B-0248 unit 4: the store writer's thread writes it (landed before its record)
+          await this._landCacheNotExact(metaPath, meta, id);   // r4006 law D: the old record claims no exact size before the copy is handed
+          await this._landCacheWhole(cachePath, whole.data, id);   // B-0248 unit 4: the store writer's thread writes it (landed before its record)
           dropScanMemo();
         }
-        await this._landCacheMeta(metaPath, JSON.stringify(nextMeta({ size, mtime, slab: true, remotePath }, { whole: !grewSlab })));
+        await this._landCacheMeta(metaPath, JSON.stringify(nextMeta({ size, mtime, slab: true, remotePath }, { whole: !grewSlab })), id);
         return cachePath;
       } catch (e2) {
         // A CACHE VERDICT IS NOT A TRANSPORT FAILURE (round 5): the moved-slot
@@ -3492,7 +3501,7 @@ class HostManager {
     const canDeltaSsh = usableSsh && !this._slotMovedEarlier(observed) && !isZstPath(remotePath) && !cacheIsCompressed() && localSizeSsh > 0 && localSizeSsh <= size && !!meta && heldStampedBytes(localSizeSsh);
     const fetchBytesSsh = canDeltaSsh ? size - localSizeSsh : size;
     if (fetchBytesSsh > maxBytes) throw tooLarge(fetchBytesSsh, cacheFault(localSizeSsh, usableSsh));
-      // B-0248 unit 4: no mkdir here (a round trip on the loop each fetch): the whole copy's folder is made by the store writer (makeDir); a delta and the heal paths write only into a copy that is there
+    // B-0248 unit 4: no mkdir here (a round trip on the loop each fetch): the whole copy's folder is made by the store writer (makeDir); a delta and the heal paths write only into a copy that is there
     let stampSize = size;
     let grewSsh = false;
     if (canDeltaSsh) {
@@ -3531,7 +3540,8 @@ class HostManager {
     }
     if (!grewSsh) {
       const buf = await this._ssh(h, `cat ${JSON.stringify(remotePath)}`, { timeoutMs: 120000, maxBuffer: maxBytes + 1024, encoding: 'buffer' });
-      await this._landCacheWhole(cachePath, buf);   // B-0248 unit 4: the store writer's thread writes it (landed before its record)
+      await this._landCacheNotExact(metaPath, meta, id);   // r4006 law D: the old record claims no exact size before the copy is handed
+      await this._landCacheWhole(cachePath, buf, id);   // B-0248 unit 4: the store writer's thread writes it (landed before its record)
       dropScanMemo();
       // STAMP WHAT THE FILE ACTUALLY HOLDS (round 5) — the rule the tail branch
       // above already follows. `cat` runs after the probe stat, so a live
@@ -3543,7 +3553,7 @@ class HostManager {
       // so it has no such gap.
       stampSize = buf.length;
     }
-    await this._landCacheMeta(metaPath, JSON.stringify(nextMeta({ size: stampSize, mtime, remotePath }, { whole: !grewSsh })));
+    await this._landCacheMeta(metaPath, JSON.stringify(nextMeta({ size: stampSize, mtime, remotePath }, { whole: !grewSsh })), id);
     return cachePath;
   }
 
@@ -3554,17 +3564,54 @@ class HostManager {
    *  written into after), urgent (its fetch waits), and answered only once ON DISK: the record (meta) is written after it, so a
    *  reader never meets a record that names bytes the copy does not hold. A write that cannot land THROWS by name, as the release's
    *  failed write did (the fetch's own road says it). The delta APPENDS (_appendDeltaAt) stay where they are: a small tail a poll */
-  async _landCacheWhole(file, data) {
-    const SW = require('./store-writer.js'), W = SW.storeWriter();
-    W.dirty(file, { name: 'remote-jsonl.write', urgent: true, makeDir: true, produce: () => SW.byRef(data) });
-    if (!(await W.durable(file, { timeoutMs: CACHE_LAND_MS }))) throw Object.assign(new Error(`the cached copy ${path.basename(file)} could not be written (the store writer did not land it)`), { code: 'ECACHEWRITE' });
+  async _landCacheWhole(file, data, id = null) {
+    // r4006 (the round on line 888), laws A, B, E, F: the fetched bytes are held in ONE cell, reachable only while their write is owed
+    // (a producer answering null writes nothing: «equal to the disk»); once durable() has answered — landed, refused or past its
+    // bound — the cell is emptied and the writer's entry for the file leaves (_letCacheGo). A machine removed meanwhile gets no copy
+    // §72 (src/timed-sync.js): the hand-off to the writer is this site's own, by its row's literal name; the bytes are the one cell's
+    await this._landCacheBytes(file, data, id, 'the cached copy', (W, cell) => W.dirty(file, { name: 'remote-jsonl.write', urgent: true, makeDir: true, produce: () => { const b = cell(); return b == null ? null : require('./store-writer.js').byRef(b); } }));
   }
   /** B-0248 unit 4: the copy's record (its .meta) through the same writer, answered once on disk — after the bytes it names */
-  async _landCacheMeta(file, text) {
-    const W = require('./store-writer.js').storeWriter();
-    W.dirty(file, { name: 'remote-jsonl-meta.write', urgent: true, makeDir: true, produce: () => text });
-    if (!(await W.durable(file, { timeoutMs: CACHE_LAND_MS }))) throw Object.assign(new Error(`the cached copy's record ${path.basename(file)} could not be written (the store writer did not land it)`), { code: 'ECACHEWRITE' });
+  async _landCacheMeta(file, text, id = null) {
+    await this._landCacheBytes(file, text, id, "the cached copy's record", (W, cell) => W.dirty(file, { name: 'remote-jsonl-meta.write', urgent: true, makeDir: true, produce: cell }));
   }
+  /** r4006 law D: before a WHOLE copy is handed, a record that claims an exact size is written without that claim. A stop between the
+   *  copy's landing and its new record then leaves a record that names no exact size: the over-stamp heal reads the next poll (also
+   *  above the fetch cap), never «too large» for good. No record yet: nothing to say */
+  async _landCacheNotExact(metaPath, meta, id = null) {
+    if (!meta || meta.sizeExact !== true) return;
+    const { sizeExact, ...rest } = meta;
+    await this._landCacheMeta(metaPath, JSON.stringify({ ...rest, notExactSince: Date.now() }), id);
+  }
+  /** `hand(W, cell)`: the caller's own W.dirty of `file` (its row's name, §72); its producer reads `cell()` — the bytes while their
+   *  write is owed, null once emptied (null = «equal to the disk»: nothing is written) */
+  async _landCacheBytes(file, bytes, id, what, hand) {
+    if (id != null && !this._state.hosts.some((x) => x && x.id === id)) throw Object.assign(new Error(`${what} ${path.basename(file)} is not written: its machine is removed`), { code: 'ECACHEWRITE' });   // law E (get() throws for a removed machine: the list is asked)
+    const W = this._W();
+    let held = bytes;
+    hand(W, () => held);
+    let ok = false;
+    try { ok = await W.durable(file, { timeoutMs: CACHE_LAND_MS }); }
+    finally { held = null; this._letCacheGo(W, file); }
+    if (!ok) throw Object.assign(new Error(`${what} ${path.basename(file)} could not be written (the store writer did not land it)`), { code: 'ECACHEWRITE' });
+  }
+  /** r4006 laws A, B, F: the file's entry LEAVES the writer once its answer is in (W.forget). By the writer's own code (src/store-writer.js
+   *  forget): on a file NOT in flight it drops the entry and never touches the file; on one IN FLIGHT (the bound passed mid-write) it
+   *  lets that write land and then unlinks the file again on the writer's thread. So a copy (or a record) answered «not written» never
+   *  stands later over one a later poll has grown — the next poll fetches whole — and the writer's table keeps no entry a transcript */
+  _letCacheGo(W, file) { try { if (typeof W.forget === 'function') W.forget(file); } catch { } }
+  /** r4006 law E: the write of `file` IN FLIGHT at a removal has LANDED (or the bound `until` passed). One durable() answer is not
+   *  that: forget() answers every waiter at once, and the fetch's own _letCacheGo (its finally, a microtask after the removal's
+   *  forget) answered the removal's wait while the copy still flew, so the landing made the folder again (this cure's first gate).
+   *  So it asks again while the writer still owes the file a write (pending(): the unlink after a forgotten landing is none) */
+  async _cacheLanded(W, file, until) {
+    for (let k = 0; k < 8 && Date.now() < until; k++) {
+      try { await W.durable(file, { timeoutMs: Math.max(1, until - Date.now()) }); } catch { return; }
+      if (typeof W.pending !== 'function' || !W.pending(file)) return;
+    }
+  }
+  /** the process's store writer, or a suite's own (`hm._writer`: the stand-in thread) */
+  _W() { return this._writer || require('./store-writer.js').storeWriter(); }
 
   // Remote WORKFLOW state (2.191.0, remote View Workflow): one read-only
   // compound probe (ssh multiplexed ~50ms warm, or dial runCmd) returning the

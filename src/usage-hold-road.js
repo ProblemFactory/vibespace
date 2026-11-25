@@ -1595,12 +1595,23 @@ class UsageHoldRoad {
     // ~60 an hour per paired machine). Readers ask memory first (set below, before the landing). A crash before the landing leaves
     // the file's older cursor: the machine's next harvest re-sends from it and the ledger's dedup keeps every row once. The bytes
     // are the newest record of this host at the write's moment; the exit's flush writes what is owed
-    if (!this._hostCursorText) this._hostCursorText = new Map();
-    this._hostCursorText.set(hostId, text);
+    // r4006 law C (r806 stands): the text is held ONLY WHILE ITS WRITE IS OWED — one record a host ({ text, produced }); the producer
+    // notes which text it handed, and the landing drops the record only when that text is still the newest (a newer one stays owed)
+    if (!this._hostCursorOwed) this._hostCursorOwed = new Map();
+    const owed = this._hostCursorOwed;
+    const r0 = owed.get(hostId) || {};
+    r0.text = text; owed.set(hostId, r0);
     const file = this._hostCursorFile(hostId);
     require('./store-writer.js').storeWriter().dirty(file, { name: 'usage-host-cursors.write', makeDir: true,
-      produce: () => (this._hostCursorText.has(hostId) ? this._hostCursorText.get(hostId) : null),
-      onWritten: (ok, e) => { if (!ok) { try { console.warn(`[usage] ${path.basename(file)}: the host cursor could not be written (${(e && (e.code || e.message)) || e}) — kept in memory, written again by the writer`); } catch { } } } });
+      produce: () => { const r = owed.get(hostId); if (!r || r.text == null) return null; r.produced = r.text; return r.text; },
+      onWritten: (ok, e) => {
+        const r = owed.get(hostId);
+        if (ok) { if (this._hostCursorFailSaid) this._hostCursorFailSaid.delete(hostId); if (r && r.produced === r.text) owed.delete(hostId); else if (r) r.produced = null; return; }
+        if (r) r.produced = null;
+        // a failure is said ONCE a stretch of failure (the writer retries at its backoff; its own line says the store), again after a landing
+        if (!this._hostCursorFailSaid) this._hostCursorFailSaid = new Set();
+        if (!this._hostCursorFailSaid.has(hostId)) { this._hostCursorFailSaid.add(hostId); try { console.warn(`[usage] ${path.basename(file)}: the host cursor could not be written (${(e && (e.code || e.message)) || e}) — kept in memory, written again by the writer`); } catch { } }
+      } });
     const rec = { ...head, cursors };
     this._hostCursors.set(hostId, rec);
     this._hostCursorDigest.set(hostId, digest);

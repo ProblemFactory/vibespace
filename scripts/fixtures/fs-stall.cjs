@@ -10,6 +10,8 @@
 // A descriptor call is judged by the path its open named (one opened before the install: /proc/self/fd). `exempt(path, fn)` → a row's name: that call is COUNTED under
 // the row and not stalled (a door this unit lists, not moves — named by the suite). → { calls, restore() }; each call
 // {fn, path, kind: 'write' | 'read', stalled, row}.
+// NOT WRAPPED (B-0248 unit 4, r4006): mkdtempSync, symlinkSync, linkSync, cpSync, rmdirSync, and the fs.promises / callback APIs
+// (those run off the loop); a leg that needs one of them stalled adds it here first.
 const fs = require('fs');
 const path = require('path');
 const WRITES = ['openSync', 'writeSync', 'writevSync', 'closeSync', 'writeFileSync', 'appendFileSync', 'renameSync', 'copyFileSync', 'mkdirSync', 'rmSync', 'unlinkSync', 'truncateSync', 'ftruncateSync', 'fsyncSync', 'fdatasyncSync', 'chmodSync'];

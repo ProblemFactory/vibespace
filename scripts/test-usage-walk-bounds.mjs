@@ -288,8 +288,17 @@ console.log('④ L3 one event\'s strings: an over-long id dropped AND counted, n
   await led.ingestRemoteEvents('host-e', 'box-e', '', { cursors: { '/p/a.jsonl': { offset: 99, lastRid: 'r9' } }, since: 'hub' }); await led.whenHostCursorWritten('host-e');
   ok(sameE && fs.statSync(cfE).ino !== inoE && led.hostCursorOf('host-e').cursors['/p/a.jsonl'].offset === 99, 'the hub\'s kept cursor file is written only when the cursor moved — the same cursors again rewrite nothing (the same inode), a moved one is written', { same: sameE });
   const onDisk = JSON.parse(fs.readFileSync(cfE, 'utf8')), dig = led._hostCursorDigest && led._hostCursorDigest.get('host-e');
-  ok(!led._hostCursorJson && typeof dig === 'string' && dig.length === 44 && onDisk.cursorsDigest === dig && onDisk.cursors['/p/a.jsonl'].offset === 99 && onDisk.v === 1,
+  // r4006 law C (r806 stands): NO SECOND COPY OF THE MAP's TEXT UNDER ANY NAME once its write landed — every own property of the
+  // ledger is searched (strings, a Map's values, an object's values, a few levels down) for the cursor map's text
+  const textOf = JSON.stringify({ '/p/a.jsonl': { offset: 99, lastRid: 'r9' } });
+  const holdsText = (o, needle) => { const seen = new Set(); const has = (x, d) => { if (typeof x === 'string') return x.includes(needle); if (!x || typeof x !== 'object' || d > 3 || seen.has(x)) return false; seen.add(x);
+    if (x instanceof Map) return [...x.values()].some((y) => has(y, d + 1)); if (Array.isArray(x) || x instanceof Set || Buffer.isBuffer(x)) return false; return Object.values(x).some((y) => has(y, d + 1)); };
+    return Object.getOwnPropertyNames(o).some((k) => { let v; try { v = o[k]; } catch { return false; } return has(v, 0); }); };
+  const secondCopy = holdsText(led, textOf);
+  ok(!secondCopy && !led._hostCursorJson && typeof dig === 'string' && dig.length === 44 && onDisk.cursorsDigest === dig && onDisk.cursors['/p/a.jsonl'].offset === 99 && onDisk.v === 1,
     'r806: the hub keeps the map\'s DIGEST to compare (44 characters a machine), never a second copy of its text; the record is written from the one string, its digest in it (a restart compares without a second stringify)', { dig: dig && dig.length, keys: Object.keys(onDisk) });
+  { const probe = Object.create(null); probe._anyNameAtAll = new Map([['host-e', { kept: textOf }]]);
+    ok(holdsText(probe, textOf) && !holdsText({ _hostCursorDigest: new Map([['host-e', dig]]) }, textOf), 'r4006 law C, the pin\'s RED: a second copy kept under ANY name (a Map of records, here) is seen by it; the digest alone is not', { secondCopy }); }
   // the RESTART roads (round wf9pjdvd9): a record an OLDER hub wrote (no digest: computed once from its map) and one this hub
   // wrote (its digest read back) — after a restart (a new ledger over the same folder) the same cursors write nothing
   const dirR = path.join(tmp, 'ledger-restart'), noHome = path.join(tmp, 'nohome');
