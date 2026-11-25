@@ -478,6 +478,10 @@ const I_RECV = {
   'src/lib/channels-panel.js|r': ['count', 'a refresh answer\'s pending flag'], 'src/lib/channel-window.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-window.js|a': ['channel author', 'lane lark-threads: an author\'s vendor name / id in the "Set a name…" dialog\'s title (the vendor\'s, never a record\'s words)'], 'src/lib/channel-window.js|r2.proposal': ['outbox proposal', 'the channel\'s refusal of a send'],
   'src/lib/chat-view.js|msg.page': ['published page', 'a page\'s name'], 'src/lib/chat-view.js|r': ['codex sub-agent', 'an unresolved sub-agent\'s reason code'],
   'src/lib/chat-status-bar.js|p': ['account', 'the conversation\'s model provider\'s label (the owner named it), in the model badge\'s "does not serve" toast — lane models-at-session'],
+  // lane lg-providers (主开发 r4464, box row 851 at 179edf1e1): the conversation strip's press reply (line 955, B-d578) — JUDGED: its words are
+  // the product's own sentences (t keys) whose only parameters are counts and a model provider's label or id; the label is the owner's
+  // (only a person's page writes it: src/routes/providers.js personVerdict) and providers are no kind a clear replaces
+  'src/lib/chat-status-bar.js|m': ['words', 'the strip\'s press reply, toast specs built in _fbPress: the product\'s own sentences (fallbackPressToasts and two t keys), their only parameters counts and a model provider\'s label (labelOf — the owner named it, as |p) or its id; no record\'s words, nothing a peer typed'],
   'src/lib/desktop-app-launcher.js|end': ['desktop app', 'an app label'], 'src/lib/desktop-manager.js|w': ['words', 'the Rename door\'s dialog words — the PURE table\'s t() keys (lane desktop-doors-table r2 ④)'], 'src/lib/file-explorer.js|bk': ['bookmark', 'a bookmark label'],
   'src/lib/integrations-window.js|v': ['integration', 'a key label'],
   'src/lib/manage-agents.js|a': ['account', 'an account'], 'src/lib/manage-agents.js|c.account': ['account', 'an account'], 'src/lib/manage-agents.js|fin.account': ['account', 'an account'],
