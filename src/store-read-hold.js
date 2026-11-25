@@ -170,7 +170,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
       if (!held || stopped) return false;
       a = SR.storeAnswer(read, { valid });
       if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; held.emptyOnce = false; return false; }
-      if (a.state === 'missing' && !missingAt) { missingAt = now(); return false; }
+      if (a.state === 'missing' && !missingAt) { missingAt = now(); held.emptyOnce = false; return false; }   // r4069: any judged read between two empty ones breaks their row
       if (a.state === 'corrupt') {
         // r4039 (a): the second look has the FIRST read's bound and words — past it the hold says a read waits (its slot stays this
         // read's until the file answers: one read in flight a store)
@@ -188,16 +188,19 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
         if (!held || stopped) return false;
         if (!fileBytes) {
           held.code = 'a read unlike the file';
+          held.emptyOnce = false;   // r4069: a read unlike the file breaks the empty answers' row
           if (!unlikeSaid) { unlikeSaid = true; log(`${name}: a read answered bytes the file does not hold (its size or a second look disagrees) — it stays held and is read again; nothing is copied or written`); }
           return false;
         }
         // r4039 (b): an EMPTY file (its size says zero, both looks agree) lifts as torn only on TWO rungs in a row — a mount wrong about
-        // everything for one moment must not empty a store; a file truly of size zero lifts a rung later
+        // everything for one moment must not empty a store; a file truly of size zero lifts a rung later. IN A ROW (r4069): every other
+        // answer judged between them (unreadable, missing, a read unlike the file, a torn file of bytes) resets the mark
         if (fileBytes.length === 0 && !held.emptyOnce) {
           held.emptyOnce = true; held.code = 'empty, read once more';
           if (!emptySaid) { emptySaid = true; log(`${name}: the file is empty (its size says zero and two reads agree) — it stays held and is read once more before it starts empty`); }
           return false;
         }
+        if (fileBytes.length) held.emptyOnce = false;   // r4069: a torn file of bytes breaks it too (its copy may fail: it stays held)
         held.torn = true;
         keepWhy = null;
         const kept = await keep(fileBytes);   // what is kept aside is THE FILE as it stands, never one read's answer

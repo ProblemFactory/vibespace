@@ -428,6 +428,43 @@ try {
     const EMPTY2 = "        if (fileBytes.length === 0 && !held.emptyOnce) {\n";
     const emptyX = await tornScene(mutant('src/store-read-hold.js', [[EMPTY2, '        if (false) {\n']]), 'torn-empty-ctl', { onDisk: '', answer: null });
     ok(!emptyX.afterAnswer.held && emptyX.afterAnswer.copies === 1, 'RED CONTROL — the empty file\'s second rung cut (in a copy): one empty moment empties the store at once', emptyX);
+    // r4069: the empty answers' «read once more» mark is reset by ANY judged read between two empty ones — a read unlike the file, a
+    // missing answer, a torn file of bytes whose copy failed: two empties NOT in a row lift nothing; two in a row still lift. The file on
+    // disk is the scene's (empty; torn bytes for the one rung that asks them); the placed answers are the read call's only
+    const rowScene = async (Mod, tag, between) => {
+      const d = dirOf(tag), f = path.join(d, 'w.json'); fs.writeFileSync(f, '');
+      const rf = fs.promises.readFile; let placed = null, badAside = false;
+      fs.promises.readFile = function (p, ...a) { if (String(p) === f && placed) { const x = placed; placed = null; return x(); } return rf.call(fs.promises, p, ...a); };
+      const keepT = setInterval(() => { }, 1000);
+      let h = null, out = null;
+      try {
+        h = Mod.create({ file: f, code: 'w', aside: (m) => (badAside ? path.join(d, 'no-such-folder', 'w.json.corrupt-' + m) : f + '.corrupt-' + m), words: () => 'w', onLift: () => { }, readMs: () => 30 });
+        h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed (placed)' });
+        await h.again();   // ① the first empty: held, read once more
+        const one = h.held() ? h.held().code : null;
+        if (between === 'unlike') placed = () => Promise.resolve(Buffer.from('{"rows": ['));
+        if (between === 'missing') placed = () => Promise.reject(Object.assign(new Error('ENOENT: not there (placed)'), { code: 'ENOENT' }));
+        if (between === 'copy-failed') { fs.writeFileSync(f, '{"rows": ['); badAside = true; }
+        await h.again();   // ② the answer between
+        const two = h.held() ? h.held().code : null;
+        fs.writeFileSync(f, ''); badAside = false; placed = null;
+        await h.again();   // ③ an empty again — NOT in a row with ①
+        const three = { held: !!h.held(), code: h.held() ? h.held().code : null };
+        await h.again();   // ④ the second empty IN A ROW
+        out = { one, two, three, lifted: !h.held() };
+      } finally { fs.promises.readFile = rf; clearInterval(keepT); if (h) h.stop(); }
+      return out;
+    };
+    const NORESET = mutant('src/store-read-hold.js', [
+      ["      if (a.state === 'missing' && !missingAt) { missingAt = now(); held.emptyOnce = false; return false; }", "      if (a.state === 'missing' && !missingAt) { missingAt = now(); return false; }   /* MUTANT: 5ed0769ee — no reset */"],
+      ["          held.emptyOnce = false;   // r4069: a read unlike the file breaks the empty answers' row\n", ''],
+      ["        if (fileBytes.length) held.emptyOnce = false;   // r4069: a torn file of bytes breaks it too (its copy may fail: it stays held)\n", '']]);
+    const rowWant = { unlike: 'a read unlike the file', missing: null, 'copy-failed': 'torn bytes, not copied' };
+    for (const between of Object.keys(rowWant)) {
+      const r = await rowScene(H, 'empty-row-' + between, between), x = await rowScene(NORESET, 'empty-row-ctl-' + between, between);
+      ok(!!r && r.one === 'empty, read once more' && !!r.two && (rowWant[between] === null || r.two === rowWant[between]) && r.three.held && r.three.code === 'empty, read once more' && r.lifted, `r4069: an empty file, then ${between === 'unlike' ? 'a read unlike the file' : between === 'missing' ? 'a missing answer' : 'a torn file of bytes whose copy failed'}, then empty again — the second empty is NOT in a row: still held, read once more; the next empty in a row lifts`, r);
+      ok(!!x && !!x.two && !x.three.held, `RED CONTROL — the mark not reset there (5ed0769ee, in a copy): the two empties that are not in a row lift the store (${between})`, x);
+    }
     // r4039 (c): THE FIRST READ AT A START — the caller's own read answered torn bytes while the file is whole: the start's road reads
     // the file again, and a placed empty answer there is a failed read too (held), then the next true read brings the records
     const startScene = async (tag, placed) => {

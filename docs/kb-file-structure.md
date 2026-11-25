@@ -2779,6 +2779,7 @@ The reports, the causes as measured and the before / after shots: /var/tmp/vibes
 - **r4039's follow (one commit on the chain's tip, the coordinator's read):**
   - (a) The torn verdict's second look has the first read's bound and words: past it the hold says a read waits, and its slot stays the read's.
   - (b) An EMPTY file (its size says zero, both looks agree) lifts as torn only on its second rung in a row, said once («empty, read once more»).
+    - **In a row (r4069):** every other answer judged between the two resets the mark: unreadable, missing, a read unlike the file, or a torn file of bytes whose copy failed. Two empties that are not in a row lift nothing.
   - (d) The net-use road reads a run killed, timed out or with no code (`_run`'s `ended: 'no-code'`) as not reached.
   - (e) The «not reached» toast says the folder may still be mounted on that machine and to unmount it there once it is back (zh, ja).
   - (f) The owed legacy-ingest mark is saved away once paid, and the owed ingest skips a record whose id or mount point the list already holds.
