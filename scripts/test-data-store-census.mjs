@@ -486,7 +486,7 @@ const DELETION_CALLS = Object.freeze({
   'src/server/session-stdout.js': 5, 'src/server/spend-guard.js': 3, 'src/server/sync-fs-witness-worker.js': 2, 'src/server/usage-index-retire.js': 1,
   'src/server/usage-pool-engine.js': 2, 'src/server/vault-engine.js': 7, 'src/server/vault-run-door.js': 6, 'src/server/vault-totp.js': 1,
   'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 1, 'src/signin-witness-worker.js': 2,
-  'src/signin-witness.js': 1, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 3,
+  'src/signin-witness.js': 2, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 3,
   'src/store-read-hold.js': 6, 'src/store-writer-worker.js': 6, 'src/store-writer.js': 2, 'src/task-groups.js': 1,
   'src/transcript-service.js': 3, 'src/usage-cache-write.js': 1, 'src/usage-hold-road.js': 1, 'src/usage-ledger-dedup.js': 4,
   'src/user-todos.js': 1, 'src/vnc.js': 1, 'src/webdav.js': 5, 'src/ws-create.js': 2,
