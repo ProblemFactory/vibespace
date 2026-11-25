@@ -70,6 +70,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return Date.now() - t0; await sleep(15); } return -1; };
+// r4456 (the flake census, round 2): a wait on the FACT the leg judges — its bound generous, its expiry a NAMED harness row (red), never a
+// silent read of whatever is there
+const untilFact = async (fn, what, ms = 10000) => { const t = await until(fn, ms); if (t < 0) ok(false, `harness: ${what} — the state never came within ${ms / 1000} s (the row after it judges nothing)`); return t; };
 
 const PL = require(path.join(REPO, 'src/preset-layers.js'));
 const R = require(path.join(REPO, 'src/integration-registry.js'));
@@ -195,9 +198,9 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   ok(st.items.some((i) => i.kind === 'gdrive' && i.source === 'release' && i.n === 1) && st.items.some((i) => i.kind === 'gdrive' && i.source === 'cluster' && i.n === 2) && Number.isInteger(st.updatedAt), `status(): counted by layer, updatedAt = the files' mtime (${JSON.stringify(st.items)})`);
 
   // a swap that changes nothing fires nothing
-  const before = changes.length;
+  const before = changes.length, read0 = r.status().loadedAt;
   project(dir, { 'gdrive-clients.json': [g('org1', SECRET_B, 'Org'), g('channels', SECRET_A), g('org2', SECRET_A)], 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }], 'override/gdrive-clients.json': [g('channels', SECRET_U, 'Mine')] });
-  await sleep(600);
+  await untilFact(() => r.status().loadedAt !== read0, 'the reader READ the same-content swap (its loadedAt moved)');   // r4456: never a fixed 600 ms
   ok(changes.length === before, 'a swap with the same content fires no listener and no line');
 
   // a malformed file keeps the previous presets, ONE line per transition, never a throw
@@ -211,8 +214,9 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   ok(r.status().errors.length === 1 && r.status().errors[0].kept === true && r.status().errors[0].code === 'unparseable', 'status() carries the typed error (kept: true)');
   ok(changes[changes.length - 1].kinds.length === 0, 'the error transition still notifies (kinds []) — the summary line must say it');
   // persisting malformed + another swap: no second line
+  const read1 = r.status().loadedAt;
   project(dir, { 'gdrive-clients.json': leak, 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }], 'override/gdrive-clients.json': [g('channels', SECRET_U, 'Mine')], 'override/integrations.json': '[]' });
-  await sleep(600);
+  await untilFact(() => r.status().loadedAt !== read1, 'the reader READ the next swap of the malformed file (its loadedAt moved)');   // r4456: never a fixed 600 ms
   ok(cap.lines.filter((l) => /could not be read/.test(l)).length === 1, 'the same failure on the next swap is not said again');
   // fixed
   project(dir, { 'gdrive-clients.json': [g('org1', SECRET_B, 'Org')], 'integrations.json': [{ id: 'lark', key: 'jarvis', label: 'Jarvis', values: { appId: 'cli_x', appSecret: LARK_S } }] });
@@ -262,15 +266,38 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
   const anchor = "      slot.error = { layer: slot.layer, file: FILES[slot.kind], code: out.error.code, kept: !!slot.list };";
   ok(srcR.includes(anchor), 'the control\'s anchor exists in the reader');
-  const dropper = M.load('src/server/cluster-presets.js', editAnchor(srcR, anchor, anchor + '\n      slot.list = null;', "src/server/cluster-presets.js"), 'drop');
+  // r4456: the copy also takes the leg's own HOLD (opt-in, `hold`) before a slot's re-read — the place the control's late fact is made
+  const aHold1 = 'function create({ dir = null, log = console, now = () => Date.now(), pollMs = POLL_MS, debounceMs = DEBOUNCE_MS } = {}) {';
+  const aHold2 = "    try { text = await fs.promises.readFile(f, 'utf-8'); }";
+  const dropSrc = editAnchor(editAnchor(editAnchor(srcR, anchor, anchor + '\n      slot.list = null;', 'src/server/cluster-presets.js'), aHold1, 'function create({ dir = null, log = console, now = () => Date.now(), pollMs = POLL_MS, debounceMs = DEBOUNCE_MS, hold = null } = {}) {', 'src/server/cluster-presets.js'), aHold2, '    if (hold) await hold();\n' + aHold2, 'src/server/cluster-presets.js');
+  const dropper = M.load('src/server/cluster-presets.js', dropSrc, 'drop');
   const dir3 = path.join(ROOT, 'ctl');
   project(dir3, { 'gdrive-clients.json': [g('org1', SECRET_A)] });
-  const d3 = dropper.create({ dir: dir3, log: capture().log, debounceMs: 20, pollMs: 100 });
+  const cap3 = capture();
+  const d3 = dropper.create({ dir: dir3, log: cap3.log, debounceMs: 20, pollMs: 100 });
   await d3.start();
   project(dir3, { 'gdrive-clients.json': '[{"key":' });
-  await sleep(500);
+  // r4456: the control judges once the copy has READ the malformed file — its own «could not be read» line (the watch or the poll,
+  // the debounce, then the read: late on a loaded machine) — never a fixed 500 ms
+  await untilFact(() => cap3.lines.some((l) => /could not be read/.test(l)), 'the copy READ the malformed file (its own «could not be read» line)');
   ok(d3.entries('gdrive') === null, 'CONTROL: a copy that drops the slot on a parse error leaves NO presets — the keep-the-previous assert above is red on it');
   d3.stop();
+  // r4456 (1) PLACED: what runs late is the copy's re-read of the malformed file. While that read is HELD (the leg's own hold in the
+  // copy), the control as it stood — a fixed 500 ms, then the read — reads the OLD presets: a red with nothing wrong, at will. The wait
+  // on the copy's own line ends only once the held read has landed, and reads the drop
+  let release = null; const held = new Promise((z) => { release = z; });
+  const dirH = path.join(ROOT, 'ctl-held');
+  project(dirH, { 'gdrive-clients.json': [g('org1', SECRET_A)] });
+  const capH = capture(), dH = dropper.create({ dir: dirH, log: capH.log, debounceMs: 20, pollMs: 100, hold: () => held });
+  await dH.start();
+  project(dirH, { 'gdrive-clients.json': '[{"key":' });
+  await sleep(500);   // the control's old wait, replayed under the hold: what it reads is the hold's doing, not the clock's
+  const oldRead = dH.entries('gdrive'), saidHeld = capH.lines.some((l) => /could not be read/.test(l));
+  release();
+  await untilFact(() => capH.lines.some((l) => /could not be read/.test(l)), 'the held copy READ the malformed file once released (its own line)');
+  const after3 = dH.entries('gdrive');
+  ok(Array.isArray(oldRead) && oldRead.length === 1 && !saidHeld && after3 === null, 'PLACED (r4456): while the copy\'s re-read is HELD, the control\'s old fixed 500 ms reads the OLD presets (a red with nothing wrong); the wait on the copy\'s own line reads the drop once the held read lands', JSON.stringify({ oldRead: oldRead && oldRead.length, saidHeld, after: after3 }));
+  dH.stop();
 }
 
 // ═══ §3 THE LAYER TABLE (verify r1, T1) ═════════════════════════════════
