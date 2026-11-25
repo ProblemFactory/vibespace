@@ -180,4 +180,28 @@ const plainRed = (read) => PLAIN.filter(([, f, , re]) => !re.test(read(f))).map(
   const KeptCut = cut('    if (kept.has(k)) continue;\n', '', 'the instance name exemption cut', 'kept-cut');
   ok(!!(!('VIBESPACE_INSTANCE_NAME' in forgedScene(KeptCut)) && !('VIBESPACE_INSTANCE_NAME' in scene(KeptCut).env)), 'CONTROL (the instance name exemption cut): the inner hub on a pod loses its instance name and judges itself «local» — red');
 }
+// ③ B-2c5c (4c), 主开发 r4380: A VIBESPACE STARTED AS A BACKGROUND JOB lives under that job's memory bound — past it the whole job is
+// stopped (its scope's OOMPolicy=stop), VibeSpace with it, and nothing starts it again. The drop KEEPS the job's id (a name, never a
+// value) and the boot says it ONCE in the journal, where the job's record is read (src/server/jobs-wiring.js); the manual says it too.
+// (The card and the job's notification already name a memory-bound end with its size: src/lib/jobs-layout.js, src/job-model.js
+// memoryEndWhat.)
+{
+  const M = require(path.join(REPO, 'src/job-model.js'));
+  const env = { PATH: '/usr/bin', HOME: '/home/userL', VIBESPACE_JOB_ID: 'jb-made-up-1', VIBESPACE_JOB_TOKEN: ['jbt', 'made', 'up'].join('-') };
+  const r = TR.dropHandedAtBoot({ env });
+  ok(!!(typeof TR.handedJobId === 'function' && TR.handedJobId(r) === 'jb-made-up-1' && !('VIBESPACE_JOB_ID' in env) && !('VIBESPACE_JOB_TOKEN' in env)), '③ a hub started INSIDE a job keeps that job\'s ID for its boot line (the names are still dropped from its env) — RED: the job is forgotten at the drop', { kept: typeof TR.handedJobId === 'function' ? TR.handedJobId(r) : null });
+  const none = TR.dropHandedAtBoot({ env: { PATH: '/usr/bin', HOME: '/home/userL' } });
+  const odd = TR.dropHandedAtBoot({ env: { PATH: '/usr/bin', VIBESPACE_JOB_ID: 'not a job id; rm -rf' } });
+  ok(!!(typeof TR.handedJobId === 'function' && TR.handedJobId(none) === null && TR.handedJobId(odd) === null), '③ CONTROL: the service start keeps no job; a handed id of another shape is never kept (a name only, from a fixed alphabet)');
+  const say = typeof M.startedInJobLine === 'function' ? M.startedInJobLine : () => '';
+  const known = say('jb-made-up-1', { label: 'build box', mb: 4096 }), unknown = say('jb-made-up-2', null), nobound = say('jb-made-up-3', { label: 'no bound', mb: 0 });
+  ok(!!(/started INSIDE the background job "build box" \(jb-made-up-1\)/.test(known) && /its memory bound of 4 GB holds VibeSpace and every conversation it starts/.test(known) && /the whole job is stopped, VibeSpace with it, and nothing starts it again/.test(known) && /«VibeSpace itself is never a job»/.test(known)
+    && /a job this VibeSpace does not know: another VibeSpace's/.test(unknown) && /where it has one/.test(nobound) && !/jbt-made-up/.test(known + unknown + nobound)),
+    '③ THE LAW: the boot\'s line names the job, its bound with its size, what passing it does (the whole job stopped, VibeSpace with it, nothing starts it again) and the sanctioned start; a job this hub does not know is said so; never a value — RED: nothing said', { known, unknown });
+  const wiring = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), manual = fs.readFileSync(path.join(REPO, 'docs/agent/background-work-manual.md'), 'utf8');
+  const iInit = wiring.indexOf("try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }"), iSay = wiring.indexOf("require('./throwaway-root.js').handedJobId(); if (id) { const job = jm.jobs && jm.jobs.get(id); log(M.startedInJobLine(id, job ? { label: jm.labelOf(job), mb: (job.memoryBound && job.memoryBound.mb) || job.memoryMb } : null)); }");
+  ok(!!(iInit > 0 && iSay > iInit && iSay - iInit < 600), '③ production\'s names: the job engine says the line once, right after its init read the job\'s record — its name through labelOf, the ONE accessor (src/server/jobs-wiring.js)', { iInit, iSay });
+  ok(!!(manual.includes('### VibeSpace itself is never a job') && /Past it, the whole job is stopped/.test(manual) && /another checkout's VibeSpace/.test(manual) && /clock steps\n?\s*forward/.test(manual) && /lost from the job's log/.test(manual)),
+    '③ the Background Work manual says it: VibeSpace is its service, never a job — the bound, another checkout, a clock step, its output (主开发 r4380: (3), (4b), (4c), (4d))');
+}
 report();
