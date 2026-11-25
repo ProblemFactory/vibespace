@@ -45,10 +45,10 @@ const THERE_FRESH_MS = 10 * 1000; // B-7a30: a kept folder's presence bit is che
 const THERE_ACT_MS = 5 * 1000; // B-7a30 r2: an act's fresh check waits at most this long — past it the act is refused by name
 const UNANSWERED = Symbol('unanswered');
 const PERSIST_TABS_MS = 30 * 1000;
-const SAVE_GAP_MS = 500;
+const SAVE_GAP_MS = 500;   // B-0248 unit 2: an act's write waits only the writer's own floor (src/store-pace.js MIN_GAP_FLOOR_MS): a burst is one write
 /** line 964's round (r4283): the files whose owed bytes a store is PEEKING at (the writer's owed() runs the producer without writing) —
  *  module-wide: the peek is another instance's read of the same file in one process (a suite's restart; a hub has one store) */
-const PEEKING = new Set();   // B-0248 unit 2: an act's write waits only the writer's own floor (src/store-pace.js MIN_GAP_FLOOR_MS): a burst is one write
+const PEEKING = new Set();
 const DU_TIMEOUT_MS = 120 * 1000;
 const BROADCAST_DEBOUNCE_MS = 250;
 /** r3585: the store the hold keeps, by its name (K.KEPT_FILE — said in the journal; the family's census reads it here) */
