@@ -154,12 +154,22 @@ const PH = await p2.evaljs(`(() => { const r = document.querySelector('.chan-row
 ok(PH && PH.inside && PH.avIn && PH.lastIn && PH.title >= 40 && PH.you === 'あなた: ', '⑥ 390 px ja: the row, its avatar, its title and its last line ("あなた: …") fit', J(PH));
 p2.close();
 // CONTROL: the old peerOf (the first author without isSelf, no stamp) on a scratch copy ⇒ the owner's face ⇒ red
-try { srv.kill('SIGKILL'); } catch {}
+// r4456 (the flake census, round 2): the patched copy boots once the FIRST server has EXITED (its own `exit`, a generous bound whose
+// expiry is a named harness line) — never after a fixed 500 ms: a killed server still alive holds the port (the copy fails) and
+// answers /api/home itself (so «the patched copy booted» would be read off the WRONG server).
+// PLACED FIRST, RED AT WILL: the kill HELD past the old fixed wait — the first server is alive and its /api/home answers: read as the
+// leg stood, «booted» is true while no copy was started; let go, the kill lands, its exit is awaited, then the copy boots
 const engRel = 'src/server/channels-engine.js', engSrc = fs.readFileSync(path.join(wt, engRel), 'utf-8');
 const NEW_PEER = 'const id = Av.peerOf(authors, selfIdOf(rec));';
 ok(engSrc.includes(NEW_PEER), 'CONTROL: the lane\'s peer line is where the control patches it');
 fs.writeFileSync(path.join(wt, engRel), engSrc.replace(NEW_PEER, 'const id = ((en.authors || []).find((a) => a && a.id && !a.isSelf) || {}).id || null;'));   // the SCRATCH copy only
-await sleep(500);
+await sleep(500);   // the leg as it stood — the kill held
+const asStood = { alive: srv.exitCode === null && srv.signalCode === null, answers: await fetch(`http://127.0.0.1:${PORT}/api/home`).then((r) => r.status, () => null) };
+const exited = new Promise((r) => { if (srv.exitCode !== null || srv.signalCode !== null) r(true); else srv.once('exit', () => r(true)); });
+try { srv.kill('SIGKILL'); } catch {}
+const gone = await Promise.race([exited, sleep(20000).then(() => false)]);
+if (!gone) ok(false, 'HARNESS (CONTROL): the first server exited within 20000 ms of its SIGKILL');
+ok(asStood.alive && asStood.answers === 200 && gone, `CONTROL PLACED (r4456): the kill HELD past the old fixed wait, the first server is alive (${asStood.alive}) and answers /api/home (${asStood.answers}) — read as the leg stood «the patched copy booted» is true with no copy started; let go, the first server exited (${gone}) before the copy boots`, J(asStood));
 srv2 = boot();
 ok(await waitServer(), 'CONTROL: the patched copy booted');
 const p3 = await newPage();
