@@ -23,10 +23,15 @@ const HOLD = require('./store-read-hold.js');
 //   WHILE HELD THE HUB TAKES NOTHING FOR IT (主开发 r3654, the family's plain law): a page's set or delete is answered «held» by name
 //     for that op (`state-held` with its key), changes nothing in memory and reaches no other page. THE PAGE OWNS WHAT IT HOLDS
 //     UNSENT (src/lib/utils.js StateSync): text typed meanwhile stays on that page and is sent at the store's first snapshot.
-//   THE HUB's OWN WRITER — the stop's put-back of queued messages into a draft (a person's words) — is the one thing the hub keeps
-//     while held: OWED in memory, joined in front of its draft at the lift, said in the journal by count. No other hub-side writer
-//     of these stores exists; one would be refused, said once.
-//   AT THE LIFT the hub loads the file (plus the owed put-backs) and sends ONE snapshot; it is written only if a put-back joined.
+//   THE HUB's OWN WRITER — Stop's put-back of queued messages into a draft (a person's words; 主开发 r3890, the shape's own law, no
+//     exception on the hub): its words go to every OPEN page at once (`state-held-putback`), which lands them in front of its box and
+//     keeps them as typed text; the hub keeps no copy of words a page was handed. Only with NO page open does the hub OWE them —
+//     bounded (OWED_MAX), said in the journal (kept in memory only: a restart before the file reads loses them) — hands them to the
+//     first page that connects while still held, and at the lift lays each on the ORDINARY put-back road AFTER the snapshot, so a
+//     page's own edit meets it by the release's own rule (the door's belt, noted at its landing). No other hub-side writer of these
+//     stores exists; one would be refused, said once.
+//   AT THE LIFT the hub loads the file and sends ONE snapshot of it; written when torn bytes were set aside (or a put-back lands).
+const OWED_MAX = 20;   // r3890 B: the put-backs owed while held with NO page open (each Stop's text capped by the put-back's own bound); past it the oldest leaves, said
 const HELD_CODES = { drafts: 'drafts_unread', stage: 'stage_unread', uploads: 'uploads_unread', settings: 'settings_unread' };
 const STORE_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.data === undefined || (!!v.data && typeof v.data === 'object' && !Array.isArray(v.data)));
 const LIST_WORDS = { drafts: 'your saved drafts', stage: 'the Stage layout', uploads: 'the list of recent uploads', settings: 'the synced settings' };
@@ -75,7 +80,7 @@ class SyncStore {
     this._heldCode = HELD_CODES[this.name] || `${this.name}_unread`;   // the store's code, said to every page while held
     this._hold = HOLD.create({
       file, valid: STORE_SHAPE, code: this._heldCode, aside: (mark) => file + '.corrupt-' + mark,
-      words: (h) => `${LIST_WORDS[this.name] || base} could not be read (${h.code}); VibeSpace reads ${base} again every few minutes. Nothing is written over it, and what is typed meanwhile is kept and joins it when it reads.`,
+      words: (h) => `${LIST_WORDS[this.name] || base} could not be read (${h.code}); VibeSpace reads ${base} again every few minutes. Nothing is written over it${this.name === 'drafts' ? ', and what is typed meanwhile stays on the open pages until it reads' : '; changes made meanwhile are not kept'}.`,
       log: (m) => console.warn('[sync] ' + m),
       onLift: (v, facts) => this._lifted(v, facts),
     });
@@ -83,7 +88,7 @@ class SyncStore {
     const a = SR.storeAnswer(read, { valid: STORE_SHAPE });
     const st = this._hold.start(a);
     if (st === 'data') { this.data = a.value.data || {}; this.version = a.value.version || 0; } else { this.data = {}; this.version = 0; }
-    this._owed = null;   // key → [the put-backs' prefixes], while held (the hub's own writer: r3654 5)
+    this._owed = null;   // [{ key, prefix, onLanded }]: Stop's put-backs while held with NO page open (r3890 B), in order
   }
 
   /** while the file is unread: { store, code (the store's: drafts_unread…), cause (the read's own: EIO, torn bytes…), file, since } —
@@ -96,7 +101,7 @@ class SyncStore {
   /** THE FIRST LOAD's answer (GET /api/sync/:store) → { status, body }: HELD by name (503, no data) — never «nothing at version 0» */
   snapshotAnswer() {
     const h = this.held();
-    if (h) return { status: 503, body: { error: this._hold.words(), code: h.code, held: true, store: this.name } };
+    if (h) { const owed = this._handOwed(); return { status: 503, body: { error: this._hold.words(), code: h.code, held: true, store: this.name, ...(owed.length ? { putbacks: owed } : {}) } }; }
     return { status: 200, body: this.getSnapshot() };
   }
 
@@ -104,50 +109,71 @@ class SyncStore {
    *  the store as UNREAD gets the full snapshot (r3654 3: «no ops» would leave it unread for good); else the missed ops or the full
    *  snapshot, as before */
   resyncAnswer(sinceVersion, { unread = false } = {}) {
-    if (this.held()) return [{ type: 'state-held', store: this.name, code: this._heldCode }];
+    if (this.held()) return [{ type: 'state-held', store: this.name, code: this._heldCode }, ...this._handOwed().map((o) => ({ type: 'state-held-putback', store: this.name, code: this._heldCode, ...o }))];
     if (unread) return [{ type: 'state-snapshot', store: this.name, data: this.data, version: this.version }];
     const result = this.getOpsSince(sinceVersion);
     if (result.full) return [{ type: 'state-snapshot', store: this.name, data: result.full, version: result.version }];
     return result.ops.map((op) => ({ type: 'state-sync', store: this.name, ...op }));
   }
 
-  /** THE LIFT (src/store-read-hold.js onLift): the file's units, as read — the hub took nothing while held — and each OWED put-back
-   *  joined in front of its draft (r3654 5); ONE snapshot to every page; written when a put-back joined or torn bytes were set aside */
+  /** THE LIFT (src/store-read-hold.js onLift): the file's units, as read — the hub took nothing while held; ONE snapshot of them to
+   *  every page; then each OWED put-back on the ordinary put-back road, after it (r3890 B); written when torn bytes were set aside */
   _lifted(v, facts) {
     const fileData = v && v.data && typeof v.data === 'object' && !Array.isArray(v.data) ? v.data : {};
     this.data = { ...fileData };
     this.version = v && Number.isSafeInteger(v.version) ? v.version : 0;
     this.ops = [];
-    let joined = 0;
-    for (const [key, prefixes] of this._owed || []) {
-      let text = typeof this.data[key] === 'string' ? this.data[key] : '';
-      for (const p of prefixes) { text = p + text; joined++; }   // each put-back lands in front, the later one first (as at the box)
-      this.data[key] = text;
-    }
-    this._owed = null;
-    if (joined || (facts && facts.setAside)) { this.version++; this._scheduleSave(); }   // a join, or torn bytes now kept aside: the file is written whole
-    if (joined) {
-      console.warn(`[sync] ${path.basename(this.filePath)}: ${joined} put-back(s) of queued messages kept while it could not be read — joined in front of their drafts now`);
-    }
+    const owed = this._owed || []; this._owed = null;
+    if (facts && facts.setAside) { this.version++; this._scheduleSave(); }   // torn bytes now kept aside: the file is written whole
     const msg = JSON.stringify({ type: 'state-snapshot', store: this.name, data: this.data, version: this.version, lifted: true, ...(facts && facts.setAside ? { setAside: facts.setAside } : {}) });
     this.wss.clients.forEach((client) => { if (client.readyState === 1) { try { client.send(msg); } catch { } } });
+    this._layOwed(owed);
+  }
+
+  /** each owed put-back, in order, as the release lays one: in front of the draft now, broadcast with its `prepended` to every page
+   *  (each lands the prefix in front of its live box), and `onLanded(version)` for the door's belt */
+  _layOwed(owed) {
+    for (const o of owed) {
+      const cur = typeof this.data[o.key] === 'string' ? this.data[o.key] : '';
+      this.set(o.key, o.prefix + cur, null, undefined, { prepended: o.prefix.length });
+      if (o.onLanded) { try { o.onLanded(this.version); } catch { } }
+    }
+    if (owed.length) console.warn(`[sync] ${path.basename(this.filePath)}: ${owed.length} put-back(s) of queued messages kept while it could not be read — laid on their drafts now, after its snapshot`);
+  }
+
+  /** STOP's PUT-BACK WHILE HELD (r3890): the words go to every OPEN page at once — each lands them in front of its box and keeps them
+   *  as typed text, so the hub keeps NO copy; with no page open they are OWED (bounded, said: in memory only), handed to the first
+   *  page that connects while still held, else laid after the lift's snapshot. → 'handed' | 'owed' */
+  heldPutBack(key, prefix, { onLanded } = {}) {
+    const base = path.basename(this.filePath);
+    const open = [...this.wss.clients].filter((c) => c && c.readyState === 1);
+    if (open.length) {
+      const msg = JSON.stringify({ type: 'state-held-putback', store: this.name, code: this._heldCode, key, prefix });
+      for (const c of open) { try { c.send(msg); } catch { } }
+      return 'handed';
+    }
+    if (!this._owed) this._owed = [];
+    this._owed.push({ key, prefix, onLanded: typeof onLanded === 'function' ? onLanded : null });
+    if (this._owed.length > OWED_MAX) { this._owed.shift(); console.warn(`[sync] ${base}: more than ${OWED_MAX} put-backs owed while it cannot be read — the oldest is dropped`); }
+    console.warn(`[sync] ${base}: a put-back of queued messages is kept in MEMORY ONLY (no page is open, and the file cannot be read): ${this._owed.length} owed; a restart before it reads loses them`);
+    return 'owed';
+  }
+  /** a page connecting while held takes the owed put-backs; the hub's copy leaves (r3890 B) → [{ key, prefix }] */
+  _handOwed() {
+    const owed = this._owed || []; this._owed = null;
+    return owed.map((o) => ({ key: o.key, prefix: o.prefix }));
   }
 
   /** WHILE HELD THE HUB TAKES NOTHING (r3654): a page's op is answered «held» by name (its key), nothing changes, nobody else hears it;
-   *  the hub's own put-back (no socket, its `prepended` prefix) is OWED for the lift. Any other hub write is refused, said once */
+   *  the hub's own put-back (no socket, its `prepended` prefix) goes the held put-back's road (heldPutBack). Any other hub write is
+   *  refused, said once */
   _whileHeld(key, senderWs, value, extra) {
     if (senderWs) {
       if (senderWs.readyState === 1) { try { senderWs.send(JSON.stringify({ type: 'state-held', store: this.name, code: this._heldCode, key })); } catch { } }
       return;
     }
     const n = extra && Number.isSafeInteger(extra.prepended) ? extra.prepended : 0;
-    if (typeof value === 'string' && n > 0) {
-      if (!this._owed) this._owed = new Map();
-      const a = this._owed.get(key) || [];
-      a.push(value.slice(0, n));
-      this._owed.set(key, a);
-      return;
-    }
+    if (typeof value === 'string' && n > 0) { this.heldPutBack(key, value.slice(0, n)); return; }
     if (!this._hubRefusedSaid) { this._hubRefusedSaid = true; console.warn(`[sync] a hub write to ${path.basename(this.filePath)} was refused: the file could not be read, and nothing is taken for it until it reads`); }
   }
 

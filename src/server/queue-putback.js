@@ -33,6 +33,14 @@ function create({ getSyncStore = () => null, log = (...a) => console.log(...a) }
       if (!store) { log(`[queue-putback] ${id}: drafts store not up — ${d.items.length} message(s) NOT put back (dropId ${d.dropId})`); return; }
       const key = 'chat:' + id;
       const { text, count, prepended } = mergeDraft(store.get(key), d.items);
+      // lane lg-recovery (主开发 r3890): the drafts cannot be read — the words go to the open pages (each keeps them as typed text) or,
+      // with none open, are owed in memory until the drafts read; the belt is noted where the put-back really lands, never at a held version
+      if (count && typeof store.heldPutBack === 'function' && typeof store.held === 'function' && store.held()) {
+        const prefix = text.slice(0, prepended);
+        const how = store.heldPutBack(key, prefix, { onLanded: (version) => { session._putbackBelt = noteBelt(session._putbackBelt, { version, prefix }); } });
+        log(`[queue-putback] ${id}: Stop put ${count} queued message(s) back while the drafts cannot be read — ${how === 'handed' ? 'handed to the open page(s), which keep them in the box' : 'kept in memory only until the drafts read (no page is open; a restart first loses them)'} (+${prepended} chars, ${d.omitted} omitted, dropId ${d.dropId})`);
+        return;
+      }
       if (count) {
         store.set(key, text, null, undefined, { prepended });
         session._putbackBelt = noteBelt(session._putbackBelt, { version: store.version, prefix: text.slice(0, prepended) });

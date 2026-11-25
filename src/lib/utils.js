@@ -2324,6 +2324,7 @@ class StateSync {
       else if (msg.type === 'state-ack') this._applyAck(msg.store, msg);
       else if (msg.type === 'state-snapshot') this._applySnapshot(msg.store, msg.data, msg.version, msg);
       else if (msg.type === 'state-held') this._applyUnread(msg.store, msg);   // lane lg-recovery (r3262 / r3271): the hub cannot read the store
+      else if (msg.type === 'state-held-putback') this._applyHeldPutback(msg.store, msg);   // r3890 A: Stop's put-back while the store is held
     };
     wsManager.onGlobal(this._globalHandler);
     // On reconnect, request missed ops for all stores
@@ -2349,11 +2350,13 @@ class StateSync {
     const s = this.stores[storeName] = { version: 0, data: {}, listeners: new Map(), loaded: null, pending: new Map(), acked: new Map(), held: new Map(), saw: false };
     s.loaded = (async () => {
       try {
+        const epoch = s.snapEpoch || 0;   // r3890: a snapshot that lands on the socket while this read is out is newer than its answer
         const res = await fetch(`/api/sync/${storeName}`);
         const snap = await res.json();
+        if ((s.snapEpoch || 0) !== epoch) return true;   // the store was lifted (or answered) since: this older answer is dropped
         // lane lg-recovery (主开发 r3262 / r3271, law (a)): the hub could not read this store — HELD by name: the page starts empty AND
-        // held (init answers false: no surface takes it for «nothing stored»), and keeps what it holds
-        if (snap && snap.held === true) { this._applyUnread(storeName, snap); return false; }
+        // held (init answers false: no surface takes it for «nothing stored»), and keeps what it holds — with any put-back the hub owed
+        if (snap && snap.held === true) { this._applyUnread(storeName, snap); for (const pb of Array.isArray(snap.putbacks) ? snap.putbacks : []) this._applyHeldPutback(storeName, { ...pb, code: snap.code }); return false; }
         s.data = snap.data || {};
         s.version = snap.version || 0;
         s.saw = true;
@@ -2453,6 +2456,19 @@ class StateSync {
     }
     if (first) this._tellUnread(storeName, s.unread, null);
   }
+  /** STOP's PUT-BACK WHILE THE STORE IS HELD (r3890 A): its words land on this page as typed text — in front of the unit's draft here,
+   *  kept in the unsent map like anything typed while unread, told to the composer as a PREFIX (it lands them in front of its live
+   *  box, as a put-back lands) — and travel at the store's first snapshot as every held-time text does */
+  _applyHeldPutback(storeName, msg) {
+    const s = this.stores[storeName];
+    if (!s || !msg || typeof msg.key !== 'string' || typeof msg.prefix !== 'string' || !msg.prefix) return;
+    if (!s.unread) this._applyUnread(storeName, { code: msg.code });
+    const cur = typeof s.data[msg.key] === 'string' ? s.data[msg.key] : '';
+    const value = msg.prefix + cur;
+    s.data[msg.key] = value;
+    if (this._isText(storeName)) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(msg.key, value);
+    this._notify(s, msg.key, value, { prepended: msg.prefix.length });
+  }
   /** the stores whose units are a person's TEXT (r3654 1): what is typed while unread stays on the page and is sent at the first snapshot */
   _isText(storeName) { return storeName === 'drafts'; }
   /** A PAGE THAT NEVER SAW THE DATA JOINS (r3654 2): the file's unit, then what was typed here, once — { value, prepended } (the saved
@@ -2487,7 +2503,11 @@ class StateSync {
     // that never saw it (it opened during the hold) JOINS a text unit (the file's, then what was typed) and sends a deletion of a unit
     // it never saw as nothing. Then the map is empty.
     const typed = s.typedWhileUnread && s.typedWhileUnread.size ? new Map(s.typedWhileUnread) : null;
-    const saw = s.saw !== false;
+    // r3890 C: «had seen the data» means «had seen THIS version» — a unit of this page is a true edit only when the snapshot is the
+    // version it last saw; a newer one (the page slept through a lift, another page saved since) makes its text JOIN and its deletion
+    // nothing, as on a page that never saw the data
+    const saw = s.saw !== false && (version || 0) === s.version;
+    s.snapEpoch = (s.snapEpoch || 0) + 1;
     const wasUnread = !!s.unread;
     s.unread = null; s.typedWhileUnread = null; s.saw = true;
     const oldData = s.data;
@@ -2514,7 +2534,7 @@ class StateSync {
       else if (value !== null) { const j = this._joinUnseen(s.data[key], value); if (j) sent.set(key, j); }
     }
     for (const [key, j] of sent) this.set(storeName, key, j.value);   // ordinary sets (set() mutates s.data)
-    if (rolledBack && saw) {
+    if (rolledBack && !wasUnread) {   // r3890: a page that was unread pushes no view of its own (its text went above; the rest was said not kept)
       for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
         if (sent.has(key)) continue;
         const localVal = oldData[key] ?? '';

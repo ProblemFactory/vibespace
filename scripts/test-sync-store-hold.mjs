@@ -19,10 +19,19 @@
 //      re-sends nothing of the first (RED: a page copy that keeps its map — the first hold's stale text sent over the newer one)
 //   ⑨ STAGE ON A FRESH PAGE (must 4): its arrangement stays on that page, NOT sent, said once; the saved record stands at the lift
 //      (RED: a page copy that keeps Stage units as text — the saved record replaced)
-//   ⑩ THE HUB's OWN WRITER (r3654 5): the stop's put-backs while held are owed, joined in front of the draft at the lift, said by
-//      count (RED: a hub copy that owes nothing — the queued messages' words lost)
+//   ⑩ STOP's PUT-BACK WHILE HELD (r3890), through the REAL door: (a) the words go to the open page at once — in its box and its
+//      map — and at the lift a page that had deleted the draft (the messages queued) sends them, not the deletion (RED: a hub copy
+//      that never hands them — the box stays empty while the toast says they are back); (b) a hub restart before the lift loses
+//      nothing the page holds (RED: the same copy — the words gone); (c) with NO page open they are owed, said «in memory only», and
+//      laid on the ordinary road AFTER the lift's snapshot, the door's belt noted at their version (RED: a copy laying them first)
 //   ⑪ TORN BYTES: held while their copy is made, lifted EMPTY; a fresh page's text is sent; the snapshot names the copy
 //   ⑫ settings-sync.json takes the same hold
+//   ⑬ THE PAGE THAT SLEPT THROUGH THE LIFT (r3890 C): its old text JOINS the newer saved draft, its old deletion is nothing (RED: a
+//      page copy that ignores the version it saw — the newer draft replaced, a unit deleted)
+//   ⑭ TYPED, THEN SENT, WHILE HELD on a page opened during the hold: the sent text never comes back into the box (RED: a page copy
+//      that does not record the send)
+//   ⑮ A HELD REPLY THAT ARRIVES AFTER THE LIFT's SNAPSHOT (placed: the first load's answer gated until after the lift) does not
+//      leave the page unread (RED: a page copy without the check)
 // Run: node scripts/test-sync-store-hold.mjs
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -71,9 +80,10 @@ const MADE = {
   uploads: { version: 7, data: { 'upload:1-0': { name: 'a.txt', path: '/home/userL/a.txt', size: 3, date: 1, status: 'done' } } },
   settings: { version: 3, data: {} },
 };
+let WORLDS = 0;   // each world its own folder: a refused file of one world must never be another world's
 const fileOf = (dir, name) => path.join(dir, name === 'drafts' ? 'drafts.json' : `${name}-sync.json`);
-function world(name, { torn = false, readable = false, Store = SyncStore, cls = CLASS } = {}) {
-  const dir = scratch('sync-hold-' + name); fs.mkdirSync(dir, { recursive: true });
+function world(name, { torn = false, readable = false, Store = SyncStore, cls = CLASS, fetchGate = null } = {}) {
+  const dir = scratch('sync-hold-' + name + '-' + (++WORLDS)); fs.mkdirSync(dir, { recursive: true });
   const file = fileOf(dir, name);
   const bytes = torn ? '{"version": 41, "data": {"chat:sess-a": "a draft cut off in the mid' : S(MADE[name], null, 2);
   fs.writeFileSync(file, bytes);
@@ -87,6 +97,7 @@ function world(name, { torn = false, readable = false, Store = SyncStore, cls = 
   const fetchFake = async (url) => {
     const st = getSyncStore(String(url).split('/').pop());
     const ans = st.snapshotAnswer();
+    if (fetchGate) await fetchGate();   // ⑮: the answer is held back until the scene lets it go
     return { ok: ans.status === 200, status: ans.status, json: async () => JSON.parse(S(ans.body)) };
   };
   const StateSync = cls ? new Function('fetch', 'arrivalVerdict', cls + '\nreturn StateSync;')(fetchFake, arrivalVerdict) : null;
@@ -126,15 +137,18 @@ const P1 = W.page('page-1');
   ok(loaded === false && !!P1.sync.unreadOf('drafts'), `the page starts empty AND held (init() answers ${loaded}: the Doc strip neither adopts nor deletes its local copy)`);
 }
 
-console.log('③ THE RECONNECT — a page ahead of version 0 is told HELD; it keeps what it holds and re-pushes nothing');
-const P2 = W.page('page-2');
+console.log('③ THE RECONNECT — a page that held the data, held after a hub restart: told HELD; it keeps what it holds, re-pushes nothing');
 {
-  const s2 = P2.sync.stores.drafts = { version: 41, data: { ...MADE.drafts.data }, listeners: new Map(), loaded: Promise.resolve(true), pending: new Map(), acked: new Map(), held: new Map(), saw: true };
-  let told = 0; s2.listeners.set('*', new Set([() => { told++; }]));
+  const R3 = world('drafts', { readable: true });
+  const P2 = R3.page('page-2');
+  const first = await P2.sync.init('drafts');
+  REFUSE.add(R3.file); R3.restart();
+  let told = 0; P2.sync.on('drafts', '*', () => { told++; });
   const before = P2.sent.length;
-  P2.reconnect(); await sleep(5);
+  P2.drop(); P2.reconnect(); await sleep(5);
   const pushed = P2.sent.slice(before).filter((m) => m.type === 'state-set');
-  ok(S(s2.data) === S(MADE.drafts.data) && told === 0 && pushed.length === 0 && !!P2.sync.unreadOf('drafts'), `the page keeps its ${Object.keys(s2.data).length} drafts, no listener told, ${pushed.length} re-pushed; it knows the store is held`);
+  ok(first === true && S(P2.sync.getAll('drafts')) === S(MADE.drafts.data) && told === 0 && pushed.length === 0 && !!P2.sync.unreadOf('drafts'), `the page keeps its ${Object.keys(P2.sync.getAll('drafts')).length} drafts, no listener told, ${pushed.length} re-pushed; it knows the store is held`);
+  REFUSE.delete(R3.file); R3.store._hold.stop();
 }
 
 console.log('④ WHILE HELD THE HUB TAKES NOTHING (r3654) — a page\'s op answered «held» by its key; nothing changes; no other page hears it');
@@ -281,28 +295,72 @@ const stageScene = async (cls, tag) => {
   ok(GX.ws !== MADE.stage.data['ws:claude:k1'], `CONTROL (a page copy that keeps Stage units as text): the saved workspace record is replaced at the lift (red) (${S(GX.ws).slice(0, 80)})`);
 }
 
-console.log('⑩ THE HUB\'s OWN WRITER (r3654 5) — the stop\'s put-backs while held are owed, joined in front at the lift, said by count');
-const putbackScene = async (Store, tag) => {
+console.log('⑩ STOP\'s PUT-BACK WHILE HELD (r3890) — through the REAL door: handed to the open pages, owed only with none open');
+const DOOR = require(path.join(REPO, 'src/server/queue-putback.js'));
+const PREFIX = 'first queued\n\nsecond queued\n\n';
+const dropped = (id) => ({ type: 'queue_dropped', dropId: id, items: [{ text: 'first queued' }, { text: 'second queued' }] });
+const NEVER_HANDS = () => M.load('src/sync-store.js', anchored(SRC, '    if (open.length) {\n      const msg = JSON.stringify({ type: \'state-held-putback\'', '    if (false) {\n      const msg = JSON.stringify({ type: \'state-held-putback\'', 'never-hands'), 'never-hands').SyncStore;
+const putbackA = async (Store, tag) => {   // must 1: a page that saw the drafts; held; two messages queued (the box cleared); Stop
+  const Q = world('drafts', { readable: true, Store });
+  const P = Q.page('p-' + tag);
+  await P.sync.init('drafts');
+  REFUSE.add(Q.file); Q.restart(); P.drop(); P.reconnect(); await sleep(5);
+  const told = [];
+  P.sync.on('drafts', 'chat:sess-a', (v, k, op) => told.push({ v, prepended: op && op.prepended }));
+  P.sync.set('drafts', 'chat:sess-a', 'two messages, sent while the agent works');
+  P.sync.set('drafts', 'chat:sess-a', '');   // sent: they queue, the box is cleared (the page's map holds a deletion)
+  const door = DOOR.create({ getSyncStore: (n) => Q.stores[n], log: () => { } });
+  door.onLiveRecord({}, 'sess-a', dropped('d-a-' + tag));   // Stop
+  const atStop = { box: P.sync.get('drafts', 'chat:sess-a'), told: told.length ? told[told.length - 1].prepended : null };
+  REFUSE.delete(Q.file); await Q.store._hold.again(); await sleep(5);
+  const out = { atStop, hub: Q.store.get('chat:sess-a'), page: P.sync.get('drafts', 'chat:sess-a') };
+  Q.store._hold.stop();
+  return out;
+};
+const putbackB = async (Store, tag) => {   // must 2: Stop while held, the hub restarted before the lift, the file reads
+  const Q = world('drafts', { readable: true, Store });
+  const P = Q.page('p-' + tag);
+  await P.sync.init('drafts');
+  REFUSE.add(Q.file); Q.restart(); P.drop(); P.reconnect(); await sleep(5);
+  DOOR.create({ getSyncStore: (n) => Q.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-b-' + tag));
+  Q.restart(); P.drop(); P.reconnect(); await sleep(5);   // the hub restarts, still held
+  REFUSE.delete(Q.file); Q.restart(); P.drop(); P.reconnect(); await sleep(5);   // …and again: the file reads
+  const out = { hub: Q.store.get('chat:sess-a') };
+  Q.store._hold.stop();
+  return out;
+};
+{
+  const A1 = await putbackA(SyncStore, 'real');
+  ok(A1.atStop.box === PREFIX + '' && A1.atStop.told === PREFIX.length, `at Stop the words are on the open page at once, in front of its box (told as a prefix of ${A1.atStop.told} chars) — the toast is true`);
+  ok(A1.hub === PREFIX && A1.page === PREFIX, `at the lift the page sends its unit — the words, not the deletion — and the hub holds them (${S(A1.hub)})`);
+  const AX = await putbackA(NEVER_HANDS(), 'never');
+  ok(AX.atStop.box !== PREFIX, `CONTROL (a hub copy that never hands the words to a page): at Stop the box holds none of them while the toast says they are back (red) (${S(AX.atStop.box)})`);
+  const B1 = await putbackB(SyncStore, 'real');
+  ok(B1.hub === PREFIX + SAVED, `a hub restart before the lift loses nothing the page holds: the words arrive from the page at the first snapshot, in front of the draft it saw (${S(B1.hub)})`);
+  const BX = await putbackB(NEVER_HANDS(), 'never');
+  ok(BX.hub === SAVED, `CONTROL (the same copy): the words lived only in the first hub's memory — gone at its restart (red) (${S(BX.hub)})`);
+}
+const putbackC = async (Store, tag) => {   // no page open: owed, said, laid AFTER the lift's snapshot on the ordinary road
   const Q = world('drafts', { Store });
   const said = [], oWarn = console.warn;
   console.warn = (...a) => { said.push(a.map(String).join(' ')); };
+  const session = {};
   try {
-    // the put-back's own call (src/server/queue-putback.js): store.set(key, text, null, undefined, { prepended })
-    for (const t of ['first queued', 'second queued']) { const pre = t + '\n\n'; Q.store.set('chat:sess-a', pre + (Q.store.get('chat:sess-a') || ''), null, undefined, { prepended: pre.length }); }
-    const heldMem = Q.store.get('chat:sess-a');
-    REFUSE.delete(Q.file); await Q.store._hold.again();
-    await until(() => ((disk(Q.file) || { data: {} }).data['chat:sess-a'] || '').includes('queued'), 500);
-    return { heldMem, store: Q.store.get('chat:sess-a'), onDisk: (disk(Q.file) || { data: {} }).data['chat:sess-a'], said: said.filter((l) => /put-back\(s\) of queued messages/.test(l)) };
+    DOOR.create({ getSyncStore: (n) => Q.stores[n], log: (l) => said.push(String(l)) }).onLiveRecord(session, 'sess-a', dropped('d-c-' + tag));
+    const seen = [];
+    Q.wss.clients.add({ readyState: 1, send: (m) => { const x = JSON.parse(m); if (x.type === 'state-snapshot' || x.type === 'state-sync') seen.push({ type: x.type, a: x.type === 'state-snapshot' ? x.data['chat:sess-a'] : x.value, prepended: x.prepended }); } });
+    REFUSE.delete(Q.file); await Q.store._hold.again(); await sleep(5);
+    return { said: said.filter((l) => /in MEMORY ONLY|kept in memory only/.test(l)).length, seen, hub: Q.store.get('chat:sess-a'), belt: session._putbackBelt };
   } finally { console.warn = oWarn; Q.store._hold.stop(); }
 };
 {
-  const want = 'second queued\n\nfirst queued\n\n' + SAVED;
-  const Q1 = await putbackScene(SyncStore, 'real');
-  ok(Q1.heldMem === undefined && Q1.store === want && Q1.onDisk === want, `held: nothing in the hub's memory; at the lift the put-backs land in front of the saved draft, the later first, and the file holds it (${S(Q1.store)})`);
-  ok(Q1.said.length === 1 && /: 2 put-back\(s\)/.test(Q1.said[0]), `…said in the journal by count (${S(Q1.said)})`);
-  const OWES = M.load('src/sync-store.js', anchored(SRC, "    if (typeof value === 'string' && n > 0) {", '    if (false) {', 'owes-nothing'), 'owes').SyncStore;
-  const QX = await putbackScene(OWES, 'owes');
-  ok(QX.store === SAVED, `CONTROL (a hub copy that owes nothing): the queued messages' words are lost at the lift (red) (${S(QX.store)})`);
+  const C1 = await putbackC(SyncStore, 'real');
+  ok(C1.said >= 1, `with no page open the words are owed, and the journal says they are kept in memory only (${C1.said} line(s))`);
+  ok(C1.seen.length === 2 && C1.seen[0].type === 'state-snapshot' && C1.seen[0].a === SAVED && C1.seen[1].type === 'state-sync' && C1.seen[1].prepended === PREFIX.length && C1.hub === PREFIX + SAVED, `at the lift: the file's snapshot FIRST, then the put-back on the ordinary road, in front of the saved draft (${S(C1.seen.map((x) => x.type))})`);
+  ok(Array.isArray(C1.belt) && C1.belt.length === 1 && C1.belt[0].prefix === PREFIX, `…the door's belt noted where the put-back landed, so a page's own edit in flight keeps it in front (${S(C1.belt)})`);
+  const FIRST = M.load('src/sync-store.js', anchored(anchored(SRC, '    this._layOwed(owed);\n  }', '  }', 'lay-first-a'), "    const msg = JSON.stringify({ type: 'state-snapshot', store: this.name, data: this.data, version: this.version, lifted: true,", "    this._layOwed(owed);\n    const msg = JSON.stringify({ type: 'state-snapshot', store: this.name, data: this.data, version: this.version, lifted: true,", 'lay-first-b'), 'lay-first').SyncStore;
+  const CX = await putbackC(FIRST, 'first');
+  ok(!(CX.seen[0] && CX.seen[0].type === 'state-snapshot' && CX.seen[0].a === SAVED), `CONTROL (a hub copy laying the put-back before its snapshot): the snapshot already carries the words, and a page's own edit then meets them unbelted (red) (${S(CX.seen.map((x) => x.type))})`);
 }
 
 console.log('⑪ TORN BYTES — held while their copy is made, lifted EMPTY; a fresh page\'s text is sent; the snapshot names the copy');
@@ -333,6 +391,72 @@ console.log('⑫ settings-sync.json takes the same hold (its read is the same; n
   X.store.flush(); await sleep(40);
   ok(!!h && h.code === 'settings_unread' && realReadSync(X.file, 'utf8') === X.bytes, `held by name (${h && h.code}), nothing written over`);
   REFUSE.delete(X.file); X.store._hold.stop();
+}
+
+console.log('⑬ THE PAGE THAT SLEPT THROUGH THE LIFT (r3890 C) — its old text JOINS the newer saved draft; its old deletion is nothing');
+const sleptScene = async (cls, tag) => {
+  const T = world('drafts', { readable: true, cls });
+  const A = T.page('A-' + tag), B = T.page('B-' + tag);
+  await A.sync.init('drafts'); await B.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await sleep(5);
+  A.sync.set('drafts', 'chat:sess-a', 'A\'s old text, typed while held');
+  A.sync.set('drafts', 'chat:sess-b', '');           // …and an old deletion
+  A.drop();                                           // A sleeps
+  REFUSE.delete(T.file); await T.store._hold.again(); await sleep(5);
+  B.sync.set('drafts', 'chat:sess-a', 'newer, saved by B after the lift');
+  await until(() => T.store.get('chat:sess-a') === 'newer, saved by B after the lift');
+  A.reconnect(); await sleep(10);                     // A wakes, still unread: the full snapshot is NEWER than the version it saw
+  const out = { a: T.store.get('chat:sess-a'), b: T.store.get('chat:sess-b') };
+  T.store._hold.stop();
+  return out;
+};
+{
+  const L1 = await sleptScene(CLASS, 'real');
+  ok(L1.a === 'newer, saved by B after the lift\n\nA\'s old text, typed while held' && L1.b === MADE.drafts.data['chat:sess-b'], `the newer saved draft, then A's old text, once; A's old deletion deletes nothing (${S(L1)})`);
+  const ANYVER = pageCopy('    const saw = s.saw !== false && (version || 0) === s.version;\n', '    const saw = s.saw !== false;\n', 'saw-any-version');
+  const LX = await sleptScene(ANYVER, 'anyver');
+  ok(LX.a === 'A\'s old text, typed while held' || LX.b !== MADE.drafts.data['chat:sess-b'], `CONTROL (a page copy that ignores the version it saw): the newer draft is replaced, the unit deleted (red) (${S(LX)})`);
+}
+
+console.log('⑭ TYPED, THEN SENT, WHILE HELD on a page opened during the hold — the sent text never comes back into the box');
+const sentScene = async (cls, tag) => {
+  const F = world('drafts', { cls });
+  const p = F.page('fresh-sent-' + tag);
+  await p.sync.init('drafts');
+  p.sync.set('drafts', 'chat:sess-a', 'typed, then sent while held');
+  p.sync.set('drafts', 'chat:sess-a', '');           // sent
+  REFUSE.delete(F.file); await F.store._hold.again(); await sleep(5);
+  const out = { box: p.sync.get('drafts', 'chat:sess-a'), hub: F.store.get('chat:sess-a') };
+  F.store._hold.stop();
+  return out;
+};
+{
+  const E1 = await sentScene(CLASS, 'real');
+  ok(E1.box === SAVED && E1.hub === SAVED, `the box shows the saved draft, never the sent text (${S(E1)})`);
+  const NOSEND = pageCopy("      if (this._isText(storeName)) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(key, value == null || value === '' ? null : value);\n",
+    "      if (this._isText(storeName) && !(value == null || value === '')) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(key, value);\n", 'send-not-recorded');
+  const EX = await sentScene(NOSEND, 'nosend');
+  ok(String(EX.box).includes('typed, then sent while held'), `CONTROL (a page copy that does not record the send): the sent text comes back into the box at the lift (red) (${S(EX.box)})`);
+}
+
+console.log('⑮ A HELD REPLY AFTER THE LIFT\'s SNAPSHOT (placed: the first load\'s answer held back until after the lift) — the page is not left unread');
+const lateScene = async (cls, tag) => {
+  let release; const gate = new Promise((r) => { release = r; });
+  const G = world('drafts', { cls, fetchGate: () => gate });
+  const p = G.page('late-' + tag);
+  const loading = p.sync.init('drafts');              // its 503 is made now, its answer waits
+  REFUSE.delete(G.file); await G.store._hold.again(); await sleep(5);   // the lift's snapshot lands on the socket first
+  release(); await loading; await sleep(5);
+  const out = { unread: !!p.sync.unreadOf('drafts'), has: p.sync.get('drafts', 'chat:sess-a') };
+  G.store._hold.stop();
+  return out;
+};
+{
+  const H1 = await lateScene(CLASS, 'real');
+  ok(!H1.unread && H1.has === SAVED, `the late «held» answer is dropped: the page reads, unread no more (${S(H1)})`);
+  const NOCHECK = pageCopy("        if ((s.snapEpoch || 0) !== epoch) return true;   // the store was lifted (or answered) since: this older answer is dropped\n", '', 'no-epoch-check');
+  const HX = await lateScene(NOCHECK, 'nocheck');
+  ok(HX.unread, `CONTROL (a page copy without the check): the late answer leaves the page unread for good (red) (${S(HX)})`);
 }
 
 for (const s of [W]) { REFUSE.delete(s.file); if (s.store._hold) s.store._hold.stop(); }
