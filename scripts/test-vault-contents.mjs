@@ -308,6 +308,43 @@ console.log('⑳ THE OWNER\'S DOWNLOAD (lane lg-vault-file, B-0830): a FILE is n
   v.close();
 }
 
+console.log('㉑ THE RUN FIT ON THE FILE ROW (主开发 r4378 (a)(b), B-0830 U1b): a file past what a run can carry says so on its row, at once — the run\'s refusal in a person\'s words; a file within it says nothing');
+{
+  const VFm = require(path.join(REPO, 'src/vault-file.js'));
+  const noop = () => {};
+  const mkEl = (tag) => { const e = { tagName: String(tag || 'div').toUpperCase(), children: [], listeners: {}, dataset: {}, style: {}, className: '', textContent: '', hidden: false, type: '', title: '', disabled: false,
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, append(...c) { this.children.push(...c); }, appendChild(c) { this.children.push(c); return c; }, addEventListener: noop, removeEventListener: noop,
+    setAttribute: noop, getAttribute: () => null, querySelector: () => null, querySelectorAll: () => [], closest: () => null, focus: noop, remove: noop }; return e; };
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };   // never navigator: Node 22's is a getter
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl('body'), head: mkEl('head') };
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const FR = await import(pathToFileURL(path.join(REPO, 'src/lib/vault-file-row.js')).href);
+    const max = VFm.RUN_FILE_BYTES_MAX;
+    const rowOf = (size, lines) => ({ id: 'secrets/keyfile:0123456789/file', file: VFm.publicFactsOf({ name: 'chain.pem', size, lines, kind: 'pem' }) });
+    const runLineOf = (row) => { const x = FR.fileExtras(row); return (x.box && x.box.children.find((c) => c.className === 'vw-file-run')) || null; };
+    const big = rowOf(max + 4096, 470), small = rowOf(max, 400), noLines = rowOf(max + 1, null);
+    const m = runLineOf(big), m0 = runLineOf(small), m2 = runLineOf(noLines);
+    ok(big.file.forRun && big.file.forRun.fits === false && small.file.forRun.fits === true, `the hub's facts say it (forRun: ${max + 4096} B does not fit, ${max} B fits)`, [big.file.forRun, small.file.forRun]);
+    ok(m && m.dataset.state === 'too-large-for-a-run' && /^Too large for a run \(470 lines, 28 KB\)/.test(m.textContent) && /up to 24 KB in all/.test(m.textContent) && /you can download it/.test(m.textContent) && /an agent can still ask you for it/.test(m.textContent),
+      'a file past the figure: its ROW says it at once — its lines, its size, the figure, and what still works (download; an agent\'s ask)', m && m.textContent);
+    ok(m0 === null, 'CONTROL: a file AT the figure fits — its row says nothing of it (the mark follows the hub\'s fact, not the kind)', m0 && m0.textContent);
+    ok(m2 && /^Too large for a run \(24 KB\)/.test(m2.textContent), 'a file whose lines are not known says its size alone', m2 && m2.textContent);
+    const doors = FR.fileExtras(big).doors;
+    ok(doors.length === 1 && doors[0].disabled === false && /Download/.test(doors[0].textContent), 'a plain MARK: the row\'s Download stays a live door — nothing is greyed by it (r1423)', doors.map((d) => [d.textContent, d.disabled]));
+  } finally {
+    for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
+  }
+  const FRS = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8');
+  ok(/onPick: \(p\) => \{ picked = p; sayRunFit\(p\);/.test(FRS) && /const over = !!p && p\.size > RUN_FILE_BYTES_MAX;/.test(FRS) && /body\.append\(help, field\(t\('File'\), pick\.el\), runNote, /.test(FRS),
+    'the upload door says it at the PICK (sayRunFit on every pick and clear, the note under the file box) — the save stays a save');
+  const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const words = ['Too large for a run ({lines} lines, {size})', 'Too large for a run ({size})', 'Larger than a run can carry ({max} in all)'];
+  ok(words.every((w) => ZH.includes(JSON.stringify(w).slice(0, -1)) && JA.includes(JSON.stringify(w).slice(0, -1))), 'its words in zh and ja beside the English (the row\'s two forms and the door\'s note)');
+}
+
 console.warn = warn0;
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

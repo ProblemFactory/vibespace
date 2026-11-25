@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { revealValue, revealWords } from './vault-reveal.js';
 import { wordsRefusalWords } from './vault-paste-box.js';   // the name / description rule's refusals in their own words
-import { FILE_MAX } from '../vault-file.js';   // THE cap (the owner's D1, 2026-11-03) — the page refuses a bigger file before reading a byte of it
+import { FILE_MAX, RUN_FILE_BYTES_MAX } from '../vault-file.js';   // THE cap (the owner's D1, 2026-11-03) — the page refuses a bigger file before reading a byte of it
 
 const FILE_MIN = 8;   // = src/vault-file.js fileVerdict's floor (a shorter file cannot be masked in a run's output)
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -22,6 +22,16 @@ function sizeWords(n) {
 }
 const KIND_WORDS = { 'ssh-key': () => t('SSH key'), pem: () => t('Certificate or PEM'), generic: () => t('File') };
 const fileKindWord = (k) => (KIND_WORDS[k] || KIND_WORDS.generic)();
+/** 主开发 r4378 (a)(b): a file past what a run can carry says so ON ITS ROW, at once — the run's own refusal in a person's words
+ *  (src/vault-file.js tooLargeForARunWords): its lines and size, the figure, and what still works. A plain mark: nothing greyed. */
+function tooLargeForARunLine(f) {
+  const fr = f && f.forRun;
+  if (!fr || fr.fits !== false) return null;
+  const size = sizeWords(fr.size), max = sizeWords(fr.max);
+  return Number.isInteger(fr.lines)
+    ? t('Too large for a run ({lines} lines, {size}) — a run carries files of up to {max} in all, so that every line of them can be kept out of its output. It stays in the vault: you can download it, and an agent can still ask you for it', { lines: fr.lines, size, max })
+    : t('Too large for a run ({size}) — a run carries files of up to {max} in all, so that every line of them can be kept out of its output. It stays in the vault: you can download it, and an agent can still ask you for it', { size, max });
+}
 
 /** A file row's extras: `box` = its file line (name · size · kind), `chips` = the passphrase state, `doors` = Download. */
 export function fileExtras(row) {
@@ -29,6 +39,8 @@ export function fileExtras(row) {
   if (!f) return { box: null, chips: [], doors: [] };
   const box = mk('div', 'vw-file');
   box.append(mk('span', 'vw-file-name', f.name), mk('span', 'vw-file-meta', `${sizeWords(f.size)} · ${fileKindWord(f.kind)}`));
+  const runLine = tooLargeForARunLine(f);
+  if (runLine) { const m = mk('div', 'vw-file-run', runLine); m.dataset.state = 'too-large-for-a-run'; box.append(m); }
   const chips = [];
   if (f.encrypted) {
     const c = mk('span', 'vw-chip vw-chip-state vw-file-pass', t('Needs its passphrase'));
@@ -133,13 +145,16 @@ export function showFileAddDialog({ refresh = () => {} } = {}) {
   const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   const name = mk('input', 'vault-pw vault-secret-name'); name.type = 'text'; name.maxLength = 80; name.autocomplete = 'off'; name.placeholder = t('What it is — e.g. Deploy key for the build server');
   const note = mk('textarea', 'vault-pw vault-secret-note'); note.rows = 2; note.maxLength = 400; note.placeholder = t('What it is for — which system, which account, what it may do (agents that may use it read this)');
-  const pick = filePickEl({ onPick: (p) => { picked = p; if (p && !name.value) name.placeholder = p.name.replace(/\.[^.]{1,12}$/, '') || p.name; }, onError: (w) => { err.textContent = w; } });
-  const help = mk('div', 'vault-words-help', t('An SSH key, a certificate, a kubeconfig, a licence file — up to 1 MB. A command an agent runs gets it as a private file for that run; nobody sees its contents on a page.'));
+  // 主开发 r4378 (b): the door says AT ONCE when the chosen file is over what a run can carry — a plain note; the save stays a save
+  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;
+  const sayRunFit = (p) => { const over = !!p && p.size > RUN_FILE_BYTES_MAX; runNote.textContent = over ? t('Larger than a run can carry ({max} in all) — the vault keeps it and you can download it, but a command an agent runs cannot get it', { max: sizeWords(RUN_FILE_BYTES_MAX) }) : ''; runNote.hidden = !over; };
+  const pick = filePickEl({ onPick: (p) => { picked = p; sayRunFit(p); if (p && !name.value) name.placeholder = p.name.replace(/\.[^.]{1,12}$/, '') || p.name; }, onError: (w) => { err.textContent = w; } });
+  const help = mk('div', 'vault-words-help', t('An SSH key, a certificate, a kubeconfig, a licence file — up to 1 MB. A command an agent runs gets files of up to {max} in all, each as a private file for that run; nobody sees a file\'s contents on a page.', { max: sizeWords(RUN_FILE_BYTES_MAX) }));
   const foot = mk('div', 'dialog-footer');
   const cancel = btn(t('Cancel'), 'btn-cancel');
   const save = btn(t('Save to vault'), 'btn-create');
   foot.append(cancel, save);
-  body.append(help, field(t('File'), pick.el), field(t('Name'), name), field(t('Description'), note), err);
+  body.append(help, field(t('File'), pick.el), runNote, field(t('Name'), name), field(t('Description'), note), err);
   dialog.append(foot);
   cancel.onclick = () => { picked = null; close(); };
   save.onclick = saveNow = async () => {

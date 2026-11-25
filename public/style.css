@@ -9266,6 +9266,8 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .vw-file { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 12px; }
 .vw-file-name { font-family: var(--font-mono, ui-monospace, monospace); color: var(--text); overflow-wrap: anywhere; min-width: 0; }
 .vw-file-meta { color: var(--text-dim); }
+.vw-file-run { flex-basis: 100%; color: var(--warn-text); line-height: 1.4; }   /* 主开发 r4378 (b): a file past what a run can carry, said on its row (a plain mark, never a greyed control) */
+.vault-file-run-note { font-size: 12px; color: var(--warn-text); line-height: 1.4; }
 .vault-file-add-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; min-width: min(420px, 90vw); }
 .vault-file-drop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-sm); background: var(--bg-input); min-width: 0; }
 .vault-file-drop.vault-file-over { border-color: var(--accent); background: var(--accent-dim); }
