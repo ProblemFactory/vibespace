@@ -111,10 +111,10 @@ function create({ file, clerk = null, clerkAuth = null, log = console, now = () 
     if (facts) return facts;
     // 主开发 r3926: the folder and the root are the ones main.js COMPUTED (placesOf), the home and the uid the facts' own defaults (this
     // process's); `scratch` is a suite's scratch home / var-tmp rung, set by no start line (main.js witnessOf never sets it)
-    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, env: {}, throwaway: witness.throwaway ? 'throwaway' : false, ...(witness.scratch || {}) }); }
+    try { facts = SW.startFactsSync({ ...(witness.scratch || {}), dataDir: witness.folder, root: witness.root, env: {}, throwaway: witness.throwaway ? 'throwaway' : false }); }   // the seam FIRST: it never overrides a computed place or a mark (主开发 r3969)
     catch (e) { sayOnce('facts', `the data folder's sign-in facts could not be read (${(e && e.code) || 'error'}) — the table is read as before`); facts = null; }
     // 主开发 r3788 (the round's shoulds): what the start TOOK is said once — a defaulted home or uid (a short line), and a throwaway start
-    if (facts) sayOnce('places', `the sign-in witness is read at this process's own places — the data folder ${facts.dataDir}, the home ${(witness.scratch && witness.scratch.home) || os.homedir()}, the uid ${facts.uid} (a folder, root, home or uid the start line names is compared, never used)`);
+    if (facts && !witness.throwaway) sayOnce('places', `the sign-in witness is read at this process's own places — the data folder ${facts.dataDir}, the home ${(witness.scratch && witness.scratch.home) || os.homedir()}, the uid ${facts.uid} (a folder, root, home or uid the start line names is compared, never used)`);
     if (facts && witness.throwaway) sayOnce('throwaway', 'a throwaway start (signin.throwaway): no sign-in witness is read or written — a lost or replaced table opens as a new instance');
     if (facts && facts.netHome) sayOnce('net-home', `the home folder ${facts.netHome} is a network mount: the piped form does not read its sign-in witness (a limit) — only the persistent local places`);
     return facts;

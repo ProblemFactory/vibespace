@@ -347,7 +347,7 @@ async function startWith(signin, mod = require(path.join(REPO, 'src/interface/ma
   const pw = (made.lines.find((l) => /Generated workspace password: /.test(l)) || '').replace(/^.*Generated workspace password: (\S+).*$/, '$1');
   ok(g.up && g.lines.some((l) => /the sign-in table .*auth\.json \(sign-in off\)/.test(l)) && made.up && pw.length === 12 && plainAuth(gen).verifyPassword(pw) && made.lines.filter((l) => l.includes(pw)).length === 1,
     'a good table: it listens and says it (sign-in off); `generate` makes a password, written, and says it ONCE', { g: g.lines, made: made.lines.length });
-  const cut = await startWith(undefined, mutant('src/interface/main.js', '    if (table) { const e = new Error(table); e.badStart = true; throw e; }\n', ''));
+  const cut = await startWith(undefined, mutant('src/interface/main.js', '    if (judged.why) { const e = new Error(judged.why); e.badStart = true; throw e; }\n', ''));
   ok(cut.exits[0] !== 2, `RED CONTROL — the check cut: a start line with no table is no longer refused by name (exit ${cut.exits[0]})`, cut.lines);
 }
 

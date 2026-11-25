@@ -184,7 +184,7 @@ console.log('⑧ 主开发 r3629 (round w43tjwjp5): the plain form\'s defaults f
   const h1 = await dflt('dflt-home'), h2 = await dflt('dflt-uid', { at: 'var-tmp' });
   ok(!('home' in h1.w) && !('uid' in h1.w) && !!h1.t.held && h1.t.held.kind === 'folder' && !!h2.t.held && h2.t.held.kind === 'folder',
     `the witness carries no home or uid: this process's own are read (the plain form's) — a witness of another folder at its home, or at its uid's var-tmp rung, HOLDS it (${h1.t.held && h1.t.held.kind}, ${h2.t.held && h2.t.held.kind})`);
-  const RNP = siCut('    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, env: {},', "    try { facts = SW.startFactsSync({ dataDir: witness.folder, root: witness.root, home: '', uid: null, env: {},", 'no-place');
+  const RNP = siCut('    try { facts = SW.startFactsSync({ ...(witness.scratch || {}), dataDir: witness.folder, root: witness.root, env: {},', "    try { facts = SW.startFactsSync({ ...(witness.scratch || {}), dataDir: witness.folder, root: witness.root, home: '', uid: null, env: {},", 'no-place');
   const r1 = await dflt('dflt-home-red', { Mod: RNP }), r2 = await dflt('dflt-uid-red', { at: 'var-tmp', Mod: RNP });
   ok(!r1.t.held && !r2.t.held, 'RED CONTROL: the home and the uid read as «no place» (the released form) — no witness read, the start OPENS against one');
 
@@ -302,11 +302,11 @@ console.log('⑨ 主开发 r3788: the start line\'s walk — only an ABSENT valu
   const said = (re) => lines.filter((l) => re.test(l)).length;
   const sd = install('walk-said'); plantId(sd, 'vi-0c1d2e3f4a5b'); lines.length = 0;
   const td = tableOf(sd, { witness: { ...(await M.witnessFor({ file: sd.table, folder: sd.data })), scratch: { varTmp: path.join(sd.base, 'vartmp') } } }); await td.load(); await td.ensure({});
-  const placesSaid = said(/the sign-in witness is read at this process's own places — the data folder .* the uid \d+ \(a folder, root, home or uid the start line names is compared, never used\)/);
   const st = install('walk-throwaway'); plantId(st, 'vi-0d1e2f3a4b5c');
   const tt = tableOf(st, { witness: witnessCfg(st, { throwaway: true }) }); await tt.load();
+  const placesSaid = said(/the sign-in witness is read at this process's own places — the data folder .* the uid \d+ \(a folder, root, home or uid the start line names is compared, never used\)/);   // counted AFTER the throwaway table too: a throwaway start says no places line (主开发 r3969 (1))
   ok(placesSaid === 1 && said(/a throwaway start \(signin\.throwaway\): no sign-in witness is read or written/) === 1,
-    'what the start took is SAID ONCE in the journal: the places it read (this process\'s own data folder, home and uid), and a throwaway start (no witness read)', lines.slice(-4));
+    'what the start took is SAID ONCE in the journal: the places it read (this process\'s own data folder, home and uid), and a throwaway start (no witness read) — which says NO places line (r3969: the two never contradict)', lines.slice(-4));
   ok(!SIGNIN_SRC.includes("'required'"), 'src/interface/signin.js spells no value of the declaration (the stand-in environment is gone; the cell is the shared module\'s)');   // stale-pins: kept — a deliberate absence check
 }
 
@@ -339,8 +339,39 @@ console.log('⑩ 主开发 r3926: the start line\'s values are CLAIMS, never pla
   // the facts' builder names no field of the line but the two marks; the table's facts read no home, uid or place of the line
   const builder = (MAIN_SRC.split('\n').find((l) => l.startsWith('const witnessOf = ')) || '');
   const marksOnly = /^const witnessOf = \(places, \{ throwaway, declared \} = \{\}\) => \(\{ folder: places\.folder, root: places\.root, throwaway: throwaway === true, declared: declared === true \}\);$/.test(builder);
+  const bodyOf = (name) => { const i = MAIN_SRC.indexOf(`async function ${name}(`); return i < 0 ? '' : MAIN_SRC.slice(i, MAIN_SRC.indexOf('\n}\n', i)); };
+  const placesBody = bodyOf('placesOf'), forBody = bodyOf('witnessFor');
+  const lineValues = (t) => [...t.matchAll(/signin\.(\w+)/g)].map((m) => m[1]);
+  // 主开发 r3969 (3): no value of the line stands in the two bodies that compute and hand the places — placesOf names nothing of the line,
+  // witnessFor only the table's file (to compute) and the folder's presence (the switch); the marks reach witnessOf, which takes two
+  const bodiesClean = placesBody.length > 0 && forBody.length > 0 && !/\bsignin\b/.test(placesBody) && JSON.stringify([...new Set(lineValues(forBody))].sort()) === JSON.stringify(['file', 'folder']) && /signin\.folder === undefined/.test(forBody);
+  const seamFirst = SIGNIN_SRC.includes('SW.startFactsSync({ ...(witness.scratch || {}), dataDir: witness.folder, root: witness.root,');
+  const handedOnce = MAIN_SRC.includes('witness: await witnessFor(line.signin, judged.places)') && (MAIN_SRC.match(/await placesOf\(/g) || []).length === 2;
+  ok(bodiesClean && seamFirst && handedOnce, `the two bodies that compute and hand the places name no value of the line (placesOf: none; witnessFor: ${[...new Set(lineValues(forBody))].join(', ')}); the suite's seam is spread FIRST (it overrides no computed place or mark); the start hands its judge's places on (computed once)`, { forBody: forBody.slice(0, 300) });
   ok(marksOnly && !/signin\./.test(builder) && !/witness\.(home|uid|varTmp)\b/.test(SIGNIN_SRC) && MAIN_SRC.includes('  return witnessOf(at, signin);'),
     'the facts\' builder (src/interface/main.js witnessOf) takes the COMPUTED places and the line\'s two marks only; the table\'s facts read no home, uid or place of the line (only a suite\'s scratch seam)', builder.slice(0, 200));
+}
+
+console.log('⑪ 主开发 r3969 (2): PARITY — the places the piped form computes are the plain form\'s, for the same install');
+{
+  const MAIN_SRC = fs.readFileSync(path.join(REPO, 'src/interface/main.js'), 'utf-8');
+  /** THE PLAIN FORM's places: server.js hands Auth path.join(__dirname, 'data') — __dirname is node's REAL path of the install — and
+   *  startFactsSync takes its root as that folder's parent (src/signin-witness.js, the facts both forms read) */
+  const plainOf = (installReal, sc) => { const f = SW.startFactsSync({ dataDir: path.join(installReal, 'data'), home: sc, varTmp: sc, env: {}, mountinfo: '' }); return { folder: f.dataDir, root: f.root }; };
+  /** three installs: a plain root; the SAME root reached through a link (the table named by the link's path); a data folder that is a link */
+  const installs = () => {
+    const base = fs.realpathSync(fs.mkdtempSync(path.join(ROOT, 'parity-'))), sc = path.join(base, 'scratch'); fs.mkdirSync(sc);
+    const plain = path.join(base, 'plain'); fs.mkdirSync(path.join(plain, 'data'), { recursive: true });
+    const real = path.join(base, 'real'); fs.mkdirSync(path.join(real, 'data'), { recursive: true }); const via = path.join(base, 'via'); fs.symlinkSync(real, via);
+    const dl = path.join(base, 'dl'), dt = path.join(base, 'data-elsewhere'); fs.mkdirSync(dl); fs.mkdirSync(dt); fs.symlinkSync(dt, path.join(dl, 'data'));
+    return { sc, cases: [['a plain root', plain, path.join(plain, 'data', 'auth.json')], ['a root reached through a link', real, path.join(via, 'data', 'auth.json')], ['a data folder that is a link', dl, path.join(dl, 'data', 'auth.json')]] };
+  };
+  const compare = async (Mm) => { const { sc, cases } = installs(), out = []; for (const [label, installReal, file] of cases) { const p = await Mm.placesOf(file), q = plainOf(installReal, sc); out.push({ label, same: p.folder === q.folder && p.root === q.root, piped: p, plain: q }); } return out; };
+  const got = await compare(M);
+  ok(got.every((g) => g.same), `the piped form's places equal the plain form's for the same install — ${got.map((g) => `${g.label}: ${g.same ? 'the same' : 'DIFFER'}`).join('; ')}`, got.filter((g) => !g.same));
+  const DRIFT = MUT.load('src/interface/main.js', anchored(MAIN_SRC, '  return { folder: path.join(root, path.basename(folderRaw)), root };', '  return { folder: await fsp.realpath(folderRaw), root };', 'places-drift'), 'main-places-drift');
+  const drift = await compare(DRIFT);
+  ok(!drift[2].same && drift[0].same, `RED CONTROL: a piped form that also resolves the data folder's own link — the parity leg names the drift (${drift.map((g) => `${g.label}: ${g.same ? 'the same' : 'DIFFER'}`).join('; ')})`, drift[2]);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
