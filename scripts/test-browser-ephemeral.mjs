@@ -335,7 +335,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     ok(cx.status === 0 && last && last.socketDir === KROOT, 'r2: `export AGENT_BROWSER_SOCKET_DIR=<mine>` (+ XDG_RUNTIME_DIR) — the shipped CLI still lands under the KEEPER\'s root', { st: cx.status, last, err: cx.stderr.slice(0, 300) });
     ok(/\[env_twin_dropped\]/.test(cx.stderr) && /AGENT_BROWSER_SOCKET_DIR/.test(cx.stderr) && /XDG_RUNTIME_DIR/.test(cx.stderr), 'r2: …and says, by name, that the shell\'s socket root was not used', cx.stderr);
     const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
-    const r1v = editAnchor(editAnchor(vsrc, "'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);", "src/browser-verbs.js"), 'if (absPath(a.socketDir)) {', 'if (false) {', "src/browser-verbs.js");
+    const r1v = editAnchor(editAnchor(vsrc, "'AGENT_BROWSER_SCREENSHOT_QUALITY']);", "'AGENT_BROWSER_SCREENSHOT_QUALITY', 'AGENT_BROWSER_SOCKET_DIR']);", "src/browser-verbs.js"), 'if (absPath(a.socketDir)) {', 'if (false) {', "src/browser-verbs.js");
     const D2 = path.join(ROOT, 'r1-cli'); fs.mkdirSync(D2, { recursive: true });
     fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
     const ctl = await new Promise((resolve) => execFile(process.execPath, [path.join(D2, 'vibespace-browser'), 'click', '@e1'], { env: decoyEnv, encoding: 'utf8', timeout: 30000 }, (err, so, se) => resolve({ status: err ? err.code : 0, stderr: String(se || '') })));

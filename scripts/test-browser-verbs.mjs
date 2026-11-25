@@ -956,8 +956,8 @@ try {
       const sline = rs.stderr.split('\n').find((l) => l.includes('[env_session_config_dropped]')) || '';
       ok(rs.status === 0 && !!ls && !('AGENT_BROWSER_DEFAULT_TIMEOUT' in ls.env) && !('AGENT_BROWSER_DEBUG' in ls.env) && ls.env.AGENT_BROWSER_JSON === '1',
         'B-e946: the agent\'s AGENT_BROWSER_DEFAULT_TIMEOUT and AGENT_BROWSER_DEBUG never reach the driver; the output keys still pass; the command runs', JSON.stringify(ls && ls.env));
-      ok(sline.includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && sline.includes('VibeSpace drives this same browser session') && sline.includes('lose every ref') && sline.includes('`vibespace-browser wait <ms>`') && !sline.includes('60000') && !/\[env_twin_dropped\]/.test(rs.stderr) && rs.stderr.split('\n').filter((l) => l.includes('[env_session_config_dropped]')).length === 1,
-        'B-e946: …SAID once on the CLI\'s own road, the names only: why (this same session; another value starts its driver again and loses every ref) and the verb that waits instead — never the launch twins\' note', rs.stderr);
+      ok(sline.includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && sline.includes('VibeSpace drives this same browser session') && sline.includes('lose every ref') && sline.includes('`vibespace-browser wait <ms>`') && !sline.includes('60000') && !/\[env_twin_dropped\]/.test(rs.stderr) && rs.stderr.split('\n').filter((l) => l.includes('[env_session_config_dropped]')).length === 1 && !String(rs.stdout).includes('[env_session_config_dropped]'),
+        'B-e946: …SAID once on the CLI\'s own road (stderr: stdout stays the driver\'s), the names only: why (this same session; another value starts its driver again and loses every ref) and the verb that waits instead — never the launch twins\' note', rs.stderr);
       const rd = await cli(['snapshot'], { ...baseEnv, AGENT_BROWSER_DEBUG: '1' });
       ok(/\[env_session_config_dropped\]/.test(rd.stderr) && !/vibespace-browser wait/.test(rd.stderr), 'B-e946: the debug name alone — its reason only (no wait is offered for it)', rd.stderr);
     }
