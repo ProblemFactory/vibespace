@@ -315,6 +315,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Named remainders, out of this unit:**
   - the agent browser's own Chrome in the real-driver rows (test-browser-live reached Google's :5228 and :443). The product already has a seam for a suite's row: the scratch HOME's ~/.agent-browser/config.json `args`, which test-browser-propose-chrome and test-vault-login-chrome already use;
   - test-window-target's Chromes, launched by the product's desktop-app road with the suite's catalog `args` (its NET list).
+- **THE ROUND wefb09ae6 (主开发 r3968, the tests round; NOT TAKEN, one must):** the catch-all takes an address written as numbers too. The vendor's net/base/host_mapping_rules.cc RewriteHost matches `base::MatchPattern(host_port->host(), map_rule.hostname_pattern)` with no branch for an address, and base/strings/pattern.h says «* matches 0 or more characters» (tag 157.0.8103.78). So a page at the box's own LAN address failed.
+  - Cured: test-desktop-v2-latency-chrome, test-mac-ard-signin-chrome and test-browser-live-input give their LAN address through the builder's `own`. scripts/xpra-window-boot.mjs gives the box's own name (its seven xpra suites' plain-http pages); the sweep found it.
+  - The builder now REFUSES a name that would split the rule (a space, a comma) or open it (a star in `own`, an empty name).
+  - test-architecture §47d runs the builder from its own text: the order (a suite's map ahead of the catch-all) and the refusals, each with a red copy.
+  - The belt's comment is reworded: the names rule alone now refuses all three probes, and the control tells belt from no belt. The control's `args` (after its rule) are handed by no caller.
 
 ## 2.369.418 — 2026-11-24
 
