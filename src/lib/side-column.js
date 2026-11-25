@@ -8,7 +8,9 @@
 //     at the release; no audit of ours covers their bars). A Safari tab keeps «contain», every inset 0, nothing in a tab
 //     changes. Set from the bundle: the page's policy allows no inline script, and WebKit re-reads the viewport meta when its
 //     content changes.
-//   - sideColumnOf (PURE): the Duo's column by its insets — a trailing inset of 80 or more with a leading inset of 0. A HEURISTIC,
+//   - sideColumnOf (PURE): the Duo's column by its insets — an inset of 80 or more on ONE side with 0 on the other: on the right
+//     (the simulator's first reading, both displays) or on the LEFT (主开发 r4481: the outer display held landscape reads left 84,
+//     right 0, bottom 34 — the system's column moved to the left and stood empty beside our bar on the right). A HEURISTIC,
 //     named as one: CSS has four edge numbers and no «bar column» kind (no web form of UIView.LayoutRegion / verticalBarEdge),
 //     and a notched iPhone held landscape reports the same inset on BOTH sides, so that shape gets the safe default.
 //   - readSideColumn: the four insets read through a hidden probe (fold-ladder.js's pattern), html[data-sidecol] written; the
@@ -33,9 +35,13 @@ export function coverIfStandalone(doc = document, win = window) {
   return true;
 }
 
-/** PURE: 'right' for the Duo's side column (a trailing inset ≥ 80 with no leading one), else null (the safe default) */
+/** PURE: the side the Duo's column stands on — 'right' (an inset ≥ 80 on the right, none on the left) or 'left' (the mirror:
+ *  the outer display held landscape, 主开发 r4481) — else null (the safe default). THE LAW (r4481): wherever the system reserves
+ *  a side column, our global doors live INSIDE it; style.css moves the bar to that side */
 export function sideColumnOf({ left = 0, right = 0 } = {}) {
-  return Number(right) >= SIDE_COLUMN_MIN && Number(left) === 0 ? 'right' : null;
+  if (Number(right) >= SIDE_COLUMN_MIN && Number(left) === 0) return 'right';
+  if (Number(left) >= SIDE_COLUMN_MIN && Number(right) === 0) return 'left';
+  return null;
 }
 
 /** the four safe-area insets through a hidden probe → { top, right, bottom, left, col }; html[data-sidecol] follows */

@@ -4794,8 +4794,9 @@ A job's result, a reminder or a message with a wake to ONE conversation resumes 
 The iPhone Duo's HOME-SCREEN copy (B-78db, the owner's word «做吧»; src/lib/side-column.js) opens with viewport-fit=cover — set
 from the bundle for a standalone copy only (navigator.standalone / display-mode standalone); a Safari tab keeps «contain» and every
 inset 0. The simulator (Xcode 27.1) reads the Duo's side column as env(safe-area-inset-right) 84 and the home indicator as a bottom
-inset 34 on BOTH displays. `sideColumnOf` (a heuristic, named as one: a trailing inset ≥ 80 with no leading inset) writes
-html[data-sidecol]; there the bar stands IN the column and holds GLOBAL things only (the owner, r3949: what acts on the conversation
+inset 34 on BOTH displays. `sideColumnOf` (a heuristic, named as one: an inset ≥ 80 on ONE side with none on the other — on the right
+as the simulator first read both displays, or on the LEFT, the outer display held landscape, 主开发 r4481) writes html[data-sidecol]
+(its side); there the bar stands IN the column and holds GLOBAL things only (the owner, r3949: what acts on the conversation
 stands at the bottom with it — kb-file-structure.md «THE SIDE COLUMN»), and it never overflows (side-column.js columnFit).
 
 Cover is set for EVERY home-screen copy, so every iPhone shape's edges were audited: a notched iPhone's copy draws under its status
@@ -4876,6 +4877,17 @@ THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coo
 - THE LAUNCH's GROUND. ThemeManager.apply remembers the applied theme's ground in one cookie (src/launch-ground.js: a hex of 3/4/6/8 digits
   or rgb()/rgba() of 0–255 channels, nothing else, never a theme's name). The index route writes it into <html>'s inline style and the
   loading screen's, so the loading screen wears the stored theme's ground from the first paint. With no cookie the ground is today's dark.
+- THE COLUMN ON THE LEFT (主开发 r4481, the owner asked where the outer display's bar was). The outer display held landscape reads
+  678×445, the insets left 84 · right 0 · bottom 34, the regular class: the system's column is on the LEFT there and draws nothing in it.
+  Before, the column stood EMPTY beside our trailing bar on the right (56 wide): 140 of 678 points gone, the conversation 538. THE LAW:
+  wherever the system reserves a side column, our global doors live INSIDE it — never an empty reserved band beside a bar of ours.
+  sideColumnOf says 'left'; style.css's «THE SYSTEM's COLUMN ON THE LEFT» moves the bar into the column (84 wide, its buttons from 8 px:
+  nothing of the system's above them there), the list column and the conversation start after it (the conversation 84–678 with the
+  list hidden), ☰, the For-you tray and the head's ✕ / ⋯ follow; the column's contents, their order and the yield law are the right
+  column's. A long press's tip stands right of a button in that column (trailing-bar.js). test-duo-layout ④h places the insets in
+  Chrome (RED: the release's verdict, the owner's picture); test-viewport-class ⑤g pins the block. A compact class with a column on
+  the left was never read (the outer display held portrait has it on the right; an iPhone has no upside-down portrait): the compact
+  rules keep the right one. UNPROVEN on the device until the simulator's picture.
 - THE WHITE BEFORE THE PAGE (about 3 s at a cold launch) comes before the page begins (the document's answer ends at 10 ms, the first paint
   at 18 ms). Nothing in the page reaches it. Apple's apple-touch-startup-image would need at least four images for one device (two
   displays, two orientations), taken at install and never following the stored theme. Not built (the coordinator's choice, named to the
