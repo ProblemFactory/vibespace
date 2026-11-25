@@ -115,7 +115,7 @@ const TPL_B = path.join(ROOT, 'tpl-b');
 const wholeOf = (s) => JSON.stringify(s.index.snapshot(), RUNTIME_KEYS, 1);
 /** One boot of the stand-in: a store reopened with the walk in slices, one row changed, durable() awaited. `place(s)` runs
  *  at the first point between two slices of the layout. → what was on disk meanwhile and after. */
-async function layoutLeg(SM, tag, place = null) {
+async function layoutLeg(SM, tag, place = null, { beforeUpdate = null, onFolded = null } = {}) {   // r4456: + the leg's two seams (opt-in): before its update, after its fold's read
   const dir = copyOf(TPL_B, `b-${tag}`);
   const before = fs.readFileSync(path.join(dir, 'index.json'), 'utf8');
   const seen = { slices: 0, partial: 0, wrote: 0, placedAt: null };
@@ -127,9 +127,11 @@ async function layoutLeg(SM, tag, place = null) {
     if (s.index.flushStats().writes) seen.wrote++;
     if (place && seen.placedAt === null) { seen.placedAt = i * S.INDEX_CHUNK; await place(s); }
   } } });
+  if (beforeUpdate) await beforeUpdate(s, seen);
   await s.index.update(() => { s.index.entry('gmail', 'thr_1', { create: false }).unread = 9; });
   const landed = await s.index.fold();
   const disk = fs.readFileSync(s.indexFile, 'utf8');
+  if (onFolded) onFolded();
   const r = { landed, same: disk === wholeOf(s), rows: JSON.parse(disk).conversations, seen, stats: s.index.flushStats() };
   s.close();
   return r;
@@ -164,10 +166,18 @@ const placedRight = (r) => r.rows['gmail/thr_1'].title === 'changed after its ch
   ok(!r.same && !placedRight(r), `(b2) RED CONTROL: a layout whose landing forgets the rows touched during it writes a file that is NOT the whole serialization (the placed rows lost) — the leg above would go red`, { same: r.same });
   const SN = M.load('src/channel-store.js', anchored(src, 'return LATER; }', 'return null; }', 'the store answers «equal to the disk» while its layout is built'), 'later-null');
   // the smalls unit's gate (box zone): the red raced its own premise — when the sliced warm-up landed before the fold's produce,
-  // the produce wrote whole and the red read as the cure. The warm-up is HELD at its first slice (300 ms) so the fold's produce
-  // always meets the layout still being built
-  const rn = await layoutLeg(SN, 'b3-red', () => new Promise((z) => setTimeout(z, 300)));
+  // the produce wrote whole and the red read as the cure. r4456 (the flake census, round 2): the warm-up is HELD at its first slice on
+  // a promise the LEG owns, let go only once the fold has answered (its produce asked, the copy's «null» taken) — never a 300 ms timer
+  // — and the leg's update and fold start only once the warm-up stands at that hold: the fold meets the layout still being built
+  // however late it runs. A hold the fold never answers is a named harness row
+  let letGo = null; const heldUp = new Promise((z) => { const t = setTimeout(() => { ok(false, 'harness: the fold never answered while the warm-up was held — the state never came within 10 s (the red control after it judges nothing)'); z(); }, 10000); letGo = () => { clearTimeout(t); z(); }; });
+  const rn = await layoutLeg(SN, 'b3-red', () => heldUp, { beforeUpdate: async (s, seen) => { await until('the warm-up standing at its first slice (the leg\'s hold)', () => seen.placedAt !== null); }, onFolded: () => letGo() });
   ok(rn.landed === true && rn.rows['gmail/thr_1'].unread !== 9, `(b3) RED CONTROL: a store answering the writer «nothing to write» (null) while its layout is built — durable() resolves TRUE with the changed row NOT on disk — the leg above would go red`, { landed: rn.landed, unread: rn.rows['gmail/thr_1'].unread });
+  // r4456 (1) PLACED: what runs late is the leg's own update and fold. Held until the warm-up has LANDED (its sliced layout counted),
+  // the control's old 300 ms hold loses its race at will: the red copy's fold meets no layout in build, writes whole, and its red reads
+  // as the cure
+  const rp = await layoutLeg(SN, 'b3-red-placed', () => new Promise((z) => setTimeout(z, 300)), { beforeUpdate: async (s) => { await until('the warm-up LANDED (its sliced layout counted)', () => s.index.flushStats().layoutSliced >= 1); } });
+  ok(rp.landed === true && rp.rows['gmail/thr_1'].unread === 9, 'PLACED (r4456): the leg\'s fold held until the warm-up LANDED — the control\'s old 300 ms hold loses its race and the red copy\'s red reads as the cure (the changed row on disk)', { landed: rp.landed, unread: rp.rows['gmail/thr_1'] && rp.rows['gmail/thr_1'].unread });
 }
 /** (b4) a laid-out index, then a mass of touched rows (more than the bound): their chunks re-serialized in slices */
 async function applyLeg(tag, mid = null, mass = null, SM = S) {
@@ -214,7 +224,7 @@ async function applyLeg(tag, mid = null, mass = null, SM = S) {
   } } });
   // B-360d unit 1: the open warms its layout in slices — the leg's layouts are the WRITE's, so it arms after that landing,
   // and a whole touch owes the sliced layout the release made at its first write
-  for (let k = 0; k < 400 && !(s.index.flushStats().layoutSliced >= 1); k++) await new Promise((z) => setTimeout(z, 5));
+  await until('the open\'s sliced layout LANDED (layoutSliced 1)', () => s.index.flushStats().layoutSliced >= 1);   // r4456: its fact, by name (was a silent 2 s count)
   armed = true;
   await s.index.update(() => { s.index.entry('gmail', 'thr_1', { create: false }).unread = 9; });
   await s.index.update((x) => { x.conversations; });
@@ -844,8 +854,8 @@ async function throwLeg(EM, tag) {
   const end = await warmP.then(() => 'landed', (x) => `threw: ${(x && x.message) || x}`);
   const ready = await Promise.race([waiter, new Promise((z) => setTimeout(() => z('deadline'), 3000))]);
   const n0 = bc.length;
-  e.notify([]);
-  await new Promise((z) => setTimeout(z, 50));
+  e.notify([]);   // r4456: read AT ONCE (the row's own claim): notify broadcasts in its turn — the red copy's deferral is then a planted fact, never a
+  // race of a 50 ms timer against the 5 s bound its deferred ask arms (past it the copy sends too)
   const sent = bc.filter((m) => m && m.type === 'channels-updated').length - bc.slice(0, n0).filter((m) => m && m.type === 'channels-updated').length;
   const got = digestOf(e), stats = e.digestWarmStats();
   e.stop();
