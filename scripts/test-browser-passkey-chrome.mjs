@@ -601,7 +601,13 @@ const SEEN = [];
 const realApply = PK.applyEvent;
 // (r4456, the flake census: the leg's own record of an `end` can be HELD — the placed red of control 1 below; the product applies it at once)
 const SEEN_HOLD = { end: null, held: [] };
-PK.applyEvent = (recs, ev, o) => { const s = { at: Date.now(), ...ev }; if (SEEN_HOLD.end && ev && ev.ev === 'end') SEEN_HOLD.held.push(s); else SEEN.push(s); return realApply(recs, ev, o); };
+// (r4579: `PK_MUT.fn` — a COPY of the product's apply put in its place for one red, below; the real one otherwise)
+const PK_MUT = { fn: null };
+PK.applyEvent = (recs, ev, o) => { const s = { at: Date.now(), ...ev }; if (SEEN_HOLD.end && ev && ev.ev === 'end') SEEN_HOLD.held.push(s); else SEEN.push(s); return (PK_MUT.fn || realApply)(recs, ev, o); };
+// THE PRODUCT's OWN VERDICT OF AN END (r4579, the round's must): passkeyChanged (src/server/browser-dialogs.js) emits the verdict at
+// every start and every APPLIED end — a ceremony's start says «pending», its end once applied says «none». «Never passkey_open» is read
+// only after that «none» (the code is said from a timer, ~3 s after the start, and only while the record is still pending)
+const endedByProduct = (evs) => { const i = evs.findIndex((e) => e.state === 'pending'); return i >= 0 && evs.slice(i + 1).some((e) => e.state === 'none'); };
 const FY = { adds: [], resolves: [] };
 const forYou = { add: (pid, item) => { const id = 'fy-' + (FY.adds.length + 1); FY.adds.push({ at: Date.now(), pid, item, id }); return id; }, resolve: (id) => { FY.resolves.push({ at: Date.now(), id }); } };
 
@@ -815,7 +821,28 @@ try {
     const ve = await until(() => SEEN.find((x) => x.ev === 'end' && x.at >= tv) || null, 15000);
     if (!ve) say('HARNESS (c): the hook\'s `end` record did not reach the server within 15000 ms');
     ok(!!(vo && heldEnd && asStood === null && ve), `(c) CONTROL 1 PLACED (r4456): the end's record HELD, read as the leg stood (right after the page said ${vo && vo.v}) there is no end (${asStood === null}) — the control red with nothing wrong; the wait reads it once let go (${ve && ve.outcome})`, { vo, asStood, ve });
-    ok(vo && vo.v === 'ok' && ve && ve.outcome === 'ok' && !w.events.slice(ev0).some((e) => e.state === PK.PASSKEY_OPEN_CODE), `(c) CONTROL 1: the ceremony completes — \`end ok\`, the page says ${vo && vo.v}, never passkey_open (read after the end: ${w.events.slice(ev0).length} events)`, { vo, ve, ev: w.events.slice(ev0) });
+    const applied = await until(() => endedByProduct(w.events.slice(ev0)) || null, 15000);
+    if (!applied) say('HARNESS (c): the product did not say «none» after the ceremony\'s «pending» within 15000 ms (its end never applied)');
+    ok(vo && vo.v === 'ok' && ve && ve.outcome === 'ok' && applied && !w.events.slice(ev0).some((e) => e.state === PK.PASSKEY_OPEN_CODE), `(c) CONTROL 1: the ceremony completes — \`end ok\`, the page says ${vo && vo.v}, and once the PRODUCT has applied the end (its own «none» after «pending»: ${!!applied}) never passkey_open (${w.events.slice(ev0).map((e) => e.state).join(' → ')})`, { vo, ve, ev: w.events.slice(ev0) });
+    // ITS RED (r4579): a COPY of the product's apply that DROPS the end's match (src/browser-passkey.js applyEvent's record lookup cut,
+    // through the one door for a control's edit): the record stays pending and the product says passkey_open from its own timer. The
+    // reading of 8b5064ba9 (the events read at the end's arrival) is green there; the reading above waits for the product's «none», which
+    // never comes, and sees the code: red
+    {
+      const pksrc = fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8');
+      const MATCH = "  const r = records.find((x) => x.n === ev.id && x.ctx === (Number(ctx) || 0) && x.outcome === 'pending');";
+      const MPK = MUT.load('src/browser-passkey.js', editAnchor(pksrc, MATCH, '  const r = null;', 'src/browser-passkey.js'), 'no-end-match');
+      PK_MUT.fn = MPK.applyEvent;
+      const tr = Date.now(), evr0 = w.events.length;
+      r = await w.cli(['click', '#go']);
+      const endR = await until(() => SEEN.find((x) => x.ev === 'end' && x.at >= tr) || null, 15000);
+      const oldRead = !!endR && !w.events.slice(evr0).some((e) => e.state === PK.PASSKEY_OPEN_CODE);   // 8b5064ba9's reading, at the end's arrival
+      const said = await until(() => (w.events.slice(evr0).some((e) => e.state === PK.PASSKEY_OPEN_CODE) ? true : null), 15000);
+      PK_MUT.fn = null;
+      const evr = w.events.slice(evr0), curedRead = endedByProduct(evr) && !evr.some((e) => e.state === PK.PASSKEY_OPEN_CODE);
+      if (!said) say('HARNESS (c) RED: the product did not say passkey_open within 15000 ms of a start whose end it never matched');
+      ok(!!(endR && oldRead && said && !curedRead), `(c) CONTROL 1's RED (r4579): a copy of the product's apply that drops the end's match — the end arrived (${!!endR}), the record stayed pending and the product said passkey_open (${!!said}); the reading at the end's arrival was GREEN (${oldRead}), the reading after the product's own «none» is RED (${evr.map((e) => e.state).join(' → ')})`, { evr });
+    }
     if (cdp) cdp.close();
     await w.close();
   }
