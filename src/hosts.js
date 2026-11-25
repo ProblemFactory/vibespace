@@ -1169,7 +1169,10 @@ class HostManager {
       // (files up to 64MB each accumulated forever — audit round-3).
       // r4006 law E: the machine's owed copies and records leave the writer first (forget: one not in flight is dropped, one IN FLIGHT
       // lands and is unlinked again). The folder goes only once every write of it in flight has landed (bounded), so no owed write
-      // makes the folder again after this removal (the writer's thread makes a missing folder for the write it runs)
+      // makes the folder again after this removal (the writer's thread makes a missing folder for the write it runs). AT THE BOUND (line
+      // 888's follow, r4154 (2)): on storage that holds a write past 120 s, or a copy parked behind another file's write, a write still owed
+      // when the bound passes lands after the folder went: its makeDir makes the folder again, and the file is unlinked after it (it was
+      // forgotten) — so what comes back is an EMPTY folder, never the copy's bytes, until the next start's sweep (sweepJsonlCache)
       let inFlight = [];
       try { const W = this._W(), base = path.join(this.dataDir, 'remote-jsonl', id) + path.sep, until = Date.now() + CACHE_LAND_MS;
         for (const st of (typeof W.stats === 'function' ? W.stats() : [])) if (st && typeof st.file === 'string' && st.file.startsWith(base)) { this._letCacheGo(W, st.file); if (st.inflight && typeof W.durable === 'function') inFlight.push(this._cacheLanded(W, st.file, until)); }   // forget FIRST (it answers every waiter at once), then wait for the in-flight write's landing
@@ -3581,7 +3584,7 @@ class HostManager {
   async _landCacheNotExact(metaPath, meta, id = null) {
     if (!meta || meta.sizeExact !== true) return;
     const { sizeExact, ...rest } = meta;
-    await this._landCacheMeta(metaPath, JSON.stringify({ ...rest, notExactSince: Date.now() }), id);
+    await this._landCacheMeta(metaPath, JSON.stringify(rest), id);   // the record without its exact claim, nothing added (r4154 (4): no field nobody reads)
   }
   /** `hand(W, cell)`: the caller's own W.dirty of `file` (its row's name, §72); its producer reads `cell()` — the bytes while their
    *  write is owed, null once emptied (null = «equal to the disk»: nothing is written) */
@@ -3591,9 +3594,13 @@ class HostManager {
     let held = bytes;
     hand(W, () => held);
     let ok = false;
+    // WHAT A FORGET ANSWERS (r4154 (5)): the writer's forget() answers EVERY waiter of the file at once, with TRUE — so a machine's removal
+    // (it forgets the folder's rows) answers this wait «landed» for bytes that will never stand. Hence the machine is asked again after
+    // the wait: a removed machine's copy or record is refused by name (ECACHEWRITE), and the fetch never returns a path for it
     try { ok = await W.durable(file, { timeoutMs: CACHE_LAND_MS }); }
     finally { held = null; this._letCacheGo(W, file); }
     if (!ok) throw Object.assign(new Error(`${what} ${path.basename(file)} could not be written (the store writer did not land it)`), { code: 'ECACHEWRITE' });
+    if (id != null && !this._state.hosts.some((x) => x && x.id === id)) throw Object.assign(new Error(`${what} ${path.basename(file)} is not kept: its machine was removed while it was written`), { code: 'ECACHEWRITE' });
   }
   /** r4006 laws A, B, F: the file's entry LEAVES the writer once its answer is in (W.forget). By the writer's own code (src/store-writer.js
    *  forget): on a file NOT in flight it drops the entry and never touches the file; on one IN FLIGHT (the bound passed mid-write) it
@@ -3603,11 +3610,16 @@ class HostManager {
   /** r4006 law E: the write of `file` IN FLIGHT at a removal has LANDED (or the bound `until` passed). One durable() answer is not
    *  that: forget() answers every waiter at once, and the fetch's own _letCacheGo (its finally, a microtask after the removal's
    *  forget) answered the removal's wait while the copy still flew, so the landing made the folder again (this cure's first gate).
-   *  So it asks again while the writer still owes the file a write (pending(): the unlink after a forgotten landing is none) */
+   *  So it asks again while the writer still owes the file a write (pending(): the unlink after a forgotten landing is none).
+   *  ASKED BEFORE EACH WAIT (r4154 (3)): a row whose only job in flight is that UNLINK shows inflight in stats(), but its end settles no
+   *  waiter (the entry just goes) — a wait there was answered only by its timer at the bound; nothing is owed, so it returns at once.
+   *  AT MOST 8 ASKS (r4154 (0)): if durable() ever answered at once while pending() stayed true, a loop bounded only by `until` would
+   *  spin on microtasks until the bound; the cap stops that */
   async _cacheLanded(W, file, until) {
     for (let k = 0; k < 8 && Date.now() < until; k++) {
+      if (typeof W.pending === 'function' && !W.pending(file)) return;
       try { await W.durable(file, { timeoutMs: Math.max(1, until - Date.now()) }); } catch { return; }
-      if (typeof W.pending !== 'function' || !W.pending(file)) return;
+      if (typeof W.pending !== 'function') return;   // a writer without pending(): its one answer
     }
   }
   /** the process's store writer, or a suite's own (`hm._writer`: the stand-in thread) */

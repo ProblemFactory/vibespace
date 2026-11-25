@@ -12,11 +12,16 @@
 //   ② laws A + F: after a whole fetch the writer's own stats() hold NO row of the copy nor of its record. RED: _letCacheGo a no-op.
 //   ③ law B: a whole write REFUSED (ECACHEWRITE), then a delta, then past the writer's real 1 s retry: the copy and its record
 //     agree. RED: the landing before r4006 (the bytes kept, nothing forgotten) — its owed old copy lands over the delta.
+//   ③b (line 888's follow, r4154 (1)) THE ONE PLACE LAW B IS NOT LITERAL: a write IN FLIGHT when the fetch's bound passes still renames,
+//     then goes (forgotten: unlinked) — a delta landed between is lost with it, the next poll fetches whole, no wrong bytes stay. RED:
+//     nothing forgotten — the late rename's bytes stay beside a record that names others.
 //   ④ law D: a stop between a whole copy's landing and its record, then the remote past a small fetch cap: the next poll heals and
 //     grows the slot, never «too large». RED: the old exact record kept (_landCacheNotExact a no-op).
 //   ⑤ law E: a removed machine's owed copy, (a) queued and (b) in flight: no bytes in its folder after the removal. RED: the
 //     removal forgets nothing (_letCacheGo a no-op); and (b) the removal waiting on ONE durable() answer (the writer seen without
-//     pending()): the fetch's own forget answers it while the copy still flies — its landing makes the folder again.
+//     pending()): the fetch's own forget answers it while the copy still flies — its landing makes the folder again. (c) (r4154 (3)) a row
+//     whose only job in flight is the UNLINK after a forgotten landing: the removal does not wait for it. RED: the wait that asks
+//     before it looks (its end settles no waiter: answered by the timer, here a placed 1.2 s).
 //   ⑥ the ssh rung (its whole `cat`) under ①'s placed stall: no main-thread write. RED: the release's write on that rung.
 //   ⑦ the record only after its bytes, on both rungs: a copy whose write FAILS leaves no record. RED: the failure swallowed.
 //   ⑧ a ~9 MB copy (above PIECE_BYTES, 4 MB) handed by reference in pieces, verifyByRef on: byte-equal on disk (no red control).
@@ -190,9 +195,45 @@ console.log('③ r4006 law B: a whole write REFUSED (ECACHEWRITE) never lands la
       return { f1: answerOf(f1, copy), f2: answerOf(f2, copy), said, f3: answerOf(f3, copy), afterDelta: b3 && b3.length, copySize: b && b.length, metaSize: m && m.size, sameAsR3: !!b && b.equals(R3), rows: rowsFor(W, [copy, meta]), sizes: { R1: R1.length, R2: R2.length, R3: R3.length } };
     } finally { W.stop(); }
   };
-  const [B, BX] = await Promise.all([scene(), scene({ red: true })]);
+  // ③b (line 888's follow, r4154 (1)): THE ONE PLACE LAW B IS NOT LITERAL — a write IN FLIGHT when the fetch's bound passes still renames,
+  // then goes (forgotten: unlinked). Its scenes run beside ③'s (the suite's time).
+  // fetch 1 — WHOLE, R1 and its exact record; fetch 2 — the remote rotated (R2, WHOLE): its old record written without its exact claim,
+  // then the copy's write HELD on the stand-in thread past THE FETCH's BOUND, PLACED (a view of the writer whose durable() of the copy
+  // answers false after BOUND_MS, as CACHE_LAND_MS does at 120 s): ECACHEWRITE said, the entry forgotten while its write flies; fetch 3
+  // — the remote back at R1 and grown (R3): its DELTA appends on the loop into the old copy at once, and its record waits on the writer's
+  // thread behind the held write AND its unlink (the hold is read per job: the unlink is held as long). So the late rename lands R2 over
+  // the delta, the unlink removes it, then the record of R3 lands: no copy, never R2's bytes under R3's record; fetch 4 fetches whole
+  const BOUND_MS = 100, HOLD_IN = 700;
+  const sceneLate = async ({ red = false } = {}) => {
+    const { S, W } = standWriter();
+    try {
+      const R = remote(R1, 3000);
+      const { hm, copy, meta, base } = lawScene(HMR, { R, writer: W, ssh: sshStand(R, () => false) });
+      let bounded = false;
+      hm._writer = new Proxy(W, { get: (t, k) => (k === 'durable' ? (f, o) => (bounded && f === copy ? new Promise((r) => setTimeout(() => r(false), BOUND_MS)) : t.durable(f, o)) : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) });
+      if (red) hm._letCacheGo = () => { };   // the RED: nothing forgotten — the late rename's bytes stay
+      const said = [], whole = hm._landCacheWhole;
+      hm._landCacheWhole = async function (...a) { try { return await whole.apply(this, a); } catch (e) { said.push(String(e && e.code)); throw e; } };
+      const f1 = await fetchR(hm);
+      R.bytes = R2; R.mtimeS = 3001;
+      S.hold(base, HOLD_IN); bounded = true;
+      const f2 = await fetchR(hm);
+      bounded = false;
+      R.bytes = R3; R.mtimeS = 3002;
+      const f3 = await fetchR(hm);
+      const settled = await until(() => { const r = rowOf(W, copy); return !r || (!r.inflight && !r.dirty); }, 3 * HOLD_IN + 3000);
+      S.unhold(base);
+      const b3 = readBytes(copy), m3 = readMeta(meta);
+      const f4 = await fetchR(hm);
+      const b = readBytes(copy), m = readMeta(meta);
+      return { f1: answerOf(f1, copy), f2: answerOf(f2, copy), said, f3: answerOf(f3, copy), settled, afterLate: b3 && b3.length, afterLateIsR2: !!b3 && b3.equals(R2), recordAfterLate: m3 && m3.size, f4: answerOf(f4, copy), sameAsR3: !!b && b.equals(R3), metaSize: m && m.size, metaExact: !!m && m.sizeExact === true, sizes: { R1: R1.length, R2: R2.length, R3: R3.length } };
+    } finally { W.stop(); }
+  };
+  const [B, BX, G, GX] = await Promise.all([scene(), scene({ red: true }), sceneLate(), sceneLate({ red: true })]);
   ok(B.f1 === 'the copy' && B.said.includes('ECACHEWRITE') && B.f3 === 'the copy' && B.afterDelta === R3.length && B.copySize === B.metaSize && B.sameAsR3 && B.rows.length === 0, `③ LAW B: fetch 2's whole write refused (ECACHEWRITE), fetch 3's delta grew the old copy to ${R3.length} bytes with its record — and ${RETRY_WAIT_MS} ms on (past the writer's 1 s retry) the copy still holds what its record says (${B.copySize} = ${B.metaSize}), byte-equal to the remote; the writer holds no row of either`, B);
   ok(BX.said.includes('ECACHEWRITE') && BX.afterDelta === R3.length && BX.copySize === R2.length && BX.copySize !== BX.metaSize, `③ RED control (the landing before r4006: the bytes kept, nothing forgotten): the refused copy's retry landed AFTER the delta — the copy ${BX.copySize} bytes, its record ${BX.metaSize} (red)`, BX);
+  ok(G.f1 === 'the copy' && G.said.includes('ECACHEWRITE') && G.settled && G.afterLate == null && G.recordAfterLate === R3.length && G.f4 === 'the copy' && G.sameAsR3 && G.metaSize === R3.length && G.metaExact, `③b THE WRITE IN FLIGHT PAST THE FETCH's BOUND: fetch 2 said ECACHEWRITE at the placed bound; its late rename landed and went (forgotten), the delta of fetch 3 with it — no copy beside the record of ${R3.length}, never R2's bytes; the next poll fetched whole (byte-equal, its record exact)`, G);
+  ok(GX.said.includes('ECACHEWRITE') && GX.afterLateIsR2 && GX.recordAfterLate === R3.length, `③b RED control (nothing forgotten): the late rename's ${GX.afterLate} bytes (R2) stayed beside a record of ${GX.recordAfterLate} (red)`, GX);
 }
 
 console.log('④ r4006 law D: a stop between a whole copy\'s landing and its record never leaves the slot «too large» for good above the fetch cap');
@@ -305,12 +346,35 @@ console.log('⑤ r4006 law E: a REMOVED machine\'s owed copy never lands its byt
       return { ...v, answer: answerOf(f, copy), said, folderBack: fs.existsSync(folder), files: filesUnder(folder), rows: rowsFor(W, [copy, meta]) };
     } finally { W.stop(); }
   };
-  const [Ea, EaX, Eb, EbX, EbY] = await Promise.all([removedScene({ shape: 'queued' }), removedScene({ shape: 'queued', red: true }), removedScene({ shape: 'flying' }), removedScene({ shape: 'flying', red: true }), removedScene({ shape: 'flying', oneAnswer: true })]);
+  // (c) r4154 (3): a copy's write handed to the writer (its own row, no fetch: no record follows it), forgotten IN FLIGHT by the suite
+  // (as when a fetch's bound passes), lands, then its UNLINK is held as long; the removal comes while only that unlink flies: stats()
+  // shows the row in flight, but nothing is owed — the removal does not wait
+  const unlinkScene = async ({ red = false } = {}) => {
+    const { S, W } = standWriter();
+    try {
+      const R = remote(R0, 5000), HOLD_U = 600;
+      const { hm, copy, base } = lawScene(HMR, { R, writer: W, ssh: async () => { throw new Error('the machine is removed'); } });
+      // the RED: the cure's first wait (it asks durable() before it looks at pending()), its bound placed at 1.2 s for the suite's time
+      if (red) hm._cacheLanded = async function (W2, file, until0) { const u = Math.min(until0, Date.now() + 1200); for (let k = 0; k < 8 && Date.now() < u; k++) { try { await W2.durable(file, { timeoutMs: Math.max(1, u - Date.now()) }); } catch { return; } if (typeof W2.pending !== 'function' || !W2.pending(file)) return; } };
+      S.hold(base, HOLD_U);
+      W.dirty(copy, { name: 'remote-jsonl.write', urgent: true, makeDir: true, produce: () => R0 });
+      const flying = await until(() => { const r = rowOf(W, copy); return !!r && r.inflight; });
+      W.forget(copy);
+      const unlinking = await until(() => { const r = rowOf(W, copy); return !!r && r.inflight && !W.pending(copy); }, HOLD_U + 3000);
+      const t0 = performance.now(); const removed = await hm.remove('hw'); const ms = Math.round(performance.now() - t0);
+      const inside = (() => { const r = rowOf(W, copy); return !!r && r.inflight; })();   // the unlink still flying: the removal ran beside it
+      await until(() => !rowOf(W, copy), HOLD_U + 2000);
+      return { flying, unlinking, removed, ms, inside };
+    } finally { W.stop(); }
+  };
+  const [Ea, EaX, Eb, EbX, EbY, Ec, EcX] = await Promise.all([removedScene({ shape: 'queued' }), removedScene({ shape: 'queued', red: true }), removedScene({ shape: 'flying' }), removedScene({ shape: 'flying', red: true }), removedScene({ shape: 'flying', oneAnswer: true }), unlinkScene(), unlinkScene({ red: true })]);
   ok(Ea.b1 && Ea.b2 && Ea.owed && Ea.removed === true && Ea.inside && Ea.ended && !Ea.folderBack && Ea.rows.length === 0, `⑤ LAW E (a), the copy QUEUED at the removal: forgotten, never written — remote-jsonl/hw does not exist after the writer's queue ran`, Ea);
   ok(EaX.owed && EaX.inside && EaX.folderBack && EaX.files.length > 0, `⑤ RED control (a) (the release's removal: it forgets nothing and waits for nothing): the queued copy landed after the removal — the folder is back with ${EaX.files.join(', ')} (red)`, EaX);
   ok(Eb.flying && Eb.removed === true && Eb.inside && Eb.ended && Eb.files.length === 0 && !Eb.folderBack && Eb.rows.length === 0, `⑤ LAW E (b), the copy IN FLIGHT at the removal: the removal waits for its landing (bounded), then the folder goes — remote-jsonl/hw does not exist`, Eb);
   ok(EbX.inside && EbX.files.length > 0, `⑤ RED control (b) (the release's removal: it forgets nothing and waits for nothing): the in-flight copy stays — ${EbX.files.join(', ')} (red)`, EbX);
   ok(EbY.flying && EbY.removed === true && EbY.inside && EbY.folderBack, `⑤ RED control (b) (the removal waiting on ONE durable() answer: the fetch's own forget answers it while the copy flies): the landing made remote-jsonl/hw again (red)`, EbY);
+  ok(Ec.flying && Ec.unlinking && Ec.removed === true && Ec.inside, `⑤ LAW E (c), only the UNLINK in flight at the removal: nothing owed — the removal ENDED WITH THE UNLINK STILL FLYING (${Ec.ms} ms; it never waits for an unlink: its end settles no waiter)`, Ec);
+  ok(EcX.unlinking && EcX.removed === true && !EcX.inside, `⑤ RED control (c) (the wait that asks before it looks): the removal ended only AFTER the unlink was over (${EcX.ms} ms), waiting to its placed bound (red)`, EcX);
 }
 
 console.log('⑥ B-0248 unit 4 on THE SSH RUNG: its whole `cat` copy is the store writer\'s too — no main-thread write under the placed stall');
