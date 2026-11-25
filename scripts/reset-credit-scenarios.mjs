@@ -104,8 +104,13 @@ class Sim {
   /** a helper press: the stub app-server in `mode`; the table's own events follow the mode */
   /** the helper's wall: the real one is 30 s; a hang mode gets a short one (the wall IS the event), every answering mode a
    *  long one (a read that falls outside it under load is a harness artefact, not the product — verify r4 saw one) */
-  async helper(tag, { mode = 'answer', readCount = 1, wallMs = null, codexCmd = null, events = null, waitMs = 8000, readResetsAt = null } = {}) {
-    if (wallMs === null) wallMs = ['hang-consume', 'exit-on-consume'].includes(mode) ? 400 : 6000;
+  async helper(tag, { mode = 'answer', readCount = 1, wallMs = null, codexCmd = null, events = null, waitMs = null, readResetsAt = null } = {}) {
+    // hosted run 45584145109 (主开发 r4209): an ANSWERING mode's wall is the real one (30 s) — a slow child start on a loaded runner
+    // never beats it — and the scene is judged after the helper has really RESOLVED (its attempt carries an outcome, or its words
+    // were said), waited on as that fact with a bound above the wall; a bound that still runs out is said as a HARNESS TIMEOUT by
+    // name (the stage the stub reached, the ms), never as the product's disagreement
+    if (wallMs === null) wallMs = ['hang-consume', 'exit-on-consume'].includes(mode) ? 400 : 30000;
+    if (waitMs === null) waitMs = wallMs + 15000;
     const rpc = this.d.stubEnv(tag, { mode, readCount });
     // verify r5: the window the stub's read STATES — the world's wall unless the scenario moves it (a credit's new window
     // = now + the period; a restatement EARLIER than the wall carries no window witness: the count alone speaks)
@@ -120,7 +125,9 @@ class Sim {
     const st = this.tableSees(r) ? this.step(ev) : { effects: {} };
     if (r.code === 200 && mode === 'hang-read') { await this.d.until(() => rpc().some((x) => x.method === 'account/rateLimits/read'), waitMs); this.helperConsumes += 0; } // parked in its read-first: the record stays open, the table gets nothing
     else if (r.code === 200) {
-      await this.d.until(() => this.w.notices.length > n0 || ((this.e() || {}).at !== at0 && !!(this.e() || {}).outcome), waitMs);
+      const t0w = Date.now();
+      const resolved = await this.d.until(() => this.w.notices.length > n0 || ((this.e() || {}).at !== at0 && !!(this.e() || {}).outcome), waitMs);
+      if (!resolved) this.harness = `HARNESS TIMEOUT: the helper had not resolved ${Date.now() - t0w} ms after the press (its wall ${wallMs} ms; the stub heard ${rpc().map((x) => String(x.method).replace('account/', '')).join(' → ') || 'nothing'})`;
       const L = rpc(); this.helperConsumes += L.filter((x) => x.method === 'account/rateLimitResetCredit/consume').length;
       if (events) for (const e of events(this)) this.step(e);
       else if (st.effects.minted) {
@@ -302,6 +309,7 @@ export async function runScenarios(deps, { only = null } = {}) {
     const oracleOk = j.oracle.block === t.block && j.oracle.consistent;
     if (!oracleOk) why.push(`oracle block ${j.oracle.block}${j.oracle.consistent ? '' : ' (charge≠went-out)'}`);
     if (err) why.push('threw: ' + err.split('\n')[0]);
+    if (s.harness) why.unshift(s.harness);   // r4209: a helper that never resolved inside its bound is the harness's, said first
     rows.push({ id: sc.id, title: sc.title, truth: t, engine: j.engine, table: j.table, oracle: j.oracle, agree: { engine: engineOk && !err, table: tableOk, oracle: oracleOk }, why, chain: j.engine.chain });
   }
   return rows;
