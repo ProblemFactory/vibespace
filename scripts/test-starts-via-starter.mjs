@@ -17,6 +17,10 @@
 //      (RED: the release's synchronous lookup); the keeper's version ask (census; RED: the release's text)
 //      (r2480) the person's Start in THE SAME MILLISECOND as a kept answer (one frozen clock): a press never reads it, «answered» by count
 //   ⑦ a FAILED copy of the rclone binary is remembered for its bound (15 min), then tried again (RED: the release; a copy kept for ever)
+//   ⑪ (r4379, B-323e's part 3 remainder) the mount auto-reconnect's own six starts — the CephFS shim, mount and unmount, the rc
+//      socket's ask (its whole rclone env), the cache's witness and the old cache's removal — through the starter; a no-reply worded
+//      by each (the mount by the mount table, the witness fail-closed, the old dir kept); FENCE: stand-in records, no mount program
+//      run or copied, the real mount table never read (RED: the release's road in a copy — every one a start from the hub)
 // r1381 (6): every moved reader is also read with a starter that gives NO REPLY (what it then says), and the env + the bound each
 // site hands are pinned.
 //   ⑧ (主开发 r2030) a host with NO `which` program finds tmux the release's way (RED: the reader without the fallback); a NO-REPLY
@@ -813,6 +817,79 @@ WD.section('⑩');
     ok(directOf(SHN) - S0 === 1, '(c) RED: a copy on the old road starts the person\'s login shell from the hub\'s process (the spy counts it)', { direct: directOf(SHN) - S0 });
   } finally { WATCH.delete(SHN); answer = prev10; }
 }
+say('⑪ THE MOUNT AUTO-RECONNECT\'s OWN STARTS (B-323e\'s part 3 remainder, 主开发 r4379): the CephFS shim, mount and unmount, the rc socket\'s ask, the cache\'s witness and its old dir\'s removal ride the starter; a no-reply is worded by each');
+WD.section('⑪');
+{
+  // FENCE (r4379): stand-in records only — no mount program run or copied, the real mount table never read (isMounted is the
+  // record's own stub). The six programs join the spy's watch for this leg only: the red copy's direct starts are counted, never run.
+  const prev11 = answer, NODE = path.basename(process.execPath), SIX = ['sh', 'sudo', 'rclone', NODE, 'rm'];
+  const added11 = SIX.filter((n) => !WATCH.has(n)); for (const n of added11) WATCH.add(n);
+  const net = require('node:net');
+  const SOCK = path.join(TMP, 'rc11.sock'), srv = net.createServer(); await new Promise((r) => srv.listen(SOCK, r));   // a socket FILE for the rc ask's stat (a stand-in daemon's; nothing answers on it)
+  const MP = path.join(TMP, 'mnt11', 'ceph'), CACHE = path.join(TMP, 'cache11');
+  const turn = () => new Promise((r) => setTimeout(r, 0));
+  const rec = { id: 'ceph11', cephMonHosts: 'mon1:6789', cephPath: '/vol', cephUser: 'u11', cephSecretEnc: 'x', cephFsName: 'fs11', mode: 'rw' };
+  const mk = (mod, mounted) => {
+    const m = Object.create(mod.MountManager.prototype);
+    Object.assign(m, { dataDir: path.join(TMP, 'data'), _errors: new Map(), _notify: () => { }, _save: () => { }, _sayW: (id, code, o) => ({ code, ...(o || {}) }),
+      _get: () => rec, pathOf: () => MP, isMounted: () => mounted.v, _ensureMountpointDir: async () => null, _noteStranded: () => { }, _dec: () => 'standin-secret',
+      rcloneBin: () => path.join(TMP, 'bin11', 'rclone'), _rcSocketPick: () => ({ path: SOCK }), _cacheDirOf: () => path.join(CACHE, 'live') });
+    return m;
+  };
+  const six = async (m, mounted) => {
+    const out = {};
+    await m._ensureModprobeShim();
+    mounted.v = false; out.umount = await m._kernelUnmount(rec, MP, (gone) => gone);
+    mounted.v = true; out.mount = await m._mountCephfs(rec.id); out.mountErr = m._errors.get(rec.id) || null;
+    out.rc = await m._rcStats(rec);
+    out.meta = await m._readCacheMeta(path.join(CACHE, 'meta'));
+    const old = path.join(CACHE, 'old', rec.id); rec.cacheOld = old; m._dropCacheDir(rec, old);
+    for (let i = 0; i < 5; i++) await turn();
+    out.cacheOldKept = rec.cacheOld === old;
+    return out;
+  };
+  const MM = require(path.join(ROOT, 'src/mounts.js'));
+  // A — every one answered: the starter is asked each start, with the site's own argv, bound, buffer and env; nothing starts from here
+  answer = (cmd, args) => (cmd === 'rclone' ? { started: true, code: 0, stdout: '{"ok":11}' } : cmd === NODE ? { started: true, code: 0, stdout: '{"exists":false}' } : { started: true, code: 0, stdout: '' });
+  const A0 = asked.length, D0 = SIX.map(directOf);
+  const stA = { v: false }, a = await six(mk(MM, stA), stA).catch((e) => ({ threw: String(e && e.message || e) }));
+  const askedA = asked.slice(A0), directA = SIX.map(directOf).reduce((n, v, i) => n + v - D0[i], 0);
+  const one = (cmd, pred) => askedA.filter((x) => x.cmd === cmd && pred(x));
+  const shim = one('sh', (x) => x.args[0] === '-c' && /\/sbin\/modprobe/.test(x.args[1]) && x.o.timeoutMs === 10000);
+  const um = one('sudo', (x) => x.args.join(' ') === `-n umount -l ${MP}` && x.o.timeoutMs === 10000);
+  const mt = one('sudo', (x) => x.args.slice(0, 4).join(' ') === '-n mount -t ceph' && x.o.timeoutMs === 30000 && x.o.capture === true);
+  const rcs = one('rclone', (x) => x.args[0] === 'rc' && x.args[2] === SOCK && x.o.wholeEnv === true && x.o.env && typeof x.o.env === 'object' && x.o.timeoutMs === 2000 && x.o.capture === true);
+  const wit = one(NODE, (x) => x.args[0] === '-e' && x.o.timeoutMs === MM.MountManager.CACHE_WITNESS_MS && x.o.maxBuffer === 64 * 1024 && x.o.capture === true);
+  const rmv = one('rm', (x) => x.args.join(' ') === `-rf --one-file-system -- ${path.join(CACHE, 'old', rec.id)}` && x.o.timeoutMs === MM.MountManager.CACHE_RM_MS);
+  const pathAdd = [...shim, ...um, ...mt, ...rmv].every((x) => x.o.envAdd && typeof x.o.envAdd.PATH === 'string' && !x.o.wholeEnv);
+  ok(!a.threw && shim.length === 2 && um.length === 1 && mt.length === 1 && rcs.length === 2 && wit.length === 1 && rmv.length === 1 && pathAdd && directA === 0,
+    `the six starts asked of THE STARTER — the shim (by itself and at the mount), the umount, the ceph mount, the rc ask ×2 (core/stats, vfs/queue: the record's WHOLE rclone env), the cache's witness, the old cache's removal — each with its bound; none from the hub's process (${directA} direct)`,
+    { threw: a.threw, asked: askedA.map((x) => [x.cmd, x.args.slice(0, 3).join(' '), x.o.timeoutMs]), directA });
+  ok(a.umount === true && a.mount === true && !a.mountErr && !!a.rc.stats && a.rc.stats.ok === 11 && !!a.meta && a.meta.exists === false && a.cacheOldKept === false,
+    'each answer read as before: the unmount judged by the mount table, the mount done, the rc stats parsed, the witness read, the old cache dir forgotten once removed', a);
+  // B — NO REPLY from the starter (unknown; and a bound passed for the rc ask): never «done», never a crash; each site words it
+  answer = () => ({ unknown: true, why: 'no answer' });
+  const stB = { v: false }, b = await six(mk(MM, stB), stB).catch((e) => ({ threw: String(e && e.message || e) }));
+  const bm = mk(MM, { v: false }); const mountedNo = { v: false };
+  bm.isMounted = () => mountedNo.v; const bNotMounted = await bm._mountCephfs(rec.id), bErr = bm._errors.get(rec.id) || null;
+  answer = (cmd) => (cmd === 'rclone' ? { started: true, timedOut: true } : { started: true, code: 0, stdout: '' });
+  const c = await mk(MM, { v: true })._rcStats(rec);
+  ok(!b.threw && b.mount === true && bNotMounted === false && !!bErr && bErr.code === 'cephfs_failed' && /no answer from the starter/.test(bErr.detail)
+    && /^core\/stats: no answer from the starter$/.test(String(b.rc.error)) && !!b.meta && b.meta.timedOut === true && b.cacheOldKept === true && /^core\/stats: no answer in 2000 ms$/.test(String(c.error)),
+    `a NO-REPLY is no verdict: the ceph mount judged by the mount table alone (mounted ⇒ ${b.mount}; not mounted ⇒ cephfs_failed «${bErr && bErr.detail}»), the rc ask «${b.rc.error}» (past its bound «${c.error}»), the witness unread as past its bound (fail closed), the old cache dir kept and named (retried after the next mount)`, { b, bErr, c });
+  // RED — the release's road in a copy: the helper starts each program from the hub's own process (execFile, as 2.369.419 had them)
+  const SRC = read('src/mounts.js');
+  const REL = require(M.write('src/mounts.js', anchored(SRC, "const viaStarter = (cmd, args, o) => Promise.resolve().then(() => require('./server/child-starter').childStarter().run(cmd, args, o)).catch((e) => ({ started: false, error: (e && e.message) || String(e) }));",
+    "const viaStarter = (cmd, args, o) => new Promise((resolve) => execFile(cmd, args, { timeout: o.timeoutMs, maxBuffer: o.maxBuffer || 1024 * 1024, ...(o.wholeEnv ? { env: o.env } : {}) }, (err, stdout, stderr) => resolve(err ? { started: true, code: 1, stdout, stderr, error: err.message } : { started: true, code: 0, stdout, stderr })));   // MUTANT: the release's road, a direct start", 'mount-starts-direct'), 'mount-starts-direct'));
+  answer = () => ({ started: true, code: 0, stdout: '' });
+  const A1 = asked.length, D1 = SIX.map(directOf);
+  const stR = { v: false }, r = await six(mk(REL, stR), stR).catch((e) => ({ threw: String(e && e.message || e) }));
+  const askedR = asked.slice(A1).filter((x) => SIX.includes(x.cmd)).length, directR = SIX.map(directOf).reduce((n, v, i) => n + v - D1[i], 0);
+  ok(directR === 8 && askedR === 0, `RED CONTROL (the release's road in a copy): ${directR} starts from the hub's own process (the shim ×2, the umount, the mount, the rc ask ×2, the witness, the removal), ${askedR} asked of the starter`, { directR, askedR, threw: r && r.threw });
+  answer = prev11; for (const n of added11) WATCH.delete(n);
+  await new Promise((res) => srv.close(res));
+}
+
 for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 16, label: 'B-323e starts ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
 say(`\n${passed} passed, ${failed} failed`);

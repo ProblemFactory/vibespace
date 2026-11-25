@@ -42,6 +42,14 @@ const DAEMON_ASK_MS = 15000;   // B-323e (主开发 r1299): the detached start's
 /** line 385's small follow: `ps -o etime` («[[dd-]hh:]mm:ss») → seconds, NaN when it is not that shape (never a guess) */
 const etimeSec = (s) => { const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(String(s || '').trim()); return m ? ((Number(m[1] || 0) * 24 + Number(m[2] || 0)) * 60 + Number(m[3])) * 60 + Number(m[4]) : NaN; };
 const unasked = (st) => !!st && !!st.unknown && (st.why === 'no starter' || st.why === 'the starter could not be started');   // its follow: a starter that never ran asked nothing
+// B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): the auto-reconnect's own starts (a CephFS connect's shim, mount and
+// unmount, the rc socket's ask, the cache's witness and its old dir's removal) are asked of THE STARTER — never forked from the hub's
+// process (a fork of the whole hub on a timer that retries a mount that stays down). The same argv, bound and buffer as before. An
+// answer that is not an ended start (no reply, past its bound, output past its buffer) is NO VERDICT; each site words it below.
+const viaStarter = (cmd, args, o) => Promise.resolve().then(() => require('./server/child-starter').childStarter().run(cmd, args, o)).catch((e) => ({ started: false, error: (e && e.message) || String(e) }));
+const endedOk = (r) => !!r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && r.code === 0;
+const noAnswer = (r) => !r || !!r.unknown || !!r.timedOut;
+const failWords = (r) => String((r && (r.error || (r.overflow ? 'its output passed its bound' : r.code != null ? `exit ${r.code}` : ''))) || 'not started').split('\n')[0];
 const CANT_TELL_MS = 60000;   // B-e783 r8: a connect waits at most this long on «can't tell» (a sleeper it cannot read may be ANY rclone: a pull mount's, another instance's) — then it connects, said
 const hasProcMemo = new Map();   // no /proc (a hub on macOS): «can't tell» — the walks' callers keep their old answer; asked once per root
 const hasProc = (opts) => { const k = (opts && opts.procRoot) || ''; if (!hasProcMemo.has(k)) hasProcMemo.set(k, PI.hasProc(opts)); return hasProcMemo.get(k); };
@@ -2365,15 +2373,14 @@ class MountManager {
   // list, decides the outcome. Idempotent; container-scoped; survives until
   // the pod is recreated, so it runs before every mount attempt.
   async _ensureModprobeShim() {
-    return new Promise((resolve) => {
-      execFile('sh', ['-c', 'command -v /sbin/modprobe >/dev/null 2>&1 || sudo -n sh -c \'mkdir -p /sbin && printf "#!/bin/sh\\nexit 0\\n" > /sbin/modprobe && chmod 755 /sbin/modprobe\' 2>/dev/null; true'], { timeout: 10000 }, () => resolve());
-    });
+    // B-323e's part 3 remainder: asked of the starter; its answer is read by nobody, as before (the mount's own answer decides)
+    await viaStarter('sh', ['-c', 'command -v /sbin/modprobe >/dev/null 2>&1 || sudo -n sh -c \'mkdir -p /sbin && printf "#!/bin/sh\\nexit 0\\n" > /sbin/modprobe && chmod 755 /sbin/modprobe\' 2>/dev/null; true'], { timeoutMs: 10000, envAdd: { PATH: process.env.PATH || '' } });
   }
 
   /** A KERNEL mount's unmount (no fuse daemon to stop) — the cephfs row's `unmount` hook. */
   _kernelUnmount(m, mp, finish) {
     return new Promise((resolve) => {
-      execFile('sudo', ['-n', 'umount', '-l', mp], { timeout: 10000 }, () => { let v = false; try { v = finish(!this.isMounted(m)); } catch (e) { console.warn(`[mounts] unmount of ${mp}: its finish threw (${(e && e.message) || e})`); } resolve(v); });   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
+      viaStarter('sudo', ['-n', 'umount', '-l', mp], { timeoutMs: 10000, envAdd: { PATH: process.env.PATH || '' } }).then(() => { let v = false; try { v = finish(!this.isMounted(m)); } catch (e) { console.warn(`[mounts] unmount of ${mp}: its finish threw (${(e && e.message) || e})`); } resolve(v); });   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
     });
   }
 
@@ -2392,8 +2399,11 @@ class MountManager {
     const src = `${m.cephMonHosts}:${m.cephPath || '/'}`;
     const opts = `name=${m.cephUser},secret=${this._dec(m.cephSecretEnc)},mds_namespace=${m.cephFsName || 'cephfs'}${m.mode === 'ro' ? ',ro' : ''}`;
     return new Promise((resolve) => {
-      execFile('sudo', ['-n', 'mount', '-t', 'ceph', src, mp, '-o', opts], { timeout: 30000 }, (err, _o, stderr) => {
-        if (err || !this.isMounted(m)) {
+      // B-323e's part 3 remainder: asked of the starter (the secret rides its argv as before — the starter writes no argv anywhere). An
+      // ended failure is cephfs_failed as before; a start with NO ANSWER is judged by the mount table alone (mounted ⇒ mounted)
+      viaStarter('sudo', ['-n', 'mount', '-t', 'ceph', src, mp, '-o', opts], { timeoutMs: 30000, capture: true, maxBuffer: 64 * 1024, envAdd: { PATH: process.env.PATH || '' } }).then((r) => {
+        const err = endedOk(r) ? null : { message: noAnswer(r) ? 'no answer from the starter' : failWords(r) }, stderr = r && r.stderr;
+        if ((err && !noAnswer(r)) || !this.isMounted(m)) {
           this._errors.set(id, this._sayW(id, 'cephfs_failed', { detail: String(stderr || err?.message || 'unknown').slice(0, 200 - 'CephFS mount failed: '.length) }));
           this._notify();
           return resolve(false);
@@ -2456,11 +2466,10 @@ class MountManager {
     if (!pick.path) return { error: pick.why };
     try { if (!(await fs.promises.stat(pick.path)).isSocket()) return { error: `${pick.path} is not a socket` }; }
     catch { return { error: `no rc socket at ${pick.path}` }; }
-    const ask = (cmd) => new Promise((resolve) => {
-      execFile(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { env: rcloneEnv(), timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, out, stderr) => {
-        if (err) return resolve({ error: `${cmd}: ${err.killed ? `no answer in ${timeoutMs} ms` : String(stderr || err.message).trim().split('\n').pop()}` });
-        try { resolve({ v: JSON.parse(out) }); } catch { resolve({ error: `${cmd}: not JSON` }); }
-      });
+    // B-323e's part 3 remainder: asked of the starter with the record's WHOLE rclone env (wholeEnv, as line 141's probes)
+    const ask = (cmd) => viaStarter(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { wholeEnv: true, env: rcloneEnv(), timeoutMs, capture: true, maxBuffer: 1024 * 1024 }).then((r) => {
+      if (!endedOk(r)) return { error: `${cmd}: ${r && r.timedOut ? `no answer in ${timeoutMs} ms` : noAnswer(r) ? 'no answer from the starter' : String((r && r.stderr) || failWords(r)).trim().split('\n').pop()}` };
+      try { return { v: JSON.parse(String(r.stdout || '')) }; } catch { return { error: `${cmd}: not JSON` }; }
     });
     const [stats, queue] = await Promise.all([ask('core/stats'), ask('vfs/queue')]);
     if (stats.error) return { error: stats.error };
@@ -2557,9 +2566,10 @@ class MountManager {
   /** The crash-surviving witness: the vfsMeta walk in a child, bounded → its summary | {timedOut} | null. */
   _readCacheMeta(dir, timeoutMs = MountManager.CACHE_WITNESS_MS) {
     return new Promise((resolve) => {
-      execFile(process.execPath, ['-e', CACHE_META_CHILD, require.resolve('./vfs-cache-place.js'), dir], { timeout: timeoutMs, maxBuffer: 64 * 1024 }, (err, out) => {
-        if (err) return resolve(err.killed ? { timedOut: true } : null);
-        try { resolve(JSON.parse(String(out))); } catch { resolve(null); }
+      // B-323e's part 3 remainder: asked of the starter; NO ANSWER reads as a walk past its bound (unread, fail closed, retried at its bound)
+      viaStarter(process.execPath, ['-e', CACHE_META_CHILD, require.resolve('./vfs-cache-place.js'), dir], { timeoutMs, capture: true, maxBuffer: 64 * 1024 }).then((r) => {
+        if (!endedOk(r)) return resolve(noAnswer(r) ? { timedOut: true } : null);
+        try { resolve(JSON.parse(String(r.stdout || ''))); } catch { resolve(null); }
       });
     });
   }
@@ -2622,8 +2632,10 @@ class MountManager {
    *  never the live one unless the record itself is being removed. */
   _dropCacheDir(m, dir, { removing = false } = {}) {
     if (!dir || !path.isAbsolute(dir) || path.basename(dir) !== m.id || (!removing && dir === this._cacheDirOf(m))) return;
-    execFile('rm', ['-rf', '--one-file-system', '--', dir], { timeout: MountManager.CACHE_RM_MS }, (err) => {
-      console.log(`[mounts] vfs cache ${m.id}: ${err ? `old dir not removed (${err.killed ? 'timed out' : String(err.message).split('\n')[0]}) — retried after the next mount` : 'old dir removed by a child'}: ${dir}`);
+    // B-323e's part 3 remainder: asked of the starter; no answer is «not removed», retried after the next mount (the old dir stays named)
+    viaStarter('rm', ['-rf', '--one-file-system', '--', dir], { timeoutMs: MountManager.CACHE_RM_MS, envAdd: { PATH: process.env.PATH || '' } }).then((r) => {
+      const err = endedOk(r) ? null : r && r.timedOut ? 'timed out' : noAnswer(r) ? 'no answer from the starter' : failWords(r);
+      console.log(`[mounts] vfs cache ${m.id}: ${err ? `old dir not removed (${err}) — retried after the next mount` : 'old dir removed by a child'}: ${dir}`);
       if (!err && m.cacheOld === dir && !removing) { delete m.cacheOld; this._save(); }
     });
   }

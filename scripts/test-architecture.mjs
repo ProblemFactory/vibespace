@@ -5600,9 +5600,9 @@ await section(async () => {
   const red87 = Object.entries(src87).flatMap(([f, s]) => hits87(s).map((h) => `${f}: ${h}`));
   ok(red87.length === 0, `§87 no fs rm/cp-family call over a VFS cache dir in the hub or the device twin${red87.length ? ' — RED: ' + red87.join(' | ') : ''}`);
   const mm87 = src87['src/mounts.js'];
-  ok(/execFile\('rm', \['-rf', '--one-file-system', '--', dir\], \{ timeout: MountManager\.CACHE_RM_MS \}/.test(mm87)
+  ok(/viaStarter\('rm', \['-rf', '--one-file-system', '--', dir\], \{ timeoutMs: MountManager\.CACHE_RM_MS,/.test(mm87)
     && /const ok = await this\._afterMounted\(m, mp\);\s*if \(ok && m\.cacheOld\) this\._dropCacheDir\(m, m\.cacheOld\);/.test(mm87),
-    '§87 the old cache dir is removed by a CHILD rm with a timeout, only after the new daemon mounted');
+    '§87 the old cache dir is removed by a CHILD rm with a timeout (asked of the starter since B-323e\'s part 3 remainder), only after the new daemon mounted');
   const c87 = [
     ['the pre-lane fs.rm over the cache', hits87("    try { fs.rm(path.join(this._vfsCacheRoot(), id), { recursive: true, force: true }, () => {}); } catch {}\n").length > 0, true],
     ['a copy of the old cache into the new', hits87('      fs.cpSync(p.from, p.dir, { recursive: true });\n').length > 0, true],

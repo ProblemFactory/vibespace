@@ -330,13 +330,10 @@ export const ROWS = Object.freeze([
   ['src/machine-mounts.js', "'sh'", 'probe', 1, PROBE + ' (a mount path check, 6 s)'],
   ['src/machine-probes.js', 'cmd', 'probe', 1, PROBE + ' (the machine facts probes)'],
   ['src/server/child-starter-proc.js', 'cmd', 'upstream', 2, "B-91aa THE STARTER: the hub's timer sites' programs (the mount liveness `ls`, the port scan's `sh`, the belt's X tools) — and (B-323e, 主开发 r1299) the DETACHED start (the mount daemon: its whole env, its log; never held) — the starter was BORN of serviceEnv (src/server/child-starter.js) and adds only the names a request carries (the X / locale names, DOCKER_*); B-323e: a request marked `whole` starts its child with exactly the request's env, built by its site through serviceEnv (WHOLE_ROWS)"],
-  ['src/mounts.js', "'sh'", 'probe', 2, PROBE + ' (the rclone binary copy, the modprobe shim)'],
+  ['src/mounts.js', "'sh'", 'probe', 1, PROBE + ' (the rclone binary copy; the modprobe shim rides the starter since B-323e\'s part 3 remainder)'],
   ['src/mounts.js', "'curl'", 'probe', 3, PROBE + ' (the rclone download, two OAuth callback pokes)'],
   ['src/mounts.js', "'unzip'", 'probe', 1, PROBE],
   ['src/mounts.js', 'local', 'probe', 1, PROBE + ' (rclone version)'],
-  ['src/mounts.js', "'sudo'", 'probe', 2, PROBE + ' (the ceph mount / umount, sudo -n)'],
-  ['src/mounts.js', 'process.execPath', 'probe', 1, PROBE + ' (the cache-meta child)'],
-  ['src/mounts.js', "'rm'", 'probe', 1, PROBE + ' (the cache wipe)'],
   ['src/mounts.js', "'rmdir'", 'probe', 1, PROBE],
   ['src/mounts.js', "'mc'", 'probe', 1, PROBE + " (mc --version: B-323e — only a share's act (a mint, a revoke) whose ask the starter left unanswered; every other ask rides the starter)"],
   ['src/opslog.js', "'sudo'", 'probe', 2, PROBE + ' (the ops log ceph mount, sudo -n)'],
@@ -444,6 +441,7 @@ export const WHOLE_ROWS = Object.freeze([
   ['src/agy-discover.js', 'runViaStarter', 1, "B-323e's remainder (lane bl-chat-b, 主开发 r2681): the agy index child through the starter the hub hands (src/routes/sessions.js) — its env BUILT whole of PATH and LANG (C.UTF-8) alone, exactly the env runIndexChild hands on the device road: nothing of the hub's, no login, no token (it reads only the roots it is handed)"],
   ['src/server/marked-walk.js', 'walkMarked', 1, "B-d8f4 (9), 主开发 r1745 (lane bl-jobs): the walk for what carries a job's mark, ONE child through the starter (never the hub's thread, never the file threadpool) — its env BUILT whole of PATH alone: never the service env, never the hub's secrets"],
   ['src/mounts.js', '_rcloneProbeRun', 1, "the mount sweep's rclone probes (the backend access probe, the OAuth read probe) and a connect's (the root-denied probe, the s3 signing probe — B-323e): their env from _rcloneFor = rcloneEnv = serviceEnv + the egress door + the provider's RCLONE_CONFIG_VS_* (ENV_FUNCS above); the hub's own secret prefixes refused by the starter"],
+  ['src/mounts.js', 'ask', 1, "B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): _rcStats's rc socket ask (core/stats, vfs/queue) through the starter — its env from rcloneEnv = serviceEnv + the egress door + the provider's RCLONE_CONFIG_VS_* (ENV_FUNCS above), the env the direct start gave it"],
 ]);
 
 /** judge(scan) → { red: [sentences], table: [{ site, class }] } */

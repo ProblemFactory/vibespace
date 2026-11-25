@@ -32,7 +32,6 @@ export const KINDS = Object.freeze(['press', 'start', 'long', 'timer', 'not-hub'
 /** a hub file: what the hub's process loads — never the device agent's own, the wrappers / CLIs, the page's code */
 export const hubFile = (f) => !/^(src\/agentd\/|data\/bin\/|src\/lib\/)/.test(f);
 const LINK = 'only while a machine\'s device link is down: an ssh road on the shared master — a NAMED DEBT, not moved (主开发 r1351 (b))';
-const MOUNT = 'a connect or teardown the mount sweep\'s auto-reconnect can still reach (60 s, backed off 1/2/5/10 min) — lane bl-machines-b\'s line 141 moved its probes and its sixteen';
 /** [file, cmd (the first argument as the scan writes it), kind, count, what fires it] — the hub's ASYNC direct starts */
 export const ROWS = Object.freeze([
   ['src/agy-discover.js', 'bin', 'not-hub', 1, 'runIndexChild, the device agent\'s road — the hub hands its starter at its load (src/routes/sessions.js, B-323e\'s remainder, lane bl-chat-b): the sessions list\'s agy poll never starts from the hub'],
@@ -66,17 +65,12 @@ export const ROWS = Object.freeze([
   ['src/machine-probes.js', 'cmd', 'timer', 1, 'the machine facts\' probes (the credentials\' read with GET /api/backend-status, polled 3 s while a setup dialog is open); its --version asks ride the starter since B-323e'],
   ['src/machine-window.js', 'how.argv[0]', 'not-hub', 2, 'the device agent'], ['src/machine-window.js', 'argv[0]', 'not-hub', 1, 'the device agent'],
   ['src/mounts.js', "'sh'", 'start', 1, 'the rclone binary\'s local copy, once per binary (a failed one is remembered since B-323e)'],
-  ['src/mounts.js', "'sh'", 'timer', 1, 'a CephFS connect — ' + MOUNT],
   ['src/mounts.js', "'curl'", 'start', 1, 'the pinned rclone\'s download at a restore'], ['src/mounts.js', "'curl'", 'press', 2, 'the Drive sign-in'],
   ['src/mounts.js', "'unzip'", 'start', 1, 'the pinned rclone\'s unpack'],
   ['src/mounts.js', 'local', 'start', 1, '`rclone version` at every restore (boot, each vault unlock)'],
-  ['src/mounts.js', 'this.rcloneBin()', 'timer', 1, 'a connect\'s stale-daemon ask (rc core/stats) — ' + MOUNT],
   ['src/mounts.js', 'this.rcloneBin()', 'long', 1, '`rclone authorize` (the mount daemon starts through the starter\'s detached ask since lane bl-machines-b\'s 3b9625657)'],
   ['src/mounts.js', 'this.rcloneBin()', 'press', 1, 'the Shared-Drive picker'],
-  ['src/mounts.js', "'sudo'", 'timer', 2, 'a CephFS mount / unmount — ' + MOUNT],
-  ['src/mounts.js', "'rm'", 'timer', 1, 'a moved cache\'s removal after a connect — ' + MOUNT],
   ['src/mounts.js', "'rmdir'", 'press', 1, 'Unmount / remove / a path edit'],
-  ['src/mounts.js', 'process.execPath', 'timer', 1, 'the cache\'s placement at a connect — ' + MOUNT],
   ['src/mounts.js', "'mc'", 'press', 4, 'a share minted / revoked'],
   ['src/node-runtime.js', 'cmd', 'not-hub', 1, 'scripts/runtime-check.mjs (a child the hub starts) and the device agent'],
   ['src/opslog.js', "'sudo'", 'start', 2, 'the ops log\'s CephFS mount at boot (opt-in)'],
@@ -157,7 +151,7 @@ export const SYNC_ROWS = Object.freeze([
     'macOS only, with active usage polling on (opt-in): ≤1 per 5 min (the 90 s timer under the global login floor) + a ⟳ press, ≤3 s, ON THE MAIN LOOP'],
 ]);
 /** THE DEBT: the sum of every timer row's count — it only shrinks (lower it when a row is lowered) */
-export const TIMER_DEBT_SUM = 20;   // B-323e's remainder (lane bl-chat-b, the coordinator's r2681 / r2689): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21; the person's login-shell look through the starter's session option — 21 → 20. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
+export const TIMER_DEBT_SUM = 14;   // B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): the mount auto-reconnect's six (a CephFS connect's shim, mount and unmount, the rc socket's ask, the cache's witness, its old dir's removal) ride the starter — 20 → 14. B-323e's remainder (lane bl-chat-b, the coordinator's r2681 / r2689): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21; the person's login-shell look through the starter's session option — 21 → 20. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
 /** a guard is a PLATFORM FACT — the OS, or /proc — never a setting, a flag, an env word */
 export const PLATFORM_GUARD = /^(?:[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)(?:\|[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)*$/;
 const NOT_PLATFORM = /setting|serverSetting|process\.env|\bflag\b|VS_[A-Z_]+|VIBESPACE_[A-Z_]+/i;
