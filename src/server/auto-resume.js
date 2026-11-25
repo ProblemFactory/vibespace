@@ -357,10 +357,6 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
  *  Returns { ms, label } (min over identities of max-over-dead), tooFar when
  *  nothing lands inside maxWaitMs, null when no dead reset is known at all
  *  (callers must SAY so, not just journal it). */
-function writeJsonAtomic(file, obj) {
-  fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2));
-  fs.renameSync(file + '.tmp', file);
-}
 
 /**
  * @param deps.activeSessions Map<id, session>
@@ -424,7 +420,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, restoreSettled = () => true, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, restoreSettled = () => true, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS, storeWriter = null }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   // r3004 (lane bl-loop-b): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of this file as «nothing armed,
   // nothing refused» and the next save wrote it over: a promised continue AND the loop-breaker's memory (its quarantines, the edges
@@ -548,7 +544,34 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   function deliverContinue(session, verb, prompt, sendChatInput) { return !!verb.deliver(session, prompt, { sendChatInput }); }
 
   let saveHeld = 0, saveOwed = false;   // U2 cure (law 2): a bulk flip holds every save and writes the arms' store ONCE after its loop
-  const save = () => {
+  const writer = () => storeWriter || require('../store-writer.js').storeWriter();
+  /** a fire's record: its save made urgent (the writer's pace set aside: on disk as soon as its thread writes it) */
+  const landFire = () => { try { writer().durable(file).catch(() => { }); } catch { } };
+  /** R9 (row B-9a24's half — 主开发 r3487 / r4350; B-574d): A CONTINUE's RECORD IS ON DISK BEFORE ITS DELIVERY. The arm is taken off and
+   *  the fire noted (the loop breaker's memory), then the file is landed by the store writer's SYNCHRONOUS road (its thread writes,
+   *  syncs and renames while the loop waits, bounded), so a kill inside the delivery never continues the conversation twice after the
+   *  start. ONE door for both continue sites (the single fire and the bulk resume's). → a function that puts the arm and the fire's
+   *  record back (a delivery that did not happen), or null: the record could not land — the caller delivers NOTHING (it gives its
+   *  hold back; the arm and the breaker stand as they were, the tick tries again). A kill after the landing and before the delivery
+   *  leaves the conversation not continued (never twice). */
+  function landRecord(why) {
+    if (hold.held()) return false;   // held: nothing is written over its file (no record, so no continue — r3004 already refuses there)
+    const was = saveHeld; saveHeld = 0;   // a bulk flip's batching never holds back the record a delivery waits on
+    try { save(); } finally { saveHeld = was; }
+    let r = null;
+    try { r = writer().flushSync([file], { waitedBy: `auto-resume.json: ${why}` }); } catch (e) { r = { left: [{ file, why: (e && e.message) || 'the writer threw' }] }; }
+    return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === file);
+  }
+  function recordBeforeDelivery(id, key, kind, origin = null) {
+    const arm = armed.has(id) ? armed.get(id) : undefined;
+    const fire = fires.has(id) ? JSON.parse(JSON.stringify(fires.get(id))) : undefined;
+    const back = () => { if (arm !== undefined) armed.set(id, arm); else armed.delete(id); if (fire !== undefined) fires.set(id, fire); else fires.delete(id); };
+    armed.delete(id);
+    noteFired(id, key, kind, Date.now(), origin);
+    if (!landRecord(`the continue of ${id}`)) { back(); save(); return null; }
+    return () => { back(); save(); };
+  }
+  function save() {   // (a declaration: test-architecture §72 finds the store's site by its name)
     if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file
     if (saveHeld) { saveOwed = true; return; }
     try {
@@ -580,7 +603,14 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
           || (!!(r.edgeHeld && r.edgeHeld.until > now) && armed.has(k));
         if (!live) fires.delete(k);
       }
-      writeJsonAtomic(file, { armed: Object.fromEntries(armed), fires: Object.fromEntries(fires), ...(damagedNow() ? { damaged } : {}) });   // r3104: + a torn lift's fact for the waiting bound
+      // B-574d unit 1 (主开发 r3450 / r3455): the record goes through THE STORE WRITER — its thread writes the temp, SYNCS it and
+      // renames it (a power loss never leaves it empty or torn), the hub's loop never waits on the data folder, and a wall's burst
+      // of arms in one turn is ONE landing: the bytes are made AT the write from the maps as they are then. A write queued before
+      // a hold never lands (the producer refuses, EHELD). A fire's record is urgent (`landFire`, after its delivery, as before)
+      writer().dirty(file, { name: 'auto-resume.write', rank: 0 /* the exit writes it first: a lost fire record could fire again after the start */, produce: () => {
+        if (hold.held()) throw Object.assign(new Error('auto-resume.json is held (it could not be read) — nothing is written over it until it reads'), { code: 'EHELD' });
+        return JSON.stringify({ armed: Object.fromEntries(armed), fires: Object.fromEntries(fires), ...(damagedNow() ? { damaged } : {}) }, null, 2);   // r3104: + a torn lift's fact for the waiting bound
+      } });
     }
     catch (e) { log('[auto-resume] persist failed: ' + e.message); }
   };
@@ -933,16 +963,17 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const prompt = bulkPromptFor(e.kind, switchedTo);
         const carried = { note: e.kind === 'overload' ? '模型过载后的批量恢复' : '因用量停止后的批量恢复' };
         let ok = false;
+        const wasArmed = armed.has(e.id), putBack = recordBeforeDelivery(e.id, ident2 ? ident2.key : null, 'timed');   // R9: the record on disk BEFORE the delivery
+        if (!putBack) { log(`[auto-resume] ${e.id}: the record of this continue could not be written to auto-resume.json — nothing was sent (the bulk resume ${batchId})`); giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
         try { ok = deliverContinue(session, verb, prompt, (s2, text) => sentNoted(s2, text, sendToSession(e.id, s2, text, carried))); }   // B-3d90: the batch's continue has its own record too
         catch (err) { log(`[auto-resume] ${e.id}: the '${verb.form}' resume verb threw in the bulk resume: ${err.message}`); ok = false; }
-        if (!ok) { giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
+        if (!ok) { putBack(); giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }
         open.delete(e.id);   // delivered: its hold becomes the charge below
         // DELIVERED: the hold becomes the charge (on the slot the BATCH authorized for it), the breaker learns a continue
         // went out (a walled answer quarantines that slot like any fire), a wait it superseded is dropped, the fact clears
         if (noteBatchSpend) { try { noteBatchSpend(e.id, session, (h && h.identity) || ident2 || null, h ? h.hold : null, paid.spendReason, batchId); } catch (err) { log('[auto-resume] spend accounting failed: ' + err.message); } }
-        noteFired(e.id, ident2 ? ident2.key : null, 'timed', Date.now());
-        if (armed.has(e.id)) { armed.delete(e.id); _cancelArmNotify(e.id); }
-        save();
+        if (wasArmed) _cancelArmNotify(e.id);   // (the arm off and the fire noted before the delivery: recordBeforeDelivery — R9)
+        save(); landFire();
         if (clearStopped) { try { clearStopped(e.id, session, 'bulk resume delivered'); } catch { } }
         rec.resumed.push({ id: e.id, name: e.name, kind: e.kind });
         log(`[auto-resume] ${e.id}: continued by the bulk resume ${batchId} (${e.kind}${ident2 ? `, on ${ident2.name}` : ''})`);
@@ -1549,25 +1580,26 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // notice survives only where no prompt reached the conversation (the
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
+      const putBack = recordBeforeDelivery(id, key2, kind, origin);   // R9: the record on disk BEFORE the delivery
+      if (!putBack) { log(`[auto-resume] ${id}: the record of this continue could not be written to auto-resume.json — nothing was sent (tried again later)`); giveBack(); return false; }
       try { ok = deliverContinue(session, verb, continuePromptFor(note, label2, freshRun(id, a2)), (s2, text) => sentNoted(s2, text, sendToSession(id, s2, text, carried))); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
-      if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
+      if (!ok) { putBack(); log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       if (session._stoppedBy && session._stoppedBy.at) session._stopContinuedAt = session._stoppedBy.at;   // this stop has had its continue (the switch never arms it again)
       // …and the STOP IS OVER at its continue's delivery (U1 cure 2 — 主开发's small one): the fact is cleared and that is
       // persisted, so a restart before the next turn's own start restores no stop a second press could arm again
       if (clearStopped && session._stoppedBy) { try { clearStopped(id, session, 'its continue was delivered'); } catch (e) { log(`[auto-resume] ${id}: clearing the stop fact failed: ${e.message}`); } }
-      armed.delete(id);
-      noteFired(id, key2, kind, Date.now(), origin);
+      // (the arm is off and the fire noted: recordBeforeDelivery, on disk before the delivery — R9)
       // CHARGED ONLY WHEN THE TURN HAPPENED (two-phase): everything above can
       // refuse, and an authorization that never became a turn must not eat an
       // identity's hourly budget. `charge.hold` is the reservation opened by
       // the call above — `note()` CONVERTS it rather than adding to it.
       if (noteSpend) { try { noteSpend(id, session, charge.identity || ident2 || null, charge.hold || null); } catch (e) { log('[auto-resume] spend accounting failed: ' + e.message); } }
-      save();
+      save(); landFire();
       _cancelArmNotify(id);
       log(kind === 'now'
-        ? `[auto-resume] ${id}: ${why}${moved ? ` (landed on ${label2 || key2})` : ''} — continued immediately`
-        : `[auto-resume] ${id}: ${note.cls === 'switched' ? `pool switched to ${label2 || '?'}` : 'usage limit reset'} — continued automatically`);
+        ? `[auto-resume] ${id}: ${why}${moved ? ' (landed on another account)' : ''} — continued immediately`   // r4778/r4784: no journal line names an account
+        : `[auto-resume] ${id}: ${note.cls === 'switched' ? 'pool switched to another account' : 'usage limit reset'} — continued automatically`);
       announce(id, session, key2, kind, note, { carried: !!carried.note });
       emit(id);
       return true;

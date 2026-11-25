@@ -55,6 +55,8 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const arMod = require(path.join(REPO, 'src/server/auto-resume.js'));
+// row B-9a24 R9 / B-574d: auto-resume.json is the store writer's — the legs read it on disk and restart over it: each save flushed here
+require('./lib/auto-resume-landed.cjs').landEveryAutoResumeSave();
 const { create, CONTINUE_PROMPT, GRACE_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, FIRE_WINDOW_MS } = arMod;
 // lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
 const IS_CONTINUE = (t) => typeof t === 'string' && !!CONTINUE_PROMPT && typeof CONTINUE_PROMPT.cli === 'string' && t.endsWith(' ' + CONTINUE_PROMPT.cli) && t.includes(' ' + CONTINUE_PROMPT.facts + ' ');
@@ -342,7 +344,7 @@ if (!probe) {
   ok('…the member that rejected us is quarantined BY NAME (the one we fired at, not the one we came from)', w.ar.recentFireFailures(w.SID).join(',') === w.SPARE, JSON.stringify(w.ar.recentFireFailures(w.SID).map(w.nameOf)));
   ok('…and the session waits instead of spinning', w.ar.statusFor(w.SID).armed === true, JSON.stringify(w.ar.statusFor(w.SID)));
   ok('…the whole episode: one continue and ONE card (the prompt itself; no separate notice), versus 130 and ~150', w.fired.length === 1 && !!w.fired[0].note && w.notes.length === 0, JSON.stringify({ fired: w.fired.length, notes: w.notes }));
-  ok('…journaled as the switch it was, not as a reset', lines.some((l) => /pool switched to B-Stack Max — continued automatically/.test(l)) && !lines.some((l) => /usage limit reset — continued automatically/.test(l)), lines.filter((l) => /continued/.test(l)).join(' | '));
+  ok('…journaled as the switch it was, not as a reset', lines.some((l) => /pool switched to another account — continued automatically/.test(l)) && !lines.some((l) => /usage limit reset — continued automatically/.test(l)), lines.filter((l) => /continued/.test(l)).join(' | '));
 }
 {
   // (b) the OTHER real producer: a limit BANNER on stdout

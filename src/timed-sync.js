@@ -38,6 +38,7 @@ const STORES = Object.freeze({
   'user-todos.write': row('write', 'user-todos', 'src/user-todos.js', ['_handToWriter']),   // through the store writer (B-0248, lane bl-loop-b, r3320)
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),
   'task-groups.write': row('write', 'task-groups', 'src/task-groups.js', ['_save']),
+  'auto-resume.write': row('write', 'auto-resume', 'src/server/auto-resume.js', ['save']),   // B-9a24's half (R9) / B-574d: the record of waiting continues, through the store writer (a wall's burst one landing; a fire's record landed before its delivery)
   'task-groups.read': row('read', 'task-groups', 'src/task-groups.js'),
   'task-groups-archive.write': row('write', 'task-groups-archive-months', 'src/task-groups.js', ['_archiveAsk']),   // B-0248 step 3 (c): the Activity log's archive appends, through the store writer (THE archive writer)
   'jobs.write': row('write', 'jobs', 'src/jobs.js', ['_save']),

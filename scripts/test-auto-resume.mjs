@@ -33,6 +33,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { create, CONTINUE_PROMPT, continuePromptFor, GRACE_MS, MAX_WAIT_MS, WF_REREAD_MS, WF_INFLIGHT_MAX } = require(path.join(REPO, 'src/server/auto-resume.js'));
+// row B-9a24 R9 / B-574d: auto-resume.json is the store writer's — a leg that reads the file or starts again over the same folder
+// (every instance and every copy of the module) reads what each save wrote: each save flushed on this suite's thread
+require('./lib/auto-resume-landed.cjs').landEveryAutoResumeSave();
 // lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
 const IS_CONTINUE = (t) => typeof t === 'string' && !!CONTINUE_PROMPT && typeof CONTINUE_PROMPT.cli === 'string' && t.endsWith(' ' + CONTINUE_PROMPT.cli) && t.includes(' ' + CONTINUE_PROMPT.facts + ' ');
 const CPF = typeof continuePromptFor === 'function' ? continuePromptFor : () => '';
@@ -2447,10 +2450,13 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
   const after = JSON.parse(fs.readFileSync(H.z.f, 'utf8'));
   ok('19b. THE READ AGAIN lifts it: the file\'s promised continue and its loop-breaker record come back BESIDE the arm made meanwhile — the file then holds both',
     lifted && H.a.ar._hold.held() === null && H.a.ar._armed.has('w1') && H.a.ar._armed.has('w2') && H.a.ar._fires.has('w1') && !!after.armed.w1 && !!after.armed.w2 && !!after.fires.w1, JSON.stringify({ armed: Object.keys(after.armed || {}), fires: Object.keys(after.fires || {}) }));
-  const mSave = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, "    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file\n", '', 'auto-resume.js'));
+  // (row B-9a24 R9 / B-574d: the store writer's producer refuses a held store too — EHELD — so the release's form is BOTH guards gone)
+  const mSave = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, "    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file\n", '', 'auto-resume.js'), "        if (hold.held()) throw Object.assign(new Error('auto-resume.json is held (it could not be read) \u2014 nothing is written over it until it reads'), { code: 'EHELD' });\n", '', 'auto-resume.js'));
   const HX = heldScene(mSave.create), axf = JSON.parse(fs.readFileSync(HX.z.f, 'utf8'));
   ok('19a RED control (the save not held — the release): the new arm writes the file over — the other conversation\'s promise and its loop-breaker record are GONE from it (red)', !HX.fileSame && !axf.armed.w1 && !(axf.fires || {}).w1, JSON.stringify(axf));
-  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'));
+  // (row B-9a24 R9: the record a continue lands before its delivery is refused while held too — recordBeforeDelivery's landRecord — so the
+  // fault's form is BOTH guards gone)
+  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'), "    if (hold.held()) return false;   // held: nothing is written over its file (no record, so no continue \u2014 r3004 already refuses there)\n", '', 'auto-resume.js'));
   const HF = heldScene(mFire.create);
   ok('19a RED control (the fire not held): a continue goes on a guess while the loop-breaker\'s memory is unread (red)', HF.timed + (HF.now2 ? 1 : 0) > 0 && HF.a.sent.length > 0, JSON.stringify({ timed: HF.timed, now: HF.now2, sent: HF.a.sent.length }));
   // 19c. a RECOVERY while held: the conversation armed only in the unread file recovers — its promise must not come back at the lift
