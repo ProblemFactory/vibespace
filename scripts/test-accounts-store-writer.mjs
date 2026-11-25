@@ -221,21 +221,23 @@ console.log('E. r3763 REQUIRED 3 — the door\'s answer goes out inside the exit
 console.log('F. r3763 REQUIRED 4 — the two boot migrations that reshape the list are recorded only once it landed');
 {
   const MIG = require(path.join(REPO, 'src/server/migrations.js'));
-  const run = async (MIGmod, AMmod = null) => {
+  const run = async (MIGmod, AMmod = null, mid = '2026-11-default-key-names') => {
     const root = dirOf('f'), dd = path.join(root, 'data'); fs.mkdirSync(dd, { recursive: true }); fs.mkdirSync(path.join(root, 'home'), { recursive: true });
     const F = path.join(dd, 'accounts.json');
-    fs.writeFileSync(F, JSON.stringify({ version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [{ id: 'acct-f1', type: 'apikey', backend: 'claude', name: 'API key …abcd1234', tail: 'abcd1234', createdAt: 1 }] }));
+    fs.writeFileSync(F, JSON.stringify({ version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: mid === '2026-09-pool-manual-priority' ? [{ id: 'pool-f1', type: 'pooled', backend: 'claude', name: 'A manual pool', auto: false, createdAt: 1 }] : [{ id: 'acct-f1', type: 'apikey', backend: 'claude', name: 'API key …abcd1234', tail: 'abcd1234', createdAt: 1 }] }));
     const am = hush(() => new (AMmod ? AMmod.AccountManager : AccountManager)({ dataDir: dd }));   // the PROCESS's writer: the one the boot's runner lands
     fs.mkdirSync(`${F}.tmp-${process.pid}-w`, { recursive: true });   // the storage refusing the write (a directory at the writer's temp name: EISDIR)
     let res = null;
-    try { res = hush(() => MIGmod.create({ rootDir: root, homeDir: path.join(root, 'home'), serverNotice: () => { }, accounts: () => am }).runLocalMigrations({ only: ['2026-11-default-key-names'] })); } catch (e) { res = { threw: e.message }; }
+    try { res = hush(() => MIGmod.create({ rootDir: root, homeDir: path.join(root, 'home'), serverNotice: () => { }, accounts: () => am }).runLocalMigrations({ only: [mid] })); } catch (e) { res = { threw: e.message }; }
     let ledger = null; try { ledger = JSON.parse(fs.readFileSync(path.join(dd, 'migrations.json'), 'utf8')); } catch { }
     try { fs.rmSync(`${F}.tmp-${process.pid}-w`, { recursive: true, force: true }); } catch { }
-    const applied = !!(ledger && ledger.applied && ledger.applied['2026-11-default-key-names']);
-    const r = Array.isArray(res) ? res.find((x) => x.id === '2026-11-default-key-names') : null;
+    const applied = !!(ledger && ledger.applied && ledger.applied[mid]);
+    const r = Array.isArray(res) ? res.find((x) => x.id === mid) : null;
     return { applied, status: r && r.status, res: Array.isArray(res) ? null : res };
   };
   const a = await run(MIG);
+  const m2 = await run(MIG, null, '2026-09-pool-manual-priority');
+  ok(m2.applied === false && m2.status === 'failed', 'F1 the pool-manual-priority migration (the second one, r3977 (4)) whose write is refused: NOT recorded either', m2);
   ok(a.applied === false && a.status === 'failed', 'F1 the default-key-names migration reshaped the live list and its write could not land: NOT recorded (its save is synchronous by r3782, and the runner lands the stores a migration dirtied before its own row), it runs again at the next start', a);
   const MSRC = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8');
   const cutL = 'todos: userTodos, landStores, onLate:';
@@ -245,6 +247,91 @@ console.log('F. r3763 REQUIRED 4 — the two boot migrations that reshape the li
   const AMy = MUT.load('src/accounts.js', anchored(ASRC, cutS, 'if (out.length) { this._save(); this._notify(); }', 'migration-off-loop'), 'migration-off-loop');
   const b = MIGx && AMy ? await run(MIGx, AMy) : null;
   ok(!!b && b.applied === true, 'RED CONTROL (the migration\'s save off the loop AND the runner without its landing of the dirtied stores): recorded applied over a write that never landed — red', b);
+}
+
+console.log('G. 主开发 r3977 — the follow: every sign-in call on the synchronous road legged, the three with no undo finish, a failed landing said');
+{
+  // G1 (4): with the writer's thread HELD, each call returns with its bytes in the file; ONE mutant copy (each call's save off the
+  // loop) is the red of every one of them
+  const ASRC = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  let off = ASRC;
+  off = anchored(off, "try { this._save({ now: true, why: 'the moved long-lived token' }); }", 'try { this._save(); }', 'move off the loop');
+  off = anchored(off, "try { this._save({ now: true, why: 'the imported accounts' }); }", 'try { this._save(); }', 'import off the loop');
+  off = anchored(off, "const unlanded = signIn ? this._saveFinishing('the merge of the two accounts') : (this._save(), null);", 'const unlanded = (this._save(), null);', 'merge off the loop');
+  off = anchored(off, "const unlanded = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);", 'const unlanded = (this._save(), null);', 'remove off the loop');
+  off = anchored(off, "try { this._save({ now: true, why: 'the new account' }); }\n    catch (e) { if (e && e.signInSave) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); try { fs.rmSync(this.subDir(id)", "try { this._save(); }\n    catch (e) { if (e && e.signInSave) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); try { fs.rmSync(this.subDir(id)", 'create off the loop');
+  const AMoff = MUT.load('src/accounts.js', off, 'sign-in-calls-off-loop');
+  const runCalls = async (Mod) => {
+    const d = dirOf('g1'), W = mkW(), am = hush(() => new Mod.AccountManager({ dataDir: d, storeWriter: W })), F = path.join(d, 'accounts.json');
+    const a1 = hush(() => am.createSubscription({ name: 'From' })).id, b1 = hush(() => am.createSubscription({ name: 'To' })).id;
+    hush(() => am.setOat(a1, OAT('V'))); const kid = hush(() => am.add({ name: 'Gone key', key: KEY('v') })).id; await am.persisted();
+    const out = {};
+    SAND.hold('accounts.json', 300);
+    hush(() => am.moveOat(a1, b1)); out.move = !!(onDiskRow(F, b1) || {}).oatEnc && !(onDiskRow(F, a1) || {}).oatEnc;
+    const impId = 'acct-' + 'a1b2c3d4e5f6';
+    hush(() => am.importBundle({ accounts: [{ id: impId, name: 'Imported key', key: KEY('w') }] })); out.import = !!(onDiskRow(F, impId) || {}).keyEnc;
+    let mergedErr = null; try { hush(() => am.mergeSubscription(b1, a1, {})); } catch (e) { mergedErr = e && (e.code || e.message); }
+    out.merge = mergedErr === null && !onDiskRow(F, b1) && !!(onDiskRow(F, a1) || {}).oatEnc;
+    hush(() => am.remove(kid)); out.remove = !onDiskRow(F, kid);
+    const nid = hush(() => am.createSubscription({ name: 'New member' })).id; out.create = !!onDiskRow(F, nid);
+    SAND.unhold('accounts.json'); await am.persisted();
+    out.mergedErr = mergedErr;
+    return out;
+  };
+  const g = await runCalls({ AccountManager });
+  ok(g.move && g.import && g.merge && g.remove && g.create, 'G1 with the writer\'s thread HELD, each returns with its bytes IN THE FILE: a long-lived token moved, a key imported, two members merged (the survivor holds the token), a row with a sign-in removed, a new member\'s row created (r3977 (3): before its folder can receive a login)', g);
+  const gx = await runCalls(AMoff);
+  ok(!gx.move && !gx.import && !gx.merge && !gx.remove && !gx.create, 'RED CONTROL (each of the five saves off the loop): every one returns while the file does not hold it — red, each', gx);
+}
+{
+  // G2 (2): a removal whose synchronous landing FAILS finishes what it started — the folder wiped, memory without the row, every page
+  // told — and only then says the landing (landingOwed: the writer writes it again); a retry finds it gone (done), never half-done
+  const run = async (Mod) => {
+    const d = dirOf('g2'), W = mkW({ durableMs: 300 }), am = hush(() => new Mod.AccountManager({ dataDir: d, storeWriter: W }));
+    const id = hush(() => am.createSubscription({ name: 'Member' })).id; hush(() => am.setOat(id, OAT('G'))); await am.persisted();
+    const folder = am.subDir(id); const had = fs.existsSync(folder);
+    SAND.failOn('accounts.json', true);
+    let err = null; try { hush(() => am.remove(id)); } catch (e) { err = e; }
+    SAND.failOn('accounts.json', false);
+    return { had, code: err && err.code, owed: !!(err && err.landingOwed), wiped: !fs.existsSync(folder), inMemory: !!am.get(id) };
+  };
+  const r = await run({ AccountManager });
+  ok(r.had && r.code === 'not-durable' && r.owed && r.wiped && !r.inMemory, 'G2 a removal whose landing FAILS finishes the act (its folder wiped, the row gone from memory) and only then says it by name (not-durable, kept: written again)', r);
+  const ASRC2 = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const AMhalf = MUT.load('src/accounts.js', anchored(ASRC2, "      this._save(); // poolMembers below must not offer the removed account (in memory now; r3977 (2): the act's ONE synchronous landing is its last save, after it finished)", "      this._save({ now: true, why: 'the removal of the account' });", 'remove stops in the middle'), 'remove-half');
+  const rx = await run(AMhalf);
+  ok(rx.code === 'not-durable' && !rx.wiped, 'RED CONTROL (the first cure\'s form: the synchronous save BEFORE the heal and the wipe): the removal throws in the middle — its folder stays', rx);
+}
+{
+  // G3 (1): a failed landing is SAID AS WHAT IT IS on the door: 503 not-durable by its code (the page's own «not on disk» words)
+  const { failAcct } = AUR;
+  const e1 = Object.assign(new Error('accounts.json could not be written (EIO) — the key was not saved'), { code: 'not-durable', status: 503, signInSave: true });
+  const r1 = resOf(); failAcct(r1, e1);
+  const e2 = Object.assign(new Error('The removal of the account was done here, but accounts.json could not be written (EIO) — VibeSpace keeps it in memory and writes it again'), { code: 'not-durable', status: 503, landingOwed: true });
+  const r2 = resOf(); failAcct(r2, e2);
+  ok(r1.statusCode === 503 && r1.sent.code === 'not-durable' && r1.sent.notOnDisk === true && r1.sent.notKept === true && r2.statusCode === 503 && r2.sent.kept === true, 'G3 the door\'s refusal of a failed landing: 503 not-durable (notKept for an undone act, kept for one that finished) — never a plain 400', { r1: [r1.statusCode, r1.sent], r2: [r2.statusCode, r2.sent] });
+}
+{
+  // G4 (1): the config import with an accounts section whose landing fails: 503 not-durable naming it, with every section it applied
+  const P = require(path.join(REPO, 'src/routes/persistence.js'));
+  const run = async (Pmod) => {
+    const D = dirOf('g4'); let mode = 'export';
+    const unlanded = () => Object.assign(new Error('accounts.json could not be written (EIO) — the imported accounts was not saved'), { code: 'not-durable', status: 503, signInSave: true });
+    const accStub = { exportBundle: () => ({ accounts: [{ id: 'acct-x', name: 'Work key' }] }), held: () => null, importBundle: () => { if (mode === 'unlanded') throw unlanded(); return { imported: 1, skipped: 0 }; }, persisted: () => Promise.resolve(true) };
+    hush(() => Pmod.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => [], getTasks: () => null, getAccounts: () => accStub, getUsageHistory: () => null, onSettingsWrite: () => { } }));
+    const door = (pth) => Pmod.router.stack.find((l) => l.route && l.route.path === pth && l.route.methods.post).route.stack[0].handle;
+    const call = (pth, body) => new Promise((resolve) => { const out = { status: 200 }; const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, getHeader() { }, get() { return undefined; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); } }; Promise.resolve().then(() => door(pth)({ body, headers: { 'sec-fetch-site': 'same-origin' }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out))).catch((e) => { out.status = 'threw'; out.body = { error: String(e && e.message) }; resolve(out); }); });
+    const ex = await hush(() => call('/api/config/export', { sections: ['settings'], includeSensitive: ['accounts'], passphrase: 'walk-pass-0001' }));
+    mode = 'unlanded';
+    const im = ex.body && ex.body.sensitive ? await hush(() => call('/api/config/import', { file: ex.body, sections: ['settings'], includeSensitive: ['accounts'], passphrase: 'walk-pass-0001' })) : null;
+    return { status: im && im.status, body: im && im.body };
+  };
+  const r = await run(P);
+  ok(r.status === 503 && !!r.body && r.body.code === 'not-durable' && Array.isArray(r.body.applied) && Array.isArray(r.body.notImported) && r.body.notImported.includes('accounts'), 'G4 the config import whose accounts section cannot land: 503 not-durable naming the accounts section, with the list of every section it DID apply — never a bare «Import failed»', r);
+  const PSRC = fs.readFileSync(path.join(REPO, 'src/routes/persistence.js'), 'utf8');
+  const Px = MUT.load('src/routes/persistence.js', anchored(PSRC, " else if (e && e.code === 'not-durable') accountsUnlanded = e; else throw e; }", ' else throw e; }', 'import rethrows'), 'import-rethrow');
+  const rx = await run(Px);
+  ok(rx.status !== 503 || !rx.body || !Array.isArray(rx.body.applied), 'RED CONTROL (the cure\'s first form: the failed landing rethrown): no named 503 with the applied list — red', rx);
 }
 
 for (const W of lives) { try { W.stop(); } catch { } }

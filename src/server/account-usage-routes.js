@@ -30,7 +30,7 @@ function answerAfterLanding(accounts, res, ctx = null) {
   // outside the door) the manager's own count since the request began
   const savedHere = () => (ctx ? ctx.saves > 0 : typeof accounts.saveSeq === 'function' && accounts.saveSeq() !== seq0);
   res.json = (body) => {
-    if (!savedHere()) return json(body);
+    if (!savedHere() || res.statusCode >= 400) return json(body);   // r3977: an error reply (a failed act) is never held for a landing
     // r3763 REQUIRED 3: THE WRITER's OWN ANSWER ROAD (persisted(answer) → durable(file, {answer})): a reply made there goes out even
     // inside the hub's exit flush — a reply made from a promise's then is never sent at a stop, and a retry after the restart would add
     // the same sign-in twice
@@ -44,6 +44,10 @@ function answerAfterLanding(accounts, res, ctx = null) {
     return res;
   };
 }
+
+// 主开发 r3977 (1): A FAILED LANDING IS SAID AS WHAT IT IS — 503 not-durable by its code (the page's own «not on disk» words), never a plain refusal
+const notDurable = (res, e, extra = {}) => res.status(503).json({ error: e.message, code: 'not-durable', notOnDisk: true, ...(e.landingOwed ? { kept: true } : { notKept: true }), ...extra });
+const failAcct = (res, e) => (e && (e.code === 'accounts_unread' || e.code === 'providers_unread' || e.code === 'providers_damaged') ? res.status(503).json({ error: e.message, code: e.code }) : e && e.code === 'pool_changed_elsewhere' ? res.status(409).json({ error: e.message, code: e.code }) : e && e.code === 'not-durable' ? notDurable(res, e) : res.status(400).json({ error: e.message }));   // (r3886 (B), r3908) a list change while the provider store cannot be read, and a stale dialog's edit, answer their codes
 
 function create({ app, rootDir, HOST, CLAUDE_CMD, cliCmds = null, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
@@ -312,7 +316,6 @@ require('../routes/account-tails.js').registerAccountTailRoutes(app, { accounts,
 app.get('/api/accounts', (req, res) => res.json(require('../routes/account-tails.js').accountsAnswer({ accounts, hosts })));
 // the B-f276 family (lane bl-windows, 主开发 r2947 (2)): a change over accounts that could not be read is refused BY NAME — 503 with its
 // code and words (the dialog says nothing was changed and that it reads again by itself); every other refusal as before (400)
-const failAcct = (res, e) => (e && (e.code === 'accounts_unread' || e.code === 'providers_unread' || e.code === 'providers_damaged') ? res.status(503).json({ error: e.message, code: e.code }) : e && e.code === 'pool_changed_elsewhere' ? res.status(409).json({ error: e.message, code: e.code }) : res.status(400).json({ error: e.message }));   // (r3886 (B), r3908) a list change while the provider store cannot be read, and a stale dialog's edit, answer their codes
 app.post('/api/accounts', (req, res) => {
   try { res.json({ success: true, account: accounts.add(req.body || {}) }); }
   catch (e) { failAcct(res, e); }
@@ -367,7 +370,7 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
               if (i >= 0) r.hostSubs.splice(i, 1, survivor.id);
             }
             try { accounts.mergeSubscription(gone.id, survivor.id, { preferFromCreds: false, liveAccountIds: liveAccountIdSet() }); }
-            catch (me) { if (me.code !== 'merge-account-live') throw me; /* live session — leave both records, merge on a later probe */ }
+            catch (me) { if (me && me.code === 'not-durable' && me.landingOwed) { console.warn(`[accounts] ${me.message}`); } else if (me.code !== 'merge-account-live') throw me; /* live session — leave both records, merge on a later probe; a fold whose landing failed happened and is written again (r3977) */ }
           }
         } catch { /* best-effort per-dir; a failed merge keeps both records */ }
       }
@@ -426,10 +429,11 @@ app.delete('/api/accounts/:id', (req, res) => {
     const _wasPool = accounts.get(req.params.id)?.type === 'pooled';
     // a deleted MEMBER leaves every pool that listed it: the default and each conversation's link go where the ENGINE
     // decides (verify r2 — the store alone re-points to the first live member / the default)
-    accounts.remove(req.params.id, {
+    let unlanded = null;   // r3977 (2): the removal FINISHED in memory and on the hub; its follow-ups on the machines run too, then the landing is said
+    try { accounts.remove(req.params.id, {
       chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
       chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
-    }); // throws for unknown ids → only real (shape-safe) ids continue
+    }); } catch (e) { if (e && e.code === 'not-durable' && e.landingOwed) unlanded = e; else throw e; } // throws for unknown ids → only real (shape-safe) ids continue
     try { modelsDoor.forget(req.params.id); } catch { } // the models its CLI reported go with it (lane agy-models-report, E2)
     // (lane pool-provider-latents, q-055 M2) a conversation the deletion left UNPLACED (nobody of its provider left) is decided
     // NOW — onto its own provider when one can serve, else the owner's card — not at the pool's next tick
@@ -451,6 +455,7 @@ app.delete('/api/accounts/:id', (req, res) => {
       const sweep = () => { for (const h of hosts.list() || []) { try { execFile('ssh', [...hosts.sshArgs(hosts.get(h.id)), '--', rm], { env: hosts.sshEnv(), timeout: 15000 }, () => {}); } catch { } } };
       if (hosts.whenRead) hosts.whenRead(sweep, `the token-copy sweep of account ${rid} on every machine`, `token-sweep:${rid}`); else sweep();   // the B-f276 remainder (its read r1, S5): a held hosts.json sweeps once it reads; the moved chain's read (S4): named + keyed
     }
+    if (unlanded) return notDurable(res, unlanded);
     res.json({ success: true });
   }
   catch (e) { failAcct(res, e); }
@@ -695,7 +700,7 @@ app.post('/api/accounts/:poolId/pin', (req, res) => {
 app.post('/api/accounts/:id/oat', async (req, res) => {
   let r;
   try { r = accounts.setOat(req.params.id, req.body?.token); }
-  catch (e) { return res.status(400).json({ error: e.message }); }
+  catch (e) { return e && e.code === 'not-durable' ? notDurable(res, e) : res.status(400).json({ error: e.message }); }
   // the token's file act runs on the store's queue, off the loop's back — the answer names its verdict
   let f = null;
   try { f = await accounts.oatFileSettled(r.id); } catch { }
@@ -714,8 +719,9 @@ const sweepHostTokenCopies = (rid) => {
 };
 app.delete('/api/accounts/:id/oat', (req, res) => {
   try {
-    accounts.clearOat(req.params.id);
-    sweepHostTokenCopies(req.params.id);
+    let unlanded = null; try { accounts.clearOat(req.params.id); } catch (e) { if (e && e.code === 'not-durable' && e.landingOwed) unlanded = e; else throw e; }
+    sweepHostTokenCopies(req.params.id);   // r3977 (2): the act finishes on the machines too, then says its landing
+    if (unlanded) return notDurable(res, unlanded);
     res.json({ success: true });
   }
   catch (e) { failAcct(res, e); }
@@ -730,7 +736,7 @@ app.post('/api/accounts/:id/oat/rebind', async (req, res) => {
   const to = typeof req.body?.to === 'string' ? req.body.to : '';
   let r;
   try { r = typeof engine.oatRebind === 'function' ? engine.oatRebind(req.params.id, to) : accounts.moveOat(req.params.id, to); }
-  catch (e) { return res.status(e.code === 'target_has_token' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
+  catch (e) { if (e && e.code === 'not-durable') return notDurable(res, e); return res.status(e.code === 'target_has_token' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
   sweepHostTokenCopies(req.params.id);
   let f = null;
   try { f = await accounts.oatFileSettled(to); } catch { }
@@ -983,6 +989,9 @@ app.post('/api/accounts/subscription/:id/finalize', async (req, res) => {
         wakeOnLoginSuccess(dup.id, merged, 'subscription login merge', merged?.id || dup.id);
         return res.json({ success: true, ...fin, merged: true, account: merged, ...(mf.stood ? { mergeStood: mf.stood } : {}), ...(mf.foldKept ? { mergeFoldKept: mf.foldKept } : {}), ...adoptFirstSignin(cardRow, fin, (merged && merged.id) || dup.id) });
       } catch (me) {
+        // r3977 (2): a merge whose synchronous landing failed DID fold (the act finished; the writer writes it again): the SURVIVOR holds
+        // the login — it gets the edge, and the person is told the landing by name
+        if (me && me.code === 'not-durable' && me.landingOwed) { if (fin?.loggedIn) wakeOnLoginSuccess(dup.id, me.merged || null, 'subscription login merge', (me.merged && me.merged.id) || dup.id); return notDurable(res, me, { ...fin, merged: true, account: me.merged || null }); }
         // THE FOLD DID NOT HAPPEN, SO THIS RECORD IS STILL THE ONE HOLDING
         // THE LOGIN (r3) — it gets the edge the gate above deferred. Above
         // the rethrow as well as above the blocked answer: a merge that
@@ -1100,4 +1109,4 @@ app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
 });
 
 }
-module.exports = { create, answerAfterLanding };
+module.exports = { create, answerAfterLanding, failAcct, notDurable };

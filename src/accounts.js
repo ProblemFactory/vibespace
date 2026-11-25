@@ -476,12 +476,23 @@ class AccountManager {
     // (the pool's ticks, the display, the billing marks: the many) rides the writer off the loop
     if (now) {
       let r = null; try { r = W.flushSync([this._file], { waitedBy: `accounts.json: ${why}` }); } catch (e) { r = { left: [{ file: this._file, why: (e && e.message) || 'the writer threw' }] }; }
-      const miss = !r ? { why: 'the store writer did not answer' } : r.deferred ? { why: 'the hub is stopping — its exit flush writes it' } : (r.left || []).find((x) => x && x.file === this._file);
+      const miss = !r ? { why: 'the store writer did not answer' } : r.deferred ? { why: 'the hub is stopping' } : (r.left || []).find((x) => x && x.file === this._file);
       if (miss) throw Object.assign(new Error(`accounts.json could not be written (${miss.why || 'the write failed'}) — ${why} was not saved`), { code: 'not-durable', status: 503, signInSave: true });
       return true;
     }
     W.durable(this._file).catch(() => { });
     return true;
+  }
+  /** 主开发 r3977 (2) — THE THREE WITH NO UNDO (remove, merge, clear) DO NOT STOP IN THE MIDDLE: their synchronous save's failure is
+   *  caught, the act FINISHES what it started in memory and on the machine (the pools healed, the folder wiped, the file act queued, every
+   *  page told), and only then is the landing's failure said — `landingOwed`: the change stays in memory and the store writer writes it
+   *  again (it lands later; the words say so, never «not saved»). → the error to throw at the act's end, or null */
+  _saveFinishing(why) {
+    try { this._save({ now: true, why }); return null; }
+    catch (e) {
+      if (!e || !e.signInSave) throw e;
+      return Object.assign(new Error(`${why[0].toUpperCase()}${why.slice(1)} was done here, but accounts.json could not be written (${String(e.message || '').replace(/^accounts\.json could not be written \((.*?)\).*$/, '$1') || 'the write failed'}) — VibeSpace keeps it in memory and writes it again`), { code: 'not-durable', status: 503, landingOwed: true });
+    }
   }
   /** a sign-in act's memory before it (r3782): restored when its synchronous landing fails — nothing is handed out from memory */
   _snapshot() { return JSON.parse(JSON.stringify(this._state)); }   // the same bytes the writer would put on disk
@@ -866,7 +877,10 @@ class AccountManager {
     this._seedConfigDir(this.subDir(id));
     const a = { id, name: String(name || '').trim().slice(0, 60) || 'Subscription', type: 'subscription', source: 'login', createdAt: Date.now(), ...(signinPending ? { signinPending: Date.now() } : {}) };
     this._state.accounts.push(a);
-    this._save();
+    // 主开发 r3977 (3): A NEW MEMBER's ROW is on disk before its folder can receive a login (the login's split road moves a real login
+    // into it right after): the synchronous road; a landing that fails undoes the row and its empty folder, said by name
+    try { this._save({ now: true, why: 'the new account' }); }
+    catch (e) { if (e && e.signInSave) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } this._notify(); } throw e; }
     this._displaySeed(a);   // B-360d: the writer made this folder — its facts set in the same step (the row says «not signed in», never «not read yet»)
     this._notify();
     return { id, dir: this.subDir(id) };
@@ -1190,7 +1204,10 @@ class AccountManager {
     this._seedCodexDir(this.codexSubDir(id));
     const a = { id, name: String(name || '').trim().slice(0, 60) || 'ChatGPT', type: 'subscription', backend: 'codex', source: 'login', createdAt: Date.now() };
     this._state.accounts.push(a);
-    this._save();
+    // 主开发 r3977 (3): A NEW MEMBER's ROW is on disk before its folder can receive a login (the login's split road moves a real login
+    // into it right after): the synchronous road; a landing that fails undoes the row and its empty folder, said by name
+    try { this._save({ now: true, why: 'the new account' }); }
+    catch (e) { if (e && e.signInSave) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); try { fs.rmSync(this.codexSubDir(id), { recursive: true, force: true }); } catch { } this._notify(); } throw e; }
     this._displaySeed(a);   // B-360d: the writer made this folder — its facts set in the same step (the row says «not signed in», never «not read yet»)
     this._notify();
     return { id, dir: this.codexSubDir(id) };
@@ -1210,7 +1227,10 @@ class AccountManager {
     c.seedDir(dir);
     const a = { id, name: String(name || '').trim().slice(0, 60) || c.loginLabel, type: 'subscription', backend, source: 'login', createdAt: Date.now() };
     this._state.accounts.push(a);
-    this._save();
+    // 主开发 r3977 (3): A NEW MEMBER's ROW is on disk before its folder can receive a login (the login's split road moves a real login
+    // into it right after): the synchronous road; a landing that fails undoes the row and its empty folder, said by name
+    try { this._save({ now: true, why: 'the new account' }); }
+    catch (e) { if (e && e.signInSave) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } this._notify(); } throw e; }
     this._displaySeed(a);   // B-360d: the writer made this folder — its facts set in the same step (the row says «not signed in», never «not read yet»)
     this._notify();
     return { id, dir, loginCmd: c.loginCommand(dir) };
@@ -1496,13 +1516,17 @@ class AccountManager {
     if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
     this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
     this._oatFileFacts.delete(fromId);
-    this._save({ now: true, why: 'the merged sign-in' });   // r3782: the survivor's token in the file before the call returns (the merge's file moves ran before it: no rollback — a failure is said by name)
+    // r3782: the survivor's token in the file before the call returns — only when a sign-in field is there (r3977 (5)); r3977 (2): the
+    // merge's file moves ran before it (no undo), so a landing that fails is said AFTER the fold finished
+    const signIn = !!(into.oatEnc || from.oatEnc || into.keyEnc || from.keyEnc);
+    const unlanded = signIn ? this._saveFinishing('the merge of the two accounts') : (this._save(), null);
     this._oatCheckReplaced(fromId, foldedCheck, 'the row was folded into ' + (into.name || intoId));
     if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
     this._noteLoginTie(intoId, { fresh: true });   // the MERGE carries the tie onto the survivor: its folder now holds the folded sign-in (r2915)
     if (this._loginTies) this._loginTies.delete(fromId);   // …and the folded row's own fingerprint leaves with it (r2972 5)
     this._displayForget(from); this._displaySeed(into);   // B-360d: the folded folder is gone; the survivor's facts are what the fold just wrote
     this._notify();
+    if (unlanded) throw Object.assign(unlanded, { merged: this.rowOf(intoId) });   // the fold HAPPENED: its caller wakes the survivor
     return this.rowOf(intoId);   // B-360d: one row by its id, never a whole list
   }
 
@@ -1773,15 +1797,18 @@ class AccountManager {
     // creds through a dead link until some spawn happened to heal it).
     // Deleting a member must leave every pool self-consistent NOW.
     if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {
-      this._save(hadSignIn ? { now: true, why: 'the removal of the account' } : {}); // poolMembers below must not offer the removed account (r3782: a row that held a sign-in, synchronously)
+      this._save(); // poolMembers below must not offer the removed account (in memory now; r3977 (2): the act's ONE synchronous landing is its last save, after it finished)
       this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
     else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
     this._displayForget(a);   // B-360d: the folder's kept facts go with it
-    this._save(hadSignIn ? { now: true, why: 'the removal of the account' } : {});   // r3782: a row that held a sign-in is gone from the file before the call returns
+    // r3782: a row that held a sign-in is gone from the file before the call returns; r3977 (2): a landing that fails is said AFTER the act
+    // finished (the pools healed, the folder wiped, every page told) — the person's retry never meets a half-done removal
+    const unlanded = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);
     this._notify();
+    if (unlanded) throw unlanded;
   }
 
   /** Every pool that referenced a just-removed member: strip it from explicit
@@ -2047,14 +2074,18 @@ class AccountManager {
   clearOat(id) {
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
+    const had = !!a.oatEnc;   // r3977 (5): the synchronous road only when a token was truly there
     delete a.oatEnc; delete a.oatMintedAt;
     // the token's identity goes with it: its check (the notice resolved) and the anchor its pick confirmed
     const prevCheck = a.oatCheck || null;
     delete a.oatCheck; delete a.oatAnchor;
-    this._save({ now: true, why: 'the removal of the long-lived token' });   // r3782: a removal the person asked for is in the file before the call returns (a kill never brings it back)
+    // r3782: a removal the person asked for is in the file before the call returns (a kill never brings it back); r3977 (2): its failure
+    // is said after the act finished (the check resolved, the member's file act queued, every page told)
+    const unlanded = had ? this._saveFinishing('the removal of the long-lived token') : (this._save(), null);
     this._oatCheckReplaced(id, prevCheck, 'the token was removed');
     this.syncOatFile(id).catch(() => { }); // no token ⇒ 'none' ⇒ our file (only ours — the mark names this row) goes
     this._notify();
+    if (unlanded) throw unlanded;
   }
 
   /** RE-BIND (改绑, lane oat-identity-postcheck): the owner moves a row's long-lived token to the account it

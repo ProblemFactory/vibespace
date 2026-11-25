@@ -2224,7 +2224,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // (+ B-0248 (a): the desktops — a person's import is an act: its layouts flushed now and landed, never «imported» on the debounce)
     const layoutsLanding = { file: LAYOUTS_FILE, after: (cb) => flushLayouts({ press: true }, cb) };
     // (+ B-574d unit 1: the accounts section — accounts.json is written by the store writer; the import answers after its landing)
-    let accountsLanding = null;
+    let accountsLanding = null, accountsUnlanded = null;   // r3977 (1): the accounts section's failed synchronous landing (undone in memory: nothing of it kept)
     const movedOf = () => [['customThemes', themesHold], ['layouts', layoutsLanding], ['userState', userStateHold], ['bookmarks', bookmarksHold]].filter(([n]) => applied.includes(n)).map(([, h]) => h).concat(accountsLanding ? [accountsLanding] : []);
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;
@@ -2280,8 +2280,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         if (r) held.push(r.code); else applied.push('mounts');
       }
       if (includeSensitive.includes('accounts') && sens.accounts) {
-        let r = null, rh = null; try { r = getAccounts?.()?.importBundle?.(sens.accounts); } catch (e) { if (e && e.code === 'accounts_unread') rh = e; else throw e; }   // the B-f276 family (r3129 (3)): held — not imported, said by name
-        if (rh) held.push(rh.code); else applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
+        let r = null, rh = null; try { r = getAccounts?.()?.importBundle?.(sens.accounts); } catch (e) { if (e && e.code === 'accounts_unread') rh = e; else if (e && e.code === 'not-durable') accountsUnlanded = e; else throw e; }   // r3977 (1): a failed landing of the accounts section is SAID (the import goes on; the answer names it and every section applied)   // the B-f276 family (r3129 (3)): held — not imported, said by name
+        if (rh) held.push(rh.code); else if (!accountsUnlanded) applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
         const A0 = rh ? null : getAccounts?.();
         // r3763 required 3: on the writer's OWN answer road (persisted(answer)) — an answer made there goes out inside the exit's flush too
         if (A0 && Number(r?.imported) > 0 && typeof A0.persisted === 'function') accountsLanding = { file: 'accounts.json', after: (cb) => { let said = false; const once = (ok) => { if (said) return; said = true; cb(ok !== false); }; try { const p = A0.persisted(once); if (p && typeof p.then === 'function') p.then(once, () => once(false)); } catch { once(false); } } };
@@ -2306,6 +2306,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // kept and written again), never «imported»
     afterAll(movedOf(), (bad) => {
       exitSafe(res);
+      if (accountsUnlanded) return res.status(503).json({ error: `the accounts section was not imported: ${accountsUnlanded.message}${bad.length ? `; not on disk yet: ${bad.join(', ')} — kept and written again` : ''}`, code: 'not-durable', applied, notOnDisk: ['accounts.json', ...bad], notImported: ['accounts'] });   // r3977 (1): said by name, with every section that WAS applied
       if (bad.length) return res.status(503).json({ error: `not on disk yet: ${bad.join(', ')} could not be written — the import is kept and written again`, code: 'not-durable', applied, notOnDisk: bad });
       res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}), ...(setAsideSaid.length ? { setAside: setAsideSaid } : {}) });   // held: the sections a held machines list refused; setAside: the damaged stores this import replaced (B-225b)
     });
