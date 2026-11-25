@@ -3243,6 +3243,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function stampsMadeNow() { stampsDirty = false; stampsMadeSeq = stampSeq; stampsSince.clear(); stampsCompactNow = false; }
   const stampsPaceOpt = () => (stampsDebounceMs !== undefined ? { debounceMs: stampsDebounceMs } : {});   // a suite may state its own debounce (the hub: the writer's)
   const stampsAsk = () => ({ name: 'channels-stamps.write', produce: produceStamps, ...stampsPaceOpt(), ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create, on every road
+  /** B-360d (the coordinator's MUST of r1556, kept at the move): A PURGE's «done» waits for a compaction MADE AFTER it to land — the
+   *  side file rewritten without the account's names, the journal folded down to the keys set since (none of the account's). It is
+   *  the writer's own durable(): the store's NEXT write after this ask, urgent (its pace set aside), the process kept up until it
+   *  lands; a compaction being made before the purge is begun again (its bytes may hold the names). → Promise<boolean> */
+  function stampsOwePurge() {
+    stampsBuild = null;
+    stampSeq++; stampsDirty = true; stampsCompactNow = true; stampsCompactOwed = true;
+    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });
+    return W().durable(stampsFile);
+  }
   /** the whole side file in ONE turn — a synchronous flush only (close, the exit, a suite's flush) */
   function wholeStamps() {
     const conv = ix.conversations, lines = [];
@@ -3484,7 +3494,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const seg = safeSeg(adapterId);
     const pre = `${adapterId}/`;
     for (const m of [dedup, sideDedup, placeCache, basePlaces, sideCompactFailedAt]) for (const k of [...m.keys()]) if (String(k).startsWith(pre)) m.delete(k);
-    for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; }
+    let purgedStamps = false;
+    for (const k of [...stampMap.keys()]) if (String(k).startsWith(pre)) { stampMap.delete(k); stampsDirty = true; purgedStamps = true; }
+    // B-360d (r1556's MUST, kept at the move): the compaction is owed AT ONCE — with no clock the account's names would stay in the
+    // side file and the journal until the next bound; `stamps` resolves when a compaction made after this lands (false: that write
+    // failed, or the family is held — the remove road says it, never a silent «done»)
+    const stampsGone = !purgedStamps ? Promise.resolve(true) : (psLoad.blocked || ixLoad.blocked) ? Promise.resolve(false) : stampsOwePurge();
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
     lruRebuilding.delete(adapterId); lruUnfinished.delete(adapterId); lruAdmitted.delete(adapterId);   // r3279 (10): a rebuild in flight ends with the account
@@ -3541,7 +3556,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       try { await pendingWrite(); } catch (e) { markUnwritten = (e && e.code) || 'error'; }
     }
     if (markUnwritten) warn(`[channels] ${adapterId}: purge-pending.json not written (${markUnwritten}) — ${left.length ? 'what is left of it is not noted on disk' : 'its finished purge is not noted on disk'}`);
-    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length, ...(markUnwritten ? { markUnwritten } : {}) };
+    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length, stamps: stampsGone, ...(markUnwritten ? { markUnwritten } : {}) };
   }
 
   acctWarmStart();   // B-dfa4 cut 3: a big index's per-account keys, in slices from the load (keysOf finishes them if it asks first)
