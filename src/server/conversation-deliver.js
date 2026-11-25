@@ -203,11 +203,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   let landingOwed = !!stashHold.held();
   const landListeners = new Set();
   const stashOnDisk = (cid, ref) => { const s0 = onDiskRefs.get(String(cid)); return !!(s0 && s0.has(String(ref))); };
+  // r4023 (D)(i) NOTHING IS JUDGED INSIDE A WRITE: the landing is told on the loop's NEXT turn (setImmediate) — after the act that caused the
+  // write has said its own word (a drain's «drained», an eviction's «evicted» are emitted right after its write, in the same turn); the lift
+  // tells its own listeners (afterLift), so a write that lands AT the lift owes no landing besides (one reconcile, one journal line)
+  let liftingNow = false;
   const noteLanded = () => {
     onDiskRefs = refsOf(stash);
     if (!landingOwed) return;
     landingOwed = false;
-    for (const fn of landListeners) { try { fn(); } catch (err) { log('[deliver] a landing listener failed:', err && err.message); } }
+    if (liftingNow) return;
+    setImmediate(() => { for (const fn of landListeners) { try { fn(); } catch (err) { log('[deliver] a landing listener failed:', err && err.message); } } });
   };
   let lastWriteError = null, retryTimer = null;
   const STASH_RETRY_MS = 30 * 1000;
@@ -670,7 +675,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     stash = read;
     slots = { ...r.sl, ...slots };
     tornAt = facts && facts.setAside ? Date.now() : (r.ta != null ? r.ta : tornAt);
-    const ok = writeStashNow();   // ONE write to the list
+    liftingNow = true;
+    let ok = false;
+    try { ok = writeStashNow(); } finally { liftingNow = false; }   // ONE write to the list — landed, its listeners are the lift's own (afterLift); failed, the landing stays owed
     log(`[deliver] the stash read again: ${facts && facts.setAside ? `torn bytes, kept aside as ${facts.setAside} — none of its entries could be read` : `${kept} entr${kept === 1 ? 'y' : 'ies'} back`}${took ? `, ${took} accepted meanwhile after them` : ''}${ok ? '' : ' — its write failed (retried on its own clock)'}`);
     afterLift();
   }

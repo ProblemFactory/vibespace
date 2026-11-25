@@ -519,19 +519,22 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
     fs.writeFileSync = function (f, ...a) { if (place && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) { place = false; throw Object.assign(new Error('ENOSPC (placed)'), { code: 'ENOSPC' }); } return realW.call(this, f, ...a); };
     try { await D.stashReadAgain(); } finally { fs.writeFileSync = realW; }
     const afterFailed = { onDisk: D.stashOnDisk(CC, 'p-9'), lands, inFile: ((readJson(F) || {})[CC] || []).some((e) => e && e.ref === 'p-9') };
-    D.flush();
-    const afterLanded = { onDisk: D.stashOnDisk(CC, 'p-9'), lands, inFile: ((readJson(F) || {})[CC] || []).some((e) => e && e.ref === 'p-9') };
-    D.flush();
+    const tick = () => new Promise((r) => setImmediate(r));   // r4023 (D)(i): the landing is told on the loop's NEXT turn, never inside the write
+    D.flush(); const insideTheWrite = lands; await tick();
+    const afterLanded = { onDisk: D.stashOnDisk(CC, 'p-9'), lands, insideTheWrite, inFile: ((readJson(F) || {})[CC] || []).some((e) => e && e.ref === 'p-9') };
+    D.flush(); await tick();
     return { whileHeld, afterFailed, afterLanded, landsAfterSecond: lands };
   };
   const g = await runW(CD);
-  ok(g.whileHeld === false && g.afterFailed.onDisk === false && g.afterFailed.lands === 0 && !g.afterFailed.inFile && g.afterLanded.onDisk === true && g.afterLanded.lands === 1 && g.afterLanded.inFile && g.landsAfterSecond === 1, 'THE STASH\'s WORD: taken while held — not in the file; the lift\'s write FAILS — still not (no landing told); the next write LANDS — in the file, the landing told ONCE (not again for a write after it)', g);
+  ok(g.whileHeld === false && g.afterFailed.onDisk === false && g.afterFailed.lands === 0 && !g.afterFailed.inFile && g.afterLanded.onDisk === true && g.afterLanded.insideTheWrite === 0 && g.afterLanded.lands === 1 && g.afterLanded.inFile && g.landsAfterSecond === 1, 'THE STASH\'s WORD: taken while held — not in the file; the lift\'s write FAILS — still not (no landing told); the next write LANDS — in the file, the landing told ONCE on the next turn (never inside the write; not again for a write after it)', g);
   const r = await runW(M.load('src/server/conversation-deliver.js', anchored(SRC10, '    catch (e) {\n      landingOwed = true;\n', '    catch (e) {\n      noteLanded();\n      landingOwed = true;\n', 'failed-write-noted-as-landed'), 'failed-write-noted-as-landed'));
   ok(r.afterFailed.onDisk === true && !r.afterFailed.inFile, 'RED: a failed write noted as landed — the word says «in the file» over an entry in memory only', r);
 }
 {
   // (h) r3988 (A) ONE CLEARER, A CENSUS PIN: the mark leaves a record in exactly the two clearers (the Outbox's reconcile, the API cards'), and
   // each asks the stash's own word; no other line in src deletes the mark or writes it false. RED: a third clearer planted
+  // r4023 (small): A PIN GUARDS A MISTAKE AND PROVES NOTHING — it reads text (a delete spelled another way, or through a helper, passes it); the
+  // legs of the outbox and API cards suites are the proof of the clearers' behaviour
   const walk2 = (dir, out = []) => { for (const n of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, n.name); if (n.isDirectory()) walk2(f, out); else if (/\.(c|m)?js$/.test(n.name)) out.push(f); } return out; };
   const clearersOf = (texts) => {
     const found = {};

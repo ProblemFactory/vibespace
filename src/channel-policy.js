@@ -1546,12 +1546,13 @@ function receiptFateOf(p) {
   // the cap dropped it before any message picked it up (recorded when it happened, so it wins over a later guess)
   // round wozyl97qk (g): the list of messages waiting for the agent was DAMAGED while this receipt waited in it (its bytes kept aside) — its end, said
   if (q.receiptEvictedAt && q.receiptEvictedHow === 'torn') return { kind: 'torn', who, at: Number(q.receiptEvictedAt) || null, woke: false };
-  // r3988 (C) ONE END: taken while the list of waiting messages was unread, and not in it once it read — LOST (not on disk when VibeSpace stopped)
-  if (q.receiptLostAt) return { kind: 'lost', who, at: Number(q.receiptLostAt) || null, woke: false };
   if (q.receiptEvictedAt) return { kind: 'evicted', who, at: Number(q.receiptEvictedAt) || null, woke: false, held: Number(q.receiptEvictedHeld) || null };
   // `reconciled` (verify): its stash entry was found gone at a boot — handed
   // by an earlier message, at a time nobody recorded (no `at`)
   if (q.receiptDrainedAt) return q.receiptDrainedHow === 'reconciled' ? { kind: 'handed', who, at: null, woke: false, lane: 'next-message', reconciled: true } : { kind: 'handed', who, at: Number(q.receiptDrainedAt) || null, woke: false, lane: 'next-message' };
+  // r3988 (C) ONE END: taken while the list of waiting messages was unread, and not in it once it read — LOST (not on disk when VibeSpace stopped).
+  // r4023 (D)(ii) THE DOOR's WORD WINS: read only after every door's own record (torn, evicted, drained) — an entry that left by a door is never lost
+  if (q.receiptLostAt) return { kind: 'lost', who, at: Number(q.receiptLostAt) || null, woke: false };
   if (del.ok) return { kind: 'handed', who, at: Number(del.at) || null, woke: !!del.woke && !del.queued, lane: del.lane || null, ...(del.queued ? { queued: true } : {}) };   // queued: in the agent's queue behind its running turn (lane queued-is-not-woke)
   // a wake the decider asked for and the ladder refused (the spend ceiling) is SAID beside the wait
   // …and a wake-now the ENGINE downgraded before the ladder (verify r4: the proposal's wake row could not be

@@ -1477,9 +1477,10 @@ function create(engineCtx) {
       for (const id of ids) {
         const q = ob.proposals[id];
         if (!q || !q.draftedBy || String(q.draftedBy.id) !== String(cid)) continue;
-        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; changed.push(id); }
-        else if (ev === 'stashed' && (q.receiptDrainedAt || q.receiptEvictedAt)) { q.receiptDrainedAt = null; q.receiptDrainedHow = null; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; changed.push(id); }
-        else if (ev === 'evicted') { q.receiptEvictedAt = t; q.receiptEvictedHeld = Number(extra && extra.held) || null; q.receiptEvictedHow = null; q.receiptDrainedAt = null; q.receiptDrainedHow = null; changed.push(id); }
+        // r4023 (D)(ii): A DOOR's OWN RECORD TAKES A LOST MARK AWAY — an entry that left by a door (drained, evicted) or came back (stashed) was never lost
+        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; q.receiptLostAt = null; q.receiptLostHow = null; changed.push(id); }
+        else if (ev === 'stashed' && (q.receiptDrainedAt || q.receiptEvictedAt || q.receiptLostAt)) { q.receiptDrainedAt = null; q.receiptDrainedHow = null; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; q.receiptLostAt = null; q.receiptLostHow = null; changed.push(id); }
+        else if (ev === 'evicted') { q.receiptEvictedAt = t; q.receiptEvictedHeld = Number(extra && extra.held) || null; q.receiptEvictedHow = null; q.receiptDrainedAt = null; q.receiptDrainedHow = null; q.receiptLostAt = null; q.receiptLostHow = null; changed.push(id); }
       }
     });
     if (changed.length) notifyOutbox(changed);

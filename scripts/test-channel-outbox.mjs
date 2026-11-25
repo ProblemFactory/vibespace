@@ -1360,6 +1360,46 @@ async function takenLeg(ladderMod, name) {
   ok(fland.markAfterLift === true && fland.markAfterLand === false, 'r3988 (A): …and when a write LANDS after it (the retry, here the stop\'s flush), the stash says the entry is in the file — the mark leaves', fland);
   const fr = await failedLift('held-receipt-lift-fails-red', ENG_EARLY);
   ok(fr.markAfterLift === false && fr.restart && fr.restart.kind === 'handed' && fr.restart.drained === 'reconciled', `RED: the clearer that asks only «the list reads» — the mark gone over memory, then after the restart «${fr.restart && fr.restart.text}»: handed, which the agent never got`, fr);
+  // r4023 (D) THE DOOR's WORD COMES FIRST AND WINS. After a lift whose write FAILED (the mark stays, the landing owed): (1) the agent's next
+  // prompt DRAINS the entry and that write LANDS — the fate is «handed», never «lost»; (2) the cap EVICTS it in the write that lands —
+  // «evicted», never «lost». RED: the landing told INSIDE the write (before the door's word) — the reconcile judges «lost» (said in the
+  // journal) and only the door's own record (D)(ii) takes it away again. (3) a record that holds both a lost and a drained time reads «handed»
+  // (RED: «lost» read before the doors, the order the second cure had)
+  const cdPath = path.join(REPO, 'src/server/conversation-deliver.js');
+  const TELLS_INSIDE = MH.load('src/server/conversation-deliver.js', anchored(fs.readFileSync(cdPath, 'utf8'), "    setImmediate(() => { for (const fn of landListeners) { try { fn(); } catch (err) { log('[deliver] a landing listener failed:', err && err.message); } } });", "    for (const fn of landListeners) { try { fn(); } catch (err) { log('[deliver] a landing listener failed:', err && err.message); } }", 'landing-told-inside-the-write'), 'landing-told-inside-the-write');   // stale-pins: kept — the RED puts the landing told inside the write back
+  const doorRun = async (name, door, ladderMod = null) => {
+    const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'msg-stash.json'), '{}');
+    const logs = [];
+    const W = mkReal({ name, dataDir: dir, holdRead: true, ...(ladderMod ? { ladderMod } : {}), log: { log: (...a) => logs.push(a.join(' ')), warn() {}, error() {} } }); const { eng } = W; await prime(eng);
+    const p = await eng.propose(AGENT, A, C, { text: `a receipt that leaves by a door (${door})` }); await eng.approve(p.proposal.id, {});
+    const realW = fs.writeFileSync; let failing = true;
+    fs.writeFileSync = function (f, ...a) { if (failing && typeof f === 'string' && f.endsWith('msg-stash.json.tmp')) throw Object.assign(new Error('ENOSPC: no space left on device (placed)'), { code: 'ENOSPC' }); return realW.call(this, f, ...a); };
+    try {
+      await W.real.stashReadAgain();   // the list reads; its one write FAILS: the mark stays, the landing is owed
+      await sleep(40);
+      const mark0 = !!(eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery || {}).notOnDisk;
+      if (door === 'drain') { failing = false; W.real.drainStash('agent-1'); }   // the disk healed: the agent's next prompt takes it, that write LANDS
+      else { for (let i = 0; i < 30; i++) { if (i === 29) failing = false; W.real.stashFor('agent-1', { source: 'agent', kind: 'peer', fromName: 'Ada', text: `a peer message ${i}` }); } }   // the cap evicts it in the write that lands
+      await sleep(120);
+      const q = eng.store.outbox.snapshot().proposals[p.proposal.id];
+      return { mark0, kind: (P.receiptFateOf(q) || {}).kind, lost: q.receiptLostAt || null, saidLost: logs.some((l) => /LOST \(not on disk when VibeSpace stopped\)/.test(l)) };
+    } finally { fs.writeFileSync = realW; eng.stop(); }
+  };
+  for (const door of ['drain', 'evict']) {
+    const want = door === 'drain' ? 'handed' : 'evicted';
+    const g = await doorRun(`door-${door}`, door);
+    ok(g.mark0 && g.kind === want && !g.lost && !g.saidLost, `r4023 (D)(i): after a failed lift write, the ${door === 'drain' ? 'DRAIN' : 'cap\'s EVICTION'} whose write lands — the fate is «${g.kind}», never «lost» (nothing judged inside the write)`, g);
+    const r = await doorRun(`door-${door}-red`, door, TELLS_INSIDE);
+    ok(r.saidLost && r.kind === want && !r.lost, `RED: the landing told inside the write — the reconcile judges «lost» before the door's word (said in the journal); (D)(ii) the door's own record takes it away: «${r.kind}»`, r);
+  }
+  {
+    const both = { receipt: 'a receipt', receiptDelivery: { stashed: true, notOnDisk: true, at: 1, choice: 'next-turn' }, receiptLostAt: 5, receiptLostHow: 'not-on-disk', receiptDrainedAt: 6, receiptDrainedHow: 'drained', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' } };
+    const polNow2 = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf8');
+    const LOST_FIRST = MH.load('src/channel-policy.js', anchored(polNow2, "  if (q.receiptEvictedAt && q.receiptEvictedHow === 'torn') return", "  if (q.receiptLostAt) return { kind: 'lost', who, at: Number(q.receiptLostAt) || null, woke: false };\n  if (q.receiptEvictedAt && q.receiptEvictedHow === 'torn') return", 'lost-read-before-the-doors'), 'lost-read-before-the-doors');
+    const k = (P.receiptFateOf(both) || {}).kind, kr = (LOST_FIRST.receiptFateOf(both) || {}).kind;
+    ok(k === 'handed', `r4023 (D)(ii): a record that holds a drained time AND a lost time reads the door's word — «${k}»`, both);
+    ok(kr === 'lost', `RED: «lost» read before the doors (the second cure's order) — «${kr}»`, kr);
+  }
   // r3988 (B) ONE SAYER — every kind the fate line knows (its `case` labels, read from the source: a kind added later is walked too) says the
   // mark beside its own words when the receipt was taken while the list was unread; the drafter GONE and a REFUSED WAKE say both.
   // RED: the sayer the cure had (the mark only beside «waiting»)
@@ -1506,7 +1546,7 @@ async function drainAfterGuessLeg(ENGmod, name) {
 {
   const dg = await drainAfterGuessLeg(ENG, 'drain-guess');
   ok(dg.at > 5 && dg.how === 'drained' && /Handed to Worker at \d\d:\d\d$/.test(dg.text), `a real drain after a reconciled stamp: the time recorded, "${dg.text}"`, JSON.stringify(dg));
-  const HOW = "        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; changed.push(id); }";
+  const HOW = "        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; q.receiptEvictedHow = null; q.receiptLostAt = null; q.receiptLostHow = null; changed.push(id); }";   // r4023: the drained branch also takes a lost mark away
   ok(esrcV2.split(HOW).length === 2, 'the drained branch is present once (the control keeps the old guess)');
   const stale = MV2.load('src/server/channels-engine.js', esrcV2.replace(HOW, "        if (ev === 'drained') { q.receiptDrainedAt = t; changed.push(id); }"), 'drain-keeps-guess');
   const dc = await drainAfterGuessLeg(stale, 'drain-guess-ctl');

@@ -1017,10 +1017,10 @@ function setLineOpen(card, open) {
 /** A card's signature WITHOUT its fate (a fate-only change patches the line). */
 function cardSig(p, compact, line = false) {
   const q = { ...p };
-  delete q.receiptDelivery; delete q.receiptDrainedAt; delete q.receiptDrainedHow; delete q.receiptEvictedAt; delete q.receiptEvictedHeld; delete q.receiptEvictedHow;
+  delete q.receiptDelivery; delete q.receiptDrainedAt; delete q.receiptDrainedHow; delete q.receiptEvictedAt; delete q.receiptEvictedHeld; delete q.receiptEvictedHow; delete q.receiptLostAt; delete q.receiptLostHow;   // r4023 (small): the lost fields are the FATE's (below), never the card's
   return JSON.stringify([q, !!compact, rememberedDelivery(), !!line]);
 }
-const fateSig = (p) => JSON.stringify([p.receiptDelivery || null, p.receiptDrainedAt || null, p.receiptDrainedHow || null, p.receiptEvictedAt || null]);
+const fateSig = (p) => JSON.stringify([p.receiptDelivery || null, p.receiptDrainedAt || null, p.receiptDrainedHow || null, p.receiptEvictedAt || null, p.receiptLostAt || null, p.receiptLostHow || null]);   // r4023: a move to «lost» patches the fate line
 /** Is the user in the middle of deciding on this card (an editor or a reject box open)? */
 const inUse = (card) => !!card.querySelector('.chan-prop-edit, .chan-prop-rejectbox');
 /**

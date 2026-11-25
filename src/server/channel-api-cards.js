@@ -85,6 +85,8 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
     }
     st.receipt = { at: now(), how: r && r.ok ? (r.stashed ? 'stashed' : 'delivered') : 'undelivered', fate: C.fateOf(p), ...(r && r.notOnDisk ? { notOnDisk: true } : {}) };
   }
+  // r4023 (small): AN API receipt's mark has NO END after a restart that lost its entry (no «lost» like the Outbox's): nothing draws this
+  // record's receipt today (no page, no CLI) — named here, not built; the day a drawer reads it, it gets the Outbox's end
   // r3919 / r3988 (A) ONE CLEARER: a receipt's mark leaves only on the stash's own word that its entry is IN THE FILE (stashOnDisk: a write
   // that LANDED holding it) — asked when the list reads again and when a write lands after none did; a lift whose write failed clears nothing
   const clearMarks = () => { try {
