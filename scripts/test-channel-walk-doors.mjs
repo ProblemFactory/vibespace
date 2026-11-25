@@ -232,11 +232,12 @@ async function searchWalk(S, tag) {
 {
   const S = require(path.join(REPO, 'src/channel-store.js'));
   const got = await searchWalk(S, 'kept');
-  const NOW = "    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(";
-  const BEFORE = "    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(";   // stale-pins: kept (the base's walk, restored by the control)
-  ok(STORE.split(NOW).length === 2, 'control setup: the search\'s walk is present once as it reads now');
-  let old = editAnchor(STORE, NOW, BEFORE, "src/channel-store.js");
-  old = old.replace(" }   // B-dfa4 cut 1: this account's rows only\n", '\n');
+  // B-360d found holder 3 (lane bl-loop-b): the search reads its order from its LOG FILES (logFilesOf) — the control puts the base's
+  // whole-map walk back in place of that one call (the same lines it restored before)
+  const NOW = "    const lf = await logFilesOf(adapterId, names, convIds);\n    names = lf.names;\n    const { lastAtOf, titleOf } = lf;\n";
+  const BEFORE = "    names = names.filter((n) => n.endsWith('.ndjson'));\n    const lastAtOf = new Map(), titleOf = new Map();\n    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); }\n";   // stale-pins: kept (the base's walk, restored by the control)
+  ok(STORE.split(NOW).length === 2, 'control setup: the search\'s read of its order is present once as it reads now');
+  const old = editAnchor(STORE, NOW, BEFORE, "src/channel-store.js");
   const c = await searchWalk(MC.load('src/channel-store.js', old, 'search-whole'), 'whole');
   ok((got.seen.search || 0) === 0 && Array.isArray(got.hits) && got.hits.length === OWN, `the search of the ${OWN}-row account beside ${OTHER_ROWS} others: 0 whole-map iterations, ${got.hits && got.hits.length} hits`, got);
   ok((c.seen.search || 0) > 0 && J(c.hits) === J(got.hits), `CONTROL: the base's walk iterates the map ${c.seen.search || 0}× for the same hits in the same order — red`, c);
