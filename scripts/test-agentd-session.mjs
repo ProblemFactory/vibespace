@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { endDaemonsAndWait } from './scratch.mjs';
-import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
+import { agentdBundle, buildPlan, stampPlugin } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -201,20 +201,44 @@ if (!fs.existsSync('/proc/self/environ')) {
   const d = daemonEnv(process.env);
   check('daemonEnv() drops them too and keeps exactly the daemon tier\'s own names on top of the agent set', !('VIBESPACE_INTEGRATION_FAKE_APIKEY' in d) && !('VIBESPACE_INTEGRATIONS' in d) && d.VIBESPACE_NODE_MODULES === process.env.VIBESPACE_NODE_MODULES && d.VIBESPACE_AGENTD_ROOT === process.env.VIBESPACE_AGENTD_ROOT && d.VS_CANARY_KEEP === 'canary-1');
   // the keep set is DERIVED from the daemon tier's own reads — a name it reads but the set omits would break the daemon loudly, a name it keeps but nothing reads is a holder for nothing
+  // r4210 / r4217 (主开发, the hosted run of 2.369.419): THE DAEMON TIER IS THE DEVICE AGENT'S REAL CLOSURE — every source file the
+  // build bundles into it: the bundle's OWN input list (esbuild's metafile, built by build:agentd's own plan — scripts/agentd-bundle.mjs
+  // buildPlan — with the same stamp; nothing written), not the folder src/agentd: the fs worker's ops (src/dir-ops.js, required at
+  // agentd.js) read VIBESPACE_DIROPS_TEST, and a walk of the folder alone called that kept name «extra». The folder's files the
+  // agent does not require (attach-cli, chan-duplex, chan-socket, client: the hub's and the session's sides) are not walked
+  const planD = buildPlan(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).scripts);
+  const metaD = await require('esbuild').build({ entryPoints: [path.join(repo, planD.entry)], absWorkingDir: repo, write: false, metafile: true, logLevel: 'error', plugins: [stampPlugin(version)], ...planD.options });
+  const daemonFiles = Object.keys(metaD.metafile.inputs).map((k) => k.split(path.sep).join('/')).filter((k) => !/(^|\/)node_modules\//.test(k) && /\.[cm]?js$/.test(k) && fs.existsSync(path.join(repo, k)));
+  check(`the daemon tier's files are the bundle's own input list (${daemonFiles.length} source files): the entry, the fs worker's ops outside src/agentd, and none of the folder's files the agent does not require`, daemonFiles.includes('src/agentd/agentd.js') && daemonFiles.includes('src/dir-ops.js') && !daemonFiles.includes('src/agentd/attach-cli.js') && !daemonFiles.includes('src/agentd/client.js'), daemonFiles.filter((f) => !f.startsWith('src/agentd/')).slice(0, 12).join(', '));
   const readByDaemonTier = new Set();
-  for (const f of fs.readdirSync(path.join(repo, 'src/agentd')).filter((x) => x.endsWith('.js'))) {
-    for (const m of fs.readFileSync(path.join(repo, 'src/agentd', f), 'utf8').matchAll(/process\.env\.(VIBESPACE_[A-Z_]+)/g)) readByDaemonTier.add(m[1]);
+  for (const f of daemonFiles) {
+    for (const m of fs.readFileSync(path.join(repo, f), 'utf8').matchAll(/process\.env\.(VIBESPACE_[A-Z_]+)/g)) readByDaemonTier.add(m[1]);
   }
-  readByDaemonTier.delete('VIBESPACE_REMOTE_ATTEMPT');   // attach-cli's OWN respawn marker (set by pty-wrapper in the attach-cli process, never a daemon spawn base)
+  // THE SET-ASIDE TABLE: names the closure READS that are never kept, each with its own law below (the keep set lacks it, the daemon's
+  // environment builder drops it); r4217 (5): a name set aside must be READ by the closure — set aside and not read is red
+  const setAside = [];
+  const aside = (n) => { setAside.push([n, readByDaemonTier.has(n)]); readByDaemonTier.delete(n); };
   // lane pairing (verify-r3 B-inst, the .197 integration): the installer's pairing tokens reach a daemon through ITS OWN
   // environment ONCE — agentd.js reads and deletes them at boot. They are read but NEVER kept: a server-spawned daemon
   // must never inherit a token, so they leave the derived set here and the keep set is asserted to lack them
-  for (const n of ['VIBESPACE_DIAL_TOKEN', 'VIBESPACE_HOST_TOKEN']) readByDaemonTier.delete(n);
+  for (const n of ['VIBESPACE_DIAL_TOKEN', 'VIBESPACE_HOST_TOKEN']) aside(n);
   // lane win-device-boot-hidden: the console self-heal's mark is ONE hop — the successor is spawned WITH it explicitly
   // (startSuccessor's env), so it is read but never kept: no session and no later re-exec inherits it
-  readByDaemonTier.delete('VIBESPACE_AGENTD_HIDDEN');
+  aside('VIBESPACE_AGENTD_HIDDEN');
   check('the console self-heal\'s mark VIBESPACE_AGENTD_HIDDEN is NOT in DAEMON_ENV_KEEP and daemonEnv drops it (one hop)', !DAEMON_ENV_KEEP.has('VIBESPACE_AGENTD_HIDDEN') && !('VIBESPACE_AGENTD_HIDDEN' in daemonEnv({ ...process.env, VIBESPACE_AGENTD_HIDDEN: '1' })));
   check('the pairing tokens the daemon reads ONCE from its own environment are NEVER in DAEMON_ENV_KEEP (a server-spawned daemon never inherits one)', !DAEMON_ENV_KEEP.has('VIBESPACE_DIAL_TOKEN') && !DAEMON_ENV_KEEP.has('VIBESPACE_HOST_TOKEN') && !('VIBESPACE_DIAL_TOKEN' in daemonEnv({ ...process.env, VIBESPACE_DIAL_TOKEN: 'x', VIBESPACE_HOST_TOKEN: 'y' })) && !('VIBESPACE_HOST_TOKEN' in daemonEnv({ ...process.env, VIBESPACE_DIAL_TOKEN: 'x', VIBESPACE_HOST_TOKEN: 'y' })));
+  // r4217 (主开发, ruling on this train — TESTS ONLY): two more names the closure reads, READ NEVER KEPT, each row asserting the
+  // opposite law (the keep set LACKS it, daemonEnv DROPS it) with its reason: a name added to the keep set without changing its row
+  // and its reason goes red here — never a name exempted by hand
+  const READ_NEVER_KEPT = [
+    ['VIBESPACE_APP_SYSTEM', "the chart's app system switch (src/app-system-serve.js, reached through desktop-serve.js and app-serve.js): a device agent never turns the app system on from a name it inherited"],
+    ['VIBESPACE_USAGE_CURSOR', "the usage cursor file's place (src/usage-walker.js): a suite's own seam for the walker run in the suite's process; an agent keeps its cursor in its own place"],
+  ];
+  for (const [n, why] of READ_NEVER_KEPT) {
+    check(`${n} is READ by the agent's closure and NEVER kept: DAEMON_ENV_KEEP lacks it and daemonEnv drops it — ${why}`, readByDaemonTier.has(n) && !DAEMON_ENV_KEEP.has(n) && !AGENT_ENV_KEEP.has(n) && !(n in daemonEnv({ ...process.env, [n]: '1' })), `read ${readByDaemonTier.has(n)} · kept ${DAEMON_ENV_KEEP.has(n)} · handed down ${n in daemonEnv({ ...process.env, [n]: '1' })}`);
+    aside(n);
+  }
+  check(`every name the set-aside table holds is READ by the agent's closure (${setAside.map(([n]) => n).join(', ')}) — a row for a name nothing reads is a row for nothing`, setAside.length === 5 && setAside.every(([, r]) => r), setAside.filter(([, r]) => !r).map(([n]) => n).join(',') || `${setAside.length} rows`);
   const missing = [...readByDaemonTier].filter((n) => !DAEMON_ENV_KEEP.has(n));
   const extra = [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n) && !readByDaemonTier.has(n));
   check(`DAEMON_ENV_KEEP = AGENT_ENV_KEEP ∪ every VIBESPACE_* the daemon tier reads (${[...readByDaemonTier].sort().join(', ')})`, !missing.length && !extra.length, `missing: ${missing.join(',') || '-'} extra: ${extra.join(',') || '-'}`);
