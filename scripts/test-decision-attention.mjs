@@ -53,7 +53,7 @@ const now = () => clock;
 // ── the fake provider (OpenAI dialect): a record whose own part says URGENT needs you (0.86) ──
 const got = [];
 let inflight = 0, maxIn = 0;
-let holdAt = 0, holdP = null;   // r2988: the call numbered `holdAt` is HELD on `holdP` (a promise) — its flight a state, never a 40 ms window
+let holdAt = 0, holdP = null, heldNow = false;   // r2988: the call numbered `holdAt` is HELD on `holdP` (a promise) — its flight a state, never a 40 ms window
 const recordPart = (input) => String(input).split('———').pop();
 // the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
 const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
@@ -61,7 +61,7 @@ async function fakeFetch(url, opts) {
   inflight++; maxIn = Math.max(maxIn, inflight);
   const raw = await bodyText(opts), body = JSON.parse(raw);
   got.push({ url, body, raw, auth: opts.headers.authorization });
-  if (holdP && got.length === holdAt) await holdP;
+  if (holdP && got.length === holdAt) { heldNow = true; try { await holdP; } finally { heldNow = false; } }   // r4310: the hold's own fact
   await sleep(40);
   inflight--;
   const hot = /URGENT/.test(recordPart(body.input));
@@ -114,7 +114,21 @@ async function engines(name, W, engineMod = ENG, fresh = true) {
   }
   return { eng, events, dataDir, decision };
 }
-async function idle(eng) { for (let i = 0; i < 200; i++) { await sleep(20); if (eng.attention.idle()) return true; } return false; }
+// r4310 (主开发; one UTC sighting in a whole gate at load 30+, green alone): «3 of 7 rows judged» — the old idle() polled 200 × 20 ms,
+// a 4 s GUESS, and returned QUIETLY at its end. Under IO load each judgment's two durable journal writes (its reservation before the
+// call, its journal line after) made the drain outlast the guess, and the next leg read the half-done drain as the product's answer.
+// A WAIT IS ON THE FACT — the product's own idle() (nothing queued, flying or due) — with a GENEROUS bound whose expiry FAILS BY A
+// NAMED HARNESS LINE; every wait of this suite goes through `until`
+const SETTLE_MS = 120000;
+async function until(fact, what, { boundMs = SETTLE_MS, say = ok } = {}) {
+  const t0 = Date.now();
+  while (!fact()) {
+    if (Date.now() - t0 >= boundMs) { say(false, `HARNESS (r4310): ${typeof what === 'function' ? what() : what} — not within ${Math.round(boundMs / 1000)} s (the wait's bound, never the product's answer)`); return false; }
+    await sleep(20);
+  }
+  return true;
+}
+const idle = (eng, opts = {}) => until(() => eng.attention.idle(), () => { const s = eng.attention.status(); return `the attention queue settles (still ${s.queued} queued, ${s.inFlight} in flight)`; }, opts);
 const rowOf = (d, id) => (d.conversations || []).find((c) => c.key === `im/${id}`);
 const tagOf = (d, id) => { const r = rowOf(d, id); return r ? FO.statusTag(r, clock) : undefined; };
 const factNamed = (bodies) => bodies.filter((g) => ['Handed one', 'Handed two'].some((t) => String(g.body.input).includes(t)));
@@ -132,7 +146,7 @@ ok(FACT.every((id) => (tagOf(d0, id) || {}).code === 'assigned'), 'FIXTURE: the 
 // r2988 (one UTC sighting in a whole gate, green alone): the poll in 1 ms sleeps had to land inside the last call's 40 ms flight, and
 // a loaded run's timers overshot it. The call is HELD now: the wait is on its state (bounded), and the reads' effect is read from
 // the queue's own size, at once
-for (const tw = Date.now(); !(got.length === 4 && inflight > 0) && Date.now() - tw < 10000;) await sleep(2);
+await until(() => got.length === 4 && inflight > 0, 'the LAST row\'s call is in flight, HELD');   // r4310: on the fact, a named expiry
 const midFlight = got.length === 4 && inflight > 0;
 A.eng.digest(); A.eng.digest();   // reads while the LAST row's call is in flight (dequeued, no verdict yet)
 const queuedAfter = A.eng.attention.status().queued;
@@ -143,6 +157,33 @@ ok(got.length === 4 && got.every((g) => g.body.questions.length === 8 && (String
 ok(maxIn === 3, `the queue keeps ≤ 3 calls in flight (measured ${maxIn})`);
 ok(got.every((g) => /^\n\n\[record\]\nfacts: addressed: no mention of the reader; kind: a group; 0 messages since the reader last read, \d+ min ago\ntitle: /.test(recordPart(g.body.input))) && A.eng.attention.status().scans === 1, 'lane decision-attention-facts: each record opens with its facts line (the backlog of a first walk is read by construction: 0 since the read line); the scan\'s facts built ONCE for the 4 rows', recordPart(got[0].body.input).slice(0, 200));
 ok(got.every((g) => String(g.body.input).includes('Invoices and contracts matter to me.') && String(g.body.input).includes('Rubric v2') && !g.raw.includes('SECRET') && g.auth === 'Bearer sk-dummy-SECRET-123456'), 'each input carries the rubric v2 and the person\'s block as written; the key rides the header only, never the body');
+
+console.log('①b r4310 THE WAIT IS ON THE FACT: a drain that outlasts any guess is waited for, and the wait\'s own bound fails by its name');
+{
+  const S = await engines('settle', world());   // run right after ①: the judge is on and the scan's calls are this world's own
+  const n0 = got.length;
+  // the scan's FIRST call HELD (its number counted from here, whatever this late world's scan holds): while it is held the drain
+  // cannot be idle — the drain outlasts any guess; the wait below is on the hold's OWN fact (the fake vendor sits on it)
+  let open1 = null; holdAt = n0 + 1; holdP = new Promise((r) => { open1 = r; });
+  S.eng.digest();
+  const w = idle(S.eng, { say: () => { } });
+  await until(() => heldNow, 'the held call sits on its hold');
+  const at = () => new Promise((r) => setImmediate(() => r('pending')));
+  const whileHeld = await Promise.race([w.then(() => 'settled'), at()]);
+  // the OLD shape, run while the call is held: a fixed count of polls that returns QUIETLY at its end (its count cut to one — the
+  // same shape, its fault placed by the hold, never by a clock)
+  const oldShape = async (eng) => { for (let i = 0; i < 1; i++) { await sleep(20); if (eng.attention.idle()) return true; } return false; };
+  const oldEnded = await oldShape(S.eng), busyAtOldEnd = !S.eng.attention.idle();
+  // THE BOUND's EXPIRY is NAMED: a second wait with a short bound, the call still held — it fails by its harness line
+  const said = [];
+  const expired = await idle(S.eng, { boundMs: 200, say: (c, n) => said.push({ c, n }) });
+  holdP = null; open1();
+  const settled = await w;
+  ok(whileHeld === 'pending' && settled === true && got.length > n0 && !heldNow && S.eng.attention.idle(), '①b the wait on the fact holds while a call is HELD (the drain outlasts any guess) and ends when the drain does: the hold released, the queue idle', { whileHeld, settled, calls: got.length - n0 });
+  ok(oldEnded === false && busyAtOldEnd, '①b RED CONTROL (the old shape: a fixed count of polls, quiet at its end): with the call HELD it ENDS while the drain is still busy — the next leg would read a half-done drain', { oldEnded, busyAtOldEnd });
+  ok(expired === false && said.length === 1 && said[0].c === false && /^HARNESS \(r4310\): the attention queue settles \(still \d+ queued, \d+ in flight\) — not within 0 s/.test(said[0].n), '①b the wait\'s own bound, when it expires, FAILS BY ITS NAMED HARNESS LINE (never a quiet return)', said);
+  got.splice(n0);   // the block's own calls given back: every later leg reads the calls it always read
+}
 
 console.log('② the candidate-set census: a fact-tagged row is never sent, not once');
 ok(factNamed(got).length === 0, 'CENSUS: no request body names a fact-tagged row', factNamed(got).map((g) => recordPart(g.body.input).slice(0, 80)));
@@ -261,7 +302,7 @@ const engMut3 = MUT.load('src/server/channels-engine.js', editAnchor(engSrc, "re
   let open3 = null; holdAt = got.length + 4; holdP = new Promise((r) => { open3 = r; });
   const g0 = got.length;
   C3.eng.digest();
-  for (const tw = Date.now(); !(got.length === g0 + 4 && inflight > 0) && Date.now() - tw < 10000;) await sleep(2);
+  await until(() => got.length === g0 + 4 && inflight > 0, 'the last row\'s call is in flight, HELD (the guard removed)');   // r4310
   const held3 = got.length === g0 + 4 && inflight > 0;
   C3.eng.digest(); C3.eng.digest();
   const queued3 = C3.eng.attention.status().queued;
@@ -505,6 +546,7 @@ console.log('⑬ B-dfa4 (verdict): the law through the engine\'s OWN roads — a
   ok(stray.bad.some((b) => b.startsWith('strayScan:')) && leak.bad.some((b) => b.startsWith('firstRead: called from leakOut2')), 'RED CONTROLS: a new function reading the judge row by row is named; a step of digest\'s walk called from outside it is named', { stray: stray.bad, leak: leak.bad });
   for (const x of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 2, label: '⑬ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
+
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
