@@ -2334,6 +2334,79 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * EVERY one of them, each ANYWHERE — its text, its author's name, an attachment's name, or its conversation's TITLE
    * (the index's; a mail thread's subject). One word = the substring it always was, the title now beside the text.
    */
+  // B-360d FOUND HOLDER 3 (lane bl-loop-b, 主开发 r4581 / r4582): THE SEARCH's ORDER AND ITS WANTED TEST FROM THE ACCOUNT's LOG FILES.
+  // The release made two passes over the whole ACCOUNT in one turn before it read a log: every id it was handed mapped to a file
+  // name, and every row of the account mapped to its file for the newest-first order (lane bl-loop-a's heavy stand-in, 173 306 rows
+  // and 50 logs: one turn of 325 to 379 ms on the box). Here each log file finds its own row. A log's name is its conversation id run
+  // through safeSeg, which escapes every character outside [A-Za-z0-9._@:+-] as % and its hex (the % sign too): a name with no % IS
+  // its id, and a name with % is read back to EVERY id that escapes to it (an escape is 2, 3 or 4 hex digits by its character's size,
+  // so one name can have several readings; each is kept only if it escapes back to the same name). No adapter's ids carry such a
+  // character (read from each kind's own code: Slack [A-Z0-9_], a webhook's slug [a-z0-9-], Lark's oc_ and hex, Gmail's thread id,
+  // the agents' session ids, the fake's names). Its row is the key `adapterId/id` (entry()'s own key), and then the rows whose key is
+  // not their account's (oddKeys, as keysOf answers them: after the account's own, as the release read them). The caller's list is
+  // read into a Set once and each file asks it once; a file outside it is never opened. The loop is given back every LOG_STEP files
+  // and every WANT_STEP ids; the per-account map (for the odd rows) is awaited in its slices, never built whole here on a big index.
+  // A name with more than SEG_IDS_MAX readings, or one log two rows of the account escape to, takes the release's pass for this
+  // search, counted (searchStats.fallback). Nothing else of the search changed: its directory read, its order, its scan, its answer
+  const LOG_STEP = 2000, WANT_STEP = 10000, SEG_IDS_MAX = 64;
+  const searchStats = { searches: 0, files: 0, rowsRead: 0, fallback: 0 };
+  const SAFE_CH = /^[A-Za-z0-9._@:+-]$/, HEX_DIGITS = /^[0-9a-f]+$/;
+  /** every id `x` with safeSeg(x) === seg (null when there are more than SEG_IDS_MAX) */
+  function segIds(seg) {
+    const out = [];
+    const walk = (i, acc) => {
+      if (out.length > SEG_IDS_MAX) return;
+      if (i === seg.length) { if (acc !== '' && acc !== '.' && acc !== '..') out.push(acc); return; }
+      const c = seg[i];
+      if (c !== '%') { if (SAFE_CH.test(c)) walk(i + 1, acc + c); return; }
+      for (let L = 2; L <= 4; L++) {
+        const h = seg.slice(i + 1, i + 1 + L);
+        if (h.length !== L || !HEX_DIGITS.test(h)) break;
+        const code = parseInt(h, 16);
+        if ((L === 3 && code < 0x100) || (L === 4 && code < 0x1000)) continue;   // its digits are its character's size (padStart(2) below 0x100)
+        if (code === 0 || code === 0x2f || code === 0x5c) continue;   // a NUL, a slash or a backslash is no id safeSeg takes
+        const ch = String.fromCharCode(code);
+        if (SAFE_CH.test(ch)) continue;   // a safe character is never escaped
+        walk(i + 1 + L, acc + ch);
+      }
+    };
+    walk(0, '');
+    return out.length > SEG_IDS_MAX ? null : out;
+  }
+  const turnBack = () => new Promise((r) => setImmediate(r));
+  async function logFilesOf(adapterId, all, convIds) {
+    searchStats.searches++;
+    let want = null;
+    if (convIds) { want = new Set(); let i = 0; for (const c of convIds) { want.add(String(c)); if (++i % WANT_STEP === 0) await turnBack(); } }
+    if (!byAcct) { acctWarmStart(); await keysReady(); if (!byAcct) keysOf(adapterId); }   // the odd rows: a big index's map in its slices; a small one at once, as keysOf builds it
+    const conv = ix.conversations, lastAtOf = new Map(), titleOf = new Map(), names = [];
+    let fallback = false, wantNames = null;
+    const wanted = (n) => { if (!wantNames) wantNames = new Set([...want].map((c) => `${safeSeg(c)}.ndjson`)); return wantNames.has(n); };   // the release's test (only for a fallback name)
+    for (let i = 0; i < all.length; i++) {
+      if (i && i % LOG_STEP === 0) await turnBack();
+      const n = all[i];
+      if (!n.endsWith('.ndjson')) continue;
+      const ids = segIds(n.slice(0, -'.ndjson'.length));
+      if (ids === null) { fallback = true; if (!want || wanted(n)) names.push(n); continue; }
+      if (want && !ids.some((c) => want.has(c))) continue;   // not the caller's: never opened
+      names.push(n); searchStats.files++;
+      let rows = 0;
+      for (const c of ids) {
+        const key = `${adapterId}/${c}`, en = hasOwn(conv, key) ? conv[key] : null;
+        searchStats.rowsRead++;
+        if (!en || en.adapterId !== adapterId || en.id == null || String(en.id) !== c) continue;
+        if (++rows > 1) { fallback = true; break; }
+        lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase());
+      }
+    }
+    if (fallback) {   // the release's pass, counted: every row of the account mapped to its file
+      searchStats.fallback++; lastAtOf.clear(); titleOf.clear();
+      for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); } }
+      return { names, lastAtOf, titleOf };
+    }
+    for (const k of oddKeys.keys()) { const en = conv[k]; if (en && en.adapterId === adapterId && en.id != null) { searchStats.rowsRead++; const n = `${safeSeg(en.id)}.ndjson`; lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }   // after the account's own (the release's order); .keys(): the odd keys' Set, or a Map of their slots, read alike
+    return { names, lastAtOf, titleOf };
+  }
   async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null, match = null } = {}) {
     // lane notify-rules-r2 (the Notify… dialog's preview): `match` = a RECORD predicate (a watcher rule, judged by the
     // PURE filter) in place of the text check — `q`, when given beside it, stays the raw-bytes pre-check; `matched`
@@ -2346,11 +2419,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const dir = path.join(msgsDir, safeSeg(adapterId));
     let names = [];
     try { names = await fs.promises.readdir(dir); } catch { return none; }
-    const wanted = convIds ? new Set([...convIds].map((c) => `${safeSeg(c)}.ndjson`)) : null;
-    names = names.filter((n) => n.endsWith('.ndjson') && (!wanted || wanted.has(n)));
-    // NEWEST CONVERSATION FIRST (design 010): the index's lastAt per log file, read-only (no copy, no touch)
-    const lastAtOf = new Map(), titleOf = new Map();
-    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); } }   // B-dfa4 cut 1: this account's rows only
+    // NEWEST CONVERSATION FIRST (design 010): the index's lastAt per log file, read-only (no copy, no touch) — B-360d found holder 3:
+    // the order and the caller's wanted test both read from the account's LOG FILES, never from its rows (logFilesOf, above)
+    const lf = await logFilesOf(adapterId, names, convIds);
+    names = lf.names;
+    const { lastAtOf, titleOf } = lf;
     names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));
     let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null, matched = 0;
     const hits = [];
@@ -3449,6 +3522,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     startDamagedEmpty,   // B-f276 1b: the damaged family's one door (a person's choice — the engine's route asks it)
     appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
+    searchStats: () => ({ ...searchStats }),   // B-360d found holder 3: the search's own counts (files, rows read, fallbacks)
     prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, attachmentLedgerSettled, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite, peopleHeld, peopleUpdate, onPeopleLift,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     feedMissRead, feedMissWrite, feedMissDrop,

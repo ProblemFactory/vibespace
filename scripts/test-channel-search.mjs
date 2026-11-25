@@ -20,9 +20,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { judgeInChild } from './work-meter.mjs';
+import { judgeInChild, BOUNDED_RATIO } from './work-meter.mjs';
+import { spawnSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -751,6 +752,80 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   ok(mq.hiddenMatch === true && JSON.stringify(mq).includes('Acmenet install') && !noLeak(mq, 'Acmenet install'), 'MUTANT (the base before this lane): a copy that words the answer server-side echoes the caller\'s query in the body — the no-query leg goes RED', JSON.stringify(mq.saidKind));
   kmq.eng.stop && kmq.eng.stop();
 }
+// ── §H B-360d FOUND HOLDER 3 (lane bl-loop-b, 主开发 r4581 / r4582): THE ORDER AND THE WANTED TEST FROM THE LOG FILES ──────────
+// The release's search made two passes over the whole ACCOUNT in one turn before it read a log (every id handed mapped to a file
+// name; every row of the account mapped to its file for the order). Now each log finds its own row. IN WORK (the meter, never a
+// clock): an account of 2000 rows and one of 4000 with the same 10 logs cost the same; RED the release's search in a copy (its two
+// passes put back), which costs about twice. WHO MAY SEE IS UNCHANGED, TO THE BYTE AND THE READ: the cure's answer and the files it
+// opens are the release's, scene by scene — a log outside the caller's set (never opened), two logs with the same newest time, a log
+// with no row, an escaped id, a row whose key is not its account's, the byte cap, a match predicate, the existence call (the kept
+// ids, limit 1) — and two ids that escape to ONE name (a fallback, counted). NOTHING NEW ON THE LOOP: no synchronous fs call
+console.log('§H B-360d found holder 3: the search reads its logs\' own rows, never the account\'s every row');
+{
+  const STORE = 'src/channel-store.js';
+  const NEW_PASS = "    const lf = await logFilesOf(adapterId, names, convIds);\n    names = lf.names;\n    const { lastAtOf, titleOf } = lf;\n";
+  const RELEASE_PASS = "    const wanted = convIds ? new Set([...convIds].map((c) => `${safeSeg(c)}.ndjson`)) : null;\n    names = names.filter((n) => n.endsWith('.ndjson') && (!wanted || wanted.has(n)));\n    const lastAtOf = new Map(), titleOf = new Map();\n    for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); } }\n";
+  const relPath = MUTE.write(STORE, anchored(SRC(STORE), NEW_PASS, RELEASE_PASS, 'b360d-h3-the-release-search'), 'release-search');
+  const REL = require(relPath);
+  // IN WORK, in a child (the meter starts before the store is loaded)
+  const FIX = path.join(REPO, 'scripts/fixtures/channel-search-work.mjs');
+  const workOf = (mod, tag) => { const r = spawnSync(process.execPath, [FIX, mod, path.join(ROOT, tag), '2000', '10'], { encoding: 'utf8', timeout: 120000 }); const line = String(r.stdout || '').trim().split('\n').pop(); try { return JSON.parse(line); } catch { return { err: `the child: exit ${r.status} ${String(r.stderr || '').slice(-300)}` }; } };
+  const cur = workOf(path.join(REPO, STORE), 'h3-work'), rel = workOf(relPath, 'h3-work-release');
+  ok(cur.w1 > 0 && cur.same === true && cur.w2 / cur.w1 <= BOUNDED_RATIO, `holder 3 IN WORK: an account of 2000 rows and one of 4000, the same 10 logs — the search does the same work (${cur.w1} / ${cur.w2}, ≤ ×${BOUNDED_RATIO}): it reads its logs' own rows, never the account's`, JSON.stringify(cur));
+  ok(rel.w1 > 0 && rel.same === true && rel.w2 / rel.w1 > BOUNDED_RATIO, `RED (the release's search, its two passes put back in a copy): ×${rel.w1 ? (rel.w2 / rel.w1).toFixed(2) : '?'} the work for twice the rows (${rel.w1} / ${rel.w2}) — the meter sees the walk over the account`, JSON.stringify(rel));
+  // THE SCENES, over ONE folder: the cure's store and the release's copy read the same disk
+  const dir = path.join(ROOT, 'h3-scenes');
+  fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+  const st = createChannelStore({ dir, log: { log() {}, warn() {} } });
+  const T0 = 1_700_000_000_000;
+  const eAcute = String.fromCharCode(0xe9) + '1', tri = String.fromCharCode(0xe91);   // both escape to «%e91» (2 and 3 hex digits)
+  const rec = (A, c, j) => makeRecord({ adapterId: A, convId: c, vendorId: `${c}-m${j}`, at: T0 + j, author: { id: 'u1', name: 'Ada' }, text: `a note ${j} ${'p'.repeat(200)}`, mentions: [], attachments: [] });
+  const plan = [['pa', 'k1', 10, 'One'], ['pa', 'k2', 50, 'Tie A'], ['pa', 'k3', 50, 'Tie B'], ['pa', 'k4', 30, ''], ['pa', 'k5', 40, 'Outside'], ['pa', 'chat 1', 20, 'Escaped'], ['pb', eAcute, 5, 'Acute'], ['pb', tri, 6, 'Tri'], ['pb', 'p1', 7, 'Plain']];
+  await st.index.update(() => {
+    for (const [A, c, at, title] of plan) { const e = st.index.entry(A, c); e.lastAt = T0 + at * 1000; e.title = title; }
+    const odd = st.index.entry('zz', 'odd1'); odd.adapterId = 'pa'; odd.lastAt = T0 + 45 * 1000; odd.title = 'Odd row';   // a row whose key is not its account's
+  });
+  let j = 0;
+  for (const [A, c] of plan) for (let r = 0; r < 2; r++) st.appendRecords(A, c, [rec(A, c, ++j)]);
+  st.appendRecords('pa', 'norow', [rec('pa', 'norow', ++j)]);   // a log with no row
+  st.appendRecords('pa', 'odd1', [rec('pa', 'odd1', ++j)]);
+  await st.index.durable();
+  const rs = REL.createChannelStore({ dir, log: { log() {}, warn() {} } });
+  const one = fs.statSync(st.logPath('pa', 'k1')).size;
+  const sync0 = ['readFileSync', 'readdirSync', 'statSync', 'existsSync', 'openSync', 'lstatSync'];
+  const reads = (store, fn) => async () => {   // the files a search opens, and its synchronous fs calls (none)
+    const seen = [], syncs = []; const rf = fs.promises.readFile, sf = fs.promises.stat, keep = {};
+    fs.promises.readFile = (f, ...a) => { seen.push(path.basename(String(f))); return rf.call(fs.promises, f, ...a); };
+    fs.promises.stat = (f, ...a) => { seen.push('stat:' + path.basename(String(f))); return sf.call(fs.promises, f, ...a); };
+    for (const k of sync0) { keep[k] = fs[k]; fs[k] = (...a) => { if (String(a[0] || '').startsWith(dir) && /channel-store[\w.-]*\.c?js/.test(String(new Error().stack || ''))) syncs.push(`${k} ${path.basename(String(a[0]))}`); return keep[k].apply(fs, a); }; }   // the store's own calls on the scenes' folder (the cure's module or the release's copy: by its frame)
+    try { const r = await fn(store); return { r: JSON.stringify(r), seen, syncs }; } finally { fs.promises.readFile = rf; fs.promises.stat = sf; for (const k of sync0) fs[k] = keep[k]; }
+  };
+  const SCENES = [
+    ['a person\'s search (no list): the order over every log, the tie, a log with no row, the escaped id, the odd row', (x) => x.search('pa', 'note', { limit: 100 })],
+    ['an agent\'s visible list (k5 outside it)', (x) => x.search('pa', 'note', { limit: 100, convIds: ['k1', 'k2', 'k3', 'k4', 'chat 1', 'norow', 'odd1'] })],
+    ['the existence call (the kept ids, limit 1)', (x) => x.search('pa', 'note', { limit: 1, convIds: ['k5'] })],
+    ['the byte cap (two logs\' bytes)', (x) => x.search('pa', 'note', { limit: 100, maxBytes: one * 2 + 1 })],
+    ['a match predicate', (x) => x.search('pa', 'note', { limit: 100, match: (r) => /note [2-6] /.test(r.text) })],
+    ['two ids that escape to one name (a fallback)', (x) => x.search('pb', 'note', { limit: 100 })],
+    ['two ids that escape to one name, the list naming one', (x) => x.search('pb', 'note', { limit: 100, convIds: [eAcute] })],
+  ];
+  const fb0 = st.searchStats().fallback, diffs = [], syncCalls = [];
+  for (const [what, fn] of SCENES) {
+    const a = await reads(st, fn)(), b = await reads(rs, fn)();
+    if (a.r !== b.r || a.seen.join() !== b.seen.join()) diffs.push({ what, cure: a.r.slice(0, 160), release: b.r.slice(0, 160), seenCure: a.seen, seenRelease: b.seen });
+    if (a.syncs.join() !== b.syncs.join()) syncCalls.push({ what, cure: a.syncs, release: b.syncs });
+  }
+  ok(diffs.length === 0, `WHO MAY SEE IS UNCHANGED: in each of ${SCENES.length} scenes the answer is the release's byte for byte, and the files it opens are the release's, in its order`, JSON.stringify(diffs).slice(0, 600));
+  const agent = await reads(st, SCENES[1][1])();
+  ok(!agent.seen.some((x) => /^(stat:)?k5\.ndjson$/.test(x)) && agent.seen.includes('k1.ndjson'), 'a log outside the caller\'s set is NEVER opened (no stat, no read of k5)', agent.seen.join());
+  ok(syncCalls.length === 0, 'nothing NEW on the loop: in every scene the store\'s synchronous fs calls are the release\'s, file for file (its scan reads each hit\'s side log as it did; the directory read stays the one it was)', JSON.stringify(syncCalls).slice(0, 600));
+  const person = await reads(st, SCENES[0][1])(), opened = person.seen.filter((x) => !x.startsWith('stat:'));
+  const WANT_ORDER = ['k2', 'k3', 'odd1', 'k5', 'k4', 'chat%201', 'k1', 'norow'].map((c) => `${c}.ndjson`);
+  ok(opened.join() === WANT_ORDER.join(), 'the logs opened newest first by their OWN rows: the tie by name (k2 before k3), the odd row by its own time, the escaped id read back to its row, the log with no row last', opened.join());
+  ok(st.searchStats().fallback - fb0 === 2, 'two ids that escape to ONE name take the release\'s pass for that search, COUNTED: once in each of its two scenes, in no other', JSON.stringify(st.searchStats()));
+  st.close(); rs.close();
+}
+
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
