@@ -1094,7 +1094,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
     ident.appendChild(el('span', 'bprof-label', String(k.label || k.browserKey || '')));
     if (k.kind === 'checking') ident.appendChild(el('span', 'bprof-chip', t('checking…'))); // B-7a30: its folder not checked since the hub started — redrawn when the check lands
     if (k.recovered) { const c = el('span', 'bprof-chip', t('found again')); c.title = t('Found again from its folder after the list of kept browsers was damaged — its tabs are not known'); ident.appendChild(c); }   // r3585
-    if (k.notKept) { const c = el('span', 'bprof-chip', t('not kept')); c.title = t('Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder'); ident.appendChild(c); }   // r3786 (hold 5)
+    if (k.notKept) { const c = el('span', 'bprof-chip', t('not kept')); c.title = k.notKept === 'kept_reconcile_unfinished' ? t('Not kept: its sign-ins end with it — VibeSpace had not finished reading its kept browsers when it was handed') : t('Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder'); ident.appendChild(c); }   // r3786 (hold 5)
     if (k.kind !== 'checking' && k.kind !== 'full') { const c = el('span', 'bprof-chip', t('tabs only')); c.title = k.kind === 'fenced' ? t('tabs only — this conversation is fenced to allowed domains, its logins are not kept') : t('tabs only — this browser had no folder of its own, its logins are not kept'); ident.appendChild(c); }
     ident.title = String(k.browserKey || '');
     row.appendChild(ident);

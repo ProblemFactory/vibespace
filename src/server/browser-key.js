@@ -192,17 +192,18 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
   function ensureBrowserKey(session, { sessionId = null } = {}) {
     if (session && B.isBrowserKey(session._browserKey)) return { ok: true, key: session._browserKey, minted: false };
     if (!session) return B.lateKeyRefusal('session_gone');
-    // r3961 (hold 3 (b), THE LATE DOOR): no NEW browser is handed before the kept folders' reconcile has ended or its bound is over — while
-    // one runs inside its bound (the start's, a lift's, or one asked again after an unknown) the first browser command is refused by name,
-    // «ask again in a moment»; past the bound the door goes on, and a key it MINTS is told by name (the kept store's start word)
-    const ks0 = (() => { const kk = kp(); try { return kk && typeof kk.keptStore === 'function' ? kk.keptStore() : null; } catch { return null; } })();
-    const order = ks0 && typeof ks0.startOrder === 'function' ? ks0.startOrder() : { done: true };
-    if (order && order.done === false && order.waiting) return refused(session, sessionId || liveIdOf(session), KEPT_RECONCILING);
     const f = factsFor(session, sessionId);
     const e = f.env;
     const v = B.lateKeyVerdict({ live: f.live, remote: f.remote, integrationOn: integrationOn(), isolationOn: isolationOn(e), envAvailable: !!(e && typeof e.envFor === 'function'),
       conversationId: f.conversationId, forkPending: f.forkPending, priorKey: f.priorKey, priorHolder: f.priorHolder });
     if (!v.ok) return refused(session, f.id, v);
+    // r3961 / r4094 (hold 3 (b), THE LATE DOOR): no NEW browser is minted before the kept folders' reconcile has ended or its flight's bound
+    // is over — asked AFTER the session's own refusals and only when this door would MINT (no key of its own found): while the flight runs
+    // inside its bound the first browser command is refused by name, «ask again in a moment» (the re-ask is the same wait: the session is
+    // the holder); past it the door goes on, and a key it MINTS is told by name (the kept store's start word)
+    const ks0 = (() => { const kk = kp(); try { return kk && typeof kk.keptStore === 'function' ? kk.keptStore() : null; } catch { return null; } })();
+    const order = !v.reuse && ks0 && typeof ks0.startOrder === 'function' ? ks0.startOrder(session) : { done: true };
+    if (order && order.done === false && order.waiting) return refused(session, f.id, KEPT_RECONCILING);
     // the spawn's own ladder: a conversation's key is kept (the resume rung), else minted
     const bk = B.browserKeyFor({ prior: v.reuse, resume: true, fork: false, mint: mintKey });
     // the spawn's pin ladder: the conversation's own pin (a kept key) > the Task Group default > the instance default
@@ -262,7 +263,10 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
       browserEnv: session._browserEnv || undefined, browserCap: Number.isInteger(session._browserCap) ? session._browserCap : undefined,
     };
     let persisted = false;
-    if (f.meta && f.meta.webuiSessionId && typeof persistMeta === 'function') {
+    // r4099: a key handed PAST the kept reconcile's bound is NOT KEPT — written into no session record (so nothing binds it: the conversation's
+    // place stays empty for its own folder's note), told by name below (hold 5's words)
+    const notKeptNow = !!(order && order.done === false);
+    if (!notKeptNow && f.meta && f.meta.webuiSessionId && typeof persistMeta === 'function') {
       try { persistMeta(session, patch); persisted = true; } catch (err) { try { log.warn?.(`[browser] ${f.id}: the late browser key was not persisted — ${err && err.message}`); } catch { } }
     }
     let bound = '';
@@ -270,10 +274,10 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     const origin = bk.origin === 'conversation' ? 'conversation' : 'new';
     try {
       log.log?.(`[browser] ${f.id}: had no browser key (it started before per-session browsers, or while they were off) — ${origin === 'conversation' ? `gave it its conversation's key ${bk.key} back` : `minted ${bk.key}`} for conversation ${v.conversationId.slice(0, 8)} on its first browser use (rung ${env.variant}${late.profileId ? `; pin ${late.profileId} ${late.origin}, ${late.source === 'witness' ? 'the pick its spawn witnessed at the start' : late.source === 'conversation' ? 'its conversation\'s own' : 'the default the user has now — a landing'}` : late.source === 'witness' ? '; no default was in force at its start' : ''})`
-        + (persisted ? (bound === bk.key ? '' : ` — the binding was NOT recorded (the store holds ${bound || 'nothing'} for it; the next resume decides from there)`) : ' — no session record to persist it to: this process keeps it, a later resume mints its own'));
+        + (persisted ? (bound === bk.key ? '' : ` — the binding was NOT recorded (the store holds ${bound || 'nothing'} for it; the next resume decides from there)`) : notKeptNow ? ' — NOT KEPT (handed past the kept reconcile\'s bound): written into no record, it takes no binding' : ' — no session record to persist it to: this process keeps it, a later resume mints its own'));
     } catch { /* never throws */ }
     try { global.__vsMetric?.('browser-key-late', 1); } catch { }
-    if (order && order.done === false && origin === 'new' && ks0 && typeof ks0.noteStartCode === 'function') { try { ks0.noteStartCode(bk.key, order.code); log.warn?.(`[browser] ${f.id}: ${order.code} — the kept browsers' notes were not read to their end within their bound when this conversation got its browser key; ${bk.key} is a new one`); } catch { /* the store says its own */ } }   // r3961 (hold 3 (b)): told by name
+    if (notKeptNow && ks0 && typeof ks0.noteStartCode === 'function') { try { ks0.noteStartCode(bk.key, order.code); log.warn?.(`[browser] ${f.id}: ${order.code} — the kept browsers' notes were not read to their end within their bound when this conversation got its browser key; ${bk.key} is a new one, NOT KEPT (no binding, no note: its own kept browser, if it has one, stays its own)`); } catch { /* the store says its own */ } }   // r3961 / r4099 (hold 3 (b)): not kept, told by name
     try { onLiveFactsChanged?.(); } catch { /* optional */ }
     return { ok: true, key: bk.key, minted: true, origin, variant: env.variant, conversationId: v.conversationId };
   }

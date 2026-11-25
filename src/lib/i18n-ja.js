@@ -9868,7 +9868,7 @@ export default {
   "VibeSpace cannot read which browser belongs to which conversation right now — no kept browser ends meanwhile, and it comes back by itself (it tries again every few minutes).": "VibeSpace はどのブラウザがどの会話のものかをいま読めません。その間に保持中のブラウザを終わらせることはなく、自動で戻ります（数分ごとに再試行します）。",
   "Which browser belongs to which conversation was damaged and found again from the conversations' records ({n} found). The damaged copy is kept as {copy}.": "ブラウザと会話の対応が壊れていたため、各会話の記録から見つけ直しました（{n} 件）。壊れたコピーは {copy} として保存しています。",
   "Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder": "保持されません：サインインはこのブラウザと共に消えます — それを保持するメモをフォルダに書き込めませんでした",
-  "A new browser: VibeSpace had not finished reading its kept browsers when this conversation resumed": "新しいブラウザです：この会話が再開したとき、VibeSpace は保持中のブラウザをまだ読み終えていませんでした",
+  "Not kept: its sign-ins end with it — VibeSpace had not finished reading its kept browsers when it was handed": "保持されません：サインインはこのブラウザと共に消えます — 渡されたとき、VibeSpace は保持中のブラウザをまだ読み終えていませんでした",
   "not measured since {ago}": "{ago}から未計測",
   "not kept": "保持されません",
   "{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them": "フォルダから見つけ直した {n} 個の保持中のブラウザは、「忘れる」を押すまで上限の外で保持されます",

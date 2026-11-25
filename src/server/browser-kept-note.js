@@ -102,7 +102,7 @@ async function writeNote(dir, doc, { timeoutMs = NOTE_WRITE_MS, fsp = fs.promise
       await fh.close(); fh = null;
       if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }
       await fsp.rename(tmp, fin);
-      if (cut && takeBack) await takeBackOwn(fin, ino, fsp);
+      if (cut && takeBack) await takeBackOwn(fin, ino, fsp, dir, doc);
       return cut ? { ok: false, code: 'kept_note_timeout' } : { ok: true };
     } catch (e) {
       const cl = fh ? await fh.close().then(() => null, (x) => x) : null;   // the temp's close on the failed road: said in the why, never swallowed
@@ -116,8 +116,15 @@ async function writeNote(dir, doc, { timeoutMs = NOTE_WRITE_MS, fsp = fs.promise
   try { return await Promise.race([work, bound]); } finally { clearTimeout(t); }
 }
 /** r3961 (1): a late landing's take-back — only when the file at the note's name is still the one this write renamed there (its inode) */
-async function takeBackOwn(fin, ino, fsp) {
-  if (ino === null || ino === undefined) return;
+async function takeBackOwn(fin, ino, fsp, dir = null, doc = null) {
+  if (ino === null || ino === undefined) {
+    // r4094 (small): the temp's inode could not be read — the note there is taken back when it is still THIS write's own (its three
+    // fields; the folder's chain lets no other write of ours land meanwhile); a note of other fields is another write's and stays
+    if (!dir || !doc) return;
+    const r = await readNote(dir, { fsp });
+    if (r.state === 'true' && r.doc.key === doc.key && r.doc.conversation === doc.conversation && r.doc.firstAt === doc.firstAt) await fsp.unlink(fin).catch(() => { });
+    return;
+  }
   const st = await fsp.lstat(fin).catch(() => null);
   if (st && st.ino === ino) await fsp.unlink(fin).catch(() => { });
 }
@@ -140,7 +147,9 @@ function serial(key, fn, waitMs = Infinity) {
   // the wait for the previous write is BOUNDED for a start (waitMs): past it this one writes nothing and answers «not kept», and the chain
   // stays on the previous write (a later one still waits for it)
   const free = waitMs === Infinity ? prev.then(() => true) : bounded(prev.then(() => true), waitMs, false);
-  const run = free.then((ok) => { if (!ok) return null; ran = true; return fn((p) => { held = p; }); });
+  // r4094 (small): a waiter that times out takes its own link back off the chain when it is still the last one — the waits of a folder
+  // whose write never ends do not pile up one a start
+  const run = free.then((ok) => { if (!ok) { if (chains.get(key) === end) chains.set(key, prev); return null; } ran = true; return fn((p) => { held = p; }); });
   const end = run.then(() => (ran ? held : prev), () => null).then(() => null, () => null);
   chains.set(key, end);
   end.then(() => { if (chains.get(key) === end) chains.delete(key); });
@@ -176,10 +185,11 @@ const QUIET_MS = 60 * 1000;
 /** remembered for the start (bounded: a run's keys), and joined into a TRUE note that names no conversation yet */
 function join(profileDir, key, conversation, { fsp = fs.promises } = {}) {
   const k = String(key || ''), c = convOf(conversation);
-  if (!KEY_RE.test(k) || !c) return null;
+  if (!KEY_RE.test(k) || !c || notKept.has(k)) return null;   // r4099: a key handed past the bound names no conversation in a note
   if (!decided.has(k)) { decided.set(k, c); if (decided.size > 8192) decided.delete(decided.keys().next().value); }
   if (decided.get(k) !== c || joined.has(k + '\0' + c)) return null;
   if (Date.now() - (quiet.get(k) || 0) < QUIET_MS) return null;
+  if (chains.has(k)) return null;   // r4094 (small): a write of this folder is in flight — one waiter a folder; the next record joins again
   const dir = path.join(profileDir, k);
   return serial(k, async (hold) => {
     const r = await bounded(readNote(dir, { fsp }), NOTE_WRITE_MS, { state: 'cut' });
@@ -191,6 +201,13 @@ function join(profileDir, key, conversation, { fsp = fs.promises } = {}) {
   }).catch(() => null);
 }
 const conversationDecided = (key) => decided.get(String(key || '')) || '';
+// r4099: THE KEYS A DOOR HANDED PAST THE KEPT RECONCILE's BOUND (this process) — NOT KEPT: no note names the conversation in their folder
+// (the store's startGate), and NO BINDING: the choke point (src/server/session-stdout.js) records none for them, the doors write them into no
+// session record — so the conversation's place stays empty for its own folder's note. Memory only (bounded): a key never written into a
+// record is bound by nothing after a restart either
+const notKept = new Set();
+function markNotKept(key) { const k = String(key || ''); if (!KEY_RE.test(k)) return false; notKept.add(k); if (notKept.size > 512) notKept.delete(notKept.values().next().value); return true; }
+const isNotKept = (key) => notKept.has(String(key || ''));
 
 // ── r3786 (hold 8): THE FOLDERS OF TODAY HAVE NO NOTE ──
 /**
@@ -273,4 +290,4 @@ async function unkeepConfig(configPath, keptDir, { fsp = fs.promises } = {}) {
   } catch (e) { return { ok: false, why: String((e && e.code) || (e && e.message) || 'failed') }; }
 }
 
-module.exports = { NOTE_NAME, NOTE_WRITE_MS, LIST_TIMEOUT_MS, ensureNote, join, conversationDecided, noteExisting, listFolders, unkeepConfig };
+module.exports = { NOTE_NAME, NOTE_WRITE_MS, LIST_TIMEOUT_MS, ensureNote, join, conversationDecided, markNotKept, isNotKept, noteExisting, listFolders, unkeepConfig };

@@ -1425,6 +1425,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // in the session's record (`browserPinAtStart`) as the WITNESS the late key restores, so a default the user
           // changes AFTER this session started never reaches it (a default reaches a conversation only at its start)
           let spawnPinWitness = null;
+          let spawnKeyNotKept = false;   // r4099: a key handed past the kept reconcile's bound — NOT KEPT: written into no record of this session (no binding)
           {
             const be0 = browserEnvOf();
             // r3786 (hold 3, THE START's ORDER): no conversation is handed a NEW browser before this start's reconcile of the kept folders'
@@ -1559,7 +1560,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               if (bk.origin === 'resume-unknown') {
                 console.warn(`[browser] ${id}: resuming ${String(data.resumeId).slice(0, 8)} but no previous browser key was recorded — minted ${bk.key} (this conversation's earlier browser, if any, is not reused)`);
                 // r3786 (hold 3): past the start's reconcile's bound — TOLD BY NAME (its code: the agent's first browser answer, the card)
-                if (keptOrder && keptOrder.code) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one`); try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }
+                if (keptOrder && keptOrder.code) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one, NOT KEPT (no binding, no note: its own kept browser stays its own)`); spawnKeyNotKept = true; try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }
               }
             }
             if (be.pairs.length) spawnEnvPairs.push(...be.pairs);
@@ -2074,6 +2075,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
+            // r4099: a key handed past the kept reconcile's bound is NOT KEPT — in no record (no binding: the conversation's place stays empty)
+            ...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined } : {}),
           });
 
           // Capture claudeSessionId from lock file for new (non-resume) Claude sessions.

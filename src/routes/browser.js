@@ -205,6 +205,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   takeovers_unread: 503,   // r3261: the takeover requests are held (unread) — the queue, an ask, a Done and a page verb wait for them
   kept_unread: 503,   // r3585 (lane card-door-in-chat): the list of kept browsers is held (unread, or being found again from its folders)
   kept_note_unwritten: 503, kept_note_timeout: 503, kept_note_unreadable: 503,   // r3786: a start that could not be kept AND could not start without its folder (rung C) — refused by name, nothing started
+  kept_reconcile_unfinished: 503,   // r4099: the same for a browser handed past the kept reconcile's bound (not kept) on rung C
   proxy_cloud_browser: 400, proxy_off_machine: 400, bad_proxy_credential: 400, bad_proxy_inline_credential: 400, proxy_unusable: 409, proxy_password_in_profile: 409, proxy_scheme_unsupported: 409, proxy_external_browser: 409, egress_proxy_missing: 409, proxy_credential_unreadable: 423,
   'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,

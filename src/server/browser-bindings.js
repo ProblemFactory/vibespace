@@ -360,6 +360,9 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
   function record(conversationId, key, { at = Date.now() } = {}) {
     const sid = typeof conversationId === 'string' ? conversationId : '';
     if (!sid || !KEY_RE.test(String(key || ''))) return false;
+    // r4099: a key a door handed PAST the kept reconcile's bound is NOT KEPT — it takes no binding (the conversation's place stays empty for
+    // its own folder's note); the note module holds the list (this process)
+    try { if (require('./browser-kept-note.js').isNotKept(key)) return false; } catch { /* the module says its own */ }
     { const H0 = HELD.get(file), g = H0 ? H0.gen : 0; if (g !== knownGen) { known.clear(); knownGen = g; } }   // r3717: a rebuild / a lift's write clears it
     if (known.get(sid) === key) return false;
     try {

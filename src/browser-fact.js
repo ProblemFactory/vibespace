@@ -151,9 +151,9 @@ function browserFactFor(session, view) {
   // lane browser-resume B (§3.9): what its own browser KEEPS once stopped (the live view's / the card's Resume reads it here)
   const kv = v.kept && typeof v.kept === 'object' ? v.kept : null;
   const kept = managed && kv && kv.kind !== 'none' ? { tabs: num(kv.tabs), kind: KEPT_KINDS.includes(kv.kind) ? kv.kind : 'tabs-only', why: kv.stoppedWhy ? str(kv.stoppedWhy) : null, restoreBy: kv.restoreBy === 'user' || kv.restoreBy === 'auto' ? kv.restoreBy : null, handedBack: kv.handedBack === true, waiting: num(kv.waiting) } : null;
-  // r3786 (holds 5 and 3): what the START of its own browser is told by — not kept (its folder's note could not be written), or a new
-  // browser handed past the start's reconcile — the card and the live view say it (startNoteWords)
-  const startNote = managed && kv ? (kv.notKept ? 'not-kept' : kv.beforeReconcile === true ? 'before-reconcile' : null) : null;
+  // r3786 / r4099 (holds 5 and 3): what the START of its own browser is told by — NOT KEPT, by hold 5's words: its folder's note could not be
+  // written, or it was handed past the kept reconcile's bound (kept_reconcile_unfinished) — the card and the live view say it (startNoteWords)
+  const startNote = managed && kv && kv.notKept ? (kv.notKept === 'kept_reconcile_unfinished' ? 'not-kept-reconcile' : 'not-kept') : null;
   const own = managed ? { label: pinned && PIN_RUNGS.includes(variant) && !atts.some((a) => str(a.profileId) === pinned.id) ? pinned.label : null, state: stateOf(v.own).state, ...(kept ? { kept } : {}), ...(startNote ? { startNote } : {}) } : null;
   const fact = { v: 1, key: bk, pinned, pinGone, pinCleared, using, own, lastUsed, differs, input, live: !!liveRef, liveRef: liveRef || null };
   // lane browser-stuck (2026-09-28): the page is held by a dialog / not responding — the dialog watch's fact, carried as
@@ -289,12 +289,12 @@ function keptLineWords(fact, tIn) {
 }
 
 /** r3786 (hold 5): the words where the person looks at the conversation's own browser (its live view, its newest chat card) when its
- *  start was NOT KEPT, or was handed a new browser past the start's reconcile ('' otherwise) */
+ *  start was NOT KEPT — its note unwritten, or handed past the kept reconcile's bound (r4099: hold 5's words both) ('' otherwise) */
 function startNoteWords(fact, tIn) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   const n = fact && fact.own && fact.own.startNote;
   if (n === 'not-kept') return t('Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder');
-  if (n === 'before-reconcile') return t('A new browser: VibeSpace had not finished reading its kept browsers when this conversation resumed');
+  if (n === 'not-kept-reconcile') return t('Not kept: its sign-ins end with it — VibeSpace had not finished reading its kept browsers when it was handed');
   return '';
 }
 /** The ref a live view shows for the browser in use (a profile id, the conversation's own, else none). */

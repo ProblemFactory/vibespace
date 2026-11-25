@@ -479,8 +479,9 @@ const DELETION_CALLS = Object.freeze({
   'src/server/browser-env.js': 1, 'src/server/browser-installs.js': 1, 'src/server/browser-keeper.js': 5, 'src/server/browser-kept.js': 7,
   // r3786 (card-door-in-chat): browser-kept.js +1 — adopted() takes the note out of a folder a profile adopted (no keep list: the registry rules
   // that folder); browser-kept-note.js 5 — the temps of the note's and of a session config's write, a note taken back past its bound (only the
-  // file that write put there: its inode), and a crash's leftover temp reaped at the folder's next write (r3961) — none keeps a list
-  'src/server/browser-kept-note.js': 5,
+  // file that write put there: its inode), and a crash's leftover temp reaped at the folder's next write (r3961); r4094 +1 — that take-back when
+  // the temp's inode could not be read (only a note still holding this write's own three fields) — none keeps a list
+  'src/server/browser-kept-note.js': 6,
   'src/server/browser-trace.js': 4, 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
   'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
   'src/server/engine-distribution.js': 15, 'src/server/handed-sweep.js': 1, 'src/server/home-rename.js': 1, 'src/server/hook-root-watch.js': 1, 'src/server/host-tokens.js': 3,

@@ -449,7 +449,7 @@ function helperNotKeptText() {
 /** r3786 (holds 5 and 3): what the AGENT is told ONCE in its command's answer (its tool prints it as a note, `browser_not_kept`) — a
  *  start that is NOT kept (its folder's note could not be written), or a resume handed a new browser past the start's reconcile */
 function startNoteText(code) {
-  if (code === 'kept_reconcile_unfinished') return 'VibeSpace had not finished reading its kept browsers when this conversation resumed (kept_reconcile_unfinished): its earlier browser, if it had one, was not found in time — this browser is a new one';
+  if (code === 'kept_reconcile_unfinished') return 'this conversation\'s browser is NOT KEPT this time: VibeSpace had not finished reading its kept browsers when it was handed (kept_reconcile_unfinished), so it is a new browser that runs without a kept folder for the rest of this session — a sign-in made now ends with it; the conversation\'s own kept browser, if it has one, stays its own for its next start';
   return `this conversation's browser is NOT KEPT this time: VibeSpace could not write the note in its folder that keeps its sign-ins (${String(code || 'kept_note_unwritten')}), so it runs without its folder for the rest of this session — a sign-in made now ends with it; the conversation's next resume tries again`;
 }
 /** …when its tabs are kept and were NOT reopened (a deliberate stop, D2): the verb that reopens them. */

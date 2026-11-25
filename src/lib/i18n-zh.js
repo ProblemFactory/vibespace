@@ -9869,7 +9869,7 @@ export default {
   "VibeSpace cannot read which browser belongs to which conversation right now — no kept browser ends meanwhile, and it comes back by itself (it tries again every few minutes).": "VibeSpace 暂时读不到哪个浏览器属于哪个对话——在此期间不会结束任何保留的浏览器，它会自己恢复（每隔几分钟重试一次）。",
   "Which browser belongs to which conversation was damaged and found again from the conversations' records ({n} found). The damaged copy is kept as {copy}.": "浏览器与对话的对应关系已损坏，已从各对话的记录中重新找回（找回 {n} 个）。损坏的副本保存为 {copy}。",
   "Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder": "未保留：登录状态会随它一起结束——无法在它的文件夹里写入保留它们的记录",
-  "A new browser: VibeSpace had not finished reading its kept browsers when this conversation resumed": "这是一个新浏览器：这个对话恢复时，VibeSpace 还没读完保留的浏览器",
+  "Not kept: its sign-ins end with it — VibeSpace had not finished reading its kept browsers when it was handed": "未保留：登录状态会随它一起结束——交给它时，VibeSpace 还没读完保留的浏览器",
   "not measured since {ago}": "自 {ago}起未测量",
   "not kept": "未保留",
   "{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them": "{n} 个从文件夹中重新找到的保留浏览器不计入上限，直到你点“忘记”",

@@ -436,7 +436,7 @@ console.log('⑮ r3585 / r3786 the panel and the words: the bindings\' hold; «n
   const NK = "    if (k.notKept) { const c = el('span', 'bprof-chip', t('not kept'));";
   const said = (line) => TV.includes(line) && !anchored(TV, line, '', 'r3786 the panel without it').includes(line);
   ok(said(NM) && said(OUT) && said(NK), 'the Agent browser panel says «not measured since …» (its age) in the size cell, that the found-again browsers are kept outside the limit until a Forget (LAW 3), and a start not kept by its chip (each line with a red copy)', null);
-  const keys = ['not measured since {ago}', '{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them', 'not kept', 'Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder', 'A new browser: VibeSpace had not finished reading its kept browsers when this conversation resumed'];
+  const keys = ['not measured since {ago}', '{n} kept browser(s) found again from their folders are kept outside the limit until you Forget them', 'not kept', 'Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder', 'Not kept: its sign-ins end with it — VibeSpace had not finished reading its kept browsers when it was handed'];
   ok(keys.every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':')), 'every new line has its zh and ja words', keys.filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':')));
   ok(!TV.includes('k.unnamedSinceDamage') && !ZH.includes('"no conversation names it since the bindings were damaged"'), 'the stood set is gone: no row says «no conversation names it since the bindings were damaged» any more (its fact is a folder\'s note now)', null);   // stale-pins: kept (a deliberate absence check)
   ok(TV.includes("    if (v.bindingsUnread) keptSec.appendChild(") && BT.includes("...(bindingsUnread ? { bindingsUnread } : {}), ...(bindingsRecovered ? { bindingsRecovered } : {}), "), 'the panel says the bindings\' hold and their rebuild (the view carries both)', null);
@@ -666,8 +666,9 @@ console.log('㉔ r3786 HOLD 3: THE START\'s ORDER — a resume during the start\
   o2.S.noteStartCode(N, r2.code);
   const b = o2.S.brief(N), words = BF.startNoteWords(BF.browserFactFor({ browserKey: N, variant: BF.MANAGED_RUNGS[0] }, { kept: b, now: Date.now() }));
   const told = o2.S.takeStartNote(N), again2 = o2.S.takeStartNote(N);
+  const g2 = await o2.S.startGate(N), noteN = fs.existsSync(path.join(o2.S.dirOf(N), NOTE));   // r4099: its start is NOT KEPT (no note)
   try { o2.S.shutdown(); } catch { }
-  ok(r2.done === false && r2.code === 'kept_reconcile_unfinished' && !!b && b.beforeReconcile === true && /A new browser/.test(words) && told === 'kept_reconcile_unfinished' && again2 === null && /kept_reconcile_unfinished/.test(KB.startNoteText(told)), 'past its bound the wait ends (unknown), and the start is TOLD BY NAME: the conversation\'s browser card says it is a new browser, the agent\'s first answer carries the code once', { r2, b, words, told, again2 });
+  ok(r2.done === false && r2.code === 'kept_reconcile_unfinished' && !!b && b.kind === 'not-kept' && b.notKept === 'kept_reconcile_unfinished' && /^Not kept: its sign-ins end with it — VibeSpace had not finished reading/.test(words) && told === 'kept_reconcile_unfinished' && again2 === null && /NOT KEPT this time/.test(KB.startNoteText(told)) && g2.kept === false && g2.code === 'kept_reconcile_unfinished' && !noteN, 'past its bound the wait ends (unknown), and the browser handed then is NOT KEPT (r4099), said by hold 5\'s words: the conversation\'s browser card «Not kept: its sign-ins end with it — …», the agent\'s first answer once; its start writes no note', { r2, b, words, told, again2, g2, noteN });
   const WC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
   const W1 = 'keptOrder = await be0.startKeyOrder({ resumeId: resumeAsk });', W2 = "const prior = resumeAsk ? (keptOrder ? keptOrder.prior : be0.priorKeyFor(data.resumeId)) : '';";
   const order = (x) => x.indexOf(W1) >= 0 && x.indexOf(W1) < x.indexOf(W2) && x.indexOf(W2) - x.indexOf(W1) < 1200;
@@ -729,7 +730,7 @@ const late = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ?
 lateEnd.n = 0;
 const N26c = await unwritableRun(KS0, late, { noteWriteMs: 80, ended: () => lateEnd.n > 0 });
 ok(N26c.kept === false && N26c.code === 'kept_note_timeout' && N26c.left.length === 0, 'a write that lands PAST its bound is taken back: the folder of a browser told «not kept» holds no note after it (nothing reads it as kept later)', N26c);
-const N26cx = await unwritableRun(overKN(anchored(anchored(KNSRC, "      if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }\n", '', 'r3786 no cut before the rename'), '      if (cut && takeBack) await takeBackOwn(fin, ino, fsp);\n', '', 'r3786 a late landing left'), 'kept-sweep-late-note').KS, late, (lateEnd.n = 0, { noteWriteMs: 80, ended: () => lateEnd.n > 0 }));
+const N26cx = await unwritableRun(overKN(anchored(anchored(KNSRC, "      if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }\n", '', 'r3786 no cut before the rename'), '      if (cut && takeBack) await takeBackOwn(fin, ino, fsp, dir, doc);\n', '', 'r3786 a late landing left'), 'kept-sweep-late-note').KS, late, (lateEnd.n = 0, { noteWriteMs: 80, ended: () => lateEnd.n > 0 }));
 ok(N26cx.left.includes(NOTE), 'RED CONTROL (a late landing left in place): a browser told «not kept» has a note in its folder after all — red', N26cx);
 {
   const d = noteWorld({}), kept = path.join(d, 'browser-profiles', freshKey()), cfg = path.join(d, 'browser-env', 'bk-madeup.json'), other = path.join(d, 'browser-env', 'bk-other.json');
@@ -910,7 +911,7 @@ console.log('㉝ r3961 (3): HOLD 3 AT EVERY DOOR — (a) a create waits for a re
     return { prior: r.prior === K, code: r.code };
   };
   const A = await aRun(KS0);
-  const Ax = await aRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    if (recState === 'done' && !recBusy) return Promise.resolve({ done: true, code: null });\n    if (!notDoneSince)", "    if (recState === 'done') return Promise.resolve({ done: true, code: null });\n    if (!notDoneSince)", 'r3786 the start\'s reconcile only'), 'kept-sweep-lift-wait'));
+  const Ax = await aRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    if (recState === 'done' && !recBusy) return Promise.resolve({ done: true, code: null });\n    const p = recBusy ||", "    if (recState === 'done') return Promise.resolve({ done: true, code: null });\n    const p = recBusy ||", 'r3786 the start\'s reconcile only'), 'kept-sweep-lift-wait'));
   ok(A.prior && A.code === null && !Ax.prior, '(a) a create during a LIFT\'s reconcile waits for it: its resume\'s key is its folder\'s (the binding made again from the note) — RED (the wait covers the start\'s reconcile only): it reads no binding and would mint a new browser', { A, Ax });
   // (b) THE LATE DOOR (browser-key.js ensureBrowserKey, the routes' first browser command of a keyless session)
   const bRun = async (BKm) => {
@@ -932,7 +933,7 @@ console.log('㉝ r3961 (3): HOLD 3 AT EVERY DOOR — (a) a create waits for a re
   };
   const BK0 = require(path.join(REPO, 'src/server/browser-key.js'));
   const Bv = await bRun(BK0);
-  const Bx = await bRun(MUT.load('src/server/browser-key.js', anchored(BKS, '    if (order && order.done === false && order.waiting) return refused(session, sessionId || liveIdOf(session), KEPT_RECONCILING);\n', '', 'r3786 the late door asks nothing'), 'kept-sweep-late-door'));
+  const Bx = await bRun(MUT.load('src/server/browser-key.js', anchored(BKS, '    if (order && order.done === false && order.waiting) return refused(session, f.id, KEPT_RECONCILING);\n', '', 'r3786 the late door asks nothing'), 'kept-sweep-late-door'));
   ok(Bv.during === 'kept_reconciling' && Bv.after === 'its own' && Bx.during === 'a NEW key', '(b) THE LATE DOOR: while the reconcile runs its first browser command is refused by name (kept_reconciling, «ask again in a moment»); after it the conversation gets ITS OWN key back (the binding made again from the note) — RED (the door asks nothing): a NEW browser over its own kept one', { Bv, Bx });
   // (c) a reconcile that ended UNKNOWN is asked again by the next wait
   const cRun = async (KS) => {
@@ -948,6 +949,40 @@ console.log('㉝ r3961 (3): HOLD 3 AT EVERY DOOR — (a) a create waits for a re
   const Cv = await cRun(KS0);
   const Cx = await cRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    const p = recBusy || reconcile(recStart ? 'a start of a conversation\\'s browser' : 'start');\n    if (!recStart) recStart = p;", "    if (!recStart) recStart = reconcile('start');\n    const p = recStart;", 'r3786 the start\'s answer for good'), 'kept-sweep-ask-again'));
   ok(Cv.first === false && Cv.second === true && Cx.second === false, '(c) the start\'s reconcile ended unknown; the next wait ASKS AGAIN and is done — RED (the start\'s answer kept for the run): every later start is told «had not finished» and waits for nothing', { Cv, Cx });
+  // (d) r4094 ONE BOUND A FLIGHT: the start's reconcile ended UNKNOWN; half an hour later on a PLACED monotonic clock (far past the bound) a
+  // resume of a conversation whose binding lives only in its folder's note — its door begins the flight and WAITS for it: its own folder
+  const dRun = async (KS) => {
+    let fail = true, clock = 1000;
+    const K = freshKey(), C = freshConv();
+    const dir = noteWorld({ folders: [[K, { key: K, conversation: C, firstAt: 1000 }]], rows: { [K]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+    const o = startOver(dir, KS, { mono: () => clock, listFolders: (d, oo) => (fail ? Promise.resolve({ ok: false, why: 'made-up: the listing timed out on a loaded start' }) : KNM.listFolders(d, oo)) });
+    const be = BE.create({ dataDir: dir, homeDir: path.join(dir, 'home'), serverSetting: () => undefined, log: quiet, socketDirBase: path.join(dir, 'sock'), keptReady: () => o.S.reconciled() });
+    const r1 = await o.S.reconciled();   // the start's flight: ended unknown
+    fail = false; clock += 30 * 60e3;    // half an hour on the placed clock; the listing answers again
+    const r = await be.startKeyOrder({ resumeId: C });
+    try { o.S.shutdown(); } catch { }
+    return { first: r1.done, own: r.prior === K, code: r.code };
+  };
+  const Dv = await dRun(KS0);
+  const Dx = await dRun(MUT.load('src/server/browser-kept.js', anchored(anchored(KSRC, '  let recFlight = 0, recFlightEnded = 0, recBusySince = 0;\n', '  let recFlight = 0, recFlightEnded = 0, recBusySince = 0, streak0 = 0;\n', 'r3961 the streak\'s field'), '    const left = Math.min(ms, RECONCILE_WAIT_MS - (mono() - recBusySince));', '    if (!streak0) streak0 = mono(); const left = Math.min(ms, RECONCILE_WAIT_MS - (mono() - streak0));', 'r3961 one bound a streak'), 'kept-sweep-streak'));
+  ok(Dv.first === false && Dv.own && Dv.code === null && !Dx.own && Dx.code === 'kept_reconcile_unfinished', '(d) ONE BOUND A FLIGHT (r4094): the start\'s reconcile ended unknown; half an hour later (a placed clock that never steps back) the resume\'s door begins a new flight and waits for it — the conversation gets ITS OWN folder, no new browser — RED (one bound a streak, 922cc8494): its wait is the streak\'s remainder, nothing; it reads no binding and would mint a new browser over its own note', { Dv, Dx });
+  // (e) r4094 THE LATE DOOR's re-ask is the SAME wait: refused while its flight runs; that flight ended unknown ⇒ its wait is over (it goes
+  // on, told by name) — never refused for good while every reconcile ends unknown
+  const eRun = async (KS) => {
+    const dir = noteWorld({});
+    let release; const gateP = new Promise((r) => { release = r; });
+    const o = startOver(dir, KS, { listFolders: () => gateP.then(() => ({ ok: false, why: 'made-up: every listing fails' })) });
+    const session = { name: 'made-up' };
+    const f0 = o.S.reconciled();   // the start's flight, held at its listing
+    const first = o.S.startOrder(session);
+    release(); await f0;           // that flight ends UNKNOWN
+    const second = o.S.startOrder(session);
+    try { o.S.shutdown(); } catch { }
+    return { first: first.waiting, second: second.waiting, secondDone: second.done };
+  };
+  const Ev = await eRun(KS0);
+  const Ex = await eRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, '      if (asked !== undefined && asked <= recFlightEnded) { lateAsked.delete(h); return { done: false, waiting: false, code: RECONCILE_CODE }; }   // its flight ended unknown: its wait is over\n', '', 'r4094 a re-ask begins a new wait'), 'kept-sweep-late-reask'));
+  ok(Ev.first === true && Ev.second === false && Ev.secondDone === false && Ex.second === true, '(e) THE LATE DOOR (r4094): refused while the flight it waits for runs; when that flight ended unknown, the session\'s re-ask is the end of the same wait — it goes on, told by name — RED (each re-ask a new wait): refused again, for good while every reconcile ends unknown', { Ev, Ex });
   const WC2 = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
   ok(WC2.includes('keptOrder = await be0.startKeyOrder({ resumeId: resumeAsk });') && WC2.includes("const prior = resumeAsk ? (keptOrder ? keptOrder.prior : be0.priorKeyFor(data.resumeId)) : '';"), 'WIRING: ws-create asks the create\'s door (startKeyOrder) for the wait AND the resume\'s prior key — the door ㉝ (a) drives', null);
 }
@@ -1036,17 +1071,25 @@ console.log('㊲ r3963 (item 6): LAW 4 — a folder a STANDING BINDING names is 
   const withStore = async (KS) => {
     const s = scene();
     const dir = restartCopy(s.dir);
+    for (const k of [s.A, s.B]) twoHoursOld(path.join(dir, 'browser-profiles', k));   // the copy keeps the folders' old time
     const o = startOver(dir, KS);
+    const t0 = Date.now();
     await o.S.reconciled();
     o.be.sweep(new Set(), { graceMs: 0 });
     const note = noteOf(path.join(dir, 'browser-profiles', s.A));
-    const out = { row: o.S.has(s.A), note: !!note && note.key === s.A && note.conversation === s.C, bound: o.bb.lookup(s.C) === s.A, kept: o.there(s.A), other: o.there(s.B) };
+    const e = o.S.get(s.A);
+    const out = { row: o.S.has(s.A), note: !!note && note.key === s.A && note.conversation === s.C, bound: o.bb.lookup(s.C) === s.A, kept: o.there(s.A), other: o.there(s.B), last: e ? e.lastUsedAt : null, t0 };
     try { o.S.shutdown(); } catch { }
     return out;
   };
   const II = await withStore(KS0);
   const IIx = await withStore(MUT.load('src/server/browser-kept.js', anchored(KSRC, "          const w = await KN.ensureNote(path.join(PROFILE_DIR, d.name), d.name, sid, { timeoutMs: noteWriteMs, now: () => d.mtimeMs || now(), ...(noteFs ? { fsp: noteFs } : {}) });", '          const w = null;', 'r3786 no note for a bound folder'), 'kept-sweep-bound-note'));
   ok(II.row && II.note && II.bound && II.kept && !II.other && !IIx.row && !IIx.note, '(ii) a start over the same data: the reconcile gives the bound folder its NOTE (true to its folder, the binding\'s conversation) and its ROW; the boot sweep spares it, removes the folder nothing names — RED (no note for a bound folder): it stays a folder with no row and no note', { II, IIx });
+  // (iii) r4094 (the coordinator's ruling): the SIZE BOUND may remove a bound, measured, ordinary row, least recently used first — but a row the
+  // REPAIR made is last used at the repair, never first in that line by its folder's old time
+  const firstOut = (x) => { if (!x.last) return null; const other = freshKey(); const pl = KB.keptRetentionPlan({ entries: [{ key: 'bk-0000a001', bytes: 10 * KB.MB, cacheBytes: 0, lastUsedAt: x.last }, { key: other, bytes: 10 * KB.MB, cacheBytes: 0, lastUsedAt: Date.now() - 3600e3 }], perConversation: 100 * KB.MB, total: 15 * KB.MB }); return pl.remove.length ? (pl.remove[0].key === 'bk-0000a001' ? 'the repaired row' : 'the other row') : 'none'; };
+  const III = await withStore(MUT.load('src/server/browser-kept.js', anchored(KSRC, 'last = repaired.has(k) ? now() : Math.max(n.firstAt, n.mtimeMs || 0);', 'last = Math.max(n.firstAt, n.mtimeMs || 0);', 'r3963 the repaired row stamped with its folder\'s time'), 'kept-sweep-repair-stamp'));   // stale-pins: kept (the red: the folder's old time)
+  ok(II.last >= II.t0 && firstOut(II) === 'the other row' && III.row && III.last < III.t0 && firstOut(III) === 'the repaired row', '(iii) the repaired row is last used AT THE REPAIR: over the total, the least recently used OTHER row goes first — RED (its folder\'s old time): the repaired row is first in the size bound\'s line', { II: { last: II.last, t0: II.t0, first: firstOut(II) }, III: { last: III.last, t0: III.t0, first: firstOut(III) } });
 }
 
 console.log('⑭b r3961 (5): THE BINDINGS\' REBUILD CHILD starts with the allowlisted environment');
@@ -1078,9 +1121,86 @@ console.log('㊳ r3961 (5): THE PERSON\'s TWO SENTENCES WHERE THEY ARE DRAWN —
   const LIVE = '    renderKeptNote();   // r3786: every move of the fact or the status asks it again';
   const liveDrawn = (x) => { const r = x.indexOf('  function renderResume() {'); return r > 0 && x.indexOf(LIVE, r) === x.indexOf('\n', r) + 1 && x.includes('  shareLine.after(keptNoteLine);') && x.includes('const words = own ? startNoteWords(f, t) : \'\';'); };
   const cardRed = anchored(CR, CARD, '', 'r3786 the card draws nothing').replace("    if (b.phase === 'end') {\n", "    if (b.phase === 'end') {\n" + CARD + '\n');   // moved into the end card only
-  ok(cardBoth(CR) && !cardBoth(cardRed) && liveDrawn(LW) && !liveDrawn(anchored(LW, LIVE + '\n', '', 'r3786 the live view never asks')), 'the chat card draws «Not kept…» / «A new browser…» from THE fact in BOTH its phases (RED: moved into the end card only — the start card would say nothing); the live view asks it at every move of the fact and draws it under its share line (RED: never asked)', null);
+  ok(cardBoth(CR) && !cardBoth(cardRed) && liveDrawn(LW) && !liveDrawn(anchored(LW, LIVE + '\n', '', 'r3786 the live view never asks')), 'the chat card draws «Not kept…» (its two reasons) from THE fact in BOTH its phases (RED: moved into the end card only — the start card would say nothing); the live view asks it at every move of the fact and draws it under its share line (RED: never asked)', null);
   const f = (n) => BF.startNoteWords({ own: { startNote: n } });
-  ok(/^Not kept: its sign-ins end with it/.test(f('not-kept')) && /^A new browser: VibeSpace had not finished reading/.test(f('before-reconcile')) && f(null) === '', 'the two sentences themselves (THE fact\'s words): «Not kept: its sign-ins end with it — …» and «A new browser: …»; nothing for a start that was kept', null);
+  ok(/^Not kept: its sign-ins end with it — the note/.test(f('not-kept')) && /^Not kept: its sign-ins end with it — VibeSpace had not finished reading/.test(f('not-kept-reconcile')) && f('before-reconcile') === '' && f(null) === '', 'the two sentences themselves (THE fact\'s words, r4099: hold 5\'s words both): «Not kept: its sign-ins end with it — the note …» and «… — VibeSpace had not finished reading …»; no «A new browser» any more; nothing for a start that was kept', null);   // stale-pins: kept (a deliberate absence: no «A new browser» phase)
+  const fk = (code) => BF.browserFactFor({ browserKey: freshKey(), variant: BF.MANAGED_RUNGS[0] }, { kept: { tabs: 0, kind: 'not-kept', notKept: code }, now: Date.now() }).own.startNote;
+  ok(fk('kept_reconcile_unfinished') === 'not-kept-reconcile' && fk('kept_note_timeout') === 'not-kept', 'THE fact names which: a browser handed past the bound → its own sentence; a note not written → hold 5\'s', null);
+}
+
+console.log('㊴ r4099: PAST ITS BOUND A DOOR HANDS A BROWSER THAT IS NOT KEPT — no binding, no note naming the conversation; the reconcile, when it at last reads the conversation\'s OWN note, binds that folder into the empty place; a sweep past the grace keeps it and ends the not-kept one');
+{
+  const BKr = require(path.join(REPO, 'src/server/browser-key.js'));
+  const BPr = require(path.join(REPO, 'src/browser-profiles.js'));
+  // the scene (the verifier's scene 3): a conversation's ONLY fact on disk is its old kept folder's note (no row, no binding); the start's
+  // reconcile hangs at its listing; a placed monotonic clock passes the flight's bound; the wall clock passes the grace for the sweep
+  const scene = () => {
+    const OLD = freshKey(), C = freshConv();
+    const dir = noteWorld({ folders: [[OLD, { key: OLD, conversation: C, firstAt: 1000 }]] });
+    let release; const gateP = new Promise((r) => { release = r; });
+    const clocks = { mono: 1000, wall: Date.now() };   // the wall clock near the folders' own times (the rows read them)
+    const o = startOver(dir, KS0, { mono: () => clocks.mono, now: () => clocks.wall, graceMs: 60000, listFolders: (d, oo) => gateP.then(() => KNM.listFolders(d, oo)) });
+    return { OLD, C, dir, o, release, clocks };
+  };
+  // the keeper's start of a handed key (its gate; the run and stop it tells the store, on its kept folder only when kept), then the
+  // listing answers, then a sweep past the grace and the boot sweep
+  const ending = async (s, NEW, f0) => {
+    const g = NEW ? await s.o.S.startGate(NEW) : null;
+    if (NEW) { fs.mkdirSync(s.o.S.dirOf(NEW), { recursive: true }); if (g.kept) fs.writeFileSync(path.join(s.o.S.dirOf(NEW), 'Cookies'), 'a sign-in in the new one'); s.o.S.noteStart(NEW, { hasDir: !!g.kept }); s.o.S.noteStop(NEW, { why: 'idle', hasDir: !!g.kept }); }
+    s.release(); await f0;
+    const boundTo = s.o.bb.lookup(s.C);
+    s.clocks.wall += 3 * 3600e3;
+    await s.o.S.sweep();
+    s.o.be.sweep(new Set(), { graceMs: 0 });
+    const out = { gate: g ? g.kept : null, noteNew: NEW ? fs.existsSync(path.join(s.o.S.dirOf(NEW), NOTE)) : null, bound: boundTo === s.OLD ? 'its OWN old browser' : boundTo && boundTo === NEW ? 'the NEW browser' : boundTo || 'none', oldLeft: fs.existsSync(path.join(s.dir, 'browser-profiles', s.OLD, 'Cookies')), newLeft: NEW ? fs.existsSync(s.o.S.dirOf(NEW)) : null };
+    try { s.o.S.shutdown(); } catch { }
+    return out;
+  };
+  // (i) THE LATE DOOR (browser-key.js ensureBrowserKey, a live session's first browser command), the product's door over the leg's store;
+  // a persisted key goes through its stand-in of the ONE choke point (the session's record binds it)
+  const lateRun = async (BKm) => {
+    const s = scene();
+    const session = { claudeSessionId: s.C, cwd: s.dir, name: 'made-up' };
+    const recorded = [];
+    const persistMeta = (x, patch) => { recorded.push(patch.browserKey); s.o.bb.record(s.C, patch.browserKey); };
+    const keys = BKm.create({ browserEnv: () => s.o.be, keeper: () => ({ keptStore: () => s.o.S }), activeSessions: new Map([['sess-made-up-1', session]]), persistMeta, readMeta: () => ({ webuiSessionId: 'sess-made-up-1', claudeSessionId: s.C }), log: quiet });
+    const f0 = s.o.S.reconciled();   // the start's flight: its listing hangs
+    const inside = keys.ensureBrowserKey(session, { sessionId: 'sess-made-up-1' });
+    s.clocks.mono += 25_000;         // past the flight's bound
+    const past = keys.ensureBrowserKey(session, { sessionId: 'sess-made-up-1' });
+    const NEW = past.ok && past.key !== s.OLD ? past.key : null;
+    const told = NEW ? s.o.S.takeStartNote(NEW) : null, card = NEW ? s.o.S.brief(NEW) : null;
+    return { inside: inside.ok ? 'handed' : inside.why, handed: !!NEW, recorded: recorded.length, told, card: card && card.kind, ...(await ending(s, NEW, f0)) };
+  };
+  const Lv = await lateRun(BKr);
+  const Lx = await lateRun(MUT.load('src/server/browser-key.js', anchored(BKS, '    const notKeptNow = !!(order && order.done === false);\n', '    const notKeptNow = false;\n', 'r4094 the mint, kept and in the record'), 'kept-sweep-late-mint'));
+  ok(Lv.inside === 'kept_reconciling' && Lv.handed && Lv.recorded === 0 && Lv.told === 'kept_reconcile_unfinished' && Lv.card === 'not-kept' && Lv.gate === false && Lv.noteNew === false && Lv.bound === 'its OWN old browser' && Lv.oldLeft && Lv.newLeft === false
+    && Lx.bound === 'the NEW browser' && !Lx.oldLeft,
+    '(i) THE LATE DOOR: refused by name inside the bound; past it the browser handed is NOT KEPT (written into no record, so no binding; its start writes no note; the agent told once, the card «not kept»); the reconcile then binds the conversation\'s OWN old folder, and a sweep past the grace keeps its sign-ins and ends the not-kept one — RED (today\'s mint, its key in the session\'s record): the mint takes the conversation\'s place, the old folder «moved on» and its sign-ins are removed', { Lv, Lx });
+  // (ii) THE CREATE's DOOR (browser-env startKeyOrder, the one ws-create asks) past its bound: the order it answers, then ws-create's own rule
+  // for the key it mints there (read in its text below: told, NOT KEPT, written into no record) — the store's half run here
+  const createRun = async (recordIt) => {
+    const s = scene();
+    const be = BE.create({ dataDir: s.dir, homeDir: path.join(s.dir, 'home'), serverSetting: () => undefined, log: quiet, socketDirBase: path.join(s.dir, 'sock'), keptReady: () => s.o.S.reconciled() });
+    const f0 = s.o.S.reconciled();
+    s.clocks.mono += 25_000;
+    const r = await be.startKeyOrder({ resumeId: s.C });
+    const bk = BPr.browserKeyFor({ prior: r.prior, resume: true, fork: false, mint: BKr.mintKey });
+    if (!recordIt && bk.origin === 'resume-unknown' && r.code) s.o.S.noteStartCode(bk.key, r.code);   // ws-create's rule (its text below): told, NOT KEPT
+    if (recordIt) s.o.bb.record(s.C, bk.key);   // the create before r4099: its key in the session's record (the choke point binds it), kept
+    return { order: r.code, origin: bk.origin, ...(await ending(s, bk.key, f0)) };
+  };
+  const Cv2 = await createRun(false), Cx2 = await createRun(true);
+  ok(Cv2.order === 'kept_reconcile_unfinished' && Cv2.origin === 'resume-unknown' && Cv2.gate === false && Cv2.noteNew === false && Cv2.bound === 'its OWN old browser' && Cv2.oldLeft && Cv2.newLeft === false && Cx2.bound === 'the NEW browser' && !Cx2.oldLeft,
+    '(ii) THE CREATE\'s DOOR past its bound: a resume-unknown key, NOT KEPT and in no record — the reconcile binds the conversation\'s own folder, the sweep keeps it — RED (the key in the record): the old folder ends', { Cv2, Cx2 });
+  const WC4 = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  const R1 = 'spawnKeyNotKept = true; try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); }', R2 = '            ...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined } : {}),\n          });';
+  const createRule = (x) => x.includes(R1) && x.includes(R2) && x.indexOf(R2) > x.indexOf('            browserKey: session._browserKey || undefined,');
+  ok(createRule(WC4) && !createRule(anchored(WC4, R2, '          });', 'r4094 the create\'s key in its record')), 'WIRING: ws-create, past its bound, tells, marks the key NOT KEPT, and its record drops the key (after the field that writes it) — RED (the key in the record)', null);
+  // the SECOND BELT: the bindings' ONE writer (record) binds no key the note module marks not kept — whoever writes a record with it
+  const beltRun = (BBm) => { const dir = noteWorld({}); const bb = BBm.create({ dataDir: dir, log: quiet }); const k = freshKey(), C = freshConv(); KNM.markNotKept(k); const r = bb.record(C, k); return { refused: r === false, bound: bb.lookup(C) || '' }; };
+  const Bt = beltRun(BB0), Btx = beltRun(MUT.load('src/server/browser-bindings.js', anchored(BBS4, "    try { if (require('./browser-kept-note.js').isNotKept(key)) return false; } catch { /* the module says its own */ }\n", '', 'r4094 the writer binds any key'), 'kept-sweep-belt'));
+  ok(Bt.refused && Bt.bound === '' && Btx.bound !== '', 'the bindings\' writer binds no key handed past the bound (a second belt beside the doors) — RED (no belt): a record with that key takes the conversation\'s place', { Bt, Btx });
 }
 
 report();
