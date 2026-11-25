@@ -185,7 +185,12 @@ class AccountManager {
   // ── S2 generic credential helpers (read the harness descriptor, never a backend-id branch) ──
   _credsOf(be) { return harnessOf(be || 'claude').creds; }
   _acctDir(be, id) { return path.join(this._dataDir, this._credsOf(be).subsDirName, id); }
-  _readAuthFor(be, id) { return this._credsOf(be).parseAuth(this._acctDir(be, id)); }
+  _readAuthFor(be, id) { return this._signInAnswer(this.get(id), () => this._credsOf(be).parseAuth(this._acctDir(be, id))); }
+  /** 主开发 r4177 (1) / r4200 (1)(2) — THE ONE CHOKE POINT: every read of a row's sign-in folder that decides «signed in» (readSubCreds,
+   *  the pool's placement, the remote ship, the pool-to-subscription link, the engine's read) and the list's display rows answer through
+   *  this rule: while a row ASKS, the signed-out shape ONLY — no token, no identity of the sign-in in question, whatever its folder
+   *  holds (its move into the hold could not finish). `read` runs only for a row that does not ask */
+  _signInAnswer(a, read) { return a && a.reloginAsk ? { loggedIn: false } : read(); }
   /** An isolated-home account's spawn env: the descriptor's `creds.spawnEnv(dir)` when it declares one (antigravity:
    *  HOME = the account's root + the bus disabled — a name no `*EnvVar` field may carry, those are stripped from
    *  every agent), else its one `spawnEnvVar` pointed at the dir (codex's CODEX_HOME). */
@@ -623,7 +628,7 @@ class AccountManager {
           // a.email = manual backfill (setEmail) for dirs whose login never
           // wrote the identity file; the dir's own identity wins when present.
           const d = this._displayOf(a);   // B-360d: the folder's KEPT facts — no file is opened here
-          const info = (d.state === 'read' && d.auth) || {};
+          const info = this._signInAnswer(a, () => (d.state === 'read' && d.auth) || {});   // r4200: an asking row's line reads signed out, as every read does
           // loginState (2026-09-07): the LOGIN SESSION's own deadline, so every
           // surface can warn BEFORE the refresh fails instead of after a dead
           // turn. 'unknown' where the harness declares no reader.
@@ -922,13 +927,7 @@ class AccountManager {
   // Read-only parse of a subscription account's creds. NEVER writes/refreshes
   // (rotation would break the account, issue #20). Returns loggedIn + identity
   // + the access token IF currently valid (for the usage poll).
-  readSubCreds(id) {   // the parser lives on the claude harness descriptor (S2)
-    const r = this._credsOf('claude').parseAuth(this.subDir(id));
-    // 主开发 r4177 (1): WHILE A ROW ASKS IT READS SIGNED OUT — a sign-in still in its own folder (its move into the hold could not
-    // finish) is the question's, never a login a conversation starts on: a spawn refuses it by name («not logged in»), a pool routes round it
-    const a = r && r.loggedIn ? this.get(id) : null;
-    return a && a.reloginAsk ? { ...r, loggedIn: false } : r;
-  }
+  readSubCreds(id) { return this._signInAnswer(this.get(id), () => this._credsOf('claude').parseAuth(this.subDir(id))); }   // the parser lives on the claude harness descriptor (S2); WHILE A ROW ASKS IT READS SIGNED OUT (_signInAnswer, the one rule: a spawn refuses «not logged in», the pool places nothing on it)
   /** A LOOK-AGAIN READ (B-403e): the member's sign-in folder asked of the mount ITSELF — never the synchronous run's earlier
    *  answer (src/run-reads.js) — for a check whose purpose is «look again before I write»; its answer is the run's from then on.
    *  The callers, each before a write: pendingSignin and discardPendingSignin (a row handed to a sign-in or removed),
@@ -1194,6 +1193,18 @@ class AccountManager {
   }
   /** THE PERSON's ANSWER to a held sign-in («ask»), on the row: 'same' ⇒ the sign-in returns into this row (in place); 'another' ⇒ a
    *  NEW row is made around it. → { outcome: 'same' | 'split' | 'none' (nothing asked) | 'gone' (nothing held any more) } */
+  /** 主开发 r4200 (3) — AN ANSWER's MOVE THAT MOVED NOTHING: while the sign-in still sits in the row or in the hold, the question is PUT
+   *  BACK (on disk, as its removal was: the synchronous road, a landing that fails stays owed) and the answer is refused BY NAME; «gone»
+   *  is said only when the sign-in sits nowhere. (A move that moved the credentials and not the config counts as moved: r2734 (b)
+   *  removes the destination's config, so both reads then say signed in, with no address until the CLI writes its config again.) */
+  _reloginMoveFailed(id, asked, where) {
+    const a = this.get(id);
+    if (!a || !this._heldSignInAt(id)) { this._notify(); return { outcome: 'gone' }; }
+    a.reloginAsk = asked;
+    this._saveOrOwe('the question put back');
+    this._displaySeed(a); this._notify();
+    return { outcome: 'refused', code: 'relogin_move_failed', error: `the new sign-in could not be moved ${where}, so this row still asks about it — answer again, or sign in again` };
+  }
   reloginAnswer(id, answer) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
@@ -1212,7 +1223,7 @@ class AccountManager {
       try { this._save({ now: true, why: 'the answer to the question about the new sign-in' }); }
       catch (e) { if (e && e.signInSave) { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }
       if (at === 'row') return { outcome: 'same', account: this.finalizeSubscription(id) };   // already in place (its move never finished)
-      if (!this._moveLogin(held, this.subDir(id))) { this._notify(); return { outcome: 'gone' }; }
+      if (!this._moveLogin(held, this.subDir(id))) return this._reloginMoveFailed(id, asked, 'back into this row');
       return { outcome: 'same', account: this.finalizeSubscription(id) };
     }
     this._save();   // «another»: the new row's synchronous landing below carries the question's removal with it (both land, or neither)
@@ -1221,7 +1232,7 @@ class AccountManager {
     let created = null;
     try { created = this.createSubscription({ name: 'Subscription' }); }
     catch (e) { if (e && e.code === 'not-durable') { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }
-    if (!this._moveLogin(at === 'row' ? this.subDir(id) : held, this.subDir(created.id))) { this.remove(created.id); this._notify(); return { outcome: 'gone' }; }
+    if (!this._moveLogin(at === 'row' ? this.subDir(id) : held, this.subDir(created.id))) { this.remove(created.id); return this._reloginMoveFailed(id, asked, 'into a new row'); }
     const finalized = this.finalizeSubscription(created.id);
     this._notify();
     return { outcome: 'split', account: finalized, keptName: a.name };

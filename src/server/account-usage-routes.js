@@ -894,6 +894,7 @@ app.post('/api/accounts/:id/relogin-answer', (req, res) => {
       sweepOnLoginTransition(req.params.id, r, 're-login');
       wakeOnLoginSuccess(req.params.id, r, 're-login', r.account.id || req.params.id);
     }
+    if (r && r.outcome === 'refused') return res.status(409).json({ success: false, ...r });   // 主开发 r4200 (3): a move that moved nothing — the row still asks, said by name (the page shows `error`; a refusal carries no account, so the sweep above never runs for it)
     res.json({ success: true, ...r });
   } catch (e) { failAcct(res, e); }   // 主开发 r4168 (a): a failed landing answers 503 not-durable, as on every door
 });
