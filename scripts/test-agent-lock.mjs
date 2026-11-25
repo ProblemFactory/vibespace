@@ -46,24 +46,55 @@ const releaseAgent = (() => {
   const A = "        if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }\n";
   return src.includes(A) ? MUT.write(AGENT, src.split(A).join(''), 'release') : null;
 })();
+// r4263: THE SLOW CASE, PLACED (never load): the release's agent with a stall of STALL_MS placed right before its lock check — the
+// hosted run's slow refusal, made certain on any machine
+const STALL_MS = 800;
+const stalledReleaseAgent = (() => {
+  const src = fs.readFileSync(path.join(REPO, AGENT), 'utf8');
+  const A = "        if (pid === process.pid) { fs.unlinkSync(LOCK); continue; }\n", S = ANCHOR(src, 'if (!acquireSingleton()) {\n  process.stderr.write(`vibespace-device: already running', 'the stall before the lock check');
+  return src.includes(A) && S ? MUT.write(AGENT, src.split(A).join('').split(S).join(`Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${STALL_MS}); ` + S), 'release-stalled') : null;
+})();
 const roots = [];
 const mkRoot = () => { const r = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agentlock-')); roots.push(r); fs.mkdirSync(path.join(r, 'agentd', 'state'), { recursive: true }); return r; };
 const envOf = (root) => ({ PATH: process.env.PATH, HOME: root, VIBESPACE_AGENTD_ROOT: path.join(root, 'agentd'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1' });
 const lockOf = (root) => path.join(root, 'agentd', 'state', 'agentd.lock');
-// start the agent; «started» = it holds the lock under its own pid and still runs; «refused» = it exited (code 3)
-const run = async (root, child) => {
-  let exit = null, err = '', own = false; child.stderr.on('data', (d) => { err += d; }); child.on('exit', (c) => { exit = c; });
-  for (let t = 0; t < 100 && exit === null; t++) {
+// start the agent. «STARTED» IS A FACT OF THE AGENT's OWN (主开发 r4263, the final hosted run of 2.369.419, 45603569761: Node 22 at
+// load 6): the lock WRITTEN BY THE AGENT ITSELF — its exclusive create holds exactly its pid, no newline (src/agentd/agentd.js
+// acquireSingleton), which only an agent that passed its lock check writes; every planted lock differs (another pid, or the own-pid
+// scene's shell `echo $$`, which ends in a newline). «REFUSED» = its EXIT. The wait is on one of the two — never a span of time: the
+// release's helper called the agent started when the lock named it for five looks of 50 ms, and on a loaded runner the release's agent
+// had not yet refused (exit 3) inside that quarter second. Bounded (RUN_BOUND_MS): the bound's expiry is a NAMED harness line, never a
+// verdict. Each leg's child is watched once (watch) and read by its exit and its stderr's end
+const RUN_BOUND_MS = 30000;
+const watch = (child) => { const w = { exit: null, closed: false, err: '' }; child.stderr.on('data', (d) => { w.err += d; }); child.on('exit', (c) => { w.exit = c; }); child.on('close', () => { w.closed = true; }); return w; };
+// (every lock a leg PLANTS ends in a newline — `echo $$`, String(pid) + '\n' — so no planted lock ever reads as the agent's own write)
+const tookLock = (root, child) => { try { return fs.readFileSync(lockOf(root), 'utf8') === String(child.pid); } catch { return false; } };
+const run = async (root, child, w = watch(child)) => {
+  let took = false;
+  for (const t0 = Date.now(); ; await sleep(20)) {
+    if (tookLock(root, child)) { took = true; break; }
+    if (w.exit !== null || Date.now() - t0 >= RUN_BOUND_MS) break;
+  }
+  const started = took && w.exit === null, timedOut = !took && w.exit === null;
+  if (timedOut) ok(`HARNESS: the agent (pid ${child.pid}) neither wrote its own lock nor exited within ${RUN_BOUND_MS / 1000} s — no verdict is read from this start`, false, { root });
+  if (w.exit === null) { try { process.kill(child.pid, 'SIGTERM'); } catch { } }   // ours: we started it and hold its pid
+  for (const t0 = Date.now(); !w.closed && Date.now() - t0 < 10000;) await sleep(20);   // its exit and the end of its stderr (the refusal's words)
+  return { started, exit: w.exit, refusedSaid: /already running/.test(w.err), ...(timedOut ? { timedOut } : {}) };
+};
+// THE RELEASE's HELPER, kept ONLY as the harness's RED CONTROL (§1): «started» = the lock names the child's pid for five looks of
+// 50 ms and the child still runs — a span of time a slow agent has not yet refused in
+const guessStarted = async (root, child, w) => {
+  let own = false;
+  for (let t = 0; t < 100 && w.exit === null; t++) {
     let held = ''; try { held = fs.readFileSync(lockOf(root), 'utf8').trim(); } catch { }
     if (held === String(child.pid)) { own = true; if (t >= 4) break; }
     await sleep(50);
   }
-  const started = exit === null && own;   // still running AND holding the lock under its own pid (a slow agent proves nothing)
-  if (exit === null) { try { process.kill(child.pid, 'SIGTERM'); } catch { } for (let t = 0; t < 60 && exit === null; t++) await sleep(50); }   // ours: we started it and hold its pid
-  return { started, exit, refusedSaid: /already running/.test(err) };
+  return w.exit === null && own;
 };
 // THE AGENT'S OWN PID IN THE LOCK: a shell writes its pid into the lock and EXECS the agent, which keeps that pid
-const ownPid = (agentFile) => { const root = mkRoot(); return run(root, spawn('/bin/sh', ['-c', 'echo $$ > "$1"; exec "$2" "$3"', 'sh', lockOf(root), process.execPath, agentFile], { env: envOf(root), stdio: ['ignore', 'ignore', 'pipe'] })); };
+const ownPidChild = (root, agentFile) => spawn('/bin/sh', ['-c', 'echo $$ > "$1"; exec "$2" "$3"', 'sh', lockOf(root), process.execPath, agentFile], { env: envOf(root), stdio: ['ignore', 'ignore', 'pipe'] });
+const ownPid = (agentFile) => { const root = mkRoot(); return run(root, ownPidChild(root, agentFile)); };
 const agentIn = (root, agentFile) => spawn(process.execPath, [agentFile], { env: envOf(root), stdio: ['ignore', 'ignore', 'pipe'] });
 
 console.log('§1 a lock that names THIS process is stale — the agent takes it and starts');
@@ -71,12 +102,18 @@ const own = await ownPid(path.join(REPO, AGENT));
 ok(`the agent handed the pid its lock already names STARTS (it removes the lock and takes it) — ${JSON.stringify(own)}`, own.started && !own.refusedSaid, own);
 const red = releaseAgent ? await ownPid(releaseAgent) : null;
 ok(`RED CONTROL (the release's agent, without the own-pid test): the same start REFUSES — «already running», exit 3 — ${JSON.stringify(red)}`, !!red && !red.started && red.exit === 3 && red.refusedSaid, red);
+{   // r4263: the slow case PLACED — the release's agent stalled STALL_MS before its lock check, read by BOTH helpers at once
+  const root = mkRoot(), child = stalledReleaseAgent ? ownPidChild(root, stalledReleaseAgent) : null, w = child ? watch(child) : null;
+  const [guess, slow] = child ? await Promise.all([guessStarted(root, child, w), run(root, child, w)]) : [null, null];
+  ok(`the release's agent STALLED ${STALL_MS} ms before its lock check (placed): the helper waits for its own act and reads the REFUSAL — exit 3, «already running», never a start — ${JSON.stringify(slow)}`, !!slow && !slow.started && slow.exit === 3 && slow.refusedSaid, slow);
+  ok(`RED CONTROL (the release's helper — five looks of 50 ms): the SAME stalled refusal is read as a START (the hosted run's red, placed) — ${JSON.stringify({ guess })}`, guess === true, { guess, slow });
+}
 
 console.log('§2 the other two answers stand');
 {
   const root = mkRoot();
   const gone = spawn('/bin/true'); const deadPid = gone.pid; await new Promise((r) => gone.on('exit', r));
-  fs.writeFileSync(lockOf(root), String(deadPid));
+  fs.writeFileSync(lockOf(root), String(deadPid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
   const r = await run(root, agentIn(root, path.join(REPO, AGENT)));
   ok(`a lock holding a DEAD pid (${deadPid}) — the agent takes it and starts`, r.started && !r.refusedSaid, r);
 }
@@ -85,7 +122,7 @@ console.log('§2 the other two answers stand');
   // a live sibling agent: a process whose command line names an agent (as the lock check reads it)
   const sib = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'vibespace-agentd-sibling'], { stdio: 'ignore', env: envOf(root) });   // an agent of THIS root (B-8475)
   await sleep(100);
-  fs.writeFileSync(lockOf(root), String(sib.pid));
+  fs.writeFileSync(lockOf(root), String(sib.pid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
   const r = await run(root, agentIn(root, path.join(REPO, AGENT)));
   try { process.kill(sib.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
   ok(`a lock holding a LIVE sibling agent (pid ${sib.pid}) — the agent still refuses, «already running», exit 3`, !r.started && r.exit === 3 && r.refusedSaid, r);
@@ -95,7 +132,7 @@ const otherHolds = async (agentFile, envFor) => {
   const root = mkRoot(), other = mkRoot();
   const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', 'vibespace-agentd-other'], { stdio: 'ignore', env: envFor(other) });
   await sleep(100);
-  fs.writeFileSync(lockOf(root), String(holder.pid));
+  fs.writeFileSync(lockOf(root), String(holder.pid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
   const r = await run(root, agentIn(root, agentFile));
   try { process.kill(holder.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
   return r;
@@ -121,7 +158,7 @@ const hubShapeEnv = (other) => ({ PATH: process.env.PATH, HOME: other });   // t
     const uni = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agentlock-\u00e9-')); roots.push(uni); fs.mkdirSync(path.join(uni, 'agentd', 'state'), { recursive: true });
     const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', 'vibespace-agentd-same'], { stdio: 'ignore', env: envOf(uni) });
     await sleep(100);
-    fs.writeFileSync(lockOf(uni), String(holder.pid));
+    fs.writeFileSync(lockOf(uni), String(holder.pid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
     const viaUtf8 = LH.holdsRoot(holder.pid, path.join(uni, 'agentd')), viaLatin1 = LH.holdsRoot(holder.pid, path.join(uni, 'agentd'), { read: (f) => fs.readFileSync(f, 'latin1') });
     const u = await run(uni, agentIn(uni, path.join(REPO, AGENT)));
     try { process.kill(holder.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
@@ -133,7 +170,7 @@ const hubShapeEnv = (other) => ({ PATH: process.env.PATH, HOME: other });   // t
     const real = mkRoot(), alias = real + '-alias'; fs.symlinkSync(real, alias); roots.push(alias);
     const holder = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', 'vibespace-agentd-alias'], { stdio: 'ignore', env: { PATH: process.env.PATH, HOME: alias, VIBESPACE_AGENTD_ROOT: path.join(alias, 'agentd') } });
     await sleep(100);
-    fs.writeFileSync(lockOf(real), String(holder.pid));
+    fs.writeFileSync(lockOf(real), String(holder.pid) + '\n');   // planted as the shell's echo plants it (a newline): the agent's own write never ends in one
     const viaCanon = LH.holdsRoot(holder.pid, path.join(real, 'agentd')), viaResolve = LH.holdsRoot(holder.pid, path.join(real, 'agentd'), { canon: path.resolve });
     const a2 = await run(real, agentIn(real, path.join(REPO, AGENT)));
     try { process.kill(holder.pid, 'SIGTERM'); } catch { }   // ours: we started it and hold its pid
@@ -318,7 +355,9 @@ console.log('§4 B-8475 the image\'s user boot hook: the installer registers the
   fs.writeFileSync(HOOK, handWritten); fs.rmSync(path.join(T, 'started'), { force: true });
   if (FR) { reg(FR, R1, 'device-a'); spawnSync('bash', [HOOK], { env: { PATH: process.env.PATH, HOME: H } }); await sleep(300); }
   let redStarted = ''; try { redStarted = fs.readFileSync(path.join(T, 'started'), 'utf8'); } catch { }
-  ok('RED CONTROL: a registration that writes no block — the container start starts NO agent', !!FR && redStarted === '', redStarted);
+  // r4263 (the class: never an absence read after a span alone): the FACT the start reads — the hook holds no block of that key
+  const redBlock = fs.readFileSync(HOOK, 'utf8').includes('# >>> vibespace-device device-a >>>');
+  ok('RED CONTROL: a registration that writes no block — the hook holds NO block of that key and the container start starts NO agent', !!FR && !redBlock && redStarted === '', { redStarted, redBlock });
   fs.rmSync(T, { recursive: true, force: true });
 }
 for (const r of roots) { try { fs.rmSync(r, { recursive: true, force: true }); } catch { } }
