@@ -2437,6 +2437,11 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         const m0 = fkR24.mark();
         await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
         await untilFact(() => w14.liveFillVerdictFor({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { verb: 'eval', argv: ['eval', '1'] }).ok, 'MUTANT 14: the fence lifted');   // the flake census r2: was 40 × 10 ms (a lift that never came read «no Network.disable» for the copy's red)
+        // 主开发 r4597 (an absence is read only once the product COULD have done it): the lift's own sync sends a Network.disable FIRST and
+        // its Fetch mode change after it, on the one socket — so «no Network.disable» is read once the kernel heard THAT Fetch call (the
+        // tab off the credential patterns: a Fetch.disable, or an enable of Document requests only — no earlier mode of the fill is one)
+        const offCred = (c) => c.method === 'Fetch.disable' || (c.method === 'Fetch.enable' && Array.isArray(c.params && c.params.patterns) && c.params.patterns.length > 0 && c.params.patterns.every((pt) => pt && pt.resourceType === 'Document'));
+        await untilFact(() => fkR24.calls().some((c) => c.seq > m0 && c.tab === tidR24 && offCred(c)), 'MUTANT 14: the lift\'s own Fetch mode at the kernel (sent after where its Network.disable goes)');
         const netDis14 = fkR24.calls().filter((c) => c.seq > m0 && c.method === 'Network.disable').length;
         ok(netDis14 === 0, 'MUTANT 14 RED (m2 network-never-disabled): without Network.disable on fence lift, Network domain stays enabled forever', { netDis14 });
         w14.shutdown();
