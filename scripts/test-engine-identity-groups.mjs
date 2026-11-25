@@ -45,7 +45,8 @@ const tmpdir = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); cle
 process.on('exit', () => { for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
 process.env.HOME = tmpdir('vs-eig-home-');
 
-const AccountManager = (() => { const m = require(path.join(REPO, 'src/accounts.js')); return m.AccountManager || m; })();
+const { waitEverySave } = require(path.join(REPO, 'scripts/lib/accounts-landed.cjs'));   // B-574d (line 832 on the 2.369.418 train): accounts.json is the store writer's — a second store over the same data (a restart) reads what the first one's saves wrote: each save waited for here (the suite's thread)
+const AccountManager = waitEverySave((() => { const m = require(path.join(REPO, 'src/accounts.js')); return m.AccountManager || m; })());
 const usageWrite = require(path.join(REPO, 'src/usage-cache-write.js'));
 const engPath = path.join(REPO, 'src/server/usage-pool-engine.js');
 const engMod = require(engPath);
@@ -63,7 +64,7 @@ const RNoPace = redCopy('src/server/usage-pool-engine.js', engSrc, [["  Object.d
 const RNoReread = redCopy('src/server/usage-pool-engine.js', engSrc, [["      try { require('../usage-anchors.js').noteAnchorsRewritten(usageAnchors.dir); } catch { }\n", '']], 'no kept line read again (RED)');
 const accPath = path.join(REPO, 'src/accounts.js'), accSrc = fs.readFileSync(accPath, 'utf8');
 const GUARD = "    if (!a || a.loginTieDropped || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;\n";
-const amOf = (m) => (m && !m.err ? (m.AccountManager || m) : m);
+const amOf = (m) => (m && !m.err ? waitEverySave(m.AccountManager || m) : m);
 const AMNoGuard = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || !o || typeof o !== 'object') return;\n"]], 'a seed over a tie (RED)'));
 const AMNoMark = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieDropped || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed with no mark (RED)'));
 const AMNoDrop = amOf(redCopy('src/accounts.js', accSrc, [[GUARD, "    if (!a || a.loginTieSeeded || this._hasTie(id) || !o || typeof o !== 'object') return;\n"]], 'a seed over a drop (RED)'));

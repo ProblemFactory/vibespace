@@ -483,6 +483,10 @@ class AccountManager {
     W.durable(this._file).catch(() => { });
     return true;
   }
+  /** (主开发 r4048) a save a sign-in's place depends on, where the act cannot stop on a failed landing (it already happened): the
+   *  synchronous road, and when that cannot land the writer keeps the write owed (it writes it again) and the act says its own
+   *  outcome. → true when it landed */
+  _saveOrOwe(why) { try { return this._save({ now: true, why }) === true; } catch (e) { if (e && e.code === 'not-durable') return false; throw e; } }
   /** 主开发 r3977 (2) — THE THREE WITH NO UNDO (remove, merge, clear) DO NOT STOP IN THE MIDDLE: their synchronous save's failure is
    *  caught, the act FINISHES what it started in memory and on the machine (the pools healed, the folder wiped, the file act queued, every
    *  page told), and only then is the landing's failure said — `landingOwed`: the change stays in memory and the store writer writes it
@@ -1113,11 +1117,17 @@ class AccountManager {
       // move (a crash between leaves a question that can be answered — r2734 (c)); a sign-in that could not be moved is never left
       // live in a row that asks: the mark comes off and the resolve refuses by name (r2734 (a))
       a.reloginAsk = { at: Date.now(), ...(lost ? { lost: true } : {}) };
-      this._save();
+      // B-574d (line 832 on the 2.369.418 train, r2734 (c)): THE MARK IS ON DISK BEFORE THE MOVE — the store writer's synchronous road,
+      // as a sign-in save (off the loop the sign-in would be set aside before its question is in the file). A mark that cannot land
+      // moves nothing: it comes off, and the resolve refuses as when the move fails (the page's own sentence), its cause by name
+      try { this._save({ now: true, why: 'the question about the new sign-in' }); }
+      catch (e) { if (!e || e.code !== 'not-durable') throw e; delete a.reloginAsk; this._saveOrOwe('the question taken back'); return { outcome: 'refused', code: 'not-durable', notOnDisk: true, error: `${e.message}, so the new sign-in was not set aside and this row was not asked — sign in again` }; }
       let moved = 0;
       try { moved = this._moveLogin(src, path.join(src, RELOGIN_HELD)); } catch { moved = 0; }
-      // r2915 (c): the refusal REACHES THE PERSON — an answer the page shows (and stops on), never a throw it polls into every 3 s
-      if (!moved) { delete a.reloginAsk; this._save(); return { outcome: 'refused', code: 'relogin_hold_failed', error: 'the new sign-in could not be set aside to ask about it, so this row was not asked — sign in again' }; }
+      // r2915 (c): the refusal REACHES THE PERSON — an answer the page shows (and stops on), never a throw it polls into every 3 s;
+      // r4048: the question comes off ON DISK before the call returns — a kill after it never leaves a row that asks while the sign-in
+      // that could not be moved is live in its folder (r2734 (a)); a landing that fails stays owed (written again)
+      if (!moved) { delete a.reloginAsk; this._saveOrOwe('the question taken back'); return { outcome: 'refused', code: 'relogin_hold_failed', error: 'the new sign-in could not be set aside to ask about it, so this row was not asked — sign in again' }; }
       this._displaySeed(a);   // B-360d: this folder just changed — its facts set in this step
       this._notify();
       return { outcome: 'ask', keptName: a.name, ...(lost ? { lost: true } : {}) };

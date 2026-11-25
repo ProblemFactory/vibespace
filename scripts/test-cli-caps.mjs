@@ -472,6 +472,7 @@ console.log('⑩ the version order: one kept collator (B-360d)');
   // every token row and makes NO compare given options. RED: the release's line in a copy of src/cli-caps.js, read by a copy of
   // src/accounts.js (each copy's other requires are the originals') — the same build makes seven a caps call.
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  require(path.join(REPO, 'scripts/lib/accounts-landed.cjs')).waitEverySave(AccountManager);   // B-574d (line 832 on the 2.369.418 train): accounts.json is the store writer's — the roster build's second store reads the pools the first one made: each save waited for here (the suite's thread)
   const NEWEST = C.measuredVersions(JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8'))).slice(-1)[0];
   const SHAPE = { scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code', 'user:mcp_servers'], subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' };
   const roster = path.join(tmp, 'roster');

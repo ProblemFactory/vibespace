@@ -51,8 +51,11 @@ const KEY = ['sk-', 'pool', '-fall', 'back-', 'b7d2e9'].join('');   // built at 
 const ds = (await store.add({ preset: 'deepseek', key: KEY })).provider;
 const ds2 = (await store.add({ preset: 'deepseek', key: KEY, label: 'Router' })).provider;
 const lab = (await store.add({ preset: 'other', key: KEY, baseUrl: 'http://127.0.0.1:9/v1', model: 'qwen3-coder', label: 'Lab', wire: 'openai-responses' })).provider;   // speaks Responses: Codex only
+// B-574d (line 832 on the 2.369.418 train): accounts.json is the store writer's — a second store over the same data (a restart, a re-read)
+// reads what the first one's saves wrote: each save waited for here (the suite's thread), the copies' classes too
+const { waitEverySave } = require(path.join(REPO, 'scripts/lib/accounts-landed.cjs'));
 const wireAm = (AM, dir = DATA) => {
-  const am = new AM({ dataDir: dir });
+  const am = new (waitEverySave(AM))({ dataDir: dir });
   am.setProviderLookup((a) => store.forAccount(a));
   am.setProviderSpawn(PSP.create({ providers: store, dataDir: dir }), (id, be, model) => PSP.modelFor(store, id, model, be));
   return am;

@@ -460,7 +460,7 @@ const READING_EMPTY_AT_BIRTH = Object.freeze([
 const RBIRTH_SIGNATURE = '5c9b32cab017';
 // every file with a file deletion call, its exact count (server.js and src/, the device agent's own side out)
 const DELETION_CALLS = Object.freeze({
-  'server.js': 3, 'src/account-material.js': 8, 'src/accounts.js': 14, 'src/adapters/codex.js': 2,
+  'server.js': 3, 'src/account-material.js': 8, 'src/accounts.js': 17, 'src/adapters/codex.js': 2,
   'src/agent-routes.js': 1, 'src/agentd/client.js': 3, 'src/app-kinds/deb.js': 3, 'src/app-secrets-seal.js': 1,
   'src/app-secrets.js': 1, 'src/app-serve.js': 8, 'src/app-system-serve.js': 1, 'src/browser-facts.js': 1,
   'src/browser-serve.js': 4, 'src/channel-outbox-files.js': 1, 'src/channel-store.js': 9, 'src/claude-oat-probe.js': 8,

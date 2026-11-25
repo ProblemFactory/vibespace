@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { scratch, anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -332,6 +333,59 @@ console.log('G. 主开发 r3977 — the follow: every sign-in call on the synchr
   const Px = MUT.load('src/routes/persistence.js', anchored(PSRC, " else if (e && e.code === 'not-durable') accountsUnlanded = e; else throw e; }", ' else throw e; }', 'import rethrows'), 'import-rethrow');
   const rx = await run(Px);
   ok(rx.status !== 503 || !rx.body || !Array.isArray(rx.body.applied), 'RED CONTROL (the cure\'s first form: the failed landing rethrown): no named 503 with the applied list — red', rx);
+}
+
+console.log('H. the relogin\'s question (r2734, on the 2.369.418 train; 主开发 r4048) — a KILL between its save and its move, then a fresh start');
+{
+  // the stand-ins are the VERDICT alone («ask»: the facts could not prove whose sign-in it is) and this press's helper success; the
+  // mark, its save, the refusals and the resolve are the real code's
+  const AI = require(path.join(REPO, 'src/account-identity.js'));
+  const ASRC3 = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  // H1: THE KILL IS REAL — a child process (scripts/fixtures/accounts-relogin-kill.cjs) runs the resolve over this suite's stand-in
+  // writer thread HELD and is SIGKILLed at the move into the hold; this process then starts FRESH over the same data, as the hub's
+  // next start would, and reads whether the row asks
+  const KILL = path.join(REPO, 'scripts/fixtures/accounts-relogin-kill.cjs');
+  const killRun = async (modPath) => {
+    const d = dirOf('h1'), W = mkW(), am = hush(() => new AccountManager({ dataDir: d, storeWriter: W }));
+    const sid = hush(() => am.createSubscription({ name: 'Member' })).id; await am.persisted();
+    SAND.hold('accounts.json', 300);   // the child's writer thread is this suite's stand-in: its write waits 300 ms
+    let r = null;
+    try { r = spawnSync(process.execPath, [KILL, modPath, d, SAND.path, sid], { encoding: 'utf8', timeout: 30000 }); } finally { SAND.unhold('accounts.json'); }
+    const fresh = hush(() => new AccountManager({ dataDir: d, storeWriter: mkW() })), row = fresh.get(sid) || {};
+    return { signal: r && r.signal, out: String((r && r.stdout) || '').trim().slice(0, 160), err: String((r && r.stderr) || '').trim().slice(-240), asks: !!row.reloginAsk, resolve: row.reloginAsk ? hush(() => fresh.reloginResolve(sid)).outcome : null };
+  };
+  const h1 = await killRun(path.join(REPO, 'src/accounts.js'));
+  ok(h1.signal === 'SIGKILL' && h1.asks === true && h1.resolve === 'ask', 'H1 a KILL between the question\'s save and the move into the hold: the fresh start reads a row that ASKS (its question can be answered)', h1);
+  const offLoop = MUT.write('src/accounts.js', anchored(ASRC3, "try { this._save({ now: true, why: 'the question about the new sign-in' }); }", 'try { this._save(); }', 'ask off the loop'), 'ask-off-loop');
+  const h1x = await killRun(offLoop);
+  ok(h1x.signal === 'SIGKILL' && h1x.asks === false, 'RED CONTROL (the question\'s save off the loop, line 832 as taken): the same kill leaves a fresh start whose row does NOT ask while the sign-in was going into the hold — red', h1x);
+  // H2 / H3 in process: the resolve itself, the move watched (H3: the file at the refusal's return is what a kill then leaves)
+  const askOf = async (Mod, { failMark = false, moveFails = false } = {}) => {
+    const d = dirOf('h2'), W = mkW(), am = hush(() => new Mod.AccountManager({ dataDir: d, storeWriter: W })), F = path.join(d, 'accounts.json');
+    const sid = hush(() => am.createSubscription({ name: 'Member' })).id; await am.persisted();
+    am._lookAgain = () => ({ loggedIn: true });
+    am._reloginBefore = new Map([[sid, { at: Date.now(), attempt: 'h-1', record: null, word: 'Member' }]]);
+    am._loginStatusRaw = () => ({ state: 'success', attempt: 'h-1' });
+    let moves = 0;
+    am._moveLogin = () => { moves++; return moveFails ? 0 : 1; };
+    const was = AI.beforeAfterVerdict; AI.beforeAfterVerdict = () => 'ask';
+    let r = null, threw = null, atReturn = null;
+    try {
+      if (failMark) SAND.failOn('accounts.json', true); else SAND.hold('accounts.json', 300);   // the writer's thread refusing (or HELD)
+      try { r = hush(() => am.reloginResolve(sid)); } catch (e) { threw = (e && e.code) || String(e); }
+      atReturn = !!(onDiskRow(F, sid) || {}).reloginAsk;
+    } finally { AI.beforeAfterVerdict = was; SAND.failOn('accounts.json', false); SAND.unhold('accounts.json'); }
+    const inMemory = !!(am.get(sid) || {}).reloginAsk;
+    await am.persisted();
+    return { outcome: r && r.outcome, code: r && r.code, threw, moves, atReturn, inMemory, onDisk: !!(onDiskRow(F, sid) || {}).reloginAsk };
+  };
+  const h2 = await askOf({ AccountManager }, { failMark: true });
+  ok(h2.outcome === 'refused' && h2.code === 'not-durable' && h2.moves === 0 && !h2.inMemory && !h2.onDisk && !h2.threw, 'H2 a question whose landing FAILS: nothing is set aside, the mark comes off, and the resolve answers the refusal the page says (never a throw it polls into)', h2);
+  const h3 = await askOf({ AccountManager }, { moveFails: true });
+  ok(h3.outcome === 'refused' && h3.code === 'relogin_hold_failed' && h3.moves === 1 && h3.atReturn === false && !h3.inMemory, 'H3 with the writer\'s thread HELD, a move into the hold that FAILS: when the refusal returns the file no longer holds the question — a kill then never leaves a row that asks while that sign-in is live (r2734 (a))', h3);
+  const AMr = MUT.load('src/accounts.js', anchored(ASRC3, "if (!moved) { delete a.reloginAsk; this._saveOrOwe('the question taken back'); return", 'if (!moved) { delete a.reloginAsk; this._save(); return', 'refusal off the loop'), 'refusal-off-loop');   // stale-pins: kept (the red copy plants the refusal's earlier form on purpose)
+  const h3x = AMr ? await askOf(AMr, { moveFails: true }) : null;
+  ok(!!h3x && h3x.outcome === 'refused' && h3x.atReturn === true, 'RED CONTROL (the refusal\'s save off the loop): the refusal returns while the file still holds the question — red', h3x);
 }
 
 for (const W of lives) { try { W.stop(); } catch { } }

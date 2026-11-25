@@ -13,6 +13,8 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { AccountManager } = require('../src/accounts.js');
+const { waitEverySave } = require('./lib/accounts-landed.cjs');   // B-574d (line 832 on the 2.369.418 train): accounts.json is the store writer's — a second store over the same data (a restart) reads what the first one's saves wrote: each save waited for here (the suite's thread)
+waitEverySave(AccountManager);
 const { buildClaudeSubscriptionLoginCommand } = require('../src/claude-subscription-login.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
@@ -122,8 +124,8 @@ try {
     ok(am2.reloginResolve(s2).outcome === 'pending', '…a helper success of ANOTHER attempt (an earlier press) is not this press\'s ⇒ PENDING'); }
   const MUT = mutantCopies('relogin-door', REPO);
   const accSrc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
-  const copyAM = (from, to, why) => { try { return require(MUT.write('src/accounts.js', anchored(accSrc, from, to, why))).AccountManager; } catch (e) { return { err: e.message }; } };
-  const copyAMs = (edits, why) => { try { return require(MUT.write('src/accounts.js', edits.reduce((s, [from, to]) => anchored(s, from, to, why), accSrc))).AccountManager; } catch (e) { return { err: e.message }; } };
+  const copyAM = (from, to, why) => { try { return waitEverySave(require(MUT.write('src/accounts.js', anchored(accSrc, from, to, why))).AccountManager); } catch (e) { return { err: e.message }; } };
+  const copyAMs = (edits, why) => { try { return waitEverySave(require(MUT.write('src/accounts.js', edits.reduce((s, [from, to]) => anchored(s, from, to, why), accSrc))).AccountManager); } catch (e) { return { err: e.message }; } };
   { const Old = copyAM("    if (!lost ? !(st && st.state === 'success' && st.attempt === kept.attempt) : !!(st && st.state === 'running')) return { outcome: 'pending' };\n", '', 'the release\'s resolve: no new-since-the-press gate (RED)'); // stale-pins: kept — the RED takes the gate out
     ok(!Old.err, 'RED CONTROL built: the resolve without the new-since-the-press gate', Old.err || '');
     if (!Old.err) { const f = firstPolls(new Old({ dataDir: path.join(tmp, 'red-gate') })); ok(f.r0 === 'same' && !f.kept0, 'RED: in that copy the FIRST poll judges the untouched folder «same» and spends BEFORE — the other account then lands with no question', JSON.stringify(f)); } }
@@ -263,8 +265,8 @@ try {
     const n = am2._moveLogin(src, dst);
     ok(n === 1 && fs.existsSync(credsAt(dst)) && !fs.existsSync(cfgAt(dst)), '(b) the config\'s rename FAILS (not ENOENT) after the credentials moved ⇒ the destination\'s old config is removed — never new credentials beside an old record', n); }
   { const body = accSrc.slice(accSrc.indexOf('  reloginResolve(id) {'), accSrc.indexOf('  reloginAnswer(id, answer) {'));
-    const mark = body.indexOf("a.reloginAsk = { at: Date.now()"), save = body.indexOf('this._save();', mark), move = body.indexOf("this._moveLogin(src, path.join(src, RELOGIN_HELD))");
-    ok(mark > 0 && save > mark && move > save, '(c) the mark is on disk BEFORE the move into the hold (a crash between leaves a question that can be answered)', { mark, save, move }); }
+    const mark = body.indexOf("a.reloginAsk = { at: Date.now()"), save = body.indexOf("this._save({ now: true, why: 'the question about the new sign-in' });", mark), move = body.indexOf("this._moveLogin(src, path.join(src, RELOGIN_HELD))");
+    ok(mark > 0 && save > mark && move > save, '(c) the mark is on disk BEFORE the move into the hold (a crash between leaves a question that can be answered) — by the store writer\'s synchronous road (B-574d; the order itself: test-accounts-store-writer H1)', { mark, save, move }); }
   { const MAsrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
     ok(MAsrc.includes('if (reloginAnswering.has(target)) return;') && MAsrc.includes('.finally(() => reloginAnswering.delete(target));'), '(e) the two presses take one press at a time: a second press while the first is out does nothing'); }
   // A LOST BEFORE: a restart between the press and the resolve (a new store on the same data), and a before past its time
