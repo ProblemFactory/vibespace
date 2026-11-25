@@ -29,6 +29,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE: both go to the store writer — the cursor (`usage-host-cursors.write`; readers ask memory first; a crash before the landing leaves an older cursor, the next harvest re-sends from it and the ledger's dedup keeps each row once; `whenHostCursorWritten()`), the whole copy (`remote-jsonl.write`: the fetched buffer handed by reference, copied 4 MB a turn, urgent, landed before its record) and its record (`remote-jsonl-meta.write`, after the bytes it names); the fetch's mkdirs go (the writer makes the folder); a copy that cannot land throws by name (ECACHEWRITE). The delta appends and the heal paths' rare record writes stay.
 - LAW 2 (the suites that read the cursor file right after an ingest): test-ledger-dedup-law ②, test-usage-walk-bounds' cursor legs — each awaits the landing. LEGS: test-usage-walk-bounds ⑦ and test-remote-copy-writer ① (a placed 400 ms stall holds nothing), each with its red. Censuses: store-write (the hold road's row gone, src/hosts.js 30 → 22, DEBT_MAX 807 → 797), temp-rename (the derived cache row gone), sync-fs (hosts.js 26 → 18, the hold road 6 → 5), src/timed-sync.js (two rows).
 
+### bl-ci — line 828's follow (line 926, 主开发 r3837 + r4125; the unit itself shipped in 2.369.419)
+- WHAT: the usage window follows the prices' hold (the family's held lists: a start or an end loads it again); a torn prices file no longer throws the ledger backfill at every start: by r4125 the prices are asked after their hold settles once (pricesSettled — the helper's own verdict, never its word; the backfill a stepped pass on a torn start); while held a cost list ranks by tokens; an editor typed in before a hold says the typing was not saved.
+
 ## 2.369.419 — 2026-11-25
 
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
