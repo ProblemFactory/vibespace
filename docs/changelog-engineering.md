@@ -149,6 +149,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### lg-providers B-d578 — test-held-words classes line 817's code (主开发 r3856: the train's whole tier at 725162b8a, tests only)
 - `fallback-key-unreadable` (memberVerdictFor's why for a LISTED fallback provider whose key cannot be read now) is a LEFT_ALONE «not» row: no list is held, no person reads the code — memberCanServe reads only `ok`, the pin route words an unknown why as «is not usable in the pool right now», the code reaches the journal and a 409's protocol field only.
+- THE FOLLOW (round wf_a630a6d5-f72, r3815 — line 820 TAKEN, no must): the words say «every frame names a CLI» (the shape is checked, not the machine); EVERY frame, not any (one frame naming no CLI keeps the file); the place by the main file's own facts (lstat: a link is not followed); the place read only for the files the live, verdict and record filters leave (a `"cli":null` answers before a parse); the journal and the boot's call give a code or a fixed word, never a message; the never-parsing record named in the head. Legs: ⑧ split into its two guards (a link named as a torn copy; a torn copy whose main name is a link), each with its RED; ⑪ mixed frames (RED: any frame); ④ the order (RED: the place read before the filters); ⑩ the journal words.
 
 ## 2.369.418 — 2026-11-24
 
