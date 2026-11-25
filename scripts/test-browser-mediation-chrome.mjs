@@ -100,7 +100,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';   // lane browser-login: ⑩'s fixture passwords, built at run time
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, CHROME_STORE, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
@@ -800,7 +800,7 @@ console.log('— ③ r4: navigation to the browser\'s own pages / this machine\'
 if (AB && CHROME) {
   const H4 = path.join(ROOT, 'home-nav'); const TMP4 = path.join(SOCK3, 't'); const NAVCFG = path.join(ROOT, 'nav-config.json');
   fs.mkdirSync(path.join(H4, '.agent-browser'), { recursive: true }); fs.mkdirSync(TMP4, { recursive: true, mode: 0o700 }); fs.mkdirSync(SOCK3, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(NAVCFG, JSON.stringify({ executablePath: CHROME, args: '--no-sandbox,--disable-gpu,--disable-dev-shm-usage' }));
+  fs.writeFileSync(NAVCFG, JSON.stringify({ executablePath: CHROME, args: driverArgs('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage') }));   // B-8695: a real Chrome's --config line carries the driver's one rule
   const navPairs = [`AGENT_BROWSER_SESSION=vs-r4nav`, `AGENT_BROWSER_NAMESPACE=${NS_PREFIX}nav`, 'AGENT_BROWSER_IDLE_TIMEOUT_MS=60000'];
   const navEnv = { ...BASE_ENV, HOME: H4, TMPDIR: TMP4, AGENT_BROWSER_SOCKET_DIR: SOCK3, AGENT_BROWSER_CONFIG: NAVCFG, ...Object.fromEntries(navPairs.map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)])) };
   delete navEnv.XDG_RUNTIME_DIR;

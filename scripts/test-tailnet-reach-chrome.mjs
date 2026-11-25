@@ -35,7 +35,7 @@ import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, chromeNames, DRIVER_NAMES } from './scratch.mjs';
+import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, chromeNames, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -123,7 +123,6 @@ const dialed = [];
 // the suite's tunnel: every tailnet address IS a loopback server (the port picks it); a name the door dials by DNS is recorded
 const dial = (h) => { dialed.push(h); return [PEER_IP, BETA_IP, SELF_IP].includes(h) ? '127.0.0.1' : h; };
 const RULES = chromeNames({ map: { 'public.example': '127.0.0.1', [FUNNEL]: '127.0.0.1' } });  // B-9dd0 r3727: scratch.mjs's ONE names rule, with the suite's own names;  the attach road carries ','
-const DRIVER_RULE = DRIVER_NAMES; // the driver's ONE line holds ONE rule: every name → loopback («public.example» included; nothing resolves off the box)
 const QUIET = ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-pings', '--disable-domain-reliability', '--disable-default-apps', '--no-first-run', '--metrics-recording-only'];
 
 // ── a headless Chrome over raw CDP ──
@@ -264,8 +263,9 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     reach = { ...UP, mode: 'userspace' };
     const door = DOOR.create({ dataDir: null, reach: () => reach, cacheMs: 0, log: quietLog });
     const v = await door.launch({ label: 'driver' });
-    const line = V.driverArgsText(['--no-sandbox', ...QUIET, DRIVER_RULE, v.arg]);
-    const cfgFile = path.join(ROOT, 'driver.json'); fs.writeFileSync(cfgFile, JSON.stringify({ args: line.args }));
+    // B-8695 (主开发 r4617): the suite's own driver line and the harness's rule as ONE line built in ONE place (scratch.mjs driverArgs: the PAC
+    // switch whole, DRIVER_NAMES — every name to the loopback — last); a --config file is the driver's line too (§47e)
+    const line = { ok: true, args: driverArgs('--no-sandbox', ...QUIET, v.arg) }, cfgFile = path.join(ROOT, 'driver.json'); fs.writeFileSync(cfgFile, JSON.stringify({ args: line.args }));
     const sock = fs.mkdtempSync('/tmp/vs-tn-' + process.pid + '-'); // short: a unix socket path — /tmp itself, never TMPDIR; per pid (test-ci-gate-tiers §6)
     const home = path.join(ROOT, 'abhome'); fs.mkdirSync(home, { recursive: true });
     const env = { PATH: process.env.PATH, HOME: home, TMPDIR: ROOT, AGENT_BROWSER_SOCKET_DIR: sock, AGENT_BROWSER_SESSION: 'tn-driver', AGENT_BROWSER_CONFIG: cfgFile, AGENT_BROWSER_EXECUTABLE_PATH: CHROME, AGENT_BROWSER_IDLE_TIMEOUT_MS: '60000', AGENT_BROWSER_JSON: '1' };
