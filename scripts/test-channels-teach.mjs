@@ -11,7 +11,8 @@
 //      built-in Agents adapter (msg-acl: other sessions) never counts; parity with listFor over the principals; the cost
 //   ③ the REAL routes (setupAgentRoutes over a fake app + a real TaskGroupManager + the engine): SessionStart and the
 //      per-turn reminder carry `vibespace-channels` + `vibespace-docs channels` with reach, neither without it, neither
-//      with the integration off or no engine; a requestable-only session gets the request words; the per-session memo
+//      with the integration off or no engine; a requestable-only session gets the request words; NOTHING KEPT (B-360d item 4):
+//      a grant given or taken mid-session reaches the very next prompt
 //   ④ CONTROLS (scripts/mutant-copy.mjs, scratch copies): a tools section without the paragraph, a route that teaches
 //      without reach, an engine that counts the Agents adapter — each turns its leg RED
 // Run: node scripts/test-channels-teach.mjs
@@ -211,19 +212,20 @@ const real = await legsOf();
   ok(!taught(out.peer.start) && !taught(out.peer.p1), 'a peer session it may message (the built-in Agents adapter) does not teach vibespace-channels');
   ok(sameNoEngine(out), 'NO ENGINE ⇒ byte-identical to an engine with no reach: the SessionStart block (paths scrubbed) and the reminder, both rendered at ONE clock');
 }
-{ // the memo: SessionStart asks fresh; a prompt reads the per-session memo for a minute
+{ // B-360d item 4 (lane bl-loop-a, 主开发 r4325): NOTHING KEPT — every prompt asks the count afresh (judged by account); the
+  // release read a per-session memo of 60 s, so a grant taken away stayed in the reminder for up to a minute
   const { eng, R } = real;
   await eng.setAgentDirectory(A, { groups: false, singles: false });
   await eng.setGrain(A, { kind: 'account' }, { access: [] });
   const s = R.session();
   const t0 = R.turns(s);
   await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: EVERY, authority: 'draft' }] });
-  const held = R.call('prompt-context', s);
-  const realNow = Date.now;
-  let later = '';
-  try { Date.now = () => realNow() + 61e3; later = R.call('prompt-context', s); } finally { Date.now = realNow; }
-  ok(!taught(t0.p1) && !taught(held) && later.includes(AR.CHANNELS_REMINDER_SEG.read), 'a grant given mid-session reaches the reminder once the per-session memo (60 s) lapses — not on every prompt\'s walk', [held, later]);
-  ok(!held.includes('<vibespace-task-context>') && !later.includes('<vibespace-task-context>') && !later.includes('<vibespace-task-update>'), 'a reach change re-sends NO block: the seen marks key on group content / folder / build, never the tools text — only the reminder moves', later.slice(0, 200));
+  const given = R.call('prompt-context', s);
+  await eng.setGrain(A, { kind: 'account' }, { access: [] });
+  const taken = R.call('prompt-context', s);
+  ok(!taught(t0.p1) && given.includes(AR.CHANNELS_REMINDER_SEG.read) && !taught(taken), 'a grant given mid-session reaches the reminder at the very next prompt, and a grant TAKEN AWAY is gone from it at the next prompt (nothing kept across asks — B-360d item 4; the release kept it for 60 s)', [given, taken]);
+  ok(!given.includes('<vibespace-task-context>') && !taken.includes('<vibespace-task-context>') && !taken.includes('<vibespace-task-update>'), 'a reach change re-sends NO block: the seen marks key on group content / folder / build, never the tools text — only the reminder moves', taken.slice(0, 200));
+  await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: EVERY, authority: 'draft' }] });   // given back: the legs below read it
   const s2 = R.session();
   ok(R.call('task-context', s2).includes(TG.CHANNELS_SECTION_LINES.read), 'a new session\'s SessionStart asks fresh');
 }

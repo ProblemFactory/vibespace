@@ -2183,27 +2183,21 @@ const channelsEngine = () => { try { const c = getChannels(); return c && typeof
 // the user connected — the engine's reachCountFor (listFor's walk, counted: one row when an account is granted to
 // everyone). Never on a message arriving (renderMsgStash's channel hint was the only teaching: a session nobody wrote to
 // never learned the tool). No channels / integration off / no engine ⇒ `channels: false` ⇒ the injection is byte-identical.
-// The count walks the index when the session can read nothing (measured: 0.4 ms over 2 000 conversations, 5–13 ms over
-// 20 000), so a prompt reads it from a per-session memo of CHANNELS_REACH_TTL_MS; SessionStart asks fresh. A grant the
-// owner gives or takes reaches the reminder within that minute.
-const CHANNELS_REACH_TTL_MS = 60e3;
-const channelsReachMemo = new WeakMap();   // session object → { at, v, x } (a verdict word + the dead sign-ins' labels, never a row)
+// B-360d item 4 (lane bl-loop-a, 主开发 r4317 / r4325): ASKED AT EVERY PROMPT, NOTHING KEPT. The count is judged by account (the
+// engine's reachCountByAccount: the accounts and their exceptions, never every conversation), so a prompt asks it fresh and a grant
+// the owner takes away is gone from the reminder at the very next turn — a per-session memo of 60 s held it for up to a minute.
 const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
   if (!integrationOnMaster()) return null;
   const eng = channelsEngine();
   if (!eng || typeof eng.reachCountFor !== 'function') return null;
   const t = Date.now();
-  const m = channelsReachMemo.get(s);
-  if (!fresh && m && t - m.at < CHANNELS_REACH_TTL_MS) return m;
   let v = false, x = [];
   // lane pod-oauth-callback (study 1 L1): nothing connected yet on an instance whose admin offers a company app ⇒ 'connect'
   // (the agent learns `vibespace-channels connect <kind>` — a Connect button in the chat, never a vendor's web login)
   try { v = eng.reachCountFor(channelPrincipal(s, id)) || (typeof eng.connectTaught === 'function' && eng.connectTaught() ? 'connect' : false); } catch (e) { v = e && e.code === 'store-blocked' ? 'paused' : false; }   // B-f276 1c: paused is UNKNOWN, said — never an empty reach
   // lane channel-reauth-visible: the accounts it reads whose sign-in is DEAD — named on the same line (none ⇒ the line is byte-identical)
   try { x = v === 'read' && typeof eng.signinExpiredFor === 'function' ? eng.signinExpiredFor(channelPrincipal(s, id)) : []; } catch { x = []; }
-  const out = { at: t, v, x };
-  channelsReachMemo.set(s, out);
-  return out;
+  return { at: t, v, x };
 };
 const toolsFor = (s, id, o) => { const m = channelsTaughtFor(s, id, o); return { ...enabledTools(), channels: m ? m.v : false, ...(m && m.x && m.x.length ? { channelsExpired: m.x } : {}) }; };
 // lane stash-pending-live: a member's OWN TURN carries what its channel watchers parked while none of the group ran (the

@@ -561,8 +561,9 @@ function create(engineCtx) {
     return { ...v };
   }
   /** L3 (lane grants-read-is-a-lookup, docs/kb-design-lessons.md §19's 250 ms): an ASYNC walk over the whole index gives the loop
-   *  back every WALK_STEP conversations scanned — a count, never a clock (≈ 75 ms of a search's scan at the owner's size). */
-  const WALK_STEP = 50000;
+   *  back every WALK_STEP conversations scanned — a count, never a clock. B-360d item 4 (主开发 r4325: under 50 ms a turn at the
+   *  owner's size): 50 000 rows held about 75 ms a turn of a search's scan; a fifth of that now. */
+  const WALK_STEP = 10000;
   /** ONE WALK'S READER of reach (lane grants-read-is-a-lookup — L3: a walk over every conversation stays one bounded loop
    *  turn at the owner's order of sizes, about two hundred thousand): what is the same for the whole walk WHILE THE ROWS ARE — the conversations a row of their
    *  own names, whether a rule holds a row, each account's own answer — is judged once per generation of the rows, asked at
@@ -602,6 +603,46 @@ function create(engineCtx) {
       if (!v) { v = accountReachOf(ctx, en.adapterId, gen); acct.set(en.adapterId, v); }
       return v;
     };
+  }
+  // B-360d item 4 (lane bl-loop-a, 主开发 r4317 / r4325): THE CHANNEL WALKS BY ACCOUNT. The agents' reach count, list and search
+  // walked EVERY conversation of the index per ask (68–155 ms a call, the search's turn longer, at about 200 000 conversations).
+  // KEEP NOTHING ACROSS ASKS: every ask reads the grants, the index's rows, the rules, the account records and the asker's groups
+  // as they stand, so a grant taken away cuts at the very next ask by construction (no table of invalidations exists to miss one).
+  // Each ask judges each ACCOUNT once; per conversation only its EXCEPTIONS: a conversation a row of its own names, one of the
+  // msg-acl account, a row whose key and account disagree, and — on an account that has a rule holding a reach row whose grant CAN
+  // apply to this asker — every row (the rule matched per row, as before). Every other conversation reaches exactly its ACCOUNT's
+  // answer: reachWalkOf's own rule; and a rule whose grants never apply to the asker cannot change the asker's level anywhere
+  // (ACL.effective is the highest level over the grants that apply — widen only). While the store's per-account map is void
+  // (`keysKept` null: after a whole-map touch, its sliced build running) a road walks the release's way: slow and right.
+  const hasOwnKey = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  /** ONE ask's account view → (rec) → the account's answer for a conversation nothing else decides, or null when its rows are
+   *  judged per row (the msg-acl account; an account a rule-with-a-row of which can apply to this asker) */
+  function accountViewOf(ctx) {
+    const gen = CG.generation(), ruleIds = CG.ruleIdsWithRows(), by = new Map();
+    return (rec) => {
+      let v = by.get(rec.id);
+      if (v !== undefined) return v;
+      if (msgAclAdapter(rec)) v = null;
+      else {
+        let applies = false;
+        if (ruleIds.size) {
+          for (const pa of rawPatternsOf(rec.id)) {
+            if (!pa || !pa.pattern || !ruleIds.has(String(pa.id))) continue;
+            if (CG.ruleGrants(pa.id, '').some((g) => ACL.principalApplies(ctx, g))) { applies = true; break; }
+          }
+        }
+        v = applies ? null : accountReachOf(ctx, rec.id, gen);
+      }
+      by.set(rec.id, v);
+      return v;
+    };
+  }
+  /** A directory that lists any kind of this account's conversations (channel-acl directoryListable: a dm by `singles`, the rest
+   *  by `groups`) */
+  function directoryListsAny(rec) {
+    if (!rec || rec.enabled === false || msgAclAdapter(rec)) return false;
+    const d = ACL.directoryOf(rec);
+    return d.groups === true || d.singles === true;
   }
   /** Does a RULE whose access is a reach row match this conversation (its derived grant then decides it with the rest)? */
   function derivesFromRule(en) {
@@ -701,14 +742,21 @@ function create(engineCtx) {
     const hidden = { match: false, capped: false };
     let truncated = false;
     const reachOf = reachWalkOf(ctx);
+    // B-360d item 4: an account this asker can know nothing of is passed over without walking its rows; and the per-account map
+    // is never built whole in this ask's turn — while it is void its sliced build runs and the search WAITS for it (slow and right)
+    const view = ctx && ctx.kind === 'agent' ? accountViewOf(ctx) : null;
+    let ownByAcct = null;
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
+      if (view && searchKnowsNothing(ctx, rec, view, reachOf, () => ownByAcct || (ownByAcct = ownKeysByAccount()))) continue;
+      let rowsRead = null;   // kept (checked again in THIS run, after the await) ⇒ rowsOf reads them; else every row as before cut 1
+      if (view) { await keysKeptFor(rec.id); if (!store.index.keysKept(rec.id)) rowsRead = Object.values(store.index.live()); }
       // REACH FIRST, per conversation: what it may read (`visible`, the title through the belt — verify r1 F2) and what it
       // may NOT (`kept`, for the existence answer) — an account it neither reads nor may request anything of is skipped
       const visible = new Map(), kept = new Map();
       const counts = !msgAclAdapter(rec);
       let knows = false, scanned = 0;
-      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows (was every account's, once per account)
+      for (const en of rowsRead || store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: this account's rows (was every account's, once per account)
         if (++scanned % WALK_STEP === 0) await new Promise((r) => setImmediate(r));   // L3: the loop given back in bounded steps
         if (!en || en.adapterId !== rec.id) continue;
         const lv = reachOf(rec, en).level;
@@ -724,8 +772,12 @@ function create(engineCtx) {
         const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
         truncated = truncated || !!r.truncated;
         covered += (r.coverage && r.coverage.scanned) || 0;   // design 010: what was searched — of what it can see only
-        // verify r2 (IDENTITY): the search was an await — a conversation whose reach was removed meanwhile gives nothing
-        for (const cid of [...visible.keys()]) if (!stillSees(ctx, rec.id, cid)) visible.delete(cid);
+        // verify r2 (IDENTITY): the search was an await — a conversation whose reach was removed meanwhile gives nothing.
+        // B-360d item 4: asked of the conversations the answer names (≤ its limit), never of every visible one — an asker who
+        // reads the biggest account asked it 173 000 times in one turn; the same conversations leave
+        const gone = new Set();
+        for (const x0 of r.results) { const cid = x0.convId; if (visible.has(cid) && !gone.has(cid) && !stillSees(ctx, rec.id, cid)) gone.add(cid); }
+        for (const cid of gone) visible.delete(cid);
         for (const x0 of r.results) {
           if (!visible.has(x0.convId)) continue;
           const x = viewOf(rec, x0);   // lane channel-rich: the same read-time view (a bot's name, markup read)
@@ -747,6 +799,35 @@ function create(engineCtx) {
     const fullOffered = adapterRecords().adapters.some((r) => r.enabled !== false && (!adapterId || r.id === adapterId) && searchRowOf(registry.capsOf(r.kind)));
     const saidKind = SR.searchSaidKind({ hitsSeen: results.length, hiddenMatch: hidden.match, capped: hidden.capped && !hidden.match, accounts });   // lane search-no-group-log: a KEY, never the caller's query
     return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind), ...signinNoteOf(dead) };
+  }
+  /** B-360d item 4: an async road's wait for ONE account's kept keys — the sliced build of a void map, awaited (bounded: a map
+   *  voided again and again meanwhile ⇒ null after three waits, and then the release's road) → the kept keys or null */
+  async function keysKeptFor(adapterId) {
+    for (let i = 0; i < 3; i++) {
+      const k = store.index.keysKept(adapterId);
+      if (k || !store.index.keysStats().warming) return k;
+      await store.index.keysReady();
+    }
+    return store.index.keysKept(adapterId);
+  }
+  /** B-360d item 4: the keys a row of their own names, by account (one ask's) */
+  function ownKeysByAccount() {
+    const live = store.index.live(), out = new Map();
+    for (const key of CG.ownConversationKeys()) { const en = hasOwnKey(live, key) ? live[key] : null; if (!en) continue; const a = out.get(en.adapterId); if (a) a.push(en); else out.set(en.adapterId, [en]); }
+    return out;
+  }
+  /** B-360d item 4: an account the search would walk only to learn it knows nothing there (its answer hides every row, no
+   *  directory lists one, no row of its own opens one to this asker, no rule can) — the release's walk found `knows` false
+   *  there and skipped it; this is that answer without the walk. The msg-acl account never counts (as the release). */
+  function searchKnowsNothing(ctx, rec, view, reachOf, ownBy) {
+    const v = view(rec);
+    if (v === null || v.level !== 'hidden' || directoryListsAny(rec)) return false;
+    for (const en of ownBy().get(rec.id) || []) {
+      if (en.adapterId !== rec.id) continue;
+      const lv = reachOf(rec, en).level;
+      if (ACL.canSee(lv) || ACL.canRequest(lv) || directoryLists(rec, en)) return false;
+    }
+    return true;
   }
   /** The built-in Agents adapter answers reach with msg-acl (other sessions — `vibespace-msg`'s door): not a channel the
    *  user shares through Channels, so a search never answers that something matched in its conversations. */
@@ -1850,9 +1931,11 @@ function create(engineCtx) {
    *  rows to list 200). The order is the full sort's — `lastAt` newest first, a tie in walk order (Array.prototype.sort is stable)
    *  — and `dropped` counts what each kind left out, so listFor's `more` / `moreRequestable` are what they were. A heap per kind
    *  whose root is the kept row listed last: O(n log max). */
-  function newestSelector(max) {
+  function newestSelector(max, tieBefore = null) {
     const at = (x) => x.c.en.lastAt || 0;
-    const before = (a, b) => (at(a) !== at(b) ? at(a) > at(b) : a.i < b.i);   // a is listed before b
+    // a is listed before b; on a tie of `lastAt` the order the rows were offered in — or `tieBefore` (B-360d item 4: the walk by
+    // account offers rows account by account, and breaks a tie by the rows' places in the index's own order, as the release's walk)
+    const before = (a, b) => (at(a) !== at(b) ? at(a) > at(b) : tieBefore ? tieBefore(a.c, b.c) : a.i < b.i);
     const heaps = { visible: [], hidden: [] }, dropped = { visible: 0, hidden: 0 };
     let n = 0;
     const up = (h, k) => { while (k > 0) { const p = (k - 1) >> 1; if (!before(h[p], h[k])) break; [h[p], h[k]] = [h[k], h[p]]; k = p; } };
@@ -1864,6 +1947,14 @@ function create(engineCtx) {
         dropped[kind]++;
         if (!before(x, h[0])) return;   // listed after every kept row: it is the one left out
         h[0] = x; down(h, 0);           // the kept row listed last is left out instead
+      },
+      /** B-360d item 4: a row offer() would leave out at once (its kind's heap full, the row older than the one listed last) —
+       *  counted as offer() counts it, with nothing built for it (the walk by account asks before it builds a candidate) */
+      drops(level, lastAt) {
+        const kind = level === 'hidden' ? 'hidden' : 'visible', h = heaps[kind];
+        if (h.length < max || !(lastAt < at(h[0]))) return false;
+        dropped[kind]++;
+        return true;
       },
       rows() { return [...heaps.visible, ...heaps.hidden].sort((a, b) => (before(a, b) ? -1 : 1)).map((x) => x.c); },
       dropped,
@@ -1879,14 +1970,17 @@ function create(engineCtx) {
     const t = now();
     const recs = adapterRecords().adapters;
     const byId = new Map(recs.map((r) => [r.id, r]));
-    const sel = newestSelector(LIST_FOR_MAX);
     const reachOf = reachWalkOf(ctx);
-    for (const en of Object.values(store.index.live())) {   // B-f32b: read-only — the rows are read, never kept or changed
-      const rec = byId.get(en.adapterId);
-      if (!rec || rec.enabled === false) continue;
-      const reach = reachOf(rec, en);
-      if (reach.level === 'hidden' && !(all && directoryLists(rec, en))) continue;
-      sel.offer({ en, rec, reach });
+    let sel = ctx && ctx.kind === 'agent' ? newestSelector(LIST_FOR_MAX, placeBefore) : null;
+    if (!(sel && listByAccount(ctx, byId, all, reachOf, sel))) {   // B-360d item 4: by account — else (the map void) the release's walk
+      sel = newestSelector(LIST_FOR_MAX);   // a fresh one: nothing was offered to the other (listByAccount offers only once the map is kept)
+      for (const en of Object.values(store.index.live())) {   // B-f32b: read-only — the rows are read, never kept or changed
+        const rec = byId.get(en.adapterId);
+        if (!rec || rec.enabled === false) continue;
+        const reach = reachOf(rec, en);
+        if (reach.level === 'hidden' && !(all && directoryLists(rec, en))) continue;
+        sel.offer({ en, rec, reach });
+      }
     }
     const out = [];
     let more = 0, moreRequestable = 0, listed = 0, listedDir = 0;
@@ -1933,6 +2027,46 @@ function create(engineCtx) {
     if (blind.length || dead.length) return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX, ...namesNoteOf(blind), ...signinNoteOf(dead) };
     return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX };
   }
+  /** B-360d item 4: THE LIST's TIE ORDER for the walk by account — a tie of `lastAt` broken by the rows' PLACES in the index's
+   *  own order (the store keeps each kept key's place: channel-store keysKept), as the release's walk over every row broke it */
+  const placeBefore = (a, b) => a.place < b.place;
+  /** B-360d item 4: the list's candidates BY ACCOUNT → true when offered, false (nothing offered) while the per-account map is void */
+  function listByAccount(ctx, byId, all, reachOf, sel) {
+    const kept = new Map();
+    for (const rec of byId.values()) { if (!rec || rec.enabled === false) continue; const k = store.index.keysKept(rec.id); if (!k) return false; kept.set(rec.id, k); }
+    const live = store.index.live(), own = CG.ownConversationKeys(), view = accountViewOf(ctx);
+    const rowOf = (key) => (hasOwnKey(live, key) ? live[key] : null);
+    const offer = (rec, en, reach, key, place) => { if (reach.level === 'hidden' && !(all && directoryLists(rec, en))) return; sel.offer({ en, rec, reach, key, place: place === undefined ? Number.MAX_SAFE_INTEGER : place }); };
+    let odd = null;
+    for (const k of kept.values()) { odd = k.odd; break; }
+    if (odd) for (const [key, place] of odd) { const en = rowOf(key), rec = en && byId.get(en.adapterId); if (rec && rec.enabled !== false) offer(rec, en, reachOf(rec, en), key, place); }
+    let ownByAcct = null;   // adapterId → the keys a row of their own names (built once, when an account needs only those)
+    const oddN = odd ? odd.size : 0, ownN = own.size;
+    for (const [id, k] of kept) {
+      const rec = byId.get(id), v = view(rec), places = k.keys;
+      if (v === null || v.level !== 'hidden' || (all && directoryListsAny(rec))) {   // its rows: each offered (its answer, or the release's reader)
+        // THE HOT LOOP (every row of a big account): directoryLists' own test (channel-acl directoryListable) with the account's
+        // switches read once; a row the selector would leave out at once builds nothing; a kept key is always a row of the map
+        // (keysKept: never inside an update)
+        const dir = all && !msgAclAdapter(rec) ? ACL.directoryOf(rec) : null;
+        const dirDm = !!dir && dir.singles === true, dirGroups = !!dir && dir.groups === true;
+        for (const key of places.keys()) {
+          if (oddN && odd.has(key)) continue;
+          const en = live[key];
+          if (!en || en.adapterId !== id) continue;
+          const reach = v === null || (ownN && own.has(key)) ? reachOf(rec, en) : v;
+          if (reach.level === 'hidden' && !(en.kind === 'dm' ? dirDm : dirGroups)) continue;
+          if (sel.drops(reach.level, en.lastAt || 0)) continue;
+          sel.offer({ en, rec, reach, key, place: places.get(key) });
+        }
+        continue;
+      }
+      // its answer hides every row and it lists no directory: only the rows a row of their own names can be offered
+      if (!ownByAcct) { ownByAcct = new Map(); for (const key of own) { const en = rowOf(key); if (en) { const a = ownByAcct.get(en.adapterId); if (a) a.push(key); else ownByAcct.set(en.adapterId, [key]); } } }
+      for (const key of ownByAcct.get(id) || []) { if (oddN && odd.has(key)) continue; const en = rowOf(key); if (en && en.adapterId === id) offer(rec, en, reachOf(rec, en), key, places.get(key)); }
+    }
+    return true;
+  }
   /** THE REACH THE HOOK TEACHES ON (lane channels-teach, a fleet user's incident 2026-10-18: a session whose four
    *  accounts were all granted to everyone never learned `vibespace-channels` and read data/channels/ with python).
    *  listFor's own walk and filters, COUNTED — nothing is built: `read` = some conversation `list` would show that the
@@ -1950,6 +2084,8 @@ function create(engineCtx) {
       recs.set(r.id, r);
     }
     if (!recs.size) return null;
+    const byAccount = ctx && ctx.kind === 'agent' ? reachCountByAccount(ctx, recs) : undefined;   // B-360d item 4
+    if (byAccount !== undefined) return byAccount;
     let request = false;
     const reachOf = reachWalkOf(ctx);
     const live = store.index.live();   // B-f32b: read-only, as listFor; walked by key — the first readable row ends it
@@ -1963,6 +2099,44 @@ function create(engineCtx) {
     }
     return request ? 'request' : null;
   }
+  /** B-360d item 4: the reach count BY ACCOUNT (the answer is a word, never an order: any readable row ⇒ 'read', else any
+   *  requestable or directory-listed row ⇒ 'request') → the word, or undefined while the per-account map is void (the release's walk) */
+  function reachCountByAccount(ctx, recs) {
+    const kept = new Map();
+    for (const id of recs.keys()) { const k = store.index.keysKept(id); if (!k) return undefined; kept.set(id, k); }
+    const live = store.index.live(), own = CG.ownConversationKeys(), view = accountViewOf(ctx), reachOf = reachWalkOf(ctx);
+    let request = false;
+    const judge = (rec, en) => {
+      const lv = reachOf(rec, en).level;
+      if (ACL.canSee(lv)) return true;
+      if (!request && (ACL.canRequest(lv) || directoryLists(rec, en))) request = true;
+      return false;
+    };
+    const rowOf = (key) => (hasOwnKey(live, key) ? live[key] : null);
+    let odd = null;
+    for (const k of kept.values()) { odd = k.odd; break; }
+    // the exceptions, each by the release's reader: the rows whose key and account disagree, the rows a row of their own names
+    if (odd) for (const key of odd.keys()) { const en = rowOf(key), rec = en && recs.get(en.adapterId); if (rec && judge(rec, en)) return 'read'; }
+    for (const key of own) { if (odd && odd.has(key)) continue; const en = rowOf(key), rec = en && recs.get(en.adapterId); if (rec && judge(rec, en)) return 'read'; }
+    for (const [id, k] of kept) {
+      const rec = recs.get(id), v = view(rec);
+      if (v === null) {   // a rule-with-a-row of this account can apply to the asker: every row by the release's reader
+        for (const key of k.keys.keys()) { if (own.has(key)) continue; const en = rowOf(key); if (en && en.adapterId === id && judge(rec, en)) return 'read'; }
+        continue;
+      }
+      // the account's answer reaches every row of it no row of its own names: is there one?
+      let plain = false;
+      for (const key of k.keys.keys()) { if (own.has(key)) continue; const en = rowOf(key); if (en && en.adapterId === id) { plain = true; break; } }
+      if (!plain) continue;
+      if (ACL.canSee(v.level)) return 'read';
+      if (request) continue;
+      if (ACL.canRequest(v.level)) { request = true; continue; }
+      if (directoryListsAny(rec)) {
+        for (const key of k.keys.keys()) { if (own.has(key)) continue; const en = rowOf(key); if (en && en.adapterId === id && directoryLists(rec, en)) { request = true; break; } }
+      }
+    }
+    return request ? 'request' : null;
+  }
   /** lane channel-reauth-visible: THE HOOK'S DEAD SIGN-INS — the labels (≤ 3, each ≤ 60 characters) of the accounts whose
    *  sign-in is dead and that hold a conversation this principal may READ (listFor's reach, walked only for a dead
    *  account — none dead ⇒ one pass over the records, no index walk). */
@@ -1971,8 +2145,13 @@ function create(engineCtx) {
     if (!dead.length) return [];
     const out = [];
     const reachOf = reachWalkOf(ctx);
+    const live = store.index.live();
     for (const rec of dead) {
-      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: the dead account's own rows
+      // B-360d item 4: the hook asks this at every prompt now — the account's kept keys read in place (never a copy of every row);
+      // while the per-account map is void (never built whole here), the walk over every row as before B-dfa4 cut 1: slow and right
+      const kept = store.index.keysKept(rec.id);
+      const rows = kept ? (function* () { for (const k of kept.keys.keys()) yield live[k]; for (const k of kept.odd.keys()) yield live[k]; })() : Object.values(live);
+      for (const en of rows) {   // B-dfa4 cut 1: the dead account's own rows
         if (!en || en.adapterId !== rec.id || en.unlistedAt) continue;
         if (ACL.canSee(reachOf(rec, en).level)) { out.push(String(rec.label || rec.id).slice(0, 60)); break; }
       }

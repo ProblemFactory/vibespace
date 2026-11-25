@@ -108,6 +108,7 @@
   "test-channel-store": 27767,
   "test-channel-threads-ui": 116748,
   "test-channel-walk-own-rows": 2643,
+  "test-channel-walks-hold": 8806,
   "test-channel-window-render": 203789,
   "test-channels-accounts": 5755,
   "test-channels-agent-cli-verbs": 13573,

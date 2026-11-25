@@ -862,9 +862,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // changed); a whole-map touch drops the sets (rebuilt at the next read). A row whose key does not begin with its own
   // account (only a damaged act line applied as written) is kept in `oddKeys` and handed to EVERY account — each walk
   // still judges every key it is handed by its own test, so the kept keys are a superset of what any walk read before.
-  let byAcct = null;              // Map<adapterId, Set<key>> — null = build at the next read (boot, a whole-map touch)
+  let byAcct = null;              // Map<adapterId, Map<key, place>> — null = build at the next read (boot, a whole-map touch)
   const acctOfKey = new Map();    // key → the account whose set holds it ('' = oddKeys)
-  const oddKeys = new Set();
+  const oddKeys = new Map();      // key → place
+  // B-360d item 4 (lane bl-loop-a): each kept key's PLACE in the map's own order (the order `live()` walks: a key placed at a
+  // build in Object.keys order, a birth after every key there is, a key that moves account keeps its place) — the channel walks
+  // by account break a tie of two accounts' rows by it exactly as the release's walk over every row did, with no copy of the order
+  let acctSeq = 0;
   const acctStats = { builds: 0, moves: 0, sliced: 0 };
   // B-dfa4 cut 3: A BIG INDEX'S PER-ACCOUNT KEYS ARE BUILT IN SLICES FROM THE LOAD (walkSliced) — the first keysOf() of a
   // 96 500-row index built them in the boot's held turn (acctPlace ← keysOf, measured). The stated snapshot: the keys at the
@@ -878,13 +882,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const a = row && typeof row.adapterId === 'string' ? row.adapterId : null;
     const next = !row ? undefined : (a !== null && key.startsWith(`${a}/`) ? a : '');
     if (prev === next) return;
-    if (prev === '') oddKeys.delete(key);
-    else if (prev !== undefined) { const set = byAcct.get(prev); if (set) { set.delete(key); if (!set.size) byAcct.delete(prev); } }
+    let place;
+    if (prev === '') { place = oddKeys.get(key); oddKeys.delete(key); }
+    else if (prev !== undefined) { const set = byAcct.get(prev); if (set) { place = set.get(key); set.delete(key); if (!set.size) byAcct.delete(prev); } }
     acctStats.moves++;
     if (next === undefined) { acctOfKey.delete(key); return; }
+    if (place === undefined) place = ++acctSeq;   // a key new to the map: after every key there is (a move keeps its place)
     acctOfKey.set(key, next);
-    if (next === '') oddKeys.add(key);
-    else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Set())); set.add(key); }
+    if (next === '') oddKeys.set(key, place);
+    else { let set = byAcct.get(next); if (!set) byAcct.set(next, (set = new Map())); set.set(key, place); }
   }
   /** B-dfa4 U2: the keys of ONE account's rows (with any row whose key and account disagree) — a fresh array, in the
    *  map's own order (a birth joins both at the end); the caller reads each row from `live()` and keeps its own test.
@@ -896,7 +902,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (acctWarm) acctFinish();   // B-dfa4 cut 3: the rest of the sliced build, in this turn
     if (!byAcct) { byAcct = new Map(); acctOfKey.clear(); oddKeys.clear(); acctStats.builds++; for (const k of Object.keys(ix.conversations)) acctPlace(k); }
     const set = byAcct.get(String(adapterId));
-    const out = oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
+    const out = oddKeys.size ? [...(set ? set.keys() : []), ...oddKeys.keys()] : (set ? [...set.keys()] : []);
     if (curTouch) for (const k of curTouch) if (!(set && set.has(k)) && !oddKeys.has(k)) out.push(k);
     return out;
   }
@@ -919,6 +925,25 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     walkSliced(keys, (k, i) => { acctPlace(k, job.map); job.i = i + 1; }, { what: 'account-keys', sliceMs: LAYOUT_SLICE_MS, onSlice: layoutSeam, alive: () => acctWarm === job && !closed })
       .then((r) => { if (r.done && acctWarm === job) acctLand(job); else job.resolve(); }, (e) => { job.resolve(); if (acctWarm === job) acctWarm = null; warn('[channels] the per-account keys build failed:', (e && e.message) || e, '— the next read builds them whole'); });
   }
+  /** B-360d item 4 (lane bl-loop-a, 主开发 r4317 / r4325): THE CHANNEL WALKS' READ of ONE account's keys — a road (the agents' reach
+   *  count, list and search) NEVER builds the per-account map whole in its own turn. → { keys: the KEPT Map itself, key → its place in the
+   *  map's order (read-only: the caller reads it within one synchronous run and never changes it), odd: the keys whose row and
+   *  account disagree (every account's, as keysOf answers them; key → place) } — or null while the map is VOID or being built in slices on a big index: the road then
+   *  answers by the release's walk (slow and right, never by a partial map). A void map's sliced build is started here (the roads'
+   *  need, nothing more: keysOf and the index's writers keep their own road); a small index (≤ LAYOUT_SYNC_ROWS rows) is built at
+   *  once, as keysOf builds it. Inside an update: null (the kept set may not hold a row the update touched yet). */
+  function keysKept(adapterId) {
+    if (curTouch || closed || acctWarm) return null;
+    if (!byAcct) {
+      acctWarmStart();   // a big index: its slices start now; a small one, or rows that are not plain, start nothing
+      if (acctWarm) return null;
+      if (Object.keys(ix.conversations).length > LAYOUT_SYNC_ROWS) return null;   // not plain rows on a big index: the release's walk
+      keysOf(adapterId);   // a small index: built at once (≤ LAYOUT_SYNC_ROWS keys), as keysOf builds it
+      if (!byAcct) return null;
+    }
+    return { keys: byAcct.get(String(adapterId)) || NO_KEYS, odd: oddKeys };
+  }
+  const NO_KEYS = new Map();
   function rowsOf(adapterId) {
     const out = [];
     for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en) out.push(en); }
@@ -3385,7 +3410,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       // resolves when that write landed (a suite's whole write; the bound's own road)
       fold: () => { if (closed) { try { flush(); } catch { return Promise.resolve(false); } return Promise.resolve(!ixLoad.blocked); } if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); markDirty(true); return W().durable(indexFile); }, isDirty: () => dirty, blocked: () => ixLoad.blocked || null, held: () => !!ixLoad.held,   // fold: r1542's law — held, refused by name
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
-      keysOf, rowsOf, keysReady, keysStats: () => ({ ...acctStats, kept: !!byAcct, warming: !!acctWarm, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
+      keysOf, rowsOf, keysReady, keysKept, keysStats: () => ({ ...acctStats, kept: !!byAcct, warming: !!acctWarm, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, onWholeTouch: (fn) => { if (typeof fn === 'function') wholeTaps.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),

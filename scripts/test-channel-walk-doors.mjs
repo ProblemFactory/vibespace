@@ -93,9 +93,11 @@ async function world(tag, { control = false } = {}) {
   const rec = () => e.adapterRecords().adapters.find((r) => r.id === A);
   ix.keysOf(A);   // the kept sets are built now: no door below may rebuild them
   const builds0 = ix.keysStats().builds;
-  const realRowsOf = ix.rowsOf, realKeysOf = ix.keysOf;
-  // the control: both reads given back the walk they replaced — `live()` read whole (inside an update: a whole-map touch)
-  if (control) { ix.rowsOf = wholeRowsOf(ix); ix.keysOf = () => O.keys(ix.live()); }
+  const realRowsOf = ix.rowsOf, realKeysOf = ix.keysOf, realKeysKept = ix.keysKept;
+  // the control: both reads given back the walk they replaced — `live()` read whole (inside an update: a whole-map touch); and
+  // B-360d item 4's read of the kept keys in place (the hook's dead sign-ins, the search's wait) void: those roads then walk the
+  // whole map, as the release did
+  if (control) { ix.rowsOf = wholeRowsOf(ix); ix.keysOf = () => O.keys(ix.live()); ix.keysKept = () => null; }
   // the keys the store's touch signal says an update changed (null = the whole map), recorded while `touchArmed`
   const touched = []; let touchArmed = false;
   ix.onTouch((k) => { if (touchArmed) touched.push(k); });
@@ -144,7 +146,7 @@ async function world(tag, { control = false } = {}) {
     out.buildsDuring = ix.keysStats().builds - builds0 - out.rejudgeBuilds;
   } finally {
     cw.stop();
-    if (control) { ix.rowsOf = realRowsOf; ix.keysOf = realKeysOf; }
+    if (control) { ix.rowsOf = realRowsOf; ix.keysOf = realKeysOf; ix.keysKept = realKeysKept; }
     try { await e.stop(); } catch { }
     try { e.store.close(); } catch { }
   }
