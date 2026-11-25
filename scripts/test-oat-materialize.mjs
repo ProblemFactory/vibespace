@@ -446,7 +446,10 @@ const P = amP.createPool({ name: 'Pool' }).id;
   const h = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
   // (B-360d, lane chrome-157: setPoolTarget + ONE line after the re-point — `this._displaySeedPool(a, subId)`, the pool folder's KEPT
   // display facts set in the switch's own step (never an old identity after a switch); the slot, the link and the ledger unchanged)
-  const PIN = { ensureSessionPoolLink: 'ea444b5b7962469d', _noteSlot: 'f7c6d00977b723ab', setPoolTarget: 'd5e1be9cf1471633', repointPoolSymlink: '90eae116e782737a' };
+  // (B-e381, lane bl-tests-e, 主开发 r4531: ensureSessionPoolLink reads its member by the member's OWN harness — _memberSignIn: the
+  // reader, the folder, the file a re-point bumps; for a Claude member the release's values, value for value — the slot (_noteSlot's
+  // row), the link and the ledger unchanged; its two writers' Claude scene is the release's byte for byte in test-codex-pool «B-e381»)
+  const PIN = { ensureSessionPoolLink: '56cc4b8af486cdd5', _noteSlot: 'f7c6d00977b723ab', setPoolTarget: 'd5e1be9cf1471633', repointPoolSymlink: '90eae116e782737a' };
   const now = { ensureSessionPoolLink: h(fnText(src, 'ensureSessionPoolLink')), _noteSlot: h(fnText(src, '_noteSlot')), setPoolTarget: h(fnText(src, 'setPoolTarget')), repointPoolSymlink: h(fnTop(mat, 'repointPoolSymlink')) };
   ok(JSON.stringify(now) === JSON.stringify(PIN), 'THE SLOT LAW (invariant 3): ensureSessionPoolLink / _noteSlot / setPoolTarget / repointPoolSymlink are byte-identical to rel267 (sha pins)', now);
   const mutated = h(fnText(src.replace("const from = this.poolCurrentFor(poolId, sessKey);", "const from = this.poolCurrentFor(poolId, sessKey) ;"), 'ensureSessionPoolLink'));
