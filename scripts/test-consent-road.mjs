@@ -413,7 +413,13 @@ let BIND0 = undefined, saidNoRange = false;
 const readNum = (f) => { try { return fs.readFileSync(f, 'utf8').trim().split(/\s+/).map(Number); } catch { return null; } };
 const bind0Range = () => { if (BIND0 === undefined) { const r = readNum('/proc/sys/net/ipv4/ip_local_port_range'); BIND0 = r && r.length === 2 && r[0] > 0 && r[1] >= r[0] ? r : null; } return BIND0; };
 const tryBind = (port) => new Promise((r) => { const s = http.createServer(); s.once('error', (e) => r((e && e.code) || 'error')); s.listen(port, '127.0.0.1', () => s.close(() => r(null))); });
-async function fixedPort({ tries = 24 } = {}) {
+// B-1217 (lane bl-loop-b, 主开发 r4407): THE FETCH STANDARD BLOCKS PORTS («bad port», https://fetch.spec.whatwg.org/#port-blocking): node's
+// fetch (undici) refuses them with «TypeError: fetch failed» (its cause «bad port») though the kernel binds them and a raw connect is
+// accepted — the leg «Google sends the browser to that address» read exactly that ONCE (run c955ce1f0-20261121112237-both:
+// {"landed":"TypeError: fetch failed","done":null}, its listener up). This file's fixed port is a RANDOM pick below the kernel's bind(0)
+// range, where about twenty of these ports lie: a world handed one bound it, and the redirect's fetch failed. It never hands one now
+const FETCH_BLOCKED = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+async function fixedPort({ tries = 24, random = Math.random, skipBlocked = true } = {}) {
   const range = bind0Range();
   if (!range) { if (!saidNoRange) { saidNoRange = true; console.log('  (no /proc/sys/net/ipv4/ip_local_port_range to read: a world\'s fixed port is a bind to port 0, as before)'); } return freePort(); }
   const [lo, hi] = range, floor = Math.max(1024, ((readNum('/proc/sys/net/ipv4/ip_unprivileged_port_start') || [])[0]) || 1024);
@@ -421,18 +427,19 @@ async function fixedPort({ tries = 24 } = {}) {
   if (!spans.length) throw new Error(`a world's fixed callback port: no room outside the kernel's bind(0) range ${lo}-${hi} (floor ${floor})`);
   const tried = [];
   for (let i = 0; i < tries; i++) {
-    const [a, b] = spans[i % spans.length], port = a + Math.floor(Math.random() * (b - a + 1));
+    const [a, b] = spans[i % spans.length], port = a + Math.floor(random() * (b - a + 1));
+    if (skipBlocked && FETCH_BLOCKED.has(port)) { tried.push(`${port} blocked by fetch`); continue; }   // B-1217: a port node's fetch refuses («bad port»)
     const why = await tryBind(port);
     if (!why) return port;
     tried.push(`${port} ${why}`);
   }
   throw new Error(`a world's fixed callback port: ${tries} ports outside the kernel's bind(0) range ${lo}-${hi} were all taken (${tried.join(', ')})`);
 }
-async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', instanceAddress: 'listed' }, env = {}, presets = null, eng = ENG, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', instanceAddress: 'listed' } } = {}) {
+async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', instanceAddress: 'listed' }, env = {}, presets = null, eng = ENG, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', instanceAddress: 'listed' } , port = null } = {}) {
   const dir = path.join(ROOT, tag);
   fs.mkdirSync(dir, { recursive: true });
   const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { ...env, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: larkPreset }]) }, presets, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [drive], log: quiet });
-  const fixed = `http://127.0.0.1:${await fixedPort()}/${fixedPath}`;
+  const fixed = `http://127.0.0.1:${port || await fixedPort()}/${fixedPath}`;   // `port`: a leg's own (B-1217's placed blocked port)
   const oauth = OL.createOAuthLoopback({ log: quiet, fixedCallbackUrl: fixed });
   const e = eng.create({ dataDir: path.join(dir, 'eng'), env, serverSetting, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, oauth, publicUrl: () => publicUrl });
   RT.setup({ getEngine: () => e });
@@ -803,6 +810,37 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
     const dc = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'custom', clientId: '456-own.apps.googleusercontent.com', clientSecret: 'dummy-own-gsecret-1', origin: HUBO, options: { clientType: 'desktop' } });
     ok(d.flow.mode === 'fixed' && dc.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(dc.url).searchParams.get('redirect_uri')), 'R4: «Desktop app» on a company preset changes nothing (its Web kind: the FIXED address); on a person\'s own client ⇒ the ephemeral port (any port — nothing registered)', { preset: d.flow.mode, own: dc.flow.mode });
   } finally { await w.close(); }
+  // B-1217 (lane bl-loop-b, 主开发 r4407): THE ONE «fetch failed», PLACED — red at will. (i) A world whose fixed callback port is one the
+  // Fetch standard blocks: the kernel binds it (the flow listening), a raw connect is accepted — yet the redirect's fetch is refused
+  // («TypeError: fetch failed», its cause «bad port»), the flow never done: the one red's facts. (ii) THE CURE's LINE: fixedPort's pick
+  // PLACED on such a port (its random handed the value that lands there) hands another port; RED (the pick before the cure, no skip): it
+  // hands the blocked one
+  {
+    let bp = null;
+    for (const p of [...FETCH_BLOCKED].filter((x) => x >= 1024)) { if (!(await tryBind(p))) { bp = p; break; } }
+    let placed = null;
+    if (bp) {
+      const wb = await world('blockedport', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', port: bp, drive: { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', clientType: 'web' } });
+      try {
+        const sb = await wb.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: HUBO });
+        const bk = new URL(wb.fixed); bk.searchParams.set('code', 'road-web-code'); bk.searchParams.set('state', new URL(sb.url).searchParams.get('state'));
+        const landed = await fetch(bk.toString()).then((r) => r.status).catch((er) => causeOf(er));
+        placed = { port: bp, listening: sb.flow.listening === true, landed, connect: await rawConnect(bp), done: !!(wb.oauth.status(sb.flowId) || {}).done };
+      } finally { await wb.close(); }
+    }
+    ok(!!placed && placed.listening && /fetch failed/.test(String(placed.landed)) && /bad port/.test(String(placed.landed)) && placed.connect === 'accepted' && !placed.done,
+      placed ? `B-1217 PLACED: a world on the blocked port ${placed.port} — listening, a raw connect accepted, and the redirect's fetch refused («fetch failed», «bad port»), the flow not done: the one red, at will` : 'HARNESS (B-1217): no port of the Fetch standard\'s blocked list above 1024 was free to bind on this machine — the placement could not be made', placed);
+    const range = bind0Range();
+    const floor0 = Math.max(1024, ((readNum('/proc/sys/net/ipv4/ip_unprivileged_port_start') || [])[0]) || 1024);
+    const span0 = range ? [floor0, range[0] - 1] : null;
+    let target = null;   // a blocked port inside the span fixedPort picks first, and free on this machine
+    if (span0) for (const x of [...FETCH_BLOCKED].filter((y) => y >= span0[0] && y <= span0[1])) { if (!(await tryBind(x))) { target = x; break; } }
+    const placedRandom = () => { let first = true; return () => { if (first && span0 && target) { first = false; return (target - span0[0] + 0.5) / (span0[1] - span0[0] + 1); } return Math.random(); }; };
+    const cured = target ? await fixedPort({ random: placedRandom() }) : null;
+    const before = target ? await fixedPort({ random: placedRandom(), skipBlocked: false }) : null;
+    ok(target != null && cured != null && !FETCH_BLOCKED.has(cured), target != null ? `B-1217 THE CURE's LINE: fixedPort's pick placed on the blocked port ${target} hands another (${cured}) — never one node's fetch refuses` : 'HARNESS (B-1217): this machine reads no bind(0) range, so fixedPort picks by port 0 (no low span to place a pick in)', { target, cured });
+    ok(target != null && before === target, `B-1217 RED (the pick before the cure, no skip): placed the same way it hands the blocked port ${target} (red)`, { target, before });
+  }
   // (c) THE SETUP CARD — the exact addresses this instance needs, per shape (PURE src/oauth-setup.js)
   const G = REG.rowById('gmail').redirect, L = REG.rowById('lark').redirect, S = REG.rowById('slack').redirect, D = REG.rowById('dropline').redirect;
   const keys = (c) => c.rows.map((x) => `${x.key}${x.now ? '*' : ''}`).join(' ');
