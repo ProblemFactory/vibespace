@@ -494,9 +494,14 @@ try {
   // probe b214928c8): insets MANDATORY; top / topMax / left / leftMax / bottom / bottomMax / right / rightMax optional integers; an
   // unset one leaves env() undefined (its fallback); env() follows it with or without viewport-fit=cover (the product's own cover
   // and column verdicts are test-viewport-class ⑤ / ⑤b). RED CONTROL: the release's stylesheet (the bar at right 0, 56 px).
-  console.log('④b THE SYSTEM\'s SIDE COLUMN (B-78db: insets PLACED — right 84, bottom 34 — inner 951×648, outer 466×657, touch)');
+  console.log('④b–④d THE SYSTEM\'s EDGES (B-78db: insets PLACED — the Duo\'s side column inner 951×648 / outer 466×657; an ordinary notched iPhone 390×844 / 844×390; the sheets\' order under a custom theme)');
   {
     const place = (insets) => cdp('Emulation.setSafeAreaInsetsOverride', { insets });
+    // THE TEST SEAM (主开发 r4115's reach order — named in the line): the product asks cover and reads the column ONLY in an iPhone's
+    // or iPad's home-screen copy (navigator.standalone === true, side-column.js). Chrome has no such property; the suite defines it
+    // for ITS OWN pages (removed at the end of ④b–④d). What the probe reads: env(safe-area-inset-*), which Chrome's override sets
+    // with or without cover (probe b214928c8).
+    const seam = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "Object.defineProperty(Navigator.prototype, 'standalone', { configurable: true, get: () => true });" });
     const COL = `(() => { const nav = document.getElementById('mobile-nav'), r = nav.getBoundingClientRect();
       const kids = [...nav.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== 'fixed' && !e.classList.contains('mnav-gap'))
         .map((e) => { const b = e.getBoundingClientRect(); return { id: e.id, top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; }).sort((a, b) => a.top - b.top);
@@ -516,7 +521,7 @@ try {
     const rows = await evalJs(`[...document.querySelectorAll('.chat-status-settings-row')].map((r) => r.className.match(/chat-status-col-[a-z]+/)?.[0] || '')`);
     await tap('.chat-status-col-window'); await sleep(300);
     const menu = await evalJs(`(() => { const m = document.querySelector('.taskbar-context-menu'), d = document.querySelector('.window.window-active .chat-status-settings'); if (!m || !d) return null; const b = m.getBoundingClientRect(); return { bottom: Math.round(b.bottom), doorTop: Math.round(d.getBoundingClientRect().top), right: Math.round(b.right), rows: [...m.querySelectorAll('.taskbar-context-menu-item')].map((r) => r.textContent.trim()) }; })()`);
-    await evalJs(`document.querySelectorAll('.context-menu, .chat-status-dropdown').forEach((m) => m.remove()); 1`);
+    await evalJs(`document.querySelectorAll('.context-menu, .taskbar-context-menu, .chat-status-dropdown').forEach((m) => m.remove()); 1`);   // r4115 (f): the window menu it opened closes too
     check('④b inner: the conversation\'s search and its window\'s menu are the «Conversation settings» door\'s last rows; the menu (Rename…) opens ABOVE the door, left of the column',
       rows.slice(-2).join() === 'chat-status-col-search,chat-status-col-window' && !!menu && menu.bottom <= menu.doorTop && menu.right <= 951 - 84 && menu.rows.some((x) => /Rename/.test(x)), { rows, menu });
     // a viewer: its ✕ at its own head's end (left of the column), never in the column
@@ -525,15 +530,27 @@ try {
     check('④b inner: a viewer (Files) wears its ✕ at its head\'s end — top 0, its right edge at the column\'s', x.onshow === 'viewer' && x.top === 0 && x.right === 951 - 84 && x.w === 44, x);
     await tap('#mobile-nav-viewer-close'); await sleep(300);
     // THE LAW: a short column yields in the stated order into rows of Global settings, never past the bottom inset
-    await device(951, 360); await sleep(600);
+    await device(951, 360);
+    await waitFor(`!!document.getElementById('mobile-nav').dataset.colYield`, 5000);   // r4115 (f): the yield's own mark, never a fixed sleep
     const short = await evalJs(COL);
-    await tap('#mobile-nav-gear'); await sleep(400);
-    const gs = await evalJs(`[...document.querySelectorAll('.gs-menu .gs-menu-item')].map((r) => r.textContent.trim())`);
+    await tap('#mobile-nav-gear'); await waitFor(`!!document.querySelector('.gs-menu')`, 4000);
+    // r4115 MUST 4: the yielded rows BY THEIR OWN IDS (gear-menu.js sets data-id from the contribution) — never a word another row also carries
+    const ROWS_JS = `[...document.querySelectorAll('.gs-menu .gs-menu-item[data-id^="gear/column-"]')].map((r) => r.dataset.id)`;
+    const gs = await evalJs(ROWS_JS);
+    // a yielded door OPENS from its row (the row presses the hidden button): Channels' window comes on show
+    const opened = gs.includes('gear/column-channels') ? (await tap('.gs-menu .gs-menu-item[data-id="gear/column-channels"]'), await waitFor(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type === 'channels'`, 5000)) : null;
+    await evalJs(`document.querySelectorAll('.context-menu, .global-settings-popover, .gs-menu').forEach((m) => m.remove()); 1`);
+    if (opened) { await tap('#mobile-nav-viewer-close'); await waitFor(`document.documentElement.dataset.onshow === 'chat'`, 4000); }
+    // …and gone again when the column is tall again
+    await device(951, 648); await waitFor(`!document.getElementById('mobile-nav').dataset.colYield`, 5000);
+    await tap('#mobile-nav-gear'); await waitFor(`!!document.querySelector('.gs-menu')`, 4000);
+    const gsTall = await evalJs(ROWS_JS);
     await evalJs(`document.querySelectorAll('.context-menu, .global-settings-popover, .gs-menu').forEach((m) => m.remove()); 1`);
     const yl = short.yielded.split(' ').filter(Boolean), hasDesk = inner.kids.some((k) => k.id === 'mobile-nav-desktops');
     const ORDER = ['desktops', 'channels', 'files', 'tasks', 'todos'].filter((k) => k !== 'desktops' || hasDesk);
-    check('④b the law at 951×360: the column yields Desktops then Channels (the stated order — 214 px of room for 308), ⚙ last above the bottom inset; each yielded one a row of Global settings',
-      yl.length >= 1 && ORDER.slice(0, yl.length).join() === yl.join() && short.kids.at(-1).id === 'mobile-nav-gear' && short.kids.at(-1).bottom <= 360 - 34 && gs.some((x) => /Channels/.test(x)), { short, gs });
+    check('④b the law at 951×360: the column yields Desktops then Channels (the stated order — 214 px of room for 308), ⚙ last above the bottom inset; the yielded doors ARE Global settings\' rows by their ids (gear/column-…), a yielded door opens from its row, and the rows are gone at 951×648 again',
+      yl.length >= 1 && ORDER.slice(0, yl.length).join() === yl.join() && short.kids.at(-1).id === 'mobile-nav-gear' && short.kids.at(-1).bottom <= 360 - 34
+      && JSON.stringify([...gs].sort()) === JSON.stringify(yl.map((k) => 'gear/column-' + k).sort()) && (opened === null || opened === true) && gsTall.length === 0, { short, gs, opened, gsTall });   // the menu sorts its rows by its own order: the SET is the law's
     // the outer display: the compact bar becomes the column; the window's own head is the name's row
     await device(466, 657); await load(); await attachBoth();
     await waitFor(`document.documentElement.dataset.vc === 'compact' && document.documentElement.dataset.sidecol === 'right'`, 5000); await sleep(400);
@@ -541,13 +558,79 @@ try {
     const head = await evalJs(`(() => { const t = document.querySelector('.window.window-active > .window-titlebar'); if (!t) return null; const b = t.getBoundingClientRect(); return { display: getComputedStyle(t).display, top: Math.round(b.top), right: Math.round(b.right), h: Math.round(b.height), name: t.querySelector('.window-title')?.dataset.name || '' }; })()`);
     check('④b outer 466×657: the bar is the column (☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙) under the clock\'s room (166), above the bottom inset; the window\'s own head is the name\'s row, clear of the column',
       want(outer, OUTER, 166) && !!head && head.display === 'flex' && head.top === 0 && head.h === 44 && head.right <= 466 - 84 && !!head.name, { outer, head });
+    // r4115 (b): the window on show closes from its own row of «Conversation settings» on the outer display (two presses)
+    await tap('.window.window-active .chat-status-settings'); await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 4000);
+    const outRows = await evalJs(`[...document.querySelectorAll('.chat-status-settings-row')].map((r) => r.className.match(/chat-status-col-[a-z]+/)?.[0] || '')`);
+    await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((m) => m.remove()); 1`);
+    check('④b outer: the «Conversation settings» door ends with this conversation\'s search, its window\'s menu and «Close window» (the compact ✕\'s act, two presses)', outRows.slice(-3).join() === 'chat-status-col-search,chat-status-col-window,chat-status-col-close', outRows);
     // RED CONTROL: the release's stylesheet (everything from «THE SYSTEM's EDGES (B-78db» cut) — the bar at right 0, the conversation's buttons in it
     await device(951, 648); await load(); await attachBoth(); await sleep(300);
     await evalJs(`(async () => { const l = [...document.querySelectorAll('link[rel=stylesheet]')].find((x) => /\\/style\\.css/.test(x.href)); const css = await (await fetch(l.href)).text(); const cut = css.slice(0, css.indexOf('/* ── THE SYSTEM\\'s EDGES (B-78db')); const s = document.createElement('style'); s.textContent = cut; l.after(s); l.disabled = true; window.dispatchEvent(new Event('resize')); return cut.length; })()`);
     await sleep(800);
     const red = await evalJs(COL);
     check('④b RED CONTROL: under the release\'s stylesheet the same predicate is RED (the bar at right 0, 56 px — its buttons from 8 px, under the system\'s clock; the conversation\'s buttons in it)', !want(red, INNER, 112), red);
-    await place({}); await load();
+    // ④c AN ORDINARY NOTCHED iPHONE's HOME-SCREEN COPY (主开发 r4115 MUST 2 — the proof that nothing changed for everybody else): portrait
+    // 390×844 (top 59, bottom 34) and landscape 844×390 (both sides 59, bottom 21), insets PLACED as for the Duo. Every bar of ours keeps
+    // its own room below / beside the system's insets; the message box and the strip stand above the bottom inset; nothing of ours
+    // inside a side inset; NO side column. RED CONTROL: 17c6dd081's compact rule (the inset as padding inside a 44 px box).
+    const PHONE = `(() => { const nav = document.getElementById('mobile-nav'), r = nav.getBoundingClientRect();
+      const rect = (e) => { const b = e.getBoundingClientRect(); return { id: e.id || String(e.className).split(' ')[0], top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; };
+      const btns = [...nav.children].filter((e) => e.getClientRects().length && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0).map(rect);
+      const box = (sel) => { const e = document.querySelector(sel); return e && e.getClientRects().length ? rect(e) : null; };
+      return { vc: document.documentElement.dataset.vc, sidecol: document.documentElement.dataset.sidecol || null, w: innerWidth, h: innerHeight, nav: rect(nav), btns,
+        input: box('.window.window-active .chat-input'), strip: box('.window.window-active .chat-status-bar'), tab: box('.sidebar .sidebar-tab'),
+        chips: (() => { const st = document.querySelector('.window.window-active .chat-status-bar'); const ks = st ? [...st.children].filter((e) => e.getClientRects().length && e.getBoundingClientRect().height > 0) : [];
+          return ks.length ? { bottom: Math.round(Math.max(...ks.map((e) => e.getBoundingClientRect().bottom))), right: Math.round(Math.max(...ks.map((e) => e.getBoundingClientRect().right))) } : null; })() }; })()`;
+    // each judged PART by name (a red says which; the kit cuts a long detail): the strip's ground runs into the bottom inset by design (its
+    // padding is the inset, chat.css), so the strip is judged by its CHIPS
+    const portraitWhy = (c) => ({ cls: c.vc === 'compact' && !c.sidecol, btns: c.btns.length > 0 && c.btns.every((b) => b.top >= 59 && b.top >= c.nav.top && b.bottom <= c.nav.bottom),
+      input: !!c.input && c.input.bottom <= c.h - 34, chips: !!c.chips && c.chips.bottom <= c.h - 34 });
+    const portraitOk = (c) => Object.values(portraitWhy(c)).every(Boolean);
+    // the trailing bar held landscape at 390 tall is TODAY's bar (no column — the law is the column's): at the release it already held more
+    // buttons than its height (about 558 px of buttons for 361), its last ones cut by its overflow — printed, judged by no leg of this unit
+    // (a decision put to the coordinator); judged here: every DRAWN button clear of the side insets
+    const drawn = (c) => c.btns.filter((b) => b.top < c.h - 21);
+    const landscapeWhy = (c) => ({ cls: c.vc === 'regular' && !c.sidecol, btns: drawn(c).length > 0 && drawn(c).every((b) => b.right <= c.w - 59),
+      input: !!c.input && c.input.bottom <= c.h - 21 && c.input.right <= c.w - 59 && c.input.left >= 59, chips: !!c.chips && c.chips.bottom <= c.h - 21 && c.chips.right <= c.w - 59, list: !c.tab || c.tab.left >= 59 });
+    const landscapeOk = (c) => Object.values(landscapeWhy(c)).every(Boolean);
+    const panelRoom = async () => { await tap('.window.window-active .chat-status-settings'); await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 4000);
+      const p = await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'), nav = document.getElementById('mobile-nav').getBoundingClientRect(); if (!d) return null; const b = d.getBoundingClientRect(); return { top: Math.round(b.top), navBottom: Math.round(nav.bottom), vertical: nav.height > nav.width, room: parseFloat(d.style.getPropertyValue('--dd-room')) || 0 }; })()`);
+      await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((m) => m.remove()); 1`); return p; };
+    await device(390, 844); await place({ top: 59, topMax: 59, bottom: 34, bottomMax: 34 }); await load(); await attachBoth();
+    await waitFor(`document.documentElement.dataset.vc === 'compact'`, 5000); await sleep(300);
+    const por = await evalJs(PHONE), porPanel = await panelRoom();
+    check('④c a notched iPhone held portrait 390×844 (top 59, bottom 34): the top bar\'s buttons inside its own box and wholly below the status bar, the message box and the strip above the home indicator, no side column; a strip panel stands under the bar\'s TRUE bottom',
+      portraitOk(por) && !!porPanel && !porPanel.vertical && porPanel.top >= porPanel.navBottom, { why: portraitWhy(por), porPanel, nav: por.nav, chips: por.chips, input: por.input, btns: por.btns.map((b) => `${b.id}:${b.top}-${b.bottom}`) });
+    await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-b78db-red'; s.textContent = 'html[data-vc="compact"] #mobile-nav { height: 44px !important; }'; document.body.appendChild(s); return 1; })()`); await sleep(300);
+    const porRed = await evalJs(PHONE);
+    await evalJs(`document.getElementById('zz-b78db-red')?.remove(); 1`);
+    check('④c RED CONTROL: 17c6dd081\'s compact bar (the inset as padding inside a 44 px box) is RED by the same predicate — its buttons under the clock', !portraitWhy(porRed).btns, { why: portraitWhy(porRed), btns: porRed.btns.map((b) => `${b.id}:${b.top}-${b.bottom}`) });
+    await device(844, 390); await place({ left: 59, leftMax: 59, right: 59, rightMax: 59, bottom: 21, bottomMax: 21 }); await load(); await attachBoth();
+    await waitFor(`document.documentElement.dataset.vc === 'regular'`, 5000); await sleep(300);
+    const land = await evalJs(PHONE), landPanel = await panelRoom();
+    const cut = land.btns.filter((b) => b.bottom > land.h - 21).map((b) => b.id);
+    console.log(`  · ④c landscape 844×390: today's trailing bar (no column) holds ${land.btns.length} buttons; past its room (the release's own overflow, not judged here): ${cut.length ? cut.join(', ') : 'none'}`);
+    check('④c a notched iPhone held landscape 844×390 (both sides 59, bottom 21): the trailing bar\'s buttons clear of the right inset and above the bottom one, the list\'s rows after the left inset, the message box and the strip above the bottom inset, NO side column (the leading inset is not 0); a strip panel keeps its room (more than the 120 px floor) under a vertical bar',
+      landscapeOk(land) && !!landPanel && landPanel.vertical && landPanel.room > 120, { why: landscapeWhy(land), landPanel, chips: land.chips, input: land.input, tab: land.tab, drawn: drawn(land).map((b) => `${b.id}:${b.right}`) });
+    // the list column hidden (☰): the conversation column starts after the left inset, never under the sensor housing
+    await tap('#list-column-toggle'); await waitFor(`document.documentElement.classList.contains('vs-list-hidden')`, 4000); await sleep(300);
+    const hid = await evalJs(PHONE);
+    await tap('#list-column-toggle'); await waitFor(`!document.documentElement.classList.contains('vs-list-hidden')`, 4000);
+    check('④c …the list column hidden: the message box and the strip\'s chips start after the left inset (59)', !!hid.input && hid.input.left >= 59 && !!hid.chips && landscapeWhy(hid).chips, { input: hid.input, chips: hid.chips });
+    // ④d THE STYLESHEETS' ORDER (主开发 r4115 MUST 1 — every device, the desktop included): a person's custom theme, injected into the head
+    // at runtime, wins its ties against the sheets as at the release. RED CONTROL: 17c6dd081's order (the sheets after the head).
+    await place({}); await device(1280, 800, { mouse: true }); await load();
+    const themed = await evalJs(`(() => { const tm = app.themeManager; tm.registerCustomTheme('zz-b78db', { '--bg-root': '#123456' }); tm.apply('custom-zz-b78db'); return getComputedStyle(document.documentElement).getPropertyValue('--bg-root').trim(); })()`);
+    const sheetsInHead = await evalJs(`document.head.querySelectorAll('link[rel="stylesheet"]').length`);
+    const redTheme = await evalJs(`(async () => { const ls = [...document.head.querySelectorAll('link[rel="stylesheet"]')];
+      const loads = ls.map((l) => new Promise((r) => { l.addEventListener('load', r, { once: true }); l.addEventListener('error', r, { once: true }); setTimeout(r, 4000); }));
+      for (const l of ls) document.body.appendChild(l); await Promise.all(loads); await new Promise((r) => requestAnimationFrame(() => r()));
+      return getComputedStyle(document.documentElement).getPropertyValue('--bg-root').trim(); })()`);
+    await evalJs(`(() => { const tm = app.themeManager; tm.apply('dark'); tm.unregisterCustomTheme('zz-b78db'); return 1; })()`);
+    check('④d a registered custom theme\'s ground, read as the computed value on the root, is the theme\'s (#123456) — the six sheets stand back in the head at their release place, so the theme\'s head rule comes after them (a desktop, 1280×800)', themed === '#123456' && sheetsInHead === 6, { themed, sheetsInHead });
+    check('④d RED CONTROL: 17c6dd081\'s order (the sheets after the head) — the same theme falls back to the stylesheet\'s dark default', redTheme !== '#123456' && !!redTheme, { redTheme });
+    await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: seam.identifier });
+    await place({}); await device(951, 585); await load();
   }
   console.log('⑧ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the Duo\'s inner display: «如何在这个界面下切换桌面？»; 951×585 + 382×580, touch) + the landscape list column\'s ☰');
   {

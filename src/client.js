@@ -6,6 +6,7 @@ import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
 import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, installFetchTimingWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, installScreenWatch, installInputStamp, recentCompositorStalls } from './lib/telemetry-client.js';
 import { continueExit } from './lib/mobile-back.js';
+import { restoreSheetOrder } from './lib/sheet-order.js'; // B-78db line 914's cure: the release's stylesheet order back at the bundle's start
 import { installSideColumn } from './lib/side-column.js'; // B-78db: the home-screen copy draws under the system's side column (viewport-fit=cover) and reads it
 import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/page-wake.js'; // B-8165: the wake's kind, and whether the page fell behind (PURE)
 // lane phone-back-reload (round 2): an older VibeSpace page the phone's exit LANDED on goes on back and never boots the
@@ -15,6 +16,7 @@ import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/pag
 // shared (src/lib/shared-gets.js). Installed here, before the exit hop and the App: every fetch from then on goes through it. The
 // imports above run first: a fetch at a module's top level goes unshared
 try { window.fetch = sharedGets(window.fetch.bind(window)); } catch { }
+try { restoreSheetOrder(); } catch { } // B-78db (主开发 r4115): the six sheets back at their release place in the head — every style injected later wins its ties as at the release
 try { installSideColumn(); } catch { } // B-78db (主开发 r3933): cover for the home-screen copy BEFORE the app lays out; html[data-sidecol] read at every resize
 const exitHop = continueExit();
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
@@ -85,4 +87,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   // removes it — a starved loop stretches that — and it swallowed the first press after the page loaded (B-b122, the
   // .190 heavy red); pointer-events go the moment the fade starts
   if (splash) { splash.style.pointerEvents = 'none'; splash.style.opacity = '0'; setTimeout(() => splash.remove(), 300); }
+  // B-78db (主开发 r4111 / r4114): <html>'s inline ground (public/index.html — the first paint in the splash's own colour, in place of
+  // WebKit's white) is the LAUNCH's only: it goes as the splash does, so the person's theme (style.css: html, body var(--bg-root))
+  // is the page's ground from here on — an inline style would outrank it for the whole session (a light theme kept a dark ground)
+  document.documentElement.style.removeProperty('background');
 });

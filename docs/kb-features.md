@@ -4812,10 +4812,10 @@ right, rightMax } }`, insets mandatory, every field an optional integer; env() f
 | 1 | style.css:114 .sidebar | t b l | desktop base; phones use rows 4 and 6 |
 | 2 | style.css:948 .sidebar-resize-preview | t b l | desktop only (a resize drag) — untouched |
 | 3 | style.css:1899 .dialog-overlay (+ .dialog 95vw, .pf-picker 100vw×100vh, .desktop-adopt 100vw×100dvh, design sheets) | all | cured — the overlay is padded by the four insets, so a centred dialog and a full-screen one stay inside |
-| 4 | style.css:2765 .sidebar (phone) | t l | slice 1: compact pads all four |
-| 5 | style.css:2778 #mobile-nav (sticky) | t | compact: slice 1 (padding-top). Regular portrait: cured: (the top bar of an iPad mini or the Duo's inner portrait under a status bar) |
-| 6 | style.css:3042 regular .sidebar (the list column) | t b l | bottom: slice 1. cured: left (an iPhone held landscape: the list under the sensor housing) and top (an iPad's status bar) |
-| 7 | style.css:3160 regular #mobile-nav (the trailing bar) | t r b | right and bottom: slice 1. cured: top (padding max(8px, the top inset)) |
+| 4 | style.css:2765 .sidebar (phone) | t l | slice 1: compact pads all four — re-walked (r4115): a fixed drawer (top 0, bottom 0), so its padding takes room from its own content, nothing crushed |
+| 5 | style.css:2778 #mobile-nav (sticky) | t | compact: cured — height 44 + the inset, padding-top the inset (slice 1 gave the padding but kept the 44 px box: under a status bar its buttons sat under the clock — line 914's round, r4115 MUST 2). Regular portrait: cured — the same form (an iPad mini; the Duo's inner portrait) |
+| 6 | style.css:3042 regular .sidebar (the list column) | t b l | bottom: slice 1. cured: left (an iPhone held landscape: the list under the sensor housing) and top (an iPad's status bar); and, with the list HIDDEN, the conversation column's margin-left is the leading inset (#main-wrapper was 0 — found by test-duo-layout ④c, line 914's cure) |
+| 7 | style.css:3160 regular #mobile-nav (the trailing bar) | t r b | right and bottom: slice 1 — re-walked: its width grows with the inset (56 + the inset) and the bottom is a fixed bar's padding, so room is given. cured: top (padding max(8px, the top inset)). Held landscape on an ordinary iPhone (390 tall) it already held more buttons than its height at the release — the column's law does not reach it (put to the coordinator) |
 | 8 | style.css:3165 #list-column-toggle | t | cured: top and left (it follows the list column) |
 | 9 | style.css:3253 book body::after (the seam) | t b | decoration — untouched; drawn through the insets on purpose |
 | 10 | style.css:3260 laptop #mobile-nav | r | cured: (the safe default's right inset); the pose's insets are UNPROVEN until a real fold |
@@ -4832,7 +4832,7 @@ right, rightMax } }`, insets mandatory, every field an optional integer; env() f
 | 21 | style.css:5386 .task-log-day | t (sticky) | same as 17 |
 | 22 | style.css:9306 .exit-access-actions | b (sticky in a dialog) | inside the dialog — covered by row 3 |
 | 23 | style.css:9376 .design-print-frame | t | off screen at left −100000 — untouched |
-| 24 | style.css:9578 .bprof-pk-sheet | all | sides: slice 1; bottom: already (.bprof-pk-in-sheet pads the bottom inset) |
+| 24 | style.css:9578 .bprof-pk-sheet | all | sides: slice 1 — re-walked: a fixed sheet (inset 0), its padding takes room from its content; bottom: already (.bprof-pk-in-sheet pads the bottom inset) |
 | 25 | chat.css:1410 .chat-img-overlay | all | cured — the picture and its close clear of the status bar and the column |
 | 26 | chat.css:1785 .chat-disconnected list::after | r b l | absolute inside the list — untouched |
 | 27 | chat.css:2162 .af-top | t (sticky) | same as 17 |
@@ -4841,6 +4841,48 @@ right, rightMax } }`, insets mandatory, every field an optional integer; env() f
 | 30 | chat.css:2341 .voice-preview-back | all | cured — padding 12px + each inset |
 | 31 | viewers.css:98 .file-group-header | t (sticky) | same as 17 |
 | 32 | viewers.css:306 .file-viewer-table th | t (sticky) | same as 17 |
+
+THE RE-WALK (line 914's round, r4115): every row whose verdict said «slice 1» was read again for a padding that grew with no
+room given. Only row 5's compact bar was such a case (a 44 px border-box with the inset as its padding). The others give room:
+fixed bars and sheets whose padding comes out of their own content, and slice 1's compact sheets, offset by left/right with no
+padding. Its legs: test-duo-layout ④c places an ordinary notched iPhone's insets (portrait 390×844 top 59 bottom 34; landscape
+844×390 sides 59 bottom 21) and judges the bars' room by their boxes, red under 17c6dd081's rule; test-viewport-class ⑤c holds
+every cure to a no-op at inset zero.
+
+WHO IS COVERED (r4115's reach): cover is asked only by an iPhone's or iPad's home-screen copy, the platform's own
+navigator.standalone. An Android or a desktop installed copy (display-mode standalone) stays exactly as at the release (no audit
+here covers its bars), and in a tab no inset exists. So side-column.js's probe runs only in that copy, at most once a frame. The
+Chrome legs define navigator.standalone for their own pages (a test seam, never product code), and Chrome's override sets
+env() with or without cover.
+THE STATUS BAR STYLE: the release's default (no status-bar-style meta). The side column comes with cover alone (the simulator's
+probe page carried no such meta and read right 84 / bottom 34), and a translucent style would draw the system's clock white over a
+light theme's chrome. The band above the inner display's head (the shot 669 CSS tall, the page 648) is that default style's own
+strip: nothing of ours paints it (UNPROVEN until the owner's look). The top inset of an ordinary iPhone in portrait under the
+default style and cover: no Apple page read gives it (UNPROVEN); the legs hold either way.
+THE COLUMN's FLOOR: ONE number, 80 (side-column.js SIDE_COLUMN_MIN). The Duo measures 84 on both displays. An ordinary iPhone
+held landscape reports about 47–59 on EACH side, so its leading inset is never 0. An iPad reports 0, and an Android copy with
+three-button navigation about 48. 80 stands above every ordinary inset and below the Duo's 84. test-viewport-class ⑤ has its
+edge at 79.
+
+### THE STYLESHEETS' ORDER (B-78db line 914's cure — 主开发 r4115 MUST 1)
+
+The launch cure puts the six stylesheet links in the BODY, after the inline loading screen (the first paint is ours and not
+WebKit's white). src/lib/sheet-order.js restoreSheetOrder (src/client.js calls it first) gives each one a clone at its release
+place in the head (after <title>, before the lazy-bundle link), in the same order. Each body twin goes once its clone's sheet is
+there (its load, or its .sheet seen on a later frame); a clone that fails is dropped and its twin kept. From then on the document
+is the release's, so every style appended to the head comes after the sheets and wins its ties as at the release. That includes
+ours, and a plugin's that appends by itself. A style inserted at the head's start loses its ties, as it did at the release.
+Legs: test-viewport-class ⑤d (a fake document: the clones at the release place, a twin kept until its clone loads, a head-appended
+rule after every sheet; RED: 17c6dd081's order); test-duo-layout ④d (a registered custom theme's ground read on the root; RED:
+the sheets after the head).
+THE CENSUS of every place in src/ that adds a style element or a stylesheet link to a document at runtime:
+- src/lib/themes.js _injectStyle: a person's custom theme and a plugin's theme (plugin-client.js registerPluginTheme takes it), appended to the head. TIES with style.css `:root` and won at the release: wins again.
+- src/lib/doc-window-ui.js #doc-window-css, appended to the head. TIES and won at the release: wins again.
+- src/lib/design-canvas.js ensureCanvasStyle(document), appended to the head. TIES and won at the release: wins again.
+- src/lib/docx-viewer.js: the paper's <style> inside a shadow root. NEVER TIED (a shadow tree's own scope).
+- src/design-viewer-entry.js; doc-window-model.js / design-canvas-model.js / mail-frame.js / setup-flows.js (their own srcdoc or new-tab documents); login-page.js (its own page). NEVER TIED (another document).
+- src/lib/safe-html.js `new CSSStyleSheet()`: used to PARSE a diagram's style, never adopted. NEVER TIED. The diagram's own <style> inside a message stands in the body after the sheets, as at the release.
+- The plugins in the tree (src/plugins/*.js) and plugin-client.js's iframes: no runtime style in the app document beyond the theme door.
 
 The server's own pages (sign-in and the like) carry no viewport-fit: every inset 0 there, untouched. UNPROVEN until a real phone or
 the simulator: the Duo's inner display held portrait, the laptop and book poses, a notched iPhone's copy and an iPad's copy (no

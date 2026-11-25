@@ -7,10 +7,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <!-- B-78db (主开发 r3948 — the owner on the simulator: a dark band above the head, the top bar washed under a fade): the
-       home-screen copy draws under the status bar too. Apple, «Configuring Web Applications» (updated 2016-12-12): «if you want
-       to use the entire screen, set the status bar style to translucent black»; the top bar takes env(safe-area-inset-top) -->
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- NO status-bar-style meta (B-78db, 主开发 r4111 / r4114): the release's DEFAULT style stays. The Duo's side column comes with
+       cover alone (the simulator probe's page carried no such meta), and a translucent style would draw the system's clock WHITE
+       over a light theme's chrome. The band above the inner display's head is that default style's own strip: nothing of ours
+       paints it. -->
   <title>VibeSpace</title>
   <!-- the LAZY diagram library (src/lib/mermaid-render.js imports it on the first diagram): an unknown rel fetches nothing; the index route stamps its ?v= like every asset here -->
   <link rel="vs-lazy-bundle" href="/mermaid.js">

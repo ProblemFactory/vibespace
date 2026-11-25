@@ -3,18 +3,23 @@
 // system's column, which it reports as env(safe-area-inset-right) = 84 on BOTH displays (bottom 34, the home indicator); without
 // cover (the product before) the page stood beside an empty 84 px column; a Safari tab reports nothing either way (Safari's own
 // controls own that column). So:
-//   - coverIfStandalone: viewport-fit=cover for the HOME-SCREEN copy only (navigator.standalone / display-mode standalone) — a
-//     Safari tab keeps «contain», every inset 0, nothing in a tab changes. Set from the bundle: the page's policy allows no
-//     inline script, and WebKit re-reads the viewport meta when its content changes.
+//   - coverIfStandalone: viewport-fit=cover for an iPHONE's or iPAD's HOME-SCREEN copy only — the platform's own
+//     navigator.standalone (主开发 r4115: never the display-mode test, so an Android or a desktop installed copy stays exactly as
+//     at the release; no audit of ours covers their bars). A Safari tab keeps «contain», every inset 0, nothing in a tab
+//     changes. Set from the bundle: the page's policy allows no inline script, and WebKit re-reads the viewport meta when its
+//     content changes.
 //   - sideColumnOf (PURE): the Duo's column by its insets — a trailing inset of 80 or more with a leading inset of 0. A HEURISTIC,
 //     named as one: CSS has four edge numbers and no «bar column» kind (no web form of UIView.LayoutRegion / verticalBarEdge),
 //     and a notched iPhone held landscape reports the same inset on BOTH sides, so that shape gets the safe default.
 //   - readSideColumn: the four insets read through a hidden probe (fold-ladder.js's pattern), html[data-sidecol] written; the
 //     stylesheet then moves the regular class's trailing bar INTO the column (public/style.css, «THE SYSTEM's EDGES»).
+/** THE COLUMN's FLOOR — ONE number (主开发 r4115 (e)): 80. The Duo measures 84 on both displays (the simulator); an ordinary
+ *  iPhone held landscape reports about 47–59 on EACH side (so its leading inset is never 0 either); an iPad 0; an Android copy
+ *  with three-button navigation about 48. 80 stands clear above every ordinary inset and below the Duo's 84. */
 export const SIDE_COLUMN_MIN = 80;
 
 function standalone(win) {
-  try { return win.navigator?.standalone === true || !!(win.matchMedia && win.matchMedia('(display-mode: standalone)').matches); } catch { return false; }
+  try { return win.navigator?.standalone === true; } catch { return false; }   // iOS / iPadOS only — the home-screen copy's own property
 }
 
 /** viewport-fit=cover for the home-screen copy only → true when it set (or found) it */
@@ -47,12 +52,17 @@ export function readSideColumn(doc = document, win = window) {
   return { ...insets, col };
 }
 
-/** the boot's one call: cover first (before the app lays out), then the column read again at every resize / rotation */
+/** the boot's one call: cover first (before the app lays out), then the column read again at a resize / rotation — at most once
+ *  a frame, and ONLY in the home-screen copy (主开发 r4115 (c)): anywhere else no inset can exist (a tab is «contain»), so
+ *  nothing listens and no probe ever runs there. → true when it installed */
 export function installSideColumn(doc = document, win = window) {
-  coverIfStandalone(doc, win);
-  const read = () => { try { readSideColumn(doc, win); } catch { /* a probe that cannot be read leaves the safe default */ } };
+  if (!coverIfStandalone(doc, win)) return false;
+  let queued = false;
+  const read = () => { queued = false; try { readSideColumn(doc, win); } catch { /* a probe that cannot be read leaves the safe default */ } };
+  const later = () => { if (queued) return; queued = true; (typeof win.requestAnimationFrame === 'function' ? win.requestAnimationFrame(read) : win.setTimeout(read, 16)); };
   read();
-  try { win.addEventListener('resize', read); win.addEventListener('orientationchange', () => win.setTimeout(read, 300)); } catch { }
+  try { win.addEventListener('resize', later); win.addEventListener('orientationchange', () => win.setTimeout(later, 300)); } catch { }
+  return true;
 }
 
 // ── THE COLUMN HOLDS GLOBAL THINGS ONLY, AND NEVER OVERFLOWS (B-78db slice 1b — 主开发 r3948 3 (a) + r3949, the owner: «针对当前对话的

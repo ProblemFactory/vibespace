@@ -16,6 +16,8 @@
 //     simulator's real column heights; RED CONTROLS: the release's eleven overflow, the slice-1 stylesheet, a bar without the law's call
 //   ⑤c THE FOUR EDGES, EVERY iPHONE SHAPE (B-78db slice 2): the audit's cures pinned, the audit's table in kb-features; RED CONTROL:
 //     the stylesheets before the block
+//   ⑤d THE LAUNCH FOR EVERY THEME (line 914's cure): the default status bar style; the inline ground goes with the splash;
+//     RED CONTROLS: 17c6dd081's meta and its client
 // Run: node scripts/test-viewport-class.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -116,9 +118,9 @@ console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the ho
   };
   const tab = fake(false), home = fake(true), homeMq = fake(undefined, true), again = fake(true, false, 'width=device-width, viewport-fit=cover');
   const r = [SC.coverIfStandalone(tab.doc, tab.win), SC.coverIfStandalone(home.doc, home.win), SC.coverIfStandalone(homeMq.doc, homeMq.win), SC.coverIfStandalone(again.doc, again.win)];
-  ok(!r[0] && tab.meta.c === 'width=device-width, initial-scale=1.0' && r[1] && /, viewport-fit=cover$/.test(home.meta.c) && home.doc.documentElement.dataset.standalone === '1' && r[2] && /viewport-fit=cover/.test(homeMq.meta.c) && r[3] && again.meta.c.split('viewport-fit').length === 2,
-    '⑤ viewport-fit=cover is set for the HOME-SCREEN copy only (navigator.standalone, or display-mode standalone) — a Safari tab keeps «contain»; set once', { tab: tab.meta.c, home: home.meta.c, mq: homeMq.meta.c, again: again.meta.c });
-  const cols = [[{ left: 0, right: 84 }, 'right', 'the Duo, either display (the simulator: right 84, left 0)'], [{ left: 0, right: 80 }, 'right', 'the floor of the heuristic'],
+  ok(!r[0] && tab.meta.c === 'width=device-width, initial-scale=1.0' && r[1] && /, viewport-fit=cover$/.test(home.meta.c) && home.doc.documentElement.dataset.standalone === '1' && !r[2] && homeMq.meta.c === 'width=device-width, initial-scale=1.0' && r[3] && again.meta.c.split('viewport-fit').length === 2,
+    '⑤ viewport-fit=cover is set for an iPHONE\'s or iPAD\'s HOME-SCREEN copy only (navigator.standalone — 主开发 r4115: an Android or a desktop installed copy, display-mode standalone, stays as at the release) — a Safari tab keeps «contain»; set once', { tab: tab.meta.c, home: home.meta.c, mq: homeMq.meta.c, again: again.meta.c });
+  const cols = [[{ left: 0, right: 84 }, 'right', 'the Duo, either display (the simulator: right 84, left 0)'], [{ left: 0, right: 80 }, 'right', 'the floor of the heuristic'], [{ left: 0, right: 79 }, null, 'one under the floor (r4115 (e): the edge)'],
     [{ left: 59, right: 59 }, null, 'a notched iPhone held landscape (the same inset on both sides)'], [{ left: 0, right: 59 }, null, 'a sensor housing on one side, under 80'], [{ left: 0, right: 0 }, null, 'a Safari tab / no inset'], [{ left: 84, right: 84 }, null, 'insets on both sides']];
   const bad = cols.filter(([i, want]) => SC.sideColumnOf(i) !== want);
   ok(bad.length === 0, `⑤ the side column by its insets (a heuristic, named as one: a trailing inset ≥ ${SC.SIDE_COLUMN_MIN} with no leading inset) — ${cols.map(([, w, why]) => `${why} → ${w || 'the safe default'}`).join('; ')}`, bad);
@@ -128,7 +130,7 @@ console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the ho
     const block = i < 0 ? '' : css.slice(i);
     return {
       compact: /html\[data-vc="compact"\] #main-wrapper \{ margin-left: env\(safe-area-inset-left, 0px\) !important; margin-right: env\(safe-area-inset-right, 0px\) !important; \}/.test(block)
-        && /html\[data-vc="compact"\] #mobile-nav \{ padding-top: env\(safe-area-inset-top, 0px\); \}/.test(block),
+        && /html\[data-vc="compact"\] #mobile-nav \{ height: calc\(44px \+ env\(safe-area-inset-top, 0px\)\); padding-top: env\(safe-area-inset-top, 0px\); \}/.test(block),
       sheets: ['.context-menu.mobile-sheet', '.ns-tg-menu.ns-tg-sheet', '.desktop-picker.desktop-picker-sheet', '.bprof-pk-sheet', '.usage-popup', '.global-settings-popover'].every((s) => block.includes(`html[data-vc="compact"] ${s}`)),
       safeDefault: /html\[data-vc="regular"\] #mobile-nav \{ width: calc\(56px \+ env\(safe-area-inset-right, 0px\)\); padding-right: calc\(6px \+ env\(safe-area-inset-right, 0px\)\); \}/.test(block)
         && /html\[data-vc="regular"\] #main-wrapper \{ margin-right: calc\(56px \+ env\(safe-area-inset-right, 0px\)\) !important; \}/.test(block),
@@ -205,13 +207,16 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const fitWired = (bar) => updateOf(bar).includes('\n    fitColumn(nav);\n') && /new ResizeObserver\(\(\) => fitColumn\(nav\)\)\.observe\(nav\)/.test(bar);
   ok(fitWired(BAR) && /this\.bar\?\.fitColumn\?\.\(\);/.test(MN) && !fitWired(BAR.replace('\n    fitColumn(nav);\n', '\n')),
     '⑤b the law runs at every update of the bar, at every size of the column and after every pass of the bar\'s buttons (RED CONTROL: a bar without the update\'s call is caught)');
-  ok(/this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(MN) && /const v = nb > 0 && !columnShape\(\) \?/.test(MN) && /if \(columnShape\(\) !== 'outer'\) return;\s*\n\s*const head = e\.target\.closest\?\.\('\.window\.window-active > \.window-titlebar'\);/.test(MN),
+  ok(/this\.app\.viewportClass\?\.\(\) === 'compact' && !columnShape\(\) && nav\.getClientRects\(\)\.length\) \{/.test(MN) && /const v = nb > 0 && !columnShape\(\) \?/.test(MN) && /if \(columnShape\(\) !== 'outer'\) return;\s*\n\s*if \(pressedAside\) \{ pressedAside = false; return; \}[^\n]*\n\s*const head = e\.target\.closest\?\.\('\.window\.window-active > \.window-titlebar'\);/.test(MN),
     '⑤b the outer column: no width fold of the compact bar there (its law is the height\'s), no sheet top from a bar that is no top row, the head\'s tap opens the switcher');
   const door = CSB.slice(CSB.indexOf("const setEl = e.target.closest('.chat-status-settings');"), CSB.indexOf('// ── the doors end ──'));
   ok(/const mineWin = columnShape\(\) \?/.test(door) && /act\('chat-status-col-search', t\('Search this conversation'\), \(\) => view\._search\.open\(\)\)/.test(door) && /if \(held\) act\('chat-status-col-window', t\('This window'\), \(\) => this\._app\?\._mobileNav\?\.bar\?\.windowMenuAt\?\.\(held\.id, setEl\)\)/.test(door) && /held = this\._app\?\.wm\?\.windows\?\.get\?\.\(mineWin\[0\]\);/.test(door) && /windowMenuAt, fitColumn/.test(BAR),
     '⑤b AT THE BOTTOM: in the column, the strip\'s «Conversation settings» door ends with this conversation\'s search and its window\'s menu (opened above the door)');
   ok(/const navR = nav && typeof nav\.getClientRects === 'function' && nav\.getClientRects\(\)\.length && nav\.getBoundingClientRect\(\)\.width >= nav\.getBoundingClientRect\(\)\.height \? nav\.getBoundingClientRect\(\) : null;/.test(CSB),
     '⑤b the strip\'s panels take their room under a TOP bar only — a vertical bar (the column; the trailing bar) is no ceiling (test-duo-layout ④b found the door\'s last rows under a 120 px panel\'s fold)');
+  ok(/if \(held && columnShape\(\) === 'outer' && this\._app\?\.wm\) act\('chat-status-col-close', t\('Close window'\), \(\) => this\._app\.wm\.requestClose\(held\.id\)\);/.test(CSB)
+    && /if \(columnShape\(\) !== 'outer'\) return;\n      if \(pressedAside\) \{ pressedAside = false; return; \}/.test(MN),
+    '⑤b the outer display: the window on show closes from its own «Close window» row (two presses, the compact ✕\'s act); its head\'s tap after a press that only chose a pane opens nothing more');
 }
 
 console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the audit of the 32 edge-pinned rules)');
@@ -224,9 +229,10 @@ console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the aud
     return {
       layers: css.includes('THE FOUR EDGES, EVERY iPHONE SHAPE') && B.includes(`.dialog-overlay, #welcome.onboarding, .palette-overlay { box-sizing: border-box; ${pad4} }`) && B.includes('.dialog-overlay > .dialog { max-width: 100% !important; }')
         && B.includes('.dialog-overlay > .dialog:is(.pf-picker, .desktop-adopt) { height: 100% !important; max-height: 100% !important; }') && B.includes('.palette { max-width: 100%; }'),
-      list: /html\[data-vc="regular"\] \.sidebar \{ padding-top: env\(safe-area-inset-top, 0px\); padding-left: env\(safe-area-inset-left, 0px\); \}/.test(B) && /html\[data-vc="regular"\] #list-column-toggle \{ top: env\(safe-area-inset-top, 0px\); \}/.test(B),
+      list: /html\[data-vc="regular"\] \.sidebar \{ padding-top: env\(safe-area-inset-top, 0px\); padding-left: env\(safe-area-inset-left, 0px\); \}/.test(B) && /html\[data-vc="regular"\] #list-column-toggle \{ top: env\(safe-area-inset-top, 0px\); \}/.test(B)
+        && /html\[data-vc="regular"\]\.vs-list-hidden #main-wrapper \{ margin-left: env\(safe-area-inset-left, 0px\) !important; \}/.test(B),
       bars: /html\[data-vc="regular"\]:not\(\[data-sidecol\]\) #mobile-nav \{ padding-top: max\(8px, env\(safe-area-inset-top, 0px\)\); \}/.test(B) && /html\[data-vc="regular"\] #mobile-nav \{ height: calc\(44px \+ env\(safe-area-inset-top, 0px\)\); padding-top: env\(safe-area-inset-top, 0px\); \}/.test(B)
-        && /html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right: env\(safe-area-inset-right, 0px\); \}/.test(B),
+        && /html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right: calc\(6px \+ env\(safe-area-inset-right, 0px\)\); \}/.test(B),
       chat: chat.includes('THE FOUR EDGES (B-78db slice 2') && C.includes(`.chat-img-overlay { box-sizing: border-box; ${pad4} }`) && /\.voice-preview-back \{ padding: calc\(12px \+ env\(safe-area-inset-top, 0px\)\)/.test(C)
         && /\.chat-status-dropdown\.chat-artifacts-panel \{ padding-left: env\(safe-area-inset-left, 0px\); padding-right: env\(safe-area-inset-right, 0px\); \}/.test(C),
       last: !/\n[^\n]*#mobile-nav[^\n]*\{[^}]*\bpadding-top:\s*8px/.test(B),
@@ -236,9 +242,83 @@ console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the aud
   ok(i > 0 && j > 0 && Object.values(E).every(Boolean), '⑤c every iPhone shape\'s edges: the full-screen layers (dialogs, the tour, the palette, a picture, the voice preview, the Artifacts sheet) inside the four insets; the regular class\'s list column and its ☰ clear of a top and a leading inset; the trailing bar under a top inset, the portrait top bar under a status bar, the laptop bar clear of a trailing inset', E);
   const R = edges4(CSS.slice(0, i), CHAT.slice(0, j));
   ok(!R.layers && !R.list && !R.bars && !R.chat, '⑤c RED CONTROL: the stylesheets before the block (slice 1b) leave a notched iPhone\'s dialogs, list column and top bars under its status bar and sensor housing', R);
+  // r4115 (the round's should: a cut at the marker is red by construction): each rule's own mutant — 17c6dd081's form put back
+  const COMPACT_OLD = '  html[data-vc="compact"] #mobile-nav { padding-top: env(safe-area-inset-top, 0px); }';  // stale-pins: kept — a red control's mutant: 17c6dd081's compact form put back
+  const LAPTOP_OLD = '  html[data-vc="regular"][data-fold="laptop"] #mobile-nav { padding-right: env(safe-area-inset-right, 0px); }';  // stale-pins: kept — a red control's mutant: 17c6dd081's laptop form put back
+  const lineOf = (css, re) => (css.split('\n').find((l) => re.test(l)) || '');
+  const compactNow = lineOf(CSS, /^  html\[data-vc="compact"\] #mobile-nav \{ height: calc\(44px/), laptopNow = lineOf(CSS, /^  html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right:/);
+  const compactOk = (css) => /html\[data-vc="compact"\] #mobile-nav \{ height: calc\(44px \+ env\(safe-area-inset-top, 0px\)\); padding-top: env\(safe-area-inset-top, 0px\); \}/.test(css);
+  const mC = { compact: compactOk(CSS.replace(compactNow, COMPACT_OLD)) }, mL = edges4(CSS.replace(laptopNow, LAPTOP_OLD), CHAT);
+  ok(!!compactNow && !!laptopNow && compactOk(CSS) && !mC.compact && !mL.bars, '⑤c RED CONTROLS, one rule each: 17c6dd081\'s compact bar (the inset as padding in a 44 px box — its buttons crushed under the clock) and its laptop bar (6 px lost at inset 0) are caught by their own pins', { mC: mC.compact, mL: mL.bars });
+  // EVERY CURE IS A NO-OP AT INSET ZERO (the unit's own law; r4115 MUST 3): each value with every env() at 0 equals the release's
+  const atZero = (v) => { const z = v.replace(/env\(safe-area-inset-[a-z]+, 0px\)/g, '0px'); let m;
+    if ((m = z.match(/^calc\((\d+)px \+ 0px\)$/))) return Number(m[1]); if ((m = z.match(/^max\((\d+)px, 0px\)$/))) return Number(m[1]); if (z === '0px') return 0; return NaN; };
+  const zero = [[/html\[data-vc="compact"\] #mobile-nav \{ height: ([^;]+);/, 44, 'the compact bar\'s height (the base 44)'], [/html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right: ([^;]+);/, 6, 'the laptop bar\'s trailing padding (the base 6)'],
+    [/html\[data-vc="regular"\]:not\(\[data-sidecol\]\) #mobile-nav \{ padding-top: ([^;]+);/, 8, 'the trailing bar\'s top padding (the base 8)'], [/@media \(orientation: portrait\) \{\n  \/\*[^\n]*\*\/\n  html\[data-vc="regular"\] #mobile-nav \{ height: ([^;]+);/, 44, 'the regular portrait bar\'s height (the base 44)']]
+    .map(([re, want, what]) => { const v = (CSS.match(re) || [])[1] || ''; return { what, v, got: atZero(v), want }; });
+  ok(zero.every((x) => x.got === x.want), `⑤c every cure is a no-op at inset zero: ${zero.map((x) => `${x.what} ${x.got}`).join(' · ')}`, zero);
+  ok(atZero('env(safe-area-inset-right, 0px)') === 0 && atZero('env(safe-area-inset-right, 0px)') !== 6, '⑤c RED CONTROL: 17c6dd081\'s laptop value at inset zero is 0, not the base\'s 6');
   const pinned = fs.existsSync(path.join(REPO, 'docs/kb-features.md')) ? read('docs/kb-features.md') : '';
   ok(/THE SYSTEM's EDGES — the four-edge audit \(B-78db slice 2\)/.test(pinned) && (pinned.match(/^\| \d+ \| (public\/)?(style|chat|viewers)\.css:/gm) || []).length === 32,
     '⑤c the audit is written down: docs/kb-features.md holds the 32 edge-pinned rules, each with its verdict (cured, or left as it is with why)');
+}
+
+console.log('⑤d the launch for every theme (B-78db line 914 cure — 主开发 r4111 / r4114)');
+{
+  const IDX = read('public/index.html'), CL = read('src/client.js');
+  const noStyleMeta = (idx) => !/name="apple-mobile-web-app-status-bar-style"/.test(idx);  // stale-pins: kept — a deliberate absence check (the meta must stay gone)
+  ok(noStyleMeta(IDX) && /<html lang="en" style="background:#0c0c18">/.test(IDX) && /id="loading-screen" style="[^"]*background:#0c0c18;/.test(IDX),
+    '⑤d the release\'s DEFAULT status bar style stays (no status-bar-style meta: the column comes with cover alone; a translucent style would draw the clock white over a light theme) — and the first paint is the splash\'s own colour');
+  ok(!noStyleMeta(IDX.replace('<title>', '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n  <title>')), '⑤d RED CONTROL: 17c6dd081\'s black-translucent meta is caught');  // stale-pins: kept — a red control's mutant: 17c6dd081's meta put back
+  const ground = (cl) => { const a = cl.indexOf("const splash = document.getElementById('loading-screen');"), b = cl.indexOf('\n});', a); const blk = a > 0 && b > a ? cl.slice(a, b) : '';
+    return /if \(splash\) \{ splash\.style\.pointerEvents = 'none'; splash\.style\.opacity = '0'; setTimeout\(\(\) => splash\.remove\(\), 300\); \}\n(  \/\/[^\n]*\n)*  document\.documentElement\.style\.removeProperty\('background'\);/.test(blk); };
+  ok(ground(CL), '⑤d the inline ground is the launch\'s only: it goes where the splash goes (src/client.js, after app.ready) — the theme\'s var(--bg-root) is the ground for the session');
+  ok(!ground(CL.replace("  document.documentElement.style.removeProperty('background');\n", '')), '⑤d RED CONTROL: 17c6dd081\'s client (the ground kept for the whole session — a light theme behind a dark page) is caught');
+  // (g) THE LAUNCH's ORDER: the six sheets after the inline loading screen, the loading screen first in the body
+  const at = (re) => { const m = IDX.match(re); return m ? m.index : -1; };
+  const ls = at(/<div id="loading-screen"/), links = [...IDX.matchAll(/<link rel="stylesheet" href="\/([a-z-]+)\.css">/g)];
+  ok(ls > 0 && links.length === 6 && links.every((m) => m.index > ls) && at(/<head>/) < at(/<\/head>/) && !links.some((m) => m.index < at(/<\/head>/)),
+    `⑤d (g) the launch: the loading screen stands first in the body and the six sheets after it (${links.map((m) => m[1]).join(', ')})`);
+  // MUST 1 (主开发 r4115): every style injected at runtime wins its ties against the sheets EXACTLY as at the release
+  const { pathToFileURL } = await import('node:url');
+  const SO = await import(pathToFileURL(path.join(REPO, 'src/lib/sheet-order.js')).href);
+  const node = (tag, attrs = {}) => ({ tag, attrs, parent: null, kids: [], on: {}, sheet: null,
+    get isConnected() { let n = this; while (n.parent) n = n.parent; return n.tag === '#doc'; },
+    cloneNode() { return node(this.tag, { ...this.attrs }); }, addEventListener(ev, f) { (this.on[ev] ||= []).push(f); }, fire(ev) { for (const f of this.on[ev] || []) f(); },
+    remove() { if (this.parent) { this.parent.kids.splice(this.parent.kids.indexOf(this), 1); this.parent = null; } },
+    appendChild(c) { c.remove(); c.parent = this; this.kids.push(c); return c; },
+    insertBefore(c, ref) { c.remove(); c.parent = this; const i = ref ? this.kids.indexOf(ref) : -1; if (i < 0) this.kids.push(c); else this.kids.splice(i, 0, c); return c; },
+    querySelector(q) { return this.querySelectorAll(q)[0] || null; },
+    querySelectorAll(q) { const m = q.match(/^:scope > link\[rel="([^"]+)"\]$/); return m ? this.kids.filter((k) => k.tag === 'link' && k.attrs.rel === m[1]) : []; } });
+  const page = () => { const doc = node('#doc'), html = doc.appendChild(node('html')), head = html.appendChild(node('head')), body = html.appendChild(node('body'));
+    head.appendChild(node('title')); head.appendChild(node('link', { rel: 'vs-lazy-bundle' })); head.appendChild(node('link', { rel: 'icon' }));
+    body.appendChild(node('div', { id: 'loading-screen' }));
+    for (const f of ['xterm', 'style', 'viewers', 'chat', 'theme-editor', 'fonts']) body.appendChild(node('link', { rel: 'stylesheet', href: `/${f}.css` }));
+    body.appendChild(node('script', { src: '/bundle.js' })); return { doc, head, body }; };
+  const flat = (root) => { const out = []; const walk = (n) => { out.push(n); n.kids.forEach(walk); }; walk(root); return out; };
+  const sheetsIn = (root) => flat(root).filter((n) => n.tag === 'link' && n.attrs.rel === 'stylesheet');
+  const tiesWon = (P) => { const st = P.head.appendChild(node('style', { id: 'custom-theme-x' })), all = flat(P.doc), i = all.indexOf(st); return sheetsIn(P.doc).every((l) => all.indexOf(l) < i); };
+  const frames = [], W = { requestAnimationFrame: (f) => frames.push(f) };
+  const A = page(), n = SO.restoreSheetOrder(A, W);
+  const headOrder = A.head.kids.map((k) => k.attrs.href || k.attrs.rel || k.tag).join(',');
+  const before = sheetsIn(A.body).length;                                   // the twins stay until their clone's sheet is there
+  for (const c of A.head.kids.filter((k) => k.attrs.rel === 'stylesheet')) c.fire('load');
+  ok(n === 6 && headOrder === 'title,/xterm.css,/style.css,/viewers.css,/chat.css,/theme-editor.css,/fonts.css,vs-lazy-bundle,icon' && before === 6 && sheetsIn(A.body).length === 0 && tiesWon(A),
+    `⑤d MUST 1: the six sheets back at their release place in the head (${headOrder}); the body twins kept until each clone loads (${before}), then gone — a style appended to the head afterwards (a custom theme, a plugin's own) comes after every sheet and wins its ties as at the release`);
+  const B = page(); SO.restoreSheetOrder(B, W); const cl = B.head.kids.filter((k) => k.attrs.rel === 'stylesheet');
+  cl[1].fire('error'); cl[0].sheet = {}; for (const f of frames.splice(0)) f();
+  ok(!cl[1].isConnected && sheetsIn(B.body).map((l) => l.attrs.href).includes('/style.css') && !sheetsIn(B.body).map((l) => l.attrs.href).includes('/xterm.css'),
+    '⑤d a clone that fails to load is dropped and its twin KEPT (the page never loses a sheet); a clone whose sheet is seen on a later frame without a load event lets its twin go');
+  ok(!tiesWon(page()), '⑤d RED CONTROL: 17c6dd081\'s order (the sheets in the body, nothing restored) — a head-injected theme rule stands BEFORE the sheets and loses every tie');
+  ok(/try \{ restoreSheetOrder\(\); \} catch \{ \}[^\n]*\ntry \{ installSideColumn\(\); \} catch \{ \}/.test(CL) && CL.indexOf('restoreSheetOrder();') < CL.indexOf('const exitHop = continueExit();'),
+    '⑤d the client restores the order FIRST, before any of the app is built (src/client.js)');
+  // r4115 (c) + the reach: the probe only in an iPhone's / iPad's home-screen copy, at most once a frame
+  const SC = await import(pathToFileURL(path.join(REPO, 'src/lib/side-column.js')).href);
+  const heard = []; const winTab = { navigator: {}, matchMedia: () => ({ matches: true }), addEventListener: (ev) => heard.push(ev) };
+  const docTab = { documentElement: { dataset: {} }, querySelector: () => ({ getAttribute: () => 'width=device-width', setAttribute() {} }) };
+  const SCS = read('src/lib/side-column.js');
+  ok(SC.installSideColumn(docTab, winTab) === false && heard.length === 0 && /const later = \(\) => \{ if \(queued\) return; queued = true;/.test(SCS) && /win\.addEventListener\('resize', later\)/.test(SCS),
+    '⑤d no listener and no probe where no inset can exist (a tab, an Android or a desktop installed copy — display-mode standalone no longer counts); in the home-screen copy the read is once a frame at most');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

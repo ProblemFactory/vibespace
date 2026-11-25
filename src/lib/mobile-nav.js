@@ -142,6 +142,7 @@ export class MobileNav {
     // is the name's row (style.css) — a tap on it opens the same switcher, as the inner display's head does
     document.getElementById('workspace')?.addEventListener('click', (e) => {
       if (columnShape() !== 'outer') return;
+      if (pressedAside) { pressedAside = false; return; } // r4115 (d): a tap that only made a split's pane the one on show opens nothing more
       const head = e.target.closest?.('.window.window-active > .window-titlebar');
       if (head && !e.target.closest('button, input, textarea, select, .window-controls, .tab-bar-tabs')) this._showWindowSwitcher(head);
     });

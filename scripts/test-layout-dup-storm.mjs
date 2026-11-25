@@ -1121,6 +1121,7 @@ const CLOSE_FENCE = {
   'mobile-nav.js::constructor': [1, 'the phone\'s close of the window on show (requestClose)'],
   'mobile-nav.js::_buildWindowItem': [1, 'the phone\'s window list: an item\'s ✕ (requestClose)'],
   'trailing-bar.js::installTrailingBar': [1, 'the trailing bar\'s close of the active window — never a conversation\'s (requestClose)'],
+  'chat-status-bar.js::_onClick': [1, 'the outer display\'s «Close window» row of the strip\'s «Conversation settings» — the phone nav\'s ✕ moved to the bottom with its conversation, that window (requestClose; B-78db r4115)'],
   'layout.js::_askRemovePlaceholder': [1, 'a placeholder tile the person removes, answered (requestClose)'],
   // ── the record names what stands (the apply, the Stage) ──
   'layout.js::_applyRemoteState': [2, 'THE RECORD\'S CLOSE: a window the remote record no longer lists (the keep-shown law first); a dead view rebuilt as the live one its record names, as its row\'s re-opening (r2 N2)'],

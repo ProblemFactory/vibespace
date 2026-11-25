@@ -1740,6 +1740,9 @@ export class ChatStatusBar {
           };
           if (view?._search?.open) act('chat-status-col-search', t('Search this conversation'), () => view._search.open());
           if (held) act('chat-status-col-window', t('This window'), () => this._app?._mobileNav?.bar?.windowMenuAt?.(held.id, setEl));
+          // the OUTER display (主开发 r4115 (b)): the compact bar's ✕ left the top row — the close of the window on show is this
+          // conversation's own control, so it is its own row here: two presses, the ✕'s own act (never three, through the menu)
+          if (held && columnShape() === 'outer' && this._app?.wm) act('chat-status-col-close', t('Close window'), () => this._app.wm.requestClose(held.id));
         }
         return;
       }
