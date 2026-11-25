@@ -1200,6 +1200,10 @@ export class ChatInput {
   sentLanded(msgId) { if (this._sentAwaiting && msgId) this._sentAwaiting.delete(msgId); }
 
   setDisconnected(disconnected) {
+    // WHY sending waits (B-a26e, 主开发 r4529 (a)): 'attaching' = the window's re-attach HOLD (the socket is up, the hub is slow to
+    // answer this conversation's attach): a press of Send then says so in the hold's own words, never «Disconnected»; any other
+    // call (a socket that really dropped) says what it always said
+    this._disconnectedWhy = disconnected ? (arguments[1] || null) : null;   // the second argument, so the method's own line stays as every lift reads it
     // Keep the textarea fully editable — the user must be able to select/copy
     // (a disabled textarea blocks selection) and keep drafting; only SENDING
     // is blocked (guarded in _send). Drafts queue via ws.pending and sync on
@@ -1474,7 +1478,8 @@ export class ChatInput {
     const hasAttachments = this._attachments.length > 0;
     if (!text && !hasAttachments) return false;
     if (this._disconnected) {
-      showToast(t('Disconnected — reconnecting… your draft is kept'), { type: 'error' });
+      if (this._disconnectedWhy === 'attaching') showToast(t('Still attaching — your draft is kept here; send it once the conversation is back.'), { type: 'info' });
+      else showToast(t('Disconnected — reconnecting… your draft is kept'), { type: 'error' });
       return false;
     }
 

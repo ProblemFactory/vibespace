@@ -7686,13 +7686,13 @@ class ChatView {
     if (this._disposed || this._readOnly) return;
     const H = this._attachHold || (this._attachHold = { line: null, timer: 0, since: Date.now() });
     H.frame = frame; H.gen = gen;
-    if (this._chatInput) this._chatInput.setDisconnected(true);
+    if (this._chatInput) this._chatInput.setDisconnected(true, 'attaching');   // r4529 (a): a press of Send says the hold's own words
     if (!H.line || !H.line.isConnected) {
       const bar = document.createElement('div');
       bar.className = 'chat-resume-bar chat-attach-hold';
       const note = document.createElement('div');
       note.className = 'chat-resume-note';
-      note.textContent = t('Still attaching — the conversation is running; it reconnects by itself.');
+      note.textContent = t('Still attaching — the conversation is running; it reconnects by itself. Your message waits here and can be sent once it is back.');   // r4529 (a): the bar says why sending waits
       bar.append(note);
       const c = this._container;
       if (c) { if (this._statusBar?.element && this._statusBar.element.parentNode === c) c.insertBefore(bar, this._statusBar.element); else c.appendChild(bar); }
