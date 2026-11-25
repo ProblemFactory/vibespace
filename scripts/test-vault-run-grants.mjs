@@ -25,6 +25,16 @@ import { anchored } from './scratch.mjs';   // FIRST after node's own (§113)
 import { REPO, R, pass, fail, ok, editAnchor, sleep, DOOR, VR, M, PW, VALUE, BIN, PRINTER, NODE, GHBIN, EventEmitter, leaks, ROWS, sourceOf, world, cardsOf, waitCard, runAnswered, openRow, ENV, auditOf } from './vault-run-world.mjs';   // THE ONE WORLD of the three suites (B-54a9, 主开发 r4355)
 console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — design D4: vibespace-vault request / uses)');
 {
+  // r4373 (the flake census of lane login-request-card, /var/tmp/vibespace-lanes/setting-doors/work/flake-census-419.md) and the
+  // law of r4340 (1): A WAIT IS ON THE FACT THE LEG JUDGES, bounded generously, and its expiry FAILS BY A NAMED HARNESS LINE — never
+  // a count of turns. untilFact(cond, what) reads cond() every 2 ms, 30 s at most, and is red «HARNESS: <what> — not reached» if it
+  // never comes (the restarts below waited a bare 20 turns, or 200 turns and then read whatever was there).
+  const untilFact = async (cond, what, ms = 30000, say = ok) => { for (const tEnd = Date.now() + ms; !cond();) { if (Date.now() > tEnd) { say(false, `HARNESS: ${what} — not reached in ${ms / 1000} s`); return false; } await sleep(2); } return true; };
+  { const said = [], late = await untilFact(() => false, 'a fact that never comes', 20, (c, n) => said.push(n));
+    ok(late === false && said.length === 1 && said[0] === 'HARNESS: a fact that never comes — not reached in 0.02 s', 'CONTROL (r4373): a wait whose fact never comes ends at its bound RED BY NAME — the harness line, never a silent read of whatever is there', said); }
+  // the start's catch-up of the «Always» cards (src/server/vault-run-door.js endGrants) is the For-you store's deferred step
+  // (userTodos.whenRead): it has run once the store is read and none of its deferred steps still waits
+  const startSwept = (w) => !w.userTodos._unread && !(w.userTodos._readWaiters || []).length;
   const w = await world();   // a LOCAL instance (a seen shape runs without its card)
   const caller = { ...w.caller, scope: 'webui-1' };   // the use law's spelling of this conversation (its vault-use conv)
   const other = { conversationId: 'conv-9', sessionKey: 'claude:conv-9', name: 'Lane Nine', cwd: w.work, scope: 'webui-9' };
@@ -476,7 +486,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const liveEnded = ws.door.usesFor(c8).ended.length;
       ws.door = ws.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART: a new door over the same data (its grants were memory)
       const recEnd = () => { const x = todoId ? ws.userTodos.get(todoId) : null; return (x && x.resolvedFact && x.resolvedFact.endedBy) || null; };
-      for (let k = 0; k < 200 && !recEnd(); k++) await new Promise((r) => setImmediate(r));   // the start's sweep has run: the record says how it ended
+      await untilFact(() => !!recEnd(), "the restart's record says how the approval ended");   // the start's sweep has run: the record says how it ended
       const e0 = ws.door.usesFor(c8).ended[0] || null;
       const ra = await runAnswered(ws, ENV('env'), { caller: c8 });
       return { answered: !!(ans && ans.ok), facts, liveEnded, afterRestart: e0 ? { endedBy: e0.endedBy, purpose: e0.purpose, entry: e0.entry } : null, code: ra.r.code, card: !!ra.card, restartWords: typeof ra.r.words === 'string' && /the hub restarted at \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(ra.r.words), recordEnd: recEnd() };
@@ -501,7 +511,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       await SW.durable(path.join(wq.dataDir, 'vault-grant-ends.json'));   // (r1700's read) the spend writes its end now — what the OFF dropped has landed before the restart reads the file
       wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });   // THE RESTART before the run ended
       const recOf = () => (wq.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted');
-      for (let k = 0; k < 200 && !((recOf() || {}).resolvedFact || {}).endedAt; k++) await new Promise((r) => setImmediate(r));   // the start's sweep ended the approval's record
+      await untilFact(() => !!((recOf() || {}).resolvedFact || {}).endedAt, "the start's sweep ended the approval's record");   // the start's sweep ended the approval's record
       const listed = wq.door.usesFor(c8).ended.map((e) => e.endedBy);
       const r = await wq.door.run({ caller: c8, args: ENV('env'), cwd: wq.work });
       h.ac.abort(); await h.pr;   // the old run ends (its door's own business)
@@ -531,7 +541,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       await SW.durable(endsF);   // what the spend (and the delete) wrote has landed: a restart reads the file
       wq.door = wq.mk(mod, { now: () => clk.t, timers: { set: () => 0, clear: () => { } } });   // THE RESTART while the run still runs
       const recOf = (gf = 'once') => (wq.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted' && (x.resolvedFact || {}).grantedFor === gf);
-      for (let k = 0; k < 200 && !(((recOf() || {}).resolvedFact || {}).endedAt && (!again || ((recOf('8h') || {}).resolvedFact || {}).endedAt)); k++) await new Promise((r) => setImmediate(r));   // the records have their ends
+      await untilFact(() => !!(((recOf() || {}).resolvedFact || {}).endedAt && (!again || ((recOf('8h') || {}).resolvedFact || {}).endedAt)), "the spent approval's record (and the new one's, when there is one) has its end after the restart");   // the records have their ends
       const e0 = wq.door.usesFor(c8).ended[0] || null;
       const r = forget || again ? null : await wq.door.run({ caller: c8, args: ENV('env'), cwd: wq.work });
       const f = (recOf() || {}).resolvedFact || {}, f2 = again ? (recOf('8h') || {}).resolvedFact || {} : null;
@@ -578,7 +588,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       await SW.durable(path.join(wb3.dataDir, 'vault-grant-ends.json'));
       wb3.door = wb3.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART
       const recOf = () => (wb3.userTodos.resolvedOf('vault-grant-ask') || []).find((x) => x.resolvedBy === 'granted');
-      for (let k = 0; k < 200 && !((recOf() || {}).resolvedFact || {}).endedAt; k++) await new Promise((r) => setImmediate(r));
+      await untilFact(() => !!((recOf() || {}).resolvedFact || {}).endedAt, "the burned run's record has its end after the restart");
       return { code, givenBack, recordEnd: ((recOf() || {}).resolvedFact || {}).endedBy || null, listed: wb3.door.usesFor(c8).ended.map((e) => e.endedBy) };
     };
     const brs = await burnedRestart(DOOR);
@@ -599,7 +609,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const fe = wd2.door.forgetEntry('mounts:m1#secretKey');   // the entry deleted (the door's forget — both of the paste door's deletes call it: a free entry's and an agent's own)
       const afterForget = { grants: [...wd2.door._grants.values()].filter((x) => x.conv === c8.scope).length, recordEnd: recEnd(), seen: wd2.door._seen.has('pair-seen-r1700') };
       wd2.door = wd2.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART
-      for (let k = 0; k < 200 && !recEnd(); k++) await new Promise((r) => setImmediate(r));   // the record has its end (at the delete, or at the start)
+      await untilFact(() => !!recEnd(), "the deleted entry's record has its end (at the delete, or at the start)");   // the record has its end (at the delete, or at the start)
       return { todo: !!todoId, forgot: !!(fe && fe.ok), afterForget, recordEnd: recEnd(), listed: wd2.door.usesFor(c8).ended.map((e) => e.endedBy) };
     };
     const dlv = await deletedLive(DOOR);
@@ -643,7 +653,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       let rowUntil = false;
       if (uga && typeof f0.principal === 'string') { const m = (uga.publicFor('mounts:m1#secretKey').to || []).find((x) => x.principal === f0.principal); rowUntil = !!(m && (m.scopes || []).some((x) => Number(x.until) === Number(f0.until))); }
       wa.door = mkA();   // THE RESTART: a new door over the same data (and the same grants store)
-      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));   // the start's sweeps have run
+      await untilFact(() => startSwept(wa), "the start's catch-up of the «Always» cards ran (the For-you store read, no deferred step waiting)");   // the start's sweeps have run
       const it = cardId ? wa.userTodos.get(cardId) : null, f = (it && it.resolvedFact) || {};
       const after = await runAnswered(wa, ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/b'], { answer: 'deny' });
       const out = { always: !!(a8.r && a8.r.ok && a8.a && a8.a.ok), alwaysFor: f.alwaysFor || null, named: typeof f0.principal === 'string' && Array.isArray(f0.entries) && f0.entries.includes('mounts:m1#secretKey'), rowUntil, recordEnd: f.endedBy || null, state: it ? FAa.decisionCard(it).state : null, ranNoCard: !!(after.r && after.r.ok) && !after.card, cardAgain: !!after.card };
@@ -683,7 +693,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const scopesNow = ((ugm.publicFor(ID).to || []).find((x) => x.principal === pk) || {}).scopes || [];
       const before = (recOf().resolvedFact || {}).endedBy || null;   // nothing told it: the store was written directly
       wm.door = mkM();   // THE RESTART (its read)
-      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+      await untilFact(() => startSwept(wm), "the start's catch-up of the «Always» cards ran (the For-you store read, no deferred step waiting)");
       return { pressed: !!(a8.a && a8.a.ok), moved: !!(moved && moved.ok) && scopesNow.some((x) => Number(x.until) === later) && !scopesNow.some((x) => Number(x.until) === Number(f0.until)), before, end: (recOf().resolvedFact || {}).endedBy || null, state: FAm.decisionCard(recOf()).state };
     };
     const amv = await alwaysMoved(DOOR), amvL = await alwaysMoved(DOOR, { shift: 30 * 86400e3 });
@@ -707,7 +717,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const rv = ugg.revoke(ID, f0.principal, { by: 'user' });   // the store written directly: no card told
       const before = (recOf().resolvedFact || {}).endedBy || null;
       wg.door = mkG();   // THE RESTART (its read)
-      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+      await untilFact(() => startSwept(wg), "the start's catch-up of the «Always» cards ran (the For-you store read, no deferred step waiting)");
       return { pressed: !!(c30.a && c30.a.ok), alwaysFor: f0.alwaysFor || null, revoked: !!(rv && rv.ok), before, end: (recOf().resolvedFact || {}).endedBy || null, state: FAg.decisionCard(recOf()).state };
     };
     const agn = await alwaysGone(DOOR);
