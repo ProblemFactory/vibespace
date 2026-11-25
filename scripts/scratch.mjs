@@ -129,6 +129,35 @@ export const driverArgs = (...switches) => {
   if (!r.ok) throw new Error(`driverArgs: ${r.error}`);
   return r.args;
 };
+// B-8695 (主开发 r4611 / r4612): THE ATTACH ROAD's OWN CHROME. A keeper wired with a real display keeper starts stock Chrome ITSELF
+// (src/browser-attach.js launchRoad → src/server/browser-attach-launch.js spawnChrome) with the product's own argv: the driver's line
+// (driverArgs) never reaches it, and the egress probe read its network service speaking to the vendor (row 912). That road finds its
+// Chrome as the first of CHROME_NAMES on the KEEPER env's PATH (browser-attach-launch.js chromeExecutable), and that env is the
+// suite's world. So this program — written into the suite's OWN world folder, first on that keeper env's PATH and on no other — execs
+// the real Chrome with the names rule FIRST (chromeNames() whole: an argv word is never cut) and the product's argv after it,
+// unchanged; exec keeps the pid, so the keeper's identity of its Chrome holds. A keeper given no program finds the real Chrome exactly
+// as at the release. The switch is the one chromeNames quotes above (services/network/public/cpp/network_switches.cc, 157.0.8103.78).
+// scripts/chrome-store-census.mjs attachCensus + test-architecture §47f: a world that wires a real display keeper and a real Chrome
+// without this program is red by name.
+export const NAMES_PROGRAM_MARK = 'VIBESPACE-CHROME-NAMES-PROGRAM';
+/** the program's TEXT (PURE): `real` = the real Chrome's absolute path, `rule` = the names rule, each single-quoted for sh */
+export const chromeNamesProgramText = (real, rule) => {
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  if (!String(real || '').startsWith('/')) throw new Error(`chromeNamesProgramText: the real Chrome «${real}» is no absolute path`);
+  return `#!/bin/sh\n# ${NAMES_PROGRAM_MARK} (B-8695): the names rule first, then the product's own argv; exec keeps the pid\nexec ${q(real)} ${q(rule)} "$@"\n`;
+};
+/** writes the program into `dir` (the suite's OWN world folder) over `env` (the world's keeper env) → { dir, program, real, rule, env }
+ *  (`env` = a copy of that env with `dir` FIRST on its PATH: hand it to the KEEPER alone), or null when that PATH finds no Chrome */
+export function chromeNamesProgram(dir, env, names = {}) {
+  const real = require('../src/server/browser-attach-launch.js').chromeExecutable(env);   // the product's own lookup: the Chrome the release finds
+  if (!real) return null;
+  if (path.resolve(path.dirname(real)) === path.resolve(dir)) throw new Error(`chromeNamesProgram: ${dir} is already first on that PATH — the real Chrome would be the program itself`);
+  const rule = chromeNames(names);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const program = path.join(dir, 'google-chrome');
+  fs.writeFileSync(program, chromeNamesProgramText(real, rule), { mode: 0o700 });
+  return Object.freeze({ dir, program, real, rule, env: { ...env, PATH: `${dir}:${(env && env.PATH) || ''}` } });
+}
 /** B-9dd0's remainder (2) and the round's CONTROL (主开发 r1246; r1521: THE CHROME UNDER TEST is probed, never a second one):
  *  reachFrom(cdpPort) opens ONE fresh blank tab in the Chrome listening on `cdpPort` — the suite's OWN Chrome: its proxy and
  *  resolver switches are the whole browser's, so a tab of it is that browser — asks it three probes and closes the tab

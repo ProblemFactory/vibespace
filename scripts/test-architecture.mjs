@@ -2275,6 +2275,37 @@ await section(async () => {
       '§47e RED CONTROLS: the quiet list joined by a comma reaches the driver as the catch-all ALONE (it takes 127.0.0.1 too) plus stray EXCLUDE words; a planted driver config not built by driverArgs is red, and so is the joined list; a row whose count moved, a pin that no longer holds and a stale row are each red',
       JSON.stringify({ cut: cut.filter((p) => /resolver|EXCLUDE/.test(p)), planted: planted.unbuilt.filter((u) => /planted/.test(u.file)), moved: movedRow.moved, unpinned: lostPin.unpinned, stale: staleRow.stale }));
   }
+  const throwsOf47f = (f) => { try { f(); return false; } catch { return true; } };
+  {
+    // §47f B-8695 (主开发 r4612): THE ATTACH ROAD's CHROME. A keeper wired with a real display keeper starts stock Chrome ITSELF with the
+    // product's argv (no driver line). The world hands that keeper scratch.mjs chromeNamesProgram: the harness's own program, first on
+    // its keeper env's PATH, which execs the real Chrome with the names rule first. The census, then the program run over a stand-in
+    // «real» Chrome (a shell script that prints its argv), then the product's own lookup with and without the program.
+    const req47f = (await import('node:module')).createRequire(import.meta.url);
+    const a = CS.attachCensus(process.cwd());
+    const unprog = CS.attachCensus(process.cwd(), { patch: { 'scripts/test-browser-live.mjs': fs.readFileSync('scripts/test-browser-live.mjs', 'utf8').split('chromeNamesProgram(').join('chromeNamesProgramX(') } });
+    ok(a.worlds.includes('scripts/test-browser-live.mjs') && a.unprogrammed.length === 0 && unprog.unprogrammed.includes('scripts/test-browser-live.mjs'),
+      `§47f every world that wires a REAL display keeper and a real Chrome hands its keeper the harness's Chrome program (${a.worlds.length} world(s): ${a.worlds.join(', ')}); RED: the same world without it is named`, JSON.stringify({ worlds: a.worlds, unprogrammed: a.unprogrammed, control: unprog.unprogrammed }));
+    const scr47f = fs.readFileSync('scripts/scratch.mjs', 'utf8'), bodyOf = (name) => { const at = scr47f.indexOf(`export const ${name} = `), end = scr47f.indexOf('\n};\n', at); return at >= 0 && end > at ? scr47f.slice(at + `export const ${name} = `.length, end + 2) : ''; };
+    const MARK47f = (/^export const NAMES_PROGRAM_MARK = '([^']*)';$/m.exec(scr47f) || [])[1] || null;
+    const TXT = (() => { try { return new Function('NAMES_PROGRAM_MARK', `return (${bodyOf('chromeNamesProgramText')});`)(MARK47f); } catch { return null; } })();
+    const NB47f = (() => { try { return new Function(`return (${bodyOf('chromeNames')});`)(); } catch { return null; } })();
+    const D47f = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-names-program-')), realDir = path.join(D47f, 'real'), progDir = path.join(D47f, 'prog');
+    fs.mkdirSync(realDir); fs.mkdirSync(progDir);
+    const realChrome = path.join(realDir, 'google-chrome');
+    fs.writeFileSync(realChrome, '#!/bin/sh\nfor a in "$@"; do printf \'%s\\n\' "$a"; done\n', { mode: 0o700 });   // the stand-in «real» Chrome: its argv, one per line
+    const rule = NB47f ? NB47f() : '', prog = path.join(progDir, 'google-chrome');
+    if (TXT) fs.writeFileSync(prog, TXT(realChrome, rule), { mode: 0o700 });
+    const ran = (() => { try { return req47f('node:child_process').execFileSync(prog, ['--user-data-dir=/x', '--a=1, 2', '--b'], { encoding: 'utf8', timeout: 10000 }).split('\n').filter(Boolean); } catch (e) { return ['ERR ' + e.message]; } })();
+    const ATL47f = req47f('../src/server/browser-attach-launch.js');
+    const withProg = ATL47f.chromeExecutable({ PATH: `${progDir}:${realDir}` }), without = ATL47f.chromeExecutable({ PATH: realDir }), after = ATL47f.chromeExecutable({ PATH: `${realDir}:${progDir}` });
+    fs.rmSync(D47f, { recursive: true, force: true });
+    ok(!!TXT && MARK47f === 'VIBESPACE-CHROME-NAMES-PROGRAM' && /^--host-resolver-rules=MAP \* \^NOTFOUND, EXCLUDE 127\.0\.0\.1/.test(rule) && JSON.stringify(ran) === JSON.stringify([rule, '--user-data-dir=/x', '--a=1, 2', '--b']) && withProg === prog && without === realChrome,
+      '§47f THE PROGRAM: it execs the real Chrome with the names rule FIRST (chromeNames() whole, one argv word) and every argument after it unchanged (a comma inside one kept whole); the product\'s own lookup finds the program when it stands first on the keeper env\'s PATH, and the real Chrome exactly as at the release when it is not there',
+      JSON.stringify({ ran, withProg, without, mark: MARK47f }));
+    ok(after === realChrome && throwsOf47f(() => TXT('chrome', rule)),
+      '§47f CONTROLS: the program put AFTER the real Chrome on the PATH is not the one found (the seam is the order); a real Chrome named by no absolute path is refused', JSON.stringify({ after }));
+  }
   const L = (src) => CS.launchesOf(src, { acorn });
   const planted = L("import { scratch } from './scratch.mjs';\nconst c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
   const carried = L("import { CHROME_STORE } from './scratch.mjs';\nconst c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");

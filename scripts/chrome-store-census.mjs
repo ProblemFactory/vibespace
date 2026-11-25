@@ -171,6 +171,26 @@ export function driverCensus(repo, { patch = {}, extra = {}, rows = DRIVER_ROWS 
   return out;
 }
 
+/** B-8695 (主开发 r4612): THE ATTACH ROAD's CHROME — a world that wires a REAL display keeper (the desktop machine half: desktop-serve /
+ *  desktop-display, handed to a keeper as its displaySessions) and a REAL Chrome lets the keeper start stock Chrome itself, with the
+ *  product's argv and no driver line: such a file names scratch.mjs chromeNamesProgram (the harness's own Chrome program, first on its
+ *  keeper env's PATH), or it is red by name. */
+export const REAL_DISPLAY = /require\(['"]\.\.\/src\/(?:desktop-display|desktop-serve)\.js['"]\)/;
+export const KEEPER_DISPLAY = /\bdisplaySessions\s*:/;
+export const REAL_CHROME = /binOf\(['"]google-chrome['"]\)|\bchromeExecutable\(/;
+export const NAMES_PROGRAM = /\bchromeNamesProgram\(/;
+/** → { worlds: [file], unprogrammed: [file] } over the scope (`patch` / `extra` as census's) */
+export function attachCensus(repo, { patch = {}, extra = {} } = {}) {
+  const out = { worlds: [], unprogrammed: [] };
+  for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
+    const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
+    if (!(REAL_DISPLAY.test(src) && KEEPER_DISPLAY.test(src) && REAL_CHROME.test(src))) continue;
+    out.worlds.push(f);
+    if (!NAMES_PROGRAM.test(src)) out.unprogrammed.push(f);
+  }
+  return out;
+}
+
 /** THE ONE EXEMPT ROW: a suite that brings its OWN Secret Service on a private bus — never the person's (its pin: the private address) */
 export const EXEMPT = Object.freeze({
   'scripts/test-app-display-secrets-chrome.mjs': { why: 'it tests Chrome\'s OSCrypt key in a Secret Service — its OWN, started on the plan\'s private bus (DBUS_SESSION_BUS_ADDRESS = plan.address); never the session bus a lane inherits', pin: /DBUS_SESSION_BUS_ADDRESS: plan\.address/ },
