@@ -2331,7 +2331,9 @@ class StateSync {
     // On reconnect, request missed ops for all stores
     this._stateHandler = (connected) => {
       // the socket dropped: an own set in flight is never answered on it — its held ops are judged now (resync converges)
-      if (!connected) { for (const [name, s] of Object.entries(this.stores)) { s.pending.clear(); s.restoring = null; for (const key of [...s.held.keys()]) this._release(name, key); } return; }
+      // r4180 1: a restore the hub did not answer is NOT lost at a drop — its old copy goes back into the page's own copy (the box told),
+      // as a restore that meets a new hold does
+      if (!connected) { for (const [name, s] of Object.entries(this.stores)) { s.pending.clear(); if (s.restoring) for (const [k, v] of s.restoring) { s.data[k] = v; this._notify(s, k, v); } s.restoring = null; for (const key of [...s.held.keys()]) this._release(name, key); } return; }
       const versions = {}, unread = [];
       for (const [name, s] of Object.entries(this.stores)) { versions[name] = s.version; if (s.unread) unread.push(name); }
       // r3654 3: a store this page holds as UNREAD is named — a hub that reads it again answers with the full snapshot

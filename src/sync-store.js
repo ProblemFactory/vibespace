@@ -100,7 +100,9 @@ class SyncStore {
     // LAW (E) (r4040): the keys WRITTEN or CLEARED in this life of the hub (since its start or its lift) — a page's restore of one
     // is refused; in memory, small, gone at a restart (a new life has no writes yet). Every store has it, a mirror with no file too
     this._lifeWrites = new Set();
-    this._lifeLaid = new Set();   // the follow (r4106 1): keys written in this life ONLY by the hub's own put-back lays — a page's restore JOINS them
+    // the follow (r4106 1, r4180 2): key → the text that stood UNDER the put-back's words when first laid, for the keys written in this
+    // life ONLY by the hub's own put-back lays — a page's restore JOINS them
+    this._lifeLaid = new Map();
     if (this.filePath) this._load();
   }
 
@@ -156,7 +158,7 @@ class SyncStore {
     this.ops = [];
     const owed = this._owed || []; this._owed = null;
     if (facts && facts.setAside) { this.version++; this._scheduleSave(); }   // torn bytes now kept aside: the file is written whole
-    this._lifeWrites = new Set(); this._lifeLaid = new Set();   // law (E): a lift begins a life — nothing is written in it yet (the owed put-backs below are its first writes)
+    this._lifeWrites = new Set(); this._lifeLaid = new Map();   // law (E): a lift begins a life — nothing is written in it yet (the owed put-backs below are its first writes)
     // `fresh`: no data came from the file (gone, or torn and set aside) — its counter began again: no page's last version is this one (r3972);
     // kept for this process, so a page still unread that missed this snapshot is told the same at its resync
     this._freshLife = !(v && v.data);
@@ -262,7 +264,8 @@ class SyncStore {
     if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs, value, extra); return; }
     // a put-back's lay (its `prepended`) on a key nothing else wrote in this life keeps the key's restore a JOIN (r4106 1); any other write ends that
     const laid = !!(extra && Number.isSafeInteger(extra.prepended) && extra.prepended > 0);
-    if (laid && (!this._lifeWrites.has(key) || this._lifeLaid.has(key))) this._lifeLaid.add(key); else this._lifeLaid.delete(key);
+    if (laid && (!this._lifeWrites.has(key) || this._lifeLaid.has(key))) { if (!this._lifeLaid.has(key)) this._lifeLaid.set(key, typeof this.data[key] === 'string' ? this.data[key] : ''); }
+    else this._lifeLaid.delete(key);
     this._lifeWrites.add(key);
     this.version++;
     this.data[key] = value;
@@ -297,7 +300,11 @@ class SyncStore {
     // earlier draft BOTH STAND, joined as rule (C) joins text (the words in front, as a put-back lands); the join is the hub's own write,
     // told to every page (a second page's restore of the key is then refused), and this page is answered with the joined value
     if (typeof value === 'string' && value !== '' && this._lifeLaid.has(key) && typeof this.data[key] === 'string') {
-      const joined = joinText(this.data[key], value);
+      // the hub knows what stood under the put-back's words (r4180 2): a page's draft that HOLDS it is that text's newer form — the
+      // words, then the page's draft, ONCE (a lift at a lower version: the file's older draft is not written twice)
+      const cur = this.data[key], under = this._lifeLaid.get(key) || '';
+      const joined = value.includes(cur) ? value : cur.includes(value) ? cur
+        : (cur.endsWith(under) && value.includes(under)) ? cur.slice(0, cur.length - under.length) + value : joinText(cur, value);
       if (joined !== this.data[key]) this.set(key, joined, null);
       if (senderWs && senderWs.readyState === 1) { try { senderWs.send(JSON.stringify({ type: 'state-restore-refused', store: this.name, key, version: this.version, value: this.data[key], joined: true })); } catch { } }
       return 'joined';

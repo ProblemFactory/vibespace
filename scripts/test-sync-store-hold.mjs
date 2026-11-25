@@ -54,7 +54,10 @@
 //   ㉑ THE FOLLOW (r4106): an owed put-back laid at a torn lift and the page's draft of before the hold BOTH STAND, joined, whichever
 //      arrives second (RED: today's refusal); a hub write then a page's restore of the key: refused (RED: the undecided hub); no
 //      second lift in one life (the life's writes kept); the box shows no old text while a restore is decided; a person typing
-//      while a restore is out keeps what they typed
+//      while a restore is out keeps what they typed; r4180: a restore unanswered at a socket drop goes back into the page (RED: the tip's
+//      drop line); a lift at a lower version joins the words and the page's newer draft ONCE (RED: today's join); a lay then a write, a lay
+//      then a clear, then a restore: refused; the same page restoring twice: refused (each with its red); reds for the second-lift and
+//      typed-meanwhile legs
 // ①–⑮ and ⑰–⑳ hand the store the writer's contract AT THE CALL (scratch.mjs landingWriter): they read the file right after its door.
 // Run: node scripts/test-sync-store-hold.mjs
 import { scratch, anchored, landingWriter } from './scratch.mjs';
@@ -136,7 +139,8 @@ function world(name, { torn = false, readable = false, Store = SyncStore, cls = 
     const sync = new StateSync(wm);
     return { sock, sync, sent, heard, errors, handle: (d) => handle(d, sock), reconnect: () => { sock.readyState = 1; for (const h of states) h(true); }, drop: () => { sock.readyState = 3; for (const h of states) h(false); },
       hold: () => { queued = queued || []; }, release: () => { const q = queued || []; queued = null; for (const d of q) deliver(d); },
-      releaseOne: () => { if (queued && queued.length) deliver(queued.shift()); } };   // ㉑: the first held send only — the rest still held
+      releaseOne: () => { if (queued && queued.length) deliver(queued.shift()); },   // ㉑: the first held send only — the rest still held
+      loseHeld: () => { queued = null; } };   // ㉑ (r4180): the held sends died with the socket — never delivered
   };
   const restart = () => { const old = stores[name]; if (old && old._hold) old._hold.stop(); stores[name] = new Store(name, file, wss, { saveDelay: 20, writer: landingWriter() }); return stores[name]; };   // (a restart: the old process's hold ends with it)
   return { dir, file, bytes, get store() { return stores[name]; }, stores, page, wss, restart };
@@ -800,7 +804,7 @@ const sceneTwo = async (cls, Store, tag, first) => {   // at the lift: B typed K
   const mirrorScene = (Store) => { try { const X = new Store('mirror', null, { clients: new Set() }); X.set('a', 'written'); const r1 = X.restore('a', 'old', null), r2 = X.restore('b', 'kept', null); return { a: X.get('a'), b: X.get('b'), r1, r2 }; } catch (e) { return { threw: String(e && e.message) }; } };
   const MR = mirrorScene(SyncStore);
   ok(MR.a === 'written' && MR.b === 'kept' && MR.r1 === 'refused' && MR.r2 === 'applied', `a store with NO file (a mirror) takes its writes and decides its restores (${S(MR)})`);
-  const NOTMIRROR = M.load('src/sync-store.js', anchored(anchored(SRC, "    this._lifeWrites = new Set();\n    this._lifeLaid = new Set();", "    this._lifeLaid = new Set();", 'set-with-file-only-a'), "    if (this.filePath) this._load();\n", "    if (this.filePath) { this._load(); this._lifeWrites = new Set(); }\n", 'set-with-file-only-b'), 'set-with-file-only').SyncStore;
+  const NOTMIRROR = M.load('src/sync-store.js', anchored(anchored(SRC, "    this._lifeWrites = new Set();\n    // the follow (r4106 1, r4180 2)", "    // the follow (r4106 1, r4180 2)", 'set-with-file-only-a'), "    if (this.filePath) this._load();\n", "    if (this.filePath) { this._load(); this._lifeWrites = new Set(); }\n", 'set-with-file-only-b'), 'set-with-file-only').SyncStore;
   const MX = mirrorScene(NOTMIRROR);
   ok(!!MX.threw, `CONTROL (a hub copy that keeps the set only for a store with a file): a mirror's first write throws (red) (${S(MX)})`);
   ok(E2X.hub === SAVED, `CONTROL (today's blind set), B's text first and A's old copy last: B's typed words gone from the hub (red) (${S(E2X.hub)})`);
@@ -912,6 +916,122 @@ const boxScene = async (tag, { typeMeanwhile = false, cls = CLASS } = {}) => {  
   ok(!!D1X.threw || (D1X.errors && D1X.errors.length > 0), `CONTROL (a page copy reading the dropped record as «s.restoring && …»: null is not undefined): the ack throws in the page (red) (${S(D1X)})`);
   const F6 = await boxScene('typed', { typeMeanwhile: true });
   ok(F6.hub === 'typed on A meanwhile' && F6.box === F6.hub, `a person typing in the box while its restore is out keeps what they typed (the refusal yields to the own later set; the hub takes it) (${S(F6)})`);
+  // r4180 3: the reds of the second-lift leg and the typed-meanwhile leg
+  const AGAIN_EMPTIES = M.load('src/sync-store.js', anchored(SRC, "      onLift: (v, facts) => this._lifted(v, facts),\n    });\n", "      onLift: (v, facts) => this._lifted(v, facts),\n    });\n    { const a = this._hold.again; this._hold.again = async (...x) => { const r = await a(...x); this._lifeWrites = new Set(); this._lifeLaid = new Map(); return r; }; }\n", 'again-empties'), 'again-empties').SyncStore;
+  const F4X = await hubWriteScene(AGAIN_EMPTIES, 'again-x', { again: true });
+  ok(F4X.hub === SAVED, `CONTROL (a hub copy whose re-ask begins a new life — the record emptied): the late restore beats the page's write (red) (${S(F4X.hub)})`);
+  const NOYIELD = pageCopy("    if (s.restoring) s.restoring.delete(msg.key);\n    const n = (s.pending.get(msg.key) || 0) - 1;\n    if (n > 0) { s.pending.set(msg.key, n); return; }\n", "    if (s.restoring) s.restoring.delete(msg.key);\n    const n = (s.pending.get(msg.key) || 0) - 1;\n", 'no-yield');
+  const F6X = await boxScene('typed-x', { typeMeanwhile: true, cls: NOYIELD });
+  ok(F6X.box !== 'typed on A meanwhile', `CONTROL (a page copy whose refusal does not yield to the own later set): the box loses what the person typed (red) (${S(F6X)})`);
+
+  // r4180 1: A RESTORE UNANSWERED AT A SOCKET DROP IS NOT LOST — it goes back into the page's own copy, the box told
+  const dropRestoreScene = async (cls, tag) => {
+    const T = world('drafts', { readable: true, cls });
+    const A = T.page('dz-' + tag);
+    await A.sync.init('drafts');
+    REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await unreadOn(A);
+    A.drop();
+    fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+    await T.store._hold.again();
+    const told = []; A.sync.on('drafts', KK, (v) => told.push(v));
+    A.hold(); A.reconnect(); A.releaseOne();         // only the resync: the fresh snapshot comes back, A's restore of K waits at the page
+    await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread, 500);
+    const inFlight = A.sync.get('drafts', KK);
+    A.drop(); A.loseHeld();                           // the socket dies with the restore unsent
+    A.reconnect();                                    // the versions agree: no rollback comes
+    await until(() => A.sync.stores.drafts.pending.size === 0, 500);
+    const out = { inFlight, box: A.sync.get('drafts', KK), told: told.slice(), hub: T.store.get(KK) };
+    T.store._hold.stop();
+    return out;
+  };
+  const G1 = await dropRestoreScene(CLASS, 'real');
+  ok(G1.inFlight === undefined && G1.box === SAVED && G1.told.includes(SAVED), `a rollback's restore held at the page, then the drop and the reconnect: the page's copy and the box still hold the old draft (${S(G1)})`);
+  const TIPDROP = pageCopy("s.pending.clear(); if (s.restoring) for (const [k, v] of s.restoring) { s.data[k] = v; this._notify(s, k, v); } s.restoring = null;", "s.pending.clear(); s.restoring = null;", 'tip-drop');   // stale-pins: kept — the red copy's own text (the follow's tip drop line), meant to be absent
+  const G1X = await dropRestoreScene(TIPDROP, 'tipdrop');
+  ok(G1X.box === undefined, `CONTROL (the follow's tip: the drop clears the restores' place): the draft is in neither the page, the box nor the hub (red) (${S(G1X)})`);
+
+  // r4180 2: A LIFT AT A LOWER VERSION — the file kept the OLDER draft, the page holds the NEWER one, an owed put-back laid in front of
+  // the older: the words and the page's draft, ONCE
+  const lowerLaidScene = async (Store, tag) => {
+    const T = world('drafts', { readable: true, Store });
+    const A = T.page('ll-' + tag);
+    await A.sync.init('drafts');
+    const NEWER = SAVED + ' — and the words typed after';
+    for (const v of [SAVED + ' —', SAVED + ' — and', NEWER]) A.sync.set('drafts', KK, v);   // three saves: the page at 44
+    await until(() => { const d = disk(T.file); return !!(d && d.version === 44); }, 500);
+    fs.writeFileSync(T.file, S(MADE.drafts, null, 2));                                      // the file kept 41: the older draft
+    REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await unreadOn(A);
+    A.drop();
+    DOOR.create({ getSyncStore: (n) => T.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-ll-' + tag));   // owed
+    REFUSE.delete(T.file); await T.store._hold.again();                                     // the lift at 41; the words laid in front of the older draft
+    const laid = T.store.get(KK);
+    A.reconnect();
+    await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread && A.sync.stores.drafts.pending.size === 0, 500);
+    const out = { NEWER, laid, hub: T.store.get(KK), box: A.sync.get('drafts', KK) };
+    T.store._hold.stop();
+    return out;
+  };
+  const G2 = await lowerLaidScene(SyncStore, 'real');
+  ok(G2.laid === PREFIX + SAVED && G2.hub === PREFIX + G2.NEWER && G2.box === G2.hub, `a lift at a LOWER version with an owed put-back laid on the older draft: the words, then the page's newer draft, ONCE (${S(G2.hub)})`);
+  const NOUNDER = M.load('src/sync-store.js', anchored(SRC, "        : (cur.endsWith(under) && value.includes(under)) ? cur.slice(0, cur.length - under.length) + value : joinText(cur, value);\n", "        : joinText(cur, value);\n", 'no-under'), 'no-under').SyncStore;
+  const G2X = await lowerLaidScene(NOUNDER, 'nounder');
+  ok(G2X.hub === PREFIX + SAVED + '\n\n' + G2X.NEWER, `CONTROL (a join blind to what stood under the words): the older draft's words land TWICE (red) (${S(G2X.hub)})`);
+
+  // r4180 3: a lay, then a page's ordinary write (or a clear: the message sent), then a restore — refused
+  const layThenScene = async (Store, tag, how) => {
+    const T = world('drafts', { readable: true, Store });
+    const A = T.page('lt-a-' + tag);
+    await A.sync.init('drafts');
+    REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await unreadOn(A);
+    A.drop();
+    DOOR.create({ getSyncStore: (n) => T.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-lt-' + tag));   // owed
+    fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+    await T.store._hold.again();                                                             // laid: the words alone
+    const B = T.page('lt-b-' + tag); await B.sync.init('drafts');                            // a page opened after the lift
+    B.sync.set('drafts', KK, how === 'clear' ? '' : 'B typed over the words');
+    const before = T.store.get(KK);
+    A.reconnect();
+    await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread && A.sync.stores.drafts.pending.size === 0, 500);
+    const out = { before, hub: T.store.get(KK), box: A.sync.get('drafts', KK), refused: A.heard.some((m) => m.type === 'state-restore-refused' && m.key === KK && !m.joined) };
+    T.store._hold.stop();
+    return out;
+  };
+  const G3 = await layThenScene(SyncStore, 'real-w', 'write');
+  ok(G3.hub === 'B typed over the words' && G3.box === G3.hub && G3.refused, `a lay, then a page's ordinary write, then a restore: refused, the write stands (${S(G3)})`);
+  const KEEPMARK = M.load('src/sync-store.js', anchored(SRC, "    else this._lifeLaid.delete(key);\n    this._lifeWrites.add(key);\n", "    this._lifeWrites.add(key);\n", 'keep-mark'), 'keep-mark').SyncStore;
+  const G3X = await layThenScene(KEEPMARK, 'keepmark', 'write');
+  ok(G3X.hub !== 'B typed over the words', `CONTROL (a hub copy whose mark survives an ordinary write): the restore joins over the write (red) (${S(G3X.hub)})`);
+  const G4 = await layThenScene(SyncStore, 'real-c', 'clear');
+  ok(G4.hub === undefined && G4.box === undefined && G4.refused, `a lay, then a clear (the message sent), then a restore: refused, the clear stands (${S(G4)})`);
+  const CLEARFORGETS = M.load('src/sync-store.js', anchored(SRC, "    this._lifeWrites.add(key); this._lifeLaid.delete(key);   // a clear is a write of the key (law (E)): a page's later restore of it is refused\n", "    this._lifeWrites.delete(key); this._lifeLaid.delete(key);\n", 'clear-forgets'), 'clear-forgets').SyncStore;
+  const G4X = await layThenScene(CLEARFORGETS, 'clearforgets', 'clear');
+  ok(G4X.hub === SAVED, `CONTROL (a hub copy whose clear forgets the key's writes, as if never written): the sent message comes back as a draft (red) (${S(G4X.hub)})`);
+
+  // r4180 3: the same page restoring twice — the second is refused, no doubling
+  const twiceScene = async (Store, tag) => {
+    const T = world('drafts', { readable: true, Store });
+    const A = T.page('tw-' + tag);
+    await A.sync.init('drafts');
+    REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await unreadOn(A);
+    A.drop();
+    DOOR.create({ getSyncStore: (n) => T.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-tw-' + tag));
+    fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+    await T.store._hold.again();
+    A.reconnect();
+    await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread && A.sync.stores.drafts.pending.size === 0, 500);
+    const first = T.store.get(KK), n0 = A.heard.length;
+    A.sync._restore('drafts', KK, SAVED);                                                   // the same page restores the same draft again
+    await until(() => A.sync.stores.drafts.pending.size === 0, 500);
+    const second = A.heard.slice(n0).find((m) => m.type === 'state-restore-refused' && m.key === KK);
+    const out = { first, hub: T.store.get(KK), box: A.sync.get('drafts', KK), secondRefused: !!second, secondJoined: !!(second && second.joined) };
+    T.store._hold.stop();
+    return out;
+  };
+  const G5 = await twiceScene(SyncStore, 'real');
+  ok(G5.first === PREFIX + SAVED && G5.hub === G5.first && G5.box === G5.first && G5.secondRefused && !G5.secondJoined, `the same page restoring twice: the second is REFUSED (the join was a write), nothing doubled (${S(G5)})`);
+  const JOINKEEPS = M.load('src/sync-store.js', anchored(SRC, "      if (joined !== this.data[key]) this.set(key, joined, null);\n", "      if (joined !== this.data[key]) { this.set(key, joined, null); this._lifeLaid.set(key, under); }\n", 'join-keeps'), 'join-keeps').SyncStore;
+  const G5X = await twiceScene(JOINKEEPS, 'joinkeeps');
+  ok(G5X.secondJoined, `CONTROL (a hub copy whose join keeps the mark): the second restore is joined again, not refused (red) (${S(G5X)})`);
 }
 
 for (const s of [W]) { REFUSE.delete(s.file); if (s.store._hold) s.store._hold.stop(); }
