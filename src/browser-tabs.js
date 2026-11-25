@@ -248,9 +248,6 @@ function isUrlTitle(title, url) {
  *  the chip then says the host). Both are page-chosen text: bounded like the rows (300). */
 function pageTitleOf(row, cdpTitle) {
   const url = str(row && row.url);
-  // row B-0e4a (主开发 r4282): a marked root's title (Chrome names a blank page by its address — the mark) is no title
-  if (isOwnBlank(cdpTitle)) cdpTitle = '';
-  if (isObj(row) && isOwnBlank(row.title)) row = { ...row, title: '' };
   for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t && !isUrlTitle(t, url)) return t; }
   return '';
 }
@@ -266,9 +263,10 @@ function pageRows(targets) {
     .map((x) => ({ targetId: idKey(x.targetId), title: str(x.title).trim().slice(0, 300), url: str(x.url).slice(0, 2048) }));
 }
 /** F8: an unowned tab with nothing on it (a session's spare blank tab) is not a chip — nothing to watch, nothing to say. */
-// row B-0e4a (主开发 r4282, part 2): THE MARKED BLANK READS AS BLANK WHEREVER A BLANK DOES — a lease's root born at its own marked
-// blank (about:blank#vs-own-<24 hex>) is a blank until its first navigation: ONE shape (OWN_BLANK_RE), in BLANK_URL_RE and isOwnBlank
-const OWN_BLANK_RE = /^about:blank#vs-own-[0-9a-f]{24}$/;
+// row B-0e4a: a lease's root born at its own marked blank (about:blank#vs-own-<24 hex>) is a blank until its first navigation — for
+// the HUB's own reads (the settling read, the spare-blank fold): ONE shape, OWN_BLANK_RE, in BLANK_URL_RE and isOwnBlank. No page ever
+// sees it: the mark leaves the hub in no view (markOut below, 主开发 r4319)
+const OWN_BLANK_RE = /^about:blank#vs-own-[0-9a-f]{24}$/i;
 const isOwnBlank = (u) => OWN_BLANK_RE.test(str(u).trim());
 const BLANK_URL_RE = new RegExp(`^(?:about:blank|${OWN_BLANK_RE.source.slice(1, -1)}|chrome:\\/\\/(?:newtab|new-tab-page)\\/?|)$`, 'i');
 /** A title for the chip: ≤ 24 characters (the full title rides the tooltip). */
@@ -316,8 +314,6 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
   // accept-fixes-strip F7: the PAGE's title (CDP's, else the binary's — never an address dressed as one); F8: a blank
   // tab nobody holds is not drawn (the tab on show always is)
   const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId)) // B-26bb: a stopped run's tabs draw nothing
-    // row B-0e4a (主开发 r4282): a lease's marked root is drawn as the blank it is — its mark in no chip, tip or url of a view
-    .map((x) => (isOwnBlank(x.url) ? { ...x, url: 'about:blank', title: isOwnBlank(x.title) ? '' : x.title } : x))
     .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))
     .filter((x) => x.active || idKey(x.targetId) === frontId || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));
   const counts = { agent: 0, you: 0, other: 0, orphan: 0 };
@@ -623,7 +619,7 @@ function rebindPick({ targets = null, holders = [], key = '' } = {}) {
   const owners = tabOwners({ targets, holders: (Array.isArray(holders) ? holders : []).filter((h) => isObj(h) && str(h.key) !== str(key)) });
   if (owners.get(only.targetId) && owners.get(only.targetId) !== 'orphan') return null;
   const raw = targets.find((x) => isObj(x) && idKey(x.targetId) === only.targetId) || {}; // pageTargets keeps no url — the note names the page
-  return { targetId: only.targetId, url: isOwnBlank(raw.url) ? 'about:blank' : (str(raw.url) || 'about:blank') }; // row B-0e4a: the note never quotes a mark
+  return { targetId: only.targetId, url: str(raw.url) || 'about:blank' };
 }
 /** Row B-0e4a (主开发 r4252 / r4264): A LEASE's OWN TAB, KNOWN AGAIN AFTER A RESTART. The keeper births the lease's root tab at a
  *  hub-made address — about:blank with the lease's own random mark as its fragment — and Chrome's own restore («continue where you
@@ -664,6 +660,40 @@ function ownWindowOf({ take = '', windows = null } = {}) {
   for (const [k, v] of m) { if (idKey(k) === id) continue; if (v == null || v === w) return null; }
   return w;
 }
+/**
+ * Row B-0e4a (主开发 r4312 / r4319, LAW A): EVERY READ FIRST, THEN AT MOST ONE ACT. The one carrier is taken back ONLY when it is
+ * ALONE in its window and every page's window was read: → { take, window }. A window not read inside its bound (the carrier's or
+ * any other page's) ⇒ { why: 'unknown' }; another page in the carrier's window ⇒ { why: 'shared' } (a tab a person put beside
+ * their own tabs is theirs now; the lease's own later tabs cannot be told from theirs). Either way NOTHING is sent to the
+ * carrier or its window. PURE.
+ */
+function aloneVerdict({ take = '', windows = null } = {}) {
+  const m = windows instanceof Map ? windows : new Map();
+  const id = idKey(take);
+  if (!id || ![...m.keys()].some((k) => idKey(k) === id)) return { why: 'unknown' }; // the carrier's own window not read
+  for (const v of m.values()) if (v == null) return { why: 'unknown' };
+  const w = ownWindowOf({ take, windows: m });
+  return w == null ? { why: 'shared' } : { take: idKey(take), window: w };
+}
+/**
+ * Row B-0e4a (主开发 r4319, L2): THE MARK LEAVES THE HUB IN NO VIEW — the ONE helper every hub exit of a tab's address or title
+ * passes (the live view's stream, both browser routers' replies, the keeper's broadcasts): the lease's marked blank — whole, or
+ * cut short — reads as the plain blank a person would see (Chrome titles a blank page `about:blank`). `markOut` walks a reply
+ * (copy-on-write: a value with no mark comes back AS IT IS, the same object); `markOutText` one serialized record. PURE.
+ */
+const MARK_ANY_RE = /about:blank#vs-own-[0-9a-f]*/gi;
+const MARK_HINT_RE = /#vs-own-/i; // one cheap scan first: a record with no mark (every frame) comes back as it is
+function markOutText(s) { return typeof s === 'string' && MARK_HINT_RE.test(s) ? s.replace(MARK_ANY_RE, 'about:blank') : s; }
+function markOut(v, depth = 0) {
+  if (typeof v === 'string') return markOutText(v);
+  if (!v || typeof v !== 'object' || depth > 16) return v;
+  if (Array.isArray(v)) { let out = null; for (let i = 0; i < v.length; i++) { const x = markOut(v[i], depth + 1); if (x !== v[i]) { out = out || v.slice(); out[i] = x; } } return out || v; }
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return v; // a Buffer, a Date, a Map: no tab's address rides one
+  let out = null;
+  for (const k of Object.keys(v)) { const x = markOut(v[k], depth + 1); if (x !== v[k]) { out = out || { ...v }; out[k] = x; } }
+  return out || v;
+}
 /** The ONE sentence the agent reads after a rebind (its command's answer, once): why its tab is gone, where it is bound now.
  *  `how` = `switched` (bound to the browser's only page) | `new` (a new tab of its own); `why` = `life` (the browser was
  *  restarted) | `closed` (the tab was closed) | `place` (B-9584 (B): the hold CLOSED it — its place could not be given to it in time,
@@ -680,7 +710,7 @@ function reboundNoteText({ how = 'new', url = '', why = 'life' } = {}) {
 }
 
 module.exports = {
-  OWN_MARK_RE, ownMarkUrl, markVerdict, ownWindowOf, OWN_BLANK_RE, isOwnBlank, // row B-0e4a: a lease's own tab known again after a restart
+  OWN_MARK_RE, ownMarkUrl, markVerdict, ownWindowOf, aloneVerdict, OWN_BLANK_RE, isOwnBlank, markOut, markOutText, // row B-0e4a: a lease's own tab known again after a restart; the mark leaves the hub in no view
   unresponsiveAgentText, // lane browser-unresponsive
   TARGET_ID_RE, TAB_ID_RE, AGENT_TAB_ACTS, USER_TAB_ACTS, OWNER_WORDS, TAB_REFUSALS, MAX_ROOTS, MAX_USER_ACTS,
   pageTargets, cleanRoots, addRoot, tabOwners, ownSetOf, ownerWord,

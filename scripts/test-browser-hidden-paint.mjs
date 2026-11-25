@@ -441,29 +441,33 @@ try {
   console.log(`    (c1: ${JSON.stringify(c1)})`);
   // r683: with nobody driving, «never stamped as the person's» cannot go red — c1 is a MEASURE of what Chrome restores, said as one
   console.log(`    MEASURE B-e674 c1 (not a proof): a relaunch with the profile's own restore setting — ${c1.measured ? `${c1.restored.length} tab(s) restored of ${c1.before}; their owners ${JSON.stringify(c1.restored.map((x) => x.owner))}` : 'not measured (' + (c1.threw || 'no relaunch') + ')'}`);
-  // ── h ── row B-0e4a (主开发 r4252 / r4264): A LEASE's OWN TAB COMES BACK WITH CHROME's RESTORE. The keeper births the lease's root at
-  // about:blank#vs-own-<its mark> (the lease's record keeps the mark); after a restart that restored pages, the ONE page whose first
-  // history entry carries it is taken back — no new tab, the page count FLAT (probe 12: one more page at every start). The person
-  // navigated it by hand ⇒ still the lease's; a copy carrying the same history (a duplicate) ⇒ none taken; a lease with no mark
-  // (today) ⇒ one more page — RED as today. The page never reads its mark. Restore set as c1 left it, every relaunch by A's command.
-  console.log('— h: B-0e4a — the lease\'s own tab comes back with Chrome\'s restore: taken back, no page more');
+  // ── h ── row B-0e4a (主开发 r4252 / r4264; LAW A of r4312 / r4319): A LEASE's OWN TAB COMES BACK WITH CHROME's RESTORE — ONLY WHEN
+  // IT STANDS ALONE IN ITS WINDOW. The keeper births the lease's root at about:blank#vs-own-<its mark>, in a window of its own; after a
+  // restart the ONE page whose first history entry carries it is taken back when no other page sits in its window — every read first
+  // (each orphan's history, every page's window), then one act. THE ALONE SCENE (a profile of its own, one conversation C): taken
+  // back at each relaunch, the count FLAT, the person's hand navigation still taken back; RED a lease with no mark (one page more).
+  // THE SHARED SCENE (A's window, where legs g, a2 and b1 left pages beside A's): NOT taken back, one page more, a new mark — today's
+  // behaviour; and a copy carrying the mark (many): none taken. L2: with C's marked root born and NOT yet navigated, nothing the hub
+  // hands a viewer or the agent carries the mark. The page never reads its mark. Restore set as c1 left it, relaunches by the agents.
+  console.log('— h: B-0e4a — the lease\'s own tab comes back with Chrome\'s restore when it stands alone in its window; never from a shared one');
   const leaseA = () => ((kk._reg() || {}).leases || []).find((l) => l.profileId === prof.id && l.browserKey === KA) || null;
-  // 主开发 r4282: each relaunch prints the keeper's own take-back facts (its verdict, pages read, unread, the read's time, the window
-  // rule) — counts and times only, through its suite seam
+  // 主开发 r4282: each relaunch prints the keeper's own take-back facts (its verdict, pages read, unread histories and windows, the
+  // reads' time, the window, a new mark) — counts and times only, through its suite seam
   const lastTakeBack = () => ((typeof kk._takeBackFacts === 'function' ? kk._takeBackFacts() : []).slice(-1)[0] || null);
-  const tbSay = (x) => (x ? `${x.verdict}, ${x.orphans} restored page(s) read, ${x.unread} unread, ${x.readMs} ms, own window ${x.ownWindow === true ? 'yes' : x.ownWindow === false ? 'no' : '-'}${x.remint ? ', a new mark' : ''}` : 'no take-back read');
+  const tbSay = (x) => (x ? `${x.verdict}, ${x.orphans} restored page(s) read, ${x.unread} unread, ${x.winUnread || 0} window(s) unread, ${x.readMs} ms, own window ${x.ownWindow === true ? 'yes' : 'no'}${x.remint ? ', a new mark' : ''}` : 'no take-back read');
   let hN = 0;
-  const relaunchH = async () => {
+  const relaunchOf = async (pr, run) => {
     const tb0 = lastTakeBack();
-    const dir = (kk.browserOf(prof.id) || {}).dir || prof.dir || null;
-    await kk.stop(prof.id, { why: 'user' });
+    const rec0 = kk.browserOf(pr.id); let before = null; try { before = rec0 && rec0.cdpUrl ? (await pagesNow(rec0)).length : null; } catch { before = null; }
+    const dir = (rec0 || {}).dir || pr.dir || null;
+    await kk.stop(pr.id, { why: 'user' });
     const pf = dir ? path.join(dir, 'Default', 'Preferences') : null;
     if (pf && fs.existsSync(pf)) { try { const j = JSON.parse(fs.readFileSync(pf, 'utf8')); j.session = { ...(j.session || {}), restore_on_startup: 1 }; fs.writeFileSync(pf, JSON.stringify(j)); } catch { /* as it is */ } }
-    const r = await A(['get', 'url']);
-    const recN = kk.browserOf(prof.id); let pages = null; try { pages = recN && recN.cdpUrl ? (await pagesNow(recN)).length : null; } catch { pages = null; }
+    const r = await run(['get', 'url']);
+    const recN = kk.browserOf(pr.id); let pages = null; try { pages = recN && recN.cdpUrl ? (await pagesNow(recN)).length : null; } catch { pages = null; }
     const tb1 = lastTakeBack(); const takeBack = tb1 && tb1 !== tb0 ? tb1 : null;
-    console.log(`    (h relaunch ${++hN}: ${pages} page(s); take-back: ${tbSay(takeBack)})`);
-    return { ok: r.code === 0, own: String(r.out || ''), pages, recN, takeBack };
+    console.log(`    (h relaunch ${++hN} [${pr.label}]: ${before} → ${pages} page(s); take-back: ${tbSay(takeBack)})`);
+    return { ok: r.code === 0, own: String(r.out || ''), before, pages, recN, takeBack };
   };
   const pageNavH = (cdpUrl, tid, url) => new Promise((resolve) => {
     const u = VP.pageUrlOf(cdpUrl, tid); if (!u) return resolve(false);
@@ -475,35 +479,71 @@ try {
     ws.on('message', (m) => { let j; try { j = JSON.parse(String(m)); } catch { return; } if (j.id === 1) sendOn(2, 'Page.navigate', { url }); else if (j.id === 2) { clearTimeout(t); setTimeout(() => fin(true), 800); } });
   });
   const pageOf = async (recN, path0) => ((recN && recN.cdpUrl ? await pagesNow(recN) : []).find((t) => t.url === U(path0)) || null);
-  const hMark = leaseA() && leaseA().ownMark;
-  const hFirst = await relaunchH();            // c1's relaunch left the restore on: this start reads it too
-  const h1 = [await relaunchH(), await relaunchH()];
-  const hBase = hFirst.pages;
+  // ── THE ALONE SCENE: a profile of its own, one conversation C, its root alone in the window the keeper opened for it
+  const KC = 'bk-0000c3c3', TC = 'vsst_hpaint_c';
+  live.add(KC); sessions.set('sess-c', { agentToken: TC, _browserKey: KC, _browserVariant: 'D', _browserEnv: null, name: 'Chat C', cwd: CWD });
+  const C = (args) => cli(TC, args);
+  const prof2 = kk.createProfile({ label: 'Solo' }, { owner: { kind: 'instance', id: null } });
+  await kk.attach({ profileId: prof2.id, browserKey: KC, sessionId: 'sess-c', by: 'user' });
+  const leaseC = () => ((kk._reg() || {}).leases || []).find((l) => l.profileId === prof2.id && l.browserKey === KC) || null;
+  const c0 = await C(['get', 'url']); // its browser starts: its root is born at its marked blank in a window of its own — not navigated
+  // L2 END TO END (主开发 r4319): the mark leaves the hub in no view. Chrome's own list carries it (the precondition: the mark IS
+  // upstream); every record the hub sends a viewer (frames and the rest, ~3 s) and every answer to the agent (its status route, its
+  // CLI's status) and to the person (the profiles list) is scanned for its fixed prefix: none. (The agent's own `get url` reads
+  // the driver directly, outside the hub: its own tab, its own address.)
+  let e2e = { measured: false };
+  try {
+    const recC = kk.browserOf(prof2.id);
+    const pagesC = recC && recC.cdpUrl ? await pagesNow(recC) : [];
+    const markedUp = pagesC.filter((t) => /#vs-own-/i.test(String(t.url || ''))).length;
+    const got = [];
+    const lvC = new WebSocket(`ws://127.0.0.1:${new URL(API).port}${S.STREAM_PATH}?session=sess-c&profile=${prof2.id}`);
+    lvC.on('message', (m) => { got.push(String(m)); });
+    await sleep(3000);
+    const st1 = await fetch(API + '/api/agent/browser/status', { headers: { Authorization: 'Bearer ' + TC } }).then((r) => r.text()).catch((e) => `! ${e && e.message}`);
+    const prl = await fetch(API + '/api/browser/profiles').then((r) => r.text()).catch((e) => `! ${e && e.message}`);
+    const cst = await C(['status']);
+    try { lvC.close(); } catch { /* */ }
+    const answers = [st1, prl, String(cst.out || '') + String(cst.err || '')];
+    const hits = [...got, ...answers].filter((x) => /vs-own-/i.test(x));
+    e2e = { measured: true, markedUp, records: got.length, frames: got.filter((x) => x.includes('"frame"')).length, answers: answers.length, answered: answers.filter((x) => x && !x.startsWith('!')).length, hits: hits.length, first: hits[0] ? hits[0].slice(0, 160) : null };
+  } catch (e) { e2e = { measured: false, threw: String(e && e.message).slice(0, 200) }; }
+  ok(c0.code === 0 && e2e.measured && e2e.markedUp >= 1 && e2e.records > 0 && e2e.answered === 3 && e2e.hits === 0,
+    `h L2: C's root born at its marked blank, not yet navigated (Chrome's own list: ${e2e.markedUp} page(s) carry the mark) — ${e2e.records} record(s) to a viewer (${e2e.frames} frames) and ${e2e.answered} answer(s) (the agent's status, its CLI's status, the profiles list): none carries it`, e2e);
+  const cNav = await C(['open', U('/c')]);
+  const hC = [await relaunchOf(prof2, C), await relaunchOf(prof2, C), await relaunchOf(prof2, C)];
+  ok(cNav.code === 0 && hC.every((x) => x.ok && x.own.includes(U('/c')) && x.pages === x.before && x.takeBack && x.takeBack.verdict === 'take' && x.takeBack.ownWindow === true),
+    `h ALONE: after each relaunch with Chrome's restore C is on ITS OWN page again — taken back, alone in its window — and the page count stays FLAT (${hC.map((x) => `${x.before} → ${x.pages}`).join(' · ')}; probe 12 grew by one a start)`, hC.map((x) => ({ own: x.own.slice(0, 80), before: x.before, pages: x.pages, tb: x.takeBack })));
   // the page never reads its mark: its own address, its referrer, its history's length — none carries it
-  const tA1 = await pageOf(h1[1].recN, '/a');
-  let seen = null; if (tA1) { const u = VP.pageUrlOf(h1[1].recN.cdpUrl, tA1.targetId); seen = await new Promise((resolve) => { const ws = new WebSocket(u); const t = setTimeout(() => { try { ws.close(); } catch { /* */ } resolve(null); }, 3000); ws.once('open', () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: '[location.href, document.referrer, String(history.length)].join(" ")', returnByValue: true } }))); ws.on('message', (m) => { let j; try { j = JSON.parse(String(m)); } catch { return; } if (j.id === 1) { clearTimeout(t); try { ws.close(); } catch { /* */ } resolve(j.result && j.result.result ? String(j.result.result.value) : null); } }); ws.once('error', () => { clearTimeout(t); resolve(null); }); }); }
-  ok(!!hMark && hFirst.own.includes(U('/a')) && h1.every((x) => x.ok && x.own.includes(U('/a')) && x.pages === hBase),
-    `h: B-0e4a — after each relaunch with Chrome's restore the agent is on ITS OWN page again (its tab taken back), and the page count stays flat (${[hFirst, ...h1].map((x) => x.pages).join(' → ')}; probe 12 grew by one a start)`, { mark: !!hMark, first: hFirst.own.slice(0, 80), pages: [hFirst, ...h1].map((x) => x.pages) });
-  ok(typeof seen === 'string' && !!hMark && !seen.includes(hMark) && !seen.includes('vs-own-'), 'h: B-0e4a — the page reads nothing of its mark: its address, its referrer and its history\'s length carry none of it', { seen: seen ? seen.replace(U(''), '') : seen });
-  // the person navigated the lease's tab by hand before the restart ⇒ still the lease's: taken back on that page
-  const navd = tA1 ? await pageNavH(h1[1].recN.cdpUrl, tA1.targetId, U('/b')) : false;
-  const h2 = navd ? await relaunchH() : null;
-  ok(navd && !!h2 && h2.own.includes(U('/b')) && h2.pages === hBase, 'h: B-0e4a — the person navigated the lease\'s tab by hand before the restart: still the lease\'s — taken back on that page, no page more', { navd, own: h2 && h2.own.slice(0, 80), pages: h2 && h2.pages });
+  const tC1 = await pageOf(hC[2].recN, '/c');
+  let seen = null; if (tC1) { const u = VP.pageUrlOf(hC[2].recN.cdpUrl, tC1.targetId); seen = await new Promise((resolve) => { const ws = new WebSocket(u); const t = setTimeout(() => { try { ws.close(); } catch { /* */ } resolve(null); }, 3000); ws.once('open', () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: '[location.href, document.referrer, String(history.length)].join(" ")', returnByValue: true } }))); ws.on('message', (m) => { let j; try { j = JSON.parse(String(m)); } catch { return; } if (j.id === 1) { clearTimeout(t); try { ws.close(); } catch { /* */ } resolve(j.result && j.result.result ? String(j.result.result.value) : null); } }); ws.once('error', () => { clearTimeout(t); resolve(null); }); }); }
+  const cMark = leaseC() && leaseC().ownMark;
+  ok(typeof seen === 'string' && !!cMark && !seen.includes(cMark) && !seen.includes('vs-own-'), 'h ALONE: the page reads nothing of its mark — its address, its referrer and its history\'s length carry none of it', { seen: seen ? seen.replace(U(''), '') : seen });
+  // the person navigated C's tab by hand before the restart ⇒ still C's: taken back on that page
+  const navd = tC1 ? await pageNavH(hC[2].recN.cdpUrl, tC1.targetId, U('/c2')) : false;
+  const hC2 = navd ? await relaunchOf(prof2, C) : null;
+  ok(navd && !!hC2 && hC2.own.includes(U('/c2')) && hC2.pages === hC2.before && hC2.takeBack && hC2.takeBack.verdict === 'take', 'h ALONE: the person navigated C\'s tab by hand before the restart — still C\'s: taken back on that page, no page more', { navd, own: hC2 && hC2.own.slice(0, 80), before: hC2 && hC2.before, pages: hC2 && hC2.pages });
   // RED as today: a lease with NO mark (a record from before this unit) ⇒ nothing to take back ⇒ one more page at the start
-  const lA = leaseA(); if (lA) delete lA.ownMark;
-  const h4 = await relaunchH();
-  ok(!!lA && !!h4 && !h4.own.includes(U('/b')) && h4.pages === hBase + 1, 'CONTROL (a lease with no mark, as every lease before this unit): its tab is not taken back — a new tab of its own, ONE PAGE MORE at the start — RED as today', { own: h4 && h4.own.slice(0, 80), pages: h4 && h4.pages, base: hBase });
-  // a copy of the lease's tab (a person's duplicate copies its history) ⇒ two carriers ⇒ none taken
-  const mark2 = leaseA() && leaseA().ownMark;
+  const lC = leaseC(); if (lC) delete lC.ownMark;
+  const hC4 = await relaunchOf(prof2, C);
+  ok(!!lC && !!hC4 && !hC4.own.includes(U('/c2')) && hC4.pages === hC4.before + 1 && !hC4.takeBack, 'CONTROL (a lease with no mark, as every lease before this unit): its tab is not taken back — a new tab of its own, ONE PAGE MORE at the start — RED as today', { own: hC4 && hC4.own.slice(0, 80), before: hC4 && hC4.before, pages: hC4 && hC4.pages });
+  // ── THE SHARED SCENE: A's window holds pages beside A's (legs g, a2, b1) — law A takes NOTHING back from it (nothing sent to the
+  // carrier or its window: the fast leg records every command; here, the carrier still stands on its page), one page more, a new mark
+  const hMarkA = leaseA() && leaseA().ownMark;
+  const hS = await relaunchOf(prof, A);
+  const carrierS = hS.recN ? await pageOf(hS.recN, '/a') : null;
+  ok(!!hMarkA && hS.ok && !!hS.takeBack && ['shared', 'unknown'].includes(hS.takeBack.verdict) && hS.takeBack.remint === true && !hS.own.includes(U('/a')) && hS.pages === hS.before + 1 && !!carrierS,
+    `h SHARED: A's carrier sits beside other pages (verdict «${hS.takeBack ? hS.takeBack.verdict : '-'}») — NOT taken back: it stands where it was, A gets a tab of its own (one page more: ${hS.before} → ${hS.pages}) under a new mark — today's behaviour`, { own: hS.own.slice(0, 80), tb: hS.takeBack, carrier: !!carrierS });
+  // a copy of A's tab (a person's duplicate copies its history) ⇒ two carriers ⇒ none taken
+  const markS = leaseA() && leaseA().ownMark;
   let dup = false;
-  if (mark2 && h4.recN) { const cc = await cdpClient(h4.recN.cdpUrl); try { const c = await cc.send('Target.createTarget', { url: `about:blank#vs-own-${mark2}` }); const did = c && c.result ? c.result.targetId : null; await sleep(500); dup = !!(did && await pageNavH(h4.recN.cdpUrl, did, U('/b'))); } finally { try { cc.close(); } catch { /* */ } } }
-  const ownTab4 = await pageOf(h4.recN, '/a') || null;
-  if (dup) { const t4 = (await pagesNow(h4.recN)).find((t) => /^about:blank#vs-own-/.test(String(t.url || ''))) || null; if (t4) await pageNavH(h4.recN.cdpUrl, t4.targetId, U('/a')); }
-  const h3 = dup ? await relaunchH() : null;
-  ok(dup && !!h3 && h3.ok && !h3.own.includes(U('/a')) && h3.pages > hBase + 1, 'h: B-0e4a — two restored pages carry the same mark (a copy of the lease\'s tab): NONE is taken back — a new tab of its own (never the copy)', { dup, own: h3 && h3.own.slice(0, 80), pages: h3 && h3.pages, ownTab4: !!ownTab4 });
+  if (markS && hS.recN) { const cc = await cdpClient(hS.recN.cdpUrl); try { const c = await cc.send('Target.createTarget', { url: `about:blank#vs-own-${markS}` }); const did = c && c.result ? c.result.targetId : null; await sleep(500); dup = !!(did && await pageNavH(hS.recN.cdpUrl, did, U('/b'))); } finally { try { cc.close(); } catch { /* */ } } }
+  if (dup) { const tS = (await pagesNow(hS.recN)).find((t) => /^about:blank#vs-own-/.test(String(t.url || ''))) || null; if (tS) await pageNavH(hS.recN.cdpUrl, tS.targetId, U('/a2')); }
+  const h3 = dup ? await relaunchOf(prof, A) : null;
+  ok(dup && !!h3 && h3.ok && !h3.own.includes(U('/a2')) && h3.pages === h3.before + 1 && h3.takeBack && h3.takeBack.verdict === 'many', 'h SHARED: two restored pages carry the same mark (a copy of A\'s tab): NONE is taken back — a tab of its own (never the copy), one page more', { dup, own: h3 && h3.own.slice(0, 80), before: h3 && h3.before, pages: h3 && h3.pages, tb: h3 && h3.takeBack });
   // 主开发 r4282 (a MEASURE, printed, never judged): ONE relaunch with ≥ 20 restored pages, most opened in the background and never
   // brought to front — does every restored page answer the history read inside its bound, or is the verdict «unknown» (today's
-  // behaviour: a new tab)? The lease gets a fresh mark carried by ONE new page (navigated on), so a take is possible
+  // behaviour: a new tab)? A gets a fresh mark carried by ONE new page (navigated on); under law A its windows decide the take
   let h5 = null, h5opened = 0, h5before = null;
   try {
     const recM = h3 ? h3.recN : null; const lA5 = leaseA();
@@ -518,11 +558,11 @@ try {
         h5before = n;
       } finally { try { cc.close(); } catch { /* */ } }
       await sleep(1500); // Chrome writes its session file
-      h5 = await relaunchH();
+      h5 = await relaunchOf(prof, A);
     }
   } catch (e) { h5 = { threw: String(e && e.message).slice(0, 160) }; }
   const tb5 = h5 && h5.takeBack;
-  console.log(`    MEASURE r4282 (not a proof): a relaunch with ${h5before == null ? '?' : h5before} page(s) before it, ${h5opened} opened in the background and never brought to front — ${h5 && h5.threw ? 'not measured (' + h5.threw + ')' : tb5 ? `take-back ${tbSay(tb5)}; ${tb5.unread ? 'NOT every restored page answered: the verdict is «unknown»' : 'every restored page answered'}; the agent on its own page again: ${h5 && h5.own.includes(U('/a?h5')) ? 'yes' : 'no'}; ${h5.pages} page(s) after` : 'no take-back read'}`);
+  console.log(`    MEASURE r4282 (not a proof): a relaunch with ${h5before == null ? '?' : h5before} page(s) before it, ${h5opened} opened in the background and never brought to front — ${h5 && h5.threw ? 'not measured (' + h5.threw + ')' : tb5 ? `take-back ${tbSay(tb5)}; ${tb5.unread ? 'NOT every restored page answered its history read: the verdict is «unknown»' : 'every restored page answered its history read'}; the agent on its own page again: ${h5 && h5.own.includes(U('/a?h5')) ? 'yes' : 'no'}; ${h5.pages} page(s) after` : 'no take-back read'}`);
 } catch (e) { if (!/^no browser$/.test(String(e && e.message))) ok(false, 'the run threw', String(e && e.stack)); }
 finally { try { spy?.close(); } catch { /* */ } try { dialogs.shutdown(); kk.shutdown(); } catch { /* */ } srv.close(); pages.close(); cleanup(); }
 done();

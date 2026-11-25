@@ -102,6 +102,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive rule every *-stream.js bridge arms
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
+const TBS = require('../browser-tabs.js'); // row B-0e4a (主开发 r4319, L2): the mark leaves the hub in no view — markOutText, the ONE door
 const { pressBearer, pressOf, pageOfUpgrade, pageVerdict, ownOriginOf, isPress } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door (r3: a press per MESSAGE)
 const FIT = require('../browser-fit.js');
 const crypto = require('crypto'); // lane browser-x-in-window: the X picture's ticket (a per-viewer secret)
@@ -209,7 +210,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
   }) : null;
 
-  const send = (ws, obj) => { try { if (ws.readyState === 1) ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj)); } catch { /* closing */ } };
+  // row B-0e4a (主开发 r4319, L2): EVERY record to a viewer leaves through this ONE send, and through the ONE door (TBS.markOutText):
+  // a lease's marked blank reads as the plain blank — in a hub-made record (the tab row's titles, a mode's url) as in a relayed one
+  const send = (ws, obj) => { try { if (ws.readyState === 1) ws.send(TBS.markOutText(typeof obj === 'string' ? obj : JSON.stringify(obj))); } catch { /* closing */ } };
   /** BROWSE YOURSELF (B-6ae8): a relay of the USER's own browsing window (`?browse=hu-<hex>`) — his own tab, his own
    *  session; its controls are the keeper's `human*` verbs (never a takeover: nothing of any agent is paused), no tab
    *  anchor (every tab change on it is his), and his forwarded input becomes ACTS on its taps (the recorder's). */
@@ -606,16 +609,21 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     notePicture(relay, msg, cls);
     if (cls === 'frame') { relay.frameSeq++; relay.lastUpFrameAt = t; if (!relay.firstFrameAt) relay.firstFrameAt = t; if (relay.bg.state) { const b = relay.bg; b.frameTimes = [...(b.frameTimes || []), t].slice(-16); recheckBackground(relay); } } // lane browser-windows: a frame while a background verdict stands is RE-ASKED (a hidden tab can still send a stray frame — the heavy leg's popup); verify r1 ④: the frame instants are kept — a tab that PAINTS clears it whatever the page says
     else if (msg.type === 'url') noteNavigation(relay, typeof msg.url === 'string' ? msg.url : '');
+    // row B-0e4a (主开发 r4319, L2): the relay's own picture state above keeps the page's own address (the viewport read finds the
+    // tab by it); what LEAVES the relay — the recorder's taps, the keeper's notes (the lease's last url, the kept tabs), the replay
+    // store, the viewers — leaves through the ONE door (a frame's pictures pass the one send's door below)
+    const outText = cls === 'frame' ? text : TBS.markOutText(text);
+    const outMsg = outText === text ? msg : JSON.parse(outText);
     // P5: every tap sees every record (a tap that throws never breaks the fan-out)
-    for (const fn of relay.taps) { try { fn(msg, text, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
-    if (cls !== 'frame') onOrderedForKeeper(relay, msg);
+    for (const fn of relay.taps) { try { fn(outMsg, outText, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
+    if (cls !== 'frame') onOrderedForKeeper(relay, outMsg);
     if (cls === 'frame') {
       relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;   // r178: the tab this picture shows
       fanOutFrame(relay, text, t);
     } else {
       relay.stats.ordered++;
-      if (S.REPLAYED_TYPES.includes(msg.type)) relay.last[msg.type] = text;
-      for (const v of relay.viewers.values()) send(v.ws, text);
+      if (S.REPLAYED_TYPES.includes(msg.type)) relay.last[msg.type] = outText;
+      for (const v of relay.viewers.values()) send(v.ws, outText);
     }
     applyBackpressure(relay);
   }

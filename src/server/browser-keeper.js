@@ -159,7 +159,7 @@ function keeper() { return installed; }
  *                    never admitted, never added to a list (identity verify r2, 2026-09-28); default none
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
-function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} of the held registry's read again (a suite's fast clock) */, geoHold = null /* B-9584 U2c: the place hold's maker ({log, now, onEvent}) ⇒ src/server/browser-geo-hold.js create — a suite's stand-in */, dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
+function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} of the held registry's read again (a suite's fast clock) */, geoHold = null /* B-9584 U2c: the place hold's maker ({log, now, onEvent}) ⇒ src/server/browser-geo-hold.js create — a suite's stand-in */, dataDir, homeDir = os.homedir(), env = () => ({}), broadcast: broadcastIn = null, serverSetting = () => undefined, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js — a profile proxy's login, read by the forwarder alone */,
   // B-7a30 unit 1': the CLI judge's one file check (injectable: the gate PLACES a stall in it), the doors' bound, the re-judge period
   cliFileFact = null, cliActMs = 5 * 1000, cliEveryMs = 10 * 1000,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
@@ -266,6 +266,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // lane lg-store-writes (B-0248 U5b): the registry's bytes go through THE STORE WRITER, keyed by the resolved path (browser-env
   // asks the writer for the same file before it reads it)
   const storeKey = path.resolve(storeFile);
+  // row B-0e4a (主开发 r4319, L2): THE MARK LEAVES THE HUB IN NO VIEW — the keeper's broadcasts (the registry's digest, the takeover
+  // requests) pass the ONE door (TBS.markOut) here, so no call site can send one raw
+  const broadcast = typeof broadcastIn === 'function' ? (m) => broadcastIn(TBS.markOut(m)) : null;
   const writerOf = () => require('../store-writer.js').storeWriter();
   const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   // ONE base environment for the probe, the runtime and the socket-root answer
@@ -964,7 +967,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const v = { ...l, mediated: !!(l && isMediated(p)) };
     delete v.tabRoots; // lane browser-resume C: a lease's tab roots are the keeper's own bookkeeping — never in a view
     delete v.rebound; // verify r3 (F4): a rebound note waiting for an answer is bookkeeping too
-    delete v.ownMark; // row B-0e4a: the lease's own tab mark is the keeper's alone — never in a view, a digest or a broadcast
+    delete v.ownMark; delete v.ownMarkRun; // row B-0e4a: the lease's own tab mark (and the run it was made in) is the keeper's alone — never in a view, a digest or a broadcast
     // lane H: a managed ephemeral browser's lease is a lease row like any other, SAID to be one
     if (isEph(p)) { v.ephemeral = true; v.child = B.isChildKey(l.browserKey); }
     return v;
@@ -6016,10 +6019,14 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!TBS.OWN_MARK_RE.test(String(l.ownMark || ''))) { l.ownMark = crypto.randomBytes(12).toString('hex'); commit(); }
     return l.ownMark;
   }
-  /** Row B-0e4a (主开发 r4252 / r4264): after a start that restored pages, the lease takes back ITS OWN previous tab — the ONE page no
-   *  holder roots whose FIRST history entry is its own marked birth address — or nothing. Each page's history is read on its own
-   *  socket and stays there (VP.firstEntryIs: yes / no / unknown); none, several (a person duplicated it: the history is copied) or
-   *  any page unread in time ⇒ null: today's behaviour, a new tab of its own. → { targetId } | null. */
+  /** Row B-0e4a (主开发 r4252 / r4264; LAW A of r4312 / r4319): after a start that restored pages, the lease takes back ITS OWN
+   *  previous tab — the ONE page no holder roots whose FIRST history entry is its own marked birth address — and ONLY when that page
+   *  is ALONE in its window. EVERY READ FIRST, THEN AT MOST ONE ACT: each orphan's history (on its own socket; VP.firstEntryIs: yes /
+   *  no / unknown) and, for the one carrier, every page's window (VP.windowOf), all bounded, before anything reaches any page. Then
+   *  the one act — the driver's `tab <carrier>` — for a carrier alone in its window only. none / many (a person duplicated it: the
+   *  history is copied) / unknown (a page or a window unread) / shared (another page in the carrier's window: a tab a person put
+   *  beside their own is theirs now, and the lease's own later tabs cannot be told from theirs) ⇒ NOTHING is sent to any page, null:
+   *  today's behaviour, a tab of its own in a window of its own. → { targetId } | null. */
   async function takeBackOwnTab(p, browserKey, o, pinTab) {
     const rec = p ? reg.browsers[p.id] : null;
     const l = p ? B.findLease(reg.leases, p.id, browserKey) : null;
@@ -6028,46 +6035,50 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const targets = await tabTargetsOf(rawCdpOf(p.id, o));
     if (!targets) return null;
     const owners = TBS.tabOwners({ targets, holders: tabHoldersOf(p.id) });
-    const orphans = TBS.pageTargets(targets).map((x) => x.targetId).filter((id) => !owners.get(id) || owners.get(id) === 'orphan');
+    const pageIds = TBS.pageTargets(targets).map((x) => x.targetId);
+    const orphans = pageIds.filter((id) => !owners.get(id) || owners.get(id) === 'orphan');
     const VPm = require('./browser-viewport.js');
     const t0 = Date.now();
+    // READ 1: each orphan's first history entry
     const readFirst = (id) => (typeof firstEntryFn === 'function' ? firstEntryFn(rec.cdpUrl, id, expected) : VPm.firstEntryIs(rec.cdpUrl, id, expected, { timeoutMs: TAKE_BACK_READ_MS }));
     const reads = await Promise.all(orphans.map((id) => Promise.resolve().then(() => readFirst(id)).catch(() => null)));
-    const v = TBS.markVerdict({ candidates: orphans, carries: new Map(orphans.map((id, i) => [id, reads[i]])) });
-    const seen = { browserKey: String(browserKey), verdict: v.take ? 'take' : v.why, orphans: orphans.length, unread: reads.filter((x) => x !== true && x !== false).length, readMs: Date.now() - t0, ownWindow: null, remint: false };
+    let v = TBS.markVerdict({ candidates: orphans, carries: new Map(orphans.map((id, i) => [id, reads[i]])) });
+    // READ 2 (only for the one carrier): EVERY page's window — still nothing sent to any page
+    let winUnread = 0;
+    if (v.take) {
+      const readWin = (id) => (typeof windowOfFn === 'function' ? windowOfFn(rec.cdpUrl, id) : VPm.windowOf(rec.cdpUrl, id, { timeoutMs: TAKE_BACK_READ_MS }));
+      const wins = await Promise.all(pageIds.map((id) => Promise.resolve().then(() => readWin(id)).then((w) => WIN.windowIdOf(w), () => null)));
+      winUnread = wins.filter((w) => w == null).length;
+      v = TBS.aloneVerdict({ take: v.take, windows: new Map(pageIds.map((id, i) => [id, wins[i]])) });
+    }
+    const seen = { browserKey: String(browserKey), verdict: v.take ? 'take' : v.why, orphans: orphans.length, unread: reads.filter((x) => x !== true && x !== false).length, winUnread, readMs: Date.now() - t0, ownWindow: v.take ? true : null, remint: false };
     takeBackSeen.push(seen); if (takeBackSeen.length > 20) takeBackSeen.shift();   // a suite's seam: counts and times only
     if (!v.take) {
-      // r4282's follow (found building): «many» (a copy) or «unknown» (a page unread) leaves carriers of the mark out there — the
-      // birth that follows would be one more, and every later start would read «many» again (one page more a start, the fault
-      // itself). The lease gets a NEW mark: the birth that follows is the ONE carrier of it; the old carriers are plain orphans,
-      // as today. «none»: nobody carries it — kept
-      const lr = v.why === 'many' || v.why === 'unknown' ? B.findLease(reg.leases, p.id, browserKey) : null;
-      if (lr) { lr.ownMark = crypto.randomBytes(12).toString('hex'); seen.remint = true; commit(); }
-      if (orphans.length) log.log?.(`[browser] ${browserKey} on ${p.id}: its own tab was not taken back (${v.why}: ${orphans.length} restored page(s) read) — a new tab of its own${lr ? ', under a new mark' : ''}`);
+      // r4282's follow (found building; r4312: «shared» too): «many» / «unknown» / «shared» leave a carrier of the mark out there —
+      // the birth that follows would be one more, and every later start would read «many» again (one page more a start, the fault
+      // itself). The lease gets a NEW mark — AT MOST ONCE A BROWSER RUN (the run it was made in is kept beside it): the birth that
+      // follows is the ONE carrier of it; the old carriers are plain orphans, as today. «none»: nobody carries it — kept
+      const lr = v.why === 'many' || v.why === 'unknown' || v.why === 'shared' ? B.findLease(reg.leases, p.id, browserKey) : null;
+      const run = WIN.instanceOf(rec);
+      const remint = !!(lr && run && lr.ownMarkRun !== run);
+      if (remint) { lr.ownMark = crypto.randomBytes(12).toString('hex'); lr.ownMarkRun = run; seen.remint = true; commit(); }
+      if (orphans.length) log.log?.(`[browser] ${browserKey} on ${p.id}: its own tab was not taken back (${v.why}: ${orphans.length} restored page(s) read) — nothing sent to it; a new tab of its own${remint ? ', under a new mark' : ''}`);
       return null;
     }
+    // THE ONE ACT: the switch to the carrier, alone in its window
     let b = null;
     try { b = await rt.exec(nsOf(p.id), [...(pinTab ? ['--pin-tab'] : []), 'tab', v.take, '--json'], o); } catch (e) { b = { ok: false, error: String(e && e.message) }; }
     if (execFailed(b)) return null;
     const l2 = B.findLease(reg.leases, p.id, browserKey);
     if (!l2) return null;
     l2.tabRoots = TBS.addRoot([], v.take);
-    // 主开发 r4282 (law L3, the round's must): the take-back gives the lease its ROOT, never a window that holds any page not the lease's
-    // (a person dragged it beside their own tabs; an orphan sits there: they cannot be told apart). Every page's window read at once,
-    // each bounded; the carrier's window is the lease's only when it is alone there and every other window was read. Else the lease
-    // has NO own window from it (windowIn cleared: its next tab gets a window of its own, as today; no new window at its next attach)
-    const pageIds = TBS.pageTargets(targets).map((x) => x.targetId);
-    const readWin = (id) => (typeof windowOfFn === 'function' ? windowOfFn(rec.cdpUrl, id) : VPm.windowOf(rec.cdpUrl, id, { timeoutMs: TAKE_BACK_READ_MS }));
-    const wins = await Promise.all(pageIds.map((id) => Promise.resolve().then(() => readWin(id)).then((w) => WIN.windowIdOf(w), () => null)));
-    const ownWin = TBS.ownWindowOf({ take: v.take, windows: new Map(pageIds.map((id, i) => [id, wins[i]])) });
-    if (ownWin != null) { l2.windowIn = WIN.instanceOf(rec); l2.windowId = ownWin; } else { delete l2.windowIn; l2.windowId = null; }
-    seen.ownWindow = ownWin != null;
+    l2.windowIn = WIN.instanceOf(rec); l2.windowId = v.window; // its window, alone: every later tab of the lease opens in it
     const k = `${p.id}|${browserKey}`;
     const lostWhy = reg.tabClosed[k] ? (reg.tabLostWhy && reg.tabLostWhy[k] === 'closed' ? 'closed' : 'life') : 'life';
     keepRebound(p.id, browserKey, { how: 'back', targetId: v.take, url: '', why: lostWhy, text: TBS.reboundNoteText({ how: 'back' }) });
     delete reg.tabClosed[k]; if (reg.tabLostWhy && typeof reg.tabLostWhy === 'object') delete reg.tabLostWhy[k];
     commit();
-    log.log?.(`[browser] ${browserKey} on ${p.id}: its own tab came back with the browser's restore — taken back (tab ${v.take.slice(0, 8)})`);
+    log.log?.(`[browser] ${browserKey} on ${p.id}: its own tab came back with the browser's restore — taken back (tab ${v.take.slice(0, 8)}, alone in its window)`);
     return { targetId: v.take };
   }
   async function ownWindowAtAttach(p, browserKey, { created = false } = {}) {

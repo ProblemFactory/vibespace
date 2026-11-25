@@ -126,6 +126,12 @@
 const express = require('express');
 const { sameToken } = require('../pairing-token.js'); // B-8dda
 const router = express.Router();
+// row B-0e4a (主开发 r4319, L2): THE MARK LEAVES THE HUB IN NO VIEW — EVERY JSON reply of this router (an agent's status, a verb's
+// answer and its notes, the takeover requests, the trace, the replay, the kept tabs) passes the ONE door (browser-tabs markOut);
+// this router is mounted app-wide, so the door wraps its own paths only (every route of it is under /api/browser or /api/agent/browser)
+const BROWSER_PATH_RE = /^\/api\/(?:agent\/)?browser(?:\/|$)/;
+const { markOut } = require('../browser-tabs.js');
+router.use((req, res, next) => { if (BROWSER_PATH_RE.test(req.path)) { const json = res.json.bind(res); res.json = (body) => json(markOut(body)); } next(); });
 
 let ctx = null;
 const vaultFillTickets = new Map();
