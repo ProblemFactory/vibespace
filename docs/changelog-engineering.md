@@ -325,6 +325,11 @@ This file is the engineers' record of every release: the lanes, the verification
   - The builder refuses a question mark in `own` beside the star (pattern.h's two wildcards), and the empty name's refusal says it would OPEN the rule.
   - Two pure legs in §47d: a machine with only the loopback never throws at a launch (the four guarded forms read from their text, and the belt handed nothing builds its rule); and, by text, the value each of the four hands the builder is the value its page is opened at. The xpra boot's HOSTNAME is opened by test-desktop-xpra-window-open and -seamless, the two of its seven suites that open a page at the name. Each leg has its red.
 
+### lg-providers B-d578 — the fallback rows say what they are (主开发 r3945, the owner's word after F3b's pictures; on line 863's tip a21841f26)
+- Words and layout only. src/lib/manage-agents.js: the section «When every member is out: pay-as-you-go API keys» (its switch lines, the ChatGPT note, the empty hint and the list's note say KEYS billed by their vendor, never «provider» alone); each row = the key's name + `fallbackWhatWords` (its vendor by `fallbackVendorOf` — the preset's own name from model-providers `shippedOf` — and ••••its last four); the rows by `fallbackRowsInOrder` (checked first, the saved order); the dialog reads through `accountsWithTails` (the person's tails, B-ba7d) and redraws a checked row into its place.
+- THE ORDER OF USE, read in the code and now a leg: usage-pool-engine `fallbackRows` walks `poolFallbacksOf` (the saved order); account-pool-auto keeps it among keys (crossRows: fallback-only last, then a stable `priorityOrder` with no reading between keys).
+- Legs: test-pool-fallback-page ⑩ (vendor + tail rows, two keys of one vendor told apart, no tail before the person's read, the order; B-ba7d: the accounts list and its push carry no tail — RED a model-providers copy whose rows carry it); test-pool-fallback (the engine moves to the FIRST listed key; the order swapped, the other).
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
