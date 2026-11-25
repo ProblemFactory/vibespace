@@ -199,12 +199,14 @@ let logOwed = null;   // B-15ac follow (主开发 r831): a failed close's senten
  *  Every direct write of the wrapper's own lines (the stop, the exit) asks it — none goes nowhere while the log has no number */
 function logOpen() {
   if (logFd === null) { logFd = fs.openSync(logPath, 'a'); logSize = fs.fstatSync(logFd).size; }
-  if (logOwed) { ownQ.push(`[job-wrapper] ${logOwed}`); logOwed = null; }   // r3732: on the own lines' road (never between two of the job's chunks)
+  if (logOwed) { ownQ.unshift(`[job-wrapper] ${logOwed}`); logOwed = null; }   // r3732: on the own lines' road (never between two of the job's chunks); r3942 (1): the OLDEST of the queue — first
   return logFd;
 }
 // r3732 / r3735 law 3 — THE WRAPPER's OWN LINES go out on the job's own ordered road: never inside a line of the job, never between the
 // pieces of a value the masker holds. Queued; written when the masker holds nothing (its `holding`) and the job's last written byte
-// ends a line — or, after a quiet with nothing held, on a line of their own; at the masker's ONE end and at the exit, all of them
+// ends a line — or, after a quiet with nothing held, on a line of their own; at the masker's ONE end and at the exit, all of them.
+// r3942: the quiet counts from the job's last write that left its line open. A job that never goes quiet with nothing held keeps them
+// until its end (the stop itself never waits for them); a wrapper killed before its drain loses what is still queued
 let lastNl = true, ownQ = [], ownT = null;
 function sayOwn(text) { ownQ.push(String(text).replace(/^\n+|\n+$/g, '')); drainOwn(); }
 function maskHolds() { try { return !!(VAL && vmask && !vEnded && typeof vmask.holding === 'number' && vmask.holding > 0); } catch { return false; } }   // (before the masker's bindings exist: nothing is held)
@@ -215,9 +217,10 @@ function drainOwn(how = '') {
   if (how !== 'end' && maskHolds()) { armOwn(); return; }
   if (how === '' && !lastNl) { armOwn(); return; }
   if (ownT) { clearTimeout(ownT); ownT = null; }
+  let fd; try { fd = logOpen(); } catch { return; }   // r3942 (1): opened BEFORE the lines are built — an owed close sentence is in THIS write, never after the exit line; no log ⇒ they wait for the next drain
   const b = Buffer.from((lastNl ? '' : '\n') + ownQ.map((l) => `${l}\n`).join(''));
   ownQ = [];
-  try { fs.writeSync(logOpen(), b); logSize += b.length; lastNl = true; } catch { }
+  try { fs.writeSync(fd, b); logSize += b.length; lastNl = true; } catch { }
 }
 function writeLog(buf) {
   if (held) { held.push(buf); return; }
@@ -232,7 +235,7 @@ function writeLog(buf) {
     fs.writeSync(logOpen(), buf); logSize += buf.length;
     if (buf.length) lastNl = buf[buf.length - 1] === 10;   // r3732: does the job's last written byte end a line
   } catch { }
-  if (ownQ.length) drainOwn();
+  if (ownQ.length) { if (ownT && buf.length && !lastNl) { clearTimeout(ownT); ownT = null; } drainOwn(); }   // r3942 (2): the quiet counts from the job's LAST write that left its line open
 }
 
 // lane agent-output-sinks (design q-043 D3 ③): a secret an agent's job prints never lands in the log in the clear —
@@ -320,7 +323,7 @@ function maskOut(k, b) {
   if (vEnded) return Buffer.alloc(0);   // F11: after the masker's ONE end nothing more is written (a fresh window would hand on a value's rest) — a belt: the end is the wrapper's last act before its exit, so no pipe event reaches here today
   let o;
   try { const m = vaultMasker(); const text = vdec[k].write(b); o = text ? m.push(k, text) : {}; }
-  catch { return Buffer.from('[job-wrapper] output withheld: the value masker failed on it\n'); }
+  catch { sayOwn('[job-wrapper] output withheld: the value masker failed on it'); return Buffer.alloc(0); }   // r3942 (3): on the own lines' road — never inside an open line of the job
   if (vquiet) { clearTimeout(vquiet); vquiet = null; }
   vquiet = setTimeout(quietTurn, 400); vquiet.unref?.();   // THE QUIET: a settle turn (healthy) or the retirement (over) — never an end of a healthy masker
   return shaped((o.out || '') + (o.err || ''));
@@ -566,7 +569,7 @@ function fellThrough(r, code, signal) {
   const why = r.refused || (words ? `${tool} refused: ${words.slice(0, 160)}` : `${tool} ended before the job ran (${signal || `exit ${code}`})`);
   if (stopping) { boundRec = { mb: memMb, by: 'none', why: `stopped before its bound was proven (${why})` }; return ended(null, stopping); }
   misses.push(why);
-  writeLog(Buffer.from(`[job-wrapper] the ${r.by} rung did not hold the job — ${why}; it runs on the next rung\n`));
+  sayOwn(`[job-wrapper] the ${r.by} rung did not hold the job — ${why}; it runs on the next rung`);   // r3942 (3): the own lines' road (never the job's bytes)
   launch();
 }
 

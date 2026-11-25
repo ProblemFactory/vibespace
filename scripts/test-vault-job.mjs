@@ -81,8 +81,18 @@ if (process.env.PIPES) {   // 主开发 r2773 (1): a value across the two pipes 
   // r3732: PIPES_END_NOW — the job ends right after its last word (no still after it), INSIDE the masker's quiet: the drain's scan
   // then meets a masker that still holds (the window a hosted runner's load opened, placed)
   const endNow = !!process.env.PIPES_END_NOW;
-  steps.forEach(([p, s, ms], i) => { fs.writeSync(p, s); if (!(endNow && i === steps.length - 1)) still(ms || 150); });
-  if (!endNow) still(700);
+  // r3942 (5): PIPES_LAST_CHILD — the LAST piece is a CHILD's of the job's group, written when the end's drain signals the group: after
+  // that drain's scan said its notice (the scan is read before the group's signal) — a PLACED order, never a race of the pipes
+  const lastChild = !!process.env.PIPES_LAST_CHILD;
+  if (lastChild) {
+    const [lp, ls] = steps.pop(), lf = path.join(out, 'last-' + process.pid), ready = lf + '-ready';
+    fs.writeFileSync(lf, ls);
+    const src = 'const fs = require("fs"); const s = fs.readFileSync(process.argv[2], "utf8"); const say = () => { try { fs.writeSync(Number(process.argv[1]), s); } catch { } process.exit(0); }; process.on("SIGTERM", say); fs.writeFileSync(process.argv[3], "1"); setTimeout(say, 4000);';
+    require('child_process').spawn(process.execPath, ['-e', src, String(lp), lf, ready], { stdio: ['ignore', 'inherit', 'inherit'] });
+    for (let i = 0; i < 500 && !fs.existsSync(ready); i++) still(10);
+  }
+  steps.forEach(([p, s, ms], i) => { fs.writeSync(p, s); if (!((endNow || lastChild) && i === steps.length - 1)) still(ms || 150); });
+  if (!endNow && !lastChild) still(700);
   process.exit(0);
 }
 if (process.env.QUIETSPLIT) {   // round wtlm3ig4w: a marker written in TWO pieces of one line with a quiet between them (the until scan's carry)
@@ -1862,13 +1872,15 @@ async function legOwnLines(wrap, tag) {
   const W = await world(tag, { wrap }), S = SENT(tag), h = Math.floor(S.length / 2);
   W.put(S);
   const want = { a: [[1, 'a1 '], [2, ' a2\n']], b: [[2, 'b1 '], [1, ' b2\n']] };
-  const jobs = Object.fromEntries(Object.keys(want).map((k) => [k, W.jm.jobs.get(W.create({ name: 'own-' + k, env: { PIPES: k, PIPES_END_NOW: '1' } }).job.id)]));
+  // r3942 (5): ac / bc — scenes a and b whose LAST piece a child of the job's group writes at the drain's signal: after the cut's notice, placed
+  const scenes = { a: { PIPES: 'a', PIPES_END_NOW: '1' }, b: { PIPES: 'b', PIPES_END_NOW: '1' }, ac: { PIPES: 'a', PIPES_LAST_CHILD: '1' }, bc: { PIPES: 'b', PIPES_LAST_CHILD: '1' } };
+  const jobs = Object.fromEntries(Object.entries(scenes).map(([k, env]) => [k, W.jm.jobs.get(W.create({ name: 'own-' + k, env }).job.id)]));
   const ended = await W.untilMs(() => Object.values(jobs).every((j) => ['done', 'failed', 'interrupted'].includes(j.state)), 15000);
   const out = {};
   for (const [k, j] of Object.entries(jobs)) {
     let raw = ''; try { raw = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { }
     const job = raw.split('\n').filter((l) => !l.startsWith('[job-wrapper]')).join('\n'), bare = job.replace(/\[vault:[^\]]*\]/g, '');
-    const wantText = want[k].map(([, w]) => w).join(''), last = want[k][want[k].length - 1][1].trim();
+    const wk = want[scenes[k].PIPES], wantText = wk.map(([, w]) => w).join(''), last = wk[wk.length - 1][1].trim();
     const cutAt = raw.indexOf('[job-wrapper] stop: its scan for what left its group read only part'), lastAt = raw.lastIndexOf(last);
     out[k] = { cutSaid: cutAt >= 0, ownApart: !/[^\n]\[job-wrapper\]/.test(raw), after: lastAt >= 0 && cutAt > lastAt,
       // the job's bytes, every one: counted without line ends — a pipe's piece that the other pipe's line overtook (each pipe in its own
@@ -1879,9 +1891,76 @@ async function legOwnLines(wrap, tag) {
   W.end();
   return { ended: ended.ok, out };
 }
+// r3942 (5): THE ROAD'S FAST PIN — the wrapper's OWN definitions (its log's open, the own lines' queue, its job write, maskOut) read from
+// its text and run in a scope of stand-ins: a log that keeps its writes, a masker whose `holding` the pin sets, a hand clock for the
+// timers. DEFINITIONS ONLY are evaluated: a range holding any other top-level line is refused, so nothing of the wrapper runs by being
+// loaded. Each rule has its RED: the same pin over a copy with that rule cut
+const ROAD_A = "/** the job's log descriptor:", ROAD_Z = '// lane agent-output-sinks', MASK_A = 'function maskOut(k, b) {', MASK_Z = "process.on('exit', () => { drainOwn('end');";
+function roadScope(src) {
+  const i = src.indexOf(ROAD_A), j = src.indexOf(ROAD_Z), m = src.indexOf(MASK_A), n = src.indexOf(MASK_Z);
+  if (i < 0 || j < i || m < 0 || n < m) return null;
+  const text = src.slice(i, j) + src.slice(m, n);
+  if (text.split('\n').some((l) => l && !/^(function \w+\(.*\) \{|let [^(]*;|\/\/|\/\*\*| |\}$)/.test(l))) return null;
+  return (S) => {
+    const clock = { now: 0, timers: [] }, log = [];
+    const fsx = { writeSync: (fd, b) => { log.push({ at: clock.now, text: String(b) }); return b.length; }, openSync: () => 9, fstatSync: () => ({ size: 0 }), renameSync: () => { } };
+    const st = (fn, ms) => { const h = { fn, due: clock.now + ms, dead: false, unref() { } }; clock.timers.push(h); return h; }, ct = (h) => { if (h) h.dead = true; };
+    const R = new Function('fs', 'setTimeout', 'clearTimeout', 'S',   // eslint-disable-line no-new-func
+      "let logFd = 5, logSize = 0, logOwed = null, held = null, logCap = 1e12, logPath = '/the-pin-opens-no-file', VAL = [1], vEnded = false, vquiet = null;\n" +
+      'const vmask = S, vdec = { out: { write: (b) => String(b) } }, closeWritten = () => null, maskChunk = (b) => b, shaped = (s) => Buffer.from(s), quietTurn = () => { };\n' +
+      "const vaultMasker = () => { if (S.maskThrows) throw new Error('placed'); return { push: (k, s) => ({ out: s }) }; };\n" +
+      text + '\nreturn { sayOwn, drainOwn, writeLog, maskOut, owe: (l) => { logOwed = l; logFd = null; }, queued: () => ownQ.length };')(fsx, st, ct, S);
+    const advance = (t) => { clock.now = t; for (let k = 0; k < 100; k++) { const h = clock.timers.find((x) => !x.dead && x.due <= t); if (!h) break; h.dead = true; h.fn(); } };
+    return { ...R, log, advance, clock, all: () => log.map((w) => w.text).join('') };
+  };
+}
+function roadPin(src) {
+  const mk = src && roadScope(src);
+  if (!mk) return null;
+  const out = {};
+  try {
+    // ① a masker that HOLDS: nothing is written — not at once, not at the quiet, not at a turn of the job — until the end
+    { const R = mk({ holding: 3 }); R.sayOwn('[job-wrapper] stop: a pin'); const now = R.log.length; R.advance(500); R.drainOwn(''); const before = R.log.length; R.drainOwn('end');
+      out.holds = { now, before, end: R.log.length, line: R.all().includes('[job-wrapper] stop: a pin\n') }; }
+    // ② nothing held, the job's line ended: at once (no pin of a road that never writes)
+    { const R = mk({ holding: 0 }); R.sayOwn('[job-wrapper] stop: a pin'); out.free = { now: R.log.length, text: R.all() }; }
+    // ③ THE QUIET counts from the job's LAST open-line write: queued at 0 ms behind an open line, the job writes on at 400 ms — at 450 ms
+    // nothing (50 ms after that write), at 900 ms the line, on a line of its own
+    { const R = mk({ holding: 0 }); R.writeLog(Buffer.from('progress 1')); R.sayOwn('[job-wrapper] stop: a pin'); R.clock.now = 400; R.writeLog(Buffer.from(' 2')); R.advance(450);
+      const at450 = R.all().includes('[job-wrapper]'); R.advance(900); const own = R.log.find((w) => w.text.includes('[job-wrapper]'));
+      out.quiet = { at450, at900: !!own, apart: !!own && own.text.startsWith('\n[job-wrapper] stop: a pin'), log: R.all() }; }
+    // ④ a failed close's OWED sentence and the exit line: one write, the owed sentence first
+    { const R = mk({ holding: 0 }); R.owe("the job's log (its rotation): the file could not be closed (EIO)"); R.sayOwn('[job-wrapper] exit code=0 signal='); R.drainOwn('end');
+      const first = R.log.length ? R.log[0].text : '', o = first.indexOf('could not be closed');
+      out.owed = { writes: R.log.length, first: o >= 0 && o < first.indexOf('exit code='), left: R.queued(), log: R.all() }; }
+    // ⑤ the masker-failed sentence behind an open line of the job: on a line of its own after the quiet
+    { const S = { holding: 0 }, R = mk(S); R.writeLog(Buffer.from('half a line')); S.maskThrows = true; R.writeLog(R.maskOut('out', Buffer.from('more'))); R.advance(500);
+      const all = R.all(); out.masker = { said: all.includes('[job-wrapper] output withheld: the value masker failed on it'), apart: !/[^\n]\[job-wrapper\]/.test(all), log: all }; }
+  } catch (e) { out.threw = String(e && e.message || e); }
+  return out;
+}
+const roadCut = (re, to) => { const s = WRAP_SRC.replace(re, to); return s !== WRAP_SRC ? s : null; };
+const ROAD = roadPin(WRAP_SRC), roadM = {
+  hold: roadPin(roadCut(/^function maskHolds\(\) \{.*$/m, 'function maskHolds() { return false; }   /* MUTANT: the getter never read */')),
+  quiet: roadPin(roadCut(/^  if \(ownQ\.length\) \{ if \(ownT && buf\.length && !lastNl\).*$/m, '  if (ownQ.length) drainOwn();   /* MUTANT: the release\'s one arm */')),
+  open: roadPin((() => { const s = roadCut(/^  let fd; try \{ fd = logOpen\(\); \} catch \{ return; \}.*\n/m, ''); return s && s.includes('fs.writeSync(fd, b)') ? s.replace('fs.writeSync(fd, b)', 'fs.writeSync(logOpen(), b)') : null; })()),
+  mask: roadPin(roadCut(/^  catch \{ sayOwn\('\[job-wrapper\] output withheld: the value masker failed on it'\); return Buffer\.alloc\(0\); \}.*$/m, "  catch { return Buffer.from('[job-wrapper] output withheld: the value masker failed on it\\n'); }   /* MUTANT: the release's job bytes */")) };
+const NO_ROAD = 'the scope could not be built (its anchors, or a line in its range that is no definition)', NO_COPY = 'the copy could not be built (its anchor is missing)';
+const roadRows = [
+  [!!ROAD && !ROAD.threw && ROAD.holds.now === 0 && ROAD.holds.before === 0 && ROAD.holds.end === 1 && ROAD.holds.line, 'a masker that HOLDS (its holding above 0): the wrapper\'s line is written neither at once, nor at the quiet, nor at a turn of the job — at the end, once', ROAD ? (ROAD.threw || ROAD.holds) : NO_ROAD],
+  [!!roadM.hold && !!roadM.hold.holds && roadM.hold.holds.now > 0, 'CONTROL — the getter never read (in a copy): the line is written at once, while the masker holds — RED on the copy', roadM.hold ? (roadM.hold.threw || roadM.hold.holds) : NO_COPY],
+  [!!ROAD && !ROAD.threw && ROAD.free.now === 1 && ROAD.free.text === '[job-wrapper] stop: a pin\n', 'nothing held, the job\'s line ended: written at once, alone on its line (the pin reads a road that writes)', ROAD ? (ROAD.threw || ROAD.free) : NO_ROAD],
+  [!!ROAD && !ROAD.threw && !ROAD.quiet.at450 && ROAD.quiet.at900 && ROAD.quiet.apart, 'r3942 (2) THE QUIET counts from the job\'s LAST write that left its line open: queued behind an open line, the job writing on at 400 ms — nothing at 450 ms, the line at 900 ms on a line of its own', ROAD ? (ROAD.threw || ROAD.quiet) : NO_ROAD],
+  [!!roadM.quiet && !!roadM.quiet.quiet && roadM.quiet.quiet.at450, 'CONTROL — the release\'s one arm (in a copy): at 450 ms the line cuts into the job\'s open line 50 ms after its write — RED on the copy', roadM.quiet ? (roadM.quiet.threw || roadM.quiet.quiet) : NO_COPY],
+  [!!ROAD && !ROAD.threw && ROAD.owed.writes === 1 && ROAD.owed.first && ROAD.owed.left === 0, 'r3942 (1) a failed close\'s OWED sentence and the exit line: ONE write, the owed sentence first, nothing left queued', ROAD ? (ROAD.threw || ROAD.owed) : NO_ROAD],
+  [!!roadM.open && !!roadM.open.owed && !roadM.open.owed.first, 'CONTROL — the log opened after the lines were built (in a copy): the owed sentence lands after the exit line — RED on the copy', roadM.open ? (roadM.open.threw || roadM.open.owed) : NO_COPY],
+  [!!ROAD && !ROAD.threw && ROAD.masker.said && ROAD.masker.apart, 'r3942 (3) the masker-failed sentence on the own road: behind the job\'s open line, said on a line of its own after the quiet', ROAD ? (ROAD.threw || ROAD.masker) : NO_ROAD],
+  [!!roadM.mask && !!roadM.mask.masker && roadM.mask.masker.said && !roadM.mask.masker.apart, 'CONTROL — the release\'s return of it as the job\'s bytes (in a copy): inside the job\'s open line — RED on the copy', roadM.mask ? (roadM.mask.threw || roadM.mask.masker) : NO_COPY],
+];
 const [ownLines, ownLinesMut] = await Promise.all([WRAP_CUT ? legOwnLines(WRAP_CUT, 'ownlines') : null, WRAP_DIRECT ? legOwnLines(WRAP_DIRECT, 'ownlinesm') : null]);
-ok(!!ownLines && ownLines.ended && Object.values(ownLines.out).every((x) => x.cutSaid && x.ownApart && x.after && x.bytes && x.noValue), 'r3732 — THE WRAPPER\'S OWN LINES: the scan\'s cut placed in scenes a and b (the job ends while the masker still holds) — the job\'s words whole and in order, each wrapper line on a line of its own, the cut\'s notice AFTER the job\'s words, no value', ownLines ? ownLines.out : 'the copy could not be built (its anchor is missing)');
-ok(!!ownLinesMut && Object.values(ownLinesMut.out).some((x) => !x.ownApart || !x.after || !x.bytes), 'CONTROL — today\'s direct write (in a copy): the cut\'s notice stands before or inside the job\'s words — RED on the copy', ownLinesMut ? ownLinesMut.out : 'the copy could not be built (its anchor is missing)');
+ok(!!ownLines && ownLines.ended && ['a', 'b', 'ac', 'bc'].every((k) => ownLines.out[k]) && Object.values(ownLines.out).every((x) => x.cutSaid && x.ownApart && x.after && x.bytes && x.noValue), 'r3732 — THE WRAPPER\'S OWN LINES: the scan\'s cut placed in scenes a and b (the job ends while the masker still holds) and in ac and bc (r3942: their LAST piece a child\'s of the group, written at the drain\'s signal) — the job\'s words whole and in order, each wrapper line on a line of its own, the cut\'s notice AFTER the job\'s words, no value', ownLines ? ownLines.out : 'the copy could not be built (its anchor is missing)');
+ok(!!ownLinesMut && ['ac', 'bc'].every((k) => ownLinesMut.out[k] && ownLinesMut.out[k].cutSaid && !ownLinesMut.out[k].after), 'CONTROL (r3942: by a PLACED seam, never the pipes\' race) — today\'s direct write (in a copy): in ac and bc the cut\'s notice stands BEFORE the job\'s last piece, written after it at the drain\'s signal — RED on the copy', ownLinesMut ? ownLinesMut.out : 'the copy could not be built (its anchor is missing)');
+print('r3942 — THE OWN LINES\' ROAD, IN-PROCESS (the wrapper\'s own definitions in a scope of stand-ins: a counted log, a masker whose holding the pin sets, a hand clock)', roadRows);
 console.log(`      7e1674a83's settle (a copy) over the same scenes: ${JSON.stringify(SETTLE_OLD ? Object.fromEntries(Object.entries(bytesOldMut.scenes || {}).map(([k, x]) => [k, { words: x.words, bytes: x.bytes, log: x.log }])) : 'no copy')}`);
 ok(!!SETTLE_NOFLAG && noFlagMut.a === false && noFlagMut.b === false && noFlagMut.c === true, 'CONTROL — MUST ONE cut ALONE (the last line still searched alone, every view\'s first trigger an end): the coloured and the ampersand last lines are NOT whole in the log in time, the completed line still is — RED on the copy', SETTLE_NOFLAG ? { a: noFlagMut.a, b: noFlagMut.b, c: noFlagMut.c } : 'the copy could not be built (its anchor is missing)');
 ok(!!SETTLE_NOLINE && noLineMut.a === true && noLineMut.b === true && noLineMut.c === false, 'CONTROL — MUST TWO cut ALONE (the whole held text searched, the unfinished-piece rule kept): the line that ENDS in the value\'s own first character is NOT whole in the log in time, the coloured and the ampersand lines still are — RED on the copy', SETTLE_NOLINE ? { a: noLineMut.a, b: noLineMut.b, c: noLineMut.c } : 'the copy could not be built (its anchor is missing)');
