@@ -315,10 +315,23 @@ await cp.go();
 await until(cp, (rs) => has(rs, 'im/c6', 'direct'));
 await cp.ev(`(${DOOR}.click(), true)`);
 await waitFor(cp, BLOCK, (s) => s && s.rows.length === 12);
+// r4456 (the flake census, round 2): the flip only CLICKS the switch — its write (SV, the stub hub's settings) and the panel's answer
+// come later; the control reads the rows once the FLIP's OWN FACTS are there (the setting saved off, the block's row off), a generous
+// bound whose expiry is a named harness line — never after a fixed 1000 ms (under load «listed» was read before the flip did anything)
+const directOff = (s) => !!(s && s.rows.some((r) => r.label === DIRECT && r.on === false));
+const flipLanded = async (p, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (SV['channels.attention.rule.direct'] === false && directOff(await p.ev(BLOCK).catch(() => null))) return true; await sleep(50); } ok(false, `HARNESS (⑦): the flip of «${DIRECT}» was saved and drawn off within ${ms} ms`); return false; };
+// PLACED FIRST, RED AT WILL: the flip HELD (a capturing listener of the leg's own stops the switch's click — no product edit — and
+// replays it once let go): read as the leg stood, the rows have the direct chat «listed» while the switch is still ON and the setting
+// unsaved — the control green with nothing proven; let go, the flip's own facts land, THEN the rows are read
+await cp.ev(`(() => { window.__flipHold = true; document.addEventListener('click', (e) => { const t = e.target; if (window.__flipHold && t && t.matches && t.matches('[data-settings-block="attention"] .settings-toggle input')) { e.preventDefault(); e.stopImmediatePropagation(); window.__flipHeld = t; } }, true); return true; })()`);
+const sv0 = SV['channels.attention.rule.direct'];
 await flip(cp, DIRECT);
-await sleep(1000);
+const asStood = { listed: has(await cp.ev(ROWS), 'im/c6'), switchOff: directOff(await cp.ev(BLOCK)), saved: SV['channels.attention.rule.direct'] === false };
+const let_ = await cp.ev(`(() => { window.__flipHold = false; const t = window.__flipHeld; window.__flipHeld = null; if (t) t.click(); return !!t; })()`);
+const landed = await flipLanded(cp);
+ok(sv0 === true && asStood.listed && !asStood.switchOff && !asStood.saved && let_ && landed, `⑦ PLACED (r4456): the flip HELD, read as the leg stood the direct chat is listed (${asStood.listed}) while the switch is still on (off: ${asStood.switchOff}) and nothing saved (${asStood.saved}) — the control green with nothing proven; let go, the flip is saved and drawn off (${landed})`, asStood);
 const cr = await cp.ev(ROWS);
-ok(has(cr, 'im/c6'), 'CONTROL: the same flip on a panel whose firstScreen is never handed the policy leaves the direct chat listed ⇒ leg ② is the policy\'s doing (RED without it)', cr.map((r) => r.key));
+ok(landed && has(cr, 'im/c6'), 'CONTROL: the same flip — saved and drawn off — on a panel whose firstScreen is never handed the policy leaves the direct chat listed ⇒ leg ② is the policy\'s doing (RED without it)', cr.map((r) => r.key));
 cp.close();
 d.close();
 
