@@ -180,7 +180,7 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
   // was `this._reattach(true)` for every view (pinned in git history), so the legs
   // below run that and go RED on the suspended views instead of being skipped.
   const reconnectOf = (v) => (typeof v._reconnectAttach === 'function' ? v._reconnectAttach() : v._reattach(true));
-  if (typeof createReconnectQueue !== 'function') createReconnectQueue = () => ({ enqueue() { }, take() { return false; }, cancel() { }, reset() { }, has() { return false; }, get size() { return 0; } });
+  if (typeof createReconnectQueue !== 'function') createReconnectQueue = () => ({ enqueue() { }, join() { }, take() { return false; }, cancel() { }, reset() { }, has() { return false; }, get size() { return 0; } });
   {
     // fake timers + a manual microtask flush — deterministic, no wall clock
     let now = 0; const timers = []; const deferred = [];
@@ -223,6 +223,41 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     ok('slot 3 = the window on the far desktop at 2250 ms', attachesOf(hid.desktop).length === 1 && attachesOf(hid.desktop)[0].at === 2250);
     advance(10000);
     ok('every view attached exactly once (no double send from the queue)', [vis, ...Object.values(hid)].every((v) => attachesOf(v).length === 1) && q.size === 0);
+  }
+  {
+    // B-a26e (主开发 r3506): THE ATTACH HOLD's SLOW ASK RIDES THE QUEUE BY `join` — a slot AFTER the armed ones, cancelling none
+    // (a new pass would cancel every armed slot: held windows asking at different moments would starve each other); one slot a
+    // view; its slot asks ONCE (`_runQueuedReattach('slow')` sends the held frame — never a new ladder); a later reconnect pass
+    // supersedes it like any slot
+    let now = 0; const timers = []; const deferred = [];
+    const setTimer = (fn, ms) => { const h = { fn, due: now + ms, live: true }; timers.push(h); return h; };
+    const clearTimer = (h) => { if (h) h.live = false; };
+    const advance = (ms) => { const end = now + ms; for (;;) { const nx = timers.filter((h) => h.live && h.due <= end).sort((a, b) => a.due - b.due)[0]; if (!nx) break; now = nx.due; nx.live = false; nx.fn(); } now = end; };
+    const drain = () => { while (deferred.length) deferred.shift()(); };
+    const q = createReconnectQueue({ setTimer, clearTimer, defer: (fn) => deferred.push(fn), rankOf: () => [0, 0] });
+    ok('B-a26e: the queue has join (the attach hold\'s slow ask)', typeof q.join === 'function');
+    const sent = [];
+    const fakeWs = { connected: true, send(m) { sent.push({ ...m, at: now }); }, onGlobal() { }, offGlobal() { } };
+    const mk = (name) => { const v = mkView(); Object.assign(v, { name, sessionId: 'sid-' + name, ws: fakeWs, app: { _reconnectQueue: q }, _readOnly: false, _disconnected: false, _normEpoch: 'e1',
+      _chatInput: { disabled: null, setDisconnected(on) { this.disabled = on; } }, _hideTyping() { }, _renderers: { appendSystem() { } } }); return v; };
+    const attachesOf = (v) => sent.filter((m) => m.type === 'attach' && m.sessionId === v.sessionId);
+    const a = mk('a'), b = mk('b'), held = mk('held'), held2 = mk('held2');
+    for (const v of [held, held2]) v._attachHold = { frame: { type: 'attach', sessionId: v.sessionId, slab: 'floor' }, line: null, timer: 0 };
+    a.setHidden('tab', true); b.setHidden('tab', true);
+    reconnectOf(a); reconnectOf(b); drain();             // a pass: two armed slots (1500, 1750)
+    if (typeof q.join === 'function') { q.join(held); q.join(held2); q.join(held); }   // two slow asks, one of them twice
+    ok('B-a26e: a join cancels no armed slot and takes the next ones (4 waiting: the pass\'s two, then the two joined; a view joined twice holds one slot)', q.size === 4, q.snapshot && q.snapshot());
+    advance(10000);
+    ok('B-a26e: the pass\'s views attach in their slots, untouched by the joins', attachesOf(a).length === 1 && attachesOf(b).length === 1 && attachesOf(a)[0].at === 1500 && attachesOf(b)[0].at === 1750, sent);
+    ok('B-a26e: each joined view asks ONCE, in the slots after them (2000, 2250 ms) — the held frame, never a new ladder', attachesOf(held).length === 1 && attachesOf(held2).length === 1 && attachesOf(held)[0].at === 2000 && attachesOf(held2)[0].at === 2250 && held._reattachGen === undefined, sent);
+    if (typeof q.join === 'function') q.join(held);
+    reconnectOf(a); drain();                               // a new pass supersedes every slot, the joined one too
+    advance(10000);
+    ok('B-a26e: a later reconnect pass supersedes a joined slot (the reconnect asks for itself)', attachesOf(held).length === 1, sent);
+    held._disconnected = true;
+    if (typeof q.join === 'function') q.join(held);
+    advance(10000);
+    ok('B-a26e: a joined slot of a view whose socket is down asks nothing (hold 1)', attachesOf(held).length === 1, sent);
   }
   {
     // un-hide mid-queue ⇒ attach NOW, slot cancelled; dispose ⇒ dequeued; a second drop ⇒ superseded
