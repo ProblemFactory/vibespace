@@ -46,6 +46,11 @@ const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 waitEverySave(AccountManager);
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const OI = require(path.join(REPO, 'src/server/oat-identity.js'));
+const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+// B-8703 (主开发 r4450): an item's words — its title, the stored detail, every i18n line and param — say what a person reads; none
+// names an account (the fixture's names), and none describes a road (the item's door opens the place)
+const wordsOf = (i) => [i.text, i.detail, i.i18n && i.i18n.text && i.i18n.text.key, ...['detail', 'fold'].flatMap((k) => ((i.i18n && i.i18n[k]) || []).flatMap((l) => [l.key, ...Object.values(l.params || {}).map(String)])), ...Object.values((i.i18n && i.i18n.text && i.i18n.text.params) || {}).map(String)].filter((x) => x != null).join('\n');
+const ROAD = /Manage Agents|Manage agents|→|⋯|the row’s|the row's/;
 // THE K-RUN IS THE WITNESS RING'S K (verify r1 F2): the engine's own constant, read off its source
 const K = Number((read('src/server/usage-pool-engine.js').match(/^const API_WITNESS_K = (\d+);/m) || [])[1]);
 
@@ -284,9 +289,15 @@ const markWith = (id, sevenDay) => { let v = null; for (let i = 0; i < K; i++) v
   const row = am.list().accounts.find((a) => a.id === S) || {};
   ok(row.oatIdentity === 'mismatch' && row.oatIdentityOther === 'Work Max' && JSON.stringify(row.oatIdentityOtherIds) === JSON.stringify([R]), '…the roster row is marked identity-mismatch (names, and the ids the re-bind preselects)', row);
   const items = openItems();
-  ok(items.length === 1 && items[0].origin === 'login' && /^Second's long-lived token belongs to another account \(its usage matches Work Max\) — re-mint it or re-bind it in Manage Agents$/.test(items[0].text) && items[0].id === c.todoId,
+  ok(items.length === 1 && items[0].origin === 'login' && items[0].text === 'A long-lived token belongs to another account and bills that account — re-mint it or re-bind it' && items[0].id === c.todoId,
     '…ONE For-you notice, origin login, in the owner\'s words, its id on the check', items.map((i) => i.text));
-  ok(items[0].i18n && items[0].i18n.text && items[0].i18n.text.params.account === 'Second' && items[0].i18n.text.params.other === 'Work Max', '…with its i18n key + params');
+  // B-8703 (主开发 r4450): its DOOR (that account's long-lived token dialog) — and words that name no account and describe no road
+  const W0 = wordsOf(items[0]), D0 = FA.doorOf(items[0]);
+  ok(items[0].i18n && items[0].i18n.text && items[0].i18n.text.key === items[0].text && (items[0].i18n.detail || []).length === 2 && (items[0].i18n.fold || []).length === 1 && items[0].i18n.fold[0].params.n === K,
+    '…said in the reader\'s language: its title, its two lines and the readings under the fold (i18n keys)', items[0].i18n);
+  ok(items[0].action && items[0].action.type === 'oat-token-check' && items[0].action.accountId === S && !!D0 && D0.opens === 'oat' && D0.verb === 'Long-lived token…',
+    '…its DOOR: «Long-lived token…», opening THAT account\'s long-lived token dialog (the payload names the row by its id, never words)', { action: items[0].action, door: D0 });
+  ok(!/Second|Work Max/.test(W0) && !ROAD.test(W0), '…its words name no account (neither «Second» nor «Work Max») and describe no road (no «Manage Agents», no arrow, no ⋯)', W0);
   ok(logs.some((l) => /Second: its long-lived token belongs to another account \(Work Max\).*the token is kept.*the pool places nothing new/.test(l)) && js.some((j) => j.outcome === 'post-check-mismatch' && j.accountId === S && j.run === K), '…said in the journal and the probe log');
   orch.onReading(S, reading(S, OWN)); orch.onReading(S, reading(S, FOREIGN));
   orch = mkOrch(); orch.attach();
@@ -370,7 +381,8 @@ const markWith = (id, sevenDay) => { let v = null; for (let i = 0; i < K; i++) v
   const hints = openItems().filter((i) => /looks like/.test(i.text));
   ok(v1.verdict === 'hint' && c.state === 'pending' && c.ask?.kind === 'hint' && JSON.stringify(c.ask.others) === JSON.stringify([H]) && c.ask.win?.sevenDay === FOREIGN && hints.length === 1 && hints[0].id === c.ask.todoId,
     'F4: a no-anchor token row whose reading carries Held\'s window ⇒ a HINT: ONE For-you ask, the check still pending (never a mark)', { v1, c });
-  ok(/^Ghost's long-lived token looks like Held's — confirm it is Ghost's, or re-bind it in Manage Agents$/.test(hints[0].text) && hints[0].i18n?.text?.params?.other === 'Held', '…in the owner\'s words, naming the row (i18n key + params)', hints[0].text);
+  ok(hints[0].text === 'A long-lived token looks like another account’s — confirm whose it is, or re-bind it' && hints[0].action?.type === 'oat-token-check' && hints[0].action?.accountId === G && FA.doorOf(hints[0])?.opens === 'oat' && !/Ghost|Held/.test(wordsOf(hints[0])) && !ROAD.test(wordsOf(hints[0])),
+    '…in the owner\'s words, its door opening THAT row\'s dialog; no account named, no road (B-8703, r4450)', { text: hints[0].text, action: hints[0].action });
   for (let i = 0; i < K + 2; i++) orch.onReading(G, reading(G, FOREIGN));
   const row = am.list().accounts.find((a) => a.id === G) || {};
   ok(am.oatCheckOf(G).state === 'pending' && openItems().filter((i) => /looks like/.test(i.text)).length === 1 && row.oatIdentity === 'hint' && row.oatIdentityOther === 'Held' && JSON.stringify(row.oatIdentityOtherIds) === JSON.stringify([H]),
@@ -392,8 +404,8 @@ const markWith = (id, sevenDay) => { let v = null; for (let i = 0; i < K; i++) v
   let e = null; try { orch.answer(G2, 'maybe'); } catch (x) { e = x; }
   const a2 = orch.answer(G2, 'not-mine');
   const c2 = am.oatCheckOf(G2);
-  ok(e && e.code === 'bad_answer' && a2.state === 'mismatch' && c2.state === 'mismatch' && c2.via === 'owner-answer' && c2.others.includes(H) && c2.others.includes(G) && todos.get(ask2).status === 'done' && todos.get(c2.todoId)?.status === 'open' && /^Ghost Two's long-lived token belongs to another account \(its usage matches [^)]*Held/.test(todos.get(c2.todoId).text),
-    '…NOT MINE ⇒ the mark (its notice filed, naming the rows — Held, and Ghost whose anchor is now that window), the ask resolved; an unknown answer is refused', c2);
+  ok(e && e.code === 'bad_answer' && a2.state === 'mismatch' && c2.state === 'mismatch' && c2.via === 'owner-answer' && c2.others.includes(H) && c2.others.includes(G) && todos.get(ask2).status === 'done' && todos.get(c2.todoId)?.status === 'open' && todos.get(c2.todoId).text === 'A long-lived token belongs to another account and bills that account — re-mint it or re-bind it' && todos.get(c2.todoId).action?.accountId === G2 && !/Ghost|Held/.test(wordsOf(todos.get(c2.todoId))),
+    '…NOT MINE ⇒ the mark (its notice filed — its door that row\'s, no account named: B-8703, r4450), the ask resolved; an unknown answer is refused', c2);
   let e2 = null; try { orch.answer(G2, 'mine'); } catch (x) { e2 = x; }
   ok(e2 && e2.code === 'nothing_to_confirm' && am.oatCheckOf(G2).state === 'mismatch', '…a MARK is never undone by one click (re-mint / re-bind / remove are its doors)');
 }
@@ -404,7 +416,7 @@ const markWith = (id, sevenDay) => { let v = null; for (let i = 0; i < K; i++) v
   const W_G = nowS + 2 * 86400 + 7 * 3600;
   wins = { ...wins, __global__: { ...win(W_G - 60), at: 1, source: 'on-demand' }, 'host-abc': { ...win(W_G), at: 1, source: 'on-demand' } };
   const v0 = orch.onReading(D, reading(D, W_G));
-  ok(v0.verdict === 'no-anchor' && !openItems().some((i) => /Token Row/.test(i.text) || /__global__|host-abc/.test(i.text)), 'F3: the machine login (__global__) and a host key holding the same window are no account — no-anchor, nothing filed, no key in any words', v0);
+  ok(v0.verdict === 'no-anchor' && !openItems().some((i) => i.action?.accountId === D || /Token Row|__global__|host-abc/.test(wordsOf(i))), 'F3: the machine login (__global__) and a host key holding the same window are no account — no-anchor, nothing filed, no key in any words', v0);
   // the row's OWN identity group (an org-merged login spans several keys) is the row
   wins = { ...wins, [E]: { ...win(W_G), at: 1, source: 'on-demand' } };
   groups = { [D]: [D, E, '__global__'], [E]: [D, E, '__global__'], __global__: [D, E, '__global__'] };
@@ -443,13 +455,14 @@ const markWith = (id, sevenDay) => { let v = null; for (let i = 0; i < K; i++) v
   ok(orch.onReanchor(Y, { window: win(RENEW), source: 'renewal-panel', independent: true }) === 'followed' && am.oatAnchorOf(Y).sevenDay === RENEW && am.oatAnchorOf(Y).followed === 'renewal-panel' && am.oatAnchorOf(Y).how === 'owner-confirmed',
     'a renewal re-anchor proven WITHOUT the token ⇒ the owner-confirmed anchor FOLLOWS it (journaled anchor-followed)', am.oatAnchorOf(Y));
   const v2 = orch.onReading(Y, reading(Y, RENEW));
-  ok(v2.verdict === 'confirmed' && v2.via === 'owner-confirmed' && am.oatCheckOf(Y).state === 'confirmed' && openItems().every((i) => !/Anchored/.test(i.text)),
+  ok(v2.verdict === 'confirmed' && v2.via === 'owner-confirmed' && am.oatCheckOf(Y).state === 'confirmed' && openItems().every((i) => i.action?.accountId !== Y && !/Anchored/.test(wordsOf(i))),
     '…the confirmed check re-arms on the move and the token\'s renewed reading confirms against it — never a mismatch on a healthy row (the verifier\'s F6)', v2);
   const MOVED = RENEW + 5 * 3600;
   ok(orch.onReanchor(Y, { window: win(MOVED), source: 'window-moved', independent: false }) === 'asked' && am.oatAnchorOf(Y).sevenDay === RENEW && am.oatCheckOf(Y).ask?.kind === 'anchor' && am.oatCheckOf(Y).state === 'confirmed',
     'a move made of the token\'s OWN readings is never followed (the token would confirm itself): the anchor kept, ONE ask, nothing marked', am.oatCheckOf(Y));
-  const items = openItems().filter((i) => /Anchored's usage window moved/.test(i.text));
-  ok(items.length === 1 && orch.onReanchor(Y, { window: win(MOVED + 3600), source: 'window-moved', independent: false }) === 'kept' && openItems().filter((i) => /Anchored's usage window moved/.test(i.text)).length === 1 && (am.list().accounts.find((a) => a.id === Y) || {}).oatIdentity === 'anchor',
+  const moved = (i) => /^An account’s usage window moved away/.test(i.text) && i.action?.accountId === Y;   // B-8703 (r4450): the item names no account — it is the row's by its door
+  const items = openItems().filter(moved);
+  ok(items.length === 1 && !/Anchored/.test(wordsOf(items[0])) && orch.onReanchor(Y, { window: win(MOVED + 3600), source: 'window-moved', independent: false }) === 'kept' && openItems().filter(moved).length === 1 && (am.list().accounts.find((a) => a.id === Y) || {}).oatIdentity === 'anchor',
     '…ONE item (a second move asks nothing more); the roster says anchor', items.map((i) => i.text));
   orch.answer(Y, 'mine');
   ok(am.oatAnchorOf(Y).sevenDay === MOVED && am.oatCheckOf(Y).state === 'confirmed' && !am.oatCheckOf(Y).ask && todos.get(items[0].id).status === 'done', '…the owner answers mine ⇒ the moved window is the anchor, the ask resolved');
@@ -599,15 +612,17 @@ console.log('§5 the roster words');
     'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it with «Re-bind», or re-mint it in this dialog while signed in as this account.',
     'No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-mint it in this dialog while signed in as this account.',
     'It is {name}’s', 'Not {name}’s', 'Confirmed: the token is {name}’s', 'Marked: the token is not {name}’s', 'Could not save the answer',
-    "{account}'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents", "{account}'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents",
-    "{account}'s long-lived token looks like {other}'s — confirm it is {account}'s, or re-bind it in Manage Agents",
-    "{account}'s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still {account}'s, or re-bind it in Manage Agents",
     // fix r3: the lost identity's ask + a conversation whose road is unknown
     'This conversation’s token road is unknown — it takes no part in the identity check',
     'A conversation restored after a restart from a record older than this version cannot say whether it runs on this long-lived token or on the sign-in, so its usage readings never judge the token. Its next start (a resume or a new conversation) records the road.',
     'Identity unverified — the usage window can no longer say whose this token is: confirm or re-bind it',
     'This row’s usage window was last written by a step that could not tell this account’s sign-in from its long-lived token, so nothing proves whose the token is. Nothing was marked and pools keep using it. Answer in «Long-lived token (active)…».',
-    "{account}'s long-lived token is unverified: its usage window can no longer say whose it is — confirm the token is {account}'s, or re-bind it in Manage Agents"];
+    // B-8703 (主开发 r4450): the four For-you items' words (no account named, no road: the item's door opens the place)
+    'A long-lived token belongs to another account and bills that account — re-mint it or re-bind it', 'A long-lived token is unverified: its usage window can no longer say whose it is — confirm or re-bind it',
+    'A long-lived token looks like another account’s — confirm whose it is, or re-bind it', 'An account’s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still its own, or re-bind it',
+    'In its dialog: re-mint it while signed in as this account, re-bind it to the account it belongs to, or remove it.', 'In its dialog: confirm it is this account’s, or re-bind it to the account it belongs to.',
+    'In its dialog: confirm it is this account’s, or re-bind it.', 'In its dialog: confirm it is still this account’s, or re-bind it.',
+    'Its token’s readings: {window} ({n} in a row)', 'Its token’s readings: {window}', 'Open this account’s long-lived token', 'Long-lived token…', 'This account is no longer in your list — there is nothing left to check: close this notice.'];
   ok(zh['This conversation’s token road is unknown — it takes no part in the identity check'] === '这段对话的 token 来路未知，不参与身份判断' && /^身份未验证——/.test(zh['Identity unverified — the usage window can no longer say whose this token is: confirm or re-bind it']),
     'zh says fix r3\'s words: 这段对话的 token 来路未知，不参与身份判断 · 身份未验证——…确认或改绑');
   const ph = (s) => (String(s).match(/\{\w+\}/g) || []).sort().join();
@@ -742,10 +757,15 @@ const hookCensus = (src) => {
     const seen = [];
     for (let i = 0; i < K; i++) { try { seen.push(o.onReading(x, { window: win(OWN), at: Date.now(), viaToken: true, gen: a2.oatCheckOf(x)?.gen, eligible: ELIGIBLE }).verdict); } catch { seen.push('threw'); } }
     const row = a2.list().accounts.find((r) => r.id === x) || {};
-    return { said: t2._state.items.filter((i) => i.status === 'open').length === 1 && row.oatIdentity === 'mismatch', kept: a2.getOat(x) === t, firstMarked: seen[0] === 'mismatch', seen };
+    const it = t2._state.items.find((i) => i.status === 'open') || null;
+    return { said: t2._state.items.filter((i) => i.status === 'open').length === 1 && row.oatIdentity === 'mismatch', kept: a2.getOat(x) === t, firstMarked: seen[0] === 'mismatch', door: it && FA.doorOf(it) ? FA.doorOf(it).opens : null, row: it && it.action ? it.action.accountId === x : false, seen };
   };
   const base = await judge(OI);
   ok(base.said && base.kept && !base.firstMarked, 'the shipped orchestrator: the mismatch is said (For you + the row) and the token kept — only after K readings', base);
+  ok(base.door === 'oat' && base.row === true, 'B-8703 (r4450): the notice carries its door — THAT row\'s long-lived token dialog', base);
+  const DOORLESS = ORCH_SRC.replace(" action: { type: 'oat-token-check', accountId: String(id) },", '');
+  const mnd = DOORLESS !== ORCH_SRC ? await judge(compileAs('src/server/oat-identity.js', DOORLESS)) : null;
+  ok(!!mnd && mnd.said && mnd.door === null, 'RED control (B-8703): the filing\'s action cut (in a copy) — the notice is said with NO door: the person is told what to do and not taken there', mnd);
   const unsaid = ORCH_SRC.replace('      const todoId = fileNotice(key, v);\n', '      const todoId = null;\n').replace("A().setOatCheck(key, { state: 'mismatch',", "A().setOatCheck(key, { state: 'pending',");
   const dropped = ORCH_SRC.replace('      const todoId = fileNotice(key, v);\n', '      const todoId = fileNotice(key, v);\n      A().clearOat(key);\n');
   const oneShot = ORCH_SRC.replace("{ now: now(), k: K() }", '{ now: now(), k: 1 }');
@@ -1005,7 +1025,7 @@ console.log('§7 the REAL producer (usage-pool-engine recordRateLimitEvent) — 
     const c = am3.oatCheckOf(A), items = w.open();
     done();
     ok(JSON.stringify(v.slice(0, K).map((x) => x.v)) === JSON.stringify([...Array(K - 1).fill('suspect'), 'moved']) && seen.every((x) => x === 'pending') && c.ask?.kind === 'anchor' && c.ask.win?.sevenDay === W_A2
-      && items.length === 1 && items[0].id === c.ask.todoId && /keep agreeing on a weekly window that is not this row/.test(items[0].detail),
+      && items.length === 1 && items[0].id === c.ask.todoId && /keep agreeing on a weekly window that is not this account’s/.test(items[0].detail),
     `C1 (verify r2 F-C): the row's OWN account changes plan while the check is PENDING — ${K - 1} suspects, then reading #${K} (the ring re-anchored the guard's window first; the check runs after it) is MOVED: ONE anchor ask, never a mark, the pool keeps using it`, { v: v.map((x) => x.v), seen, ask: c.ask, n: items.length });
     const r = eng.oatAnswer(A, 'mine');
     ok(r.state === 'confirmed' && am3.oatAnchorOf(A)?.sevenDay === W_A2 && w.open().length === 0, '…the owner answers mine ⇒ the new window is the row\'s (owner-confirmed, newer than the login stamp), the ask resolved', am3.oatCheckOf(A));

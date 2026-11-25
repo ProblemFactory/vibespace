@@ -209,6 +209,10 @@ const ROWS = Object.freeze([
     checkRoute: '/api/queued-wakes/set-aside', checkSaid: { done: i18nKey('Set aside — the record of waiting messages is written again'), none: i18nKey('The file reads again — nothing to set aside'), failed: i18nKey('Could not set the file aside') } },
   // B-e40d's remainder: a REPLACED preset client — ONE item per preset key naming the Drive / Gmail mounts still on the old client;
   // its door opens the first mount's Re-authorize (the client's ROW_DOORS `storage`); the item follows who is left and resolves itself
+  // B-8703 (主开发 r4450): the long-lived token identity check's four items (src/server/oat-identity.js — another account's, unverified,
+  // looks like another's, its window moved) carry ONE door: that account's long-lived token dialog, the place every one of them is
+  // answered — so their words describe no road and name no account; the payload names the row (`accountId`), never words
+  { type: 'oat-token-check', identity: 'accountId', producer: 'src/server/oat-identity.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group', door: Object.freeze({ opens: 'oat', verb: i18nKey('Long-lived token…'), title: i18nKey('Open this account’s long-lived token') }) },
   { type: 'mount-reauth', identity: null, producer: 'src/server/mount-for-you.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group', door: Object.freeze({ opens: 'storage', verb: i18nKey('Re-authorize…'), title: i18nKey('Open the first mount\'s Re-authorize — sign in again under the preset\'s new client') }) },
   { type: 'browser-restart', identity: null, producer: 'src/server/browser-keeper.js', waits: false, answer: 'reply', card: 'inbox-window', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the base's two browser cards (int358: lanes browser-surfaces + browser-login, after this registry's own base — int360 seam (e)):
@@ -256,6 +260,13 @@ const ROW_OF = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.type, r])));
 // list is not kept by hand: test-needs-doors ⑩ reads every producer's stored words in this tree and in the last release (git) — a
 // release-stored sentence keeps its rows or is named here.
 const STORED_WORDS_LEGACY = Object.freeze({
+  // B-8703 (主开发 r4450): the long-lived token identity check's four items name no account and no road now (their door opens the place) — the
+  // titles a hub up to 2.369.419 filed stay drawable
+  'oat-identity-mark-other': Object.freeze({ left: '2.369.419', filedBy: 'src/server/oat-identity.js', key: "{account}'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents" }),
+  'oat-identity-mark': Object.freeze({ left: '2.369.419', filedBy: 'src/server/oat-identity.js', key: "{account}'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents" }),
+  'oat-identity-unverified': Object.freeze({ left: '2.369.419', filedBy: 'src/server/oat-identity.js', key: "{account}'s long-lived token is unverified: its usage window can no longer say whose it is — confirm the token is {account}'s, or re-bind it in Manage Agents" }),
+  'oat-identity-hint': Object.freeze({ left: '2.369.419', filedBy: 'src/server/oat-identity.js', key: "{account}'s long-lived token looks like {other}'s — confirm it is {account}'s, or re-bind it in Manage Agents" }),
+  'oat-identity-moved': Object.freeze({ left: '2.369.419', filedBy: 'src/server/oat-identity.js', key: "{account}'s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still {account}'s, or re-bind it in Manage Agents" }),
   // r3095 (lane bl-loop-b): the setting holds' «could not be read» notice names no path any more (its list by its plain name) — the line a hub up to 2.369.415 filed stays drawable.
   'setting-holds-unread-path': Object.freeze({ left: '2.369.416', filedBy: 'src/server/setting-holds.js', key: 'data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}' }),
   // B-f276 1b (主开发 r809): a channels file is never set aside at a start any more (held as damaged, its one door) — the two heads a hub up to 2.369.415 filed stay drawable.

@@ -83,7 +83,7 @@ const PRODUCERS = {
   'src/server/mount-for-you.js': { origin: 'server', scope: 'group', types: ['mount-reconnect', 'mount-reauth'] },   // B-e40d: + a replaced preset client's Re-authorize   // B-5ce7: a parked mount's item carries its Reconnect
   'src/server/hooks-late.js': { origin: 'agent', scope: 'group', types: [] },
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },
-  'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: [] },
+  'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: ['oat-token-check'] },   // B-8703 (主开发 r4450): its four items' door
   'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: ['cli-check-again'] }, // lane cli-self-measure: a FAIL / cannot-run / stopped check's item carries «Check again»
   'src/server/vault-job-door.js': { origin: 'vault', scope: 'conversation', types: ['vault-job-ask'] },   // B-a08e (lane vault-job-approval): a Background job's approval card, filed under its owner conversation
   'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request', 'vault-words-ask'] },   // + lane vault-entry-description: an agent's proposal of an entry's words

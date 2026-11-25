@@ -120,57 +120,47 @@ function create({ accounts, todos = () => null, windows = () => ({}), groups = (
       // fix r2 L1: at most ONE open item per account row (a mark resolves the ask) — the store's per-key cap of 20 (an
       // agent looping on add) would otherwise drop the 21st row's item while its roster line says it is asked
       let rows = 0; try { rows = (A().list().accounts || []).length; } catch { rows = 0; }
-      const item = t.add(INBOX_KEY, { origin: 'login', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Manage Agents', text, detail, i18n, openCap: 2 * rows });
+      // B-8703 (主开发 r4450): every item of this check carries ONE door — THAT account's long-lived token dialog (src/foryou-actions.js
+      // 'oat-token-check'); its words name no road and no account (the payload names the row, never words)
+      const item = t.add(INBOX_KEY, { origin: 'login', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Manage Agents', text, detail, i18n, action: { type: 'oat-token-check', accountId: String(id) }, openCap: 2 * rows });
       return item && item.id ? String(item.id) : null;
     } catch (e) { log('[oat-identity] could not file the For-you item:', e.message); return null; }
   }
+  /** B-8703 (主开发 r4450): THE FOUR ITEMS' WORDS — what happened and what to do there, said in the reader's language (i18n text +
+   *  detail lines; the readings under the fold); the item's door opens the place (that account's long-lived token dialog), so no
+   *  sentence describes a road, and none names an account, an address or an id (`detail` = the same words, for the record) */
+  const words = (title, lines, fold) => ({
+    text: title, detail: [...lines, ...fold.map((f) => f.text)].join('\n'),
+    i18n: { text: { key: title }, detail: lines.map((key) => ({ key })), fold: fold.map((f) => ({ key: f.key, params: f.params })) },
+  });
+  const readings = (fp, run) => (run
+    ? { key: i18nKey('Its token’s readings: {window} ({n} in a row)'), params: { window: String(fp || '—'), n: Number(run) || 0 }, text: `Its token’s readings: ${fp || '—'} (${Number(run) || 0} in a row)` }
+    : { key: i18nKey('Its token’s readings: {window}'), params: { window: String(fp || '—') }, text: `Its token’s readings: ${fp || '—'}` });
   function fileNotice(id, v) {
-    const name = nameOf(id);
-    const otherNames = [...new Set((v.others || []).map(nameOf))];
-    return fileItem(id, {
-      text: otherNames.length
-        ? `${name}'s long-lived token belongs to another account (its usage matches ${otherNames.join(', ')}) — re-mint it or re-bind it in Manage Agents`
-        : `${name}'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents`,
-      detail: `Account: ${name}\nWhat its token's readings said: ${v.fp || '(no window)'}${v.run ? ` (${v.run} consecutive readings)` : ''}\nThe row's identity: ${v.via === 'owner-answer' ? 'the owner said the token is not this account\'s' : (v.via || 'its anchor')}\n\n`
-        + 'The long-lived token saved on this row answered with ANOTHER account\'s usage window, so it bills that account, not this one. '
-        + 'It is kept (conversations already running on it continue), and the pool places nothing new where it would spend it. '
-        + 'Manage Agents → the row\'s ⋯ → Long-lived token: re-mint it while signed in as this account, re-bind it to the account it belongs to, or remove it.',
-      i18n: { text: otherNames.length
-        ? { key: i18nKey('{account}\'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents'), params: { account: name, other: otherNames.join(', ') } }
-        : { key: i18nKey('{account}\'s long-lived token belongs to another account — re-mint it or re-bind it in Manage Agents'), params: { account: name } } },
-    }, 'mark');
+    return fileItem(id, words(i18nKey('A long-lived token belongs to another account and bills that account — re-mint it or re-bind it'),
+      [i18nKey('The token saved on this account answered with another account’s usage window, so it bills that account. It is kept — conversations already running on it continue — and the pool places nothing new where it would spend it.'),
+        i18nKey('In its dialog: re-mint it while signed in as this account, re-bind it to the account it belongs to, or remove it.')],
+      [readings(v.fp, v.run)]), 'mark');
   }
-  function fileAsk(id, kind, { others = [], fp = null, pending = false, lost = false } = {}) {
-    const name = nameOf(id);
-    const otherNames = [...new Set(others.map(nameOf))];
+  function fileAsk(id, kind, { fp = null, pending = false, lost = false } = {}) {
     if (lost) {
-      return fileItem(id, {
-        text: `${name}'s long-lived token is unverified: its usage window can no longer say whose it is — confirm the token is ${name}'s, or re-bind it in Manage Agents`,
-        detail: `Account: ${name}\nWhat its token's reading said: ${fp || '(no window)'}\n\n`
-          + 'This row\'s usage window was last written by a step that could not tell this account\'s sign-in from its long-lived token (an identity repair, or a conversation whose start was never recorded), so nothing proves whose the token is. Nothing was marked and the pool keeps using it. '
-          + 'Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is this account\'s, or re-bind it to the account it belongs to.',
-        i18n: { text: { key: i18nKey('{account}\'s long-lived token is unverified: its usage window can no longer say whose it is — confirm the token is {account}\'s, or re-bind it in Manage Agents'), params: { account: name } } },
-      }, 'ask');
+      return fileItem(id, words(i18nKey('A long-lived token is unverified: its usage window can no longer say whose it is — confirm or re-bind it'),
+        [i18nKey('This account’s usage window was last written by a step that could not tell its sign-in from its long-lived token (an identity repair, or a conversation whose start was never recorded), so nothing proves whose the token is. Nothing was marked and the pool keeps using it.'),
+          i18nKey('In its dialog: confirm it is this account’s, or re-bind it to the account it belongs to.')],
+        [readings(fp)]), 'ask');
     }
     return kind === 'hint'
-      ? fileItem(id, {
-        text: `${name}'s long-lived token looks like ${otherNames.join(', ')}'s — confirm it is ${name}'s, or re-bind it in Manage Agents`,
-        detail: `Account: ${name}\nWhat its token's first reading said: ${fp || '(no window)'}\n\n`
-          + `This row has no usage window of its own to check its long-lived token against, and the token's usage window is the one ${otherNames.join(', ')} holds. Two accounts can share a weekly reset hour by chance, so nothing was marked and the pool keeps using it. `
-          + 'Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is this account\'s, or re-bind it to the account it belongs to.',
-        i18n: { text: { key: i18nKey('{account}\'s long-lived token looks like {other}\'s — confirm it is {account}\'s, or re-bind it in Manage Agents'), params: { account: name, other: otherNames.join(', ') } } },
-      }, 'ask')
-      : fileItem(id, {
-        text: `${name}'s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still ${name}'s, or re-bind it in Manage Agents`,
-        detail: pending
-          ? `Account: ${name}\nWhat its token's readings say: ${fp || '(no window)'}\n\n`
-            + 'The long-lived token\'s readings keep agreeing on a weekly window that is not this row\'s and that no other account holds. A renewal or a plan change of this account moves its window like that — and so would a token of an account outside this roster — so nothing was marked and the pool keeps using it. '
-            + 'Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is this account\'s, or re-bind it.'
-          : `Account: ${name}\nIts usage window now: ${fp || '(no window)'}\n\n`
-            + 'The window moved by the long-lived token\'s own readings, so the move cannot vouch for the token: the anchor the owner confirmed is kept and nothing was marked. '
-            + 'A renewal or a plan change moves the window too. Manage Agents → the row\'s ⋯ → Long-lived token: confirm it is still this account\'s, or re-bind it.',
-        i18n: { text: { key: i18nKey('{account}\'s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still {account}\'s, or re-bind it in Manage Agents'), params: { account: name } } },
-      }, 'ask');
+      ? fileItem(id, words(i18nKey('A long-lived token looks like another account’s — confirm whose it is, or re-bind it'),
+        [i18nKey('This account has no usage window of its own to check its long-lived token against, and the token’s usage window is the one another account holds. Two accounts can share a weekly reset hour by chance, so nothing was marked and the pool keeps using it.'),
+          i18nKey('In its dialog: confirm it is this account’s, or re-bind it to the account it belongs to.')],
+        [readings(fp)]), 'ask')
+      : fileItem(id, words(i18nKey('An account’s usage window moved away from the one its long-lived token was confirmed with — confirm the token is still its own, or re-bind it'),
+        pending
+          ? [i18nKey('The long-lived token’s readings keep agreeing on a weekly window that is not this account’s and that no other account holds. A renewal or a plan change of this account moves its window like that — and so would a token of an account outside your list — so nothing was marked and the pool keeps using it.'),
+            i18nKey('In its dialog: confirm it is this account’s, or re-bind it.')]
+          : [i18nKey('The window moved by the long-lived token’s own readings, so the move cannot vouch for the token: the anchor you confirmed is kept and nothing was marked. A renewal or a plan change moves the window too.'),
+            i18nKey('In its dialog: confirm it is still this account’s, or re-bind it.')],
+        [readings(fp)]), 'ask');
   }
   function resolveItem(id, todoId, why) {
     if (!todoId || todoId === OWED) return false;   // an owed item was never filed (the pass at the read files only what is still owed)

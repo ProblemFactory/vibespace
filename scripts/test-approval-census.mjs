@@ -570,6 +570,15 @@ const ROWS = [
     c: [pin('src/foryou-actions.js', /\{ type: 'mount-reconnect', identity: 'mountId', producer: 'src\/server\/mount-for-you\.js',/, 'THE registry row: one producer, one identity (the mount), one door (a check: Reconnect)')],
     d: [decl('no agent wrote words here to be read and approved: the item names a storage, a count and a provider label the record keeps')],
     gate: [['scripts/test-mount-liveness.mjs', 'the cure: Reconnect on a parked mount whose storage answers']] },
+  // B-8703 (主开发 r4450): the long-lived token identity check's four items — ONE item an account a question; its only door OPENS that
+  // account's long-lived token dialog; nothing is granted by the door
+  { id: 'oat-token-check', surface: 'the long-lived token identity check — "A long-lived token belongs to another account …" (unverified, looks like another\'s, its window moved): «Long-lived token…» in For you opens THAT account\'s long-lived token dialog',
+    doors: [['A', 'src/server/oat-identity.js', /^oat-token-check$/]],
+    a: [pin('src/server/oat-identity.js', /action: \{ type: 'oat-token-check', accountId: String\(id\) \}/, 'the item names its row by the row\'s id (the door\'s subject), never by words')],
+    b: [decl('its only door OPENS the account\'s own long-lived token dialog (app.openOatDialog → the row\'s _oatDialog, the account read from the page\'s list as it is NOW — a row gone is said, nothing opened); every act there is that dialog\'s own (re-mint, re-bind, remove, its answer), each checked by its own route; the door grants nothing')],
+    c: [pin('src/foryou-actions.js', /\{ type: 'oat-token-check', identity: 'accountId', producer: 'src\/server\/oat-identity\.js',/, 'THE registry row: one producer, one identity (the account row), one door (Long-lived token…)')],
+    d: [decl('no agent wrote words here to be read and approved: the item says what the hub\'s own check found, in its own sentences (no account named)')],
+    gate: [['scripts/test-oat-identity.mjs', 'its DOOR: «Long-lived token…», opening THAT account']] },
   // r3136 / r3200 (主开发: a way out of a hold that never ends): an account's usage reading file that CANNOT BE READ — ONE item an
   // account while it cannot; its only door (Set it aside) reads the file once more, then renames it beside itself; nothing is granted
   { id: 'usage-reading-unread', surface: 'an account\'s unreadable usage file — "VibeSpace could not read the usage file of {account}: automatic turns on it wait …" (Set it aside in For you; one item an account)',

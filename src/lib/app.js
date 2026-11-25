@@ -2619,7 +2619,10 @@ class App {
   openInbox(opts) { return openInboxWindow(this, opts || {}); }
   /** THE Outbox window (P3, design §9.2) — a singleton kind. */
   openChannelOutbox(opts) { return openChannelOutboxFn(this, opts || {}); }
-  openMountReauth(id) { return this.sidebar?.openMountReauth?.(id); }   // B-e40d: For you's door — a mount on a replaced preset client signs in again
+  openMountReauth(id) { return this.sidebar?.openMountReauth?.(id); }
+  /** B-8703 (主开发 r4450): For you's door of the long-lived token identity check — THAT account's long-lived token dialog (the row's
+   *  own «Long-lived token…» in Manage agents opens the same); a row no longer in the list ⇒ said in the reader's language, never a dead press */
+  openOatDialog(id) { const a = ((this._accounts && this._accounts.accounts) || []).find((x) => x && x.id === id); if (!a || typeof this._oatDialog !== 'function') { showToast(t('This account is no longer in your list — there is nothing left to check: close this notice.')); return null; } return this._oatDialog(id, a); }   // B-e40d: For you's door — a mount on a replaced preset client signs in again
   /** The Channels PANEL (the rail). Returns false where there is no rail —
    *  the caller (the ⚙ row) is gated on the same fact, so a dead entry point
    *  is never offered rather than offered and refused. */
