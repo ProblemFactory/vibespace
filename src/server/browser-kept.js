@@ -156,21 +156,30 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // is written by the hub's exit (the writer's exitFlush) — the moving tabs too, which the release's own 30 s timer lost at a stop.
   // HELD (r3006 / r3585): save() writes nothing while the list is unread or rebuilding, and a write owed when a hold BEGINS (the rebuild
   // that did not finish holds again) is refused by its producer (EHELD: kept owed; the lift's list then writes) — never written over.
+  // LINE 961's ROUND (主开发 r4278, the must): THE WRITER KEEPS ONE DEBOUNCE A FILE, AND THE LAST CALL SETS IT (counted from the first change
+  // not yet written) — so a tabs save handed while an ACT's change was still owed pushed that act's write from the floor to 30 s (a kill
+  // then left a list without the new row, or still naming a folder a remover had deleted). AN ACT's WRITE, ONCE OWED, IS NEVER DUE LATER
+  // BECAUSE OF A TABS SAVE: while an act's change is owed and NOT YET TAKEN by the writer, a tabs save keeps the floor (the tabs ride the
+  // act's write). The producer marks the moment the writer TAKES the bytes (a tabs change after it waits its own 30 s, counted from it); a
+  // write of an act's bytes that FAILS leaves the act owed at the floor again. The writer itself is unchanged (its one debounce a file)
+  let actOwed = false, actTaken = false;
   function owe(debounceMs) {   // the list's one hand-off to the writer (store-timing's row: src/timed-sync.js browser-kept.write)
     return W().dirty(file, { name: 'browser-kept.write', mode: FILE_MODE, makeDir: true, debounceMs,
-      produce: () => { if (isHeld()) throw namedError('EHELD', 'the kept browsers\' list is held (unread or rebuilding) — nothing is written over it until it reads'); return JSON.stringify(store, null, 2); } });
+      onWritten: (ok) => { const wasAct = actTaken; actTaken = false; if (!ok && wasAct) { actOwed = true; try { owe(SAVE_GAP_MS); } catch { } } },
+      produce: () => { if (isHeld()) throw namedError('EHELD', 'the kept browsers\' list is held (unread or rebuilding) — nothing is written over it until it reads'); actTaken = actOwed; actOwed = false; return JSON.stringify(store, null, 2); } });
   }
   function save() {
     if (!store) return;
     if (isHeld()) { hold.writable('a change of the kept browsers'); return; }   // r3006 / r3585: an unread (or not yet rebuilt) list is never written over
-    try { owe(SAVE_GAP_MS); }
+    try { actOwed = true; owe(SAVE_GAP_MS); }
     catch (e) { log.warn?.(`[browser-kept] the store could not be handed to its writer (${e && e.message}) — kept in memory, handed again at the next change`); }
   }
   /** A tab list moving while the browser runs is persisted at most every PERSIST_TABS_MS (a crash keeps the last): the writer's own
-   *  debounce, counted from the first change not yet written (never re-armed by a later one) — owed, so a stop writes it */
+   *  debounce, counted from the first change not yet written (never re-armed by a later one) — owed, so a stop writes it. While an act's
+   *  change is owed and not yet taken, the tabs ride its write at the floor (line 961's round, above) */
   function saveSoon() {
     if (!store || isHeld()) return;
-    try { owe(PERSIST_TABS_MS); } catch (e) { log.warn?.(`[browser-kept] the tab list could not be handed to its writer (${e && e.message}) — handed again at the next change`); }
+    try { owe(actOwed ? SAVE_GAP_MS : PERSIST_TABS_MS); } catch (e) { log.warn?.(`[browser-kept] the tab list could not be handed to its writer (${e && e.message}) — handed again at the next change`); }
   }
   /** the list as memory holds it is on disk — true when written; false when the write failed or passed its bound (it stays owed) */
   const whenWritten = () => { try { return Promise.resolve(W().durable(file)).then((ok) => ok !== false, () => false); } catch { return Promise.resolve(false); } };

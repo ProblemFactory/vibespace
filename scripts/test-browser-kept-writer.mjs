@@ -13,6 +13,12 @@
 //     the exit, the tabs lost (the store's shutdown, the only flush of that timer, has no caller in the hub).
 //   ④ the person's Forget answers once the list is ON DISK (as the release's synchronous write was). RED: an answer before the landing.
 //   ⑤ a second store over the file in ONE process, built while a write is owed, reads the owed bytes. RED: the owed bytes unread.
+//   LINE 961's ROUND (主开发 r4278, the must — the writer keeps ONE debounce a file and the last call sets it): an act's write, once owed,
+//   is never due later because of a tabs save.
+//   ⑥ an act (a new row), then a tabs change inside the floor: the list is on disk with the act's row within the bound (the floor is
+//     500 ms; the bound 2 s, said). CONTROL (the cure's line blinded: the tabs save always 30 s): the row is not on disk at the bound.
+//   ⑦ the reverse: a remover's dropped row (an adopt), then a tabs change inside the floor: the file no longer names the folder within
+//     the bound. CONTROL (blinded): the file still names it at the bound.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -164,6 +170,34 @@ console.log('⑤ a second store built while a write is OWED reads the owed bytes
   ok(E.owed && E.has, '⑤ THE OWED BYTES: a second store built before the first one\'s write landed knows the browser it noted', E);
   const EX = scene(M.load(KS_REL, NO_OWED(KSRC), 'no-owed'));
   ok(EX.owed && !EX.has, '⑤ RED control (the owed bytes unread — the older file read): the browser just noted is not known (red)', EX);
+}
+
+console.log('⑥ ⑦ line 961\'s round (r4278): an act\'s write, once owed, is never due later because of a tabs save (one debounce a file)');
+{
+  const BOUND_MS = 2000;   // the floor is 500 ms (SAVE_GAP_MS); the tabs' debounce 30 s — the bound tells the two apart
+  const BLIND = (src) => anchored(src, '    try { owe(actOwed ? SAVE_GAP_MS : PERSIST_TABS_MS); }', '    try { owe(PERSIST_TABS_MS); }', 'the-cure-blinded-a-tabs-save-always-30s');
+  const K4 = 'bk-0000d014';
+  const scene = async (Mod, { reverse = false } = {}) => {
+    const w = world(), W = SW.create({ log: quiet });
+    try {
+      const S = mk(Mod, w.dir, W);
+      S.noteStart(K3, { hasDir: false, label: 'running' });   // a running kept browser whose tabs move
+      if (reverse) S.noteStart(K4, { hasDir: false, label: 'to adopt' });
+      await S.whenWritten();   // both rows on disk: the act below is the only change owed
+      const t0 = performance.now();
+      if (reverse) S.adopted(K4); else S.noteStart(K4, { hasDir: false, label: 'the act' });   // THE ACT: owed at the floor
+      S.noteTabs(K3, [{ targetId: 't1', url: 'https://tabs.example/moved', title: 'Moved', active: true }]);   // …a tabs save inside the floor
+      const landed = await until(() => { const r = rows(w.file); return !!r && (reverse ? !r.includes(K4) : r.includes(K4)); }, BOUND_MS);
+      const ms = Math.round(performance.now() - t0);
+      stopHold(S);
+      return { landed, ms, rows: rows(w.file) };
+    } finally { W.stop(); }
+  };
+  const [G, GX, H, HX] = await Promise.all([scene(KS), scene(M.load(KS_REL, BLIND(KSRC), 'blind-6')), scene(KS, { reverse: true }), scene(M.load(KS_REL, BLIND(KSRC), 'blind-7'), { reverse: true })]);
+  ok(G.landed, `⑥ AN ACT THEN A TABS SAVE INSIDE THE FLOOR: the list was on disk with the act's row within the ${BOUND_MS / 1000} s bound (in ${G.ms} ms) — the tabs rode the act's write`, G);
+  ok(!GX.landed, `⑥ CONTROL (the cure's line blinded: a tabs save always 30 s): the act's row was NOT on disk at the ${BOUND_MS / 1000} s bound — the tabs save pushed it to 30 s (red)`, GX);
+  ok(H.landed, `⑦ THE REVERSE — A REMOVER's DROPPED ROW (an adopt), THEN A TABS SAVE: the file no longer named the folder within the ${BOUND_MS / 1000} s bound (in ${H.ms} ms)`, H);
+  ok(!HX.landed, `⑦ CONTROL (blinded): the file still named the dropped folder at the ${BOUND_MS / 1000} s bound (red)`, HX);
 }
 
 report();
