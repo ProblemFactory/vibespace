@@ -15,6 +15,11 @@
 //   · take(view)   — the view was un-hidden before its slot: remove it and let
 //                    the caller attach NOW (no displayed window waits);
 //   · cancel(view) — dispose: remove silently;
+//   · join(view)   — B-a26e: a held view's SLOW re-ask (the attach ladder's slow hold, once a minute) takes the
+//                    NEXT slot after the ones already armed and cancels none of them (a new pass would cancel
+//                    every armed slot: the held windows' asks, coming at different moments, would starve each
+//                    other); it stops only the clock's re-ask — never a person's press, never a reconnect's own
+//                    first attach, never a window shown again (take);
 //   · reset()      — the socket dropped again: every pending slot is superseded
 //                    (the next `connected` pass re-enqueues whoever is still
 //                    hidden, exactly like `_reattachGen` supersedes a ladder).
@@ -71,6 +76,17 @@ export function createReconnectQueue({
     if (!pending.includes(view)) pending.push(view);
     if (!flushArmed) { flushArmed = true; defer(flush); }
   }
+  function join(view) {
+    if (!view || armed.has(view) || pending.includes(view)) return;   // already waiting: one slot a view
+    const index = armed.size, delayMs = slot({ suspended: true, index }), myGen = gen;
+    const timer = setTimer(() => {
+      if (myGen !== gen || !armed.has(view)) return;
+      armed.delete(view);
+      try { view._runQueuedReattach?.('slow'); } catch { }
+    }, delayMs);
+    armed.set(view, { timer, index, delayMs });
+    try { view._trace?.('reconnect:joined', { slot: index, delay: delayMs }); } catch { }
+  }
   /** Remove `view` if it is waiting; true ⇔ it was (the caller attaches now). */
   function take(view) {
     const i = pending.indexOf(view);
@@ -84,5 +100,5 @@ export function createReconnectQueue({
   function reset() { gen++; pending = []; cancelArmed(); }
   function has(view) { return pending.includes(view) || armed.has(view); }
   function snapshot() { return [...armed.values()].map(({ index, delayMs }) => ({ index, delayMs })).concat(pending.map(() => ({ index: null, delayMs: null }))); }
-  return { enqueue, take, cancel, reset, has, snapshot, get size() { return pending.length + armed.size; } };
+  return { enqueue, join, take, cancel, reset, has, snapshot, get size() { return pending.length + armed.size; } };
 }
