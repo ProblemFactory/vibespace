@@ -138,6 +138,15 @@ function wrapperEnv(jobId, base = process.env) {
 // A wrapper that does not speak it never starts the job and says so (exit.json reason update_window) — _finalizeRun.
 // 3 (lane vault-job-road): a job's vault values ride the wrapper's fd 3 as ONE frame (src/vault-job.js) — the spec names them
 const WRAPPER_PROTO = 3;
+// B-91aa's remainder (主开发 r4525 / r4591) — A JOB'S START NO LONGER FORKS THE HUB'S MAIN PROCESS: the bounds, NAMED (law 1). The
+// starter's answer (its pid at the spawn) within JOB_START_ANSWER_MS (+ the starter's own guards: under the CLI's 30 s write budget,
+// so a person's press is answered); a run whose wrapper wrote no pid record within START_LOOK_MS of its start is a FAILED START (the
+// release left it «up» with no process until the next restart); a wrapper that shows up after its start was failed is looked for
+// LATE_LOOK_MS — and stopped by its own stamp
+const JOB_START_ANSWER_MS = 15000;
+const boundWords = (ms) => (ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${ms} ms`);   // a bound in a person's words (a suite's placed one is under a second)
+const START_LOOK_MS = 60000;
+const LATE_LOOK_MS = 10 * 60000;
 const JOB_CPU_WEIGHT = 33;   // B-f494: a lowered job's scope CPUWeight — nice +5's share of nice 0's (335 / 1024 × systemd's default 100)
 // how long after the wrapper changed on disk a mismatch is still the update's window (its restart is on the way: 45 s
 // measured on the owner's hub; an install + build bounded at minutes) — past it, the install itself is broken: a fault
@@ -3395,6 +3404,7 @@ class JobManager {
       // so the job keeps the VALUE — and its scope takes spec.cpuWeight (B-f494). The wrapper's own words stay ONE array (suites cut
       // it as a whole: test-vault-job, test-jobs-engine).
       const argv = [...priorityArgv(pri && pri.priority), process.execPath, ...[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]];
+      if (!vj) { this._askStart(job, argv, specPath, trigger); return; }   // B-91aa's remainder: THE STARTER starts it (below) — a VAULT job alone keeps this road (its values ride fd 3: r4591 (A))
       child = spawn(argv[0], argv.slice(1), { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
       // an exec that fails late (the nice program gone since the one look) is an 'error' event: never the hub's crash —
       // the run's wrapper never appears, and the engine's supervision judges a start that wrote no pid
@@ -3402,10 +3412,92 @@ class JobManager {
     } catch (e) { try { fs.unlinkSync(specPath); } catch { } if (frame) frame.fill(0); throw e; } // a failed write or spawn leaves no spec behind (nor a frame)
     child.unref();
     if (vj) this._handValues(child, job, vj, frame, job.runs[job.runs.length - 1]);
+    try { this._starter().noteDirect(); } catch { }   // B-91aa's remainder (r4591 (A)): a vault job's start on the hub's own road — COUNTED (the hourly line's vault-direct-starts)
+    job.runs[job.runs.length - 1].ask = 'direct';   // …and its run is THIS engine's start: the bounded look judges it too
     job.state = 'up';
     job.proc = { pid: child.pid };
     this._touch(job);
     if (job.kind === 'service' && job.publish && (job.ports || []).length) this._ensurePublish(job);
+  }
+  /** B-91aa's remainder: THE STARTER the jobs engine asks (the hub's ONE — src/server/child-starter.js; a suite hands its own through
+   *  its seam setChildStarter) */
+  _starter() { return require('./server/child-starter').childStarter(); }
+  /** B-91aa's remainder (主开发 r4525 / r4591): A JOB'S START NO LONGER FORKS THE HUB'S MAIN PROCESS. Its wrapper is a DETACHED start of
+   *  THE STARTER (its own session; no log — the wrapper writes its own; its env the wrapper's builder, the job's mark admitted by
+   *  name). The job stays 'starting' until the starter answers. THE KILL LAW: the record a stop signals by stays the wrapper's OWN
+   *  stamp (pid.json: pid + its birth + the boot) — the answer's pid and birth are kept on the run as a CROSS-CHECK only (a stamp that
+   *  names another is not ours: never signalled). A start error, or no answer within its bound, is a FAILED START said — never a
+   *  guess; a wrapper that shows up after it is stopped by its own stamp (_lateStarts). A person's press waits for this answer
+   *  (startAnswer). */
+  _askStart(job, argv, specPath, trigger) {
+    const run = job.runs[job.runs.length - 1];
+    run.ask = 'asked';
+    let p;
+    try { p = this._starter().run(argv[0], argv.slice(1), { detach: { job: true, quiet: true }, wholeEnv: true, env: wrapperEnv(job.id), timeoutMs: this.d.startAnswerMs || JOB_START_ANSWER_MS }); }
+    catch (e) { p = Promise.resolve({ started: false, error: (e && e.message) || String(e) }); }
+    job._startAnswerAt = now();
+    job._startAnswer = Promise.resolve(p).then((r) => r, (e) => ({ started: false, error: (e && e.message) || String(e) })).then((r) => {
+      try { return this._startAnswered(job, run, specPath, trigger, r); } catch (e) { this.d.log(`[jobs] ${job.id}: its start's answer could not be judged: ${(e && e.message) || e}`); return { error: `spawn failed: ${(e && e.message) || e}` }; }
+    });
+  }
+  /** the starter's answer for ONE run: its pid ⇒ 'up' (the cross-check kept); none — a start error, or no answer — ⇒ the run's OWN
+   *  stamp decides first (a wrapper that started and wrote it is a start, whatever the pipe lost), else a FAILED START, said */
+  _startAnswered(job, run, specPath, trigger, r) {
+    const live = this.jobs.get(job.id) === job && job.runs && job.runs[job.runs.length - 1] === run;
+    if (r && r.started && Number(r.pid) > 1) {
+      run.ask = 'started'; run.startPid = Number(r.pid); if (r.starttime != null && Number.isFinite(Number(r.starttime))) run.startStarttime = Number(r.starttime);
+      if (!live) { run.startFailed = 'its job was removed while its start was answered'; this._lateLook(job, run); this._dirty = true; return { ok: true }; }   // a wrapper no record holds: stopped by its stamp
+      job.proc = { pid: run.startPid }; if (job.state === 'starting') { job.state = 'up'; if (job.kind === 'service' && job.publish && (job.ports || []).length) this._ensurePublish(job); } this._touch(job);
+      return { ok: true };
+    }
+    const st = this._ctlJson(job, run, 'pid.json');
+    if (st && this._verifyAlive(st)) {   // the pipe lost its answer, the wrapper did not: the start happened — its own stamp says so
+      run.ask = 'stamped'; run._stamped = true;
+      if (live) { job.proc = { pid: Number(st.pid) }; if (job.state === 'starting') job.state = 'up'; this._touch(job); }
+      return { ok: true };
+    }
+    const why = r && r.unknown ? `the starter gave no answer within ${boundWords(this.d.startAnswerMs || JOB_START_ANSWER_MS)} — its wrapper was not started` : `its wrapper could not be started (${(r && r.error) || 'no reason given'})`;
+    fs.promises.unlink(specPath).catch(() => { });   // a wrapper that starts after this finds no spec: it never runs the job (off the loop — no store's write; a late one that read it first is stopped by its stamp)
+    run.ask = r && r.unknown ? 'unknown' : 'failed';
+    this._lateLook(job, run);
+    if (live && ['starting', 'up'].includes(job.state)) this._failedStart(job, run, trigger, why);
+    return { error: `spawn failed: ${why}` };
+  }
+  /** A FAILED START — the starter's refusal or silence, or a wrapper that wrote no pid record within START_LOOK_MS (the bounded look):
+   *  the run ENDED (no process of it is held), the record failed, said where the person looks (and to its owner when nobody pressed) */
+  _failedStart(job, run, trigger, why) {
+    run.endedAt = now(); run.code = null; run.cause = 'start_failed'; run.startFailed = why;
+    job.state = 'failed'; job.proc = null;
+    const what = `not started (${trigger}): ${why}`;
+    this._touch(job, { what, alarm: true });
+    if (trigger !== 'manual') this._notifyOwner(job, { what });
+    this.d.log(`[jobs] ${job.id}: ${what}`);
+    this._save();
+  }
+  /** a person's press waits for ITS start's answer (r4591 (2)): the promise of the start asked at or after `since` (null: none asked —
+   *  a deferred start, a wait, a vault job's direct one) — answered in today's failed-start words, never a silent «starting» */
+  startAnswer(job, since = 0) { return job && job._startAnswer && (job._startAnswerAt || 0) >= since ? job._startAnswer : Promise.resolve(null); }
+  /** a run whose start FAILED is looked at for LATE_LOOK_MS: a wrapper of it that shows up (its own stamp in its own run folder, proven
+   *  by its birth) is STOPPED by that stamp, said once — the kill law: only what the job started and holds */
+  _lateLook(job, run) {
+    if (!run || !run.startedAt) return;
+    (this._lateStarts || (this._lateStarts = new Map())).set(this._ctlDir(job, run.startedAt), { job, run, until: now() + (this.d.lateLookMs || LATE_LOOK_MS) });
+  }
+  /** the bounded look's fact: the run's pid record is ABSENT (ENOENT) — a read that fails any other way is no «never wrote» */
+  _noPidFile(job, run) { try { fs.statSync(path.join(this._ctlDir(job, run.startedAt), 'pid.json')); return false; } catch (e) { return !!(e && e.code === 'ENOENT'); } }
+  _lateSweep() {
+    if (!this._lateStarts || !this._lateStarts.size) return;
+    for (const [ctl, l] of [...this._lateStarts]) {
+      const st = this._ctlJson(l.job, l.run, 'pid.json');
+      if (st && this._verifyAlive(st)) {
+        const hubInGroup = PI.pgidOf(process.pid) === Number(st.pid);
+        const r = PI.signalIdentity(st, 'SIGTERM', { group: !hubInGroup, what: `job ${l.job.id}'s late wrapper` });
+        const what = `its wrapper started after its start was failed (${l.run.startFailed || 'its start was not confirmed'}) — stopped by its own stamp${r && r.ok ? '' : ` (the signal was refused: ${(r && r.why) || '?'})`}`;
+        this.d.log(`[jobs] ${l.job.id}: ${what}`);
+        try { this._touch(l.job, { what, alarm: true }); } catch { }
+        this._lateStarts.delete(ctl);
+      } else if (now() > l.until) this._lateStarts.delete(ctl);
+    }
   }
   /** service⇄ports sync (2.343.0): a published service gets a forward + (when
    *  the frp plugin is configured) a public URL; teardown on stop/park. All
@@ -4393,11 +4485,21 @@ class JobManager {
     if (now() - this._lastArchiveSweep >= ARCHIVE_SWEEP_MS) {
       try { this.archiveSweep({ why: 'tick' }); } catch (e) { this.d.log('[jobs] archive sweep failed:', e.message); }
     }
+    try { this._lateSweep(); } catch (e) { this.d.log('[jobs] the late-start look failed:', e.message); }   // B-91aa's remainder
     for (const job of this.jobs.values()) {
       if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
       const run = job.runs && job.runs[job.runs.length - 1];
       const stamp = this._readStamp(job);
       if (stamp && job.state === 'starting') { job.state = 'up'; this._touch(job); }
+      if (stamp && run) run._stamped = true;   // B-91aa's remainder: its wrapper's stamp seen — the bounded look never judges this run again (a later unreadable read is no «never wrote»)
+      // B-91aa's remainder — THE BOUNDED LOOK (r4591 (3)): a run whose wrapper wrote NO pid record within START_LOOK_MS of its start (an
+      // exec that failed late, a wrapper that died before its first act) is a FAILED START, said — the release left it «up» with no
+      // process until the next restart. A start still waiting for the starter's answer is that answer's (its own bound)
+      if (!stamp && run && !run.endedAt && !run._stamped && run.ask && run.ask !== 'asked' && Number(run.startedAt) > 0 && now() - Number(run.startedAt) > (this.d.startLookMs || START_LOOK_MS) && this._noPidFile(job, run) && !this._hubIsMain(job, run)) {
+        this._failedStart(job, run, run.trigger || 'its start', `its wrapper wrote no pid record within ${boundWords(this.d.startLookMs || START_LOOK_MS)} of its start — no process of it is held`);
+        this._lateLook(job, run);
+        continue;
+      }
       if (stamp && run && !run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) { this._adoptBound(run, b); this._touch(job); } } // lane jobs-memory-bound
       // a stop that raced the wrapper's first act (no pid stamp yet ⇒ nothing
       // to kill) is honored HERE once the stamp exists — without this, a stop

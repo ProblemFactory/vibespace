@@ -407,7 +407,8 @@ const CLASS = {
   // B-2c5c: _hubMainDown#1 = a hub-main service not restarted by itself (its end, or the next hub's boot: said, never a failure);
   // _sweepPass#1 = a hub-main run's wrapper gone while its main (this hub) runs — not ended (said once)
   '_hubMainDown#1': 'event',
-  '_hubMainTaskEnd#1': 'event',   // r1610: a hub-main TASK met at the next boot — its own words, never «the machine restarted»
+  '_hubMainTaskEnd#1': 'event',
+  '_failedStart#1': 'alarm', '_lateSweep#1': 'alarm',   // B-91aa's remainder (r4591): a start the starter could not do, or a wrapper that wrote no pid record — failed, said; a late wrapper stopped by its stamp   // r1610: a hub-main TASK met at the next boot — its own words, never «the machine restarted»
   '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
   '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
   '_applyWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal (the one door's apply, lane lg-store-writes)
@@ -477,6 +478,8 @@ const DRIVERS = {
   '_waitFor#1': async () => { const j = task('drv-waitfor'); jm._waitFor(j, 'vault', null); return j; },
   '_adoptAndReplay#1': async () => { const j = svc('drv-adopt'); j.state = 'up'; run0(j); const un = stub(jm, { _readStamp: () => ({ pid: 4244 }), _verifyAlive: () => false, _readExit: () => null, _reapScope: async () => true, _bootJudge: () => null }); const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); try { jm._adoptAndReplay(); } catch { } jm.jobs.clear(); for (const [k, v] of keep) jm.jobs.set(k, v); un(); return j; },
   '_bootNoExit#1': async () => { const j = svc('drv-boot-oom-svc'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 1, park: false }) }); jm._bootNoExit(j, r, { cause: 'oom', at: Date.now(), jobAnonMb: 900, anonMb: 1000, limitMb: 1024 }); un(); return j; },
+  '_failedStart#1': async () => { const j = task('drv-failed-start'), r = run0(j); jm._failedStart(j, r, 'manual', 'its wrapper could not be started (ENOENT)'); return j; },   // B-91aa's remainder
+  '_lateSweep#1': async () => { const j = task('drv-late-start'), r = run0(j, { startFailed: 'the starter gave no answer' }); const un = stub(jm, { _ctlJson: () => ({ pid: 4246, starttime: 1, bootId: 'b' }), _verifyAlive: () => true }); jm._lateLook(j, r); jm._lateSweep(); un(); return j; },   // its planted stamp's birth is no live process's: nothing is signalled
   '_bootNoExit#2': async () => { const j = task('drv-boot-oom-task'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 1, park: false }) }); jm._bootNoExit(j, r, { cause: 'oom', at: Date.now(), jobAnonMb: 900, anonMb: 1000, limitMb: 1024 }); un(); return j; },
   '_bootNoExit#3': async () => { const j = task('drv-boot-env'), r = run0(j); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },
   '_parkForMemory#1': async () => { const j = svc('drv-park-memory'), r = run0(j, { endedAt: Date.now(), cause: 'oom-bound', memoryMb: 512 }); jm._parkForMemory(j, r); return j; },

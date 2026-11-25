@@ -11,7 +11,10 @@
  *     census-asks=<n> census-paid=<s> hub-up=<h> hub-heap=<MB>/<MB> hub-rss=<MB> cli=<n>/<MB> wrapper=<n>/<MB> browser=<n>/<MB>
  *     agentd=<n>/<MB> other=<n>/<MB> procs-by=<service|container|tree> conversations=<n> turn-running=<n> turn-waiting=<n>
  *     idle-under-1h=<n> idle-1-2h=<n> idle-2-4h=<n> idle-over-4h=<n> turn-unknown=<n> ages-read=<n>/<n> browsers-ready=<n> browsers-idle-1h=<n>
- *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s> program-starts=<starter|direct-since-<minute>Z|?>
+ *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s> vault-direct-starts=<n>
+ *     program-starts=<starter|direct-since-<minute>Z|?>
+ * vault-direct-starts = the hour's job starts the jobs engine made ITSELF by design (B-91aa's remainder, 主开发 r4591 (A)): a VAULT job's
+ * wrapper (its values ride the hub's own pipe on fd 3), counted by the starter's `directJobs`; every other job starts through the starter
  * EACH FIELD COUNTS WHAT ITS NAME SAYS: held / holds / longest / top = the hour's holds of a second or more AFTER the boot (an hour
  * no watchdog watched prints «?» — never a clean hour); boot-held / boot-holds = the boot's own, apart; lost-holds = holds the
  * watchdog's ring dropped before the hour's book read them; no-ours-holds / no-ours-held = the hour's holds whose
@@ -147,7 +150,7 @@ function line(rep = {}) {
     `page-sockets=${int(z.pageSockets)}`, `device-links=${int(z.deviceLinks)}`,
     `ws-in=${int(z.wsIn)}`, `ws-out=${int(z.wsOut)}`, `parsed=${Number.isFinite(z.parsedChars) ? `${(z.parsedChars / 1e6).toFixed(1)}M` : '?'}`,
     `creates=${int(z.creates)}`, `resumes=${int(z.resumes)}`, `writes=${int(z.writes)}`, `write-max=${s1(z.writeMaxMs)}`,
-    `program-starts=${startsOf(rep.starter)}`].join(' ');   // B-91aa: the timer sites' programs — «starter», or the old road in force since when
+    `vault-direct-starts=${int(rep.vaultDirect)}`, `program-starts=${startsOf(rep.starter)}`].join(' ');   // B-91aa: the timer sites' programs — «starter», or the old road in force since when
 }
 
 const N = '(\\d+|\\?)', S = '(\\d+\\.\\ds|\\?)';
@@ -158,7 +161,7 @@ const LINE_RE = new RegExp('^\\[loop-(hour|exit)\\] hour=(\\d{4}-\\d\\d-\\d\\dT\
   + ' hub-heap=(\\d+MB|\\?)\\/(\\d+MB|\\?) hub-rss=(\\d+MB|\\?)' + KIDS.map((n) => ` ${n}=${N}\\/(\\d+MB|\\?)`).join('') + ' procs-by=(service|container|tree|\\?)'
   + ` conversations=${N}` + AGES.map((a) => ` ${a}=${N}`).join('') + ` ages-read=${N}\\/${N} browsers-ready=${N} browsers-idle-1h=${N}`
   + ` page-sockets=${N} device-links=${N} ws-in=${N} ws-out=${N} parsed=(\\d+\\.\\dM|\\?) creates=${N} resumes=${N} writes=${N} write-max=${S}`
-  + ' program-starts=(starter|direct-since-\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\dZ|\\?)$');
+  + ` vault-direct-starts=${N}` + ' program-starts=(starter|direct-since-\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\dZ|\\?)$');
 /** the causes a line may name: a code location of the hub's own, a verdict's fixed words, the three markers */
 function causesOk(text) {
   const m = /top="([^"]*)"/.exec(String(text || ''));

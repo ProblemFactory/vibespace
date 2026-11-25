@@ -384,9 +384,11 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
     const b = req.body || {};
     const spec = { ...b, owner: { conversation: null, sessionId: null, sessionCreatedAt: 0, createdBy: 'user', groupsSnapshot: [] } };
+    const pressedAt = Date.now();   // B-91aa's remainder (r4591 (2)): the create's start is answered by the STARTER's answer — a failed start in today's words
     const r = jm.create(spec, USER);
     if (r.error) return res.status(400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.budget ? { budget: r.budget } : {}) });   // B-b14a: a create past the memory budget is named in the reader's language
-    jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, job: r.job, renamed: r.renamed, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the answer waits for the store, never the loop
+    const reply = () => jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, job: r.job, renamed: r.renamed, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the answer waits for the store, never the loop
+    jm.startAnswer(jm.jobs.get(r.job.id), pressedAt).then((sa) => (sa && sa.error ? res.status(400).json({ error: sa.error }) : reply()));
   });
   app.get('/api/jobs/:id', (req, res) => {
     const job = jm.jobs.get(req.params.id);
@@ -432,6 +434,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     }
     try {
       let r;
+      const pressedAt = Date.now();   // B-91aa's remainder (r4591 (2)): a start press is answered by ITS start's answer
       if (act === 'stop') r = jm.stop(job, { force: !!req.body?.force });
       else if (act === 'start') r = jm.start(job, { caller: USER });   // B-b14a: the refusal is worded for its caller (the person views every job)
       else if (act === 'rm') r = jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
@@ -460,7 +463,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       }
       else return res.status(400).json({ error: `unknown action "${act}"` });
       if (r.error) return res.status(r.code === 'stale-panel' ? 409 : 400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.stopped ? { stopped: true } : {}), ...(r.budget ? { budget: r.budget } : {}), ...(Number.isInteger(r.version) ? { version: r.version } : {}) }); // r6 D-F5: a refused answer is named (stale-panel / version-required)
-      jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID
+      const reply = () => jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID
+      if (act === 'start') return void jm.startAnswer(job, pressedAt).then((sa) => (sa && sa.error ? res.status(400).json({ error: sa.error }) : reply()));   // a failed start in today's words (never a silent «starting»)
+      reply();
     } catch (e) { res.status(e && e.code === 'EVSNOTONDISK' ? 503 : 400).json({ error: e.message, ...(e && e.code === 'EVSNOTONDISK' ? { code: 'not-on-disk' } : {}) }); }   // a person's start refused because its run could not be saved first: worded on the page by its code (the moved2 cure 2)
   });
   // B-e3fe follow-up (主开发 04:02Z: THE HOLD IS NOT SILENT): an unreadable data/msg-queued.json is said in For you, with the person's

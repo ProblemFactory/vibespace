@@ -1443,7 +1443,8 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     J.init();
     const job = J.jobs.get('jb-0248a402'), runs0 = (job.runs || []).length;
     let threw = null; try { J._spawn(job, 'manual'); } catch (e) { threw = e.message; }
-    return { J, threw, state: job.state, proc: job.proc || null, runs: (job.runs || []).length - runs0, said: said.filter((l) => /the run's intent/.test(l)), ack: job.ack };
+    const last = (job.runs || [])[job.runs.length - 1];
+    return { J, threw, state: job.state, proc: job.proc || null, asked: !!job.proc || !!(last && last.ask), runs: (job.runs || []).length - runs0, said: said.filter((l) => /the run's intent/.test(l)), ack: job.ack };   // B-91aa's remainder: a start is ASKED of the starter (its pid answered a turn later) — `asked` reads either road
   };
   for (const how of ['held', 'deferred']) {
     const s1 = spawnScene({ JobManager }, how, stalled(how));
@@ -1455,7 +1456,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   const aSp = '    if (!intent.ok) {';
   const NoCheck = mutantCopies('jobs-triage-u4-spawn', ROOT).load('src/jobs.js', anchored(jsrcSp, aSp, '    if (false) {', 'the run\'s intent check (_spawn)'), 'no-intent-check');   // ALSO CURED (the moved2 cure 2): through anchored()
   const s2 = spawnScene(NoCheck, 'red', stalled('held'));
-  ok(!s2.threw && !!s2.proc, 'U4 cure (1) CONTROL: the check removed (a mutant copy) ⇒ a child IS started while its run is not on disk — the check above would be red', { threw: s2.threw, proc: s2.proc });
+  ok(!s2.threw && s2.asked, 'U4 cure (1) CONTROL: the check removed (a mutant copy) ⇒ a child IS started (asked of the starter) while its run is not on disk — the check above would be red', { threw: s2.threw, proc: s2.proc, state: s2.state });
   try { if (s2.proc && s2.proc.pid) process.kill(s2.proc.pid, 'SIGKILL'); } catch { }
   s2.J.shutdown();
   // the cure's own adversarial read: (a) a REFUSED cron fire moves the schedule to its NEXT slot — never a re-fire at every
@@ -1506,6 +1507,7 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
     const svc = J.jobs.get('jb-0248a405'), st1 = svc.state, words = (J.events.filter((e) => e.jobId === svc.id).pop() || {}).what || '';
     rec.unstall(); rec.land();   // the storage answers: the store lands (its onWritten)
     await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+    await J.startAnswer(svc, 0);   // B-91aa's remainder: the start is ASKED of the starter — its answer (a pipe turn later) is the fact
     return { J, st1, words, state: svc.state, proc: svc.proc || null };
   };
   const b1 = await backScene({ JobManager }, 'cure');

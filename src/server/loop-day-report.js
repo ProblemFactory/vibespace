@@ -216,6 +216,10 @@ function create({ log = console, census = async () => null, foldCensus = null, s
   const memNow = (k) => { let h = {}; try { h = heap() || {}; } catch { } let r = null; try { r = rss(); } catch { } return { heapUsed: h.heapUsed, heapLimit: h.heapLimit, rss: r, kids: k }; };
   const sizesNow = () => { try { return sizes() || {}; } catch { return {}; } };
   const starterNow = () => { try { return starter() || null; } catch { return null; } };   // B-91aa: «program-starts=» — the old road in force is said every hour
+  // B-91aa's remainder (r4591 (A)): «vault-direct-starts=» — the vault jobs' starts on the hub's own road since the last line (the starter's
+  // `directJobs` counts them; its delta here); a starter that tells none ⇒ «?»
+  let directJobs0 = (() => { const s = starterNow(); return s && Number.isFinite(s.directJobs) ? s.directJobs : 0; })();
+  const vaultDirectOf = (s) => { if (!s || !Number.isFinite(s.directJobs)) return null; const d = s.directJobs - directJobs0; directJobs0 = s.directJobs; return d; };
   const entriesNow = () => { try { return [...(sessions() || [])]; } catch { return []; } };
   const turnsNow = (t, entries = entriesNow(), times = null) => { try { return turnsOf(entries, t, times); } catch { return null; } };
   /** THE AGE PASS (cure r3, T2): ONE at a time, ended at its time-out (cancelled) — then the hour's idle ages are «?» and the line says
@@ -265,7 +269,8 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     if (k) lastKids = k;
     const entries = entriesNow();
     const ag = await agesOnce(entries);
-    const rep = { kind: 'hour', hour: h, toMs, busy, engines, upMs: upNow(), mem: memNow(k), turns: turnsNow(toMs, entries, ag.times), agesRead: ag, browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts }, starter: starterNow() };
+    const st0 = starterNow();
+    const rep = { kind: 'hour', hour: h, toMs, busy, engines, upMs: upNow(), mem: memNow(k), turns: turnsNow(toMs, entries, ag.times), agesRead: ag, browsers: browsersNow(toMs), sizes: { ...sizesNow(), ...counts }, starter: st0, vaultDirect: vaultDirectOf(st0) };
     rep.line = LDR.line(rep);
     kept.push(rep); if (kept.length > keepHours) kept.splice(0, kept.length - keepHours);
     try { log.log(rep.line); } catch { }
@@ -284,7 +289,8 @@ function create({ log = console, census = async () => null, foldCensus = null, s
     exitSaid = true;
     const t = wallNow();
     if (!watchedNow()) cur.watched = false;
-    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, upMs: upNow(), mem: memNow(lastKids), turns: turnsNow(t, entriesNow(), null), agesRead: { read: 0, total: entriesNow().length }, browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() }, starter: starterNow() };
+    const st0 = starterNow();
+    const rep = { kind: 'exit', hour: cur, toMs: t, busy: busySince(eluAt), engines: null, upMs: upNow(), mem: memNow(lastKids), turns: turnsNow(t, entriesNow(), null), agesRead: { read: 0, total: entriesNow().length }, browsers: browsersNow(t), sizes: { ...sizesNow(), ...LC.peek() }, starter: st0, vaultDirect: vaultDirectOf(st0) };
     rep.line = LDR.line(rep);
     try { log.log(rep.line); } catch { }
     return rep;

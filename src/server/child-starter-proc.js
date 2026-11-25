@@ -84,10 +84,10 @@ function detach(m) {
   m.env = null;   // the request keeps no sign-in material once its child's env is built
   let fd = null, c = null, said = false, startErr = null, closeErr = null;
   const no = (e) => { send({ id, ev: 'exit', code: null, signal: null, error: String((e && e.code) || e) }); };
-  try { fd = fs.openSync(logPath, 'a'); } catch (e) { return no(e); }
-  try { c = spawn(cmd, args, { env, detached: true, stdio: ['ignore', fd, fd] }); } catch (e) { startErr = e; }
+  if (m.quiet !== true) { try { fd = fs.openSync(logPath, 'a'); } catch (e) { return no(e); } }   // B-91aa's remainder: a job's start (quiet) has no log — its wrapper writes its own
+  try { c = spawn(cmd, args, { env, detached: true, stdio: fd === null ? 'ignore' : ['ignore', fd, fd] }); } catch (e) { startErr = e; }
   // ONE close of the log's descriptor, here: spawn returns after the fork, so the child already holds its own copy (or none started)
-  try { fs.closeSync(fd); } catch (e) { closeErr = String((e && e.code) || e); }
+  if (fd !== null) { try { fs.closeSync(fd); } catch (e) { closeErr = String((e && e.code) || e); } }
   if (!c) return no(startErr);
   c.on('error', (e) => { if (said) return; said = true; no(e); });
   c.on('spawn', () => { if (said) return; said = true; try { c.unref(); } catch { } send({ id, ev: 'started', pid: c.pid, detached: true, starttime: (() => { try { return require('../proc-identity.js').starttimeOf(c.pid); } catch { return null; } })(), ...(closeErr ? { logClose: closeErr } : {}) }); });   // its start time read here, before this process can reap it (the hub's adoption proof)

@@ -37,6 +37,11 @@
  *    `termFirst: <grace ms>`: then SIGTERM first (a parent that RELAYS it — sudo, to the mount or unmount program under it — passes it
  *    on; a SIGKILL it cannot relay would leave a root program running after the hub said «failed»), SIGKILL only after the grace. On
  *    both roads; the answer is «timed out» at the bound either way (signal SIGTERM). Every other site's ending is unchanged.
+ *  · THE JOB'S START (B-91aa's remainder, 主开发 r4525 / r4591): a background job's wrapper is a DETACHED start too —
+ *    `detach: { job: true, quiet: true }`: no log (the wrapper writes its own; its stdio ignored, as the hub's own start gave it)
+ *    and the job's MARK admitted by name in its whole env (JOB_MARKS: VIBESPACE_JOB_ID, the /proc mark the hub's walks read —
+ *    scoped to the request that built it). A VAULT job keeps the direct start (its values ride the hub's own pipe on fd 3): the
+ *    jobs engine notes each such start (`noteDirect`), counted in `directJobs` — the hourly line says how many an hour.
  */
 const fs = require('fs');
 const path = require('path');
@@ -54,12 +59,12 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   let proc = null, seq = 0, restarted = false, direct = false, directAt = 0, directSince = 0, said = false, buf = '';
   const mono = () => performance.now();   // the re-arm's clock never steps with the wall clock (its read: a clock stepped back kept the old road an hour longer)
   const pending = new Map();      // id → { resolve, settled, onTimeout, onLateExit, timer, started, pid }
-  const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0, rearmed: 0, refused: 0 };
+  const stats = { starts: 0, requests: 0, unknown: 0, faults: 0, direct: 0, rearmed: 0, refused: 0, directJobs: 0 };   // directJobs: a vault job's start, by design on the hub's own road (B-91aa's remainder, r4591)
   let saidRefused = false;
   /** B-323e: a whole env's names, the hub's own prefixes refused (counted; said once as a count — never a name, never a value) */
-  function wholeOf(env, marks = false) {   // marks: a SESSION request's whole env may carry WHOLE_MARKS (r2862's reader: the mark scoped to the request that built it)
+  function wholeOf(env, marks = false) {   // marks: a SESSION request's whole env may carry WHOLE_MARKS (r2862's reader: the mark scoped to the request that built it); a JOB's, JOB_MARKS (a Set)
     const out = {}; let n = 0;
-    for (const [k, v] of Object.entries(env || {})) { if (typeof v !== 'string') continue; if (HUB_OWN.test(k) && !(marks && WHOLE_MARKS.has(k))) { n++; continue; } out[k] = v; }
+    for (const [k, v] of Object.entries(env || {})) { if (typeof v !== 'string') continue; if (HUB_OWN.test(k) && !(marks && (marks instanceof Set ? marks : WHOLE_MARKS).has(k))) { n++; continue; } out[k] = v; }
     if (n) { stats.refused += n; if (!saidRefused) { saidRefused = true; try { log.warn?.(`[child-starter] a whole env carried ${n} name(s) of the hub's own secret prefixes — refused (a site must build its child's env through serviceEnv)`); } catch { } } }
     return out;
   }
@@ -113,7 +118,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
    *  or, with `wholeEnv: true`, `env` IS the child's whole env (built through serviceEnv), sent whole (B-323e). */
   function run(cmd, args = [], o = {}) {
     stats.requests++;
-    if (o.wholeEnv) o = { ...o, env: wholeOf(o.env, !!o.session) };   // B-323e: the same refused names on both roads (the starter's and the old one)
+    if (o.wholeEnv) o = { ...o, env: wholeOf(o.env, o.detach && o.detach.job ? JOB_MARKS : !!o.session) };   // B-323e: the same refused names on both roads (the starter's and the old one); a job's mark by name
     if (direct && mono() - directAt >= rearmMs) { direct = false; restarted = true; stats.rearmed++; }   // a fresh starter, tried again (a whole-box stall is not for good) — ONE: a fault after the re-arm falls back for the hour
     if (direct) return runDirect(cmd, args, o);
     if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); if (direct) return runDirect(cmd, args, o); stats.unknown++; return Promise.resolve({ unknown: true, why: 'no starter' }); } }   // the request answers unknown, counted as one
@@ -132,7 +137,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
       const p = proc;
       if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { });   // a pipe the starter closed is never an uncaught 'error' (§101)
       try { p.stdin.write(JSON.stringify(o.detach
-        ? { op: 'detach', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), log: String(o.detach.log || '') }   // B-323e: never held there
+        ? { op: 'detach', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), log: String(o.detach.log || ''), ...(o.detach.quiet ? { quiet: true } : {}) }   // B-323e: never held there; a job's start: no log
         : { op: 'run', id, cmd: String(cmd), args: (args || []).map(String), env: add, ...(o.wholeEnv ? { whole: true } : {}), ...(o.session ? { session: { cwd: typeof o.session.cwd === 'string' ? o.session.cwd : '' } } : {}), timeoutMs: o.timeoutMs > 0 ? o.timeoutMs : 0, maxBuffer: o.maxBuffer || 1048576, capture: !!o.capture, ...(o.termFirst > 0 ? { termFirst: Number(o.termFirst) } : {}) }) + '\n'); }
       catch { fault('the pipe to the starter broke'); }
     });
@@ -153,10 +158,10 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     if (o.detach) return new Promise((resolve) => {   // B-323e: the detached start, as the starter makes it (its own session, the log, the answer at its spawn)
       let fd = null, c = null, said = false, startErr = null;
       const no = (e) => resolve({ started: false, code: null, error: String((e && e.code) || e) });
-      try { fd = fs.openSync(String(o.detach.log || ''), 'a'); } catch (e) { no(e); return; }
-      try { const env = directEnv(o); c = spawn(cmd, args, { env, detached: true, stdio: ['ignore', fd, fd] }); } catch (e) { startErr = e; }
+      if (!o.detach.quiet) { try { fd = fs.openSync(String(o.detach.log || ''), 'a'); } catch (e) { no(e); return; } }   // a job's start (quiet): no log, its stdio ignored
+      try { const env = directEnv(o); c = spawn(cmd, args, { env, detached: true, stdio: fd === null ? 'ignore' : ['ignore', fd, fd] }); } catch (e) { startErr = e; }
       // ONE close of the log's descriptor, here: spawn returns after the fork, so the child already holds its own copy (or none started)
-      try { fs.closeSync(fd); } catch (e) { log.warn(`[child-starter] the old road's log descriptor did not close: ${(e && e.code) || e}`); }
+      if (fd !== null) { try { fs.closeSync(fd); } catch (e) { log.warn(`[child-starter] the old road's log descriptor did not close: ${(e && e.code) || e}`); } }
       if (!c) { no(startErr); return; }
       c.on('error', (e) => { if (said) return; said = true; no(e); });
       c.on('spawn', () => { if (said) return; said = true; try { c.unref(); } catch { } resolve({ started: true, detached: true, pid: c.pid, starttime: (() => { try { return require('../proc-identity.js').starttimeOf(c.pid); } catch { return null; } })(), code: null, signal: null, stdout: '', stderr: '', error: null }); });
@@ -178,7 +183,9 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   }
   /** the hub's end of the pipe closed (a test's «the hub is gone»): the starter ends by itself — nothing is signalled */
   function closePipe() { const p = proc; proc = null; if (p) { if (!p.stdin.listenerCount('error')) p.stdin.on('error', () => { }); try { p.stdin.end(); } catch { } } return p; }
-  return { run, closePipe, stats: () => ({ ...stats, restarted, direct, directSince: direct ? directSince : 0, pending: pending.size, pid: proc ? proc.pid : null }), _proc: () => proc };
+  /** B-91aa's remainder (r4591): a job start the jobs engine made ITSELF by design (a vault job: its values ride the hub's pipe) — counted */
+  function noteDirect() { stats.directJobs++; }
+  return { run, closePipe, noteDirect, stats: () => ({ ...stats, restarted, direct, directSince: direct ? directSince : 0, pending: pending.size, pid: proc ? proc.pid : null }), _proc: () => proc };
 }
 
 /** B-323e's remainder (lane bl-chat-b, the coordinator's r2689 / r2862): the old road's SESSION child's group — the one this process made
@@ -189,6 +196,10 @@ const SESSION_DRAIN_MS = 100;   // r2917: then ONE more turn of the loop before 
 /** B-323e's remainder (lane bl-chat-b, r2689): the MARKS a whole env may carry under the hub's own prefixes — a word a person's rc
  *  reads, never a secret: the login-shell look's VIBESPACE_SHELL_PROBE=1 («skip a tmux autostart or a banner») */
 const WHOLE_MARKS = new Set(['VIBESPACE_SHELL_PROBE']);
+/** B-91aa's remainder (主开发 r4591): THE JOB'S MARK — a job wrapper's whole env (jobs.js wrapperEnv: PATH / HOME / LANG / TMPDIR + this)
+ *  carries the job's id under the hub's own prefix: the /proc mark the hub's walks read (jobs.js _walkMarked, left-behind.js), an id,
+ *  never a secret. Admitted by its WHOLE name, only on a job's request (`detach.job`) */
+const JOB_MARKS = new Set(['VIBESPACE_JOB_ID']);
 /** B-ddf3 (lane bl-scratch, the coordinator's r4027): the NAMED PLAN MARKS a request's `envAdd` may carry under the hub's own prefixes
  *  — a plan the site built, never a secret: the CLI-config helper's plan (VIBESPACE_CLI_CONFIG, src/server/cli-config-runner.js; the
  *  shipped helper reads it by that name). Matched by the WHOLE name, on BOTH roads (the starter's and the direct one); every other name
@@ -211,4 +222,4 @@ function execFileVia(starter) {
 /** a suite's seam: hand the process a starter of its own (null = the default again) */
 function setChildStarter(s) { shared = s || null; }
 
-module.exports = { createChildStarter, childStarter, setChildStarter, execFileVia, STARTER_SCRIPT, GUARD_MS, SECRET_NAME };
+module.exports = { createChildStarter, childStarter, setChildStarter, execFileVia, STARTER_SCRIPT, GUARD_MS, SECRET_NAME, JOB_MARKS };
