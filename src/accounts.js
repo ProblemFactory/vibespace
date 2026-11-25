@@ -1119,9 +1119,10 @@ class AccountManager {
       a.reloginAsk = { at: Date.now(), ...(lost ? { lost: true } : {}) };
       // B-574d (line 832 on the 2.369.418 train, r2734 (c)): THE MARK IS ON DISK BEFORE THE MOVE — the store writer's synchronous road,
       // as a sign-in save (off the loop the sign-in would be set aside before its question is in the file). A mark that cannot land
-      // moves nothing: it comes off, and the resolve refuses as when the move fails (the page's own sentence), its cause by name
+      // moves nothing: it comes off (queued behind the write that carries it — never a second wait of the writer's bound), and the
+      // resolve refuses as when the move fails (the page's own sentence), its cause by name
       try { this._save({ now: true, why: 'the question about the new sign-in' }); }
-      catch (e) { if (!e || e.code !== 'not-durable') throw e; delete a.reloginAsk; this._saveOrOwe('the question taken back'); return { outcome: 'refused', code: 'not-durable', notOnDisk: true, error: `${e.message}, so the new sign-in was not set aside and this row was not asked — sign in again` }; }
+      catch (e) { if (!e || e.code !== 'not-durable') throw e; delete a.reloginAsk; this._save(); return { outcome: 'refused', code: 'not-durable', notOnDisk: true, error: `${e.message}, so the new sign-in was not set aside and this row was not asked — sign in again` }; }
       let moved = 0;
       try { moved = this._moveLogin(src, path.join(src, RELOGIN_HELD)); } catch { moved = 0; }
       // r2915 (c): the refusal REACHES THE PERSON — an answer the page shows (and stops on), never a throw it polls into every 3 s;
@@ -1165,13 +1166,18 @@ class AccountManager {
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
     if (answer !== 'same' && answer !== 'another') throw new Error('answer must be «same» or «another»');
     if (!a.reloginAsk) return { outcome: 'none' };
+    const asked = a.reloginAsk;
     delete a.reloginAsk; this._save();
     const held = path.join(this.subDir(id), RELOGIN_HELD);
     if (answer === 'same') {
       if (!this._moveLogin(held, this.subDir(id))) { this._notify(); return { outcome: 'gone' }; }
       return { outcome: 'same', account: this.finalizeSubscription(id) };
     }
-    const created = this.createSubscription({ name: 'Subscription' });
+    // 主开发 r4168 (MUST 2): WHILE A SIGN-IN SITS IN THE HOLD ITS ROW ASKS — a new row whose landing fails (it undoes itself) puts the
+    // question back before the refusal goes out (the queued write then carries it; nothing left the hold)
+    let created = null;
+    try { created = this.createSubscription({ name: 'Subscription' }); }
+    catch (e) { if (e && e.code === 'not-durable') { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }
     if (!this._moveLogin(held, this.subDir(created.id))) { this.remove(created.id); this._notify(); return { outcome: 'gone' }; }
     const finalized = this.finalizeSubscription(created.id);
     this._notify();
@@ -1799,6 +1805,7 @@ class AccountManager {
     // re-points its conversations only onto THAT provider, and the engine's removal verdicts name it (goneProviderOf)
     let goneProvider = null; try { goneProvider = this.memberProviderOf(id); } catch { }
     (this._gone || (this._gone = new Map())).set(id, { provider: goneProvider, name: a.name || null });
+    let unlanded0 = null;
     this._state.accounts.splice(i, 1);
     for (const f of this._defaultIdFields()) if (this._state[f] === id) this._state[f] = null; // every harness's default field
     // POOL HYGIENE (2.335.0, real report: deleting the account a pool was
@@ -1807,7 +1814,10 @@ class AccountManager {
     // creds through a dead link until some spawn happened to heal it).
     // Deleting a member must leave every pool self-consistent NOW.
     if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {
-      this._save(); // poolMembers below must not offer the removed account (in memory now; r3977 (2): the act's ONE synchronous landing is its last save, after it finished)
+      // poolMembers below must not offer the removed account; 主开发 r4168 (MUST 1): a row that held a sign-in is OFF THE FILE before its
+      // pools are healed and its folder wiped, as at the release (a kill after the wipe never brings it back with its sign-in and its pools);
+      // the act still finishes (it has no undo) and a landing that fails is said at its end (r3977 (2))
+      unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);
       this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
@@ -1818,7 +1828,7 @@ class AccountManager {
     // finished (the pools healed, the folder wiped, every page told) — the person's retry never meets a half-done removal
     const unlanded = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);
     this._notify();
-    if (unlanded) throw unlanded;
+    if (unlanded || unlanded0) throw (unlanded || unlanded0);
   }
 
   /** Every pool that referenced a just-removed member: strip it from explicit

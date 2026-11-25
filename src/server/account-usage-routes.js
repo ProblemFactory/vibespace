@@ -895,7 +895,7 @@ app.post('/api/accounts/:id/relogin-answer', (req, res) => {
       wakeOnLoginSuccess(req.params.id, r, 're-login', r.account.id || req.params.id);
     }
     res.json({ success: true, ...r });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { failAcct(res, e); }   // 主开发 r4168 (a): a failed landing answers 503 not-durable, as on every door
 });
 
 // THE FIRST SIGN-IN BECOMES THE DEFAULT (lane signin-card-real-screen): a card's row (signinPending, read before

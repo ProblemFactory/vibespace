@@ -299,9 +299,33 @@ console.log('G. 主开发 r3977 — the follow: every sign-in call on the synchr
   const r = await run({ AccountManager });
   ok(r.had && r.code === 'not-durable' && r.owed && r.wiped && !r.inMemory, 'G2 a removal whose landing FAILS finishes the act (its folder wiped, the row gone from memory) and only then says it by name (not-durable, kept: written again)', r);
   const ASRC2 = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
-  const AMhalf = MUT.load('src/accounts.js', anchored(ASRC2, "      this._save(); // poolMembers below must not offer the removed account (in memory now; r3977 (2): the act's ONE synchronous landing is its last save, after it finished)", "      this._save({ now: true, why: 'the removal of the account' });", 'remove stops in the middle'), 'remove-half');
+  const AMhalf = MUT.load('src/accounts.js', anchored(ASRC2, "      unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);", "      this._save({ now: true, why: 'the removal of the account' });", 'remove stops in the middle'), 'remove-half');
   const rx = await run(AMhalf);
   ok(rx.code === 'not-durable' && !rx.wiped, 'RED CONTROL (the first cure\'s form: the synchronous save BEFORE the heal and the wipe): the removal throws in the middle — its folder stays', rx);
+}
+{
+  // G5 (主开发 r4168 MUST 1): a row that holds a sign-in is OFF THE FILE before its folder is wiped (and its pools healed), as at the
+  // release — with the writer's thread HELD, what the file lists at the moment of the wipe (the wipe watched); red: that first save off
+  // the loop (the follow's first form: the removed row, its long-lived token and its pools come back after a kill past the wipe)
+  const fsm = require('fs');
+  const wipeOf = async (Mod) => {
+    const d = dirOf('g5'), W = mkW(), am = hush(() => new Mod.AccountManager({ dataDir: d, storeWriter: W })), F = path.join(d, 'accounts.json');
+    const id = hush(() => am.createSubscription({ name: 'Member' })).id; hush(() => am.setOat(id, OAT('W'))); await am.persisted();
+    const folder = path.resolve(am.subDir(id)); let atWipe = null;
+    const rm0 = fsm.rmSync;
+    fsm.rmSync = function (p, ...rest) { if (atWipe === null && path.resolve(String(p)) === folder) atWipe = !!onDiskRow(F, id); return rm0.call(this, p, ...rest); };
+    SAND.hold('accounts.json', 300);
+    let err = null;
+    try { hush(() => am.remove(id)); } catch (e) { err = (e && e.code) || String(e); } finally { fsm.rmSync = rm0; SAND.unhold('accounts.json'); }
+    await am.persisted();
+    return { atWipe, err, wiped: !fs.existsSync(folder), onDisk: !!onDiskRow(F, id) };
+  };
+  const g5 = await wipeOf({ AccountManager });
+  ok(g5.atWipe === false && g5.wiped && !g5.onDisk && !g5.err, 'G5 with the writer\'s thread HELD, a member holding a long-lived token is removed: when its folder is wiped the file no longer lists it (a kill past the wipe never brings it back)', g5);
+  const ASRC5 = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const AMw = MUT.load('src/accounts.js', anchored(ASRC5, "unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);", 'unlanded0 = (this._save(), null);', 'remove first save off the loop'), 'remove-first-off-loop');
+  const g5x = await wipeOf(AMw);
+  ok(g5x.atWipe === true, 'RED CONTROL (the first save off the loop, the follow\'s first form): the folder is wiped while the file still lists the row — red', g5x);
 }
 {
   // G3 (1): a failed landing is SAID AS WHAT IT IS on the door: 503 not-durable by its code (the page's own «not on disk» words)
@@ -386,6 +410,82 @@ console.log('H. the relogin\'s question (r2734, on the 2.369.418 train; 主开�
   const AMr = MUT.load('src/accounts.js', anchored(ASRC3, "if (!moved) { delete a.reloginAsk; this._saveOrOwe('the question taken back'); return", 'if (!moved) { delete a.reloginAsk; this._save(); return', 'refusal off the loop'), 'refusal-off-loop');   // stale-pins: kept (the red copy plants the refusal's earlier form on purpose)
   const h3x = AMr ? await askOf(AMr, { moveFails: true }) : null;
   ok(!!h3x && h3x.outcome === 'refused' && h3x.atReturn === true, 'RED CONTROL (the refusal\'s save off the loop): the refusal returns while the file still holds the question — red', h3x);
+}
+
+{
+  // H4 (主开发 r4168 MUST 2): WHILE A SIGN-IN SITS IN THE HOLD ITS ROW ASKS — «another account» whose new row cannot land (it undoes
+  // itself) puts the question back before its refusal: memory asks, what lands next asks, the hold untouched. The ask is the real
+  // resolve's (the verdict its only stand-in) with the real move into the hold
+  const AI = require(path.join(REPO, 'src/account-identity.js'));
+  const HELD = '.vibespace-relogin-held';
+  const askedRow = async (Mod) => {
+    const d = dirOf('h4'), W = mkW({ durableMs: 300 }), am = hush(() => new Mod.AccountManager({ dataDir: d, storeWriter: W })), F = path.join(d, 'accounts.json');
+    const sid = hush(() => am.createSubscription({ name: 'Member' })).id; await am.persisted();
+    fs.writeFileSync(path.join(am.subDir(sid), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'h4-access', refreshToken: 'h4-refresh', expiresAt: Date.now() + 36e5 } }), { mode: 0o600 });
+    am._lookAgain = () => ({ loggedIn: true });
+    am._reloginBefore = new Map([[sid, { at: Date.now(), attempt: 'h-4', record: null, word: 'Member' }]]);
+    am._loginStatusRaw = () => ({ state: 'success', attempt: 'h-4' });
+    const was = AI.beforeAfterVerdict; AI.beforeAfterVerdict = () => 'ask';
+    let r0 = null; try { r0 = hush(() => am.reloginResolve(sid)); } finally { AI.beforeAfterVerdict = was; }
+    await am.persisted();
+    return { am, F, sid, ask: r0 && r0.outcome, heldFile: path.join(am.subDir(sid), HELD, '.credentials.json') };
+  };
+  const anotherOf = async (Mod) => {
+    const w = await askedRow(Mod), heldBefore = fs.existsSync(w.heldFile);
+    SAND.failOn('accounts.json', true);
+    let code = null; try { hush(() => w.am.reloginAnswer(w.sid, 'another')); } catch (e) { code = (e && e.code) || String(e); }
+    SAND.failOn('accounts.json', false);
+    const asksNow = !!(w.am.get(w.sid) || {}).reloginAsk;
+    let landed = null; try { landed = hush(() => w.am._save({ now: true, why: 'the suite: what memory holds, landed' })); } catch (e) { landed = (e && e.code) || String(e); }
+    return { ask: w.ask, heldBefore, code, asksNow, landed, asksOnDisk: !!(onDiskRow(w.F, w.sid) || {}).reloginAsk, heldAfter: fs.existsSync(w.heldFile), rows: w.am.list().accounts.length };
+  };
+  const h4 = await anotherOf({ AccountManager });
+  ok(h4.ask === 'ask' && h4.heldBefore && h4.code === 'not-durable' && h4.asksNow && h4.landed === true && h4.asksOnDisk && h4.heldAfter && h4.rows === 1, 'H4 «another account» whose new row cannot land: refused by name, the question PUT BACK (in memory and in what lands next), the held sign-in untouched, no new row', h4);
+  const ASRC4 = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const AMa = MUT.load('src/accounts.js', anchored(ASRC4, "catch (e) { if (e && e.code === 'not-durable') { a.reloginAsk = asked; this._save(); this._notify(); } throw e; }", 'catch (e) { throw e; }', 'another drops the question'), 'another-drops-question');
+  const h4x = await anotherOf(AMa);
+  ok(h4x.code === 'not-durable' && !h4x.asksNow && !h4x.asksOnDisk && h4x.heldAfter, 'RED CONTROL (the reply that does not put the question back): a row that no longer asks beside a sign-in in the hold — red', h4x);
+  // H5 (主开发 r4168 shoulds (a) and (c)): THE TWO RELOGIN DOORS of the real routes module (create() over stand-in hub parts, its data
+  // under a scratch root): the finalize door answers the resolve's refusal as an ANSWER (200, outcome refused, its code — the page
+  // stops on it); the answer door answers a failed landing 503 not-durable like every other door (red: the bare 400)
+  const routesOf = (mod, accounts) => {
+    const h = {};
+    const app = new Proxy({}, { get: (t, k) => (k === 'use' ? () => { } : (p, ...fns) => { if (typeof p === 'string' && fns.length) (h[k] || (h[k] = new Map())).set(p, fns[fns.length - 1]); }) });
+    const at = Date.now(), none = async () => ({ since: at, facts: new Map() });
+    const base = { list: () => ({ accounts: [] }), get: () => null, subDir: () => dirOf('h5-nope'), finalizeSubscription: () => ({ loggedIn: true }), finalizeCodexSubscription: () => ({ loggedIn: true }), _subscriptionLoginStatus: () => null, decisionList: () => ({ accounts: [] }), decisionRowOf: () => null, signinFactsNow: none, signinFactsSettled: none };
+    let err = null;
+    try { hush(() => mod.create({ app, rootDir: dirOf('h5-root'), HOST: '127.0.0.1', CLAUDE_CMD: 'claude', NODE_CMD: 'node', CLAUDE_SUBSCRIPTION_LOGIN_HELPER: path.join(dirOf('h5-helper'), 'helper.js'), activeSessions: new Map(), auth: { enabled: false }, engine: { clearSealedOrders: () => { } }, serverSetting: () => null, recordUsageAttribution: () => { }, liveAccountIdSet: () => new Set(), buildClaudeSubscriptionLoginCommand: () => 'claude auth login', getAccounts: () => ({ ...base, ...accounts }), getHosts: () => null, getMounts: () => null, getTelemetry: () => null, getUsageHistory: () => null, getLoginExpiryWatch: () => null })); } catch (e) { err = e && e.message; }
+    return { post: h.post || new Map(), err };
+  };
+  const callDoor = (fn, req) => { const res = resOf(); try { fn({ params: {}, query: {}, body: {}, headers: {}, ...req }, res); } catch (e) { res.threw = e && e.message; } return res; };
+  const doors = async (mod) => {
+    // the finalize door over the REAL resolve whose question cannot land
+    const d = dirOf('h5'), W = mkW({ durableMs: 300 }), am = hush(() => new AccountManager({ dataDir: d, storeWriter: W }));
+    const sid = hush(() => am.createSubscription({ name: 'Member' })).id; await am.persisted();
+    am._lookAgain = () => ({ loggedIn: true });
+    am._reloginBefore = new Map([[sid, { at: Date.now(), attempt: 'h-5', record: null, word: 'Member' }]]);
+    am._loginStatusRaw = () => ({ state: 'success', attempt: 'h-5' });
+    let w = null;   // the answer door's world (below), read by the stand-in only when that door is called
+    const R = routesOf(mod, { reloginResolve: (id) => am.reloginResolve(id), reloginAnswer: (id, ans) => w.am.reloginAnswer(id, ans) });
+    const fin = R.post.get('/api/accounts/:id/relogin-finalize'), ans = R.post.get('/api/accounts/:id/relogin-answer');
+    const was = AI.beforeAfterVerdict; AI.beforeAfterVerdict = () => 'ask';
+    let f = null;
+    SAND.failOn('accounts.json', true);
+    try { f = fin ? callDoor(fin, { params: { id: sid } }) : null; } finally { AI.beforeAfterVerdict = was; SAND.failOn('accounts.json', false); }
+    // the answer door over the REAL reply whose new row cannot land
+    w = await askedRow({ AccountManager });
+    let a = null;
+    SAND.failOn('accounts.json', true);
+    try { a = ans ? callDoor(ans, { params: { id: w.sid }, body: { answer: 'another' } }) : null; } finally { SAND.failOn('accounts.json', false); }
+    return { built: !R.err, err: R.err, fin: f && { status: f.statusCode, success: f.sent && f.sent.success, outcome: f.sent && f.sent.outcome, code: f.sent && f.sent.code }, ans: a && { status: a.statusCode, code: a.sent && a.sent.code, notKept: a.sent && a.sent.notKept } };
+  };
+  const h5 = await doors(AUR);
+  ok(h5.built && h5.fin && h5.fin.status === 200 && h5.fin.success === true && h5.fin.outcome === 'refused' && h5.fin.code === 'not-durable', 'H5 the finalize door: a question that cannot land comes back as an ANSWER the page stops on (200, outcome refused, code not-durable) — never a throw it polls into', h5);
+  ok(h5.ans && h5.ans.status === 503 && h5.ans.code === 'not-durable' && h5.ans.notKept === true, 'H5 the answer door: a reply whose new row cannot land answers 503 not-durable (notKept: undone in memory), as every other door', h5.ans);
+  const AURSRC5 = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
+  const AURx5 = MUT.load('src/server/account-usage-routes.js', anchored(AURSRC5, "  } catch (e) { failAcct(res, e); }   // 主开发 r4168 (a): a failed landing answers 503 not-durable, as on every door", '  } catch (e) { res.status(400).json({ error: e.message }); }', 'answer door bare 400'), 'answer-door-400');
+  const h5x = await doors(AURx5);
+  ok(h5x.ans && h5x.ans.status === 400, 'RED CONTROL (the answer door\'s bare 400): the failed landing is not said as not-durable — red', h5x.ans);
 }
 
 for (const W of lives) { try { W.stop(); } catch { } }
