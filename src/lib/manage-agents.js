@@ -131,6 +131,8 @@ const foldAnchor = (btn) => (btn.classList.contains(FOLDED) && btn.parentElement
 // the codex roster name-sorted "because all codex entries are logins", which
 // stopped being true with codex pools); the billing switcher and the New
 // Session dropdown inline the same comparator — keep them in step.
+// r4073 (2): the Remove road's «err» causes (src/hosts.js LOOK_ERR_WORDS), in the person's language — each a t() of its own words
+const LOOK_ERR_WHY = { unreadable: () => t('its hook file is there but could not be read'), dangling: () => t('its hook file is a link to nowhere (a volume not mounted yet?)'), 'folder-dangling': () => t('its folder is a link to nowhere (a volume not mounted yet?)'), unsearchable: () => t('its folder cannot be searched'), unknown: () => t('its hook file could not be looked at') };
 const acctTypeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 'subscription' ? 1 : 2);
 /** a paired machine's CLI key «already imported»? Only when its tail is KNOWN and an account's tail matches it (B-ee0a: an unknown tail —
  *  a refused read, a hub restarted between the two asks — is never «imported»: the import is offered, and it is idempotent) */
@@ -3036,6 +3038,7 @@ export function installManageAgents(App, ctx = {}) {
           else toolsHtml = `<span class="ob-ok">✓ ${t('{n} tools current', { n: presentN })}</span>`;
           const hookHtml = ['claude', 'codex'].map((k) => rs.hooks?.[k]
             ? `<span class="ob-ok">✓ ${escHtml(getBackendMeta(k).label)} ${t('hook')}</span>`
+            : rs.hooks?.[k] === null ? `<span class="ob-warn">${escHtml(getBackendMeta(k).label)} ${t('hook')}: ${t('not known — its hook file could not be read')}</span>`   // r4073 (3)
             : `<span class="ob-warn">${escHtml(getBackendMeta(k).label)} ${t('hook')}: ${t('not registered')}</span>`).join(' &nbsp; ');
           const extras = [];
           if (!rs.node) extras.push(`<span class="ob-bad">${t('node missing on the host — agent tools cannot run')}</span>`);
@@ -3098,7 +3101,9 @@ export function installManageAgents(App, ctx = {}) {
               try {
                 const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/uninstall`, { method: 'POST' });
                 if (r?.success) showToast(t('Integration removed from {host}', { host: hostName }));
-                else showToast(r?.code === 'look-no-reply' ? t('{host}: the look at its hook files did not reply — nothing was removed', { host: hostName }) : (r?.error || t('Remove failed')), { type: 'error' });   // r4014 (2): the look's own door, by its code
+                else showToast(r?.code === 'look-no-reply' ? t('{host}: the look at its hook files did not reply — nothing was removed', { host: hostName })
+                  : r?.code === 'look-err' && Array.isArray(r.unread) ? t('{host}: the tools were kept — whether our hook entries are left is not known: {what}', { host: hostName, what: [...(Array.isArray(r.left) ? r.left : []).map((c) => `${getBackendMeta(c)?.label || c} (${t('still in its hook file')})`), ...r.unread.map((u) => `${getBackendMeta(u.cli)?.label || u.cli} (${(Object.hasOwn(LOOK_ERR_WHY, u.why) ? LOOK_ERR_WHY[u.why] : LOOK_ERR_WHY.unknown)()})`)].join(', ') })   // r4073 (2): err's own door, its causes in their true words
+                  : (r?.error || t('Remove failed')), { type: 'error' });   // r4014 (2): the look's own door, by its code
               } catch { showToast(t('Remove failed'), { type: 'error' }); }
               refresh();
             };

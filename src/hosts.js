@@ -2107,7 +2107,7 @@ class HostManager {
       + `for f in ${HostManager.agentTools().join(' ')}; do `
       + 'p="$HOME/.vibespace/bin/$f"; if [ -f "$p" ]; then s=$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p" 2>/dev/null) | cut -d" " -f1 ); echo "T|$f|$s"; else echo "T|$f|"; fi; done; '
       + 'command -v node >/dev/null 2>&1 && echo "NODE|yes" || echo "NODE|no"; '
-      + HostManager.hookLeftProbe(HostManager.hookClis())   // r4014 (1): THE look, over the declared rows (an unreadable file: «err», read as not registered)
+      + HostManager.hookLeftProbe(HostManager.hookClis())   // r4014 (1): THE look, over the declared rows (r4073 (3): «err» reads not known)
       + 'echo "KEEP|$(ls "$HOME/.vibespace/run" 2>/dev/null | grep -c "\\.sock$")"; '
       // CLI-CONFIG RECEIPTS (design-harness-settings §6), GATED: only a helper
       // that knows the plan env (grep for the env NAME in the shipped file) is
@@ -2123,7 +2123,7 @@ class HostManager {
       const p = line.trim().split('|');
       if (p[0] === 'T') st.tools[p[1]] = { present: !!p[2], sha256: p[2] || null };
       else if (p[0] === 'NODE') st.node = p[1] === 'yes';
-      else if (p[0] === 'HOOK') st.hooks[p[1]] = p[2] === 'yes';
+      else if (p[0] === 'HOOK') st.hooks[p[1]] = p[2] === 'yes' ? true : p[2] === 'err' ? null : false;   // r4073 (3): err = not known (null), never «not registered»
       else if (p[0] === 'KEEP') st.keeperSessions = parseInt(p[1], 10) || 0;
     }
     return st;
@@ -2160,14 +2160,17 @@ class HostManager {
   }
   static hookClis() { return HostManager.hookFiles().map(([c]) => c); }
   /** the look at whether our marker is still in each CLI's hook file (the status probe's own lines too) → one line a CLI:
-   *  HOOK|<cli>|yes (our entries still there) · no (no such file, or none of ours) · err (r4014 (2): the file is THERE but could
-   *  not be read, a link to nowhere (a volume not mounted yet), or its folder cannot be searched (a root-owned ~/.claude) — never
-   *  «gone») */
+   *  HOOK|<cli>|yes (our entries still there) · no (no such file, or none of ours) · err|<why> (r4014 (2), never «gone»): why =
+   *  unreadable (the file is THERE but could not be read) · dangling (the file is a link to nowhere: a volume not mounted yet) ·
+   *  folder-dangling (the CLI's FOLDER is a link to nowhere, r4073 (1)) · unsearchable (its folder cannot be searched: a root-owned
+   *  ~/.claude) */
   static hookLeftProbe(clis) {
-    return HostManager.hookFiles().filter(([c]) => clis.includes(c)).map(([, file, q]) => `f=${file}; d="\${f%/*}"; if [ -L "$f" ] && [ ! -e "$f" ]; then v=err; elif [ ! -e "$f" ] && [ -d "$d" ] && [ ! -x "$d" ]; then v=err; elif [ ! -e "$f" ]; then v=no; elif [ ! -r "$f" ]; then v=err; else grep -q vibespace-hook.mjs "$f" 2>/dev/null; v=$?; if [ "$v" = 0 ]; then v=yes; elif [ "$v" = 1 ]; then v=no; else v=err; fi; fi; printf 'HOOK|%s|%s\\n' ${q} "$v"; `).join('');
+    return HostManager.hookFiles().filter(([c]) => clis.includes(c)).map(([, file, q]) => `f=${file}; d="\${f%/*}"; if [ -L "$d" ] && [ ! -e "$d" ]; then v='err|folder-dangling'; elif [ ! -d "\${d%/*}" ] || [ ! -x "\${d%/*}" ]; then v='err|unsearchable'; elif [ -L "$f" ] && [ ! -e "$f" ]; then v='err|dangling'; elif [ ! -e "$f" ] && [ -d "$d" ] && [ ! -x "$d" ]; then v='err|unsearchable'; elif [ ! -e "$f" ]; then v=no; elif [ ! -r "$f" ]; then v='err|unreadable'; else grep -q vibespace-hook.mjs "$f" 2>/dev/null; v=$?; if [ "$v" = 0 ]; then v=yes; elif [ "$v" = 1 ]; then v=no; else v='err|unreadable'; fi; fi; printf 'HOOK|%s|%s\\n' ${q} "$v"; `).join('');
   }
   /** r4014 (2): the door a look that did not reply names (its words; the page words it by the code `look-no-reply`) */
   static LOOK_NO_REPLY = 'the look at that machine\'s hook files did not reply — nothing removed';
+  /** r4073 (2): each cause of «err» in its TRUE words (never «is there» for a link to nowhere); the page words them by `why` */
+  static LOOK_ERR_WORDS = Object.freeze({ unreadable: 'its hook file is there but could not be read', dangling: 'its hook file is a link to nowhere (a volume not mounted yet?)', 'folder-dangling': 'its folder is a link to nowhere (a volume not mounted yet?)', unsearchable: 'its folder cannot be searched', unknown: 'its hook file could not be looked at' });   // unknown: a cause this hub does not know (a newer probe) — never the «is there» words
   static installNotLanded(receipts, { refused = null, hooks = [] } = {}) {
     if (refused) return [`the hooks and CLI settings were not registered there: ${refused.line || refused.why || 'this server never writes a machine\'s CLI config'}`];
     const rs = Array.isArray(receipts) ? receipts : [], by = new Map();
@@ -2479,12 +2482,13 @@ class HostManager {
       let out = '';
       try { out = String(await this._ssh(h, REMOTE_PRELUDE + HostManager.hookLeftProbe(clis), { timeoutMs: 15000 })); }
       catch (e) { return { ok: false, code: 'look-no-reply', notLanded: [HostManager.LOOK_NO_REPLY], error: `${HostManager.LOOK_NO_REPLY} (the tools kept): ${cause} — ${String((e && e.message) || e).split('\n')[0].slice(0, 160)}` }; }   // its read's S8: a look that hung or failed over ssh names the same door
-      const said = new Map(out.split('\n').map((l) => /^HOOK\|(.+)\|(yes|no|err)$/.exec(l.trim())).filter(Boolean).map((m) => [m[1], m[2]]));
+      const said = new Map(out.split('\n').map((l) => /^HOOK\|(.+?)\|(yes|no|err)(?:\|([a-z-]+))?$/.exec(l.trim())).filter(Boolean).map((m) => [m[1], m[2] === 'err' ? 'err|' + (m[3] && Object.hasOwn(HostManager.LOOK_ERR_WORDS, m[3]) ? m[3] : m[3] ? 'unknown' : 'unreadable') : m[2]]));
       if (!clis.every((c) => said.has(c))) return { ok: false, code: 'look-no-reply', notLanded: [HostManager.LOOK_NO_REPLY], error: `${HostManager.LOOK_NO_REPLY} (the tools kept): ${cause}` };
-      const left = clis.filter((c) => said.get(c) === 'yes'), unread = clis.filter((c) => said.get(c) === 'err');
+      const left = clis.filter((c) => said.get(c) === 'yes'), unread = clis.filter((c) => String(said.get(c)).startsWith('err|')).map((c) => ({ cli: c, why: said.get(c).slice(4) }));
       if (!left.length && !unread.length) return null;
-      const nl = [...left.map((c) => `${c} (hooks): still in its hook file — ${cause}`), ...unread.map((c) => `${c} (hooks): its hook file is there but could not be read, so whether our entries are left is not known — ${cause}`)];
-      return { ok: false, notLanded: nl, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${nl.join('; ')}` };
+      const nl = [...left.map((c) => `${c} (hooks): still in its hook file — ${cause}`), ...unread.map((u) => `${u.cli} (hooks): ${HostManager.LOOK_ERR_WORDS[u.why]}, so whether our entries are left is not known — ${cause}`)];
+      // r4073 (2): an err of its own CODE (the page words it, its causes too, in three languages) when nothing is known to be left
+      return { ok: false, ...(unread.length ? { code: 'look-err', unread, left } : {}), notLanded: nl, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${nl.join('; ')}` };
     };
     const refusal = this._ownerWriteRefusal();
     if (!refusal) {
@@ -2494,7 +2498,9 @@ class HostManager {
       const sRecs = parseReceiptLines(sOut);
       stripped = HostManager.installNotLanded(sRecs);
       if (stripped.length) return { ok: false, notLanded: stripped, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${stripped.join('; ')}` };
-      const unsaid = HostManager.hookClis().filter((c) => !sRecs.some((x) => x && x.harness === c && x.key === 'hooks' && x.state !== 'unknown'));
+      // r4073's follow read (M1): a hooks receipt «missing» is LOOKED at too — the helper reads a CLI folder that is a link to
+      // nowhere (or one it cannot search) as «missing», so the look decides: truly absent ⇒ no (removed), else err (kept)
+      const unsaid = HostManager.hookClis().filter((c) => !sRecs.some((x) => x && x.harness === c && x.key === 'hooks' && x.state !== 'unknown' && x.state !== 'missing'));
       if (unsaid.length) { const kept = await look(unsaid, stripRan ? 'the helper there said nothing this hub knows of the strip' : 'no helper ran there (no node, or its register helper is gone), so its hooks could not be stripped'); if (kept) return kept; }
     } else {
       const kept = await look(HostManager.hookClis(), `this server never writes a machine's CLI config (${refusal.why || refusal.kind}), so it strips nothing`);

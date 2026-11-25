@@ -29,6 +29,8 @@
 //     bound.                                          RED: no let-go (the status «out» for the hub's life)
 //   ⑬c r4030: each further let-go of ONE spell waits twice as long (a placed clock: 10, 30, 70 minutes, never sooner); a real
 //     read ends the spell.                            RED: a fixed ten minutes
+//   ⑬d (r4073's round): a REUSED pid (a placed /proc: the same pid, another start time) is another process — the child is gone.
+//                                                     RED: the start time not compared
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -402,6 +404,28 @@ ok(!!(sc[0] === 1 && sc[9.99] === 1 && sc[10] === 2 && sc[29.99] === 2 && sc[30]
 const FIXED_TEN = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (mono() - m.since >= letGoBound()) {', 'if (mono() - m.since >= statusLateLetGoMs) {', 'a fixed ten minutes'), 'status-fixed-ten');
 const r13c = await spellLeg(FIXED_TEN);
 ok(!!(r13c.seen[29.99] === 3 && r13c.seen[69.99] > 3), 'RED (a fixed ten minutes): a home that hangs gathers a child every ten minutes', r13c.seen);
+
+// ── ⑬d (r4073's round: a REUSED pid) — «seen gone» is of THAT child: the same pid with another start time is another process ──
+console.log('⑬d A PID THE SYSTEM GAVE TO ANOTHER PROCESS: the same pid, another start time (a placed /proc) — the child is gone, the next look reads fresh');
+async function reusedLeg(modPath) {
+  const proc = path.join(ROOT, `proc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`), PID = 4242;
+  fs.mkdirSync(path.join(proc, 'self'), { recursive: true }); fs.mkdirSync(path.join(proc, String(PID)), { recursive: true });
+  const stat = (start) => fs.writeFileSync(path.join(proc, String(PID), 'stat'), `${PID} (node helper) S ${Array(18).fill('1').join(' ')} ${start} 0 0\n`);   // field 3 the state, field 22 the start
+  stat(777);
+  const st = { runs: 0, run: (cmd, args) => { if (!args.includes('--status')) return Promise.resolve({ started: true, code: 0, stdout: '', stderr: '' }); st.runs++; return Promise.resolve(st.runs === 1 ? { timedOut: true, pid: PID } : { started: true, code: 0, stdout: cfg('applied'), stderr: '' }); } };
+  const S = mkHand(modPath, st, { statusMs: 3000, statusFreshMs: 0, statusBackoffMs: 50, procRoot: proc });
+  const a = await S.cliConfigStatus();
+  await sleep(120);
+  const b = await S.cliConfigStatus();   // the child itself, still there (its start 777)
+  stat(888);   // the child ended unheard and the system gave its pid to a stranger
+  const c = await S.cliConfigStatus();
+  return { a: a && a.unreadCode, b: b && b.unreadCode, c: c && c.unread, cCode: c && c.unreadCode, runs: st.runs };
+}
+const s13d = await reusedLeg(path.join(REPO, SYNC_REL));
+ok(!!(s13d.a === 'timed-out' && s13d.b === 'status-out' && s13d.c === null && s13d.runs === 2), '⑬d the same pid with another start time is ANOTHER process: the child is gone, and the next look reads fresh (a stranger never holds the mark)', s13d);
+const NO_START = MC.write(SYNC_REL, anchored(src(SYNC_REL), '(m.start != null && st.start != null && st.start !== m.start)', 'false', 'the start time not compared'), 'status-no-start');
+const r13d = await reusedLeg(NO_START);
+ok(!!(r13d.cCode === 'status-out' && r13d.runs === 1), 'RED (the start time not compared): a stranger at the child\'s pid holds the status «not known now» for as long as it lives', r13d);
 
 // ── ⑩ the secret lens ──
 console.log('⑩ r3784 (4): THE SECRET LENS — no piece of a value in a hand-broken file reaches a chip, the route\'s error, the journal or a paired machine\'s words');
