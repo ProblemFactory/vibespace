@@ -7134,7 +7134,7 @@ class ChatView {
   _reconnectAttach() {
     const q = this.app?._reconnectQueue;
     if (q && this._suspended && !this._readOnly && !this._disposed) {
-      if (this._chatInput) this._chatInput.setDisconnected(true); // as _reattach(true) would — nothing is sent from a window not yet re-registered
+      if (this._chatInput) this._chatInput.setDisconnected(true, this._attachHold ? 'attaching' : null); // as _reattach(true) would — nothing is sent from a window not yet re-registered (B-a26e: a held window keeps the hold's reason)
       q.enqueue(this);
       return;
     }
@@ -7158,7 +7158,7 @@ class ChatView {
     if (this._attachHold) { clearTimeout(this._attachHold.timer); try { this.app?._reconnectQueue?.cancel(this); } catch { } }   // B-a26e: a new cycle (a reconnect) asks now; the hold's line stays until the attach lands
     // Keep input disabled until server confirms re-attach — prevents
     // sending messages before the WS is registered in session.clients
-    if (keepDisabled && this._chatInput) this._chatInput.setDisconnected(true);
+    if (keepDisabled && this._chatInput) this._chatInput.setDisconnected(true, this._attachHold ? 'attaching' : null);   // B-a26e: a new cycle while held keeps the hold's reason
 
     // Snapshot the epoch BEFORE re-attaching: the permanent handler stores the
     // fresh epoch as soon as 'attached' arrives, so comparing against
@@ -7194,9 +7194,9 @@ class ChatView {
     // windows. Now: a RETRY ladder — re-send the attach while the server
     // hasn't even ACKED it (the 2.234.1 'attach-ack' lands synchronously, so
     // its absence means the attach may never have arrived); once acked, just
-    // wait (server alive, processing). Flip read-only only after ~2 minutes,
-    // with a message that says the truth: timeout ≠ dead — the old certainty
-    // is reserved for the explicit not-found error path.
+    // wait (server alive, processing). After ~2 minutes the window HOLDS (B-a26e: one bar, the composer held, one ask a minute —
+    // `_holdAttach`): timeout ≠ dead, so a timeout never turns it read-only; only the server's explicit words do (the
+    // not-found error path, exited, the sign-in wall).
     const reattachAt = Date.now();
     this._reattachGen = (this._reattachGen || 0) + 1;
     const gen = this._reattachGen;
@@ -7222,7 +7222,7 @@ class ChatView {
       // exited, the sign-in wall: each reaches _setReadOnly or the view's replacement, and both clear the hold first); the
       // view-only rescue is never a timeout's (it stays the explicit not-found's road).
       this._hideTyping();
-      this._holdAttach?.(attachFrame, gen);
+      this._holdAttach?.(attachFrame, gen, () => this.ws.offGlobal(handler));   // the hold owns the handler's off-switch (adversarial read: it outlived a closed window)
     };
     setTimeout(checkOrRetry, 20000);
 
@@ -7231,6 +7231,7 @@ class ChatView {
       if (msg.type !== 'attached' || msg.sessionId !== this.sessionId) return;
       this.ws.offGlobal(handler);
       if (gen !== this._reattachGen) return; // a newer reconnect cycle owns the view now
+      if (this._disposed) return;   // B-a26e: a closed view's handler applies nothing (the hold unhooks it; this is the belt)
       this._clearAttachHold?.();   // B-a26e: the attach landed — the hold's line goes the moment it does
       // WHEN THIS PAYLOAD ARRIVED (2026-09-09 r2). Everything in it is a
       // snapshot of the server at THIS instant, and the epoch branch below
@@ -7333,7 +7334,7 @@ class ChatView {
     // catch-up / epoch full-reset never ran → silently stale view; B-b87b).
     // The ladder's terminal paths remove the handler instead.
     setTimeout(() => {
-      if (this._chatInput) this._chatInput.setDisconnected(false);
+      if (this._chatInput && !this._attachHold) this._chatInput.setDisconnected(false);   // B-a26e: never under the hold's bar (a new cycle while held)
     }, 30000);
   }
 
@@ -7682,17 +7683,18 @@ class ChatView {
    *  while the socket is down (the reconnect's own re-attach asks then), never while a FRESH ack (≤ 30 s) says the hub is working
    *  on it. It stops only the clock's ask: Resume, Reload, a reconnect and a window shown again all ask as before. Ended by the
    *  attach landing (`_clearAttachHold` in the cycle's handler), by the server's explicit words (`_setReadOnly`), or by dispose. */
-  _holdAttach(frame, gen) {
-    if (this._disposed || this._readOnly) return;
-    const H = this._attachHold || (this._attachHold = { line: null, timer: 0, since: Date.now() });
-    H.frame = frame; H.gen = gen;
+  _holdAttach(frame, gen, off = null) {
+    if (this._disposed || this._readOnly) { try { off?.(); } catch { } return; }
+    const H = this._attachHold || (this._attachHold = { line: null, timer: 0, since: 0, off: null });
+    H.frame = frame; H.gen = gen; H.since = Date.now();
+    if (off) { if (H.off && H.off !== off) { try { H.off(); } catch { } } H.off = off; }   // one armed handler a hold: an older cycle's is unhooked
     if (this._chatInput) this._chatInput.setDisconnected(true, 'attaching');   // r4529 (a): a press of Send says the hold's own words
-    if (!H.line || !H.line.isConnected) {
+    if (!H.line || H.line.parentNode !== this._container) {
       const bar = document.createElement('div');
       bar.className = 'chat-resume-bar chat-attach-hold';
       const note = document.createElement('div');
       note.className = 'chat-resume-note';
-      note.textContent = t('Still attaching — the conversation is running; it reconnects by itself. Your message waits here and can be sent once it is back.');   // r4529 (a): the bar says why sending waits
+      note.textContent = t('Still attaching — the hub has not answered yet; this window reconnects by itself. Your message waits here and can be sent once it is back.');   // r4529 (a): the bar says why sending waits
       bar.append(note);
       const c = this._container;
       if (c) { if (this._statusBar?.element && this._statusBar.element.parentNode === c) c.insertBefore(bar, this._statusBar.element); else c.appendChild(bar); }
@@ -7720,6 +7722,8 @@ class ChatView {
   _attachHoldAsk() {
     const H = this._attachHold;
     if (!H || this._disposed || this._readOnly || this.ws?.connected === false || this._disconnected) return;
+    const ack = this._lastAttachAckAt || 0;
+    if (ack >= H.since && Date.now() - ack < ATTACH_HOLD_FRESH_ACK_MS) return;   // a FRESH ack stands: the hub works on it — no ask (checked when the ask goes, not only when it was queued)
     try { this._trace?.('attach:holdAsk', {}); } catch { }
     this.ws.send(H.frame);
   }
@@ -7729,6 +7733,7 @@ class ChatView {
     if (!H) return;
     this._attachHold = null;
     clearTimeout(H.timer);
+    try { H.off?.(); } catch { }   // the cycle's handler goes with the hold (the landing already removed it: a second off is harmless)
     try { this.app?._reconnectQueue?.cancel(this); } catch { }
     if (H.line) H.line.remove();
   }

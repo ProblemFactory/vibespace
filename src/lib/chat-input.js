@@ -1204,13 +1204,18 @@ export class ChatInput {
     // answer this conversation's attach): a press of Send then says so in the hold's own words, never «Disconnected»; any other
     // call (a socket that really dropped) says what it always said
     this._disconnectedWhy = disconnected ? (arguments[1] || null) : null;   // the second argument, so the method's own line stays as every lift reads it
+    // THE HOLD IS NO DEAD LINK (B-a26e, the adversarial read's must): while 'attaching' the socket is UP — a send already gone
+    // reached the hub; restoring it into the box («Connection lost …») would have it sent TWICE after the landing. So the hold
+    // runs none of the dead-link roads below, and it greys nothing: Send stays a live press answered in words (the owner's rule)
+    const dead = disconnected && this._disconnectedWhy !== 'attaching';
     // Keep the textarea fully editable — the user must be able to select/copy
     // (a disabled textarea blocks selection) and keep drafting; only SENDING
     // is blocked (guarded in _send). Drafts queue via ws.pending and sync on
     // reconnect.
     this._disconnected = disconnected;
-    this._element.classList.toggle('chat-input-disconnected', disconnected);
-    if (disconnected && this._pendingSend) {
+    this._element.classList.toggle('chat-input-disconnected', dead);
+    this._element.classList.toggle('chat-input-attaching', disconnected && !dead);
+    if (dead && this._pendingSend) {
       // The socket died with a send still unconfirmed — the message may never
       // have reached the server. Restore the text (draft was never cleared)
       // so the user can re-send after checking the conversation; without this
@@ -1231,7 +1236,7 @@ export class ChatInput {
         noneMsg: t('Connection lost — your last message may not have been sent'),
       });
     }
-    if (disconnected && this._pendingEdit) {
+    if (dead && this._pendingEdit) {
       // Same class: the edit frame may never have reached the server, and its
       // result certainly will not arrive on this socket. The rewrite is
       // already in the textarea — end the wait and say so (a row left
@@ -1239,7 +1244,7 @@ export class ChatInput {
       // prevent).
       this._resolvePendingEdit(false, t('Connection lost — the edit may not have been saved.'));
     }
-    if (disconnected && this._pendingGoal) {
+    if (dead && this._pendingGoal) {
       // Same class as the unconfirmed send above — don't make the user wait out
       // the 10s timer when the socket is already known dead.
       clearTimeout(this._goalTimer);
@@ -1478,7 +1483,7 @@ export class ChatInput {
     const hasAttachments = this._attachments.length > 0;
     if (!text && !hasAttachments) return false;
     if (this._disconnected) {
-      if (this._disconnectedWhy === 'attaching') showToast(t('Still attaching — your draft is kept here; send it once the conversation is back.'), { type: 'info' });
+      if (this._disconnectedWhy === 'attaching') showToast(t('Still attaching — your draft is kept here; send it once this window is back.'), { type: 'info' });
       else showToast(t('Disconnected — reconnecting… your draft is kept'), { type: 'error' });
       return false;
     }
