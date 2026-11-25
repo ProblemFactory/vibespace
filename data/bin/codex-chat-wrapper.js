@@ -9,6 +9,7 @@ const path = require('path');
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode); try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(`${where}: its new bytes could not be synced before it took its name (${(e && e.code) || 'error'}) — after a power cut it may read empty`); } catch { } } } finally { fd = closeWritten(fd, where, say); } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn } = require('child_process');
 
 const bufferFile = process.argv[2];
@@ -519,8 +520,7 @@ function persistBuffer() {
   const tmp = `${bufferFile}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(bufferFile), { recursive: true });
-    fs.writeFileSync(tmp, buffer);
-    fs.renameSync(tmp, bufferFile);
+    renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log });   // B-bcb8 unit B: synced before its name
     if (JOURNAL) JOURNAL.rewritten();
   } catch { try { fs.unlinkSync(tmp); } catch {} }
 }
@@ -532,8 +532,7 @@ function persistMeta() {
   const tmp = `${metaFile}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(metaFile), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(meta));
-    fs.renameSync(tmp, metaFile);
+    renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log });   // B-bcb8 unit B: synced before its name
   } catch { try { fs.unlinkSync(tmp); } catch {} }
 }
 

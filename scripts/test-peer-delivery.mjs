@@ -446,11 +446,11 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const RED = path.join(D, 'red', 'data', 'bin', 'agy-wrapper.js');
   fs.writeFileSync(RED, editAnchor(wsrc, ADVERT, 'caps: { frameFile: true, peerMessage: false,', "data/bin/agy-wrapper.js"));
   // …and the same red copy with the PRE-.358 sidecar write (in place: truncate, then the bytes) — ④'s negative control
-  const ATOMIC = 'fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile);';
+  const ATOMIC = "renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log });";   // B-bcb8 unit B: the sidecar's write is the synced helper's now
   fs.mkdirSync(path.join(D, 'inplace', 'data', 'bin'), { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(D, 'inplace', 'src'));
   const INPLACE = path.join(D, 'inplace', 'data', 'bin', 'agy-wrapper.js');
-  fs.writeFileSync(INPLACE, fs.readFileSync(RED, 'utf8').replace(ATOMIC, 'fs.writeFileSync(metaFile, JSON.stringify(meta));'));
+  fs.writeFileSync(INPLACE, editAnchor(fs.readFileSync(RED, 'utf8'), ATOMIC, 'fs.writeFileSync(metaFile, JSON.stringify(meta));', 'data/bin/agy-wrapper.js'));   // a gone anchor is LOUD (a silent .replace left the copy atomic)
   const until = async (pred, ms, what) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = pred(); if (v) return v; await new Promise((r) => setTimeout(r, 15)); } throw new Error('timeout: ' + what); };
   const env0 = { ...process.env };
   for (const k of Object.keys(env0)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_/.test(k)) delete env0[k];
@@ -554,7 +554,8 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
       // …and every chat wrapper the hub reads with wrapperCaps writes its sidecar the same way (a temp file renamed over it)
       const persistOf = (f) => { const t = read(f), i = t.indexOf('function persistMeta() {'); return i < 0 ? '' : t.slice(i, t.indexOf(t[i + 24] === '\n' ? '\n}\n' : '\n', i)); };
       const WRAPPERS = ['data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js'];
-      ok('…every chat wrapper REPLACES its sidecar (temp file + rename), none rewrites it in place (ci358-reds item 7)', WRAPPERS.every((f) => /fs\.renameSync\(tmp, metaFile\)/.test(persistOf(f)) && !/writeFileSync\(metaFile/.test(persistOf(f))), WRAPPERS.filter((f) => !/fs\.renameSync\(tmp, metaFile\)/.test(persistOf(f)) || /writeFileSync\(metaFile/.test(persistOf(f))));
+      const REPLACES = /(?:fs\.renameSync|renameSynced)\(tmp, metaFile\b/;   // B-bcb8 unit B: the temp + rename through the synced helper (src/fd-close.js renameSynced) or by hand
+      ok('…every chat wrapper REPLACES its sidecar (temp file + rename — through the synced helper since B-bcb8 unit B), none rewrites it in place (ci358-reds item 7)', WRAPPERS.every((f) => REPLACES.test(persistOf(f)) && !/writeFileSync\(metaFile/.test(persistOf(f))), WRAPPERS.filter((f) => !REPLACES.test(persistOf(f)) || /writeFileSync\(metaFile/.test(persistOf(f))));
       // ci358-reds round 2: the pin's scope is the WHOLE file — the boot write included (chat-wrapper's went through writeFileSync(metaFile)
       // until round 2); the one in-place write left is the exit record (overwriteIfPresent: opened r+, never truncated, padded to the
       // old length — it must never recreate a sidecar the hub already removed)

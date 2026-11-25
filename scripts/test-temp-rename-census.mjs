@@ -197,6 +197,7 @@ const ROWS = [
   ["src/desktop-serve.js", "unsynced", "derived", "a seeded profile frame, made again when missing", "install > seedChromiumFrame"],
   ["src/desktop-serve.js", "move", "move", "", "install > stop"],
   ["src/exit-proxy.js", "synced", "self-synced", "", "ExitProxyManager._transferHeld"],
+  ["src/fd-close.js", "synced", "self-synced-best-effort", "the wrappers' records the hub reads (B-bcb8 unit B, 主开发 r4367: the job's pid / exit / bound records, the conversations' meta sidecar, buffer and handed records): a refused sync is SAID in the wrapper's own log and the record still takes its name — never a lost exit record", "renameSynced"],
   ["src/fixture-ledger-purge.js", "unsynced", "store", "", "_writeAtomic"],
   ["src/gmail-sync.js", "unsynced", "store", "", "GmailSync._saveState"],
   ["src/gmail-sync.js", "synced", "self-synced", "the person's local mail copy: the folder's file NAMES are the seen index (a torn copy would never be fetched again) — written, synced and renamed off the loop since B-ddf3 unit 1", "GmailSync._writeMessage"],
@@ -380,11 +381,11 @@ ok(OWED_MAX <= OWED_BASELINE + RISES.reduce((a, r) => a + r[0], 0) && RISES.ever
 // (1) data/bin: every member rename on a file-system object (and every bare-name call) of its tracked files; (2) shell: every
 // `mv` inside a string or template a src/ file holds (a command a child runs: an install step, a device's state over ssh)
 const REGION_ROWS = [
-  ["data/bin", "data/bin/acp-wrapper.js", 2],
-  ["data/bin", "data/bin/agy-wrapper.js", 5],
-  ["data/bin", "data/bin/chat-wrapper.js", 4],   // + B-5a4d root: the conversation's handed records (<buffers>/handed/<conversation id>.json), temp + rename
-  ["data/bin", "data/bin/codex-chat-wrapper.js", 3],   // + B-cd4b's said journal (the wrapper's hold): one more temp + rename
-  ["data/bin", "data/bin/job-wrapper.js", 5],
+  ["data/bin", "data/bin/acp-wrapper.js", 2],   // B-bcb8 unit B: − its meta sidecar (through renameSynced), + the helper's one-line fallback (one spelling, test-fd-close-census ⑥)
+  ["data/bin", "data/bin/agy-wrapper.js", 5],   // B-bcb8 unit B: − its meta sidecar (through renameSynced), + the helper's fallback; its conversation modes and the person's link: unit C
+  ["data/bin", "data/bin/chat-wrapper.js", 2],   // B-bcb8 unit B: − the meta sidecar, the handed records and the buffer (through renameSynced), + the helper's fallback   // + B-5a4d root: the conversation's handed records (<buffers>/handed/<conversation id>.json), temp + rename
+  ["data/bin", "data/bin/codex-chat-wrapper.js", 2],   // B-bcb8 unit B: − the buffer and the meta sidecar (through renameSynced), + the helper's fallback   // + B-cd4b's said journal (the wrapper's hold): one more temp + rename
+  ["data/bin", "data/bin/job-wrapper.js", 3],   // B-bcb8 unit B: − pid.json, exit.json, bound.json (through renameSynced), + the helper's fallback; left: the log's rotation, pressure.json (rewritten each sample)
   ["data/bin", "data/bin/pty-wrapper.js", 1],
   ["data/bin", "data/bin/vibespace-browser", 1],
   ["data/bin", "data/bin/vibespace-channels", 1],

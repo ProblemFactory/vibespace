@@ -102,6 +102,7 @@ const path = require('path');
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode); try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(`${where}: its new bytes could not be synced before it took its name (${(e && e.code) || 'error'}) — after a power cut it may read empty`); } catch { } } } finally { fd = closeWritten(fd, where, say); } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn } = require('child_process');
 const os = require('os');
 const { randomUUID } = require('crypto');
@@ -218,7 +219,7 @@ let metaTimer = null;
 function persistMeta() {
   metaTimer = null;
   const tmp = `${metaFile}.${process.pid}.tmp`;
-  try { fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile); return null; } catch (e) { try { fs.unlinkSync(tmp); } catch {} return e; }
+  try { renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log }); return null; } catch (e) { try { fs.unlinkSync(tmp); } catch {} return e; }   // B-bcb8 unit B: synced before its name
 }
 
 function scheduleMeta() {
@@ -323,7 +324,7 @@ function writeRecords() {
   if (dropped.length) log(`handed records: past ${HANDED_MAX} records or ${HANDED_FILE_MAX} bytes — ${dropped.length} record(s) not finished left ${path.basename(file)}: ${dropped.join(', ')}`);
   if (Buffer.byteLength(text) > HANDED_FILE_MAX) { sayOnce('big:' + file, `one record alone passes ${HANDED_FILE_MAX} bytes — not written`); return false; }
   const tmp = `${file}.${process.pid}.tmp`;
-  try { fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, file); }
+  try { renameSynced(tmp, file, text, { mode: 0o600, where: 'the handed records', say: log }); }   // B-bcb8 unit B: synced before its name
   catch (e) { try { fs.unlinkSync(tmp); } catch { } sayOnce('write:' + file, `write of ${path.basename(file)} failed (${(e && e.code) || (e && e.message)})`); return false; }
   for (const id of [...HR.keys()]) if (!all.has(id)) HR.delete(id);   // this wrapper's memory: what was written, never more
   return true;
@@ -489,7 +490,7 @@ function persistBuffer() {
   // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
   // its path: a reader sees the whole old file or the whole new one, never a truncated one mid-write (write-through made it often)
   const tmp = `${bufferFile}.${process.pid}.tmp`;
-  try { fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced
+  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: synced before its name
   catch (e) { try { fs.unlinkSync(tmp); } catch {} if (!persistBuffer.said) { persistBuffer.said = true; log(`history buffer write failed: ${e.message}`); } }
 }
 

@@ -27,4 +27,23 @@ async function closeWrittenHandle(fh, where, say) {
   return null;
 }
 
-module.exports = { closeWritten, closeWrittenHandle, closeFailedWords };
+/** THE words of a refused sync (the one spelling) */
+function syncFailedWords(where, code) { return `${where}: its new bytes could not be synced before it took its name (${code || 'error'}) — after a power cut it may read empty`; }
+
+/** B-bcb8 unit B (主开发 r4367): A RECORD THE HUB READS TAKES ITS NAME ONLY AFTER ONE SYNC OF ITS TEMP — the job wrapper's pid / exit /
+ *  bound records, the conversation wrappers' meta sidecar, buffer and handed records (after a power cut or a full disk the hub read a
+ *  record with its name and no bytes). `bytes` written to `tmp` (its mode), synced ONCE, closed through closeWritten, renamed to `final`.
+ *  A refused sync is SAID once (the site's name, the code — no path) and the record STILL takes its name: never a lost record because a
+ *  sync refused. A failed open / write / rename THROWS, as writeFileSync + renameSync did: each caller's own try is unchanged. WHAT is
+ *  written and WHEN are the caller's, as before. The wrappers carry a one-line fallback with THESE words (test-fd-close-census ⑥) */
+function renameSynced(tmp, final, bytes, { mode, where, say } = {}) {
+  const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes));
+  let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode);
+  try {
+    for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; }
+    try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(syncFailedWords(where, e && e.code)); } catch { /* a sink that throws says nothing more */ } }
+  } finally { fd = closeWritten(fd, where, say); }
+  fs.renameSync(tmp, final);
+}
+
+module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncFailedWords };

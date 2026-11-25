@@ -790,6 +790,13 @@ const PRINTS = {
   // lane cli-call-timeouts: THE ONE CALL every agent CLI requires (src/cli-call.js, walked above) prints ONE line of its own —
   // the expiry line (stderr, then exit 124) and a bad --timeout's refusal: our words around numbers, the hub's own address,
   // a step KEY the hub's 103 named (stepKey: [a-z0-9-] ≤ 40, worded by STEP_WORDS) and the caller's OWN typed value
+  // lane bl-jobs (B-bcb8 unit B): src/fd-close.js renameSynced WRITES a wrapper's record to its own temp file (fs.writeSync) — no print: these
+  // pieces go to that file, never to a terminal or an agent
+  ...rows('src/fd-close.js', {
+    'fd': `${V}:the descriptor of the record's own temp file (renameSynced opens it; never stdout or stderr)`,
+    'b': `${V}:the record's own bytes the wrapper hands it (its sidecar, buffer, handed or exit record), written to that temp file — never printed`,
+    'o': `${V}:a byte offset into those bytes (a number)`,
+  }),
   ...rows('src/cli-call.js', {
     'line': `${V}:THE expiry line (expiryLine — our words around a budget number, the hub's own address, an HTTP status number and a step KEY worded by STEP_WORDS; stderr)`,
     // lane lg-store-writes, the U4/U5 cure: an answer carrying notOnDisk prints ONE line of our own words around the CLI's own name

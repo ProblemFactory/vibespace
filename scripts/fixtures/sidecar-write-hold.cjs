@@ -22,4 +22,16 @@ if (DIR && SIDE) {
       fs.writeSync(fd, typeof data === 'string' ? data : Buffer.from(data));
     } finally { fs.closeSync(fd); }
   };
+  // B-bcb8 unit B: the synced helper's road (src/fd-close.js renameSynced: openSync 'w', then its own writes) — held the same way, between
+  // the open that truncates and the bytes (its writes come after this returns)
+  const open0 = fs.openSync;
+  fs.openSync = function (p, flags, ...rest) {
+    const fd = open0.call(this, p, flags, ...rest);
+    if (held || typeof p !== 'string' || !(p === SIDE || p.startsWith(SIDE + '.')) || !/^w/.test(String(flags)) || !fs.existsSync(path.join(DIR, 'arm'))) return fd;
+    held = true;
+    write0(path.join(DIR, 'held'), p);
+    const nap = new Int32Array(new SharedArrayBuffer(4)), t0 = Date.now();
+    while (!fs.existsSync(path.join(DIR, 'release')) && Date.now() - t0 < 10000) Atomics.wait(nap, 0, 0, 5);
+    return fd;
+  };
 }

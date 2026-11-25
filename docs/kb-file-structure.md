@@ -267,7 +267,7 @@ src/lib/held-lists-words.js — NEW PURE (bl-phone-ui, B-f276 unit B) the notice
 src/lib/utils.js HELD_WORDS · HELD_CODE_RE · familyHeldWords · heldGenericWords (B-f276 family r3032) — the ONE table of the family's held codes in the page's refusal pass (refusalWords, heldWordsOf); a lane adds its code here ⇒ kb-features.md
 src/routes/persistence.js (B-225b's remainder, r1310 / r1318 / r1353) — the rollback points' refused or late save said once (lost counted); an unread point never offered; the `_vs` stamp + the owed mark ⇒ the next start's KNOWN / «may not» ⇒ the B-225b remainder essay
 src/lib/store-held.js + utils storeStopWords (B-225b's remainder) — the strip's last-stop row (known: «Understood»; maynot: quiet) and the rollback points' sentences ⇒ the B-225b remainder essay
-src/fd-close.js — NEW SHARED (lg-store-writes, B-15ac) the ONE close of a written file: closes once, a failed close SAID once (code + site, no path), never throws, → null; the hub, the wrappers (same-words fallback), the channels CLI (boot copy, AGENT_TOOLS)
+src/fd-close.js — SHARED (lg-store-writes, B-15ac; B-bcb8 unit B) the ONE close of a written file (said once, no path, never throws) + renameSynced: a wrapper's record synced before its name; the hub, the wrappers (same-words fallbacks), the channels CLI ⇒
 src/said-journal.js (NEW SHARED, B-cd4b the wrapper's hold) — every line a chat wrapper SAYS is appended to its file before it is said (one write per input, between the timer's whole rewrites); the restore's FENCE and its PURE gap (fenceGap) ⇒ «THE WRAPPER'S HOLD»
 src/proc-identity.js childTreeOf (twin in data/bin/job-wrapper.js) · treeOf · endTree · treeLine + scripts/test-stop-tree.mjs (bl-jobs B-c134) — A STOP ENDS THE WHOLE TREE IT STARTED: the tree by the parent chain before the first signal; one signal a process ⇒
 src/store-pace.js — PURE NEW (lane hub-loop-stalls commit 2) THE PACE + THE QUEUE: minGapMs, dueAt, nextOf (acts / paced ALTERNATE: 2K + 1 / 2P + 1 writes), exitOrder, exitLine, stopGraceOf (round 6: the exit's only bound), the keeper's moments and words ⇒ kb-file-structure.md
@@ -2975,6 +2975,24 @@ userW (inc-mw2oamb4-vain, 2.369.378): a window that turned red blinked yellow in
   - **r3942 (line 871's follow):** the quiet counts from the job's LAST write that left its line open (a job streaming one open line keeps them until it pauses). The log is opened BEFORE a drain builds its lines, and a failed close's owed sentence goes FIRST, so it is never after the exit line. The masker-failed sentence and the fall-through rung's line are on this road too (no longer the job's bytes).
   - **The residual:** a job that never goes quiet with nothing held keeps the wrapper's lines until its end. It may stream without a pause, or its masker may keep an uncertain tail. The stop itself never waits for them. A wrapper killed before its drain (the engine's kill step) loses what is still queued. A refused stop still reaches the person by the engine's own error and its `[jobs]` line.
   - **Legs:** scenes ac and bc, whose LAST piece a child of the job's group writes at the drain's signal, after the cut's notice: a PLACED order, the RED by it. Plus «r3942 — THE OWN LINES' ROAD, IN-PROCESS», the wrapper's own definitions over stand-ins: a holding masker writes nothing until the end; the quiet re-armed; the owed sentence first; the masker-failed line off an open line. Each has its RED in a copy.
+
+### src/fd-close.js — the one close of a written file, and a wrapper's record synced before its name (B-15ac; B-bcb8 unit B, 主开发 r4367)
+- **`closeWritten(fd, where, say)` / `closeWrittenHandle`** (B-15ac): a written file is closed ONCE. A failed close (where a deferred write error arrives on a network or FUSE folder) is said once, with the site's name and the code, never a path. It never throws; the caller forgets the number in the statement that closes it.
+- **`renameSynced(tmp, final, bytes, {mode, where, say})`** (B-bcb8 unit B): a record the hub reads takes its name only after ONE sync of its temp. It writes, makes one `fsyncSync`, closes through `closeWritten`, then renames.
+  - A refused sync is SAID once (`syncFailedWords`: the site's name and the code) and the record STILL takes its name: never a lost exit record because a sync refused.
+  - A failed open, write or rename throws, as `writeFileSync` + `renameSync` did, so each caller's own try is unchanged.
+  - Its users are the job wrapper's pid.json, exit.json and bound.json, and the conversation wrappers' meta sidecar (chat, codex, acp, agy), buffer (chat, codex) and the chat wrapper's handed records.
+  - The job's refused sync is said in the job's log: appended before the own lines' road exists (the job has not started), on that road after.
+  - WHAT is written and WHEN are the callers'. The sync runs on the wrapper's own loop, as its write did; a buffer's writes stay throttled by their timer.
+- **Carried, not bundled:** each wrapper requires src/fd-close.js at its start and carries a one-line fallback with the SAME words (test-fd-close-census ⑤ for the close, ⑥ for the rename: one spelling, built from each file's own text). acp and agy load it since unit B.
+- **Old and new:** a RUNNING conversation's or job's wrapper keeps the code it started with, so the sync reaches new starts only. An old wrapper with a new hub writes the same files, and the hub reads them the same way.
+- **Not this helper's (named):**
+  - log rotations (a rename of a whole file, no temp);
+  - the job's pressure.json (rewritten every sample; read only after an instance's death);
+  - the acp and agy buffers (written in place, no rename);
+  - agy's conversation modes and the person's agy link (unit C);
+  - agy's own synced settings write.
+- **Legs:** test-fd-close-census ⑥ runs each of the 10 records from its wrapper's own code with its sync REFUSED (placed). Each is said once and LANDED. RED: the release's form of each record asks no sync. test-temp-rename-census: the helper's rename is rowed (self-synced-best-effort), and the data/bin counts fall (job 5→3, chat 4→2, codex 3→2).
 
 ### src/job-notice.js + src/jobs.js — B-74f5: a published service's URL change is said only when proven (2026-11-19)
 A URL different from the job's `lastPublicUrl` is SAID only when the new address answered AND the old one failed. A web address (http / https) followed by a tcp:// one (`keepsWebUrl`) is not the job's until then: `publishedUrl` and `lastPublicUrl` keep the web address. This guards against the http probe misreading a web service as tcp while it or the relay comes back (fb-71b12fb3cd, fb-197c3042ca, fb-9efc35787c).

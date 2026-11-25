@@ -61,6 +61,11 @@
 
 const fs = require('fs');
 const path = require('path');
+// B-15ac (lane lg-store-writes): the ONE close of a written file — src/fd-close.js, required at the start as kept-copies.js is (the
+// build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
+let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
+const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode); try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(`${where}: its new bytes could not be synced before it took its name (${(e && e.code) || 'error'}) — after a power cut it may read empty`); } catch { } } } finally { fd = closeWritten(fd, where, say); } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn } = require('child_process');
 
 const bufferFile = process.argv[2];
@@ -177,7 +182,7 @@ function persistBuffer() {
 function persistMeta() {
   metaTimer = null;
   const tmp = `${metaFile}.${process.pid}.tmp`;
-  try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile); } catch { try { fs.unlinkSync(tmp); } catch {} }
+  try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log }); } catch { try { fs.unlinkSync(tmp); } catch {} }   // B-bcb8 unit B: synced before its name
 }
 function schedulePersist() { if (!writeTimer) writeTimer = setTimeout(persistBuffer, Date.now() - lastReceiptAt < FOLLOWED_MS ? 250 : 1000); }   // a person's CLI follows the buffer (it asked for a receipt lately): its replies land in 250 ms
 /** THE RECEIPTS ROAD (lane human-cli r3): a receipt is the WRITER's, never a replayed record — the buffer is what a
