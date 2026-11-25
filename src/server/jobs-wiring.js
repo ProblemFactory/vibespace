@@ -516,6 +516,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     getJobs: () => jm,
     initAfterListen: () => {
       try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }
+      // B-2c5c (4c), 主开发 r4380: a VibeSpace started AS a background job lives under that job's memory bound — said ONCE, here, where
+      // the job's record is read (the card and the job's notification already name a memory-bound end with its size)
+      try { const id = require('./throwaway-root.js').handedJobId(); if (id) { const job = jm.jobs && jm.jobs.get(id); log(M.startedInJobLine(id, job ? { label: jm.labelOf(job), mb: (job.memoryBound && job.memoryBound.mb) || job.memoryMb } : null)); } } catch { /* words only */ }
       // two passes: dtach re-attaches trickle in after boot
       const t1 = setTimeout(pushAcceptToLiveSessions, 5000);
       const t2 = setTimeout(pushAcceptToLiveSessions, 60_000);

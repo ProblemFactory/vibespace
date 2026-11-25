@@ -201,6 +201,10 @@ function dropHandedAtBoot({ env = process.env } = {}) {
   const creds = new Set(HV.HUB_KNOBS.credentials.map((c) => c && c.name).filter(Boolean));
   const kept = new Set(KEPT_ENV);
   const dropped = [];
+  // B-2c5c (4c), 主开发 r4380: the background job this hub was started INSIDE (its handed id, a name and never a secret) is kept for the
+  // boot's one journal line (src/server/jobs-wiring.js) — the job's memory bound holds this VibeSpace
+  const handedJob = env.VIBESPACE_JOB_ID;   // read, never written (test-architecture §112)
+  const jobId = typeof handedJob === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(handedJob) ? handedJob : null;
   for (const k of Object.keys(env)) {
     if (person.has(k)) continue;
     if (creds.has(k)) continue;
@@ -209,13 +213,15 @@ function dropHandedAtBoot({ env = process.env } = {}) {
     const handed = has && (k === CE.HANDED_MARK || listed.has(k) || k === APP_MARK_ENV || PAGE_HELPER_ENV.includes(k));
     if (job || handed) { delete env[k]; dropped.push(k); }
   }
-  handedDrop = { by: has ? 'mark' : 'none', dropped: dropped.sort() };
+  handedDrop = { by: has ? 'mark' : 'none', dropped: dropped.sort(), jobId };
   return handedDrop;
 }
+/** B-2c5c (4c): the background job this hub was started inside (its id), or null */
+function handedJobId(d = handedDrop) { return d && d.jobId ? d.jobId : null; }
 /** The boot narrative's one line for it (names only, never a value) — null when no mark was found. */
 function handedLine(d = handedDrop) {
   if (!d || d.by !== 'mark') return null;
   return `[env] started inside a VibeSpace (its handed mark): dropped ${d.dropped.length} name${d.dropped.length === 1 ? '' : 's'} a parent conversation, job or app handed — ${d.dropped.join(', ')}`;
 }
 
-module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, SEAM_ENV, seamOf, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine, dropHandedAtBoot, handedLine, PAGE_HELPER_ENV, KEPT_ENV };
+module.exports = { setHubRoot, hub, OWN_HOME_DIR, OVERRIDE_ENV, SEAM_ENV, seamOf, HUB_DROPS, sshOnOwnFiles, tmpRootsOf, tmpRoots, judge, throwaway, rehomeAtBoot, boot, view, bootLine, unruledLine, dropHandedAtBoot, handedLine, handedJobId, PAGE_HELPER_ENV, KEPT_ENV };

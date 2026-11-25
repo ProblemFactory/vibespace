@@ -628,6 +628,17 @@ function leftWords(l) {
 /** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left (round 6: and when the engine
  *  stopped what it kept), else a kill we made */
 function runEndWords(run) { return run && run.left ? leftWords(run.left) : (run && typeof run.forced === 'string' && run.forced) || ''; }
+/** B-2c5c (4c), 主开发 r4380: the boot's ONE journal line when this VibeSpace was started INSIDE a background job (its handed id):
+ *  that job's memory bound holds VibeSpace and every conversation it starts — past it the whole job is stopped (its scope's
+ *  OOMPolicy=stop) and nothing starts it again. `seen` = what the engine knows of it, {label, mb} — the label is the engine's labelOf
+ *  (the ONE accessor of a job's name, test-architecture §93: a renderer never takes the record), mb the bound in force; null: a job this
+ *  VibeSpace does not know */
+function startedInJobLine(id, seen = null) {
+  const mb = seen ? Number(seen.mb) || 0 : 0;
+  const who = seen && seen.label ? `"${String(seen.label).slice(0, 80)}" (${id})` : `${id}${seen ? '' : ' (a job this VibeSpace does not know: another VibeSpace\'s)'}`;
+  const bound = mb > 0 ? `its memory bound of ${memoryWords(mb)} holds` : 'its memory bound, where it has one, holds';
+  return `[jobs] this VibeSpace was started INSIDE the background job ${who}: ${bound} VibeSpace and every conversation it starts — past it the whole job is stopped, VibeSpace with it, and nothing starts it again. Start VibeSpace as its service (the Background Work manual: «VibeSpace itself is never a job»)`;
+}
 /** the NAMED end the journal says (the card words the same through its own t()) */
 function memoryEndWhat(run) {
   if (!run || !MEMORY_CAUSES.includes(run.cause)) return '';
@@ -1382,7 +1393,7 @@ function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null,
   if (at && cwdExists === false) return { ok: false, code: 'wrong-machine', error: `jobs run on ${hub}, not on ${there} where your conversation runs; this folder is not there: ${at} — nothing was created. Give --cwd a folder ${hub} has, or run the command on ${there} yourself` };
   return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs${at ? ` (the path is used as it is on ${hub})` : ''}` };   // ui-words: the agent's and the CLI's line (the create answer's «where:»), never drawn in a page
 }
-module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
+module.exports = { startedInJobLine /* B-2c5c (4c) */, jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   MAY_READ_MAX, MAY_READ_RECIPE, mayReadOf, ownerAsCaller, jobMayRead, jobsReadableBy, jobReadableRef, JOB_READ_VERBS, JOB_SELF_READS, JOB_SELF_ACTS, JOB_SELF_ACTS_WORDS, mayReadRefusal, jobTokenVerdict, mayReadVerdict, GRANTED_VIEW_FIELDS, grantedJobView,   // B-3992
   ownedJobsView, STATE_WORDS,

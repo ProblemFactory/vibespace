@@ -511,6 +511,18 @@ vibespace-job run "./report.sh" --name report --may-read siblings               
 - Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's For you tray is NOT copied unless you add `--notify-user` — §3 «The user's For you copy» says what it does per kind, that it is set at creation, and that a reminder made before 2.369.363 must be recreated — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
 - Simple user forms → Interaction Panels (§5) before building a web page (§6)
 
+### VibeSpace itself is never a job
+
+VibeSpace runs as its service. Start or restart it with `systemctl --user restart vibespace` (or ⚙ → Update VibeSpace…), never as a
+job's command (`./run.sh`, `node server.js`, `node .`). Never run another checkout's VibeSpace as a job either:
+- **The memory bound:** a VibeSpace started as a job lives under that job's memory bound (§7b). Past it, the whole job is stopped:
+  VibeSpace and every conversation it started end together, and nothing starts it again. Its boot says so in its journal.
+- **Another checkout:** a VibeSpace of another checkout run as a job IS that job's main. The job's stop ends it, with every
+  conversation it started.
+- **A clock step:** one started as a job by `node .` or under pm2 can be read as gone for a moment after the machine's clock steps
+  forward, and that job's stop could then end it.
+- **Its output:** what it prints after its job's wrapper has ended is lost from the job's log.
+
 ## The full teaching behind the session intro's pointer line
 
 Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:
