@@ -22,7 +22,7 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   ok(!/\{name\} drives/.test(lw) && /function chipClick\(row\)/.test(lw) && /type: 'watch-tab'/.test(lw) && /case 'tab-background':/.test(lw) && /case 'watching':/.test(lw) && /if \(row\) chipClick\(row\)/.test(lw), 'the client: the "{name} drives" strip words are gone; a chip click goes through chipClick (the PURE verdict); `watching` and `tab-background` records are read');
 
   const kp = read('src/server/browser-keeper.js');
-  ok(/if \(v\.noop && act === 'switch' && !eph\)/.test(kp) && /broughtForward: true/.test(kp) && /tabVisibilityFor, captureTabFor, watchTabFor,/.test(kp), 'the keeper: a driving click on the agent\'s CURRENT tab brings it forward (never a silent no-op); the visibility / capture / watch seams are exported');
+  ok(/if \(v\.front && act === 'switch'\) \{/.test(kp) && /\[\.\.\.\(eph \? \[\] : pin\), 'tab', id, '--json'\]/.test(kp) && /broughtForward: true/.test(kp) && /tabVisibilityFor, captureTabFor, watchTabFor,/.test(kp), 'the keeper: a driving click on the agent\'s CURRENT tab brings it forward (never a silent no-op) — in EVERY browser, a conversation\'s own by the no-pin form (r4412); the visibility / capture / watch seams are exported');
 
   const lwG = read('src/lib/browser-live-window.js');
   const moreSrc = lwG.slice(lwG.indexOf('tabRowMore.onclick'), lwG.indexOf('function clickOf('));

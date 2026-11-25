@@ -627,7 +627,7 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const bfRoads = [
     ['brought forward: the stuck tab itself (ids in either case)', { state: 'unresponsive', id: 'a1b2', ack: { ok: true, act: 'switch', targetId: 'A1B2', switchedTo: 'A1B2', broughtForward: true } }, true],
     ['the agent switched to ANOTHER tab', { state: 'unresponsive', id: 'A1B2', ack: { ok: true, act: 'switch', targetId: 'C3D4', switchedTo: 'C3D4' } }, false],
-    ['a no-op that ran nothing (an ephemeral browser\'s own tab)', { state: 'unresponsive', id: 'A1B2', ack: { ok: true, act: 'switch', targetId: 'A1B2', switchedTo: 'A1B2', noop: true } }, false],
+    ['a no-op that ran nothing (an ack that brought nothing forward)', { state: 'unresponsive', id: 'A1B2', ack: { ok: true, act: 'switch', targetId: 'A1B2', switchedTo: 'A1B2', noop: true } }, false],
     ['the tab only hidden, not hung', { state: 'hidden', id: 'A1B2', ack: { ok: true, act: 'switch', targetId: 'A1B2', switchedTo: 'A1B2', broughtForward: true } }, false],
     ['a refused act (no ack)', { state: 'unresponsive', id: 'A1B2', ack: null }, false],
   ];

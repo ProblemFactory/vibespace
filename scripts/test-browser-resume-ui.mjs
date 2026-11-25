@@ -831,7 +831,9 @@ else await (async () => {
       const DRIVE_WORDS = { en: 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.', zh: 'VibeSpace 无法把此页面带回前台。点击上方它的标签即可将其带到前面。' };
       for (const code of Object.keys(PAINT_WORDS.en)) { ASKED.add(`bcf8-still-${code}-en-1280.png`); ASKED.add(`bcf8-still-${code}-zh-390.png`); }
       ASKED.add('bcf8-still-show-left-driving-en-1280.png'); ASKED.add('bcf8-still-show-left-driving-zh-390.png');
-      const chipOf = (id) => ev(`const el = [...L().el().querySelectorAll('.browser-live-tabchip')].find((e) => String(e.dataset.target || '').toUpperCase() === String(${S(id)} || '').toUpperCase()); return el ? { role: el.getAttribute('role'), drawn: !!el.offsetParent } : null;`);
+      const chipOf = (id) => ev(`const root = L().el(); const el = [...root.querySelectorAll('.browser-live-tabchip')].find((e) => String(e.dataset.target || '').toUpperCase() === String(${S(id)} || '').toUpperCase()); const bar = root.querySelector('.browser-live-bar'), trow = root.querySelector('.browser-live-tabrow'), take = root.querySelector('.browser-live-mode-btn'); const vis = (e) => !!e && e.style.display !== 'none' && !!e.offsetParent && e.getBoundingClientRect().width > 0; const r = el && vis(el) ? rect(el) : null, b = rect(bar), rr = vis(trow) ? rect(trow) : null; return { role: el ? el.getAttribute('role') : null, drawn: !!r, above: !!r && r.top + r.height <= b.top + 1 && r.left >= 0 && r.left + r.width <= innerWidth + 1, rect: r, row: rr, take: vis(take) ? rect(take) : null };`);
+      // r4334: the pictures carry the door the line names IN THE SAME FRAME — the tab row above the bar joins the clip
+      const framed = async (b) => { const f = await ev(`const e = L().el().querySelector('.browser-live-tabrow'); return e && e.style.display !== 'none' && e.offsetParent ? rect(e) : null;`); if (!b || !b.clip || !f) return b; const c = b.clip; return { ...b, clip: { left: Math.min(c.left, f.left), top: Math.min(c.top, f.top), right: Math.max(c.right, f.left + f.width), bottom: Math.max(c.bottom, f.top + f.height) } }; };
       // `whose`: 'shown' = the tab the view shows (its row marked active), 'other' = a tab it does not show, null = no paint (it cleared)
       const plantPaint = (code, whose) => ev(`const s = L().state(); const rows = (s.tabRow && s.tabRow.rows) || []; const shown = (rows.find((r) => r.active) || {}).targetId || null; const d = JSON.parse(JSON.stringify(app._browserProfiles || { profiles: [] })); d.browsers = d.browsers || {}; const ids = new Set(Object.keys(d.browsers)); if (s.target && s.target.profileId) ids.add(s.target.profileId); const key = ${S(whose)} === 'shown' ? shown : 'F'.repeat(32); const paint = ${S(whose)} && key ? { [key]: ${S(code)} } : null; for (const id of ids) d.browsers[id] = { ...(d.browsers[id] || {}), display: ${S(hidFact)}, startedAt: 1, paint }; const m = { type: 'browser-profiles-updated', ...d }; app._onBrowserProfilesUpdated(m); ${relayBroadcastJs('m')} return { shown, ids: [...ids] };`);
       for (const lang of ['en', 'zh']) {
@@ -842,12 +844,12 @@ else await (async () => {
         await ev(`await app.refreshBrowserProfiles(); if (!chatWin()) app.attachSession(${S(SID)}, 'Resume chat', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
         await until(() => ev('return !!chatWin();'), 10000);
         await ev(`if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
-        await until(() => ev('const l = L(); return !!(l && l.state().connected && l.state().target && l.state().target.profileId && (l.state().tabRow.rows || []).some((r) => r.active));'), 30000);   // the tabs record reaches a rebooted page when the stream sends it (its connection, then a change): measured past 12 s at the base run
+        await until(() => ev('const l = L(); return !!(l && l.state().connected && l.state().target && l.state().target.profileId && (l.state().tabRow.rows || []).some((r) => r.active));'), 60000);   // the tabs record reaches a rebooted page when the bridge replays it (a late viewer) or the stream sends it: measured past 12 s at the base run and past 30 s in both tries at d580629bd — r4340 law 1: the wait is on the fact the leg judges, its bound generous, its expiry NAMED by the next red judge
         await ev(gateJs);   // the suite's gate on this page load's socket road (⑩): the hub's own digest held while a read is planted and made
         const got = {};
         for (const code of Object.keys(PW)) {
           got[code] = {};
-          for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { got[code].at = await plantPaint(code, 'shown'); await sleep(150); got[code][wpx] = await bars(); await shoot(`bcf8-still-${code}-${lang}-${wpx}.png`, got[code][wpx], wpx); }); }
+          for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { got[code].at = await plantPaint(code, 'shown'); await sleep(150); got[code][wpx] = await bars(); got[code]['door' + wpx] = got[code].at && got[code].at.shown ? await chipOf(got[code].at.shown) : null; await shoot(`bcf8-still-${code}-${lang}-${wpx}.png`, await framed(got[code][wpx]), wpx); }); }
           ok(!!got[code].at && !!got[code].at.shown && [1280, 390].every((x) => got[code][x].note === PW[code] && markOk(got[code][x], w)),
             `⑪ ${lang}: «${code}» on the tab the view shows — its line said on the display line («${PW[code]}»), the hidden-window mark still on the bar, at 1280 and 390`, S(got[code]));
         }
@@ -862,13 +864,21 @@ else await (async () => {
         // r4297: the watcher's third line names Take over first BECAUSE the shown tab's chip is no button for a watcher
         await sizeTo(1280); const shownW = got['show-left'].at && got['show-left'].at.shown; const chipW = shownW ? await chipOf(shownW) : null;
         ok(!!chipW && chipW.role !== 'button', `⑪ ${lang}: a person who only watches — the shown tab's chip is no button, and the third line says Take over first («${PW['show-left']}»)`, S(chipW));
+        ok([1280, 390].every((x) => { const dr = got['show-left']['door' + x]; return !!dr && dr.drawn && dr.above && !!dr.take; }), `⑪ ${lang}: r4334 — BOTH doors the watcher's line names are DRAWN, at 1280 and 390: Take over on the bar, and the shown tab's chip in the tab row ABOVE the bar (never folded)`, S({ 1280: got['show-left'].door1280, 390: got['show-left'].door390 }));
         // …then as a person who DRIVES: Take over, the same code — «Click its tab above», the chip a button
-        await ev('L().takeOver(); return true;');
+        // r4334: the watcher follows the line — a REAL click on the bar's Take over (the first door it names)
+        const tkR = await ev('const b = L().el().querySelector(".browser-live-mode-btn"); return b && b.offsetParent ? rect(b) : null;'); if (tkR) await click(centre(tkR)); else await ev('L().takeOver(); return true;');
         const drivingN = await until(() => ev('const s = L().state(); return s.mode === "takeover" && s.mine;'), 12000);
         const drv = {};
-        for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { drv.at = await plantPaint('show-left', 'shown'); await sleep(150); drv[wpx] = await bars(); drv['chip' + wpx] = drv.at && drv.at.shown ? await chipOf(drv.at.shown) : null; await shoot(`bcf8-still-show-left-driving-${lang}-${wpx}.png`, drv[wpx], wpx); }); }
+        for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { drv.at = await plantPaint('show-left', 'shown'); await sleep(150); drv[wpx] = await bars(); drv['chip' + wpx] = drv.at && drv.at.shown ? await chipOf(drv.at.shown) : null; await shoot(`bcf8-still-show-left-driving-${lang}-${wpx}.png`, await framed(drv[wpx]), wpx); }); }
         ok(drivingN && [1280, 390].every((x) => drv[x].note === DRIVE_WORDS[lang]) && !!drv.chip1280 && drv.chip1280.role === 'button',
           `⑪ ${lang}: a person who DRIVES — the third line «${DRIVE_WORDS[lang]}», and the shown tab's chip IS a button (it brings the tab forward), at 1280 and 390`, S(drv));
+        // r4334: the driver's door is drawn where the line says (the chip in the row ABOVE the bar) and a REAL press on it reaches the tab:
+        // the switch runs under the agent's own session, by the tab's id (the fake agent-browser's command log)
+        await sizeTo(1280); const dChip = drv.at && drv.at.shown ? await chipOf(drv.at.shown) : null; const nCmd = cmds().length;
+        if (dChip && dChip.rect) await click(centre(dChip.rect));
+        const pressed = !!(drv.at && drv.at.shown) && await until(() => cmds().slice(nCmd).includes(`tab ${String(drv.at.shown).toUpperCase()}`), 8000, 100);
+        ok(!!dChip && dChip.drawn && dChip.above && dChip.role === 'button' && pressed, `⑪ ${lang}: r4334 — the driver's door is DRAWN where the line says (the chip in the tab row above the bar) and a REAL press on it reaches the tab (the switch to it, under the agent's own session)`, S({ chip: dChip, cmds: cmds().slice(nCmd) }));
         await readHeld(async () => { await plantPaint('show-left', null); });
         await ev('L().send({ type: "handback" }); return true;');
         await until(() => ev('const s = L().state(); return s.mode === "watch" && !s.mine;'), 10000);

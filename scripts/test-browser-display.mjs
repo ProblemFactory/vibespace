@@ -869,21 +869,62 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const wordsBad = [];
   for (const [code, line] of Object.entries(EN)) {
     if (typeof W.paintLineOf !== 'function') { wordsBad.push('no paintLineOf in src/lib/browser-display-words.js'); break; }
-    if (W.paintLineOf(recOf({ [TA]: code }), TA) !== line) wordsBad.push(code + ': the shown tab not said in its words');
-    if (W.paintLineOf(recOf({ [TA]: code }), TA.toLowerCase()) !== line) wordsBad.push(code + ': a lower-case id of the shown tab not said');
-    if (W.paintLineOf(recOf({ [TB]: code }), TA) !== '') wordsBad.push(code + ': ANOTHER tab\'s code said');
+    const WAT = { chipDrawn: true, canTake: true };   // r4334: a watcher whose view draws the chip in the row above and Take over on the bar
+    if (W.paintLineOf(recOf({ [TA]: code }), TA, WAT) !== line) wordsBad.push(code + ': the shown tab not said in its words');
+    if (W.paintLineOf(recOf({ [TA]: code }), TA.toLowerCase(), WAT) !== line) wordsBad.push(code + ': a lower-case id of the shown tab not said');
+    if (W.paintLineOf(recOf({ [TB]: code }), TA, WAT) !== '') wordsBad.push(code + ': ANOTHER tab\'s code said');
   }
   if (typeof W.paintLineOf === 'function') {
     for (const [name, r, id] of [['the record as it is today (no paint)', recOf(undefined), TA], ['paint null', recOf(null), TA], ['front_unread (that browser draws)', recOf({ [TA]: 'front-unread' }), TA],
       ['a code it does not know', recOf({ [TA]: 'gone' }), TA], ['no shown tab', recOf({ [TA]: 'show-left' }), null], ['no record', null, TA], ['a prototype key', recOf({}), '__proto__']]) if (W.paintLineOf(r, id) !== '') wordsBad.push(name + ': said');
   }
   if (typeof W.paintLineOf === 'function') {
-    if (W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: true }) !== CLICK_B) wordsBad.push('show-left: the chip CAN bring it forward (the person drives) — not «Click its tab above»');
-    if (W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: false, driving: true }) !== BARE_B) wordsBad.push('show-left: the person drives and the chip cannot (mediated) — a door named anyway');
-    if (W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: false, driving: false }) !== EN['show-left']) wordsBad.push('show-left: the person only watches — not «Take over, then click its tab above»');
-    for (const code of ['thaw-unread', 'show-owed']) for (const o of [{ canFront: true }, { driving: true }]) if (W.paintLineOf(recOf({ [TA]: code }), TA, o) !== EN[code]) wordsBad.push(code + ': its words moved with the chip\'s verdict');
+    const SL = (o) => W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, o);
+    if (SL({ canFront: true, driving: true, chipDrawn: true }) !== CLICK_B) wordsBad.push('show-left: the chip drawn and it CAN bring the tab forward (the person drives) — not «Click its tab above»');
+    if (SL({ canFront: false, driving: true, chipDrawn: true, canTake: true }) !== BARE_B) wordsBad.push('show-left: the person drives and the chip cannot (mediated) — a door named anyway');
+    if (SL({ canFront: false, driving: false, chipDrawn: true, canTake: true }) !== EN['show-left']) wordsBad.push('show-left: the person only watches — not «Take over, then click its tab above»');
+    // r4334: a door the view does NOT draw is never named — the chip not drawn in the row above (the row hidden, the chip folded), or
+    // no Take over on the bar for a watcher (or a chip a driver could not use either) ⇒ the fact alone
+    if (SL({ canFront: true, driving: true, chipDrawn: false }) !== BARE_B) wordsBad.push('show-left: «Click its tab above» with no chip drawn above');
+    if (SL({ canFront: false, driving: false, chipDrawn: false, canTake: true }) !== BARE_B) wordsBad.push('show-left: «Take over, then click its tab above» with no chip drawn above');
+    if (SL({ canFront: false, driving: false, chipDrawn: true, canTake: false }) !== BARE_B) wordsBad.push('show-left: «Take over…» with no Take over to press (or a chip a driver could not use)');
+    if (SL({}) !== BARE_B) wordsBad.push('show-left: a caller that says nothing of the drawing — a door named anyway');
+    for (const code of ['thaw-unread', 'show-owed']) for (const o of [{ canFront: true, chipDrawn: true }, { driving: true }, {}]) if (W.paintLineOf(recOf({ [TA]: code }), TA, o) !== EN[code]) wordsBad.push(code + ': its words moved with the chip\'s verdict');
   }
   ok(wordsBad.length === 0, 'B-bcf8 (r4256) (1)/(3): each of the three codes gives its line for the tab the view SHOWS — never another tab\'s, never front_unread (that browser draws), never a record without `paint` (today\'s says nothing)', wordsBad);
+  {
+    const MW = mutantCopies('browser-display-words-door', REPO), wsrcW = fs.readFileSync(path.join(REPO, 'src/lib/browser-display-words.js'), 'utf8');
+    const GATE = "if (c === 'show-left') return chipDrawn && canFront ? t(";
+    if (!wsrcW.includes(GATE)) ok(false, 'the anchor of the r4334 control «the door named as the view draws it» is not in the source (src/lib/browser-display-words.js)');
+    else {
+      const cut = anchored(anchored(wsrcW, GATE, "if (c === 'show-left') return canFront ? t(", 'r4334 control: the line as it stood (no drawing asked)'), ": chipDrawn && canTake && !driving ? t(", ": !driving ? t(", 'r4334 control: …its watcher form too');   // stale-pins: kept — the line as it stood at ceaff7077, planted back as this control
+      const WR = await import(pathToFileURL(MW.write('src/lib/browser-display-words.js', cut)).href);
+      const asStood = { click: WR.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: true, driving: true, chipDrawn: false }), take: WR.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { chipDrawn: false, canTake: true }) };
+      ok(asStood.click === CLICK_B && asStood.take === EN['show-left'], 'CONTROL (r4334: the line as it stood at ceaff7077, no drawing asked): with no chip drawn above, it still says «Click its tab above» / «Take over, then click its tab above» — RED', asStood);
+      for (const r of copiesCensus(MW.files, MW.dir, REPO, { label: 'r4334 control: ' })) ok(r.pass, r.name, r.detail);
+    }
+  }
+  // r4340 law 4 (a second round of ONE class — r4297 then r4334, a door named that is not there — changes the shape): ONE builder of
+  // the still line's words, paintLineOf (src/lib/browser-display-words.js), asked from ONE place (paintLineNow, src/lib/browser-live-window.js,
+  // which reads the view's own drawing); no other src file calls it or writes a still line's sentence. THE CENSUS over every src file,
+  // and its RED: the same census over the tree plus one planted file that words a door of its own
+  {
+    const STILL = [CLICK_B, EN['show-left'], BARE_B, EN['thaw-unread'], EN['show-owed']];
+    const OWN = new Set(['src/lib/browser-display-words.js', 'src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']);
+    const srcFiles = []; const walkS = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const q = d + '/' + e.name; if (e.isDirectory()) walkS(q); else if (e.name.endsWith('.js')) srcFiles.push([q, fs.readFileSync(path.join(REPO, q), 'utf8')]); } };
+    walkS('src');
+    const stillCensus = (files) => {
+      const out = [];
+      const calls = files.flatMap(([f, txt]) => (f === 'src/lib/browser-display-words.js' ? [] : Array.from({ length: (txt.match(/\bpaintLineOf\(/g) || []).length }, () => f)));
+      if (calls.length !== 1 || calls[0] !== 'src/lib/browser-live-window.js') out.push(`paintLineOf asked from ${calls.length} place(s) — ${[...new Set(calls)].join(', ') || 'none'} — never one: the live view's paintLineNow only`);
+      for (const [f, txt] of files) if (!OWN.has(f)) { const hit = STILL.filter((w) => txt.includes(w)); if (hit.length) out.push(`${f} writes ${hit.length} still line sentence(s) of its own («${hit[0].slice(0, 48)}…»): only paintLineOf words them`); }   // one item a file (one sentence holds another: the bare line is the click line's head)
+      return out;
+    };
+    const tree = stillCensus(srcFiles);
+    ok(srcFiles.length > 100 && tree.length === 0, `B-bcf8 r4340 law 4: ONE builder of the still line's door words — paintLineOf, asked from ONE place (paintLineNow, which reads the view's drawing), its sentences in no other src file (${srcFiles.length} src files read)`, tree);
+    const planted = stillCensus([...srcFiles, ['src/lib/planted-still.js', "export const say = () => t('" + CLICK_B + "'); paintLineOf(r, id);"]]);
+    ok(planted.length === 2 && planted.some((x) => /2 place/.test(x)) && planted.some((x) => x.startsWith('src/lib/planted-still.js writes')), 'CONTROL (r4340 law 4): a planted file that words the door itself and asks the builder from a second place is RED by name, twice', planted);
+  }
   const zhB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const missB = [...Object.values(EN), CLICK_B, BARE_B].filter((k) => !(zhB.includes('  ' + JSON.stringify(k) + ': ') && jaB.includes('  ' + JSON.stringify(k) + ': ')));
   ok(missB.length === 0 && Object.values(EN).every((x) => !/[{}]|https?:/.test(x)), 'B-bcf8 (r4256) (3): the three lines have zh and ja rows, and no line has a slot (no title, no address can ride it)', missB);
@@ -894,7 +935,10 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const PINSB = [
     ['the words module\'s function imported', "runLineVerdict, paintLineOf /* B-bcf8 (r4256) */ } from './browser-display-words.js';"],
     ['the shown tab', "function shownTabId() { return (st.watch && st.watch.targetId) || ((st.tabs || []).find((x) => x && x.active) || {}).targetId || null; }"],
-    ['its line from the shown browser\'s record, worded by the shown tab\'s chip\'s OWN verdict (r4297: one source)', "return paintLineOf(d && d.browsers && pid ? d.browsers[pid] : null, sid, { canFront: !!row && clickOf(row).act === 'front', driving: st.mode === 'takeover' && st.mine }); }"],
+    ['its line from the shown browser\'s record, worded by the shown tab\'s chip\'s OWN verdict (r4297: one source)', "return paintLineOf(d && d.browsers && pid ? d.browsers[pid] : null, sid, { canFront: !!row && clickOf(row).act === 'front', driving: st.mode === 'takeover' && st.mine, chipDrawn, canTake: takeBtn.style.display !== 'none' && (asDriver === 'front' || asDriver === 'switch') }); }"],
+    ['…and by the row\'s OWN drawing (r4334: the row shown, the chip not folded — what the row\'s fit writes)', "const chipDrawn = !!row && tabRow.style.display !== 'none' && !(st.tabFolded || []).includes(row.targetId);"],
+    ['…the row\'s fit writing that fold', 'st.tabFolded = f.folded; st.tabFoldFront = f.foldFront || null;'],
+    ['…the row drawn above the bar (the root\'s order)', 'root.append(strip, tabRow, watchLine, bar,'],
     ['…the chip drawn as a button by that same verdict', "const clickable = cv.act !== 'none' || r.canSwitch;"],
     ['…said while it stands (it takes the line)', 'st.paintShown = paintLineNow(); if (st.paintShown) line = st.paintShown;'],
     ['…re-rendered when the shown tab moved', "try { if (paintLineNow() !== (st.paintShown || '')) renderDisplay(); } catch { /* the view is still being built */ }"],
@@ -910,6 +954,27 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const chipB = { drivingShown: vOf({ active: true, driving: true }), watchingShown: vOf({ active: true, driving: false }), watchingWatched: vOf({ active: false, watching: TA, driving: false }), drivingMediated: vOf({ active: true, driving: true, mediated: true }) };
   ok(chipB.drivingShown === 'front' && chipB.watchingShown !== 'front' && chipB.watchingWatched !== 'front' && chipB.drivingMediated !== 'front',
     'B-bcf8 r4297 (its pin): the shown tab\'s chip brings it forward ONLY while the person drives — watching, its shown tab (the agent\'s or the one watched) answers no act; a mediated browser\'s tab none even while driving — and the line follows that one verdict', chipB);
+  // r4412 (B-bcf8): ONE VERDICT for the chip and the keeper — tabClickVerdict (the chip, src/browser-windows.js) answers «front» from
+  // userTabVerdict's `front` (src/browser-tabs.js), the very field the keeper acts on: over every driving / mediated / on-show case they agree,
+  // and the chip's driving branch asks that function (no answer of its own). RED: the chip's driving branch as it stood (its own «front»)
+  {
+    const TBV = require('../src/browser-tabs.js');
+    const parts = [];
+    for (const driving of [true, false]) for (const mediated of [true, false]) for (const active of [true, false]) {
+      const chip = BW.tabClickVerdict({ owner: 'agent', targetId: TA, driving, mediated, active }).act;
+      const keep = TBV.userTabVerdict({ act: 'switch', owner: 'agent', human: false, driving, mediated, active });
+      if ((chip === 'front') !== !!(keep.ok && keep.front)) parts.push({ driving, mediated, active, chip, keeper: keep.ok ? (keep.front ? 'front' : 'switch') : keep.code });
+    }
+    const bwSrc = fs.readFileSync(path.join(REPO, 'src/browser-windows.js'), 'utf8');
+    const ASKS = "return currentTabFront({ owner: 'agent', human: false, driving, mediated, active }) ? { act: 'front'";
+    const tbSrc = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8'), KEEPS = "front: require('./browser-windows.js').currentTabFront({ owner, human, driving, mediated, active })";
+    const branchOf = (src) => { const i = src.indexOf('  if (driving) {', src.indexOf('function tabClickVerdict')); return i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); };
+    const oneSource = (src) => { const b = branchOf(src); return b.includes(ASKS) && (b.match(/act: 'front'/g) || []).length === 1 && tbSrc.split(KEEPS).length === 2; };
+    ok(parts.length === 0 && oneSource(bwSrc), 'B-bcf8 r4412: ONE verdict — currentTabFront (src/browser-windows.js, PURE): the chip\'s «front» and the keeper\'s act (userTabVerdict\'s `front`) agree over all eight driving / mediated / on-show cases, and both ask that one function', parts);
+    const asStoodBranch = "  if (driving) {\n    if (mediated) return { act: 'none', why: 'mediated_tabs' };\n    return active ? { act: 'front', why: 'its-current-tab' } : { act: 'switch', why: 'another-of-its-tabs' };";   // stale-pins: kept — the chip's driving branch as it stood, planted back as this control
+    const planted = bwSrc.replace(branchOf(bwSrc), asStoodBranch);
+    ok(planted !== bwSrc && !oneSource(planted), 'CONTROL (r4412: the chip\'s driving branch as it stood — its own «front», the keeper\'s apart): RED by the one-source census');
+  }
   // THE REAL KEEPER's digest over a stand-in paint watch: `stillTabs` is the watch's answer; the sweep's tick pushes the digest
   // (`browser-profiles-updated`) only when a browser's `paint` moved; a left tab's mark dropped by the recheck (a viewer watches) is
   // pushed at once, between ticks

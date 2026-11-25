@@ -55,13 +55,16 @@ export function runLineVerdict(firstAt, now, sayMs = DISPLAY_SAY_MS) {
  *  r4297 (the round's must): the third line names a door that WORKS from where the person stands — `canFront` is the shown tab's
  *  chip's own verdict (the live view asks clickOf, the same answer that makes the chip a button): it can bring the tab forward ⇒
  *  «Click its tab above»; the person only watches ⇒ «Take over, then click its tab above» (the two steps that exist); the person
- *  drives and the chip still cannot (a mediated browser's tabs) ⇒ the fact alone, no door named. No new power. */
-export function paintLineOf(record, targetId, { canFront = false, driving = false } = {}) {
+ *  drives and the chip still cannot (a mediated browser's tabs) ⇒ the fact alone, no door named. No new power.
+ *  r4334: the door is named AS THE VIEW DRAWS IT — `chipDrawn`: the shown tab's chip stands in the tab row above (the row drawn, the
+ *  chip not folded: the row's own state, the one its drawing writes); `canTake`: the bar's Take over is drawn and that chip would act
+ *  for a driver. A door the view does not draw is never named: the fact alone. */
+export function paintLineOf(record, targetId, { canFront = false, driving = false, chipDrawn = false, canTake = false } = {}) {
   const id = String(targetId || '').toUpperCase(); const p = record && record.paint && typeof record.paint === 'object' ? record.paint : null;
   const c = id && p && Object.prototype.hasOwnProperty.call(p, id) ? p[id] : null;
   if (c === 'thaw-unread') return t('This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.');
   if (c === 'show-owed') return t('This page has not come back to the front yet. VibeSpace tries again shortly.');
-  if (c === 'show-left') return canFront ? t('VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.') : driving ? t('VibeSpace could not bring this page back to the front.') : t('VibeSpace could not bring this page back to the front. Take over, then click its tab above to bring it forward.');
+  if (c === 'show-left') return chipDrawn && canFront ? t('VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.') : chipDrawn && canTake && !driving ? t('VibeSpace could not bring this page back to the front. Take over, then click its tab above to bring it forward.') : t('VibeSpace could not bring this page back to the front.');
   return '';
 }
 /** One sentence for a browser's launch fact — '' when there is nothing to say (a window as asked, or none asked). */

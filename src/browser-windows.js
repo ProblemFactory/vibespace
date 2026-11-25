@@ -183,6 +183,13 @@ function watchModeVerdict({ framesSeen = 0, waitedMs = 0, firstFrameMs = WATCH_F
 const TAB_CLICK_ACTS = Object.freeze(['front', 'switch', 'watch', 'follow', 'none']);
 /** F8: the owner words of a tab he may watch that is not the viewed agent's (browser-tabs OWNER_WORDS less `agent`). */
 const OWNER_SEEN = Object.freeze(['other', 'you', 'orphan']);
+/** r4412 (B-bcf8): THE ONE VERDICT of «a press on this chip brings the agent's CURRENT tab to the front of its window» (the session's
+ *  own `tab <id>`, U0b) — the person drives a takeover, the tab is the viewed agent's and on show, the browser not mediated; in EVERY
+ *  browser, a conversation's own too. The chip asks it (tabClickVerdict) and the keeper acts by it (src/browser-tabs.js userTabVerdict's
+ *  `front`, read by src/server/browser-keeper.js): one function, so the chip's button and the keeper's act cannot part. PURE. */
+function currentTabFront({ owner = 'orphan', human = false, driving = false, mediated = false, active = false } = {}) {
+  return owner === 'agent' && !human && !!driving && !mediated && !!active;
+}
 function tabClickVerdict({ owner = 'orphan', human = false, driving = false, mediated = false, active = false, watching = null, targetId = '' } = {}) {
   const id = String(targetId || '').toUpperCase();
   const w = watching ? String(watching).toUpperCase() : null;
@@ -196,7 +203,8 @@ function tabClickVerdict({ owner = 'orphan', human = false, driving = false, med
   if (human || owner !== 'agent') return { act: 'none', why: 'not-the-agents' };
   if (driving) {
     if (mediated) return { act: 'none', why: 'mediated_tabs' };
-    return active ? { act: 'front', why: 'its-current-tab' } : { act: 'switch', why: 'another-of-its-tabs' };
+    // r4412 (B-bcf8): THE one verdict the keeper acts on too (src/browser-tabs.js userTabVerdict's `front`) — currentTabFront
+    return currentTabFront({ owner: 'agent', human: false, driving, mediated, active }) ? { act: 'front', why: 'its-current-tab' } : { act: 'switch', why: 'another-of-its-tabs' };
   }
   if (w && w === id) return { act: 'none', why: 'already-watched' };
   if (active) return w ? { act: 'follow', why: 'back-to-its-tab' } : { act: 'none', why: 'already-shown' };
@@ -498,7 +506,7 @@ const CREATE_SITE_RE = /Target\.createTarget'|['"]tab['"], ?['"]new['"]|window\.
 module.exports = {
   WINDOWS_PROOF, ownWindowParams, windowCreateParams, instanceOf, hasOwnWindow, windowMates,
   TAB_LABELS_MAX, withTabLabel, labelTargetOf, withLabelsOnRows,
-  stuckPolledVerdict, broughtFrontVerdict, ownPictureVerdict, WATCH_FIRST_FRAME_MS, WATCH_POLL_MS, watchModeVerdict, TAB_CLICK_ACTS, tabClickVerdict, BACKGROUND_SILENCE_MS, UNRESPONSIVE_MS,
+  stuckPolledVerdict, broughtFrontVerdict, ownPictureVerdict, WATCH_FIRST_FRAME_MS, WATCH_POLL_MS, watchModeVerdict, TAB_CLICK_ACTS, tabClickVerdict, currentTabFront /* r4412 */, BACKGROUND_SILENCE_MS, UNRESPONSIVE_MS,
   ONE_WINDOW_PER_HOLDER, OPENER_ANCHORS_MAX, OPENER_PROOF, BACKGROUND_PAINT_PROOF, windowIdOf, windowCensus, multiWindowHolders,
   ANCHOR_PROBE_MS, RUNG2_TRIES, STRAYS_NOTE, RUNG2_CREATE, rung2Plan, strayWindowsOf, // verify r4: the plan takes {viewers, driven}; the create is a background one // verify r3: the anchor probe, rung 2's tries + plan (the window-state cycle off a real display), the strays said once // verify r1 T2 ⑧ + r2 T1: one window per holder, the measured opener table, the census of the red cell
   DRIVE_ENDED_NOTICE_KIND, driveEndedNotice, driveEndedText, renderDriveEndedNotice, // verify r5 ②: the refused holders told, free, when the user's drive ends

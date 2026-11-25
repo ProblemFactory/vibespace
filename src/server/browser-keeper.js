@@ -5041,11 +5041,15 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // that tab may be BEHIND another one in its window (Chrome activated a neighbour when a tab closed): it paints nothing
     // and the view is a frozen picture. The session's own switch (`tab <id>`, the binary activates it) brings it forward;
     // its current tab is unchanged, so nothing is told to the agent — the journal and the view say it
-    if (v.noop && act === 'switch' && !eph) {
+    // r4412 (B-bcf8, the heavy leg's real press): EVERY browser, a conversation's OWN too — before, «&& !eph» left that one's current tab a
+    // silent no-op though its chip said «Bring this tab to the front» (written with the feature in 2.369.202, no reason said). An
+    // ephemeral session runs WITHOUT --pin-tab (the flag is sticky per session): the no-pin form, as its other tabs' switch below.
+    // The act is the verdict's `front` — the very field the chip asks (src/browser-windows.js tabClickVerdict) — and only while driving.
+    if (v.front && act === 'switch') {
       if (!driving) refuse(TBS.userTabVerdict({ act, owner: 'agent', human: false, driving: false, mediated: false, counts }), 'not driving');
-      const r = await rt.exec(ns, [...pin, 'tab', id, '--json'], { ...opts, timeout: 30000 });
+      const r = await rt.exec(ns, [...(eph ? [] : pin), 'tab', id, '--json'], { ...opts, timeout: 30000 });
       if (execFailed(r)) throw namedError('tab_failed', execWhy(r));
-      log.log?.(`[browser] ${bk} on ${p.id}: the user brought the agent's current tab ${id.slice(0, 8)} to the front of its window while driving it (the agent's tab is unchanged — nothing to tell it)`);
+      log.log?.(`[browser] ${who}: the user brought the agent's current tab ${id.slice(0, 8)} to the front of its window while driving it (the agent's tab is unchanged — nothing to tell it)`);
       return { ok: true, act, targetId: id, switchedTo: id, broughtForward: true };
     }
     if (v.noop) return { ok: true, act, targetId: id, switchedTo: id, noop: true };

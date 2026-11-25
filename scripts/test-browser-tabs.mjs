@@ -1169,6 +1169,22 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       }
       return out;
     };
+    // r4412 (3): THE FRONT IS REMEMBERED (row B-98f5's law: the freeze remembers every front) — A's page sits BEHIND A's blank in its
+    // window; the person's press brings it forward (the session's own `tab <id>`: here the stand-in's bring); the browser idles into its
+    // freeze and a thaw for A shows THAT page, never the blank it was behind. Its contrast: no press — the thaw shows the blank
+    const frontKeptLeg = async (Dmod, pressed, sfx) => {
+      const SI = await standIn(); const PID = 'bp-0000c28' + sfx; const D = mkD(Dmod, SI, []);
+      try {
+        await D.arm(PID, { budgetMs: 3000 }); const opened = await until(() => !!D.paintFacts(PID), 3000);
+        SI.bring(TA0); if (pressed) SI.bring(TA);   // A's blank in front of its page; the press brings the page forward
+        const fz = opened ? await D.freezePaint(PID) : null;
+        const th = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null;
+        return { fz: fz && { ok: fz.ok, fronts: fz.fronts }, shown: ids2(th), pageHidden: SI.st.hid.has(TA) };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    const [fr, frNo] = await Promise.all([frontKeptLeg(DD, true, '0'), frontKeptLeg(DD, false, '1')]);
+    ok(!!fr.fz && fr.fz.ok && J(fr.shown) === J([TA]) && fr.pageHidden === false && !!frNo.fz && frNo.fz.ok && J(frNo.shown) === J([TA0]),
+      'B-bcf8 r4412 (3): the tab the person brings forward is the front the freeze remembers — after the idle freeze, the thaw for A shows THAT page (drawing again), never the blank it sat behind; without the press the thaw shows the blank', { pressed: fr, contrast: frNo });
     const judgeStill = (x) => !!x && !!x.thaw && x.thaw.fz && J(x.thaw.s0) === J({}) && J(x.thaw.s1) === J({ [TA]: 'thaw-unread' }) && J(x.thaw.s2) === J({})
       && !!x.owed && x.owed.fz && J(x.owed.s1) === J({ [TA]: 'show-owed' }) && J(x.owed.s2) === J({});
     const judgeLeft = (x) => !!x && !!x.left && x.left.fz && J(x.left.seq) === J(['show-owed', 'show-owed', 'show-left', 'show-left']) && x.left.flips === 3

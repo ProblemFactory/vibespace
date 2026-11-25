@@ -220,7 +220,10 @@ function userTabVerdict({ act = 'switch', owner = 'orphan', human = false, drivi
   // the viewed conversation's own tab (owner 'agent')
   if (mediated) return no('mediated_tabs');
   if (!driving) return no('take_over_first');
-  if (act === 'switch') return active ? { ok: true, via: 'lease', noop: true } : { ok: true, via: 'lease' };
+  // r4412 (B-bcf8): the tab on show, while the person drives — its switch is the session's own `tab <id>`, which brings it to the FRONT of
+  // its window (U0b: it may sit behind another tab and paint nothing); `front` is THE one verdict (src/browser-windows.js currentTabFront)
+  // the chip asks too (tabClickVerdict) and the keeper acts on — so the chip's button and the keeper's act cannot part, in EVERY browser
+  if (act === 'switch') return active ? { ok: true, via: 'lease', noop: true, front: require('./browser-windows.js').currentTabFront({ owner, human, driving, mediated, active }) } : { ok: true, via: 'lease' };
   return Number(c.agent) > 1 ? { ok: true, via: 'lease' } : no('last_tab');
 }
 /** The host a tab's badge names (its initial + hue come from the channel avatar's rule on the client), '' for none. */
