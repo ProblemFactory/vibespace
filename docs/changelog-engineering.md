@@ -320,6 +320,10 @@ This file is the engineers' record of every release: the lanes, the verification
   - The builder now REFUSES a name that would split the rule (a space, a comma) or open it (a star in `own`, an empty name).
   - test-architecture §47d runs the builder from its own text: the order (a suite's map ahead of the catch-all) and the refusals, each with a red copy.
   - The belt's comment is reworded: the names rule alone now refuses all three probes, and the control tells belt from no belt. The control's `args` (after its rule) are handed by no caller.
+- **Line 889's follow (主开发 r4009, taken with no must; four smalls):**
+  - CASE: the vendor lowers every pattern (net/base/host_mapping_rules.cc AddRuleFromString: `rule.hostname_pattern = base::ToLowerASCII(parts[1]);`, for MAP and EXCLUDE), and a page's host is canonical lower case. So a machine name with a capital letter needs nothing.
+  - The builder refuses a question mark in `own` beside the star (pattern.h's two wildcards), and the empty name's refusal says it would OPEN the rule.
+  - Two pure legs in §47d: a machine with only the loopback never throws at a launch (the four guarded forms read from their text, and the belt handed nothing builds its rule); and, by text, the value each of the four hands the builder is the value its page is opened at. The xpra boot's HOSTNAME is opened by test-desktop-xpra-window-open and -seamless, the two of its seven suites that open a page at the name. Each leg has its red.
 
 ## 2.369.418 — 2026-11-24
 
