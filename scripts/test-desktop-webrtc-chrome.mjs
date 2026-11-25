@@ -867,25 +867,36 @@ console.log('⑬ THE ESTIMATE: the agent reads its own transport-cc — werift 0
 {
   const H = require(path.join(REPO, 'src/stream-h264.js'));
   const AUS = H.accessUnits(H.splitNalus(fs.readFileSync(FIXTURE)));
-  const PER = Math.round((3000 * 1000) / 8 / 30), SC = Buffer.from([0, 0, 0, 1]), parts = [];
-  for (const au of AUS.slice(AUS.findIndex((a) => a.key))) { // each picture grown to ~3 Mbps at 30 fps by one filler NAL (type 12 — a decoder skips it)
-    const have = au.nalus.reduce((a, n) => a + n.length + 4, 0);
-    for (const n of au.nalus) parts.push(SC, n);
-    const fill = Buffer.alloc(Math.max(2, PER - have - 4), 0xff); fill[0] = 0x0c; fill[fill.length - 1] = 0x80; parts.push(SC, fill);
-  }
-  const PADDED = path.join(root, 'padded-3mbps.h264'); fs.writeFileSync(PADDED, Buffer.concat(parts));
-  const estHub = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: PADDED }) }), log: quiet });
-  R.setup({ ...BASE, webrtc: estHub });
-  const p = await page(1280, 800, DESK);
-  await p.ev(`window.__open(${JSON.stringify(M)})`);
-  const up = await playing(p);
-  const seen = [];
-  for (let i = 0; i < 6; i++) { await sleep(1000); const st = (estHub.facts('win-a')[0] || {}).stats || {}; if (st.bweKbps != null && st.kbps > 0) seen.push([st.kbps, st.bweKbps]); }
-  const tail = seen.slice(-3), fits = tail.length === 3 && tail.every(([k, b]) => k >= 2000 && b >= 0.7 * k && b <= 2.5 * k);
-  ok(up && fits, `⑬ ~3 Mbps through the real agent bundle to this Chrome: the agent's estimate tracks what it sent (sent/estimated kbps: ${tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, seen);
-  await p.close();
-  estHub.shutdown();
-  R.setup({ ...BASE });
+  /** a fixture whose every picture is grown to `kbps` at 30 fps by one filler NAL (type 12 — a decoder skips it) */
+  const padded = (kbps) => { const PER = Math.round((kbps * 1000) / 8 / 30), SC = Buffer.from([0, 0, 0, 1]), parts = [];
+    for (const au of AUS.slice(AUS.findIndex((a) => a.key))) {
+      const have = au.nalus.reduce((a, n) => a + n.length + 4, 0);
+      for (const n of au.nalus) parts.push(SC, n);
+      const fill = Buffer.alloc(Math.max(2, PER - have - 4), 0xff); fill[0] = 0x0c; fill[fill.length - 1] = 0x80; parts.push(SC, fill);
+    }
+    const f = path.join(root, `padded-${kbps}kbps.h264`); fs.writeFileSync(f, Buffer.concat(parts)); return f; };
+  /** THE ESTIMATE TRACKS WHAT WAS SENT (the census r2, 主开发 r4456 — the find: six fixed seconds and an absolute ≥ 2000 kbps floor were a
+   *  rate read against a wall clock, which a loaded box's sender and pacing fail): the hub's own stats sampled until SIX carry a rate
+   *  and an estimate (a generous bound, its expiry a NAMED line), the last three judged by the RATIO; the rate printed, not judged */
+  const estimateRun = async (kbps) => {
+    const hub = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: padded(kbps) }) }), log: quiet });
+    R.setup({ ...BASE, webrtc: hub });
+    const pg = await page(1280, 800, DESK);
+    await pg.ev(`window.__open(${JSON.stringify(M)})`);
+    const playingNow = await playing(pg);
+    const seen = [], until6 = Date.now() + 60000; let last = null;
+    while (seen.length < 6 && Date.now() < until6) { await sleep(1000); const st = (hub.facts('win-a')[0] || {}).stats || {}; if (st.bweKbps != null && st.kbps > 0 && st !== last) { seen.push([st.kbps, st.bweKbps]); last = st; } }
+    if (seen.length < 6) markTimedOut(seen, 60000, `⑬ at ${kbps} kbps: fewer than six stats samples with a rate and an estimate`);
+    const tail = seen.slice(-3);
+    await pg.close(); hub.shutdown(); R.setup({ ...BASE });
+    return { up: playingNow, seen, tail, tracks: tail.length === 3 && tail.every(([k, b]) => b >= 0.7 * k && b <= 2.5 * k), oldFloor: tail.length === 3 && tail.every(([k]) => k >= 2000) };
+  };
+  const e3 = await estimateRun(3000);
+  ok(e3.up && e3.tracks, `⑬ ~3 Mbps through the real agent bundle to this Chrome: the agent's estimate tracks what it sent (sent/estimated kbps: ${e3.tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, e3.seen);
+  // PLACED (the census r2 — the find made red at will): the sender sending LESS (what a loaded box makes of it), planted as a 1.2 Mbps
+  // fixture — the old ≥ 2000 kbps floor reads RED while the estimate still tracks what was sent
+  const e1 = await estimateRun(1200);
+  ok(e1.up && e1.tracks && !e1.oldFloor, `PLACED ⑬: the sender at 1.2 Mbps — the old «≥ 2000 kbps» floor reads RED (${e1.tail.map((x) => x.join('/')).join(', ')}) while the estimate tracks what it sent`, e1.seen);
 }
 console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stream to ONE conversation; its records reach THE resident script; the owner\'s input pauses it; 「收回」');
 {
