@@ -436,16 +436,24 @@ else {
     let where = null; for (let i = 0; i < 100 && (where = await onPage()) !== 'http:|complete|true'; i++) await sleep(50);
     const cams = async () => { const r = await raw.call('Runtime.evaluate', { expression: '(async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput").length)()', awaitPromise: true, returnByValue: true }, camS); return r.result && r.result.result && typeof r.result.result.value === 'number' ? r.result.result.value : `no count (${where}; ${JSON.stringify(r).slice(0, 120)})`; };
     const n0 = await cams();
+    // r4456 (the flake census, round 2): the device list in another tab is read when it HAS moved — a bounded poll on the count, its
+    // expiry a named harness line — never after a fixed 200 / 300 ms; the lease's «unchanged» is completed by ORDER below (the raw
+    // add, made after it, is seen at exactly n0 + 1: a camera the refused call had added would be counted there too)
+    const camsAt = async (want, what, ms = 15000) => { const end = Date.now() + ms; let n = await cams(); while (n !== want && Date.now() < end) { await sleep(50); n = await cams(); } if (n !== want) console.log(`    · HARNESS (⑥): ${what}: the device list read ${n}, not ${want}, within ${ms} ms`); return n; };
     const mc = await c6.call('Browser.addMockCamera', { deviceId: 'vs-census-lease' });
-    await sleep(200);
     ok(typeof n0 === 'number' && codeOf(mc) === 'method_refused' && /every browser context/.test(mc.error.message) && (await cams()) === n0, `⑥ handed back (the agent drives), Chrome ${cv}: Browser.addMockCamera is method_refused and the browser's device list is unchanged (${n0} video inputs, counted from another tab)`, mc.error && mc.error.message);
     const rawCam = cdpClient(world.ver.webSocketDebuggerUrl); await rawCam.open;
-    const added = await rawCam.call('Browser.addMockCamera', { deviceId: 'vs-census-raw' });
-    await sleep(200);
-    const n1 = await cams();
-    rawCam.ws.close(); await rawCam.closed; await sleep(300);
-    const n2 = await cams();
-    ok(added.result !== undefined && n1 === n0 + 1 && n2 === n0, `⑥ …CONTROL: the same call on the RAW endpoint adds one (${n0} → ${n1} video inputs in another tab) and it leaves with its DevTools connection (${n2}) — the oracle sees what the lease's call did not do`, JSON.stringify(added).slice(0, 160));
+    // PLACED FIRST, RED AT WILL: the raw add HELD (sent only after the read as the leg stood) — the device list «did not move», the
+    // control red with nothing wrong; then the disconnect HELD (the read as the leg stood comes before it) — the camera «never left»
+    let goAdd = null; const addP = new Promise((r) => { goAdd = r; }).then(() => rawCam.call('Browser.addMockCamera', { deviceId: 'vs-census-raw' }));
+    const asStoodN1 = await cams();
+    goAdd(); const added = await addP;
+    const n1 = await camsAt(n0 + 1, 'the raw mock camera showed in another tab');
+    const asStoodN2 = await cams();
+    rawCam.ws.close(); await rawCam.closed;
+    const n2 = await camsAt(n0, 'the raw mock camera left with its DevTools connection');
+    ok(asStoodN1 === n0 && asStoodN2 === n0 + 1 && n1 === n0 + 1 && n2 === n0, `⑥ …PLACED (r4456): the raw add held, the device list read as the leg stood did not move (${asStoodN1}); the disconnect held, the camera read as the leg stood had not left (${asStoodN2}) — the control red both ways with nothing wrong; the waits read ${n1} and ${n2}`, JSON.stringify({ n0, asStoodN1, n1, asStoodN2, n2 }));
+    ok(added.result !== undefined && n1 === n0 + 1 && n2 === n0, `⑥ …CONTROL: the same call on the RAW endpoint adds one (${n0} → ${n1} video inputs in another tab, exactly one: the lease's refused call added none) and it leaves with its DevTools connection (${n2}) — the oracle sees what the lease's call did not do`, JSON.stringify(added).slice(0, 160));
     const sg = await c6.call('Browser.setGlobalPrivacyControl', { gpc: true });
     ok(codeOf(sg) === 'method_refused' && /Global Privacy Control/.test(sg.error.message), `⑥ handed back, Chrome ${cv}: Browser.setGlobalPrivacyControl is method_refused on the lease — the mediator's refusal, never Chrome's own answer`, sg.error && sg.error.message);
     try { await raw.call('Target.closeTarget', { targetId: camT }); } catch { /* gone */ }
