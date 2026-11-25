@@ -330,6 +330,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE ORDER OF USE, read in the code and now a leg: usage-pool-engine `fallbackRows` walks `poolFallbacksOf` (the saved order); account-pool-auto keeps it among keys (crossRows: fallback-only last, then a stable `priorityOrder` with no reading between keys).
 - Legs: test-pool-fallback-page ⑩ (vendor + tail rows, two keys of one vendor told apart, no tail before the person's read, the order; B-ba7d: the accounts list and its push carry no tail — RED a model-providers copy whose rows carry it); test-pool-fallback (the engine moves to the FIRST listed key; the order swapped, the other).
 
+### lg-providers B-d578 — the rows' small follow (主开发 r4028, round wf_d7cb0d27-08b's shoulds; on line 895's 773468779)
+- Words: the ninth-key toast and the four reason lines of a row say «key», as the section does (en / zh / ja). Legs (test-pool-fallback-page ⑪): the vendor through the REAL roster's rows (model-providers rosterRowsOf, no tail on them); a hostile name and tail (a tag and a quote) drawn escaped on the new span — RED a copy whose span drops its escape. test-vault-words' row for the vault sentence moved with it.
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
