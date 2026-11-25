@@ -946,20 +946,33 @@ try {
     lc = last();
     ok(lc.env.AGENT_BROWSER_SOCKET_DIR === KEEPER.socketDir && lc.xdg === null, 'r2: a keeper with NO XDG_RUNTIME_DIR ⇒ the child has none either (the shell\'s is removed, not kept)', JSON.stringify({ sd: lc.env.AGENT_BROWSER_SOCKET_DIR, xdg: lc.xdg }));
     ok(/\[env_twin_dropped\]/.test(r3.stderr) && /AGENT_BROWSER_CDP/.test(r3.stderr) && /AGENT_BROWSER_PROXY/.test(r3.stderr) && !/\bk\b|evil-chrome/.test(r3.stderr.replace(/AGENT_BROWSER_\w+/g, '')), '…and the drop is SAID (the key names, never their values) — no silent change', r3.stderr);
-    // row B-e946 (主开发 r4206): the two names the driver's session fingerprint reads — never passed, SAID on this same road with THEIR
-    // reason and, for the timeout, the driver's own verb that waits (wait <ms>, bounded by the number given); never under the twins' note
+    // row B-e946 (主开发 r4206 / r4242): the two names the driver's session fingerprint reads — never passed, SAID on this same road with
+    // THEIR reason and, for the timeout, the driver's own verb that waits (wait <ms>, bounded by the number given). A LEG JUDGES WHAT IT
+    // CONTROLS: each child gets an environment THE LEG BUILT — the suite's base WITHOUT any AGENT_BROWSER_* name (baseEnv carries the
+    // session's own AGENT_BROWSER_SESSION, a launch twin the CLI drops and says under its own note), then exactly the names it tests
     {
       const SESS = { AGENT_BROWSER_DEFAULT_TIMEOUT: '60000', AGENT_BROWSER_DEBUG: '1' };
+      const bare = Object.fromEntries(Object.entries(baseEnv).filter(([k]) => !k.startsWith('AGENT_BROWSER_')));
+      const linesOf = (r, code) => String(r.stderr).split('\n').filter((l) => l.includes(`[${code}]`));
       resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
-      const rs = await cli(['snapshot'], { ...baseEnv, ...OUT, ...SESS });
+      // (1) the two names alone
+      const rs = await cli(['snapshot'], { ...bare, ...OUT, ...SESS });
       const ls = last();
-      const sline = rs.stderr.split('\n').find((l) => l.includes('[env_session_config_dropped]')) || '';
+      const sl = linesOf(rs, 'env_session_config_dropped'), tl = linesOf(rs, 'env_twin_dropped');
       ok(rs.status === 0 && !!ls && !('AGENT_BROWSER_DEFAULT_TIMEOUT' in ls.env) && !('AGENT_BROWSER_DEBUG' in ls.env) && ls.env.AGENT_BROWSER_JSON === '1',
         'B-e946: the agent\'s AGENT_BROWSER_DEFAULT_TIMEOUT and AGENT_BROWSER_DEBUG never reach the driver; the output keys still pass; the command runs', JSON.stringify(ls && ls.env));
-      ok(sline.includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && sline.includes('VibeSpace drives this same browser session') && sline.includes('lose every ref') && sline.includes('`vibespace-browser wait <ms>`') && !sline.includes('60000') && !/\[env_twin_dropped\]/.test(rs.stderr) && rs.stderr.split('\n').filter((l) => l.includes('[env_session_config_dropped]')).length === 1 && !String(rs.stdout).includes('[env_session_config_dropped]'),
-        'B-e946: …SAID once on the CLI\'s own road (stderr: stdout stays the driver\'s), the names only: why (this same session; another value starts its driver again and loses every ref) and the verb that waits instead — never the launch twins\' note', rs.stderr);
-      const rd = await cli(['snapshot'], { ...baseEnv, AGENT_BROWSER_DEBUG: '1' });
-      ok(/\[env_session_config_dropped\]/.test(rd.stderr) && !/vibespace-browser wait/.test(rd.stderr), 'B-e946: the debug name alone — its reason only (no wait is offered for it)', rd.stderr);
+      ok(sl.length === 1 && sl[0].includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && sl[0].includes('VibeSpace drives this same browser session') && sl[0].includes('lose every ref') && sl[0].includes('`vibespace-browser wait <ms>`') && !sl[0].includes('60000')
+        && tl.every((l) => !l.includes('AGENT_BROWSER_DEBUG') && !l.includes('AGENT_BROWSER_DEFAULT_TIMEOUT')) && !String(rs.stdout).includes('[env_session_config_dropped]'),
+        'B-e946: the two names are SAID ONCE, in their own note on the CLI\'s road (stderr: stdout stays the driver\'s), names only: why (this same session; another value starts its driver again and loses every ref) and the verb that waits instead — and a twins\' note, if one is printed, names neither of them', rs.stderr);
+      // (2) the debug name alone: its reason only
+      const rd = await cli(['snapshot'], { ...bare, AGENT_BROWSER_DEBUG: '1' });
+      const dl = linesOf(rd, 'env_session_config_dropped');
+      ok(dl.length === 1 && dl[0].includes('AGENT_BROWSER_DEBUG') && !dl[0].includes('vibespace-browser wait'), 'B-e946: the debug name alone — its reason only (no wait is offered for it)', rd.stderr);
+      // (3) both kinds dropped at once (the product does it): BOTH notes, each with its own names
+      const rb = await cli(['snapshot'], { ...bare, ...SESS, AGENT_BROWSER_PROXY: 'http://127.0.0.1:1' });
+      const bs = linesOf(rb, 'env_session_config_dropped'), bt = linesOf(rb, 'env_twin_dropped');
+      ok(rb.status === 0 && bs.length === 1 && bt.length === 1 && bs[0].includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && !bs[0].includes('AGENT_BROWSER_PROXY') && bt[0].includes('AGENT_BROWSER_PROXY') && !bt[0].includes('AGENT_BROWSER_DEBUG') && !bt[0].includes('AGENT_BROWSER_DEFAULT_TIMEOUT') && !String(rb.stderr).includes('127.0.0.1:1'),
+        'B-e946: a launch twin and the two names dropped at once — BOTH notes, each naming only its own names (never a value)', rb.stderr);
     }
     // the unmanaged rung of a session with its OWN pairs (a remote session): the server names them
     const HOST_BASE = path.join(ROOT, 'hb');
