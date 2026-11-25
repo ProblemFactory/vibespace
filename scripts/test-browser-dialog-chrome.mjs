@@ -114,8 +114,10 @@ async function world(tag, { Kmod = Kk, ephemeral = false, second = false } = {})
   if (second) await kk.attach({ profileId: prof.id, browserKey: KEY_B, sessionId: 'sess-' + tag + '-b', by: 'user' });
   const PASSWD = path.join(W, 'passwd.cjs'); fs.writeFileSync(PASSWD, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(KH)} });\n`);
   const env = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${port}`, VIBESPACE_SESSION_TOKEN: TOKEN, VIBESPACE_SESSION_CWD: W };
-  const cli = (args, { timeoutMs = 90000, token = TOKEN } = {}) => new Promise((resolve) => {
-    const t0 = Date.now(); const c = spawn(process.execPath, ['--require', PASSWD, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: { ...env, VIBESPACE_SESSION_TOKEN: token }, cwd: W });
+  // (r4456: `holdGo` — a preload of the leg's own HOLDS this one child at its start until that file exists: the dialog control's placed red)
+  const cli = (args, { timeoutMs = 90000, token = TOKEN, holdGo = null } = {}) => new Promise((resolve) => {
+    const pre = holdGo ? (() => { const f = path.join(W, 'hold-' + path.basename(holdGo) + '.cjs'); fs.writeFileSync(f, `const fs = require('fs'); const t = new Int32Array(new SharedArrayBuffer(4)); while (!fs.existsSync(${JSON.stringify(holdGo)})) Atomics.wait(t, 0, 0, 20);\n`); return ['--require', f]; })() : [];
+    const t0 = Date.now(); const c = spawn(process.execPath, ['--require', PASSWD, ...pre, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: { ...env, VIBESPACE_SESSION_TOKEN: token }, cwd: W });
     let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
     const t = setTimeout(() => c.kill('SIGKILL'), timeoutMs);
     c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err, ms: Date.now() - t0, exitAt: Date.now() }); });
@@ -125,7 +127,7 @@ async function world(tag, { Kmod = Kk, ephemeral = false, second = false } = {})
   const leaseDaemons = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { const e = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); return e.includes(`AGENT_BROWSER_SESSION=vs-${KEY}`) && e.includes(`HOME=${KH}`) && fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('agent-browser'); } catch { return false; } });
   const close = async () => { dialogs.shutdown(); kk.shutdown(); await new Promise((r) => srv.close(() => r())); };
   const cliB = (args, o = {}) => cli(args, { ...o, token: TOKEN_B });
-  return { kk, prof, cli, cliB, opens, jsonList, leaseDaemons, close, get dialogs() { return dialogs; }, restartWatch: () => { dialogs.shutdown(); armWatch(); }, KEY, ephemeral, launchCfg: () => { try { return JSON.parse(fs.readFileSync(kk.machineConfigFile('machine', prof.id), 'utf8')); } catch { return null; } } };
+  return { kk, prof, cli, cliB, opens, jsonList, leaseDaemons, close, dir: W, get dialogs() { return dialogs; }, restartWatch: () => { dialogs.shutdown(); armWatch(); }, KEY, ephemeral, launchCfg: () => { try { return JSON.parse(fs.readFileSync(kk.machineConfigFile('machine', prof.id), 'utf8')); } catch { return null; } } };
 }
 const HEAD = 'A page dialog is open and the page will not move until it is answered — ';
 async function typeDraft(w, text) {
@@ -267,12 +269,28 @@ try {
     let c = null; try { c = await world('ctl', { Kmod: Kmut }); } catch (e) { skip(`control: the keeper could not launch: ${e && e.message}`); }
     if (c) {
       ok(c.launchCfg() && c.launchCfg().noAutoDialog === undefined, 'control setup: its launch config carries no noAutoDialog');
+      // r4456 (the flake census, round 2): the fault is judged by its FACTS — the navigation answers ok, the page left is the OTHER one,
+      // the typed draft is gone — never by the child's wall time (`r.ms < 5000` read red on a loaded box with the fault shown); the
+      // CLI's own 90 s kill is the harness's named expiry. PLACED FIRST, RED AT WILL: the same fault on a SLOW child — its CLI held at
+      // its start (a preload of the leg's own) until the old verdict's own 5 s bound has passed: every fact of the fault shows, the old
+      // verdict (with the time term) reads red, the verdict on the facts reads the fault
+      await typeDraft(c, 'held draft');
+      const goF = path.join(c.dir, 'held-open.go'); try { fs.unlinkSync(goF); } catch { }
+      const letGo = setTimeout(() => fs.writeFileSync(goF, ''), 5100);   // let go once the old verdict's own bound is past
+      const rh = await c.cli(['open', U('/other-c')], { holdGo: goF }); clearTimeout(letGo);
+      const th = await c.cli(['get', 'title']);
+      await c.cli(['open', U('/form')]);
+      const vh = await c.cli(['get', 'value', '#f']);
+      const faultH = rh.code === 0 && /OTHER \/other-c/.test(th.out) && !/held draft/.test(vh.out);
+      ok(faultH && !(rh.ms < 5000), `CONTROL PLACED (r4456): its CLI held past 5 s (${rh.ms} ms), the fault shows (code ${rh.code}, the OTHER page, the draft gone) — the old verdict with its time term reads red with nothing wrong; the verdict on the facts reads the fault`, { rh: { code: rh.code, ms: rh.ms }, t: th.out, v: vh.out });
+      if (rh.code === null) console.log('    · HARNESS (CONTROL): the held CLI was killed at its own 90 s bound');
       await typeDraft(c, 'lost draft');
       const r = await c.cli(['open', U('/other-c')]);
       const t = await c.cli(['get', 'title']);
       await c.cli(['open', U('/form')]);
       const v = await c.cli(['get', 'value', '#f']);
-      ok(r.code === 0 && r.ms < 5000 && /OTHER \/other-c/.test(t.out) && !/lost draft/.test(v.out), `CONTROL: without it the navigation answers ok in ${r.ms} ms and the typed draft is GONE — the browser CLI's silent beforeunload accept the lane turns off`, { r, t: t.out, v: v.out });
+      if (r.code === null) console.log('    · HARNESS (CONTROL): the navigation\'s CLI was killed at its own 90 s bound');
+      ok(r.code === 0 && /OTHER \/other-c/.test(t.out) && !/lost draft/.test(v.out), `CONTROL: without it the navigation answers ok (in ${r.ms} ms) and the typed draft is GONE — the browser CLI's silent beforeunload accept the lane turns off`, { r, t: t.out, v: v.out });
       ok(/the browser accepted the page's leave-page dialog by itself — the page was left and what was typed on it is gone/.test(r.err) && !/dialog_open/.test(r.out + r.err), '…and on such a browser (launched before the lane) the watch never reports a dialog 0.38.1 closes itself — it SAYS afterwards that the draft is gone', r);
       await c.close();
     }
