@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, takeCspReports, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, takeCspReports, CHROME_STORE, CHROME_QUIET, anchored } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
@@ -280,9 +280,36 @@ try {
   console.log('Ⓔ CONTROL — the OLD preview (srcdoc + allow-same-origin) of the same hostile page');
   {
     const html = fs.readFileSync(path.join(H, 'hostile.html'), 'utf8').replace('FHV-HOSTILE', 'FHV-CONTROL');
-    await evalJs(`(() => { const f = document.createElement('iframe'); f.id = 'fhv-control'; f.setAttribute('sandbox', 'allow-scripts allow-same-origin'); f.style.cssText = 'position:fixed;left:-3000px;width:300px;height:200px'; f.srcdoc = ${JSON.stringify(html)}; document.body.appendChild(f); return true; })()`);
-    await sleep(1500);
-    const c = await evalJs(`(async () => { const w = document.getElementById('fhv-control').contentWindow; const p = w.__probe ? await w.__probe : null; return { origin: w.origin, p }; })()`);
+    // r4456 (the flake census, round 2): the control frame has to load and RUN its script before its probe exists — the leg reads it
+    // once THAT fact is there (a wait on the probe, generous, its expiry a named harness line), never after a fixed 1500 ms
+    const mkFrame = (id, src) => evalJs(`(() => { const f = document.createElement('iframe'); f.id = ${JSON.stringify(id)}; f.setAttribute('sandbox', 'allow-scripts allow-same-origin'); f.style.cssText = 'position:fixed;left:-3000px;width:300px;height:200px'; f.srcdoc = ${JSON.stringify(src)}; document.body.appendChild(f); return true; })()`);
+    const inFrame = (id, expr) => `(() => { const f = document.getElementById(${JSON.stringify(id)}); const w = f && f.contentWindow; return !!(w && (${expr})); })()`;
+    const waitFrame = async (id, expr, what, ms = 20000) => {
+      const end = Date.now() + ms;
+      while (Date.now() < end) { if (await evalJs(inFrame(id, expr))) return true; await sleep(50); }
+      ok(false, `HARNESS (Ⓔ): ${what} within ${ms} ms`);
+      return false;
+    };
+    const readProbe = (id) => evalJs(`(async () => { const w = document.getElementById(${JSON.stringify(id)}).contentWindow; const p = w.__probe ? await w.__probe : null; return { origin: w.origin, p }; })()`);
+    // PLACED FIRST, RED AT WILL: the same control frame with its script HELD (a hold in the control's own copy of the page, no product
+    // edit: the script runs only once the leg lets it go). The frame is parsed and shown, but read as the leg stood (no wait on the
+    // probe) it «has no probe»: the control goes red with nothing wrong. The wait on the probe, once let go, reads the app's answer
+    {
+      const HOLD_IN = '<script>window.__inline = 1;', HOLD_OUT = "window.__top = 'THROW ' + e.name; }\n</script>";
+      const held = anchored(anchored(html, HOLD_IN, '<script>parent.__fhvGo.then(() => { window.__inline = 1;', 'Ⓔ the held script opens'), HOLD_OUT, "window.__top = 'THROW ' + e.name; }\n});</script>", 'Ⓔ the held script closes');
+      await evalJs(`(window.__fhvGo = new Promise((r) => { window.__fhvLet = r; }), true)`);
+      await mkFrame('fhv-held', held);
+      const shown = await waitFrame('fhv-held', `w.document.getElementById('ok')`, 'the held control frame was parsed');
+      const asStood = await readProbe('fhv-held');
+      await evalJs(`(window.__fhvLet(), true)`);
+      const up = await waitFrame('fhv-held', 'w.__probe', 'the held control frame set its probe once let go');
+      const now = up ? await readProbe('fhv-held') : { p: null };
+      ok(shown && asStood.p === null && up && now.p && /^200:/.test(now.p.api), `Ⓔ PLACED (r4456): its script HELD, the parsed control frame read as the leg stood has no probe (${asStood.p === null}) — the control RED with nothing wrong; the wait on the probe, once let go, reads the app's answer (${now.p && now.p.api})`, { asStood, now: now.p && now.p.api });
+      await evalJs(`document.getElementById('fhv-held').remove(); true`);
+    }
+    await mkFrame('fhv-control', html);
+    await waitFrame('fhv-control', 'w.__probe', 'the control frame set its probe');
+    const c = await readProbe('fhv-control');
     ok(c.origin === new URL(BASE).origin && c.p && /^200:/.test(c.p.api), 'CONTROL: the old shape runs AS THE APP — the app\'s origin, and the hub\'s /api answers it with the owner\'s cookie', { origin: c.origin, api: c.p && c.p.api });
     const taken = await takeCspReports((r) => r.document === 'about', { ms: 3000, want: Infinity });
     ok(taken.length > 0, `CONTROL: the app page's policy reports the old shape's page (${taken.length} report(s), taken — the teardown judges the rest)`, taken.slice(0, 3));
