@@ -456,9 +456,28 @@ try {
   const lastTakeBack = () => ((typeof kk._takeBackFacts === 'function' ? kk._takeBackFacts() : []).slice(-1)[0] || null);
   const tbSay = (x) => (x ? `${x.verdict}, ${x.orphans} restored page(s) read, ${x.unread} unread, ${x.winUnread || 0} window(s) unread, ${x.readMs} ms, own window ${x.ownWindow === true ? 'yes' : 'no'}${x.remint ? ', a new mark' : ''}` : 'no take-back read');
   let hN = 0;
-  const relaunchOf = async (pr, run) => {
+  // 主开发 r4391 (box row 821: leg h judged a scene an earlier leg had already undone): ONE SHAPE for every scene of leg h — each
+  // PROVES ITS PREMISE by Chrome's own list before it judges (each page's window by Browser.getWindowForTarget, each page's first
+  // history entry against the lease's mark as it stood before the relaunch); a scene not made is said by a NAMED HARNESS LINE,
+  // never by the law's line; and every relaunch prints that list beside the product's own facts, so the next red tells itself
+  const shortOf = (u) => (/#vs-own-/i.test(String(u || '')) ? 'marked-blank' : (String(u || '').replace(U(''), '') || 'blank'));
+  const layoutOf = async (rec, mark) => {
+    const pages = rec && rec.cdpUrl ? await pagesNow(rec).catch(() => []) : [];
+    const want = mark ? `about:blank#vs-own-${mark}` : null;
+    const rows = await Promise.all(pages.map(async (t) => ({ id: String(t.targetId).toUpperCase(), url: String(t.url || ''), win: await VP.windowOf(rec.cdpUrl, t.targetId), carrier: want ? (await VP.firstEntryIs(rec.cdpUrl, t.targetId, want)) === true : false })));
+    const carriers = rows.filter((r) => r.carrier);
+    const unread = rows.filter((r) => r.win == null).length;
+    const mates = carriers.length === 1 && carriers[0].win != null ? rows.filter((r) => r !== carriers[0] && r.win === carriers[0].win).length : null;
+    const byWin = new Map(); for (const r of rows) { const k = r.win == null ? 'unread' : String(r.win); byWin.set(k, [...(byWin.get(k) || []), r]); }
+    const say = [...byWin.entries()].map(([w, rs]) => `w${w}: ${rs.map((r) => (r.carrier ? '*' : '') + shortOf(r.url)).join(', ')}`).join(' · ');
+    return { pages: rows.length, carriers: carriers.length, carrierUrl: carriers.length === 1 ? shortOf(carriers[0].url) : null, mates, unread, say };
+  };
+  const sceneMade = (made, scene, facts) => { if (!made) ok(false, `h ${scene}: scene not made — Chrome's own list does not show the scene this leg judges, so the law's line is not judged`, facts); return made; };
+  const relaunchOf = async (pr, run, leaseOf = null, markAs = null) => {
     const tb0 = lastTakeBack();
+    const mark = markAs || (typeof leaseOf === 'function' ? (leaseOf() || {}).ownMark : null) || null; // the carrier's mark as it stood BEFORE the relaunch
     const rec0 = kk.browserOf(pr.id); let before = null; try { before = rec0 && rec0.cdpUrl ? (await pagesNow(rec0)).length : null; } catch { before = null; }
+    const pre = await layoutOf(rec0, mark); // the scene as made, on the running browser
     const dir = (rec0 || {}).dir || pr.dir || null;
     await kk.stop(pr.id, { why: 'user' });
     const pf = dir ? path.join(dir, 'Default', 'Preferences') : null;
@@ -466,8 +485,10 @@ try {
     const r = await run(['get', 'url']);
     const recN = kk.browserOf(pr.id); let pages = null; try { pages = recN && recN.cdpUrl ? (await pagesNow(recN)).length : null; } catch { pages = null; }
     const tb1 = lastTakeBack(); const takeBack = tb1 && tb1 !== tb0 ? tb1 : null;
+    const post = await layoutOf(recN, mark); // as Chrome restored it — what the product read
     console.log(`    (h relaunch ${++hN} [${pr.label}]: ${before} → ${pages} page(s); take-back: ${tbSay(takeBack)})`);
-    return { ok: r.code === 0, own: String(r.out || ''), before, pages, recN, takeBack };
+    console.log(`      (Chrome's own list — before: ${pre.say || 'none'} | as restored: ${post.say || 'none'}; * carries the mark as it stood before; carrier's window mates as restored: ${post.mates == null ? '-' : post.mates}, windows unread: ${post.unread})`);
+    return { ok: r.code === 0, own: String(r.out || ''), before, pages, recN, takeBack, pre, post };
   };
   const pageNavH = (cdpUrl, tid, url) => new Promise((resolve) => {
     const u = VP.pageUrlOf(cdpUrl, tid); if (!u) return resolve(false);
@@ -508,11 +529,12 @@ try {
     const hits = [...got, ...answers].filter((x) => /vs-own-/i.test(x));
     e2e = { measured: true, markedUp, records: got.length, frames: got.filter((x) => x.includes('"frame"')).length, answers: answers.length, answered: answers.filter((x) => x && !x.startsWith('!')).length, hits: hits.length, first: hits[0] ? hits[0].slice(0, 160) : null };
   } catch (e) { e2e = { measured: false, threw: String(e && e.message).slice(0, 200) }; }
-  ok(c0.code === 0 && e2e.measured && e2e.markedUp >= 1 && e2e.records > 0 && e2e.answered === 3 && e2e.hits === 0,
+  if (sceneMade(c0.code === 0 && e2e.measured && e2e.markedUp >= 1 && e2e.records > 0, 'L2', e2e)) ok(e2e.answered === 3 && e2e.hits === 0,
     `h L2: C's root born at its marked blank, not yet navigated (Chrome's own list: ${e2e.markedUp} page(s) carry the mark) — ${e2e.records} record(s) to a viewer (${e2e.frames} frames) and ${e2e.answered} answer(s) (the agent's status, its CLI's status, the profiles list): none carries it`, e2e);
   const cNav = await C(['open', U('/c')]);
-  const hC = [await relaunchOf(prof2, C), await relaunchOf(prof2, C), await relaunchOf(prof2, C)];
-  ok(cNav.code === 0 && hC.every((x) => x.ok && x.own.includes(U('/c')) && x.pages === x.before && x.takeBack && x.takeBack.verdict === 'take' && x.takeBack.ownWindow === true),
+  const hC = [await relaunchOf(prof2, C, leaseC), await relaunchOf(prof2, C, leaseC), await relaunchOf(prof2, C, leaseC)];
+  const aloneMade = (x) => !!x && x.post.carriers === 1 && x.post.mates === 0 && x.post.unread === 0; // ONE carrier, alone in its window, every window read
+  if (sceneMade(cNav.code === 0 && hC.every(aloneMade), 'ALONE', hC.map((x) => ({ pre: x.pre, post: x.post })))) ok(hC.every((x) => x.ok && x.own.includes(U('/c')) && x.pages === x.before && x.takeBack && x.takeBack.verdict === 'take' && x.takeBack.ownWindow === true),
     `h ALONE: after each relaunch with Chrome's restore C is on ITS OWN page again — taken back, alone in its window — and the page count stays FLAT (${hC.map((x) => `${x.before} → ${x.pages}`).join(' · ')}; probe 12 grew by one a start)`, hC.map((x) => ({ own: x.own.slice(0, 80), before: x.before, pages: x.pages, tb: x.takeBack })));
   // the page never reads its mark: its own address, its referrer, its history's length — none carries it
   const tC1 = await pageOf(hC[2].recN, '/c');
@@ -521,26 +543,40 @@ try {
   ok(typeof seen === 'string' && !!cMark && !seen.includes(cMark) && !seen.includes('vs-own-'), 'h ALONE: the page reads nothing of its mark — its address, its referrer and its history\'s length carry none of it', { seen: seen ? seen.replace(U(''), '') : seen });
   // the person navigated C's tab by hand before the restart ⇒ still C's: taken back on that page
   const navd = tC1 ? await pageNavH(hC[2].recN.cdpUrl, tC1.targetId, U('/c2')) : false;
-  const hC2 = navd ? await relaunchOf(prof2, C) : null;
-  ok(navd && !!hC2 && hC2.own.includes(U('/c2')) && hC2.pages === hC2.before && hC2.takeBack && hC2.takeBack.verdict === 'take', 'h ALONE: the person navigated C\'s tab by hand before the restart — still C\'s: taken back on that page, no page more', { navd, own: hC2 && hC2.own.slice(0, 80), before: hC2 && hC2.before, pages: hC2 && hC2.pages });
+  const hC2 = navd ? await relaunchOf(prof2, C, leaseC) : null;
+  if (sceneMade(navd && aloneMade(hC2), 'ALONE (by hand)', hC2 && { pre: hC2.pre, post: hC2.post })) ok(!!hC2 && hC2.own.includes(U('/c2')) && hC2.pages === hC2.before && hC2.takeBack && hC2.takeBack.verdict === 'take', 'h ALONE: the person navigated C\'s tab by hand before the restart — still C\'s: taken back on that page, no page more', { navd, own: hC2 && hC2.own.slice(0, 80), before: hC2 && hC2.before, pages: hC2 && hC2.pages });
   // RED as today: a lease with NO mark (a record from before this unit) ⇒ nothing to take back ⇒ one more page at the start
-  const lC = leaseC(); if (lC) delete lC.ownMark;
-  const hC4 = await relaunchOf(prof2, C);
-  ok(!!lC && !!hC4 && !hC4.own.includes(U('/c2')) && hC4.pages === hC4.before + 1 && !hC4.takeBack, 'CONTROL (a lease with no mark, as every lease before this unit): its tab is not taken back — a new tab of its own, ONE PAGE MORE at the start — RED as today', { own: hC4 && hC4.own.slice(0, 80), before: hC4 && hC4.before, pages: hC4 && hC4.pages });
+  const lC = leaseC(); const markWasC = lC ? lC.ownMark : null; if (lC) delete lC.ownMark;
+  const hC4 = await relaunchOf(prof2, C, null, markWasC); // its old carrier, read by the mark it had: alone, so only the missing mark keeps it
+  if (sceneMade(!!lC && !!markWasC && aloneMade(hC4), 'CONTROL (no mark)', hC4 && { pre: hC4.pre, post: hC4.post })) ok(!!hC4 && !hC4.own.includes(U('/c2')) && hC4.pages === hC4.before + 1 && !hC4.takeBack, 'CONTROL (a lease with no mark, as every lease before this unit): its tab is not taken back — a new tab of its own, ONE PAGE MORE at the start — RED as today', { own: hC4 && hC4.own.slice(0, 80), before: hC4 && hC4.before, pages: hC4 && hC4.pages });
   // ── THE SHARED SCENE: A's window holds pages beside A's (legs g, a2, b1) — law A takes NOTHING back from it (nothing sent to the
   // carrier or its window: the fast leg records every command; here, the carrier still stands on its page), one page more, a new mark
+  // r4391: the scene is MADE, not assumed (row 821: c1's relaunch had already given A a root alone in a window of its own) — A's
+  // page goes to /s, then opens a pop-up by its own window.open (the limit's own scene: a pop-up in the conversation's window)
+  const evalOn = (cdpUrl, tid, expression) => new Promise((resolve) => {
+    const u = VP.pageUrlOf(cdpUrl, tid); if (!u) return resolve(null);
+    const ws = new WebSocket(u); const t = setTimeout(() => { try { ws.close(); } catch { /* */ } resolve(null); }, 5000);
+    ws.once('open', () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, userGesture: true, returnByValue: true } })));
+    ws.on('message', (m) => { let j; try { j = JSON.parse(String(m)); } catch { return; } if (j.id === 1) { clearTimeout(t); try { ws.close(); } catch { /* */ } resolve(j.result && j.result.result ? j.result.result.value : null); } });
+    ws.once('error', () => { clearTimeout(t); resolve(null); });
+  });
   const hMarkA = leaseA() && leaseA().ownMark;
-  const hS = await relaunchOf(prof, A);
-  const carrierS = hS.recN ? await pageOf(hS.recN, '/a') : null;
-  ok(!!hMarkA && hS.ok && !!hS.takeBack && ['shared', 'unknown'].includes(hS.takeBack.verdict) && hS.takeBack.remint === true && !hS.own.includes(U('/a')) && hS.pages === hS.before + 1 && !!carrierS,
-    `h SHARED: A's carrier sits beside other pages (verdict «${hS.takeBack ? hS.takeBack.verdict : '-'}») — NOT taken back: it stands where it was, A gets a tab of its own (one page more: ${hS.before} → ${hS.pages}) under a new mark — today's behaviour`, { own: hS.own.slice(0, 80), tb: hS.takeBack, carrier: !!carrierS });
+  const sNav = await A(['open', U('/s')]);
+  const recS0 = kk.browserOf(prof.id); const tS0 = await pageOf(recS0, '/s');
+  const popped = tS0 ? await evalOn(recS0.cdpUrl, tS0.targetId, `!!window.open(${JSON.stringify(U('/s-pop'))}, '_blank')`) : null;
+  await sleep(800);
+  const hS = await relaunchOf(prof, A, leaseA);
+  const carrierS = hS.recN ? await pageOf(hS.recN, '/s') : null;
+  const sharedMade = !!hMarkA && sNav.code === 0 && popped === true && hS.pre.carriers === 1 && hS.pre.mates >= 1 && hS.post.carriers === 1 && hS.post.mates >= 1 && hS.post.unread === 0;
+  if (sceneMade(sharedMade, 'SHARED', { popped, pre: hS.pre, post: hS.post })) ok(hS.ok && !!hS.takeBack && ['shared', 'unknown'].includes(hS.takeBack.verdict) && hS.takeBack.remint === true && !hS.own.includes(U('/s')) && hS.pages === hS.before + 1 && !!carrierS,
+    `h SHARED: A's carrier sits beside its own pop-up (${hS.post.mates} other page(s) in its window, by Chrome's list) — NOT taken back (verdict «${hS.takeBack ? hS.takeBack.verdict : '-'}»): it stands where it was, A gets a tab of its own (one page more: ${hS.before} → ${hS.pages}) under a new mark — today's behaviour`, { own: hS.own.slice(0, 80), tb: hS.takeBack, carrier: !!carrierS });
   // a copy of A's tab (a person's duplicate copies its history) ⇒ two carriers ⇒ none taken
   const markS = leaseA() && leaseA().ownMark;
   let dup = false;
   if (markS && hS.recN) { const cc = await cdpClient(hS.recN.cdpUrl); try { const c = await cc.send('Target.createTarget', { url: `about:blank#vs-own-${markS}` }); const did = c && c.result ? c.result.targetId : null; await sleep(500); dup = !!(did && await pageNavH(hS.recN.cdpUrl, did, U('/b'))); } finally { try { cc.close(); } catch { /* */ } } }
   if (dup) { const tS = (await pagesNow(hS.recN)).find((t) => /^about:blank#vs-own-/.test(String(t.url || ''))) || null; if (tS) await pageNavH(hS.recN.cdpUrl, tS.targetId, U('/a2')); }
-  const h3 = dup ? await relaunchOf(prof, A) : null;
-  ok(dup && !!h3 && h3.ok && !h3.own.includes(U('/a2')) && h3.pages === h3.before + 1 && h3.takeBack && h3.takeBack.verdict === 'many', 'h SHARED: two restored pages carry the same mark (a copy of A\'s tab): NONE is taken back — a tab of its own (never the copy), one page more', { dup, own: h3 && h3.own.slice(0, 80), before: h3 && h3.before, pages: h3 && h3.pages, tb: h3 && h3.takeBack });
+  const h3 = dup ? await relaunchOf(prof, A, leaseA) : null;
+  if (sceneMade(dup && !!h3 && h3.post.carriers >= 2, 'MANY', h3 && { pre: h3.pre, post: h3.post })) ok(!!h3 && h3.ok && !h3.own.includes(U('/a2')) && h3.pages === h3.before + 1 && h3.takeBack && h3.takeBack.verdict === 'many', 'h SHARED: two restored pages carry the same mark (a copy of A\'s tab): NONE is taken back — a tab of its own (never the copy), one page more', { dup, own: h3 && h3.own.slice(0, 80), before: h3 && h3.before, pages: h3 && h3.pages, tb: h3 && h3.takeBack });
   // 主开发 r4282 (a MEASURE, printed, never judged): ONE relaunch with ≥ 20 restored pages, most opened in the background and never
   // brought to front — does every restored page answer the history read inside its bound, or is the verdict «unknown» (today's
   // behaviour: a new tab)? A gets a fresh mark carried by ONE new page (navigated on); under law A its windows decide the take
@@ -558,7 +594,7 @@ try {
         h5before = n;
       } finally { try { cc.close(); } catch { /* */ } }
       await sleep(1500); // Chrome writes its session file
-      h5 = await relaunchOf(prof, A);
+      h5 = await relaunchOf(prof, A, leaseA);
     }
   } catch (e) { h5 = { threw: String(e && e.message).slice(0, 160) }; }
   const tb5 = h5 && h5.takeBack;
