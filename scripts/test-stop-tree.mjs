@@ -29,6 +29,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(20); } return !!(await fn()); };
+// r4294: a spawned process is READ — its kernel name (its exec landed), its first child — never assumed after a fixed span
+const commOf = (pid) => { try { return Number(pid) > 1 ? fs.readFileSync(`/proc/${Number(pid)}/comm`, 'utf8').trim() : ''; } catch { return ''; } };
+const childOf = (pid) => { try { return Number(String(fs.readFileSync(`/proc/${Number(pid)}/task/${Number(pid)}/children`, 'utf8')).trim().split(/\s+/)[0]) || 0; } catch { return 0; } };
 const mine = [];   // every identity this suite made or found under its own children — ended at exit, by identity
 const endMine = () => { for (const id of mine) { try { if (id) PI.signalIdentity(id, 'SIGKILL'); } catch { } } };
 process.on('exit', endMine);
@@ -134,7 +137,7 @@ const PIsrc = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8'), 
 ok(twinOf(PIsrc) && twinOf(PIsrc) === twinOf(WRAP), 'data/bin/job-wrapper.js carries src/proc-identity.js childTreeOf byte-for-byte (the wrapper cannot require src/)');
 
 console.log('§4 THE JOB DOOR — the wrapper\'s one table: a stopped job leaves nothing of its tree, each heard ONCE, its queue marker free');
-const { jobScene, timed, escScene } = stopScenes({ D, mine, ROOT });   // B-d8f4 (r1045): the scene builders live in scripts/lib/stop-scenes.mjs (one file for both stop suites)
+const { jobScene, timed, escScene, expired } = stopScenes({ D, mine, ROOT });   // B-d8f4 (r1045): the scene builders live in scripts/lib/stop-scenes.mjs (one file for both stop suites)
 const real = await jobScene(WRAP, 'job');
 ok(real.tree.length >= 4 && real.held && real.state === 'interrupted', 'the scene: the job\'s tree holds the setsid env -i flock + its waiter and the timeout + its sleep, the queue\'s lock HELD', { tree: names(real.tree), held: real.held, state: real.state });
 ok(!real.left.length && real.free, 'B-c134: the job\'s STOP leaves NOTHING of its tree running — and its queue marker is free', { left: names(real.left), free: real.free });
@@ -187,20 +190,26 @@ ok(/\[jobs\] stop: its forced end killed \d+ process(es)? it started outside its
     try {
       const self = {};
       JM.prototype._runLogLine.call(self, f, '[jobs] stop: the first line'); JM.prototype._runLogLine.call(self, f, '[jobs] stop: the second line');
-      for (let k = 0; k < 200 && !release; k++) await new Promise((r) => setImmediate(r));
-      for (let k = 0; k < 50; k++) await new Promise((r) => setImmediate(r));   // (a separate second append lands in these turns)
+      // r4294 (the family's law): every wait here is on its FACT with a generous bound, its expiry NAMED — never a count of loop turns (a
+      // red at the train's tip, box zone: the road read 20 turns after both lines landed, its last append's own callback not yet run)
+      const has = (re) => re.test(fs.readFileSync(f, 'utf8')), W = 20000;
+      if (!(await until(() => !!release, W))) expired.push(`${tag}: the first append was never asked (${W / 1000} s)`);
+      // THE FACT that splits the two roads: how many appends are ASKED while the first is stalled — the ordered road asks the second only
+      // once the first has landed (1); separate appends ask it at once (2). A second append asked is waited for until its line has landed
+      const asked = n;
+      if (asked >= 2 && !(await until(() => has(/second line/), W))) expired.push(`${tag}: the second append was asked, its line not landed in ${W / 1000} s`);
       const during = fs.readFileSync(f, 'utf8');
       if (release) release();
-      for (let k = 0; k < 5000 && !(/first line/.test(fs.readFileSync(f, 'utf8')) && /second line/.test(fs.readFileSync(f, 'utf8'))); k++) await new Promise((r) => setImmediate(r));
-      for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));   // (the last append's own callback ends the road)
+      if (!(await until(() => has(/first line/) && has(/second line/), W))) expired.push(`${tag}: the two lines did not both land in ${W / 1000} s`);
+      if (!(await until(() => !(self._runLogRoad && self._runLogRoad.size), W))) expired.push(`${tag}: the road did not end in ${W / 1000} s after its last line`);   // the road ends with its last line: its own callback
       const after = fs.readFileSync(f, 'utf8');
-      return { during: during.trim(), ordered: after.indexOf('the first line') >= 0 && after.indexOf('the first line') < after.indexOf('the second line'), road: !!(self._runLogRoad && self._runLogRoad.size) };
+      return { asked, during: during.trim(), ordered: after.indexOf('the first line') >= 0 && after.indexOf('the first line') < after.indexOf('the second line'), road: !!(self._runLogRoad && self._runLogRoad.size) };
     } finally { fs.promises.appendFile = pa; }
   };
   const { JobManager: JMr } = require(path.join(ROOT, 'src/jobs.js'));
   const o = await order(JMr, 'runlog-road'), ox = await order(JMx, 'runlog-road-ctl');
-  ok(o.ordered && o.during === '' && !o.road, 'r3888: the engine\'s own lines in a job\'s log go by ONE ordered road — the first append STALLED, the second waits for it, and the log holds them in the order they were written (the road ends with its last line)', o);
-  ok(!ox.ordered && /second line/.test(ox.during), 'RED CONTROL — the release\'s separate appends (in a copy): the second line lands while the first is stalled — the log holds them reversed', ox);
+  ok(o.asked === 1 && o.ordered && o.during === '' && !o.road, 'r3888: the engine\'s own lines in a job\'s log go by ONE ordered road — the first append STALLED, the second is not even asked while it waits (r4294: judged by that fact), and the log holds them in the order they were written (the road ends with its last line)', o);
+  ok(ox.asked === 2 && !ox.ordered && /second line/.test(ox.during), 'RED CONTROL — the release\'s separate appends (in a copy): the second append is asked at once and its line lands while the first is stalled — the log holds them reversed', ox);
   for (const r of copiesCensus(MJr.files, MJr.dir, ROOT, { minCopies: 1, label: 'r3888 ' })) ok(r.pass, r.name, r.detail);
 }
 ok(real.heldOut, 'B-c134 cure (MUST A): the engine keeps each live job\'s wrapper OUT of every other stop\'s walk (PI.keptOut names it) — and its own stop walks it (the root)', real.heldOut);
@@ -625,9 +634,9 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // (d) the engine's one test, by the REAL parent chain: this process (the stand-in hub) and its own child are the hub's; pid 1 is not
   const JM = require(path.join(ROOT, 'src/jobs.js')).JobManager, own = (pid, wrappers = [], wrapper = 0) => JM.prototype._hubsOwn.call({ _wrappersHeld: () => wrappers }, pid, wrapper);
   const kid = spawn('sleep', ['30'], { stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 100));
+  if (!(await until(() => commOf(kid.pid) === 'sleep', 20000))) expired.push('(d) the stand-in child never read as `sleep` (20 s)');   // r4294: its exec landed — the fact, never a span
   const wrap = spawn('sh', ['-c', 'sleep 30; true'], { stdio: 'ignore' });   // a stand-in job wrapper (ours) and its job's process
-  await new Promise((r) => setTimeout(r, 150));
+  if (!(await until(() => commOf(childOf(wrap.pid)) === 'sleep', 20000))) expired.push('(d) the stand-in wrapper\'s child never read as `sleep` (20 s)');
   let jobKid = 0; try { jobKid = Number(String(fs.readFileSync(`/proc/${wrap.pid}/task/${wrap.pid}/children`, 'utf8')).trim().split(/\s+/)[0]) || 0; } catch { }
   const kidOwn = own(kid.pid), selfOwn = own(process.pid), initOwn = own(1), jobOwn = jobKid ? own(jobKid, [[wrap.pid, 0]]) : null, jobNoStop = jobKid ? own(jobKid, []) : null;
   // its read r2 (R1): `kid` stands for ANOTHER job's wrapper the hub spawned (it sits in this job's scope once the hub runs inside it): with
@@ -639,7 +648,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // (e) its read r2 (R6): the WRAPPER's own test — compiled from its source, over REAL processes this suite started: the suite is the hub
   // (the server.pid root), `wrap2` (sh, ours) the wrapper, its child the job's process; and hubShaped over real node processes
   const wrap2 = spawn('sh', ['-c', 'sleep 30; true'], { stdio: 'ignore' }), hubKid2 = spawn('sleep', ['30'], { stdio: 'ignore' });   // the wrapper stand-in; a process the «hub» (this suite) runs
-  await new Promise((r) => setTimeout(r, 300));
+  if (!(await until(() => commOf(childOf(wrap2.pid)) === 'sleep' && commOf(hubKid2.pid) === 'sleep', 20000))) expired.push('(e) the wrapper stand-in\'s child and the hub\'s sleep never both read as `sleep` (20 s)');   // r4294: on the fact
   let job2 = 0; try { job2 = Number(String(fs.readFileSync(`/proc/${wrap2.pid}/task/${wrap2.pid}/children`, 'utf8')).trim().split(/\s+/)[0]) || 0; } catch { }
   // hubShaped over a STAND-IN /proc table (no process named like the hub is started here — test-architecture §57 keeps hub boots in
   // scripts/hub-boot.mjs): its argv and its cwd, as the kernel would answer them
@@ -697,7 +706,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // REAL engine over a stand-in wrapper (a sleep of ours, its identity stamped as pid.json); every signal the engine would send is
   // RECORDED (proc-identity's signalIdentity swapped for the leg — nothing is signalled), the kill doors wrapped to see who calls them
   const JSRC10 = JS, sent10 = [], realSig = PI10.signalIdentity;
-  const standIn = spawn('sleep', ['120'], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 100));
+  const standIn = spawn('sleep', ['120'], { stdio: 'ignore' }); if (!(await until(() => commOf(standIn.pid) === 'sleep', 20000))) expired.push('the main door\'s stand-in never read as `sleep` (20 s)');   // r4294: on the fact
   const wid = PI10.identityOf(standIn.pid); mine.push(wid);
   let seq10 = 0;
   const scene = async (Mod, tag, act) => {
@@ -870,7 +879,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   ok(Array.isArray(spx.unread) && spx.unread.length === 0, 'CONTROL (every error as «empty», as before, in a copy): a list that exists and cannot be read reads as an empty scope — the reap stops while what the run left may still run — RED', spx);
   // (j) its readers' should: the hub's own ANCESTORS (a launcher — ./run.sh, npm start — and what started it) are the hub's: a reap after a
   // killed wrapper never kills them one by one. The REAL chain: this suite's parent stands for the launcher; a child of ours is not one
-  const kid10 = spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 100)); mine.push(PI10.identityOf(kid10.pid));
+  const kid10 = spawn('sleep', ['30'], { stdio: 'ignore' }); if (!(await until(() => commOf(kid10.pid) === 'sleep', 20000))) expired.push('(j) the child never read as `sleep` (20 s)'); mine.push(PI10.identityOf(kid10.pid));   // r4294: on the fact
   const ancOf = (Mod) => Mod.JobManager.prototype._hubTest.call({ _hubsOwn: () => false, _hubAncestors: Mod.JobManager.prototype._hubAncestors }, 0);
   const an = ancOf(JM10), anc = { parent: an(process.ppid), child: an(kid10.pid), self: an(process.pid), init: an(1) };
   const anx = ancOf(cut(' || (anc || (anc = this._hubAncestors())).has(p)', '', 'hub-ancestor-cut'));   // stale-pins: kept — the control plants the older form in a copy
@@ -935,6 +944,8 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
 }
 
 // §11 (B-7ca1's group rung, B-d8f4 (7)/(8)) MOVED to scripts/test-stop-rung.mjs — the split of 主开发 r1529 (3): this suite sat at the fast bound (10.3 s alone)
+
+ok(!expired.length, 'r4294 HARNESS: every wait of the stop scenes met its fact inside its bound (the force scene: every forced-end sentence the journal holds is in the job\'s log); an expiry is NAMED here, never read silently', expired);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

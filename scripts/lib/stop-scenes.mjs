@@ -19,6 +19,30 @@ const require = createRequire(path.join(ROOT, 'scripts', 'lib', 'stop-scenes.mjs
 const PI = require(path.join(ROOT, 'src/proc-identity.js'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(20); } return !!(await fn()); };
+// r4294 (主开发, THE FORCED-STOP FAMILY — one placement for test-stop-tree and test-stop-rung): between a stop's signal and a judgment the
+// scenes read a process's life AT ONCE (the stranger, the hub's launcher) or after a FIXED span (the escapee 200 ms, the deaf escapee
+// 300 ms), and the force scene's log after a 3 s wait that ended SILENTLY. A signalled process is not dead the instant its signal is sent:
+// the kernel ends it when it next runs (a loaded machine: milliseconds, or more). THE FACT a judgment reads instead (`quietOrGone`): the
+// process is GONE (or a zombie), or QUIET — asleep (state S), no signal pending to it or its process, not exiting (PF_EXITING) — so
+// nothing sent before the read can still end it. Every such wait is on its fact with a generous bound; an expiry is a NAMED harness line
+// (`expired`), which each suite judges in one leg — never a silent read of whatever is there
+const PF_EXITING = 0x4, SETTLE_MS = 20000, FORCED_MS = 20000;
+const expired = [];
+const quietOrGone = (id) => {
+  if (PI.aliveIdentity(id) !== true) return true;
+  try {
+    const st = fs.readFileSync(`/proc/${Number(id.pid)}/stat`, 'utf8'), f = st.slice(st.lastIndexOf(')') + 2).split(' ');
+    const status = fs.readFileSync(`/proc/${Number(id.pid)}/status`, 'utf8');
+    const pending = ['SigPnd', 'ShdPnd'].some((k) => { const m = status.match(new RegExp(`^${k}:\\s*([0-9a-f]+)`, 'm')); return !m || BigInt('0x' + m[1]) !== 0n; });
+    return f[0] === 'S' && (Number(f[6]) & PF_EXITING) === 0 && !pending;
+  } catch { return PI.aliveIdentity(id) !== true; }
+};
+const settleOn = async (id, what) => {
+  if (await until(() => quietOrGone(id), SETTLE_MS)) return true;
+  let st = null; try { st = fs.readFileSync(`/proc/${Number(id.pid)}/status`, 'utf8').split('\n').filter((l) => /^(State|SigPnd|ShdPnd):/.test(l)).join('; '); } catch { }
+  expired.push(`${what}: neither gone nor quiet ${SETTLE_MS / 1000} s after the stop answered (${st || 'unreadable'})`);
+  return false;
+};
 const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null, jobsMod = null, deps = {}, refusal = null } = {}) => {
   const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), wrapperText);
@@ -58,7 +82,9 @@ const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAl
   const free = spawnSync('flock', ['-n', marker, 'true']).status === 0;
   const terms = (() => { try { return fs.readFileSync(heard, 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } })();
   const readLog = () => { try { const run = job.runs[job.runs.length - 1]; return fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'current.log'), 'utf8'); } catch { return ''; } };
-  if (force) await until(() => forcedLanded(logs, job.id, readLog()), 3000);   // the engine's lines land off the loop — r3888: every one the journal holds
+  if (force && !(await until(() => forcedLanded(logs, job.id, readLog()), FORCED_MS))) {   // r4294: the wait on its fact, generous — its expiry NAMED
+    expired.push(`${tag}: the forced end's sentences the journal holds did not all reach the job's log in ${FORCED_MS / 1000} s — the journal: ${JSON.stringify(logs.filter((l) => l.includes(job.id) && l.includes('its forced end')))}; the log's [jobs] lines: ${JSON.stringify(readLog().split('\n').filter((l) => l.startsWith('[jobs]')))}`);
+  }   // the engine's lines land off the loop — r3888: every one the journal holds
   const log = readLog();
   const said = logs.filter((l) => l.includes(job.id)).join(' | ');
   let intent = null; try { const run = job.runs[job.runs.length - 1]; intent = JSON.parse(fs.readFileSync(path.join(dd, 'job-logs', job.id, String(run.startedAt), 'stop.json'), 'utf8')); } catch { }
@@ -100,7 +126,7 @@ const escScene = timed(async (wrapperText, tag, opts = {}) => {
       if (opts.stall && opts.settle !== false) setTimeout(release, 300);   // the window held open 300 ms by the leg, then released (the stall placed)
       const settled = opts.settle === false ? null : { escapee: await until(() => settledNow(pid, MARKS[0]), 5000), stranger: await until(() => settledNow(spid, MARKS[0]), 5000) };
       return { after: async () => {
-        await until(() => PI.aliveIdentity(id) === false, 200);   // the drain (or the engine's SIGKILL) ended it before the run's end — its reaping by the subreaper is what is left: milliseconds
+        await settleOn(id, `${tag}: the escapee`); await settleOn(sid, `${tag}: the stranger`);   // r4294: each read on its fact (gone, or quiet), never at once
         const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
         if (alive) PI.signalIdentity(id, 'SIGKILL');
         if (stranger) PI.signalIdentity(sid, 'SIGKILL');
@@ -110,5 +136,5 @@ const escScene = timed(async (wrapperText, tag, opts = {}) => {
       } };
     } });
 });
-return { jobScene, timed, escScene };
+return { jobScene, timed, escScene, settleOn, quietOrGone, expired };
 }

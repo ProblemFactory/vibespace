@@ -35,7 +35,7 @@ process.on('exit', () => { try { fs.rmSync(D, { recursive: true, force: true });
 const WRAP = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8');
 const MJ = mutantCopies('stop-rung', ROOT);
 import { stopScenes } from './lib/stop-scenes.mjs';
-const { jobScene, timed, escScene } = stopScenes({ D, mine, ROOT });
+const { jobScene, timed, escScene, settleOn, quietOrGone, expired } = stopScenes({ D, mine, ROOT });
 
 console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run together)');
 {
@@ -63,7 +63,7 @@ console.log('§1 B-d8f4 — the group rung\'s counts and words (the scenes run t
     return jobScene(wrapperText, tag, { deps: GRACE, argv: ['sh', '-c', `(setsid sh -c 'trap "" TERM; echo $$ > ${JSON.stringify(E)}; exec sleep 343' &); sleep 344 & wait`],
       ready: () => fs.existsSync(E) && Number(fs.readFileSync(E, 'utf8').trim()) > 1,
       before: ({ jm }) => { const id = PI.identityOf(Number(fs.readFileSync(E, 'utf8').trim())); mine.push(id); const job = [...jm.jobs.values()][0];
-        return { after: async () => { await until(() => PI.aliveIdentity(id) === false, 300); const alive = PI.aliveIdentity(id) === true; if (alive) PI.signalIdentity(id, 'SIGKILL'); return { alive, left: (job.runs[job.runs.length - 1] || {}).left || null }; } }; } });
+        return { after: async () => { await settleOn(id, `${tag}: the deaf escapee`); const alive = PI.aliveIdentity(id) === true; if (alive) PI.signalIdentity(id, 'SIGKILL'); return { alive, left: (job.runs[job.runs.length - 1] || {}).left || null }; } }; } });
   });
   const KF = "    const esc = mine ? rawE : taskStop ? rawE.filter(ours) : [];";
   const killFilterCut = anchored(WRAP, KF, "    const esc = mine ? rawE : [];   /* MUTANT: the kill pass without this run's escapees */", 'd8f4-kill-filter');
@@ -205,7 +205,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
       ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(LP) && fs.existsSync(SP) && Number(fs.readFileSync(SP, 'utf8').trim()) > 1,
       before: () => {
         const lid = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())), hid = PI.identityOf(Number(fs.readFileSync(SP, 'utf8').trim())); mine.push(lid, hid);
-        return { after: async () => { const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true };   // the run has ended: the stop's work is done (lesson (c): no fixed sleep)
+        return { after: async () => { await settleOn(lid, `${tag}: the launcher`); await settleOn(hid, `${tag}: the hub`); const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true };   // the run has ended: the stop's work is done (lesson (c): no fixed sleep)
           for (const x of [...PI.treeOf([hid.pid]), lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };   // the stand-in's own sleep too (its read r3: it outlived the scene)
       } });
   });
@@ -265,6 +265,25 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     'B-7ca1 (its read r2, S1): the hub drops an inherited VIBESPACE_JOB_RUN (a hub started inside a job: its double-forked daemons never read as that run\'s escapees); CONTROL (the drop cut, in a copy): kept — RED');
 }
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 0, label: 'B-d8f4 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+// r4294 THE KILL IN FLIGHT, PLACED (no load): a process with a fatal signal PENDING is the hosted runner's moment at will — a `sleep`,
+// stopped (SIGSTOP), then sent SIGTERM: the signal waits until it runs again. The release's read (its life at once) calls it alive; the
+// fact does not; the wait on the fact reads it gone once it runs (SIGCONT, 300 ms later). A spared process (asleep, nothing pending) is
+// read at once: the wait costs a survivor nothing
+{
+  const pidOf = () => Number(String(spawnSync('sh', ['-c', 'sleep 341 >/dev/null 2>&1 & echo $!'], { encoding: 'utf8' }).stdout || '').trim());
+  const vp = pidOf(), sp = pidOf(), vid = PI.identityOf(vp), sid = PI.identityOf(sp); mine.push(vid, sid);
+  await until(() => PI.stateOf(sp) === 'S' && PI.stateOf(vp) === 'S', 3000);
+  process.kill(vp, 'SIGSTOP'); await until(() => PI.stateOf(vp) === 'T', 3000);
+  process.kill(vp, 'SIGTERM');
+  const atOnce = PI.aliveIdentity(vid) === true, factNow = quietOrGone(vid), spared = quietOrGone(sid);
+  setTimeout(() => { try { process.kill(vp, 'SIGCONT'); } catch { } }, 300);
+  const t0 = Date.now(), settled = await settleOn(vid, 'r4294 placed: the kill in flight'), waited = Date.now() - t0, gone = PI.aliveIdentity(vid) !== true;
+  const placed = { atOnce, factNow, settled, waited, gone, spared, sparedAlive: PI.aliveIdentity(sid) === true };
+  for (const x of [vid, sid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL');
+  ok(atOnce && !factNow && settled && gone && waited >= 200, 'r4294 THE KILL IN FLIGHT, PLACED: a process whose SIGTERM is pending (stopped, then signalled) reads ALIVE at once — the release\'s read, the hosted red made at will — while the fact reads it not yet quiet, and the wait on the fact reads it GONE once it runs (no fixed span)', placed);
+  ok(spared && placed.sparedAlive, 'r4294: a spared process (asleep, nothing pending) is quiet at once — read alive without a wait', placed);
+}
+ok(!expired.length, 'r4294 HARNESS: every wait of the stop scenes met its fact inside its bound — a process read gone or quiet, the forced end\'s sentences in the job\'s log; an expiry is NAMED here, never read silently', expired);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
