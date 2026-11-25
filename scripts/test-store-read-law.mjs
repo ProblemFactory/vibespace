@@ -27,6 +27,13 @@ const plant = (F, body) => { if (asRoot) fs.mkdirSync(F); else { fs.writeFileSyn
 // rename replaces) is SKIPPED BY NAME under root, never green by an early true
 const rootSkip = (name) => (SKIPPED.n++, console.log(`  ○ SKIPPED under root (by name, never a green): ${name} — root reads a 000 file, so the stand-in is a folder no save can replace`));
 const unplant = (F, body) => { if (asRoot) { fs.rmdirSync(F); fs.writeFileSync(F, body); } else fs.chmodSync(F, 0o644); };
+// r4362 (row B-3dbd's family, the flake census at 2.369.419): A TORN START IS JUDGED ONLY ONCE ITS HOLD HAS LIFTED — waited on the
+// lift itself (the store's unreadWords() gone), never on a count of turns standing in for it: the copy aside is written, synced and
+// linked OFF the loop, and 5000 turns are tens of ms while that I/O is pending. The bound is generous and its expiry is a NAMED failed
+// line, never a silent read of a store still held (the form of test-store-read-three's r4213 cure). The placed leg after the torn
+// hosts.json holds the copy at its link: the old wait ends with the store still held (red at will), the wait on the lift sees it lift.
+const LIFT_MS = 20000;
+const liftOf = async (store, what) => { const t0 = Date.now(); while (store.unreadWords() && Date.now() - t0 < LIFT_MS) await new Promise((r) => setTimeout(r, 20)); const up = !store.unreadWords(); if (!up) ok(false, `the torn start never lifted (${what}) — waited ${LIFT_MS} ms on its lift`, { words: store.unreadWords() }); return up; };
 const bodyOf = (F) => { try { return fs.statSync(F).isDirectory() ? '(a folder)' : (fs.chmodSync(F, 0o644), fs.readFileSync(F, 'utf8')); } catch (e) { return '(' + e.code + ')'; } };
 
 console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial token hash');
@@ -155,10 +162,28 @@ console.log('§1 hosts.json (src/hosts.js) — every paired machine and its dial
     const H = new (require(path.join(ROOT, 'src/hosts.js')).HostManager)({ dataDir: d });
     const atStart = { held: !!H.unreadWords(), copies: fs.readdirSync(d).filter((n) => /^hosts\.json\.corrupt-\d+/.test(n)).length };
     let refused = null; try { H.get('h-0001'); } catch (e) { refused = e && e.code; }
-    for (let k = 0; k < 5000 && H.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // (turns, never a clock: the copy lands off the loop)
+    await liftOf(H, 'the torn hosts.json (2b)');   // r4362: waited on the lift itself (the copy lands off the loop), its expiry a named line
     const asides = fs.readdirSync(d).filter((n) => /^hosts\.json\.corrupt-\d+/.test(n));
     ok(atStart.held && atStart.copies === 0 && refused === 'hosts-unread' && !H.unreadWords() && H.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"hosts": [' && H.tornCopy() === asides[0], 'torn bytes (2b, decision 1): HELD while they are copied aside off the loop — no synchronous copy at the start, a lookup refused by name for that moment — then KEPT once and the machines list starts empty (tornCopy() names its copy)', { atStart, refused, asides });
     H._hold.stop();
+  }
+  // r4362 (主开发 r4340 law 3): THE RACE MADE RED AT WILL — the same torn hosts.json with the copy aside HELD at its link (a placed hold
+  // on fs.promises.link, the keep's last step): the OLD wait, 5000 turns, ends with the store STILL HELD — a leg judged then read a
+  // held store; released, the wait on the lift sees it lift, and the copy went through the held link
+  {
+    const d = path.join(D, 'hosts-torn-placed'); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'hosts.json'), '{"hosts": [');
+    const realLink = fs.promises.link; let release = null, linkAsked = 0; const gate = new Promise((r) => { release = r; });
+    fs.promises.link = async (...a) => { linkAsked++; await gate; return realLink.apply(fs.promises, a); };
+    let H = null, heldAfterTurns = null, lifted = false;
+    try {
+      H = new (require(path.join(ROOT, 'src/hosts.js')).HostManager)({ dataDir: d });
+      for (let k = 0; k < 5000 && H.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // the OLD wait, as it stood
+      heldAfterTurns = !!H.unreadWords();
+      release(); lifted = await liftOf(H, 'the placed torn hosts.json, its link released');
+    } finally { release(); fs.promises.link = realLink; if (H) H._hold.stop(); }
+    const asides = fs.readdirSync(d).filter((n) => /^hosts\.json\.corrupt-\d+/.test(n));
+    ok(heldAfterTurns === true && lifted && linkAsked >= 1 && asides.length === 1, `PLACED (r4340 law 3): the copy aside held at its link — the old wait (5000 turns) ended with the store STILL HELD (red at will for a leg judged then); released, the wait on the lift saw it lift through the held link (${linkAsked} link asked, ${asides.length} copy)`, { heldAfterTurns, lifted, linkAsked, asides });
   }
   // 2b (主开发 r3648 / r3792): three laws this store proved on its own road are the FAMILY HELPER's now, proved there with their reds —
   // retired here: «missing» right after «unreadable» is read once more (test-store-read-three ⑤ «a file GONE right after a failed read
@@ -435,7 +460,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const M = new (require(path.join(ROOT, 'src/machine-mounts.js')).MachineMounts)(deps(d, [], logs));
     clearInterval(M._sweep);
     const atStart = { held: !!M.unreadWords(), copies: fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+/.test(n)).length };
-    for (let k = 0; k < 5000 && M.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // (turns, never a clock: the copy lands off the loop)
+    await liftOf(M, 'the torn machine-mounts.json (2b)');   // r4362: waited on the lift itself (the copy lands off the loop), its expiry a named line
     const asides = fs.readdirSync(d).filter((n) => /^machine-mounts\.json\.corrupt-\d+/.test(n));
     ok(atStart.held && atStart.copies === 0 && !M.unreadWords() && M.list().length === 0 && asides.length === 1 && fs.readFileSync(path.join(d, asides[0]), 'utf8') === '{"mounts": [' && logs.some((l) => /the one-time ingest of the legacy mount stores is not run mid-life/.test(l)), 'torn bytes (2b, decision 1): HELD while copied aside off the loop — no synchronous copy at the start — then KEPT once and the mounts list starts empty; the one-time legacy ingest waits for the next start (said)', { atStart, asides });
     M._hold.stop();
@@ -449,7 +474,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
       fs.writeFileSync(path.join(d, 'machine-mounts.json'), '{"mounts": [ {"id": "mm-0001", "dir": "push", "hostId": "h-0001", "tokenId": "tok-0001"');   // torn: a push record cut mid-write
       const revoked = [], logs = [];
       const M = new Mod.MachineMounts(deps(d, revoked, logs)); clearInterval(M._sweep);
-      for (let k = 0; k < 5000 && M.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // 2b: HELD while its bytes are copied aside off the loop — the mark is the lift's
+      await liftOf(M, `the torn push record (${name})`);   // 2b: HELD while its bytes are copied aside off the loop — the mark is the lift's (r4362: waited on the lift itself)
       const tornAt = M._state.tornAt;
       let saved = null; try { saved = JSON.parse(fs.readFileSync(path.join(d, 'machine-mounts.json'), 'utf8')); } catch { }
       try { await M.restore(); } catch { }
