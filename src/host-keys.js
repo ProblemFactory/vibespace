@@ -179,7 +179,10 @@ function hostKeyRefusal(h, stderr) {
   // (pinLine 'none'), the same door. Or the host now shows a key of ANOTHER type than the pinned one (reinstalled without it, or
   // somebody in the middle offering only another type): a CHANGED key, its warning and its door — never «a start writes it again»
   const noLineT = /^No (\S+) host key is known for/i.exec(w.said);
-  const noLineOf = (keys) => !!noLineT && keys.some((k) => (SSH_TYPE_NAMED[noLineT[1].toUpperCase()] || []).includes(k.type));
+  // r3966: ssh's ONE word names every key type of its family — ECDSA is three curves — so a host that moved from one curve to another
+  // (nistp256 → nistp384) prints the very sentence of a missing line: the no-line words only when the record pins EVERY type the word
+  // names (one type for each other word); any other case is a changed key, its warning and its door
+  const noLineOf = (keys) => { const named = noLineT ? SSH_TYPE_NAMED[noLineT[1].toUpperCase()] || [] : []; return named.length > 0 && named.every((ty) => keys.some((k) => k.type === ty)); };
   // r3431: the key ssh refused was the JUMP HOST's (the line names the hop, never the machine) — said as the hop's, its door the same
   const hop = hopAliasOf(h);
   if (hop && hop !== aliasOf(h) && nameOfSaid(w.said) === hop) {

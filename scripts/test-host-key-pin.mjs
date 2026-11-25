@@ -541,6 +541,18 @@ console.log('— ⑩ THE JUMP HOST\'s KEY (B-7f0b\'s remainder, 主开发 r3431)
   const hmW = new WholeRefused({ dataDir: dJ }); let eW = null;
   process.env.PATH = stubG; try { await hmW.pinKnownHostKeys(id12, { file: kh }); } catch (e) { eW = e; } finally { process.env.PATH = stubBin; }
   ok(eW && eW.code === 'host-key-via-config' && !hmW.get(id12).hostKeys, 'RED CONTROL: a copy that refuses the WHOLE press for a hop of this hub\'s configuration (the cure as first built) leaves the machine\'s own known key unpinned — the press leg above would go red', eW && eW.code);
+
+  // r3966: the unanswered check's OWN red — a copy that takes «no answer» as certain pins the hop from the hub's line
+  const id13 = hm.add({ name: 'unchecked hop red', user: 'ubuntu', host: '10.0.0.17', port: 22 }); hm.get(id13).jump = JUMP; hm._save();
+  fs.writeFileSync(kh, `10.0.0.17 ssh-ed25519 ${KM}\n[bastion.example.test]:2200 ssh-ed25519 ${KJ}\n`);
+  if (typeof hm.persisted === 'function') await hm.persisted();
+  const AsCertain = MJ.load('src/hosts.js', anchored(HSJ, "    let left = !a ? 'unchecked' :", '    let left = !a ? null :', 'unchecked-as-certain'), 'unchecked-as-certain').HostManager;
+  const hmU = new AsCertain({ dataDir: dJ });
+  process.env.PATH = stubN; const vU = await hmU.pinKnownHostKeys(id13, { file: kh }).catch((e) => ({ e })); process.env.PATH = stubBin;
+  ok(vU && !vU.e && vU.jumpPin && vU.jumpPin.hostKeys && vU.jumpPin.hostKeys[0].fp === FJ && !vU.hopLeft,
+    'RED CONTROL: a copy that takes an `ssh -G` with no answer as certain pins the jump host from this hub\'s line — the unchecked leg above (hopLeft unchecked, the hop not pinned) would go red', vU && (vU.e ? vU.e.message : vU.hopLeft));
+  ok(sm.includes("if (o.kind === 'pinned') { pinnedN++; if (o.words) hopLeft.push(o.words); } else missed.push(o.words); }") && sm.includes("showToast(hopLeft.length ? head + ' ' + hopLeft.join(' ') : head,"),
+    '«Pin all N»: a machine pinned while its jump host was left says the one press\'s own words there too (they were thrown away)');
   // (d) a pin FILE with no line (removed or emptied by hand) is said as that, never as a changed key — the hub's words, the route, the page, For you
   const noLineHop = 'No ED25519 host key is known for bastion.example.test and you have requested strict checking.\nHost key verification failed.';
   const recM = { id: 'host-m1', name: 'plain', host: 'plain.example.test', port: 22, hostKeys: [{ type: 'ssh-ed25519', key: KM, fp: FM }] };
@@ -558,9 +570,19 @@ console.log('— ⑩ THE JUMP HOST\'s KEY (B-7f0b\'s remainder, 主开发 r3431)
   ok(otherHop && otherHop.code === 'host-key-changed' && !otherHop.pinLine && otherHop.jump === 'Bastion.Example.test' && /showed an ssh host key that is not the key pinned for it/.test(otherHop.message)
     && otherM && !otherM.pinLine && /^plain showed an ssh host key that is not the key pinned for it/.test(otherM.message) && nj.pinLine === 'none' && nm.pinLine === 'none',
     'A KEY OF ANOTHER TYPE IS A CHANGED KEY: ssh\'s «No <TYPE> host key is known» for a type the record never pinned (reinstalled without it, or somebody in the middle offering only another type) keeps the changed-key warning and its door; only a type the record DOES pin is said as the file having no line', [otherHop && otherHop.message, otherM && otherM.message]);
-  const TypeBlind = MJ.load('src/host-keys.js', anchored(HKJ, 'keys.some((k) => (SSH_TYPE_NAMED[noLineT[1].toUpperCase()] || []).includes(k.type))', 'true', 'no-line-type-blind'), 'no-line-type-blind');
+  const TypeBlind = MJ.load('src/host-keys.js', anchored(HKJ, 'named.length > 0 && named.every((ty) => keys.some((k) => k.type === ty))', '!!noLineT', 'no-line-type-blind'), 'no-line-type-blind');
   const tbR = TypeBlind.hostKeyRefusal(recP, 'No ECDSA host key is known for bastion.example.test and you have requested strict checking.\nHost key verification failed.');
   ok(tbR && tbR.pinLine === 'none', 'RED CONTROL: a copy that decides from ssh\'s sentence alone tells a jump host showing ANOTHER key type that its pin file has no line (the warning gone) — the another-type leg above would go red', tbR && tbR.message);
+
+  // r3966: ssh's ONE word ECDSA names three curves — a host that moved from one curve to another is a CHANGED key, never «no line»
+  const KE = blob('ecdsa-sha2-nistp256', 45), recE = { ...rec, jumpHostKeys: [{ type: 'ssh-ed25519', key: KJ }, { type: 'ecdsa-sha2-nistp256', key: KE }] };
+  const curveSaid = 'No ECDSA host key is known for bastion.example.test and you have requested strict checking.\nHost key verification failed.';
+  const cv = HK.hostKeyRefusal(recE, curveSaid), cvAll = HK.hostKeyRefusal({ ...recE, jumpHostKeys: [...recE.jumpHostKeys, { type: 'ecdsa-sha2-nistp384', key: blob('ecdsa-sha2-nistp384', 46) }, { type: 'ecdsa-sha2-nistp521', key: blob('ecdsa-sha2-nistp521', 47) }] }, curveSaid);
+  ok(HK.hopPinned(recE) && cv && cv.code === 'host-key-changed' && !cv.pinLine && /showed an ssh host key that is not the key pinned for it/.test(cv.message) && cvAll && cvAll.pinLine === 'none',
+    'ssh\'s ONE word ECDSA names three curves: a jump host pinned by one curve that now shows another prints the missing-line sentence and is said as a CHANGED key; only a record pinning every curve the word names is told its file has no line', [cv && cv.message, cvAll && cvAll.pinLine]);
+  const AnyCurve = MJ.load('src/host-keys.js', anchored(HKJ, 'named.length > 0 && named.every((ty) => keys.some((k) => k.type === ty))', 'named.some((ty) => keys.some((k) => k.type === ty))', 'one-curve-no-line'), 'one-curve-no-line');
+  const acR = AnyCurve.hostKeyRefusal(recE, curveSaid);
+  ok(acR && acR.pinLine === 'none', 'RED CONTROL: a copy for which one pinned curve stands for the whole word tells a host that moved curve that its file has no line — the curve leg above would go red', acR && acR.message);
   // r3873 (5): the scan's and the press's own refusals in the page's words, in three languages
   ok(['host-key-none-seen', 'host-key-not-seen', 'host-key-jump-unchecked'].every((c) => sm.includes(`if (e && e.code === '${c}') return tr(`)) && /'host-key-known-unreadable', 'host-key-jump-unchecked'\]\.includes\(e\.code\)/.test(sm),
     'the page words the scan\'s «no key seen», the press\'s «a chosen key not shown» and the unchecked hop by their codes (they showed the hub\'s English sentence); the unchecked hop opens the dialog\'s scan');

@@ -468,9 +468,11 @@ export function installSidebarMounts(Sidebar) {
           all.onclick = async () => {
             all.disabled = true;
             // r1602: the toast says WHICH machines did not pin and why, each in its own words (never one count under one cause)
-            let pinnedN = 0; const missed = [];
-            for (const x of unpinned) { const o = await this._pinKnown(x); if (o.kind === 'pinned') pinnedN++; else missed.push(o.words); }
-            showToast(missed.length ? tr('{n} pinned; not pinned — {list}', { n: pinnedN, list: missed.join(' · ') }) : tr('{n} pinned.', { n: pinnedN }), missed.length ? { type: 'warn' } : {});
+            // r3966: a machine pinned while its jump host was left (hopLeft) says so here too, in the one press's own words
+            let pinnedN = 0; const missed = [], hopLeft = [];
+            for (const x of unpinned) { const o = await this._pinKnown(x); if (o.kind === 'pinned') { pinnedN++; if (o.words) hopLeft.push(o.words); } else missed.push(o.words); }
+            const head = missed.length ? tr('{n} pinned; not pinned — {list}', { n: pinnedN, list: missed.join(' · ') }) : tr('{n} pinned.', { n: pinnedN });
+            showToast(hopLeft.length ? head + ' ' + hopLeft.join(' ') : head, missed.length || hopLeft.length ? { type: 'warn' } : {});
             this._renderMounts();
           };
           root.appendChild(all);
