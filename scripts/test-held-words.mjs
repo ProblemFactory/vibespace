@@ -30,7 +30,7 @@ import { dictEntries } from './i18n-extract.mjs';
 import { anchored } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { ok, report } = checker();
+const { ok, report } = checker({ whole: true });   // r3928: a failing line's list printed whole, one item a line
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 // ── the tree's server sources (src/ outside the page's src/lib, and server.js) ──

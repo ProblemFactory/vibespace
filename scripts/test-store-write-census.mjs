@@ -47,12 +47,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import os from 'node:os';
+import { wholeDetail } from './lib/check.mjs';   // r3928: a failing line's list printed whole, one item a line
 import { filesOf, sitesOf, walk, scopeOf } from './sync-fs-census.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, process.env.CENSUS_ALL ? 1e9 : 1500) : '')); } };
+const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? wholeDetail(d) : '')); } };
 
 // channel-store-off-loop (commit 1): THE CENSUS LEARNS WHAT IT MISSED — a directory made (mkdirSync), a file opened for
 // write or append (openSync whose flags are not a read's), a tree or a file removed (rmSync, unlinkSync) hold the loop on a
@@ -431,7 +432,7 @@ function judge(sites, rows, debtMax) {
 console.log('① every synchronous persistence write of the main process is a row');
 const sites = scan(REPO);
 const J = judge(sites, ROWS, DEBT_MAX);
-ok(!J.problems.length, `${J.sites} sites in ${ROWS.length} rows — durable ${ROWS.filter((r) => r[3] === 'durable').reduce((a, r) => a + r[2], 0)} · not-main ${ROWS.filter((r) => r[3] === 'not-main').reduce((a, r) => a + r[2], 0)} · not-a-store ${ROWS.filter((r) => r[3] === 'not-a-store').reduce((a, r) => a + r[2], 0)} · exit ${ROWS.filter((r) => r[3] === 'exit').reduce((a, r) => a + r[2], 0)} · DEBT ${J.debt} (≤ ${DEBT_MAX})`, process.env.CENSUS_ALL ? J.problems : J.problems.slice(0, 12));
+ok(!J.problems.length, `${J.sites} sites in ${ROWS.length} rows — durable ${ROWS.filter((r) => r[3] === 'durable').reduce((a, r) => a + r[2], 0)} · not-main ${ROWS.filter((r) => r[3] === 'not-main').reduce((a, r) => a + r[2], 0)} · not-a-store ${ROWS.filter((r) => r[3] === 'not-a-store').reduce((a, r) => a + r[2], 0)} · exit ${ROWS.filter((r) => r[3] === 'exit').reduce((a, r) => a + r[2], 0)} · DEBT ${J.debt} (≤ ${DEBT_MAX})`, J.problems);
 
 console.log('② the moved stores hand their bytes to the writer by name; nothing of theirs is written here');
 {
@@ -713,12 +714,12 @@ console.log('⑤ the channels index in two columns: a person\'s act / a decision
     const added = unawaited.slice(n0); unawaited.length = n0;
     ok(esrc0.split(AW).length === 2 && added.some((x) => /«create > markRead»/.test(x)), `CONTROL: markRead's update without its await (the flag kept) is red by name (${added.join(', ') || 'nothing flagged'})`);
   }
-  ok(!pr.length, `${got.size} scopes: ${sum(2)} index updates durable before the answer (acts, decisions, billing / delivery records) · ${sum(3)} paced (re-derived)`, pr.slice(0, 10));
+  ok(!pr.length, `${got.size} scopes: ${sum(2)} index updates durable before the answer (acts, decisions, billing / delivery records) · ${sum(3)} paced (re-derived)`, pr);
   const esrc = fs.readFileSync(path.join(REPO, E), 'utf8');
   const MR = esrc.match(/async function markRead\([\s\S]*?\n  \}/);
   ok(!!MR && /, \{ durable: true \}\)/.test(MR[0]), 'CONTROL setup: markRead\'s update is spelled durable once');
   const cut = MR ? ixJudge(ixSites({ [E]: esrc.replace(MR[0], MR[0].replace(', { durable: true })', ')')) })) : [];
-  ok(cut.some((p) => p.startsWith(`MOVED: ${E}|create > markRead`)), 'CONTROL: markRead without `durable` (the read mark at the index\'s pace — 11 s on a 22 MB index) is red by name', cut.slice(0, 3));
+  ok(cut.some((p) => p.startsWith(`MOVED: ${E}|create > markRead`)), 'CONTROL: markRead without `durable` (the read mark at the index\'s pace — 11 s on a 22 MB index) is red by name', cut);
   ok(ixJudge(ixSites({ [O]: fs.readFileSync(path.join(REPO, O), 'utf8') + '\nasync function zzNewAct(store) { await store.index.update(() => {}); }\n' })).some((p) => p.startsWith(`UNCLASSED: ${O}|zzNewAct`)), 'CONTROL: a new update scope is red by name until it is classed');
 
   // the live leg: a store over its own writer (its own thread) — A PERSON'S ACT LIVES IN A SMALL FILE OF ITS OWN: its
@@ -923,7 +924,7 @@ console.log('⑦ round 2 — session-meta\'s writes in two columns (a binding / 
     ok(['zzEmptyThen', 'zzThenIgnores', 'zzCatchNull', 'zzThenPass', 'zzFinally', 'zzThenRest'].every((n) => ctl6.some((x) => x.includes(`«${n}»`))) && !ctl6.some((x) => /«zzThenReads»|«zzThenPassKept»/.test(x)) && WH0.includes(M1) && ctlM1.some((x) => /«registerWsHandler > handleMessage»/.test(x)),
       `CONTROL (round 6 + its amend): \`.then(() => {})\`, \`.then(() => res.json(…))\`, \`.catch(() => null)\`, \`.then((ok) => ok);\` dropped, a \`.finally\` with a body, \`.then((...ok) => {})\` and the verifier's M1 in handleMessage (\`.then(() => {}, (ok) => …)\`) are red by name — a .then that READS the value and \`return ….then((ok) => ok)\` are not (${[...ctl6, ...ctlM1].filter((x) => /zz|handleMessage/.test(x)).join(', ') || 'nothing flagged'})`); }
   const sumM = (i) => M.reduce((n, r) => n + r[i], 0);
-  ok(!pm.length, `session-meta: ${gm.size} scopes — ${sumM(2)} writes durable before the answer (bindings, a person's acts), ${sumM(3)} paced (stamps, caches, rings, a first version written synchronously)`, pm.slice(0, 8));
+  ok(!pm.length, `session-meta: ${gm.size} scopes — ${sumM(2)} writes durable before the answer (bindings, a person's acts), ${sumM(3)} paced (stamps, caches, rings, a first version written synchronously)`, pm);
   const WH = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const lockW = "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext }, { durable: true })";   // B-6c55: the fact rides the same durable write
   ok(WH.includes(lockW) && judgeM(metaSites({ 'src/ws-handler.js': WH.replace(lockW, "modelLocked: session._modelLocked, lockedModel: session._lockedModel, lockedContext: session._lockedContext })") })).some((x) => x.startsWith('MOVED: src/ws-handler.js|registerWsHandler > handleMessage')),
@@ -1498,7 +1499,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           return { problems, sites: all.reduce((k, o) => k + o.n, 0), facts: all.reduce((k, o) => k + o.fact, 0) };
         };
         const BF = bfiles(), bc = bcensus(BF, BROWS);
-        ok(!bc.problems.length && BROWS.every((r) => WHY[r[3]] && r[2] > 0), `⑨ follow (2) THE PRINCIPAL BUILDERS: ${bc.sites} object literals with Task Group ids in ${BF.size} hub files — ${bc.facts} hand the hold's fact, ${BROWS.reduce((k, r) => k + r[2], 0)} more each a row saying why none is needed (${Object.keys(WHY).map((c) => `${c} ${BROWS.filter((r) => r[3] === c).reduce((k, r) => k + r[2], 0)}`).join(' · ')})${bc.problems.length ? `\n  ${bc.problems.slice(0, 12).join('\n  ')}` : ''}`);
+        ok(!bc.problems.length && BROWS.every((r) => WHY[r[3]] && r[2] > 0), `⑨ follow (2) THE PRINCIPAL BUILDERS: ${bc.sites} object literals with Task Group ids in ${BF.size} hub files — ${bc.facts} hand the hold's fact, ${BROWS.reduce((k, r) => k + r[2], 0)} more each a row saying why none is needed (${Object.keys(WHY).map((c) => `${c} ${BROWS.filter((r) => r[3] === c).reduce((k, r) => k + r[2], 0)}`).join(' · ')})${bc.problems.length ? `\n  ${bc.problems.join('\n  ')}` : ''}`);
         // CONTROLS — one per shape the read named (each planted alone in a new file, the fact left out ⇒ a row is owed), the same
         // shapes WITH the fact (no row owed: a spread, a key, an Object.assign — never a comment), and two real doors that LOSE it
         const SHAPES = [

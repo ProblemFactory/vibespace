@@ -62,10 +62,11 @@ import './scratch.mjs';   // FIRST (B-ba47 B2): the re-home comes before any oth
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { wholeDetail } from './lib/check.mjs';   // r3928: a failing line's list printed whole, one item a line
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok() was handed a ${typeof c} as its condition (arguments swapped, or not a verdict): ${n}`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 4000) : '')); } };
+const ok = (c, n, d) => { if (typeof c !== 'boolean') throw new TypeError(`ok() was handed a ${typeof c} as its condition (arguments swapped, or not a verdict): ${n}`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? wholeDetail(d) : '')); } };
 
 const U = 'UNDER THE LAW', H = 'ITS OWN HOLD', D = 'DERIVED', X = 'WRITTEN OVER', N = 'NOT A STORE', G = 'GONE';
 const VERDICTS = Object.freeze([U, H, D, X, N, G]);

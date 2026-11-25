@@ -28,7 +28,7 @@ import { dictEntries } from './i18n-extract.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { ok, report } = checker();
+const { ok, report } = checker({ whole: true });   // r3928: a failing line's list printed whole, one item a line
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ROOT = scratch('held-lists');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });

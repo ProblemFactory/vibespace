@@ -26,7 +26,7 @@
 // test-ci-gate-tiers §7b runs both over every script: no swapped call anywhere, and the inline helpers without the guard
 // only ever fall (a new suite imports this file). PURE: no I/O beyond the console in checker(), verdictOf() and gateOf().
 
-export function checker({ log = (l) => console.log(l), err = (l) => console.error(l), exit = (c) => process.exit(c) } = {}) {
+export function checker({ log = (l) => console.log(l), err = (l) => console.error(l), exit = (c) => process.exit(c), whole = false } = {}) {
   const counts = { pass: 0, fail: 0, failed: [] };
   const ok = (cond, name, detail) => {
     if (typeof name !== 'string' || name.length === 0) throw new TypeError(`ok(cond, name): the name is ${name === '' ? 'empty' : 'a ' + typeof name} (${String(name).slice(0, 80)}) — the arguments are swapped, or the leg has no name`);
@@ -34,7 +34,7 @@ export function checker({ log = (l) => console.log(l), err = (l) => console.erro
     if (cond) { counts.pass++; log('  ✓ ' + name); }
     else {
       counts.fail++; counts.failed.push(name);
-      const d = detail === undefined ? '' : ' — ' + (typeof detail === 'string' ? detail : safeJson(detail)).slice(0, 800);
+      const d = detail === undefined ? '' : whole ? wholeDetail(detail) : ' — ' + (typeof detail === 'string' ? detail : safeJson(detail)).slice(0, 800);
       err('  ✗ ' + name + d);
     }
     return cond;
@@ -43,6 +43,14 @@ export function checker({ log = (l) => console.log(l), err = (l) => console.erro
   return { ok, report, counts };
 }
 const safeJson = (v) => { try { return JSON.stringify(v); } catch { return String(v); } };
+/** A FAILING LINE's LIST IS PRINTED WHOLE (主开发 r3928, the law of r3874 (2)): a reader of a red counts its items. A list detail is
+ *  printed as its count, then ONE ITEM A LINE under the ✗ line, uncut; any other detail whole (no cut). A census opts in with
+ *  checker({ whole: true }), or its own ok appends this. The default checker() keeps its one-line 800-character form. → the text
+ *  that follows the ✗ line's name */
+export function wholeDetail(detail) {
+  if (Array.isArray(detail)) return ` — ${detail.length} item(s):` + detail.map((x, k) => `\n      ${k + 1}. ${typeof x === 'string' ? x : safeJson(x)}`).join('');
+  return ' — ' + (typeof detail === 'string' ? detail : safeJson(detail));
+}
 
 // THE GUARDED COERCION (B-1747 part 2, the coordinator's r1347): scripts/guard-inline-helpers.mjs wraps an EXISTING call's
 // condition in it wherever that condition is no boolean by its operator — never a plain `!!( … )`, which would make a vacuous

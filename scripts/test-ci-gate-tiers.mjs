@@ -425,6 +425,15 @@ console.log('\n§7b a leg never passes by its name: no swapped call anywhere, on
     'the swap THROWS (a name where the condition goes, a value where a comparison belongs, an empty or missing name) — a crash with a stack, never a green leg');
   H.report();
   ok(codes.join() === '1' && /^\n1 FAILED \(1 passed\)$/.test(lines[lines.length - 1]), 'report(): «n FAILED (m passed)» and exit 1 on a red');
+  // r3928 (主开发 r3874 (2)): A FAILING LINE's LIST IS PRINTED WHOLE when a census opts in — its count, then one item a line, uncut;
+  // the default keeps its one-line 800-character form (the RED control: the same long list through the default is cut)
+  const wl = [], longItem = 'x'.repeat(900);
+  const HW = C.checker({ whole: true, log: (l) => wl.push(l), err: (l) => wl.push(l), exit: (c) => c });
+  HW.ok(false, 'w', [longItem, 'y']); HW.ok(false, 'v', { why: longItem });
+  const dl = []; const HD = C.checker({ log: (l) => dl.push(l), err: (l) => dl.push(l), exit: (c) => c }); HD.ok(false, 'w', [longItem, 'y']);
+  ok(wl[0] === `  ✗ w — 2 item(s):\n      1. ${longItem}\n      2. y` && wl[1] === `  ✗ v — {"why":"${longItem}"}` && C.wholeDetail(['a']) === ' — 1 item(s):\n      1. a',
+    'checker({ whole: true }) prints a failing list WHOLE — its count, then one item a line, uncut — and any other detail uncut (r3928)', { wl: wl.map((l) => l.length) });
+  ok(dl[0].length === '  ✗ w — '.length + 800 && !dl[0].includes('\n'), 'RED control: the default checker() cuts the same list at 800 characters on one line — the whole form is the opt-in\'s, not luck', { len: dl[0].length });
   const MC = mutantCopies('cigate7b-check', REPO), libSrc = fs.readFileSync(path.join(dir, 'lib/check.mjs'), 'utf-8');
   const unguardedSrc = libSrc.split('\n').filter((l) => !/^\s*if \(typeof (cond|name) !== /.test(l)).join('\n');
   ok(unguardedSrc.split('\n').length === libSrc.split('\n').length - 2, 'RED control: the copy without the two guard lines is the lib minus exactly two lines');
