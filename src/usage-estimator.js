@@ -1235,6 +1235,8 @@ class UsageEstimator {
     if (this._closed) return; // usage-relearn-stepped round 2 (small 4): an estimator let go writes nothing more
     // r3748 should (r3145 unit 2): while the person's prices are HELD a fit is learned from costs at VibeSpace's defaults — it stays in
     // memory (the quota estimate's minutes, re-learned on its TTL after the lift) and is never written to rates.json
+    // r4125: asked as HELD — a torn read's moment too (the helper's verdict is still to come; the fit stays in memory and is written at a
+    // later persist, once the prices read: the person's, or the defaults after the helper's confirmed lift)
     { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; if (uh && typeof uh.pricesHeld === 'function' && uh.pricesHeld()) return; }
     // lane hub-loop-stalls commit 2: through THE STORE WRITER (its own thread; on the owner's hub this write held the loop
     // twice ≥ 1 s in six hours). The file is read at the first persist after a (re)load and kept here; each persist merges

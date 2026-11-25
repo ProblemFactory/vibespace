@@ -515,38 +515,52 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
       const { UsageEstimator } = require('./usage-estimator.js');
       const uh = new UsageHistory({ dataDir, homeDir: path.join(dataDir, '.no-home') });
       // B-f276's family (r3145 unit 2 + r3181 (1)): the re-learn writes rates.json from ledger COSTS — while the person's prices are held
-      // those would be the defaults' and kept for good: the migration throws (its runner tries it again at the next start), nothing written
-      if (uh.pricesHeld && uh.pricesHeld()) { try { uh._pricingHold.stop(); } catch { } throw new Error('the person\'s prices (usage-history/pricing.json) could not be read — the re-learn waits for them: nothing was written, it runs again at the next start'); }
-      const est = new UsageEstimator({ anchorsDir, usageHistory: uh, resolveIdentity: () => null, lagS: 0, priorsFor: require('./usage-predict.js').priorsForIdentity });   // each source's own prior (usage-predict pick 3)
-      for (const k of idents) { try { est.learnNow(k); report.relearned++; } catch (e) { throw new Error(`re-learning ${k} failed: ${e.message}`); } } // the migration's own synchronous road (usage-relearn-stepped: ratesFor folds a slice a turn)
-      est.flushRates();   // on disk BEFORE the pass completes (the estimator writes through the store writer)
-      est.close(); // usage-relearn-stepped round 2 (small 4): this estimator is let go — it folds and persists nothing more
-      try { uh._pricingHold && uh._pricingHold.stop(); } catch { }   // r3145 unit 2: its prices' hold leaves the live list with it
+      // those would be the defaults' and kept for good: the migration throws (its runner tries it again at the next start), nothing written.
+      // r4125 (the helper's law, r3986): the prices are asked AFTER their hold has SETTLED ONCE in this life — a start whose read was torn
+      // waits (bounded, off the loop) for the helper's own verdict: a torn FILE lifts (the defaults, its own confirmed lift: the pass
+      // finishes), a torn READ of a whole file lifts at the person's own prices, a file that cannot be read stays held (the re-learn waits)
+      const relearnNow = () => {
+        if (uh.pricesHeld && uh.pricesHeld()) { try { uh._pricingHold.stop(); } catch { } throw new Error('the person\'s prices (usage-history/pricing.json) could not be read — the re-learn waits for them: nothing was written, it runs again at the next start'); }
+        const est = new UsageEstimator({ anchorsDir, usageHistory: uh, resolveIdentity: () => null, lagS: 0, priorsFor: require('./usage-predict.js').priorsForIdentity });   // each source's own prior (usage-predict pick 3)
+        for (const k of idents) { try { est.learnNow(k); report.relearned++; } catch (e) { throw new Error(`re-learning ${k} failed: ${e.message}`); } } // the migration's own synchronous road (usage-relearn-stepped: ratesFor folds a slice a turn)
+        est.flushRates();   // on disk BEFORE the pass completes (the estimator writes through the store writer)
+        est.close(); // usage-relearn-stepped round 2 (small 4): this estimator is let go — it folds and persists nothing more
+        try { uh._pricingHold && uh._pricingHold.stop(); } catch { }   // r3145 unit 2: its prices' hold leaves the live list with it
+      };
+      if (uh.pricesSettling && uh.pricesSettling()) {
+        // a STEPPED pass for that one case (src/migration-runner.js records it when it ends): the re-key above is on disk already
+        return uh.pricesSettled().then(() => { relearnNow(); return finishPass(); }, (e) => { try { uh._pricingHold.stop(); } catch { } throw e; });
+      }
+      relearnNow();
     }
   }
-  report.total = { rekeyed: sumMax(tot.rekeyed), archived: sumMax(tot.archived), corrective: sumMax(tot.corrective) };
-  // A FINISHED PASS THE RUNNER NEVER RECORDED (quota r3): killed between the
-  // marker below and the runner's migrations.json write, the retry finds every
-  // row already re-keyed and nothing open — it states the recorded pass's
-  // repair (its marker) instead of 0 / 0 with no notice, and writes no second
-  // marker (the repair happened once).
-  const nothingNow = !report.resumed && !report.total.rekeyed && !report.total.archived && !report.total.corrective;
-  const lc = prior.lastComplete;
-  if (nothingNow && lc && lc.total && (lc.total.rekeyed || lc.total.archived || lc.total.corrective)) {
-    report.total = { rekeyed: Number(lc.total.rekeyed) || 0, archived: Number(lc.total.archived) || 0, corrective: Number(lc.total.corrective) || 0 };
-    report.resumed = true; report.recovered = true;
-    if (Number(lc.relearned) > 0) report.relearned = Number(lc.relearned);
+  return finishPass();
+  // the pass's close — its totals, its marker, its report (r4125: also the end of a pass that waited for the prices' settle)
+  function finishPass() {
+    report.total = { rekeyed: sumMax(tot.rekeyed), archived: sumMax(tot.archived), corrective: sumMax(tot.corrective) };
+    // A FINISHED PASS THE RUNNER NEVER RECORDED (quota r3): killed between the
+    // marker below and the runner's migrations.json write, the retry finds every
+    // row already re-keyed and nothing open — it states the recorded pass's
+    // repair (its marker) instead of 0 / 0 with no notice, and writes no second
+    // marker (the repair happened once).
+    const nothingNow = !report.resumed && !report.total.rekeyed && !report.total.archived && !report.total.corrective;
+    const lc = prior.lastComplete;
+    if (nothingNow && lc && lc.total && (lc.total.rekeyed || lc.total.archived || lc.total.corrective)) {
+      report.total = { rekeyed: Number(lc.total.rekeyed) || 0, archived: Number(lc.total.archived) || 0, corrective: Number(lc.total.corrective) || 0 };
+      report.resumed = true; report.recovered = true;
+      if (Number(lc.relearned) > 0) report.relearned = Number(lc.relearned);
+      report.ms = Date.now() - t0;
+      return report;
+    }
+    // THE PASS FINISHED: a marker closes the segment, so a later retry (there is
+    // none after the runner records the id) would not re-count this one, and a
+    // pass that dies before this line is RESUMED by the next one
+    if (report.resumed || report.total.rekeyed || report.total.archived || report.total.corrective) {
+      _appendLines(archiveDir, archiveName, JSON.stringify({ migration: id, at: now, store: 'pass', complete: true, total: report.total, resumed: report.resumed, relearned: report.relearned }) + '\n');
+    }
     report.ms = Date.now() - t0;
     return report;
   }
-  // THE PASS FINISHED: a marker closes the segment, so a later retry (there is
-  // none after the runner records the id) would not re-count this one, and a
-  // pass that dies before this line is RESUMED by the next one
-  if (report.resumed || report.total.rekeyed || report.total.archived || report.total.corrective) {
-    _appendLines(archiveDir, archiveName, JSON.stringify({ migration: id, at: now, store: 'pass', complete: true, total: report.total, resumed: report.resumed, relearned: report.relearned }) + '\n');
-  }
-  report.ms = Date.now() - t0;
-  return report;
 }
 
 module.exports = { backfillLedgerBySlot, readPriorArchive, readOtelStash, readAttribution, walkAt, slotRecordFor, refusalFor, indexTransitions, ownLedgerRow, membersOffDisk };

@@ -37,6 +37,7 @@ const HOLD = require('./store-read-hold.js');   // B-f276's family (主开发 r3
 // Read again off the loop on the helper's ladder; the lift prices at the person's table at once. Torn bytes: kept aside once, then
 // the defaults are written as on a first start (r3181: never held until the person sets prices) and the page says where they are.
 const PRICES_UNREAD = 'prices_unread';
+const PRICES_SETTLE_MS = 10000;   // r4125: the bound of a wait for the prices' first settle, off the loop (the helper's own reads keep their bounds inside it)
 const PRICING_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const pricesWords = (h) => `VibeSpace cannot read your edited prices right now (${(h && h.code) || 'unreadable'}) — nothing is written over them, and costs are not shown as yours until they read. VibeSpace reads them again by itself every few minutes.`;
 const { isThirdPartyAccount } = require('./provider-ids.js'); // PURE (B-d578 P1-b): a `pv-` id that names a third-party provider's record
@@ -540,6 +541,7 @@ class UsageHistory {
     let read; try { read = { text: fs.readFileSync(this.pricingFile, 'utf-8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: PRICING_SHAPE });
     const st = this._pricingHold.start(a0);
+    this._pricesStartTorn = a0.state === 'corrupt';   // r4125: this start's read was torn — the helper's verdict is still to come
     if (st === 'held') { this._heldDefaults = { version: 2, tiers: { ...DEFAULT_PRICING }, accounts: {} }; return this._heldDefaults; }
     this._heldDefaults = null;
     return this._shapePricing(st === 'data' ? a0.value : null);
@@ -581,6 +583,20 @@ class UsageHistory {
   }
   /** the prices' hold: {file, code, since} while pricing.json could not be read — null when it reads (or in a fold worker's copy) */
   pricesHeld() { return this._pricingHold ? this._pricingHold.held() : null; }
+  /** r4125 (the helper's law, r3986 — line 828's follow): a road that needs the TRUE prices and meets a hold asks after the hold has
+   *  SETTLED ONCE in this life. `pricesSettling()`: this start's read was torn (the store-read answer, never a word of the helper's), so
+   *  the helper's own verdict is still to come; `pricesSettled()` waits for it, bounded and off the loop, by the helper's own read
+   *  again: a torn FILE lifts (the defaults — its confirmed lift, pricesTorn), a torn READ of a whole file lifts at the person's own
+   *  prices, a file that cannot be read stays held → the hold's facts (null: the prices are known) */
+  pricesSettling() { return !!(this._pricesStartTorn && this.pricesHeld()); }
+  async pricesSettled({ boundMs = PRICES_SETTLE_MS, gapMs = 100 } = {}) {
+    const end = Date.now() + boundMs;
+    while (this.pricesSettling() && Date.now() < end) {
+      try { await this._pricingHold.again(); } catch { }   // the helper's own try: one in flight, its own bounds (a try in flight answers false)
+      if (this.pricesSettling()) await new Promise((r) => setTimeout(r, gapMs));   // NOT unref'd: an awaited wait, bounded — an unref'd one let a process with nothing else alive end mid-wait
+    }
+    return this.pricesHeld();
+  }
   /** the words a person reads while held (null: not held) */
   pricesWords() { return this._pricingHold ? this._pricingHold.words() : null; }
   /** a lift from TORN bytes in this run: {copy, since} (the copy's base name) — null when none */

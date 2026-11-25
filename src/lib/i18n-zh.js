@@ -15720,6 +15720,7 @@ export default {
   "VibeSpace cannot read your edited prices right now — nothing was changed and nothing is written over them, and costs are not shown as yours until they read. It reads them again by itself in a few minutes.": "VibeSpace 暂时读不到你编辑过的价格 — 没有更改任何东西，也不会覆盖它们；在读到之前不会把费用当作你的价格显示。它会在几分钟内自己再读一次。",
   "prices not known": "价格未知",
   "your edited prices": "你编辑过的价格",
+  "What you typed in the editor was not saved — set your prices again once they read.": "你在编辑器里输入的内容没有保存 — 等价格能读到后请重新设置。",
   "Your edited prices cannot be read right now, so this backup leaves them out — the Usage window says why": "暂时读不到你编辑过的价格，所以这次备份不包含它们 — 用量窗口会说明原因",
   "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "你的价格文件已损坏，无法读取。它的原始字节保存在 VibeSpace 数据文件夹中旁边的 {copy}，VibeSpace 的默认价格已恢复：请在「价格…」中重新设置你的价格，或手动修好该文件后重启 VibeSpace。",
 };

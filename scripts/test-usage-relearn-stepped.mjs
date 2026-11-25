@@ -476,7 +476,7 @@ console.log('§12 A FOLD THAT THROWS · AN ESTIMATOR LET GO · THE SMALLEST FIRS
   const disk = JSON.parse(fs.readFileSync(path.join(w.adir, 'rates.json'), 'utf8'))[key];
   const after = { folds: w.est._folds.size, asks: w.est.ratesFor(key) === w.est._rateCache.get(key).rates, started: w.est.foldsStarted };
   w.est.invalidate(key); w.est.ratesFor(key); const noNew = w.est._folds.size === 0 && w.est.foldsStarted === after.started;
-  const bf = read('src/ledger-slot-backfill.js'), closes = /\n {6}est\.flushRates\(\);[^\n]*\n {6}est\.close\(\);/.test(bf);
+  const bf = read('src/ledger-slot-backfill.js'), closes = /\n {8}est\.flushRates\(\);[^\n]*\n {8}est\.close\(\);/.test(bf);   // the re-learn sits in its own function since line 828's follow (r4125)
   ok(inFlight === 1 && after.folds === 0 && after.asks && noNew && same(disk.buckets, r2) && closes, `AN ESTIMATOR LET GO: close() ends its fold in flight (${inFlight} → ${after.folds}), it serves what it has and folds nothing more (${noNew}); rates.json keeps its successor's learning (${same(disk.buckets, r2)}); the slot backfill closes its own after its flush (${closes})`, { inFlight, after, noNew, closes });
   rmWorld(w);
 }

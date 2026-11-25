@@ -822,7 +822,7 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   const server = read('server.js'), sd = server.slice(server.indexOf('function shutdown'), server.indexOf("process.on('SIGTERM', shutdown)")), bf = read('src/ledger-slot-backfill.js');
   const bi = bf.indexOf('_readJson(ratesFp)');
   const est = read('src/usage-estimator.js');
-  ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'usage-rates\.write'/.test(est) && /beginExit|exitFlush/.test(server) && !/flushRatesIn/.test(sd) && bi > 0 && /\n {6}est\.flushRates\(\);/.test(bf) && !/typeof est\.flushRates/.test(bf), 'ROUND 3 ON THE STORE WRITER: rates.json is a store of the writer — the stop path\'s exit flush writes what it owes (no flush of ours); the slot backfill\'s pass ends with its rates on disk (est.flushRates(), no typeof guard)');
+  ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'usage-rates\.write'/.test(est) && /beginExit|exitFlush/.test(server) && !/flushRatesIn/.test(sd) && bi > 0 && /\n {8}est\.flushRates\(\);/.test(bf) && !/typeof est\.flushRates/.test(bf), 'ROUND 3 ON THE STORE WRITER: rates.json is a store of the writer — the stop path\'s exit flush writes what it owes (no flush of ours); the slot backfill\'s pass ends with its rates on disk (est.flushRates(), no typeof guard)');
   // a pinned ask whose load throws while the ledger is loading answers master's «partial»; a whole ledger's throw stays a throw
   const w = world(REPO, { seed: 42, rows: 2000 }), realLoad = w.uh._loadEvents, realLoading = w.uh.ledgerLoading;
   w.uh._loadEvents = () => { throw new Error('EIO injected'); };

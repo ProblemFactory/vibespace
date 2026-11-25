@@ -19,6 +19,11 @@
 //      «prices not known»; the CSV's lines while held carry no dollar cell and say it; the one held reading of the answer. PINS on
 //      every wire of the window and the dashboard (the editor, the trend, the bars, the export, the save toast, the head notice).
 //      The estimator writes no fit to rates.json while held; the export dialog's held row.
+//   ⑤ THE FOLLOW (主开发 r3837 + r4125): the prices are asked after their hold has SETTLED ONCE (never on a word of the helper's): a torn
+//      READ of a whole file → the person's prices, a torn FILE → the defaults by the helper's own lift (the backfill's pass finishes), a
+//      file that cannot be read → held; the estimator writes nothing meanwhile; the old word test's red control;
+//      the page FOLLOWS the hold — the family's REAL list (src/server/held-lists.js) read by the page's pure predicate while held and
+//      after the lift, a copy reading a field the hub's rows lack red; pins: the window's listener, the ranking by tokens, the typed note.
 //   ④ RED CONTROLS: the store with its hold cut writes the defaults over the unread file at the start (the release's shape); the
 //      pure module with its held branch cut (costWords, the CSV) is red by name.
 // At the release (the base of this row) the law's legs are RED: that is the harm, as the release has it.
@@ -226,7 +231,115 @@ const importCopy = async (src, tag) => { const f = path.join(root, `cw-${tag}.mj
   try { e.close(); } catch { }
   ok(whileHeld === null && !!after && !!after['acct:made-up-acct'], 'the estimator writes NO fit to rates.json while the prices are held (a fit at the defaults, memory only) — and writes it once they read', { whileHeld, after: after && Object.keys(after) });
   const bf = onDisk(path.join(REPO, 'src/ledger-slot-backfill.js')) || '';
-  ok(/const uh = new UsageHistory\(\{ dataDir, homeDir: path\.join\(dataDir, '\.no-home'\) \}\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(uh\.pricesHeld && uh\.pricesHeld\(\)\) \{[^\n]*throw new Error\(/.test(bf), 'the ledger backfill\'s re-learn throws FIRST while the prices are held (before any estimator is made): its rates are never learned at the defaults', null);
+  ok(/const relearnNow = \(\) => \{\n\s*if \(uh\.pricesHeld && uh\.pricesHeld\(\)\) \{[^\n]*throw new Error\(/.test(bf) && bf.indexOf('const relearnNow = () => {') < bf.indexOf('new UsageEstimator({ anchorsDir, usageHistory: uh'), 'the ledger backfill\'s re-learn throws FIRST while the prices are held (before any estimator is made): its rates are never learned at the defaults', null);
+}
+
+console.log('⑤ THE FOLLOW (主开发 r3837 + r4125): the prices asked after their hold settles once; the page follows the hold');
+{
+  // (2) r4125 (the helper's law, r3986, AS AT THE TRAIN's TIP): the prices are asked after their hold has SETTLED ONCE — never on a word of
+  // the helper's. Three starts on the real helper: (i) a TORN READ of a whole file (the start's read and the helper's first read placed
+  // torn; the helper's second look finds the file whole); (ii) a truly TORN FILE; (iii) a file that cannot be read.
+  const UE = require('../src/usage-estimator.js');
+  const TORN = '{"version":2,"tiers":{"opus":{"input":1';
+  const tornOnce = (file, n) => {   // the first n reads of `file` answer torn bytes (the sync start read and the helper's first async read); the file stays whole
+    const rf = fs.readFileSync, rp = fs.promises.readFile; let left = n;
+    fs.readFileSync = function (q, ...x) { if (typeof q === 'string' && path.resolve(q) === file && left > 0) { left--; return x[0] ? TORN : Buffer.from(TORN); } return rf.call(fs, q, ...x); };
+    fs.promises.readFile = function (q, ...x) { if (typeof q === 'string' && path.resolve(q) === file && left > 0) { left--; return Promise.resolve(x[0] ? TORN : Buffer.from(TORN)); } return rp.call(fs.promises, q, ...x); };
+    return () => { fs.readFileSync = rf; fs.promises.readFile = rp; };
+  };
+  const persists = (uh, tag) => {   // the estimator's persist over THIS reader: written now? (memory only while held)
+    const ad = path.join(root, 'anchors-' + tag); fs.mkdirSync(ad, { recursive: true, mode: 0o700 });
+    const e = new UE.UsageEstimator({ anchorsDir: ad, usageHistory: uh, resolveIdentity: () => null, lagS: 0 });
+    e._persistRates('acct:made-up-acct', [{ bucket: 'made-up' }], 1); e.flushRates();
+    let w = null; try { w = JSON.parse(onDisk(path.join(ad, 'rates.json'))); } catch { w = null; }
+    try { e.close(); } catch { }
+    return !!(w && w['acct:made-up-acct']);
+  };
+  // (i) a torn READ of a whole file: the person's prices, after the settle — nothing at the defaults written meanwhile
+  const d1 = dirOf('torn-read'); const f1 = plant(d1); const undo1 = tornOnce(f1, 2);
+  const uh1 = make(d1);
+  const word = uh1.pricesHeld && uh1.pricesHeld();   // what the helper's hold says at once
+  const atStart1 = { settling: typeof uh1.pricesSettling === 'function' && uh1.pricesSettling(), persists: persists(uh1, 'i-start') };
+  const settled1 = typeof uh1.pricesSettled === 'function' ? await uh1.pricesSettled({ boundMs: 5000 }) : 'none';
+  undo1();
+  const after1 = { held: uh1.pricesHeld(), cost: uh1._cost(EV), persists: persists(uh1, 'i-after'), file: onDisk(f1) === JSON.stringify(MINE(), null, 2) };
+  stopOf(uh1);
+  ok(!!word && atStart1.settling === true && atStart1.persists === false && settled1 === null && !after1.held && Math.abs(after1.cost - atMine) < 1e-9 && after1.persists === true && after1.file,
+    '(i) a TORN READ of a WHOLE file: while the helper decides, nothing is written at the defaults (the estimator keeps its fit in memory); after the settle the prices are the PERSON\'s and the file is untouched', { word: word && word.code, atStart1, settled1, after1 });
+  // RED CONTROL: the word test this follow had (a hold's code «torn bytes» read as «known: the defaults») — on scene (i) it says known while
+  // the file is whole and its prices are the person's: the re-learn would have written default-priced rates for good
+  ok(!!word && word.code === 'torn bytes' && Math.abs(atMine - atDefault) > 1e-9, 'CONTROL: on that scene the old word test (code «torn bytes» ⇒ the defaults, for certain) would have called the prices known at the DEFAULTS while the person\'s whole file holds other prices — red by its own facts', { code: word && word.code, mine: atMine, defaults: atDefault });
+  // (ii) a truly TORN FILE: after the settle the helper's own confirmed lift (pricesTorn names the copy): the defaults, known — the pass finishes
+  const d2 = dirOf('torn-file'); const f2 = path.join(d2, 'usage-history', 'pricing.json'); fs.writeFileSync(f2, TORN, { mode: 0o600 });
+  const uh2 = make(d2);
+  const atStart2 = { settling: uh2.pricesSettling && uh2.pricesSettling(), persists: persists(uh2, 'ii-start') };
+  const settled2 = uh2.pricesSettled ? await uh2.pricesSettled({ boundMs: 5000 }) : 'none';
+  const after2 = { held: uh2.pricesHeld(), torn: uh2.pricesTorn && uh2.pricesTorn(), cost: uh2._cost(EV), persists: persists(uh2, 'ii-after') };
+  stopOf(uh2);
+  ok(atStart2.settling === true && atStart2.persists === false && settled2 === null && !after2.held && !!after2.torn && !!after2.torn.copy && Math.abs(after2.cost - atDefault) < 1e-9 && after2.persists === true,
+    '(ii) a truly TORN FILE: after the settle the helper\'s OWN confirmed lift (its copy named): the defaults are known, the estimator writes its fit, the pass can finish (the release threw at every start)', { atStart2, settled2, after2 });
+  // (iii) a file that cannot be read: not «settling» (no wait), held — the re-learn waits for the next start, as before
+  const d3 = dirOf('eio-start'); const f3 = plant(d3); const undo3 = refuse(f3);
+  const uh3 = make(d3);
+  const r3 = { settling: uh3.pricesSettling && uh3.pricesSettling(), held: uh3.pricesHeld(), persists: persists(uh3, 'iii') };
+  let tries3 = 0; { const ag = uh3._pricingHold.again; uh3._pricingHold.again = (...a) => { tries3++; return ag(...a); }; }   // no wait = no read again asked
+  const settled3 = uh3.pricesSettled ? await uh3.pricesSettled({ boundMs: 5000 }) : 'none';
+  stopOf(uh3); undo3();
+  ok(r3.settling === false && !!r3.held && r3.persists === false && !!settled3 && tries3 === 0, '(iii) a file that CANNOT be read: no wait (not a torn start: no read again asked), held — the estimator writes nothing and the re-learn waits for the next start', { r3, settled3: settled3 && settled3.code, tries3 });
+  // the roads ask the settle, on the helper's FACTS: the backfill waits for it only on a torn start (a stepped pass), the migration answers
+  // a stepped pass; the estimator asks HELD; the helper's facts this reads stay where they are (red when a fact goes)
+  const bfs = onDisk(path.join(REPO, 'src/ledger-slot-backfill.js')) || '', mig = onDisk(path.join(REPO, 'src/server/migrations.js')) || '', est = onDisk(path.join(REPO, 'src/usage-estimator.js')) || '', hold = onDisk(path.join(REPO, 'src/store-read-hold.js')) || '';
+  const roads = {
+    backfillWaits: bfs.includes('if (uh.pricesSettling && uh.pricesSettling()) {') && bfs.includes('return uh.pricesSettled().then(() => { relearnNow(); return finishPass(); }') && bfs.includes('  return finishPass();'),
+    migrationSteps: mig.includes("if (pass && typeof pass.then === 'function') return pass.then((rep) => said(rep));"),
+    estimatorHeld: est.includes("if (uh && typeof uh.pricesHeld === 'function' && uh.pricesHeld()) return; }") && !est.includes('pricesUnknown'),
+    noWord: !(onDisk(path.join(REPO, 'src/usage-history.js')) || '').includes("code !== 'torn bytes'"),
+    helperFacts: hold.includes('start, again, refusal, held: facts,') && hold.includes('torn: () => (tornLift ? { ...tornLift } : null),'),
+  };
+  ok(Object.values(roads).every(Boolean), 'the roads ask the SETTLE on the helper\'s facts: the backfill waits only on a torn start (a stepped pass, its close after the re-learn), the migration answers a stepped pass, the estimator asks held, no word of the helper is read; the helper still offers again(), held() and torn()', roads);
+}
+{
+  // (1) BY BEHAVIOUR: the family's REAL list (src/server/held-lists.js over the real helper) while the prices are held and after their
+  // lift, read by the page's pure predicate — and a copy of it reading the wrong field (`file`, `held`: not in the hub's rows) is red
+  const HL = require('../src/server/held-lists.js');
+  const got = [];
+  const hl = HL.create({ broadcast: (m) => got.push(m) });
+  const d = dirOf('lists'); const f = plant(d); const undo = refuse(f);
+  const uh = make(d);
+  const heldList = hl.list();
+  undo(); const lifted = await HOLD.readAgainOf('pricing.json');
+  const afterList = hl.list();
+  try { hl.stop(); } catch { } stopOf(uh);
+  const W = await import(pathToFileURL(CW_FILE).href);
+  const src = RAW.call(fs, CW_FILE, 'utf8');
+  const cut = src.includes("(r) => !!r && r.what === 'pricing.json'") ? await importCopy(src.replace("(r) => !!r && r.what === 'pricing.json'", "(r) => !!r && r.file === 'pricing.json' && r.held"), 'wrong-field') : null;
+  ok(typeof W.pricesHeldInLists === 'function' && W.pricesHeldInLists(heldList) === true && lifted === true && W.pricesHeldInLists(afterList) === false && !!cut && cut.pricesHeldInLists(heldList) === false,
+    'BEHAVIOUR: the family\'s real list says the prices held while they are and not after the lift, as the page reads it; CONTROL: a reader of a field the hub\'s rows do not carry never sees the hold (red)', { held: heldList.map((r) => r.what), after: afterList.map((r) => r.what), lifted, broadcasts: got.length });
+  // r4125's CHECK: the helper keeps a row for a LIFT FROM TORN BYTES (held false, its copy named): the hub's list never carries it (only held
+  // rows: the line below), and the predicate reads a row's held mark anyway — after a torn lift the window does not load again at every push
+  const hl2 = HL.create({ broadcast: () => { } });
+  const dT = dirOf('lists-torn'); const fT = path.join(dT, 'usage-history', 'pricing.json'); fs.writeFileSync(fT, '{"version":2,"tiers":{"opus":{"input":1', { mode: 0o600 });
+  const uhT = make(dT);
+  await until(() => typeof uhT.pricesTorn === 'function' && !!uhT.pricesTorn());
+  const tornRows = HOLD.holds().filter((r) => r.file === 'pricing.json'), hubAfterTorn = hl2.list();
+  try { hl2.stop(); } catch { } stopOf(uhT);
+  const hubSrc = onDisk(path.join(REPO, 'src/server/held-lists.js')) || '';
+  ok(tornRows.some((r) => r.held === false && r.copy) && !W.pricesHeldInLists(hubAfterTorn) && !hubAfterTorn.some((r) => r.what === 'pricing.json') && W.pricesHeldInLists([{ what: 'pricing.json', held: false }]) === false && W.pricesHeldInLists([{ what: 'pricing.json' }]) === true && hubSrc.includes('for (const h of hold.holds()) if (h && h.held) out.push({'),
+    'CHECK: after a TORN lift the helper keeps its not-held row (its copy named), the hub\'s list carries only held rows (its line), and the page\'s predicate ignores a row marked not held — no reload at every push', { tornRows: tornRows.map((r) => ({ held: r.held, copy: !!r.copy })), hub: hubAfterTorn.map((r) => r.what) });
+}
+{
+  // (1) THE PAGE FOLLOWS THE HOLD, and the rest of r3837's list on the page (pins: no DOM leg)
+  const win = onDisk(path.join(REPO, 'src/lib/usage-window.js')) || '';
+  const zh = onDisk(path.join(REPO, 'src/lib/i18n-zh.js')) || '', ja = onDisk(path.join(REPO, 'src/lib/i18n-ja.js')) || '';
+  const TYPED = 'What you typed in the editor was not saved — set your prices again once they read.';
+  const f = {
+    follows: win.includes("import { onHeldLists } from './held-lists.js';") && win.includes("const offHeld = onHeldLists((rows) => { if (closed || !state.data) return; if (pricesHeldInLists(rows) !== pricesHeldOf(state.data)) load(); });") && win.includes('winInfo.onClose = () => { offHeld(); prevClose2?.(); };'),
+    rankGroup: win.includes("  if (metric === 'cost' && PRICES_HELD) rows = tokensFirst(rows);"),
+    rankSessions: win.includes("if (state.metric === 'cost' && PRICES_HELD) d = { ...d, groups: { ...d.groups, session: tokensFirst(d.groups.session) } };"),
+    typed: win.includes("wrap.addEventListener('input', () => { state.pricingTyped = true; });") && win.includes("if (state.pricingTyped) {") && win.includes(`t('${TYPED}')`),
+    words: zh.includes(JSON.stringify(TYPED) + ':') && ja.includes(JSON.stringify(TYPED) + ':'),
+  };
+  ok(Object.values(f).every(Boolean), 'the page FOLLOWS the prices\' hold (the family\'s signal: a start or an end loads the window again, its listener gone at the close); while held a cost list is ranked by tokens (the grouped lists, the sessions); an editor typed in before a hold landed says it was not saved (zh, ja)', f);
 }
 
 console.log('④ RED CONTROL');

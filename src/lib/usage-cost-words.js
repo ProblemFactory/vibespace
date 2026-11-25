@@ -41,6 +41,9 @@ export function pricesTornWords(torn, t) { return torn && torn.copy ? t("Your pr
 /** r3145 unit 2 (round wf_b6ee29e5 must 4): THE ONE READING of «the person's prices are held» off the usage answer — every wire of
  *  the page asks it (the window's paint, the dashboard's panels, the editor, the trend, the CSV) */
 export function pricesHeldOf(data) { return !!(data && data.prices && data.prices.held); }
+/** r3837 (1): the prices held, read off THE FAMILY's LIST (the hub's `held-lists` rows: { key, what, since, next } — a row is listed only
+ *  while its store is held; `what` = the store's file base name) — the window follows the hold by it */
+export function pricesHeldInLists(rows) { return (rows || []).some((r) => !!r && r.what === 'pricing.json' && r.held !== false); }   // r4125: a row marked not held (a lift from torn bytes) never counts
 /** a CSV cell, quoted when it must be */
 export function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 /** THE USAGE WINDOW's CSV, its lines (round wf_b6ee29e5 must 1). estCost = the PRICED part: a row whose every request has an unknown

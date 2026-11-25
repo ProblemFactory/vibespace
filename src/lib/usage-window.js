@@ -11,7 +11,8 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
 import { tailOf } from './account-tails.js'; // B-ba7d: a usage row carries no key tail — the person's read does
-import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords, pricesHeldOf, usageCsvLines } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
+import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices, rateProblem, pricesTornWords, pricesHeldOf, usageCsvLines, pricesHeldInLists } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
+import { onHeldLists } from './held-lists.js'; // r3837 (1): the family's own signal — the window follows the prices' hold
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -77,6 +78,8 @@ const fmtRowCost = (r) => costOfRow(r).text;
 // r3748 must 3: a bar's length while the person's prices are HELD goes by its tokens — a share of costs priced at the defaults is a
 // default figure too (its words say «prices not known»)
 const barVal = (r, metric) => (r ? (metric === 'cost' && !PRICES_HELD ? r.cost : r.totalTokens) : 0) || 0;
+// r3837: a cost list while HELD is ranked by its tokens, as its bars are (the answer's order is by costs at the defaults)
+const tokensFirst = (rows) => [...(rows || [])].sort((a, b) => (Number(b && b.totalTokens) || 0) - (Number(a && a.totalTokens) || 0));
 const fmtPct = (r) => (Math.round((r || 0) * 1000) / 10) + '%';
 
 export function openUsageWindow(app, opts = {}) {
@@ -343,6 +346,11 @@ export function openUsageWindow(app, opts = {}) {
   const prevClose = winInfo.onClose;
   winInfo.onClose = () => { closed = true; clearTimeout(state.reaskT); state.reaskT = null; state.ledgerLoading = null; destroyCharts(root); for (const io of state.seen.splice(0)) io.disconnect(); prevClose?.(); };
   winInfo._reloadUsage = load;
+  // r3837 (1): THE PAGE FOLLOWS THE PRICES' HOLD. The held sentence says VibeSpace reads them again by itself: when the family's
+  // list (the hub's `held-lists`) says the prices' hold started or ended and this window's answer says otherwise, it loads again
+  // (an open editor too: its held branch, or the person's table back)
+  { const offHeld = onHeldLists((rows) => { if (closed || !state.data) return; if (pricesHeldInLists(rows) !== pricesHeldOf(state.data)) load(); });
+    const prevClose2 = winInfo.onClose; winInfo.onClose = () => { offHeld(); prevClose2?.(); }; }
   load();
   // Remote hosts (2.127.0): kick an incremental ledger harvest over ssh on
   // window open (server-throttled 15min/host); reload once if it added events
@@ -505,12 +513,15 @@ function renderPricingEditor(state, rerender, reload) {
   // (no rates, no inputs, no Save): the hold's words in its place, and the way back (a save would be refused by name anyway)
   if (pricesHeldOf(state.data)) {
     const n = document.createElement('div'); n.className = 'usage-note usage-prices-held'; n.textContent = heldWordsOf({ code: 'prices_unread' }); wrap.appendChild(n);
+    // r3837: the editor was open with the person's typing when the hold became known (a start brought it): said, never dropped in silence
+    if (state.pricingTyped) { const lost = document.createElement('div'); lost.className = 'usage-note usage-prices-typed'; lost.textContent = t('What you typed in the editor was not saved — set your prices again once they read.'); wrap.appendChild(lost); }
     const back = document.createElement('button'); back.className = 'usage-btn'; back.textContent = t('Cancel');
-    back.onclick = () => { state.view = 'dash'; rerender(); };
+    back.onclick = () => { state.pricingTyped = false; state.view = 'dash'; rerender(); };
     const actions = document.createElement('div'); actions.className = 'usage-pricing-actions'; actions.appendChild(back); wrap.appendChild(actions);
     return wrap;
   }
   const pricing = (state.data && state.data.pricing) || { tiers: {}, accounts: {} };
+  wrap.addEventListener('input', () => { state.pricingTyped = true; });   // r3837: the person typed here (the held branch says it if a hold lands first)
   // Accounts from the UNFILTERED union — the editor must list every account,
   // not just whatever the currently-active backend/account filter left visible
   // (a codex-filtered dashboard used to shrink this to one row).
@@ -664,11 +675,12 @@ function renderPricingEditor(state, rerender, reload) {
       return;
     }
     showToast(t('Prices saved'));
+    state.pricingTyped = false;
     state.view = 'dash';
     reload(); // re-fetch so costs reflect the new prices
   };
   const cancel = document.createElement('button'); cancel.className = 'usage-btn'; cancel.textContent = t('Cancel');
-  cancel.onclick = () => { state.view = 'dash'; rerender(); };
+  cancel.onclick = () => { state.pricingTyped = false; state.view = 'dash'; rerender(); };
   actions.append(save, cancel);
   wrap.appendChild(actions);
   return wrap;
@@ -783,6 +795,7 @@ function renderBilling(d) {
 function renderGroup(title, rows, state, opts = {}) {
   const sec = section(title);
   const metric = state.metric;
+  if (metric === 'cost' && PRICES_HELD) rows = tokensFirst(rows);   // r3837: held — ranked by tokens, as the bars
   // a row whose price is unknown sorts as $0 among the costs: it stays in view, said, never cut off as the smallest bill (B-d578 P1-b)
   const list = metric === 'cost' ? keepUnpriced(rows, opts.limit || 10) : (rows || []).slice(0, opts.limit || 10);
   if (!list.length) { sec.appendChild(emptyLine()); return sec; }
@@ -858,6 +871,7 @@ function renderOrigin(d, state) {
 // with fixed columns, which is why this one is built by hand.
 function renderSessions(d, state, opts = {}) {
   const sec = section(t('By session'));
+  if (state.metric === 'cost' && PRICES_HELD) d = { ...d, groups: { ...d.groups, session: tokensFirst(d.groups.session) } };   // r3837: held — ranked by tokens
   const rows = state.metric === 'cost' ? keepUnpriced(d.groups.session, opts.limit || 12) : (d.groups.session || []).slice(0, opts.limit || 12);   // B-d578 P1-b: an unknown price stays in view
   if (!rows.length) { sec.appendChild(emptyLine()); return sec; }
   // the origin columns ARE the session×origin pivot: until it is here the

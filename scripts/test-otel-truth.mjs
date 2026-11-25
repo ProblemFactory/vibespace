@@ -487,7 +487,7 @@ const PAYLOAD = (recs) => ({
     const SYNC = /\bfs\.(?:readFileSync|readSync|existsSync|statSync|renameSync)\(\s*file\b|\bfinishReplay\b/g;
     const cur = strip(fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8')), rel = strip(fs.readFileSync(path.join(REPO, 'scripts/fixtures/otel-replay/otel-ingest-944de13f9.js.frozen'), 'utf8'));
     ok(!(cur.match(SYNC) || []).length && (rel.match(SYNC) || []).length >= 4, `row B-360d: no synchronous read of the stash left in the ingest (the release frozen beside it had ${(rel.match(SYNC) || []).length}: finishReplay, its existsSync + readFileSync, the trim's statSync + renameSync)`, cur.match(SYNC));
-    const ID = '2026-09-backfill-ledger-by-slot', MIG = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8'), at = MIG.indexOf(`id: '${ID}'`), row = at < 0 ? '' : MIG.slice(at, MIG.indexOf('const rep = backfillLedgerBySlot(', at) + 1);
+    const ID = '2026-09-backfill-ledger-by-slot', MIG = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf8'), at = MIG.indexOf(`id: '${ID}'`), row = at < 0 ? '' : MIG.slice(at, MIG.indexOf('const pass = backfillLedgerBySlot(', at) + 1);   // the call is `const pass =` since line 828's follow (r4125: a pass may be stepped)
     ok(at > 0 && row.length > 1 && !/\btry\s*\{/.test(row.slice(row.indexOf('run() {'))) && cur.includes(`const BACKFILL_ID = '${ID}';`), 'row B-360d: the hub\'s backfill row runs the backfill with no catch of its own (a failed read reaches the runner), and the ingest\'s keep rule names that migration');
   }
   const oi = read('src/server/otel-ingest.js');
