@@ -528,6 +528,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
           if (threw) {
             failed++;
             if (!rec.restored) rec.restored = -1;   // spent: a later echo of the frame never restores a part twice
+            persistDelivered();   // r3995 (should): …and on disk, so a restart never restores it again
             delete e.about; unmarked++;
             log.warn?.(`[stash] ${cid}: the originals of hand-over ${id} could not all be restored (${(threw && threw.message) || threw}) — the kept frame goes as itself, never lost`);
           } else if (k > 0) {
@@ -549,8 +550,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   if (file && !memHeld()) schedule(() => settleEchoes(), 0);   // an earlier life's kept frames whose lift never came: judged at a readable start
   /** the hold LIFTED: the file's records (null: torn bytes kept aside — none), memory's after them (memory's record wins on an id),
-   *  the clears made while held, the bounds, ONE write (then one more a kept frame restored — each the release's synchronous write, its
-   *  standing debt); the file's put-backs of job notifications put back; the kept frames judged */
+   *  the clears made while held, the bounds, ONE write (then one more a kept frame restored, and one write of the stash's own when a kept
+   *  frame's mark is dropped — settleEchoes' d.flush — each the release's synchronous writer: standing debt, r3995); the file's put-backs of
+   *  job notifications put back; the kept frames judged */
   function liftMemory(v, facts) {
     const mine = new Set(delivered.keys());
     const ids = v ? loadRecords(v, mine) : [];
@@ -808,11 +810,20 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     if (rec.restored) { log.log?.(`[stash] ${cid}: hand-over ${m[1]} echoed again — already restored (${rec.restored})`); return rec.restored; }
     let k = 0;
     const d = getDeliver();
-    if (rec.msg.length && d && typeof d.restoreStash === 'function') k += d.restoreStash(cid, rec.msg);
+    // line 886's small follow (主开发 r3995): THE RESTORE SAYS HOW FAR IT GOT — the ladder's originals once back are the record's no more
+    // (`rec.msg` emptied at once); a throw of the jobs store AFTER them leaves its notifications OWED (put back on the jobs store's own road,
+    // by job and instant — never twice) and the frame is taken out for what came back; only a restore where NOTHING landed throws to the
+    // caller (the frame then goes as itself: it carries them all)
+    if (rec.msg.length && d && typeof d.restoreStash === 'function') { k += d.restoreStash(cid, rec.msg); rec.msg = []; }
     const jm = jobsReady();
-    if (rec.jobs.length && jm && typeof jm.restoreNotifs === 'function') k += jm.restoreNotifs(cid, rec.jobs);
+    let jobsThrew = null;
+    if (rec.jobs.length && jm && typeof jm.restoreNotifs === 'function') {
+      try { k += jm.restoreNotifs(cid, rec.jobs); }
+      catch (e) { if (!(k > 0)) throw e; jobsThrew = e; rec.jobsOwed = true; }
+    }
     rec.restored = k || -1; rec.msg = [];   // spent: the ladder's originals are back in its store (written at once)
-    keepUntilLanded(rec, jm);
+    if (!jobsThrew) keepUntilLanded(rec, jm);
+    else { log.warn?.(`[stash] ${cid}: hand-over ${m[1]} — its messages are back, its job notifications could not be put back now (${(jobsThrew && jobsThrew.message) || jobsThrew}): owed, put back on the jobs store's road`); schedule(() => { try { putBackHeld(0, new Set([rec])); } catch (e2) { log.warn?.(`[stash] ${cid}: the owed job notifications of hand-over ${m[1]} wait for the next start (${(e2 && e2.message) || e2})`); } }, 0); }
     persistDelivered();
     log.log?.(`[stash] ${cid}: hand-over ${m[1]} came back undelivered — ${k} entr${k === 1 ? 'y' : 'ies'} restored, each as itself`);
     changed();

@@ -146,25 +146,66 @@ console.log('§3b THE SAME FRAME ECHOED TWICE while held (a Stop AND a queue rem
   ok(r.kept === 2 && r.firsts === 1 && r.frames === 1, `RED: the unit's tip before the follow — kept twice, the second handed out after the restore: the same message twice (${r.firsts} original + ${r.frames} frame)`, r);
 }
 
-console.log('§3c A RESTORE THAT THROWS at the lift: the kept frame is not lost — it goes as itself, said by a count');
+console.log('§3c A RESTORE THAT THROWS at the lift: (i) after its messages landed — they are back ONCE, the frame taken out, the job notifications OWED and put back once; (ii) with nothing landed — the frame goes as itself, the record spent on disk, said by a count');
 {
-  const run = async (Mod = SH) => {
+  // line 886's small follow (主开发 r3995): THE RESTORE SAYS HOW FAR IT GOT — the leg counts the ORIGINALS too, never only the frames
+  const run = async (Mod = SH, { msg = true, throwsOnce = true } = {}) => {
     const d = mk(); const f = await firstLife(d);
-    const j = readJson(fileOf(d)); j[f.id].jobs = [{ jobId: 'jb-r1', jobName: 'nightly', text: 'a job result', at: 5 }]; fs.writeFileSync(fileOf(d), JSON.stringify(j));
+    const j = readJson(fileOf(d)); j[f.id].jobs = [{ jobId: 'jb-r1', jobName: 'nightly', text: 'a job result', at: 5 }]; if (!msg) j[f.id].msg = []; fs.writeFileSync(fileOf(d), JSON.stringify(j));
     const echo = j[f.id].text;
-    const jobs = { peekNotifs: () => [], restoreNotifs: () => { throw new Error('the jobs store refused (placed)'); }, afterNotifsLanded: () => { }, shutdown: () => { } };
+    let calls = 0, landedJobs = 0;
+    const jobs = { peekNotifs: () => [], restoreNotifs: (c, js) => { calls++; if (!throwsOnce || calls === 1) throw new Error('the jobs store refused (placed)'); landedJobs += js.length; return js.length; }, afterNotifsLanded: () => { }, shutdown: () => { } };
     const { R } = heldLife(d, Mod, jobs);
     R.deliver.restoreFrame(CID, echo, { kind: null });
-    await R.view.memoryReadAgain();
+    await R.view.memoryReadAgain(); await sleep(30);
     const after = R.deliver.stashEntries(CID);
-    const out = { frames: after.filter((e) => e && e.text === echo && !(e.about && e.about.handover)).length, said: R.logs.filter((l) => /1 kept frame whose originals could not all be restored/.test(l)).length, spent: !!(R.view._delivered.get(f.id) || {}).restored };
+    const out = { frames: after.filter((e) => e && e.text === echo && !(e.about && e.about.handover)).length, firsts: after.filter((e) => e && e.text === FIRST).length, calls, landedJobs,
+      said: R.logs.filter((l) => /1 kept frame whose originals could not all be restored/.test(l)).length, spentOnDisk: !!((readJson(fileOf(d)) || {})[f.id] || {}).restored };
     R.stop(); return out;
   };
   const g = await run();
-  ok(g.frames === 1 && g.said === 1 && g.spent, `a throw in the restore: the frame stays and goes as itself (${g.frames}), ONE count line, the record spent (never restored in part twice)`, g);
+  ok(g.firsts === 1 && g.frames === 0 && g.calls === 2 && g.landedJobs === 1, `(i) the jobs store throws AFTER the messages landed: the message back ONCE (${g.firsts}), no frame handed out (${g.frames}), the job result OWED and put back once (${g.landedJobs})`, g);
+  const PROPAGATES = M.load('src/server/stash-handover.js', anchored(SRC, "      try { k += jm.restoreNotifs(cid, rec.jobs); }\n      catch (e) { if (!(k > 0)) throw e; jobsThrew = e; rec.jobsOwed = true; }\n", "      k += jm.restoreNotifs(cid, rec.jobs);\n", 'restore-throws-whole'), 'restore-throws-whole');
+  const r1 = await run(PROPAGATES);
+  ok(r1.firsts === 1 && r1.frames === 1, `RED: the follow's first form (a throw after the messages landed reaches the caller) — the message back AND the frame handed out: the same message twice (${r1.firsts} + ${r1.frames})`, r1);
+  const n = await run(SH, { msg: false, throwsOnce: false });
+  ok(n.frames === 1 && n.firsts === 0 && n.said === 1 && n.spentOnDisk, `(ii) nothing landed (the jobs store refuses, no messages in the record): the frame goes as itself (${n.frames}), ONE count line, the record spent ON DISK (a restart never restores it again)`, n);
   const OLD = M.load('src/server/stash-handover.js', anchored(SRC, "          try { k = restoreHandedOver(cid, text, { kind: e.kind || null }); } catch (err) { threw = err; }\n", "          if (typeof d.drainStash === 'function') d.drainStash(cid, new Set([e]));\n          try { k = restoreHandedOver(cid, text, { kind: e.kind || null }); } catch (err) { threw = err; }\n", 'frame-out-before-restore'), 'frame-out-before-restore');
-  const r = await run(OLD);
-  ok(r.frames === 0, `RED: the frame taken out BEFORE its originals are restored — a throw leaves it out: the messages lost (${r.frames})`, r);
+  const r = await run(OLD, { msg: false, throwsOnce: false });
+  ok(r.frames === 0, `RED: the frame taken out BEFORE its originals are restored — a throw with nothing landed leaves it out: the job result lost (${r.frames})`, r);
+}
+
+console.log('§3e THE DOUBLE ECHO IN THE TWO ORDERS NOT YET LEGGED (r3995): one while held and one after the lift; one restored in an earlier life and echoed again while held — the original once, no frame handed out');
+{
+  const order1 = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d); const echo = echoOf(d, f.id);
+    const { R } = heldLife(d, Mod);
+    R.deliver.restoreFrame(CID, echo, { kind: null });
+    await R.view.memoryReadAgain();
+    const n2 = R.deliver.restoreFrame(CID, echo, { kind: null });
+    if (!n2) R.deliver.stashFor(CID, { source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: echo });   // as the two stdout consumers do with a 0: the frame stashed as itself
+    const after = R.deliver.stashEntries(CID);
+    const out = { n2, firsts: after.filter((e) => e && e.text === FIRST).length, frames: after.filter((e) => e && e.text === echo).length };
+    R.stop(); return out;
+  };
+  const g1 = await order1();
+  ok(g1.firsts === 1 && g1.frames === 0 && g1.n2 > 0, `one echo while held, one after the lift: the original once (${g1.firsts}), no frame (${g1.frames}) — the second answered by the record (${g1.n2})`, g1);
+  const r1 = await order1(M.load('src/server/stash-handover.js', anchored(SRC, "    if (rec.restored) { log.log?.(`[stash] ${cid}: hand-over ${m[1]} echoed again — already restored (${rec.restored})`); return rec.restored; }\n", '', 'second-echo-restores-again'), 'second-echo-restores-again'));
+  ok(r1.frames === 1, `RED: a restore blind to «already restored» — the second echo answers 0 and the consumer stashes the frame as itself: the words twice (${r1.firsts} original + ${r1.frames} frame)`, r1);
+  const order2 = async (Mod = SH) => {
+    const d = mk(); const f = await firstLife(d); const echo = echoOf(d, f.id);
+    const a = rig(d); a.deliver.restoreFrame(CID, echo, { kind: null }); a.stop();   // an EARLIER LIFE: read, restored, written
+    const { R } = heldLife(d, Mod);
+    R.deliver.restoreFrame(CID, echo, { kind: null });   // echoed again while this life's memory is unread: kept
+    await R.view.memoryReadAgain();
+    const after = R.deliver.stashEntries(CID);
+    const out = { firsts: after.filter((e) => e && e.text === FIRST).length, frames: after.filter((e) => e && e.text === echo).length };
+    R.stop(); return out;
+  };
+  const g2 = await order2();
+  ok(g2.firsts === 1 && g2.frames === 0, `restored in an earlier life, echoed again while held: at the lift the record says restored — the kept copy taken out (frames ${g2.frames}), the original once (${g2.firsts})`, g2);
+  const r2 = await order2(M.load('src/server/stash-handover.js', HAND_OUT_SECOND(SRC), 'earlier-life-copy-handed-out'));
+  ok(r2.frames === 1, `RED: the restored record's copy handed out as itself (${r2.frames})`, r2);
 }
 
 console.log('§3d A FRAME FOR A HAND-OVER THE MEMORY DOES NOT KNOW, even after the read: kept while held, then handed out AS ITSELF — its mark dropped on disk too, the wrapper\'s own label');
