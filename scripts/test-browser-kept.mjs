@@ -1275,7 +1275,7 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
   const lines14 = [];
   const klog14 = { log: (...a) => lines14.push(a.join(' ')), warn: (...a) => lines14.push('WARN ' + a.join(' ')), error() { } };
   const live14 = new Set([KEY_A, KEY_B]);
-  const mk14 = (Kmod, dataDir, readTargetsFn = readT) => { const kk = Kmod.create({ dataDir, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: F.createBrowserRuntime({ env: rtE }), facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readTargetsFn }); keepers.push(kk); return kk; };
+  const mk14 = (Kmod, dataDir, readTargetsFn = readT, wrapRuntime = (r) => r) => { const kk = Kmod.create({ dataDir, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: wrapRuntime(F.createBrowserRuntime({ env: rtE })), facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readTargetsFn }); keepers.push(kk); return kk; };
   const sleep14 = (ms) => new Promise((r) => setTimeout(r, ms));
   const killDaemon = async (kk, id) => { const rec = kk._reg().browsers[id]; try { process.kill(rec.pid, 'SIGKILL'); } catch { } for (let i = 0; i < 30; i++) { try { process.kill(rec.pid, 0); await sleep14(50); } catch { break; } } };
   let kp = mk14(K, D14);
@@ -1323,19 +1323,32 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
       // mutant did not lose the race and this control went red for the wrong reason): a hold IN THE WINDOW — each rebind's read
       // of the page list waits until the OTHER session's read has arrived, then both bind — never load or luck. The hold has its
       // own bound (5 s) and says by name when it was reached; it is armed for the two first commands only
+      const HOLD_BOUND_MS = 15000;   // generous: a hold that waits its bound says so by name (a HARNESS line), never a silent read
       const hold = { armed: false, arrived: 0, met: null, bound: false }; let releaseBoth; const bothRead = new Promise((r) => { releaseBoth = r; });
-      const readHeld = async (url) => { const got = await readT(url); if (!hold.armed) return got; hold.arrived++; if (hold.arrived >= 2) releaseBoth(true); const met = await Promise.race([bothRead, sleep14(5000).then(() => false)]); if (!met) hold.bound = true; hold.met = !!met; return got; };
-      const kn = mk14(M14.load('src/server/browser-keeper.js', noSerial, 'no-serial-rebind'), DN, readHeld);
+      const readHeld = async (url) => { const got = await readT(url); if (!hold.armed) return got; hold.arrived++; if (hold.arrived >= 2) releaseBoth(true); const met = await Promise.race([bothRead, sleep14(HOLD_BOUND_MS).then(() => false)]); if (!met) hold.bound = true; hold.met = !!met; return got; };
+      // THE BIND HELD TOO (the mirror of 2.369.419, run 45633627765, heavy 5/7: the reads were both held — {"reads":2,"bothRead":true} — yet
+      // the second session went «new»: each pick reads the lease holders AFTER its read resumes, and under load the first session's
+      // `tab <id>` returned and rooted the page before the second picked). Each session's bind to a page (`tab <targetId>`, never `tab
+      // new`) waits until BOTH binds were issued — so both picked before either landed: the race is placed, never a clock's
+      const bindHold = { armed: false, arrived: 0, met: null, bound: false }; let releaseBinds; const bothBinds = new Promise((r) => { releaseBinds = r; });
+      const bindHeld = (rt0) => new Proxy(rt0, { get: (t0, k) => (k === 'exec' ? async (ns0, args, opts) => {
+        const i = Array.isArray(args) ? args.indexOf('tab') : -1;
+        if (bindHold.armed && i >= 0 && args[i + 1] && args[i + 1] !== 'new') { bindHold.arrived++; if (bindHold.arrived >= 2) releaseBinds(true); const met = await Promise.race([bothBinds, sleep14(HOLD_BOUND_MS).then(() => false)]); if (!met) bindHold.bound = true; bindHold.met = !!met; }
+        return t0.exec(ns0, args, opts);
+      } : typeof t0[k] === 'function' ? t0[k].bind(t0) : t0[k]) });
+      const kn = mk14(M14.load('src/server/browser-keeper.js', noSerial, 'no-serial-rebind'), DN, readHeld, bindHeld);
       const pn = kn.createProfile({ label: 'Race' }); const nsn = 'vs-' + pn.id;
       await kn.attach({ profileId: pn.id, browserKey: KEY_A, sessionId: 'sess-a' });
       await kn.attach({ profileId: pn.id, browserKey: KEY_B, sessionId: 'sess-b' });
       await killDaemon(kn, pn.id);
-      hold.armed = true;
+      hold.armed = true; bindHold.armed = true;
       const [d1, d2] = await Promise.all([kn.attach({ profileId: pn.id, browserKey: KEY_A, sessionId: 'sess-a' }), kn.attach({ profileId: pn.id, browserKey: KEY_B, sessionId: 'sess-b' })]);
-      hold.armed = false;
-      const ctl14 = { hold: { reads: hold.arrived, bothRead: hold.met, boundReached: hold.bound }, d1: d1.rebound && { how: d1.rebound.how, targetId: d1.rebound.targetId }, d2: d2.rebound && { how: d2.rebound.how, targetId: d2.rebound.targetId }, tabs: fakeTabs(nsn).length };
+      hold.armed = false; bindHold.armed = false;
+      const ctl14 = { hold: { reads: hold.arrived, bothRead: hold.met, boundReached: hold.bound }, bind: { binds: bindHold.arrived, bothBound: bindHold.met, boundReached: bindHold.bound }, d1: d1.rebound && { how: d1.rebound.how, targetId: d1.rebound.targetId }, d2: d2.rebound && { how: d2.rebound.how, targetId: d2.rebound.targetId }, tabs: fakeTabs(nsn).length };
       console.log(`    ⑭b CONTROL's facts: ${JSON.stringify(ctl14)}`);
-      ok(hold.arrived >= 2 && hold.met === true && !hold.bound, `⑭b CONTROL setup: the hold placed the race — both first commands read the page list before either bound (${hold.arrived} reads held${hold.bound ? '; the 5 s bound was REACHED' : ''})`, ctl14);
+      const placed = hold.arrived >= 2 && hold.met === true && !hold.bound && bindHold.arrived >= 2 && bindHold.met === true && !bindHold.bound;
+      ok(placed, placed ? `⑭b CONTROL setup: the holds placed the race — both first commands read the page list, and both issued their bind, before either bind landed (${hold.arrived} reads, ${bindHold.arrived} binds held)`
+        : `HARNESS (⑭b CONTROL's placement): ${hold.bound || bindHold.bound ? `a hold reached its ${HOLD_BOUND_MS / 1000} s bound` : 'the holds did not both meet'} — ${hold.arrived} reads, ${bindHold.arrived} binds held: the race was not placed, so the control's verdict below says nothing of the product`, ctl14);
       ok(d1.rebound && d2.rebound && d1.rebound.targetId === d2.rebound.targetId && fakeTabs(nsn).length === 1, '⑭b CONTROL: an unserialized rebind binds BOTH concurrent sessions to the one page — the leg above catches it', ctl14);
       try { await kn.stop(pn.id, { why: 'user' }); } catch { /* none */ }
       kn.shutdown();
