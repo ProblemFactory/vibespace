@@ -102,6 +102,20 @@ if (process.env.QUIETSPLIT) {   // round wtlm3ig4w: a marker written in TWO piec
   for (let i = 0; i < 600 && !fs.existsSync(path.join(out, 'release')); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
   process.exit(0);
 }
+if (process.env.ROADS) {   // r4321: while the job's line stands OPEN (a value's first half held by its masker), ONE own line comes by a road — (a) the wrapper's own road (a stop's line: the job hears the stop, the leg's go writes the rest), (b) the engine's run log line, (c) the notice of a failed mask (a chunk the leg's copy fails on) — then the job's line goes on
+  const k = process.env.ROADS, h = Math.floor(v.length / 2), nl = String.fromCharCode(10), still = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms), hold = (f) => { for (let i = 0; i < 800 && !fs.existsSync(path.join(out, f)); i++) still(15); };
+  const rest = () => { fs.writeSync(1, v.slice(h) + ' ' + k + '2' + nl); still(300); process.exit(0); };
+  if (k === 'a') process.on('SIGTERM', () => fs.writeFileSync(path.join(out, 'roads-sig-a'), '1'));   // (a): the stop's signal is HEARD — its handler marks it
+  fs.writeSync(1, k + '1 ' + v.slice(0, h));   // the line OPEN: the value's first half (its masker holds it)
+  fs.writeFileSync(path.join(out, 'roads-open-' + k), '1');
+  if (k === 'a') {   // the loop stays alive for the handler; the leg's go comes after its mark
+    const iv = setInterval(() => { if (fs.existsSync(path.join(out, 'roads-go-a'))) { clearInterval(iv); rest(); } }, 15);
+    return;   // (a CommonJS program: its top level ends here, the interval keeps it alive — never a fall-through into the modes below)
+  }
+  hold('roads-go-' + k);   // the leg's go — (b): after its placed line stands in the log; (c): it starts the chunk the copy fails on
+  if (k === 'c') { fs.writeSync(1, 'MASK-FAILS-HERE'); still(150); }
+  rest();
+}
 if (process.env.CRONMARK) {   // round w3aprsv38's MUST (r2890 / r3108): a task's two runs (a cron's fires, or a start by hand) — run 1 prints its marker on an UNTERMINATED line; run 2 works first (a first line longer than run 1's log), its marker only when the leg says. Its files are its marker's
   const nl = String.fromCharCode(10), mk = process.env.CRONMARK, cnt = path.join(out, 'runs-' + mk), hold = (f) => { for (let i = 0; i < 600 && !fs.existsSync(path.join(out, f + '-' + mk)); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15); };
   let n = 0; try { n = Number(fs.readFileSync(cnt, 'utf8')) || 0; } catch { n = 0; }
@@ -436,6 +450,38 @@ async function legCronCarry({ jobs = null } = {}) {
   W.end();
   return rows;
 }
+// r4321 (主开发): THE OWN LINES' ROADS, PLACED — while a job's line stands OPEN across the quiet between a value's halves (scene g's own
+// moment), ONE own line is written by EACH road: (a) the wrapper's own road (a stop's line), (b) the engine's run log line, (c) the notice
+// of a failed mask (a copy of the masker that fails on one chunk). For each: a line break stands BEFORE the own line, the job's line goes
+// on after it (its head and its end in the log, in order), and no part of the value is shown. A red here names the writer (law 3)
+async function legOwnRoads({ failMask = null } = {}) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world(failMask ? 'roadsm' : 'roads', failMask ? { srcMut: failMask } : {}), S = SENT('roads'), h = Math.floor(S.length / 2);
+  W.put(S);
+  const rawOf = (j) => { let t = ''; try { t = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return t; };
+  const marked = (t) => t.split(S).join('<VALUE>').split(S.slice(0, h)).join('<H1>').split(S.slice(h)).join('<H2>');
+  const ks = failMask ? ['c'] : ['a', 'b'];
+  const jobs = Object.fromEntries(ks.map((k) => [k, W.jm.jobs.get(W.create({ name: 'roads-' + k, env: { ROADS: k } }).job.id)]));
+  const opened = {}, heard = {};
+  for (const k of ks) {
+    const j = jobs[k];
+    opened[k] = (await W.untilMs(() => fs.existsSync(path.join(W.root, 'out', 'roads-open-' + k)) && rawOf(j).includes(k + '1 '), 8000)).ok;   // the quiet's settle wrote the line's head; its half held
+    // (a): the stop reaches the job's group while its line stands open — the job HEARD it (its own mark), then the leg's go. The
+    // wrapper's stop line is never waited for in the log: by the road's law it waits while the masker holds the value's first half
+    if (k === 'a') { W.jm.stop(j); heard.a = (await W.untilMs(() => fs.existsSync(path.join(W.root, 'out', 'roads-sig-a')), 8000)).ok; }
+    if (k === 'b') { W.jm._runLogLine(W.jm._runLogFile(j), "[jobs] placed: the engine's own line (r4321)"); await W.untilMs(() => rawOf(j).includes('[jobs] placed'), 8000); }
+    fs.writeFileSync(path.join(W.root, 'out', 'roads-go-' + k), '1');
+  }
+  const ended = await W.untilMs(() => ks.every((k) => ['done', 'failed', 'interrupted', 'stopped', 'down'].includes(jobs[k].state)), 15000);
+  const ROAD = { a: [/\[job-wrapper\] stop:/, 'the wrapper\'s own road (a stop\'s line)'], b: [/\[jobs\] placed:/, 'the engine\'s run log line'], c: [/\[job-wrapper\] output withheld:/, 'the notice of a failed mask'] };
+  for (const k of ks) {
+    const t = rawOf(jobs[k]), m = ROAD[k][0].exec(t), at = m ? m.index : -1;
+    const x = { opened: opened[k], ...(k === 'a' ? { heard: heard.a } : {}), own: at >= 0, breakBefore: at === 0 || (at > 0 && t[at - 1] === '\n'), lineGoesOn: t.includes(k + '1 ') && t.indexOf(k + '1 ') < t.indexOf(' ' + k + '2'), noValue: !t.includes(S.slice(0, h)) && !t.includes(S.slice(h)), log: marked(t).slice(0, 600) };
+    row(ended.ok && x.opened && x.heard !== false && x.own && x.breakBefore && x.lineGoesOn && x.noValue, `r4321 (${k}) — ${ROAD[k][1]}, written while the job's line stands OPEN (its value's first half held): a line break stands before it, the job's line goes on after it, no part of the value shown`, x);
+  }
+  W.end();
+  return rows;
+}
 async function legBytes({ srcMut = null } = {}) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
   const W = await world(srcMut ? 'bytesm' : 'bytes', { srcMut }), S = SENT('bytes'), h = Math.floor(S.length / 2);
@@ -447,7 +493,11 @@ async function legBytes({ srcMut = null } = {}) {
   const inOrder = (t, ws) => [1, 2].every((p) => { let at = 0; for (const [q, w] of ws) { if (q !== p) continue; const x = w.trimEnd(), i = t.indexOf(x, at); if (i < 0) return false; at = i + x.length; } return true; });
   const jobs = Object.fromEntries(Object.keys(own).map((k) => [k, W.jm.jobs.get(W.create({ name: 'pipes-' + k, env: { PIPES: k } }).job.id)]));
   const ended = await W.untilMs(() => Object.values(jobs).every((j) => ['done', 'failed', 'interrupted'].includes(j.state)), 15000);
-  const textOf = (j) => { let t = ''; try { t = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return t.split('\n').filter((l) => !l.startsWith('[job-wrapper]')).join('\n'); };
+  const rawOf = (j) => { let t = ''; try { t = fs.readFileSync(j.runs[j.runs.length - 1].log, 'utf8'); } catch { } return t; };
+  const textOf = (j) => rawOf(j).split('\n').filter((l) => !l.startsWith('[job-wrapper]')).join('\n');
+  // r4321 FENCE 1: a print never holds the value or a half of it — each is replaced by its own mark first
+  const marked = (t) => t.split(S).join('<VALUE>').split(S.slice(0, h)).join('<H1>').split(S.slice(h)).join('<H2>');
+  const gotAll = W.got(), handed = { jobs: gotAll.length, equal: gotAll.filter((g) => g.v === S).length };   // r4321: every job was handed its value (equal or not, never the value)
   const out = {};
   for (const [k, j] of Object.entries(jobs)) {
     const t = textOf(j), bare = t.replace(/\[vault:[^\]]*\]/g, '');
@@ -456,7 +506,11 @@ async function legBytes({ srcMut = null } = {}) {
   }
   rows.scenes = out;
   if (srcMut) { W.end(); return rows; }
-  row(ended.ok && Object.values(out).every((x) => x.words && x.bytes && x.noValue), 'r2773 (1) — NO BYTE OF THE JOB\'S OWN WORDS IS LOST: a value split between the pipes (a, b), whole on one with the other\'s bytes between its pieces (c, d), a QUIET between its halves (e), the other pipe\'s line written during that quiet (f), split between the pipes across a quiet (g) — each pipe\'s words in its own order, every byte counted, neither half of the value in the log', out);
+  const allOk = ended.ok && Object.values(out).every((x) => x.words && x.bytes && x.noValue) && handed.jobs >= Object.keys(own).length && handed.equal === handed.jobs;
+  // r4321: a failing scene is printed WHOLE (its raw log, the wrapper's lines in it; the value and its halves as marks) — the next
+  // sighting names what wrote inside the job's line
+  if (!allOk) for (const [k, x] of Object.entries(out)) if (!(x.words && x.bytes && x.noValue)) console.log(`      ①f WHOLE PRINT of scene ${k} (r4321; <VALUE> / <H1> / <H2> are marks, never the value): raw log ${JSON.stringify(marked(rawOf(jobs[k])))} · its own words by pipe ${JSON.stringify(own[k])} · handed its value: ${handed.equal} of ${handed.jobs} jobs`);
+  row(allOk, 'r2773 (1) — NO BYTE OF THE JOB\'S OWN WORDS IS LOST: a value split between the pipes (a, b), whole on one with the other\'s bytes between its pieces (c, d), a QUIET between its halves (e), the other pipe\'s line written during that quiet (f), split between the pipes across a quiet (g) — each pipe\'s words in its own order, every byte counted, neither half of the value in the log — and every job was handed its value (its own got-file: equal or not, never the value)', { ...out, handed });
   W.end();
   return rows;
 }
@@ -1457,12 +1511,16 @@ async function legSurfaces(doorSrc = null) {
   const W = await world(doorSrc ? 'surfm' : 'surf', { doorSrc });
   W.vault.agentMint('agent:conv-a/tok', { length: 32 });
   const { job, a, ok: up } = await approvedService(W, 'surf');
+  // r4225 (a sighting beside 175 suites: starts 0, the tally empty): the rows read the USE LINE (the vault audit, written when the
+  // hub READS the wrapper's ack on fd 3); the wait above ends on the program's own file, which under load stands on disk before
+  // the hub's loop has read that ack — the leg waits for the line itself (a fact, bounded), the rows' law unchanged
+  const tallied = await W.untilMs(() => ((((W.vault.useCounts()['agent:conv-a/tok'] || {}).jobs) || {})[job.id] || 0) >= 1, 4000);
   const f1 = W.door.rowFacts({ id: a.entry }) || [];
   const u1 = W.door.usesOf(job), lbl = W.jm.labelOf(job);
   rows.starts = (f1[0] || {}).starts;
   if (doorSrc) { W.release(); W.end(); return rows; }
   row(up && f1.length === 1 && f1[0].id === job.id && f1[0].name === lbl && f1[0].kind === 'service' && f1[0].state === 'running' && f1[0].starts === 1,
-    'the Vault row\'s job facts (door rowFacts → the contents list\'s `jobs`): the approved job, its BELTED name (labelOf), a state CODE (running) and its starts counted from the audit (1) — never a value', f1);
+    'the Vault row\'s job facts (door rowFacts → the contents list\'s `jobs`): the approved job, its BELTED name (labelOf), a state CODE (running) and its starts counted from the audit (1) — never a value',{ facts: f1, tallied });
   row(u1.length === 1 && u1[0].name === 'TOK' && u1[0].id === a.entry && u1[0].approved === true && typeof u1[0].label === 'string' && u1[0].label.length > 0 && JSON.stringify(W.jm.vaultUsesOf(job)) === JSON.stringify(u1),
     'a job\'s uses as its PERSON\'s card names them (usesOf / the engine\'s vaultUsesOf → GET /api/jobs `vaultUses`): the NAME, the entry\'s row id, its Vault name, approved', u1);
   const counted = W.vault.useCounts()['agent:conv-a/tok'] || {};
@@ -1755,6 +1813,7 @@ const UNTIL_NOCARRY = (() => { try { return swap(JOBS_SRC, "      const lines = 
 const SETTLE_NOFLAG = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", "    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln)); };"); } catch { return null; } })();
 const SETTLE_NOLINE = (() => { try { return scrubMut("    const lastLine = (x) => { const ln = x.lastIndexOf('\\n') + 1; return ln + cutTailStart(x.slice(ln), { unfinished: true }); };", '    const lastLine = (x) => cutTailStart(x, { unfinished: true });'); } catch { return null; } })();
 const CARRY_NOEND = (() => { try { return swap(JOBS_SRC, "\n    delete job._untilCarry;   // THE CARRY IS ITS RUN'S", '\n    void 0;   // (the control: the end without the carry\'s clear) —'); } catch { return null; } })();
+const ROAD_FAILMASK = (() => { try { return scrubMut("      const t = String(chunk == null ? '' : chunk);\n", "      const t = String(chunk == null ? '' : chunk);\n      if (t.includes('MASK-FAILS-HERE')) throw new Error('a placed failure (the leg\\'s copy, r4321)');\n"); } catch { return null; } })();   // r4321 road (c): the masker fails on one chunk
 const SETTLE_DROPS = (() => { try { return scrubMut('    held = kept;   // the uncertain tails stay held — the masker lives on', '    held = [];   // (the control: the kept run dropped)'); } catch { return null; } })();
 const QUIET_NONE = (() => { try { return swap(WRAP_SRC, '  try { o = vmask.settle(); } catch { o = null; }', '  o = null;'); } catch { return null; } })();
 const MUTANTS = [
@@ -1833,14 +1892,14 @@ clearTimeout(tBegan);
 // ⑫b's card is judged AT ITS BOUND (never the stall's end) — it runs to its end beside the two timed reads, before the other legs set
 // up: the same legs' synchronous setups held the loop past the bound and its stalled read answered first (red in UTC at 35c84a98a)
 const factsCardEarly = await legFactsCard();
-const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut, noFlagMut, noLineMut, carryRows, carryMut, handRows, handMut] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
+const [offLoop, offNoBound, offSync, factsCard, wrapSkip, closedElse, closedMut, restartRevoke, smalls, words, setMoves, setMovesMut, takeRows, takeRowsMut, oneCard, oneDeny, redraw, standing, fullRow, fullHalfMut, takeAll, waitLine, noWaitMut, everyWaitMut, pieces, piecesMut, childHalf, childHalfMut, quietLine, quietNoneMut, settleLines, settleOldMut, noCarryMut, pieces64, pieces64Mut, bytesRows, bytesMut, bytesOldMut, noFlagMut, noLineMut, carryRows, carryMut, handRows, handMut, roadsRows, roadsFailRows] = await Promise.all([...offRuns, MUT_SYNCREAD ? legFactsOffLoop(MUT_SYNCREAD) : null,
   factsCardEarly, legWrapperSkip(), legClosedElsewhere(), MUT_ONSTATUS ? legClosedElsewhere(MUT_ONSTATUS) : {}, legRestartRevoke(), legSmalls(),
   legWords(), legSetMoves(), MUT_GROWONLY ? legSetMoves(MUT_GROWONLY) : {}, legTakeAllRows(), MUT_DECLARED ? legTakeAllRows(MUT_DECLARED) : {}, legOneCard(), legOneDeny(), legRedraw(), legStanding(), legFullRow(), MUT_HALF ? legFullRow(MUT_HALF) : {}, legTakeAll(), legWaitLine(), MUT_NOWAIT ? legWaitLine({ doorSrc: MUT_NOWAIT }) : {}, MUT_EVERYWAIT ? legWaitLine({ jobs: MUT_EVERYWAIT }) : {},
   legPieces(), QUIET_FLUSH ? legPieces(QUIET_FLUSH) : {}, legChildHalf(), EXIT_FLUSH ? legChildHalf(EXIT_FLUSH) : {},
   legQuietLine(), QUIET_NONE ? legQuietLine(QUIET_NONE) : {},
   legSettleLines(), SETTLE_OLD ? legSettleLines({ srcMut: SETTLE_OLD }) : {}, UNTIL_NOCARRY ? legSettleLines({ jobs: UNTIL_NOCARRY }) : {}, legPiecesEncoded(), QUIET_FLUSH ? legPiecesEncoded(QUIET_FLUSH) : {},
   legBytes(), SETTLE_DROPS ? legBytes({ srcMut: SETTLE_DROPS }) : {}, SETTLE_OLD ? legBytes({ srcMut: SETTLE_OLD }) : {},
-  SETTLE_NOFLAG ? legSettleLines({ srcMut: SETTLE_NOFLAG }) : {}, SETTLE_NOLINE ? legSettleLines({ srcMut: SETTLE_NOLINE }) : {}, legCronCarry(), CARRY_NOEND ? legCronCarry({ jobs: CARRY_NOEND }) : {}, legHandCarry(), CARRY_NOEND ? legHandCarry({ jobs: CARRY_NOEND }) : {}]);
+  SETTLE_NOFLAG ? legSettleLines({ srcMut: SETTLE_NOFLAG }) : {}, SETTLE_NOLINE ? legSettleLines({ srcMut: SETTLE_NOLINE }) : {}, legCronCarry(), CARRY_NOEND ? legCronCarry({ jobs: CARRY_NOEND }) : {}, legHandCarry(), CARRY_NOEND ? legHandCarry({ jobs: CARRY_NOEND }) : {}, legOwnRoads(), ROAD_FAILMASK ? legOwnRoads({ failMask: ROAD_FAILMASK }) : [['__nocopy__']]]);
 const MUT_STARTS = dmut('return n + (k === j || (c && c.cronParent === j) ? Number(v) || 0 : 0);', 'return n;');   // ⑪'s control: the starts never counted
 const [cronRevoke, rmNoRefile, archivePrune] = await Promise.all([legCronRevoke(), legRmNoRefile(), legArchivePrune()]);   // ⑩c
 const [surfaces, chips, surfacesMut] = await Promise.all([legSurfaces(), legChips(), MUT_STARTS ? legSurfaces(MUT_STARTS) : {}]);   // ⑪ (lane vault-job-approval L2)
@@ -1968,6 +2027,8 @@ print('①h THE UNTIL SCAN\'S CARRY ENDS WITH ITS RUN (round w3aprsv38\'s MUST)'
 ok(!!CARRY_NOEND && carryMut.scene === true && carryMut.early === true, 'CONTROL — the run\'s end WITHOUT the carry\'s clear: the cron\'s next run is «completing» at its first output — RED on the copy', CARRY_NOEND ? { scene: carryMut.scene, early: carryMut.early } : 'the copy could not be built (its anchor is missing)');
 print('①i THE CARRY IS ITS RUN\'S: A START BY HAND (round w3aprsv38\'s MUST, r3108)', handRows);
 ok(!!CARRY_NOEND && handMut.scene === true && handMut.early === true, 'CONTROL — the run\'s end WITHOUT the carry\'s clear: the task started again by hand is «completing» at its first output — RED on the copy', CARRY_NOEND ? { scene: handMut.scene, early: handMut.early, tries: handMut.tries } : 'the copy could not be built (its anchor is missing)');
+print('①j THE OWN LINES\' ROADS WHILE A JOB\'S LINE IS OPEN (r4321, placed)', roadsRows);
+if (roadsFailRows.length === 1 && roadsFailRows[0][0] === '__nocopy__') ok(false, 'r4321 (c): the copy of the masker that fails on one chunk could not be built (its anchor is missing)'); else print('①j (c) the notice of a failed mask', roadsFailRows);
 print('② LOCKED = WAIT', locked);
 print('③ THE CRASH LOOP', crash);
 console.log('④ A LOCKED BOOT WAITS (the frp class)');
