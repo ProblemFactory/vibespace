@@ -823,10 +823,15 @@ else await (async () => {
       // are printed as PICTURE lines, as ⑩'s are
       console.log('— ⑪ B-bcf8: a still picture of the live view, told on its display line — en + zh, 1280 + 390');
       const PAINT_WORDS = {
-        en: { 'thaw-unread': 'This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.', 'show-owed': 'This page has not come back to the front yet. VibeSpace tries again shortly.', 'show-left': 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.' },
-        zh: { 'thaw-unread': '此页面没有在绘制：唤醒时它没有回应。你观看时 VibeSpace 会继续唤醒它。', 'show-owed': '此页面还没有回到前台，VibeSpace 稍后会再试。', 'show-left': 'VibeSpace 无法把此页面带回前台。点击上方它的标签即可将其带到前面。' },
+        en: { 'thaw-unread': 'This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.', 'show-owed': 'This page has not come back to the front yet. VibeSpace tries again shortly.', 'show-left': 'VibeSpace could not bring this page back to the front. Take over, then click its tab above to bring it forward.' },
+        zh: { 'thaw-unread': '此页面没有在绘制：唤醒时它没有回应。你观看时 VibeSpace 会继续唤醒它。', 'show-owed': '此页面还没有回到前台，VibeSpace 稍后会再试。', 'show-left': 'VibeSpace 无法把此页面带回前台。先接管，再点击上方它的标签即可将其带到前面。' },
       };
+      // r4297 (the round's must): as a person who only WATCHES sees them (the third line names Take over first: the chip is no button
+      // then), and the third line once more as a person who DRIVES sees it (the chip brings the tab forward): eight pictures
+      const DRIVE_WORDS = { en: 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.', zh: 'VibeSpace 无法把此页面带回前台。点击上方它的标签即可将其带到前面。' };
       for (const code of Object.keys(PAINT_WORDS.en)) { ASKED.add(`bcf8-still-${code}-en-1280.png`); ASKED.add(`bcf8-still-${code}-zh-390.png`); }
+      ASKED.add('bcf8-still-show-left-driving-en-1280.png'); ASKED.add('bcf8-still-show-left-driving-zh-390.png');
+      const chipOf = (id) => ev(`const el = [...L().el().querySelectorAll('.browser-live-tabchip')].find((e) => String(e.dataset.target || '').toUpperCase() === String(${S(id)} || '').toUpperCase()); return el ? { role: el.getAttribute('role'), drawn: !!el.offsetParent } : null;`);
       // `whose`: 'shown' = the tab the view shows (its row marked active), 'other' = a tab it does not show, null = no paint (it cleared)
       const plantPaint = (code, whose) => ev(`const s = L().state(); const rows = (s.tabRow && s.tabRow.rows) || []; const shown = (rows.find((r) => r.active) || {}).targetId || null; const d = JSON.parse(JSON.stringify(app._browserProfiles || { profiles: [] })); d.browsers = d.browsers || {}; const ids = new Set(Object.keys(d.browsers)); if (s.target && s.target.profileId) ids.add(s.target.profileId); const key = ${S(whose)} === 'shown' ? shown : 'F'.repeat(32); const paint = ${S(whose)} && key ? { [key]: ${S(code)} } : null; for (const id of ids) d.browsers[id] = { ...(d.browsers[id] || {}), display: ${S(hidFact)}, startedAt: 1, paint }; const m = { type: 'browser-profiles-updated', ...d }; app._onBrowserProfilesUpdated(m); ${relayBroadcastJs('m')} return { shown, ids: [...ids] };`);
       for (const lang of ['en', 'zh']) {
@@ -854,6 +859,19 @@ else await (async () => {
         }
         ok([1280, 390].every((x) => !said.includes(other[x].note) && markOk(other[x], w)), `⑪ ${lang}: a code on ANOTHER tab (one this view does not show) — no line of it here`, S(other));
         ok([1280, 390].every((x) => !said.includes(gone[x].note) && markOk(gone[x], w)), `⑪ ${lang}: the code cleared — its line gone with it (said while it stands, never after)`, S(gone));
+        // r4297: the watcher's third line names Take over first BECAUSE the shown tab's chip is no button for a watcher
+        await sizeTo(1280); const shownW = got['show-left'].at && got['show-left'].at.shown; const chipW = shownW ? await chipOf(shownW) : null;
+        ok(!!chipW && chipW.role !== 'button', `⑪ ${lang}: a person who only watches — the shown tab's chip is no button, and the third line says Take over first («${PW['show-left']}»)`, S(chipW));
+        // …then as a person who DRIVES: Take over, the same code — «Click its tab above», the chip a button
+        await ev('L().takeOver(); return true;');
+        const drivingN = await until(() => ev('const s = L().state(); return s.mode === "takeover" && s.mine;'), 12000);
+        const drv = {};
+        for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { drv.at = await plantPaint('show-left', 'shown'); await sleep(150); drv[wpx] = await bars(); drv['chip' + wpx] = drv.at && drv.at.shown ? await chipOf(drv.at.shown) : null; await shoot(`bcf8-still-show-left-driving-${lang}-${wpx}.png`, drv[wpx], wpx); }); }
+        ok(drivingN && [1280, 390].every((x) => drv[x].note === DRIVE_WORDS[lang]) && !!drv.chip1280 && drv.chip1280.role === 'button',
+          `⑪ ${lang}: a person who DRIVES — the third line «${DRIVE_WORDS[lang]}», and the shown tab's chip IS a button (it brings the tab forward), at 1280 and 390`, S(drv));
+        await readHeld(async () => { await plantPaint('show-left', null); });
+        await ev('L().send({ type: "handback" }); return true;');
+        await until(() => ev('const s = L().state(); return s.mode === "watch" && !s.mine;'), 10000);
         await readHeld(async () => { await plantPaint('show-left', null); });
       }
       await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });

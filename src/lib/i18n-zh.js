@@ -7609,6 +7609,8 @@ export default {
   "This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.": "此页面没有在绘制：唤醒时它没有回应。你观看时 VibeSpace 会继续唤醒它。", // B-bcf8 (r4256): the live view's still-picture line
   "This page has not come back to the front yet. VibeSpace tries again shortly.": "此页面还没有回到前台，VibeSpace 稍后会再试。", // B-bcf8 (r4256): the live view's still-picture line
   "VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.": "VibeSpace 无法把此页面带回前台。点击上方它的标签即可将其带到前面。", // B-bcf8 (r4256): the live view's still-picture line
+  "VibeSpace could not bring this page back to the front. Take over, then click its tab above to bring it forward.": "VibeSpace 无法把此页面带回前台。先接管，再点击上方它的标签即可将其带到前面。", // B-bcf8 (r4297): the third line as a person who only watches / drives where the chip cannot
+  "VibeSpace could not bring this page back to the front.": "VibeSpace 无法把此页面带回前台。", // B-bcf8 (r4297): the third line as a person who only watches / drives where the chip cannot
   "Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer": "浏览器「{label}」正在等待通行密钥（{rp}）——切换过去回应", // lane passkey-browse-yourself (acceptance r1)
   "Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer": "这个对话的另一个浏览器正在等待通行密钥（{rp}）——切换过去回应", // lane passkey-browse-yourself (acceptance r1)
   "The passkey wait had already ended": "这次通行密钥等待已经结束了", // lane passkey-browse-yourself (acceptance r1)

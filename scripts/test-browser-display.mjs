@@ -862,8 +862,9 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const EN = {
     'thaw-unread': 'This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.',
     'show-owed': 'This page has not come back to the front yet. VibeSpace tries again shortly.',
-    'show-left': 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.',
+    'show-left': 'VibeSpace could not bring this page back to the front. Take over, then click its tab above to bring it forward.',   // r4297: a person who only watches (the default): the two steps that exist
   };
+  const CLICK_B = 'VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.', BARE_B = 'VibeSpace could not bring this page back to the front.';
   const recOf = (paint) => ({ profileId: 'bp-1', state: 'ready', ...(paint === undefined ? {} : { paint }) });
   const wordsBad = [];
   for (const [code, line] of Object.entries(EN)) {
@@ -876,9 +877,15 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
     for (const [name, r, id] of [['the record as it is today (no paint)', recOf(undefined), TA], ['paint null', recOf(null), TA], ['front_unread (that browser draws)', recOf({ [TA]: 'front-unread' }), TA],
       ['a code it does not know', recOf({ [TA]: 'gone' }), TA], ['no shown tab', recOf({ [TA]: 'show-left' }), null], ['no record', null, TA], ['a prototype key', recOf({}), '__proto__']]) if (W.paintLineOf(r, id) !== '') wordsBad.push(name + ': said');
   }
+  if (typeof W.paintLineOf === 'function') {
+    if (W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: true }) !== CLICK_B) wordsBad.push('show-left: the chip CAN bring it forward (the person drives) — not «Click its tab above»');
+    if (W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: false, driving: true }) !== BARE_B) wordsBad.push('show-left: the person drives and the chip cannot (mediated) — a door named anyway');
+    if (W.paintLineOf(recOf({ [TA]: 'show-left' }), TA, { canFront: false, driving: false }) !== EN['show-left']) wordsBad.push('show-left: the person only watches — not «Take over, then click its tab above»');
+    for (const code of ['thaw-unread', 'show-owed']) for (const o of [{ canFront: true }, { driving: true }]) if (W.paintLineOf(recOf({ [TA]: code }), TA, o) !== EN[code]) wordsBad.push(code + ': its words moved with the chip\'s verdict');
+  }
   ok(wordsBad.length === 0, 'B-bcf8 (r4256) (1)/(3): each of the three codes gives its line for the tab the view SHOWS — never another tab\'s, never front_unread (that browser draws), never a record without `paint` (today\'s says nothing)', wordsBad);
   const zhB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaB = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  const missB = Object.values(EN).filter((k) => !(zhB.includes('  ' + JSON.stringify(k) + ': ') && jaB.includes('  ' + JSON.stringify(k) + ': ')));
+  const missB = [...Object.values(EN), CLICK_B, BARE_B].filter((k) => !(zhB.includes('  ' + JSON.stringify(k) + ': ') && jaB.includes('  ' + JSON.stringify(k) + ': ')));
   ok(missB.length === 0 && Object.values(EN).every((x) => !/[{}]|https?:/.test(x)), 'B-bcf8 (r4256) (3): the three lines have zh and ja rows, and no line has a slot (no title, no address can ride it)', missB);
   // the live view's wiring (src/lib/browser-live-window.js), each line ONCE: the shown tab (the watched one, else the agent's current tab),
   // its line from the digest's record, said AFTER the once-a-run drop (a still picture is said while it stands, not 20 s a run) and
@@ -887,21 +894,31 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   const PINSB = [
     ['the words module\'s function imported', "runLineVerdict, paintLineOf /* B-bcf8 (r4256) */ } from './browser-display-words.js';"],
     ['the shown tab', "function shownTabId() { return (st.watch && st.watch.targetId) || ((st.tabs || []).find((x) => x && x.active) || {}).targetId || null; }"],
-    ['its line from the shown browser\'s record', 'return paintLineOf(d && d.browsers && pid ? d.browsers[pid] : null, shownTabId()); }'],
+    ['its line from the shown browser\'s record, worded by the shown tab\'s chip\'s OWN verdict (r4297: one source)', "return paintLineOf(d && d.browsers && pid ? d.browsers[pid] : null, sid, { canFront: !!row && clickOf(row).act === 'front', driving: st.mode === 'takeover' && st.mine }); }"],
+    ['…the chip drawn as a button by that same verdict', "const clickable = cv.act !== 'none' || r.canSwitch;"],
     ['…said while it stands (it takes the line)', 'st.paintShown = paintLineNow(); if (st.paintShown) line = st.paintShown;'],
     ['…re-rendered when the shown tab moved', "try { if (paintLineNow() !== (st.paintShown || '')) renderDisplay(); } catch { /* the view is still being built */ }"],
   ];
   const missW = PINSB.filter(([, x]) => nB(x) !== 1).map(([w, x]) => ({ w, n: nB(x) }));
   const iDrop = LWB.indexOf("if (!said.say) line = '';"), iSay = LWB.indexOf('st.paintShown = paintLineNow();'), iDraw = LWB.indexOf('if (displayNote.textContent !== line) displayNote.textContent = line;');
   ok(missW.length === 0 && iDrop > 0 && iDrop < iSay && iSay < iDraw, `B-bcf8 (r4256) (1): the live view says it on its OWN display line, for the tab it shows, after the once-a-run drop (${PINSB.length} pins, each once)`, { missW, iDrop, iSay, iDraw });
+  // r4297 (the round's must) — THE PIN: the shown tab's chip answers «front» ONLY while the person drives (src/browser-windows.js
+  // tabClickVerdict, the verdict clickOf asks and the line asks too); a watcher's shown tab — the agent's current one or the one
+  // watched — answers no act (its chip is no button), so the line names Take over first
+  const BW = require('../src/browser-windows.js');
+  const vOf = (o) => BW.tabClickVerdict({ owner: 'agent', targetId: TA, ...o }).act;
+  const chipB = { drivingShown: vOf({ active: true, driving: true }), watchingShown: vOf({ active: true, driving: false }), watchingWatched: vOf({ active: false, watching: TA, driving: false }), drivingMediated: vOf({ active: true, driving: true, mediated: true }) };
+  ok(chipB.drivingShown === 'front' && chipB.watchingShown !== 'front' && chipB.watchingWatched !== 'front' && chipB.drivingMediated !== 'front',
+    'B-bcf8 r4297 (its pin): the shown tab\'s chip brings it forward ONLY while the person drives — watching, its shown tab (the agent\'s or the one watched) answers no act; a mediated browser\'s tab none even while driving — and the line follows that one verdict', chipB);
   // THE REAL KEEPER's digest over a stand-in paint watch: `stillTabs` is the watch's answer; the sweep's tick pushes the digest
   // (`browser-profiles-updated`) only when a browser's `paint` moved; a left tab's mark dropped by the recheck (a viewer watches) is
   // pushed at once, between ticks
   const NOW_P = Date.parse('2026-11-25T12:00:00Z'); let paintSeq = 0;
-  const paintKeeper = async (Kmod, steps, { viewers = 0 } = {}) => {
+  const paintKeeper = async (Kmod, steps, { viewers = 0, lease = false } = {}) => {
     const root = path.join(ROOT, `paint-digest-${++paintSeq}`), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
     (landedU5b(), fs).writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-000000c2', label: 'STILL', dir: path.join(root, 'prof'), createdAt: NOW_P - 3600e3 }],
-      browsers: { 'bp-000000c2': { profileId: 'bp-000000c2', ns: 'vs-bp-000000c2', state: 'ready', pid: null, hostId: null, external: false, display: { headed: true, fallback: { rung: 'hidden-window' } } } } }));
+      browsers: { 'bp-000000c2': { profileId: 'bp-000000c2', ns: 'vs-bp-000000c2', state: 'ready', pid: null, hostId: null, external: false, display: { headed: true, fallback: { rung: 'hidden-window' } } } },
+      ...(lease ? { leases: [{ profileId: 'bp-000000c2', browserKey: 'bk-000000c2', at: NOW_P - 60000 }] } : {}) }));   // r4297: the agent's own status answer reads its lease's browser
     const quiet = { log() {}, info() {}, warn() {}, error() {} }, sent = [];
     const kk = Kmod.create({ dataDir, homeDir: root, env: () => ({ PATH: path.join(root, 'nobin'), HOME: root }), install: false, log: quiet, now: () => NOW_P, tickMs: 3600e3,
       serverSetting: (k) => (k === 'browser.idlePaintFreeze' ? true : undefined), daemonTable: async () => [], broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') sent.push(m); } });
@@ -916,7 +933,8 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
         still = s.still; later = s.later || null; const n0 = sent.length;
         await kk.sweepIdlePaint(NOW_P); await new Promise((r) => setTimeout(r, 60));
         const b = kk.list().browsers['bp-000000c2'] || {};
-        rows.push({ pushed: sent.length - n0, paint: b.paint === undefined ? 'NO FIELD' : b.paint, pushedPaint: sent.length > n0 ? ((sent[sent.length - 1].browsers || {})['bp-000000c2'] || {}).paint || null : null });
+        const ag = lease ? ((kk.statusFor('bk-000000c2') || {}).leases || [])[0] || null : null;
+        rows.push({ agent: lease ? { row: !!(ag && ag.browser), paint: !!(ag && ag.browser && 'paint' in ag.browser) } : null, pushed: sent.length - n0, paint: b.paint === undefined ? 'NO FIELD' : b.paint, pushedPaint: sent.length > n0 ? ((sent[sent.length - 1].browsers || {})['bp-000000c2'] || {}).paint || null : null });
       }
     } finally { kk.shutdown(); }
     return { rows, asked: asked.length, seen: seenP };
@@ -932,19 +950,29 @@ console.log('— B-bcf8 (r4256): a still picture of the live view is told to the
   ok(judgePriv(pv), 'B-bcf8 (r4256) (2): CODES AND TARGET IDS ONLY — whatever the watch hands, an address, a page title, a key not of a target id\'s shape and a code not of the three are dropped, never carried', pv.rows);
   ok(pw.asked === 1 && pw.rows[0].pushed === 2 && pw.rows[0].paint === null && pn.asked === 0 && pn.rows[0].pushed === 1 && J(pn.rows[0].paint) === J({ [TA]: 'show-left' }),
     'B-bcf8 (r4256): a LEFT tab brought forward while a person watches — the sweep asks the recheck (reads only) and its dropped mark is pushed at once, between ticks; with nobody watching, never asked', { watched: pw, alone: pn });
+  // r4297 (part 2): THE FIELD IS THE PAGE's — the agent's own status answer (statusFor: its lease's browser, agentBrowserView) carries
+  // no `paint` while a code stands, the person's digest does
+  const pa = await paintKeeper(KP, [{ still: { [TA]: 'show-left' } }], { lease: true });
+  const judgeAgent = (r) => !!r && J(r.rows[0].paint) === J({ [TA]: 'show-left' }) && !!r.rows[0].agent && r.rows[0].agent.row === true && r.rows[0].agent.paint === false;
+  ok(judgeAgent(pa), 'B-bcf8 r4297 (part 2): the field is the PAGE\'s — while a code stands the person\'s digest carries it and the agent\'s own status answer (its lease\'s browser) does not (a code that comes and goes would tell an agent a person watches)', pa.rows);
   // the reds: today's record (no `paint`), a keeper that pushes at every tick, a keeper that carries the watch's map as it comes
   const MPB = mutantCopies('browser-display-paint', REPO), ksrcB = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const PANCH = ', paint: paintOf(rec.profileId) /* B-bcf8 (r4256): the still tabs, codes and ids only */', TANCH = '    pushPaintIfMoved(); // B-bcf8 (r4256)', RANCHB = "if (/^[0-9A-Fa-f]{16,64}$/.test(id) && (code === 'thaw-unread' || code === 'show-owed' || code === 'show-left')) out[id.toUpperCase()] = code;";
-  const anchB = [[PANCH, 'the digest field'], [TANCH, 'the push when it moved'], [RANCHB, 'codes and ids only']].filter(([a]) => !ksrcB.includes(a)).map(([, n]) => n);
+  const AANCHB = 'const { launchEnv, paint, ...rest } = v;', VANCHB = 'if (vw.n > 0 && !f.busy && !f.frozen && typeof paintWatch.recheckLeft';
+  const anchB = [[PANCH, 'the digest field'], [TANCH, 'the push when it moved'], [RANCHB, 'codes and ids only'], [AANCHB, 'the agent\'s view drops it'], [VANCHB, 'the recheck only while watched']].filter(([a]) => !ksrcB.includes(a)).map(([, n]) => n);
   ok(anchB.length === 0, 'the anchors of the B-bcf8 keeper controls are in the source (src/server/browser-keeper.js)', anchB);
   const KnoP = anchB.length ? null : MPB.load('src/server/browser-keeper.js', anchored(ksrcB, ', paint: paintOf(rec.profileId) /* B-bcf8 (r4256): the still tabs, codes and ids only */', '', 'B-bcf8 control: the record as it is today (no paint)'), 'bcf8-no-paint');
   const Ktick = anchB.length ? null : MPB.load('src/server/browser-keeper.js', anchored(ksrcB, '    pushPaintIfMoved(); // B-bcf8 (r4256)', '    notify(); // B-bcf8 control: pushed at every tick', 'B-bcf8 control: a push at every tick'), 'bcf8-every-tick');
   const Kraw = anchB.length ? null : MPB.load('src/server/browser-keeper.js', anchored(ksrcB, "if (/^[0-9A-Fa-f]{16,64}$/.test(id) && (code === 'thaw-unread' || code === 'show-owed' || code === 'show-left')) out[id.toUpperCase()] = code;", 'out[id] = code;', 'B-bcf8 control: the watch\'s map carried as it comes'), 'bcf8-raw');
   if (!anchB.length) {
-  const [cP, cT, cR] = await Promise.all([paintKeeper(KnoP, STEPS), paintKeeper(Ktick, STEPS), paintKeeper(Kraw, PRIV)]);
+  const Kagent = MPB.load('src/server/browser-keeper.js', anchored(ksrcB, AANCHB, 'const { launchEnv, ...rest } = v;', 'B-bcf8 control: the agent\'s view as it spread before r4297'), 'bcf8-agent-sees');   // stale-pins: kept — the agent view's line before r4297, planted back as this control
+  const Kalone = MPB.load('src/server/browser-keeper.js', anchored(ksrcB, VANCHB, 'if (!f.busy && !f.frozen && typeof paintWatch.recheckLeft', 'B-bcf8 control: the recheck asked with nobody watching'), 'bcf8-recheck-alone');
+  const [cP, cT, cR, cA, cN] = await Promise.all([paintKeeper(KnoP, STEPS), paintKeeper(Ktick, STEPS), paintKeeper(Kraw, PRIV), paintKeeper(Kagent, [{ still: { [TA]: 'show-left' } }], { lease: true }), paintKeeper(Kalone, [{ still: { [TA]: 'show-left' }, later: {} }])]);
   ok(!judgeSteps(cP) && cP.rows.every((x) => x.paint === 'NO FIELD'), 'CONTROL (the record as it is today): no `paint` in the digest — the live view has nothing to say for a still picture — RED', cP.rows.map((x) => x.paint));
   ok(!judgeSteps(cT) && cT.rows[2].pushed === 1 && cT.rows[5].pushed === 1, 'CONTROL (the digest pushed at every tick): a push on ticks that changed nothing — RED', cT.rows.map((x) => x.pushed));
   ok(!judgePriv(cR), 'CONTROL (the watch\'s map carried as it comes): an address and a page title ride the digest — RED', cR.rows[0].paint);
+  ok(!judgeAgent(cA) && cA.rows[0].agent && cA.rows[0].agent.paint === true, 'CONTROL (r4297: the agent\'s view spread as before): the code rides into the agent\'s own status — RED', cA.rows[0].agent);
+  ok(cN.asked === 1, 'CONTROL (the recheck asked with nobody watching): the sweep reads a left tab no person looks at — RED against the leg above (never asked alone)', { asked: cN.asked });
   for (const r of copiesCensus(MPB.files, MPB.dir, REPO, { label: 'B-bcf8 control: ' })) ok(r.pass, r.name, r.detail);
   }
 }

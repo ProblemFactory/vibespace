@@ -954,7 +954,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function agentBrowserView(rec) {
     const v = browserView(rec);
     if (!v) return null;
-    const { launchEnv, ...rest } = v; // eslint-disable-line no-unused-vars
+    const { launchEnv, paint, ...rest } = v; // eslint-disable-line no-unused-vars — r4297 (B-bcf8): `paint` is the PAGE's (the live view's still line), never the agent's: a code that comes and goes would tell an agent a person watches
     return { ...rest, cli: cliFactOf(rec), ...(v.browserChoice ? { browserChoice: BB.agentChoiceView(v.browserChoice) } : {}) }; // verify r2 (H1): the CLI by VERSION only
   }
   function leaseView(l) {
@@ -6614,7 +6614,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     } catch { return null; }
   }
   /** B-bcf8 (r4256): the digest is PUSHED when a browser's `paint` moved — compared at the sweep's tick (and when a left tab's mark is
-   *  dropped), never on a tick that changed nothing. → moved */
+   *  dropped), never on a tick that changed nothing: at most one push a tick (TICK_MS, 5 s) plus one a dropped mark. → moved */
   let paintSaid = new Map(); // profileId → the `paint` last pushed (JSON)
   function pushPaintIfMoved() {
     const nowP = new Map();

@@ -7608,6 +7608,8 @@ export default {
   "This page is not drawing: it did not answer when it was woken. VibeSpace keeps asking while you watch.": "このページは描画されていません：再開の呼びかけに応答がありませんでした。表示中は VibeSpace が呼びかけ続けます。", // B-bcf8 (r4256): the live view's still-picture line
   "This page has not come back to the front yet. VibeSpace tries again shortly.": "このページはまだ前面に戻っていません。VibeSpace がまもなく再試行します。", // B-bcf8 (r4256): the live view's still-picture line
   "VibeSpace could not bring this page back to the front. Click its tab above to bring it forward.": "VibeSpace はこのページを前面に戻せませんでした。上のタブをクリックすると前面に出せます。", // B-bcf8 (r4256): the live view's still-picture line
+  "VibeSpace could not bring this page back to the front. Take over, then click its tab above to bring it forward.": "VibeSpace はこのページを前面に戻せませんでした。引き継いでから、上のタブをクリックすると前面に出せます。", // B-bcf8 (r4297): the third line as a person who only watches / drives where the chip cannot
+  "VibeSpace could not bring this page back to the front.": "VibeSpace はこのページを前面に戻せませんでした。", // B-bcf8 (r4297): the third line as a person who only watches / drives where the chip cannot
   "Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer": "ブラウザー「{label}」がパスキーを待っています（{rp}）。切り替えて応答してください", // lane passkey-browse-yourself (acceptance r1)
   "Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer": "この会話の別のブラウザーがパスキーを待っています（{rp}）。切り替えて応答してください", // lane passkey-browse-yourself (acceptance r1)
   "The passkey wait had already ended": "このパスキーの待機はすでに終わっていました", // lane passkey-browse-yourself (acceptance r1)
