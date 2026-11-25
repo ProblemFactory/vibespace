@@ -616,6 +616,30 @@ function rebindPick({ targets = null, holders = [], key = '' } = {}) {
   const raw = targets.find((x) => isObj(x) && idKey(x.targetId) === only.targetId) || {}; // pageTargets keeps no url — the note names the page
   return { targetId: only.targetId, url: str(raw.url) || 'about:blank' };
 }
+/** Row B-0e4a (主开发 r4252 / r4264): A LEASE's OWN TAB, KNOWN AGAIN AFTER A RESTART. The keeper births the lease's root tab at a
+ *  hub-made address — about:blank with the lease's own random mark as its fragment — and Chrome's own restore («continue where you
+ *  left off») keeps that address as the restored tab's FIRST history entry, after the agent navigated on (probe 14, box row 811: one
+ *  carrier, entry 0). A page's script never reads another history entry's address. `OWN_MARK_RE` = the mark's own shape (random hex,
+ *  never an address or a title). PURE. */
+const OWN_MARK_RE = /^[0-9a-f]{24}$/;
+const ownMarkUrl = (mark) => (OWN_MARK_RE.test(str(mark)) ? `about:blank#vs-own-${mark}` : null);
+/**
+ * Row B-0e4a: WHICH restored page the lease takes back. `candidates` = the page targets no holder roots (orphans); `carries` = a Map
+ * target id → true (its FIRST history entry is this lease's own mark) | false (it is not) | null (its history did not answer in time).
+ * EXACTLY ONE carrier ⇒ { take: id }; any unknown ⇒ { why: 'unknown' } (an unread page could carry it too: never «not the lease's»);
+ * none ⇒ { why: 'none' }; two or more (a person duplicated the tab: it copies the history) ⇒ { why: 'many' } — the last three keep
+ * today's behaviour (a new tab of its own). PURE.
+ */
+function markVerdict({ candidates = [], carries = null } = {}) {
+  const ids = (Array.isArray(candidates) ? candidates : []).map((x) => idKey(x)).filter(Boolean);
+  if (!ids.length) return { why: 'none' };
+  const m = carries instanceof Map ? carries : new Map();
+  const read = ids.map((id) => (m.has(id) ? m.get(id) : null));
+  if (read.some((v) => v !== true && v !== false)) return { why: 'unknown' };
+  const yes = ids.filter((id, i) => read[i] === true);
+  if (yes.length === 1) return { take: yes[0] };
+  return { why: yes.length ? 'many' : 'none' };
+}
 /** The ONE sentence the agent reads after a rebind (its command's answer, once): why its tab is gone, where it is bound now.
  *  `how` = `switched` (bound to the browser's only page) | `new` (a new tab of its own); `why` = `life` (the browser was
  *  restarted) | `closed` (the tab was closed) | `place` (B-9584 (B): the hold CLOSED it — its place could not be given to it in time,
@@ -626,10 +650,13 @@ function reboundNoteText({ how = 'new', url = '', why = 'life' } = {}) {
   // verify r1 (F8): the url is the PAGE's (a data: url keeps every character — a frame tag, a bidi override) and this note
   // is printed to the agent: THE belt (peer-text), as browser-kept's keptUrl and browser-stuck's loadingText — never a raw slice
   const u = PT.toAgentText(str(url), { kind: 'line', max: REBOUND_URL_MAX }).trim();
+  // row B-0e4a: `back` — the lease's OWN tab came back with Chrome's restore and is bound again (its address never said: a page's)
+  if (how === 'back') return 'the browser was restarted — your own tab came back with it and is bound again; re-read the page before continuing';
   return how === 'switched' ? `${gone} — bound to ${u || 'about:blank'}; re-read the page before continuing` : `${gone} — a new tab was opened and bound for you${u && u !== 'about:blank' ? ' (' + u + ')' : ''}; open your page again`;
 }
 
 module.exports = {
+  OWN_MARK_RE, ownMarkUrl, markVerdict, // row B-0e4a: a lease's own tab known again after a restart
   unresponsiveAgentText, // lane browser-unresponsive
   TARGET_ID_RE, TAB_ID_RE, AGENT_TAB_ACTS, USER_TAB_ACTS, OWNER_WORDS, TAB_REFUSALS, MAX_ROOTS, MAX_USER_ACTS,
   pageTargets, cleanRoots, addRoot, tabOwners, ownSetOf, ownerWord,

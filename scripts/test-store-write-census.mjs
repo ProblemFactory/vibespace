@@ -2043,6 +2043,7 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
 console.log('⑬ every registry save of the browser keeper has its side (lands / rides / owed with its why)');
 {
   const SIDES = {
+    ...Object.fromEntries(['ownMarkOf', 'takeBackOwnTab'].map((f) => [f, 'owed'])), // row B-0e4a: the lease's own tab mark and its take-back — lease bookkeeping, owed like ownWindowAtAttach
     ...Object.fromEntries(['batched', 'commit', 'commitSync', 'landNow', 'landedOrThrow', 'save', 'saveNow'].map((f) => [f, 'helper'])),
     ...Object.fromEntries(['addSiteHint', 'attachStart', 'blocked', 'cardOnLanding', 'clearBlocked', 'copyPin', 'dropSiteHint', 'keepEgress', 'moveDirLineage', 'moveProxyPassword', 'newChild', 'proposeSiteReset', 'restorePin', 'setCap', 'setPin', 'start', 'startEphemeral', 'stepProposal', 'switchBackend', 'updateProfileNow', 'userStoppedDisplay', 'watchTabFor'].map((f) => [f, 'lands'])),
     ...Object.fromEntries(['adoptScratch', 'clearPin', 'removeProfile'].map((f) => [f, 'rides'])),

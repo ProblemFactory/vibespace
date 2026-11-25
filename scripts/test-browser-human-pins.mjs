@@ -104,7 +104,7 @@ console.log('— ③ THE HOLDER CENSUS');
     // through openOwnTab, never a lease), the WINDOW MATES a takeover of a conversation's window takes with it (conversation
     // leases only: their row is never a mate — their window is their own), and agentTabAct's 4th site (the lease that records the
     // new tab's window + its label)
-    ownWindowAtAttach: 2, windowMatesOf: 1,
+    ownWindowAtAttach: 2, windowMatesOf: 1, ownMarkOf: 1, takeBackOwnTab: 2, // row B-0e4a: the lease's own mark and its take-back (a conversation's lease only)
     // verify r1 T2 ⑧ (one window per holder): openOwnTab reads the CONVERSATION lease's `windowId` + roots to open a later tab IN
     // its window (their key names no lease ⇒ their first tab is a new window of their own, their popups stay in it by Chrome's rule)
     openOwnTab: 1,

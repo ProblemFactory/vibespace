@@ -346,6 +346,17 @@ async function captureTarget(cdpUrl, targetId, { quality = 70, timeoutMs = READ_
   return data ? { ok: true, data, clientWidth: size ? size.clientWidth : 0, clientHeight: size ? size.clientHeight : 0, targetId: String(targetId) } : { ok: false, error: 'the page answered no picture' };
 }
 /** lane browser-windows (U0b): is a NAMED tab painting — `document.visibilityState` asked of the page. → {ok, visibility}. */
+/** Row B-0e4a: is the tab's FIRST history entry exactly `expected` (a lease's own marked birth address, about:blank#vs-own-…)? Read
+ *  on the tab's own socket, bounded: the history stays here, in memory — only the answer leaves: true | false | null (no answer in
+ *  time, or nothing to compare: UNKNOWN, never «not the lease's»). */
+async function firstEntryIs(cdpUrl, targetId, expected, { timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
+  const u = pageUrlOf(cdpUrl, targetId);
+  if (!u || typeof expected !== 'string' || !expected) return null;
+  const r = await pageCommand(u, 'Page.getNavigationHistory', {}, timeoutMs, WebSocketImpl);
+  const es = r && r.ok && r.result && Array.isArray(r.result.entries) ? r.result.entries : null;
+  if (!es) return null;
+  return es.length > 0 && String((es[0] && es[0].url) || '') === expected;
+}
 async function visibilityOf(cdpUrl, targetId, { timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
   const u = pageUrlOf(cdpUrl, targetId);
   if (!u) return { ok: false, error: 'no such tab' };
@@ -549,4 +560,4 @@ async function stopLoadingOf(cdpUrl, targetId, { timeoutMs = READ_MS, WebSocketI
   const r = await pageCommand(u, 'Page.stopLoading', {}, timeoutMs, WebSocketImpl);
   return r.ok ? { ok: true } : { ok: false, error: r.error || 'no answer' };
 }
-module.exports = { stopLoadingOf, readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, windowBoundsOf, setWindowBounds /* lane browser-x-in-window */, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };
+module.exports = { firstEntryIs /* row B-0e4a */, stopLoadingOf, readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, windowBoundsOf, setWindowBounds /* lane browser-x-in-window */, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };

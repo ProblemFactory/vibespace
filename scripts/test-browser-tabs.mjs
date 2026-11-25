@@ -1201,6 +1201,37 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     if (DDnl) ok(!judgeLeft(stlNl) && !(stlNl.left.seq || []).includes('show-left'), 'CONTROL (the watch as it was: the tab left is not kept by id): the page left hidden for good is said to nobody — RED', stlNl.left && stlNl.left.seq);
     if (DDany) ok(!judgeLeft(stlAny) && stlAny.left.r1.cleared === 1, 'CONTROL (a recheck that drops a left tab on ANY answer): a page still hidden is called come forward — RED', stlAny.left && stlAny.left.r1);
   }
+  // ═══ ROW B-0e4a (主开发 r4252 / r4264; probe 14, box row 811): A LEASE's OWN TAB, KNOWN AGAIN AFTER A RESTART. The keeper births the
+  //     lease's root at about:blank#vs-own-<its random mark>; Chrome's own restore keeps that as the restored tab's FIRST history entry
+  //     (one carrier, entry 0, after the tab navigated on); EXACTLY ONE orphan carrying it is taken back — none, two (a person
+  //     duplicated the tab: the history is copied) or any page unread in time ⇒ today's behaviour. RED: «at least one» ═══
+  {
+    const TBS0 = require('../src/browser-tabs.js'), VPm = require('../src/server/browser-viewport.js');
+    const MARK = 'a1b2c3d4e5f6a7b8c9d0e1f2', OTHER = 'ffeeddccbbaa998877665544';
+    const U0 = TBS0.ownMarkUrl(MARK);
+    ok(U0 === `about:blank#vs-own-${MARK}` && TBS0.ownMarkUrl('about:blank') === null && TBS0.ownMarkUrl('ZZ' + MARK.slice(2)) === null && TBS0.OWN_MARK_RE.test(MARK),
+      'B-0e4a PURE: the lease\'s own birth address is about:blank with its random mark (24 hex) — anything else is no mark', U0);
+    const P1 = T(0xa1), P2 = T(0xa2), P3 = T(0xa3);
+    const mv = (pairs) => TBS0.markVerdict({ candidates: pairs.map(([id]) => id), carries: new Map(pairs) });
+    const cases = { one: mv([[P1, true], [P2, false], [P3, false]]), none: mv([[P1, false], [P2, false]]), two: mv([[P1, true], [P2, true], [P3, false]]), unread: mv([[P1, true], [P2, null]]), empty: TBS0.markVerdict({ candidates: [], carries: new Map() }) };
+    ok(cases.one.take === P1 && cases.none.why === 'none' && cases.two.why === 'many' && cases.unread.why === 'unknown' && cases.empty.why === 'none' && !cases.two.take && !cases.unread.take,
+      'B-0e4a PURE: EXACTLY ONE carrier is taken back; none ⇒ none; two (a person duplicated the tab) ⇒ none taken; any page unread in time ⇒ unknown (never «not the lease\'s») — the last three keep today\'s behaviour', cases);
+    const note = TBS0.reboundNoteText({ how: 'back', url: `${U0} https://secret.example/` });
+    ok(/came back/.test(note) && !note.includes('about:blank') && !note.includes(MARK) && !note.includes('example'), 'B-0e4a PURE: the agent\'s note says its own tab came back — never an address (nor the mark)', note);
+    const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8'), MANCH0 = '  if (yes.length === 1) return { take: yes[0] };';
+    if (!tsrc.includes(MANCH0)) ok(false, 'the anchor of the control «at least one carrier» is not in the source (src/browser-tabs.js)');
+    const TBSr = tsrc.includes(MANCH0) ? M.load('src/browser-tabs.js', editAnchor(tsrc, MANCH0, '  if (yes.length >= 1) return { take: yes[0] };', 'src/browser-tabs.js'), 'b0e4a-at-least-one') : null;
+    if (TBSr) { const r2 = TBSr.markVerdict({ candidates: [P1, P2], carries: new Map([[P1, true], [P2, true]]) }); ok(!!r2.take, 'CONTROL («at least one»): a duplicated tab\'s two carriers — one of them, perhaps the person\'s copy, is taken — RED', r2); }
+    // the one read the keeper makes: on each page's own socket, the history stays there — only yes / no / unknown comes back
+    const { WebSocketServer: WSS2 } = require('ws');
+    const hist = new Map([[P1, [{ url: U0 }, { url: 'https://a.example/' }]], [P2, [{ url: 'about:blank' }, { url: 'https://b.example/' }]], [P3, null]]);
+    const wss2 = new WSS2({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss2.once('listening', r));
+    wss2.on('connection', (sock, req) => { const tid = (/\/devtools\/page\/([^/?]+)/.exec(String(req.url || '')) || [])[1] || ''; sock.on('message', (raw) => { let m; try { m = JSON.parse(String(raw)); } catch { return; } if (m.method !== 'Page.getNavigationHistory') return; const es = hist.get(tid); if (!es) return; try { sock.send(JSON.stringify({ id: m.id, result: { currentIndex: es.length - 1, entries: es } })); } catch { /* closed */ } }); });
+    const base = `ws://127.0.0.1:${wss2.address().port}/devtools/browser/stand-in`;
+    const got = await Promise.all([P1, P2, P3].map((id) => VPm.firstEntryIs(base, id, U0, { timeoutMs: 400 })));
+    for (const c of wss2.clients) c.terminate(); await new Promise((r) => wss2.close(() => r()));
+    ok(got[0] === true && got[1] === false && got[2] === null, 'B-0e4a: the keeper\'s read — the FIRST history entry compared on the page\'s own socket: the marked tab yes, another no, a silent page UNKNOWN at its bound; only the answer leaves', got);
+  }
   // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
   //     left its tab busy ~2 min, the person saw a crashed page; opening the sign-in page again recovered it at once) — PLACED over
   //     the real watch on a stand-in browser (a loaded page: no navigation in flight), its clock the leg's own ═══

@@ -831,6 +831,16 @@
   "why": "lease window bookkeeping; re-bound next attach"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > ownMarkOf · commit()",
+  "verdict": "none",
+  "why": "lease mark; remade at next birth"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > takeBackOwnTab · commit()",
+  "verdict": "none",
+  "why": "lease window bookkeeping; re-bound next attach"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > attach · commit()",
   "verdict": "none",
   "why": "lease record; grant row already stored"

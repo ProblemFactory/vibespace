@@ -60,6 +60,7 @@ const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs): a
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const TAKE_BACK_READ_MS = 1500; // row B-0e4a: each restored page's first history entry, read on its own socket, bounded (unanswered ⇒ unknown)
 const { spawn } = require('child_process');
 const B = require('../browser-profiles.js');
 const SR = require('../store-read.js');   // the remainder of B-f276 (bl-jobs): a registry read that FAILED is no answer — HELD, never written over
@@ -962,6 +963,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const v = { ...l, mediated: !!(l && isMediated(p)) };
     delete v.tabRoots; // lane browser-resume C: a lease's tab roots are the keeper's own bookkeeping — never in a view
     delete v.rebound; // verify r3 (F4): a rebound note waiting for an answer is bookkeeping too
+    delete v.ownMark; // row B-0e4a: the lease's own tab mark is the keeper's alone — never in a view, a digest or a broadcast
     // lane H: a managed ephemeral browser's lease is a lease row like any other, SAID to be one
     if (isEph(p)) { v.ephemeral = true; v.child = B.isChildKey(l.browserKey); }
     return v;
@@ -4514,7 +4516,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     return r;
   }
   function openOwnTabMarked(p, holderKey, o = {}) { return keeperMakes(p && p.id, () => openOwnTab(p, holderKey, o)); } // every caller outside the body goes through the mark
-  async function openOwnTab(p, holderKey, { url = '', ns = null, opts = {}, pin = [], fallback = true, json = false, timeout = 30000, _again = false } = {}) {
+  async function openOwnTab(p, holderKey, { url = '', ns = null, opts = {}, pin = [], fallback = true, json = false, timeout = 30000, _again = false, birth = '' } = {}) {
     const rec = p ? reg.browsers[p.id] : null;
     const VP = () => require('./browser-viewport.js');
     let made = null;
@@ -4591,7 +4593,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (!anchors.length || gone) {
         // no tab of the lease answers its window: the window is GONE (none yet, or a previous run's) ⇒ ONE new window of its own
         const hadWindow = wantWin != null;
-        try { made = await (typeof openWindowFn === 'function' ? openWindowFn(rec.cdpUrl, { url: 'about:blank' }) : VP().openWindow(rec.cdpUrl, { url: 'about:blank' })); } catch (e) { made = { ok: false, error: String(e && e.message) }; }
+        // row B-0e4a: the lease's ROOT is born at its own marked blank (`birth`, the keeper's births only), every other window at about:blank
+        const at = birth && /^about:blank#vs-own-[0-9a-f]{24}$/.test(birth) ? birth : 'about:blank';
+        try { made = await (typeof openWindowFn === 'function' ? openWindowFn(rec.cdpUrl, { url: at }) : VP().openWindow(rec.cdpUrl, { url: at })); } catch (e) { made = { ok: false, error: String(e && e.message) }; }
         if (made && made.ok) { made.remade = hadWindow; made.rung = 'new-window'; } // the holder HAD a window and it was lost ⇒ a new single one of its own
       }
       if (made && made.ok && strays.windows.length) made.strays = strays; // verify r3 ④: said with the result, once per run
@@ -5997,6 +6001,47 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * until the browser restarts (`windowMates`). A MEDIATED lease's tabs land in windows of their own through the proxy's
    * create rewrite (src/browser-mediation.js) — it is only recorded. `windowIn` = the browser run its window is in.
    */
+  /** Row B-0e4a: the lease's OWN tab mark — random, the lease's alone, kept on its record (so it outlives a hub restart), made the
+   *  first time the keeper births a root tab for it. Never in a view (leaseView), a journal line, a note or a broadcast. */
+  function ownMarkOf(profileId, browserKey) {
+    const l = B.findLease(reg.leases, profileId, browserKey);
+    if (!l) return null;
+    if (!TBS.OWN_MARK_RE.test(String(l.ownMark || ''))) { l.ownMark = crypto.randomBytes(12).toString('hex'); commit(); }
+    return l.ownMark;
+  }
+  /** Row B-0e4a (主开发 r4252 / r4264): after a start that restored pages, the lease takes back ITS OWN previous tab — the ONE page no
+   *  holder roots whose FIRST history entry is its own marked birth address — or nothing. Each page's history is read on its own
+   *  socket and stays there (VP.firstEntryIs: yes / no / unknown); none, several (a person duplicated it: the history is copied) or
+   *  any page unread in time ⇒ null: today's behaviour, a new tab of its own. → { targetId } | null. */
+  async function takeBackOwnTab(p, browserKey, o, pinTab) {
+    const rec = p ? reg.browsers[p.id] : null;
+    const l = p ? B.findLease(reg.leases, p.id, browserKey) : null;
+    const expected = l ? TBS.ownMarkUrl(l.ownMark) : null;
+    if (!expected || !o || isMediated(p) || !rec || !rec.cdpUrl || !isLocalRec(rec)) return null;
+    const targets = await tabTargetsOf(rawCdpOf(p.id, o));
+    if (!targets) return null;
+    const owners = TBS.tabOwners({ targets, holders: tabHoldersOf(p.id) });
+    const orphans = TBS.pageTargets(targets).map((x) => x.targetId).filter((id) => !owners.get(id) || owners.get(id) === 'orphan');
+    const VPm = require('./browser-viewport.js');
+    const reads = await Promise.all(orphans.map((id) => VPm.firstEntryIs(rec.cdpUrl, id, expected, { timeoutMs: TAKE_BACK_READ_MS }).catch(() => null)));
+    const v = TBS.markVerdict({ candidates: orphans, carries: new Map(orphans.map((id, i) => [id, reads[i]])) });
+    if (!v.take) { if (orphans.length) log.log?.(`[browser] ${browserKey} on ${p.id}: its own tab was not taken back (${v.why}: ${orphans.length} restored page(s) read) — a new tab of its own`); return null; }
+    let b = null;
+    try { b = await rt.exec(nsOf(p.id), [...(pinTab ? ['--pin-tab'] : []), 'tab', v.take, '--json'], o); } catch (e) { b = { ok: false, error: String(e && e.message) }; }
+    if (execFailed(b)) return null;
+    const l2 = B.findLease(reg.leases, p.id, browserKey);
+    if (!l2) return null;
+    l2.tabRoots = TBS.addRoot([], v.take);
+    l2.windowIn = WIN.instanceOf(rec);
+    try { const w = await VPm.windowOf(rec.cdpUrl, v.take); if (WIN.windowIdOf(w) != null) l2.windowId = WIN.windowIdOf(w); } catch { /* unread: derived later from its tab */ }
+    const k = `${p.id}|${browserKey}`;
+    const lostWhy = reg.tabClosed[k] ? (reg.tabLostWhy && reg.tabLostWhy[k] === 'closed' ? 'closed' : 'life') : 'life';
+    keepRebound(p.id, browserKey, { how: 'back', targetId: v.take, url: '', why: lostWhy, text: TBS.reboundNoteText({ how: 'back' }) });
+    delete reg.tabClosed[k]; if (reg.tabLostWhy && typeof reg.tabLostWhy === 'object') delete reg.tabLostWhy[k];
+    commit();
+    log.log?.(`[browser] ${browserKey} on ${p.id}: its own tab came back with the browser's restore — taken back (tab ${v.take.slice(0, 8)})`);
+    return { targetId: v.take };
+  }
   async function ownWindowAtAttach(p, browserKey, { created = false } = {}) {
     const rec = reg.browsers[p.id];
     const inst = WIN.instanceOf(rec);
@@ -6009,7 +6054,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const o = await leaseCliOpts(p.id, browserKey);
     if (!o) return null;
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
-    const r = await openOwnTabMarked(p, browserKey, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [], fallback: false });
+    // row B-0e4a: a lease whose window was in a previous run (a restart that may have restored its tab) takes back ITS OWN tab first
+    if (!created) { const back = await takeBackOwnTab(p, browserKey, o, pinTab); if (back) return { ok: true, targetId: back.targetId, window: 'own', back: true }; }
+    const r = await openOwnTabMarked(p, browserKey, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [], fallback: false, birth: TBS.ownMarkUrl(ownMarkOf(p.id, browserKey)) || '' });
     if (!(r && r.ok && r.targetId)) return null;
     const l2 = B.findLease(reg.leases, p.id, browserKey);
     if (!l2) return null;
@@ -6135,10 +6182,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         const pin = pinTab0 ? ['--pin-tab'] : [];
         // lane profile-lock-roll (L2): the browser's ONE page that nobody roots (a fresh launch's single blank tab) is bound
         // to — no second blank tab per relaunch; anything else ⇒ a new tab of its own (never another holder's)
+        // row B-0e4a: the lease's OWN tab, restored by Chrome, is taken back first (exactly one carrier of its mark); else as before
+        const back = o ? await takeBackOwnTab(p, browserKey, o, pinTab0) : null;
+        if (back) { bound = true; rebound = { how: 'back', targetId: back.targetId, url: '', why, text: TBS.reboundNoteText({ how: 'back' }) }; return; }
         const pick = o ? TBS.rebindPick({ targets: await tabTargetsOf(rawCdpOf(p.id, o)), holders: tabHoldersOf(p.id), key: browserKey }) : null;
         let r = o && pick ? await rt.exec(nsOf(p.id), [...pin, 'tab', pick.targetId, '--json'], o) : null;
         let how = r && r.ok ? 'switched' : null;
-        if (!how) { r = o ? await keeperMakes(p.id, () => rt.exec(nsOf(p.id), [...pin, 'tab', 'new'], o), (x) => (x && x.ok ? KB.targetIdOf(x.stdout) : null)) : null; how = r && r.ok ? 'new' : null; } // B-e674 unit 2's cure: the keeper's own create
+        if (!how) { const birth = TBS.ownMarkUrl(ownMarkOf(p.id, browserKey)); r = o ? await keeperMakes(p.id, () => rt.exec(nsOf(p.id), [...pin, 'tab', 'new', ...(birth ? [birth] : [])], o), (x) => (x && x.ok ? KB.targetIdOf(x.stdout) : null)) : null; how = r && r.ok ? 'new' : null; } // B-e674 unit 2's cure: the keeper's own create
         if (r && r.ok) {
           bound = true; clearTabLost(p.id, browserKey);
           const nid = how === 'switched' ? pick.targetId : KB.targetIdOf(r.stdout);
@@ -8831,7 +8881,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!o) return { ok: false, error: noCdpError(p) };
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
     // lane browser-windows (U1): in a WINDOW OF ITS OWN (openOwnTab admits a mediated lease's tab before its session binds it)
-    const r = await openOwnTabMarked(p, l.browserKey, { url: String(url || ''), ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
+    const r = await openOwnTabMarked(p, l.browserKey, { url: String(url || ''), ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [], birth: TBS.ownMarkUrl(ownMarkOf(p.id, l.browserKey)) || '' }); // row B-0e4a: the switch's re-open is the lease's root too
     const targetId = r.targetId || null;
     if (r.ok && targetId) { l.targetId = String(targetId); l.lastUrl = String(url || ''); if (r.window === 'own') { l.windowIn = WIN.instanceOf(reg.browsers[p.id]); if (WIN.windowIdOf(r.windowId) != null) l.windowId = WIN.windowIdOf(r.windowId); } if (mediator && isMediated(p)) mediator.admitTarget(p.id, l.browserKey, l.targetId); commit(); } // T2 ⑧: in the holder's one window (re-minted only when it was lost)
     return { ok: !!r.ok, targetId: targetId ? String(targetId) : null, error: r.ok ? null : (String(r.error || '').trim().slice(0, 200) || 'open failed') };
