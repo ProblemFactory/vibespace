@@ -45,6 +45,7 @@ const THERE_FRESH_MS = 10 * 1000; // B-7a30: a kept folder's presence bit is che
 const THERE_ACT_MS = 5 * 1000; // B-7a30 r2: an act's fresh check waits at most this long — past it the act is refused by name
 const UNANSWERED = Symbol('unanswered');
 const PERSIST_TABS_MS = 30 * 1000;
+const SAVE_GAP_MS = 500;   // B-0248 unit 2: an act's write waits only the writer's own floor (src/store-pace.js MIN_GAP_FLOOR_MS): a burst is one write
 const DU_TIMEOUT_MS = 120 * 1000;
 const BROADCAST_DEBOUNCE_MS = 250;
 /** r3585: the store the hold keeps, by its name (K.KEPT_FILE — said in the journal; the family's census reads it here) */
@@ -59,12 +60,6 @@ const RECONCILE_CODE = 'kept_reconcile_unfinished';
 const NOT_KEPT_CODES = Object.freeze(['kept_note_unwritten', 'kept_note_timeout', 'kept_note_unreadable', RECONCILE_CODE]);
 
 const namedError = (code, msg, extra = {}) => { const e = new Error(msg); e.code = code; Object.assign(e, extra); return e; };
-/** tmp + rename, 0600 at create (a url or a title can be a secret) — the tree's one persistence rule. */
-function writeJsonAtomic(file, obj) {
-  const tmp = file + '.tmp-' + crypto.randomBytes(4).toString('hex');
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: FILE_MODE });
-  fs.renameSync(tmp, file);
-}
 
 /**
  * @param deps
@@ -78,6 +73,7 @@ function writeJsonAtomic(file, obj) {
  *   endsAtTerminate — D1's flag (default false: a Terminate is not an end)
  */
 function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings = null, serverSetting = () => undefined, broadcast = null, log = console, now = Date.now,
+  writer = null,   // B-0248 unit 2: a suite's own store writer (else the process's)
   liveConversations = () => new Set(),   // r4145 (1)
   mono = () => performance.now(),   // r4094: the doors' bound is counted on a clock that never steps back (placed by a leg)
   execFileImpl = execFile, sweepEveryMs = SWEEP_EVERY_MS, endsAtTerminate = false, graceMs = K.KEPT_END_GRACE_MS,
@@ -134,12 +130,16 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   try { offBindingsLift = require('./browser-bindings.js').onLift(path.join(dataDir, 'browser-env', 'bindings.json'), () => { reconcile('bindings-lift').catch(() => { }); }) || offBindingsLift; } catch { /* the bindings' module says its own */ }
   const latest = new Map();        // bk → { tabs: [{targetId, url, title, active, type}], at, source } — the live list
   const deliberate = new Map();    // bk → { why: 'user'|'agent', at } — a stop the user / the agent asked for
-  let flushTimer = null, bcTimer = null, sweepTimer = null, sweeping = null, lastSweep = null, thereTimer = null;
+  let bcTimer = null, sweepTimer = null, sweeping = null, lastSweep = null, thereTimer = null;
 
+  // B-0248 unit 2: the list is THE STORE WRITER's (save, below) — a suite's own writer, else the process's. A second store over this file in
+  // ONE process (a suite's restart) reads what the writer still OWES it, never the older file (the moved2 law; null while held: EHELD)
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  const owedNow = () => { try { const w = W(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } };
   function load() {
     if (store) return store;
     // r3585: the ONE sync read at the start, as before, answered through the family's law (held ⇒ the helper reads it again off the loop)
-    let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+    let read; const owed = owedNow(); if (owed != null) read = { text: owed }; else try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: KEPT_SHAPE });
     store = K.normalizeKeptStore(hold.start(a0) === 'data' ? a0.value : null);
     return store;
@@ -149,15 +149,31 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // read (keptKeySet) then answered an EMPTY set, and the boot sweep removed every kept browser's profile folder, its sign-ins. Now the
   // file stays where it is while held (torn bytes: COPIED aside, the original left until the rebuilt list is written): browser-env reads
   // it itself (a read that still fails ⇒ unknown ⇒ every key-named directory spared), and NOTHING is written over it (save() below)
+  // B-0248 step 2 unit 2 (lane bl-loop-b, 主开发 r3320 / r4232): THE LIST IS THE STORE WRITER's — its temp (0600 from its first byte: a
+  // url or a title can be a secret), write and rename on the writer's thread. The release wrote them ON THE LOOP at every act and every
+  // 30 s while a kept browser's tabs moved (the page bl-loop-b/b0248-page.md, row 4: a rename's whole delay on slow storage). The bytes
+  // are made AT the write (the list as memory holds it then). A failed write is said by the writer and written again; one owed at a stop
+  // is written by the hub's exit (the writer's exitFlush) — the moving tabs too, which the release's own 30 s timer lost at a stop.
+  // HELD (r3006 / r3585): save() writes nothing while the list is unread or rebuilding, and a write owed when a hold BEGINS (the rebuild
+  // that did not finish holds again) is refused by its producer (EHELD: kept owed; the lift's list then writes) — never written over.
+  function owe(debounceMs) {   // the list's one hand-off to the writer (store-timing's row: src/timed-sync.js browser-kept.write)
+    return W().dirty(file, { name: 'browser-kept.write', mode: FILE_MODE, makeDir: true, debounceMs,
+      produce: () => { if (isHeld()) throw namedError('EHELD', 'the kept browsers\' list is held (unread or rebuilding) — nothing is written over it until it reads'); return JSON.stringify(store, null, 2); } });
+  }
   function save() {
     if (!store) return;
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     if (isHeld()) { hold.writable('a change of the kept browsers'); return; }   // r3006 / r3585: an unread (or not yet rebuilt) list is never written over
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(file, store); }
-    catch (e) { log.warn?.(`[browser-kept] the store could not be written (${e && e.message}) — kept in memory, retried at the next change`); }
+    try { owe(SAVE_GAP_MS); }
+    catch (e) { log.warn?.(`[browser-kept] the store could not be handed to its writer (${e && e.message}) — kept in memory, handed again at the next change`); }
   }
-  /** A tab list moving while the browser runs is persisted at most every PERSIST_TABS_MS (a crash keeps the last). */
-  function saveSoon() { if (flushTimer) return; flushTimer = setTimeout(() => { flushTimer = null; save(); }, PERSIST_TABS_MS); if (flushTimer.unref) flushTimer.unref(); }
+  /** A tab list moving while the browser runs is persisted at most every PERSIST_TABS_MS (a crash keeps the last): the writer's own
+   *  debounce, counted from the first change not yet written (never re-armed by a later one) — owed, so a stop writes it */
+  function saveSoon() {
+    if (!store || isHeld()) return;
+    try { owe(PERSIST_TABS_MS); } catch (e) { log.warn?.(`[browser-kept] the tab list could not be handed to its writer (${e && e.message}) — handed again at the next change`); }
+  }
+  /** the list as memory holds it is on disk — true when written; false when the write failed or passed its bound (it stays owed) */
+  const whenWritten = () => { try { return Promise.resolve(W().durable(file)).then((ok) => ok !== false, () => false); } catch { return Promise.resolve(false); } };
   function changed() {
     if (bcTimer) return;
     bcTimer = setTimeout(() => { bcTimer = null; try { broadcast?.({ type: 'browser-kept-updated' }); } catch (e) { log.warn?.(`[browser-kept] broadcast failed: ${e && e.message}`); } try { onChange?.(); } catch (e) { log.warn?.(`[browser-kept] change hook failed: ${e && e.message}`); } }, BROADCAST_DEBOUNCE_MS);
@@ -481,7 +497,12 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     await checkThere(key); // B-7a30 r2: the act's door — its folder asked fresh (5 s), refused by name past it, never a removal on an unanswered disk
     const r = await removeEntry(key, why, { byPerson: true });
     if (!r.removed) throw namedError(/runs|started/.test(r.why) ? 'kept_live' : 'forget_failed', `the browser was not forgotten: ${r.why}`);
-    return { ok: true, browserKey: key, dirGone: !!r.dirGone, dirKept: r.dirKept || null };
+    // B-0248 unit 2: A PERSON's ACT IS ON DISK BEFORE ITS ANSWER, as the release's synchronous write was. Not landed (a failed write, its
+    // bound): the answer says so (listSaved: false) — the row is gone here and its write stays owed, so a restart before it lands shows
+    // the row again (its folder already gone), never a removal of anything else
+    const listSaved = await whenWritten();
+    if (!listSaved) log.warn?.(`[browser-kept] ${key}: forgotten here, but the list's write has not landed yet — it stays owed (a restart before it lands shows the row again)`);
+    return { ok: true, browserKey: key, dirGone: !!r.dirGone, dirKept: r.dirKept || null, listSaved };
   }
   /** An adopt MOVED the directory into a named profile: the entry ends (the directory is the profile's now). */
   function adopted(bk) {
@@ -639,7 +660,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
     if (sweepTimer) clearInterval(sweepTimer); sweepTimer = null;
     if (thereTimer) clearInterval(thereTimer); thereTimer = null;
     if (bcTimer) { clearTimeout(bcTimer); bcTimer = null; }
-    if (flushTimer) save();
+    // B-0248 unit 2: a tab list still owed is the writer's — the hub's exit writes it (exitFlush); nothing to write here
   }
 
   // ── r3585: the lift, the rebuild from the folders, the facts the panel and the notice read ──
@@ -899,7 +920,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   return { noteStart, noteTabs, noteStop, noteDeliberate, latestOf, has, keys, get, brief, list, limits, forget, adopted, sweep, checkThere /* B-7a30 r2: the acts' door */, recheckAll /* B-7a30 r2: the tick's pass */, boot, shutdown, dirOf, file, lastSweep: () => lastSweep, _load: load, _measure: measure,
     heldFacts, heldWords, recoveredFacts, bindingsHeld, bindingsRecovered, _hold: hold, _rebuild: rebuildFromFolders,   // r3585
     reconcile, reconciled, startOrder, startGate, takeStartNote, noteStartCode, startRefused, keyVerdict, notedKeys, _reconcileState: () => recState,   // r3786 / r3961
-    setRestore, consumeRestore, afterReopen }; // lane B
+    setRestore, consumeRestore, afterReopen, whenWritten /* B-0248 unit 2: the list on disk */ }; // lane B
 }
 
-module.exports = { create, SWEEP_EVERY_MS, PERSIST_TABS_MS, writeJsonAtomic, KEPT_SHAPE };
+module.exports = { create, SWEEP_EVERY_MS, PERSIST_TABS_MS, KEPT_SHAPE };

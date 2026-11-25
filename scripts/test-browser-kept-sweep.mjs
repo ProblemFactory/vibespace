@@ -190,6 +190,7 @@ async function liftRun(KS) {
   let fg = null; try { await S.forget(KEYS[0]); } catch (e) { fg = { code: e.code, status: e.status }; }
   S.noteStart('bk-0000c013', { hasDir: true });   // a browser that runs meanwhile (a true fact)
   await again(S);
+  await S.whenWritten();   // B-0248 unit 2 (lane bl-loop-b): the list is the store writer's — read once it is on disk
   const after = { held: hf(S), n: S.list().length, file: Object.keys((JSON.parse(realRead(w.file, 'utf8')).entries) || {}).length };
   stopHold(S);
   return { held: held && held.code, heldList, fg, after };
@@ -208,6 +209,7 @@ async function tornRun(KS, extra = {}) {
   const S = mkStore(KS, w.dir, { graceMs: 0, ...extra });
   S.has(KEYS[0]);
   await until(() => !hf(S));
+  await S.whenWritten();   // B-0248 unit 2: the rebuilt list is the store writer's — read once it is on disk
   const rows = S.list(), facts = rf(S);
   let doc = null; try { doc = JSON.parse(fs.readFileSync(w.file, 'utf8')); } catch { doc = null; }
   const copies = fs.readdirSync(w.dir).filter((n) => n.startsWith(KB.KEPT_FILE + '.corrupt-'));
@@ -371,6 +373,7 @@ async function bindTornRun(KSmod) {
   [[CONVS[0], KEYS[0]], [CONVS[1], KEYS[1]], [CSTOOD, STOOD]].forEach(([c, k]) => bb0.record(c, k, { at: clock }));
   const S0 = KSmod.create({ dataDir: w.dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb0, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
   for (const k of [...KEYS, STOOD, LATER]) { fs.mkdirSync(S0.dirOf(k), { recursive: true }); if (k !== LATER) await S0.startGate(k); S0.noteStart(k, { hasDir: true }); fs.writeFileSync(path.join(S0.dirOf(k), 'Cookies'), 'a sign-in'); S0.noteStop(k, { why: 'idle' }); }
+  await S0.whenWritten();   // B-0248 unit 2 (lane bl-loop-b): the run before ends with its list on disk (the hub's exit writes what is owed)
   S0.shutdown();
   // THE DAMAGE, then A START: the bindings file torn; fresh bindings and a fresh store over the same data
   const dir = restartCopy(w.dir), bfile = path.join(dir, 'browser-env', 'bindings.json');
@@ -529,6 +532,7 @@ async function noteRun(KS, KN = KNM) {
     gate = await S0.startGate(K);   // the browser's START: its folder's note, the conversation the choke point decided
     S0.noteStart(K, { hasDir: true }); fs.writeFileSync(path.join(S0.dirOf(K), 'Cookies'), 'a sign-in'); S0.noteStop(K, { why: 'idle' });
   } finally { fs.readFileSync = realRead; }
+  await S0.whenWritten();   // B-0248 unit 2: the run before ends with its list on disk (the hub's exit writes what is owed)
   try { S0.shutdown(); } catch { } const h0 = hbHold(bb0); if (h0) h0.stop();
   // A RESTART over the same data: fresh bindings, a fresh store — three hours later, past the grace
   const dir = restartCopy(w.dir);
@@ -1226,19 +1230,20 @@ console.log('㊵ r4145: THE FOLLOW — a running conversation\'s own kept folder
   const Zx = await sizeRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, ' || !!(liveConvs && ownerOf.has(e.browserKey) && liveConvs.has(ownerOf.get(e.browserKey)))', '', 'r4099 a running conversation\'s bound folder not live'), 'kept-sweep-running-bound'));
   ok(Z.old && !Z.other && Zx && !Zx.old, '(1) over the total, a kept folder BOUND to a running conversation counts as live: the bound takes the other one, never it while its conversation runs — RED (not live): its own kept folder, the older, goes first while it runs', { Z, Zx });
   // (2) «not kept» leaves no row and no tabs
-  const rowRun = (KS) => {
+  const rowRun = async (KS) => {
     const dir = noteWorld({});
     const o = startOver(dir, KS);
     const K = freshKey();
     o.S.noteStartCode(K, 'kept_reconcile_unfinished');   // a door handed it past the bound
     o.S.noteStart(K, { hasDir: false }); o.S.noteTabs(K, [{ targetId: 't1', url: 'https://a.test/private', title: 'A made-up private title', active: true }]); o.S.noteStop(K, { why: 'idle', hasDir: false });
+    await o.S.whenWritten();   // B-0248 unit 2: the list is the store writer's — judged once what it owes is on disk
     const file = (() => { try { return fs.readFileSync(path.join(dir, KB.KEPT_FILE), 'utf8'); } catch { return ''; } })();
     const out = { row: o.S.has(K), tabsWritten: file.includes('A made-up private title') || file.includes('a.test/private') };
     try { o.S.shutdown(); } catch { }
     return out;
   };
-  const R2 = rowRun(KS0);
-  const R2x = rowRun(MUT.load('src/server/browser-kept.js', anchored(anchored(anchored(KSRC, "    if (KN.isNotKept(bk)) return null;   // r4145 (2): a browser handed past the bound is NOT KEPT — it leaves no row and no tabs\n", '', 'r4099 a row for it'), "    if (KN.isNotKept(bk)) return false;   // r4145 (2): not kept — its tabs' addresses and titles are written nowhere\n", '', 'r4099 its tabs'), "    if (KN.isNotKept(bk)) return null;   // r4145 (2): not kept — no row\n", '', 'r4099 its stop'), 'kept-sweep-not-kept-row'));
+  const R2 = await rowRun(KS0);
+  const R2x = await rowRun(MUT.load('src/server/browser-kept.js', anchored(anchored(anchored(KSRC, "    if (KN.isNotKept(bk)) return null;   // r4145 (2): a browser handed past the bound is NOT KEPT — it leaves no row and no tabs\n", '', 'r4099 a row for it'), "    if (KN.isNotKept(bk)) return false;   // r4145 (2): not kept — its tabs' addresses and titles are written nowhere\n", '', 'r4099 its tabs'), "    if (KN.isNotKept(bk)) return null;   // r4145 (2): not kept — no row\n", '', 'r4099 its stop'), 'kept-sweep-not-kept-row'));
   ok(!R2.row && !R2.tabsWritten && R2x.row && R2x.tabsWritten, '(2) a browser handed past the bound leaves NO ROW and NO TABS in the kept list (its start, its tabs, its stop) — RED (today\'s notes): a row with its tabs\' addresses and titles', { R2, R2x });
   // (3) where it cannot start (rung C: its link IS its folder): the keeper's words say it will not start in this run, the card says «Not started»
   const KPS = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');

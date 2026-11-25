@@ -361,6 +361,7 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   s1.noteTabs(KEY_A, tabsRec, 'relay');
   ok(s1.get(KEY_A).stoppedAt === null && s1.get(KEY_A).tabs.length === 2 && s1.latestOf(KEY_A).tabs.length === 3, 'a live entry: the relay\'s list noted (in memory whole, the kept list web-only)');
   const e = s1.noteStop(KEY_A, { why: 'turn-idle' });
+  await s1.whenWritten();   // B-0248 unit 2 (lane bl-loop-b): the list is the store writer's — judged once it is on disk
   const st = fs.statSync(s1.file);
   const disk = JSON.parse(fs.readFileSync(s1.file, 'utf8'));
   ok(e && e.stoppedWhy === 'turn-idle' && e.restore && e.restore.mode === 'auto' && /^bres-[0-9a-f]{8}$/.test(e.restore.id) && e.tabs[1].active && (st.mode & 0o777) === 0o600 && disk.entries[KEY_A].conversationId === 'conv-' + KEY_A && !JSON.stringify(disk).includes('"dir"'), 'a turn-idle stop: the tabs kept (current one marked), restore AUTO (D2), the file 0600, the conversation named, no directory written', { e, mode: (st.mode & 0o777).toString(8) });
@@ -423,6 +424,7 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   ok(s1.adopted(KEY_A) && !s1.has(KEY_A) && fs.existsSync(dirA), 'an adopt that moved the directory ends the entry (the directory is the profile\'s now — never removed here)');
   fs.rmSync(dirA, { recursive: true, force: true });
   // a corrupt store is KEPT AS IT IS (the sweep's fail-closed law (lane bl-windows, 主开发 r3006)): never set aside — the boot sweep reads it itself and spares every kept folder
+  await s1.whenWritten();   // B-0248 unit 2 (lane bl-loop-b): what the stores before owe is on disk first — an owed write landing later would land over the planted bytes
   fs.writeFileSync(path.join(S_DATA, KB.KEPT_FILE), '{ torn');
   const s3 = mk();
   const s3n = s3.keys().size; s3.noteStart('bk-0000d009', { hasDir: true });
@@ -517,14 +519,19 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   ok(rL.calls >= 3 && rL.kept && rL.planned, 'a key a live session starts carrying between the plan and the act is NOT removed (re-asked at the act, verify F2)', rL);
   carried.clear();
   delete settings[KB.PER_CONVERSATION_SETTING]; delete settings[KB.TOTAL_SETTING];
-  // shutdown flushes a throttled tab list
+  // a throttled tab list is OWED at a stop, and the stop writes it — B-0248 unit 2 (lane bl-loop-b): the list is the store writer's, the
+  // tabs' 30 s its debounce (from the first change not yet written); the hub's exit writes what is owed (its exitFlush: here the same
+  // synchronous flush, flushSync — the process's writer is this suite's). The release's own 30 s timer was flushed only by the store's
+  // shutdown, which nothing in the hub called: the moving tabs were lost at a stop
   const s7 = mk();
   s7.noteStart(KEY_B, { hasDir: true, label: 'Flush' });
+  await s7.whenWritten();   // the start's row on disk
   s7.noteTabs(KEY_B, [{ url: 'https://flush.test/', active: true }]);
-  const before = JSON.parse(fs.readFileSync(s7.file, 'utf8')).entries[KEY_B].tabs.length;
-  s7.shutdown();
+  const PW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  const before = JSON.parse(fs.readFileSync(s7.file, 'utf8')).entries[KEY_B].tabs.length, owedTabs = PW.pending(s7.file);
+  s7.shutdown(); PW.flushSync([s7.file]);
   const after = JSON.parse(fs.readFileSync(s7.file, 'utf8')).entries[KEY_B].tabs.length;
-  ok(before === 0 && after === 1, 'a running browser\'s tab list is written at most every 30 s — and flushed at shutdown (the crash path this exists for)', { before, after });
+  ok(before === 0 && owedTabs && after === 1, 'a running browser\'s tab list is written at most every 30 s (the writer\'s debounce) — OWED meanwhile, and the stop\'s flush writes it (the crash path this exists for)', { before, owedTabs, after });
   // verify r2 (Y1c), MOVED TO THE LAW by B-7a30 (主开发's ruling: a VIEW reads what the last check found, an ACT awaits a fresh check
   // through one door): the directory gone out of band ⇒ the views say tabs only once a check has seen it — at the act's door at
   // once, or the tick's next check (THERE_FRESH_MS, 10 s) — never "its logins are kept" over nothing past that; once in the journal
@@ -538,6 +545,7 @@ const S_DATA = path.join(ROOT, 's-data'); fs.mkdirSync(S_DATA, { recursive: true
   const n8 = lines.length;
   const gDoor = await s8.checkThere(KG); // THE ACT'S DOOR: a fresh check
   const gGet = s8.get(KG), gBrief = s8.brief(KG), gList = s8.list().find((x) => x.browserKey === KG);
+  await s8.whenWritten();   // B-0248 unit 2: the list is the store writer's — read below once it is on disk
   s8.get(KG); s8.brief(KG);
   const said = lines.slice(n8).filter((l) => l.includes(KG) && /is gone — read as tabs only/.test(l)).length;
   ok(gFull === 'full' && gWithin === 'full' && gDoor === false && gGet.kind === 'tabs-only' && gGet.hasDir === false && gGet.dir === null && gBrief.kind === 'tabs-only' && gList.kind === 'tabs-only' && gList.hasDir === false && said === 1 && JSON.parse(fs.readFileSync(s8.file, 'utf8')).entries[KG].hasDir === true, 'the kept directory removed out of band: get / brief / list answer TABS ONLY (the words say "not its logins"), said once in the journal — the file untouched (its next start makes a fresh directory)', { gFull, get: gGet.kind, brief: gBrief.kind, list: gList.kind, said });
