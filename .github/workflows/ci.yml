@@ -357,7 +357,7 @@ jobs:
       # with them every failed try's WHOLE output (ci.mjs's fail-logs; the log
       # above keeps a tail).
       - name: Upload the failed suites' whole logs + chrome-suite screenshots (failure only)
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         timeout-minutes: 5
         with:
