@@ -33,6 +33,9 @@ const ROUTES = require('../src/agent-routes.js');
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// r4456 (the flake census, round 2): a wait on the FACT the leg judges — its bound generous, its expiry a NAMED harness row (red), never a
+// silent read of whatever is there
+const untilFact = async (fn, what, ms = 20000) => { const t0 = Date.now(); for (;;) { let v = false; try { v = fn(); } catch { v = false; } if (v) return Date.now() - t0; if (Date.now() - t0 >= ms) { ok(false, `harness: ${what} — the state never came within ${ms / 1000} s (the row after it judges nothing)`); return -1; } await sleep(15); } };
 const LAW_MS = 250, SLOW_MS = 25, SLOWER_MS = 90, FILES = 14;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-hookhold-'));
 
@@ -88,6 +91,9 @@ for (let i = 0; i < FILES; i++) { const p = path.join(slowRoot, i % 2 ? 'b' : 'a
 const SLEEP_SRC = (ms) => `const __sab = new Int32Array(new SharedArrayBuffer(4)); const __slow = (p) => { if (String(p).startsWith(${JSON.stringify(slowRoot)})) Atomics.wait(__sab, 0, 0, ${ms}); };
 for (const k of ['readdirSync', 'statSync', 'lstatSync']) { const real = require('fs')[k]; require('fs')[k] = function (p, ...a) { __slow(p); return real.call(this, p, ...a); }; }`;
 const workerOf = (ms) => { const f = path.join(tmp, `slow-worker-${ms}.js`); fs.writeFileSync(f, `${SLEEP_SRC(ms)}\nrequire(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});\n`); return f; };
+// r4456: the same slow worker that also HOLDS each call on the slow root while the file `hold` stands — the leg's own hold (it lets the
+// read go by removing the file), never a span
+const workerHeldOf = (ms, hold) => { const f = path.join(tmp, `slow-worker-held-${ms}-${path.basename(hold)}.js`); fs.writeFileSync(f, `${SLEEP_SRC(ms)}\nconst __hs = new Int32Array(new SharedArrayBuffer(4)); for (const k of ['readdirSync', 'statSync', 'lstatSync']) { const inner = require('fs')[k]; require('fs')[k] = function (p, ...a) { if (String(p).startsWith(${JSON.stringify(slowRoot)})) { while (require('fs').existsSync(${JSON.stringify(hold)})) Atomics.wait(__hs, 0, 0, 5); } return inner.call(this, p, ...a); }; }\nrequire(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});\n`); return f; };
 const slowMain = () => { const real = {}; const sab = new Int32Array(new SharedArrayBuffer(4)); for (const k of ['readdirSync', 'statSync', 'lstatSync']) { real[k] = fs[k]; fs[k] = function (p, ...a) { if (String(p).startsWith(slowRoot)) Atomics.wait(sab, 0, 0, SLOW_MS); return real[k].call(this, p, ...a); }; } return () => { for (const k of Object.keys(real)) fs[k] = real[k]; }; };
 let road = null;
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
@@ -105,11 +111,12 @@ const mkRig = () => {
     sessionStatusKey: (s, id) => `claude:${id}`, serverSetting: () => undefined, scheduleCtxSync: () => {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null,
     getSessionMetaStore: () => ({ readSessionMeta: () => null, writeSessionMeta: () => {} }),
   });
-  const prompt = (id) => new Promise((resolve) => {
+  // r4456: `hold` (opt-in, the leg's): the answer is DELIVERED to the leg only once hold() settles (what it reads is the route's, unchanged)
+  const prompt = (id, { hold = null } = {}) => new Promise((resolve) => {
     const s = activeSessions.get(id);
     const req = { headers: { authorization: 'Bearer ' + s.agentToken }, query: {}, body: {} };
     const l = console.log, w = console.warn; console.log = () => { }; console.warn = () => { };
-    const res = { json: (o) => { console.log = l; console.warn = w; resolve((o && o.context) || ''); }, status: () => res };
+    const res = { json: (o) => { console.log = l; console.warn = w; const v = (o && o.context) || ''; if (hold) Promise.resolve().then(hold).then(() => resolve(v), () => resolve(v)); else resolve(v); }, status: () => res };
     routes['GET /api/agent/prompt-context'](req, res);
   });
   return { activeSessions, prompt };
@@ -146,11 +153,48 @@ road = slower; fresh();
 const late = await measure('late', () => rigS.prompt('B'));
 const sB = rigS.activeSessions.get('B');
 console.log(`    the prompt answered at ${late.ms} ms; the loop's worst gap ${gapWords(late.j.top)}`);
-ok(late.j.ok && late.ms >= 900 && late.ms < 2000 && !late.r.includes(gid) && sB._sigStale && gid in sB._sigStale, `the answer at the BOUND (${late.ms} ms, inside the hook's 3 s), the group DEFERRED (nothing told, sigStale), the loop free (${late.j.maxHeld} ms at most)`, { ms: late.ms, stale: sB._sigStale, over: late.j.over });
-await sleep(FILES * SLOWER_MS * 1.6);   // the read lands
+// r4456: no upper time bound in the verdict (a late timer on a loaded box passed it): the ORDER — the answer came by its bound (it
+// waited it: ≥ 900 ms) and BEFORE the read landed (the group not told, sigStale marked) — the hook's 3 s is the bound's own (≤ 1 s)
+ok(late.j.ok && late.ms >= 900 && !late.r.includes(gid) && sB._sigStale && gid in sB._sigStale, `the answer at the BOUND (${late.ms} ms: it waited the bound, and came before the read landed), the group DEFERRED (nothing told, sigStale), the loop free (${late.j.maxHeld} ms at most)`, { ms: late.ms, stale: sB._sigStale, over: late.j.over });
+// r4456: the read LANDED after the mark (the group's signature newer than the session's sigStale) — its fact, never a fixed span
+const landedFor = (sess) => { const t = tasks._groupOf(gid), h = t && tasks._sigCache && tasks._sigCache.get(tasks._sigKey(t)), m = sess && sess._sigStale ? sess._sigStale[gid] : null; return m != null && !!h && (h.gen || 0) > m; };
+await untilFact(() => landedFor(sB), 'the worker\'s read LANDED after the mark (the group\'s signature newer than sigStale)');
 const after = await measure('after', () => rigS.prompt('B'));
 ok(after.j.ok && after.r.includes(gid) && !sB._sigStale, `the next turn tells the group (the read that landed after the mark answers) — never dropped; the loop free (${after.j.maxHeld} ms at most)`, { ms: after.ms, ctx: after.r.slice(0, 160) });
 slower.close();
+
+// ════════ ④p PLACED (r4456, the flake census round 2): leg ④'s two clocks, each red AT WILL by the leg's own holds ════════
+console.log('④p PLACED — leg ④\'s two clocks, made wrong at will by holds the leg owns');
+{
+  // (1) the upper bound it had: the answer DELIVERED only once the read landed, the read let go only once the route ANSWERED (at its
+  // bound) — the walk's own calls (17 on the slow root, a sleep each) then put the delivery past 2 s with every deferral fact right
+  const hold1 = path.join(tmp, 'hold-p1'); fs.writeFileSync(hold1, '1');
+  const held1 = new SafeFs({ poolSize: 2, name: 'hookhold-held1', workerPath: workerHeldOf(SLOWER_MS * 2, hold1) });
+  const rigP = mkRig(); rigP.activeSessions.set('C', mkSession('C'));
+  road = held1; fresh();
+  const lateP = await measure('late-held', () => rigP.prompt('C', { hold: async () => { fs.rmSync(hold1, { force: true }); await untilFact(() => landedFor(rigP.activeSessions.get('C')), 'the held read LANDED once let go (scene 1)'); } }));
+  const sC = rigP.activeSessions.get('C');
+  const facts = !lateP.r.includes(gid) && !!sC._sigStale && gid in sC._sigStale;
+  const oldV = lateP.j.ok && lateP.ms >= 900 && lateP.ms < 2000 && facts, newV = lateP.j.ok && lateP.ms >= 900 && facts;
+  ok(!oldV && newV, `PLACED (r4456) (1): the bound's answer delivered late (${lateP.ms} ms) with every deferral fact right — the old verdict's «< 2000 ms» reads it RED with nothing wrong; the verdict as it stands now (by its bound, before the read landed) reads it green`, { ms: lateP.ms, ok: lateP.j.ok, facts });
+  held1.close();
+  // (2) the fixed span it had: the read HELD (not let go) — the old «sleep, then the next turn» reads the group NOT told with nothing
+  // wrong; the read let go, the wait on its landing, then the next turn tells it
+  const hold2 = path.join(tmp, 'hold-p2'); fs.writeFileSync(hold2, '1');
+  const held2 = new SafeFs({ poolSize: 2, name: 'hookhold-held2', workerPath: workerHeldOf(SLOWER_MS, hold2) });
+  const rigQ = mkRig(); rigQ.activeSessions.set('D', mkSession('D'));
+  road = held2; fresh();
+  const lateQ = await rigQ.prompt('D');
+  const sD = rigQ.activeSessions.get('D');
+  await sleep(FILES * SLOWER_MS * 1.6);   // the leg's old span, replayed under the hold: what the next turn reads is the hold's doing, not the clock's
+  const oldAfter = await rigQ.prompt('D');
+  const oldTold = oldAfter.includes(gid) && !sD._sigStale;
+  fs.rmSync(hold2, { force: true });
+  await untilFact(() => landedFor(sD), 'the held read LANDED once let go (scene 2)');
+  const newAfter = await rigQ.prompt('D');
+  ok(!lateQ.includes(gid) && !oldTold && newAfter.includes(gid) && !sD._sigStale, 'PLACED (r4456) (2): the read HELD — the old fixed span then the next turn reads the group NOT told (red with nothing wrong); let go, the wait on its landing, then the next turn tells it', { deferredFirst: !lateQ.includes(gid), oldTold, newTold: newAfter.includes(gid) });
+  held2.close();
+}
 
 clearInterval(tickT);
 fs.rmSync(tmp, { recursive: true, force: true });
