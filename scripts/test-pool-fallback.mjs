@@ -477,9 +477,15 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
 
   // ── §4b THE CURE OF ROUND wuq1b1trm (主开发 r2939) ──
   // THE MUST: a pool-made move is judged against the pool's setting AT THE MOVE; a change of the setting empties its pool-made entries
+  // (the hosted run of 2.369.419, r4213) the pass STARTS six moves and each lands only after its awaited refusal check (the managed
+  // settings read): a count after one settle is a guess — the moves are read once nothing of the world is in flight, the fact
+  // itself, at most 3 s; an expiry is said by its own named line, never read as the pool's refusal
+  const flights = async (w, ms = 3000) => { for (let t = 0; t < ms && w.eng._fbInFlight.size; t += 25) await w.settle(); return w.eng._fbInFlight.size === 0; };
   const wS = world({ cross: 'allow' });
   wS.client(); for (let i = 0; i < 8; i++) wS.mk('q' + i);
   await wS.pass();
+  const flownS = await flights(wS);   // the six LANDED while the pool is still «Move without asking»
+  ok(flownS, 'the six moves the pass started LANDED within 3 s while the pool was still «Move without asking» (the harness\'s bound, read before the leg below)', { inFlight: wS.eng._fbInFlight.size, restarts: wS.restarts().length });
   const leftS = wS.eng._fbQueue.size;
   wS.am.updatePool(wS.P, { crossProvider: 'never' });   // the person turns the pool back — no purge called: the move itself must judge it
   await wS.eng.pumpFallbackMoves(Date.now() + 61e3);
@@ -495,6 +501,19 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     && read('src/server/account-usage-routes.js').includes("if (req.body?.crossProvider !== undefined && typeof engine.purgePoolMadeMoves === 'function') { try { engine.purgePoolMadeMoves(id); } catch { } }"),
     'THE MUST: the pool turned back to never ⇒ the two pool-made moves still queued are NOT made (judged against the setting at the move) and leave the queue; the setting\'s own door empties the pool\'s pool-made entries at once — a person\'s press stays (its own authority)',
     { leftS, restarts: wS.restarts().length, queue: wS.eng._fbQueue.size, purged, kept: wP.eng._fbQueue.has(pressedSid) });
+  // THE MONEY LAW ITSELF (r4213, asked beside the cure): a move still IN FLIGHT when the setting turns back to never is NOT made and
+  // leaves no record — its record's write held (the move on its way past its refusal check), the setting changed, then the write lands
+  const wI = world({ cross: 'allow' });
+  wI.client(); wI.meta.mode = 'hold'; wI.mk('if1');
+  await wI.pass();
+  for (let t = 0; t < 3000 && !wI.meta.held.length; t += 25) await wI.settle();   // the fact: its record's write is held (the move in flight)
+  const heldI = wI.meta.held.length === 1 && wI.eng._fbInFlight.has('if1');
+  wI.am.updatePool(wI.P, { crossProvider: 'never' });   // the person turns the pool back while the move is in flight
+  wI.meta.mode = 'ok'; wI.meta.held.splice(0).forEach((go) => go());   // its record lands AFTER the setting changed
+  const doneI = await flights(wI);
+  ok(heldI && doneI && wI.restarts().length === 0 && !(wI.metas.get('cw-if1') || {}).poolFallback && wI.eng._fbQueue.size === 0,
+    'THE MONEY LAW: a move still IN FLIGHT when the pool is turned back to never is NOT made — judged again after its record landed — and leaves NO record (the conversation stays where it was)',
+    { heldI, doneI, restarts: wI.restarts().length, record: (wI.metas.get('cw-if1') || {}).poolFallback || null, queue: wI.eng._fbQueue.size });
   // (1) THE RECORD rides the moved conversation's own create (test-harness-spawn «THE REAL ROAD»); a record on a conversation that did not move is cleared
   const wN = world({ cross: 'allow' });
   wN.mk('nc1');   // no page open: the restart cannot be asked
