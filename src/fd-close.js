@@ -37,6 +37,17 @@ const SYNC_UNSUPPORTED = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 /** THE words of a sync the file system does not do (the one spelling) */
 function syncUnsupportedWords(where, code) { return `${where}: its file system does not do a sync (${code}) — its new bytes took their name unsynced`; }
 
+/** B-ddf3 unit 3 (lane bl-vault, 主开发 r4634): A PERSON's FILE ON A FOLDER WHOSE FILE SYSTEM DOES NOT DO A SYNC STILL LANDS. THE one
+ *  reading of a sync's error at a site that writes a person's file: a code of SYNC_UNSUPPORTED → true (the file takes its name), its
+ *  words SAID ONCE A SITE (`where`, for this process's life: the site's name and the code, no path) in the site's own sink; EVERY OTHER
+ *  error → false (a failed write — the caller's, said by name). The open and the write keep their own try: only the sync's answer comes here */
+const syncUnsupportedSaid = new Set();
+function syncUnsupportedLands(e, where, say) {
+  if (!(e && SYNC_UNSUPPORTED.has(e.code))) return false;
+  if (!syncUnsupportedSaid.has(where)) { syncUnsupportedSaid.add(where); try { if (typeof say === 'function') say(syncUnsupportedWords(where, e.code)); } catch { /* a sink that throws says nothing more */ } }
+  return true;
+}
+
 /** B-bcb8 unit B (主开发 r4367; r4474's law): A RECORD THE HUB READS TAKES ITS NAME ONLY AFTER ONE SYNC OF ITS TEMP — the job wrapper's
  *  pid / exit / bound records, the conversation wrappers' meta sidecars and the chat wrapper's handed records (after a power cut or a full
  *  disk the hub read a record with its name and no bytes); the two BUFFERS (chat, codex) pass `sync: false` (r4563 / r4578). `bytes` written to `tmp` (its mode), synced ONCE, closed, renamed to `final`.
@@ -60,4 +71,4 @@ function renameSynced(tmp, final, bytes, { mode, where, say, sync = true } = {})
   fs.renameSync(tmp, final);
 }
 
-module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncUnsupportedWords, SYNC_UNSUPPORTED };
+module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncUnsupportedWords, SYNC_UNSUPPORTED, syncUnsupportedLands };

@@ -278,6 +278,7 @@ const ROWS = [
   ["src/server/plugin-loader.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/published-pages.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/published-pages.js", "synced", "self-synced", "a page's published content: written, synced and renamed through the thread pool (never the hub's loop), a failed sync a failed publish said by name (B-ddf3 unit 3, lane bl-vault, r4361)", "create > publishContentNow"],
+  ["src/server/published-pages.js", "synced", "self-synced", "a page's content ADOPTED by the row of its source that appeared while it was written (the person's own Publish): the file just written and SYNCED renamed onto that row's file — one source, one page (line 1044's cure, lane bl-vault, r4634)", "create > publishContentNow"],
   ["src/server/queued-wakes.js", "move", "move", "", "create"],
   ["src/server/rewind-keep-worker.js", "synced", "self-synced", "the kept copy (row B-437e): its press's manifest, a person's file put back from its kept copy, and the conversation's kept lines (U3) — the temp synced before the rename; a sync that fails fails the act", "seal", "putOne", "writeLines"],
   ["src/signin-witness-worker.js", "synced", "self-synced", "B-dc3f (1) H1 (主开发 r3030 (a)): the network home's sign-in witness copy — a temp opened wx 0600, written, SYNCED, renamed over the copy; a sync that fails fails the write (the temp removed, the failure said once by the hub)", "netWrite"],

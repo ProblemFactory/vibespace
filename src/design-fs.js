@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const FC = require('./fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const M = require('./design-model.js');
 const DT = require('./design-tokens.js');
@@ -119,7 +120,7 @@ async function writeUser(dir, text) {
   try {
     fh = await fsp.open(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o644);
     await fh.writeFile(String(text));
-    await fh.sync();   // B-ddf3 (lane bl-vault, r4361): on disk before its name points at it — a failed sync is a failed write, said below (write_failed)
+    try { await fh.sync(); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a design file', (l) => console.warn(`[design] ${l}`))) throw se; }   // B-ddf3 (lane bl-vault, r4361): on disk before its name points at it — a failed sync is a failed write, said below (write_failed); r4634: a file system that does not do a sync lands, said once
     await fh.close(); fh = null;
     await fsp.rename(tmp, file);
     let mtime = null;
