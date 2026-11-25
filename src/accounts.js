@@ -3322,8 +3322,11 @@ class AccountManager {
           // the conversations already on them keep running; a new one waits for a measured CLI (or a sign-in)
           const held = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile).length;
           // …or every such token is ANOTHER account's (the identity post-check, lane oat-identity-postcheck): said by name
-          const foreign = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile && this.oatCheckOf(m.id)?.state === 'mismatch').map((m) => m.name || m.id);
-          if (held && foreign.length === held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: the long-lived token${foreign.length === 1 ? '' : 's'} its member${foreign.length === 1 ? '' : 's'} ${foreign.join(', ')} ${foreign.length === 1 ? 'holds belongs' : 'hold belong'} to another account — conversations already running continue; re-mint or re-bind it in Manage agents: «Long-lived token (active)…» on its row`), { code: 'oat-identity-mismatch' });   // B-8703 (r4450): the live labels
+          const foreignM = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile && this.oatCheckOf(m.id)?.state === 'mismatch'), foreign = foreignM.map((m) => m.name || m.id);
+          // B-8703 (r4586): each member's row named as its menu shows it — «Long-lived token (expired)…» once the token's lifetime ran out, else «(active)…»
+          const rowOf = (m) => `«Long-lived token (${m.oatEnc && (m.oatMintedAt || 0) + this.OAT_TTL_MS < Date.now() ? 'expired' : 'active'})…»`;
+          const rows = foreignM.length === 1 ? `${rowOf(foreignM[0])} on its row` : foreignM.map((m) => `${m.name || m.id}: ${rowOf(m)}`).join('; ');
+          if (held && foreign.length === held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: the long-lived token${foreign.length === 1 ? '' : 's'} its member${foreign.length === 1 ? '' : 's'} ${foreign.join(', ')} ${foreign.length === 1 ? 'holds belongs' : 'hold belong'} to another account — conversations already running continue; re-mint or re-bind ${foreignM.length === 1 ? 'it' : 'each'} in Manage agents (${rows})`), { code: 'oat-identity-mismatch' });   // B-8703 (r4450 / r4586): the live labels, each row as its menu shows it
           if (held) throw Object.assign(new Error(cliCaps.cliHeldSpawnText({ pool: a.name, cli: this.oatFileCaps().cli, local: localFacetOf(this.oatFileCaps()).local })), { code: 'oat-cli-unmeasured' });
           throw new Error(`every member of pool "${a.name}" is signed out — re-login one in Manage Agents (the pool cannot route around a fully signed-out member set)`);
         }

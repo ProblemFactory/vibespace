@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gitEnvFrom } from './git-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -682,6 +682,36 @@ console.log('§5 the roster words');
   ok(/body\.querySelector\('#oat-rebind'\)/.test(ma) && /`\/api\/accounts\/\$\{enc\}\/oat\/rebind`, \{ method: 'POST'/.test(ma) && /id="oat-rebind-pick"/.test(ma) && /mint\.reason === 'anchor_mismatch'/.test(ma), 'WIRING: the token dialog\'s re-bind door posts /oat/rebind with the picked row; the mint\'s anchor_mismatch has its words');
   ok(/const rebindTo = \(oatForeign\(a\) \|\| oatIdentityAsk\(a\) \|\| oatUnverified\(a\)\) \?/.test(ma) && /id="oat-mine"/.test(ma) && /id="oat-not-mine"/.test(ma) && /`\/api\/accounts\/\$\{enc\}\/oat\/identity`, \{ method: 'POST'[^\n]*JSON\.stringify\(\{ answer \}\)/.test(ma),
     'WIRING: an ask / an unverified token gets the re-bind picker; an ask gets the owner\'s two answers (mine / not mine), posted to /oat/identity');
+}
+
+console.log('§5b the door\'s page half (B-8703, 主开发 r4586): «gone» only after the list answered')
+{
+  // the PURE door the page's opener runs (src/lib/oat-door.js), driven with the page's facts stood in: its list, its own refresh (the
+  // ask), the dialog it opens, the toast it says; the two sentences stood in by name
+  const OD = await import(pathToFileURL(path.join(REPO, 'src/lib/oat-door.js')).href);
+  const drive = async (D, start, after) => {
+    const said = [], opened = []; let asked = 0, list = start;
+    const r = await D.openOatDoor({ id: 'acc-1', getList: () => list, ask: async () => { asked++; list = after; }, open: (a) => opened.push(a.id), say: (w) => said.push(w), goneWords: () => 'GONE', heldWords: () => 'HELD' });
+    return { r, said, opened, asked };
+  };
+  const holds = { accounts: [{ id: 'acc-2' }, { id: 'acc-1' }], answered: true }, without = { accounts: [{ id: 'acc-2' }], answered: true };
+  const fresh = { accounts: [] }, held = { accounts: [], held: { code: 'EIO' }, answered: true };
+  const a = await drive(OD, holds, holds), b = await drive(OD, without, without), c = await drive(OD, fresh, holds), d = await drive(OD, fresh, without), e = await drive(OD, held, held), f = await drive(OD, fresh, fresh);
+  ok(a.r === 'open' && a.opened.join() === 'acc-1' && a.asked === 0 && !a.said.length, 'a list that holds the account: its dialog opens — THAT account\'s, nothing asked, nothing said', a);
+  ok(b.r === 'gone' && b.said.join() === 'GONE' && b.asked === 0 && !b.opened.length, 'a list that ANSWERED without it: the gone words, nothing opened', b);
+  ok(c.r === 'open' && c.asked === 1 && c.opened.join() === 'acc-1' && !c.said.length && d.r === 'gone' && d.asked === 1 && d.said.join() === 'GONE', 'a list not yet arrived (a freshly loaded page): the list is ASKED first, then judged — its dialog, or the gone words once it answered without it', { c, d });
+  ok(e.r === 'held' && e.said.join() === 'HELD' && !e.opened.length && e.asked === 0 && f.r === 'unread' && f.asked === 1 && f.said.join() === 'HELD', 'a list that cannot be read (held), or an ask it did not answer: it SAYS the list cannot be read — never «gone»', { e, f });
+  // RED: the tip's opener — «gone» whenever the page's list does not hold the account (no arrival, no hold looked at)
+  const SRC = read('src/lib/oat-door.js');
+  const TIP = SRC.replace("  if (l && l.held) return { kind: 'held' };\n", '').replace("  return l && l.answered === true ? { kind: 'gone' } : { kind: 'ask' };", "  return { kind: 'gone' };");
+  const ODt = await import('data:text/javascript,' + encodeURIComponent(TIP));
+  const cr = await drive(ODt, fresh, holds), er = await drive(ODt, held, held);
+  ok(TIP !== SRC && cr.r === 'gone' && cr.asked === 0 && er.r === 'gone', 'RED CONTROL: the tip\'s opener (a copy) says «gone» on a freshly loaded page and on a held list — a false sentence to a person', { cr, er });
+  // the page's wiring: the opener hands the door ITS list, ITS refresh, the row's dialog, the toast; both of the list's answers say it answered
+  const APP = read('src/lib/app.js');
+  ok(APP.includes("return openOatDoor({ id, getList: () => this._accounts, ask: () => this.refreshAccounts(), open: (a) => this._oatDialog?.(id, a), say: (w) => showToast(w),") && APP.includes("heldWords: () => heldWordsOf({ code: 'accounts_unread' }) });")
+    && APP.includes("cliKey: d.cliKey || {}, held: d.held || null, answered: true };") && APP.includes("held: msg.held || null, answered: true };"),
+    'the page\'s opener runs the door over its own list, refresh, dialog and toast; the refresh\'s answer and the push both mark the list answered');
 }
 
 console.log('§6 wiring census + RED controls');

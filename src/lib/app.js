@@ -24,6 +24,7 @@ import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { createHeldKeeper } from './jobs-held.js';   // B-360d unit 3: the held digest, kept once a page
+import { openOatDoor } from './oat-door.js';   // B-8703 (r4586): the identity check's door — PURE
 import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { lateFocus } from './late-focus.js'; // B-c87d: a go-to that lands after an await asks THE door (the keyboard stays where the person last put it)
 import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
@@ -406,7 +407,7 @@ class App {
       }
       if (msg.type === 'setting-holds' && Array.isArray(msg.holds)) this._setSettingHolds(msg.holds);   // lane setting-doors pick 2: a press, an «End now», a return
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg), held: msg.held || null };   // r3129 (2): the push's `held` — the lift ends the banner on every open page, and a page that never fetched during the hold learns it
+        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg), held: msg.held || null, answered: true };   // r3129 (2): the push's `held` — the lift ends the banner on every open page, and a page that never fetched during the hold learns it
         // B-ba7d: the push carries no key tail — the person's last read is laid on, and asked again (coalesced: one ask in flight) — a
         // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one. ONE ask a tails
         // generation: the push carries its word; the roster's refresh below takes this read (B-ee0a smalls)
@@ -2621,8 +2622,12 @@ class App {
   openChannelOutbox(opts) { return openChannelOutboxFn(this, opts || {}); }
   openMountReauth(id) { return this.sidebar?.openMountReauth?.(id); }
   /** B-8703 (主开发 r4450): For you's door of the long-lived token identity check — THAT account's long-lived token dialog (the row's
-   *  own «Long-lived token…» in Manage agents opens the same); a row no longer in the list ⇒ said in the reader's language, never a dead press */
-  openOatDialog(id) { const a = ((this._accounts && this._accounts.accounts) || []).find((x) => x && x.id === id); if (!a || typeof this._oatDialog !== 'function') { showToast(t('This account is no longer in your list — there is nothing left to check: close this notice.')); return null; } return this._oatDialog(id, a); }   // B-e40d: For you's door — a mount on a replaced preset client signs in again
+   *  own «Long-lived token…» in Manage agents opens the same) — src/lib/oat-door.js decides: the row in the list ⇒ its dialog; a list that
+   *  cannot be read ⇒ said; a list not yet arrived ⇒ asked first; «gone» only once the list answered without it (r4586) */
+  openOatDialog(id) {
+    return openOatDoor({ id, getList: () => this._accounts, ask: () => this.refreshAccounts(), open: (a) => this._oatDialog?.(id, a), say: (w) => showToast(w),
+      goneWords: () => t('This account is no longer in your list — there is nothing left to check: close this notice.'), heldWords: () => heldWordsOf({ code: 'accounts_unread' }) });   // r4586: «gone» only after the list ANSWERED without it
+  }
   /** The Channels PANEL (the rail). Returns false where there is no rail —
    *  the caller (the ⚙ row) is gated on the same fact, so a dead entry point
    *  is never offered rather than offered and refused. */
@@ -2655,7 +2660,7 @@ class App {
   refreshAccounts() {
     return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {   // B-ee0a: the list's word decides whether the last read holds
       const d = withTails(d0, tl);   // B-ba7d: the list carries no key tail; the person's own read (POST /api/accounts/tails) lays it on
-      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {}, held: d.held || null }; // every harness's default field (agent-meta); `held`: the B-f276 family (r2947)
+      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {}, held: d.held || null, answered: true };   // answered: the list was asked and said (B-8703 r4586: its door's «gone» waits for it) // every harness's default field (agent-meta); `held`: the B-f276 family (r2947)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);

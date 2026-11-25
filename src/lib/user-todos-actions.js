@@ -209,7 +209,7 @@ export function inboxModel(app) {
   // lane ui-needs-a-button pick 6: THE OPENERS a registry row's `door` names (src/foryou-actions.js doorOf — a pointer whose
   // question lives in a window of its own: the account's composed messages awaiting approval live in the Outbox). A registry
   // read, never a type-literal branch (§78); a door with no opener here is no door (no button, no jump)
-  const ROW_DOORS = { outbox: () => app.openChannelOutbox?.(), storage: (item) => app.openMountReauth?.(item && item.action ? item.action.mountId : null), oat: (item) => app.openOatDialog?.(item && item.action ? item.action.accountId : null) };   // B-8703 (r4450): the identity check's items open THAT account's long-lived token dialog   // B-e40d: a replaced preset client's Re-authorize
+  const ROW_DOORS = { outbox: () => app.openChannelOutbox?.(), storage: (item) => app.openMountReauth?.(item && item.action ? item.action.mountId : null) /* B-e40d: a replaced preset client's Re-authorize */, oat: (item) => app.openOatDialog?.(item && item.action ? item.action.accountId : null) };   // B-8703 (r4450): the identity check's items open THAT account's long-lived token dialog
   const rowDoorOf = (item) => { const d = doorOf(item); return d && typeof ROW_DOORS[d.opens] === 'function' ? d : null; };
   /** Go to where an item is answered. `close` = the calling surface's own
    *  "I am leaving" (the popup hides itself; the window stays). */
