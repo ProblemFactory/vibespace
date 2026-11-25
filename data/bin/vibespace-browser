@@ -1046,7 +1046,12 @@ async function runPage(c) {
     if (cc.dropped.project.length) console.error(`note: ${cc.projectPath} sets ${cc.dropped.project.join(', ')} — not applied: an agent-browser.json in your directory may only add a restriction (${V.PROJECT_CONFIG_KEYS.join(', ')}) this machine's own configuration does not already set [config_keys_dropped]`);
     if (cc.dropped.args.length || cc.dropped.keys.length) console.error(`note: ${[...cc.dropped.keys, ...cc.dropped.args].join(' ')} from ${cc.userPath} ${cc.dropped.keys.length + cc.dropped.args.length === 1 ? 'is' : 'are'} not applied — a raw debugging endpoint goes around the lease and the mediation [config_keys_dropped]`);
   }
-  if (built && built.dropped.length) console.error(`note: ${built.dropped.join(', ')} from your environment ${built.dropped.length === 1 ? 'was' : 'were'} not passed to the browser — which browser you drive and how it launches is VibeSpace's decision, not an environment variable's [env_twin_dropped]`);
+  // row B-e946: the two names ENV_PASS passed until 2.369.420 are said with THEIR reason (the driver's session configuration, which
+  // VibeSpace's own road shares) and, for the timeout, the verb that waits instead (the driver's own `wait <ms>`, bounded by the
+  // number given); every other dropped name keeps its note
+  const sessOnly = V.SESSION_ENV_DROPPED || [], twinDropped = built ? built.dropped.filter((k) => !sessOnly.includes(k)) : [], sessNote = built && typeof V.sessionConfigNote === 'function' ? V.sessionConfigNote(built.dropped) : null;
+  if (twinDropped.length) console.error(`note: ${twinDropped.join(', ')} from your environment ${twinDropped.length === 1 ? 'was' : 'were'} not passed to the browser — which browser you drive and how it launches is VibeSpace's decision, not an environment variable's [env_twin_dropped]`);
+  if (sessNote) console.error(sessNote);
   let profileId = null;
   let closeAllScoped = false; // lane H verify r2 L6: an attachment's `close --all` is ITS session's close, never the namespace's
   if (r.kind === 'ephemeral') {

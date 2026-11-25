@@ -116,6 +116,10 @@ const RAW_CDP_FLAGS = Object.freeze(['--cdp', '--auto-connect']);
 // TRUSTS (an interception proxy's CA — a launch decision, and a trust decision that is the user's), `--no-webmcp`
 // how locally launched Chrome starts; all three are VibeSpace's to launch with, never a command's
 const LAUNCH_FLAGS = Object.freeze(['--executable-path', '--provider', '-p', '--engine', '--extension', '--args', '--user-agent', '--proxy', '--proxy-bypass', '--headed', '--webgpu', '--allowed-domains', '--action-policy', '--confirm-actions', '--confirm-interactive', '--init-script', '--enable', '--ignore-https-errors', '--allow-file-access', '--color-scheme', '--download-path', '--no-auto-dialog', '--hide-scrollbars', '--idle-timeout', '--ca-cert', '--no-ca-cert', '--no-webmcp']);
+/** Row B-e946 (主开发 r4206): flags that set the browser DRIVER's own session configuration — a field its session fingerprint
+ *  reads (DRIVER_FINGERPRINT below) that no other list here already refuses. VibeSpace's own road drives the SAME session, so
+ *  another value started its driver again at every switch of road and lost every ref (probe 11, box row 784: 5 of 5). */
+const SESSION_FLAGS = Object.freeze(['--debug']);
 /** Per-PAGE launch-looking flags that pass beside `open` (D12). */
 const OPEN_FLAGS = Object.freeze(['--enable', '--init-script']);
 /** Output/format flags that pass through (documentation; an unknown flag also
@@ -181,6 +185,7 @@ const PAGE_SET = new Set(PAGE_VERBS);
 const IDENTITY_SET = new Set(IDENTITY_FLAGS);
 const RAW_CDP_SET = new Set(RAW_CDP_FLAGS);
 const LAUNCH_SET = new Set(LAUNCH_FLAGS);
+const SESSION_SET = new Set(SESSION_FLAGS);
 const OPEN_SET = new Set(OPEN_FLAGS);
 
 const isFlag = (t) => typeof t === 'string' && t.length > 1 && t[0] === '-';
@@ -527,6 +532,10 @@ function judgeAt(body, vi, ni, { escape = false, profile = null, inBatch = false
       if (OPEN_SET.has(name) && verb === 'open') continue;
       return refused(base, R('launch_flag_refused', `\`${name}\` is a property of how the browser is LAUNCHED, and VibeSpace launches it`,
         'a proxy or launch setting belongs to a named profile (`vibespace-browser new <label> --proxy <url>`) or to the user\'s Settings → Agent browser'), { flag: name });
+    }
+    if (SESSION_SET.has(name)) {
+      return refused(base, R('session_flag_refused', `\`${name}\` sets the browser driver's own session configuration — VibeSpace drives this same session, and another value would start its driver again and lose every ref`,
+        'drop the flag (the driver\'s debug output is not available on a VibeSpace session)'), { flag: name });
     }
   }
   // ⑥ the verb table (§3.2)
@@ -1260,7 +1269,8 @@ function sanctionedConfig({ user = null, project = null, deny = [] } = {}) {
  *    ① process.env minus EVERY `AGENT_BROWSER_*` key (agentEnv() strips them
  *      all at spawn, so what is left in a session's shell is either a pair
  *      VibeSpace set or one the agent added — and the server knows which);
- *    ② the keys an agent may set because they only shape OUTPUT (`ENV_PASS`);
+ *    ② the keys an agent may set (`ENV_PASS`): output settings, and ONLY names the driver's session fingerprint does not
+ *      read (row B-e946: DRIVER_FINGERPRINT beside the list);
  *    ③ rung H only: the scratch user-data-dir the host's prelude exported for
  *      THIS conversation (`hostProfile` names it; any other value is not kept)
  *      and the short socket directory the prelude exports on a long home
@@ -1288,7 +1298,40 @@ const ENV_PREFIX = 'AGENT_BROWSER_';
 // path-less `screenshot` writes into), the env twin of `--screenshot-dir`, which the write guard judges and hands over
 // absolute. An env value would reach the binary unjudged and relative to the daemon's frame, so it is dropped like every
 // other twin (said by name); `--screenshot-dir <dir>` on the command is the road
-const ENV_PASS = Object.freeze(['AGENT_BROWSER_JSON', 'AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_COLOR', 'AGENT_BROWSER_ANNOTATE', 'AGENT_BROWSER_MAX_OUTPUT', 'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_FORMAT', 'AGENT_BROWSER_SCREENSHOT_QUALITY', 'AGENT_BROWSER_DEFAULT_TIMEOUT']);
+// Row B-e946 (主开发 r4206): THE RULE OF THE LIST — a name passes only if the driver's SESSION FINGERPRINT does not read it.
+// agent-browser starts a session's daemon AGAIN whenever a command's configuration fingerprint differs from the running one's, and
+// VibeSpace's own road (the keeper: the trace's box read, the live view's stream ask, the tab verbs) drives the SAME session with the
+// lease's configuration — so a value the agent set for a fingerprint field started its driver again at every switch of road and lost
+// every ref (probe 11, box row 784: AGENT_BROWSER_DEFAULT_TIMEOUT and AGENT_BROWSER_DEBUG 5 of 5 «Unknown ref», neither 0 of 5).
+// Those two passed until 2.369.420, on the belief that they only shaped output; they are dropped now, said by name on the CLI's road.
+// The names still passed feed no fingerprint field at that version: json (cli/src/flags.rs 534), annotate (607), content_boundaries
+// (614), max_output (616), screenshot_quality (641), screenshot_format (645), AGENT_BROWSER_COLOR (cli/src/color.rs 26, the CLI's
+// own output colour) — none of them is a field of the daemon's options (cli/src/main.rs 1691-1729).
+const ENV_PASS = Object.freeze(['AGENT_BROWSER_JSON', 'AGENT_BROWSER_COLOR', 'AGENT_BROWSER_ANNOTATE', 'AGENT_BROWSER_MAX_OUTPUT', 'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_FORMAT', 'AGENT_BROWSER_SCREENSHOT_QUALITY']);
+/** Row B-e946: THE DRIVER's SESSION FINGERPRINT, QUOTED at the version the tree pins (AGENT_BROWSER_CLI.table) — agent-browser
+ *  v0.38.2 cli/src/connection.rs daemon_config_fingerprint (lines 592-601) hashes exactly these six fields of the daemon's options;
+ *  each field's env name and flag at that tag (cli/src/flags.rs): debug ← AGENT_BROWSER_DEBUG (536) and --debug (736-741, into the
+ *  options at cli/src/main.rs 1693); default_timeout ← AGENT_BROWSER_DEFAULT_TIMEOUT (654; no flag; main.rs 1725); action_policy ←
+ *  AGENT_BROWSER_ACTION_POLICY (629) and --action-policy (1028); confirm_actions ← AGENT_BROWSER_CONFIRM_ACTIONS (632) and
+ *  --confirm-actions (1034); idle_timeout ← AGENT_BROWSER_IDLE_TIMEOUT_MS (650) and --idle-timeout (796); no_auto_dialog ←
+ *  AGENT_BROWSER_NO_AUTO_DIALOG (657) and --no-auto-dialog (1104). When the pinned version moves, test-browser-verbs goes red by
+ *  name until this is read again at the new tag. */
+const DRIVER_FINGERPRINT = Object.freeze({
+  version: '0.38.2',
+  fields: Object.freeze(['debug', 'action_policy', 'confirm_actions', 'idle_timeout', 'default_timeout', 'no_auto_dialog']),
+  names: Object.freeze({ AGENT_BROWSER_DEBUG: 'debug', AGENT_BROWSER_ACTION_POLICY: 'action_policy', AGENT_BROWSER_CONFIRM_ACTIONS: 'confirm_actions', AGENT_BROWSER_IDLE_TIMEOUT_MS: 'idle_timeout', AGENT_BROWSER_DEFAULT_TIMEOUT: 'default_timeout', AGENT_BROWSER_NO_AUTO_DIALOG: 'no_auto_dialog' }),
+  flags: Object.freeze({ '--debug': 'debug', '--action-policy': 'action_policy', '--confirm-actions': 'confirm_actions', '--idle-timeout': 'idle_timeout', '--no-auto-dialog': 'no_auto_dialog' }),
+});
+/** Row B-e946: the two names ENV_PASS passed until 2.369.420 — dropped now, and said with their own reason (the CLI's note). */
+const SESSION_ENV_DROPPED = Object.freeze(['AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_DEFAULT_TIMEOUT']);
+/** Row B-e946: the CLI's note for those of `dropped` (childEnv's) that are SESSION_ENV_DROPPED — said once on stderr, on the road of
+ *  the other dropped names, names only, never values: why (the hub drives this same session; another value starts its driver again
+ *  and loses every ref) and, for the timeout, the driver's own `wait <ms>` (its bound: the number given). null ⇒ none dropped. */
+function sessionConfigNote(dropped) {
+  const sess = (Array.isArray(dropped) ? dropped : []).filter((k) => SESSION_ENV_DROPPED.includes(k));
+  if (!sess.length) return null;
+  return `note: ${sess.join(', ')} from your environment ${sess.length === 1 ? 'was' : 'were'} not passed to the browser — VibeSpace drives this same browser session, and another value would start its driver again and lose every ref${sess.includes('AGENT_BROWSER_DEFAULT_TIMEOUT') ? '; for a slow page, wait before the step: `vibespace-browser wait <ms>`' : ''} [env_session_config_dropped]`;
+}
 const SOCKET_KEY = 'AGENT_BROWSER_SOCKET_DIR';
 const RUNTIME_KEY = 'XDG_RUNTIME_DIR';
 // r4 (takeover finding 4): AGENT_BROWSER_CONFIG is NOT kept on the legacy path either — the r3 rule is that
@@ -1543,7 +1586,7 @@ function keyNameVerdict(argv) {
   };
 }
 module.exports = {
-  browserCell, REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS,
+  browserCell, REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, SESSION_FLAGS, DRIVER_FINGERPRINT, SESSION_ENV_DROPPED, sessionConfigNote, OPEN_FLAGS,
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,

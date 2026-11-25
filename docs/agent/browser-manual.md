@@ -97,6 +97,7 @@ which cookie jar you are in.
 | `connect <port>`, `get cdp-url` (in any spelling: `get --json cdp-url`, `get --json true cdp-url`, inside a batch), `--cdp`, `--auto-connect` | `raw_cdp_refused` | run the verb directly — every command already acts on your own browser (`get attr @e cdp-url` / `get text cdp-url` read the page and run) |
 | `--session`, `--namespace`, `--session-name`, `--config`, `--state`, `--restore…`, `--no-pin-tab` | `identity_flag_refused` | drop the flag; `--profile <handle>` names one of your attachments |
 | `--proxy`, `--headed`, `--args`, `--user-agent`, `--executable-path`, `--extension`, `-p/--provider`, `--ca-cert`, `--no-webmcp`, … | `launch_flag_refused` | a launch setting is a property of a named profile (`new <label> --proxy <url>`) or of the user's Settings → Agent browser. `--enable react-devtools` and `--init-script` pass beside `open` |
+| `--debug` | `session_flag_refused` | drop the flag — it sets the browser driver's own session configuration, and VibeSpace drives this same session: another value would start its driver again and lose every ref (the driver's debug output is not available here) |
 | `confirm <id>`, `deny <id>` | `confirmation_is_human` | a pending confirmation is the user's to answer — tell them and stop |
 | `auth …` | `verb_not_offered` | a password never rides the command line: log in inside the page with `fill`, or hand the login to the user |
 | `session`, `stream`, `inspect`, `install`, `upgrade`, `doctor`, `plugin`, `mcp`, `dashboard`, `chat`, `skills`, `webmcp` | `verb_not_offered` | `vibespace-browser status` / the live view / ask the user — the message says which (`webmcp`: drive the page through its own UI with `snapshot` + `click`/`fill`) |
@@ -129,13 +130,23 @@ restarted — only `/tmp` and `~/Downloads` are writable.
 
 **Environment variables do not choose your browser either.** Every flag in the
 table above has an `AGENT_BROWSER_*` environment twin; `vibespace-browser`
-passes none of them from your shell (only output settings such as
-`AGENT_BROWSER_JSON` / `AGENT_BROWSER_MAX_OUTPUT`). The same holds for where
+passes none of them from your shell — only these output settings:
+`AGENT_BROWSER_JSON`, `AGENT_BROWSER_COLOR`, `AGENT_BROWSER_ANNOTATE`,
+`AGENT_BROWSER_MAX_OUTPUT`, `AGENT_BROWSER_CONTENT_BOUNDARIES`,
+`AGENT_BROWSER_SCREENSHOT_FORMAT`, `AGENT_BROWSER_SCREENSHOT_QUALITY`. The same holds for where
 the browser's socket lives (`AGENT_BROWSER_SOCKET_DIR`, `XDG_RUNTIME_DIR`):
 VibeSpace decides it, so your commands always reach the browser the user
 sees. If you set one it is dropped and said once — `note: … were not passed
 to the browser … [env_twin_dropped]` — and the command still runs on your
 own browser.
+
+**The browser's session settings are the lease's.** `AGENT_BROWSER_DEFAULT_TIMEOUT`
+and `AGENT_BROWSER_DEBUG` (and the `--debug` flag) set the browser driver's own
+session configuration, and VibeSpace drives this same session: another value
+would start its driver again and lose every ref. They are not passed — said once,
+`note: … VibeSpace drives this same browser session … [env_session_config_dropped]`
+(the flag is refused: `session_flag_refused`) — and the command still runs. For a
+slow page, wait before the step: `vibespace-browser wait <ms>`.
 
 **The rules are measured on one version of the browser CLI.** If the machine
 has another, every command says so once — `note: the browser CLI here is …;

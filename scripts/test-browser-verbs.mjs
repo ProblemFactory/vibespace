@@ -181,7 +181,7 @@ console.log('① the PURE router');
   // r2: a BOOLEAN global flag takes an optional `true` / `false` (the help's "Boolean flags accept an
   // optional true/false value"; measured: `get --json true cdp-url` IS the raw endpoint, `get --json TRUE
   // cdp-url` is `Unknown subcommand`) — so `true`/`false` after a flag is never the noun
-  for (const argv of [['get', '--json', 'true', 'cdp-url'], ['get', '--json', 'false', 'cdp-url'], ['get', '-v', 'true', 'cdp-url'], ['get', '--debug', 'false', 'cdp-url'], ['get', '--max-output', '5', '--json', 'true', 'cdp-url'], ['--json', 'true', 'get', 'cdp-url'], ['--', 'get', '--json', 'true', 'cdp-url']]) {
+  for (const argv of [['get', '--json', 'true', 'cdp-url'], ['get', '--json', 'false', 'cdp-url'], ['get', '-v', 'true', 'cdp-url'], ['get', '--annotate', 'false', 'cdp-url'], ['get', '--max-output', '5', '--json', 'true', 'cdp-url'], ['--json', 'true', 'get', 'cdp-url'], ['--', 'get', '--json', 'true', 'cdp-url']]) {
     const c = V.classify(argv);
     ok(c.kind === 'refused' && c.code === 'raw_cdp_refused', `r2: \`${argv.join(' ')}\` ⇒ raw_cdp_refused (a boolean flag's true/false is its value, not the noun)`, JSON.stringify([c.kind, c.code, c.sub]));
   }
@@ -312,6 +312,33 @@ console.log('① the PURE router');
     const e3 = V.childEnv(shell, { spawnEnv: own, env: own });
     ok(!('AGENT_BROWSER_SOCKET_DIR' in e3.env) && e3.env.XDG_RUNTIME_DIR === '/tmp/mine', 'r2 PURE: no socket root in the answer ⇒ the shell\'s SOCKET_DIR is not an output key any more (dropped); XDG untouched', JSON.stringify(e3.env));
     ok(!V.ENV_PASS.includes('AGENT_BROWSER_SOCKET_DIR'), 'r2 PURE: AGENT_BROWSER_SOCKET_DIR is not in ENV_PASS');
+    // ── row B-e946 (主开发 r4206): THE RULE OF THE PASS LIST — a name passes only if the driver's SESSION FINGERPRINT does not read
+    //    it (V.DRIVER_FINGERPRINT: agent-browser's daemon_config_fingerprint and its env names and flags, QUOTED at the version the tree
+    //    pins). A fingerprint name that passed started the session's driver again at every switch between the agent's road and the
+    //    hub's (probe 11, box row 784: 5 of 5 «Unknown ref»). RED: the list as it stood (DEBUG and DEFAULT_TIMEOUT passed); the flag
+    //    as it stood (--debug passed); and the pinned driver version moved without the fingerprint read again ──
+    {
+      const J = (x) => JSON.stringify(x);
+      const ruleOf = (Vx) => ({ pinned: Vx.DRIVER_FINGERPRINT.version === Vx.AGENT_BROWSER_CLI.table, fields: Vx.DRIVER_FINGERPRINT.fields.length, passed: Object.keys(Vx.DRIVER_FINGERPRINT.names).filter((k) => Vx.ENV_PASS.includes(k)),
+        flagsLoose: Object.keys(Vx.DRIVER_FINGERPRINT.flags).filter((f) => !Vx.LAUNCH_FLAGS.includes(f) && !Vx.SESSION_FLAGS.includes(f)), debugFlag: Vx.classify(['snapshot', '--debug']).code || Vx.classify(['snapshot', '--debug']).kind });
+      const r0 = ruleOf(V);
+      ok(r0.pinned, `B-e946 PURE: the session fingerprint beside the pass list is quoted at the driver version the tree pins (${V.DRIVER_FINGERPRINT.version}) — ${r0.pinned ? 'it is' : `the pinned driver is ${V.AGENT_BROWSER_CLI.table} now: read daemon_config_fingerprint (cli/src/connection.rs) and the env names and flags (cli/src/flags.rs, cli/src/main.rs's daemon options) again at that tag, then move DRIVER_FINGERPRINT`}`, r0);
+      ok(r0.fields === 6 && J(r0.passed) === J([]) && J(r0.flagsLoose) === J([]) && r0.debugFlag === 'session_flag_refused' && Object.values(V.DRIVER_FINGERPRINT.names).every((f) => V.DRIVER_FINGERPRINT.fields.includes(f)) && Object.values(V.DRIVER_FINGERPRINT.flags).every((f) => V.DRIVER_FINGERPRINT.fields.includes(f)),
+        'B-e946 PURE: no name the session fingerprint reads is in ENV_PASS, and every flag that sets one of its six fields is refused (a launch flag, or --debug: session_flag_refused)', r0);
+      const ce = V.childEnv({ AGENT_BROWSER_DEFAULT_TIMEOUT: '60000', AGENT_BROWSER_DEBUG: '1', AGENT_BROWSER_JSON: '1' }, { spawnEnv: [] });
+      ok(!('AGENT_BROWSER_DEFAULT_TIMEOUT' in ce.env) && !('AGENT_BROWSER_DEBUG' in ce.env) && ce.env.AGENT_BROWSER_JSON === '1' && ce.dropped.includes('AGENT_BROWSER_DEBUG') && ce.dropped.includes('AGENT_BROWSER_DEFAULT_TIMEOUT') && J(V.SESSION_ENV_DROPPED) === J(['AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_DEFAULT_TIMEOUT']),
+        'B-e946 PURE: the agent\'s DEFAULT_TIMEOUT and DEBUG are dropped (named among the dropped), an output key still passes', ce);
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const Me = mutantCopies('browser-verbs-e946', REPO);
+      const vsrcE = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+      const Vlist = Me.load('src/browser-verbs.js', editAnchor(vsrcE, "'AGENT_BROWSER_SCREENSHOT_QUALITY']);", "'AGENT_BROWSER_SCREENSHOT_QUALITY', 'AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_DEFAULT_TIMEOUT']);", 'src/browser-verbs.js'), 'e946-old-list');
+      const Vflag = Me.load('src/browser-verbs.js', editAnchor(vsrcE, "const SESSION_FLAGS = Object.freeze(['--debug']);", 'const SESSION_FLAGS = Object.freeze([]);', 'src/browser-verbs.js'), 'e946-old-flag');
+      const Vmove = Me.load('src/browser-verbs.js', editAnchor(vsrcE, "Object.freeze({ table: '0.38.2',", "Object.freeze({ table: '0.39.0',", 'src/browser-verbs.js'), 'e946-driver-moved');
+      const [rl, rf, rm] = [ruleOf(Vlist), ruleOf(Vflag), ruleOf(Vmove)];
+      ok(J(rl.passed) === J(['AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_DEFAULT_TIMEOUT']), 'CONTROL (the list as it stood): two names the session fingerprint reads pass — RED on the rule', rl);
+      ok(J(rf.flagsLoose) === J(['--debug']) && rf.debugFlag !== 'session_flag_refused', 'CONTROL (the flag as it stood): --debug reaches the driver — RED on the rule', rf);
+      ok(rm.pinned === false, 'CONTROL (the pinned driver moved to 0.39.0, the fingerprint not read again): the pin goes RED by name', rm);
+    }
     ok(V.hostSocketDirPath('/tmp', 1000) === B.socketDirDecision({ browserKey: 'bk-0000000a', home: '/h', uid: 1000, base: '/tmp' }).dir && B.remoteBrowserPrelude({ browserKey: 'bk-0000000a', socketDirBase: '/tmp' }).includes('vs_ab_s="/tmp/vs-ab-$(id -u)"'), 'r2 PURE: the rung-H shape `<base>/vs-ab-<uid>` is spelled the same as browser-profiles\' decision and the prelude\'s shell text');
     // PURE values, never touched on disk — a base outside /tmp so no literal here reads as a machine-global fixture (test-ci-gate §6)
     const e4 = V.childEnv({ ...shell, AGENT_BROWSER_SOCKET_DIR: '/var/tmp/vs-ab-7' }, { spawnEnv: own, env: [], hostSocketBase: '/var/tmp' }, { uid: 7 });
@@ -894,7 +921,7 @@ try {
 
   // r1 (finding 2): the ENV TWINS of every refused launch / identity / CDP flag never reach the real
   // binary — the child env is process.env minus every AGENT_BROWSER_* key, then the output keys the
-  // agent may set (JSON, DEBUG, …, SOCKET_DIR), then /resolve's pairs verbatim, then `unset`. The
+  // agent may set (JSON, MAX_OUTPUT, …; never a name the driver's session fingerprint reads: B-e946), then /resolve's pairs verbatim, then `unset`. The
   // real 0.32.0 binary HONOURS these twins (test-browser-mediation-chrome ③ is the control).
   {
     const TWINS = { AGENT_BROWSER_CDP: '1', AGENT_BROWSER_AUTO_CONNECT: '1', AGENT_BROWSER_PROXY: 'http://127.0.0.1:1', AGENT_BROWSER_ARGS: '--remote-debugging-port=9', AGENT_BROWSER_EXECUTABLE_PATH: '/tmp/evil-chrome', AGENT_BROWSER_HEADED: '1', AGENT_BROWSER_STATE: '/tmp/s.json', AGENT_BROWSER_PROFILE: '/home/u/.config/google-chrome', AGENT_BROWSER_PROVIDER: 'browserbase', AGENT_BROWSER_CONFIG: '/tmp/c.json', AGENT_BROWSER_SESSION: 'vfy-e', AGENT_BROWSER_NAMESPACE: 'vfy-e', AGENT_BROWSER_RESTORE: '1', AGENT_BROWSER_SESSION_NAME: 'x', AGENT_BROWSER_INIT_SCRIPTS: '/tmp/i.js', AGENT_BROWSER_ENCRYPTION_KEY: 'k' };
@@ -919,6 +946,21 @@ try {
     lc = last();
     ok(lc.env.AGENT_BROWSER_SOCKET_DIR === KEEPER.socketDir && lc.xdg === null, 'r2: a keeper with NO XDG_RUNTIME_DIR ⇒ the child has none either (the shell\'s is removed, not kept)', JSON.stringify({ sd: lc.env.AGENT_BROWSER_SOCKET_DIR, xdg: lc.xdg }));
     ok(/\[env_twin_dropped\]/.test(r3.stderr) && /AGENT_BROWSER_CDP/.test(r3.stderr) && /AGENT_BROWSER_PROXY/.test(r3.stderr) && !/\bk\b|evil-chrome/.test(r3.stderr.replace(/AGENT_BROWSER_\w+/g, '')), '…and the drop is SAID (the key names, never their values) — no silent change', r3.stderr);
+    // row B-e946 (主开发 r4206): the two names the driver's session fingerprint reads — never passed, SAID on this same road with THEIR
+    // reason and, for the timeout, the driver's own verb that waits (wait <ms>, bounded by the number given); never under the twins' note
+    {
+      const SESS = { AGENT_BROWSER_DEFAULT_TIMEOUT: '60000', AGENT_BROWSER_DEBUG: '1' };
+      resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
+      const rs = await cli(['snapshot'], { ...baseEnv, ...OUT, ...SESS });
+      const ls = last();
+      const sline = rs.stderr.split('\n').find((l) => l.includes('[env_session_config_dropped]')) || '';
+      ok(rs.status === 0 && !!ls && !('AGENT_BROWSER_DEFAULT_TIMEOUT' in ls.env) && !('AGENT_BROWSER_DEBUG' in ls.env) && ls.env.AGENT_BROWSER_JSON === '1',
+        'B-e946: the agent\'s AGENT_BROWSER_DEFAULT_TIMEOUT and AGENT_BROWSER_DEBUG never reach the driver; the output keys still pass; the command runs', JSON.stringify(ls && ls.env));
+      ok(sline.includes('AGENT_BROWSER_DEBUG, AGENT_BROWSER_DEFAULT_TIMEOUT') && sline.includes('VibeSpace drives this same browser session') && sline.includes('lose every ref') && sline.includes('`vibespace-browser wait <ms>`') && !sline.includes('60000') && !/\[env_twin_dropped\]/.test(rs.stderr) && rs.stderr.split('\n').filter((l) => l.includes('[env_session_config_dropped]')).length === 1,
+        'B-e946: …SAID once on the CLI\'s own road, the names only: why (this same session; another value starts its driver again and loses every ref) and the verb that waits instead — never the launch twins\' note', rs.stderr);
+      const rd = await cli(['snapshot'], { ...baseEnv, AGENT_BROWSER_DEBUG: '1' });
+      ok(/\[env_session_config_dropped\]/.test(rd.stderr) && !/vibespace-browser wait/.test(rd.stderr), 'B-e946: the debug name alone — its reason only (no wait is offered for it)', rd.stderr);
+    }
     // the unmanaged rung of a session with its OWN pairs (a remote session): the server names them
     const HOST_BASE = path.join(ROOT, 'hb');
     const UID = process.getuid();
@@ -987,7 +1029,7 @@ try {
     // copy of the CLI lets the agent's decoy root through — the socket legs above can go red
     {
       const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
-      const r1v = editAnchor(editAnchor(vsrc, "'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);", "src/browser-verbs.js"), 'if (absPath(a.socketDir)) {', 'if (false) {', "src/browser-verbs.js");
+      const r1v = editAnchor(editAnchor(vsrc, "'AGENT_BROWSER_SCREENSHOT_QUALITY']);", "'AGENT_BROWSER_SCREENSHOT_QUALITY', 'AGENT_BROWSER_SOCKET_DIR']);", "src/browser-verbs.js"), 'if (absPath(a.socketDir)) {', 'if (false) {', "src/browser-verbs.js");
       const D2 = path.join(ROOT, 'r1-sockctl'); fs.mkdirSync(D2, { recursive: true });
       fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
       resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
