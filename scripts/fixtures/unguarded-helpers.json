@@ -875,6 +875,7 @@
   "test-stream-hdr.mjs": 1,
   "test-stream-leg-fallback.mjs": 1,
   "test-stream-locked.mjs": 1,
+  "test-stream-mac-daemon.mjs": 1,
   "test-stream-mac.mjs": 1,
   "test-stream-mic-op.mjs": 1,
   "test-stream-op.mjs": 1,
