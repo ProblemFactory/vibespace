@@ -32,6 +32,13 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-ci — line 828's follow (line 926, 主开发 r3837 + r4125; the unit itself shipped in 2.369.419)
 - WHAT: the usage window follows the prices' hold (the family's held lists: a start or an end loads it again); a torn prices file no longer throws the ledger backfill at every start: by r4125 the prices are asked after their hold settles once (pricesSettled — the helper's own verdict, never its word; the backfill a stepped pass on a torn start); while held a cost list ranks by tokens; an editor typed in before a hold says the typing was not saved.
 
+### bl-browser-b — r3261 (its second unit): browser-takeovers.json under the store-read law
+- THE FIND: src/server/browser-keeper.js `loadRequests` took ANY failed read of the takeover requests as an empty queue, and the next write (an agent's ask, the person's Done, an item's note, a lease's end) wrote the file over: every open request waiting for a person lost, and a page verb ran on a browser a person had been asked to take over.
+- THE CURE, on src/store-read-hold.js: HELD, the queue, a request by its id and the agent's open request answer the hold by name (503 `takeovers_unread`); every writer is refused before anything moves; a page verb is refused (fail closed); nothing is written over the file; read again off the loop, lifted with no restart. Torn bytes kept aside once (0600), then empty with the damaged mark (read back at a start); «Waiting for you» says the hold or the damage in place; the family's notice names it.
+- THE REMOVERS (r3019): none by the file's silence — the closed tail's trim is inside the refused write; a pressed For-you item is put back while held.
+- LEGS: scripts/test-browser-takeovers-held.mjs (new, fast) — the real keeper, two requests on two leases, two placed refusals; red at the release 0a031b541 first.
+- THE ROUND's CURE (r4130): the leg's unreadable store is a PLACED refusal of the read call (no mode change, no skip); while held the idle release releases nothing and the stop list says «unknown»; the agent's words and the CLI's wait say the hold; a For-you press put back is said to the person; the damaged mark ends at the first new request; legs for the save's own guard, once-per-content across a restart and the CLI's printed line.
+
 ## 2.369.419 — 2026-11-25
 
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)

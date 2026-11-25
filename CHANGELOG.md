@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - If VibeSpace cannot read your drafts, Stage layout or upload history, it no longer writes an empty copy over them; what you type meanwhile stays on the page.
 - On slow storage, VibeSpace no longer stalls for a moment every few seconds while you type a draft or rearrange Stage.
+- If VibeSpace cannot read the requests waiting for you to take over a browser, it now says so and keeps them instead of writing over them.
 
 ## 2.369.419 — 2026-11-25
 
