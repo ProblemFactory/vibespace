@@ -190,6 +190,12 @@ console.log('⑨ r3199 / r3920 — a torn record the person removes is «not the
   // control: the wait for the FILE alone (the form those runs had) reads the removed record inside that window — still unread
   const HELD = new Map(), realWrite = fs.promises.writeFile;
   fs.promises.writeFile = function (p, ...a) { const k = typeof p === 'string' ? p : ''; for (const [pre, g] of HELD) if (k.startsWith(pre)) return realWrite.call(fs.promises, p, ...a).then(() => g.p); return realWrite.call(fs.promises, p, ...a); };
+  // r4150: the helper may put a written part in place by an exclusive hard LINK (copyFile only where links are refused): the copy's
+  // answer is held on each of those roads too — the copy's file there, its fact not yet
+  const realCopy = fs.promises.copyFile, realLink = fs.promises.link;
+  const heldAt = (dst, real, args) => { const k = typeof dst === 'string' ? dst : ''; for (const [pre, g] of HELD) if (k.startsWith(pre)) return real.apply(fs.promises, args).then(() => g.p); return real.apply(fs.promises, args); };
+  fs.promises.copyFile = function (src, dst, ...a) { return heldAt(dst, realCopy, [src, dst, ...a]); };
+  fs.promises.link = function (src, dst, ...a) { return heldAt(dst, realLink, [src, dst, ...a]); };
   const hold = (sock) => { const g = {}; g.p = new Promise((res) => { g.go = res; }); HELD.set(path.join(META_DIR, sock + '.json.corrupt-'), g); return g; };
   const fileThere = (sock) => fs.readdirSync(META_DIR).some((n) => n.startsWith(sock + '.json.corrupt-'));
   const until = async (pred) => { for (let i = 0; i < 400 && !pred(); i++) await sleep(25); return pred(); };
@@ -204,7 +210,7 @@ console.log('⑨ r3199 / r3920 — a torn record the person removes is «not the
   const placed = (await until(() => fileThere(s))) && !copyOf(s);   // the file there, its fact not yet: the window placed
   g9.go();
   const copiedOk = await copied(s);
-  fs.promises.writeFile = realWrite;
+  fs.promises.writeFile = realWrite; fs.promises.copyFile = realCopy; fs.promises.link = realLink;
   const rows = SMV && typeof SMV.rows === 'function' ? SMV.rows() : [];
   const named = rows.find((r) => r.file === s + '.json');
   fs.unlinkSync(f);
@@ -260,12 +266,19 @@ console.log('⑫ r3245 (1) — a live conversation whose record is unread at a s
   const lineOf = (text, head) => { const a = text.indexOf(head); return a < 0 ? '' : text.slice(a, text.indexOf('\n', a)); };
   const sfm = braces(BR, 'function sessionFromMeta(meta, transportFacts) {');
   const BLOCK = braces(BR, "if (require('./session-meta-verdict.js').isUnread(meta)) {");
+  // r4150: THE SLICE TAKES WHAT IT NEEDS — every name of boot-restore's OWN top-level requires that sessionFromMeta reads comes from the
+  // same module (the release's restoredForkSource came after this leg was written: a fixed list of stand-ins went stale)
+  const GIVEN = new Set(['require', 'activeSessions', 'os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'console', 'meta', 'SOCK']);
+  const REQ = new Map();
+  for (const m of BR.matchAll(/^const \{([^}]+)\} = require\('([^']+)'\)/gm)) for (const part of m[1].split(',')) { const [from, as] = part.split(':').map((x) => x.trim()); if (from && !GIVEN.has(as || from)) REQ.set(as || from, { mod: m[2], key: from }); }
+  const NEEDED = [...REQ.keys()].filter((n) => new RegExp(`\\b${n}\\b`).test(sfm));
+  const neededOf = () => NEEDED.map((n) => { const r = REQ.get(n); return require(path.join(REPO, 'src/server', r.mod))[r.key]; });
   const restore = (block) => {   // the restore's step for ONE live socket, its unread branch as shipped; a socket past it is ADOPTED
     const live = new Map();
     const req = (m) => (m === './session-meta-verdict.js' ? SMV : require(m));
-    new Function('require', 'activeSessions', 'os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'console', 'meta', 'SOCK',
+    new Function('require', 'activeSessions', 'os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', 'console', 'meta', 'SOCK', ...NEEDED,
       `${sfm}\nfunction* each() { for (const sockFile of [SOCK]) { const socketPath = '/made/up/sockets/' + sockFile;\n${block}\nactiveSessions.set('sess-minted-' + sockFile, { adopted: true }); yield; } }\nfor (const _ of each()) { }`)(
-      req, live, os, () => null, () => ({}), 'v-made-up', { log: () => { }, warn: () => { } }, meta, S);
+      req, live, os, () => null, () => ({}), 'v-made-up', { log: () => { }, warn: () => { } }, meta, S, ...neededOf());
     return live;
   };
   const live = restore(BLOCK), L = live.get(S);
