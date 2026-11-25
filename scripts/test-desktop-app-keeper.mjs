@@ -44,6 +44,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs'; // the flake census r2: a wait that runs out SAYS so
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 
@@ -62,6 +63,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 100) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
+/** A WAIT ON THE FACT THE LEG JUDGES (the flake census r2, 主开发 r4456): a generous bound whose expiry is a NAMED harness line (the one
+ *  mark, scripts/lib/timed-out.mjs) — never a fixed sleep before a read, never a silent null */
+const waitFact = async (fn, ms, what, step = 100) => { const v = await until(fn, ms, step); return v || markTimedOut(v, ms, what); };
 /** ONE record as data/desktop-apps.json holds it NOW (read whole, at once — the store writer lands it off the loop since B-0248, so an
  *  act's record is on disk only once it LANDED: a leg reads it at a named moment or waits for it, bounded) — null: no such record */
 const diskRecOf = (k, id) => { try { return JSON.parse(fs.readFileSync(k.storeFile, 'utf8')).apps[id] || null; } catch (e) { return { unread: (e && e.code) || String(e) }; } };
@@ -291,7 +295,7 @@ console.log('§2 the ONE ws bridge');
   let authed = true;
   // two FAKE xpra upstreams (ws servers on loopback): each records what reached it — a second id must never reach the first's port
   const { WebSocketServer } = require('ws');
-  const fakeUp = async ({ onConnect = null } = {}) => { const wss = new WebSocketServer({ host: '127.0.0.1', port: 0, handleProtocols: (ps) => (ps.has('binary') ? 'binary' : false) }); await new Promise((r) => wss.on('listening', r)); const st = { conns: 0, got: [], protocols: [], closed: 0 }; wss.on('connection', (c, req) => { st.conns++; st.protocols.push(c.protocol); if (onConnect) onConnect(c); c.on('message', (m, isBinary) => { st.got.push({ bytes: Buffer.from(m), isBinary }); c.send(Buffer.concat([Buffer.from('echo:'), Buffer.from(m)])); }); c.on('close', () => { st.closed++; }); }); return { port: wss.address().port, st, close: () => new Promise((r) => { for (const c of wss.clients) { try { c.close(1001, 'upstream gone'); } catch {} } wss.close(r); }) }; }; // ws ≥ 8: close() alone leaves clients open and the http server's close waits for them
+  const fakeUp = async ({ onConnect = null, echoHold = 0 } = {}) => { const wss = new WebSocketServer({ host: '127.0.0.1', port: 0, handleProtocols: (ps) => (ps.has('binary') ? 'binary' : false) }); await new Promise((r) => wss.on('listening', r)); const st = { conns: 0, got: [], protocols: [], closed: 0 }; wss.on('connection', (c, req) => { st.conns++; st.protocols.push(c.protocol); if (onConnect) onConnect(c); c.on('message', (m, isBinary) => { st.got.push({ bytes: Buffer.from(m), isBinary }); const echo = () => c.send(Buffer.concat([Buffer.from('echo:'), Buffer.from(m)])); if (echoHold) setTimeout(echo, echoHold); else echo(); }); c.on('close', () => { st.closed++; }); }); return { port: wss.address().port, st, close: () => new Promise((r) => { for (const c of wss.clients) { try { c.close(1001, 'upstream gone'); } catch {} } wss.close(r); }) }; }; // ws ≥ 8: close() alone leaves clients open and the http server's close waits for them
   const upA = await fakeUp(), upB = await fakeUp();
   const streamLog = [];
   const stream = S.create({ auth: { requestAuthed: () => authed }, resolveTarget: (id) => (id === 'xpra-one' ? { kind: 'xpra', port: upA.port } : id === 'xpra-two' ? { kind: 'xpra', port: upB.port } : id === 'weird' ? { kind: 'rdp', port: 1 } : k.streamTarget(id)), onInput: (id) => inputs.push(id), log: { warn() {}, log: (l) => streamLog.push(String(l)) } });
@@ -398,21 +402,40 @@ console.log('§2 the ONE ws bridge');
     await new Promise((r) => srvC.close(r));
     // NETEM (dev-only): with the gate ON and ?netem=rtt:120 an echo round trip takes ≥ 120 ms; with the gate OFF the same url is plain
     const upD = await fakeUp();
-    for (const [gate, min] of [[true, 115], [false, 0]]) {
+    for (const [n, [gate, min]] of [[true, 115], [false, 0]].entries()) {
       const streamD = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upD.port }), netemEnabled: gate, log: { warn() {}, log() {} } });
       const srvD = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
       srvD.on('upgrade', (req, socket, head) => streamD.handleUpgrade(req, socket, head, 'xpra-d'));
       const portD = await freePort(); await new Promise((r) => srvD.listen(portD, '127.0.0.1', r));
       const wsd = new WebSocket(`ws://127.0.0.1:${portD}/api/desktop/xpra-d/stream?netem=rtt:120`, ['binary']);
       await new Promise((r) => wsd.on('open', r));
-      await sleep(150); // the upstream open
+      await waitFact(() => (upD.st.conns === n + 1 ? true : null), 10000, `netem gate ${gate ? 'ON' : 'OFF'}: the bridge's upstream never opened`); // the upstream open: its OWN fact, never a sleep
       const t0 = Date.now();
       const rt = await new Promise((resolve) => { wsd.once('message', () => resolve(Date.now() - t0)); wsd.send(rpkt('ping')); });
-      ok(gate ? rt >= min && rt < 1000 : rt < 100, `netem gate ${gate ? 'ON' : 'OFF'}: an echo round trip through the bridge took ${rt} ms (${gate ? '≥ 120 ms — rtt/2 each way' : 'no delay: the parameter is IGNORED off the gate'})`);
+      // the census r2: an upper time bound is no verdict (a loaded box ADDS time, never subtracts it) — gate ON keeps its lower bound;
+      // gate OFF is judged on the bridge's own fact: no shaper installed (stats.netem 0, netemOf null); the round trip printed, not judged
+      ok(gate ? rt >= min : streamD.stats().netem === 0 && streamD.netemOf('xpra-d') === null, `netem gate ${gate ? 'ON' : 'OFF'}: ${gate ? `an echo round trip through the bridge took ${rt} ms (≥ 115 — rtt/2 each way)` : `no shaper on the bridge — the parameter is IGNORED off the gate (measured, not judged: ${rt} ms)`}`);
       ok(streamD.stats().netem === (gate ? 1 : 0) && streamD.netemEnabled === gate, `stats.netem counts ${gate ? 'the one' : 'no'} shaped bridge`);
       ok(streamD.setNetem('any', 'rtt:50') === (gate ? null : null) || true, 'setNetem exists'); // shape asserted below
       ok((gate ? JSON.stringify(streamD.setNetem('z', 'rtt:50,kbps:2000')) === '{"rttMs":50,"kbps":2000}' : streamD.setNetem('z', 'rtt:50') === null) && (gate ? JSON.stringify(streamD.netemOf('z')) === '{"rttMs":50,"kbps":2000}' : streamD.netemOf('z') === null), `setNetem/netemOf ${gate ? 'remember a spec per id' : 'answer null off the gate'}`);
       wsd.close(); await new Promise((r) => srvD.close(r));
+    }
+    // PLACED (the census r2 — the find made red at will): the SAME fake upstream holding its echo (a loaded box's socket I/O) — gate OFF
+    // 150 ms, gate ON 1000 ms: the old verdicts («< 100» off, «< 1000» on) read RED with nothing shaped wrongly; today's verdicts hold
+    for (const [gate, hold] of [[false, 150], [true, 1000]]) {
+      const upH = await fakeUp({ echoHold: hold });
+      const streamH = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upH.port }), netemEnabled: gate, log: { warn() {}, log() {} } });
+      const srvH = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+      srvH.on('upgrade', (req, socket, head) => streamH.handleUpgrade(req, socket, head, 'xpra-h'));
+      const portH = await freePort(); await new Promise((r) => srvH.listen(portH, '127.0.0.1', r));
+      const wsh = new WebSocket(`ws://127.0.0.1:${portH}/api/desktop/xpra-h/stream?netem=rtt:120`, ['binary']);
+      await new Promise((r) => wsh.on('open', r));
+      await waitFact(() => (upH.st.conns === 1 ? true : null), 10000, `PLACED gate ${gate ? 'ON' : 'OFF'}: the upstream never opened`);
+      const t1 = Date.now();
+      const rtH = await new Promise((resolve) => { wsh.once('message', () => resolve(Date.now() - t1)); wsh.send(rpkt('ping')); });
+      const oldOk = gate ? rtH >= 115 && rtH < 1000 : rtH < 100, nowOk = gate ? rtH >= 115 : streamH.stats().netem === 0 && streamH.netemOf('xpra-h') === null;
+      ok(!oldOk && nowOk, `PLACED netem gate ${gate ? 'ON' : 'OFF'}: the upstream holding its echo ${hold} ms — the round trip took ${rtH} ms: the OLD verdict reads RED with nothing shaped wrongly, today's verdict holds`);
+      wsh.close(); await new Promise((r) => srvH.close(r)); await upH.close();
     }
     await upD.close();
     // THE POLICY PER PACKET on the xpra kind (2026-09-22, the verifier's 09-policy repro): a REFUSED viewer (Watch
@@ -867,14 +890,25 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const r = k.get(rec.id);
   ident.resetProcTables();
   const pids = k.sessionPids(r);
-  const a0 = D.procSample(r.pids.app), s0 = await D.sessionSample(pids); await sleep(1000);
-  const a1 = D.procSample(r.pids.app), s1 = await D.sessionSample(pids);
-  ok(a0 && a1 && s0 && s1 && a1.cpuTicks - a0.cpuTicks < 20 && s1.cpuTicks - s0.cpuTicks >= 50, `CONTROL: over one second the recorded pid burned ${a1 && a0 ? a1.cpuTicks - a0.cpuTicks : '?'} ticks (the round-1 sample — blind) while its session (${pids.length} pids) burned ${s1 && s0 ? s1.cpuTicks - s0.cpuTicks : '?'}`);
+  // PLACED (the census r2 — the find made red at will): the session's burner HELD stopped through the old one-second window (a loaded
+  // box starving it) — the old read (≥ 50 ticks in a second) is RED with nothing wrong in the guard
+  const others = pids.filter((p) => p !== r.pids.app);
+  for (const p of others) { try { process.kill(p, 'SIGSTOP'); } catch { /* gone */ } }
+  const p0 = await D.sessionSample(pids); await sleep(1000); const p1 = await D.sessionSample(pids);
+  for (const p of others) { try { process.kill(p, 'SIGCONT'); } catch { /* gone */ } }
+  ok(!!p0 && !!p1 && p1.cpuTicks - p0.cpuTicks < 50, `PLACED: the burner held stopped through the old one-second window — its session burned ${p0 && p1 ? p1.cpuTicks - p0.cpuTicks : '?'} ticks (< 50): the old CONTROL reads RED with nothing wrong`);
+  // THE CURE: a COUNT, never a rate over a clock — the session sampled until it has burned 50 ticks (a named expiry); the recorded pid's
+  // own ticks at that moment are under a quarter of it (the round-1 sample — blind)
+  const a0 = D.procSample(r.pids.app), s0 = await D.sessionSample(pids);
+  const s1 = await waitFact(async () => { const sNow = await D.sessionSample(pids); return sNow && s0 && sNow.cpuTicks - s0.cpuTicks >= 50 ? sNow : null; }, 30000, 'CONTROL: the session never burned 50 ticks', 200);
+  const a1 = D.procSample(r.pids.app);
+  ok(a0 && a1 && s0 && s1 && (a1.cpuTicks - a0.cpuTicks) * 4 < s1.cpuTicks - s0.cpuTicks, `CONTROL: over one second the recorded pid burned ${a1 && a0 ? a1.cpuTicks - a0.cpuTicks : '?'} ticks (the round-1 sample — blind) while its session (${pids.length} pids) burned ${s1 && s0 ? s1.cpuTicks - s0.cpuTicks : '?'}`);
   const liveNow = await until(() => { const l = k.get(rec.id).live; return l && l.cpuPct > 50 ? l : null; }, 5000);
   ok(liveNow && liveNow.pids >= 2 && liveNow.cpuPct > 50 && liveNow.memMetric === 'pss' && liveNow.memBytes > 0, `the broadcast live sample counts the session's pids, their CPU and their footprint (${liveNow && liveNow.pids} pids, ${liveNow && Math.round(liveNow.cpuPct)} %, ${liveNow && Math.round(liveNow.memBytes / 2 ** 20)} MB PSS)`, liveNow);
   const tripped = await reportedOver(k, rec.id);
   ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over) && k.get(rec.id).state === 'ready', 'a burner in a CHILD is REPORTED (the whole session is sampled) — and left running', tripped && tripped.live);
-  await k.stop(rec.id); await sleep(300); ident.resetProcTables();
+  await k.stop(rec.id);
+  await waitFact(() => { ident.resetProcTables(); return k.sessionPids(k.get(rec.id)).length === 0 ? true : null; }, 20000, 'the user\'s stop never emptied the session');
   ok(k.sessionPids(k.get(rec.id)).length === 0, 'and the user\'s stop empties every session (the `yes` child too)');
   k.shutdown();
 }
@@ -1891,7 +1925,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
     if (!XDPY16) skip('no xdpyinfo on PATH — the display-size legs read the X screen with it');
     else {
       const sizeOf = (id) => { const m = /dimensions:\s+(\d+)x(\d+) pixels/.exec(execFileSync(XDPY16, [], { env: k.x11EnvFor(id) }).toString()); return m ? `${m[1]}x${m[2]}` : null; };
-      const settle = (id, want, ms = 5000) => until(() => (sizeOf(id) === want ? want : null), ms, 100);
+      const settle = (id, want, ms = 30000) => waitFact(() => (sizeOf(id) === want ? want : null), ms, `xpra never applied the display size ${want}`);   // the census r2: 30 s and a named expiry (5 s was a clock on a loaded box)
       let own16 = false;
       const policy16 = (id, v) => (v === 'v-own' || (own16 && v === 'v-watch') ? { relay: true } : { relay: false, code: 'watch-mode' });
       const b16 = await bridgeOn(S, policy16);
@@ -1906,15 +1940,16 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       w6.send(P.displayPacket(['display-configure'], { width: 1, height: 1 }));
       w6.send(P.displayPacket(['configure-display'], { width: 480, height: 360 }));
       w6.send(P.displayPacket([], { width: 320, height: 240 })); // the legacy desktop_size spelling
-      await sleep(2500);
+      await waitFact(() => (b16.br.stats().dropped - d6 >= 3 ? true : null), 20000, 'the bridge never counted the three refused size packets');   // the census r2: their own count, never a sleep
       ok(sizeOf(r6.id) === '900x600' && b16.br.stats().dropped - d6 === 3, `its display-configure (1x1), configure-display (480x360) and desktop_size (320x240) never reach xpra: the display is ${sizeOf(r6.id)} 2.5 s later, all three counted refused (+${b16.br.stats().dropped - d6})`);
       w6.close();
       await sleep(800);
       ok(sizeOf(r6.id) === '900x600', `…and after the Watch viewer closes the holder's size stands (${sizeOf(r6.id)})`);
       // THE TAKEOVER: the pane that watched becomes the holder — the size it asked for while refused is its fit now
       const w7 = await viewer(b16, r6.id, 'v-watch');
+      const d7 = b16.br.stats().dropped;
       w7.send(P.displayPacket(['display-configure'], { width: 700, height: 500 }));
-      await sleep(1500);
+      await waitFact(() => (b16.br.stats().dropped > d7 ? true : null), 20000, 'the bridge never counted the watcher\'s refused 700x500');   // HELD before the takeover flips (else it is read as the holder's)
       ok(sizeOf(r6.id) === '900x600', `still refused: its 700x500 is held, not applied (${sizeOf(r6.id)})`);
       own16 = true;
       w7.send(P.pingEcho(3));
@@ -1933,12 +1968,27 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       o9.send(P.displayPacket(['display-configure'], { width: 900, height: 600 }));
       await settle(r9.id, '900x600');
       const w9 = await viewer(bn, r9.id, 'v-watch');
+      const d9 = bn.br.stats().dropped;
       w9.send(P.displayPacket(['display-configure'], { width: 700, height: 500 }));
-      await sleep(800);
+      await waitFact(() => (bn.br.stats().dropped > d9 ? true : null), 20000, 'CONTROL: the bridge never counted the watcher\'s refused 700x500');   // held BEFORE the flip
+      const rl9 = bn.br.stats().relayed;
       ownN = true; w9.send(P.pingEcho(4));
-      await sleep(2000);
+      await waitFact(() => (bn.br.stats().relayed > rl9 ? true : null), 20000, 'CONTROL: the bridge never relayed the takeover\'s ping');   // the takeover read through, never a 2 s sleep
       ok(sizeOf(r9.id) === '900x600', `CONTROL: fenced without the replay, the pane that took over is left at the old holder's ${sizeOf(r9.id)} instead of its own 700x500`);
-      w9.close(); o9.close(); await k.stop(r9.id); await bn.close();
+      w9.close(); o9.close(); await k.stop(r9.id);
+      // PLACED (the census r2 — L1940's late fact at will): the watcher's 700x500 read by the bridge AFTER the takeover flips — the no-replay
+      // mutant then relays it as the holder's and the display becomes 700x500: the OLD read (900x600 after a sleep) is RED with nothing
+      // wrong in the fence; the cure above waits for the refusal to be COUNTED before the flip, so it can never be read after it
+      ownN = false;
+      const r9p = await launch('k16-noreplay-late');
+      const o9p = await viewer(bn, r9p.id, 'v-own');
+      o9p.send(P.displayPacket(['display-configure'], { width: 900, height: 600 }));
+      await settle(r9p.id, '900x600');
+      const w9p = await viewer(bn, r9p.id, 'v-watch');
+      ownN = true; w9p.send(P.displayPacket(['display-configure'], { width: 700, height: 500 }));   // read after the flip
+      const late = await settle(r9p.id, '700x500');
+      ok(!!late && sizeOf(r9p.id) !== '900x600', `PLACED: the watcher's size read AFTER the flip — the mutant relays it as the holder's (${sizeOf(r9p.id)}): the old CONTROL read (900x600) is RED with nothing wrong`);
+      w9p.close(); o9p.close(); await k.stop(r9p.id); await bn.close();
       // CONTROL: the r7 allowlist (the display-size packets as watch types) — the same Watch viewer resizes the holder's display
       const fromD = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
       ok(srcS.split(fromD).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
@@ -1950,8 +2000,9 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       await settle(r8.id, '900x600');
       const w8 = await viewer(bd, r8.id, 'v-watch');
       w8.send(P.displayPacket(['display-configure'], { width: 1, height: 1 }));
-      const shrunk = await until(() => { const s = sizeOf(r8.id); return s && s !== '900x600' ? s : null; }, 5000, 100);
-      w8.close(); await sleep(800);
+      const shrunk = await waitFact(() => { const s = sizeOf(r8.id); return s && s !== '900x600' ? s : null; }, 30000, 'CONTROL: xpra never applied the watcher\'s display-configure');
+      w8.close();
+      await waitFact(() => (!bd.br.viewersOf(r8.id).includes('v-watch') ? true : null), 20000, 'CONTROL: the bridge never dropped the closed watcher');   // its close PROCESSED, never a sleep
       const after = sizeOf(r8.id);
       ok(!!shrunk && after !== '900x600', `CONTROL: through the r7 allowlist the same Watch viewer resizes the holder's display (900x600 ⇒ ${shrunk}) and it stays ${after} after the watcher closes — the hole`);
       o8.close(); await k.stop(r8.id);
