@@ -76,6 +76,11 @@
 //        [--no-netns --claude <fake script>]   no namespace: a FAKE claude only (below)
 //        [--no-netns --loopback-real --claude <the real claude>]   no namespace, the REAL binary (the loopback-real rung, below)
 //        [--gap ms] [--flush-ms ms] [--near-ms ms] [--scope-wait-ms ms]   (the fake's fast self-test shortens the waits)
+//        [--variant entry [--entry <name>]]   主开发 r4483: the entry label's pair (entry-off, entry-on: the checkpoint pair's turn
+//                                             without and with CLAUDE_CODE_ENTRYPOINT=<name>, vibespace unless named; a name the
+//                                             setting refuses is REFUSED before anything starts) — the record's entry-on result
+//                                             carries the billing line's labels, the user agents and the first stream events' shape;
+//                                             exit 5 when the pair read FAIL (src/entry-measure.js entryVerdict)
 //
 // Needs `sudo -n` (for the network namespace) and `strace`. Without them it
 // REFUSES — it never runs a claude process that could reach the network.
@@ -124,6 +129,7 @@ const NETNS = !flag('no-netns');
 const LOOPBACK_REAL = flag('loopback-real') && !NETNS; // the real binary without the namespace (header)
 const { OAT_VARIANTS, MINT_VARIANT, oatInFile, mintScopesOf, cliVersionOf, measuredVersions, withMeasured } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'cli-caps.js'));
 const { CKPT_VARIANTS, ckptSwitchOf } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'ckpt-switch.js')); // row B-437e U0
+const { ENTRY_VARIANTS } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'entry-measure.js')); // 主开发 r4483
 // THE MEASUREMENT IS ONE MODULE (lane cli-self-measure, 2026-11-09): the mock, the variants, the belt and the verdicts live in
 // src/claude-oat-probe.js, which the hub also runs (src/server/cli-self-measure.js) when it first sees a CLI build with no PASS;
 // this script keeps the argv, the sudo netns re-exec and the fixture writer (test-cli-self-measure §1 fails a copy of either; test-oat-measure-fake runs both roads over one fake)
@@ -167,7 +173,7 @@ async function main() {
   const OUT = opt('out', '');
   const all = ['slowstream', 'baseline', 'symlink', 'symlink-bare', 'overwrite', 'hardlink-mtime', 'hardlink-same', 'utimes', 'refresh', 'gate429'];
   const v = opt('variant', 'all');
-  const want = v === 'all' ? all : v === 'oat' ? [...OAT_VARIANTS] : v.split(',').flatMap((x) => (x === 'oat' ? OAT_VARIANTS : x === 'mint' ? [MINT_VARIANT] : x === 'ckpt' ? CKPT_VARIANTS : [x]));
+  const want = v === 'all' ? all : v === 'oat' ? [...OAT_VARIANTS] : v.split(',').flatMap((x) => (x === 'oat' ? OAT_VARIANTS : x === 'mint' ? [MINT_VARIANT] : x === 'ckpt' ? CKPT_VARIANTS : x === 'entry' ? ENTRY_VARIANTS : [x]));
   if (flag('write-mint-fixture') && !want.includes(MINT_VARIANT)) { console.error(`REFUSED: --write-mint-fixture needs the mint variant in the run (--variant mint)`); process.exit(2); }
   const MINT_FIXTURE = opt('mint-fixture', path.join(path.dirname(SELF), 'fixtures', 'oat-mint-scopes.json'));
   const mintFixtureNow = () => { try { return JSON.parse(fs.readFileSync(MINT_FIXTURE, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw new Error(`${MINT_FIXTURE} does not read (${e.message})`); } };
@@ -185,7 +191,7 @@ async function main() {
   if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: '0.0.0', variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture adds this CLI's record to the fixture and keeps every other version's — ${e.message}`); process.exit(2); } }
   let record = null;
   try {
-    record = await PROBE.measure({ claude: opt('claude', ''), rung: RUNG, variants: want, gapMs: Number(opt('gap', '65000')), flushMs: Number(opt('flush-ms', '2500')), nearMs: Number(opt('near-ms', '30000')), ...(Number(opt('scope-wait-ms', '0')) > 0 ? { scopeWaitMs: Number(opt('scope-wait-ms', '0')) } : {}), keep: flag('keep'), dump: opt('dump', '') || null });
+    record = await PROBE.measure({ claude: opt('claude', ''), rung: RUNG, variants: want, gapMs: Number(opt('gap', '65000')), flushMs: Number(opt('flush-ms', '2500')), nearMs: Number(opt('near-ms', '30000')), ...(Number(opt('scope-wait-ms', '0')) > 0 ? { scopeWaitMs: Number(opt('scope-wait-ms', '0')) } : {}), keep: flag('keep'), dump: opt('dump', '') || null, entryName: opt('entry', '') || null });
   } catch (e) {
     if (e && e.refusal) { console.error(`REFUSED: ${e.detail || e.refusal}`); process.exit(2); }
     throw e;
@@ -230,5 +236,8 @@ async function main() {
   // r1107: a STOP is said by the exit code whether or not a fixture was written — the tier stops here (to 主开发)
   const stopped = results.find((x) => x.variant === 'ckpt-on' && x.verdict === 'STOP');
   if (stopped) { console.error(`STOP: what the CLI sends differs with the checkpoint switch — ${stopped.note.slice(0, 400)}`); process.exit(4); }
+  // 主开发 r4483: the entry pair's reading is said by the exit code too (its record is the --out file, read by the coordinator)
+  const entryOn = results.find((x) => x.variant === 'entry-on');
+  if (entryOn && entryOn.verdict !== 'PASS') { console.error(`ENTRY: the entry pair read ${entryOn.verdict} — ${String(entryOn.note).slice(0, 600)}`); process.exit(5); }
   process.exit(0);
 }

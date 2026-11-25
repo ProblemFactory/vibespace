@@ -229,6 +229,23 @@ const HARNESS_SETTINGS = {
       tier: 'advanced',
       apply: { kind: 'spawn', mode: 'terminal' },
     },
+    // THE ENTRY LABEL (主开发 r4483, the owner's word, 2026-11-25): the name a CHAT-mode Claude start's CLI reports on its
+    // requests (CLAUDE_CODE_ENTRYPOINT — the CLI keeps a value already set). ONE stored string (a combobox, like defaultModel):
+    // off (the default) = nothing passed, the CLI's own label; vibespace = ours; a TYPED name (Custom…) judged by the vendor's
+    // naming rule (src/claude-entry-label.js nameVerdict) — a refused name passes NOTHING. NO «cli» option, and a typed cli is
+    // refused (the CLI rewrites cli to sdk-cli on a non-interactive start). Chat only: a terminal start is the CLI's interactive
+    // start, whose own label (cli) is the true one. A running conversation takes a change at its next start. `fact`: the
+    // Settings window draws the verdict of the stored value under the row (src/lib/entry-label-words.js).
+    {
+      key: "entryLabel",
+      type: "enum", default: "off", combobox: true,
+      options: [
+        { value: "off" },
+        { value: "vibespace" },
+      ],
+      fact: 'entry-label',
+      apply: { kind: 'spawn', mode: 'chat' },
+    },
     ],
   },
   codex: {

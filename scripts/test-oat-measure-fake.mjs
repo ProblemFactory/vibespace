@@ -398,5 +398,43 @@ else {
   ok('--write-ckpt-fixture without both variants in the run is REFUSED before anything runs (exit 2, no fixture)', lone.status === 2 && /needs both checkpoint variants/.test(lone.stderr) && !fs.existsSync(path.join(tmp, 'ckpt-fx-lone.json')), `exit ${lone.status}: ${String(lone.stderr).slice(-200)}`);
 }
 
+// ── THE ENTRY LABEL over the fake (主开发 r4483; the verdict's own table is test-claude-entry-label ⑦, fast) ──
+console.log('the entry label over the FAKE claude (主开发 r4483: the request heads and the first stream events, without and with the name)');
+if (!haveStrace) { skip++; console.log('  SKIP the entry runs: no strace on this machine'); }
+else {
+  const runEntry = (mode, tag, extra = []) => {
+    const rec = path.join(tmp, `entry-rec-${tag}.json`);
+    const r = measure(['--claude', wrap(mode), '--variant', 'entry', '--out', rec, ...extra]);
+    let R = null; try { R = JSON.parse(fs.readFileSync(rec, 'utf8')); } catch { }
+    const off = R && R.results.find((x) => x.variant === 'entry-off'), on = R && R.results.find((x) => x.variant === 'entry-on');
+    return { r, R, off, on };
+  };
+  const g = runEntry('entry', 'good');
+  console.log(`    (entry-on: ${g.on ? `${g.on.verdict} — ${g.on.note}` : 'no result'}${g.r.status ? ` · exit ${g.r.status}: ${String(g.r.stderr).slice(-300)}` : ''})`);
+  ok('the honest fake: with the name the billing line says vibespace on every request, sdk-cli without it; the first stream events keep their shape ⇒ PASS (exit 0); the run is not void, nothing left loopback',
+    g.r.status === 0 && !!g.on && g.on.verdict === 'PASS' && g.on.entry.verdict === 'PASS' && JSON.stringify(g.on.entry.marks.on.labels) === '["vibespace"]' && JSON.stringify(g.on.entry.marks.off.labels) === '["sdk-cli"]'
+      && g.on.entry.events.on.length >= 2 && JSON.stringify(g.on.entry.events.on) === JSON.stringify(g.on.entry.events.off) && g.on.switch === 'CLAUDE_CODE_ENTRYPOINT=vibespace' && g.off.switch === 'unset' && !g.R.void && !g.R.aborted && g.R.escapes.length === 0,
+    g.on && g.on.note);
+  ok('…the user agents are recorded as the CLI sent them (the label inside), and nothing else differs (elsewhere empty)',
+    !!g.on && JSON.stringify(g.on.entry.marks.on.uas) === '["claude-cli/9.9.9 (external, vibespace)"]' && JSON.stringify(g.on.entry.marks.off.uas) === '["claude-cli/9.9.9 (external, sdk-cli)"]' && g.on.entry.elsewhere.length === 0,
+    g.on && JSON.stringify(g.on.entry.marks));
+  const named = runEntry('entry', 'named', ['--entry', 'my-team']);
+  ok('--entry my-team: the run sets that name and the billing line says it', named.r.status === 0 && !!named.on && named.on.switch === 'CLAUDE_CODE_ENTRYPOINT=my-team' && JSON.stringify(named.on.entry.marks.on.labels) === '["my-team"]', named.on && named.on.note);
+  const refused = runEntry('entry', 'refused', ['--entry', 'cli']);
+  ok('--entry cli: REFUSED before anything starts (exit 2, the setting\'s own rule), no record', refused.r.status === 2 && /setting refuses \(entry_name_cli\)/.test(refused.r.stderr) && !refused.R, `exit ${refused.r.status}: ${String(refused.r.stderr).slice(-200)}`);
+  const ig = runEntry('entry-ignore', 'ignore');
+  ok('RED CONTROL: a fake that never takes the name ⇒ FAIL (exit 5), the billing line named as it read',
+    !!ig.on && ig.on.verdict === 'FAIL' && ig.r.status === 5 && ig.on.entry.findings.some((x) => /^with the name, the billing line said \["sdk-cli"\]/.test(x)), ig.on && `exit ${ig.r.status}: ${ig.on.note}`);
+  const sh = runEntry('entry-shape', 'shape');
+  ok('RED CONTROL: a fake whose first event gains a key with the name ⇒ FAIL (exit 5) on the events\' shape, the event named',
+    !!sh.on && sh.on.verdict === 'FAIL' && sh.r.status === 5 && sh.on.entry.findings.some((x) => /^the first stream events differ in shape: #1 system\/init \{subtype,type\} \| system\/init \{entry,subtype,type\}/.test(x)), sh.on && `exit ${sh.r.status}: ${sh.on.note}`);
+  const ex = runEntry('entry-extra', 'extra');
+  ok('a fake that sends one header more with the name ⇒ PASS, the header RECORDED by name «elsewhere» (read by the coordinator, never judged here)',
+    !!ex.on && ex.on.verdict === 'PASS' && ex.r.status === 0 && ex.on.entry.elsewhere.some((x) => /header only with the name: x-fake-entry$/.test(x)), ex.on && ex.on.note);
+  const ord = measure(['--claude', wrap('entry'), '--variant', 'entry-on,entry-off', '--out', path.join(tmp, 'entry-rec-order.json')]);
+  let RO = null; try { RO = JSON.parse(fs.readFileSync(path.join(tmp, 'entry-rec-order.json'), 'utf8')); } catch { }
+  ok('the pair runs off first whatever the order asked (entry-on is read against entry-off)', ord.status === 0 && !!RO && JSON.stringify(RO.results.map((x) => x.variant)) === '["entry-off","entry-on"]' && RO.results[1].entry.verdict === 'PASS', `exit ${ord.status}: ${RO && JSON.stringify(RO.results.map((x) => x.variant))}`);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
 process.exit(fail ? 1 : 0);
