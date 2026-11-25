@@ -4,8 +4,8 @@
 // The engine is scripts/harness-fences.mjs (the generator scripts/harness-new.mjs imports the same row kinds). Here:
 //   §1 the REAL registry over the real tree ⇒ green (or a real fence lacks an id today — add the row, never an exemption);
 //      the fence TABLE printed (file → shape → the ids it names), the row kinds, the rules
-//   §2 THE RED CONTROL: a minimal descriptor (`zz-probe`, the REQUIRED keys, a fake wrapper) register()ed in a CHILD
-//      process ⇒ the census names EXACTLY the fences that lack it — every table site, every applicable row kind — and
+//   §2 THE RED CONTROL: a minimal descriptor (`zz-probe`, the REQUIRED keys, a fake wrapper) register()ed in a FRESH
+//      registry (this process, its src/ modules loaded again, the cache put back) ⇒ the census names EXACTLY the fences that lack it — every table site, every applicable row kind — and
 //      the Antigravity lane's eleven traps are all among them, by file; the built-ins stay green beside it
 //   §3 MUTANTS: a fence's row deleted for an existing id ⇒ RED naming the file and the row (a test's id list, a cli-registry
 //      EXCLUDED row, a kb-features table row, the §78 family list); a dead exemption ⇒ RED; a rule's needle gone ⇒ RED
@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { census, scanSet, harnessNames, loadRegistry, formatChecklist, FENCE_EXEMPT, ROW_KINDS, RULES, tableSites, mdTables } from './harness-fences.mjs';
 
@@ -55,29 +56,32 @@ ok(real.sites.some((s) => s.file === 'scripts/test-quota-source.mjs' && s.countP
   const { BACKEND_CAPS } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/backend-caps.js'));
   ok((tpl.match(/'modelFacts'/g) || []).length >= 2 && Object.values(BACKEND_CAPS).every((r) => typeof r.modelFacts === 'boolean'), 'the harness-add checklist names the `modelFacts` capability (both harness-new templates) and every built-in caps row declares it as a boolean', Object.keys(BACKEND_CAPS).filter((id) => typeof BACKEND_CAPS[id].modelFacts !== 'boolean'));
 }
-console.log('§2 THE RED CONTROL: a planted descriptor in a child — the checklist');
-const DIR = scratch('hac'); fs.mkdirSync(DIR, { recursive: true });
+console.log('§2 THE RED CONTROL: a planted descriptor in a FRESH registry — the checklist');
 const PROBE = { id: 'zz-probe', label: 'ZZ Probe', kind: 'chat', wrapper: 'data/bin/zz-wrapper.js' };
 const WRAPPER = '#!/usr/bin/env node\n// a fake chat wrapper: it reaches the agent API (VIBESPACE_API), as agy\'s does\nconst api = process.env.VIBESPACE_API;\n';
-const child = path.join(DIR, 'probe.mjs');
-fs.writeFileSync(child, `import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const REPO = process.argv[2];
-const H = require(REPO + '/src/harnesses/index.js');
-const { BackendAdapter } = require(REPO + '/src/adapters/base.js');
-class ZzAdapter extends BackendAdapter {}
-// the REQUIRED keys (id/label/kind/caps/Adapter/adapterConfig/wrapper) — and the quota contract register() demands of everyone (NULL_QUOTA: no limit signal)
-H.register({ ...${JSON.stringify(PROBE)}, caps: { pool: false }, Adapter: ZzAdapter, adapterConfig: (cfg) => ({ ptyWrapper: cfg.ptyWrapper }), quota: H.NULL_QUOTA });
-const F = await import(REPO + '/scripts/harness-fences.mjs');
-const r = F.census({ repo: REPO, descriptors: H.list(), builtin: H.ids().filter((id) => H.isBuiltin(id)), override: { ${JSON.stringify(PROBE.wrapper)}: ${JSON.stringify(WRAPPER)} } });
-process.stdout.write(JSON.stringify({ ok: r.ok, ids: H.ids(), sites: r.sites.length, missing: r.missing, rows: r.rows, dead: r.dead, rules: r.rules.map((x) => ({ suite: x.suite, alive: x.alive })), text: F.formatChecklist(r) }));
-`);
-const run = spawnSync(process.execPath, [child, REPO], { encoding: 'utf8', maxBuffer: 1 << 26 });
-let P = null; try { P = JSON.parse(run.stdout); } catch { P = null; }
-ok(run.status === 0 && P, `the child registered zz-probe beside the built-ins and ran the census (exit ${run.status})`, (run.stderr || '').slice(0, 400));
+// r4363 (B-7e49; profiled alone: the child paid the census's scan COLD, 2.9 s, plus a node start, about 4 s of this suite's 12 s): the
+// planted descriptor is register()ed in a FRESH registry IN THIS PROCESS — every src/ module dropped from the module cache, the
+// registry and its adapter base loaded again, the same register() and the same census the child ran, then the cache put back EXACTLY
+// (this process's own registry and caps are never touched: judged below). The census reuses the scan already made (its warm memo)
+const requireF = createRequire(import.meta.url), SRC_DIR = path.join(REPO, 'src') + path.sep;
+const inFreshSrc = (fn) => { const snap = { ...requireF.cache }; for (const k of Object.keys(requireF.cache)) if (k.startsWith(SRC_DIR)) delete requireF.cache[k]; try { return fn(); } finally { for (const k of Object.keys(requireF.cache)) if (!(k in snap)) delete requireF.cache[k]; Object.assign(requireF.cache, snap); } };
+let P = null, freshErr = null;
+try {
+  P = inFreshSrc(() => {
+    const H2 = requireF(path.join(REPO, 'src/harnesses/index.js'));
+    const { BackendAdapter } = requireF(path.join(REPO, 'src/adapters/base.js'));
+    class ZzAdapter extends BackendAdapter {}
+    // the REQUIRED keys (id/label/kind/caps/Adapter/adapterConfig/wrapper) — and the quota contract register() demands of everyone (NULL_QUOTA: no limit signal)
+    H2.register({ ...PROBE, caps: { pool: false }, Adapter: ZzAdapter, adapterConfig: (cfg) => ({ ptyWrapper: cfg.ptyWrapper }), quota: H2.NULL_QUOTA });
+    const r = census({ repo: REPO, descriptors: H2.list(), builtin: H2.ids().filter((id) => H2.isBuiltin(id)), override: { [PROBE.wrapper]: WRAPPER } });
+    return { ok: r.ok, ids: H2.ids(), sites: r.sites.length, missing: r.missing, rows: r.rows, dead: r.dead, rules: r.rules.map((x) => ({ suite: x.suite, alive: x.alive })), text: formatChecklist(r) };
+  });
+} catch (e) { freshErr = String((e && e.stack) || e).slice(0, 400); P = null; }
+ok(!!P, 'the FRESH registry registered zz-probe beside the built-ins and ran the census', freshErr);
+ok(!H.ids().includes(PROBE.id) && H.ids().join() === IDS.join() && H.list().length === DESCS.length, 'this process\'s own registry is untouched by it (the module cache put back as it was): no zz-probe here, the same ids and descriptors', H.ids());
 if (P) {
   const mine = P.missing.filter((m) => m.id === PROBE.id), others = P.missing.filter((m) => m.id !== PROBE.id);
-  ok(P.ids.includes(PROBE.id) && P.sites === real.sites.length, `the child saw the same ${P.sites} table sites and six harnesses`);
+  ok(P.ids.includes(PROBE.id) && P.sites === real.sites.length, `the fresh registry's census saw the same ${P.sites} table sites and six harnesses`);
   ok(!P.ok && mine.length === P.sites && others.length === 0 && P.dead.length === 0, `RED: zz-probe is missing from EXACTLY every table site (${mine.length} of ${P.sites}); the built-ins stay green beside it; no exemption names it`, { others: others.slice(0, 3), dead: P.dead });
   const kinds = P.rows.filter((r) => r.id === PROBE.id).map((r) => r.kind);
   const expectKinds = ['cli-registry-excluded', 'peer-text-declared', 'brand-svg', 'i18n-category', 'i18n-category', 'backend-option', 'own-suite-ci-row', 'kb-features'];
