@@ -226,8 +226,10 @@ class SlotTransitions {
    *  the loop at each pool re-point: the page bl-loop-b/b0248-page.md). The live file's line count is now kept in the file's one state
    *  (every instance of the file shares it): learned at a whole read (all(), or here when not known), one more a line appended, and
    *  dropped wherever the kept rows are (a failed write, a trim, a change seen outside the hub, a suite's drop). For the hub's own writes
-   *  it is never below the file's count (a line glued onto a partial last one counts one more), so their trim is never missed; a writer
-   *  outside the hub is seen by the backstop's look (above), which drops it. The file is read whole only when
+   *  it is never below the file's count (a line glued onto a partial last one counts one more), so their trim is never missed. A writer
+   *  outside the hub is seen by the backstop's look (above), which drops it — while rows are kept (the look runs from a read that
+   *  answers from memory); with none kept, the next whole read (all()) learns the file's count. So another writer's lines can make
+   *  the trim late by those lines, never wrong: the cut judges the lines it read. The file is read whole only when
    *  the count is not known or has passed the bound, and the cut judges the lines it read, never the count */
   _maybeTrim() {
     const st = this._st;

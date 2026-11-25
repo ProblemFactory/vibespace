@@ -11,6 +11,16 @@
 //     RED: the release's write at the call (temp + rename on the loop) holds the loop a stall's length or more.
 //   ② the login record owed at a STOP is written by the writer's exit (server.js shutdown: exitFlush). RED: a save left to a timer
 //     outside the writer — at the exit nothing is owed, and the record is lost.
+//   UNIT 5's FOLLOW (主开发 r4231, the round wf_00e4a213-190's legs named missing), each with its RED:
+//   ①b the temp file's mode read BEFORE its rename (on the writer's thread): 0600 from its first byte. RED: the mode not handed.
+//   ②b a KILL with the login save still owed, then a restart over the same For-you store: the warning is the same item (its key).
+//     RED: a filing with no key of its own — filed twice.
+//   ②c a watch built while a save is OWED reads the writer's owed bytes: it files nothing twice. RED: the read of the owed bytes gone.
+//   ③b no writer handed writes nothing — RED: the release's write as a no-writer fallback; and the rings stay owed when the hand-over
+//     THROWS (the mark cleared only once the writer took them) — RED: the mark cleared before the hand-over.
+//   ⑤b the count after a FAILED append is not known: the next re-point reads the file once and counts it right. RED: a count kept
+//     across the failure (below the file's). ⑤c a line appended by ANOTHER HAND: the backstop's look drops the count. RED: a look
+//     that drops the rows but keeps the count.
 //   (HELD — nothing written over a record that could not be read — is scripts/test-login-expiry-held.mjs §1/§2, carried in this
 //   unit: it awaits the writer before judging the bytes, and its no-hold red writes over the record.)
 //   ③ the resource history under a placed stall: its save stalls NO main-thread write; the rings on disk after; with no writer handed
@@ -42,6 +52,9 @@ const STALL_MS = 300;
 let nD = 0;
 const dirOf = (tag) => { const d = path.join(home, `${tag}-${++nD}`); fs.mkdirSync(d, { recursive: true }); return d; };
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (f, ms = 3000) => { const t0 = performance.now(); while (!f()) { if (performance.now() - t0 > ms) return false; await sleep(5); } return true; };
+const STAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs'));
 const stalledOf = (S) => { const st = S.calls.filter((c) => c.kind === 'write' && c.stalled); return { stalled: st.length, fns: [...new Set(st.map((c) => c.fn))] }; };
 
 // ── the login warnings' record (src/server/login-expiry-watch.js) ───────────────────────────────────────────────────────────────
@@ -78,6 +91,32 @@ console.log('① B-0248 unit 5: the login warnings\' record is the store writer\
   ok(AX.held >= STALL_MS && AX.stalled >= 2, `① RED control (the release's write at the call: temp + rename on the loop): the sweep held the loop ${AX.held} ms (${AX.stalled} main-thread writes stalled: ${AX.fns.join(', ')}) (red)`, AX);
 }
 
+console.log('①b unit 5\'s follow (r4231): the temp file is 0600 BEFORE its rename (read on the writer\'s own thread)');
+{
+  // a stand-in writer thread (scripts/fixtures/store-stand-writer.cjs, the REAL writeJob) whose renameSync first records the temp's mode
+  const scene = async ({ noMode = false } = {}) => {
+    const dir = dirOf('login-mode'), ctl = dirOf('login-mode-ctl'), file = path.join(dir, 'login-expiry.json'), mark = path.join(ctl, 'mode-before-rename');
+    const S = STAND.make(ctl);
+    const src = fs.readFileSync(S.path, 'utf8'), at = "const path = require('path');\n";
+    if (src.split(at).length !== 2) throw new Error('the stand-in thread\'s header moved: ' + at.trim());
+    fs.writeFileSync(S.path, src.replace(at, at + `const __rn = fs.renameSync; fs.renameSync = function (a, b) { try { if (path.basename(String(b)) === 'login-expiry.json') fs.writeFileSync(${JSON.stringify(mark)}, String(fs.statSync(a).mode & 0o777)); } catch { } return __rn.apply(this, arguments); };\n`));
+    const W = SW.create({ log: quiet, workerPath: S.path });
+    // the RED: a view of the writer whose dirty() drops the mode — the temp is made with the process's default
+    const writer = noMode ? new Proxy(W, { get: (t, k) => (k === 'dirty' ? (f, o) => t.dirty(f, { ...o, mode: undefined }) : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) }) : W;
+    try {
+      const w = LEW.create({ accounts, userTodos: todos(), dataDir: dir, now: () => T0, log: () => { }, writer });
+      w.sweep();
+      const landed = await w.whenWritten();
+      let before = null; try { before = Number(fs.readFileSync(mark, 'utf8')); } catch { }
+      let after = null; try { after = fs.statSync(file).mode & 0o777; } catch { }
+      return { landed, before, after };
+    } finally { W.stop(); }
+  };
+  const [F, FX] = await Promise.all([scene(), scene({ noMode: true })]);
+  ok(F.landed && F.before === 0o600 && F.after === 0o600, `①b THE TEMP's MODE before its rename is 0600 (read on the writer's thread at the rename), and the record's after it`, F);
+  ok(FX.landed && FX.before != null && FX.before !== 0o600, `①b RED control (the mode not handed to the writer): the temp was ${FX.before != null ? FX.before.toString(8) : 'unread'} before its rename (red)`, FX);
+}
+
 console.log('② the login record OWED at a stop is written by the writer\'s exit (server.js shutdown: exitFlush)');
 {
   const scene = ({ deferred = false } = {}) => {
@@ -100,13 +139,65 @@ console.log('② the login record OWED at a stop is written by the writer\'s exi
   ok(!BX.owedBefore && BX.since == null, '② RED control (a save left to a timer outside the writer): nothing owed at the exit, no record on disk (red)', BX);
 }
 
+const LE_REL = 'src/server/login-expiry-watch.js';
+const LE_SRC = fs.readFileSync(path.join(REPO, LE_REL), 'utf8');
+console.log('②b unit 5\'s follow (r4231): a KILL with the login save still owed, then a restart over the same For-you store — never filed twice');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const T1 = T0 + 3 * 3600e3;   // a later life: the same «24 h left» rung, its words moved with the clock
+  const NO_KEY = (src) => anchored(src, "          itemKey: `login-expiry:${a.id}:${emit}:${lexp ?? 'none'}`,\n", '', 'filed-with-no-key');
+  const scene = async (Mod) => {
+    const dir = dirOf('login-kill'), file = path.join(dir, 'login-expiry.json');
+    const todos1 = new UserTodoManager({ dataDir: dir, onChange: () => { }, expirySweepMs: 0, now: () => T0 });
+    const W1 = SW.create({ log: quiet });
+    const w1 = Mod.create({ accounts, userTodos: todos1, dataDir: dir, now: () => T0, log: () => { }, writer: W1 });
+    w1.sweep();
+    const owed = W1.pending(file);
+    W1.stop();   // THE KILL, in the sweep's own turn (inside the writer's half second): the record is never written
+    await todos1.whenWritten();   // For you's own write is its own (the item on disk)
+    const recordOnDisk = fs.existsSync(file);
+    const logs = [], W2 = SW.create({ log: quiet });
+    const todos2 = new UserTodoManager({ dataDir: dir, onChange: () => { }, expirySweepMs: 0, now: () => T1 });
+    try {
+      const w2 = Mod.create({ accounts, userTodos: todos2, dataDir: dir, now: () => T1, log: (...a) => logs.push(a.join(' ')), writer: W2 });
+      w2.sweep();
+      await w2.whenWritten(); await todos2.whenWritten();
+      return { owed, recordOnDisk, items: todos2.forSession([LEW.INBOX_KEY]).length, same: logs.some((l) => /already in For you — the same item/.test(l)), recordAfter: !!readJson(file) };
+    } finally { W2.stop(); }
+  };
+  const K = await scene(LEW);
+  ok(K.owed && !K.recordOnDisk && K.items === 1 && K.same && K.recordAfter, '②b THE KILL with the record owed (never on disk): the restart over the same For-you store files the warning as THE SAME item (its key) — one item, never two; the record written by the second life', K);
+  const KX = await scene(M.load(LE_REL, NO_KEY(LE_SRC), 'no-key'));
+  ok(KX.owed && !KX.recordOnDisk && KX.items === 2, `②b RED control (a filing with no key of its own): after the kill the same warning is filed twice (${KX.items} items) (red)`, KX);
+}
+
+console.log('②c unit 5\'s follow (r4231): a watch built while a save is OWED reads the writer\'s owed bytes — it files nothing twice');
+{
+  const NO_OWED = (src) => anchored(src, '{ let read; const owed = owedNow();', '{ let read; const owed = null;', 'the-owed-bytes-unread');
+  const scene = (Mod) => {
+    const dir = dirOf('login-owed'), file = path.join(dir, 'login-expiry.json'), t = todos(), W = SW.create({ log: quiet });
+    try {
+      const w1 = LEW.create({ accounts, userTodos: t, dataDir: dir, now: () => T0, log: () => { }, writer: W });
+      w1.sweep();
+      const owed = W.pending(file) && !fs.existsSync(file);
+      const w2 = Mod.create({ accounts, userTodos: t, dataDir: dir, now: () => T0 + 60e3, log: () => { }, writer: W });   // the same turn: still owed
+      w2.sweep();
+      return { owed, filed: t.filed.length, since: w2.watchingSince(), sent: ((w2.ledger()['sub-1'] || {}).sent || []).length };
+    } finally { W.stop(); }
+  };
+  const O = scene(LEW);
+  ok(O.owed && O.filed === 1 && O.since === T0 && O.sent >= 1, '②c THE OWED BYTES: a second watch built before the first one\'s save landed reads it (its birth, the rung sent) — its sweep files nothing twice', O);
+  const OX = scene(M.load(LE_REL, NO_OWED(LE_SRC), 'no-owed'));
+  ok(OX.owed && OX.filed === 2, `②c RED control (the writer's owed bytes unread: the older file — none — read): the same warning filed again (${OX.filed}) (red)`, OX);
+}
+
 // ── the resource history (src/sysinfo.js) ─────────────────────────────────────────────────────────────────────────────────────
 const SI_REL = 'src/sysinfo.js';
 const SI_SRC = fs.readFileSync(path.join(REPO, SI_REL), 'utf8');
 const SI = require(path.join(REPO, SI_REL));
 const RELEASE_HISTORY = (src) => anchored(src,
-  "  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); } catch { }",
-  "  try { const tmp = _histFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse })); fs.renameSync(tmp, _histFile); } catch { }",
+  "  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); _histDirty = false; } catch { }",
+  "  try { const tmp = _histFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse })); fs.renameSync(tmp, _histFile); _histDirty = false; } catch { }",
   'the-release-history-write');
 
 console.log('③ the resource history is the store writer\'s — its 5-minute save never waits for its write');
@@ -126,8 +217,39 @@ console.log('③ the resource history is the store writer\'s — its 5-minute sa
   ok(C.stalled === 0 && C.held < STALL_MS && C.landed && C.fine >= 1 && C.last && C.last.m === 512, `③ THE PLACED STALL: the history's save in ${C.held} ms with NO main-thread write stalled; its rings on disk after it (${C.fine} fine point(s), the sample's memory)`, C);
   const CN = await scene(M.load(SI_REL, SI_SRC, 'no-writer', { same: true }), null);   // a deliberate unpatched copy: its own module state, no writer handed
   ok(CN.stalled === 0 && CN.fine === null, '③ CONTROL: no writer handed (the device agent bundles this module and has no store writer): nothing written, no write on the loop', CN);
+  // ③b (r4231): the no-writer control's RED — the release's write kept as a fallback when no writer is handed
+  const NO_WRITER_FALLBACK = (src) => anchored(src, '  if (!_histFile || !_histDirty || !writer) return;',
+    "  if (!_histFile || !_histDirty) return;\n  if (!writer) { try { const tmp = _histFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse })); fs.renameSync(tmp, _histFile); _histDirty = false; } catch { } return; }",
+    'a-no-writer-fallback');
+  const CNX = await scene(M.load(SI_REL, NO_WRITER_FALLBACK(SI_SRC), 'no-writer-fallback'), null);
+  ok(CNX.stalled >= 2 && CNX.fine !== null, `③b RED control of the no-writer CONTROL (the release's write as a fallback): ${CNX.stalled} main-thread writes, the rings on disk (red)`, CNX);
   const CX = await scene(M.load(SI_REL, RELEASE_HISTORY(SI_SRC), 'release-history'));
   ok(CX.held >= STALL_MS && CX.stalled >= 2, `③ RED control (the release's persistHistory: temp + rename on the loop): the save held the loop ${CX.held} ms (${CX.stalled} main-thread writes stalled: ${CX.fns.join(', ')}) (red)`, CX);
+}
+
+console.log('③b unit 5\'s follow (r4231): the rings stay OWED when the hand-over to the writer throws — the next save hands them');
+{
+  const CLEARED_FIRST = (src) => anchored(src,
+    "  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); _histDirty = false; } catch { }",
+    "  _histDirty = false;\n  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); } catch { }",
+    'the-mark-cleared-before-the-hand-over');
+  const scene = async (Mod) => {
+    const dir = dirOf('history-throw'), file = path.join(dir, 'sysinfo-history.json');
+    Mod.loadHistory(dir);
+    Mod.recordSample({ used: 333, limit: 1024 }, 0.1);
+    let asked = 0;
+    Mod.persistHistory({ dirty: () => { asked++; throw Object.assign(new Error('the writer refused the hand-over (placed)'), { code: 'EPLACED' }); } });
+    const P = SW.storeWriter();
+    Mod.persistHistory(P);   // the next 5-minute save, no new sample between
+    const owed = P.pending(file);
+    await P.durable(file);
+    const rec = readJson(file);
+    return { asked, owed, fine: rec && rec.fine ? rec.fine.length : null };
+  };
+  const H = await scene(M.load(SI_REL, SI_SRC, 'mark-after', { same: true }));
+  ok(H.asked === 1 && H.owed && H.fine >= 1, '③b A HAND-OVER THAT THROWS leaves the rings owed: the next save (no new sample) hands them, on disk after it', H);
+  const HX = await scene(M.load(SI_REL, CLEARED_FIRST(SI_SRC), 'mark-before'));
+  ok(HX.asked === 1 && !HX.owed && HX.fine === null, '③b RED control (the mark cleared before the hand-over): the next save hands nothing — the rings unwritten until a new sample (red)', HX);
 }
 
 // ── the slot ledger's trim check (src/slot-transitions.js) ──────────────────────────────────────────────────────────────────────
@@ -186,6 +308,55 @@ console.log('⑤ the count is THE FILE\'s: two instances writing one file past t
   ok(E.live <= 10 && E.archived > 0 && E.rows === 15 && E.distinct === 15, `⑤ ONE COUNT A FILE: fifteen re-points through two instances (bound 10) — trimmed (${E.live} live, ${E.archived} archived), all fifteen rows once each`, E);
   const EX = scene({ own: true });
   ok(EX.live > 10 && EX.archived === 0, `⑤ RED control (a count of its own on one instance): the other's appends unseen — no trim, ${EX.live} lines in the live file past its bound of 10 (red)`, EX);
+}
+
+const ST_REL = 'src/slot-transitions.js';
+const ST_SRC = fs.readFileSync(path.join(REPO, ST_REL), 'utf8');
+console.log('⑤b unit 5\'s follow (r4231): after a FAILED append the count is not known — the next re-point reads the file once and counts it right');
+{
+  const KEPT = (src) => anchored(src, '    const counted = st.lines; st.lines = null;', '    const counted = st.lines;', 'the-count-kept-across-a-failure');
+  const scene = (Mod) => {
+    const dir = dirOf('slots-fail'), live = path.join(dir, 'slot-transitions.jsonl');
+    const L = new Mod.SlotTransitions({ dataDir: dir, max: 1000 });
+    for (let i = 0; i < 3; i++) L.record(move(i));
+    // THE FAILURE, placed: the append's bytes land, then the call throws (a write that fails after a part — here all — of it landed)
+    const real = fs.appendFileSync; let failed = false;
+    fs.appendFileSync = function (p, ...a) { if (!failed && path.resolve(String(p)) === path.resolve(live)) { failed = true; real.call(this, p, ...a); throw Object.assign(new Error('EIO (placed, after the bytes)'), { code: 'EIO' }); } return real.call(this, p, ...a); };
+    let rec3 = 'x'; try { rec3 = L.record(move(3)); } finally { fs.appendFileSync = real; }
+    const S = STALL.install({ under: dir, ms: 0 });
+    try { L.record(move(4)); } finally { S.restore(); }
+    return { failed, rec3, reads: S.calls.filter((c) => c.fn === 'readFileSync' && c.path === 'slot-transitions.jsonl').length, count: L._st.lines, file: liveLines(dir) };
+  };
+  const G = scene({ SlotTransitions });
+  ok(G.failed && G.rec3 === null && G.reads === 1 && G.count === G.file && G.file === 5, `⑤b A FAILED APPEND: the count was not kept — the next re-point read the file once and counts ${G.count}, the file's own`, G);
+  const GX = scene(M.load(ST_REL, KEPT(ST_SRC), 'count-kept'));
+  ok(GX.failed && GX.reads === 0 && GX.count < GX.file, `⑤b RED control (a count kept across the failure): no read, the count ${GX.count} below the file's ${GX.file} (red)`, GX);
+}
+
+console.log('⑤c unit 5\'s follow (r4231): a line appended by ANOTHER HAND — the backstop\'s look drops the count, the next re-point counts it');
+{
+  const LOOK_KEEPS = (src) => anchored(src, '{ st.rows = null; st.lines = null; st.gen++; return; }   // changed outside the hub', '{ st.rows = null; st.gen++; return; }   // changed outside the hub', 'a-look-that-keeps-the-count');
+  const scene = async (Mod) => {
+    let clock = 1_000_000;
+    Mod._ledgerTestSeam({ now: () => clock });
+    try {
+      const dir = dirOf('slots-hand'), live = path.join(dir, 'slot-transitions.jsonl');
+      const L = new Mod.SlotTransitions({ dataDir: dir, max: 1000 });
+      for (let i = 0; i < 3; i++) L.record(move(i));
+      L.all();   // the rows kept, the count learned (3), the look's clock set
+      fs.appendFileSync(live, JSON.stringify(move(50)) + '\n');   // ANOTHER HAND (a tool, a second process): one line the hub never wrote
+      clock += Mod.LOOK_EVERY_MS + 1;
+      L.all();   // a read answered from memory starts the look (off the loop)
+      const dropped = await until(() => L._st.rows == null, 2000);
+      const S = STALL.install({ under: dir, ms: 0 });
+      try { L.record(move(5)); } finally { S.restore(); }
+      return { dropped, reads: S.calls.filter((c) => c.fn === 'readFileSync' && c.path === 'slot-transitions.jsonl').length, count: L._st.lines, file: liveLines(dir) };
+    } finally { Mod._ledgerTestSeam({}); }
+  };
+  const Hh = await scene({ SlotTransitions, LOOK_EVERY_MS: require(path.join(REPO, ST_REL)).LOOK_EVERY_MS, _ledgerTestSeam: require(path.join(REPO, ST_REL))._ledgerTestSeam });
+  ok(Hh.dropped && Hh.reads === 1 && Hh.count === Hh.file && Hh.file === 5, `⑤c ANOTHER HAND's line: the look dropped the count with the rows; the next re-point read the file once and counts ${Hh.count}, the file's own`, Hh);
+  const HhX = await scene(M.load(ST_REL, LOOK_KEEPS(ST_SRC), 'look-keeps-count'));
+  ok(HhX.dropped && HhX.reads === 0 && HhX.count < HhX.file, `⑤c RED control (a look that drops the rows but keeps the count): no read, the count ${HhX.count} below the file's ${HhX.file} (red)`, HhX);
 }
 
 console.log('⑥ the history at the hub\'s STOP: the real startWatch handed the hub\'s writer, its stop asks the save, the writer\'s exit writes it');

@@ -374,8 +374,8 @@ function loadHistory(dataDir) {
 let _histWriter = null;
 function persistHistory(writer = _histWriter) {
   if (!_histFile || !_histDirty || !writer) return;
-  _histDirty = false;
-  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); } catch { }
+  // the rings are no longer owed only once the writer TOOK them (unit 5's follow, r4231): a hand-over that throws leaves them owed
+  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); _histDirty = false; } catch { }
 }
 let _lastLoopLag = 0; // most recent 500ms-drift sample, folded into history
 function recordSample(mem, cores) {
