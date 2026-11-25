@@ -209,6 +209,16 @@ const STEPS = [
     (b, a) => nOf(a, 'lineage') === nOf(b, 'lineage') + 1 && a.lineage.list.conversations[0].lastAt === T + 5000],
   ['its removal (a whole-map touch: the per-account map is void, then read again)', () => W.ix.update((x) => { delete x.conversations[`${W.A[1]}/cnew`]; }),
     (b, a) => nOf(a, 'lineage') === nOf(b, 'lineage') - 1],
+  // r4526 (1): every write that can change one of the two facts the list keeps beside a key's place (its lastAt, whether it is a
+  // single chat) — the roads that write them (channels-engine's listing, feed, landing, ingest, push and thread roads; the webhook's
+  // participants) all write through entry() inside an update, as these steps do
+  ['a message arriving moves an existing row\'s last time (the newest now)', () => W.ix.update(() => { W.ix.entry(W.A[1], 'c000030', { create: false }).lastAt = T + 9000; }),
+    (b, a) => nOf(a, 'lineage') === nOf(b, 'lineage') && a.lineage.list.conversations[0].lastAt === T + 9000 && b.lineage.list.conversations[0].lastAt !== T + 9000],
+  ['a row\'s kind changing (a single chat a listing pass now names a group: the directory lists it)', () => W.ix.update(() => { W.ix.entry(W.A[0], 'c000003', { create: false }).kind = 'group'; }),
+    (b, a) => allOf(a, 'blind') === allOf(b, 'blind') + 1],
+  ['a row removed…', () => W.ix.update((x) => { delete x.conversations[`${W.A[2]}/c000007`]; }), (b, a) => nOf(a, 'teamB') === nOf(b, 'teamB') - 1],
+  ['…and born again (a later update: its place after every key there is)', () => W.ix.update(() => { Object.assign(W.ix.entry(W.A[2], 'c000007'), { title: '[ops-0] thread 7 of 2', kind: 'group', lastAt: T - 7000, unread: 0, listedAt: T }); }),
+    (b, a) => nOf(a, 'teamB') === nOf(b, 'teamB') + 1],
   ['a fact a rule matches (a title renamed into the rule)', () => W.ix.update(() => { W.ix.entry(W.A[2], 'c000001', { create: false }).title = '[ops-3] renamed'; }),
     (b, a) => nOf(a, 'rule') === nOf(b, 'rule') + 1],
   ['a rule\'s body changed', () => W.ix.update((x) => { x.patternAssignments.patR.pattern = { match: 'any', rules: [{ kind: 'title', value: 'ops-4' }] }; }),
@@ -283,6 +293,32 @@ console.log('④ law (d): the roads make no synchronous call of the fs module');
   const planted = await counted(() => answersOf(R6, W, { only: ['count'] }));
   const plain = await counted(() => answersOf(RELW, W, { only: ['count'] }));
   ok(planted.n > plain.n, `RED: a copy with one synchronous read planted in the count is seen (${planted.n} calls against ${plain.n})`);
+}
+
+// ═══ ⑥ THE LIST READS FROM THE INDEX ONLY THE ROWS IT CAN LIST (主开发 r4520 / r4526: the box's 55 ms list roads) ═══════════════
+console.log('⑥ the list reads from the index only the rows it can list (2 000 rows of one account, the newest first: 200 listed)');
+{
+  const dataDir = path.join(ROOT, 'reads'); fs.mkdirSync(dataDir, { recursive: true });
+  const si = globalThis.setInterval;
+  globalThis.setInterval = () => ({ unref() { }, ref() { }, [Symbol.toPrimitive]: () => 0 });
+  let eng;
+  try { eng = ENG.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => { }, now: () => T, log: quiet, censusTimer: () => ({ cancel() { } }), liveSessions: () => [] }); }
+  finally { globalThis.setInterval = si; }
+  const ix = eng.store.index, rec = eng.adapterRecords().adapters.find((r) => r.kind === 'fake-poll');
+  const N = 2000;
+  await ix.update(() => { for (let i = 0; i < N; i++) Object.assign(ix.entry(rec.id, `r${String(i).padStart(5, '0')}`), { title: `[ops-${i % 7}] thread ${i}`, kind: i % 3 ? 'group' : 'dm', lastAt: T - i * 1000, unread: 0, listedAt: T }); });
+  const w = GS.forDir(dataDir).set('channel-reach', `account:${rec.id}`, { to: [{ kind: 'group', id: 'T-big', name: 'Big' }] }, 'user');
+  await ix.durable();
+  const asker = agent('agent-big', ['T-big']);
+  const readsBy = (fn) => {
+    const orig = ix.live, seen = new Set(), wrapped = new WeakMap();
+    ix.live = () => { const m = orig(); if (!wrapped.has(m)) wrapped.set(m, new Proxy(m, { get(t, k, r) { if (typeof k === 'string' && k.includes('/')) seen.add(k); return Reflect.get(t, k, r); } })); return wrapped.get(m); };
+    let out; try { out = fn(); } finally { ix.live = orig; }
+    return { out, n: seen.size };
+  };
+  eng.listFor(asker());   // the map kept (a small index: built at its first read)
+  const r = readsBy(() => eng.listFor(asker()));
+  ok(!!(w && w.ok !== false) && r.out.conversations.length === 200 && r.out.more === N - 200 && r.n <= 200, `⑥ the list of 200 over ${N} rows read ${r.n} rows from the index (≤ the 200 it lists: a row the selector would leave out is dropped from the facts kept beside its key, never read)`, { listed: r.out.conversations.length, more: r.out.more, read: r.n });
 }
 
 // ═══ ③ THE MAP VOID: built in slices, never whole in a road's turn ═════════════════════════════════════════════════════════
