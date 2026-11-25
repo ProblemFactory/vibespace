@@ -433,9 +433,21 @@ for (const mode of ['password', 'open']) {
   ok(pins.every((p) => p[1]), `every cookie door of the upgrade dispatcher and the per-mount / per-page doors ask auth.requestAuthed (${pins.length} pins)`, pins.filter((p) => !p[1]).map((p) => p[0]));
   const raw = [];
   const WITHDRAW = /\(req\.headers\.cookie \|\| req\.headers\['sec-fetch-site'\]\)\) return res\.status\(403\)\.json\(\{ error: 'only the agent that (?:proposed it can withdraw|drafted it can ask to resend)/;   // lane bl-msg B-da74: the resend route's role refusal, the same declared shape
+  // B-78db (主开发 r4467): the index route reads the LAUNCH GROUND's own cookie ONCE (src/launch-ground.js groundOf: the name vs_ground
+  // alone, a colour or nothing — never the session's, never a decision of who may in); declared by its exact line, in server.js only
+  const GROUND_READ = /^\s*const ground = launchGround\.groundOf\(req\.headers\.cookie\);(\s*\/\/[^\n]*)?$/;
+  const declared = (f, l) => (f === 'src/agent-routes.js' && WITHDRAW.test(l)) || (f === 'server.js' && GROUND_READ.test(l));
   const READERS = new Set(['src/auth.js', 'src/interface/signin.js']);   // the plain form's table, and the piped form's: the interface holds the table (the separation's B3b-1, 主开发 r1060 + r1517)
-  for (const f of hubFiles()) { if (READERS.has(f)) continue; codeLines(readRepo(f)).forEach((l, i) => { if (/\bcookieToken\(|\.checkToken\(|headers\.cookie\b|headers\[['"]cookie['"]\]/.test(l) && !(f === 'src/agent-routes.js' && WITHDRAW.test(l))) raw.push(`${f}:${i + 1}`); }); }
+  for (const f of hubFiles()) { if (READERS.has(f)) continue; codeLines(readRepo(f)).forEach((l, i) => { if (/\bcookieToken\(|\.checkToken\(|headers\.cookie\b|headers\[['"]cookie['"]\]/.test(l) && !declared(f, l)) raw.push(`${f}:${i + 1}`); }); }
   ok(raw.length === 0, 'no file but src/auth.js (and, in the piped form, src/interface/signin.js: the interface holds the table) reads the session cookie (cookieToken / checkToken / the Cookie header) — every cookie decision passes the verdict; the withdraw route\'s presence check is the declared role refusal (⑥)', raw);
+  {
+    const LGM = require(path.join(REPO, 'src/launch-ground.js'));
+    const line = "    const ground = launchGround.groundOf(req.headers.cookie); // the launch ground's OWN cookie";
+    ok(LGM.COOKIE === 'vs_ground' && LGM.groundOf('vs_session=abc.def; vs_ground=%23fafafa') === '#fafafa' && LGM.groundOf('vs_session=%23fafafa') === null && declared('server.js', line),
+      'the launch ground\'s ONE read (server.js, the index route — B-78db): its own cookie vs_ground alone, a colour or nothing; the session\'s never answers it');
+    ok(!declared('src/routes/x.js', line) && !declared('server.js', '    const tok = req.headers.cookie;') && !declared('server.js', '    const ground = launchGround.groundOf(req.headers.cookie); if (ok) next();'),
+      'CONTROL: the same read in another file, another read of the header, or more on that line stays red');
+  }
 }
 
 // ── ⑥ THE ROUTE CENSUS ──────────────────────────────────────────────────────────────────────────────────────────────

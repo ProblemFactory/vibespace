@@ -4877,6 +4877,10 @@ THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coo
 - THE LAUNCH's GROUND. ThemeManager.apply remembers the applied theme's ground in one cookie (src/launch-ground.js: a hex of 3/4/6/8 digits
   or rgb()/rgba() of 0–255 channels, nothing else, never a theme's name). The index route writes it into <html>'s inline style and the
   loading screen's, so the loading screen wears the stored theme's ground from the first paint. With no cookie the ground is today's dark.
+  Only spaces and tabs are trimmed: a newline beside a colour is no colour. The ONE cookie is declared in three censuses by its exact
+  line: its one read (server.js's index route, `const ground = …groundOf(req.headers.cookie)` — test-auth), its one write (src/lib/themes.js
+  through cookieFor — test-user-state-echo, test-record-clear-census H1); src/launch-ground.js and src/launch-image.js are the interface's
+  files in the loop census.
 - THE COLUMN ON THE LEFT (主开发 r4481, the owner asked where the outer display's bar was). The outer display held landscape reads
   678×445, the insets left 84 · right 0 · bottom 34, the regular class: the system's column is on the LEFT there and draws nothing in it.
   Before, the column stood EMPTY beside our trailing bar on the right (56 wide): 140 of 678 points gone, the conversation 538. THE LAW:
