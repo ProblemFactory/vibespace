@@ -76,8 +76,13 @@ export function retentionText(limitBytes) { return t('Frames are kept until this
 /** r3941 (3): the action trace off BY THE SETTINGS' HOLD (its switch unread) — said by its true reason, never «off»; no «Turn on…» door
  *  (Settings refuses a save while the settings are held) */
 export function traceHeldText() { return t('VibeSpace’s settings cannot be read right now, so the action trace records nothing until they can be read'); }
-/** r3941: the panel's Sweep pressed while the settings are held — nothing was removed, and why */
-export function sweepHeldText() { return t('VibeSpace’s settings cannot be read right now, so the sweep removed nothing: the frames and the kept browsers wait until they can be read'); }
+/** r3941 / r4060 (1): the panel's Sweep pressed while the settings are held — WHICH sweep waited (`held` {trace, kept} of the reply); the
+ *  recordings' own fixed bound and an unheld sweep still remove, and their counts are said before this */
+export function sweepHeldText(held = {}) {
+  if (held && held.trace && held.kept) return t('VibeSpace’s settings cannot be read right now, so the frames and the kept browsers wait until they can be read');
+  if (held && held.kept) return t('VibeSpace’s settings cannot be read right now, so the kept browsers wait until they can be read');
+  return t('VibeSpace’s settings cannot be read right now, so the frames wait until they can be read');
+}
 /** A replay pane's empty state by NAME (src/browser-sessions.js replayEmpty). */
 export function emptyText(kind, { limit = 0 } = {}) {
   if (kind === 'no-sessions') return t('No browser sessions recorded for this conversation');

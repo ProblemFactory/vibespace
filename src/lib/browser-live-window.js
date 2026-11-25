@@ -2275,6 +2275,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (st.closed || !msg) return;
     if (msg.type === 'active-sessions' && Array.isArray(msg.sessions)) { const r = msg.sessions.find((x) => x && x.id === sessionId); if (r && r.browserFact) onFact(r.browserFact); return; }
     // 2026-09-27: a session of this conversation's browser started or ended — the Actions pane's Sessions list re-reads
+    if (msg.type === 'browser-trace-status' && msg.code === 'settings-lifted') { syncTrace(); return; }   // r4060 (3): the settings read again — the Actions pane re-reads at once
     if (msg.type === 'browser-sessions-updated') { const r = row(); const bk = timeline.browserKey() || (r && r.browserKey) || null; if (bk && msg.browserKey && (msg.browserKey === bk || String(msg.browserKey).startsWith(bk + '.'))) timeline.onSessions(); return; }
     if (msg.type === 'browser-site-reset' && msg.profileId && st.target && st.target.profileId === msg.profileId) { // lane site-reset
       resetNote.textContent = t('{host}\'s stored login was cleared in this profile ({n} cookies) — you approved it; its pages need a new sign-in', { host: String(msg.host || ''), n: Number(msg.cookies) || 0 });

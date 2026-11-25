@@ -30,6 +30,9 @@
 //   B14 the trace off by the hold is said by ITS reason (browser_settings_unread, the hold's words), never «off» with a «Turn on» door
 //   B15 the two sweeps' journal line once a hold, not once a pass; the Sweep press's reply says the hold
 //   B16 the keeper's journal says a person's own browser is kept with no end, never «0 h»
+//   B17 (主开发 r4060, the small follow): a SECOND lift doubles no tap and no door; a person's own browsing tap is armed at the lift;
+//       the open views are told at once; the Sweep press's toast says WHICH sweep waited and still gives what was removed; each
+//       branch of the hub's hook in its own guard
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -383,7 +386,7 @@ console.log('B15 the two sweeps say their wait once a hold, not once a pass; the
   ok(!!(k1 === 1 && t1 === 1 && k2 === 2 && t2 === 1), 'B15 — THE LAW: three passes while held say the wait ONCE for each sweep (never once a pass); after a read pass, the kept sweep\'s next hold says it once again — RED: once a pass', { kept: [k1, k2], trace: [t1, t2] });
   kept.shutdown(); tr.shutdown();
   const route = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8'), view = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  ok(!!(route.includes("res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed,") && view.includes('if (r && r.held) showToast(sweepHeldText(), { duration: 8000 });')),
+  ok(!!(route.includes("res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed,") && view.includes('+ sweepHeldText(r.held), { duration: 8000 }); } else if (r) showToast(')),
     'B15 — the Sweep press while held: its reply carries the hold (the trace\'s and the kept sweep\'s), and the page says it — never «removed 0» as if it had looked');
 }
 
@@ -393,5 +396,39 @@ console.log('B16 a person\'s own browser kept with no end is said so in the jour
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   ok(!!(src.includes("const keepWords = (ms, unit, name) => (Number(ms) > 0 ? `${Math.round(ms / unit)} ${name}` : 'with no end (never lapses)');") && src.includes("kept ' + keepWords(humanKeepOf(h), 3600000, 'h') + ' while away'") && !src.includes("Math.round(humanKeepOf(h) / 3600000) + ' h while away'")),   // stale-pins: kept (a deliberate absence check: the old «0 h» words are gone)
     'B16 — the journal line of a person\'s own browsing says «with no end (never lapses)» for a keep of 0, never «kept 0 h»');
+}
+// ── B17 — THE SMALL FOLLOW (主开发 r4060) ───────────────────────────────────────────────────────────────────────────────────────
+console.log('B17 a second lift doubles nothing; a person\'s own tap at the lift; the views told at once; the toast says which sweep waited');
+{
+  const TR = require('../src/server/browser-trace.js');
+  const W = path.join(ROOT, 'trace-lift2-' + (++worlds)); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true });
+  const st = { held: HELD, settings: { 'browser.actionTrace': true } };
+  let taps = 0, humanTaps = 0; const sent = [];
+  const KEY = 'bk-0000c001', PID = 'bp-0000c001', HKEY = 'hu-0000c0de';
+  const keeperStub = { _reg: () => ({ profiles: [{ id: PID, recordMine: true }], leases: [{ profileId: 'bp-0000c002', sessionId: 'sess-lift2-1', browserKey: KEY }], browsers: { 'bp-0000c002': { state: 'ready' } } }), isEphemeral: () => true, holdersFor: (bk) => [{ ephemeral: true, child: false, browserKey: bk }], onLease: () => () => { }, addDigest() { }, browserOf: () => ({ state: 'ready' }),
+    profile: (id) => (id === PID ? { id: PID, recordMine: true } : null), humanOf: (id) => (id === PID ? { browserKey: HKEY, state: 'driving' } : null) };
+  const tr = TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), keeper: keeperStub, broadcast: (m) => sent.push(m),
+    bridge: { tap: async () => { taps++; return { ok: true, key: 'k-l2', untap() { } }; }, tapHuman: async () => { humanTaps++; return { ok: true, key: 'k-h2', untap() { } }; } }, serverSetting: heldView(st), log: quiet, sweepEveryMs: 0 });
+  try { await tr.boot(); } catch { /* the leg reads the taps */ }
+  st.held = null;
+  const a1 = typeof tr.settingsLifted === 'function' ? await tr.settingsLifted() : null;
+  const t1 = taps, h1 = humanTaps;
+  const a2 = typeof tr.settingsLifted === 'function' ? await tr.settingsLifted() : null;
+  ok(!!(t1 === 1 && h1 === 1 && taps === 1 && humanTaps === 1), 'B17 — THE LAW (r4060 (2), (4)): at the lift the running browser\'s tap AND the person\'s own browsing tap (they drive, it records their actions) are armed; a SECOND lift arms nothing twice — RED: the person\'s own tap waits for their next act', { first: { taps: t1, human: h1, armed: a1 }, second: { taps, human: humanTaps, armed: a2 } });
+  ok(!!(sent.some((m) => m && m.type === 'browser-housekeeping-updated' && m.sweep && m.sweep.lifted === true) && sent.some((m) => m && m.type === 'browser-trace-status' && m.code === 'settings-lifted')), 'B17 — THE LAW (r4060 (3)): the open views are told at once — the panel and the replay pane by the housekeeping word, the conversation\'s cards and the live view\'s Actions pane by the lift\'s status', { sent: sent.map((m) => m && m.type + ':' + (m.code || (m.sweep && m.sweep.lifted ? 'lifted' : ''))).slice(0, 8) });
+  tr.shutdown();
+  // the views take it: the cards (onStatus), the live view (syncTrace), the replay pane (its housekeeping reload)
+  const view = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8'), live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8'), rep = fs.readFileSync(path.join(REPO, 'src/lib/browser-replay-window.js'), 'utf8');
+  ok(!!(view.includes("const mine = msg.code === 'settings-lifted' ||") && live.includes("if (msg.type === 'browser-trace-status' && msg.code === 'settings-lifted') { syncTrace(); return; }") && rep.includes("m.type === 'browser-housekeeping-updated' && m.sweep) scheduleReload();")),
+    'B17 — the four views re-read at the lift: the cards ask again, the live view\'s Actions pane re-syncs, the panel and the replay pane reload');
+  // the Sweep press's toast, by WHICH sweep waited, with what was removed still said (the page's own words, zh and ja)
+  const words = fs.readFileSync(path.join(REPO, 'src/lib/browser-session-words.js'), 'utf8'), zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const W3 = ['VibeSpace’s settings cannot be read right now, so the frames and the kept browsers wait until they can be read', 'VibeSpace’s settings cannot be read right now, so the kept browsers wait until they can be read', 'VibeSpace’s settings cannot be read right now, so the frames wait until they can be read'];
+  ok(!!(W3.every((w) => words.includes(`'${w}'`) && zh.includes(`"${w}":`) && ja.includes(`"${w}":`)) && !words.includes('so the sweep removed nothing') && view.includes("showToast((n ? t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})'")),   // stale-pins: kept (a deliberate absence check: the old «removed nothing» words are gone)
+    'B17 — THE LAW (r4060 (1)): the toast says WHICH sweep waited (frames, kept browsers, or both), and what WAS removed is still said first — never «removed nothing» when the recordings\' own bound or the unheld sweep removed');
+  // the hub's one hook: each branch in its own guard (one that throws never stops the other)
+  const wiring = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(!!wiring.includes("persistenceRouter.onSettingsLift(() => {\n    try { plugins.settingsLifted(); } catch (e) { console.warn('[plugins] the settings\\' lift could not be told — ' + (e && e.message)); }\n    try { if (browserTrace && typeof browserTrace.settingsLifted === 'function') browserTrace.settingsLifted(); } catch (e) {"),
+    'B17 — the hub\'s lift hook runs each branch in its OWN guard: the plugins\' word throwing never keeps the trace from re-arming, nor the other way round');
 }
 report();

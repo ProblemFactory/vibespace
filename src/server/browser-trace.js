@@ -1053,8 +1053,26 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     }
     return armed;
   }
-  /** r3941 (2): the settings READ again — what the hold turned off comes back (the hub's ONE lift hook calls this) */
-  function settingsLifted() { return enabled() ? armRunning().catch((e) => { log.warn?.(`[browser-trace] the taps could not be armed at the settings' lift: ${e && e.message}`); return 0; }) : Promise.resolve(0); }
+  /** r3941 (2): the settings READ again — what the hold turned off comes back (the hub's ONE lift hook calls this). r4060: a person's OWN
+   *  browsing tap (their opt-in recording of their own tab) is armed too while they drive, and the open views are told at once (the panel
+   *  and the replay pane by the housekeeping word, the conversation's cards and the live view's Actions pane by the status). A second lift
+   *  doubles nothing: watch() and watchHuman() keep an armed tap as it is. */
+  function settingsLifted() {
+    if (!enabled()) return Promise.resolve(0);
+    return (async () => {
+      let armed = await armRunning();
+      try {
+        const reg = keeper && typeof keeper._reg === 'function' ? keeper._reg() : { profiles: [] };
+        for (const p of reg.profiles || []) {
+          const h = keeper && typeof keeper.humanOf === 'function' ? keeper.humanOf(p.id) : null;
+          if (h && h.state === 'driving' && h.browserKey) { const r = await watchHuman({ key: h.browserKey, profileId: p.id }); if (r && r.ok) armed++; }
+        }
+      } catch (e) { log.warn?.(`[browser-trace] a person's own browsing could not be armed at the settings' lift: ${e && e.message}`); }
+      bc({ type: 'browser-housekeeping-updated', sweep: { lifted: true } });
+      bc({ type: 'browser-trace-status', code: 'settings-lifted', sessionId: null, profileId: null, browserKey: null });
+      return armed;
+    })().catch((e) => { log.warn?.(`[browser-trace] the taps could not be armed at the settings' lift: ${e && e.message}`); return 0; });
+  }
   async function boot() {
     loadForgotten();
     if (keeper && typeof keeper.onLease === 'function' && !unsubLease) unsubLease = keeper.onLease(onLeaseEvent);
