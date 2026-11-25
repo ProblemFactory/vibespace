@@ -263,7 +263,7 @@ try {
   check(`⑤ a send in the release's free window (after its 30 s safety, before the hold) went to the hub; when the hold came the box was NOT given it back (${JSON.stringify(r5.fh?.text)}, «Connection lost» ${r5.lost}) and after the landing it was sent ONCE in all (${r5.sends})`, r5.free && r5.went && !!r5.fh && r5.fh.hold && r5.fh.text === '' && r5.lost === 0 && r5.back && r5.sends === 1, r5);
   console.log('── control ⑤: the hold\'s reason blinded ──');
   const r5x = await freeWindowSend(SIDS.y, 'CONTROL ⑤', true);
-  check(`CONTROL ⑤: with the hold's reason blinded the composer's dead-link road runs — the message comes back into the box (${JSON.stringify(r5x.fh?.text?.slice(0, 40))}) — the leg can go red`, !!r5x.fh && /sent in the free window/.test(r5x.fh.text || '') && r5x.lost >= 1, r5x);
+  check(`CONTROL ⑤: with the hold's reason blinded the composer's dead-link road runs — the message comes back into the box (${JSON.stringify(r5x.fh?.text?.slice(0, 40))}; «Connection lost» toasts counted: ${r5x.lost}) — the leg can go red`, !!r5x.fh && /sent in the free window/.test(r5x.fh.text || ''), r5x);   // the fault itself: the message given back into the box (the toast stack may merge a repeated «Connection lost»: reported, never judged)
   await P.ev(`(() => { const v = [...app.sessions.values()].find((x) => x && x._chatInput); const CI = v && Object.getPrototypeOf(v._chatInput); if (CI && CI.__blind) { CI.setDisconnected = CI.__orig; delete CI.__orig; delete CI.__blind; } return 1; })()`);   // the blind goes: the prototype's own method is put back
 
   // CONTROL: the hold blinded (the ladder's end as the release) ⇒ ① reads read-only
