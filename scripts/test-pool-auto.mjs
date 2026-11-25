@@ -1,4 +1,5 @@
 // B-6217 auto-switch decision logic (pure; the server engine feeds it the
+// B-7e49 (主开发 r4570): the three WRITER CENSUSES (K2, CW, r1: pure reads of the tree) run in the fast twin test-pool-auto-writers, moved verbatim; this file keeps every scene.
 // passive usage cache). v3 EDF semantics (user-designed 2026-08-09): quota is
 // perishable — drain the member whose WEEKLY deadline (7d reset == scoped
 // Fable reset, same window) is soonest. 5h = usability gate only. Exhaustion
@@ -1020,20 +1021,7 @@ await (async () => {
         x._turnState = 'requires_action'; sendW(x, 7000); const paused = x._turnStartedAt;
         ck('K2 writers: the flag writer keeps the instant while in flight; the request-out writer re-stamps it; a pause clears it (both writers)', keep === 1000 && re === 6000 && paused === null, JSON.stringify([keep, re, paused]));
       }
-      {
-        // THE WRITER CENSUS: `_turnStartedAt` is assigned in turn-state.js alone, and each writer is called at exactly its sites
-        const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
-        const files = [...walk(path.resolve('src')), path.resolve('server.js')];
-        const assigns = files.filter((f) => /\._turnStartedAt\s*=[^=]/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(path.resolve('.'), f));
-        const callers = files.filter((f) => !/src\/(turn-state|session-schema)\.js$/.test(f)); // the definitions and the field's schema note
-        const calls = (name) => { const out = {}; for (const f of callers) { const n = fs.readFileSync(f, 'utf8').split('\n').filter((l) => new RegExp('\\b' + name + '\\b').test(l) && !/^\s*const \{[^}]*\} = require\(|^\s*\*|^\s*\/\//.test(l)).length; if (n) out[path.relative(path.resolve('.'), f)] = n; } return out; };
-        const sentAt = calls('noteRequestSent'), flagAt = calls('noteTurnFlight');
-        ck('K2 WRITER CENSUS: `_turnStartedAt` is assigned only in turn-state.js; noteRequestSent at the send that starts a request (none in flight before it — r5), the continue, the parse (a new \'running\', a user record) and the device feed; noteTurnFlight at a mid-turn send, the parse (result, the state word, a local command\'s reply — B-ba09), the attach reconcile, the exit',
-          JSON.stringify(assigns) === JSON.stringify(['src/turn-state.js'])
-          && JSON.stringify(sentAt) === JSON.stringify({ 'src/server/session-brain.js': 1, 'src/server/stdout/claude-stream-json.js': 2, 'src/server/user-input.js': 1, 'server.js': 1 })
-          && JSON.stringify(flagAt) === JSON.stringify({ 'src/server/session-stdout.js': 1, 'src/server/stdout/claude-stream-json.js': 4, 'src/server/user-input.js': 1, 'src/ws-handler.js': 1 }),
-          JSON.stringify({ assigns, sentAt, flagAt }));
-      }
+      // K2's WRITER CENSUS runs in the fast twin test-pool-auto-writers (B-7e49, r4570), moved verbatim
       // ROUND 5 (L1): A SEND STARTS A REQUEST ONLY WHEN NONE WAS IN FLIGHT — a message sent WHILE a turn runs (the person's
       // steer, a peer's dispatch) goes out with nothing: the wrapper holds the frame, and a steer rides the next tool result
       // (that record re-stamps). The acceptance's probe through the REAL typing path (createUserInputSender), the REAL parse
@@ -1457,16 +1445,7 @@ await (async () => {
         ck('CW8 MUTANT RED: strictly-after ⇒ both same-ms shapes read «compacted» — what CW8\'s pins refuse',
           !!rS && rS.fEq.unknownWhy === 'compacted' && rS.fParse.unknownWhy === 'compacted', rS && JSON.stringify([rS.fEq.unknownWhy, rS.fParse.unknownWhy]));
       }
-      {
-        // THE WRITER CENSUS (the lane's growth of K2's): `_compactedAt` and `_cacheFact` are assigned in usage-pool-engine.js alone
-        // (noteCompacted sets the reset, noteModelRequest ends it and stamps the fact; boot-restore's restore is a literal's key)
-        const walkM = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkM(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
-        const filesM = [...walkM(path.resolve('src')), path.resolve('server.js')];
-        const by = (re) => { const o = {}; for (const f of filesM) { const n = (fs.readFileSync(f, 'utf8').match(re) || []).length; if (n) o[path.relative(path.resolve('.'), f)] = n; } return o; };
-        const comp = by(/\._compactedAt\s*=[^=]/g), fact = by(/\._cacheFact\s*=[^=]/g), compBy = by(/\._compactedBy\s*=[^=]/g);
-        ck('CW WRITER CENSUS: `_compactedAt` is assigned only in usage-pool-engine.js — noteCompacted\'s reset and noteModelRequest\'s end of it; `_cacheFact` only by noteModelRequest; `_compactedBy` only by noteCompacted (r3) (RED on 749aa7bf9: neither exists)',
-          JSON.stringify(comp) === JSON.stringify({ 'src/server/usage-pool-engine.js': 2 }) && JSON.stringify(fact) === JSON.stringify({ 'src/server/usage-pool-engine.js': 1 }) && JSON.stringify(compBy) === JSON.stringify({ 'src/server/usage-pool-engine.js': 1 }), JSON.stringify({ comp, fact, compBy }));
-      }
+      // CW's WRITER CENSUS runs in the fast twin test-pool-auto-writers (B-7e49, r4570), moved verbatim
     }
     const pr = w.eng.projectionRereadFor(w.A, Date.now());
     ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));
@@ -2653,23 +2632,7 @@ await (async () => {
   // ensureSessionPoolLink → account-material's repointPoolSymlink); they are CALLED only by the store, the
   // engine and the owner's account routes — never by an agent-facing route — and each of the owner's
   // placement routes refuses an agent's token before it reads anything.
-  {
-    const { execFileSync } = require('node:child_process');
-    const { gitEnvFrom } = await import('./git-env.mjs');
-    const files = execFileSync('git', ['ls-files', 'src', 'server.js'], { encoding: 'utf8', cwd: path.resolve('.'), env: gitEnvFrom(process.env) }).split('\n').filter((f) => /\.js$/.test(f));
-    const code = (f) => fs.readFileSync(path.resolve(f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-    const callers = (re) => files.filter((f) => re.test(code(f))).sort();
-    // (the atomic symlink primitive has two callers that are NOT pool placement and predate this lane: the device's
-    // sealed-orders reflex and the agent browser's pin link — the set is master's, the lane added no caller)
-    ck('r1 census: the symlink primitive is called by the SAME files as before the lane — for a pool link, by the store alone', JSON.stringify(callers(/(^|[^'"`\w])repointPoolSymlink\(/m)) === JSON.stringify(['src/account-material.js', 'src/accounts.js', 'src/agentd/agentd.js', 'src/server/browser-env.js']) && !/symlinkSync\(|repointPoolSymlink\(/.test(code('src/server/usage-pool-engine.js') + code('src/server/account-usage-routes.js') + code('src/ws-create.js')), JSON.stringify(callers(/(^|[^'"`\w])repointPoolSymlink\(/m)));
-    const writers = callers(/\.(setPoolTarget|ensureSessionPoolLink|updatePool)\(/);
-    ck('r1 census: setPoolTarget / ensureSessionPoolLink / updatePool are CALLED by the store, the engine and the owner\'s account routes only (' + files.length + ' files read)', files.length > 300 && JSON.stringify(writers) === JSON.stringify(['src/accounts.js', 'src/server/account-usage-routes.js', 'src/server/usage-pool-engine.js']), JSON.stringify(writers));
-    ck('r1 census: no agent-facing module names a pool writer, the pin writer, the removal or the gather plan', !/setPoolTarget|ensureSessionPoolLink|updatePool|setConversationPin|memberRemoved|gatherPlan/.test(code('src/agent-routes.js')));
-    const routes = code('src/server/account-usage-routes.js');
-    const fence = "if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });";
-    const first = (head) => { const i = routes.indexOf(head); if (i < 0) return false; const body = routes.slice(i + head.length, i + head.length + 400); return body.indexOf(fence) >= 0 && !/accounts\.|engine\./.test(body.slice(0, body.indexOf(fence)).replace(/const id = req\.params\.id;/, '')); };
-    ck('r1 census: the members/priority PATCH, the gather and the pin refuse an agent\'s token BEFORE they read anything; the retired target route answers 410 to everyone', first("app.patch('/api/accounts/pool/:id', (req, res) => {") && first("app.post('/api/accounts/pool/:id/gather', (req, res) => {") && first("app.post('/api/accounts/:poolId/pin', (req, res) => {") && /app\.post\('\/api\/accounts\/pool\/:id\/target', \(req, res\) => \{\n\s*res\.status\(410\)/.test(routes));
-  }
+  // r1's WRITER CENSUS runs in the fast twin test-pool-auto-writers (B-7e49, r4570), moved verbatim
   // ── verify r2 (the UNSTAGED-WIRING class): WHAT THE ACCOUNT ROUTES ASK THE ENGINE, server.js HANDS THEM ──
   // Every suite builds the account routes over the WHOLE engine, so a name missing from server.js's
   // `engine: {…}` literal is invisible to all of them — verify r2 reverted F4's `gatherPlan` out of that

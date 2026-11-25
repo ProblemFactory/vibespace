@@ -45,6 +45,7 @@ scripts/test-msg-retry-held.mjs (fast, NEW — B-f276's remainder unit 2) — ms
 scripts/test-browser-builds-keeper.mjs (NEW, heavy — B-7e49) — test-browser-builds' legs that drive the REAL keeper over the fake agent-browser binary moved verbatim: ②, ③b, ⑤'s keeper controls, ⑦ … ⑧c; the table (①, ③, ④, ⑥, ⑤ (a), verify r1, B-0bc7) stays fast + a pin
 scripts/test-stream-mac-daemon.mjs (NEW, heavy — B-7e49) — test-stream-mac's §6 + §7 moved verbatim: a REAL Mac-shaped daemon (the agent bundle as a child, darwin roads on) over the fake helper, a werift stand-in, real ps; the fast suite keeps §1–§5b + §T ⇒ kb-file-structure.md
 scripts/test-ci-remote-impact.mjs (NEW, heavy — B-7e49) — test-ci-remote's real-tree impact legs moved verbatim: ④ selectSlice vs listAffected on src/server.js, ⑦'s affected batch; the fast suite keeps ④'s law over the whole tier ⇒ kb-file-structure.md
+scripts/test-pool-auto-writers.mjs (NEW, fast — B-7e49) — test-pool-auto's three writer censuses moved verbatim: K2 (`_turnStartedAt` writers), CW (`_compactedAt` / `_cacheFact`), r1 (the pool link's writers + the agent fence) ⇒ kb-file-structure.md
 
 ```
 src/signin-witness.js (NEW — B-dc3f (1)) — a data folder that is not the one at the start is HELD: its own id inside it (data/instance.json), a witness outside it (the CLI index's persistent place); verdictOf (PURE), placeOf, startFactsSync, the one writer; the opt-in VIBESPACE_SIGNIN=required ⇒

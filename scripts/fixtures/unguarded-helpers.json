@@ -735,6 +735,7 @@
   "test-plugin-settings.mjs": 1,
   "test-plugin-trust.mjs": 1,
   "test-plugins-grammar.mjs": 1,
+  "test-pool-auto-writers.mjs": 1,
   "test-pool-auto.mjs": 1,
   "test-pool-link-notify.mjs": 1,
   "test-pool-pass-reads.mjs": 1,
