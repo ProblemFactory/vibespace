@@ -152,7 +152,10 @@ export function installTrailingBar(app) {
     tip.style.display = 'block';
     const vertical = getComputedStyle(nav).flexDirection === 'column';
     tip.style.top = (vertical ? r.top + r.height / 2 - tip.offsetHeight / 2 : r.bottom + 6) + 'px';
-    tip.style.left = (vertical ? r.left - tip.offsetWidth - 8 : Math.max(4, Math.min(r.left, innerWidth - tip.offsetWidth - 4))) + 'px';
+    // a vertical bar says it on the conversation's side: left of a bar on the right, RIGHT of one in the system's column on the left
+    // (主开发 r4481 — the outer display held landscape: left of a bar at x 0 the tip stood off the screen)
+    const atLeft = vertical && r.left + r.width / 2 < innerWidth / 2;
+    tip.style.left = (vertical ? (atLeft ? r.right + 8 : r.left - tip.offsetWidth - 8) : Math.max(4, Math.min(r.left, innerWidth - tip.offsetWidth - 4))) + 'px';
     clearTimeout(tipTimer); tipTimer = setTimeout(() => { if (tip) tip.style.display = 'none'; }, 1600);
   });
 

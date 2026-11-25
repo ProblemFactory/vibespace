@@ -20,6 +20,9 @@
 //     fixed container; RED CONTROLS: 26d571cdb's route and stylesheet
 //   ⑤d THE LAUNCH FOR EVERY THEME (line 914's cure): the default status bar style; the inline ground goes with the splash;
 //     RED CONTROLS: 17c6dd081's meta and its client
+//   ⑤g THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the outer display held landscape): the bar moves into it, the list column and
+//     the conversation after it, ☰ / the For-you tray / the head's ✕ and ⋯ follow; a long press's tip on the conversation's side;
+//     RED CONTROL: effa5382a's stylesheet (no column on the left)
 // Run: node scripts/test-viewport-class.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -123,9 +126,10 @@ console.log('⑤ the system\'s edges (B-78db, 主开发 r3933): cover for the ho
   ok(!r[0] && tab.meta.c === 'width=device-width, initial-scale=1.0' && r[1] && /, viewport-fit=cover$/.test(home.meta.c) && home.doc.documentElement.dataset.standalone === '1' && !r[2] && homeMq.meta.c === 'width=device-width, initial-scale=1.0' && r[3] && again.meta.c.split('viewport-fit').length === 2,
     '⑤ viewport-fit=cover is set for an iPHONE\'s or iPAD\'s HOME-SCREEN copy only (navigator.standalone — 主开发 r4115: an Android or a desktop installed copy, display-mode standalone, stays as at the release) — a Safari tab keeps «contain»; set once', { tab: tab.meta.c, home: home.meta.c, mq: homeMq.meta.c, again: again.meta.c });
   const cols = [[{ left: 0, right: 84 }, 'right', 'the Duo, either display (the simulator: right 84, left 0)'], [{ left: 0, right: 80 }, 'right', 'the floor of the heuristic'], [{ left: 0, right: 79 }, null, 'one under the floor (r4115 (e): the edge)'],
-    [{ left: 59, right: 59 }, null, 'a notched iPhone held landscape (the same inset on both sides)'], [{ left: 0, right: 59 }, null, 'a sensor housing on one side, under 80'], [{ left: 0, right: 0 }, null, 'a Safari tab / no inset'], [{ left: 84, right: 84 }, null, 'insets on both sides']];
+    [{ left: 59, right: 59 }, null, 'a notched iPhone held landscape (the same inset on both sides)'], [{ left: 0, right: 59 }, null, 'a sensor housing on one side, under 80'], [{ left: 0, right: 0 }, null, 'a Safari tab / no inset'], [{ left: 84, right: 84 }, null, 'insets on both sides'],
+    [{ left: 84, right: 0 }, 'left', 'the outer display held landscape (主开发 r4481: left 84, right 0)'], [{ left: 80, right: 0 }, 'left', 'the floor, on the left'], [{ left: 79, right: 0 }, null, 'one under the floor, on the left'], [{ left: 59, right: 0 }, null, 'a sensor housing on the left, under 80']];
   const bad = cols.filter(([i, want]) => SC.sideColumnOf(i) !== want);
-  ok(bad.length === 0, `⑤ the side column by its insets (a heuristic, named as one: a trailing inset ≥ ${SC.SIDE_COLUMN_MIN} with no leading inset) — ${cols.map(([, w, why]) => `${why} → ${w || 'the safe default'}`).join('; ')}`, bad);
+  ok(bad.length === 0, `⑤ the side column by its insets (a heuristic, named as one: an inset ≥ ${SC.SIDE_COLUMN_MIN} on ONE side with none on the other, its side the verdict) — ${cols.map(([, w, why]) => `${why} → ${w || 'the safe default'}`).join('; ')}`, bad);
   const CSS = read('public/style.css');
   const edgesOk = (css) => {
     const i = css.indexOf('THE SYSTEM\'s EDGES (B-78db');
@@ -382,6 +386,33 @@ console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears th
   const fixedOk = (css) => /html\[data-standalone\] #main-wrapper \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; \}/.test(css);
   ok(fixedOk(CSS), '⑤e the home-screen copy\'s #main-wrapper is fixed at its own rectangle (主开发\'s simulator experiment: the system\'s top band then takes the bar\'s colour, the title sharp) — UNPROVEN on the device until the pictures');
   ok(!fixedOk(CSS.slice(0, CSS.indexOf('THE SYSTEM\'s TOP BAND (B-78db'))), '⑤e RED CONTROL: 26d571cdb\'s stylesheet leaves the wrapper in the flow (the blurred title)');
+}
+
+console.log('⑤g the system\'s column on the LEFT (主开发 r4481 — the owner\'s simulator: the outer display held landscape, left 84 · right 0 · bottom 34)');
+{
+  const CSS = read('public/style.css'), TB = read('src/lib/trailing-bar.js'), HEAD = 'THE SYSTEM\'s COLUMN ON THE LEFT (B-78db';
+  const LEFT_RULES = [
+    'html[data-vc="regular"][data-sidecol="left"] #mobile-nav { left: 0; right: auto; width: max(56px, env(safe-area-inset-left, 0px)); padding-left: 6px; padding-right: 6px; padding-top: max(8px, env(safe-area-inset-top, 0px)); border-left: none; border-right: 1px solid var(--border); }',
+    'html[data-vc="regular"][data-sidecol="left"] #main-wrapper { margin-right: 0 !important; margin-left: calc(max(56px, env(safe-area-inset-left, 0px)) + 321px) !important; }',
+    'html:not([data-fold="book"])[data-vc="regular"][data-sidecol="left"].vs-list-hidden #main-wrapper { margin-left: max(56px, env(safe-area-inset-left, 0px)) !important; }',
+    'html[data-vc="regular"][data-sidecol="left"] .sidebar { left: max(56px, env(safe-area-inset-left, 0px)); padding-left: 0; }',
+    'html[data-vc="regular"][data-sidecol="left"] #list-column-toggle { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 321px); }',
+    'html[data-vc="regular"][data-sidecol="left"].vs-list-hidden #list-column-toggle { left: max(56px, env(safe-area-inset-left, 0px)); }',
+    'html[data-vc="regular"][data-sidecol="left"] #mobile-nav :is(#mobile-nav-viewer-close, #mobile-nav-more).on { right: 0; }',
+    'html[data-vc="regular"][data-sidecol="left"] #mobile-nav #mobile-nav-viewer-close.on ~ #mobile-nav-more.on { right: 44px; }',
+    'html[data-vc="regular"][data-sidecol="left"] #user-todos-popup.usage-popup { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 329px) !important; right: 8px !important; }',
+    'html[data-vc="regular"][data-sidecol="left"].vs-list-hidden #user-todos-popup.usage-popup { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 8px) !important; }'];
+  const leftOk = (css) => { const i = css.indexOf(HEAD); if (i < 0) return false; const b = css.slice(i), m = b.indexOf('@media (orientation: landscape) {'), end = m < 0 ? -1 : b.indexOf('\n}\n', m);
+    return m > 0 && end > m && LEFT_RULES.every((r) => b.slice(m, end).split('\n').some((l) => l.trim() === r)); };
+  ok(leftOk(CSS), '⑤g the bar moves INTO a column on the left (as wide as it, its buttons from the top), the list column and the conversation start after it, ☰ / the For-you tray / the head\'s ✕ and ⋯ follow, nothing of ours on the right (one landscape block)');
+  // the conversation's start when the list is hidden ties the home-screen copy's list-hidden rule in specificity (line 914's cure): the block wins by ORDER
+  const tie = CSS.indexOf('html:not([data-fold="book"])[data-vc="regular"][data-standalone].vs-list-hidden #main-wrapper'), at = CSS.indexOf(HEAD);
+  ok(tie > 0 && at > tie, '⑤g the block stands AFTER the home-screen copy\'s list-hidden rule it ties in specificity (it wins by order)', { tie, at });
+  ok(!leftOk(CSS.slice(0, CSS.indexOf(HEAD))), '⑤g RED CONTROL: effa5382a\'s stylesheet has no column on the left (the owner\'s picture: an empty band beside our bar on the right)');
+  const tipOk = (tb) => /const atLeft = vertical && r\.left \+ r\.width \/ 2 < innerWidth \/ 2;\n    tip\.style\.left = \(vertical \? \(atLeft \? r\.right \+ 8 : r\.left - tip\.offsetWidth - 8\)/.test(tb);
+  ok(tipOk(TB), '⑤g a long press\'s tip stands on the conversation\'s side of a vertical bar: right of a bar in the column on the left, left of one on the right');
+  const tipWas = TB.replace(/    const atLeft = [^\n]*\n    tip\.style\.left = \(vertical \? \(atLeft \? r\.right \+ 8 : r\.left - tip\.offsetWidth - 8\)/, '    tip.style.left = (vertical ? r.left - tip.offsetWidth - 8');   // stale-pins: kept — effa5382a's line, planted back by the CONTROL (anchored: the plant must change the text)
+  ok(tipWas !== TB && !tipOk(tipWas) && tipWas.includes("tip.style.left = (vertical ? r.left - tip.offsetWidth - 8 : Math.max(4,"), '⑤g RED CONTROL: effa5382a\'s tip (always left of a vertical bar — off the screen beside a bar at x 0) is caught');   // stale-pins: kept — the control's own text (effa5382a's line)
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

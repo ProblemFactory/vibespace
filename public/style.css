@@ -10426,3 +10426,25 @@ html[data-vc="compact"][data-sidecol] .mobile-win-switcher { right: max(56px, en
    every other installed copy keep the release's flow. The same rectangle: its margins stand, inset 0, its height from its insets.
    UNPROVEN on the device until the simulator's pictures. */
 html[data-standalone] #main-wrapper { position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; }
+
+/* THE SYSTEM's COLUMN ON THE LEFT (B-78db, 主开发 r4481 — the owner's simulator: the outer display held landscape reads 678×445, the
+   insets left 84 · bottom 34, the regular class, and the system draws nothing in that column; before this the column stood EMPTY
+   beside our trailing bar on the right — 140 of 678 points gone). THE LAW: wherever the system reserves a side column, our global
+   doors live INSIDE it — never an empty reserved band beside a bar of ours. side-column.js writes html[data-sidecol="left"]; the
+   bar moves INTO the column (as wide as it, its buttons from the top: 8 px, nothing of the system's above them there), the list
+   column and the conversation start after it, nothing of ours stands on the right. What the column on the right holds stands as
+   it is (global doors only, their order, the yield law, the conversation's doors at the strip and at its head's end): only the
+   side moves. A COMPACT class with a column on the left was never read (the outer display held portrait has it on the right, and
+   an iPhone has no upside-down portrait): the compact rules keep the right one. */
+@media (orientation: landscape) {
+  html[data-vc="regular"][data-sidecol="left"] #mobile-nav { left: 0; right: auto; width: max(56px, env(safe-area-inset-left, 0px)); padding-left: 6px; padding-right: 6px; padding-top: max(8px, env(safe-area-inset-top, 0px)); border-left: none; border-right: 1px solid var(--border); }
+  html[data-vc="regular"][data-sidecol="left"] #main-wrapper { margin-right: 0 !important; margin-left: calc(max(56px, env(safe-area-inset-left, 0px)) + 321px) !important; }
+  html:not([data-fold="book"])[data-vc="regular"][data-sidecol="left"].vs-list-hidden #main-wrapper { margin-left: max(56px, env(safe-area-inset-left, 0px)) !important; }
+  html[data-vc="regular"][data-sidecol="left"] .sidebar { left: max(56px, env(safe-area-inset-left, 0px)); padding-left: 0; }
+  html[data-vc="regular"][data-sidecol="left"] #list-column-toggle { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 321px); }
+  html[data-vc="regular"][data-sidecol="left"].vs-list-hidden #list-column-toggle { left: max(56px, env(safe-area-inset-left, 0px)); }
+  html[data-vc="regular"][data-sidecol="left"] #mobile-nav :is(#mobile-nav-viewer-close, #mobile-nav-more).on { right: 0; }
+  html[data-vc="regular"][data-sidecol="left"] #mobile-nav #mobile-nav-viewer-close.on ~ #mobile-nav-more.on { right: 44px; }
+  html[data-vc="regular"][data-sidecol="left"] #user-todos-popup.usage-popup { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 329px) !important; right: 8px !important; }
+  html[data-vc="regular"][data-sidecol="left"].vs-list-hidden #user-todos-popup.usage-popup { left: calc(max(56px, env(safe-area-inset-left, 0px)) + 8px) !important; }
+}

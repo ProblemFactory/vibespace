@@ -34,6 +34,11 @@
 //     only in their order, under the clock's room and above the bottom inset; the conversation's search and menu at the
 //     strip's «Conversation settings» door; a viewer's ✕ at its head; the never-overflow law at 951×360 (yields → ⚙'s rows);
 //     the outer's own head = the name's row. RED CONTROL: the release's stylesheet (the bar at right 0, 56 px) is red
+//   ④h THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the outer display held landscape, 678×445, insets left 84 · bottom 34):
+//     the bar IN the column at x 0 (84 wide, global things only, in order, from the top, above the bottom inset), the list
+//     column and the conversation after it (hidden: the conversation 84–678; shown: the list 84–404, the conversation from
+//     405), ☰ follows, nothing of ours on the right; a long press's tip right of the bar, inside the screen. RED CONTROL: the
+//     release's verdict (no column on the left) — the bar back on the right, an empty 84 beside it (the owner's picture)
 //   ⑦ THE POSTURE LADDER (slice 4 — SPEC-v3 §1.6 / §3 / §5, research-v4 B.5; CDP: setDevicePostureOverride drives
 //     (device-posture: folded), setDeviceMetricsOverride's displayFeature drives the segments — offset 475 / mask 0 =
 //     Safari's seamless pair): folded alone on the inner display = pending, NOTHING moves, back to none after 1.5 s;
@@ -710,6 +715,37 @@ try {
       const wears = (html, g) => html.includes('<html lang="en" style="background:' + g + '">') && html.includes('background:' + g + ';color:');
       return { gl, gd, cookie: /vs_ground=/.test(cl), light: wears(hl, gl), dark: wears(hd, gd) }; })()`);
     check(`④g a theme that applies remembers its ground, and the page the server sends wears it in <html> and the loading screen (light ${ground.gl}, then dark ${ground.gd})`, ground.cookie && ground.light && ground.dark && ground.gl !== ground.gd, ground);
+    // ④h THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the owner's simulator: the outer display held landscape reads 678×445, the insets
+    // left 84 · bottom 34, the regular class; the column stood EMPTY beside our bar on the right, the conversation 538 of 678). THE LAW:
+    // wherever the system reserves a side column our global doors live INSIDE it. Insets PLACED; the list hidden, then shown.
+    const LEFT = `(() => { const c = ${COL}, mw = document.getElementById('main-wrapper').getBoundingClientRect(), sb = document.querySelector('.sidebar');
+      const sr = sb && sb.getClientRects().length && getComputedStyle(sb).display !== 'none' ? sb.getBoundingClientRect() : null, tg = document.getElementById('list-column-toggle').getBoundingClientRect();
+      return { ...c, vc: document.documentElement.dataset.vc, hidden: document.documentElement.classList.contains('vs-list-hidden'), main: [Math.round(mw.left), Math.round(mw.right)], list: sr ? [Math.round(sr.left), Math.round(sr.right)] : null, toggle: Math.round(tg.left) }; })()`;
+    const inLeft = (c) => { const got = c.kids.map((k) => k.id), exp = INNER.filter((id) => id !== 'mobile-nav-desktops' || got.includes(id));
+      return c.sidecol === 'left' && c.vc === 'regular' && c.left === 0 && c.width === 84 && JSON.stringify(got) === JSON.stringify(exp) && c.kids[0].top >= 8 && c.kids.at(-1).bottom <= c.h - 34
+        && c.kids.every((k) => k.left >= 0 && k.right <= 84) && !c.out.length && c.main[1] === c.w; };
+    await device(678, 445); await place({ left: 84, leftMax: 84, bottom: 34, bottomMax: 34 }); await load(); await attachBoth();
+    await waitFor(`document.documentElement.dataset.sidecol === 'left' && document.documentElement.dataset.onshow === 'chat'`, 6000);
+    await evalJs(`(app.sidebar.setListHidden(true), 1)`); await sleep(300);
+    const lh = await evalJs(LEFT);
+    check(`④h 678×445, the column on the LEFT, the list hidden: the bar IN the column (x ${lh.left}, ${lh.width} wide) — global things only, in order, from the top, above the bottom inset; the conversation ${lh.main[0]}–${lh.main[1]} with ☰ at its head (${lh.toggle}); nothing of ours on the right`,
+      inLeft(lh) && lh.hidden && !lh.list && lh.main[0] === 84 && lh.toggle === 84, lh);
+    await evalJs(`(app.sidebar.setListHidden(false), 1)`); await sleep(300);
+    const ls = await evalJs(LEFT);
+    check(`④h the list shown: the list column after the column (${ls.list ? ls.list.join('–') : 'none'}), the conversation from ${ls.main[0]}, ☰ at ${ls.toggle}`,
+      inLeft(ls) && !ls.hidden && !!ls.list && ls.list[0] === 84 && ls.main[0] === 84 + 321 && ls.toggle === 84 + 321, ls);
+    // a long press says the door's name beside it — on the conversation's side, inside the screen
+    const tipAt = await evalJs(`(() => { const g = document.getElementById('mobile-nav-gear'), r = g.getBoundingClientRect(); g.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+      const t = document.querySelector('.mnav-tip'); if (!t) return null; const b = t.getBoundingClientRect(), out = { shown: getComputedStyle(t).display !== 'none', left: Math.round(b.left), right: Math.round(b.right), btn: Math.round(r.right), w: innerWidth, was: Math.round(r.left - t.offsetWidth - 8) }; t.style.display = 'none'; return out; })()`);
+    check('④h a long press on ⚙ in the left column: its tip stands right of the button (the conversation\'s side, as the column on the right mirrors), inside the screen', !!tipAt && tipAt.shown && tipAt.left >= tipAt.btn && tipAt.right <= tipAt.w, tipAt);
+    check('④h RED CONTROL: effa5382a\'s tip (left of every vertical bar) would stand off the screen there', !!tipAt && tipAt.was < 0, tipAt);
+    // RED CONTROL: the release's verdict — no column on the left (sideColumnOf said null for left 84) — in the same frame
+    await evalJs(`(app.sidebar.setListHidden(true), delete document.documentElement.dataset.sidecol, 1)`); await sleep(300);
+    const leftRed = await evalJs(LEFT);
+    await evalJs(`(window.dispatchEvent(new Event('resize')), 1)`); await waitFor(`document.documentElement.dataset.sidecol === 'left'`, 4000);
+    await evalJs(`(app.sidebar.setListHidden(false), 1)`);
+    check(`④h RED CONTROL: the release's verdict (no column on the left) — our bar back on the right (x ${leftRed.left}), an empty ${leftRed.main[0]} px band at the left, the conversation ${leftRed.main[1] - leftRed.main[0]} of ${leftRed.w} (the owner's picture)`,
+      !inLeft(leftRed) && !leftRed.sidecol && leftRed.left === leftRed.w - 56 && leftRed.main[0] === 84 && leftRed.main[1] === leftRed.w - 56, leftRed);
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: seam.identifier });
     await place({}); await device(951, 585); await load();
   }
