@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On slow storage, VibeSpace no longer stalls for a moment every few seconds while you type a draft or rearrange Stage.
 - If VibeSpace cannot read the requests waiting for you to take over a browser, it now says so and keeps them instead of writing over them.
 - An idle browser's page that failed to come back on the first try is now shown at the next look, so its live view no longer stays blank.
+- An agent's own browser timeout or debug setting no longer restarts its browser between commands, which made it lose the page's element references.
 
 ## 2.369.419 — 2026-11-25
 
