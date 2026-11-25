@@ -85,9 +85,11 @@ export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock
 // one (Chrome keeps the LAST copy of a switch). scripts/chrome-store-census.mjs + test-architecture §47d: a launch that names the
 // switch itself is red by name.
 export const chromeNames = ({ map = {}, own = [] } = {}) => {
-  // r3968: a name holding a space or a comma would SPLIT the rule (the vendor splits the list at «,» and a rule at « »), and a
-  // star in `own` would OPEN it (EXCLUDE * = the rule off): each is refused by name, never written
-  const word = (h, what) => { const v = String(h ?? ''); if (!v || /[\s,]/.test(v) || (what === 'own' && v.includes('*'))) throw new Error(`chromeNames: ${what} «${v}» would ${/[\s,]/.test(v) || !v ? 'split' : 'open'} the names rule — name each host, with no space, comma or star`); return v; };
+  // r3968 / r4009: a name holding a space or a comma would SPLIT the rule (the vendor splits the list at «,» and a rule at « »);
+  // a wildcard in `own` (« * » or « ? », base/strings/pattern.h's two) or an empty name would OPEN it (EXCLUDE * = the rule off):
+  // each is refused by name, never written. Case needs nothing: the vendor lowers every pattern (AddRuleFromString:
+  // `rule.hostname_pattern = base::ToLowerASCII(parts[1]);`) and a page's host is canonical lower case
+  const word = (h, what) => { const v = String(h ?? ''); if (!v || /[\s,]/.test(v) || (what === 'own' && /[*?]/.test(v))) throw new Error(`chromeNames: ${what} «${v}» would ${v && /[\s,]/.test(v) ? 'split' : 'open'} the names rule — name each host, with no space, comma, star or question mark`); return v; };
   const maps = Object.entries(map || {}).map(([h, to]) => `MAP ${word(h, 'map')} ${word(to, 'map')}`);
   const keep = [...new Set([...(own || [])].map((h) => word(h, 'own')))].map((h) => `EXCLUDE ${h}`);
   return `--host-resolver-rules=${[...maps, 'MAP * ^NOTFOUND', 'EXCLUDE 127.0.0.1', 'EXCLUDE [::1]', 'EXCLUDE localhost', ...keep].join(', ')}`;

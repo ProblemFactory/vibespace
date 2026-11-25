@@ -2198,12 +2198,33 @@ await section(async () => {
     const nbOf = (src) => { try { return new Function(`return (${src});`)(); } catch { return null; } };
     const NB = nbOf(nbSrc), throwsOf = (f, arg) => { try { f(arg); return false; } catch { return true; } };
     const ordered = (f) => { const r = f ? f({ map: { 'hub.test': '127.0.0.1' } }) : ''; const m = r.indexOf('MAP hub.test 127.0.0.1'), c = r.indexOf('MAP * ^NOTFOUND'); return m >= 0 && c > m; };
-    const BAD = [{ own: ['a b'] }, { own: ['x,y'] }, { own: ['*'] }, { own: ['*.example.com'] }, { map: { 'a,b.test': '127.0.0.1' } }, { map: { 'a.test': '127.0.0.1, MAP * 1.2.3.4' } }, { own: [''] }];
-    const NBswap = nbOf(nbSrc.replace("[...maps, 'MAP * ^NOTFOUND',", "['MAP * ^NOTFOUND', ...maps,")), NBloose = nbOf(nbSrc.replace("if (!v || /[\\s,]/.test(v) || (what === 'own' && v.includes('*'))) throw", 'if (false) throw'));
+    const BAD = [{ own: ['a b'] }, { own: ['x,y'] }, { own: ['*'] }, { own: ['*.example.com'] }, { own: ['box?'] }, { map: { 'a,b.test': '127.0.0.1' } }, { map: { 'a.test': '127.0.0.1, MAP * 1.2.3.4' } }, { own: [''] }];
+    const NBswap = nbOf(nbSrc.replace("[...maps, 'MAP * ^NOTFOUND',", "['MAP * ^NOTFOUND', ...maps,")), NBloose = nbOf(nbSrc.replace("if (!v || /[\\s,]/.test(v) || (what === 'own' && /[*?]/.test(v))) throw", 'if (false) throw'));
     ok(!!NB && ordered(NB) && BAD.every((x) => throwsOf(NB, x)) && !throwsOf(NB, { map: { 'hub.test': '127.0.0.1' }, own: ['192.168.1.9', 'box-name'] }),
       '§47d r3968 THE BUILDER: a suite\'s own map stands AHEAD of the catch-all (the vendor takes the FIRST matching MAP), and a name that would split the rule (a space, a comma) or open it (a star in own, an empty name) is refused by name — a plain address and a plain name are taken', JSON.stringify({ built: !!NB, ordered: ordered(NB), refused: NB ? BAD.map((x) => throwsOf(NB, x)) : null }));
     ok(!!NBswap && !ordered(NBswap) && !!NBloose && BAD.some((x) => !throwsOf(NBloose, x)),
       '§47d r3968 RED CONTROLS: the catch-all written FIRST reads out of order; the refusal cut lets a splitting name through — the legs above can fail', JSON.stringify({ swapOrdered: NBswap ? ordered(NBswap) : null, looseLets: NBloose ? BAD.filter((x) => !throwsOf(NBloose, x)).length : null }));
+    // r4009 (3): the refusal's WORD is the true one — an empty name or a wildcard would OPEN the rule, a space or a comma SPLIT it
+    const wordOf = (x) => { try { NB(x); return null; } catch (e) { return / would (split|open) /.exec(String(e && e.message))?.[1] || '?'; } };
+    ok(!!NB && wordOf({ own: [''] }) === 'open' && wordOf({ own: ['box?'] }) === 'open' && wordOf({ own: ['*'] }) === 'open' && wordOf({ own: ['a b'] }) === 'split' && wordOf({ map: { 'a,b.test': '127.0.0.1' } }) === 'split',
+      '§47d r4009 THE REFUSAL SAYS WHICH: an empty name, a star or a question mark would OPEN the rule; a space or a comma would SPLIT it', JSON.stringify({ empty: wordOf({ own: [''] }), q: wordOf({ own: ['box?'] }), star: wordOf({ own: ['*'] }), space: wordOf({ own: ['a b'] }), comma: wordOf({ map: { 'a,b.test': '127.0.0.1' } }) }));
+    // r4009 (4a): A MACHINE WITH ONLY THE LOOPBACK never throws at a launch — the four launches hand the builder their address only
+    // when there is one (the guarded form, read from each file's text), and the belt handed nothing builds its rule
+    const OWN4 = [['scripts/test-desktop-v2-latency-chrome.mjs', 'IP'], ['scripts/test-mac-ard-signin-chrome.mjs', 'IP'], ['scripts/test-browser-live-input.mjs', 'LAN_IP'], ['scripts/xpra-window-boot.mjs', 'HOSTNAME']];
+    const guardedIn = (src, v) => src.includes(`...(${v} ? [chromeNames({ own: [${v}] })] : [])`);
+    const beltAt = scr.indexOf('export const chromeBelt = '), beltEnd = scr.indexOf('\n};\n', beltAt);
+    const beltOf = (nb) => { try { return new Function('chromeNames', `return (${scr.slice(beltAt + 'export const chromeBelt = '.length, beltEnd + 2)});`)(nb); } catch { return null; } };
+    const BELT = NB ? beltOf(NB) : null, guardedNone = (v) => [...(v ? [NB({ own: [v] })] : [])];
+    ok(OWN4.every(([f, v]) => guardedIn(fs.readFileSync(f, 'utf8'), v)) && !!BELT && !throwsOf(BELT, undefined) && !throwsOf(BELT, []) && !throwsOf(BELT, [null, '']) && [null, undefined, ''].every((v) => guardedNone(v).length === 0),
+      '§47d r4009 A MACHINE WITH ONLY THE LOOPBACK: each of the four launches hands its address to the builder only when it has one (no address ⇒ nothing handed, nothing thrown), and the belt handed no own name (none, [], an empty one) builds its rule', JSON.stringify(OWN4.map(([f, v]) => [f, guardedIn(fs.readFileSync(f, 'utf8'), v)])));
+    // r4009 (4b): THE VALUE HANDED TO THE BUILDER IS THE VALUE THE PAGE IS OPENED AT — by text: each file hands `own: [X]` and opens
+    // `http://${X}` (the xpra boot's X is opened by the suites that import it from the boot)
+    const opensAt = (src, v) => src.includes('http://${' + v);
+    const xpraUsers = fs.readdirSync('scripts').filter((n) => /^test-.*\.mjs$/.test(n)).map((n) => 'scripts/' + n).filter((n) => { const t = fs.readFileSync(n, 'utf8'); return t.includes("from './xpra-window-boot.mjs'") && opensAt(t, 'HOSTNAME'); });
+    const sameValue = (f, v, src, users = []) => src.includes(`chromeNames({ own: [${v}] })`) && (opensAt(src, v) || users.length > 0);
+    const planted = "chrome = spawn(CHROME, [...CHROME_QUIET, ...(IP ? [chromeNames({ own: [IP] })] : [])]);\nawait page(`http://${OTHER}:${PORT}`);\n";
+    ok(OWN4.every(([f, v]) => sameValue(f, v, fs.readFileSync(f, 'utf8'), f.endsWith('xpra-window-boot.mjs') ? xpraUsers : [])) && xpraUsers.length >= 2 && !sameValue('planted', 'IP', planted),
+      `§47d r4009 THE VALUE THE BUILDER GETS IS THE VALUE THE PAGE IS OPENED AT (by text): each of the four hands own: [X] and opens http://\${X}; the xpra boot's HOSTNAME is opened by ${xpraUsers.length} suites that import it; RED: a planted launch that opens another value reads false`, JSON.stringify({ xpraUsers }));
     const Ln = (src) => CS.launchesOf(src, { acorn }).launches[0] || {};
     const litOnly = Ln("const c = spawn(CHROME, ['--disable-background-networking', '--password-store=basic', '--headless=new', '--remote-debugging-port=0']);\n");
     const own = Ln("const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--host-resolver-rules=MAP * 127.0.0.1', '--headless=new', '--remote-debugging-port=0']);\n");
