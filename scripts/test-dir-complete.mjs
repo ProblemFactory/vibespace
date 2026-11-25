@@ -853,18 +853,33 @@ lap('\n── ③b the hung source and the slow one (B-0f3d, kept) · ③c THE F
     const [gr, grC, gp, gpC] = await Promise.all([grp(DS), grp(KEEPALL), gap(DS), gap(LATEGAP)]);
     ok(`r2178 (2): twelve answers joined ~/work's call with no bound and no field — the group holds ${gr.size} asker (the typed ask) — RED CONTROL the tip's join: ${grC.size} (each join kept)`, gr.size === 1 && grC.size >= 13, { real: gr, control: grC });
     ok(`r2178 (3): the refusal that ends ~/work's call LATE — two microtask steps later it is out of \`sent\` (${gp.ending && gp.ending.inSent === false}) — RED CONTROL the tip's: still there (${gpC.ending && gpC.ending.inSent})`, gp.refusals > 1 && gp.ending && gp.ending.inSent === false && gpC.ending && gpC.ending.inSent === true, { real: gp, control: gpC });
-    // r2178 (4): THE HOME ROUTE'S WAIT ENDS WITH ITS REQUEST — a home folder's facts held out, the request ends at ~80 ms: selfWhole
-    // answers then (not whole), never its bound (600 ms here; the route's is 1.5 s). RED: the tip's selfWhole (no abort read)
-    const SW_BOUND_MS = 600;   // the wait's own bound in this leg (the route's is 1.5 s)
-    const swOf = async (D2) => {
+    // r2178 (4): THE HOME ROUTE'S WAIT ENDS WITH ITS REQUEST — a home folder's facts held out, the request ends while it waits: selfWhole
+    // answers then (not whole), never at its bound. RED: the tip's selfWhole (no abort read).
+    // r4362 (row B-3dbd's family, the flake census at 2.369.419): judged on FACTS, never on the two copies' clocks (it was «the real's
+    // ms under half its red copy's, the copy within 5 % of a 600 ms bound» — a loaded machine could lose it). Both copies wait under
+    // ONE request (one AbortController) with a bound far past any answer judged here; the request ends once BOTH have asked for the held
+    // fact (a fact, not 80 ms); the real answers on the request's end while the copy with no abort read is STILL waiting (its own run
+    // judged: it answers only when its fact comes, whole). Every wait has a generous bound whose expiry is a NAMED line.
+    const SW_BOUND_MS = 60000;   // the wait's own bound in this leg: far past any answer judged here — neither copy can end on it
+    const SW_EXPIRY_MS = 20000;   // the harness's bound on an answer it waits for; its expiry is said by name in the leg
+    const swStart = (D2, signal) => {
       const g = hold(), c = standIn({ dead: [{ path: path.join(K9, 'f01'), g, op: 'pathStat' }] }), d = D2.create({ home: K9, repoDir: REPO, call: c });
-      const ac = new AbortController(); setTimeout(() => ac.abort(), 80);
-      const t0 = Date.now(), r = await d.selfWhole(SW_BOUND_MS, ac.signal), ms = Date.now() - t0; g.open(); return { ms, whole: r.whole };
+      const run = { g, c, done: null }; run.p = d.selfWhole(SW_BOUND_MS, signal).then((r) => (run.done = { whole: r.whole })); return run;
+    };
+    const swWithin = (p, what) => Promise.race([p, new Promise((r) => setTimeout(() => r({ expired: what }), SW_EXPIRY_MS))]);
+    const swOf = async (D2, D2c) => {
+      const ac = new AbortController(), real = swStart(D2, ac.signal), ctl = swStart(D2c, ac.signal);
+      const asked = await swWithin((async () => { while (!(real.c.touched >= 1 && ctl.c.touched >= 1)) await sleep(10); return { asked: true }; })(), 'the held fact was never asked by both');
+      ac.abort();   // the request ends — once both wait on the held fact
+      const sa = await swWithin(real.p, 'the real route never ended with its request'), ctlAtReal = ctl.done;   // null: the copy still waits
+      real.g.open(); ctl.g.open();
+      const saC = await swWithin(ctl.p, 'the copy never answered once its fact came');
+      return { asked: !asked.expired, sa, ctlAtReal, saC, expired: [asked, sa, saC].map((x) => x && x.expired).filter(Boolean) };
     };
     const NOABORT = M5dc(anchored(DCsrc5, 'if (mono() >= until || (signal && signal.aborted)) return { v, whole: false };', 'if (mono() >= until) return { v, whole: false };', 'no abort read (the tip)'), 'ds-sw-noabort');   // stale-pins: kept (a red control: its replacement is the tip's own text)
     lap('    · sa, saC');
-    const [sa, saC] = await Promise.all([swOf(DS), swOf(NOABORT)]);
-    ok(`r2178 (4): the home route's wait ends with its request — answered in ${sa.ms} ms, not whole (${sa.whole}) — RED CONTROL the tip's: ${saC.ms} ms`, sa.whole === false && sa.ms < saC.ms / 2 && saC.ms >= SW_BOUND_MS * 0.95, { real: sa, control: saC });
+    const sw = await swOf(DS, NOABORT);
+    ok(`r2178 (4): the home route's wait ends with its request — the real answered on the request's end, not whole (${sw.sa.whole}) — RED CONTROL the tip's (no abort read): still waiting when the real answered (${sw.ctlAtReal === null}), answered only once its fact came (whole ${sw.saC.whole})${sw.expired.length ? ' — EXPIRED (' + SW_EXPIRY_MS + ' ms): ' + sw.expired.join('; ') : ''}`, sw.asked && !sw.expired.length && sw.sa.whole === false && sw.ctlAtReal === null && sw.saC.whole === true, sw);
   });
   // THE FIELD'S SIDE: askedOf (late and failed probes marked nothing) · replyKind (skipped / failed) · THE ONE RESOLVER (model() reads the
   // verdict in hand; target, rankOf and Tab read model) — source pins with their controls
