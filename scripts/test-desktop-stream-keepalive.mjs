@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { markTimedOut } from './lib/timed-out.mjs'; // the flake census r2: a wait that runs out SAYS so
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The no-cap control's patched bridge is written OUTSIDE the tree
@@ -375,6 +376,9 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
     return { ws, got: () => Buffer.concat(got), status: () => status, closed: new Promise((r) => ws.on('close', (code, reason) => r({ code, reason: String(reason) }))) };
   }
   const until = async (fn, ms = 3000) => { const t = Date.now() + ms; while (Date.now() < t) { if (fn()) return true; await sleep(20); } return false; };
+  /** A WAIT ON THE FACT THE LEG JUDGES (the flake census r2, 主开发 r4456): a generous bound, its expiry a NAMED line */
+  const waitFact = async (fn, ms, what) => ((await until(fn, ms)) ? true : markTimedOut(null, ms, what));
+  const sockClosed = (s) => !!s && (s.destroyed || s._vsClosed === true);
 
   // the PROBE (the launcher's question) — through tcpForward, never a new op
   const rows = await accW.machines();
@@ -425,10 +429,12 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
   const humanLine = dsSrc.split('\n').find((l) => l.includes('if (target.humanOnly && bearerOf(req))'));
   const noHuman = MUTK.load('src/server/desktop-stream.js', editAnchor(dsSrc, humanLine, '    // (pre-fix: no human_only rule)', "src/server/desktop-stream.js"), 'nohuman');
   cur = mkBridge(noHuman);
+  const nLeak = vncSrv.seen.sockets.length;   // the leak's OWN machine-side socket is the next one (the census r2: its own fact, never a global count)
   const leak = client('machine-desktop.win-a', { headers: { Authorization: 'Bearer vsst_abc123' } });
   ok('CONTROL: a bridge copy without the human_only line relays the agent\'s socket (the rule above is what refuses it)', !!humanLine && await until(() => leak.got().length >= 12));
   leak.ws.close(); cur = bridge;
-  await sleep(300); // the control's own connection on the machine closes first (counted below otherwise)
+  // the control's own connection on the machine closes FIRST (counted below otherwise) — waited on as ITS OWN socket's close, never a sleep
+  await waitFact(() => sockClosed(vncSrv.seen.sockets[nLeak]), 20000, 'the leak control\'s machine-side connection never closed');
 
   // CLOSES, EITHER SIDE: the browser leaves ⇒ the server side closes; the server closes ⇒ the browser is told
   const closedBefore = vncSrv.seen.closed;
@@ -445,13 +451,27 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
     await acc0.openMachineDesktop('win-c');
     const b0 = DS.create({ auth: { requestAuthed: () => true }, log: bLog, pingMs: 5000, resolveTarget: (id) => acc0.machineDesktopTarget(id), forwardPort: (h, p2) => acc0.forwardPort(h, p2) });
     cur = b0;
-    const x1 = client('machine-desktop.win-c'), x2 = client('machine-desktop.win-c');
-    await until(() => x1.got().length >= 34 + SERVER_INIT.length && x2.got().length >= 34 + SERVER_INIT.length);
+    // the two windows opened ONE AFTER THE OTHER, so each machine-side socket is known by its own index (the census r2: x2's OWN socket is
+    // judged — the old global count after a sleep was red whenever an earlier close landed in the window)
+    const nX = vncSrv.seen.sockets.length;
+    const x1 = client('machine-desktop.win-c');
+    await waitFact(() => x1.got().length >= 34 + SERVER_INIT.length && vncSrv.seen.sockets.length >= nX + 1, 20000, 'CONTROL: the first window never reached its machine');
+    const x2 = client('machine-desktop.win-c');
+    await waitFact(() => x2.got().length >= 34 + SERVER_INIT.length && vncSrv.seen.sockets.length >= nX + 2, 20000, 'CONTROL: the second window never reached its machine');
+    const s2 = vncSrv.seen.sockets[nX + 1]; s2.on('close', () => { s2._vsClosed = true; });
+    // PLACED (the census r2 — the find made red at will): an UNRELATED machine connection closing inside the window
+    const nStray = vncSrv.seen.sockets.length; const stray = net.connect(vncSrv.port, '127.0.0.1'); stray.on('error', () => { });
+    await waitFact(() => vncSrv.seen.sockets.length > nStray, 20000, 'PLACED: the stray connection never reached the machine');
     const cb = vncSrv.seen.closed;
-    x2.ws.close(1000, 'bye');
-    await sleep(400);
-    ok('CONTROL: without the `end` line the closed window\'s connection on the machine stays open until the last viewer leaves', !!endLine && vncSrv.seen.closed === cb, { cb, now: vncSrv.seen.closed });
-    x1.ws.close(); await sleep(50); acc0.shutdown(); cur = bridge;
+    x2.ws.close(1000, 'bye'); stray.destroy();
+    await x2.closed;   // x2's own close answered by the bridge
+    await waitFact(() => sockClosed(vncSrv.seen.sockets[nStray]), 20000, 'PLACED: the stray connection\'s close never landed');
+    ok('PLACED: an unrelated machine connection closing inside the window — the OLD verdict (the global close count unchanged) reads RED with the hole unchanged', vncSrv.seen.closed !== cb && !sockClosed(s2), { cb, now: vncSrv.seen.closed });
+    ok('CONTROL: without the `end` line the closed window\'s OWN connection on the machine stays open after its window closed…', !!endLine && !sockClosed(s2));
+    x1.ws.close();
+    const lastLeft = await waitFact(() => sockClosed(s2), 20000, 'CONTROL: the last viewer leaving never closed the closed window\'s machine connection');
+    ok('…until the last viewer leaves: then it closes (the order — open after its own window closed, closed after the last)', lastLeft === true);
+    acc0.shutdown(); cur = bridge;
   }
   ok('…and releases its forward reference (refs 2 → 1)', (accW.forwards().find((f) => f.hostId === 'win-a') || {}).refs === 1, accW.forwards());
   const c4 = client('machine-desktop.win-a');

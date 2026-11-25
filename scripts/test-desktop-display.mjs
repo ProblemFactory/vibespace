@@ -17,6 +17,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs'; // the flake census r2: a wait that runs out SAYS so
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +41,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** «NEVER A HANG» IS A SETTLE (the flake census r2, 主开发 r4456): the promise settles within a generous bound, whose expiry is a NAMED line
+ *  — never an upper time bound read off the answer (a loaded box's forks and timers add, the verdict is the same) */
+const settles = (p, ms, what) => { let t; return Promise.race([Promise.resolve(p).finally(() => clearTimeout(t)), new Promise((r) => { t = setTimeout(() => r(markTimedOut(null, ms, what)), ms); })]); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const run = (bin, args, env) => new Promise((res) => execFile(bin, args, { env, timeout: 5000, encoding: 'utf8' }, (err, stdout, stderr) => res({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
 
@@ -424,8 +428,13 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
         const w0 = await D.waitForXftDpi({ binPath: XRDB, env: ctx.x11Env(up.display) });
         ok(w0.ok === true && w0.dpi === 144 && w0.why === null, `waitForXftDpi resolves once xpra has written the display's font dpi (${w0.dpi} after ${w0.ms} ms of polling)`, w0);
         const wNo = await D.waitForXftDpi({ binPath: null, env: {} });
-        const wDead = await D.waitForXftDpi({ binPath: XRDB, env: { ...ctx.x11Env(':98765') }, deadlineMs: 400, stepMs: 100 });
-        ok(wNo.ok === false && wNo.why === 'xrdb not on PATH' && wDead.ok === false && /no Xft\.dpi in the display's resources within 400 ms/.test(wDead.why) && wDead.ms < 3000, `CONTROL: no xrdb, and a display that never answers, are REPORTED by name within the deadline — never thrown, never a hang (${wDead.why})`, { wNo, wDead });
+        const wDead = await settles(D.waitForXftDpi({ binPath: XRDB, env: { ...ctx.x11Env(':98765') }, deadlineMs: 400, stepMs: 100 }), 30000, 'CONTROL: waitForXftDpi against a display that never answers never settled');
+        // PLACED (the census r2 — the find made red at will): the SAME dead display through the function's own `now`, stepped 3.5 s after its
+        // start (a loaded box's forks and timers): the verdict is reported by name all the same, and the old «ms < 3000» reads RED
+        let steps = 0; const stepped = () => Date.now() + (steps++ ? 3500 : 0);
+        const wStep = await settles(D.waitForXftDpi({ binPath: XRDB, env: { ...ctx.x11Env(':98765') }, deadlineMs: 400, stepMs: 100, now: stepped }), 30000, 'PLACED: the stepped dead display never settled');
+        ok(!!wStep && wStep.ok === false && /within 400 ms/.test(wStep.why) && !(wStep.ms < 3000), `PLACED: a stepped clock — the dead display is reported by name (${wStep && wStep.why}) after ${wStep && wStep.ms} «ms»: the old «< 3000» verdict reads RED with nothing hung`);
+        ok(wNo.ok === false && wNo.why === 'xrdb not on PATH' && !!wDead && wDead.ok === false && /no Xft\.dpi in the display's resources within 400 ms/.test(wDead.why), `CONTROL: no xrdb, and a display that never answers, are REPORTED by name within the deadline — never thrown, never a hang (${wDead.why})`, { wNo, wDead });
         const q0 = await xq();
         ok(/^Xft\.dpi:\s+144$/m.test(q0), `xpra started with ctx.dpi 144 ⇒ the display's resource database says Xft.dpi 144 before any client (${(q0.match(/^Xft\.dpi:.*$/m) || ['none'])[0]})`);
         const merged = await D.applyXResources({ binPath: XRDB, env: ctx.x11Env(up.display), text: 'XTerm*faceName: Monospace\nXTerm*faceSize: 16\n' });
