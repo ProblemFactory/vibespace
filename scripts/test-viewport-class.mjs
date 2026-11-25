@@ -210,6 +210,8 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const door = CSB.slice(CSB.indexOf("const setEl = e.target.closest('.chat-status-settings');"), CSB.indexOf('// ── the doors end ──'));
   ok(/const mineWin = columnShape\(\) \?/.test(door) && /act\('chat-status-col-search', t\('Search this conversation'\), \(\) => view\._search\.open\(\)\)/.test(door) && /if \(held\) act\('chat-status-col-window', t\('This window'\), \(\) => this\._app\?\._mobileNav\?\.bar\?\.windowMenuAt\?\.\(held\.id, setEl\)\)/.test(door) && /held = this\._app\?\.wm\?\.windows\?\.get\?\.\(mineWin\[0\]\);/.test(door) && /windowMenuAt, fitColumn/.test(BAR),
     '⑤b AT THE BOTTOM: in the column, the strip\'s «Conversation settings» door ends with this conversation\'s search and its window\'s menu (opened above the door)');
+  ok(/const navR = nav && typeof nav\.getClientRects === 'function' && nav\.getClientRects\(\)\.length && nav\.getBoundingClientRect\(\)\.width >= nav\.getBoundingClientRect\(\)\.height \? nav\.getBoundingClientRect\(\) : null;/.test(CSB),
+    '⑤b the strip\'s panels take their room under a TOP bar only — a vertical bar (the column; the trailing bar) is no ceiling (test-duo-layout ④b found the door\'s last rows under a 120 px panel\'s fold)');
 }
 
 console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the audit of the 32 edge-pinned rules)');

@@ -1655,7 +1655,9 @@ export class ChatStatusBar {
       // AND ITS HEIGHT — the room above the chip, under the top of its container, the phone's top bar and the viewport
       // (dropdownRoom, PURE); the panel scrolls inside it (chat.css max-height: var(--dd-room)). LAYOUT px.
       const nav = typeof document.getElementById === 'function' ? document.getElementById('mobile-nav') : null;
-      const navR = nav && typeof nav.getClientRects === 'function' && nav.getClientRects().length ? nav.getBoundingClientRect() : null;
+      // B-78db: a VERTICAL bar (the regular class's trailing bar; the bar in the Duo's side column) is no top bar — its bottom is the
+      // screen's, and it left the panel its 120 px floor (the door's last rows under the panel's fold); only a top bar is a ceiling
+      const navR = nav && typeof nav.getClientRects === 'function' && nav.getClientRects().length && nav.getBoundingClientRect().width >= nav.getBoundingClientRect().height ? nav.getBoundingClientRect() : null;
       if (typeof dropdown.style.setProperty === 'function') dropdown.style.setProperty('--dd-room', dropdownRoom({ anchorTop: rect.top, containerTop: containerRect.top, barBottom: navR ? navR.bottom : 0, scale }) + 'px');
       // an outside press closes it — THE ONE closer (utils.js onOutsidePress: capture-phase pointerdown, so a press
       // into an app's picture counts too); its own rule kept: a press ON the anchor element is the toggle's, and a
