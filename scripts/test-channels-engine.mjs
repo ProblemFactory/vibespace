@@ -6630,9 +6630,9 @@ console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every d
   const hk = await run(ENG, 'q011-kill', { kill: true });
   ok(hk.n > 0 && hk.polled === hk.n && hk.due === 0 && hk.same, `design 011 lane 2: after a KILL (the data dir as the kill left it: no close, no side file) NO conversation is due early either — ${hk.due} of ${hk.n} due, every lastPollAt read back from the journal (a lost one read as "never polled": a restored window fetched it ahead of discovery)`, JSON.stringify(hk));
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');
-  const JOURNAL = '    journal(k);\n    armStamps();\n';
+  const JOURNAL = '    journal(k);\n    stampsCompactIfDue();';   // B-360d: the side file is the journal's compaction — with no line, none comes due
   ok(ssrc.split(JOURNAL).length === 2, 'design 011 lane 2 · CONTROL setup: stamps.set appends the journal line where the control cuts it');
-  const scQ = patchPath('src', 'channel-store'); writeCopy(scQ, ssrc.replace(JOURNAL, '    armStamps();\n'));
+  const scQ = patchPath('src', 'channel-store'); writeCopy(scQ, ssrc.replace(JOURNAL, '    stampsCompactIfDue();'));
   const ecQ = patchPath('src/server', 'channels-engine'); writeCopy(ecQ, engineSource(REPO).replace("require('../channel-store.js')", `require(${JSON.stringify(scQ)})`));
   const c = await run(require(ecQ), 'q011-nojournal', { kill: true });
   ok(c.n > 0 && c.due === c.n, `design 011 lane 2 · CONTROL: no journal (the side file alone) — after the same kill ${c.due} of ${c.n} conversations are due at once — red`, JSON.stringify(c));

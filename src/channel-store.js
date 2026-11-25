@@ -280,7 +280,7 @@ const RUNTIME_KEYS = (k, v) => (k.startsWith('_') ? undefined : v);
 // THE POLL STAMPS LEAVE THE ROW (design 011 lane 2, 2026-10-03): a pass that brought nothing changed nothing but these
 // three instants, and stamping them into the row kept the index dirty on every poll — userW's 87 MB file rewritten whole
 // about every 2.3 s. They live in a side file (poll-stamps.json, one line per conversation) flushed at most every
-// STAMPS_FLUSH_MS and at close, and the index's serializer omits them. They must still PERSIST: a row is due at
+// the journal's compaction (B-360d: past its bound, on a failed journal line, at close), and the index's serializer omits them. They must still PERSIST: a row is due at
 // `lastPollAt + cadence`, so losing them makes every conversation due at once after a restart (a long, metered re-poll
 // — the vendor's budget paces it, and the store says it). A row that still carries them (an index written before this
 // lane, or a write past the door) is read, and loses them where it is next serialized — no migration.
@@ -292,7 +292,16 @@ const RUNTIME_KEYS = (k, v) => (k.startsWith('_') ? undefined : v);
 // (truncated after the rename), a start replays it over the side file in order (the last line per key wins). A kill
 // keeps every stamp, as the row did; a line a kill cut short is counted and said.
 const STAMP_KEYS = Object.freeze(['lastPollAt', 'lastScanAt', 'walkStartedAt']);
-const STAMPS_FLUSH_MS = 120 * 1000;
+// THE COMPACTION (B-360d, the coordinator's r1319 / r4414 — QUIET IS FREE): the journal is the record of every change; the side
+// file is written only when the journal's bytes pass HALF the side file's bytes (at least `min`, at most `max`), when a journal
+// line fails, and at close. Was: the whole side file every 120 s while any stamp moved — measured at the release 2.369.419 on a
+// stand-in of 200 000 stamped keys: the bytes' build held the loop 170 ms at the median and 287 ms at the worst write (the write
+// itself on the writer's thread, 18–23 ms there), every 120 s, growing with the keys. `max` bounds a start's replay. Its bytes are
+// made in SLICES of at most STAMPS_SLICE keys, each its own turn. A journal append that FAILS asks the compaction at once: the
+// side file is then behind by at most the writer's paced gap (store-pace's 30 s ceiling) and the slices — STAMPS_FAIL_BEHIND_MS.
+const STAMPS_BOUND = Object.freeze({ min: 64 * 1024, max: 2 * 1024 * 1024 });
+const STAMPS_SLICE = 20000;
+const STAMPS_FAIL_BEHIND_MS = 30 * 1000;   // = src/store-pace.js MIN_GAP_CEIL_MS, the writer's longest paced gap (the SHARED store imports no pace module: test-channel-store-pins)
 const NO_STAMPS = Object.freeze({});
 /** The index's replacer: RUNTIME_KEYS, and a row's `lane` without the poll stamps (the belt — `serializeChunk` heals a
  *  row of them first; this catches one written between two serializations). */
@@ -405,7 +414,7 @@ function readIndexFamily(dir) {
 /** B-92fc follow (主开发 r3021 (1)): THE STORE's OWN FOLDERS under data/channels — ONE list, and every one of them is made from it
  *  (never an account's id: a purge mark naming one is a bad id, L6). The staged outbox files' folder is its module's own name, pinned equal. */
 const OWN_FOLDERS = Object.freeze({ msgs: 'msgs', archive: 'archive', attachments: 'attachments', outboxFiles: 'outbox-files' });   // outboxFiles = src/channel-outbox-files.js DIR (a SHARED store imports no such module: test-channel-store-forget ⑫ pins them equal)
-function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsFlushMs = STAMPS_FLUSH_MS, walk = null, heldRetry = null } = {}) {
+function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsBound = STAMPS_BOUND, stampsSlice = STAMPS_SLICE, stampsDebounceMs = undefined, walk = null, heldRetry = null } = {}) {
   // lane hub-loop-stalls commit 2: the index reaches the disk through THE STORE WRITER (its own thread; a pace stated for
   // the index's size) — a 21.7 MB index's rename held the owner's main loop 1.3 s median, 58 times in six hours
   const W = () => writer || require('./store-writer.js').storeWriter();
@@ -733,7 +742,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const dedup = new Map(); // `${adapterId}/${convId}` -> Set<vendorId>
 
   // ── THE POLL STAMPS' SIDE FILE (design 011 lane 2): `{v, fields, stamps: {key: [lastPollAt, lastScanAt,
-  // walkStartedAt]}}`, memory authoritative, written at most every STAMPS_FLUSH_MS and at close; a key whose row left
+  // walkStartedAt]}}`, memory authoritative, written as the journal's COMPACTION (B-360d) and at close; a key whose row left
   // the index leaves with the next write; an unreadable file is set aside like every family here ──
   const stampsFile = path.join(dir, 'poll-stamps.json');
   const stampsLog = path.join(dir, 'poll-stamps.log');   // THE JOURNAL (above): every set since the side file's last write
@@ -758,14 +767,18 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // written synchronously before the index, inside the index's produce)
   let stampSeq = 0, stampsMadeSeq = -1, healing = null;
   const stampsSince = new Set();   // cure r1 (C2): the keys set after the side file's bytes were made — what a fold keeps
-  let stampsTimer = null;
-  const stampStats = { writes: 0, healed: 0, lostAtLoad: 0 };
+  // B-360d THE COMPACTION's state: owed once until it lands; `Now` = a failed journal line asks it at once; the journal's bytes
+  // since its last fold against the side file's own (its bound); the bytes being made, a slice a turn
+  let stampsCompactOwed = false, stampsCompactNow = false, stampsJournalLen = 0, stampsBuild = null, stampsMadeBytes = 0;
+  let stampsSideBytes = (() => { try { return fs.statSync(stampsFile).size; } catch { return -1; } })();   // -1: no side file (its first write once the journal holds a line)
+  const stampStats = { writes: 0, healed: 0, lostAtLoad: 0, compactions: 0, slices: 0 };
   let journalFd = null, journalTorn = false, journalSaidAt = 0, journalWas = false;   // journalWas: a journal there at the start (or opened since)
   const journalStats = { replayed: 0, torn: 0, lines: 0, bytes: 0, folds: 0 };
   {   // the journal replayed over the side file, in order — a kill since its last write lost no stamp
     let text = '';
     try { text = fs.readFileSync(stampsLog, 'utf8'); journalWas = true; } catch (e) { if (e && e.code !== 'ENOENT') holdCompanion(psLoad, 'poll-stamps.log', e); /* «not there»: the side file is the whole truth */ }
     if (text && !text.endsWith('\n')) journalTorn = true;   // a tail a kill cut short: the next line starts on its own
+    stampsJournalLen = text.length;   // B-360d: the journal's bytes at the start count toward its bound
     for (const ln of text.split('\n')) {
       if (!ln) continue;
       let a = null;
@@ -812,7 +825,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (healed) warn(`[channels] poll-stamps.json: ${healed} conversation(s)' poll times taken out of index.json (an index written before the side file) — the side file is written before the index's next write`);
       else if (lost) warn(`[channels] poll-stamps.json was not read (${psLoad.blocked ? 'blocked' : 'missing or set aside'}) — ${lost} conversation(s) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll`);
     } else if (unreadStamps) warn(`[channels] poll-stamps.json: ${unreadStamps} entr${unreadStamps === 1 ? 'y is' : 'ies are'} not a list of instants — that many conversation(s) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll`);
-    if (stampsDirty) armStamps();
+    // B-360d: nothing is written at the open (QUIET IS FREE) — a journal replayed here is compacted by the next set past its bound
   }
   // lane lark-threads (A1): the STORED place of every record the dedup set holds that carries one (sparse:
   // vendorId → {threadKey, root, replyTo}) — what the place door judges an offer against; REBUILT with the set (every
@@ -2942,9 +2955,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // attachment metas (search-memo and feed-miss moved by B-360d r1360), the message-log and audit appends, the outbox files' removal; and the
   // poll-stamps JOURNAL's append and fold (a named exception: a kill must keep every stamp — see the journal's note).
   const moved = new Set();   // the files this store handed to the writer (close() flushes them through it)
-  function owe(file, { name, produce, mode, act = false, onWritten, makeDir = false } = {}) {
+  function owe(file, { name, produce, mode, act = false, onWritten, makeDir = false, debounceMs } = {}) {
     moved.add(file);
-    W().dirty(file, { name, produce, ...(mode !== undefined ? { mode } : {}), ...(act ? { rank: 0 } : {}), ...firstWrite(file, onWritten), ...(makeDir ? { makeDir: true } : {}) });   // B-f276 1b (r809): a family read missing — its first write is the exclusive create
+    W().dirty(file, { name, produce, ...(mode !== undefined ? { mode } : {}), ...(act ? { rank: 0 } : {}), ...firstWrite(file, onWritten), ...(makeDir ? { makeDir: true } : {}), ...(debounceMs !== undefined ? { debounceMs } : {}) });   // B-f276 1b (r809): a family read missing — its first write is the exclusive create
     if (closed) writeNow(file);
   }
   /** the file's bytes through the writer NOW, waited for (bounded by the writer's synchronous bound) — close(), a change
@@ -3167,7 +3180,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     stampsDirty = true; stampSeq++; stampsSince.add(k);
     if (closed) { stampsFlush(); return; }
     journal(k);
-    armStamps();
+    stampsCompactIfDue();   // B-360d: QUIET IS FREE — the side file is written only past the journal's bound (or on a failed line)
   }
   /** THE JOURNAL'S ONE WRITER: the key's whole triple after a change (null = none), one line, appended now (a kept fd,
    *  O_APPEND) — a list of keys is ONE append (the load's heal). Never throws — a failure is said at most once a minute,
@@ -3188,9 +3201,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       let o = 0;
       while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
       journalTorn = false; journalStats.lines += Array.isArray(keys) ? keys.length : 1; journalStats.bytes += b.length;
+      stampsJournalLen += b.length;   // B-360d: toward the compaction's bound
     } catch (e) {
       if (e && e.code === 'EEXIST' && (psLoad.missing || psLoad.readMissing)) { tookAppeared(psLoad, 'poll-stamps.log'); return; }   // B-f276 1c follow (r1588 (2)): the life-long flag the open asks — never a once-a-minute retry nobody hears of   // the journal APPEARED: the stamps held at once (loaded at the next start)
       journalTorn = true;
+      stampsCompactNow = true;   // B-360d: a line that could not be written asks the compaction at once (the side file carries the change)
       if (now() - journalSaidAt >= 60e3) { journalSaidAt = now(); warn(`[channels] poll-stamps.log not written (${(e && e.code) || (e && e.message) || e}) — the stamp is kept in memory and in the side file's next write`); }
     }
   }
@@ -3206,43 +3221,98 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }
     catch (e) { if (e && e.code !== 'ENOENT') warn(`[channels] poll-stamps.log not folded (${e.code || e.message || e}) — replayed over the side file at the next start`); return; }
     journalStats.folds++;
+    stampsJournalLen = 0;   // B-360d: the kept keys' lines are appended again below and counted there
     if (keep && keep.length) journal(keep);
   }
-  function armStamps() { if (stampsTimer || closed) return; stampsTimer = setTimeout(oweStamps, stampsFlushMs); if (stampsTimer.unref) stampsTimer.unref(); }
-  /** the side file's bytes, made when the writer's turn comes (a key whose row left the index is dropped here); null =
-   *  nothing to write. A BLOCKED family or index is never written (said each time). */
-  function produceStamps() {
-    if (!stampsDirty) return null;
-    if (psLoad.blocked || ixLoad.blocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixLoad.blocked)); return null; }
+  // ── B-360d THE COMPACTION (the coordinator's r1319 / r4414): the side file is written when the journal passes its bound, never
+  // on a clock — a quiet hour appends its few lines and writes nothing else. `max` bounds what a start replays. ──
+  function stampsBoundBytes() { return stampsSideBytes < 0 ? 0 : Math.min(stampsBound.max, Math.max(stampsBound.min, Math.floor(stampsSideBytes / 2))); }
+  function stampsCompactIfDue() {
+    if (closed || !stampsDirty || stampsCompactOwed || psLoad.blocked || ixLoad.blocked) return;
+    if (stampsCompactNow || (stampsJournalLen > 0 && stampsJournalLen >= stampsBoundBytes())) oweStamps();   // a line in the journal (or a failed one) is what a compaction carries
+  }
+  const lineOfStamp = (k, st) => `${JSON.stringify(k)}:${JSON.stringify(STAMP_KEYS.map((f) => st[f] || null))}`;
+  /** one key's side-file line, or null: a key whose row left the index leaves with this write (the sliced and the whole road) */
+  function sideLineOf(conv, k, st) {
+    if (!hasOwn(conv, k)) { stampMap.delete(k); return null; }
+    return lineOfStamp(k, st);
+  }
+  const sideTextOf = (lines) => `{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`;
+  /** the moment the compaction's bytes are MADE (its first slice, or the one synchronous turn): every key set after it is kept
+   *  by the fold (stampsSince — cure r1 C2's rule) */
+  function stampsMadeNow() { stampsDirty = false; stampsMadeSeq = stampSeq; stampsSince.clear(); stampsCompactNow = false; }
+  const stampsPaceOpt = () => (stampsDebounceMs !== undefined ? { debounceMs: stampsDebounceMs } : {});   // a suite may state its own debounce (the hub: the writer's)
+  const stampsAsk = () => ({ name: 'channels-stamps.write', produce: produceStamps, ...stampsPaceOpt(), ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create, on every road
+  /** the whole side file in ONE turn — a synchronous flush only (close, the exit, a suite's flush) */
+  function wholeStamps() {
     const conv = ix.conversations, lines = [];
-    for (const [k, st] of stampMap) {
-      if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }
-      lines.push(`${JSON.stringify(k)}:${JSON.stringify(STAMP_KEYS.map((f) => st[f] || null))}`);
+    for (const [k, st] of stampMap) { const ln = sideLineOf(conv, k, st); if (ln) lines.push(ln); }
+    stampsMadeNow();
+    const text = sideTextOf(lines); stampsMadeBytes = text.length;
+    return text;
+  }
+  /** one slice of the compaction: at most `stampsSlice` keys, then the next turn; the last hands the bytes to the writer */
+  function stampsBuildSlice() {
+    const b = stampsBuild;
+    if (!b || closed || b !== stampsBuild) return;
+    const conv = ix.conversations, end = Math.min(b.keys.length, b.i + stampsSlice);
+    for (; b.i < end; b.i++) {
+      const k = b.keys[b.i], st = stampMap.get(k);
+      if (!st) continue;   // removed since the compaction began (its removal is a journal line, kept by the fold)
+      const ln = sideLineOf(conv, k, st); if (ln) b.lines.push(ln);
     }
-    stampsDirty = false; stampsMadeSeq = stampSeq; stampsSince.clear();
-    return `{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`;
+    stampStats.slices++;
+    if (b.i < b.keys.length) { const im = setImmediate(() => { if (stampsBuild === b) stampsBuildSlice(); }); if (im && im.unref) im.unref(); return; }
+    b.ready = sideTextOf(b.lines); b.lines = null; stampsMadeBytes = b.ready.length;
+    // the bytes are ready: a compaction made over LATER turns asks the writer to take them (its LATER answer is still owed);
+    // one made inside its own produce returns them there — it never asks again (round wv1mi5o6j's MUST: A WRITE NEVER SCHEDULES
+    // THE NEXT WRITE — a one-slice compaction that re-dirtied itself from its own produce sent the side file out at the writer's pace)
+    if (!b.inProduce) W().dirty(stampsFile, stampsAsk());
+  }
+  /** the side file's bytes when the writer's turn comes: a compaction not begun BEGINS (its first slice now) and answers LATER —
+   *  the writer waits for the store to ask again when its bytes are ready (the index's road, B-dfa4 cut 3); a synchronous flush
+   *  makes them in this turn. null = nothing to write. A BLOCKED family or index is never written (said each time). */
+  function produceStamps(o) {
+    if (psLoad.blocked || ixLoad.blocked) { stampsBuild = null; stampsCompactOwed = false; warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixLoad.blocked)); return null; }
+    if (o && o.sync) {   // close, the exit, a suite's flush: the whole file in this turn (a compaction being made is begun again whole)
+      if (stampsBuild) { stampsBuild = null; stampsDirty = true; }
+      if (!stampsDirty) { stampsCompactOwed = false; return null; }
+      return wholeStamps();
+    }
+    if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return text; }
+    if (stampsBuild) return LATER;   // still being made, a slice a turn
+    if (!stampsDirty) { stampsCompactOwed = false; return null; }
+    if (!stampsCompactOwed) return null;   // the writer asking on its own (a stray dirty): the side file is written ONLY when its compaction is owed (the bound, a failed line)
+    stampsMadeNow();
+    stampsBuild = { keys: [...stampMap.keys()], i: 0, lines: [], ready: null, inProduce: true };
+    stampsBuildSlice();
+    if (stampsBuild) stampsBuild.inProduce = false;
+    if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return text; }   // a small map: one slice was the whole
+    return LATER;
   }
   function stampsWritten(ok) {
-    if (!ok) { stampsDirty = true; return; }   // owed: the writer keeps it and retries (its failure said there)
-    stampStats.writes++;
+    if (!ok) { stampsDirty = true; stampsCompactOwed = true; return; }   // owed: the writer keeps it and retries (its failure said there) — the compaction stays OWED
+    stampsCompactOwed = false;
+    stampStats.writes++; stampStats.compactions++;
+    stampsSideBytes = stampsMadeBytes;
     foldJournal(stampSeq === stampsMadeSeq ? null : [...stampsSince]);   // cure r1 (C2): every line before the bytes is in the file just renamed; the keys set since are kept, one line each
+    stampsCompactIfDue();   // a journal that grew past the bound during the write's flight (rare) is compacted again — by the store, never by the writer's own produce
   }
-  /** the side file handed to the WRITER (paced: the 120 s timer, the index's pace) */
+  /** the compaction handed to the WRITER (paced by its rules) — once until it lands */
   function oweStamps() {
-    if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
-    if (!stampsDirty) return;
-    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten });   // owe(): a missing stamps file's first write is the exclusive create
+    if (!stampsDirty || stampsCompactOwed) return;
+    stampsCompactOwed = true;
+    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });   // owe(): a missing stamps file's first write is the exclusive create
   }
   /** THE SYNCHRONOUS WRITE of the side file (close, a suite): through the writer, waited for. → whether it was written;
    *  never throws (a failure is said, kept in memory and retried) */
   function stampsFlush() {
-    if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
     if (!stampsDirty && !W().pending(stampsFile)) return false;
     if (psLoad.blocked || ixLoad.blocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixLoad.blocked)); return false; }
     moved.add(stampsFile);
-    W().dirty(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create
+    W().dirty(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, ...stampsPaceOpt(), ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create
     try { return writeNow(stampsFile); }
-    catch (e) { warn(`[channels] poll-stamps.json not written (${(e && e.code) || (e && e.message) || e}) — kept in memory, retried`); armStamps(); return false; }
+    catch (e) { warn(`[channels] poll-stamps.json not written (${(e && e.code) || (e && e.message) || e}) — kept in memory, retried`); return false; }   // the writer keeps it owed and retries
   }
 
   interval = setInterval(() => {   // every tick sweeps (B-f32b); a dirty index is the writer's (its pace, its retries)
@@ -3570,7 +3640,7 @@ function pauseDoorsOf(api, table, { held, error, answer, say = () => {} }) {
 }
 
 module.exports = {
-  createChannelStore, OWN_FOLDERS, readIndexFamily, replayIndexJournal, pauseDoorsOf, HELD_WALLS, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_FLUSH_MS,
+  createChannelStore, OWN_FOLDERS, readIndexFamily, replayIndexJournal, pauseDoorsOf, HELD_WALLS, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_BOUND, STAMPS_SLICE, STAMPS_FAIL_BEHIND_MS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
   SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES, PLACE_CACHE_MAX, PLACE_KEEP_MAX,
 };

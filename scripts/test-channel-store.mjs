@@ -1380,10 +1380,10 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   // to the writer's thread (was: the side file written first, inline). The control cuts that append.
   const OWED = ['    if (took.length) journal(took);', '    if (took.length && false) journal(took);'];
   const LOADHEAL = ['    for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;\n', ''];
-  const PRUNE = ['      if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }\n', ''];
+  const PRUNE = ['    if (!hasOwn(conv, k)) { stampMap.delete(k); return null; }\n', ''];   // B-360d: ONE helper for the sliced and the whole road
   const BIRTH = ['      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps\n', ''];
   const SAID = ['      else if (lost) warn(', '      else if (lost && false) warn('];
-  const JOURNAL = ['    journal(k);\n    armStamps();\n', '    armStamps();\n'];
+  const JOURNAL = ['    journal(k);\n    stampsCompactIfDue();', '    stampsCompactIfDue();'];   // B-360d: the side file is the journal's compaction
   const REPLAY = ['      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);\n', ''];
   const FOLD = ['    try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }', '    try { journalTorn = false; }'];   // the fold runs in the side file's LANDED callback (stampsWritten)
   const cuts = { KEEP, HEAL, HEAL2, SKIP, QUIET, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
@@ -1429,19 +1429,19 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
     await quietPass(st, ['c3', 'c7'], T + 1000, false);
     st.stamps.set('a/c9', { lastScanAt: T + 2000 });
     st.index.flush();
-    const before = fs.existsSync(st.stamps.file);
+    const before = fs.existsSync(st.stamps.file), writesBefore = (st.stamps.stats() || {}).writes || 0;   // B-360d: a store with no side file writes one once its journal holds a line
     st.close();
     const logBytes = fs.existsSync(st.stamps.log) ? fs.statSync(st.stamps.log).size : 0;   // the journal, folded by close()'s write
     const re = M.createChannelStore({ dir, log: slog });
     const g = (k) => re.stamps.lane(re.index.peek(k));
     let shape = null;
     try { const j = JSON.parse(fs.readFileSync(re.stamps.file, 'utf8')); shape = JSON.stringify(j.fields) + Object.keys(j.stamps).sort().join(','); } catch { }
-    const r = { before, logBytes, c3: g('a/c3').lastPollAt, c7w: g('a/c7').walkStartedAt, c9: g('a/c9').lastScanAt, none: g('a/c5').lastPollAt ?? null, shape };
+    const r = { before, writesBefore, logBytes, c3: g('a/c3').lastPollAt, c7w: g('a/c7').walkStartedAt, c9: g('a/c9').lastScanAt, none: g('a/c5').lastPollAt ?? null, shape };
     re.close();
     return r;
   };
   const rh = await restartRun(S, 'head');
-  ok(!rh.before && rh.logBytes === 0 && rh.c3 === T + 1000 && rh.c7w === T + 1000 && rh.c9 === T + 2000 && rh.none === null && rh.shape === '["lastPollAt","lastScanAt","walkStartedAt"]a/c3,a/c7,a/c9', '⑭ the stamps survive a restart (lastPollAt, walkStartedAt, lastScanAt read back; an unstamped row stays unstamped); the side file is not written per stamp — close() writes it and folds the journal (0 bytes left)', JSON.stringify(rh));
+  ok(rh.writesBefore <= 1 && rh.logBytes === 0 && rh.c3 === T + 1000 && rh.c7w === T + 1000 && rh.c9 === T + 2000 && rh.none === null && rh.shape === '["lastPollAt","lastScanAt","walkStartedAt"]a/c3,a/c7,a/c9', '⑭ the stamps survive a restart (lastPollAt, walkStartedAt, lastScanAt read back; an unstamped row stays unstamped); the side file is not written per stamp — close() writes it and folds the journal (0 bytes left)', JSON.stringify(rh));
   const rc = await restartRun(cut('qr-noclose', CLOSE), 'c-noclose');
   ok(rc.c3 === T + 1000 && rc.logBytes > 0, `⑭ CONTROL: close() without the side file's write — the journal is left unfolded (${rc.logBytes} bytes; the stamps read back only by replaying it) — red`, JSON.stringify(rc));
   const rf = await restartRun(cut('qr-nofold', FOLD), 'c-nofold');
@@ -1476,7 +1476,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const kt = killRun(path.join(REPO, 'src/channel-store.js'), 'tear', { tear: true });
   ok(kt.exact === 40 && kt.torn === 1 && /1 line\(s\) unreadable/.test(kt.said) && kt.after === T + 7000 && kt.torn2 === 1, `⑭ …a line the kill cut short is skipped, counted and said ("${kt.said.slice(0, 120)}"), its conversation keeping its older instant; the next stamp after it starts on its own line and survives a second kill`, JSON.stringify(kt));
   const kj = killRun(cutFile('qk-nojournal', JOURNAL), 'c-nojournal');
-  ok(kj.signal === 'SIGKILL' && kj.exact === 0, `⑭ CONTROL: no journal (the side file alone, ≤ every 120 s) — the same kill loses every stamp (${kj.exact} of 40 read back): each row "never polled" after the restart — red`, JSON.stringify(kj));
+  ok(kj.signal === 'SIGKILL' && kj.exact === 0, `⑭ CONTROL: no journal (the side file alone: with no journal line its compaction never comes due, B-360d) — the same kill loses every stamp (${kj.exact} of 40 read back): each row "never polled" after the restart — red`, JSON.stringify(kj));
   const kr = killRun(cutFile('qk-noreplay', REPLAY), 'c-noreplay');
   ok(kr.exact === 0, `⑭ CONTROL: the journal written but not replayed at the start — ${kr.exact} of 40 read back — red`, JSON.stringify(kr));
 
