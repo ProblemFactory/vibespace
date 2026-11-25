@@ -176,6 +176,7 @@ const CALLERS = { 'src/hosts.js': ['hosts.json'], 'src/machine-mounts.js': ['mac
   'src/server/agent-listener.js': ['agent-door.json'],   // r3333 unit 1: the agent door's record (its port)
   // 主开发 r3336 (lane lg-text-legs-3): the data folder's own id file, held by the sign-in's start
   'src/auth.js': { sites: 1, stores: ['instance.json'] },   // (it names the file through SW.INSTANCE_FILE)
+  'src/port-forward.js': ['port-forwards.json'], 'src/server/instance-url.js': ['instance-url.json'],   // bl-machines-a (lines 702 + 646 + 749, moved onto 2.369.419): the Ports list and the publish setting
   'src/opencode-serve.js': ['opencode-serve.json'],   // r3334 unit 1 (lane bl-chat-b): the OpenCode serve's record
   'src/server/plugin-loader.js': ['plugin-registry.json'],   // bl-browser-a (主开发 r3305): which plugins are on and trusted
   'src/server/vault-engine.js': { sites: 1, stores: ['vault.json'] },   // lg-vault-env's vault record (unit (b)): the engine names its file through src/vault.js VAULT_FILE, never a quoted literal

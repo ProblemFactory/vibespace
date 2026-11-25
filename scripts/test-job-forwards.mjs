@@ -211,7 +211,7 @@ const SRV = read('server.js'), i0 = SRV.indexOf('const portForwards = new PortFo
 const ctor = i0 >= 0 && i1 > i0 ? SRV.slice(i0, i1) : '';
 ok(ctor.includes('getJobs: jobsWiring.getJobs,'), 'server.js builds the forwards\' manager WITH the jobs engine (getJobs: jobsWiring.getJobs) — without it no reconcile runs', ctor.slice(0, 200));
 const r0 = SRV.indexOf("app.post('/api/hosts/:id/port-forward'"), r9 = SRV.indexOf('killOrphan', r0), routes = r0 >= 0 && r9 > r0 ? SRV.slice(r0, r9) : '';
-ok(!!routes && !routes.includes('res.status(400).json({ error: e.message })') && (routes.match(/res\.status\(e\.status \|\| 400\)\.json\(\{ error: e\.message, \.\.\.\(e\.code \? \{ code: e\.code \} : \{\}\) \}\)/g) || []).length >= 7, 'every port-forward route answers the store\'s own status and code (503 ports_unread while held — never a 400)');
+ok(!!routes && !/res\.status\(400\)/.test(routes) && (routes.match(/res\.status\(e\.status \|\| 400\)\.json\(\{ error: e\.message, \.\.\.\((?:e && )?e\.code \? \{ code: e\.code \} : \{\}\) \}\)/g) || []).length >= 7, 'every port-forward route answers the store\'s own status and code (503 ports_unread while held — never a 400)');
 
 console.log('§8 THE READER TABLE\'s empty states (主开发 r3230): the machine dialog, the artifact cards, the new-port watcher while held');
 // (a) the machine dialog (src/lib/sidebar-mounts.js, a page): the list held or torn is said there in the Ports panel's own sentences
