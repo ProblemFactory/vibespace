@@ -690,6 +690,7 @@ async function waitForHuman(q) {
     const hold = Math.max(1000, Math.min(Number(q.pollMs) > 0 ? Number(q.pollMs) : 20000, until - Date.now()));
     const a = await peek(`/api/agent/browser/takeover-request?id=${encodeURIComponent(q.id)}&wait=${hold}`);
     if (!a) { await new Promise((ok) => setTimeout(ok, 1000)); continue; } // a miss: ask again (the hub restarting, a dropped poll)
+    if (a._failed && a.code === 'takeovers_unread') return { ended: false, line: `${a.error || 'the takeover requests could not be read'} [takeovers_unread] — your command did NOT run` };   // r4130 (a): the hold, never «gone»
     if (a._failed) return { ended: true, line: `request ${q.id} is gone — your command runs now` };
     if (a.replied) return { ended: false, replied: true, line: a.line };
     if (!a.open) return { ended: true, line: a.line };
