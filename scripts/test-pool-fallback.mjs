@@ -355,7 +355,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
       readSessionMeta: (k) => metas.get(k) || null,
       writeSessionMeta: (k, m, o = {}) => {
         if (o.durable && meta.mode === 'fail') return Promise.resolve(false);
-        if (o.durable && meta.mode === 'hold') return new Promise((res) => meta.held.push(() => { metas.set(k, m); res(true); }));
+        if (o.durable && meta.mode === 'hold') return new Promise((res) => { const go = () => { metas.set(k, m); res(true); }; go.key = k; meta.held.push(go); });   // the held write knows its conversation (the door below)
         metas.set(k, m); return Promise.resolve(true);
       },
     };
@@ -386,10 +386,25 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     };
     const mute = (f) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return f(); } finally { console.log = o; console.warn = w; } };
     const settle = () => new Promise((r) => setTimeout(r, 25));
-    const pass = async (pool = poolIds[0]) => { mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); }); await settle(); };
+    // (r4340 laws 1 + 4) THE DOOR: a move onto the fallback is read once it is PAST ITS REFUSAL CHECK (the managed settings' read, off the
+    // loop) — its restart out (a press's slot then waits for its landing), its record write held by the scene, or the move ended —
+    // never after a fixed settle (Node 22 read the pace control's 8 as 0 once: a count judged by a clock); at most 10 s, its expiry a
+    // NAMED harness line, never read as the product's answer. The pass, a person's answer, a turn's stop and a landing come through it
+    // (the door's census, §4b's controls); the door is cut only where a scene reads a placed hold's red on purpose
+    const onWay = () => [...eng._fbInFlight.values()].filter((e) => ![...eng._fbLanding.values()].some((x) => x.sid === e.sid) && !meta.held.some((go) => go.key === (sessions.get(e.sid) || {}).sockName));
+    const moved = async (what, ms = 10e3) => {
+      const end = Date.now() + ms;
+      while (onWay().length && Date.now() < end) await settle();
+      const left = onWay().map((e) => e.sid);
+      if (left.length) ok(false, `THE HARNESS's BOUND (never the product's answer): ${what} — every move it started past its refusal check within ${ms / 1e3} s`, left);
+      return !left.length;
+    };
+    const pass = async (pool = poolIds[0], { guess = false } = {}) => { mute(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(pool, { force: true }); }); await settle(); if (!guess) await moved('a pass'); };
+    const answer = async (askId, body) => { const r = mute(() => eng.answerCrossProviderAsk(askId, body)); await settle(); await moved('a person\'s answer (' + body.answer + ')'); return r; };
+    const stop = async (s) => { mute(() => eng.maybePoolAutoSwitch(s, { stop: true })); await settle(); await moved('a turn\'s stop'); };
     const restarts = () => sent.filter((m) => m.type === 'pool-auto-switched').flatMap((m) => m.affected);
     const client = () => clients.add({ readyState: 1, send: (p) => sent.push(JSON.parse(p)) });
-    return { am: wam, eng, A: WA, B: WB, P: poolIds[0], P2: poolIds[1], pools: poolIds, cacheDir, sessions, notices, sent, items, cards, metas, meta, mk, pass, settle, mute, restarts, client, todos };
+    return { am: wam, eng, A: WA, B: WB, P: poolIds[0], P2: poolIds[1], pools: poolIds, cacheDir, sessions, notices, sent, items, cards, metas, meta, mk, pass, answer, stop, moved, settle, mute, restarts, client, todos };
   };
   const fbItems = (w) => w.items.filter((x) => x.action && x.action.type === 'pool-cross-provider' && x.action.fallback === true);
 
@@ -427,7 +442,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   ok(!!firstItem && firstItem.text.startsWith('2 conversations') && settled && fbItems(w1b).filter((x) => x.status === 'open').length === 1,
     'none waits (B serves again and takes them) ⇒ the item is settled — and that is no Deny: at the next wall a new item asks', w1b.items.map((x) => `${x.text.slice(0, 16)}…:${x.status}:${x.by || ''}`));
   // ALLOW ONCE: a person's press — at once, outside the pace; the record on disk before each restart
-  const ans = w1.eng.answerCrossProviderAsk(fbItems(w1)[0].action.askId, { answer: 'once' });
+  const ans = await w1.answer(fbItems(w1)[0].action.askId, { answer: 'once' });
   await w1.settle();
   const r1 = w1.restarts();
   ok(ans.ok && ans.state === 'allowed' && ans.queued === 3 && r1.length === 3 && r1.every((t) => t.model === 'deepseek-chat' && !('message' in t) && !('prompt' in t) && !('text' in t))
@@ -481,7 +496,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await w5.pass();
   const before = w5.restarts().length;
   busy._isStreaming = false; busy._turnState = 'idle';
-  w5.mute(() => w5.eng.maybePoolAutoSwitch(busy, { stop: true }));   // the turn's STOP runs its own pass, which pumps (the road production takes)
+  await w5.stop(busy);   // the turn's STOP runs its own pass, which pumps (the road production takes)
   await w5.settle();
   ok(before === 0 && w5.eng._fbQueue.size === 0 && w5.restarts().length === 1 && w5.restarts()[0].serverId === 't1' && !w5.sent.some((m) => m.type === 'FIRE'),
     'scene 5: a conversation in a turn is not moved (its turn finishes where it started); at its end it moves — and nothing continues a turn for it (no automatic continue fired by the move)', { before, after: w5.restarts().length });
@@ -585,20 +600,20 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     '(4) the managed settings refuse the provider ⇒ asked BEFORE the kill: nothing restarted (the conversation never left stopped by the pool), no record, its line says why', wM.cards.map((c) => c.text));
   // (5) A PERSON's PRESS, PACED FOR THE BOX (r3041 MUST): at the head, uncounted, FOUR restarts OUT at a time — a slot is held until
   // that conversation's restart LANDS (its create asks the carry), never freed at the send
-  const land = (w, t) => w.eng.poolChooserForModel(w.P, { model: t.model, resumeOf: t.backendSessionId, carryRecord: true });
-  const pressTen = async (w) => { w.client(); for (let i = 0; i < 10; i++) w.mk('pb' + i); await w.pass(); const a = w.mute(() => w.eng.answerCrossProviderAsk(fbItems(w)[0].action.askId, { answer: 'once' })); await w.settle(); await w.settle(); return a; };
+  const land = async (w, t) => { const r = w.eng.poolChooserForModel(w.P, { model: t.model, resumeOf: t.backendSessionId, carryRecord: true }); await w.moved('a landing (its press slot freed: the next press goes)'); return r; };
+  const pressTen = async (w) => { w.client(); for (let i = 0; i < 10; i++) w.mk('pb' + i); await w.pass(); const a = await w.answer(fbItems(w)[0].action.askId, { answer: 'once' }); await w.settle(); await w.settle(); return a; };
   const settleUntil = async (w, n, k = 8) => { for (let i = 0; i < k && w.restarts().length < n; i++) await w.settle(); };
   const wB = world();
   const ansB = await pressTen(wB);
   const atOnce = wB.restarts().length;
   let landed = 0, maxOut = atOnce, rounds = 0, recs = 0;
-  while (landed < wB.restarts().length && rounds++ < 30) { if (land(wB, wB.restarts()[landed])) recs++; landed++; await wB.settle(); await wB.settle(); maxOut = Math.max(maxOut, wB.restarts().length - landed); }
+  while (landed < wB.restarts().length && rounds++ < 30) { if (await land(wB, wB.restarts()[landed])) recs++; landed++; await wB.settle(); await wB.settle(); maxOut = Math.max(maxOut, wB.restarts().length - landed); }
   ok(ansB.queued === 10 && ansB.moved === false && atOnce === 4 && maxOut === 4 && wB.restarts().length === 10 && recs === 10 && wB.eng._fbLanding.size === 0 && wB.eng._fbMovedAt.length === 0 && wB.eng.PRESS_MOVES_AT_ONCE === 4,
     '(5) Allow once on 10 waiting conversations: the answer says 10 QUEUED; FOUR restarts out at a time — the next goes only as one LANDS (its create asks the carry), never at the send; all ten in the end, none counted by the pool\'s pace', { queued: ansB.queued, atOnce, maxOut, restarts: wB.restarts().length, recs, rounds });
   const wL = world({ landingMs: 250 });
   wL.client(); for (let i = 0; i < 6; i++) wL.mk('pl' + i);
   await wL.pass();
-  wL.mute(() => wL.eng.answerCrossProviderAsk(fbItems(wL)[0].action.askId, { answer: 'once' }));
+  await wL.answer(fbItems(wL)[0].action.askId, { answer: 'once' });
   await wL.settle();
   const firstL = wL.restarts().length;
   const saidL = [], logL = console.log; console.log = (m) => { saidL.push(String(m)); };
@@ -615,6 +630,9 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   // (b) THE REFUSAL CHECK FAILS CLOSED (r3041): a check that throws refuses — nothing killed, said in the line in its own sentence; and
   // it asks with the conversation's OWN backend and the model its restart carries
   const MAN = require(path.join(REPO, 'src/managed-claude-settings.js')), realMH = MAN.managedHelperFact;
+  // (r4340 law 2) A PLACED HOLD at every refusal check (the managed settings' read, off the loop): the moves wait there until the
+  // scene lets them go — the window a loaded machine widens, made at will, never by a clock
+  const holdChecks = () => { let go; const gate = new Promise((r) => { go = r; }); MAN.managedHelperFact = (o) => gate.then(() => realMH(o)); return () => { MAN.managedHelperFact = realMH; go(); }; };
   const wX = world({ cross: 'allow' });
   wX.client(); wX.mk('x1');
   MAN.managedHelperFact = async () => { throw new Error('a placed throw'); };
@@ -643,23 +661,23 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
     '(c) refused once ⇒ backed off: two more passes queue nothing and ask the check NO more (one check, one line); B serving again ends the episode (the backoff cleared)', kAfter);
   // (r3148 (2)) the backoff of a conversation that is gone is dropped at the next pump (and the map is capped as the said-once one is)
   wK.eng._fbBackoff.set('gone-sid', { to: ds.id, n: 1, until: Date.now() + 36e5 });
-  wK.eng.pumpFallbackMoves();
+  await wK.eng.pumpFallbackMoves();
   ok(!wK.eng._fbBackoff.has('gone-sid') && /while \(_fbBackoff\.size > 4096\)/.test(read('src/server/usage-pool-engine.js')), '(r3148 (2)) a gone conversation keeps no backoff (dropped at the next pump); the map is capped at 4096 like the said-once map');
   // (r3148 (3) (4)) A PRESS REFUSED AGAIN says it again (the toast promised the line); a press's failed check promises no «asks again»
   const wPr = world({ managedDir: mdir });
   wPr.client(); wPr.mk('pr1');
   await wPr.pass();
-  wPr.mute(() => wPr.eng.answerCrossProviderAsk(fbItems(wPr)[0].action.askId, { answer: 'once' })); await wPr.settle(); await wPr.settle();
+  await wPr.answer(fbItems(wPr)[0].action.askId, { answer: 'once' }); await wPr.settle(); await wPr.settle();
   await wPr.pass();
   const again = fbItems(wPr).filter((x) => x.status === 'open');
-  if (again.length) { wPr.mute(() => wPr.eng.answerCrossProviderAsk(again[0].action.askId, { answer: 'once' })); await wPr.settle(); await wPr.settle(); }
+  if (again.length) { await wPr.answer(again[0].action.askId, { answer: 'once' }); await wPr.settle(); await wPr.settle(); }
   const prLines = wPr.cards.filter((c) => c.sid === 'pr1' && /keep a provider's key out/.test(c.text)).length;
   ok(again.length === 1 && prLines === 2 && wPr.restarts().length === 0, '(r3148 (3)) a press refused AGAIN in the same episode says its line again (two presses, two lines, nothing restarted)', { again: again.length, prLines });
   const wPu = world();
   wPu.client(); wPu.mk('pu1');
   await wPu.pass();
   MAN.managedHelperFact = async () => { throw new Error('a placed throw'); };
-  try { wPu.mute(() => wPu.eng.answerCrossProviderAsk(fbItems(wPu)[0].action.askId, { answer: 'once' })); await wPu.settle(); await wPu.settle(); } finally { MAN.managedHelperFact = realMH; }
+  try { await wPu.answer(fbItems(wPu)[0].action.askId, { answer: 'once' }); await wPu.settle(); await wPu.settle(); } finally { MAN.managedHelperFact = realMH; }
   ok(wPu.cards.some((c) => c.sid === 'pu1' && c.text === 'DeepSeek cannot take this conversation now: its refusals could not be checked — nothing moved') && !wPu.cards.some((c) => /asks again/.test(c.text || '')),
     '(r3148 (4)) a PRESS whose check could not be made says so with no «the pool asks again» (under «never» nothing asks again)', wPu.cards.map((c) => c.text));
   // (r3148 (5)) A MOVE WITH NO BACKEND ID is refused before anything: no check, no record, nothing restarted, no slot held
@@ -682,7 +700,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   wA.client(); wA.mk('aa1'); wA.mk('aa2', wA.P2);
   await wA.pass(wA.P); await wA.pass(wA.P2);
   const itP = fbItems(wA).find((x) => x.action.poolId === wA.P), itP2 = fbItems(wA).find((x) => x.action.poolId === wA.P2);
-  wA.eng.answerCrossProviderAsk(itP.action.askId, { answer: 'always' });
+  await wA.answer(itP.action.askId, { answer: 'always' });
   await wA.settle();
   const alw = { p: wA.am.get(wA.P).crossProvider, p2: wA.am.get(wA.P2).crossProvider, moved: wA.restarts().some((t) => t.serverId === 'aa1') };
   wA.todos.dismiss(itP2.id);
@@ -690,7 +708,7 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   const wD = world();
   wD.client(); wD.mk('dd1');
   await wD.pass();
-  wD.eng.answerCrossProviderAsk(fbItems(wD)[0].action.askId, { answer: 'deny' });
+  await wD.answer(fbItems(wD)[0].action.askId, { answer: 'deny' });
   await wD.pass();
   ok(alw.p === 'allow' && alw.p2 === undefined && alw.moved && fbItems(wA).filter((x) => x.action.poolId === wA.P2 && x.status === 'open').length === 0
     && fbItems(wD).filter((x) => x.status === 'open').length === 0 && fbItems(wD).length === 1 && wD.restarts().length === 0,
@@ -749,6 +767,16 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   wPace.client(); for (let i = 0; i < 8; i++) wPace.mk('p' + i);
   await wPace.pass();
   ok(wPace.restarts().length === 8, 'CONTROL: a copy without the pace restarts all 8 in the minute ⇒ the 6-a-minute leg goes RED', wPace.restarts().length);
+  // (r4340) THE PACE CONTROL PLACED BY A HOLD (Node 22 read it 0 once — a control judged by a clock): the same copy, every refusal check
+  // HELD, its eight moves wait in flight; read after the pass alone (the door cut: the control as it stood) it reads 0 — the red made
+  // on demand; let go and read through the door it reads all 8
+  const wPh = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, PACE, '', 'no pace'), 'eng-no-pace-held') });
+  wPh.client(); for (let i = 0; i < 8; i++) wPh.mk('ph' + i);
+  const letPace = holdChecks();
+  let paceCut = -1, paceHeld = -1, paceDoor = -1;
+  try { await wPh.pass(wPh.P, { guess: true }); paceCut = wPh.restarts().length; paceHeld = wPh.eng._fbInFlight.size; letPace(); await wPh.moved('the held no-pace copy\'s eight moves, let go'); paceDoor = wPh.restarts().length; } finally { letPace(); }
+  ok(paceHeld === 8 && paceCut === 0, 'CONTROL (r4340): the pace control\'s copy with every refusal check HELD, read after the pass alone (the door cut — the control as it stood), reads 0 with its 8 moves in flight — Node 22\'s red, made on demand by a placed hold', { paceHeld, paceCut });
+  ok(paceDoor === 8, '(r4340) …the same held copy, let go and read through the door (a wait on its moves, never a settle), reads all 8 — the pace control stands on the fact', paceDoor);
   const SET1 = "  if (by !== 'person' && crossProviderMode((accounts.get(poolId) || {}).crossProvider) !== 'allow') return { why: 'setting' };";
   const SET2 = "    if (e.by !== 'person' && crossProviderMode((accounts.get(e.poolId) || {}).crossProvider) !== 'allow') { _fbQueue.delete(e.sid); continue; }   // (r2939 MUST) the pool's setting is no longer 'allow': its own entries go";
   const wForce = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(anchored(ENG, SET1, '', 'the move forces allow'), SET2, '', 'the queue keeps the pool\'s entries'), 'eng-forced-allow') });
@@ -764,28 +792,50 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   ok(swept2.some((x) => x && Array.isArray(x.removed) && x.removed.includes(ds.id)), 'CONTROL: a copy of the stale-member sweep without the fallback\'s exemption takes the conversation on DeepSeek for a removed member ⇒ the sweep leg goes RED', swept2);
   ok(BR.poolFallbackOf({ poolFallback: { poolId: 'p', provider: 'acct-1' } }) === null && BR.poolFallbackOf({ poolFallback: 'x' }) === null && BR.poolFallbackOf({}) === null, 'boot-restore reads a malformed record — another kind of id, a string, none — as NO record (nothing guessed)');
   const FIRST = '  const saved = await writeFallbackRecord(j.s2, record);';
-  // THE COPY (the record not waited for), its world's record write REFUSED (meta 'fail'); `stall` places a stall in the copy's AWAITED
-  // refusal check (the window the box zone's load widened, run bf075c6b4-20261125015229-both: the copy's «cross-provider switch …/r1»
-  // printed after the leg read 0); `wait`: the count is read once the copy's move has landed (at most 2 s), else after the pass alone
-  const STALL_AT = '  const refused = await fallbackRefusal(e.to, x.toModel, convBackend(j.s2));';
-  const recScene = async ({ stall = 0, wait = true, tag }) => {
-    let text = anchored(ENG, FIRST, '  const saved = (writeFallbackRecord(j.s2, record), true);', 'restart before the record');
-    if (stall) text = anchored(text, STALL_AT, `  const refused = await new Promise((r) => setTimeout(r, ${stall})).then(() => fallbackRefusal(e.to, x.toModel, convBackend(j.s2)));`, 'a placed stall in the awaited refusal check');
-    const w = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', text, tag) });
+  // THE COPY (the record not waited for), its world's record write REFUSED (meta 'fail'). (r4340 law 2) `hold` places a HOLD at the
+  // copy's awaited refusal check (the window the box zone's load widened, run bf075c6b4-20261125015229-both: the copy's «cross-provider
+  // switch …/r1» printed after the leg read 0) — never a clock; `door`: the count read through the world's door (the hold let go
+  // first), else read after the pass alone with the hold in place (then let go)
+  const recScene = async ({ hold = false, door = true, tag }) => {
+    const w = world({ cross: 'allow', engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, FIRST, '  const saved = (writeFallbackRecord(j.s2, record), true);', 'restart before the record'), tag) });
     w.client(); w.meta.mode = 'fail'; w.mk('r1');
-    await w.pass();
-    if (wait) for (let i = 0; i < 80 && w.restarts().length === 0; i++) await w.settle();
+    const letGo = hold ? holdChecks() : () => { };
+    let moved = -1;
+    try {
+      await w.pass(w.P, { guess: true });
+      if (!door) moved = w.restarts().length;
+      letGo(); await w.moved('the record-first copy\'s move');
+      if (door) moved = w.restarts().length;
+    } finally { letGo(); }
     const m = w.metas.get('cw-r1');
-    return { moved: w.restarts().length, record: !!(m && m.poolFallback) };
+    return { moved, record: !!(m && m.poolFallback) };
   };
   const rec0 = await recScene({ tag: 'eng-no-record-first' });
   ok(rec0.moved === 1 && rec0.record === false, 'CONTROL: a copy that restarts without waiting for the record moves the conversation with NO record on disk ⇒ the record-first legs go RED', rec0);
-  // (r4002) THE CURE PROVEN BY ITS WINDOW: a PLACED 300 ms stall in the copy's awaited refusal check — the control still reads the
-  // move and still shows no record on disk; its red: the same stalled copy read after the pass alone (the wait cut) reads 0, as the box zone did
-  const recS = await recScene({ stall: 300, tag: 'eng-no-record-first-stalled' });
-  ok(recS.moved === 1 && recS.record === false, '(r4002) the control through a PLACED 300 ms stall in the copy\'s awaited refusal check: it still reads the copy\'s move, and still no record on disk', recS);
-  const recCut = await recScene({ stall: 300, wait: false, tag: 'eng-no-record-first-stalled-nowait' });
-  ok(recCut.moved === 0, 'CONTROL (r4002): the same stalled copy read after the pass alone (the wait cut) reads 0 — the box zone\'s red, made on demand', recCut);
+  // (r4002, r4340) THE CURE PROVEN BY ITS WINDOW: a PLACED HOLD at the copy's awaited refusal check — read through the door the control
+  // still reads the move and still shows no record on disk; its red: the same held copy read after the pass alone (the door cut) reads 0
+  const recS = await recScene({ hold: true, tag: 'eng-no-record-first-held' });
+  ok(recS.moved === 1 && recS.record === false, '(r4002, r4340) the control through a PLACED HOLD at the copy\'s awaited refusal check, read through the door (the hold let go): it still reads the copy\'s move, and still no record on disk', recS);
+  const recCut = await recScene({ hold: true, door: false, tag: 'eng-no-record-first-held-nodoor' });
+  ok(recCut.moved === 0, 'CONTROL (r4002, r4340): the same held copy read after the pass alone (the door cut) reads 0 — the box zone\'s red, made on demand by a placed hold', recCut);
+  // (r4340 law 4) THE DOOR's CENSUS (this file's own code): the engine's roads that start a move onto the fallback appear ONCE each —
+  // the door's own call (the pass, a person's answer, a turn's stop) — a landing goes through the door's land helper only, a pump is
+  // always awaited (its promise: the batch ended), and the door is cut only at the two placed holds above (the pace's, the record's).
+  // A move BACK onto a member asks no refusal check (nothing off the loop): outside this class
+  const doorCensus = (text) => {
+    const code = text.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), n = (s) => code.split(s).length - 1, E = 'eng' + '.', found = [];
+    for (const f of ['answerCrossProviderAsk(', 'maybePoolAutoSwitch(', 'maybePoolAutoSwitchForPool(']) if (n(E + f) !== 1) found.push(f + ' called ' + n(E + f) + ' times (the door\'s one call only)');
+    if (n('carryRecord' + ': true') !== 1) found.push('a landing outside the door\'s land helper (' + n('carryRecord' + ': true') + ')');
+    const pumps = n(E + 'pumpFallbackMoves('), awaited = (code.match(new RegExp('await \\w+\\.' + 'eng\\.pumpFallbackMoves\\(', 'g')) || []).length;
+    if (pumps !== awaited) found.push((pumps - awaited) + ' pump(s) not awaited');
+    if (n('guess' + ': true') !== 2) found.push('the door cut ' + n('guess' + ': true') + ' times (named: 2)');
+    return found;
+  };
+  const SELF = read('scripts/test-pool-fallback.mjs'), censusSelf = doorCensus(SELF);
+  ok(censusSelf.length === 0, '(r4340 law 4) THE DOOR\'s CENSUS: every road that starts a move onto the fallback here goes through the world\'s door (each engine road called once, there; a landing through its helper; every pump awaited); the door cut only at the two placed holds', censusSelf);
+  const planted = SELF + '\n  wZ.' + 'eng.' + 'answerCrossProviderAsk(id, { answer: \'once\' }); await wZ.settle();\n  wZ.' + 'eng.' + 'pumpFallbackMoves();\n  await wZ.pass(wZ.P, { guess' + ': true });\n';
+  const censusRed = doorCensus(planted);
+  ok(censusRed.length === 3 && /^answerCrossProviderAsk\( called 2 times/.test(censusRed[0]) && /^1 pump/.test(censusRed[1]) && /cut 3 times/.test(censusRed[2]), 'CONTROL: a copy of this file with an answer read after a settle, a pump not awaited and a third cut of the door ⇒ the census names all three', censusRed);
   const ONE = "        if (ds && ds.crossOffer && ds.crossOffer.fallbackOnly && /^pv-/.test(String(ds.crossOffer.id))) {";
   const wCards = world({ engM: M.load('src/server/usage-pool-engine.js', anchored(ENG, ONE, '        if (false) {', 'a card a conversation'), 'eng-card-each') });
   wCards.client(); for (const sid of ['c1', 'c2', 'c3', 'c4']) wCards.mk(sid);
