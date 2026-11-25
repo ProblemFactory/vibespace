@@ -9,16 +9,19 @@
 // headless Chrome over raw CDP. A HELD HUB is placed in the page: the socket drops and comes back, and the page swallows the
 // hub's `attached` and `attach-ack` for that one session (the hub never answers it). THE LADDER's CLOCK is shortened in the page
 // (its 20 s / 25 s rungs and the hold's 60 s ask run at 1/100) — the same code, a short clock.
-//   ① THE HOLD: past the whole ladder the window is NOT read-only, shows the hold's one line, its composer is held with the text
-//      typed before the drop still in it; it asks again on the clock (one attach a short minute); when the hub answers, the
-//      attach lands: the line goes, the composer is free with the text kept, the window is live.
+//   ① THE HOLD: past the whole ladder the window is NOT read-only, shows the hold's ONE bar (never a line added to the chat), its
+//      composer is held with the text typed before the drop still in it, and it TAKES TYPING while held; a press of Send while
+//      held sends nothing and says the hold's own words (主开发 r4529 (a)); it asks again on the clock (one attach a short
+//      minute, judged by the gaps between its asks), and starts nothing (no create); when the hub answers, the attach lands: the
+//      bar goes, the composer is free with all the text kept, and ONE press sends it ONCE.
 //   ② THE SERVER's WORD ENDS IT: held, the conversation ends on the hub (a kill) — the window says the hub's own words and goes
-//      read-only; the hold's line is gone (never both).
+//      read-only WITH RESUME, as the release; the hold's bar is gone (never both).
 //   ③ THE PACE: held, while a FRESH ack keeps coming (the hub working on it) the window asks nothing; once the acks stop it asks
 //      again, at most one attach a short minute.
 //   ④ RESUME WHILE HELD is harmless: the conversation's card resume sends no create (the window is live, not read-only) and the
 //      stand-in keeps its one process (B-a26e item 2's measure: run 427f425cf-20261124150245-box).
 //   CONTROL: the hold blinded (the ladder's end as the release: the sentence and read-only) ⇒ ① reads read-only — the leg can go red.
+// EVERY WAIT IS ON THE FACT IT JUDGES (主开发 r4340 law 1): its bound is generous and its expiry is a named harness line.
 // Run: node scripts/test-attach-hold-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -36,6 +39,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 let passed = 0, failed = 0;
 const check = (n, c, e) => { if (typeof c !== 'boolean') throw new TypeError(`check(${n}): the condition must be a boolean`); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1400) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const waitFor = async (what, fn, ms = 30000, step = 200) => { const v = await until(fn, ms, step); if (v == null) { failed++; console.error(`  ✗ HARNESS: the wait for ${what} expired after ${Math.round(ms / 1000)} s`); } return v; };   // r4340 law 1
 const until = async (fn, ms = 30000, step = 200) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
 const [PORT, CDP_PORT] = await freePorts(2);
 const VNC_ENV = await vncEnv();
@@ -82,9 +86,9 @@ process.on('exit', () => { try { client.kill('SIGKILL'); } catch { } try { fs.rm
 
 // THE PAGE's WITNESSES AND THE HELD HUB: every create and attach the page sends; while window.__hold names a server session, its
 // `attached` and `attach-ack` frames are swallowed before any handler hears them (the hub never answers that session)
-const SPY = `(() => { window.__creates = []; window.__attachesOut = []; window.__hold = null;
+const SPY = `(() => { window.__creates = []; window.__attachesOut = []; window.__chatOut = []; window.__hold = null;
   const iv = setInterval(() => { if (!window.app || !app.ws || !app.ws.send || app.ws.__spied) return; app.ws.__spied = true; clearInterval(iv);
-    const s = app.ws.send.bind(app.ws); app.ws.send = (m) => { try { const o = typeof m === 'string' ? JSON.parse(m) : m; if (o && o.type === 'create') window.__creates.push({ at: Date.now(), resumeId: o.resumeId || null, reqId: o.reqId || null }); if (o && o.type === 'attach') window.__attachesOut.push({ at: Date.now(), sid: o.sessionId }); } catch {} return s(m); };
+    const s = app.ws.send.bind(app.ws); app.ws.send = (m) => { try { const o = typeof m === 'string' ? JSON.parse(m) : m; if (o && o.type === 'create') window.__creates.push({ at: Date.now(), resumeId: o.resumeId || null, reqId: o.reqId || null }); if (o && o.type === 'attach') window.__attachesOut.push({ at: Date.now(), sid: o.sessionId }); if (o && o.type === 'chat-input') window.__chatOut.push({ at: Date.now(), sid: o.sessionId, text: String(o.text != null ? o.text : (o.content != null ? o.content : '')) }); } catch {} return s(m); };
     const h = app.ws.heard.bind(app.ws); app.ws.heard = (d, how) => { if (window.__hold && d && (d.type === 'attached' || d.type === 'attach-ack') && d.sessionId === window.__hold) return; return h(d, how); };
     window.__answers = []; app.ws.onGlobal((m) => { if (m && (m.type === 'created' || m.type === 'error') && m.reqId) window.__answers.push({ type: m.type, code: m.code || null, reqId: m.reqId, sessionId: m.sessionId || null }); }); }, 20);
   // THE SHORT CLOCK: the ladder's rungs (20 s, 25 s) and the hold's ask (60 s) at 1/100 — only those three delays
@@ -119,13 +123,17 @@ async function living(P, sid) {
 }
 const VIEW = (S0) => `[...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(S0)})`;
 const facts = (P, S0) => P.ev(`(() => { const v = ${VIEW(S0)}; if (!v) return null; const box = v._container; const hold = box && box.querySelector('.chat-attach-hold'); const ta = v._chatInput && v._chatInput._element && v._chatInput._element.querySelector('textarea');
-  return { readOnly: !!v._readOnly, hold: !!hold && hold.isConnected, line: hold ? hold.textContent.trim() : null, held: !!(v._chatInput && v._chatInput._disconnected), text: ta ? ta.value : null,
+  return { readOnly: !!v._readOnly, hold: !!hold && hold.isConnected, bars: box ? box.querySelectorAll('.chat-attach-hold').length : 0, resume: !!(box && box.querySelector('.chat-resume-btn')), holdLines: [...(box ? box.querySelectorAll('.chat-system') : [])].filter((n) => /Still attaching/.test(n.textContent)).length, line: hold ? hold.textContent.trim() : null, held: !!(v._chatInput && v._chatInput._disconnected), text: ta ? ta.value : null,
     sentence: [...(box ? box.querySelectorAll('.chat-system') : [])].map((n) => n.textContent).filter((x) => /re-attach|no longer running|read-only/i.test(x)).slice(-1)[0] || null, rescued: !!v._viewOnly }; })()`);
 const holdOn = async (P, S0, typed) => {
   if (typed) await P.ev(`(() => { const v = ${VIEW(S0)}; const ta = v._chatInput._element.querySelector('textarea'); ta.value = ${JSON.stringify(typed)}; ta.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
   await P.ev(`(window.__shortClock = true, window.__hold = ${JSON.stringify(S0)}, window.__attachesOut.length = 0, app.ws.ws.close(), true)`);   // the socket drops; the hub then never answers this session
-  return until(async () => { const f = await facts(P, S0); return f && (f.hold || f.readOnly) ? f : null; }, 30000, 100);
+  return waitFor('the ladder to end (the hold or read-only)', async () => { const f = await facts(P, S0); return f && (f.hold || f.readOnly) ? f : null; }, 30000, 100);
 };
+const askTimes = (P, S0, sinceMs) => P.ev(`window.__attachesOut.filter((x) => x.sid === ${JSON.stringify(S0)} && x.at >= ${sinceMs}).map((x) => x.at)`);
+const chatOutOf = (P, S0) => P.ev(`window.__chatOut.filter((x) => x.sid === ${JSON.stringify(S0)})`);
+const pressSend = (P, S0) => P.ev(`(() => { const v = ${VIEW(S0)}; const b = v && v._chatInput && v._chatInput._element.querySelector('.chat-send-btn'); if (!b) return false; b.click(); return true; })()`);
+const toastSays = (P, re) => P.ev(`[...document.querySelectorAll('.global-toast-body')].map((n) => n.textContent).filter((x) => ${re}.test(x)).length`);
 const asksOf = (P, S0, sinceMs) => P.ev(`window.__attachesOut.filter((x) => x.sid === ${JSON.stringify(S0)} && x.at >= ${sinceMs}).length`);
 
 try {
@@ -146,16 +154,37 @@ try {
   const typed = 'a draft typed before the drop';
   const f1 = Sa && await holdOn(P, Sa, typed);
   const t1 = await P.ev('Date.now()');
-  check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — the conversation is running; it reconnects by itself.' && !f1.rescued, f1);
+  check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — the conversation is running; it reconnects by itself. Your message waits here and can be sent once it is back.' && !f1.rescued, f1);
   check('① …its composer is held (sending blocked) with the text typed before the drop still in it, and no read-only sentence was said', !!f1 && f1.held && f1.text === typed && !f1.sentence, f1);
-  // the short clock shortens the hold's minute (600 ms) but not the queue's slot (1.5 s, unscaled): an ask is joined, waits its
-  // slot and goes — about one ask per 1.8 s here (in real time one a minute: the slot is far shorter than the minute)
-  await sleep(6000);   // 10 short minutes
-  const asks1 = await asksOf(P, Sa, t1);
-  check(`① it asks again on the clock: ${asks1} attach(es) in 10 short minutes (at least 2, at most one a short minute)`, asks1 >= 2 && asks1 <= 11, asks1);
+  // IT TAKES TYPING WHILE HELD (主开发 r4529 (a)): the composer's own road for a link that is down keeps the box editable
+  const more = ' — and more typed while held';
+  await P.ev(`(() => { const v = ${VIEW(Sa)}; const ta = v._chatInput._element.querySelector('textarea'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); return 1; })()`);
+  await P.S('Input.insertText', { text: more });   // a real keystroke road (CDP's own text input), not a value set
+  const fT = await waitFor('the typed text in the held box', async () => { const f = await facts(P, Sa); return f && f.text === typed + more ? f : null; }, 10000, 100);
+  check('① the held box TAKES TYPING: the text typed while held is in it, after the text typed before the drop', !!fT && fT.held && fT.text === typed + more, fT);
+  // A PRESS OF SEND WHILE HELD sends nothing and says the hold's own words, never «Disconnected»
+  const out0 = (await chatOutOf(P, Sa)).length, DISC = "/^Disconnected — reconnecting… your draft is kept/", wrong0 = await toastSays(P, DISC);   // the composer's link-down words (the connection notice's own «Disconnected from server» is not this press's)
+  const pressed = await pressSend(P, Sa);
+  const said = await waitFor('the held Send press\'s words', async () => (await toastSays(P, '/Still attaching — your draft is kept here/')) > 0 ? true : null, 10000, 100);
+  const out1 = (await chatOutOf(P, Sa)).length, wrong = (await toastSays(P, DISC)) - wrong0;
+  check(`① a press of Send while held sends NOTHING (${out1 - out0} chat send(s)) and says why it waits in the hold's own words (never «Disconnected»: ${wrong})`, pressed === true && !!said && out1 === out0 && wrong === 0, { pressed, out0, out1, wrong });
+  // THE PACE, by the gaps between its asks (the short clock: the hold's minute is 600 ms; the queue's slot, 1.5 s, is unscaled)
+  const times = await waitFor('two asks of the hold', async () => { const a = await askTimes(P, Sa, t1); return a.length >= 2 ? a : null; }, 30000, 100);
+  const gaps = (times || []).slice(1).map((x, i) => x - times[i]);
+  check(`① it asks again on the clock, at most one a short minute: ${times ? times.length : 0} asks, the shortest gap ${gaps.length ? Math.min(...gaps) : '—'} ms (≥ 600)`, !!times && gaps.length >= 1 && Math.min(...gaps) >= 600, { times, gaps });
+  const fB = await facts(P, Sa), creates1 = await P.ev('window.__creates.length');
+  check(`① ONE bar throughout (${fB?.bars}), never a line added to the chat (${fB?.holdLines}), and the hold started nothing (${creates1} create(s))`, !!fB && fB.bars === 1 && fB.holdLines === 0 && creates1 === 0, { fB, creates1 });
   await P.ev('(window.__hold = null, true)');   // the hub answers again (the short clock still runs: the next ask lands)
-  const back = await until(async () => { const f = await facts(P, Sa); return f && !f.hold && !f.held ? f : null; }, 15000, 100);
-  check('① the attach lands: the line goes, the composer is free with the typed text kept, the window is live', !!back && !back.readOnly && back.text === typed, back);
+  const back = await waitFor('the attach to land (the bar gone, the composer free)', async () => { const f = await facts(P, Sa); return f && !f.hold && !f.held ? f : null; }, 15000, 100);
+  check('① the attach lands: the bar goes, the composer is free with all the text kept (before the drop and while held), the window is live', !!back && !back.readOnly && back.bars === 0 && back.text === typed + more, back);
+  // ONE PRESS SENDS IT ONCE: nothing was sent while held, so the first send is this press's; a second press on the emptied box sends nothing
+  const before = (await chatOutOf(P, Sa)).length;
+  await pressSend(P, Sa);
+  const sent = await waitFor('the one send after the landing', async () => { const o = await chatOutOf(P, Sa); return o.length > before ? o : null; }, 10000, 100);
+  await waitFor('the composer to empty after the send', async () => { const f = await facts(P, Sa); return f && f.text === '' ? true : null; }, 10000, 100);
+  await pressSend(P, Sa);
+  const after = await chatOutOf(P, Sa);
+  check(`① after the landing ONE press sends the kept text ONCE (${after.length - before} send(s): «${(sent && sent[sent.length - 1].text || '').slice(0, 60)}»)`, !!sent && after.length - before === 1 && after[after.length - 1].text === typed + more, { before, after });
   check('① …and the conversation kept its one process throughout', spawnsOf(SIDS.a).length === 1 && alive(spawnsOf(SIDS.a)[0]), spawnsOf(SIDS.a));
 
   // ② THE SERVER's WORD ENDS IT
@@ -164,8 +193,8 @@ try {
   const f2 = Sb && await holdOn(P, Sb, null);
   check('② held (the same placed scene)', !!f2 && f2.hold && !f2.readOnly, f2);
   await P.ev(`(app.ws.send({ type: 'kill', sessionId: ${JSON.stringify(Sb)} }), true)`);   // the conversation ends on the hub
-  const ended = await until(async () => { const f = await facts(P, Sb); return f && f.readOnly ? f : null; }, 20000, 100);
-  check('② the conversation ended on the hub ⇒ the window says the hub\'s own words and goes read-only; the hold\'s line is gone (never both)', !!ended && ended.readOnly && !ended.hold, ended);
+  const ended = await waitFor('the server\'s word (read-only)', async () => { const f = await facts(P, Sb); return f && f.readOnly ? f : null; }, 20000, 100);
+  check('② the conversation ended on the hub ⇒ the window says the hub\'s own words and goes read-only WITH RESUME, as the release; the hold\'s bar is gone (never both)', !!ended && ended.readOnly && !ended.hold && ended.resume === true, ended);
 
   // ③ THE PACE: a fresh ack means the hub works on it — no ask
   console.log('── ③ the pace ──');
@@ -174,13 +203,12 @@ try {
   check('③ held', !!f3 && f3.hold, f3);
   await P.ev(`(window.__acks = setInterval(() => { const v = ${VIEW(Sc)}; if (v) v._lastAttachAckAt = Date.now(); }, 100), true)`);   // a FRESH ack keeps coming (the page's own stamp, as the hub's re-ack sets it)
   const t3 = await P.ev('Date.now()');
-  await sleep(2500);
+  await sleep(2400);   // THE ABSENCE's SPAN, the one span here: four short minutes (4 × 600 ms) in which the hold would have asked had the ack not been fresh
   const asks3 = await asksOf(P, Sc, t3);
   await P.ev(`(clearInterval(window.__acks), ${VIEW(Sc)}._lastAttachAckAt = Date.now() - 31000, true)`);   // the acks stop; the last one ages out
   const t3b = await P.ev('Date.now()');
-  await sleep(4000);
-  const asks3b = await asksOf(P, Sc, t3b);
-  check(`③ while a fresh ack keeps coming the window asks nothing (${asks3}); once it stops it asks again, at most one a short minute (${asks3b})`, asks3 === 0 && asks3b >= 1 && asks3b <= 8, { asks3, asks3b });
+  const asks3b = (await waitFor('an ask once the acks stop', async () => { const a = await askTimes(P, Sc, t3b); return a.length >= 1 ? a : null; }, 15000, 100) || []).length;
+  check(`③ while a fresh ack keeps coming the window asks nothing (${asks3}); once it stops it asks again, at most one a short minute (${asks3b})`, asks3 === 0 && asks3b >= 1, { asks3, asks3b });
   await P.ev('(window.__hold = null, true)');
 
   // ④ RESUME WHILE HELD is harmless
