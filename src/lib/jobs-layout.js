@@ -229,6 +229,20 @@ export function publishBlockedNote(j, t) {
 /** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing; a
  *  bound a limit lowered says so (round 3), and WHICH limit (round 4 — the one that contains the job): «6 GB · rlimit · capped
  *  by the instance’s 8 GB limit» · «24 GB · cgroup · capped by the user slice’s 32 GB limit». A live run's are its own proof's. */
+/** B-2c5c (4c), 主开发 r4564: a job that runs VibeSpace itself says what its memory bound does to VibeSpace — TRUE TO THE RUNG its latest
+ *  run's bound record names (`memoryBound` {by, why}: a scope stopped whole only on the cgroup rung with OOMPolicy=stop; ONE process
+ *  in a scope without it; each process's own limit on RLIMIT_DATA); the soft sentence when no record says; '' for none */
+export function hubBoundNote(j, t, compact = false) {
+  if (!j || !j.runsHub) return '';
+  const b = j.memoryBound;
+  const rung = !b ? 'unknown' : (b.by === 'none' || b.mb === 0) ? 'none' : b.by === 'cgroup' ? (/OOMPolicy=stop/.test(String(b.why || '')) ? 'whole' : 'process') : b.by === 'rlimit-data' ? 'own' : 'unknown';
+  if (rung === 'none') return '';
+  if (compact) return rung === 'whole' ? t('Runs VibeSpace: its memory bound ends it whole.') : t('Runs VibeSpace: its memory bound can end it.');
+  if (rung === 'whole') return t('This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.');
+  if (rung === 'process') return t('This job runs VibeSpace itself: past this memory bound the kernel stops one of its processes, which can be VibeSpace or a conversation.');
+  if (rung === 'own') return t('This job runs VibeSpace itself: each of its processes has this memory bound as its own limit, and one that passes it gets no more memory — VibeSpace too.');
+  return t('This job runs VibeSpace itself: its memory bound can end VibeSpace and the conversations it started.');
+}
 export function memoryChip(j, t) {
   if (!j || j.memoryMb === undefined || j.memoryMb === null) return '';
   const b = j.memoryBound, live = !!(b && b.mb && runsNow(j));

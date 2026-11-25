@@ -513,10 +513,17 @@ vibespace-job run "./report.sh" --name report --may-read siblings               
 
 ### VibeSpace itself is never a job
 
-VibeSpace runs as its service. Start or restart it with `systemctl --user restart vibespace` (or ⚙ → Update VibeSpace…), never as a
-job's command (`./run.sh`, `node server.js`, `node .`). Never run another checkout's VibeSpace as a job either:
-- **The memory bound:** a VibeSpace started as a job lives under that job's memory bound (§7b). Past it, the whole job is stopped:
-  VibeSpace and every conversation it started end together, and nothing starts it again. Its boot says so in its journal.
+VibeSpace runs as its service. Start or restart it with `systemctl --user restart vibespace` where it runs as a user service (or
+⚙ → Update VibeSpace…; on a pod, the pod's own restart), never as a job's command (`./run.sh`, `node server.js`, `node .`). Never run another checkout's VibeSpace as a job either:
+- **The memory bound:** a VibeSpace started as a job lives under that job's memory bound (§7b). What passing it does is the bound's
+  rung's:
+  - in the job's own scope on a systemd that stops a scope whole (253 or newer), the whole job is stopped, VibeSpace and every
+    conversation it started together;
+  - in an older scope, the kernel stops ONE of the job's processes, which can be VibeSpace or a conversation;
+  - where each process has its own limit (RLIMIT_DATA, as on a pod), a process that passes it fails its own allocation, VibeSpace's
+    too.
+  A job of this VibeSpace that ran VibeSpace itself is never started again by itself; another VibeSpace's service job may be,
+  once. The boot says which rung in its journal, and the job's card says it too.
 - **Another checkout:** a VibeSpace of another checkout run as a job IS that job's main. The job's stop ends it, with every
   conversation it started.
 - **A clock step:** one started as a job by `node .` or under pm2 can be read as gone for a moment after the machine's clock steps

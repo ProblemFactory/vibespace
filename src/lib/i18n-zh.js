@@ -13560,6 +13560,10 @@ export default {
   "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.": "未移除：无法读取端口转发列表，因此无法撤下此服务的公开地址。请先停止它；等端口转发列表能读取后再移除。",
   "Stopped, not removed: the list of forwards could not be read, so this service's public address could not be taken down yet. Remove it once the list of forwards reads.": "已停止，未移除：无法读取端口转发列表，因此暂时无法撤下此服务的公开地址。等端口转发列表能读取后再移除。",
   "Its background job is gone: this forward and its public address stay until you remove it here.": "它的后台任务已不存在：这个转发及其公开地址会一直保留，直到你在这里移除它。",
+  "Runs VibeSpace: its memory bound can end it.": "运行着 VibeSpace：它的内存上限可能让它结束。", // B-2c5c (r4564): the card true to the run's rung
+  "This job runs VibeSpace itself: past this memory bound the kernel stops one of its processes, which can be VibeSpace or a conversation.": "这个作业运行的就是 VibeSpace 本身：超过这个内存上限时，内核会停掉它的一个进程，可能是 VibeSpace，也可能是某个对话。", // B-2c5c (r4564): the card true to the run's rung
+  "This job runs VibeSpace itself: each of its processes has this memory bound as its own limit, and one that passes it gets no more memory — VibeSpace too.": "这个作业运行的就是 VibeSpace 本身：它的每个进程各自以这个内存上限为限，超过的那个进程再也拿不到更多内存——VibeSpace 也一样。", // B-2c5c (r4564): the card true to the run's rung
+  "This job runs VibeSpace itself: its memory bound can end VibeSpace and the conversations it started.": "这个作业运行的就是 VibeSpace 本身：它的内存上限可能让 VibeSpace 和它启动的对话结束。", // B-2c5c (r4564): the card true to the run's rung
   "Not restarted: it ran VibeSpace itself.": "未自动重启：它运行的是 VibeSpace 本身。",
   "Runs VibeSpace: its memory bound ends it whole.": "运行 VibeSpace：超出内存上限会让它整体结束。",
   "Memory bound": "内存上限",

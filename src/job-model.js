@@ -628,16 +628,45 @@ function leftWords(l) {
 /** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left (round 6: and when the engine
  *  stopped what it kept), else a kill we made */
 function runEndWords(run) { return run && run.left ? leftWords(run.left) : (run && typeof run.forced === 'string' && run.forced) || ''; }
-/** B-2c5c (4c), 主开发 r4380: the boot's ONE journal line when this VibeSpace was started INSIDE a background job (its handed id):
- *  that job's memory bound holds VibeSpace and every conversation it starts — past it the whole job is stopped (its scope's
- *  OOMPolicy=stop) and nothing starts it again. `seen` = what the engine knows of it, {label, mb} — the label is the engine's labelOf
- *  (the ONE accessor of a job's name, test-architecture §93: a renderer never takes the record), mb the bound in force; null: a job this
- *  VibeSpace does not know */
+/** B-2c5c (4c), 主开发 r4564 M1: THE BOUND IN FORCE for a job — its LAST RUN's own bound record (the wrapper's, adopted: {mb, by, why}),
+ *  else what the tree's one bound function gives that job (memoryMbOf over the engine's context: the ladder and the instance's cap,
+ *  its rung not known). Never the raw figure a job asked. → { mb, by: 'cgroup' | 'rlimit-data' | 'none' | null, why } */
+function boundInForceOf(job, ctx = {}) {
+  const runs = job && Array.isArray(job.runs) ? job.runs : [];
+  const run = runs.length ? runs[runs.length - 1] : null;
+  if (run && run.memoryBound && typeof run.memoryBound === 'object') { const b = boundRecord(run.memoryBound); return { mb: b.mb, by: b.by, why: b.why }; }
+  const m = memoryMbOf(job, ctx || {});
+  return { mb: finiteMb(m && m.mb) || 0, by: null, why: '' };
+}
+/** B-2c5c (4c), 主开发 r4564 M2: what passing that bound does, TRUE TO ITS RUNG — 'whole' (a scope stopped whole: the cgroup rung with
+ *  OOMPolicy=stop, which the wrapper names in the record's why), 'process' (a scope with no such policy: the kernel's OOM kill takes ONE
+ *  process), 'own' (RLIMIT_DATA: each process its own limit), 'none' (unbounded), 'unknown' (no run record: the soft sentence) */
+function boundRungOf(b) {
+  if (!b) return 'unknown';
+  if (b.by === 'none' || b.mb === 0) return 'none';   // 0 = the owner set no bound: unbounded, on any rung
+  if (!(finiteMb(b.mb) > 0)) return 'unknown';
+  if (b.by === 'cgroup') return /OOMPolicy=stop/.test(String(b.why || '')) ? 'whole' : 'process';
+  if (b.by === 'rlimit-data') return 'own';
+  return 'unknown';   // by null: the ladder's figure, its rung not read yet
+}
+/** B-2c5c (4c), 主开发 r4380 / r4564: the boot's ONE journal line when this VibeSpace was started INSIDE a background job (its handed id).
+ *  `seen` = what the engine knows of it: { label (its labelOf — the ONE accessor of a job's name, test-architecture §93), mb, by, why
+ *  (boundInForceOf) }; null = a job this VibeSpace does not hold now (another VibeSpace's, or one it archived). Every clause is true to
+ *  what the record names: the size the bound IN FORCE; the consequence its RUNG's; the start again its HOLDER's (a job this engine holds
+ *  is a hub-main run, never started again by itself — B-2c5c unit 2; another holder may) */
 function startedInJobLine(id, seen = null) {
-  const mb = seen ? Number(seen.mb) || 0 : 0;
-  const who = seen && seen.label ? `"${String(seen.label).slice(0, 80)}" (${id})` : `${id}${seen ? '' : ' (a job this VibeSpace does not know: another VibeSpace\'s)'}`;
-  const bound = mb > 0 ? `its memory bound of ${memoryWords(mb)} holds` : 'its memory bound, where it has one, holds';
-  return `[jobs] this VibeSpace was started INSIDE the background job ${who}: ${bound} VibeSpace and every conversation it starts — past it the whole job is stopped, VibeSpace with it, and nothing starts it again. Start VibeSpace as its service (the Background Work manual: «VibeSpace itself is never a job»)`;
+  const held = !!seen;
+  const label = held && seen.label ? String(seen.label).replace(/[\r\n\t]+/g, ' ').slice(0, 80) : '';
+  const who = label ? `"${label}" (${id})` : held ? String(id) : `${id} (a job this VibeSpace does not hold now: another VibeSpace's, or one it archived)`;
+  const rung = boundRungOf(seen), size = held && finiteMb(seen.mb) > 0 ? memoryWords(seen.mb) : '';
+  const bound = size ? `its memory bound of ${size}` : 'its memory bound';
+  const what = rung === 'whole' ? `${bound} holds VibeSpace and every conversation it starts — past it the whole job is stopped, VibeSpace and every conversation with it`
+    : rung === 'process' ? `${bound} holds the job's processes together — past it the kernel stops ONE of them, which can be VibeSpace or a conversation`
+      : rung === 'own' ? `${bound} is each of its processes' own limit (RLIMIT_DATA) — a process that passes it fails its own allocation, VibeSpace's too, which can end it`
+        : rung === 'none' ? 'it runs under no memory bound of its own'
+          : `${bound} can end VibeSpace and the conversations it started`;
+  const again = rung === 'none' ? '' : held ? '; VibeSpace does not start again by itself' : "; only that job's own VibeSpace may start it again";
+  return `[jobs] this VibeSpace was started INSIDE the background job ${who}: ${what}${again}. Start VibeSpace as its service (the Background Work manual: «VibeSpace itself is never a job»)`;
 }
 /** the NAMED end the journal says (the card words the same through its own t()) */
 function memoryEndWhat(run) {
@@ -1393,7 +1422,7 @@ function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null,
   if (at && cwdExists === false) return { ok: false, code: 'wrong-machine', error: `jobs run on ${hub}, not on ${there} where your conversation runs; this folder is not there: ${at} — nothing was created. Give --cwd a folder ${hub} has, or run the command on ${there} yourself` };
   return { ok: true, words: `runs on ${hub}${at ? ` in ${at}` : ''} — not on ${there}, where your conversation runs${at ? ` (the path is used as it is on ${hub})` : ''}` };   // ui-words: the agent's and the CLI's line (the create answer's «where:»), never drawn in a page
 }
-module.exports = { startedInJobLine /* B-2c5c (4c) */, jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
+module.exports = { startedInJobLine /* B-2c5c (4c) */, boundInForceOf, boundRungOf /* r4564 */, jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   MAY_READ_MAX, MAY_READ_RECIPE, mayReadOf, ownerAsCaller, jobMayRead, jobsReadableBy, jobReadableRef, JOB_READ_VERBS, JOB_SELF_READS, JOB_SELF_ACTS, JOB_SELF_ACTS_WORDS, mayReadRefusal, jobTokenVerdict, mayReadVerdict, GRANTED_VIEW_FIELDS, grantedJobView,   // B-3992
   ownedJobsView, STATE_WORDS,

@@ -193,15 +193,46 @@ const plainRed = (read) => PLAIN.filter(([, f, , re]) => !re.test(read(f))).map(
   const none = TR.dropHandedAtBoot({ env: { PATH: '/usr/bin', HOME: '/home/userL' } });
   const odd = TR.dropHandedAtBoot({ env: { PATH: '/usr/bin', VIBESPACE_JOB_ID: 'not a job id; rm -rf' } });
   ok(!!(typeof TR.handedJobId === 'function' && TR.handedJobId(none) === null && TR.handedJobId(odd) === null), '③ CONTROL: the service start keeps no job; a handed id of another shape is never kept (a name only, from a fixed alphabet)');
+  // r4564 (line 1031's cure): LEGS OF BEHAVIOUR over REAL record shapes — the bound IN FORCE (the last run's own record, else the tree's
+  // one bound function) and the consequence TRUE TO ITS RUNG; the holder's start-again; the card's note by the same law
   const say = typeof M.startedInJobLine === 'function' ? M.startedInJobLine : () => '';
-  const known = say('jb-made-up-1', { label: 'build box', mb: 4096 }), unknown = say('jb-made-up-2', null), nobound = say('jb-made-up-3', { label: 'no bound', mb: 0 });
-  ok(!!(/started INSIDE the background job "build box" \(jb-made-up-1\)/.test(known) && /its memory bound of 4 GB holds VibeSpace and every conversation it starts/.test(known) && /the whole job is stopped, VibeSpace with it, and nothing starts it again/.test(known) && /«VibeSpace itself is never a job»/.test(known)
-    && /a job this VibeSpace does not know: another VibeSpace's/.test(unknown) && /where it has one/.test(nobound) && !/jbt-made-up/.test(known + unknown + nobound)),
-    '③ THE LAW: the boot\'s line names the job, its bound with its size, what passing it does (the whole job stopped, VibeSpace with it, nothing starts it again) and the sanctioned start; a job this hub does not know is said so; never a value — RED: nothing said', { known, unknown });
-  const wiring = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), manual = fs.readFileSync(path.join(REPO, 'docs/agent/background-work-manual.md'), 'utf8');
-  const iInit = wiring.indexOf("try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }"), iSay = wiring.indexOf("require('./throwaway-root.js').handedJobId(); if (id) { const job = jm.jobs && jm.jobs.get(id); log(M.startedInJobLine(id, job ? { label: jm.labelOf(job), mb: (job.memoryBound && job.memoryBound.mb) || job.memoryMb } : null)); }");
-  ok(!!(iInit > 0 && iSay > iInit && iSay - iInit < 600), '③ production\'s names: the job engine says the line once, right after its init read the job\'s record — its name through labelOf, the ONE accessor (src/server/jobs-wiring.js)', { iInit, iSay });
-  ok(!!(manual.includes('### VibeSpace itself is never a job') && /Past it, the whole job is stopped/.test(manual) && /another checkout's VibeSpace/.test(manual) && /clock steps\n?\s*forward/.test(manual) && /lost from the job's log/.test(manual)),
-    '③ the Background Work manual says it: VibeSpace is its service, never a job — the bound, another checkout, a clock step, its output (主开发 r4380: (3), (4b), (4c), (4d))');
+  const inForce = typeof M.boundInForceOf === 'function' ? M.boundInForceOf : () => ({ mb: 0, by: null, why: '' });
+  const CG_POLICY = 'a scope of the user systemd (vs-job-x.scope, MemoryMax, OOMPolicy=stop)', CG_OLD = 'a scope of the user systemd (vs-job-x.scope, MemoryMax; systemd 249 has no OOMPolicy for a scope)';
+  const jobOf = (bound, extra = {}) => ({ id: 'jb-made-up-1', name: 'build-box', runs: bound === undefined ? [] : [{ startedAt: 1, memoryBound: bound }], ...extra });
+  // M1: a job with NO figure of its own, its run holding the ladder's default bound — the line says that size
+  const j1 = jobOf({ mb: 4096, by: 'cgroup', why: CG_POLICY }), b1 = inForce(j1, {}), l1 = say('jb-made-up-1', { label: 'build box', ...b1 });
+  ok(!!(b1.mb === 4096 && /started INSIDE the background job "build box" \(jb-made-up-1\)/.test(l1) && /its memory bound of 4 GB holds VibeSpace and every conversation it starts — past it the whole job is stopped, VibeSpace and every conversation with it/.test(l1) && /VibeSpace does not start again by itself/.test(l1) && /«VibeSpace itself is never a job»/.test(l1)),
+    '③ M1 + the cgroup rung with OOMPolicy=stop: a job with NO figure of its own whose run holds 4096 — the line says «4 GB» and the WHOLE job stopped (true there) — RED: no size', { line: l1 });
+  const tipMb = (j1.memoryBound && j1.memoryBound.mb) || j1.memoryMb, lTip = say('jb-made-up-1', { label: 'build box', mb: tipMb });
+  ok(!!(!(tipMb > 0) && !/4 GB/.test(lTip)), '③ M1 RED CONTROL: the first form read the RECORD (job.memoryBound, job.memoryMb) — such a job got no size at all', { tipMb });
+  const b0 = inForce(jobOf(undefined), {}), l0 = say('jb-made-up-1', { label: 'fresh', ...b0 });
+  ok(!!(b0.mb === 4096 && b0.by === null && /its memory bound of 4 GB can end VibeSpace and the conversations it started/.test(l0) && !/whole job is stopped/.test(l0)), '③ M1: no run record yet — the size from the tree\'s ONE bound function (memoryMbOf: the ladder\'s 4096), the consequence the SOFT sentence (its rung not read)', { b0, line: l0 });
+  const bCap = inForce(jobOf(undefined, { memoryMb: 16384 }), { instanceMb: 8192 }), bLow = inForce(jobOf(undefined, { memoryMb: 100 }), {});
+  ok(!!(bCap.mb === 6144 && bLow.mb === 256), '③ M1: a figure the instance\'s cap lowered is said lowered (16 GB asked, 6 GB in force on an 8 GB instance), a stored figure under the floor is said at the floor (100 → 256 MB) — never raw', { bCap, bLow });
+  // M2: one leg a rung
+  const lP = say('jb-made-up-1', { label: 'old scope', ...inForce(jobOf({ mb: 4096, by: 'cgroup', why: CG_OLD }), {}) });
+  ok(!!(/past it the kernel stops ONE of them, which can be VibeSpace or a conversation/.test(lP) && !/whole job is stopped/.test(lP)), '③ M2 the cgroup rung WITHOUT OOMPolicy=stop (systemd < 253): the kernel stops ONE process — never «the whole job»', { line: lP });
+  const lR = say('jb-made-up-1', { label: 'pod', ...inForce(jobOf({ mb: 4096, by: 'rlimit-data', why: 'RLIMIT_DATA on each process (no user systemd)' }), {}) });
+  ok(!!(/its memory bound of 4 GB is each of its processes' own limit \(RLIMIT_DATA\) — a process that passes it fails its own allocation, VibeSpace's too/.test(lR) && !/whole job is stopped/.test(lR) && !/holds VibeSpace and every conversation/.test(lR)), '③ M2 the rlimit-data rung (a pod): each process its own limit, a process that passes it fails its own allocation — nothing «holds» them together', { line: lR });
+  const lN = say('jb-made-up-1', { label: 'free', ...inForce(jobOf({ mb: 0, by: 'none', why: 'unbounded (the owner set 0)' }), {}) });
+  ok(!!(/it runs under no memory bound of its own/.test(lN) && !/start again/.test(lN) && !/stopped/.test(lN)), '③ M2 no bound (the owner\'s 0): said unbounded — no consequence claimed', { line: lN });
+  const lU = say('jb-made-up-2', null);
+  ok(!!(/jb-made-up-2 \(a job this VibeSpace does not hold now: another VibeSpace's, or one it archived\)/.test(lU) && /its memory bound can end VibeSpace and the conversations it started/.test(lU) && /only that job's own VibeSpace may start it again/.test(lU) && !/whole job is stopped/.test(lU)),
+    '③ the small: a job this VibeSpace does not hold NOW (another\'s, or one it archived) — the soft sentence, and its start-again is its own holder\'s', { line: lU });
+  const lNL = say('jb-made-up-1', { label: 'two\nlines', ...b1 });
+  ok(!!(!/\n/.test(lNL) && /"two lines"/.test(lNL) && !/jbt-made-up/.test(l1 + l0 + lP + lR + lN + lU)), '③ one journal line: a label\'s line break is folded (never a second, forged line); never a value');
+  // the CARD's hub note, by the same law (src/lib/jobs-layout.js hubBoundNote; the view carries the run's memoryBound)
+  const JL = await import(new URL('../src/lib/jobs-layout.js', import.meta.url).href);
+  const tt = (x) => x, card = (b, c = false) => (typeof JL.hubBoundNote === 'function' ? JL.hubBoundNote({ runsHub: true, memoryBound: b }, tt, c) : null);
+  const cW = card({ mb: 4096, by: 'cgroup', why: CG_POLICY }), cP = card({ mb: 4096, by: 'cgroup', why: CG_OLD }), cR = card({ mb: 4096, by: 'rlimit-data', why: 'x' }), cU = card(null), cN = card({ mb: 0, by: 'none', why: 'x' });
+  ok(!!(cW && /they all end together/.test(cW) && /kernel stops one of its processes/.test(cP || '') && !/end together/.test(cP || '') && /gets no more memory/.test(cR || '') && /can end VibeSpace/.test(cU || '') && cN === ''
+    && card({ mb: 4096, by: 'cgroup', why: CG_POLICY }, true) === 'Runs VibeSpace: its memory bound ends it whole.' && card({ mb: 4096, by: 'rlimit-data', why: 'x' }, true) === 'Runs VibeSpace: its memory bound can end it.'),
+    '③ THE CARD (B-2c5c r1263 / r1610), by the same law: «they all end together» only on a scope stopped whole; one process in an older scope; each process its own limit on RLIMIT_DATA; the soft sentence with no record; nothing unbounded — RED: «they all end together» on every rung', { cW, cP, cR, cU, cN });
+  const wiring = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), manual = fs.readFileSync(path.join(REPO, 'docs/agent/background-work-manual.md'), 'utf8'), panel = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf8');
+  const iInit = wiring.indexOf("try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }"), iSay = wiring.indexOf('M.startedInJobLine(id, job ? { label: jm.labelOf(job), ...M.boundInForceOf(job,');
+  ok(!!(iInit > 0 && iSay > iInit && iSay - iInit < 800 && wiring.split('M.startedInJobLine(').length === 2 && /catch \(e\) \{ log\('\[jobs\] the boot could not say which job holds this VibeSpace —', e && e\.message\); \}/.test(wiring) && panel.includes('hubBoundNote(j, t, compact)')),
+    '③ production\'s names: the line is said ONCE (one call), right after the job engine\'s init, with the bound IN FORCE (boundInForceOf over the engine\'s context) and the name through labelOf; its failure is logged; the card takes the note by rung');
+  ok(!!(manual.includes('### VibeSpace itself is never a job') && /the whole job is stopped, VibeSpace and every\s+conversation it started together/.test(manual) && /in an older scope, the kernel stops ONE of the job's processes/.test(manual) && /RLIMIT_DATA, as on a pod/.test(manual) && /another VibeSpace's service job may be,\s+once/.test(manual) && /on a pod, the pod's own restart/.test(manual) && /another checkout's VibeSpace/.test(manual) && /clock steps\n?\s*forward/.test(manual) && /lost from the job's log/.test(manual)),
+    '③ the Background Work manual, by the same law: what passing the bound does, rung by rung; the start-again by holder; a pod\'s own restart; another checkout, a clock step, its output');
 }
 report();
