@@ -1231,6 +1231,98 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const got = await Promise.all([P1, P2, P3].map((id) => VPm.firstEntryIs(base, id, U0, { timeoutMs: 400 })));
     for (const c of wss2.clients) c.terminate(); await new Promise((r) => wss2.close(() => r()));
     ok(got[0] === true && got[1] === false && got[2] === null, 'B-0e4a: the keeper\'s read — the FIRST history entry compared on the page\'s own socket: the marked tab yes, another no, a silent page UNKNOWN at its bound; only the answer leaves', got);
+    // ═══ 主开发 r4282 PART 1 (law L3, the round's must): the take-back gives the lease its ROOT — a WINDOW only when the carrier is
+    //     alone in it and every page's window was read; a page beside it (a person's, an orphan: they cannot be told apart) or a
+    //     window unread ⇒ no window stamped (windowIn cleared: its next tab gets a window of its own). RED: the stamp as built ═══
+    const ow = {
+      alone: TBS0.ownWindowOf({ take: P1, windows: new Map([[P1, 11], [P2, 12], [P3, 12]]) }),
+      shared: TBS0.ownWindowOf({ take: P1, windows: new Map([[P1, 11], [P2, 11], [P3, 12]]) }),
+      unread: TBS0.ownWindowOf({ take: P1, windows: new Map([[P1, 11], [P2, null], [P3, 12]]) }),
+      carrierUnread: TBS0.ownWindowOf({ take: P1, windows: new Map([[P1, null], [P2, 12]]) }),
+      notListed: TBS0.ownWindowOf({ take: P3, windows: new Map([[P1, 11], [P2, 12]]) }),
+      none: TBS0.ownWindowOf({ take: P1, windows: null }),
+    };
+    ok(ow.alone === 11 && ow.shared === null && ow.unread === null && ow.carrierUnread === null && ow.notListed === null && ow.none === null,
+      'r4282 L3 PURE: the carrier\'s window is the lease\'s only when the carrier is alone there and every page\'s window was read — a second page in it, any window unread ⇒ none', ow);
+    const WINm = require('../src/browser-windows.js');
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const WANCH = '    const ownWin = TBS.ownWindowOf({ take: v.take, windows: new Map(pageIds.map((id, i) => [id, wins[i]])) });\n';
+    if (!ksrc.includes(WANCH)) ok(false, 'the anchor of the control «the stamp as built» is not in the source (src/server/browser-keeper.js)');
+    const Kw = ksrc.includes(WANCH) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, WANCH, '    const ownWin = wins[pageIds.indexOf(v.take)];\n', 'src/server/browser-keeper.js'), 'b0e4a-stamp-as-built') : null;
+    const R1 = T(0xb1), R2 = T(0xb2);
+    // the keeper's own take-back (the rebind's call, through its suite seam) over the fake browser: Chrome's restore stood in by two
+    // pages nobody roots — R1 carries the lease's mark (its first entry), R2 does not; their windows as the case places them
+    const upId = (v) => String(v || '').toUpperCase(); // the page ids as the keeper keys them (the suite keeps no idKey of its own)
+    const takeLeg = async (Kmod, tag, wins, { carries = new Map([[R1, true]]), reopen = false } = {}) => {
+      const opened = []; // the birth address of every window the keeper asks for (the stand-in opens none: its first command opens the tab)
+      const kw = mkKeeper(Kmod, { dataDir: path.join(ROOT, 'data-0e4a-' + tag), firstEntryIs: async (_c, id) => (carries.has(upId(id)) ? carries.get(upId(id)) : false), windowOf: async (_c, id) => (wins.has(upId(id)) ? wins.get(upId(id)) : null),
+        openWindow: async (_c, o) => { opened.push(String((o && o.url) || '')); return { ok: false, error: 'stand-in: no window' }; } });
+      await kw._facts.probeVersion();
+      const pw = kw.createProfile({ label: '0e4a ' + tag });
+      await kw.attach({ profileId: pw.id, browserKey: KA, sessionId: 'x-0e4a-' + tag });
+      const NSW = B.sessionNameFor(pw.id);
+      await kw._runtime.exec(NSW, ['--pin-tab', 'open', 'https://own.example/'], await kw.leaseCliOpts(pw.id, KA));
+      const sf = path.join(AB, NSW + '.json'); const st = JSON.parse(fs.readFileSync(sf, 'utf8'));
+      st.tabs = [R1, R2].map((id, i) => ({ tabId: 'r' + (i + 1), targetId: id, url: `https://restored.example/${i + 1}`, title: `Restored ${i + 1}`, label: null, opener: null }));
+      fs.writeFileSync(sf + '.part', JSON.stringify(st)); fs.renameSync(sf + '.part', sf);
+      const l = B.findLease(kw._reg().leases, pw.id, KA);
+      if (l) { if (!TBS0.OWN_MARK_RE.test(String(l.ownMark || ''))) l.ownMark = MARK; l.targetId = null; l.tabRoots = []; l.windowIn = 'a-run-before'; l.windowId = 99; }
+      const mark0 = l ? String(l.ownMark || '') : '';
+      const back = await kw._takeBack(pw.id, KA);
+      const l2 = B.findLease(kw._reg().leases, pw.id, KA) || {};
+      const inst = WINm.instanceOf(kw._reg().browsers[pw.id]);
+      const out = { back: back ? back.targetId : null, own: !!inst && l2.windowIn === inst, hasWindowIn: 'windowIn' in l2, windowId: l2.windowId == null ? null : l2.windowId, roots: l2.tabRoots, remarked: !!l2.ownMark && l2.ownMark !== mark0, markOk: TBS0.OWN_MARK_RE.test(String(l2.ownMark || '')), facts: kw._takeBackFacts().slice(-1)[0] || null };
+      // the switch's / a site's re-open (openInLease) afterwards: the birth address of the window it asks for
+      if (reopen) { const n0 = opened.length; await kw.openInLease({ profileId: pw.id, browserKey: KA, url: 'https://next.example/' }); const at = opened.slice(n0); out.reopenAt = at.map((u) => (u === TBS0.ownMarkUrl(l2.ownMark) ? 'its mark' : u)); }
+      return out;
+    };
+    const many = new Map([[R1, true], [R2, true]]), unknown = new Map([[R1, true], [R2, null]]), none = new Map();
+    // the two finds' controls: the take-back with no new mark (as at a6cb1f17d), the birth beside a live root (as at e7c90bba6)
+    const REMINT_ANCH = "      if (lr) { lr.ownMark = crypto.randomBytes(12).toString('hex'); seen.remint = true; commit(); }\n";
+    const ROOT_ANCH = "        if (at !== 'about:blank' && liveRoots.length) { const tl = await tabTargetsOf(rec.cdpUrl); if (!tl || TBS.pageTargets(tl).some((x) => liveRoots.includes(x.targetId))) at = 'about:blank'; }\n";
+    for (const [a, n] of [[REMINT_ANCH, 'the new mark'], [ROOT_ANCH, 'the live-root birth']]) if (!ksrc.includes(a)) ok(false, `the anchor of the control «no ${n}» is not in the source (src/server/browser-keeper.js)`);
+    const Kr = ksrc.includes(REMINT_ANCH) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, REMINT_ANCH, '      // (the control: no new mark)\n', 'src/server/browser-keeper.js'), 'b0e4a-no-remint') : null;
+    const Kl = ksrc.includes(ROOT_ANCH) ? M.load('src/server/browser-keeper.js', editAnchor(ksrc, ROOT_ANCH, '        // (the control: a marked birth beside a live root)\n', 'src/server/browser-keeper.js'), 'b0e4a-birth-beside-root') : null;
+    const [tAlone, tShared, tUnread, tCtl, tMany, tUnknown, tNone, tCtlR, tCtlL] = await Promise.all([takeLeg(K, 'alone', new Map([[R1, 11], [R2, 12]])), takeLeg(K, 'shared', new Map([[R1, 11], [R2, 11]]), { reopen: true }),
+      takeLeg(K, 'unread', new Map([[R1, 11]])), Kw ? takeLeg(Kw, 'ctl', new Map([[R1, 11], [R2, 11]])) : Promise.resolve(null),
+      takeLeg(K, 'many', new Map(), { carries: many }), takeLeg(K, 'unknown', new Map(), { carries: unknown }), takeLeg(K, 'none', new Map(), { carries: none, reopen: true }),
+      Kr ? takeLeg(Kr, 'ctl-r', new Map(), { carries: many }) : Promise.resolve(null), Kl ? takeLeg(Kl, 'ctl-l', new Map([[R1, 11], [R2, 11]]), { reopen: true }) : Promise.resolve(null)]);
+    ok(tAlone.back === R1 && tAlone.own && tAlone.windowId === 11 && tAlone.facts && tAlone.facts.verdict === 'take' && tAlone.facts.ownWindow === true && tAlone.facts.orphans === 2 && tAlone.facts.unread === 0,
+      'r4282 L3: a carrier ALONE in its window — taken back, and that window is the lease\'s (its next tab lands there)', tAlone);
+    ok(tShared.back === R1 && !tShared.hasWindowIn && tShared.windowId === null && tShared.facts && tShared.facts.ownWindow === false,
+      'r4282 L3: a carrier with a SECOND page in its window — its root taken back, NO window stamped (windowIn cleared, windowId none: its next tab gets a window of its own)', tShared);
+    ok(tUnread.back === R1 && !tUnread.hasWindowIn && tUnread.windowId === null,
+      'r4282 L3: a page whose window was not read inside the bound counts as shared — no window stamped', tUnread);
+    if (Kw) ok(!!tCtl && tCtl.back === R1 && tCtl.windowId === 11 && tCtl.own, 'CONTROL (the stamp as built: the carrier\'s window whatever shares it): the shared window is stamped the lease\'s — RED', tCtl);
+    // ═══ r4282's FOLLOW (found building the must): the take-back leaves ONE carrier for the next start, never two ═══
+    ok(!tMany.back && tMany.facts && tMany.facts.verdict === 'many' && tMany.remarked && tMany.markOk && tMany.facts.remint === true && !tUnknown.back && tUnknown.facts && tUnknown.facts.verdict === 'unknown' && tUnknown.remarked && tUnknown.markOk && !tNone.back && tNone.facts && tNone.facts.verdict === 'none' && !tNone.remarked,
+      'r4282 follow: «many» (a copy) and «unknown» (a page unread) give the lease a NEW mark — the birth that follows is the ONE carrier of it, so the next start is not «many» again; «none» keeps its mark', { many: tMany.facts, unknown: tUnknown.facts, none: tNone.facts });
+    ok(J(tShared.reopenAt) === J(['about:blank']) && J(tNone.reopenAt) === J(['its mark']),
+      'r4282 follow: a re-open (openInLease) beside the lease\'s LIVE root (a take-back that gave it no window) births its window at a plain blank — no second carrier; with no live root it is the root, born at its mark', { shared: tShared.reopenAt, none: tNone.reopenAt });
+    if (Kr) ok(!!tCtlR && tCtlR.facts && tCtlR.facts.verdict === 'many' && !tCtlR.remarked, 'CONTROL (no new mark after «many»): the old mark stays — its next birth is a third carrier and every later start reads «many» (one page more a start) — RED', tCtlR && tCtlR.facts);
+    if (Kl) ok(!!tCtlL && J(tCtlL.reopenAt) === J(['its mark']), 'CONTROL (a marked birth beside a live root): the re-open is a SECOND carrier of the mark — RED', tCtlL && tCtlL.reopenAt);
+    // ═══ 主开发 r4282 PART 2: THE MARKED BLANK READS AS BLANK WHEREVER A BLANK DOES — a blank tab's fold, the settling read
+    //     (TBS.BLANK_URL_RE), the rebind's pick and its note, the view's rows and titles, the live view's address lines ═══
+    const blank = { re: TBS0.BLANK_URL_RE.test(U0), tab: TBS0.isBlankTab({ url: U0 }), own: TBS0.isOwnBlank(U0), plain: TBS0.BLANK_URL_RE.test('about:blank') && TBS0.BLANK_URL_RE.test('chrome://newtab/') && TBS0.BLANK_URL_RE.test(''),
+      notOwn: [`about:blank#vs-own-${'g'.repeat(24)}`, `https://a.example/#vs-own-${MARK}`, `${U0}x`, 'about:blank'].map((u) => TBS0.isOwnBlank(u)), page: TBS0.BLANK_URL_RE.test('https://a.example/') };
+    ok(blank.re && blank.tab && blank.own && blank.plain && blank.notOwn.every((x) => x === false) && !blank.page,
+      'r4282 PART 2 PURE: the marked blank is a blank (BLANK_URL_RE, isBlankTab, isOwnBlank) — one shape: 24 hex after about:blank#vs-own-, nothing else', blank);
+    const pick = TBS0.rebindPick({ targets: [{ targetId: P1, type: 'page', url: U0, title: U0 }], holders: [], key: KA });
+    const pnote = TBS0.reboundNoteText({ how: 'switched', url: pick && pick.url, why: 'life' });
+    const mDrawn = TBS0.tabRowModel({ tabs: [{ targetId: P1, url: U0, title: U0, active: true }], owners: { [P1]: 'agent' } });
+    const mOrphan = TBS0.tabRowModel({ tabs: [{ targetId: P2, url: U0, title: U0 }], owners: {} });
+    const ptitle = TBS0.pageTitleOf({ url: 'about:blank', title: U0 }, U0);
+    ok(!!pick && pick.url === 'about:blank' && !pnote.includes(MARK) && mDrawn.rows.length === 1 && mDrawn.rows[0].url === 'about:blank' && !J(mDrawn).includes(MARK) && mOrphan.rows.length === 0 && ptitle === '',
+      'r4282 PART 2: the rebind\'s pick and its note, the view\'s rows (url, chip, tip) and the page title read a marked root as about:blank; nobody\'s marked blank is folded like a blank', { pick, pnote, drawn: mDrawn.rows, orphanRows: mOrphan.rows.length, ptitle });
+    const lsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    const lpins = ["const shown = isOwnBlank(st.url) ? 'about:blank' : (st.url || '');", 'openBtn.disabled = !st.url || isOwnBlank(st.url);', "(!st.url || st.url === 'about:blank' || isOwnBlank(st.url))", "st.url && st.url !== 'about:blank' && !isOwnBlank(st.url) ? st.url : ''"];
+    ok(lpins.every((x) => lsrc.includes(x)) && ksrc.includes('!TBS.BLANK_URL_RE.test(x.url.trim()) && TBS.isUrlTitle(x.title, x.url)'),
+      'r4282 PART 2: the live view\'s address line, its open button, the first focus and Esc read the marked blank as blank; the keeper\'s settling read is TBS.BLANK_URL_RE', lpins.filter((x) => !lsrc.includes(x)));
+    const BANCH = "const BLANK_URL_RE = new RegExp(`^(?:about:blank|${OWN_BLANK_RE.source.slice(1, -1)}|chrome:\\\\/\\\\/(?:newtab|new-tab-page)\\\\/?|)$`, 'i');";
+    if (!tsrc.includes(BANCH)) ok(false, 'the anchor of the control «the blank shape without the mark» is not in the source (src/browser-tabs.js)');
+    const TBSb = tsrc.includes(BANCH) ? M.load('src/browser-tabs.js', editAnchor(tsrc, BANCH, 'const BLANK_URL_RE = /^(?:about:blank|chrome:\\/\\/(?:newtab|new-tab-page)\\/?|)$/i;', 'src/browser-tabs.js'), 'b0e4a-blank-unmarked') : null;
+    if (TBSb) ok(!TBSb.isBlankTab({ url: U0 }) && !TBSb.BLANK_URL_RE.test(U0),
+      'CONTROL (the blank shape without the mark, as at e7c90bba6): a marked root is no blank — the settling read waits on it, a window\'s spare one is not folded — RED', { tab: TBSb.isBlankTab({ url: U0 }) });
   }
   // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
   //     left its tab busy ~2 min, the person saw a crashed page; opening the sign-in page again recovered it at once) — PLACED over

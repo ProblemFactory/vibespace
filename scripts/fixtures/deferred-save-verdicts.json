@@ -838,7 +838,7 @@
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > takeBackOwnTab · commit()",
   "verdict": "none",
-  "why": "lease window bookkeeping; re-bound next attach"
+  "why": "lease bookkeeping; redone at next start"
  },
  {
   "key": "browser-keeper · src/server/browser-keeper.js · create > attach · commit()",

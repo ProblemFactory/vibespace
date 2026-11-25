@@ -448,14 +448,22 @@ try {
   // (today) ⇒ one more page — RED as today. The page never reads its mark. Restore set as c1 left it, every relaunch by A's command.
   console.log('— h: B-0e4a — the lease\'s own tab comes back with Chrome\'s restore: taken back, no page more');
   const leaseA = () => ((kk._reg() || {}).leases || []).find((l) => l.profileId === prof.id && l.browserKey === KA) || null;
+  // 主开发 r4282: each relaunch prints the keeper's own take-back facts (its verdict, pages read, unread, the read's time, the window
+  // rule) — counts and times only, through its suite seam
+  const lastTakeBack = () => ((typeof kk._takeBackFacts === 'function' ? kk._takeBackFacts() : []).slice(-1)[0] || null);
+  const tbSay = (x) => (x ? `${x.verdict}, ${x.orphans} restored page(s) read, ${x.unread} unread, ${x.readMs} ms, own window ${x.ownWindow === true ? 'yes' : x.ownWindow === false ? 'no' : '-'}${x.remint ? ', a new mark' : ''}` : 'no take-back read');
+  let hN = 0;
   const relaunchH = async () => {
+    const tb0 = lastTakeBack();
     const dir = (kk.browserOf(prof.id) || {}).dir || prof.dir || null;
     await kk.stop(prof.id, { why: 'user' });
     const pf = dir ? path.join(dir, 'Default', 'Preferences') : null;
     if (pf && fs.existsSync(pf)) { try { const j = JSON.parse(fs.readFileSync(pf, 'utf8')); j.session = { ...(j.session || {}), restore_on_startup: 1 }; fs.writeFileSync(pf, JSON.stringify(j)); } catch { /* as it is */ } }
     const r = await A(['get', 'url']);
     const recN = kk.browserOf(prof.id); let pages = null; try { pages = recN && recN.cdpUrl ? (await pagesNow(recN)).length : null; } catch { pages = null; }
-    return { ok: r.code === 0, own: String(r.out || ''), pages, recN };
+    const tb1 = lastTakeBack(); const takeBack = tb1 && tb1 !== tb0 ? tb1 : null;
+    console.log(`    (h relaunch ${++hN}: ${pages} page(s); take-back: ${tbSay(takeBack)})`);
+    return { ok: r.code === 0, own: String(r.out || ''), pages, recN, takeBack };
   };
   const pageNavH = (cdpUrl, tid, url) => new Promise((resolve) => {
     const u = VP.pageUrlOf(cdpUrl, tid); if (!u) return resolve(false);
@@ -493,6 +501,28 @@ try {
   if (dup) { const t4 = (await pagesNow(h4.recN)).find((t) => /^about:blank#vs-own-/.test(String(t.url || ''))) || null; if (t4) await pageNavH(h4.recN.cdpUrl, t4.targetId, U('/a')); }
   const h3 = dup ? await relaunchH() : null;
   ok(dup && !!h3 && h3.ok && !h3.own.includes(U('/a')) && h3.pages > hBase + 1, 'h: B-0e4a — two restored pages carry the same mark (a copy of the lease\'s tab): NONE is taken back — a new tab of its own (never the copy)', { dup, own: h3 && h3.own.slice(0, 80), pages: h3 && h3.pages, ownTab4: !!ownTab4 });
+  // 主开发 r4282 (a MEASURE, printed, never judged): ONE relaunch with ≥ 20 restored pages, most opened in the background and never
+  // brought to front — does every restored page answer the history read inside its bound, or is the verdict «unknown» (today's
+  // behaviour: a new tab)? The lease gets a fresh mark carried by ONE new page (navigated on), so a take is possible
+  let h5 = null, h5opened = 0, h5before = null;
+  try {
+    const recM = h3 ? h3.recN : null; const lA5 = leaseA();
+    if (recM && recM.cdpUrl && lA5) {
+      const mark5 = 'b5'.repeat(12); lA5.ownMark = mark5;
+      const cc = await cdpClient(recM.cdpUrl);
+      try {
+        const c5 = await cc.send('Target.createTarget', { url: `about:blank#vs-own-${mark5}` }); const t5 = c5 && c5.result ? c5.result.targetId : null;
+        if (t5) { await sleep(300); await pageNavH(recM.cdpUrl, t5, U('/a?h5')); }
+        let n = (await pagesNow(recM)).length;
+        for (let i = 0; n < 24 && i < 30; i++) { const b = await cc.send('Target.createTarget', { url: U(`/a?bg=${i}`), background: true }); if (b && b.result && b.result.targetId) { n++; h5opened++; } }
+        h5before = n;
+      } finally { try { cc.close(); } catch { /* */ } }
+      await sleep(1500); // Chrome writes its session file
+      h5 = await relaunchH();
+    }
+  } catch (e) { h5 = { threw: String(e && e.message).slice(0, 160) }; }
+  const tb5 = h5 && h5.takeBack;
+  console.log(`    MEASURE r4282 (not a proof): a relaunch with ${h5before == null ? '?' : h5before} page(s) before it, ${h5opened} opened in the background and never brought to front — ${h5 && h5.threw ? 'not measured (' + h5.threw + ')' : tb5 ? `take-back ${tbSay(tb5)}; ${tb5.unread ? 'NOT every restored page answered: the verdict is «unknown»' : 'every restored page answered'}; the agent on its own page again: ${h5 && h5.own.includes(U('/a?h5')) ? 'yes' : 'no'}; ${h5.pages} page(s) after` : 'no take-back read'}`);
 } catch (e) { if (!/^no browser$/.test(String(e && e.message))) ok(false, 'the run threw', String(e && e.stack)); }
 finally { try { spy?.close(); } catch { /* */ } try { dialogs.shutdown(); kk.shutdown(); } catch { /* */ } srv.close(); pages.close(); cleanup(); }
 done();

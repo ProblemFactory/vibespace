@@ -138,7 +138,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFit } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
-import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep, takeoverStays, handbackStayText } from '../browser-tabs.js';
+import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep, takeoverStays, handbackStayText, isOwnBlank } from '../browser-tabs.js'; // isOwnBlank: row B-0e4a, a lease's marked root reads as a blank
 /** B-e674 follow (r694 (3)): a handback's own words, then what stays with the conversation (one sentence after the other). */
 const withStays = (text, stays) => (stays ? t('{first}. {second}', { first: text, second: stays }) : text);
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
@@ -942,7 +942,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (taken && st.mine && !st.noteOpen) { // lane browser-resume B: the hand-back's note dialog holds the keys out of the page
       const first = !st.claimed;
       if (first) { st.claimed = true; st.sent = 0; st.pressed.clear(); ky.reset('claim'); claimKeyboard(claimRec()); watchDialogs(); }
-      if (H && first && (!st.url || st.url === 'about:blank')) { try { addrInput.focus({ preventScroll: true }); } catch { /* detached */ } }
+      if (H && first && (!st.url || st.url === 'about:blank' || isOwnBlank(st.url))) { try { addrInput.focus({ preventScroll: true }); } catch { /* detached */ } } // row B-0e4a: the marked blank too
       else if (!ky.yielded && !ky.dialogHolds && !ownBox(document.activeElement)) focusSink(); // lane dialog-keys: …nor while a dialog the user opened holds the keys; B-b56d cure: nor while the person types in a box of the window's own (the address row, the sign-in form)
     }
     else if (st.claimed) { st.claimed = false; st.pressed.clear(); ky.reset('release'); releaseKeyboard(winInfo.id); watchDialogs(); if (isSink(document.activeElement)) document.activeElement.blur(); kbd.value = ''; st.youPt = null; hideCopied(); }
@@ -1419,7 +1419,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     else showToast(r && r.restarted ? t('The browser was restarted — its tabs open fresh') : t('The browser was stopped — the agent’s next browser command starts it fresh'), { duration: 4000 });
   }
   const renderViewers = () => { viewersEl.textContent = t('{n} viewer(s)', { n: st.viewers || 1 }); viewersEl.title = t('Windows watching this browser right now (on every client)'); };
-  const renderUrl = () => { urlEl.textContent = st.url || ''; urlEl.title = st.url || ''; openBtn.disabled = !st.url; if (H && document.activeElement !== addrInput && addrInput.value !== (st.url || '')) addrInput.value = st.url && st.url !== 'about:blank' ? st.url : ''; };
+  // row B-0e4a (主开发 r4282): a lease's marked root is shown as the blank it is — its address never in the bar, the box, the tip
+  const renderUrl = () => { const shown = isOwnBlank(st.url) ? 'about:blank' : (st.url || ''); urlEl.textContent = shown; urlEl.title = shown; openBtn.disabled = !st.url || isOwnBlank(st.url); if (H && document.activeElement !== addrInput && addrInput.value !== shown) addrInput.value = shown && shown !== 'about:blank' ? shown : ''; };
   // lane browser-tabs-by-window (the owner, 2026-10-08): the holders' windows in this client's words (the sidebar's name
   // first, as the tab row's names) — the row and the pane group by the SAME facts
   const tabLeasesNow = () => (st.tabLeases || []).map((l) => ({ windowId: l.windowId, holder: { word: l.word, name: (l.sessionId ? nameOfSession(String(l.sessionId)) : '') || l.name || '' } }));
@@ -2700,7 +2701,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   }
   addrInput.addEventListener('keydown', (e) => {
     if (enterSubmits(e)) { e.preventDefault(); const u = addrInput.value.trim(); if (u) humanNav({ url: u }).then((ok) => { if (ok) { addrInput.blur(); if (driving()) focusSink(); } }); }
-    else if (e.key === 'Escape') { e.preventDefault(); addrInput.value = st.url && st.url !== 'about:blank' ? st.url : ''; addrInput.blur(); if (driving()) focusSink(); }
+    else if (e.key === 'Escape') { e.preventDefault(); addrInput.value = st.url && st.url !== 'about:blank' && !isOwnBlank(st.url) ? st.url : ''; addrInput.blur(); if (driving()) focusSink(); } // row B-0e4a: never the marked blank back in the box
   }, { signal: winInfo._listenerCtl?.signal });
   addrInput.addEventListener('focus', () => { try { addrInput.select(); } catch { /* */ } }, { signal: winInfo._listenerCtl?.signal });
   backNav.onclick = () => humanNav({ verb: 'back' });

@@ -248,6 +248,9 @@ function isUrlTitle(title, url) {
  *  the chip then says the host). Both are page-chosen text: bounded like the rows (300). */
 function pageTitleOf(row, cdpTitle) {
   const url = str(row && row.url);
+  // row B-0e4a (主开发 r4282): a marked root's title (Chrome names a blank page by its address — the mark) is no title
+  if (isOwnBlank(cdpTitle)) cdpTitle = '';
+  if (isObj(row) && isOwnBlank(row.title)) row = { ...row, title: '' };
   for (const v of [cdpTitle, row && row.title]) { const t = str(v).trim().slice(0, 300); if (t && !isUrlTitle(t, url)) return t; }
   return '';
 }
@@ -263,7 +266,11 @@ function pageRows(targets) {
     .map((x) => ({ targetId: idKey(x.targetId), title: str(x.title).trim().slice(0, 300), url: str(x.url).slice(0, 2048) }));
 }
 /** F8: an unowned tab with nothing on it (a session's spare blank tab) is not a chip — nothing to watch, nothing to say. */
-const BLANK_URL_RE = /^(?:about:blank|chrome:\/\/(?:newtab|new-tab-page)\/?|)$/i;
+// row B-0e4a (主开发 r4282, part 2): THE MARKED BLANK READS AS BLANK WHEREVER A BLANK DOES — a lease's root born at its own marked
+// blank (about:blank#vs-own-<24 hex>) is a blank until its first navigation: ONE shape (OWN_BLANK_RE), in BLANK_URL_RE and isOwnBlank
+const OWN_BLANK_RE = /^about:blank#vs-own-[0-9a-f]{24}$/;
+const isOwnBlank = (u) => OWN_BLANK_RE.test(str(u).trim());
+const BLANK_URL_RE = new RegExp(`^(?:about:blank|${OWN_BLANK_RE.source.slice(1, -1)}|chrome:\\/\\/(?:newtab|new-tab-page)\\/?|)$`, 'i');
 /** A title for the chip: ≤ 24 characters (the full title rides the tooltip). */
 function chipTitle(title, url) {
   // verify r1 F4 (bound before parse): a page chose the title — cut to TITLE_CHIP × 4 code units BEFORE the code-point walk
@@ -309,6 +316,8 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
   // accept-fixes-strip F7: the PAGE's title (CDP's, else the binary's — never an address dressed as one); F8: a blank
   // tab nobody holds is not drawn (the tab on show always is)
   const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId)) // B-26bb: a stopped run's tabs draw nothing
+    // row B-0e4a (主开发 r4282): a lease's marked root is drawn as the blank it is — its mark in no chip, tip or url of a view
+    .map((x) => (isOwnBlank(x.url) ? { ...x, url: 'about:blank', title: isOwnBlank(x.title) ? '' : x.title } : x))
     .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))
     .filter((x) => x.active || idKey(x.targetId) === frontId || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));
   const counts = { agent: 0, you: 0, other: 0, orphan: 0 };
@@ -614,7 +623,7 @@ function rebindPick({ targets = null, holders = [], key = '' } = {}) {
   const owners = tabOwners({ targets, holders: (Array.isArray(holders) ? holders : []).filter((h) => isObj(h) && str(h.key) !== str(key)) });
   if (owners.get(only.targetId) && owners.get(only.targetId) !== 'orphan') return null;
   const raw = targets.find((x) => isObj(x) && idKey(x.targetId) === only.targetId) || {}; // pageTargets keeps no url — the note names the page
-  return { targetId: only.targetId, url: str(raw.url) || 'about:blank' };
+  return { targetId: only.targetId, url: isOwnBlank(raw.url) ? 'about:blank' : (str(raw.url) || 'about:blank') }; // row B-0e4a: the note never quotes a mark
 }
 /** Row B-0e4a (主开发 r4252 / r4264): A LEASE's OWN TAB, KNOWN AGAIN AFTER A RESTART. The keeper births the lease's root tab at a
  *  hub-made address — about:blank with the lease's own random mark as its fragment — and Chrome's own restore («continue where you
@@ -640,6 +649,21 @@ function markVerdict({ candidates = [], carries = null } = {}) {
   if (yes.length === 1) return { take: yes[0] };
   return { why: yes.length ? 'many' : 'none' };
 }
+/**
+ * Row B-0e4a (主开发 r4282, the round's must — law L3): THE TAKE-BACK GIVES THE LEASE ITS ROOT, NEVER A WINDOW THAT HOLDS ANY PAGE
+ * THAT IS NOT THE LEASE's. `windows` = a Map page target id → its window (null: not read inside the bound). The carrier's window is
+ * the lease's own ONLY when it is read and NO other page sits in it and every other page's window was read (an unread one counts
+ * as shared: it could be there). Else null ⇒ the tab is the root, the lease has no own window from it (its next tab gets one of
+ * its own, as today). PURE.
+ */
+function ownWindowOf({ take = '', windows = null } = {}) {
+  const m = windows instanceof Map ? windows : new Map();
+  const id = idKey(take);
+  const w = m.get(id);
+  if (w == null) return null;
+  for (const [k, v] of m) { if (idKey(k) === id) continue; if (v == null || v === w) return null; }
+  return w;
+}
 /** The ONE sentence the agent reads after a rebind (its command's answer, once): why its tab is gone, where it is bound now.
  *  `how` = `switched` (bound to the browser's only page) | `new` (a new tab of its own); `why` = `life` (the browser was
  *  restarted) | `closed` (the tab was closed) | `place` (B-9584 (B): the hold CLOSED it — its place could not be given to it in time,
@@ -656,7 +680,7 @@ function reboundNoteText({ how = 'new', url = '', why = 'life' } = {}) {
 }
 
 module.exports = {
-  OWN_MARK_RE, ownMarkUrl, markVerdict, // row B-0e4a: a lease's own tab known again after a restart
+  OWN_MARK_RE, ownMarkUrl, markVerdict, ownWindowOf, OWN_BLANK_RE, isOwnBlank, // row B-0e4a: a lease's own tab known again after a restart
   unresponsiveAgentText, // lane browser-unresponsive
   TARGET_ID_RE, TAB_ID_RE, AGENT_TAB_ACTS, USER_TAB_ACTS, OWNER_WORDS, TAB_REFUSALS, MAX_ROOTS, MAX_USER_ACTS,
   pageTargets, cleanRoots, addRoot, tabOwners, ownSetOf, ownerWord,
