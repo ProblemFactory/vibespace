@@ -1353,7 +1353,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js (and of its scru
 {
   const dir = scratchDir('vaultrun-model');   // r1152: never the vault run door's folder shape vs-vault-run-…
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
+  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js', 'vault-file.js', 'ssh-key-format.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));   // B-ef1b: vault-inventory reads the For-you registry (a band item's declared buttons)
   const real = fs.readFileSync(SRC, 'utf8');
   // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (the copy still loads, hit:
   // false, and the mutant's own «the patch hits once» row reds too — nothing crashes)

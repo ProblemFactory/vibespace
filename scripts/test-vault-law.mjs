@@ -180,6 +180,7 @@ ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only fro
     totp: 'a two-step code\'s seed (design q-047 L1) — vault-totp; an agent gets the current code by grant, never the seed',
     secret: 'a FREE entry (lane vault-paste-request) — pasted by the owner into For you at an agent\'s request, or added in the Vault window; the owner reveals it (验证是你), an agent uses it by purpose (a run by reference — never its bytes)',
     provider: 'a third-party model provider\'s key (lane lg-providers, B-d578) — pasted by the owner in the provider wizard, sealed by ONE writer (src/server/provider-store.js add / rekey), read by ONE reader (keyOf: the spawn road, the provider Test, the listed-model refresh); its record keeps the reference and the last four characters, never the value',
+    keyfile: 'a FILE the owner put in (lane lg-vault-file, B-0830 — design q-058): its bytes sealed in data/vault-files/<id>.vfile under a file key that is the entry\'s value; a run gets it as a 0600 file (fileOpen, the ONE road), an agent never gets its bytes; secretGet refuses its key by name (is_a_file)',
     'web-login': 'a website login (lane browser-login) — the sealed record of PURE src/browser-login.js, written by ONE writer (src/server/browser-logins.js); the custom kernel fills it, an agent never gets its bytes (purpose + receipt — ⑫); the owner reveals its password (验证是你)',
     'proxy-login': 'a browser proxy\'s login (B-8b87) — its password sealed under proxy-login:<scheme>://<host>:<port>#<user>, written and read by ONE module (src/server/browser-proxy-logins.js); its one reader is the browser keeper\'s forwarder, each reading a use noted (door browser-proxy) — no agent door, the browser never sees it',
   };
@@ -189,7 +190,7 @@ ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only fro
   const kinds = kindsOf(engSrc);
   const noRow = kinds.filter((k) => !SECRET_KINDS[k]), noKind = Object.keys(SECRET_KINDS).filter((k) => !kinds.includes(k));
   ok(kinds.length >= 6 && !noRow.length && !noKind.length && VE.isSecretName('secret:0a1b2c3d4e') && !VE.isSecretName('secret:') && !VE.isSecretName('secrets:x'), `every secret kind of the engine is a row here — ${kinds.join(', ')} (+ agent:<scope>/<name>, lane vault-mint-put) — none unclassified, none dead`, { noRow, noKind });
-  const planted = kindsOf(engSrc.replace('|totp|secret|provider):', '|totp|secret|provider|note):'));
+  const planted = kindsOf(engSrc.replace('|totp|secret|provider|keyfile):', '|totp|secret|provider|keyfile|note):'));   // lane lg-vault-file: the literal gained `keyfile`
   ok(planted.includes('note') && planted.filter((k) => !SECRET_KINDS[k]).join() === 'note', 'CONTROL: a planted kind (`note:`) in SECRET_RE is a kind with no row — RED');
 }
 
@@ -229,12 +230,12 @@ console.log('④ the agent side has no unlock');
     return writes.join(' ') === 'parts.out.push(o.out); parts.err.push(o.err);'
       && /const handOn = \(o\) => \{ parts\.out\.push\(o\.out\); parts\.err\.push\(o\.err\); \};/.test(t)
       && handed.length === 1 && handed[0] === 'e' && /scrub\.end\(cut\)\.then\(\(e\) => \{/.test(t) && /scrub\.onOut = handOn;/.test(t) && /if \(text\) scrub\.push\(k, text\);/.test(t)
-      && /m = VR\.createRunMasker\(msg\.secrets, \['out', 'err'\]/.test(wk)
+      && /m = VR\.createRunMasker\(valuesOf\(msg\.secrets\), \['out', 'err'\]/.test(wk)
       && /const outT = \{ text: parts\.out\.join\(''\), redacted: 0 \}, errT = \{ text: parts\.err\.join\(''\), redacted: 0 \};/.test(t)
       && /stdout: outT\.text, stderr: errT\.text/.test(t) && !/stdout: (?!outT\.text|utf8Head\(outT\.text\))/.test(t) && !/stderr: (?!errT\.text|utf8Head\(errT\.text\))/.test(t);
   };
   ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
-  ok(!scrubbedOnly(door.replace('if (text) scrub.push(k, text);', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) scrub.push(k, text);', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")) && !scrubbedOnly(door, scrubWorker.replace("m = VR.createRunMasker(msg.secrets, ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']")),
+  ok(!scrubbedOnly(door.replace('if (text) scrub.push(k, text);', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) scrub.push(k, text);', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")) && !scrubbedOnly(door, scrubWorker.replace("m = VR.createRunMasker(valuesOf(msg.secrets), ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']")),
     'MUTANTS: a stream chunk handed on without the scrubber (straight into parts, or into handOn), or a worker whose masker holds none of the run\'s values ⇒ RED');
   // 主开发 r1919 (4): THE ONE FEED of the hand-on is inside the worker's start (startScrub): a piece's reply, in order, is the only
   // `onOut(` call, and an end resolves with the worker's end reply or the loss's withheld words, nothing else; THE WORKER'S REPLY
@@ -471,6 +472,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const ENGINE_KEYS = {
     dataDir: 'receipt', file: 'receipt', state: 'receipt', facts: 'receipt', epoch: 'receipt', hasEntry: 'receipt', peek: 'receipt', lastUse: 'receipt', secretNames: 'receipt', blockedSummary: 'receipt',
     lock: 'purpose-door', noteUse: 'purpose-door', agentMint: 'purpose-door', agentPut: 'purpose-door',
+    agentFilePut: 'purpose-door', fileOf: 'receipt', filePut: 'hub-only', fileOpen: 'hub-only', filesSettled: 'hub-only',   // the cure: the sweep's and the shreds' end (the hub's close, the suites) — no route names it   // lane lg-vault-file: an agent's put --file (name + reference + the file's facts, never a byte) · a file's public facts · the owner's / a request's file write · THE one road to a file's bytes (a run's injection, the owner's download)
     blocked: 'refusal',
     setup: 'owner-only', unlock: 'owner-only', change: 'owner-only', confirm: 'owner-only', setIdleLock: 'owner-only', touch: 'owner-only',
     keyFor: 'hub-only', secretGet: 'hub-only', secretPut: 'hub-only', secretDrop: 'hub-only', secretAdopt: 'hub-only', resumeSeal: 'hub-only', audit: 'hub-only', idleTick: 'hub-only', close: 'hub-only',
@@ -602,7 +604,13 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     ok(eng8.secretPut(entry, v).ok, `the sweep's sentinel sealed: ${label}`);
     sentinels.push([label, Buffer.from(v)]);
   }
-  ok(sentinels.length === VE8.STORE_KEYS.length + 6, `${sentinels.length} sentinels: every store key, two machines' link tokens, the relay token, a sealed file key, an automation key, a free entry`);
+  // lane lg-vault-file (B-0830): + a FILE the owner put in and an agent's own file — their BYTES are sentinels (no door answers them)
+  for (const [entry, label, put] of [['keyfile:0b1c2d3e4f', 'the owner\'s file', (n, b) => eng8.filePut(n, b, { filename: 'law-licence.lic', prov: 'uploaded' })], ['agent:c-local/law-file', 'an agent\'s file', (n, b) => eng8.agentFilePut(n, b, { filename: 'law.key', actor: 'Law local' })]]) {
+    const b = Buffer.from(`law-file-${label.replace(/\W/g, '')}-${crypto.randomBytes(16).toString('hex')}`);
+    ok((await put(entry, b)).ok, `the sweep's sentinel sealed: ${label} (its bytes)`);   // the cure: a file's put answers a promise
+    sentinels.push([label, b]);
+  }
+  ok(sentinels.length === VE8.STORE_KEYS.length + 8, `${sentinels.length} sentinels: every store key, two machines' link tokens, the relay token, a sealed file key, an automation key, a free entry, the owner's file and an agent's file`);
   const formsOf = (b) => [b.toString('hex'), b.toString('base64'), b.toString('base64url'), ...(/^[\x20-\x7e]+$/.test(b.toString('latin1')) ? [b.toString('latin1')] : [])].filter((x) => x.length >= 12);
   const hitsOf = (text) => sentinels.filter(([, b]) => formsOf(b).some((f) => text.includes(f))).map(([l]) => l);
   const T = (p) => p + crypto.randomBytes(16).toString('hex');
@@ -714,7 +722,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     // THE CONTROL: the same run through the door with a scrubber worker that masks nothing (its masker built over no value) ⇒ the
     // value IS in the answer (the 0 above is not vacuous). The worker is planted beside the run root, its requires absolute
     const WK = path.join(REPO, 'src/server/vault-run-scrub-worker.js'), wkSrc = fs.readFileSync(WK, 'utf8');
-    let wkMut = anchored(wkSrc, "m = VR.createRunMasker(msg.secrets, ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']", '(c2) a scrubber worker that masks nothing');
+    let wkMut = anchored(wkSrc, "m = VR.createRunMasker(valuesOf(msg.secrets), ['out', 'err']", "m = VR.createRunMasker([], ['out', 'err']", '(c2) a scrubber worker that masks nothing');
     wkMut = anchored(wkMut, "require('../worker-memory.js')", `require(${JSON.stringify(path.join(REPO, 'src/worker-memory.js'))})`, '(c2) the planted worker reads the memory helper');
     wkMut = anchored(wkMut, "require('../vault-scrubber.js')", `require(${JSON.stringify(path.join(REPO, 'src/vault-scrubber.js'))})`, '(c2) the planted worker reads the scrubber');
     const wkFile = path.join(ROOT8, 'scrub-worker-masks-nothing.js'); fs.writeFileSync(wkFile, wkMut);

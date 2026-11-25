@@ -254,7 +254,7 @@ function compileForms(secrets) {
     if (bytesOf(v) < MIN_MASK_BYTES) { const e = new Error(WORDS.entry_too_short_to_mask); e.code = 'entry_too_short_to_mask'; throw e; }
     const ph = placeholderOf(s.ref && typeof s.ref === 'object' ? s.ref : s.label != null ? { label: s.label } : parseRef(String(s.ref)) || String(s.ref));
     vi++;
-    for (const f of formsOf(v)) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form, v: vi });
+    for (const f of (s.asIs === true ? [{ form: 'raw', text: v }] : formsOf(v))) if (!table.has(f.text)) table.set(f.text, { ph, form: f.form, v: vi });   // 主开发 r4413 (B): a value that IS its own spelling — a FILE's encoded piece or line (src/vault-file.js runValuesOf, the ONLY road that sets `asIs`) — enters as it is; every other value is spelled every way
   }
   const texts = [...table.keys()].sort((a, b) => b.length - a.length);
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;

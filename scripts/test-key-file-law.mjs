@@ -130,6 +130,7 @@ const RANDOM32 = new Map([
   ['src/server/desktop-webrtc.js', [1, 'a stream session\'s UDP-leg HMAC key (lane stream-relay-udp — memory only; handed to the daemon in stream-offer over the device link, never on UDP)']],
   ['src/mutual-auth.js', [1, 'newNonce: a hello\'s fresh 32-byte NONCE (lane lg-remote-hardening, D3) — sent in the clear, signed over, never kept; never a key (the device\'s and the hub\'s keys are ed25519, generateKeyPair)']],
   ['src/agentd/client.js', [1, 'lane device-bundle-signing: the single-use LOCAL PROOF of an upgrade of this machine\'s own daemon (<root>/state/upgrade-proof, 0600; the daemon deletes it on any read) — a nonce, never a key']],
+  ['src/server/vault-files.js', [1, 'mintKey: a FILE entry\'s file key (lane lg-vault-file, B-0830) — sealed at once as the entry\'s value (the engine\'s filePut → secretPut), the bytes at rest under it in data/vault-files/<id>.vfile; never a key file']],
   ['src/server/sealed-json.js', [1, 'a sealed JSON file\'s key — minted INTO the vault as its `file:<name>` entry (secretPut), never a file (lane vault-e2e-password-fix-r2)']],
   ['src/server/feedback-forward.js', [1, 'the feedback ORIGIN KEY (fk_, lane feedback-forward): names this instance to the maintainer hub and opens only the marks on its own forwarded reports — data/feedback-outbox.json 0600, a named exception in src/vault.js SECRETS_AT_REST (never a store key); the hub keeps its sha256']],
   ['src/webauthn-sign.js', [1, 'makeCredential: a new passkey\'s CREDENTIAL ID (lane passkey-sink) — public, handed to the site in the attestation and kept in the row; never a key (the key pair is generateKeyPairSync, sealed through the passkeys\' lawfulKey)']],
@@ -843,6 +844,9 @@ try {
     'src/server/feedback-forward.js', 'src/server/local-index.js', 'src/server/migrations.js', 'src/server/plugin-install.js',
     'src/server/stash-handover.js', 'src/server/tls.js', 'src/server/vault-run-door.js',
     'src/server/vault-totp.js', 'src/server/voice-teach-engine.js', 'src/ssh-key.js',
+    // lane lg-vault-file (the cure): its sha256 is the sender's digest of a put (compared in memory, never written — the box keeps
+    // NO digest, test-vault-engine R); what it writes is the AES-GCM sealed file
+    'src/server/vault-files.js',
     'src/user-todos.js', 'src/webdav.js',
     'src/signin-witness.js', // B-dc3f (1): the sha256 of the ROOT's path names the sign-in witness file (the CLI index's own digest) — no secret is digested; the file holds a fact and a path
     'src/signin-witness-worker.js', // B-dc3f (1) H1 (r3030 (b)): the sha256 of the MACHINE id keys the network home's witness copy (two machines at one path never read each other's) — no secret is digested

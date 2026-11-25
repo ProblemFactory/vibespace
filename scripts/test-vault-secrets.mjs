@@ -667,6 +667,20 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     const callers = [...walkJs(path.join(REPO, 'src')), path.join(REPO, 'server.js')].filter((f) => /\bsecretGet\(/.test(srcCode(f))).map((f) => path.relative(REPO, f)).filter((f) => f !== 'src/server/vault-engine.js').sort();
     ok(callers.join() === [...READERS.keys()].sort().join(), `THE SEED'S READERS are named: every src/ caller of secretGet( is classified (${callers.join(', ')})`, { callers, named: [...READERS.keys()] });
   }
+  // lane lg-vault-file (B-0830): a FILE the vault keeps, on the same data dir — data/vault-files/<id>.vfile holds it SEALED (the
+  // SECRETS_AT_REST row): every line of it, and the whole of it (raw / hex / base64), is in NO file under data/; LOCKED ⇒ its one
+  // road answers vault_locked
+  {
+    const LINES = [`licence-key: ${crypto.randomBytes(24).toString('hex')}`, `signature: ${crypto.randomBytes(30).toString('base64')}`];
+    const FB = Buffer.from(['# a licence file', ...LINES, ''].join('\n'));
+    const fp = (await v.filePut('keyfile:0f0e0d0c0b', FB, { filename: 'licence.lic', prov: 'uploaded' }));
+    ok(fp.ok && fs.readdirSync(path.join(D, 'vault-files')).length >= 1 && hitsIn(D, [...LINES, FB.toString()], { skip: (f) => f === authLink }).length === 0,
+      'a FILE the vault keeps: data/vault-files/<id>.vfile holds it sealed — none of its lines, nor the whole (raw / hex / base64), is in any file under data/');
+    ok(R('src/vault.js').SECRETS_AT_REST.some((r) => /data\/vault-files/.test(r.where) && /keyfile:/.test(r.entry)), 'SECRETS_AT_REST names data/vault-files and its entries');   // stale-pins: kept (it reads src/vault.js's SECRETS_AT_REST row, which holds the words)
+    v.lock('door');
+    ok((await v.fileOpen('keyfile:0f0e0d0c0b')).code === KF.VAULT_LOCKED, 'LOCKED ⇒ its one road answers vault_locked');
+    await v.unlock(PW, {});
+  }
   // the boundary, stated by the census: what stays a file (TLS key, vendor CLI files, …) is the exception list — none of it is planted here
   const VAULT_SRC = fs.readFileSync(path.join(REPO, 'src/vault.js'), 'utf8');
   ok(/SECRETS_AT_REST/.test(VAULT_SRC) && R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · ').length > 0, 'the exceptions are a NAMED list (src/vault.js SECRETS_AT_REST): ' + R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · '));

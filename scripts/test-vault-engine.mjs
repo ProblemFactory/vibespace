@@ -33,11 +33,13 @@
 //      grant, an unspent automation once-grant) and a running `vault run` child — that a lock by the door, an agent or the
 //      idle timer ENDS whole (the asks withdrawn `vault_locked`), while the shutdown's QUIET lock runs no subscriber;
 //      MUTANTS: a copy dropping ONE consequence (the window, the request, the grants, the run) ⇒ RED on that one
+//   R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed in data/vault-files/<id>.vfile (never vault.json), ONE road (fileOpen),
+//      secretGet refuses it (is_a_file), the caps and the kinds by name, a re-put / a delete SHREDS, damage and the boot sweep
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
@@ -800,6 +802,410 @@ console.log('Q  A FREE ENTRY (lane vault-paste-request — the owner: 「我压�
   ok(v.secretDrop('secret:0a1b2c3d4e').ok && !v.secretNames().some((x) => x.name === 'secret:0a1b2c3d4e'), 'its delete door forgets it — a locked vault forgets too (no key needed)');
   ok(!frames.some((f) => f.includes(VAL)), 'no broadcast frame holds the value');
   v.close();
+}
+
+// ── R  A FILE ENTRY (lane lg-vault-file, B-0830 — design q-058; the owner 2026-11-02: 「general 文件种类，这样什么 ssh key，某些
+//      应用的授权文件啥的都能存进去了」, decided 2026-11-03: a 1 MB cap, `keyfile:<10 hex>`, a text value never upgraded, a key
+//      with its passphrase stored AS IS): the bytes sealed in data/vault-files/<id>.vfile under a file key that is the entry's
+//      value — never in vault.json, never answered by secretGet (`is_a_file`), opened by ONE road (fileOpen); a re-put and a
+//      delete SHRED the old file (a hard link sees the overwrite); the boot shreds a file no entry names (never while the
+//      record is unreadable); a file moved onto another id, or one flipped byte, does not open (`file_damaged`).
+console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the record, one road to its bytes, shredded when it goes');
+{
+  const VF = require(path.join(REPO, 'src/vault-file.js'));
+  const VC = require(path.join(REPO, 'src/server/vault-contents.js'));
+  const u32 = (x) => { const b = Buffer.alloc(4); b.writeUInt32BE(x); return b; };
+  const sstr = (x) => { const b = Buffer.isBuffer(x) ? x : Buffer.from(String(x), 'latin1'); return Buffer.concat([u32(b.length), b]); };
+  const ARMOR = ['OPENSSH', 'PRIVATE', 'KEY'].join(' ');   // built at runtime: no key-shaped literal in the tree
+  /** An openssh-key-v1 private key as ssh-keygen writes it (its public half in the clear; `encrypted` = a passphrase's cipher + kdf). */
+  function opensshKey({ encrypted = false } = {}) {
+    const { publicKey } = crypto.generateKeyPairSync('ed25519');
+    const pub = Buffer.concat([sstr('ssh-ed25519'), sstr(Buffer.from(publicKey.export({ format: 'jwk' }).x, 'base64url'))]);
+    const body = Buffer.concat([Buffer.from('openssh-key-v1\0', 'latin1'), sstr(encrypted ? 'aes256-ctr' : 'none'), sstr(encrypted ? 'bcrypt' : 'none'),
+      sstr(encrypted ? Buffer.concat([sstr(crypto.randomBytes(16)), u32(16)]) : Buffer.alloc(0)), u32(1), sstr(pub), sstr(crypto.randomBytes(160))]);
+    return Buffer.from([`-----BEGIN ${ARMOR}-----`, ...body.toString('base64').match(/.{1,70}/g), `-----END ${ARMOR}-----`, ''].join('\n'), 'latin1');
+  }
+  const pem = (label, n = 300) => Buffer.from([`-----BEGIN ${label}-----`, ...crypto.randomBytes(n).toString('base64').match(/.{1,64}/g), `-----END ${label}-----`, ''].join('\n'), 'latin1');
+  // the PURE verdicts
+  const RLO = String.fromCodePoint(0x202e), NUL = String.fromCodePoint(0);
+  ok(VF.cleanName('../../home/x/.ssh/id_ed25519') === 'id_ed25519' && VF.cleanName('C:\\keys\\deploy.pem') === 'deploy.pem' && VF.cleanName(`gpj${RLO}.exe`) === 'gpj.exe' && VF.cleanName(`a${NUL}b.txt`) === 'ab.txt',
+    'cleanName keeps the base name only — no folder (either slash), no control or direction character');
+  ok(VF.cleanName('..') === null && VF.cleanName('') === null && VF.cleanName('   ') === null && VF.cleanName(7) === null && [...VF.cleanName('k'.repeat(300))].length === VF.NAME_MAX, 'a name that cleans to nothing is refused; a long one is cut to 120');
+  const v0 = VF.fileVerdict(Buffer.alloc(0), 'a'), v7 = VF.fileVerdict(Buffer.alloc(7, 1), 'a'), vMax = VF.fileVerdict(Buffer.alloc(VF.FILE_MAX, 1), 'big.bin'), vOver = VF.fileVerdict(Buffer.alloc(VF.FILE_MAX + 1, 1), 'big.bin'), vNo = VF.fileVerdict(Buffer.alloc(9, 1), '../');
+  ok(v0.code === 'file_empty' && v7.code === 'file_too_small' && vMax.ok && vMax.size === VF.FILE_MAX && vOver.code === 'file_too_large' && vNo.code === 'file_name_bad' && [v0, v7, vOver, vNo].every((x) => x.words && x.words.length > 20),
+    'fileVerdict: empty / under 8 bytes / over 1 MB / no name ⇒ refused BY NAME with words; exactly 1 MB ⇒ kept (the owner\'s D1)', [v0.code, v7.code, vMax.ok, vOver.code, vNo.code]);
+  const kPlain = opensshKey(), kEnc = opensshKey({ encrypted: true });
+  ok(VF.kindOf(kPlain) === 'ssh-key' && VF.encryptedOf(kPlain) === false && VF.kindOf(kEnc) === 'ssh-key' && VF.encryptedOf(kEnc) === true,
+    'an OpenSSH key is ssh-key by its header; the one with a passphrase is ENCRYPTED (read from its body — its armor is the same)');
+  ok(VF.kindOf(pem('CERTIFICATE')) === 'pem' && VF.encryptedOf(pem('CERTIFICATE')) === false && VF.kindOf(pem(['ENCRYPTED', 'PRIVATE', 'KEY'].join(' '))) === 'pem' && VF.encryptedOf(pem(['ENCRYPTED', 'PRIVATE', 'KEY'].join(' '))) === true
+    && VF.kindOf(pem(['RSA', 'PRIVATE', 'KEY'].join(' '))) === 'ssh-key' && VF.kindOf(Buffer.from('apiVersion: v1\nkind: Config\n')) === 'generic' && VF.kindOf(crypto.randomBytes(64)) === 'generic',
+    'a certificate / a PKCS#8 key is pem (the encrypted PKCS#8 says so), a classic RSA key is ssh-key, a kubeconfig or random bytes generic — the HEADER only, never the name');
+  const text = Buffer.from(['apiVersion: v1', 'kind: Config', 'client-key-data: ' + crypto.randomBytes(40).toString('base64'), '  token: ' + crypto.randomBytes(20).toString('hex'), 'client-key-data: ' + 'x'.repeat(3), ''].join('\n'));
+  const ms = VF.maskSetOf(text);
+  ok(ms.whole.some(([f, t]) => f === 'raw' && t === text.toString()) && ms.whole.some(([f, t]) => f === 'base64' && t === text.toString('base64')) && ms.whole.some(([f, t]) => f === 'hex' && t === text.toString('hex').toUpperCase())
+    && ms.lines.length === 3 && ms.lines.every((l) => Buffer.byteLength(l) >= 16) && !ms.lines.includes('kind: Config') && !ms.lines.includes('apiVersion: v1') && ms.lines.some((l) => l.startsWith('token: ')) && ms.pieces.length > 0,
+    'maskSetOf: a small file whole (raw / base64 / hex, both cases) + its 64-character pieces + every DISTINCT line of 16 bytes or more, trimmed (the short ones are ordinary text)', ms.lines);
+  const bin = Buffer.concat([Buffer.from([0, 255, 0, 1, 2, 3]), crypto.randomBytes(300)]);
+  const mb = VF.maskSetOf(bin);
+  ok(mb.whole.some(([, t]) => t === bin.toString('base64')) && mb.whole.some(([, t]) => t === bin.toString('hex')) && mb.pieces.some(([f, t]) => f === 'base64' && t === bin.toString('base64').slice(0, 64)), 'a binary file: its base64 and hex whole and in pieces (its raw text is what the output decoder makes of it)');
+  // adversarial read r1: a Latin-1 licence file is NOT strict UTF-8 — its lines are read as the run's output decoder reads them
+  const lat = Buffer.concat([Buffer.from('Licensee: Soci'), Buffer.from([0xe9]), Buffer.from('t'), Buffer.from([0xe9]), Buffer.from(' Example\nLicense-Key: 3F9A-77B2-C0DE-9911-ABCD\n')]);
+  const ml = VF.maskSetOf(lat);
+  ok(ml.lines.includes('License-Key: 3F9A-77B2-C0DE-9911-ABCD') && ml.lines.some((l) => l.startsWith('Licensee: Soci')), 'a Latin-1 file: its lines as the output decoder reads them (lenient UTF-8) — never «no text, no lines»', ml.lines);
+  // r1: a short token file — `$(cat "$VAULT_FILE{K}")` drops its newline, and its one line is under 16 bytes
+  const tok = VF.maskSetOf(Buffer.from('XXXX-1234-YYYY\n'));
+  ok(tok.trimmed === 'XXXX-1234-YYYY' && tok.lines.length === 0, 'a short token file: its TRIMMED whole is masked in every spelling (14 bytes, its newline dropped)', tok);
+  // r1: a big file is masked by PIECES — no whole form, so the masker's window does not grow with the file
+  const big = Buffer.from(Array.from({ length: 5000 }, (_, i) => `${i} ` + crypto.randomBytes(45).toString('base64')).join('\n'));
+  const mbig = VF.maskSetOf(big);
+  ok(mbig.whole.length === 0 && mbig.pieces.every(([, t]) => t.length <= 64) && mbig.pieces.length > 5000 && mbig.lines.every((l) => Buffer.byteLength(l) <= 1024), `a ${big.length}-byte file: no whole form, ${mbig.pieces.length} pieces of ≤ 64 characters, every line ≤ 1024 bytes`);
+  ok(VF.maskSetOf(Buffer.from(['-----BEGIN', 'CERTIFICATE-----'].join(' ') + '\n' + crypto.randomBytes(48).toString('base64') + '\n')).lines.every((l) => !/BEGIN/.test(l)), 'a PEM armor line is the format\'s — never masked as the file\'s (it is in every certificate a run prints)');
+  ok(VF.diskNameOf('id_rsa (1)') === 'id_rsa_1' && VF.diskNameOf('my key.pem') === 'my_key.pem' && VF.diskNameOf('a$b;c`d.key') === 'a_b_c_d.key' && VF.diskNameOf('鍵ファイル.pem') === 'file.pem' && VF.diskNameOf('') === 'file' && Buffer.byteLength(VF.diskNameOf('k'.repeat(300) + '.yaml')) <= 80 && VF.diskNameOf('k'.repeat(300) + '.yaml').endsWith('.yaml'),
+    'diskNameOf: the run writes a shell-safe name (no space, no $ ; `), at most 80 bytes, its extension kept');
+  const many = Buffer.from(Array.from({ length: 6000 }, (_, i) => `line ${String(i).padStart(5, '0')} ${'z'.repeat(50)}`).join('\n'));
+  const mm = VF.maskSetOf(many);
+  ok(mm.lines.length > 1000 && mm.lines.length <= VF.LINES_MAX && mm.lines.reduce((s, l) => s + Buffer.byteLength(l), 0) <= VF.LINE_BYTES_MAX, `the lines stop at the measured bound (${mm.lines.length} lines, ≤ ${VF.LINE_BYTES_MAX} bytes) — the whole-file forms still hold past it`);
+  const wb = VF.wireBytesOf(bin.toString('base64'), { size: bin.length });
+  ok(wb.ok && wb.bytes.equals(bin) && VF.wireBytesOf('a b=', {}).code === 'bytes_bad' && VF.wireBytesOf('QUJD', { size: 4 }).code === 'bytes_bad' && VF.wireBytesOf('QUJD').ok && VF.wireBytesOf('').code === 'file_empty' && VF.wireBytesOf('QUJ').code === 'bytes_bad',
+    'wireBytesOf: strict base64 only (a space, a cut quantum ⇒ bytes_bad), the size the sender said must be the size that arrived');
+
+  // the engine
+  const d = path.join(ROOT, 'file-entry'); fs.mkdirSync(d, { recursive: true });
+  const frames = [];
+  const v = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false, bcast: (m) => frames.push(JSON.stringify(m)) });
+  ok((await v.filePut('keyfile:0123456789', bin, { filename: 'blob.bin' })).code === 'vault_not_set_up', 'NOT SET UP ⇒ a file is refused by name (vault_not_set_up), nothing written');
+  await v.setup(PW);
+  ok(VE.isSecretName('keyfile:0123456789') && !VE.isSecretName('keyfile:') && !VE.isSecretName('keyfile:../x'), 'the kind: `keyfile:<id>` is a secret name (the owner\'s files — decision D4)');
+  const put = (await v.filePut('keyfile:0123456789', bin, { filename: '../tmp/blob.bin', prov: 'uploaded', label: 'Blob', note: 'the licence file' }));
+  ok(put.ok && put.file && put.file.name === 'blob.bin' && put.file.size === bin.length && put.file.kind === 'generic' && put.file.encrypted === false && !('id' in put.file) && !('sha256' in put.file),
+    'filePut ⇒ { ok, file: { name, size, kind, encrypted } } — its id (a path piece) and digest stay in the vault', put);
+  const rec = fs.readFileSync(path.join(d, 'vault.json'), 'utf8');
+  const box = JSON.parse(rec).entries['keyfile:0123456789'];
+  ok(box && box.file && /^[0-9a-f]{10}$/.test(box.file.id) && box.file.size === bin.length && !('sha256' in box.file) && !rec.includes(crypto.createHash('sha256').update(bin).digest('hex')) && box.prov === 'uploaded' && box.label === 'Blob',
+    'the box carries the file\'s FACTS (id, name, size, kind) beside its words — and NO digest of its bytes anywhere in vault.json (the cure: RULE 5′ — a short token file\'s sha256 is a guess away)');
+  ok(!rec.includes(bin.toString('base64').slice(0, 40)) && !rec.includes(bin.toString('hex').slice(0, 40)) && rec.length < 4000, 'vault.json holds NONE of the bytes (no base64, no hex) — only the wrapped 32-byte file key');
+  const vfile = path.join(d, 'vault-files', `${box.file.id}.vfile`);
+  const vst = fs.statSync(vfile), dst = fs.statSync(path.join(d, 'vault-files'));
+  const sealed = fs.readFileSync(vfile);
+  ok((vst.mode & 0o777) === 0o600 && (dst.mode & 0o777) === 0o700 && sealed.subarray(0, 6).toString('latin1') === 'VSVF1\n' && sealed.indexOf(bin.subarray(6, 40)) < 0 && sealed.length === bin.length + 34,
+    'the bytes are SEALED in data/vault-files/<id>.vfile (0600 in a 0700 folder): magic · iv · tag · ciphertext — no plaintext run in it');
+  const op = (await v.fileOpen('keyfile:0123456789'));
+  ok(op.ok && Buffer.isBuffer(op.bytes) && op.bytes.equals(bin) && op.file.name === 'blob.bin', 'fileOpen (the ONE road) opens it to the very bytes'); if (op.bytes) op.bytes.fill(0);
+  const sg = v.secretGet('keyfile:0123456789');
+  ok(!sg.ok && sg.code === 'is_a_file' && !('value' in sg), 'secretGet REFUSES a file entry by name (is_a_file) — no door gets its box value (the file key)');
+  let revealed = null, revealCode = null;
+  try { revealed = VC.secretSource({ vault: v }).vaultReveal('keyfile:0123456789'); } catch (e) { revealCode = e && e.code; }
+  ok(revealed === null && revealCode === 'is_a_file', 'the Vault window\'s reveal source meets the same refusal (a file is never SHOWN — its download is its own door)', { revealCode });
+  const sn = v.secretNames().find((x) => x.name === 'keyfile:0123456789');
+  ok(sn && sn.file && sn.file.name === 'blob.bin' && sn.file.size === bin.length && !('id' in sn.file) && !('sha256' in sn.file) && sn.label === 'Blob', 'secretNames carries the file\'s public facts (name, size, kind) — no id, no digest');
+  ok(v.fileOf('keyfile:0123456789').id === box.file.id && v.fileOf('secret:nope') === null, 'fileOf = the box\'s facts (the doors ask it before opening anything)');
+  // a re-put: a NEW sealed file, the old one SHREDDED once the record names the new one
+  const link = path.join(ROOT, 'file-entry-old-link'); fs.linkSync(vfile, link);
+  const bin2 = Buffer.concat([bin, Buffer.from('v2')]);
+  const re = (await v.filePut('keyfile:0123456789', bin2, { filename: 'blob.bin', prov: 'uploaded' }));
+  await v.filesSettled();   // the cure: the old file is shredded off the main loop, after the record names the new one
+  const box2 = JSON.parse(fs.readFileSync(path.join(d, 'vault.json'), 'utf8')).entries['keyfile:0123456789'];
+  ok(re.ok && box2.file.id !== box.file.id && !fs.existsSync(vfile) && fs.existsSync(path.join(d, 'vault-files', `${box2.file.id}.vfile`)) && !fs.readFileSync(link).equals(sealed),
+    'a re-put seals a NEW file and SHREDS the old one (a hard link to it reads the overwrite, not the old ciphertext)');
+  fs.unlinkSync(link);
+  // a text value is never turned into a file — and a file never into a text value (the owner's D5)
+  ok(v.secretPut('secret:0a1b2c3d4e', 'a text value of the owner', { prov: 'owner', label: 'x' }).ok && (await v.filePut('secret:0a1b2c3d4e', bin, { filename: 'b.bin' })).code === 'not_a_file', 'a TEXT entry ⇒ filePut refused not_a_file (never upgraded)');
+  const af = (await v.agentFilePut('agent:conv-9/deploy-key', kEnc, { filename: 'id_ed25519', actor: 'Deploy chat', note: 'the deploy key' }));
+  ok(af.ok && af.ref === 'vault://agent:conv-9/deploy-key' && af.file.kind === 'ssh-key' && af.file.encrypted === true, 'agentFilePut (put --file) ⇒ its ref + the file\'s facts; a key with its passphrase is stored AS IS and SAID (encrypted — the owner\'s change, round 3)', af);
+  ok(v.agentPut('agent:conv-9/deploy-key', 'now a text value').code === 'is_a_file' && v.agentPut('agent:conv-9/t', 'a text value here').ok && (await v.agentFilePut('agent:conv-9/t', bin, { filename: 'b.bin' })).code === 'not_a_file',
+    'a text put over a FILE entry ⇒ is_a_file; a file put over a TEXT entry ⇒ not_a_file');
+  const idBefore = v.fileOf('agent:conv-9/deploy-key').id;
+  ok(v.agentMint('agent:conv-9/deploy-key', {}).code === 'is_a_file' && v.secretPut('agent:conv-9/deploy-key', 'x'.repeat(20)).code === 'is_a_file' && v.fileOf('agent:conv-9/deploy-key').id === idBefore && fs.existsSync(path.join(d, 'vault-files', `${idBefore}.vfile`)),
+    'adversarial read r1: a MINT (or any text write) over a file entry ⇒ is_a_file — the file and its sealed bytes stay (it once became a random text value later runs wrote out as the key)');
+  const before = fs.readdirSync(path.join(d, 'vault-files')).length;
+  const bb = await v.agentFilePut('agent:conv-9/x', bin, { filename: 'b.bin', expect: { sha256: 'f'.repeat(64) } });
+  await v.filesSettled();
+  ok(bb.code === 'bytes_bad' && fs.readdirSync(path.join(d, 'vault-files')).length === before && !v.fileOf('agent:conv-9/x'),
+    'the sender\'s digest differs ⇒ bytes_bad, its sealed file shredded, no entry');
+  ok((await v.filePut('keyfile:0b1b2c3d4e', Buffer.alloc(VF.FILE_MAX + 1, 7), { filename: 'big.bin' })).code === 'file_too_large' && !v.fileOf('keyfile:0b1b2c3d4e'), 'over 1 MB ⇒ file_too_large (by name), nothing kept');
+  const audit = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
+  ok(/"event":"vault-agent-put"/.test(audit) && /"file":\{"size":/.test(audit) && !audit.includes(kEnc.toString('latin1').split('\n')[1].slice(0, 30)) && !frames.some((f) => f.includes(bin.toString('base64').slice(0, 30))),
+    'the put is audited by name, size and kind — no byte in any audit line or broadcast frame');
+  // damaged: a file moved onto another id does not open (the id is its additional data), a flipped byte does not open
+  const idA = JSON.parse(fs.readFileSync(path.join(d, 'vault.json'), 'utf8')).entries['agent:conv-9/deploy-key'].file.id;
+  const fA = path.join(d, 'vault-files', `${idA}.vfile`), keepA = fs.readFileSync(fA);
+  fs.copyFileSync(path.join(d, 'vault-files', `${box2.file.id}.vfile`), fA);
+  ok((await v.fileOpen('agent:conv-9/deploy-key')).code === 'file_damaged', 'another entry\'s sealed file moved onto this id ⇒ file_damaged (never another file\'s bytes)');
+  const flip = Buffer.from(keepA); flip[flip.length - 3] ^= 1; fs.writeFileSync(fA, flip);
+  ok((await v.fileOpen('agent:conv-9/deploy-key')).code === 'file_damaged', 'one flipped byte ⇒ file_damaged');
+  fs.writeFileSync(fA, keepA);
+  const back = (await v.fileOpen('agent:conv-9/deploy-key'));
+  ok(back.ok && back.bytes.equals(kEnc), 'the file put back ⇒ it opens again'); if (back.bytes) back.bytes.fill(0);
+  // LOCKED: refused by name, nothing read, nothing written — its facts still readable (no DEK)
+  v.lock('door');
+  const nFiles = fs.readdirSync(path.join(d, 'vault-files')).length;
+  ok((await v.filePut('keyfile:0c1b2c3d4e', bin, { filename: 'b.bin' })).code === KF.VAULT_LOCKED && (await v.fileOpen('keyfile:0123456789')).code === KF.VAULT_LOCKED && fs.readdirSync(path.join(d, 'vault-files')).length === nFiles && v.fileOf('keyfile:0123456789').size === bin2.length,
+    'LOCKED ⇒ filePut and fileOpen refused vault_locked, no file written; fileOf still answers (facts, no key)');
+  // the delete: the entry and its sealed file go together (a locked vault forgets too)
+  const fK = path.join(d, 'vault-files', `${box2.file.id}.vfile`), lk2 = path.join(ROOT, 'file-entry-del-link'); fs.linkSync(fK, lk2); const sealedK = fs.readFileSync(fK);
+  const dropped = v.secretDrop('keyfile:0123456789');
+  await v.filesSettled();
+  ok(dropped.ok && !fs.existsSync(fK) && !fs.readFileSync(lk2).equals(sealedK) && !v.fileOf('keyfile:0123456789'), 'secretDrop SHREDS the sealed file with the entry (a hard link reads the overwrite) — locked too');
+  fs.unlinkSync(lk2);
+  v.close();
+  // THE BOOT SWEEP: a sealed file no entry names (a put that died between its file and the record) and a stale temp file go;
+  // a live one stays — and nothing is swept while the record cannot be read
+  // a temp file is stale by its writer (a pid that is gone) or by its age (over a minute): pid 1 is always alive, so the stale
+  // one is aged two minutes and a fresh one of a live writer stays (a put in flight in another process)
+  const orphan = path.join(d, 'vault-files', 'abcdefabcd.vfile'), tmp = path.join(d, 'vault-files', 'abcdefabcd.vfile.tmp-1-0a0b0c0d'), young = path.join(d, 'vault-files', 'abcdefabcd.vfile.tmp-1-0e0f0a0b');
+  // the cure (round 2): the sweep runs OFF the main loop beside puts — a put in flight is spared by its ID (the engine's in-flight set,
+  // from mint to record), never by an age: a FRESH orphan goes like an old one (a crash's leftover at the next boot, whatever its age)
+  const fresh = path.join(d, 'vault-files', 'fedcbafedc.vfile');
+  fs.writeFileSync(orphan, 'orphan'); fs.writeFileSync(tmp, 'temp'); fs.writeFileSync(young, 'temp in flight'); fs.writeFileSync(fresh, 'a fresh orphan');
+  const aged = (Date.now() - 120_000) / 1000; fs.utimesSync(tmp, aged, aged);
+  const v2 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+  await v2.filesSettled();
+  ok(!fs.existsSync(orphan) && !fs.existsSync(tmp) && fs.existsSync(fA), 'the boot sweep shreds a .vfile no entry names and a stale temp file — the live one stays');
+  ok(fs.existsSync(young), 'a fresh temp file of a writer that is alive stays (another process\'s put in flight)');
+  ok(!fs.existsSync(fresh), 'round 2: a FRESH .vfile no entry names goes too — no age rule (a put in flight is spared by its id)');
+  fs.rmSync(young, { force: true });
+  v2.close();
+  // …the store's own rule, the engine's predicate: a sealed file and a temp of a put IN FLIGHT stay (this process's own temp too);
+  // the same names out of flight go
+  {
+    const VFS = require(path.join(REPO, 'src/server/vault-files.js'));
+    const fd = path.join(ROOT, 'file-sweep-flight'); fs.mkdirSync(fd, { recursive: true });
+    const st = VFS.create({ dataDir: fd }), key = crypto.randomBytes(32);
+    await st.write('0f0f0f0f0f', key, Buffer.from('a sealed file of a put in flight'));
+    const ownTmp = path.join(st.dir, `0e0e0e0e0e.vfile.tmp-${process.pid}-0a0b0c0d`); fs.writeFileSync(ownTmp, 'this process\'s own temp, in flight');
+    const inFlight = new Set(['0f0f0f0f0f', '0e0e0e0e0e']);
+    const n1 = await st.sweep((id) => inFlight.has(id));
+    const kept = fs.existsSync(path.join(st.dir, '0f0f0f0f0f.vfile')) && fs.existsSync(ownTmp);
+    const n2 = await st.sweep(() => false);
+    ok(n1 === 0 && kept && n2 === 2 && !fs.existsSync(ownTmp) && !fs.existsSync(path.join(st.dir, '0f0f0f0f0f.vfile')),
+      'round 2: the sweep spares a put IN FLIGHT by its id (its sealed file, and this process\'s own temp — it used to take its own temps) and takes them once out of flight', { n1, kept, n2 });
+    key.fill(0);
+  }
+  // round 2: a read that LOSES to a drop (or a re-put) says what happened — file_moved / entry_unknown — never «restore data/vault-files
+  // from a backup» about a healthy vault (the drop shreds THIS file under the read)
+  {
+    const v5 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+    await v5.unlock(PW);
+    ok((await v5.filePut('keyfile:0d0e0f0a0b', bin, { filename: 'race.bin', prov: 'uploaded' })).ok, 'a file to race');
+    const pending = v5.fileOpen('keyfile:0d0e0f0a0b');
+    v5.secretDrop('keyfile:0d0e0f0a0b');   // synchronous: the record no longer names it before the read resumes
+    const lost = await pending;
+    await v5.filesSettled();
+    ok(!lost.ok && ['file_moved', 'entry_unknown'].includes(lost.code) && !('bytes' in lost), 'a read that loses to a drop ⇒ file_moved / entry_unknown, no byte — never file_damaged / file_missing', lost.code);
+    v5.close();
+  }
+  fs.writeFileSync(orphan, 'orphan');
+  const recText = fs.readFileSync(path.join(d, 'vault.json'), 'utf8');
+  fs.writeFileSync(path.join(d, 'vault.json'), '{ not a record');
+  const v3 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+  await v3.filesSettled();
+  ok(fs.existsSync(orphan) && fs.existsSync(fA), 'a vault.json that cannot be read ⇒ NOTHING is swept (which files are live is unknown then)');
+  v3.close();
+  fs.writeFileSync(path.join(d, 'vault.json'), recText);
+  // THE CURE (主开发 11-18, MUST 2 — «nothing of a file holds the hub's main loop»; the data folder may sit on a network mount):
+  // a boot sweep, a put, an open and a drop make NO synchronous fs call on data/vault-files — every *Sync of the engine's own fs
+  // object is counted while they run (by its path, or by an fd opened on one); the probe's control: one sync read IS counted
+  {
+    const cfs = require('fs');
+    const SYNC = Object.keys(cfs).filter((k) => /Sync$/.test(k) && typeof cfs[k] === 'function');
+    const keep = {}, hits = [], fds = new Set();
+    const under = (x) => typeof x === 'string' && x.includes(`${path.sep}vault-files`);
+    for (const k of SYNC) {
+      keep[k] = cfs[k];
+      cfs[k] = function (...a) { const r = keep[k].apply(this, a); if (under(a[0]) || under(a[1]) || (typeof a[0] === 'number' && fds.has(a[0]))) hits.push(`${k}(${typeof a[0] === 'string' ? path.basename(a[0]) : a[0]})`); if (k === 'openSync' && under(a[0])) fds.add(r); return r; };
+    }
+    let flow = null, controlSeen = false;
+    try {
+      const v4 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+      await v4.unlock(PW);
+      await v4.filesSettled();
+      const p4 = await v4.filePut('keyfile:0d1d2d3d4d', bin, { filename: 'probe.bin', prov: 'uploaded' });
+      const o4 = await v4.fileOpen('keyfile:0d1d2d3d4d');
+      const same = !!(o4.ok && o4.bytes.equals(bin)); if (o4.bytes) o4.bytes.fill(0);
+      const d4 = v4.secretDrop('keyfile:0d1d2d3d4d');
+      await v4.filesSettled();
+      flow = { put: p4.ok, open: same, drop: d4.ok, gone: !v4.fileOf('keyfile:0d1d2d3d4d') };
+      v4.close();
+      const n0 = hits.length; cfs.readFileSync(fA); controlSeen = hits.length > n0; hits.length = n0;   // the probe's control (Node's readFileSync makes more than one synchronous call itself)
+    } finally { for (const k of SYNC) cfs[k] = keep[k]; }
+    ok(controlSeen, 'the probe\'s control: a synchronous read of a sealed file IS counted (the probe is not blind)');
+    ok(flow && flow.put && flow.open && flow.drop && flow.gone && hits.length === 0,
+      'the cure: a boot sweep, a put, an open and a drop of a file make NO synchronous fs call on data/vault-files (fs.promises, awaited)', { flow, hits: hits.slice(0, 12) });
+  }
+  // ROUND 3 (the cure's second read): THE ENGINE'S OWN WIRING, each held where it matters by a patched store (the engine asks
+  // src/server/vault-files.js create at its construction — a mutant engine copy reaches the same module), each with its red control
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const VFS = require(path.join(REPO, 'src/server/vault-files.js'));
+    const realCreate = VFS.create;
+    const gate = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    let hold = {}, written = null;
+    VFS.create = (o) => { const st = realCreate(o); return { ...st,
+      write: async (...a) => { const r = await st.write(...a); written = a[0]; if (hold.write) await hold.write.p; return r; },   // the sealed file ON DISK, the put not answered yet
+      read: async (...a) => { if (hold.read) await hold.read.p; return st.read(...a); },
+      sweep: async (...a) => { if (hold.sweep) await hold.sweep.p; return st.sweep(...a); } }; };
+    const ES3 = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8'), SF3 = fs.readFileSync(path.join(REPO, 'src/server/vault-files.js'), 'utf8');
+    const MR = mutantCopies('vault-engine-r3', REPO);
+    const patch = (rel, text, from, to, tag) => MR.load(rel, anchored(text, from, to, tag), tag);   // an anchor gone or found twice THROWS by the control's name (B-0d3e)
+    const vfileOf = (id) => path.join(d, 'vault-files', `${id}.vfile`);
+    const mk3 = (E) => E.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+    /** (a) the boot sweep runs WHILE a put is in flight (its sealed file on disk, its record not written yet) */
+    const flightLeg = async (E) => {
+      hold = { sweep: gate(), write: gate() }; written = null;
+      const v = mk3(E);
+      await v.unlock(PW);
+      const p = v.filePut('keyfile:0a1a2a3a4a', bin, { filename: 'flight.bin', prov: 'uploaded' });
+      for (let k = 0; k < 400 && !written; k++) await tick();
+      const id = written, onDisk = !!id && fs.existsSync(vfileOf(id));
+      hold.sweep.open();
+      await v.filesSettled();
+      const kept = !!id && fs.existsSync(vfileOf(id));
+      hold.write.open();
+      const r = await p;
+      const o = await v.fileOpen('keyfile:0a1a2a3a4a');
+      const same = !!(o.ok && o.bytes.equals(bin)); if (o.bytes) o.bytes.fill(0);
+      v.secretDrop('keyfile:0a1a2a3a4a'); await v.filesSettled(); v.close(); hold = {};
+      return { onDisk, kept, put: r.ok, same };
+    };
+    /** (b) a read that LOSES to a drop / a re-put — the drop's shred DONE before the read reaches the disk (the catch's road) */
+    const lostLeg = async (E) => {
+      hold = {};
+      const v = mk3(E);
+      await v.unlock(PW); await v.filesSettled();
+      await v.filePut('keyfile:0b1b2b3b4b', bin, { filename: 'race.bin', prov: 'uploaded' });
+      hold = { read: gate() };
+      const pd = v.fileOpen('keyfile:0b1b2b3b4b');
+      v.secretDrop('keyfile:0b1b2b3b4b'); await v.filesSettled();
+      hold.read.open();
+      const dropped = await pd;
+      hold = {};
+      await v.filePut('keyfile:0b1b2b3b4b', bin, { filename: 'race.bin', prov: 'uploaded' });
+      hold = { read: gate() };
+      const pr = v.fileOpen('keyfile:0b1b2b3b4b');
+      await v.filePut('keyfile:0b1b2b3b4b', Buffer.concat([bin, Buffer.from('v2')]), { filename: 'race.bin', prov: 'uploaded' }); await v.filesSettled();
+      hold.read.open();
+      const moved = await pr;
+      v.secretDrop('keyfile:0b1b2b3b4b'); await v.filesSettled(); v.close(); hold = {};
+      return { dropped: dropped.code, moved: moved.code, bytes: 'bytes' in dropped || 'bytes' in moved };
+    };
+    /** (c) a put whose write is held across a LOCK and an UNLOCK (the lock epoch moved; the state reads «unlocked» again) */
+    const epochLeg = async (E) => {
+      hold = { write: gate() }; written = null;
+      const v = mk3(E);
+      await v.unlock(PW); await v.filesSettled();
+      const p = v.filePut('keyfile:0c1c2c3c4c', bin, { filename: 'epoch.bin', prov: 'uploaded' });
+      for (let k = 0; k < 400 && !written; k++) await tick();
+      v.lock('agent'); await v.unlock(PW);
+      hold.write.open();
+      const r = await p; await v.filesSettled();
+      const stored = !!v.fileOf('keyfile:0c1c2c3c4c'), shredded = !!written && !fs.existsSync(vfileOf(written));
+      if (stored) { v.secretDrop('keyfile:0c1c2c3c4c'); await v.filesSettled(); }
+      v.close(); hold = {};
+      return { code: r.code, stored, shredded };
+    };
+    /** (d) ONE AT A TIME: 8 writes and 8 reads at once — the most opens of data/vault-files in flight together */
+    const oneLeg = async (create) => {
+      const fsp = fs.promises, keepOpen = fsp.open;
+      let inFlight = 0, most = 0;
+      fsp.open = async function (p, ...a) { const under = String(p).includes(`${path.sep}vault-files`); if (under) { inFlight++; most = Math.max(most, inFlight); } try { const fh = await keepOpen.call(this, p, ...a); if (under) await tick(); return fh; } finally { if (under) inFlight--; } };
+      try {
+        const st = create({ dataDir: path.join(ROOT, `files-one-${most}-${Date.now()}`) }), key = crypto.randomBytes(32);
+        const ids = Array.from({ length: 8 }, (_, i) => `0e0e0e0e0${i}`);
+        await Promise.all(ids.map((id) => st.write(id, key, bin)));
+        await Promise.all(ids.map((id) => st.read(id, key, { size: bin.length }).then((b) => b.fill(0))));
+        key.fill(0);
+      } finally { fsp.open = keepOpen; }
+      return most;
+    };
+    try {
+      const fl = await flightLeg(VE);
+      ok(fl.onDisk && fl.kept && fl.put && fl.same, 'round 3: the boot sweep that runs WHILE a put is in flight spares its sealed file BY ITS ID (filesInFlight, added before the write) — the put lands, the file opens', fl);
+      const mF = patch('src/server/vault-engine.js', ES3, '    filesInFlight.add(id);\n', '\n', 'noflight');
+      const fm = mF ? await flightLeg(mF) : null;
+      ok(fm && fm.onDisk && !fm.kept && !fm.same, 'MUTANT «a put never marked in flight»: the patch hits once and the leg goes RED — the sweep shredded the put\'s sealed file under it', fm);
+      const lo = await lostLeg(VE);
+      ok(lo.dropped === 'entry_unknown' && lo.moved === 'file_moved' && !lo.bytes, 'round 3 (deterministic): a read that reaches the disk AFTER a drop\'s shred ⇒ entry_unknown, after a re-put ⇒ file_moved — the catch\'s own road, no byte', lo);
+      const mL = patch('src/server/vault-engine.js', ES3, "      if (!now) return { ok: false, code: 'entry_unknown' };\n      if (!now.file || now.file.id !== f.id) return { ok: false, code: 'file_moved', words: VF.WORDS.file_moved };\n", '', 'nolost');
+      const lm = mL ? await lostLeg(mL) : null;
+      ok(lm && lm.dropped === 'file_missing' && lm.moved === 'file_missing', 'MUTANT «the catch says what the disk said»: the patch hits once and the leg goes RED — «file_missing» (restore from a backup) about a healthy vault', lm);
+      const ep = await epochLeg(VE);
+      ok(/vault_locked/.test(String(ep.code)) && !ep.stored && ep.shredded, 'round 3: a put whose write was held across a lock AND an unlock ⇒ vault_locked (the lock EPOCH moved), nothing stored, its sealed file shredded', ep);
+      const mE = patch('src/server/vault-engine.js', ES3, "state() !== 'unlocked' || epoch !== ep0) { key.fill(0); shredLater(id);", "state() !== 'unlocked') { key.fill(0); shredLater(id);", 'noepoch');
+      const em = mE ? await epochLeg(mE) : null;
+      ok(em && em.stored, 'MUTANT «the state asked, not the epoch»: the patch hits once and the leg goes RED — the put that was in flight across the lock landed', em);
+      const one = await oneLeg(realCreate);
+      ok(one === 1, `round 3: ONE sealed-file operation at a time — 8 writes and 8 reads at once never open two files of data/vault-files together (most ${one})`, one);
+      const mQ = patch('src/server/vault-files.js', SF3, 'write: one(write), read: one(read), shred: one(shred), sweep };', 'write, read, shred, sweep };', 'noqueue');   // stale-pins: kept (the replacement IS the round-2 store, unqueued)
+      const qm = mQ ? await oneLeg(mQ.create) : null;
+      ok(qm != null && qm > 1, `MUTANT «the store's operations unqueued»: the patch hits once and the leg goes RED — ${qm} opens in flight together`, qm);
+      // ROUND 4 (the third read: one HUNG operation held the queue for ever — every put unanswered, its bytes and its key in memory):
+      // an operation past its bound (opMs; 30 s, here 60 ms) is answered files_stuck and the store is STUCK until it settles — every
+      // operation meanwhile is refused at once, the fs never asked; once it settles the store works again. Red control: the refusal gone
+      const stuckLeg = async (create) => {
+        const fsp = fs.promises, keepOpen = fsp.open, rel = gate();
+        let opens = 0, hung = false;
+        fsp.open = async function (p, ...a) { if (String(p).includes(`${path.sep}vault-files`)) { opens++; if (!hung) { hung = true; await rel.p; } } return keepOpen.call(this, p, ...a); };
+        const out = {};
+        try {
+          const st = create({ dataDir: path.join(ROOT, `files-stuck-${Date.now()}-${opens}`), opMs: 60 }), key = crypto.randomBytes(32);
+          const p1 = st.write('0f1f2f3f4f', key, bin).then(() => 'ok', (e) => e.code);
+          const early = st.read('0f1f2f3f4f', key, { size: bin.length }).then((b) => { b.fill(0); return 'ok'; }, (e) => e.code);   // queued BEHIND the hung write, before its bound
+          const w1 = await p1;
+          const o0 = opens;
+          out.early = await early;
+          const r2 = await st.read('0f1f2f3f4f', key, { size: bin.length }).then((b) => { b.fill(0); return 'ok'; }, (e) => e.code);
+          out.whileStuck = { write: w1, early: out.early, read: r2, fsAsked: opens - o0 };
+          rel.open();
+          let w3 = 'files_stuck';
+          for (let k = 0; k < 200 && w3 === 'files_stuck'; k++) { await tick(); w3 = await st.write('0e1e2e3e4e', key, bin).then(() => 'ok', (e) => e.code); }   // until the hung one settles
+          out.after = w3;
+          key.fill(0);
+        } finally { fsp.open = keepOpen; rel.open(); }
+        return out;
+      };
+      const sk = await stuckLeg(realCreate);
+      ok(sk.whileStuck.write === 'files_stuck' && sk.whileStuck.early === 'files_stuck' && sk.whileStuck.read === 'files_stuck' && sk.whileStuck.fsAsked === 0 && sk.after === 'ok',
+        'round 4: a sealed-file operation past its bound ⇒ files_stuck; one queued behind it before the bound and one called after are refused (the fs never asked); once the hung one settles the store works again', sk);
+      const mS2 = patch('src/server/vault-files.js', SF3, '      if (stuck) throw stuckErr();\n', '', 'nostuck2');   // round 5 (the fourth read): the IN-QUEUE refusal alone — an operation queued before the bound fired
+      const skm = mS2 ? await stuckLeg(mS2.create) : null;
+      ok(skm && skm.whileStuck.fsAsked > 0, 'MUTANT «an operation queued behind a stuck one still asks the fs»: the patch hits once and the leg goes RED — the queued read went to the mount', skm);
+    } finally { VFS.create = realCreate; hold = {}; }
+  }
+}
+
+console.log('⑳ ROUND 7 OF THE U1a CURE (its sixth read, MINOR): a sealed file\'s size is the box\'s — refused BEFORE a byte is decrypted; the shred overwrites through ONE 64 KiB buffer');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  /** a 1 KB file sealed, then its .vfile grown 4 MB past its box (a replaced file, a damaged mount): the read's code and its
+   *  decrypts; then its shred: the largest random buffer one fill asked for, and whether the file is gone */
+  const leg7 = async (VFSx) => {
+    const { dir: d7 } = world();
+    const st7 = VFSx.create({ dataDir: d7, log: quiet });
+    const key = crypto.randomBytes(32), id = '0a0b0c0d0e';
+    await st7.write(id, key, crypto.randomBytes(1024));
+    const file = path.join(d7, 'vault-files', `${id}.vfile`);
+    fs.appendFileSync(file, Buffer.alloc(4 << 20));
+    let deciphers = 0, most = 0, code = null;
+    const keepD = crypto.createDecipheriv, keepF = crypto.randomFillSync, keepB = crypto.randomBytes;
+    crypto.createDecipheriv = function (...a) { deciphers++; return keepD.apply(this, a); };
+    try { await st7.read(id, key, { size: 1024 }); } catch (e) { code = e.code; } finally { crypto.createDecipheriv = keepD; }
+    crypto.randomFillSync = function (b, o, k) { most = Math.max(most, k == null ? b.length - (o || 0) : k); return keepF.apply(this, arguments); };
+    crypto.randomBytes = function (k, ...r) { most = Math.max(most, k); return keepB.call(this, k, ...r); };
+    try { await st7.shred(id); } finally { crypto.randomFillSync = keepF; crypto.randomBytes = keepB; }
+    return { code, deciphers, most, gone: !fs.existsSync(file) };
+  };
+  const VFS7 = require(path.join(REPO, 'src/server/vault-files.js'));
+  const r7 = await leg7(VFS7);
+  console.log(`    judged: read ${r7.code} with ${r7.deciphers} decrypts · the shred's largest random buffer ${r7.most} B · gone ${r7.gone}`);
+  ok(r7.code === 'file_damaged' && r7.deciphers === 0 && r7.most > 0 && r7.most <= 64 * 1024 && r7.gone, 'a sealed file grown 4 MB past its 1 KB box ⇒ file_damaged with NO decrypt; its shred fills ONE buffer of at most 64 KiB at a time, and the file is gone', r7);
+  const M7 = mutantCopies('vault-files-r7', REPO), SF7 = fs.readFileSync(path.join(REPO, 'src/server/vault-files.js'), 'utf8');
+  const mSz = M7.load('src/server/vault-files.js', anchored(SF7, '        if (facts.size != null) sized = (await fh.stat()).size === MAGIC.length + 28 + Number(facts.size);\n', '', 'the size checked after the decrypt'), 'nosize');
+  const rSz = await leg7(mSz);
+  ok(rSz.deciphers > 0, `MUTANT «the size checked after the decrypt»: the patch hits once and the leg goes RED — ${rSz.deciphers} decrypts of a file past its box`, rSz);
+  const mCh = M7.load('src/server/vault-files.js', anchored(SF7, 'Buffer.allocUnsafe(Math.min(SHRED_CHUNK, st.size))', 'Buffer.allocUnsafe(st.size)', 'one buffer the size of the file'), 'nochunk');
+  const rCh = await leg7(mCh);
+  ok(rCh.most > 64 * 1024, `MUTANT «one buffer the size of the file»: the patch hits once and the leg goes RED — the shred filled ${rCh.most} B at once`, rCh);
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

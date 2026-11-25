@@ -285,6 +285,7 @@ const ROWS = [
   ["src/server/usage-probe-log.js", "move", "move", "", "appendProbeLog"],
   ["src/server/provider-spawn.js", "unsynced", "derived", "a spawn plan's file (B-d578 P1-a: OpenCode's one config under the provider's home), written again from its plan at every spawn", "writePlanFile"],
   ["src/server/vault-engine.js", "synced", "self-synced-best-effort", "", "writeAtomic"],
+  ["src/server/vault-files.js", "synced", "self-synced-best-effort", "", "create > write"],   // lane lg-vault-file (B-0830): a sealed FILE written to a temp, fh.sync best effort, renamed in place
   ["src/server/vault-run-door.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/vault-run-door.js", "synced", "self-synced", "the run store's torn bytes kept aside (主开发 r3040 (a), the family's way): written whole under a .part- name, synced (a sync that fails fails the keep — the store stays held), then named", "create > keepTornAside"],
   ["src/server/vault-totp.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],

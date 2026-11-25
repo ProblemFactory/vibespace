@@ -133,6 +133,12 @@ const USAGE = [
   '      rides a 0600 file or stdin — NEVER the command line (argv is readable). The vault records that you saw the',
   '      plaintext; rotate it when you can (the transcript\'s copy is not protected). This conversation runs with',
   '      it without asking anyone. A two-step seed or a website password is NOT a put: use totp add / login add.',
+  '  vibespace-vault put <name> --file <0600 file> [--note "<what it is for>"]',
+  '      seal a FILE you already have (an SSH key, a certificate, a kubeconfig, a licence file — up to 1 MB, read as bytes,',
+  '      its name kept) under agent:<this conversation>/<name>. A run gets it as a 0600 file for that run only:',
+  '      run --file KEY=vault://agent:<conv>/<name> -- ssh -i \'$VAULT_FILE{KEY}\' … — never as --env, --stdin or text. Delete',
+  '      the copy on your disk yourself. A key that needs its passphrase is stored as it is (VibeSpace never types one).',
+  '      A text value stays text and a file stays a file (a put of the other kind under the same name is refused).',
   '',
   '  (unlock, set up and change are the user\'s, from the page: ⚙ System ▸ Vault… — never ask for the password)',
 ].join('\n');
@@ -402,11 +408,37 @@ async function loginAdd(rest) {
   console.log(`  sign in with it: vibespace-browser fill <@ref> --vault ${d.origin}#${d.user}/user  (+ /password; no grant: this conversation stored it)`);
 }
 
+/** lane lg-vault-file (B-0830): `put <name> --file <0600 file>` — the FILE's bytes (never decoded as text), its name, its size
+ *  and sha256 ride the request body (base64); the hub seals them and answers facts, never a byte. */
+async function putFile(name, file, note) {
+  let st; try { st = fs.statSync(file); } catch (e) { console.error('vibespace-vault: cannot read ' + file + ' (' + (e && e.code) + ')'); process.exit(1); }
+  if (!st.isFile()) { console.error('vibespace-vault: ' + file + ' is not a regular file'); process.exit(1); }
+  if (st.mode & 0o077) { console.error('vibespace-vault: ' + file + ' is readable by others (mode ' + (st.mode & 0o777).toString(8) + ') — the plaintext must be private; run: chmod 600 ' + file); process.exit(1); }
+  if (st.size > 1024 * 1024) { console.error('vibespace-vault: ' + file + ' is ' + st.size + ' bytes — the vault keeps files up to 1 MB (it is not a file store); nothing was sent'); process.exit(1); }
+  const bytes = fs.readFileSync(file);
+  if (!bytes.length) { console.error('vibespace-vault: ' + file + ' is empty'); process.exit(1); }
+  const sha256 = require('crypto').createHash('sha256').update(bytes).digest('hex');
+  const body = { name, bytes: bytes.toString('base64'), filename: require('path').basename(file), size: bytes.length, sha256, ...(note !== undefined ? { note } : {}) };
+  bytes.fill(0);
+  const d = await call('POST', '/api/agent/vault/put', body);
+  console.log('stored ' + d.name + (d.file ? `  (a file: ${d.file.name}, ${d.file.size} bytes, ${d.file.kind})` : ''));
+  if (d.rotated) console.log('  ' + d.rotated);
+  console.log('  reference: ' + d.ref);
+  console.log('  ' + (d.provenance || 'agent stored · the agent saw the plaintext'));
+  if (d.use) console.log('  ' + d.use);
+  if (d.encrypted) console.log('  ' + d.encrypted);
+  if (d.copy) console.log('  ' + d.copy + ': ' + file);
+}
+
 async function put(rest) {
-  const { out, positional } = parseFlags(rest, { '--from-file': 'value', '--stdin': 'bool', '--note': 'value' });
-  if (positional.length !== 1) { console.error('vibespace-vault: put <name> --from-file <0600 file> | --stdin [--note "<what it is for>"]\n  (the value NEVER rides the command line — it is readable there; use a 0600 file or stdin)'); process.exit(2); }
+  const { out, positional } = parseFlags(rest, { '--from-file': 'value', '--stdin': 'bool', '--note': 'value', '--file': 'value' });
+  if (positional.length !== 1) { console.error('vibespace-vault: put <name> --from-file <0600 file> | --stdin | --file <0600 file> [--note "<what it is for>"]\n  (the value NEVER rides the command line — it is readable there; use a 0600 file or stdin)'); process.exit(2); }
   const name = positional[0];
   const hasFile = out['--from-file'] !== undefined, hasStdin = !!out['--stdin'];
+  if (out['--file'] !== undefined) {   // lane lg-vault-file: a FILE, not a text value
+    if (hasFile || hasStdin) { console.error('vibespace-vault: put takes ONE of --from-file (a text value), --stdin (a text value) or --file (a file, kept as bytes)'); process.exit(2); }
+    return putFile(name, out['--file'], out['--note']);
+  }
   if (hasFile === hasStdin) { console.error('vibespace-vault: put needs exactly one of --from-file <0600 file> or --stdin (never the value on the command line)'); process.exit(2); }
   let value;
   if (hasFile) {

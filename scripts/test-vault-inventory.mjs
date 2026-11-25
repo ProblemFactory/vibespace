@@ -561,6 +561,24 @@ console.log('⑨ AGENT-OWNED SECRETS — provenance rows (q-043 §9, lane vault-
   ea.close();
 }
 
+console.log('⑳ A FILE ENTRY\'S ROW (lane lg-vault-file, B-0830): its name, its file\'s facts — never a byte, never 显示');
+{
+  const facts = { name: 'id_ed25519', size: 411, kind: 'ssh-key', encrypted: true };
+  const own = VI.secretRowOf({ name: 'keyfile:0123456789', at: 9, label: 'Deploy key', note: 'the CI deploy key', noteShared: true, file: facts });
+  ok(own && own.field === 'file' && own.kind === 'file' && own.label === 'Deploy key' && own.note === 'the CI deploy key' && own.bytes === 411 && own.file.name === 'id_ed25519' && own.file.encrypted === true,
+    'secretRowOf: the owner\'s file (keyfile:<id>) ⇒ a row of field `file`, kind `file`, its words and its file\'s facts', own);
+  ok(VI.secretRowOf({ name: 'keyfile:0123456789', at: 9 }).label === '0123456789' && VI.secretRowOf({ name: 'keyfile:0123456789', at: 9, file: facts }).label === 'id_ed25519' && VI.secretRowOf({ name: 'keyfile:nothex', at: 1 }) === null,
+    'with no name of its own it is called by its file\'s name; an id that is not 10 hex is no row');
+  const row = VI.rowOf('secrets', own);
+  ok(row && row.id === 'secrets:keyfile:0123456789#file' && row.revealable === false && row.file && row.file.size === 411 && !('id' in row.file) && row.size === 'long' && VI.KIND_WORDS.file === 'File',
+    'rowOf: the file row is NEVER revealable (a file is downloaded, never shown — U1b) and carries the public facts only', row);
+  const ag = VI.rowOf('secrets', VI.secretRowOf({ name: 'agent:conv-1/deploy-key', at: 3, prov: 'stored', actor: 'Lane X', file: { ...facts, id: '00aa11bb22', sha256: 'f'.repeat(64) } }));
+  ok(ag && ag.kind === 'file' && ag.revealable === false && ag.file && ag.file.name === 'id_ed25519' && !('id' in ag.file) && !('sha256' in ag.file) && ag.provenance && ag.provenance.prov === 'stored',
+    'an agent\'s FILE (put --file) is its own entry\'s row with kind `file` and the public facts — the id and digest a box keeps never reach a row', ag);
+  const txt = VI.rowOf('secrets', VI.secretRowOf({ name: 'agent:conv-1/vendor-key', at: 3, prov: 'stored', actor: 'Lane X' }));
+  ok(txt && txt.kind === 'secret' && txt.revealable === true && !('file' in txt), 'a TEXT entry\'s row is as before (no `file`, revealable)');
+}
+
 try { ce.stop(); ce.store.close(); } catch { }
 eng.close();
 fs.rmSync(ROOT, { recursive: true, force: true });

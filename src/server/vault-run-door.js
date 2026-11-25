@@ -113,6 +113,7 @@ const { trackWorker } = require('../worker-memory.js');   // the memory census: 
 const { StringDecoder } = require('string_decoder');
 const VR = require('../vault-run.js');
 const VI = require('../vault-inventory.js');
+const VF = require('../vault-file.js');   // PURE (lane lg-vault-file, B-0830): a FILE entry's mask set and words
 // round 12 (BLOCKER): "the agent cannot write it" is OWNERSHIP, never mode bits — a path is the hub's to trust only when ROOT owns
 // it (st.uid === 0) AND it has no group/other write bit; a uid-owned path is one the agent (= the hub's uid) can chmod and replace.
 // statSync FOLLOWS symlinks (the unit bakes the PATH string; an agent cannot insert a link into a root-owned string; /bin → usr/bin
@@ -185,6 +186,7 @@ const SEAL_NOWHERE = '/nonexistent/vibespace-vault-run';   // round 11 (BLOCKER)
 const ARGS_MAX = 65536, CWD_MAX = 4096;      // the request's words (the review: an unbounded value stalled the loop)
 const STORE_MAX = 1024 * 1024;               // data/vault-run.json read bounded (a FIFO / a huge file never stalls the hub)
 const KILL_GRACE_MS = 5000;
+const FILE_READ_MS = 30000;                  // lane lg-vault-file cure round 3: a sealed file's read that has not answered by then ⇒ file_unreadable (the run's slot given back)
 const PIPE_GRACE_MS = 2000;                  // after the child's exit, a pipe a stray still holds is cut (the answer never waits on it)
 // THE SCAN OFF THE LOOP (lane lg-vault-file, 主开发 r1505 / r1573): a run's output is scrubbed in ONE WORKER A RUN
 // (src/server/vault-run-scrub-worker.js), never on the hub's main loop — the loop decodes a read, posts it and appends
@@ -217,6 +219,9 @@ const STATUS = Object.freeze({
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
   env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400, url_userinfo: 403,
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, grant_expired: 403, entry_too_short_to_mask: 403, use_not_granted: 403, run_not_admitted: 403,   // B-a14b: + grant_expired · B-bc3b: + run_not_admitted
+  file_needs_file: 400,   // lane lg-vault-file: a FILE entry used other than as a file
+  file_too_large_for_a_run: 413,   // 主开发 r4378: the files a run names are past what a run can carry (THE FILE FIGURE)
+  file_missing: 500, file_damaged: 500, file_unreadable: 500, file_moved: 409,   // lane lg-vault-file cure: a sealed file that cannot be opened, said by name (was «entry_unknown»)
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, ask_redrawn: 409, restore_failed: 500, caller_gone: 410, too_many_runs: 429,   // r4: + ask_redrawn (the card drawn again at the press) · restore_failed (a partial write not put back — by name)
   spawn_failed: 500, run_unanswered: 500, store_held: 503, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
@@ -235,6 +240,9 @@ const LOCKED_AFTER_RAN = Object.freeze({   // 主开发 r2229: the words name ho
 const MORE_WORDS = Object.freeze({
   store_held: 'the vault\'s run store (data/vault-run.json) could not be read, so it is HELD: nothing was changed and nothing is written over it; it is read again by itself — try again in a minute',   // 主开发 r2920
   run_unanswered: 'the command RAN, but its answer could not be written: its output is lost — do not run it again blindly; its receipt and its use are recorded',   // r1919 (2)
+  file_needs_file: VF.WORDS.file_needs_file,   // lane lg-vault-file (B-0830)
+  file_too_large_for_a_run: VF.WORDS.file_too_large_for_a_run,   // 主开发 r4378 (a): the run's reply names the file, its lines and the figure (tooLargeForARunWords)
+  file_missing: VF.WORDS.file_missing, file_damaged: VF.WORDS.file_damaged, file_unreadable: VF.WORDS.file_unreadable, file_moved: VF.WORDS.file_moved,   // the cure: each with its door
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
   card_too_long: `the card that shows this run to the user would be cut (over ${DETAIL_MAX} characters) — a shorter command or template`,
   unauthorized: 'only a conversation\'s own session token runs a command with a stored secret',
@@ -313,6 +321,7 @@ function classOf(ref, row = null) {
   if (modelDoor) return { cls: NEVER_CLASS[ref.store] || 'unknown', runnable: false, door: modelDoor };
   if (VR.agentScopeOf(ref)) return { cls: 'agent-entry', runnable: true };   // an AGENT's own entry (lane vault-mint-put: mint / put) — the owner opens it like any other; only its conversation may use it
   if (VR.isFreeEntry(ref.store, ref.entry, ref.field)) return { cls: 'secret', runnable: true };   // lane vault-paste-request: a free entry (`secret:<id>`) — the owner opens it (the switch, a grant, a paste for the asker)
+  if (VR.isKeyFile(ref.store, ref.entry, ref.field)) return { cls: 'file', runnable: true };   // lane lg-vault-file: the owner's FILE (`keyfile:<id>`) — opened like a free entry, used as a file only
   if (!Object.prototype.hasOwnProperty.call(RUN_CLASS, ref.store)) return { cls: NEVER_CLASS[ref.store] || 'unknown', runnable: false, door: 'no run door (a store this door does not open)' };
   if (row && NEVER_KINDS.includes(row.kind)) return { cls: 'login', runnable: false, door: 'a sign-in token is never referenced by a run' };
   return { cls: RUN_CLASS[ref.store], runnable: true };
@@ -432,7 +441,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   scrubWorkerFile = SCRUB_WORKER_FILE, scrubSteps = null, scrubSilenceMs = SCRUB_SILENCE_MS,   // THE SCAN OFF THE LOOP: the worker, its planted figures and its silence bound (a suite's seams — the product keeps the file, the module's figures and 10 s)
   spawnPriority = () => null,   // B-7f18: () → src/server/spawn-priority.js priorityFor's answer (its `priority.by` = the step below the hub); none = the hub's own
   lowerImpl = lowerRun,   // B-7f18: the run's child set `by` below the hub (a suite's seam)
-  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes, fileReadMs = FILE_READ_MS,
   storeRetry = { firstMs: 30000, maxMs: 300000, missingMs: 1000 },   // 主开发 r2920: the held store's read again (src/store-read.js retryDelay) and the once-more read of a «missing» after it
   useGrants = null, useFacts = () => null, groupNameOf = null,   // the chain's cure (B): a group id → its belted name (tasks.lineageNameOf)
   writer = null,   // B-a14b: the grant ends' store writer (THE store writer when none is handed in)
@@ -453,6 +462,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const latePair = new Map();    // pair → askId — the one open late card for a (conversation, shape), so a second run re-asks it, never a second card
   const lateByShape = new Map();  // round 23: `${sessionKey}\n${shapeId}` → askId — the restart fallback for the one-card bound (reconcile has the item's sessionKey + action.shapeId but not the live pair key)
   const runs = new Set();      // the children running now
+  // lane lg-vault-file (the U1a cure): a run between its cap check and its spawn now AWAITS (a file read off the main loop, its mask
+  // built in slices) — it holds its slot here meanwhile, so the caps still count it (round 14: 20 parallel runs ⇒ exactly 4 spawn)
+  const holds = new Set();
   // lane vault-manual-and-lock: an agent's REQUESTS (one For-you ask each, open until answered or the lock) and the GRANT ROWS
   // their answers write (memory only — the «always» rows' shape + once + purpose; a lock ends them all)
   const requests = new Map();  // askId → { askId, pair, scope, conv, sessionKey, who, ref, id, label, purpose, detail, askedAt, todoId }
@@ -1032,6 +1044,46 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const raw = rows.find((r) => r && String(r.entry) === ref.entry && String(r.field) === ref.field);
     return raw ? VI.rowOf(ref.store, raw) : null;
   }
+  /** lane lg-vault-file (B-0830): a reference's FILE facts (the owner's keyfile:, an agent's put --file) | null — no DEK read. */
+  const fileFactsOf = (ref) => (ref && ref.store === 'secrets' && typeof vault.fileOf === 'function' ? vault.fileOf(ref.entry) : null);
+  /** The first reference of a FILE entry this run would use other than as a file (an env value, stdin, a template's
+   *  $VAULT{…}, a command-line value) | null — the file goes to a run as a 0600 file, never as text (design q-058 §1 use ③). */
+  /** 主开发 r4378: the FILE a run names that takes it past what a run carries (every file's bytes counted together; the largest
+   *  named) | null — the facts only (names and sizes), no byte read */
+  function fileTooLargeOf(spec) {
+    let total = 0, largest = null;
+    for (const r of spec.refs) { const ff = fileFactsOf(r); if (!ff) continue; total += Number(ff.size) || 0; if (!largest || ff.size > largest.size) largest = { ref: r.ref, name: ff.name, size: Number(ff.size) || 0, lines: Number.isInteger(ff.lines) ? ff.lines : null }; }
+    return largest && total > VF.RUN_FILE_BYTES_MAX ? largest : null;
+  }
+  function fileMisuseOf(spec) {
+    const isFile = (x) => { const r = spec.refs.find((y) => y.ref === x); return !!(r && fileFactsOf(r)); };
+    for (const e of spec.env) if (isFile(e.ref)) return e.ref;
+    if (spec.stdin && isFile(spec.stdin)) return spec.stdin;
+    for (const f of spec.files) if (f.template != null) for (const x of VR.scanRefs(f.text).refs) if (isFile(x.ref)) return x.ref;
+    for (const a of spec.argv) for (const x of VR.scanRefs(a).refs) if (x.form !== 'file' && isFile(x.ref)) return x.ref;
+    return null;
+  }
+  /** lane lg-vault-file: a FILE entry's BYTES come through the engine's ONE road (fileOpen — read off the main loop, the cure)
+   *  — never the box value (its file key). → a promise of a Buffer; rejects with the engine's code (file_missing, …). */
+  async function fileBytesOf(ref) {
+    const r = await vault.fileOpen(ref.entry);
+    if (!r || !r.ok) throw Object.assign(new Error((r && r.code) || 'file_unreadable'), { code: (r && r.code) || 'file_unreadable' });
+    return r.bytes;
+  }
+  /** Round 3 (the cure's second read: a HUNG read on a network mount never gave the run's slot back, and a gone caller could not
+   *  release it — four of them and the conversation answered too_many_runs until a restart): the read RACED against the caller's
+   *  signal (`caller_gone` — nothing ran) and a bound (`fileReadMs`, 30 s ⇒ `file_unreadable`); bytes that arrive after either
+   *  are zeroed. → a promise of a Buffer. */
+  const fileBytesRaced = (ref, signal) => new Promise((resolve, reject) => {
+    let over = false, t = null;
+    const end = (f) => { if (over) return false; over = true; if (t != null) timers.clear(t); if (signal && typeof signal.removeEventListener === 'function') signal.removeEventListener('abort', gone); f(); return true; };
+    const gone = () => end(() => reject(Object.assign(new Error('gone'), { code: 'caller_gone' })));
+    if (signal && signal.aborted) { gone(); return; }
+    if (signal && typeof signal.addEventListener === 'function') signal.addEventListener('abort', gone, { once: true });
+    t = timers.set(() => end(() => reject(Object.assign(new Error('slow'), { code: 'file_unreadable' }))), fileReadMs);
+    t?.unref?.();
+    fileBytesOf(ref).then((b) => { if (!end(() => resolve(b)) && Buffer.isBuffer(b)) b.fill(0); }, (e) => end(() => reject(e)));
+  });
   function valueOf(ref) {
     const src = sourceOf(ref.store);
     const v = src && typeof src.vaultReveal === 'function' ? src.vaultReveal(ref.entry, ref.field) : null;
@@ -2328,7 +2380,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const withRecipe = (r, recipe) => (recipe && r && r.ok === false ? { ...r, words: `${r.words || r.error || r.code} — ${recipe.words}`, standing: { kind: recipe.kind, ...(recipe.command ? { command: recipe.command } : { hosts: recipe.hosts }) } } : r);
   const forWords = (h) => (h ? ` for ${h}` : ' with no host named');
   // ── THE RUN ──
-  const callerRuns = (conv) => [...runs].filter((r) => r.conv === conv).length;
+  const callerRuns = (conv) => [...runs, ...holds].filter((r) => r.conv === conv).length;
   function killGroup(rec, sig) {
     const child = rec.child;   // THIS process's own spawn handle — its group (spawned detached) ends with it
     if (!child || !child.pid) return;
@@ -2542,6 +2594,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // run answers alike); with no grant door at all it is refused here, before anything is read
     const foreignRefs = spec.refs.filter((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
     if (foreignRefs.length && !useGrants) { note('use_not_granted', { ...head, ref: foreignRefs[0].ref }); return named('use_not_granted', { ref: foreignRefs[0].ref }); }
+    const misused = fileMisuseOf(spec);   // lane lg-vault-file: a FILE entry rides a run as a file only — refused before any card is drawn
+    if (misused) { note('file_needs_file', { ...head, ref: misused }); return named('file_needs_file', { ref: misused, use: `--file KEY=${misused} -- <command> … '$VAULT_FILE{KEY}'`, words: `${VF.WORDS.file_needs_file} — use: --file KEY=${misused} -- <command> … '$VAULT_FILE{KEY}' (the path of that file)` }); }   // the exact flag (主开发 00:58Z)
+    // 主开发 r4378 (a) + (c): the files a run names, TOGETHER, are within what a run can carry (THE FILE FIGURE, src/vault-file.js) —
+    // a larger one is refused BY NAME before any card is drawn: the file, its line count, the figure and what still works said at once
+    const tooLarge = fileTooLargeOf(spec);
+    if (tooLarge) { note('file_too_large_for_a_run', { ...head, ref: tooLarge.ref }); return named('file_too_large_for_a_run', { ref: tooLarge.ref, file: tooLarge.name, lines: tooLarge.lines, size: tooLarge.size, figure: VF.RUN_FILE_BYTES_MAX, words: VF.tooLargeForARunWords(tooLarge.name, tooLarge.lines, tooLarge.size) }); }
     const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
     // lane vault-standing-request: where NO host can be read (an interpreter + its script, a program outside the tool table), the
     // run's COMMAND TOKEN — what a standing grant on «this command» names (the program's real path, the script's real path + the
@@ -2587,7 +2645,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const e0 = !open && row && !own && !refused ? endedOf(scope, r.id) : null;
       const ended = e0 && !(suspended && offSinceOf(d, r.id) >= e0.grantAt) ? e0 : null;   // B-a14b: an approval that ended — said as itself; an OFF that came AFTER the approval was given is the owner's news (a grant given after the OFF, then used, is said as used)
       let bytes = 0;
-      if (row && (open || own)) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
+      if (row && (open || own)) { const ff = fileFactsOf(r); if (ff) bytes = ff.size; else { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } } }   // lane lg-vault-file: a file's size from its facts (never opened for a length)
       entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString(), ...(suspended ? { off: true } : {}) } } : {}) });   // r13 should: `off` — the owner had switched the entry OFF before this approval, and it still is
     }
     // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
@@ -2761,7 +2819,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!verdict.ok && verdict.ask) {
         // round 18/19 (item 2 + item 5): a template over the card render bound ⇒ card_too_long — but ONLY here, where a card is DRAWN (an owner entry needing approval). An own-entry run or a remembered pass returned verdict.ok above and never reached this bound (base ran an own 7 KB body by:own; daade1a7 refused it with words about an approval that never happens on that road).
         if (shape.cardTooLong) { const c = shape.cardTooLong; return named('card_too_long', { template: c.name, words: `this run needs your approval, and the template ${c.name} (@${c.template}) is ${c.bytes} bytes — longer than ${VR.TEMPLATE_CARD_MAX} bytes, so the card cannot show it in full and you would be approving a run you cannot read; shorten the template (or pass its bytes a smaller way) — nothing ran` }); }
-        if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
+        if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size + holds.size >= RUNS_MAX) return named('too_many_runs');
         // r4 (B): what this card's «Always» WOULD change of this conversation's own scopes, on EVERY entry (the run card's default
         // end — the press asks again with the end it writes, and a card whose words no longer hold is drawn again)
         const ids = spec.refs.map((r) => r.id), many = ids.length > 1;
@@ -2814,7 +2872,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // the starts are counted with the runs (taken in the same tick as this check): a burst of calls never starts more workers than
       // the caps let run — each start is let go after its await, whatever came of it, and the caps below are asked again
       const sconv = caller.conversationId;
-      if ((startingBy.get(sconv) || 0) + callerRuns(sconv) >= RUNS_PER_CALLER || startingAll + runs.size >= RUNS_MAX) { giveBackLate(); return named('too_many_runs'); }
+      if ((startingBy.get(sconv) || 0) + callerRuns(sconv) >= RUNS_PER_CALLER || startingAll + runs.size + holds.size >= RUNS_MAX) { giveBackLate(); return named('too_many_runs'); }
       startingBy.set(sconv, (startingBy.get(sconv) || 0) + 1); startingAll++;
       let scrub;
       try { scrub = await startScrub(); } finally { const n = (startingBy.get(sconv) || 1) - 1; if (n > 0) startingBy.set(sconv, n); else startingBy.delete(sconv); startingAll--; }
@@ -2823,7 +2881,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const unscrub = (r) => { scrub.close(); return r; };
       if (lockGen !== lg0 || vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', head); return unscrub(named('vault_locked')); }
       if (signal && signal.aborted) { giveBackLate(); note('caller_gone', head); return unscrub(named('caller_gone')); }
-      if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) { giveBackLate(); return unscrub(named('too_many_runs')); }
+      if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size + holds.size >= RUNS_MAX) { giveBackLate(); return unscrub(named('too_many_runs')); }
       // A ONCE-GRANT IS SPENT BEFORE THE RUN (a grant never runs twice): still the very row the verdict read — a lock, the switch
       // or another run of this conversation took it meanwhile ⇒ nothing runs
       const spent = [];
@@ -2836,14 +2894,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // L3 (int331) + round 14: a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
-      const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
-      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; } for (const a of spent) inFlight.delete(a.g); if (burned) for (const a of spent) unsayUse(a.g);   // nothing ran: not spent. It comes back only when nothing ENDED it meanwhile: the owner's OFF of an entry it holds (an OFF landing between the spend and here — the asynchronous spawn error's road) ends it «revoked» at the OFF, as each grant the OFF ended (r901); a lock ends it «lock» at the lock — it was out of `grants` when onLocked ended the live ones and cleared every end timer — as each grant the lock ended; the FIRST of the two is its end (the first end stands; its For-you record and `uses` say so)
+      const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed',
+        'file_missing', 'file_damaged', 'file_unreadable', 'file_moved', 'caller_gone']);   // lane lg-vault-file cure (round 2): a sealed file that could not be read, or a caller gone while its file was read — nothing ran: the once-grant comes back
+      // round 3 (the cure's second read, BLOCKER): `caller_gone` is burned only when NOTHING RAN — a child that ran and was stopped
+      // because its caller left answers it `killed` (as a lock's does), and its once-grant ENDS as used: an agent that kills its own
+      // CLI after the work never gets the owner's «Allow once» back for 8 hours. A spent grant that a LOCK ended before its child
+      // could run (the file read, the build) ends `lock`, not `used` (nothing used it).
+      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code) && !r.killed; if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; } for (const a of spent) inFlight.delete(a.g); if (burned) for (const a of spent) unsayUse(a.g);   // nothing ran: not spent. It comes back only when nothing ENDED it meanwhile: the owner's OFF of an entry it holds (an OFF landing between the spend and here — the asynchronous spawn error's road) ends it «revoked» at the OFF, as each grant the OFF ended (r901); a lock ends it «lock» at the lock — it was out of `grants` when onLocked ended the live ones and cleared every end timer — as each grant the lock ended; the FIRST of the two is its end (the first end stands; its For-you record and `uses` say so)
       const open = burned && lockGen === lg0 && vaultState() === 'unlocked', lockT = lockGen !== lg0 ? lockedAt : now();
-      if (!burned) for (const a of spent) grantEnded(a.g, 'used'); else for (const a of spent) { const offT = offTimeOf(a.g), pe = a.g.pendingEnd; if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else if (pe && (open || pe.at <= lockT)) grantEnded(a.g, pe.by, pe.at); else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now()) { if (!a.g.endedBy) grants.set(a.pair, a.g); } }
+      if (!burned) for (const a of spent) { if (r && r.ok === false && r.code === 'vault_locked' && !r.killed && !r.ran) grantEnded(a.g, 'lock', lockT); else grantEnded(a.g, 'used'); } else for (const a of spent) { const offT = offTimeOf(a.g), pe = a.g.pendingEnd; if (offT && (open || offT <= lockT)) grantEnded(a.g, 'revoked', offT); else if (pe && (open || pe.at <= lockT)) grantEnded(a.g, pe.by, pe.at); else if (!open) grantEnded(a.g, 'lock', lockT); else if (a.g.until > now()) { if (!a.g.endedBy) grants.set(a.pair, a.g); } }   // the cure's round 3: a lock that ended the run before its child ran (the file's read) ends the grant `lock`, never `used`
       if (open) giveBackLate(); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(unscrub(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" }))); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
-      const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName, scrub, onRan: () => { for (const a of spent) a.g.ran = true; } });   // (r1825) a child STARTED: the once-grants it spent RAN
+      const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName, scrub, lg0, onRan: () => { for (const a of spent) a.g.ran = true; } });   // (r1825) a child STARTED: the once-grants it spent RAN
       const nextOf = (r) => (r && r.ok && recipe && (verdict.by === 'once' || verdict.by === 'late') ? { ...r, next: recipe.words } : r);   // lane vault-standing-request: a run the owner let through ONCE says the standing road
       return out && typeof out.then === 'function' ? out.finally(() => scrub.close()).then(restoreOnce).then(nextOf) : nextOf(restoreOnce(unscrub(out)));   // THE SCAN OFF THE LOOP: the worker never outlives the run — every road out of spawnRun ends it (a no-op after its end)
     } finally {
@@ -2852,7 +2915,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
   }
 
-  async function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note, receipt, toolFd, closeTool, toolName, scrub, onRan = null }) {
+  async function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note, receipt, toolFd, closeTool, toolName, scrub, onRan = null, lg0 = lockGen }) {
     // round 11: the sealed env is built HERE, at the spawn. The PATH is the set of root-owned realpaths computed ONCE at boot; if a
     // runSeal tool has no safe system dir to run from (a root hub, or git only under a writable prefix) the run is refused BY NAME.
     // round 14 (MAJOR): the SEAL's host comes ONLY from gh's ROUTING inputs — -R/--repo, --hostname, GH_HOST, a spec positional's
@@ -2877,33 +2940,55 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // held fd is closed in finish() with the run.
     // THE VALUES — read now, held in this closure only for the spawn and the scrubbers; never stored, never logged
     let values = new Map();
+    const hold = { conv: caller.conversationId };   // the U1a cure: this run's slot, held across the awaits below (the caps count it)
+    holds.add(hold);
+    // the cure (the acceptance read): a file's bytes are zeroed on EVERY early return, not only at the run's end — and the slot is given back
+    const dropValues = () => { holds.delete(hold); if (values) for (const x of values.values()) if (Buffer.isBuffer(x)) x.fill(0); values = null; };
     for (const r of spec.refs) {
       let v = null;
-      try { v = valueOf(r); } catch (e) { note('entry_unknown', { ...head, ref: r.ref, why: String((e && e.code) || 'unreadable').slice(0, 60) }); closeTool(); return named('entry_unknown', { ref: r.ref }); }
-      if (v == null) { note('entry_unknown', { ...head, ref: r.ref }); closeTool(); return named('entry_unknown', { ref: r.ref }); }
-      if (Buffer.byteLength(v, 'utf8') < VR.MIN_MASK_BYTES) { note('entry_too_short_to_mask', { ...head, ref: r.ref }); closeTool(); return named('entry_too_short_to_mask', { ref: r.ref }); }
+      try { v = fileFactsOf(r) ? await fileBytesRaced(r, signal) : valueOf(r); } catch (e) {
+        const c0 = String((e && e.code) || 'unreadable'), c = /vault_locked/.test(c0) ? 'vault_locked' : c0;
+        dropValues(); closeTool();
+        if (c === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } }   // round 3: a lock the read met names the run, as every other lock refusal of the door does
+        // the cure: a sealed file that cannot be opened (or a lock while it was read) is said by its OWN name, with its door
+        if (STATUS[c]) { note(c, { ...head, ref: r.ref }); return named(c, { ref: r.ref }); }
+        note('entry_unknown', { ...head, ref: r.ref, why: c.slice(0, 60) }); return named('entry_unknown', { ref: r.ref });
+      }
+      if (v == null) { dropValues(); note('entry_unknown', { ...head, ref: r.ref }); closeTool(); return named('entry_unknown', { ref: r.ref }); }
+      if ((Buffer.isBuffer(v) ? v.length : Buffer.byteLength(v, 'utf8')) < VR.MIN_MASK_BYTES) { if (Buffer.isBuffer(v)) v.fill(0); dropValues(); note('entry_too_short_to_mask', { ...head, ref: r.ref }); closeTool(); return named('entry_too_short_to_mask', { ref: r.ref }); }
       values.set(r.ref, v);
     }
-    const secrets = spec.refs.map((r) => ({ ref: r, value: values.get(r.ref) }));
+    // lane lg-vault-file (B-0830, 主开发 r4378): a FILE is VALUES of the ONE scrubber. Its bytes ride the run's values to the run's
+    // scan worker (scrub.give, once, below) and the WORKER spells its pieces (src/vault-file.js runValuesOf: the whole ≤ 2 KiB, its
+    // base64 / hex in 64-character pieces, every line of ≥ 16 B, a long line's pieces, the trimmed whole ≤ 4 KiB; PEM armor out) —
+    // never a masker of its own (the cure's index and stepper are gone: one scrubber cannot disagree with itself), never on the loop.
+    // A lock (its epoch moved) or the caller gone while the file was read stops it HERE: nothing spawns, never spawn-then-stop.
+    const stopIf = () => { if (lockGen !== lg0 || vaultState() !== 'unlocked') throw Object.assign(new Error('locked'), { code: 'vault_locked' }); if (signal && signal.aborted) throw Object.assign(new Error('gone'), { code: 'caller_gone' }); };
+    const stopped = (e) => { dropValues(); closeTool(); if (e.code === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } } note(e.code, { ...head }); return named(e.code); };
+    try { stopIf(); } catch (e) { return stopped(e); }
+    const secrets = spec.refs.map((r) => { const v = values.get(r.ref); return Buffer.isBuffer(v) ? { ref: r, file: v } : { ref: r, value: v }; });
+    // lane lg-vault-file: a FILE lands as `f<slot>-<its name>` (a tool that wants its extension gets it), its slot's other files as before
+    const fileNames = new Map(spec.files.filter((f) => f.template == null && Buffer.isBuffer(values.get(f.ref))).map((f) => { const r = spec.refs.find((y) => y.ref === f.ref); const ff = r && fileFactsOf(r); return [f.slot, VF.diskNameOf(ff ? ff.name : 'file')]; }));   // the shell-safe spelling of its name (adversarial read r1)
     // ONE scrubber per run, both pipes in arrival order (one window) — IN ITS OWN WORKER (主开发 r1505 / r1573: THE SCAN OFF THE
     // LOOP), started in run() before the caps; it gets the run's values HERE, once, BEFORE any file holds a value (the review: a
     // throw here leaked the folder), and builds its masker before it reads the first piece (a build that throws there is a lost
     // worker: the output withheld by name)
     scrub.give(secrets);
+    holds.delete(hold);   // from here to runs.add(rec) nothing awaits: the run takes its slot back as its record
     let dir = null;
     try {
       dir = fs.mkdtempSync(path.join(runRoot(), RUN_DIR_PREFIX)); fs.chmodSync(dir, 0o700);
       const ofd = fs.openSync(path.join(dir, OWNER_FILE), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
       try { const mb = Buffer.from(JSON.stringify(hubIdentity || { pid: process.pid })), wrote = fs.writeSync(ofd, mb); if (wrote !== mb.length) throw Object.assign(new Error(`the owner mark was written short (${wrote} of ${mb.length} bytes)`), { code: 'ESHORTMARK' }); } finally { fs.closeSync(ofd); }   // r1213 (b): a SHORT write is a failed mark — the run stops before any value file and its folder is shredded, as a thrown write is
-    } catch (e) { if (dir) shredDir(dir); scrub.close(); values = null; note('spawn_failed', { ...head, why: `the run directory (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'the run directory could not be made' }); }
+    } catch (e) { if (dir) shredDir(dir); scrub.close(); dropValues(); note('spawn_failed', { ...head, why: `the run directory (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'the run directory could not be made' }); }
     const mark = path.basename(dir);
-    const m = VR.materialize(spec, { valueOf: (ref) => values.get(ref), pathOf: (slot) => path.join(dir, `f${slot}`) });
+    const m = VR.materialize(spec, { valueOf: (ref) => values.get(ref), pathOf: (slot) => path.join(dir, fileNames.has(slot) ? `f${slot}-${fileNames.get(slot)}` : `f${slot}`) });
     try {
       for (const f of m.files) {
         const fd = fs.openSync(f.path, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
         try { fs.writeSync(fd, f.content); } finally { fs.closeSync(fd); }
       }
-    } catch (e) { shredDir(dir); scrub.close(); values = null; note('spawn_failed', { ...head, why: `a run file (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'a run file could not be written' }); }
+    } catch (e) { shredDir(dir); scrub.close(); dropValues(); note('spawn_failed', { ...head, why: `a run file (${e.code || e.message})` }); closeTool(); return named('spawn_failed', { why: 'a run file could not be written' }); }
     return new Promise((resolve) => {
       const rec = { conv: caller.conversationId, name: caller.name || null, child: null, stopped: null, hard: null, timer: null, dir, mark, piped: false, closeScrub: () => scrub.close() };   // closeScrub: the lock ends the worker of a run that waits for its end (r1919 (1))
       const dec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
@@ -2943,7 +3028,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           runs.delete(rec);   // r1919 (1): gone from the caps and the lock's walk only now, its worker ended
           handOn(e);
           lastScrub = { ...scrub.stats };
-          values = null;
+          dropValues();
           const ms = now() - t0;
           const c = e.counts, stoppedBy = rec.lockedInEnd ? 'lock' : stoppedAt;   // r1919 (1): a lock that landed while the worker answered the end gives the lock's line
           // round 21 (fb-93219e801a): the run's output scrubber is VALUE-based ONLY — createRunMasker (`scrub`) above masked the
@@ -2958,11 +3043,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: stoppedBy === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
           if (spawnErr) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnErr }); resolve(named('spawn_failed', { why: spawnErr })); return; }   // no child ran: no receipt, no use
           if (stoppedBy === 'lock') { const ranFirst = stoppedAt !== 'lock'; note('vault_locked', { ...line, killed: !ranFirst, ...(ranFirst ? { ran: true } : {}) }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(ranFirst ? { ...named('vault_locked', { killed: false, ran: true, receipt }), words: LOCKED_AFTER_RAN[stoppedAt === 'timeout' || stoppedAt === 'gone' ? stoppedAt : 'end'] } : named('vault_locked', { killed: true })); return; }   // r2161 (c): a child that FINISHED before the lock — its words (and the CLI) say the command RAN
-          if (stoppedBy === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
+          if (stoppedBy === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone', { killed: true })); return; }   // the cure's round 3: a child RAN — `killed`, so restoreOnce ends its once-grant as used (caller_gone is BURNED only when nothing ran)
           note('ran', line);
           resolve({ ok: true, exit: line.exit, signal: line.signal, timedOut: line.timedOut, truncated, ms, stdout: outT.text, stderr: errT.text, scrubbed: { hits: scrubbed.hits, bytes: scrubbed.bytes, ...(scrubbed.withheld ? { withheld: scrubbed.withheld } : {}) }, redacted: line.redacted, by: verdict.by, shapeId: head.shapeId, receipt });
         }).catch((x) => {   // the read's #9: never a run whose answer hangs
-          runs.delete(rec); values = null;
+          runs.delete(rec); dropValues();
           try { log(`vault-run: the run's answer could not be written (${(x && x.message) || x})`); } catch { }
           // r1919 (2): a child that RAN answers its own code, outside BURNED (a spent once-grant never comes back), its use line
           // written (a receipt on the note); a child that never spawned stays spawn_failed (nothing ran: the grant is given back)

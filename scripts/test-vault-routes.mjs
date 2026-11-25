@@ -678,6 +678,40 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   ok(rvBearer.status === 403 && rvBearer.json.code === 'human_only', 'the person reveal door refuses a bearer even past the sign-in gate (human_only) — only the owner reveals a value', rvBearer);
   const names = v2.secretNames().map((x) => x.name).sort();
   ok(JSON.stringify(names) === JSON.stringify(['agent:conv-NINE/signup-pw', 'agent:conv-NINE/vendor', 'agent:job-j9/token']), 'every entry landed under the caller\'s OWN scope (conv-NINE / job-j9) — the agent chose none of them', names);
+  // lane lg-vault-file (B-0830): `put <name> --file <0600 file>` — the FILE's bytes ride the body (base64) with its name, size
+  // and digest, taken off the request like `value`; the answer is facts (the file's name, size, kind), the road to use it, the
+  // copy on disk the agent must delete itself — never a byte. And THE CAP put never had: a text value is 8192 characters.
+  {
+    const VF = require(path.join(REPO, 'src/vault-file.js'));
+    const u32 = (x) => { const b = Buffer.alloc(4); b.writeUInt32BE(x); return b; };
+    const sstr = (x) => { const b = Buffer.isBuffer(x) ? x : Buffer.from(String(x), 'latin1'); return Buffer.concat([u32(b.length), b]); };
+    const ARMOR = ['OPENSSH', 'PRIVATE', 'KEY'].join(' ');
+    const body = Buffer.concat([Buffer.from('openssh-key-v1\0', 'latin1'), sstr('aes256-ctr'), sstr('bcrypt'), sstr(Buffer.concat([sstr(crypto.randomBytes(16)), u32(16)])), u32(1), sstr(crypto.randomBytes(51)), sstr(crypto.randomBytes(160))]);
+    const KEY = Buffer.from([`-----BEGIN ${ARMOR}-----`, ...body.toString('base64').match(/.{1,70}/g), `-----END ${ARMOR}-----`, ''].join('\n'), 'latin1');
+    const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+    const fp = await H('/api/agent/vault/put', { body: { name: 'deploy-key', bytes: KEY.toString('base64'), filename: 'id_ed25519', size: KEY.length, sha256: sha(KEY) } });
+    ok(fp.status === 200 && fp.json.name === 'agent:conv-NINE/deploy-key' && fp.json.file && fp.json.file.name === 'id_ed25519' && fp.json.file.size === KEY.length && fp.json.file.kind === 'ssh-key'
+      && /\$VAULT_FILE\{KEY\}/.test(fp.json.use) && /delete that copy yourself/.test(fp.json.copy) && /passphrase/.test(fp.json.encrypted || '') && !JSON.stringify(fp.json).includes(KEY.toString('base64').slice(0, 30)) && !('bytes' in fp.json),
+      'put --file ⇒ 200: the file\'s facts, the road to use it ($VAULT_FILE), the copy to delete, the passphrase fact (stored as is) — no byte back', fp.json);
+    ok((await v2.fileOpen('agent:conv-NINE/deploy-key')).bytes.equals(KEY) && v2.secretGet('agent:conv-NINE/deploy-key').code === 'is_a_file', 'sealed to the very bytes; no door reads its key');
+    const tries = [
+      [{ name: 'f1', bytes: KEY.toString('base64'), filename: 'k', size: KEY.length + 1 }, 400, 'bytes_bad', 'a size that is not what arrived'],
+      [{ name: 'f1', bytes: KEY.toString('base64'), filename: 'k', sha256: sha(Buffer.from('other')) }, 400, 'bytes_bad', 'a digest that is not what arrived'],
+      [{ name: 'f1', bytes: 'not base64 at all', filename: 'k' }, 400, 'bytes_bad', 'bytes that are not strict base64'],
+      [{ name: 'f1', bytes: KEY.toString('base64'), filename: '/' }, 400, 'file_name_bad', 'a file with no name'],
+      [{ name: 'f1', bytes: KEY.toString('base64'), value: 'both', filename: 'k' }, 400, 'value_and_file', 'a value AND a file'],
+      [{ name: 'vendor', bytes: KEY.toString('base64'), filename: 'k' }, 409, 'not_a_file', 'a file over a TEXT entry (never upgraded)'],
+      [{ name: 'deploy-key', value: 'a text value now' }, 409, 'is_a_file', 'a text value over a FILE entry'],
+      [{ name: 'long', value: 'v'.repeat(VF.TEXT_PUT_MAX + 1) }, 400, 'value_too_long', 'a text value over 8192 characters (put had no bound)'],
+    ];
+    const got = [];
+    for (const [b, st, code] of tries) { const r = await H('/api/agent/vault/put', { body: b }); got.push([r.status, r.json.code, r.json.error]); }
+    ok(got.every(([st, code, err], i) => st === tries[i][1] && code === tries[i][2] && typeof err === 'string' && err.length > 15) && /--file/.test(got[7][2]) && !v2.fileOf('agent:conv-NINE/f1') && !v2.secretNames().some((x) => x.name === 'agent:conv-NINE/long'),
+      `each refused BY NAME, in words, nothing stored: ${tries.map((t) => t[3]).join(' · ')}`, got);
+    const ok8192 = await H('/api/agent/vault/put', { body: { name: 'long', value: 'v'.repeat(VF.TEXT_PUT_MAX) } });
+    const bq = await H('/api/agent/vault/put', { query: '?bytes=QUJDREVGR0g', body: { name: 'q' } });
+    ok(ok8192.status === 200 && bq.status === 400 && bq.json.code === 'value_in_argv', 'exactly 8192 characters is kept; a file\'s bytes in the URL ⇒ value_in_argv (argv-readable)', [ok8192.status, bq.json]);
+  }
   // lane vault-agent-own: a conversation with a DURABLE id (its CLI session id — a resume keeps it) names a NEW entry by it, so a
   // conversation that ended and came back still owns it; a pending fork (it borrows its parent's id) falls back to its own
   // registered id; a mint records its --for (the one host a run sends it to without asking)
@@ -706,7 +740,7 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   const rsrc = fs.readFileSync(rf, 'utf8');
   const rcut = rsrc
     .replace("const value = b.value; if (b && typeof b === 'object') delete b.value;   // taken OFF the request — no later reader sees it", "const value = (b.value != null ? b.value : (req.query && req.query.value)); if (b && typeof b === 'object') delete b.value;")
-    .replace("if (req.query && typeof req.query.value !== 'undefined') return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)", "/* mutant: the argv guard removed */");
+    .replace("if (req.query && (typeof req.query.value !== 'undefined' || typeof req.query.bytes !== 'undefined')) return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)", "/* mutant: the argv guard removed */");   // lane lg-vault-file: the guard reads `bytes` too
   const rm = new Mod(rf); rm.filename = rf; rm.paths = Mod._nodeModulePaths(path.dirname(rf)); rm._compile(rcut, rf);
   const appM = express(); appM.use(auth2.middleware()); auth2.registerRoutes(appM); appM.use(express.json());
   rm.exports.registerVaultRoutes(appM, { vault: v2, activeSessions: sessions2, getJobs: getJobs2 });

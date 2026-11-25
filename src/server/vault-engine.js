@@ -49,6 +49,8 @@ const HOLD = require('../store-read-hold.js');   // r3002 (b): the vault record'
 const { runMigrations, ledgerFileOf } = require('../migration-runner.js');
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped, this lock epoch (lane vault-locked-refusal-notice)
 const VU = require('../vault-use.js');   // PURE: the use's ONE shape, its audit line, the daily failure count (lane vault-use-law)
+const VF = require('../vault-file.js');   // PURE: a FILE entry's verdicts — its name, its cap, its kind (lane lg-vault-file, B-0830)
+const VFS = require('./vault-files.js');  // the file entries' sealed bytes, data/vault-files/<id>.vfile (lane lg-vault-file)
 
 /** THE STORE KEYS the vault holds — the key files the key-file law used to keep beside their data (name = the base name under
  *  data/; `raw` = the file holds the 32 bytes, else 64 hex characters). scripts/test-vault-law.mjs: every key file a src/
@@ -77,8 +79,10 @@ const IDLE_MAX_HOURS = 720;
  *  website's login — the sealed JSON record of PURE src/browser-login.js, whose NAME_RE spells this same shape; written by ONE
  *  writer, src/server/browser-logins.js) · `provider:<record id>` (lane lg-providers, B-d578: a third-party model provider's
  *  key — its record in data/providers.json names it, src/server/provider-store.js is its one writer; the spawn road and the
- *  provider Test read it) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
-const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret|provider):[\w.-]{1,160}$|^web-login:https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#[^\s#\u0000-\u001f\u007f]{1,160}$|^proxy-login:(?:https?|socks5):\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\]):\d{1,5}#[^\s#\u0000-\u001f\u007f]{1,128}$/;   // B-8b87: a browser proxy's login (src/server/browser-proxy-logins.js)
+ *  provider Test read it) · `keyfile:<10 hex>` (lane lg-vault-file, B-0830 — design q-058: a FILE the owner put in, its bytes
+ *  sealed beside the record in data/vault-files/; the value is its file key — src/vault-file.js) — never a key file's name
+ *  (STORE_KEYS names start with `.` or `browser-`). */
+const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret|provider|keyfile):[\w.-]{1,160}$|^web-login:https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#[^\s#\u0000-\u001f\u007f]{1,160}$|^proxy-login:(?:https?|socks5):\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\]):\d{1,5}#[^\s#\u0000-\u001f\u007f]{1,128}$/;   // B-8b87: a browser proxy's login (src/server/browser-proxy-logins.js)
 const isSecretName = (name) => { const s = String(name || ''); return SECRET_RE.test(s) || V.AGENT_NS_RE.test(s); };   // lane vault-mint-put: `agent:<scope>/<name>` too
 
 let SIGNALS_ARMED = false;
@@ -192,6 +196,19 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   sweepStaleVaultTmp(dataDir, now());
   load();
+  // lane lg-vault-file (B-0830): the file entries' sealed bytes — at boot a `.vfile` no entry names (a put that died between
+  // its file and the record) is shredded; never while the record cannot be read (which files are live is unknown then)
+  const files = VFS.create({ dataDir, log });   // round 7: a failed close is said in the engine's log
+  // lane lg-vault-file cure (主开发 11-18: nothing of a file holds the main loop): the boot sweep runs OFF the loop — it asks the
+  // record whether an id is live at the moment a file would go (puts may land meanwhile); never while the record is unreadable
+  const filesInFlight = new Set();   // round 2: a put's id from its mint to its record (or its refusal) — the sweep never takes it
+  const fileLive = (id) => filesInFlight.has(id) || !record || Object.values(record.entries).some((b) => b && b.file && b.file.id === id);   // the census's find: a record unread while the sweep walks keeps EVERY file (it read «none live» before)
+  const pendingFiles = new Set();   // the sweep and every shred in flight (filesSettled waits for them: a clean close, the suites)
+  const track = (p) => { pendingFiles.add(p); p.then(() => pendingFiles.delete(p), () => pendingFiles.delete(p)); return p; };
+  if (record) track(files.sweep(fileLive).catch(() => 0));
+  const shredLater = (id) => { track(files.shred(id).catch(() => false)); };   // a failed shred: the next boot's sweep takes a file no entry names
+  /** → a promise that resolves once the boot sweep and every shred in flight have ended. */
+  const filesSettled = async () => { while (pendingFiles.size) await Promise.all([...pendingFiles]); };
 
   const setUp = () => !!record || !!recordBad;
   const state = () => (setUp() ? (dek ? 'unlocked' : 'locked') : 'not_set_up');
@@ -416,13 +433,15 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
     const box = record.entries[name];
     if (!box) return { ok: true, value: null };
+    if (box.file) return { ok: false, code: 'is_a_file' };   // lane lg-vault-file: a FILE entry's value is its file key — no door reads it (fileOpen is the one road to its bytes)
     const v = V.unwrapEntry(dek, name, box);
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null, noteShared = false, pending = null, rev = null } = {}) {
+  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null, owner = null, forHost = null, noteShared = false, pending = null, rev = null, file = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
+    if (!file && record && record.entries && record.entries[name] && record.entries[name].file) return { ok: false, code: 'is_a_file', words: VF.WORDS.is_a_file };   // lane lg-vault-file (adversarial read r1): a FILE stays a file on EVERY writer — a mint over it was a text value that later runs wrote out as the key
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
     try {
       const prevBox = record && record.entries ? record.entries[name] : null;
@@ -443,8 +462,10 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       if (pending === 'register' || pending === 'change') box.pending = pending;
       const boxRev = Number.isInteger(rev) && rev >= 1 ? rev : (prevBox && Number.isInteger(prevBox.rev) && prevBox.rev >= 1 ? prevBox.rev : null);
       if (boxRev !== null) box.rev = boxRev;
+      if (file) box.file = file;   // lane lg-vault-file: a FILE entry's facts (filePut) — a name, a size, a kind, `encrypted`; never a byte, never a digest of the bytes
       const next = { ...record, entries: { ...record.entries, [name]: box } };
       writeRecord(next); record = next;
+      if (prevBox && prevBox.file && file && prevBox.file.id !== file.id) shredLater(prevBox.file.id);   // a re-put: the old sealed file goes once the record names the new one
       return { ok: true };
     } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; } finally { V.zero(plain); }
   }
@@ -477,14 +498,88 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const kept = wordsKept(name);   // lane vault-entry-description r2 (MAJOR 2): a re-put rotates the value, never the words
     if (kept && note && !(kept.noteShared && kept.note === note)) return { ok: false, code: 'words_later' };   // r3 (MINOR d)
+    if (record.entries[name] && record.entries[name].file) return { ok: false, code: 'is_a_file', words: VF.WORDS.is_a_file };   // lane lg-vault-file: a file stays a file
     const r = secretPut(name, value, { prov: 'stored', actor, ...(kept ? kept : { note, noteShared: !!note }) });   // note: lane vault-entry-description (`put --note`)
     if (!r.ok) return r;
     audit('vault-agent-put', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });
     return { ok: true, name, ref: V.vaultRefOf(name), ...(kept ? { rotated: true } : {}) };
   }
+  // ── FILE ENTRIES (lane lg-vault-file, B-0830 — design q-058, the owner's decisions of 2026-11-03): the bytes sealed in
+  //    data/vault-files/<id>.vfile under a random FILE KEY that is the entry's sealed value (src/server/vault-files.js); the
+  //    box carries the file's facts (`file`: id, name, size, kind, encrypted — never a digest of the bytes). ONE road opens the bytes — fileOpen (a
+  //    run's injection; the owner's download) — and secretGet refuses a file entry by name (`is_a_file`): no door answers its key.
+  /** → the box's file facts (src/vault-file.js factsOf) | null — names and sizes only; readable while locked (no DEK). */
+  const fileOf = (name) => { const b = record && record.entries[String(name)]; return b && b.file ? VF.factsOf(b.file) : null; };
+  /** Seal a FILE under `name` (a secret name the door built): the bytes judged (VF.fileVerdict), sealed in a NEW `.vfile`,
+   *  then the entry written (secretPut — the old file of the same name shredded once the record names the new one; a failed
+   *  record write shreds the new file). A name holding a TEXT value is refused (the owner's D5: never upgraded).
+   *  The sealed file is written OFF the main loop (vault-files' fs.promises) — so the lock, the name and a text entry of the
+   *  same name are asked again once it is on disk. → a promise of { ok, name, file (its public facts) } | { ok: false, code, words? }. */
+  async function filePut(name, bytes, { filename = null, prov = null, actor = null, label = null, note = null, noteShared = false, owner = null, askedBy = null, hosts = null, expect = null } = {}) {
+    if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
+    const fv = VF.fileVerdict(bytes, filename);
+    if (!fv.ok) return fv;
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
+    const prev = record.entries[name];
+    if (prev && !prev.file) return { ok: false, code: 'not_a_file', words: VF.WORDS.not_a_file };
+    const id = files.mintId(), key = files.mintKey(), ep0 = epoch;   // round 3: the lock EPOCH — a lock-then-unlock during a slow write is a lock too
+    filesInFlight.add(id);
+    try {
+    let sha256;
+    try { sha256 = await files.write(id, key, bytes); } catch (e) { key.fill(0); shredLater(id); return e && e.code === 'files_stuck' ? { ok: false, code: 'file_not_stored', words: VF.WORDS.file_not_stored } : { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }   // round 4: a stuck store (vault-files' bound) is said as a put that did not happen
+    if (expect && expect.sha256 != null && String(expect.sha256).toLowerCase() !== sha256) { key.fill(0); shredLater(id); return { ok: false, code: 'bytes_bad', words: VF.WORDS.bytes_bad }; }
+    // the write awaited: a lock (its epoch moved — a lock then an unlock too), or a TEXT entry of this name, may have landed meanwhile
+    if (state() !== 'unlocked' || epoch !== ep0) { key.fill(0); shredLater(id); blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: state() === 'unlocked' ? KF.VAULT_LOCKED : lockedCode() }; }
+    if (record.entries[name] && !record.entries[name].file) { key.fill(0); shredLater(id); return { ok: false, code: 'not_a_file', words: VF.WORDS.not_a_file }; }   // the sender's digest: what arrived is what was sent
+    const file = { id, name: fv.name, size: fv.size, lines: fv.lines, kind: fv.kind, encrypted: fv.encrypted };   // the cure (RULE 5′, test-key-file-law): NO digest of the bytes is kept — vault.json is not sealed field by field, and a short token file's sha256 is a guess away; the sender's digest is checked in memory above, the seal's GCM tag (the id its AAD) proves the bytes
+    let r;
+    try { r = secretPut(name, key, { prov, actor, label, note, noteShared, owner, askedBy, hosts, file }); } finally { key.fill(0); }
+    if (!r.ok) { shredLater(id); return r; }
+    return { ok: true, name, file: VF.publicFactsOf(file) };
+    } finally { filesInFlight.delete(id); }
+  }
+  /** THE ONE ROAD to a file entry's BYTES: unlocked only — its file key unwrapped, the `.vfile` opened (its GCM tag under the
+   *  entry's own key and the box's size prove the bytes — no digest is kept), read OFF the main loop. → a promise of { ok, bytes: Buffer (the caller's copy to zero), file } |
+   *  { ok: false, code }; a lock or a re-put while it read ⇒ the bytes zeroed, the lock's code / `file_moved`. Never audits:
+   *  the door that uses it writes the use (a run's receipt, the owner's download). */
+  async function fileOpen(name) {
+    if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
+    const box = record.entries[name];
+    if (!box) return { ok: false, code: 'entry_unknown' };
+    const f = box.file ? VF.factsOf(box.file) : null;
+    if (!f) return { ok: false, code: 'not_a_file', words: VF.WORDS.not_a_file };
+    const key = V.unwrapEntry(dek, name, box), ep0 = epoch;
+    if (!key || key.length !== 32) { V.zero(key); return { ok: false, code: 'key-malformed' }; }
+    let bytes;
+    try { bytes = await files.read(f.id, key, f); }
+    catch (e) {
+      // round 2 (the cure's read): a re-put or a drop while it read shreds THIS file under it — said as what happened
+      const now = record && record.entries[name];
+      if (!now) return { ok: false, code: 'entry_unknown' };
+      if (!now.file || now.file.id !== f.id) return { ok: false, code: 'file_moved', words: VF.WORDS.file_moved };
+      return { ok: false, code: e && e.code && e.code !== 'files_stuck' ? e.code : 'file_unreadable' };   // round 4: a stuck store reads as unreadable (nothing was used)
+    }
+    finally { V.zero(key); }
+    if (state() !== 'unlocked' || epoch !== ep0) { bytes.fill(0); return { ok: false, code: state() === 'unlocked' ? KF.VAULT_LOCKED : lockedCode() }; }   // round 3: a lock-then-unlock while it read is a lock
+    const now = record.entries[name];
+    if (!now || !now.file || now.file.id !== f.id) { bytes.fill(0); return { ok: false, code: 'file_moved', words: VF.WORDS.file_moved }; }
+    return { ok: true, bytes, file: VF.publicFactsOf(f) };
+  }
+  /** PUT a FILE the agent holds (`vibespace-vault put <name> --file <0600 file>`) under its own `agent:<scope>/<name>` —
+   *  provenance 'stored' (the agent saw the bytes), its words kept on a re-put (as agentPut). Same answer shape + `file`. */
+  async function agentFilePut(name, bytes, { filename = null, actor = null, note = null, expect = null } = {}) {
+    if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
+    const kept = wordsKept(name);
+    if (kept && note && !(kept.noteShared && kept.note === note)) return { ok: false, code: 'words_later' };
+    const r = await filePut(name, bytes, { filename, prov: 'stored', actor, expect, ...(kept ? kept : { note, noteShared: !!note }) });
+    if (!r.ok) return r;
+    audit('vault-agent-put', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent', file: { size: r.file.size, kind: r.file.kind } });   // the name, the size, the kind — never a byte
+    return { ok: true, name, ref: V.vaultRefOf(name), file: r.file, ...(kept ? { rotated: true } : {}) };
+  }
   /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
    *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(!b.label && b.note ? { note: b.note } : {}), ...(b.noteShared === true ? { noteShared: true } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}), ...(b.pending === 'register' || b.pending === 'change' ? { pending: b.pending } : {}), ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), `pending` state and `rev` counter, never a value
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(!b.label && b.note ? { note: b.note } : {}), ...(b.noteShared === true ? { noteShared: true } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}), ...(b.owner ? { owner: b.owner } : {}), ...(b.forHost ? { forHost: b.forHost } : {}), ...(b.pending === 'register' || b.pending === 'change' ? { pending: b.pending } : {}), ...(Number.isInteger(b.rev) && b.rev >= 1 ? { rev: b.rev } : {}), ...(b.file ? { file: VF.publicFactsOf(b.file) } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), `pending` state and `rev` counter, never a value
   /** lane vault-entry-description r2: the words an EXISTING entry carries ({ label, note, noteShared } as its box holds them) —
    *  a rotation (mint / put of the same name) writes them back unchanged; null = no such entry. Never a value. */
   const wordsKept = (name) => { const o = record && record.entries[name]; return o ? { label: o.label || null, note: o.note || null, noteShared: o.noteShared === true } : null; };
@@ -535,6 +630,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       const next = { ...record, ...(nextFloor > 0 ? { loginRevFloor: nextFloor } : {}), entries: rest };
       writeRecord(next); record = next;
     } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }
+    if (gone && gone.file && gone.file.id) shredLater(gone.file.id);   // lane lg-vault-file: a file entry's sealed bytes go with it (overwritten, then unlinked — off the loop, after the record no longer names it)
     return { ok: true };
   }
   const loginRevFloor = () => (record && Number.isInteger(record.loginRevFloor) && record.loginRevFloor >= 0 ? record.loginRevFloor : 0);
@@ -568,7 +664,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   // ── A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) ──
   const storeVerb = (name) => { const k = STORE_KEYS.find((x) => x.name === name); return k ? `the ${k.store} store` : name; };
-  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'agent' ? 'an agent secret' : kind === 'secret' ? 'a stored password or key' : kind === 'web-login' ? 'a website login' : kind === 'provider' ? 'a model provider\'s key' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
+  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'keyfile' ? 'a stored file' : kind === 'agent' ? 'an agent secret' : kind === 'secret' ? 'a stored password or key' : kind === 'web-login' ? 'a website login' : kind === 'provider' ? 'a model provider\'s key' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
   /** THE ONE HELPER a door calls when it refuses `vault_locked`: `actor` = WHO it stopped (a NAME a person reads — the door
    *  passes the conversation's / the machine's / the account's name, never an id), `verb` = WHAT. Only while LOCKED (a
    *  not-set-up vault refuses nothing by this code). A note that changes what the owner reads re-announces the facts and
@@ -906,6 +1002,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
      *  card = { actor, by, key, entry, door, outcome, n, since, at } (names and codes; never a value). */
     onFailing(fn) { if (typeof fn === 'function') failingHooks.push(fn); },
     secretGet, secretPut, secretDrop, secretAdopt, secretNames, agentMint, agentPut,   // lane vault-mint-put
+    fileOf, filePut, fileOpen, agentFilePut, filesSettled,   // lane lg-vault-file (B-0830): a FILE entry — its facts, its put, its ONE opening road (filePut / fileOpen / agentFilePut answer promises: the bytes never touch the main loop) · the sweep's and the shreds' end
     batchRecordWrite, loginRevFloor,   // lane vault-login: single-write batchRecordWrite (afterCommit) + monotonic floor across web-login drop/re-add
     editEntryWords,   // lane vault-entry-description: THE writer of an entry's name and description after its creation
     macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked

@@ -27,6 +27,7 @@ const { runOfToken } = require('../server/vault-totp.js');
 const V = require('../vault.js');   // PURE: the agent-secret namespace builder + mint verdict (lane vault-mint-put)
 const PW = require('../vault-paste.js');   // PURE (lane vault-entry-description): THE words rule of an entry (wordsOf) — mint / put `--note`
 const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-request r11 (MINOR 2): the «谁可以用…» writer's codes (STATUS / WORDS below)
+const VF = require('../vault-file.js');   // PURE (lane lg-vault-file, B-0830): a FILE entry's wire bytes, its cap, its words
 
 // r11 (主开发's acceptance of r10, MINOR 2 — the writer's except_unnamed went out as 400 with the bare code, an older page said
 // «Could not reach the vault — except_unnamed»): every code the use-grants writer answers rides these maps AS THE WRITER
@@ -53,6 +54,7 @@ const STATUS = Object.freeze({
   window_not_offered: 400, window_card_only: 400, window_end_required: 400, window_too_long: 400, window_excepted: 409,   // lane vault-standing-request r7: «Allow for 1 hour» (r8: + the writer's cap, 除了)
   hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
+  value_and_file: 400, file_empty: 400, file_too_small: 400, file_too_large: 413, file_name_bad: 400, bytes_bad: 400, is_a_file: 409, not_a_file: 409, file_missing: 500, file_damaged: 500, file_unreadable: 500, file_moved: 409, file_not_stored: 500,   // lane lg-vault-file: a FILE entry (src/vault-file.js)
   bad_grant_answer: 400, // lane vault-manual-and-lock: the answer to an agent's request
   bad_job_answer: 400, ask_over: 410, too_many_jobs: 409, bad_revoke: 400, not_approved: 404, ask_changed: 409, // lane vault-job-approval: the answer to a Background job's approval card · its ✕ · stage L3's F1: a press of the card's earlier set
   // lane vault-paste-request: a paste request's answer / a free entry (src/server/vault-paste-door.js)
@@ -121,6 +123,11 @@ const WORDS = Object.freeze({
   bad_length: 'the length is a whole number from 8 to 256',
   bad_charset: 'the charset is ascii-printable, alnum or digits',
   value_required: 'put needs a value — pass --from-file or --stdin (the value rides the request body, never the command line)',
+  // lane lg-vault-file: a FILE entry (src/vault-file.js — one sentence per code, the CLI prints it)
+  value_and_file: 'put takes a text value (--from-file / --stdin) OR a file (--file) — not both',
+  file_empty: VF.WORDS.file_empty, file_too_small: VF.WORDS.file_too_small, file_too_large: VF.WORDS.file_too_large, file_name_bad: VF.WORDS.file_name_bad, bytes_bad: VF.WORDS.bytes_bad,
+  is_a_file: VF.WORDS.is_a_file, not_a_file: VF.WORDS.not_a_file, file_missing: VF.WORDS.file_missing,
+  file_damaged: VF.WORDS.file_damaged, file_unreadable: VF.WORDS.file_unreadable, file_moved: VF.WORDS.file_moved, file_not_stored: VF.WORDS.file_not_stored,
   value_in_argv: 'the value must not ride the URL (it is logged like a command line) — put it in the request body via --from-file or --stdin',
   bad_grant_answer: 'the answer is once, 8h or deny',
   bad_job_answer: 'the answer is allow or deny', ask_over: 'the job that asked is gone — nothing was written', too_many_jobs: 'that conversation already has 64 approved jobs on this secret — remove one of them, then allow this one', bad_revoke: 'name the entry (secrets:…#secret) and the job (jb-…) to take back', not_approved: 'that job holds no approval on that entry — nothing to take back',   // lane vault-job-approval
@@ -230,8 +237,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const person = (fn) => async (req, res) => {
     const v = personVerdict(req);
-    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword`
-    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
+    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword', 'bytes'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword` — lane lg-vault-file: a file's `bytes`
+    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword', 'bytes'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
   };
   /** An AGENT (vsst_ session / jbt_ job token) — it may read the state and lock, nothing else. */
   const agentOk = (req) => {
@@ -410,22 +417,36 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'mint', conv: p.scope }, { outcome: 'ok', purpose: typeof b.for === 'string' ? b.for.slice(0, 200) : 'mint a secret it never sees', actor: p.actor }); } catch { /* the mint still answered — the use law seam (int331): mint is a USE so `uses` reads it back */ } }
     res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent minted · never shown to the agent', for: typeof b.for === 'string' ? b.for.slice(0, 200) : null, ...(r.rotated ? { rotated: 'value rotated; its name and description kept' } : {}) });
   });
-  app.post('/api/agent/vault/put', (req, res) => {
+  app.post('/api/agent/vault/put', async (req, res) => {   // lane lg-vault-file cure: async — a file's put is sealed off the main loop
+    try {   // round 2 (the cure's read): the handler is async now — ANY throw is answered, never an unanswered request
     const p = agentPrincipal(req);
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const value = b.value; if (b && typeof b === 'object') delete b.value;   // taken OFF the request — no later reader sees it
+    const bytes = b.bytes; if (b && typeof b === 'object') delete b.bytes;   // lane lg-vault-file: a FILE's bytes (base64) — taken off the same way
     if (!p) return agentErr(res, { code: 'unauthorized' });
-    if (req.query && typeof req.query.value !== 'undefined') return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)
+    if (req.query && (typeof req.query.value !== 'undefined' || typeof req.query.bytes !== 'undefined')) return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)
     const en = V.agentEntryName(p.owner, b.name);   // lane vault-agent-own: named by the durable id
     if (!en.ok) return agentErr(res, en);
-    if (typeof value !== 'string' || value === '') return agentErr(res, { code: 'value_required' });
+    const isFile = bytes !== undefined;   // lane lg-vault-file: `put <name> --file <0600 file>` — the file's bytes, its name, its size and digest
+    if (isFile && value !== undefined) return agentErr(res, { code: 'value_and_file' });
+    if (!isFile && (typeof value !== 'string' || value === '')) return agentErr(res, { code: 'value_required' });
+    if (!isFile && value.length > VF.TEXT_PUT_MAX) return res.status(400).json({ ok: false, code: 'value_too_long', error: VF.WORDS.value_too_long });   // lane lg-vault-file: before it put had NO bound (a 100 KB --from-file sealed as text)
     const nw = typeof b.note === 'string' && b.note.trim() ? PW.wordsOf({ note: b.note }) : { ok: true };   // lane vault-entry-description: `put --note`
     if (!nw.ok) return res.status(400).json({ ok: false, code: nw.code, error: nw.words });
-    const r = vault.agentPut(en.name, value, { actor: p.actor, note: nw.note || null });
+    let r;
+    if (isFile) {
+      const got = VF.wireBytesOf(bytes, { size: b.size });
+      if (!got.ok) return agentErr(res, got);
+      try { r = await vault.agentFilePut(en.name, got.bytes, { filename: b.filename, actor: p.actor, note: nw.note || null, expect: { sha256: typeof b.sha256 === 'string' ? b.sha256 : null } }); }
+      catch { r = { ok: false, code: 'file_not_stored' }; }   // the cure: an awaited seal that throws is ANSWERED (never an unanswered request) — round 3: with a PUT's words (was a read's «nothing was used»)
+      finally { got.bytes.fill(0); }
+    } else r = vault.agentPut(en.name, value, { actor: p.actor, note: nw.note || null });
     if (!r.ok && r.code === 'words_later') return res.status(409).json({ ok: false, code: r.code, error: PW.WORDS.words_later });   // lane vault-entry-description r2 (MAJOR 2)
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'put', conv: p.scope }, { outcome: 'ok', purpose: 'store a value it was given', actor: p.actor }); } catch { /* the put still answered — the use law seam (int331): put is a USE so `uses` reads it back */ } }
-    res.json({ ok: true, name: r.name, ref: r.ref, ...(r.rotated ? { rotated: 'value rotated; its name and description kept' } : {}), provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can; this conversation runs with it without asking anyone (vibespace-vault run)' });
+    res.json({ ok: true, name: r.name, ref: r.ref, ...(r.rotated ? { rotated: 'value rotated; its name and description kept' } : {}), provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can; this conversation runs with it without asking anyone (vibespace-vault run)',
+      ...(r.file ? { file: r.file, use: `use it as a FILE: vibespace-vault run --file KEY=${r.ref} -- <command> … '$VAULT_FILE{KEY}' (a 0600 file named f<slot>-${VF.diskNameOf(r.file.name)}, for that run only)`, copy: VF.WORDS.file_copy, ...(r.file.encrypted ? { encrypted: VF.WORDS.encrypted_kept } : {}) } : {}) });   // lane lg-vault-file
+    } catch { if (!res.headersSent) res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing was stored' }); }
   });
   // lane vault-use-law: every answer of the link-token door (the device audit's row, below) is also a USE of that machine's
   // link token by the conversation that asked — the ONE writer's line (door link-token, conv, outcome) and, for a refusal
@@ -544,6 +565,10 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take, who = (
   // B-ef1b: the retired job-secrets notice's two buttons — move each value into the vault (then the file goes), or delete the file
   app.post('/api/vault/job-secrets/:answer', person((req) => (jobSecrets ? jobSecrets.answer(String(req.params.answer), { by: 'user', who: (() => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } })(), ip: ipOf(req) }) : { ok: false, code: 'job_secrets_gone' })));
   app.delete('/api/vault/agent-secrets/:entry', person((req) => paste.dropAgentEntry(String(req.params.entry), { by: 'user', who: (() => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } })(), ip: ipOf(req) })));   // B-3fb5: an agent's own entry's 删除 (the whole agent:<scope>/<name>, encoded)
+  // lane lg-vault-file (B-0830): THE OWNER'S FILE — added in the Vault window (添加 › 文件…) as `keyfile:<10 hex>`, its bytes
+  // (base64) taken off the body at once; its delete door shreds the sealed file with the entry
+  app.post('/api/vault/files', person(async (req) => { const [bytes] = take(req, 'bytes'); const b = req.body || {}; const got = VF.wireBytesOf(bytes, { size: b.size }); if (!got.ok) return got; try { return await paste.addFile({ label: b.label, note: b.note, filename: b.filename, bytes: got.bytes, by: 'user' }); } finally { got.bytes.fill(0); } }));   // the cure: awaited — the bytes are zeroed once the seal is on disk
+  app.delete('/api/vault/files/:id', person((req) => paste.dropFile(String(req.params.id), { by: 'user' })));
   // lane vault-entry-description: THE OWNER answers an agent's proposal of an entry's words (允许 / 拒绝), and the owner's own edit of them
   app.post('/api/vault/words-asks/:id/answer', person((req) => { const b = req.body || {}; return paste.answerWords(String(req.params.id), { answer: b.answer, by: 'user', person: true }); }));
   app.post('/api/vault/entry-words', person((req) => { const b = req.body || {}; return paste.ownerWords({ entry: typeof b.entry === 'string' ? b.entry : '', name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, by: 'user' }); }));

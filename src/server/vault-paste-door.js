@@ -59,6 +59,7 @@ const VR = require('../vault-run.js');   // PURE: an entry's reference (B-3fb5: 
 const VB = require('../vault-blocked.js');   // PURE: a caller's name in words; THE words toward an agent on a locked refusal
 const SS = require('../secret-shapes.js');   // B-a14b's last remainder (r2175 (5)): the request's words belted at the record's WRITE, as their readers do
 const URL_ = require('url');   // lane login-request-card: a site's Unicode form beside its punycode one (P.siteWords takes the function)
+const VF = require('../vault-file.js');   // PURE (lane lg-vault-file, B-0830): a FILE entry's name, cap and words
 
 const FROM_NAME = 'Vault';
 const SETTLED_MAX = 256;
@@ -455,6 +456,37 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) { lockAtRead = true; userTodos.whenRead(() => { lockAtRead = false; withdrawAll(); }, "the vault lock's withdraw of the paste requests"); } return; }
     withdrawAll();
   });
+  /** lane lg-vault-file (B-0830, design q-058 §1): THE OWNER'S FILE (the Vault window's 添加 › 文件…) → `keyfile:<10 hex>` —
+   *  a name (default: the file's name without its extension), a description, the file's name and its bytes (taken off the body
+   *  by the route). Unlocked only; the engine seals the bytes (filePut — off the main loop: a promise). An encrypted private key
+   *  is stored as it is (the owner's decision of 2026-11-03) and the answer says so. */
+  async function addFile({ label = null, note = '', filename = null, bytes = null, by = 'user' } = {}) {
+    const fname = VF.cleanName(filename);
+    if (!fname) return named('file_name_bad', { words: VF.WORDS.file_name_bad });
+    const given = !(label == null || label === '');
+    let m = P.entryMetaOf({ label: given ? label : (fname.replace(/\.[^.]{1,12}$/, '') || fname).slice(0, 80), note, kind: 'secret' });
+    if (!m.ok && !given) m = P.entryMetaOf({ label: 'File', note, kind: 'secret' });   // adversarial read r1: a name the OWNER never typed (a long or hex file name) is never refused for its words
+    if (!m.ok) return m;
+    const st = vault.state();
+    if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
+    const entry = `${VF.KEYFILE_PREFIX}${crypto.randomBytes(5).toString('hex')}`;
+    const r = await vault.filePut(entry, bytes, { filename: fname, prov: 'uploaded', label: m.label, note: m.note, noteShared: true });
+    if (!r || !r.ok) { const c = String((r && r.code) || ''); return c.includes('vault_locked') ? named('vault_locked') : VF.WORDS[c] ? { ok: false, code: c, words: VF.WORDS[c] } : named('store_failed'); }
+    audit('vault-file-added', { by: String(by).slice(0, 40), entry, size: r.file.size, kind: r.file.kind });   // the name, the size, the kind — never a byte
+    return { ok: true, entry, ref: `vault://secrets/${entry}/file`, label: m.label, file: r.file, ...(r.file.encrypted ? { encrypted: VF.WORDS.encrypted_kept } : {}) };
+  }
+  /** The owner's file's delete door — `id` = the 10 hex after `keyfile:`. Who may use it goes FIRST (as a free entry's), then
+   *  the entry; the engine shreds its sealed file with it. */
+  function dropFile(id, { by = 'user' } = {}) {
+    const entry = `${VF.KEYFILE_PREFIX}${String(id || '')}`;
+    if (!VF.KEYFILE_RE.test(entry)) return named('entry_unknown_id');
+    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${entry}#file`, { by }); } catch (e) { log(`${entry}: its vault-use grant row could not be removed — ${e.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
+    const r = vault.secretDrop(entry);
+    if (!r || !r.ok) return named('store_failed');
+    if (r.already) return named('entry_unknown_id');
+    audit('vault-file-deleted', { by: String(by).slice(0, 40), entry });
+    return { ok: true, entry };
+  }
   /** 「其他密钥或密码…」 (the Vault window's 添加 menu — the owner 2026-10-23: 「我压根没法添加啊」): a FREE entry the owner adds —
    *  a label, a kind, a note and the value (taken off the body by the route) → `secret:<10 hex>`. Unlocked only. */
   function addEntry({ label, note = '', kind = 'secret', value = null, by = 'user', entry: made = null } = {}) {
@@ -664,7 +696,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** The open requests of ONE conversation (`vibespace-vault uses` — words, places, times; never a value). */
   function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : q.target.kind === P.LOGIN_KIND ? `a website login on ${q.target.origin}` : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
 
-  return { request, answer, addEntry, dropEntry, dropAgentEntry, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
+  return { request, answer, addEntry, dropEntry, dropAgentEntry, addFile, dropFile, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
 }
 
 module.exports = { create, MORE_WORDS, STATUS, FROM_NAME };

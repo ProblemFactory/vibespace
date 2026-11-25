@@ -79,6 +79,9 @@ const FAMILIES = Object.freeze([
   fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample', confirmKey: 'agent-secret',
     surfaces: { request: NONE('an agent puts its own (vibespace-vault mint / put) — it never asks the user for one'), list: true, row: 'base', add: NONE('an agent puts it in (vibespace-vault mint / put) — a person never adds one'), reveal: true,
       use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] }, cli: { bin: 'vibespace-vault', verbs: ['mint', 'put'] },   // lane vault-job-road: + a Background Work job (--vault, its own conversation's)
+    // lane lg-vault-file (B-0830): an agent's FILE (put --file) is a member of THIS family — its reveal is the owner's download, a
+    // run uses it as a file only, its 删除 (B-3fb5's door) shreds the sealed file with the entry; a job's --vault of it is refused
+    // (entry_unreadable — the job road takes no file yet)
       delete: { method: 'DELETE', path: '/api/vault/agent-secrets/' },   // B-3fb5 (found by this registry's census, deferred 2026-10-26): the person's 删除 — design q-047 §3.3
       route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put', 'DELETE /api/vault/agent-secrets/:entry'], words: WORDS(['mint', 'put']), doc: '**Agents put their OWN secrets in' } }),
   fam({ id: 'account', label: 'An account\'s API key or long-lived token', category: 'accounts', stores: ['accounts'], entryRe: null, sample: 'acc-census', confirmKey: 'account',
@@ -138,6 +141,21 @@ const FAMILIES = Object.freeze([
   fam({ id: 'free-secret', label: 'A key or password no card holds', category: 'keys', stores: ['secrets'], entryRe: /^secret:/, sample: 'secret:census', confirmKey: 'secret',
     surfaces: { request: REQUEST({ lands: 'entry', kinds: ['api-key', 'password', 'secret'] }), list: true, row: 'base', add: { door: 'secret', order: 50 }, reveal: true, use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] },   // lane vault-job-road: + a Background Work job (--vault, the owner approves it)
       delete: { method: 'DELETE', path: '/api/vault/secrets/' }, cli: { bin: 'vibespace-vault', verbs: ['run', 'request'] }, route: ['POST /api/vault/secrets', 'DELETE /api/vault/secrets/:id'], words: WORDS(['request']), doc: '**「其他密钥或密码…」' } }),
+  // lane lg-vault-file (B-0830, design q-058 — the owner 2026-11-02: 「general 文件种类，这样什么 ssh key，某些应用的授权文件啥的都能存进去了」):
+  // a FILE the owner put in — its bytes sealed beside the record (data/vault-files/), used by a run as a 0600 file, never read
+  // back by an agent. U1a = the hub's half (the routes, the run's injection); the Vault window's surfaces are U1b, the agent's
+  // ask for one is U2 — each a deferral with this lane's name until its unit lands.
+  // ui-words: the kind's name in the census's own table (scripts/test-vault-kinds-census prints it) — no window draws a family's label
+  fam({ id: 'owner-file', label: 'A file the owner put in (an SSH key, a certificate, a licence file)', category: 'keys', stores: ['secrets'], entryRe: /^keyfile:/, sample: 'keyfile:0123456789',
+    surfaces: { list: true, use: { route: 'POST /api/agent/vault/run' }, cli: { bin: 'vibespace-vault', verbs: ['run'] }, route: ['POST /api/vault/files', 'DELETE /api/vault/files/:id'], doc: '**Files in the vault' },
+    deferred: {
+      row: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U1b: the Vault window\'s file row (its name, size and kind)' },
+      add: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U1b: the Vault window\'s 添加 › 文件… door (POST /api/vault/files is mounted)' },
+      reveal: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U1b: the owner\'s download inside 验证是你 (a file is never shown)' },
+      delete: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U1b: the row\'s 删除 and its confirm words (DELETE /api/vault/files/:id is mounted)' },
+      words: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U1b: its name and description at upload and in Edit…' },
+      request: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U2: an agent asks the owner for a file (request --file)' },
+    } }),
   fam({ id: 'sealed-file-key', label: 'A sealed file\'s key', category: 'other', stores: ['secrets'], entryRe: /^file:/, sample: 'file:census',
     surfaces: { request: NONE('VibeSpace makes it when it seals the file'), list: true, row: 'base', add: NONE('VibeSpace makes it when it seals the file'), reveal: false, use: SYSTEM('VibeSpace opens the file with it'),
       delete: NONE('it goes with its file'), cli: NONE('no agent verb — VibeSpace uses it itself'), route: NONE('listed by the Vault window only — never shown, no door of its own'), words: NONE('VibeSpace names it after its file'), doc: 'a sealed file\'s key' } }),

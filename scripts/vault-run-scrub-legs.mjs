@@ -165,7 +165,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
   const releaseCopy = () => {
     const dir = scratchDir('scrublegs-release');   // r1670: never the run door's folder shape (vs-vault-run-…, src/temp-sweepers.js)
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js', 'vault-file.js', 'ssh-key-format.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
     let t = fs.readFileSync(SRC, 'utf8');
     const back = (from, to, name) => { t = anchored(t, from, to, `⑦g the release's ${name}`); };
     t = anchored(t, /\n[^\n]*\/\/ THE SCRUBBER'S OVERLAP[^\n]*/, '', "⑦g the release's run scan", { count: 7 });
@@ -381,7 +381,7 @@ export function scrubLegs({ REPO, SRC, scratchDir, anchored, require }) {
   const copyOf = (name, edit) => {
     const dir = scratchDir('scrublegs-' + name);
     fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+    for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js', 'vault-file.js', 'ssh-key-format.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
     const f = path.join(dir, 'src', `${path.basename(SRC, '.js')}-${name}.js`);
     fs.writeFileSync(f, edit(fs.readFileSync(SRC, 'utf8')));
     return require(f);

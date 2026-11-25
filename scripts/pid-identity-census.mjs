@@ -117,6 +117,7 @@ export const ROWS = [
   ['src/server/ops-routes.js', 'process.kill(_selfUpdate.pid, 0); running = true;', 'probe', 'the same — status only', 'nothing'],
   ['src/server/ops-routes.js', 'process.kill(row.pid, 0); live = true;', 'probe', 'a CI run record — status only', 'nothing'],
   ['src/server/session-stdout.js', 'if (!HAS_PROC) { try { process.kill(pid, 0)', 'probe', 'no-/proc liveness', 'nothing'],
+  ['src/server/vault-files.js', "try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }", 'probe', 'lane lg-vault-file: the boot sweep of a stale <id>.vfile.tmp-<pid>-<hex> (another live process\'s temp newer than a minute is kept) — existence probe only; signals nothing', 'nothing'],
   ['src/server/vault-engine.js', "try { process.kill(pid, 0); return true; } catch (e) { return Boolean(e && e.code === 'EPERM'); }", 'probe', 'boot sweep of orphan vault.json.tmp-<pid>-<hex> files (existence probe only; signals nothing)', 'nothing'],
   ['src/server/sysinfo-wiring.js', 'if kill -${sig} ${p} 2>/dev/null; then', 'user', 'the owner\'s process-panel kill on a host', 'a pid the owner named'],
   ['src/server/sysinfo-wiring.js', "try { process.kill(pid, 'SIG' + sig); }", 'user', 'the owner\'s process-panel kill', 'a pid the owner named'],

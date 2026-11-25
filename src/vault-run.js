@@ -190,6 +190,10 @@ const isAgentEntry = (store, entry, field) => store === 'secrets' && field === '
 // opened for runs like a storage credential — the row's switch, a grant (the owner's paste grants the conversation that asked)
 const FREE_ENTRY = /^secret:[\w.-]{1,160}$/;
 const isFreeEntry = (store, entry, field) => store === 'secrets' && field === 'secret' && FREE_ENTRY.test(String(entry));
+// lane lg-vault-file (B-0830, design q-058): the OWNER'S FILE (`keyfile:<10 hex>`, field `file` — vault://secrets/keyfile:<id>/file):
+// opened for runs like a free entry (the switch, a grant) and used as a FILE only (--file NAME=… / $VAULT_FILE{…} — the door refuses the rest)
+const KEYFILE_ENTRY = /^keyfile:[0-9a-f]{10}$/;
+const isKeyFile = (store, entry, field) => store === 'secrets' && field === 'file' && KEYFILE_ENTRY.test(String(entry));
 function refOf(store, entry, field) {
   const id = VI.refOf(store, entry, field);
   if (!id) return null;
@@ -687,6 +691,7 @@ function planOf(req = {}) {
 }
 /** The door's LAST step over planOf's answer (`run`) — the only object that holds values (never stored, never logged): the
  *  child's argv / env / stdin and each file's content. `valueOf(ref)` = the vault's value; `pathOf(slot)` = the door's 0700 run dir + a name. */
+const bytesOrText = (v) => (Buffer.isBuffer(v) ? v : String(v));
 function materialize(run, { valueOf, pathOf }) {
   const slotOf = (x) => (run.files.find((f) => (x.name ? f.name === x.name : f.name === null && f.ref === x.ref)) || {}).slot;
   const argv = run.argv.map((a) => {
@@ -699,7 +704,7 @@ function materialize(run, { valueOf, pathOf }) {
   for (const e of run.plainEnv) env[e.name] = e.value;
   for (const e of run.env) env[e.name] = String(valueOf(e.ref));
   for (const f of run.files) if (f.name) env[f.name] = String(pathOf(f.slot));
-  const files = run.files.map((f) => ({ slot: f.slot, path: String(pathOf(f.slot)), content: f.template != null ? renderTemplate(f.text, valueOf) : String(valueOf(f.ref)) }));
+  const files = run.files.map((f) => ({ slot: f.slot, path: String(pathOf(f.slot)), content: f.template != null ? renderTemplate(f.text, valueOf) : bytesOrText(valueOf(f.ref)) }));   // lane lg-vault-file: a FILE entry's bytes stay bytes
   return { argv, env, files, stdin: run.stdin ? String(valueOf(run.stdin)) + '\n' : null };
 }
 
@@ -1528,6 +1533,7 @@ function ownDoorOf(ref) {
   if (!ref) return 'no run door';
   if (isAgentEntry(ref.store, ref.entry, ref.field)) return null;   // lane vault-run-door: an AGENT's own entry (mint / put) — the owner opens it like any other; only its conversation references it
   if (isFreeEntry(ref.store, ref.entry, ref.field)) return null;    // lane vault-paste-request: a free entry — the owner opens it (switch / grant)
+  if (isKeyFile(ref.store, ref.entry, ref.field)) return null;      // lane lg-vault-file: the owner's file — the owner opens it (switch / grant)
   const d = OWN_DOORS.find((x) => x.store === ref.store && (!x.entry || x.entry.test(ref.entry)));
   return d ? d.door : RUNNABLE_STORES.includes(ref.store) ? null : 'no run door (a store the run table does not know)';
 }
@@ -1607,4 +1613,5 @@ module.exports = {
   shapeOf, shapeKeyOf, commandCandidateOf, PIN_GRAMMAR, PIN_WHY, PIN_ENV, pinOf, wildcardToolOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS: VS.FORMS, FORM_ROWS: VS.FORM_ROWS, VIEWS: VS.VIEWS, formsOf: VS.formsOf, compileForms: VS.compileForms, isCompiledForms: VS.isCompiledForms, createMasker: VS.createMasker, createRunMasker: VS.createRunMasker, maskText: VS.maskText, compileTextScrubber: VS.compileTextScrubber,   // THE SCRUBBER (src/vault-scrubber.js)
   settleCuts: VS.settleCuts, SCRUB_STEPS_PUSH: VS.SCRUB_STEPS_PUSH, SCRUB_STEPS_RUN: VS.SCRUB_STEPS_RUN,   // 主开发 r1068: the cuts settled in one sweep (the suite's equivalence leg reads it against the fixpoint), the scan's two figures
+  isKeyFile,   // lane lg-vault-file (B-0830): the owner's FILE entry (`keyfile:<id>`, field `file`)
 };

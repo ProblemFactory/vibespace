@@ -43,6 +43,7 @@ const i18nKey = (s) => s;
  *  below READ it (no second list); scripts/test-vault-kinds-census.mjs checks every surface a family declares. */
 const VK = require('./vault-kinds.js');
 const FA = require('./foryou-actions.js');   // PURE (B-ef1b): a row's DECLARED buttons — the 需要你 band draws them as every surface does
+const VF = require('./vault-file.js');   // PURE (lane lg-vault-file, B-0830): a FILE entry's public facts
 /** The sealed stores, in the window's order — the ids of src/server/vault-engine.js STORE_KEYS `store` (each one key). */
 const STORES = Object.freeze([
   Object.freeze({ store: 'accounts', label: 'Accounts' }),
@@ -103,6 +104,7 @@ const PROXY_LOGIN_DETAIL = i18nKey('A browser proxy\'s login — VibeSpace hands
 const TOTP_TYPED = i18nKey('Added by an agent itself — the agent saw the seed');   // lane vault-agent-own: `vibespace-vault totp add`
 const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
 const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
+const KEYFILE_RE = /^keyfile:[0-9a-f]{10}$/;   // lane lg-vault-file: the owner's FILE (src/vault-file.js KEYFILE_RE)
 function secretRowOf(s, { machineName = (k) => k, providerName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
   const nameOf = (k) => { try { return String(machineName(k) || k); } catch { return k; } };
@@ -117,6 +119,12 @@ function secretRowOf(s, { machineName = (k) => k, providerName = (k) => k } = {}
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
   const pl = PROXY_LOGIN_ROW_RE.exec(name);   // B-8b87
   if (pl) return { entry: name, field: 'password', kind: 'proxy-login', label: `${pl[2]} · ${pl[1]}`, detail: PROXY_LOGIN_DETAIL, createdAt: at };
+  // lane lg-vault-file (B-0830, design q-058): the OWNER'S FILE (`keyfile:<10 hex>`) — its row names it (a name, a description)
+  // and says the file's facts (its name, its size, its kind, a passphrase it needs) — never a byte; field `file`
+  if (KEYFILE_RE.test(name)) {
+    const f = s && s.file ? VF.publicFactsOf(s.file) : null;
+    return { entry: name, field: 'file', kind: 'file', label: String((s && s.label) || (f && f.name) || name.slice(8)), detail: String((s && s.note) || ''), note: String((s && s.note) || ''), noteShared: !!(s && s.noteShared === true), createdAt: at, ...(f ? { file: f, bytes: f.size } : {}) };
+  }
   const wl = WEB_LOGIN_RE.exec(name);
   if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}) }; }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
@@ -137,7 +145,7 @@ function secretRowOf(s, { machineName = (k) => k, providerName = (k) => k } = {}
     // lane vault-agent-own: `origin` says mint or put (provenanceOf's chip read it, the row never carried it: a PUT showed «never
     // shown»); `forHost` = the host a minted value was made for (the run door's one remaining question); lane vault-entry-description:
     // its name (a rename) and description (mint / put --note, describe) — an agent's entry has no note from before the rule
-    return { entry: name, field: 'secret', kind: prov === 'minted' ? 'password' : 'secret', label: (s && s.label) || `Agent secret · ${am[2]}`, detail: p.label, note: String((s && s.note) || ''), noteShared: true, createdAt: at, origin: prov === 'minted' ? 'mint' : 'put', provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, ...(prov === 'minted' && s && s.forHost ? { forHost: String(s.forHost).slice(0, 200) } : {}) } };
+    return { entry: name, field: 'secret', kind: s && s.file ? 'file' : prov === 'minted' ? 'password' : 'secret', label: (s && s.label) || `Agent secret · ${am[2]}`, detail: p.label, note: String((s && s.note) || ''), noteShared: true, createdAt: at, origin: prov === 'minted' ? 'mint' : 'put', provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, ...(prov === 'minted' && s && s.forHost ? { forHost: String(s.forHost).slice(0, 200) } : {}) }, ...(s && s.file ? { file: VF.publicFactsOf(s.file), bytes: Number(s.file.size) || 0 } : {}) };   // lane lg-vault-file: an agent's FILE (put --file)
   }
   return null;
 }
@@ -145,11 +153,11 @@ function secretRowOf(s, { machineName = (k) => k, providerName = (k) => k } = {}
 /** The kinds a row says (English keys — the page words them). `long-lived-oauth-token` = an account's `claude setup-token`
  *  (sk-ant-oat01-…, a year, no refresh) — its OWN words so nobody reads it as the CLI's browser login (the owner 2026-10-19,
  *  lane vault-one-door); `oauth-token` stays for a mount's or a channel's OAuth sign-in. */
-const KINDS = Object.freeze(['api-key', 'long-lived-oauth-token', 'oauth-token', 'client-secret', 'password', 'token', 'secret-key', 'session-token', 'private-key', 'parameter', 'login', 'secret', 'totp']);
+const KINDS = Object.freeze(['api-key', 'long-lived-oauth-token', 'oauth-token', 'client-secret', 'password', 'token', 'secret-key', 'session-token', 'private-key', 'parameter', 'login', 'secret', 'totp', 'file']);   // file: lane lg-vault-file
 const KIND_WORDS = Object.freeze({
   'api-key': 'API key', 'long-lived-oauth-token': 'Long-lived OAuth token', 'oauth-token': 'OAuth token', 'client-secret': 'Client secret', password: 'Password', token: 'Token',
   'secret-key': 'Secret key', 'session-token': 'Session token', 'private-key': 'Private key', parameter: 'Parameter', login: 'Login', secret: 'Secret',
-  totp: 'Two-step code',
+  totp: 'Two-step code', file: 'File',
 });
 /** A field NAME → its kind (a store may say the kind itself; this is the fallback for declared-field stores). */
 function kindOfField(name) {
@@ -250,7 +258,8 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     label: clip(raw.label, 120) || String(raw.entry).slice(0, 120), detail: clip(raw.detail, 120),
     createdAt: when(raw.createdAt), rotatedAt: when(raw.rotatedAt), lastUsed: useOf(lastUsed),
     size: bytes == null ? 'unknown' : sizeClassOf(bytes), doors: doorsOf({ store, entry: raw.entry, field: raw.field }),
-    revealable: revealableOf(store, raw.entry),
+    revealable: revealableOf(store, raw.entry) && !raw.file,   // lane lg-vault-file: a FILE is never SHOWN (its download is its own door)
+    ...(raw.file && typeof raw.file === 'object' ? { file: VF.publicFactsOf(raw.file) } : {}),   // lane lg-vault-file: its name, size, kind, passphrase fact
     origin: ORIGINS.includes(raw.origin) ? raw.origin : null, expiresAt: when(raw.expiresAt),   // lane vault-window-v2
     provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it
     // lane vault-use-grants: the hosts a request named and the conversation that asked (names — never a value)

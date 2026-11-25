@@ -316,7 +316,7 @@ console.log('⑧ MUTANTS (of ⑥, ⑦g and the scan\'s budget) — patched copie
 {
   const dir = scratchDir('scrubmodel-deep');   // r1670: never the run door's folder shape (vs-vault-run-…, src/temp-sweepers.js)
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js', 'foryou-actions.js', 'vault-scrubber.js', 'vault-file.js', 'ssh-key-format.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
   const real = fs.readFileSync(SCRUBBER_SRC, 'utf8');   // every ⑧ anchor is the scrubber's own line (src/vault-scrubber.js since 主开发 r1919)
   const mutant = (name, from, to) => { const f = path.join(dir, 'src', `vault-scrubber-${name}.js`); fs.writeFileSync(f, anchored(real, from, to, `⑧ «${name}»`)); return { hit: true, M: require(f) }; };   // anchored: an anchor that moved fails BY NAME
   const LEGS = [

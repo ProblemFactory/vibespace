@@ -1150,6 +1150,38 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
     'the door\'s file and notice key ARE the migration\'s (one name each)');
 }
 
+console.log('⑧b 添加 › 文件… — THE OWNER\'S FILE (lane lg-vault-file, B-0830): its bytes taken off the body, sealed, shredded with its delete');
+{
+  const VF = require(path.join(REPO, 'src/vault-file.js'));
+  const BYTES = Buffer.concat([Buffer.from([0, 1, 2, 250]), crypto.randomBytes(200)]), B64 = BYTES.toString('base64');
+  const hexName = await S.hit('/api/vault/files', { body: { filename: crypto.randomBytes(20).toString('hex') + '.lic', bytes: B64, size: BYTES.length } });
+  ok(hexName.status === 200 && hexName.json.label && hexName.json.label.length <= 80, 'adversarial read r1: a long hex file name the owner never typed as a name ⇒ stored, its name clipped or «File» — never refused for its words', hexName.json);
+  if (hexName.json.entry) await S.hit(`/api/vault/files/${hexName.json.entry.slice(8)}`, { method: 'DELETE' });
+  const add = await S.hit('/api/vault/files', { body: { filename: 'licence.lic', note: 'the IDE licence', bytes: B64, size: BYTES.length } });
+  ok(add.status === 200 && VF.KEYFILE_RE.test(add.json.entry) && add.json.ref === `vault://secrets/${add.json.entry}/file` && add.json.label === 'licence' && add.json.file && add.json.file.name === 'licence.lic' && add.json.file.size === BYTES.length
+    && !JSON.stringify(add.json).includes(B64.slice(0, 24)), 'add a file ⇒ 200 {entry keyfile:<id>, ref …/file, label = its name without the extension, file: {name, size, kind}} — never a byte', add.json);
+  const op = (await W.vault.fileOpen(add.json.entry));
+  ok(op.ok && op.bytes.equals(BYTES) && W.vault.secretNames().find((x) => x.name === add.json.entry).note === 'the IDE licence' && W.vault.secretGet(add.json.entry).code === 'is_a_file',
+    'sealed as a FILE with its description; the one road opens it, secretGet refuses it'); if (op.bytes) op.bytes.fill(0);
+  const bearer = await S.hit('/api/vault/files', { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN }, body: { filename: 'x.bin', bytes: B64 } });
+  ok(bearer.status === 403 && bearer.json.code === 'human_only' && !JSON.stringify(bearer.json).includes(B64.slice(0, 24)), 'a bearer ⇒ 403 human_only — its answer carries no byte', bearer);
+  for (const [body, code] of [[{ filename: 'x.bin' }, 'file_empty'], [{ filename: '../', bytes: B64 }, 'file_name_bad'], [{ filename: 'x.bin', bytes: 'not base64!' }, 'bytes_bad'], [{ filename: 'x.bin', bytes: B64, size: 3 }, 'bytes_bad'], [{ filename: 'x.bin', bytes: 'QUJD' }, 'file_too_small']]) {
+    const r = await S.hit('/api/vault/files', { body });
+    ok(r.status === 400 && r.json.code === code && typeof r.json.error === 'string' && r.json.error.length > 20, `${code} ⇒ 400 by name, in words`, r.json);
+  }
+  W.vault.lock('test');
+  ok((await S.hit('/api/vault/files', { body: { filename: 'x.bin', bytes: B64 } })).status === 423, 'LOCKED ⇒ 423 vault_locked');
+  await W.vault.unlock(PW);
+  const id = W.vault.fileOf(add.json.entry).id, sealed = path.join(W.dataDir, 'vault-files', `${id}.vfile`);
+  ok(fs.existsSync(sealed), 'its sealed file is in data/vault-files');
+  const del = await S.hit(`/api/vault/files/${add.json.entry.slice(8)}`, { method: 'DELETE' });
+  await W.vault.filesSettled();   // the cure: the sealed file is shredded off the main loop, once the record no longer names it
+  ok(del.status === 200 && !W.vault.secretNames().some((x) => x.name === add.json.entry) && !fs.existsSync(sealed), 'delete ⇒ 200: the entry and its sealed file are gone', del.json);
+  const again = await S.hit(`/api/vault/files/${add.json.entry.slice(8)}`, { method: 'DELETE' }), notId = await S.hit('/api/vault/files/not-a-file-id', { method: 'DELETE' }), dotted = await S.hit('/api/vault/files/..%2Fsecret%3Ax', { method: 'DELETE' });
+  ok(again.status === 404 && notId.status === 404 && dotted.status === 400 && dotted.json && dotted.json.code === 'path_dot_segment',
+    'delete again / a name that is no file id ⇒ 404; a name holding a dot segment never reaches the route — the auth layer refuses it 400 path_dot_segment (src/path-dot-segment.js, the release)', { again: again.status, notId: notId.status, dotted: dotted.status, code: dotted.json && dotted.json.code });
+}
+
 console.log('⑨ A RESTART — the item is the record');
 {
   const a = await S.agent(W.OTHER_TOKEN, { words: 'the agentcore secret', purpose: 'a cloud browser', into: 'cloud:agentcore.secretAccessKey' });

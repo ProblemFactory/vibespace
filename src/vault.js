@@ -234,6 +234,7 @@ const SECRETS_AT_REST = Object.freeze([
   { what: 'VibeSpace\'s own automation keys (vsak_, design q-046)', where: 'data/automation-keys.json holds each key\'s sha256 digest + its grants', entry: 'apikey:<key id>' },
   { what: 'the maintainer key (vsmk_, lane fleet-feedback-marks)', where: 'NOT on the instance — env VIBESPACE_MAINTAINER_KEY_SHA (the chart\'s maintainerKeySha)', holds: 'its sha256 only — the value is the maintainers\' (their triage job\'s 0600 file); it opens feedback.list / feedback.handled here and nothing else' },
   { what: 'the two-step (TOTP) seeds and their settings (design q-047)', where: 'the vault record only — data/vault-grants.json holds who may have the CODE, never a seed', entry: 'totp:<name>' },
+  { what: 'the files the vault keeps (lane lg-vault-file, design q-058 — an SSH key, a certificate, a licence file)', where: 'data/vault-files/<id>.vfile, sealed (AES-256-GCM) under a random file key', entry: 'keyfile:<id> (the owner\'s) · agent:<conversation>/<name> (an agent\'s put --file) — the entry\'s value IS the file key' },
   { what: 'the login tokens', where: 'data/auth.json tokens', holds: 'sha256 digests only' },
   { what: 'the pairing / agentd / mount tokens', where: 'data/hosts.json dialTokenHash · agentd-tokens.json · mount-tokens.json', holds: 'sha256 digests only' },
   { what: 'the TLS private key', where: 'data/tls/*.key', exception: 'the sign-in door needs it before any unlock' },

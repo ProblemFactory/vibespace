@@ -328,7 +328,7 @@ ok(real.doors.size >= 7 && [...real.doors.keys()].every((d) => VK.addOrderOf(d) 
 ok(VK.ADD_DOORS.map((d) => d.door).join() === 'account,integration,channel,totp,automation,web-login,secret' && VK.ADD_DOORS.every((d, i, a) => !i || a[i - 1].order < d.order),
   '添加…\'s order is the registry\'s: Account… · Integration key… · Channel account… · Two-step code… · Automation key… · Website login… · Other key or password…', VK.ADD_DOORS);
 ok(R.cells.get('totp') && R.cells.get('totp').add.mark === '✓', 'TOTP\'s add surface: the 两步验证… door is registered (the gap the owner found is closed)', R.cells.get('totp'));
-ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,web-login,proxy-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
+ok(R.heads.join() === 'host,frp,file,apikey,totp,secret,provider,keyfile,web-login,proxy-login', `the engine's SECRET_RE heads read: ${R.heads.join(', ')} (+ the agent namespace) — each held by a family`, R.heads);
 ok(VI.PURPOSES === VK.CATEGORIES && VI.PURPOSE_IDS.join() === VK.CATEGORY_IDS.join(), 'the inventory\'s purposes ARE the registry\'s categories (one list — the rail reads it)');
 {
   const off = VK.FAMILIES.filter((f) => { const st = (f.stores && f.stores[0]) || 'secrets'; const fam = VK.familyOf(st, f.sample); return !fam || fam.id !== f.id || VI.purposeOf({ store: st, entry: f.sample }) !== f.category || VK.categoryOf(st, f.sample) !== f.category; });
@@ -455,7 +455,7 @@ console.log('④ RED CONTROLS (in memory)');
   const docLess = census(VK.FAMILIES, factsOf(treeOf({ 'docs/kb-features.md': realRead('docs/kb-features.md').split('**Two-step codes (TOTP)**').join('**Codes**') })));
   ok(docLess.problems.length === 1 && /^totp·doc:/.test(docLess.problems[0]), 'no kb-features line naming the kind ⇒ RED', docLess.problems);
   const eng = realRead('src/server/vault-engine.js');
-  const newHead = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/vault-engine.js': eng.replace('(?:host|frp|file|apikey|totp|secret|provider):', '(?:host|frp|file|apikey|totp|secret|provider|vapid):') })));
+  const newHead = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/vault-engine.js': eng.replace('(?:host|frp|file|apikey|totp|secret|provider|keyfile):', '(?:host|frp|file|apikey|totp|secret|provider|keyfile|vapid):') })));
   ok(newHead.problems.length === 1 && /«vapid:» is held by no family/.test(newHead.problems[0]), 'a SECRET_RE head nobody holds (a new hub secret kind with no registry row) ⇒ RED', newHead.problems);
   const sourceLess = census(VK.FAMILIES, factsOf(treeOf({ 'src/server/mounts-plugins-wiring.js': realRead('src/server/mounts-plugins-wiring.js').replace("  passkeys: () =>", '  passkeysGone: () =>') })));
   ok(sourceLess.problems.length === 1 && /^passkey·list: the hub's wiring lists no source for the store «passkeys»/.test(sourceLess.problems[0]), 'a store with no source in the wiring ⇒ RED on its family\'s list surface', sourceLess.problems);

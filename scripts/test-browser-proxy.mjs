@@ -534,7 +534,7 @@ console.log('⑥ THE PERSON\'S DOORS — no bearer reaches a proxy login; an age
 {
   const RV = read('src/routes/vault.js'), RB = read('src/routes/browser.js'), RT = read('src/routes/browser-trace.js');
   const routes = ["app.get('/api/vault/proxy-logins', noStoreP(person(", "app.post('/api/vault/proxy-logins', noStoreP(person(", "app.delete('/api/vault/proxy-logins/:name', noStoreP(person(", "app.post('/api/vault/proxy-logins/move', noStoreP(person("];
-  ok(!!(routes.every((r) => RV.includes(r)) && RV.includes("const [pw] = take(req, 'proxyPassword');") && /take\(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'\); refusedBearer/.test(RV)),
+  ok(!!(routes.every((r) => RV.includes(r)) && RV.includes("const [pw] = take(req, 'proxyPassword');") && /take\(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword', 'proxyPassword'(?:, '\w+')*\); refusedBearer/.test(RV)),   // lane lg-vault-file: later body fields (the file's bytes, its passphrase) follow it in the list
     'the four routes sit behind person() — every bearer (agent, job, automation key) and a cross-site request refused; the password taken from the body at once, also on a refusal');
   ok(!!(/patch\.proxy !== undefined \|\| patch\.proxyCredential !== undefined\) && isAgentBearer\(req\)\) return res\.status\(403\)/.test(RT) && /input\.proxyCredential != null && input\.proxyCredential !== '' && refuseAgentBearer\(req, res,/.test(RB)),
     'an agent\'s token never changes a profile\'s proxy or its login (PATCH), and never names a vault entry at a creation');
