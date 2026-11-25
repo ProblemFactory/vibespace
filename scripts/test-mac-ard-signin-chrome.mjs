@@ -105,10 +105,10 @@ function paint() {
   return px;
 }
 function ardServer() {
-  const seen = { conns: 0, creds: [], refusedTypes: 0 };
+  const seen = { conns: 0, creds: [], refusedTypes: 0, held: 0 };
   const frame = paint();
   const u16 = (n) => Buffer.from([(n >> 8) & 255, n & 255]);
-  const st = { mode: 'accept' };
+  const st = { mode: 'accept', hold: null };   // r4456: st.hold = a promise — the Mac's DH challenge is HELD until it settles (a leg places a late challenge)
   const server = net.createServer((sock) => {
     seen.conns++;
     const c = { stage: 0, buf: Buffer.alloc(0), x: 0n };
@@ -124,8 +124,10 @@ function ardServer() {
           c.buf = b.subarray(1);
           if (b[0] !== 30) { seen.refusedTypes++; sock.destroy(); return; }
           c.x = BigInt('0x' + crypto.randomBytes(32).toString('hex'));
-          sock.write(Buffer.concat([u16(2), u16(KEYLEN), toBuf(P, KEYLEN), toBuf(modPow(2n, c.x, P), KEYLEN)]));
-          c.stage = 2; continue;
+          const challenge = () => sock.write(Buffer.concat([u16(2), u16(KEYLEN), toBuf(P, KEYLEN), toBuf(modPow(2n, c.x, P), KEYLEN)]));
+          c.stage = 2;
+          if (st.hold) { seen.held++; st.hold.then(challenge); continue; }   // r4456: the challenge HELD (the client's answer can only follow it)
+          challenge(); continue;
         }
         if (c.stage === 2) {
           if (b.length < 128 + KEYLEN) return;
@@ -340,10 +342,15 @@ console.log('§3b the armed moment, proven: the record\'s first look starved 400
 {
   ard.st.mode = 'silent';
   const early = await openAndAsk(desk, { holdGate: true, firstLookMs: 400, releaseOnArrival: true });
+  // r4456 (the same shape as §5's): each control below is read once the record HAS the word it judges (its first word; «Connecting…»),
+  // never at a guessed 300 ms after the sign-in was asked — a bound whose expiry is a named line. The first's absence half keeps its
+  // 300 ms window, now counted from its first word
+  if (!(await desk.until('window.__st.length > 0', 10000))) ok(false, 'harness: §3b: the starved record never took its first word within 10 s');
   await sleep(300); const stE = await desk.ev('window.__st'); await closeWins(desk);
   ok(early.held === 1 && stE[0] === Z('Connecting…') && !stE.includes(Z('Starting desktop…')), `RED CONTROL (the gate answered on its POST's arrival — §3's old rule): the starved record begins at ${Z('Connecting…')}, the runner's record`, stE);
   const bounded = await openAndAsk(desk, { holdGate: true, firstLookMs: 400 });
-  await sleep(300); const stB = await desk.ev('window.__st'); await closeWins(desk);
+  if (!(await desk.until(`window.__st.includes(${JSON.stringify(Z('Connecting…'))})`, 10000))) ok(false, `harness: §3b: the record never said ${Z('Connecting…')} within 10 s of the gate's answer`);
+  const stB = await desk.ev('window.__st'); await closeWins(desk);
   ok(bounded.held === 1 && bounded.armed === Z('Starting desktop…') && stB[0] === Z('Starting desktop…') && stB.includes(Z('Connecting…')), `…the gate held until the record is armed: the same starved record begins at ${Z('Starting desktop…')}, then ${Z('Connecting…')}`, stB);
 }
 await desk.close();
@@ -367,12 +374,25 @@ console.log(`§5 RED control: the BASE vnc-view.js (${BASE_SHA}) on the same ins
 if (baseView) {
   const base = await page(1100, 800, `http://${IP}:${PORT}/?base=1`);
   ok((await base.ev('window.isSecureContext')) === false, 'the base page is on the insecure origin');
-  const n0 = ard.seen.creds.length;
+  // r4456 (the flake census, round 2): the RED is judged once noVNC's auth HAS rejected (the fact the control names), never at a
+  // guessed 6 s — the rejection comes after the Mac's challenge over the bridge and WebCrypto's failure, and a loaded box ran past 6
+  // s (empty, the control red with the bug present). PLACED first: the Mac's DH challenge HELD (st.hold) through the old 6 s — the
+  // old wait reads no rejection; then let go, and the wait on the rejection itself (a 30 s bound, its expiry a named line)
+  const REJ = 'window.__rejections.some((x) => /subtle|importKey|undefined/.test(x))';
+  const n0 = ard.seen.creds.length, h0 = ard.seen.held;
+  let letGo = null; ard.st.hold = new Promise((res) => { letGo = res; });
   const r = await openAndAsk(base);
   await base.ev(typeSignIn(USER, PASS));
-  await sleep(6000);
+  const asked = await (async () => { const t0 = Date.now(); while (ard.seen.held <= h0 && Date.now() - t0 < 15000) await sleep(50); return ard.seen.held > h0; })();   // the client chose the Mac's type: its challenge is held
+  if (!asked) ok(false, 'harness: the base page never chose the Mac\'s security type within 15 s (no challenge to hold)');
+  await sleep(6000);   // the old wait, read under the hold
+  const rejOld = await base.ev('window.__rejections');
+  ok(asked && !rejOld.some((x) => /subtle|importKey|undefined/.test(x)), `PLACED: with the Mac's challenge held, the OLD 6 s wait reads no rejection (${rejOld.length}) — the red control on a clock would say the bug is gone`, rejOld);
+  ard.st.hold = null; letGo();
+  const rejected = await base.until(REJ, 30000);
+  if (!rejected) ok(false, 'harness: noVNC\'s auth never rejected within 30 s of the challenge\'s release');
   const st = await base.ev(statusText), rej = await base.ev('window.__rejections');
-  ok(st === Z('Connecting…') && ard.seen.creds.length === n0 && rej.some((x) => /subtle|importKey|undefined/.test(x)), `RED: the base page still says ${Z('Connecting…')} 6 s after the sign-in, the Mac received nothing, noVNC's auth rejected unseen (${rej[0] || '—'})`, { st, sent: ard.seen.creds.length - n0, rej, asked: r.asked });
+  ok(st === Z('Connecting…') && ard.seen.creds.length === n0 && rej.some((x) => /subtle|importKey|undefined/.test(x)), `RED: the base page still says ${Z('Connecting…')} once noVNC's auth has rejected, the Mac received nothing, the rejection unseen by the page (${rej[0] || '—'})`, { st, sent: ard.seen.creds.length - n0, rej, asked: r.asked });
   await closeWins(base);
   await base.close();
 }
