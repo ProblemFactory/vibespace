@@ -40,7 +40,7 @@ const K = 6;
 
 /** r4213: A WORKER BOOT HELD UNTIL THE SCENE LETS IT GO (the hosted run of 2.369.419: a fixed 400 ms from the spawn raced the main
  *  thread). The held script claims the next boot number (boot-<k>, made exclusively), waits on its own thread for go-<k> or open (5 ms
- *  naps in Atomics.wait, never load), marks loaded-<k>, then loads the real worker. Its bound is HOLD_BOUND_MS: a hold that runs out
+ *  naps in Atomics.wait, never load), marks loaded-<k>, then loads the held-call worker below (the real worker; r4293). Its bound is HOLD_BOUND_MS: a hold that runs out
  *  marks expired-<k> and loads (the scene says it by name, never a hang). Each hold has a fresh folder of its own. */
 const HOLD_LET_MS = 400, HOLD_BOUND_MS = 60000;
 function heldBoot(tag) {
@@ -57,7 +57,7 @@ function heldBoot(tag) {
     "  Atomics.wait(nap, 0, 0, 5);",
     "}",
     "fs.writeFileSync(path.join(DIR, 'loaded-' + k), '');",
-    `require(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});`,
+    `require(${JSON.stringify(DEADW.script)});`,
     '',
   ].join('\n'));
   const has = (f) => fs.existsSync(path.join(dir, f));
@@ -69,6 +69,42 @@ function heldBoot(tag) {
     expired: () => fs.readdirSync(dir).filter((f) => f.startsWith('expired-')).map((f) => tag + ' boot ' + f.slice(8)),
   };
 }
+
+/** r4293 (the third hosted run of 2.369.419): A HELD CALL — a call that runs until the scene lets it go, its own deadline ends it, or its
+ *  worker is ended; never a fixed sleep raced against the main thread (a 4 s «dead path», a 2.5 s «live call», a 0.7 s «running op»).
+ *  The stand-in worker is the real worker with ONE change, in the test-only __sleep alone: asked for HELD_MS, its wait is held ON ITS
+ *  OWN THREAD until the hold's go file is there (5 ms naps in Atomics.wait, never load); any other ms sleeps as it was. Its bound is
+ *  HOLD_BOUND_MS: a held call that runs out marks expired-<thread>-<t0> and the suite's last line says it by name, never a hang. */
+const HELD_MS = 3600000;   // the ms a held __sleep is asked with (an hour: never reached — the go file, the call's deadline or its worker's end comes first)
+const HELD_ALL = [];
+function heldCalls(tag) {
+  const dir = fs.mkdtempSync(path.join(scratchDir('safe-fs-path-memory-held'), tag + '-'));
+  const script = path.join(dir, 'held-call-worker.js');
+  fs.writeFileSync(script, [
+    "const fs = require('fs'), path = require('path'), { threadId } = require('worker_threads');",
+    `const DIR = ${JSON.stringify(dir)}, HELD_MS = ${HELD_MS}, BOUND_MS = ${HOLD_BOUND_MS};`,
+    "const wait = Atomics.wait;",
+    "Atomics.wait = function (ia, i, v, ms) {",
+    "  if (ms !== HELD_MS) return wait.call(Atomics, ia, i, v, ms);",
+    "  const t0 = Date.now();",
+    "  while (!fs.existsSync(path.join(DIR, 'go'))) {",
+    "    if (Date.now() - t0 > BOUND_MS) { fs.writeFileSync(path.join(DIR, 'expired-' + threadId + '-' + t0), ''); break; }",
+    "    wait.call(Atomics, ia, i, v, 5);",
+    "  }",
+    "  return 'timed-out';",
+    "};",
+    `require(${JSON.stringify(path.join(REPO, 'src/safe-fs-worker.js'))});`,
+    '',
+  ].join('\n'));
+  const h = {
+    script,
+    let: () => fs.writeFileSync(path.join(dir, 'go'), ''),
+    expired: () => fs.readdirSync(dir).filter((f) => f.startsWith('expired-')).map((f) => tag + ' held call ' + f.slice(8)),
+  };
+  HELD_ALL.push(h);
+  return h;
+}
+const DEADW = heldCalls('dead');   // the suite's DEAD PATHS: a held call never let go — only its deadline (or its worker's end) ends it
 
 /** Wait for every worker of the pool to be live again (a respawn after an end), bounded and said by name at the bound. */
 async function untilLive(pool, n, boundMs = 10000) {
@@ -87,14 +123,14 @@ function httpAsk(port, p, headers = {}, method = 'GET') {
   });
 }
 
-/** The scene over a SafeFs module: K asks of the dead path, each after the pool is whole again → the ends, the answers, a path beside it. */
+/** The scene over a SafeFs module: K asks of the dead path (a held call: only its deadline ends it), each after the pool is whole again → the ends, the answers. */
 async function scene(Mod, tag, k = K) {
-  const pool = new Mod.SafeFs({ poolSize: 2, name: `path-memory-${tag}`, timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText });
+  const pool = new Mod.SafeFs({ poolSize: 2, name: `path-memory-${tag}`, timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText, workerPath: DEADW.script });
   const answers = [];
   try {
     for (let i = 0; i < k; i++) {
       await untilLive(pool, 2);
-      answers.push(await pool.call('__sleep', { path: `${DEAD}/file-${i}`, ms: 4000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code))));
+      answers.push(await pool.call('__sleep', { path: `${DEAD}/file-${i}`, ms: HELD_MS }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code))));
     }
     return { ends: pool.stats().timeouts, answers };
   } finally { pool.close(); }
@@ -131,12 +167,12 @@ async function sideOne(ok, console) {   // B-4b9a: started beside the other pool
   const RK = 3;   // the release's road needs no more asks to show itself
   const redP = Rel ? scene(Rel, 'release', RK).catch((e) => ({ ends: -1, answers: [String(e && e.message)] })) : null;   // the release's road runs beside the leg (its own pool); a throw is a red, never an unhandled rejection
   let shift = 0; const clock = () => performance.now() + shift;   // r275 should 3: the memory's own clock, advanced by the leg (never a real 3 s wait)
-  const pool = new SF.SafeFs({ poolSize: 2, name: 'path-memory', timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText, clock });
+  const pool = new SF.SafeFs({ poolSize: 2, name: 'path-memory', timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText, clock, workerPath: DEADW.script });
   const answers = [];
   try {
     for (let i = 0; i < K; i++) {
       await untilLive(pool, 2);
-      answers.push(await pool.call('__sleep', { path: `${DEAD}/file-${i}`, ms: 4000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code))));
+      answers.push(await pool.call('__sleep', { path: `${DEAD}/file-${i}`, ms: HELD_MS }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code))));
     }
     const ends = pool.stats().timeouts;
     await untilLive(pool, 2);
@@ -147,14 +183,14 @@ async function sideOne(ok, console) {   // B-4b9a: started beside the other pool
       `ONE DEAD THING: ${K} asks of files in a dead folder ended ${ends} workers — the second sibling names their folder (the law: 2), the rest refused by name (${answers.slice(2).join(', ')}); a path beside it answered (${alive})`, { ends, answers, alive });
     // after the bound the path is asked again — one more end, never a path refused for good
     shift += 3100; await untilLive(pool, 2);
-    const again = await pool.call('__sleep', { path: `${DEAD}/file-again`, ms: 4000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code)));
+    const again = await pool.call('__sleep', { path: `${DEAD}/file-again`, ms: HELD_MS }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code)));
     ok(again === 'deadline' && pool.stats().timeouts === ends + 1, `after its bound the dead path is asked again (${again}; ends ${pool.stats().timeouts})`, { again });
   } finally { pool.close(); }
   // THE SAME dead path asked K times: ONE end
-  const same = new SF.SafeFs({ poolSize: 2, name: 'path-memory-same', timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText });
+  const same = new SF.SafeFs({ poolSize: 2, name: 'path-memory-same', timeouts: { default: 15000, __sleep: 300 }, hungMs: 3000, mountsText, workerPath: DEADW.script });
   try {
     const got = [];
-    for (let i = 0; i < K; i++) { await untilLive(same, 2); got.push(await same.call('__sleep', { path: `${DEAD}/one-file`, ms: 4000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code)))); }
+    for (let i = 0; i < K; i++) { await untilLive(same, 2); got.push(await same.call('__sleep', { path: `${DEAD}/one-file`, ms: HELD_MS }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && e.code)))); }
     ok(same.stats().timeouts === 1 && got.slice(1).every((a) => a === 'path-hung'), `ONE DEAD THING, ONE CALL: the same dead path asked ${K} times ended ${same.stats().timeouts} worker (${got.join(', ')})`, got);
   } finally { same.close(); }
   // RED CONTROL: the release's pool (a deadline end remembers nothing) — every ask of the dead path ends a fresh worker
@@ -271,17 +307,27 @@ console.log('①e the pool\'s own mount reading is local-index\'s (parity: the p
 console.log('①d the call the worker was RUNNING is the dead one — never a call queued behind it');
 await told(sideD);
 async function sideD(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
-  const run = async (Mod, probeMs = null) => {
-    const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-queue', timeouts: { default: 15000 }, hungMs: 60000 });
+  // r4293 (the third hosted run of 2.369.419, Node 22, load 7.4): THE RED's PATIENT CALLER WAS THE HEALTHY RUN's — its probe (the
+  // healthy run's bound + 50 ms) was judged against the copy's OWN run: the healthy run's queued deadline fired 211 ms late (it ran 511
+  // ms), the copy's on time (300 ms ⇒ 1.5 × 300 = 450 < 561): the patient caller got through and the control said green for the fault.
+  // Now each run is judged by ITS OWN run: `ranMs` is what the scene saw of this run — the queued call's deadline (QUEUED_MS) or the time
+  // from the hung call's send to the queued call's end, whichever is longer (the product's own measure, bracketed from outside: never
+  // shorter than it); the copy's caller is that + 50 ms. And the hung call is a HELD call (only the queued call's deadline ends it)
+  const QUEUED_MS = 300;
+  const run = async (Mod) => {
+    const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-queue', timeouts: { default: 15000 }, hungMs: 60000, workerPath: DEADW.script });
     try {
-      const A = pool.call('__sleep', { path: '/scratch-b23e5/q/dead', ms: 4000 }, { timeoutMs: 5000 }).catch(() => {});   // the hung one, long deadline
-      const B = pool.call('__sleep', { path: '/scratch-b23e5/q/healthy/f', ms: 1 }, { timeoutMs: 300 }).catch(() => {});   // queued behind it in the same worker
+      let endedAt = null; const t0 = performance.now();
+      const A = pool.call('__sleep', { path: '/scratch-b23e5/q/dead', ms: HELD_MS }, { timeoutMs: 5000 }).catch(() => {});   // the hung one (held), long deadline
+      const B = pool.call('__sleep', { path: '/scratch-b23e5/q/healthy/f', ms: 1 }, { timeoutMs: QUEUED_MS }).catch(() => { endedAt = performance.now(); });   // queued behind it in the same worker: its deadline ends the worker
       await Promise.all([A, B]);
-      const m = pool._hung.get('/scratch-b23e5/q/dead'), bound = m ? m.under : null, probe = probeMs || (Number.isFinite(bound) ? Math.ceil(bound) + 50 : 400);
+      const m = pool._hung.get('/scratch-b23e5/q/dead'), bound = m ? m.under : null, probe = Number.isFinite(bound) ? Math.ceil(bound) + 50 : 400;
+      const ranMs = endedAt == null ? null : Math.max(QUEUED_MS, endedAt - t0), ranProbe = ranMs == null ? null : Math.ceil(ranMs) + 50;
       // (its delta read S1) ended EARLY by the queued call's deadline, it refuses only callers that wait no longer than it ran — a caller
       // 50 ms more patient than that is asked again (the 1.5× slack is for an op that ran out its OWN deadline)
       // asked by a caller no more patient than the queued call (200 ms ≤ its 300 ms deadline; the early bound is the ~300 ms it ran)
-      return { dead: !!pool._hungOf({ path: '/scratch-b23e5/q/dead' }, '__sleep', 200), healthy: !!pool._hungOf({ path: '/scratch-b23e5/q/healthy/f' }, '__sleep', 200), bound, probe, patientRefused: !!pool._hungOf({ path: '/scratch-b23e5/q/dead' }, '__sleep', probe) };
+      const refused = (ms) => (ms == null ? null : !!pool._hungOf({ path: '/scratch-b23e5/q/dead' }, '__sleep', ms));
+      return { dead: !!pool._hungOf({ path: '/scratch-b23e5/q/dead' }, '__sleep', 200), healthy: !!pool._hungOf({ path: '/scratch-b23e5/q/healthy/f' }, '__sleep', 200), bound, probe, patientRefused: refused(probe), ranMs, ranProbe, ranRefused: refused(ranProbe) };
     } finally { pool.close(); }
   };
   const nowP = run(SF);
@@ -293,8 +339,9 @@ async function sideD(ok, console) {   // B-4b9a: started beside the other pool s
   ok(!!red && red.healthy && !red.dead, `RED CONTROL (the timed-out call blamed): the healthy queued path is remembered and the dead one is not (${JSON.stringify(red)})`, red);
   const EARLY = ', { early: running !== call });';
   const E = src.split(EARLY).length === 2 ? mutantCopies('safe-fs-path-memory-e', REPO).load('src/safe-fs.js', anchored(src, EARLY, ', { early: false });', 'early-as-full'), 'early-as-full') : null;
-  const redE = E ? await run(E, now.probe) : null;
-  ok(!!redE && redE.dead && redE.patientRefused, `RED CONTROL (an early end taken as a full deadline, 1.5×): the ${now.probe} ms caller of a path that ran only ${now.bound && Math.round(now.bound)} ms is refused (${JSON.stringify(redE)})`, redE);
+  const redE = E ? await run(E) : null;
+  ok(now.ranMs != null && now.ranMs >= now.bound && !now.ranRefused, `each run judged by its OWN run: the scene's measure of this run (${now.ranMs != null && now.ranMs.toFixed(1)} ms) is never shorter than the pool's own (${now.bound && Math.round(now.bound)} ms), and its ${now.ranProbe} ms caller is asked again too (${!now.ranRefused})`, now);
+  ok(!!redE && redE.dead && redE.ranRefused, `RED CONTROL (an early end taken as a full deadline, 1.5×): the ${redE && redE.ranProbe} ms caller of a path that ran only ${redE && redE.ranMs != null && redE.ranMs.toFixed(1)} ms (ITS OWN run) is refused (${JSON.stringify(redE)})`, redE);
 }
 
 console.log('①g 主开发\'s r275: a person\'s own press is tried; a path that replies is forgiven; a repeat end doubles its time');
@@ -315,7 +362,7 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
   };
   const run = async (Mod, { workerPath = null, warm = true, hold = null } = {}) => {
     let shift = 0; const clock = () => performance.now() + shift;
-    const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-press', timeouts: { default: 15000, __sleep: 300 }, hungMs: 30000, mountsText, clock, ...(workerPath ? { workerPath } : {}) });
+    const pool = new Mod.SafeFs({ poolSize: 1, name: 'path-memory-press', timeouts: { default: 15000, __sleep: 300 }, hungMs: 30000, mountsText, clock, workerPath: workerPath || DEADW.script });   // r4293: the dead press is a held call
     const out = {};
     try {
       out.warmMs = [await ready(pool, warm, hold)];
@@ -333,12 +380,12 @@ async function sideG(ok, console) {   // B-4b9a: started beside the other pool s
       await pool._noteHung({ path: '/scratch-b23e5/still/x' }, 'stat', 15000);
       const ends0 = pool.stats().timeouts, until0 = (pool._hung.get('/scratch-b23e5/still/x') || {}).until;
       out.aliveAtDeadPress = pool.stats().alive;
-      out.deadPress = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: 4000 }, { attended: true }));
+      out.deadPress = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: HELD_MS }, { attended: true }));
       out.deadEnds = pool.stats().timeouts - ends0;
       out.renewed = ((pool._hung.get('/scratch-b23e5/still/x') || {}).until || 0) > (until0 || 0);
       out.warmMs.push(await ready(pool, warm, hold));   // the worker the dead press ended comes back: its first op after a fresh boot is a timed one too
       if (hold) hold.open();   // the leg's held boots are done: any later boot goes at once
-      out.unmarked = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: 4000 }));
+      out.unmarked = await word(pool.call('__sleep', { path: '/scratch-b23e5/still/x', ms: HELD_MS }));
       out.unmarkedEnds = pool.stats().timeouts - ends0;
       // r316 MUST 1: a LISTING's entry (the path itself) is forgiven only by a listing that replies at exactly that path — never by the
       // folder's own other op, nor by a reply under it
@@ -694,15 +741,21 @@ async function sideH(ok, console) {   // B-4b9a: started beside the other pool s
     ok(!!rc && rc.linkFolder === true, 'RED CONTROL (the links\' answer not read, in a copy): the two links name their healthy folder — everything under it refused', rc);
     // THE LOOK TAKES AN IDLE WORKER ONLY (its read; r1378 (4)): with the one worker held by a live call, the look never queues behind it
     // (its 1.5 s deadline would end that call's worker) — the folder is not named now (a later sibling names it); the held call answers
+    // r4293: the live call is a HELD call (its own hold, one a run), let go by the scene only once the climb's look has CONCLUDED — no
+    // idle worker within its window (the law), or its own deadline queued behind the call (the copy) — never a 2.5 s sleep raced against
+    // the look's 1.5 s window and whatever the main thread did between the call's send and the look's
     const busy = async (Mod, tag) => {
-      const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-busy-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText: async () => ROOTMI });
+      const hold = heldCalls(`busy-${tag}`);
+      const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-busy-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText: async () => ROOTMI, workerPath: hold.script });
       try {
         await untilLive(pool, 1);
         const ends0 = pool.stats().timeouts;
-        const held = pool.call('__sleep', { path: '/scratch-b23e5/busy/x', ms: 2500 }, { timeoutMs: 6000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && (e.code || e.message))));
+        const held = pool.call('__sleep', { path: '/scratch-b23e5/busy/x', ms: HELD_MS }, { timeoutMs: 6000 }).then(() => 'answered', (e) => (e && e.safeFsTimeout ? 'deadline' : String(e && (e.code || e.message))));
         await sleep(50);
-        await pool._noteHung({ path: path.join(Y, 'a.txt') }, 'stat', 15000); await pool._noteHung({ path: path.join(Y, 'b.txt') }, 'stat', 15000);
-        return { named: !!pool._hungOf({ path: path.join(Y, 'c.txt') }, 'stat', 15000), held: await held, ends: pool.stats().timeouts - ends0 };
+        await pool._noteHung({ path: path.join(Y, 'a.txt') }, 'stat', 15000); await pool._noteHung({ path: path.join(Y, 'b.txt') }, 'stat', 15000);   // the climb (its look) has concluded
+        const named = !!pool._hungOf({ path: path.join(Y, 'c.txt') }, 'stat', 15000), outAtLook = pool.stats().inflight;
+        hold.let();
+        return { named, outAtLook, held: await held, ends: pool.stats().timeouts - ends0 };
       } finally { pool.close(); }
     };
     const bP = busy(SF, 'now');   // the scene and its RED copy side by side
@@ -710,7 +763,7 @@ async function sideH(ok, console) {   // B-4b9a: started beside the other pool s
     const queued = src.split(LI).length === 2 ? mutantCopies('safe-fs-path-memory-busy', REPO).load('src/safe-fs.js', anchored(src, LI, "    const once = () => this.call('lstatKinds', payload, { timeoutMs: CLIMB_LOOK_MS, look: true })", 'look-queued'), 'look-queued') : null;
     const [b, bq] = await Promise.all([bP, queued ? busy(queued, 'queued') : null]);
     console.log('    the busy worker: ' + JSON.stringify({ now: b, queued: bq }));
-    ok(!b.named && b.held === 'answered' && b.ends === 0, `the look takes an IDLE worker only: the one worker held by a live call, the folder is not named now (${b.named}) and the held call answers (${b.held}; ${b.ends} worker ended)`, b);
+    ok(!b.named && b.outAtLook === 1 && b.held === 'answered' && b.ends === 0, `the look takes an IDLE worker only: the one worker held by a live call (still out when the look concluded: ${b.outAtLook}), the folder is not named now (${b.named}) and the held call answers once let go (${b.held}; ${b.ends} worker ended)`, b);
     ok(!!bq && bq.held !== 'answered' && bq.ends >= 1, `RED CONTROL (the look queued behind the live call, in a copy): its short deadline ends the worker under the held call (${bq && bq.held}; ${bq && bq.ends} ended)`, bq);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 }
@@ -950,7 +1003,7 @@ await told(sideK);
 async function sideK(ok, console) {   // B-4b9a: started beside the other pool scenes (above), told here
   const word = (p) => p.then(() => 'answered', (e) => (e && e.code === 'path-trying' ? 'still trying' : e && e.code === 'path-hung' ? (e.tried ? 'path-hung, tried' : 'path-hung') : e && e.safeFsTimeout ? 'deadline' : String(e && e.code)));
   const run = async (Mod, tag) => {
-    const pool = new Mod.SafeFs({ poolSize: 4, name: `path-memory-ten-${tag}`, timeouts: { default: 15000, __sleep: 400 }, hungMs: 60000, mountsText });
+    const pool = new Mod.SafeFs({ poolSize: 4, name: `path-memory-ten-${tag}`, timeouts: { default: 15000, __sleep: 400 }, hungMs: 60000, mountsText, workerPath: DEADW.script });   // r4293: the dead presses are held calls
     try {
       await untilLive(pool, 4);
       await pool._noteHung({ path: '/scratch-b23e5/ten' }, 'stat', 15000);   // remembered dead: an unmarked call is refused, a press is tried
@@ -958,8 +1011,8 @@ async function sideK(ok, console) {   // B-4b9a: started beside the other pool s
       // THE PERSON'S TEN PRESSES while the first is out: Open on the folder five times (one call: they join), then five files in it
       // (another call each, refused by the same remembered path: told «still trying»)
       const presses = [];
-      for (let i = 0; i < 5; i++) presses.push(word(pool.call('__sleep', { path: '/scratch-b23e5/ten', ms: 4000 }, { attended: true })));
-      for (let i = 0; i < 5; i++) presses.push(word(pool.call('__sleep', { path: `/scratch-b23e5/ten/f-${i}`, ms: 4000 }, { attended: true })));
+      for (let i = 0; i < 5; i++) presses.push(word(pool.call('__sleep', { path: '/scratch-b23e5/ten', ms: HELD_MS }, { attended: true })));
+      for (let i = 0; i < 5; i++) presses.push(word(pool.call('__sleep', { path: `/scratch-b23e5/ten/f-${i}`, ms: HELD_MS }, { attended: true })));
       const words = await Promise.all(presses);
       const sent = pool._seq - seq0, ends = pool.stats().timeouts - ends0, trying = pool._trying ? pool._trying.size : 0;
       // A HEALTHY press out on a folder (its listing; a dead child mount holds such a listing its whole deadline): a PRESS under it (a
@@ -978,7 +1031,7 @@ async function sideK(ok, console) {   // B-4b9a: started beside the other pool s
       await untilLive(pool, 4);
       await pool._noteHung({ path: '/scratch-b23e5/two/a.txt' }, 'stat', 15000); await pool._noteHung({ path: '/scratch-b23e5/two/b.txt' }, 'stat', 15000);
       const named2 = !!pool._hungOf({ path: '/scratch-b23e5/two/c.txt' }, 'stat', 15000), s2 = pool._seq;
-      const two = await Promise.all(['a.txt', 'b.txt', 'c.txt'].map((n) => word(pool.call('__sleep', { path: `/scratch-b23e5/two/${n}`, ms: 4000 }, { attended: true }))));
+      const two = await Promise.all(['a.txt', 'b.txt', 'c.txt'].map((n) => word(pool.call('__sleep', { path: `/scratch-b23e5/two/${n}`, ms: HELD_MS }, { attended: true }))));
       return { sent, ends, words, trying, pressUnder, readUnder, writesSent, held, named2, twoSent: pool._seq - s2, two };
     } finally { pool.close(); }
   };
@@ -1061,7 +1114,7 @@ console.log('①l r1378 (1): the mark is NOT an access door — a marked call is
       for (const [k, op, payload] of [['a parked mount', 'stat', { path: '/scratch-b23e5/parked/a' }], ['a file over the bound', 'readText', { path: big, maxSize: 10 * 1024 * 1024 }], ['a file the person may not read', 'readText', { path: shut, maxSize: 1024 }], ['a folder read as a file', 'readText', { path: T, maxSize: 1024 }]]) {
         out[k] = [await say(pool.call(op, payload)), await say(pool.call(op, payload, { attended: true }))];
       }
-      out.deadline = await say(pool.call('__sleep', { path: '/scratch-b23e5/slow-x', ms: 4000 }, { attended: true }));   // a 4 s stall, a 300 ms bound: a widened deadline would ANSWER
+      out.deadline = await say(pool.call('__sleep', { path: '/scratch-b23e5/slow-x', ms: 4000 }, { attended: true }));   // a 4 s stall, a 300 ms bound: a widened deadline would ANSWER (r4293: kept a SLEEP, never a held call — its power is that answer)
       out.workers = pool._workers.length;
       return out;
     } finally { pool.close(); }
@@ -1150,11 +1203,11 @@ async function sideO(ok, console) {   // B-4b9a: started beside the other pool s
     `«THE FIRST READ IS MARKED ONCE»: the code editor's two loads ${ceNow}, the document window's two first loads ${dwNow}; REDs (each reset cut, lifted): every load marked (${ceRed} · ${dwRed})`, { ceNow, ceRed, dwNow, dwRed });
   // (4c) THE HOLD RELEASED when the worker DIES or the send FAILS (not only an answer or a deadline)
   const hold = async (Mod, tag) => {
-    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-hold-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText });
+    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-hold-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText, workerPath: DEADW.script });   // r4293: the held press is a held call (only the worker's death ends it)
     try {
       await untilLive(pool, 1);
       await pool._noteHung({ path: '/scratch-b23e5/held' }, 'stat', 15000);
-      const p = pool.call('__sleep', { path: '/scratch-b23e5/held', ms: 4000 }, { attended: true, timeoutMs: 15000 }).catch((e) => String(e && e.message));
+      const p = pool.call('__sleep', { path: '/scratch-b23e5/held', ms: HELD_MS }, { attended: true, timeoutMs: 15000 }).catch((e) => String(e && e.message));
       await sleep(50); const during = pool._trying ? pool._trying.size : 0;
       pool._workers[0].worker.terminate();   // the worker DIES under the held press
       const died = await p; await sleep(20); const afterDeath = pool._trying ? pool._trying.size : 0;
@@ -1304,10 +1357,10 @@ console.log('①p r2006 / r2198 / r2221 / r2222 (the save\'s laws): A one write 
   const noQueue = fwSrc.split(QLINE).length === 2 ? mutantCopies('safe-fs-path-memory-fw', REPO).load('src/server/file-writes.js', anchored(fwSrc, QLINE, '  const answer = Promise.resolve().then(() => run());', 'no-queue'), 'no-queue') : null;
   // A1 / A5 on the real pool: a call that ran out its deadline WHILE QUEUED never started; the one the worker was running may have run
   const poolMarks = async (Mod, tag) => {
-    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-marks-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText });
+    const pool = new Mod.SafeFs({ poolSize: 1, name: `path-memory-marks-${tag}`, timeouts: { default: 15000 }, hungMs: 60000, mountsText, workerPath: DEADW.script });   // r4293: the running op is a held call (only the queued call's deadline ends it)
     try {
       await untilLive(pool, 1);
-      const pa = pool.call('__sleep', { ms: 700 }, { timeoutMs: 5000 }).then(() => null, (e) => e);
+      const pa = pool.call('__sleep', { ms: HELD_MS }, { timeoutMs: 5000 }).then(() => null, (e) => e);
       const pb = pool.call('__sleep', { ms: 1 }, { timeoutMs: 150 }).then(() => null, (e) => e);
       const [a1, b1] = await Promise.all([pa, pb]);
       return { a: a1 && { msg: String(a1.message).slice(0, 40), mayHaveRun: !!a1.mayHaveRun, out: FW.outcomeOf(a1) }, b: b1 && { msg: String(b1.message).slice(0, 40), neverStarted: !!b1.neverStarted, out: FW.outcomeOf(b1) } };
@@ -1615,4 +1668,6 @@ console.log('② the cost of one parked thread, measured (printed, never asserte
   } finally { pool.close(); }
 }
 
+// r4293: no HELD call of the suite ran out its bound (a held call is let go, ended by its deadline, or ended with its worker)
+{ const ran = HELD_ALL.flatMap((h) => h.expired()); ok(ran.length === 0, `no held call ran out its bound (${HOLD_BOUND_MS / 1000} s): each was let go or ended by its deadline or its worker's end${ran.length ? ' — RAN OUT: ' + ran.join(', ') : ''}`, ran); }
 report();
