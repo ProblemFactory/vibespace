@@ -664,7 +664,11 @@ async function outsideThePass(ENGmod, label) {
     await sleep(1100);
     const br = Wr.sends.length;
     const ps = Array.from({ length: 12 }, (_, k) => er.attachment('pr', 'c0000', `att${k}`, { msg: cr.recs[cr.recs.length - 1].vendorId }));
-    await sleep(150);   // two left at once, the third sleeps, nine queue
+    // two left at once, the third sleeps, nine queue — waited for as a FACT (two vendor calls out), never a fixed 150 ms (B-fbd6,
+    // 主开发 r4365: the flake census of 2.369.419); its bound fails by a named harness line
+    let two = false;
+    for (let k = 0; k < 500 && !(two = Wr.sends.length - br >= 2); k++) await sleep(10);
+    if (!two) ok(false, `HARNESS (remove under a full queue, ${label}): two attachment calls never left within 5 s (${Wr.sends.length - br} left)`);
     const tr = performance.now();
     await er.remove('pr');
     const rs = await Promise.race([Promise.all(ps), sleep(9000).then(() => null)]);
@@ -683,7 +687,7 @@ async function outsideThePass(ENGmod, label) {
     ] });
     ok(cwr.setup, 'CONTROL setup: the r2 build\'s paceWait (a gone entry = "nothing to pace against" = return) is reconstructed', cwr.missing);
     const c3 = await removeUnderQueue(cwr.mod, 'ctl');
-    ok(c3.after >= 8 && c3.within50ms >= 8 && c3.unitsAfter >= 160, `CONTROL: ${c3.after} calls = ${c3.unitsAfter} units leave within 50 ms of the remove (${c3.within50ms}) — the leg above would go red`, JSON.stringify(c3));
+    ok(c3.after >= 8 && c3.unitsAfter >= 160, `CONTROL: ${c3.after} calls = ${c3.unitsAfter} units leave AFTER the remove, counted (the queued callers let through; ${c3.within50ms} of them within 50 ms, printed, never judged: B-fbd6, a control is judged on its fault, never a window) — the leg above would go red`, JSON.stringify(c3));
     for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
   }
   // CONTROL: the R5 build's paceWait — no arrival order, no reservation (the two are one fix: with the FIFO alone the
@@ -2737,18 +2741,24 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
       const ts = [];
       for (let i = 0; i < 15; i++) { const t0 = performance.now(); ed.dueListOf('due'); ts.push(performance.now() - t0); }
       ts.sort((a, b) => a - b);
-      return { got, ms: ts[7] };
+      // B-fbd6 (主开发 r4365: a ratio is restated on a FACT): the rows ONE due-list call reads from the index, counted by a
+      // proxy on the index's two row maps (rows() — the due walk's candidates; live() — a scan of every row)
+      let reads = 0;
+      const counted = (o) => new Proxy(o, { get(tg, k, rc) { if (typeof k === 'string') reads += 1; return Reflect.get(tg, k, rc); } });
+      const rows0 = ed.store.index.rows, live0 = ed.store.index.live;
+      ed.store.index.rows = (...a) => counted(rows0(...a)); ed.store.index.live = (...a) => counted(live0(...a));
+      try { ed.dueListOf('due'); } finally { ed.store.index.rows = rows0; ed.store.index.live = live0; }
+      return { got, ms: ts[7], reads };
     } finally { ed.stop(); }
   };
   const m10 = await meter(ENG, 10000, 20, 'real'), m90 = await meter(ENG, 90000, 20, 'real'), m90d = await meter(ENG, 90000, 2000, 'real');
-  console.log(`    dueList (median of 15): 10 000 rows · 20 due ${m10.ms.toFixed(3)} ms · 90 000 rows · 20 due ${m90.ms.toFixed(3)} ms · 90 000 rows · 2 000 due ${m90d.ms.toFixed(3)} ms`);
+  console.log(`    dueList (median of 15; printed, never judged): 10 000 rows · 20 due ${m10.ms.toFixed(3)} ms · 90 000 rows · 20 due ${m90.ms.toFixed(3)} ms · 90 000 rows · 2 000 due ${m90d.ms.toFixed(3)} ms`);
   ok(m10.got === 20 && m90.got === 20 && m90d.got === 2000, `the index answers the due rows exactly (${m10.got} / ${m90.got} / ${m90d.got})`);
-  ok(m90.ms < 2, `90 000 rows, 20 due ⇒ dueList < 2 ms (${m90.ms.toFixed(3)} ms)`);
-  ok(m90.ms < 3 * m10.ms + 0.3 && m90d.ms > m90.ms, `the meter is linear in DUE, not rows (9× the rows: ${(m90.ms / m10.ms).toFixed(2)}×; 100× the due: ${(m90d.ms / m90.ms).toFixed(1)}×)`);
+  ok(m10.reads === m90.reads && m90.reads <= 3 * 20 && m90d.reads >= 2000, `the walk reads the DUE rows, not the rows (counted rows read a call: 10 000 rows · 20 due ${m10.reads}, 90 000 rows · 20 due ${m90.reads}, 90 000 rows · 2 000 due ${m90d.reads})`, { m10, m90, m90d });
   // CONTROL ② the scan restored ⇒ the meter follows the rows
   const scanEng = Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, '    if (all) {\n      const live = store.index.live();   // B-dfa4 U2: this account\'s rows only (the store keeps each account\'s keys)\n      for (const k of store.index.keysOf(rec.id)) { const en = live[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true); }', '    if (true) {\n      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, all);', 'indexed dueList'), 'due-scan');
   const s10 = await meter(scanEng, 10000, 20, 'scan'), s90 = await meter(scanEng, 90000, 20, 'scan');
-  ok(s90.got === 20 && !(s90.ms < 2 && s90.ms < 3 * s10.ms + 0.3), `CONTROL: the scan restored ⇒ the meter follows the ROWS (90 000 rows · 20 due: ${s90.ms.toFixed(2)} ms, ${(s90.ms / s10.ms).toFixed(1)}× the 10 000-row figure)`);
+  ok(s90.got === 20 && s10.reads >= 10000 && s90.reads >= 90000, `CONTROL: the scan restored ⇒ the walk reads EVERY row (counted rows read a call: 10 000 rows ${s10.reads}, 90 000 rows ${s90.reads}; ${s90.ms.toFixed(2)} ms, printed)`, { s10, s90 });
   for (const r of copiesCensus(Mf.files, Mf.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
 }
 
