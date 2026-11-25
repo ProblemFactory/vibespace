@@ -242,11 +242,15 @@ class MachineMounts {
     // minted before it is UNKNOWN to the sweep, which revokes none of them until the list reads (the copy put back: no mark) or a
     // person decides (a machine removed revokes its own — onMachineUnpaired)
     const tornCopy = a.state === 'missing' && a.setAside ? a.setAside : null;   // 2b: torn bytes lift through the helper (kept aside, then empty)
+    // r3982 (3): a lift with no mounts read (torn bytes kept, a gone file) mid-life OWES the one-time legacy ingest to the next start —
+    // marked in the list it saves (the torn lift saves: the next start reads data, and without the mark the ingest never ran again)
+    if (a.state !== 'data' && atLift) this._state.legacyOwed = true;
     if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save(); }
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
-    else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores is not run mid-life (a legacy store still there is ingested by a start that finds no machine-mounts.json)');
+    else if (a.state === 'data' && !atLift && this._state.legacyOwed) { delete this._state.legacyOwed; this.log('machine-mounts.json: the one-time ingest of the legacy mount stores owed by a mid-life lift runs at this start'); this._migrateLegacy(); }
+    else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores is not run mid-life (a legacy store still there is ingested at the next start: the lift marks it owed)');
   }
   _asideName(mark = Date.now()) { return this._file + '.corrupt-' + mark; }   // ONE set-aside name: the helper's keep and the copies' prefix (the census counts the names)
   /** 2b: the hold is the helper's — every guard of this file asks it by its old name: { code, at } while held, else null */
@@ -280,6 +284,14 @@ class MachineMounts {
     } catch { return false; }
   }
 
+  /** r3982 (1): did a run on the machine NOT reach it — by the run's OWN result (`_run` resolves, it never throws for a machine that does
+   *  not reply): the device road's «device unreachable», an ssh refusal or ssh's own failure (255); for a command that cannot fail once it
+   *  runs (`… || true`), any other code too */
+  _notReached(r, { cannotFail = false } = {}) {
+    if (!r || typeof r !== 'object') return true;
+    if (r.refusal || r.code === 255 || /^device unreachable: /.test(String(r.stderr || ''))) return true;
+    return cannotFail ? r.code !== 0 : false;
+  }
   /** r3813: is the mount's machine in the machines list (a held list counts as listed — unknown, never «not listed») */
   _hostListed(hostId) { try { this.hosts.get(hostId); return true; } catch (e) { return !(e && e.code === 'host_not_found'); } }
   /** the MOVE (part one): a mount's machine is NOT LISTED but a kept copy of hosts.json's torn bytes may name it — never «removed».
@@ -291,6 +303,7 @@ class MachineMounts {
     if (!h || typeof h.namedByCopy !== 'function') return false;
     let listed = true; try { this.hosts.get(hostId); } catch (e) { listed = !(e && e.code === 'host_not_found'); }   // held ⇒ «listed»: unknown, and the page shows no machine as removed while held
     if (listed) return false;
+    if (typeof h.removedByPerson === 'function' && h.removedByPerson(hostId)) return false;   // r3982 (2): a PERSON's removal is «removed» at once — asked before the copies (more than the look reads must not make it unknown)
     let named = false; try { named = !!h.namedByCopy(hostId); } catch { return null; }
     // the copies not read: an unread answer names every id but a person's removal (that one is «removed» at once). This run's own tear
     // says «may still name»; otherwise the page waits for the read, said neutrally — an ordinary boot's first seconds would otherwise
@@ -639,9 +652,11 @@ class MachineMounts {
     let side = listed ? null : 'not-listed';
     if (listed) try {
       if (rec.method === 'rclone-webdav' || rec.method === 'rclone-nfs' || rec.method === 'mount_webdav') {
-        await this._run(rec.hostId, 'sh', ['-c', `fusermount -u '${rec.mountpoint}' 2>/dev/null || umount '${rec.mountpoint}' 2>/dev/null || true`]);
+        const r = await this._run(rec.hostId, 'sh', ['-c', `fusermount -u '${rec.mountpoint}' 2>/dev/null || umount '${rec.mountpoint}' 2>/dev/null || true`]);
+        if (this._notReached(r, { cannotFail: true })) side = 'not-reached';   // r3982 (1): the run RESOLVES on a machine that does not reply — its own result says so
       } else if (rec.method === 'net-use') {
-        await this._run(rec.hostId, 'cmd', ['/c', `net use ${rec.mountpoint} /delete /y`]);
+        const r = await this._run(rec.hostId, 'cmd', ['/c', `net use ${rec.mountpoint} /delete /y`]);
+        if (this._notReached(r)) side = 'not-reached';
       }
     } catch { side = 'not-reached'; }
     try { this.mountTokens.revoke?.(rec.tokenId); } catch { }

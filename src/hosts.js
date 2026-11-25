@@ -402,6 +402,8 @@ class HostManager {
     return this._copies().names(String(id));
   }
   /** a PERSON's removal of machine `id` (remove()) — the newest 200 kept in the store itself; a machine added again leaves the list */
+  /** r3982 (2): did a PERSON remove machine `id` (its id in the removed list this store keeps) — asked by the mounts list before the copies */
+  removedByPerson(id) { return Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id)); }
   _noteRemoved(id) { const was = Array.isArray(this._state.removedIds) ? this._state.removedIds : []; this._state.removedIds = [...was.filter((x) => x !== id), String(id)].slice(-200); }
   _noteAdded(id) { if (Array.isArray(this._state.removedIds) && this._state.removedIds.includes(String(id))) this._state.removedIds = this._state.removedIds.filter((x) => x !== String(id)); }
   _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this._file, prefix: path.basename(this._asideName()).replace(/\d+$/, ''), log: (m) => console.warn(m), omit: ['removedIds'] })); }   // (round wjgchwl6a (7): the removed list is no id)

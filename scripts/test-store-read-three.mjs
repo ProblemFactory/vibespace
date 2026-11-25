@@ -364,6 +364,10 @@ try {
     ok(!!bd && bd.first === false && bd.waiting && bd.words === 'a read waits' && bd.second === false && bd.during === 1 && bd.saidOnce === 1 && bd.up, 'a read past its bound is let go as the try\'s own (the try answers false), SAID once, carried in the hold\'s facts (`waiting`: the words say a read waits); no second read starts while it hangs; its late answer lifts the hold', bd);
     const bdx = await boundScene(mutant('src/store-read-hold.js', [[RACE, '    const first = await p;\n']]), 'bound-ctl');
     ok(!!bdx && bdx.first === 'not let go' && !bdx.waiting && bdx.saidOnce === 0, 'RED CONTROL — the bound cut (in a copy): the try waits on the hung read, and nothing says it', bdx);
+    const LATEJ = '    p.then((late) => judge(late)).catch(onErr);\n';
+    ok(HSRC2.split(LATEJ).length === 2, 'control setup: the let-go read\'s late answer is judged on one line (found once)');
+    const bdy = await boundScene(mutant('src/store-read-hold.js', [[LATEJ, '']]), 'bound-late-ctl');
+    ok(!!bdy && bdy.first === false && !bdy.up, 'RED CONTROL — the late answer not judged (in a copy): the storage answers after the bound and the hold stands', bdy);
   }
   {
     console.log('⑤ the helper: the family\'s ceiling on the shared pool');
@@ -759,20 +763,26 @@ try {
       // r3813 (the verifier's two facts, same follow): a REMOUNT on a machine not listed is refused as «not in the machines list» — never
       // «start its daemon» (the page offers no Remount there); a PUSH UNMOUNT whose machine side was not reached SAYS so (not listed, or no
       // answer), its token revoked and its record dropped as before
-      const sideRun = async (MMX, tag, { listed = false } = {}) => {
+      const sideRun = async (MMX, tag, { listed = false, run = null } = {}) => {   // run: the machine's answer, in the product's real shape (r3982 (1): `_run` RESOLVES, it never throws)
         const d = dirOf(tag); fs.writeFileSync(path.join(d, 'machine-mounts.json'), JSON.stringify({ mounts: [
           { id: 'mm-push01', dir: 'push', hostId: 'host-made07', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro', method: 'rclone-webdav', tokenId: 'tok-made07', createdAt: 1 },
           { id: 'mm-pull01', dir: 'pull', hostId: 'host-made07', remotePath: '/srv/r', mountpoint: path.join(d, 'pulled'), createdAt: 1 }] }));
         const revoked = [];
         const hosts = { get: (id) => { if (listed) return { id, name: 'made-up', transport: 'ssh', host: 'made.example.invalid', user: 'u' }; throw Object.assign(new Error('host not found'), { code: 'host_not_found' }); }, findByDeviceId: () => null, held: () => false };
         const M = new MMX({ dataDir: d, hosts, mountTokens: { list: () => [], revoke: (t) => revoked.push(t) }, broadcast() { }, log() { } }); clearInterval(M._sweep);
-        if (listed) M._run = async () => { throw new Error('the machine did not answer (placed)'); };
+        if (listed) M._run = run || (async () => ({ code: 1, stdout: '', stderr: 'device unreachable: the device is not dialed in (placed)' }));   // the device road's own answer for a machine that does not reply
         let re = null; if (!listed) { try { await M.remount('mm-pull01'); re = 'answered'; } catch (e) { re = e && e.code; } }   // (a LISTED ssh machine reads as online: its remount would start a real pull — not asked here)
         const un = await M.unmount('mm-push01');
         return { re, side: un && un.machineSide, revoked: revoked.join(), left: M.list().map((m) => m.id).join() };
       };
       const sNL = await sideRun(MMv, 'side-not-listed'), sNR = await sideRun(MMv, 'side-no-answer', { listed: true });
+      const sSSH = await sideRun(MMv, 'side-ssh-fails', { listed: true, run: async () => ({ code: 255, stdout: '', stderr: 'ssh: connect to host made.example.invalid port 22: Connection refused (placed)' }) });   // ssh's own failure
+      const sOK = await sideRun(MMv, 'side-reached', { listed: true, run: async () => ({ code: 0, stdout: '', stderr: '' }) });   // reached: nothing to say
       ok(sNL.re === 'machine_not_listed' && sNL.side === 'not-listed' && sNL.revoked === 'tok-made07' && sNL.left === 'mm-pull01' && sNR.side === 'not-reached' && sNR.revoked === 'tok-made07', 'r3813: a remount on a machine NOT LISTED is refused as such (machine_not_listed — never «start its daemon»); a push unmount there answers machineSide not-listed (and not-reached when the machine did not answer) — its token revoked, its record dropped', { sNL, sNR });
+      ok(sSSH.side === 'not-reached' && sOK.side === undefined && sOK.revoked === 'tok-made07', 'r3982 (1): the machine side NOT REACHED is read from the run\'s OWN result — the device road\'s «device unreachable» and ssh\'s own failure (255) say not-reached; a run that answered says nothing', { sNR, sSSH, sOK });
+      const NRL = "        if (this._notReached(r, { cannotFail: true })) side = 'not-reached';   // r3982 (1): the run RESOLVES on a machine that does not reply — its own result says so\n";
+      const sRX = await sideRun(mutant('src/machine-mounts.js', [[NRL, '']]).MachineMounts, 'side-throw-only-ctl', { listed: true });
+      ok(sRX.side === undefined, 'RED CONTROL — the release\'s read of a throw only (in a copy): the unreachable machine\'s own answer is read as reached, and the person is told plainly «Unmounted»', sRX);
       const MMS2 = fs.readFileSync(path.join(REPO, 'src/machine-mounts.js'), 'utf8');
       const RENL = "MW.refusal(this._hostListed(rec.hostId) ? 'machine_offline_start' : 'machine_not_listed')", SIDE = "    return { ok: true, ...(side ? { machineSide: side } : {}) };\n";
       ok(MMS2.split(RENL).length === 2 && MMS2.split(SIDE).length === 2, 'control setup: the remount\'s refusal and the unmount\'s answer are each found once in machine-mounts.js');
@@ -784,6 +794,44 @@ try {
       ok(SMr.includes("if (!m.live && !(m.errorParams && m.errorParams.held) && !h.notListed) {") && SMr.includes('if (pushGone && !h.notListed) {') && (SMr.match(/, notListed: true \}, m\)\);/g) || []).length === 3
         && SMr.includes(`r && r.machineSide === 'not-listed' ? tr('${NR_L}')`) && SMr.includes(`r && r.machineSide === 'not-reached' ? tr('${NR_R}')`) && MWS.includes(`machine_not_listed: i18nKey('${NLW}')`)
         && [NR_L, NR_R, NLW].every((w) => zhr.includes(`"${w}":`) && jar.includes(`"${w}":`)), 'r3813 (pins): the three sections of machines not listed offer no Remount; the unmount\'s toast says a machine side not reached; the refusal\'s words (zh, ja beside)');
+      // r3982 (2): a PERSON's removal is «removed» at once — asked before the copies; more copies than the look reads never make it unknown
+      const fGoneMany = await flagRun(MMv, 'move-flag-removed-many', { removed: true, many: true });
+      const RBP = "    if (typeof h.removedByPerson === 'function' && h.removedByPerson(hostId)) return false;";
+      const fGoneManyX = await flagRun(mutant('src/machine-mounts.js', [[RBP, '']]).MachineMounts, 'move-flag-removed-many-ctl', { removed: true, many: true });
+      ok(!fGoneMany.unknown && !fGoneMany.flag && !fGoneMany.earlyUnknown, 'r3982 (2): a machine the person REMOVED is «removed» at once, even with more copies than the look reads', fGoneMany);
+      ok(fGoneManyX.unknown === true, 'RED CONTROL — the removal asked after the copies (in a copy): over twenty copies, the removed machine is drawn as unknown', fGoneManyX);
+      // r3982 (3): after a torn boot the one-time legacy ingest runs at the NEXT start — the lift marks it owed in the list it saves
+      const legacyRun = async (MMX, tag) => {
+        const d = dirOf(tag), f = path.join(d, 'machine-mounts.json'), LEG = path.join(d, 'host-mounts.json'); fs.writeFileSync(f, '{"mounts": [');
+        fs.writeFileSync(LEG, JSON.stringify({ mounts: [{ id: 'old-made08', hostId: 'host-made08', folder: '/srv/old', mountpoint: '/mnt/old' }] }));
+        const mkM = () => { const M = new MMX({ dataDir: d, hosts: { get: () => null, findByDeviceId: () => null, held: () => false }, mountTokens: { list: () => [], revoke() { } }, broadcast() { }, log() { } }); clearInterval(M._sweep); return M; };
+        const M1 = mkM();
+        for (let k = 0; k < 5000 && M1.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // the torn start: held while its copy is made, then the lift
+        const afterLift = { legacyLeft: fs.existsSync(LEG), owed: !!(JSON.parse(fs.readFileSync(f, 'utf8')).legacyOwed) }; M1._hold.stop();
+        const M2 = mkM();   // the next start: the list reads as data
+        const next = { ingested: M2.list().some((m) => m.id === 'old-made08'), migrated: fs.existsSync(LEG + '.migrated') }; M2._hold.stop();
+        return { ...afterLift, ...next };
+      };
+      const lg = await legacyRun(MMv, 'legacy-owed');
+      const OWE = "    if (a.state !== 'data' && atLift) this._state.legacyOwed = true;\n";
+      const lgx = await legacyRun(mutant('src/machine-mounts.js', [[OWE, '']]).MachineMounts, 'legacy-owed-ctl');
+      ok(lg.legacyLeft && lg.owed && lg.ingested && lg.migrated, 'r3982 (3): after a torn boot the one-time ingest of the legacy mount stores is OWED (marked in the list the lift saves) and runs at the NEXT start', lg);
+      ok(!lgx.ingested && !lgx.migrated, 'RED CONTROL — no mark (in a copy): the torn lift saves, the next start reads data, and the legacy store is never ingested', lgx);
+      // r3982 (4): the machines list's lift ORDER — the records loaded, THEN the waits run (a wait sees the machines)
+      const orderRun = async (HMX, tag) => {
+        const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [{ id: 'host-made09', name: 'made-up', host: 'made.example.invalid', user: 'u' }] }));
+        const un = refuse(f); let H = null; try { H = new HMX.HostManager({ dataDir: d }); } finally { un(); }
+        const seen = []; H.whenRead(() => seen.push(H.list().length), 'a made-up wait');
+        await H.readAgain(); for (let k = 0; k < 20; k++) await new Promise((r) => setImmediate(r));
+        H._hold.stop(); return { seen: seen.join() };
+      };
+      const LIFTLOAD = "    this._loadAnswer(value ? { state: 'data', value } : { state: 'missing' });\n", WAITS = "    for (const fn of waits) { try { fn(); } catch (e) { console.warn('[hosts] a wait for the machines failed:', e && e.message); } }\n";
+      const od = await orderRun(HMb, 'lift-order'), odx = await orderRun(mutant('src/hosts.js', [[LIFTLOAD, ''], [WAITS, WAITS + LIFTLOAD]]), 'lift-order-ctl');
+      ok(od.seen === '1', 'r3982 (4): the lift loads the records, THEN runs what waited for the machines — the wait sees the machine', od);
+      ok(odx.seen === '0', 'RED CONTROL — the waits before the load (in a copy): a wait runs over the empty, held list', odx);
+      // r3982 (5): the mounts' held words while a read is past the helper's bound
+      const mw = MMv.prototype._heldWords.call({}, { code: 'EIO', waiting: 1 }), mw0 = MMv.prototype._heldWords.call({}, { code: 'EIO' });
+      ok(/a read of it is still waiting for the storage to answer, and its answer is used the moment it comes/.test(mw) && !/still waiting/.test(mw0) && /reads it again every few minutes/.test(mw0), 'r3982 (5): machine-mounts.json\'s held words say a read waits while the helper\'s bound has let one go — and the ladder\'s words otherwise', { mw, mw0 });
       // the torn lift's copy, said: hosts.tornCopy() names it at boot; the route carries it; the page says it, and keeps the flagged mounts
       // out of «removed machines» (zh, ja beside)
       const dT = dirOf('move-torn'), fT = path.join(dT, 'hosts.json'); fs.writeFileSync(fT, '{"hosts": [{"id": "host-made05"');
