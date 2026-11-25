@@ -298,10 +298,10 @@ async function click(w, key, id) {
   fs.writeFileSync(path.join(sd, R.INDEX_FILE), lines.join('\n') + '\n');
   fs.writeFileSync(path.join(sd, BS.MARKERS_FILE), marks.map((m) => JSON.stringify(m)).join('\n') + '\n');
   settings['browser.traceBytesPerProfile'] = 64; // MB: 100 MB of frames ⇒ the oldest session (80 MB) goes
-  const legs = (RR2) => {
+  const legs = async (RR2) => {
     const bc3 = [];
     const tr3 = RR2.create({ dataDir: w3.DATA, homeDir: path.join(ROOT, 'home'), keeper: w3.keeper, bridge: w3.bridge, serverSetting: (k) => settings[k], broadcast: (m) => bc3.push(m), log: quiet, now, sweepEveryMs: 0 });
-    const sw = tr3.sweep();
+    const sw = await tr3.sweep();   // r4522 (B-360d): the sweep is off the loop
     const idx = fs.readFileSync(path.join(sd, R.INDEX_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     const e1 = idx.find((e) => e.id === 'tr-000000001101');
     return [
@@ -315,15 +315,15 @@ async function click(w, key, id) {
   };
   // CONTROL (b) FIRST, on a copy of the files: a recorder whose sweep DROPS the lists must fail the legs
   const osrc = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
-  const needle = '      rewriteIndex(sc, list);\n    }\n    // recordings: their own bound';
+  const needle = '      await rewriteIndexAsync(sc, step);\n    }\n    // recordings: their own bound';   // r4522: the rewrite reads the live list
   ok(osrc.includes(needle), 'the list-dropping control\'s anchor is in the sweep');
   const snap = fs.mkdtempSync(path.join(ROOT, 'snap-'));
   fs.cpSync(sd, snap, { recursive: true });
-  const dropper = M.load('src/server/browser-trace.js', editAnchor(osrc, needle, '      rewriteIndex(sc, list.filter((e) => !gone.has(e.id)));\n    }\n    // recordings: their own bound', "src/server/browser-trace.js"), 'drops-lists');
-  const bad = legs(dropper);
+  const dropper = M.load('src/server/browser-trace.js', editAnchor(osrc, needle, '      indexes.set(sc, list.filter((e) => !gone.has(e.id))); await rewriteIndexAsync(sc, step);\n    }\n    // recordings: their own bound', "src/server/browser-trace.js"), 'drops-lists');
+  const bad = await legs(dropper);
   ok(bad.some((x) => !x.c), `CONTROL: a sweep that DROPS the swept actions' lists fails (${bad.filter((x) => !x.c).map((x) => x.n).join(' | ')})`);
   fs.rmSync(sd, { recursive: true, force: true }); fs.cpSync(snap, sd, { recursive: true });
-  for (const x of legs(R)) ok(x.c, x.n);
+  for (const x of await legs(R)) ok(x.c, x.n);
   delete settings['browser.traceBytesPerProfile'];
   const hk = await mk(w3, [], []).housekeeping();
   const row = hk.profiles.find((r) => r.id === P1);

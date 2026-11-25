@@ -350,10 +350,10 @@ const K1 = `sess-1|${P1}`;
   fs.appendFileSync(path.join(sdir, R.INDEX_FILE), JSON.stringify(old) + '\n' + JSON.stringify(big) + '\n');
   trace.unwatch({ sessionId: 'sess-1', profileId: P1 });
   const fresh = R.create({ dataDir: DATA, homeDir: HOME, keeper: stubKeeper, bridge, serverSetting: (k) => settings[k], broadcast: (m) => bcast.push(m), log: quiet, now, execFileImpl: fakeDu, sweepEveryMs: 0 });
-  const sw0 = fresh.sweep();
+  const sw0 = await fresh.sweep();   // r4522 (B-360d): the sweep is off the loop
   ok(sw0.removed === 0 && fs.existsSync(path.join(sdir, 'tr-0000000000aa-before.jpg')), 'under the 1 GiB default the sweep removes nothing — an 8-day-old frame stays (no age rule)');
   settings['browser.traceBytesPerProfile'] = 64; // MB — the floor
-  const sw = fresh.sweep();
+  const sw = await fresh.sweep();
   ok(sw.removed === 2 && sw.plan.removeFrames.map((r) => r.id).join() === 'tr-0000000000aa,tr-0000000000bb' && sw.plan.removeFrames.every((r) => /over 64 MB/.test(r.why)) && sw.limit === 64 * 1048576, 'over the setting\'s 64 MB: the two OLDEST sessions\' frames go (the old one first, then the 250 MB one), each naming its rule');
   ok(!fs.existsSync(path.join(sdir, 'tr-0000000000aa-before.jpg')) && fresh.list({ profileId: P1 }).length === 7 && fs.readFileSync(path.join(sdir, R.INDEX_FILE), 'utf8').trim().split('\n').length === 7, 'its frame files are gone and EVERY action list stays — 7 index lines before, 7 after');
   ok(fresh.entry('tr-0000000000aa').framesRemoved && fresh.entry('tr-0000000000aa').framesRemoved.why === 'size' && fresh.entry('tr-0000000000aa').before === null, '…the entry says its frames went to the size limit');
