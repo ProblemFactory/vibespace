@@ -7,7 +7,8 @@
 // server's explicit words end it.
 // HEAVY: a scratch hub (hub-boot.mjs) with a stand-in `claude` (init for the resumed id, then idle — no vendor, VS_NO_REAL_CLI),
 // headless Chrome over raw CDP. A HELD HUB is placed in the page: the socket drops and comes back, and the page swallows the
-// hub's `attached` and `attach-ack` for that one session (the hub never answers it). THE LADDER's CLOCK is shortened in the page
+// hub's `attached`, `attach-ack` and live `msg` frames for that one session — what a socket the hub has not attached yet gets
+// (ws-handler.js holds a session's frames back from it): the hub never answers it, and a send's own echo never comes. THE LADDER's CLOCK is shortened in the page
 // (its 20 s / 25 s rungs and the hold's 60 s ask run at 1/100) — the same code, a short clock.
 //   ① THE HOLD: past the whole ladder the window is NOT read-only, shows the hold's ONE bar (never a line added to the chat), its
 //      composer is held with the text typed before the drop still in it, and it TAKES TYPING while held; a press of Send while
@@ -20,8 +21,15 @@
 //      again, at most one attach a short minute.
 //   ④ RESUME WHILE HELD is harmless: the conversation's card resume sends no create (the window is live, not read-only) and the
 //      stand-in keeps its one process (B-a26e item 2's measure: run 427f425cf-20261124150245-box).
-//   CONTROL: the hold blinded (the ladder's end as the release: the sentence and read-only) ⇒ ① reads read-only — the leg can go red.
-// EVERY WAIT IS ON THE FACT IT JUDGES (主开发 r4340 law 1): its bound is generous and its expiry is a named harness line.
+//   ⑤ A SEND IN THE FREE WINDOW BEFORE THE HOLD (the release's own order: its 30 s safety frees the composer long before the
+//      ~2 minute ladder ends): the send goes to the hub; when the hold comes, the box is NOT given the message back («Connection
+//      lost …») and, after the landing, a press sends nothing a second time. Its CONTROL blinds the hold's reason (the
+//      composer's dead-link road runs): the message comes back into the box — the leg can go red.
+//   CONTROL (①): the hold blinded (the ladder's end as the release: the sentence and read-only) ⇒ ① reads read-only — the leg can go red.
+// EVERY WAIT IS ON THE FACT IT JUDGES (主开发 r4340 law 1): its bound is generous and its expiry is a named harness line. The
+// only spans are two ABSENCES (③: no ask while a fresh ack stands; ④: no create after a resume press), each said where it is.
+// THE SHORT CLOCK runs only from a leg's drop to its hold (living() turns it off), and it scales the release's 30 s safety too,
+// so every leg runs in the release's own order: the safety frees the composer before the ladder ends.
 // Run: node scripts/test-attach-hold-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -52,7 +60,7 @@ const NOW = Date.now(), DAY = 86400e3;
 const { fixtureLitter } = require(path.join(repo, 'src/fixture-guard.js'));
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
-const SIDS = { a: fixtureSid('a26e11'), b: fixtureSid('a26e12'), c: fixtureSid('a26e13'), d: fixtureSid('a26e14'), x: fixtureSid('a26e15') };
+const SIDS = { a: fixtureSid('a26e11'), b: fixtureSid('a26e12'), c: fixtureSid('a26e13'), d: fixtureSid('a26e14'), x: fixtureSid('a26e15'), e: fixtureSid('a26e16'), y: fixtureSid('a26e17') };
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'package.json', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -89,10 +97,11 @@ process.on('exit', () => { try { client.kill('SIGKILL'); } catch { } try { fs.rm
 const SPY = `(() => { window.__creates = []; window.__attachesOut = []; window.__chatOut = []; window.__hold = null;
   const iv = setInterval(() => { if (!window.app || !app.ws || !app.ws.send || app.ws.__spied) return; app.ws.__spied = true; clearInterval(iv);
     const s = app.ws.send.bind(app.ws); app.ws.send = (m) => { try { const o = typeof m === 'string' ? JSON.parse(m) : m; if (o && o.type === 'create') window.__creates.push({ at: Date.now(), resumeId: o.resumeId || null, reqId: o.reqId || null }); if (o && o.type === 'attach') window.__attachesOut.push({ at: Date.now(), sid: o.sessionId }); if (o && o.type === 'chat-input') window.__chatOut.push({ at: Date.now(), sid: o.sessionId, text: String(o.text != null ? o.text : (o.content != null ? o.content : '')) }); } catch {} return s(m); };
-    const h = app.ws.heard.bind(app.ws); app.ws.heard = (d, how) => { if (window.__hold && d && (d.type === 'attached' || d.type === 'attach-ack') && d.sessionId === window.__hold) return; return h(d, how); };
+    const h = app.ws.heard.bind(app.ws); app.ws.heard = (d, how) => { if (window.__hold && d && (d.type === 'attached' || d.type === 'attach-ack' || d.type === 'msg') && d.sessionId === window.__hold) return; return h(d, how); };
     window.__answers = []; app.ws.onGlobal((m) => { if (m && (m.type === 'created' || m.type === 'error') && m.reqId) window.__answers.push({ type: m.type, code: m.code || null, reqId: m.reqId, sessionId: m.sessionId || null }); }); }, 20);
-  // THE SHORT CLOCK: the ladder's rungs (20 s, 25 s) and the hold's ask (60 s) at 1/100 — only those three delays
-  const st = window.setTimeout.bind(window); window.__shortClock = false; window.setTimeout = (fn, ms, ...a) => st(fn, (window.__shortClock && (ms === 20000 || ms === 25000 || ms === 60000)) ? ms / 100 : ms, ...a); })();`;
+  // THE SHORT CLOCK: the ladder's rungs (20 s, 25 s), the release's safety (30 s) and the hold's ask (60 s) at 1/100 — only those
+  // four delays; 'safety' scales the 30 s safety alone (⑤: the free window stays open while the leg sends)
+  const st = window.setTimeout.bind(window); window.__shortClock = false; window.setTimeout = (fn, ms, ...a) => st(fn, (window.__shortClock === true && (ms === 20000 || ms === 25000 || ms === 30000 || ms === 60000)) || (window.__shortClock === 'safety' && ms === 30000) ? ms / 100 : ms, ...a); })();`;
 
 const BLIND_HOLD = `(() => { const CV = Object.getPrototypeOf([...app.sessions.values()].find((v) => v && v._reattach)); CV._holdAttach = function () { this._renderers.appendSystem('the release: did not answer the re-attach'); this._setReadOnly(); }; return 1; })()`;
 
@@ -114,7 +123,7 @@ async function newPage() {
 }
 // a living conversation: started through the page's own resume road; its view live, its stand-in idle
 async function living(P, sid) {
-  await P.ev(`(window.__creates.length = 0, app.resumeSession(${JSON.stringify(sid)}, ${JSON.stringify(CWD)}, 'Plan', { mode: 'chat', backend: 'claude', backendSessionId: ${JSON.stringify(sid)} }), true)`);
+  await P.ev(`(window.__shortClock = false, window.__creates.length = 0, app.resumeSession(${JSON.stringify(sid)}, ${JSON.stringify(CWD)}, 'Plan', { mode: 'chat', backend: 'claude', backendSessionId: ${JSON.stringify(sid)} }), true)`);
   const made = await until(() => P.ev(`(() => { const c = window.__creates.find((x) => x.resumeId === ${JSON.stringify(sid)}); const a = c && window.__answers.find((x) => x.reqId === c.reqId); return a || null; })()`), 30000);
   const S0 = made && made.sessionId;
   const live = S0 && await until(() => P.ev(`(() => { const v = [...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(S0)}); return v && !v._readOnly && v._chatInput ? true : null; })()`), 30000);
@@ -123,11 +132,12 @@ async function living(P, sid) {
 }
 const VIEW = (S0) => `[...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(S0)})`;
 const facts = (P, S0) => P.ev(`(() => { const v = ${VIEW(S0)}; if (!v) return null; const box = v._container; const hold = box && box.querySelector('.chat-attach-hold'); const ta = v._chatInput && v._chatInput._element && v._chatInput._element.querySelector('textarea');
-  return { readOnly: !!v._readOnly, hold: !!hold && hold.isConnected, bars: box ? box.querySelectorAll('.chat-attach-hold').length : 0, resume: !!(box && box.querySelector('.chat-resume-btn')), holdLines: [...(box ? box.querySelectorAll('.chat-system') : [])].filter((n) => /Still attaching/.test(n.textContent)).length, line: hold ? hold.textContent.trim() : null, held: !!(v._chatInput && v._chatInput._disconnected), text: ta ? ta.value : null,
+  const el = v._chatInput && v._chatInput._element;
+  return { readOnly: !!v._readOnly, greyed: !!(el && el.classList.contains('chat-input-disconnected')), lastSys: [...(box ? box.querySelectorAll('.chat-system') : [])].map((n) => n.textContent).slice(-1)[0] || null, hold: !!hold && hold.isConnected, bars: box ? box.querySelectorAll('.chat-attach-hold').length : 0, resume: !!(box && box.querySelector('.chat-resume-btn')), holdLines: [...(box ? box.querySelectorAll('.chat-system') : [])].filter((n) => /Still attaching/.test(n.textContent)).length, line: hold ? hold.textContent.trim() : null, held: !!(v._chatInput && v._chatInput._disconnected), text: ta ? ta.value : null,
     sentence: [...(box ? box.querySelectorAll('.chat-system') : [])].map((n) => n.textContent).filter((x) => /re-attach|no longer running|read-only/i.test(x)).slice(-1)[0] || null, rescued: !!v._viewOnly }; })()`);
 const holdOn = async (P, S0, typed) => {
   if (typed) await P.ev(`(() => { const v = ${VIEW(S0)}; const ta = v._chatInput._element.querySelector('textarea'); ta.value = ${JSON.stringify(typed)}; ta.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
-  await P.ev(`(window.__shortClock = true, window.__hold = ${JSON.stringify(S0)}, window.__attachesOut.length = 0, app.ws.ws.close(), true)`);   // the socket drops; the hub then never answers this session
+  await P.ev(`(window.__shortClock = true, window.__hold = ${JSON.stringify(S0)}, window.__attachesOut.length = 0, window.__creates.length = 0, app.ws.ws.close(), true)`);   // the creates counted FROM THE DROP (the adversarial read: living()'s own resume is one)   // the socket drops; the hub then never answers this session
   return waitFor('the ladder to end (the hold or read-only)', async () => { const f = await facts(P, S0); return f && (f.hold || f.readOnly) ? f : null; }, 30000, 100);
 };
 const askTimes = (P, S0, sinceMs) => P.ev(`window.__attachesOut.filter((x) => x.sid === ${JSON.stringify(S0)} && x.at >= ${sinceMs}).map((x) => x.at)`);
@@ -154,8 +164,8 @@ try {
   const typed = 'a draft typed before the drop';
   const f1 = Sa && await holdOn(P, Sa, typed);
   const t1 = await P.ev('Date.now()');
-  check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — the conversation is running; it reconnects by itself. Your message waits here and can be sent once it is back.' && !f1.rescued, f1);
-  check('① …its composer is held (sending blocked) with the text typed before the drop still in it, and no read-only sentence was said', !!f1 && f1.held && f1.text === typed && !f1.sentence, f1);
+  check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — the hub has not answered yet; this window reconnects by itself. Your message waits here and can be sent once it is back.' && !f1.rescued, f1);
+  check('① …its composer is held (sending blocked) with the text typed before the drop still in it, NOT greyed (a live press answered in words: the owner\'s rule), and no read-only sentence was said', !!f1 && f1.held && !f1.greyed && f1.text === typed && !f1.sentence, f1);
   // IT TAKES TYPING WHILE HELD (主开发 r4529 (a)): the composer's own road for a link that is down keeps the box editable
   const more = ' — and more typed while held';
   await P.ev(`(() => { const v = ${VIEW(Sa)}; const ta = v._chatInput._element.querySelector('textarea'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); return 1; })()`);
@@ -194,7 +204,7 @@ try {
   check('② held (the same placed scene)', !!f2 && f2.hold && !f2.readOnly, f2);
   await P.ev(`(app.ws.send({ type: 'kill', sessionId: ${JSON.stringify(Sb)} }), true)`);   // the conversation ends on the hub
   const ended = await waitFor('the server\'s word (read-only)', async () => { const f = await facts(P, Sb); return f && f.readOnly ? f : null; }, 20000, 100);
-  check('② the conversation ended on the hub ⇒ the window says the hub\'s own words and goes read-only WITH RESUME, as the release; the hold\'s bar is gone (never both)', !!ended && ended.readOnly && !ended.hold && ended.resume === true, ended);
+  check('② the conversation ended on the hub ⇒ the window says the hub\'s own words and goes read-only WITH RESUME, as the release; the hold\'s bar is gone (never both)', !!ended && ended.readOnly && !ended.hold && ended.resume === true && /Session ended/.test(ended.lastSys || ''), ended);
 
   // ③ THE PACE: a fresh ack means the hub works on it — no ask
   console.log('── ③ the pace ──');
@@ -202,13 +212,15 @@ try {
   const f3 = Sc && await holdOn(P, Sc, null);
   check('③ held', !!f3 && f3.hold, f3);
   await P.ev(`(window.__acks = setInterval(() => { const v = ${VIEW(Sc)}; if (v) v._lastAttachAckAt = Date.now(); }, 100), true)`);   // a FRESH ack keeps coming (the page's own stamp, as the hub's re-ack sets it)
-  const t3 = await P.ev('Date.now()');
+  await waitFor('the fresh acks to flow', () => P.ev(`(() => { const v = ${VIEW(Sc)}; return v && Date.now() - (v._lastAttachAckAt || 0) < 300 ? true : null; })()`), 5000, 50);
+  const t3 = await P.ev('Date.now()');   // from here no ask may go: an ask is checked against the fresh ack when it GOES (a slot joined before the acks began asks nothing)
   await sleep(2400);   // THE ABSENCE's SPAN, the one span here: four short minutes (4 × 600 ms) in which the hold would have asked had the ack not been fresh
   const asks3 = await asksOf(P, Sc, t3);
   await P.ev(`(clearInterval(window.__acks), ${VIEW(Sc)}._lastAttachAckAt = Date.now() - 31000, true)`);   // the acks stop; the last one ages out
   const t3b = await P.ev('Date.now()');
-  const asks3b = (await waitFor('an ask once the acks stop', async () => { const a = await askTimes(P, Sc, t3b); return a.length >= 1 ? a : null; }, 15000, 100) || []).length;
-  check(`③ while a fresh ack keeps coming the window asks nothing (${asks3}); once it stops it asks again, at most one a short minute (${asks3b})`, asks3 === 0 && asks3b >= 1, { asks3, asks3b });
+  const ts3b = await waitFor('two asks once the acks stop', async () => { const a = await askTimes(P, Sc, t3b); return a.length >= 2 ? a : null; }, 30000, 100);
+  const asks3b = (ts3b || []).length, gap3b = ts3b ? Math.min(...ts3b.slice(1).map((x, i) => x - ts3b[i])) : null;
+  check(`③ while a fresh ack keeps coming the window asks nothing (${asks3}); once it stops it asks again, at most one a short minute (${asks3b} asks, the shortest gap ${gap3b} ms ≥ 600)`, asks3 === 0 && asks3b >= 2 && gap3b >= 600, { asks3, ts3b });
   await P.ev('(window.__hold = null, true)');
 
   // ④ RESUME WHILE HELD is harmless
@@ -217,10 +229,42 @@ try {
   const f4 = Sd && await holdOn(P, Sd, null);
   check('④ held', !!f4 && f4.hold, f4);
   await P.ev(`(window.__creates.length = 0, app.resumeSession(${JSON.stringify(SIDS.d)}, ${JSON.stringify(CWD)}, 'Plan', { mode: 'chat', backend: 'claude', backendSessionId: ${JSON.stringify(SIDS.d)} }), true)`);
-  await sleep(3000);
+  await sleep(3000);   // THE ABSENCE's SPAN (④): a resume press answers by a create within a round trip; three seconds see none
   const creates4 = await P.ev('window.__creates.length');
   check(`④ the card's resume on a held window sends no create (the window is live, not read-only: ${creates4} create(s)) and the stand-in keeps its one process`, creates4 === 0 && spawnsOf(SIDS.d).length === 1 && alive(spawnsOf(SIDS.d)[0]), { creates4, spawns: spawnsOf(SIDS.d) });
   await P.ev('(window.__hold = null, true)');
+
+  // ⑤ A SEND IN THE FREE WINDOW BEFORE THE HOLD: never given back, never sent twice (the adversarial read's must on 911cd6fc4)
+  const freeWindowSend = async (sid, label, blindWhy) => {
+    const S0 = await living(P, sid);
+    if (blindWhy) await P.ev(`(() => { const ci = ${VIEW(S0)}._chatInput; const CI = Object.getPrototypeOf(ci); if (!CI.__blind) { CI.__orig = CI.setDisconnected; CI.setDisconnected = function (d) { return CI.__orig.call(this, d); }; CI.__blind = true; } return 1; })()`);
+    const msg = `${label}: sent in the free window before the hold`;
+    await P.ev(`(window.__shortClock = 'safety', window.__hold = ${JSON.stringify(S0)}, window.__attachesOut.length = 0, window.__creates.length = 0, app.ws.ws.close(), true)`);   // the ladder at its full length, the safety short
+    await waitFor(`${label}: the drop seen (the composer held)`, async () => { const f = await facts(P, S0); return f && f.held ? true : null; }, 15000, 50);
+    const free = await waitFor(`${label}: the release's 30 s safety freeing the composer before the hold`, async () => { const f = await facts(P, S0); return f && !f.held && !f.hold && !f.readOnly ? f : null; }, 15000, 50);
+    await P.ev(`(() => { const ta = ${VIEW(S0)}._chatInput._element.querySelector('textarea'); ta.focus(); return 1; })()`);
+    await P.S('Input.insertText', { text: msg });
+    const n0 = (await chatOutOf(P, S0)).length, lost0 = await toastSays(P, '/Connection lost/');
+    await pressSend(P, S0);
+    const went = await waitFor(`${label}: the send in the free window`, async () => { const o = await chatOutOf(P, S0); return o.length > n0 ? o : null; }, 10000, 50);
+    await P.ev('(window.__shortClock = true, true)');   // the ladder's next rungs short: the hold comes
+    const fh = await waitFor(`${label}: the hold after the send`, async () => { const f = await facts(P, S0); return f && (f.hold || f.readOnly) ? f : null; }, 60000, 100);
+    const lost = (await toastSays(P, '/Connection lost/')) - lost0;
+    await P.ev('(window.__hold = null, true)');
+    const back5 = await waitFor(`${label}: the landing`, async () => { const f = await facts(P, S0); return f && !f.hold && !f.held ? f : null; }, 15000, 100);
+    const before5 = (await chatOutOf(P, S0)).filter((x) => x.text === msg).length;
+    await pressSend(P, S0);
+    await sleep(0);
+    const after5 = await waitFor(`${label}: the press after the landing answered`, async () => { const f = await facts(P, S0); const o = await chatOutOf(P, S0); return f && (f.text === '' || o.filter((x) => x.text === msg).length > before5) ? o : null; }, 10000, 100);
+    return { went: !!went && went[went.length - 1].text === msg, free: !!free, fh, lost, back: !!back5, sends: (after5 || []).filter((x) => x.text === msg).length };
+  };
+  console.log('── ⑤ a send in the free window before the hold ──');
+  const r5 = await freeWindowSend(SIDS.e, '⑤', false);
+  check(`⑤ a send in the release's free window (after its 30 s safety, before the hold) went to the hub; when the hold came the box was NOT given it back (${JSON.stringify(r5.fh?.text)}, «Connection lost» ${r5.lost}) and after the landing it was sent ONCE in all (${r5.sends})`, r5.free && r5.went && !!r5.fh && r5.fh.hold && r5.fh.text === '' && r5.lost === 0 && r5.back && r5.sends === 1, r5);
+  console.log('── control ⑤: the hold\'s reason blinded ──');
+  const r5x = await freeWindowSend(SIDS.y, 'CONTROL ⑤', true);
+  check(`CONTROL ⑤: with the hold's reason blinded the composer's dead-link road runs — the message comes back into the box (${JSON.stringify(r5x.fh?.text?.slice(0, 40))}) — the leg can go red`, !!r5x.fh && /sent in the free window/.test(r5x.fh.text || '') && r5x.lost >= 1, r5x);
+  await P.ev(`(() => { const v = [...app.sessions.values()].find((x) => x && x._chatInput); const CI = v && Object.getPrototypeOf(v._chatInput); if (CI && CI.__blind) { CI.setDisconnected = CI.__orig; delete CI.__orig; delete CI.__blind; } return 1; })()`);   // the blind goes: the prototype's own method is put back
 
   // CONTROL: the hold blinded (the ladder's end as the release) ⇒ ① reads read-only
   console.log('── control: the release\'s ladder end ──');
